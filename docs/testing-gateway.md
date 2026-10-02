@@ -105,6 +105,19 @@ clients must not derive pane names or pixel geometry. For development, the
 initial grid can be selected with `BLIT_PANE_LAYOUT=1x1`, `2x1`, `1x2`, or
 `2x2`.
 
+The split can also be changed through the topology API before sessions are
+attached:
+
+```sh
+curl --fail --request PUT \
+  --header 'Content-Type: application/json' \
+  --data '{"layout":{"columns":2,"rows":2}}' \
+  http://127.0.0.1:8080/v1/topology
+```
+
+Blit rejects layout changes while a pane is occupied with
+`topology_in_use`; detach or stop joined sessions before changing the grid.
+
 Resize a running terminal through the same session resource. The gateway
 updates the PTY window size, resets the canonical surface to the requested
 dimensions, increments `surface_revision`, and emits a surface-delta event:

@@ -146,6 +146,8 @@ typedef struct {
     BlitDisplay displays[BLIT_MAX_DISPLAYS];
     int pane_count;
     BlitPane panes[BLIT_MAX_PANES];
+    int pane_columns;
+    int pane_rows;
     unsigned long long topology_revision;
     int session_count;
     unsigned long long next_session_id;
@@ -170,6 +172,7 @@ static volatile sig_atomic_t blit_running = 1;
 static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan);
 static const char *pane_surface_id(const BlitRuntime *runtime,
                                    const BlitPane *pane);
+static void discover_panes(BlitRuntime *runtime);
 
 static void stop_server(int signal_number)
 {
@@ -275,10 +278,12 @@ static void topology_json(const BlitRuntime *runtime, char *body, size_t capacit
     int i;
 
     {
-        char revision_prefix[64];
+        char revision_prefix[256];
         snprintf(revision_prefix, sizeof(revision_prefix),
-                 "{\"id\":\"topology-0\",\"revision\":%llu,"
-                 "\"outputs\":[", runtime->topology_revision);
+                             "{\"id\":\"topology-0\",\"revision\":%llu,"
+                 "\"layout\":{\"columns\":%d,\"rows\":%d},"
+                 "\"outputs\":[", runtime->topology_revision,
+                 runtime->pane_columns, runtime->pane_rows);
         snprintf(body, capacity, "%s", revision_prefix);
         used = strlen(body);
     }
@@ -2169,6 +2174,38 @@ static void handle_request(int fd, BlitRuntime *runtime,
         send_http(fd, 200, "OK", "application/json", body);
         return;
     }
+    if (strcmp(path, "/v1/topology") == 0 && strcmp(method, "PUT") == 0) {
+        int columns;
+        int rows;
+        int i;
+
+        if (idempotency_replay(runtime, fd, request, method, path, payload))
+            return;
+        if (!strstr(payload, "\"layout\"") ||
+            !json_int(payload, "columns", &columns) ||
+            !json_int(payload, "rows", &rows) || columns < 1 || columns > 2 ||
+            rows < 1 || rows > 2) {
+            send_problem(fd, 400, "Bad Request", "invalid_topology_layout",
+                         "The layout must specify columns and rows from one through two.");
+            return;
+        }
+        for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
+            if (runtime->sessions[i].used && runtime->sessions[i].pane_id[0]) {
+                send_problem(fd, 409, "Conflict", "topology_in_use",
+                             "The topology cannot change while a pane is attached.");
+                return;
+            }
+        }
+        runtime->pane_columns = columns;
+        runtime->pane_rows = rows;
+        discover_panes(runtime);
+        ++runtime->topology_revision;
+        topology_json(runtime, body, sizeof(body));
+        send_http(fd, 200, "OK", "application/json", body);
+        idempotency_store(runtime, request, method, path, payload, 200,
+                          "OK", "application/json", body);
+        return;
+    }
     if (strcmp(method, "GET") != 0) {
         send_problem(fd, 405, "Method Not Allowed", "method_not_allowed",
                      "This gateway route does not support the requested method.");
@@ -2240,16 +2277,19 @@ static void discover_displays(BlitRuntime *runtime)
 static void discover_panes(BlitRuntime *runtime)
 {
     const char *layout = getenv("BLIT_PANE_LAYOUT");
-    int columns = 1;
-    int rows = 1;
+    int columns = runtime->pane_columns;
+    int rows = runtime->pane_rows;
     int display_index;
 
-    if (layout != NULL)
+    if (columns == 0 && layout != NULL)
         sscanf(layout, "%dx%d", &columns, &rows);
     if (columns < 1 || columns > 2 || rows < 1 || rows > 2) {
         columns = 1;
         rows = 1;
     }
+    runtime->pane_columns = columns;
+    runtime->pane_rows = rows;
+    runtime->pane_count = 0;
     for (display_index = 0; display_index < runtime->display_count;
          ++display_index) {
         BlitDisplay *display = &runtime->displays[display_index];
