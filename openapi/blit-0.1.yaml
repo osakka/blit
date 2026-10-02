@@ -282,6 +282,7 @@ paths:
         messages:
           - $ref: '#/components/schemas/StreamSubscribe'
           - $ref: '#/components/schemas/StreamInputEvent'
+          - $ref: '#/components/schemas/StreamTerminalOutput'
           - $ref: '#/components/schemas/StreamSurfaceDelta'
           - $ref: '#/components/schemas/StreamFrameEvent'
           - $ref: '#/components/schemas/StreamDiagnosticEvent'
@@ -559,15 +560,24 @@ components:
           type: array
           items:
             type: string
-            enum: [input, surfaces, frames, hardware, diagnostics]
+            enum: [input, terminals, surfaces, frames, hardware, diagnostics]
       additionalProperties: false
     StreamInputEvent:
       type: object
-      required: [type, device_id, event]
+      required: [type, session_id, device_id, event]
       properties:
         type: {type: string, const: input}
+        session_id: {$ref: '#/components/schemas/ResourceId'}
         device_id: {$ref: '#/components/schemas/ResourceId'}
         event: {type: object, additionalProperties: true}
+      additionalProperties: false
+    StreamTerminalOutput:
+      type: object
+      required: [type, session_id, data]
+      properties:
+        type: {type: string, const: terminal_output}
+        session_id: {$ref: '#/components/schemas/ResourceId'}
+        data: {type: string}
       additionalProperties: false
     StreamSurfaceDelta:
       type: object

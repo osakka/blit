@@ -26,6 +26,7 @@
 #define BLIT_STREAM_FRAMES 4
 #define BLIT_STREAM_INPUT 8
 #define BLIT_STREAM_HARDWARE 16
+#define BLIT_STREAM_TERMINALS 32
 
 typedef struct {
     unsigned long long id;
@@ -242,14 +243,31 @@ static int json_string(const char *json, const char *key, char *value,
     const char *cursor;
     size_t out = 0;
 
-    snprintf(needle, sizeof(needle), "\"%s\":\"", key);
+    snprintf(needle, sizeof(needle), "\"%s\"", key);
     cursor = strstr(json, needle);
     if (cursor == NULL)
         return 0;
     cursor += strlen(needle);
+    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
+           *cursor == '\n') ++cursor;
+    if (*cursor != ':')
+        return 0;
+    ++cursor;
+    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
+           *cursor == '\n') ++cursor;
+    if (*cursor != '"')
+        return 0;
+    ++cursor;
     while (*cursor != '\0' && *cursor != '"' && out + 1 < capacity) {
-        if (*cursor == '\\' && cursor[1] != '\0')
+        if (*cursor == '\\' && cursor[1] != '\0') {
             ++cursor;
+            if (*cursor == 'n') value[out++] = '\n';
+            else if (*cursor == 'r') value[out++] = '\r';
+            else if (*cursor == 't') value[out++] = '\t';
+            else value[out++] = *cursor;
+            ++cursor;
+            continue;
+        }
         value[out++] = *cursor++;
     }
     if (*cursor != '"')
@@ -264,11 +282,18 @@ static int json_int(const char *json, const char *key, int *value)
     const char *cursor;
     char *end;
 
-    snprintf(needle, sizeof(needle), "\"%s\":", key);
+    snprintf(needle, sizeof(needle), "\"%s\"", key);
     cursor = strstr(json, needle);
     if (cursor == NULL)
         return 0;
     cursor += strlen(needle);
+    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
+           *cursor == '\n') ++cursor;
+    if (*cursor != ':')
+        return 0;
+    ++cursor;
+    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
+           *cursor == '\n') ++cursor;
     *value = (int)strtol(cursor, &end, 10);
     return end != cursor;
 }
@@ -346,22 +371,28 @@ static void frame_receipt_json(BlitRuntime *runtime, char *body,
              runtime->frame_revision);
 }
 
-static BlitSession *find_session(BlitRuntime *runtime, const char *path)
+static BlitSession *find_session_id(BlitRuntime *runtime,
+                                    unsigned long long session_id)
 {
-    const char *prefix = "/v1/terminal-sessions/";
-    const char *id;
-    unsigned long long session_id;
     int i;
-
-    if (strncmp(path, prefix, strlen(prefix)) != 0)
-        return NULL;
-    id = path + strlen(prefix);
-    session_id = strtoull(id, NULL, 10);
     for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
         if (runtime->sessions[i].used && runtime->sessions[i].id == session_id)
             return &runtime->sessions[i];
     }
     return NULL;
+}
+
+static BlitSession *find_session(BlitRuntime *runtime, const char *path)
+{
+    const char *prefix = "/v1/terminal-sessions/";
+    const char *id;
+    unsigned long long session_id;
+
+    if (strncmp(path, prefix, strlen(prefix)) != 0)
+        return NULL;
+    id = path + strlen(prefix);
+    session_id = strtoull(id, NULL, 10);
+    return find_session_id(runtime, session_id);
 }
 
 static void refresh_session_state(BlitSession *session)
@@ -442,6 +473,7 @@ static int create_session(BlitRuntime *runtime, const char *json,
         execl(command, command, (char *)NULL);
         _exit(127);
     }
+    fcntl(master_fd, F_SETFL, O_NONBLOCK);
     for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
         if (!runtime->sessions[i].used) {
             BlitSession *session = &runtime->sessions[i];
@@ -641,14 +673,21 @@ static int websocket_accept(const char *request, char *accept, size_t capacity)
 
 static int send_websocket_text(int fd, const char *text)
 {
-    unsigned char header[2];
+    unsigned char header[4];
     size_t length = strlen(text);
 
-    if (length > 125)
+    if (length > 65535)
         return 0;
     header[0] = 0x81;
-    header[1] = (unsigned char)length;
-    send_all(fd, header, sizeof(header));
+    if (length <= 125) {
+        header[1] = (unsigned char)length;
+        send_all(fd, header, 2);
+    } else {
+        header[1] = 126;
+        header[2] = (unsigned char)(length >> 8);
+        header[3] = (unsigned char)length;
+        send_all(fd, header, 4);
+    }
     return send_all(fd, text, length);
 }
 
@@ -670,7 +709,8 @@ static int add_stream(BlitRuntime *runtime, int fd)
             runtime->streams[i].fd = fd;
             runtime->streams[i].subscriptions = BLIT_STREAM_DIAGNOSTICS |
                 BLIT_STREAM_SURFACES | BLIT_STREAM_FRAMES |
-                BLIT_STREAM_INPUT | BLIT_STREAM_HARDWARE;
+                BLIT_STREAM_INPUT | BLIT_STREAM_HARDWARE |
+                BLIT_STREAM_TERMINALS;
             return 1;
         }
     }
@@ -701,6 +741,43 @@ static void broadcast_stream(BlitRuntime *runtime, const char *message,
     }
 }
 
+static void service_session_output(BlitRuntime *runtime, int fd)
+{
+    unsigned char output[768];
+    char escaped[1536];
+    char event[1800];
+    ssize_t received;
+    int i;
+
+    received = read(fd, output, sizeof(output) - 1);
+    if (received < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+        return;
+    if (received <= 0) {
+        for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
+            if (runtime->sessions[i].used && runtime->sessions[i].pty_fd == fd) {
+                snprintf(runtime->sessions[i].state,
+                         sizeof(runtime->sessions[i].state), "stopped");
+                close(fd);
+                runtime->sessions[i].pty_fd = -1;
+                return;
+            }
+        }
+        return;
+    }
+    output[received] = '\0';
+    json_escape((char *)output, escaped, sizeof(escaped));
+    for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
+        if (runtime->sessions[i].used && runtime->sessions[i].pty_fd == fd) {
+            snprintf(event, sizeof(event),
+                     "{\"type\":\"terminal_output\","
+                     "\"session_id\":\"%llu\",\"data\":\"%s\"}",
+                     runtime->sessions[i].id, escaped);
+            broadcast_stream(runtime, event, BLIT_STREAM_TERMINALS);
+            return;
+        }
+    }
+}
+
 static void send_websocket_control(int fd, unsigned char opcode,
                                    const unsigned char *payload, size_t length)
 {
@@ -723,6 +800,7 @@ static unsigned int subscription_mask(const char *payload)
     if (strstr(payload, "frames") != NULL) mask |= BLIT_STREAM_FRAMES;
     if (strstr(payload, "input") != NULL) mask |= BLIT_STREAM_INPUT;
     if (strstr(payload, "hardware") != NULL) mask |= BLIT_STREAM_HARDWARE;
+    if (strstr(payload, "terminals") != NULL) mask |= BLIT_STREAM_TERMINALS;
     return mask;
 }
 
@@ -777,11 +855,33 @@ static void service_stream(BlitRuntime *runtime, int fd)
                     break;
                 }
             }
+        } else if (strstr((char *)frame + offset, "\"input\"") != NULL &&
+                   strstr((char *)frame + offset, "session_id") != NULL) {
+            char session_id[64];
+            char data[768];
+            unsigned long long numeric_id;
+            BlitSession *session;
+
+            if (json_string((char *)frame + offset, "session_id",
+                            session_id, sizeof(session_id)) &&
+                json_string((char *)frame + offset, "data",
+                            data, sizeof(data)) &&
+                sscanf(session_id, "%llu", &numeric_id) == 1) {
+                session = find_session_id(runtime, numeric_id);
+                if (session != NULL && session->pty_fd >= 0) {
+                    write(session->pty_fd, data, strlen(data));
+                    send_websocket_text(fd,
+                        "{\"type\":\"diagnostic\",\"severity\":\"info\","
+                        "\"code\":\"input_forwarded\","
+                        "\"detail\":\"input forwarded to terminal session\"}");
+                }
+            }
         }
-        send_websocket_text(fd,
-            "{\"type\":\"diagnostic\",\"severity\":\"info\","
-            "\"code\":\"subscription_received\","
-            "\"detail\":\"stream subscription accepted\"}");
+        if (strstr((char *)frame + offset, "subscribe") != NULL)
+            send_websocket_text(fd,
+                "{\"type\":\"diagnostic\",\"severity\":\"info\","
+                "\"code\":\"subscription_received\","
+                "\"detail\":\"stream subscription accepted\"}");
     }
 }
 
@@ -1070,6 +1170,13 @@ int main(int argc, char **argv)
                     max_fd = runtime.streams[i].fd;
             }
         }
+        for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
+            if (runtime.sessions[i].used && runtime.sessions[i].pty_fd >= 0) {
+                FD_SET(runtime.sessions[i].pty_fd, &readable);
+                if (runtime.sessions[i].pty_fd > max_fd)
+                    max_fd = runtime.sessions[i].pty_fd;
+            }
+        }
         timeout.tv_sec = 1;
         timeout.tv_usec = 0;
         ready = select(max_fd + 1, &readable, NULL, NULL, &timeout);
@@ -1097,6 +1204,11 @@ int main(int argc, char **argv)
                 FD_ISSET(runtime.streams[i].fd, &readable)) {
                 service_stream(&runtime, runtime.streams[i].fd);
             }
+        }
+        for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
+            if (runtime.sessions[i].used && runtime.sessions[i].pty_fd >= 0 &&
+                FD_ISSET(runtime.sessions[i].pty_fd, &readable))
+                service_session_output(&runtime, runtime.sessions[i].pty_fd);
         }
     }
     close(server_fd);

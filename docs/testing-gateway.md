@@ -101,4 +101,6 @@ Clients may send a text WebSocket message to receive a subscription diagnostic
 acknowledgement, for example a `frames`-only subscription. Event fan-out is
 filtered by subscription, and client text frames are unmasked. Ping frames
 receive pong responses; surface deltas and frame receipts are the currently
-implemented event types.
+implemented event types, along with `terminal_output` events from PTY-backed
+sessions. Input messages identify `session_id` and carry terminal data inside
+the event object.
