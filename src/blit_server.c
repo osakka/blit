@@ -2,6 +2,7 @@
 
 #include <arpa/inet.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <signal.h>
 #include <stdint.h>
@@ -29,6 +30,16 @@ typedef struct {
 typedef struct {
     int used;
     unsigned long long id;
+    unsigned long long revision;
+    unsigned long long owner_session_id;
+    int width;
+    int height;
+    char state[16];
+} BlitSurface;
+
+typedef struct {
+    int used;
+    unsigned long long id;
     pid_t process_id;
     int pty_fd;
     unsigned long long revision;
@@ -43,6 +54,9 @@ typedef struct {
     int session_count;
     unsigned long long next_session_id;
     BlitSession sessions[BLIT_MAX_SESSIONS];
+    BlitSurface surfaces[BLIT_MAX_SESSIONS];
+    unsigned long long next_frame_id;
+    unsigned long long frame_revision;
     int sdl_ready;
     char sdl_error[256];
 } BlitRuntime;
@@ -217,6 +231,79 @@ static int json_int(const char *json, const char *key, int *value)
     return end != cursor;
 }
 
+static BlitSurface *find_surface_id(BlitRuntime *runtime,
+                                    unsigned long long surface_id)
+{
+    int i;
+
+    for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
+        if (runtime->surfaces[i].used && runtime->surfaces[i].id == surface_id)
+            return &runtime->surfaces[i];
+    }
+    return NULL;
+}
+
+static BlitSurface *find_surface(BlitRuntime *runtime, const char *path)
+{
+    const char *prefix = "/v1/surfaces/";
+    const char *id;
+    unsigned long long surface_id;
+
+    if (strncmp(path, prefix, strlen(prefix)) != 0)
+        return NULL;
+    id = path + strlen(prefix);
+    if (sscanf(id, "surface-%llu/cells", &surface_id) != 1)
+        return NULL;
+    return find_surface_id(runtime, surface_id);
+}
+
+static int surface_ids_are_valid(BlitRuntime *runtime, const char *json,
+                                 unsigned long long revision)
+{
+    const char *cursor = json;
+    int found = 0;
+
+    while ((cursor = strstr(cursor, "\"surface-")) != NULL) {
+        char id[64];
+        const char *end = strchr(cursor + 1, '"');
+        size_t length;
+        unsigned long long surface_id;
+        BlitSurface *surface;
+
+        if (end == NULL)
+            return 0;
+        length = (size_t)(end - (cursor + 1));
+        if (length >= sizeof(id))
+            return 0;
+        memcpy(id, cursor + 1, length);
+        id[length] = '\0';
+        if (sscanf(id, "surface-%llu", &surface_id) != 1)
+            return 0;
+        surface = find_surface_id(runtime, surface_id);
+        if (surface == NULL || surface->revision != revision)
+            return 0;
+        found = 1;
+        cursor = end + 1;
+    }
+    return found;
+}
+
+static void mutation_receipt_json(const BlitSurface *surface, char *body,
+                                  size_t capacity)
+{
+    snprintf(body, capacity, "{\"revision\":%llu,\"accepted\":true}",
+             surface->revision);
+}
+
+static void frame_receipt_json(BlitRuntime *runtime, char *body,
+                               size_t capacity)
+{
+    snprintf(body, capacity,
+             "{\"frame_id\":\"frame-%llu\",\"revision\":%llu,"
+             "\"state\":\"accepted\"}", runtime->next_frame_id - 1,
+             runtime->frame_revision);
+}
+
 static BlitSession *find_session(BlitRuntime *runtime, const char *path)
 {
     const char *prefix = "/v1/terminal-sessions/";
@@ -327,6 +414,17 @@ static int create_session(BlitRuntime *runtime, const char *json,
                      "surface-%llu", session->id);
             snprintf(session->display_id, sizeof(session->display_id), "%s",
                      display_id);
+            {
+                BlitSurface *surface = &runtime->surfaces[i];
+                memset(surface, 0, sizeof(*surface));
+                surface->used = 1;
+                surface->id = session->id;
+                surface->revision = 1;
+                surface->owner_session_id = session->id;
+                surface->width = width;
+                surface->height = height;
+                snprintf(surface->state, sizeof(surface->state), "available");
+            }
             ++runtime->session_count;
             *created = session;
             return 1;
@@ -567,6 +665,53 @@ static void handle_request(int fd, BlitRuntime *runtime,
         send_http(fd, 201, "Created", "application/json", body);
         return;
     }
+    if (strncmp(path, "/v1/surfaces/", strlen("/v1/surfaces/")) == 0 &&
+        strcmp(method, "PUT") == 0) {
+        BlitSurface *surface = find_surface(runtime, path);
+        int base_revision;
+
+        if (surface == NULL) {
+            send_problem(fd, 404, "Not Found", "surface_not_found",
+                         "The text surface does not exist.");
+            return;
+        }
+        if (!json_int(payload, "base_revision", &base_revision) ||
+            !strstr(payload, "\"cells\"")) {
+            send_problem(fd, 400, "Bad Request", "invalid_cell_update",
+                         "A base revision and cells array are required.");
+            return;
+        }
+        if ((unsigned long long)base_revision != surface->revision) {
+            send_problem(fd, 409, "Conflict", "revision_conflict",
+                         "The surface revision does not match the requested update.");
+            return;
+        }
+        ++surface->revision;
+        mutation_receipt_json(surface, body, sizeof(body));
+        send_http(fd, 200, "OK", "application/json", body);
+        return;
+    }
+    if (strcmp(path, "/v1/frames") == 0 && strcmp(method, "POST") == 0) {
+        int base_revision;
+
+        if (!json_int(payload, "base_revision", &base_revision) ||
+            !surface_ids_are_valid(runtime, payload,
+                                   (unsigned long long)base_revision)) {
+            send_problem(fd, 400, "Bad Request", "invalid_frame_request",
+                         "A base revision and existing surface ids are required.");
+            return;
+        }
+        if ((unsigned long long)base_revision == 0) {
+            send_problem(fd, 409, "Conflict", "revision_conflict",
+                         "The frame base revision must identify current surface state.");
+            return;
+        }
+        ++runtime->frame_revision;
+        ++runtime->next_frame_id;
+        frame_receipt_json(runtime, body, sizeof(body));
+        send_http(fd, 202, "Accepted", "application/json", body);
+        return;
+    }
     if (strncmp(path, "/v1/terminal-sessions/",
                 strlen("/v1/terminal-sessions/")) == 0 &&
         (strcmp(method, "GET") == 0 || strcmp(method, "PATCH") == 0)) {
@@ -681,6 +826,7 @@ int main(int argc, char **argv)
         bind_address = "127.0.0.1";
     memset(&runtime, 0, sizeof(runtime));
     runtime.next_session_id = 1;
+    runtime.next_frame_id = 1;
     signal(SIGINT, stop_server);
     signal(SIGTERM, stop_server);
     discover_displays(&runtime);
@@ -690,6 +836,7 @@ int main(int argc, char **argv)
         perror("socket");
         return 1;
     }
+    fcntl(server_fd, F_SETFD, FD_CLOEXEC);
     {
         int reuse = 1;
         setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));

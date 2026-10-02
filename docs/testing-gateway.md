@@ -58,6 +58,27 @@ Use the returned numeric session id with `GET` or `PATCH` to inspect or update
 its display placement. The current slice accepts the command and surface
 dimensions; argument/environment policy is intentionally still pending.
 
+## Apply cells and present a frame
+
+The created session owns a surface whose initial revision is `1`. Cell updates
+must name that revision; successful updates return the next revision. A frame
+request then references the surface and its current revision:
+
+```sh
+curl --fail --request PUT \
+  --header 'Content-Type: application/json' \
+  --data '{"base_revision":1,"cells":[{"x":0,"y":0,"text":"hello"}]}' \
+  http://127.0.0.1:8080/v1/surfaces/surface-1/cells
+
+curl --fail --request POST \
+  --header 'Content-Type: application/json' \
+  --data '{"base_revision":2,"surface_ids":["surface-1"]}' \
+  http://127.0.0.1:8080/v1/frames
+```
+
+Stale cell revisions are rejected with `409 Conflict`. Frame receipts currently
+record acceptance; native presentation and stream fan-out are the next layer.
+
 Unsupported inventories are returned as empty arrays until their native
 backends are implemented. Display discovery is sourced from SDL3.
 
