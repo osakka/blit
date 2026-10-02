@@ -46,11 +46,21 @@ typedef struct {
     int height;
     char state[16];
     char cells[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
+    int damage_valid;
+    int damage_x;
+    int damage_y;
+    int damage_width;
+    int damage_height;
 } BlitSurface;
 
 typedef struct {
     unsigned long long surface_id;
     unsigned long long surface_revision;
+    int damage_valid;
+    int damage_x;
+    int damage_y;
+    int damage_width;
+    int damage_height;
 } BlitFrameSurface;
 
 typedef struct {
@@ -382,6 +392,14 @@ static int build_frame_plan(BlitRuntime *runtime, const char *json,
         plan->surfaces[plan->surface_count].surface_id = surface_id;
         plan->surfaces[plan->surface_count].surface_revision =
             surface->revision;
+        plan->surfaces[plan->surface_count].damage_valid =
+            surface->damage_valid;
+        plan->surfaces[plan->surface_count].damage_x = surface->damage_x;
+        plan->surfaces[plan->surface_count].damage_y = surface->damage_y;
+        plan->surfaces[plan->surface_count].damage_width =
+            surface->damage_width;
+        plan->surfaces[plan->surface_count].damage_height =
+            surface->damage_height;
         ++plan->surface_count;
         found = 1;
         cursor = end + 1;
@@ -394,6 +412,29 @@ static void mutation_receipt_json(const BlitSurface *surface, char *body,
 {
     snprintf(body, capacity, "{\"revision\":%llu,\"accepted\":true}",
              surface->revision);
+}
+
+static void mark_surface_damage(BlitSurface *surface, int x, int y)
+{
+    int right = x + 1;
+    int bottom = y + 1;
+
+    if (!surface->damage_valid) {
+        surface->damage_valid = 1;
+        surface->damage_x = x;
+        surface->damage_y = y;
+        surface->damage_width = 1;
+        surface->damage_height = 1;
+        return;
+    }
+    if (x < surface->damage_x)
+        surface->damage_x = x;
+    if (y < surface->damage_y)
+        surface->damage_y = y;
+    if (right > surface->damage_x + surface->damage_width)
+        surface->damage_width = right - surface->damage_x;
+    if (bottom > surface->damage_y + surface->damage_height)
+        surface->damage_height = bottom - surface->damage_y;
 }
 
 static int apply_cell_update(BlitSurface *surface, const char *json)
@@ -418,6 +459,7 @@ static int apply_cell_update(BlitSurface *surface, const char *json)
                 if (text[i] == '\n' || text[i] == '\r')
                     break;
                 surface->cells[y][x + i] = text[i];
+                mark_surface_damage(surface, x + (int)i, y);
             }
             updated += 1;
         }

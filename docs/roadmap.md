@@ -17,7 +17,8 @@ gateway, PTY sessions, revisioned surfaces, persistent WebSocket stream, SDL3
 output initialization, and explicit session-to-display routing are implemented.
 The first renderer-neutral frame plan is now also implemented: a frame request
 captures the selected surface revisions before the SDL adapter presents them.
-Native text rasterization, effects, damage tracking, authentication, and VKMS
+The plan now carries each surface's accumulated dirty rectangle. Native text
+rasterization, damage-aware presentation, effects, authentication, and VKMS
 gateway integration remain open.
 
 ## Milestone 1: contract vertical slice
