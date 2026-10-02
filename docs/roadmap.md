@@ -18,8 +18,10 @@ output initialization, and explicit session-to-display routing are implemented.
 The first renderer-neutral frame plan is now also implemented: a frame request
 captures the selected surface revisions before the SDL adapter presents them.
 The plan now carries each surface's accumulated dirty rectangle. Native text
-rasterization, damage-aware presentation, effects, authentication, and VKMS
-gateway integration remain open.
+rasterization, richer damage composition, effects, authentication, and VKMS
+gateway integration remain open. The SDL adapter now uses dirty rows for
+single-surface incremental frames and conservatively redraws multi-surface
+outputs.
 
 ## Milestone 1: contract vertical slice
 
@@ -81,7 +83,7 @@ suite on VKMS and then on a physical DRM/KMS host.
 
 ## Immediate next action
 
-Extend the renderer-neutral frame plan with damage regions and text
+Extend the renderer-neutral frame plan with richer damage composition and text
 rasterization boundaries. It must consume the existing surface revisions,
 preserve the explicit output mapping, drive the SDL3 output adapter, and be
 exercised against the two-output VKMS fixture before CRT effects are added.

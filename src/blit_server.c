@@ -79,6 +79,7 @@ typedef struct {
     SDL_Window *window;
     SDL_Renderer *renderer;
     unsigned long long display_id;
+    int initialized;
 } BlitOutput;
 
 typedef struct {
@@ -460,6 +461,11 @@ static int apply_cell_update(BlitSurface *surface, const char *json)
                     break;
                 surface->cells[y][x + i] = text[i];
                 mark_surface_damage(surface, x + (int)i, y);
+            }
+            if (surface->width > x) {
+                mark_surface_damage(surface, x, y);
+                if (surface->damage_width < surface->width - x)
+                    surface->damage_width = surface->width - x;
             }
             updated += 1;
         }
@@ -1172,6 +1178,12 @@ static void handle_request(int fd, BlitRuntime *runtime,
                 }
                 snprintf(session->display_id, sizeof(session->display_id),
                          "%s", display_id);
+                {
+                    int output_index;
+                    for (output_index = 0;
+                         output_index < runtime->output_count; ++output_index)
+                        runtime->outputs[output_index].initialized = 0;
+                }
             }
             ++session->revision;
         }
@@ -1299,9 +1311,47 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
 
     for (output_index = 0; output_index < runtime->output_count;
          ++output_index) {
+        int target_count = 0;
+        int full_redraw;
         SDL_Renderer *renderer = runtime->outputs[output_index].renderer;
-        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-        SDL_RenderClear(renderer);
+
+        for (plan_index = 0; plan_index < plan->surface_count;
+             ++plan_index) {
+            BlitSurface *surface = find_surface_id(
+                runtime, plan->surfaces[plan_index].surface_id);
+            BlitSession *session;
+            char display_id[128];
+
+            if (surface == NULL || !surface->used)
+                continue;
+            session = find_session_id(runtime, surface->owner_session_id);
+            if (session == NULL)
+                continue;
+            if (session->display_id[0] == '\0') {
+                if (output_index == 0)
+                    ++target_count;
+            } else {
+                snprintf(display_id, sizeof(display_id), "display-%llu",
+                         runtime->outputs[output_index].display_id);
+                if (strcmp(session->display_id, display_id) == 0)
+                    ++target_count;
+            }
+        }
+        if (target_count == 0) {
+            if (!runtime->outputs[output_index].initialized) {
+                SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+                SDL_RenderClear(renderer);
+                SDL_RenderPresent(renderer);
+                runtime->outputs[output_index].initialized = 1;
+            }
+            continue;
+        }
+        full_redraw = !runtime->outputs[output_index].initialized ||
+            target_count > 1;
+        if (full_redraw) {
+            SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+            SDL_RenderClear(renderer);
+        }
         SDL_SetRenderDrawColor(renderer, 190, 210, 190, 255);
         for (plan_index = 0; plan_index < plan->surface_count;
              ++plan_index) {
@@ -1310,6 +1360,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
             BlitSession *session;
             char display_id[128];
             char line[BLIT_MAX_CELL_COLS + 1];
+            int first_row = 0;
+            int last_row;
             int column;
 
             if (surface == NULL || !surface->used ||
@@ -1327,8 +1379,27 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
                 if (strcmp(session->display_id, display_id) != 0)
                     continue;
             }
-            for (row = 0; row < surface->height && row < BLIT_MAX_CELL_ROWS;
-                 ++row) {
+            if (!full_redraw) {
+                if (!plan->surfaces[plan_index].damage_valid)
+                    continue;
+                first_row = plan->surfaces[plan_index].damage_y;
+                last_row = first_row +
+                    plan->surfaces[plan_index].damage_height;
+                {
+                    SDL_FRect damage;
+                    damage.x = 4.0f + plan->surfaces[plan_index].damage_x * 8.0f;
+                    damage.y = 4.0f + first_row * 8.0f;
+                    damage.w = plan->surfaces[plan_index].damage_width * 8.0f;
+                    damage.h = plan->surfaces[plan_index].damage_height * 8.0f;
+                    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+                    SDL_RenderFillRect(renderer, &damage);
+                    SDL_SetRenderDrawColor(renderer, 190, 210, 190, 255);
+                }
+            }
+            last_row = full_redraw ? surface->height : last_row;
+            if (last_row > BLIT_MAX_CELL_ROWS)
+                last_row = BLIT_MAX_CELL_ROWS;
+            for (row = first_row; row < last_row; ++row) {
                 for (column = 0; column < surface->width &&
                      column < BLIT_MAX_CELL_COLS; ++column)
                     line[column] = surface->cells[row][column] ?
@@ -1339,6 +1410,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
             }
         }
         SDL_RenderPresent(renderer);
+        runtime->outputs[output_index].initialized = 1;
     }
 }
 

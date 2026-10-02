@@ -94,9 +94,11 @@ curl --fail --request POST \
 
 Stale cell revisions are rejected with `409 Conflict`. Cell mutations update
 authoritative state; frame receipts record acceptance and trigger the SDL3
-output adapter from an immutable surface/revision plan. The initial renderer uses
-SDL3's deterministic built-in bitmap text primitive; font selection, cell
-attributes, damage tracking, and CRT effects remain later renderer layers.
+output adapter from an immutable surface/revision plan. The first frame for an
+output is a full draw; subsequent single-surface frames use the captured dirty
+rows, while multi-surface frames conservatively redraw the output. The renderer
+uses SDL3's deterministic built-in bitmap text primitive; font selection, cell
+attributes, and CRT effects remain later layers.
 
 Unsupported inventories are returned as empty arrays until their native
 backends are implemented. Display discovery is sourced from SDL3.
