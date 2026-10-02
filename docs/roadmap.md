@@ -21,7 +21,7 @@ The plan now carries each surface's accumulated dirty rectangle. Native text
 rasterization, richer damage composition, effects, authentication, and VKMS
 gateway integration remain open. The SDL adapter now uses dirty rows for
 single-surface incremental frames and conservatively redraws multi-surface
-outputs.
+outputs with deterministic vertical stacking.
 
 ## Milestone 1: contract vertical slice
 

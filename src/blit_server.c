@@ -1303,6 +1303,21 @@ static void destroy_outputs(BlitRuntime *runtime)
     runtime->output_count = 0;
 }
 
+static int surface_targets_output(BlitRuntime *runtime,
+                                  BlitSurface *surface, int output_index)
+{
+    BlitSession *session = find_session_id(runtime, surface->owner_session_id);
+    char display_id[128];
+
+    if (session == NULL)
+        return 0;
+    if (session->display_id[0] == '\0')
+        return output_index == 0;
+    snprintf(display_id, sizeof(display_id), "display-%llu",
+             runtime->outputs[output_index].display_id);
+    return strcmp(session->display_id, display_id) == 0;
+}
+
 static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
 {
     int output_index;
@@ -1319,23 +1334,11 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
              ++plan_index) {
             BlitSurface *surface = find_surface_id(
                 runtime, plan->surfaces[plan_index].surface_id);
-            BlitSession *session;
-            char display_id[128];
 
             if (surface == NULL || !surface->used)
                 continue;
-            session = find_session_id(runtime, surface->owner_session_id);
-            if (session == NULL)
-                continue;
-            if (session->display_id[0] == '\0') {
-                if (output_index == 0)
-                    ++target_count;
-            } else {
-                snprintf(display_id, sizeof(display_id), "display-%llu",
-                         runtime->outputs[output_index].display_id);
-                if (strcmp(session->display_id, display_id) == 0)
-                    ++target_count;
-            }
+            if (surface_targets_output(runtime, surface, output_index))
+                ++target_count;
         }
         if (target_count == 0) {
             if (!runtime->outputs[output_index].initialized) {
@@ -1360,12 +1363,16 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
             BlitSession *session;
             char display_id[128];
             char line[BLIT_MAX_CELL_COLS + 1];
+            int surface_origin_y = 4;
+            int prior_index;
             int first_row = 0;
             int last_row;
             int column;
 
             if (surface == NULL || !surface->used ||
                 surface->revision != plan->surfaces[plan_index].surface_revision)
+                continue;
+            if (!surface_targets_output(runtime, surface, output_index))
                 continue;
             session = find_session_id(runtime, surface->owner_session_id);
             if (session == NULL)
@@ -1379,6 +1386,13 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
                 if (strcmp(session->display_id, display_id) != 0)
                     continue;
             }
+            for (prior_index = 0; prior_index < plan_index; ++prior_index) {
+                BlitSurface *prior = find_surface_id(
+                    runtime, plan->surfaces[prior_index].surface_id);
+                if (prior != NULL && prior->used &&
+                    surface_targets_output(runtime, prior, output_index))
+                    surface_origin_y += prior->height * 8 + 4;
+            }
             if (!full_redraw) {
                 if (!plan->surfaces[plan_index].damage_valid)
                     continue;
@@ -1388,7 +1402,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
                 {
                     SDL_FRect damage;
                     damage.x = 4.0f + plan->surfaces[plan_index].damage_x * 8.0f;
-                    damage.y = 4.0f + first_row * 8.0f;
+                    damage.y = (float)surface_origin_y + first_row * 8.0f;
                     damage.w = plan->surfaces[plan_index].damage_width * 8.0f;
                     damage.h = plan->surfaces[plan_index].damage_height * 8.0f;
                     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
@@ -1405,7 +1419,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
                     line[column] = surface->cells[row][column] ?
                         surface->cells[row][column] : ' ';
                 line[column] = '\0';
-                SDL_RenderDebugText(renderer, 4.0f, 4.0f + row * 8.0f,
+                SDL_RenderDebugText(renderer, 4.0f,
+                                    (float)surface_origin_y + row * 8.0f,
                                     line);
             }
         }
