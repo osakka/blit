@@ -29,6 +29,8 @@ relevant documentation and schema in the same change.
   criteria.
 - [Bare-metal testing](testing-baremetal.md) — how to test direct KMSDRM on a
   Linux host without X11 or Wayland.
+- [Gateway testing](testing-gateway.md) — how to build and exercise the first
+  TCP/OpenAPI/WebSocket gateway slice.
 - [ADR index](adr/README.md) — decisions that constrain implementation.
 
 ## Working status

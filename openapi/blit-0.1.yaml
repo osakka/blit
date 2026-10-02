@@ -343,7 +343,7 @@ components:
       additionalProperties: false
     ServerDetails:
       type: object
-      required: [id, name, api_version, revision, capabilities]
+      required: [id, name, api_version, revision, capabilities, display_backend]
       properties:
         id: {$ref: '#/components/schemas/ResourceId'}
         name: {type: string}
@@ -352,6 +352,13 @@ components:
         capabilities:
           type: array
           items: {type: string}
+        display_backend:
+          type: object
+          required: [ready, error]
+          properties:
+            ready: {type: boolean}
+            error: {type: string}
+          additionalProperties: false
       additionalProperties: false
     GraphicsCard:
       type: object
