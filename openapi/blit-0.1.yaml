@@ -1,0 +1,592 @@
+openapi: 3.1.0
+info:
+  title: blit network API
+  version: 0.1.0
+  description: >-
+    Network control, discovery, terminal-session, display, input, and
+    diagnostic API for the blit terminal and display service.
+servers:
+  - url: http://localhost:8080
+    description: Development HTTP over TCP
+  - url: https://blit.example.invalid
+    description: Production HTTPS placeholder
+tags:
+  - name: server
+  - name: hardware
+  - name: topology
+  - name: terminals
+  - name: frames
+  - name: diagnostics
+paths:
+  /v1/server:
+    get:
+      tags: [server]
+      operationId: getServerDetails
+      summary: Get server identity and capabilities
+      responses:
+        '200':
+          description: Server details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServerDetails'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/graphics:
+    get:
+      tags: [hardware]
+      operationId: listGraphicsCards
+      summary: List graphics cards and render capabilities
+      responses:
+        '200':
+          description: Graphics inventory
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [revision, graphics_cards]
+                properties:
+                  revision:
+                    $ref: '#/components/schemas/Revision'
+                  graphics_cards:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/GraphicsCard'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/displays:
+    get:
+      tags: [hardware]
+      operationId: listDisplays
+      summary: List displays, modes, and presentation state
+      responses:
+        '200':
+          description: Display inventory
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [revision, displays]
+                properties:
+                  revision:
+                    $ref: '#/components/schemas/Revision'
+                  displays:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Display'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/audio:
+    get:
+      tags: [hardware]
+      operationId: listAudioDevices
+      summary: List audio devices and capabilities
+      responses:
+        '200':
+          description: Audio inventory
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [revision, devices]
+                properties:
+                  revision:
+                    $ref: '#/components/schemas/Revision'
+                  devices:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AudioDevice'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/input/devices:
+    get:
+      tags: [hardware]
+      operationId: listInputDevices
+      summary: List keyboard, pointer, and other input devices
+      responses:
+        '200':
+          description: Input inventory
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [revision, devices]
+                properties:
+                  revision:
+                    $ref: '#/components/schemas/Revision'
+                  devices:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/InputDevice'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/topology:
+    get:
+      tags: [topology]
+      operationId: getTopology
+      summary: Get the logical multi-display topology
+      responses:
+        '200':
+          description: Current topology
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Topology'
+        default:
+          $ref: '#/components/responses/Problem'
+    put:
+      tags: [topology]
+      operationId: replaceTopology
+      summary: Replace the desired display topology
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Topology'
+      responses:
+        '200':
+          description: Applied topology
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Topology'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/terminal-sessions:
+    post:
+      tags: [terminals]
+      operationId: createTerminalSession
+      summary: Create a PTY-backed terminal session
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTerminalSession'
+      responses:
+        '201':
+          description: Created terminal session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TerminalSession'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/terminal-sessions/{session_id}:
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+    get:
+      tags: [terminals]
+      operationId: getTerminalSession
+      summary: Get terminal-session state
+      responses:
+        '200':
+          description: Terminal session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TerminalSession'
+        default:
+          $ref: '#/components/responses/Problem'
+    patch:
+      tags: [terminals]
+      operationId: updateTerminalSession
+      summary: Update terminal placement and input policy
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTerminalSession'
+      responses:
+        '200':
+          description: Updated terminal session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TerminalSession'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/surfaces/{surface_id}/cells:
+    parameters:
+      - $ref: '#/components/parameters/SurfaceId'
+    put:
+      tags: [terminals]
+      operationId: replaceSurfaceCells
+      summary: Apply a revisioned text-cell update
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CellUpdate'
+      responses:
+        '200':
+          description: Accepted surface revision
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MutationReceipt'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/frames:
+    post:
+      tags: [frames]
+      operationId: presentFrame
+      summary: Request presentation of a coherent frame
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FrameRequest'
+      responses:
+        '202':
+          description: Frame accepted for presentation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FrameReceipt'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/stream:
+    get:
+      tags: [diagnostics]
+      operationId: openEventStream
+      summary: Open the bidirectional blit WebSocket stream
+      description: >-
+        Clients upgrade this HTTP request to WebSocket. Stream messages use
+        the schemas declared in x-blit-stream and components.schemas.
+      responses:
+        '101':
+          description: WebSocket upgrade accepted
+        default:
+          $ref: '#/components/responses/Problem'
+      x-blit-stream:
+        protocol: websocket
+        direction: bidirectional
+        messages:
+          - $ref: '#/components/schemas/StreamSubscribe'
+          - $ref: '#/components/schemas/StreamInputEvent'
+          - $ref: '#/components/schemas/StreamSurfaceDelta'
+          - $ref: '#/components/schemas/StreamFrameEvent'
+          - $ref: '#/components/schemas/StreamDiagnosticEvent'
+
+components:
+  parameters:
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      schema:
+        type: string
+      description: Expected current resource revision.
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+    SessionId:
+      name: session_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/ResourceId'
+    SurfaceId:
+      name: surface_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/ResourceId'
+  responses:
+    Problem:
+      description: Typed API or hardware failure
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+  schemas:
+    ResourceId:
+      type: string
+      minLength: 1
+      maxLength: 128
+      pattern: '^[A-Za-z0-9._:-]+$'
+    Revision:
+      type: integer
+      format: int64
+      minimum: 0
+    Bounds:
+      type: object
+      required: [x, y, width, height]
+      properties:
+        x: {type: integer}
+        y: {type: integer}
+        width: {type: integer, minimum: 1}
+        height: {type: integer, minimum: 1}
+      additionalProperties: false
+    ServerDetails:
+      type: object
+      required: [id, name, api_version, revision, capabilities]
+      properties:
+        id: {$ref: '#/components/schemas/ResourceId'}
+        name: {type: string}
+        api_version: {type: string, const: '0.1'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        capabilities:
+          type: array
+          items: {type: string}
+      additionalProperties: false
+    GraphicsCard:
+      type: object
+      required: [id, vendor, device, render_apis, formats]
+      properties:
+        id: {$ref: '#/components/schemas/ResourceId'}
+        vendor: {type: string}
+        device: {type: string}
+        render_apis:
+          type: array
+          items: {type: string}
+        formats:
+          type: array
+          items: {type: string}
+        capabilities:
+          type: object
+          additionalProperties: {type: [string, number, boolean]}
+      additionalProperties: false
+    DisplayMode:
+      type: object
+      required: [width, height, refresh_hz]
+      properties:
+        width: {type: integer, minimum: 1}
+        height: {type: integer, minimum: 1}
+        refresh_hz: {type: number, exclusiveMinimum: 0}
+      additionalProperties: false
+    Display:
+      type: object
+      required: [id, name, bounds, modes, presentation_state]
+      properties:
+        id: {$ref: '#/components/schemas/ResourceId'}
+        name: {type: string}
+        bounds: {$ref: '#/components/schemas/Bounds'}
+        modes:
+          type: array
+          items: {$ref: '#/components/schemas/DisplayMode'}
+        active_mode: {$ref: '#/components/schemas/DisplayMode'}
+        presentation_state:
+          type: string
+          enum: [available, unavailable, presenting, failed]
+      additionalProperties: false
+    AudioDevice:
+      type: object
+      required: [id, name, direction, formats]
+      properties:
+        id: {$ref: '#/components/schemas/ResourceId'}
+        name: {type: string}
+        direction:
+          type: string
+          enum: [playback, capture, duplex]
+        formats:
+          type: array
+          items: {type: string}
+        channels: {type: integer, minimum: 1}
+        sample_rates:
+          type: array
+          items: {type: integer, minimum: 1}
+      additionalProperties: false
+    InputDevice:
+      type: object
+      required: [id, name, kinds, capabilities]
+      properties:
+        id: {$ref: '#/components/schemas/ResourceId'}
+        name: {type: string}
+        kinds:
+          type: array
+          items:
+            type: string
+            enum: [keyboard, pointer, touch, gamepad, other]
+        capabilities:
+          type: array
+          items: {type: string}
+      additionalProperties: false
+    Topology:
+      type: object
+      required: [id, revision, outputs]
+      properties:
+        id: {$ref: '#/components/schemas/ResourceId'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        outputs:
+          type: array
+          items:
+            type: object
+            required: [display_id, bounds]
+            properties:
+              display_id: {$ref: '#/components/schemas/ResourceId'}
+              bounds: {$ref: '#/components/schemas/Bounds'}
+              rotation: {type: integer, enum: [0, 90, 180, 270]}
+              scale: {type: number, exclusiveMinimum: 0}
+            additionalProperties: false
+      additionalProperties: false
+    CreateTerminalSession:
+      type: object
+      required: [command, surface]
+      properties:
+        command: {type: string, minLength: 1}
+        arguments:
+          type: array
+          items: {type: string}
+        environment:
+          type: object
+          additionalProperties: {type: string}
+        surface:
+          type: object
+          required: [width, height]
+          properties:
+            width: {type: integer, minimum: 1}
+            height: {type: integer, minimum: 1}
+          additionalProperties: false
+        display_id: {$ref: '#/components/schemas/ResourceId'}
+      additionalProperties: false
+    UpdateTerminalSession:
+      type: object
+      properties:
+        display_id: {$ref: '#/components/schemas/ResourceId'}
+        input_route: {$ref: '#/components/schemas/ResourceId'}
+        focused: {type: boolean}
+      additionalProperties: false
+    TerminalSession:
+      type: object
+      required: [id, revision, state, surface_id]
+      properties:
+        id: {$ref: '#/components/schemas/ResourceId'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        state:
+          type: string
+          enum: [starting, running, stopped, failed]
+        surface_id: {$ref: '#/components/schemas/ResourceId'}
+        display_id: {$ref: '#/components/schemas/ResourceId'}
+        process_id: {type: integer, minimum: 1}
+        exit_code: {type: integer}
+      additionalProperties: false
+    CellUpdate:
+      type: object
+      required: [base_revision, cells]
+      properties:
+        base_revision: {$ref: '#/components/schemas/Revision'}
+        cells:
+          type: array
+          items:
+            type: object
+            required: [x, y, text]
+            properties:
+              x: {type: integer, minimum: 0}
+              y: {type: integer, minimum: 0}
+              text: {type: string, minLength: 1}
+              style: {type: object, additionalProperties: true}
+            additionalProperties: false
+      additionalProperties: false
+    FrameRequest:
+      type: object
+      required: [base_revision, surface_ids]
+      properties:
+        base_revision: {$ref: '#/components/schemas/Revision'}
+        surface_ids:
+          type: array
+          minItems: 1
+          items: {$ref: '#/components/schemas/ResourceId'}
+      additionalProperties: false
+    MutationReceipt:
+      type: object
+      required: [revision, accepted]
+      properties:
+        revision: {$ref: '#/components/schemas/Revision'}
+        accepted: {type: boolean}
+      additionalProperties: false
+    FrameReceipt:
+      type: object
+      required: [frame_id, revision, state]
+      properties:
+        frame_id: {$ref: '#/components/schemas/ResourceId'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        state:
+          type: string
+          enum: [accepted, presenting, presented, failed]
+      additionalProperties: false
+    Problem:
+      type: object
+      required: [type, title, status, code, detail]
+      properties:
+        type: {type: string, format: uri-reference}
+        title: {type: string}
+        status: {type: integer, minimum: 400, maximum: 599}
+        code: {type: string}
+        detail: {type: string}
+        instance: {type: string, format: uri-reference}
+        revision: {$ref: '#/components/schemas/Revision'}
+        diagnostics:
+          type: array
+          items: {type: string}
+      additionalProperties: true
+    StreamSubscribe:
+      type: object
+      required: [type, subscriptions]
+      properties:
+        type: {type: string, const: subscribe}
+        subscriptions:
+          type: array
+          items:
+            type: string
+            enum: [input, surfaces, frames, hardware, diagnostics]
+      additionalProperties: false
+    StreamInputEvent:
+      type: object
+      required: [type, device_id, event]
+      properties:
+        type: {type: string, const: input}
+        device_id: {$ref: '#/components/schemas/ResourceId'}
+        event: {type: object, additionalProperties: true}
+      additionalProperties: false
+    StreamSurfaceDelta:
+      type: object
+      required: [type, surface_id, revision, update]
+      properties:
+        type: {type: string, const: surface_delta}
+        surface_id: {$ref: '#/components/schemas/ResourceId'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        update: {$ref: '#/components/schemas/CellUpdate'}
+      additionalProperties: false
+    StreamFrameEvent:
+      type: object
+      required: [type, frame]
+      properties:
+        type: {type: string, const: frame}
+        frame: {$ref: '#/components/schemas/FrameReceipt'}
+      additionalProperties: false
+    StreamDiagnosticEvent:
+      type: object
+      required: [type, severity, code, detail]
+      properties:
+        type: {type: string, const: diagnostic}
+        severity:
+          type: string
+          enum: [debug, info, warning, error, critical]
+        code: {type: string}
+        detail: {type: string}
+        resource_id: {$ref: '#/components/schemas/ResourceId'}
+      additionalProperties: false

@@ -73,6 +73,6 @@ suite on VKMS and then on a physical DRM/KMS host.
 
 ## Immediate next action
 
-Create ADR 0002 for the schema and transport boundary, then add only the
-Milestone 1 schema artifact. No renderer feature or effect should precede that
-contract.
+Implement the TCC server gateway against the OpenAPI artifact: start with
+`GET /v1/server`, `GET /v1/displays`, `GET /v1/topology`, and the WebSocket
+stream handshake. No renderer feature or effect should precede that contract.

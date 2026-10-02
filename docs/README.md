@@ -19,6 +19,8 @@ relevant documentation and schema in the same change.
   boundaries between API, terminal state, effects, layout, and rendering.
 - [API principles](spec/api-principles.md) — schema-first rules for designing
   the public API.
+- [OpenAPI contract](../openapi/blit-0.1.yaml) — the canonical version 0.1
+  network API and stream message schemas.
 - [Engineering constitution](engineering-constitution.md) — the project’s
   non-negotiable development constraints.
 - [Toolchain baseline](toolchain.md) — the compiler and dependency gates for
