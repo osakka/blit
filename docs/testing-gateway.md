@@ -118,7 +118,8 @@ Session responses expose `surface_revision` separately from the session
 configuration `revision`. Clients should use that value as `base_revision` for
 cell updates. A `409 revision_conflict` response also carries the authoritative
 current revision in `Problem.revision`, so clients can retry without another
-discovery request when PTY output wins the race.
+discovery request when PTY output wins the race. The same revision-bearing
+conflict applies when a frame references stale surfaces.
 
 Unsupported inventories are returned as empty arrays until their native
 backends are implemented. Display discovery is sourced from SDL3.

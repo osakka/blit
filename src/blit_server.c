@@ -541,7 +541,8 @@ static BlitSurface *find_surface(BlitRuntime *runtime, const char *path)
 }
 
 static int build_frame_plan(BlitRuntime *runtime, const char *json,
-                            unsigned long long revision, BlitFramePlan *plan)
+                            unsigned long long revision, BlitFramePlan *plan,
+                            unsigned long long *conflict_revision)
 {
     const char *cursor = json;
     int found = 0;
@@ -566,9 +567,12 @@ static int build_frame_plan(BlitRuntime *runtime, const char *json,
         if (sscanf(id, "surface-%llu", &surface_id) != 1)
             return 0;
         surface = find_surface_id(runtime, surface_id);
-        if (surface == NULL || surface->revision != revision ||
-            plan->surface_count >= BLIT_MAX_FRAME_SURFACES)
+        if (surface == NULL || plan->surface_count >= BLIT_MAX_FRAME_SURFACES)
             return 0;
+        if (surface->revision != revision) {
+            *conflict_revision = surface->revision;
+            return -1;
+        }
         plan->surfaces[plan->surface_count].surface_id = surface_id;
         plan->surfaces[plan->surface_count].surface_revision =
             surface->revision;
@@ -1641,11 +1645,25 @@ static void handle_request(int fd, BlitRuntime *runtime,
     }
     if (strcmp(path, "/v1/frames") == 0 && strcmp(method, "POST") == 0) {
         int base_revision;
+        int plan_status;
+        unsigned long long conflict_revision = 0;
         BlitFramePlan plan;
 
-        if (!json_int(payload, "base_revision", &base_revision) ||
-            !build_frame_plan(runtime, payload,
-                              (unsigned long long)base_revision, &plan)) {
+        if (!json_int(payload, "base_revision", &base_revision)) {
+            send_problem(fd, 400, "Bad Request", "invalid_frame_request",
+                         "A base revision and existing surface ids are required.");
+            return;
+        }
+        plan_status = build_frame_plan(runtime, payload,
+                                       (unsigned long long)base_revision,
+                                       &plan, &conflict_revision);
+        if (plan_status < 0) {
+            send_revision_problem(fd, "revision_conflict",
+                                  "A frame surface revision is stale.",
+                                  conflict_revision);
+            return;
+        }
+        if (plan_status == 0) {
             send_problem(fd, 400, "Bad Request", "invalid_frame_request",
                          "A base revision and existing surface ids are required.");
             return;
