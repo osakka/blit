@@ -31,6 +31,7 @@
 #define BLIT_STREAM_TERMINALS 32
 #define BLIT_MAX_FRAME_SURFACES 16
 #define BLIT_MAX_IDEMPOTENCY 16
+#define BLIT_MAX_EVENT_HISTORY 64
 #define BLIT_DEFAULT_FOREGROUND 0xbed2beU
 #define BLIT_ATTR_BOLD 1
 #define BLIT_ATTR_DIM 2
@@ -109,6 +110,13 @@ typedef struct {
 
 typedef struct {
     int used;
+    unsigned long long sequence;
+    unsigned int subscription;
+    char message[2304];
+} BlitEventRecord;
+
+typedef struct {
+    int used;
     unsigned long long id;
     pid_t process_id;
     int pty_fd;
@@ -134,6 +142,8 @@ typedef struct {
     BlitStream streams[BLIT_MAX_STREAMS];
     BlitOutput outputs[BLIT_MAX_DISPLAYS];
     BlitIdempotency idempotency[BLIT_MAX_IDEMPOTENCY];
+    BlitEventRecord event_history[BLIT_MAX_EVENT_HISTORY];
+    unsigned int next_event_history;
     int output_count;
     int sdl_ready;
     char sdl_error[256];
@@ -1479,11 +1489,59 @@ static void broadcast_stream(BlitRuntime *runtime, const char *message,
         return;
     snprintf(sequenced, sizeof(sequenced), "%.*s,\"sequence\":%llu}",
              (int)(length - 1), message, sequence);
+    {
+        BlitEventRecord *record = &runtime->event_history[
+            runtime->next_event_history % BLIT_MAX_EVENT_HISTORY];
+        record->used = 1;
+        record->sequence = sequence;
+        record->subscription = subscription;
+        snprintf(record->message, sizeof(record->message), "%s", sequenced);
+        ++runtime->next_event_history;
+    }
     for (i = 0; i < BLIT_MAX_STREAMS; ++i) {
         if (runtime->streams[i].used &&
             (runtime->streams[i].subscriptions & subscription) &&
             !send_websocket_text(runtime->streams[i].fd, sequenced))
             remove_stream(runtime, runtime->streams[i].fd);
+    }
+}
+
+static void replay_stream(BlitRuntime *runtime, int fd,
+                          unsigned long long since)
+{
+    unsigned long long oldest = 0;
+    unsigned long long sequence;
+    int gap = 0;
+    int i;
+
+    for (i = 0; i < BLIT_MAX_EVENT_HISTORY; ++i) {
+        if (runtime->event_history[i].used &&
+            (oldest == 0 || runtime->event_history[i].sequence < oldest))
+            oldest = runtime->event_history[i].sequence;
+    }
+    if (oldest != 0 && since + 1 < oldest)
+        gap = 1;
+    if (gap) {
+        char diagnostic[256];
+        snprintf(diagnostic, sizeof(diagnostic),
+                 "{\"type\":\"diagnostic\",\"severity\":\"warning\","
+                 "\"code\":\"replay_gap\",\"detail\":"
+                 "\"requested sequence is no longer retained\","
+                 "\"resource_id\":\"sequence-%llu\"}", oldest);
+        send_websocket_text(fd, diagnostic);
+    }
+    for (sequence = since + 1; sequence < runtime->next_event_sequence;
+         ++sequence) {
+        for (i = 0; i < BLIT_MAX_EVENT_HISTORY; ++i) {
+            BlitEventRecord *record = &runtime->event_history[i];
+            if (record->used && record->sequence == sequence) {
+                if (!send_websocket_text(fd, record->message)) {
+                    remove_stream(runtime, fd);
+                    return;
+                }
+                break;
+            }
+        }
     }
 }
 
@@ -1659,9 +1717,13 @@ static void handle_request(int fd, BlitRuntime *runtime,
         return;
     }
 
-    if (strcmp(path, "/v1/stream") == 0 && strcmp(method, "GET") == 0) {
+    if (strncmp(path, "/v1/stream", strlen("/v1/stream")) == 0 &&
+        (path[strlen("/v1/stream")] == '\0' ||
+         path[strlen("/v1/stream")] == '?') &&
+        strcmp(method, "GET") == 0) {
         char accept[64];
         char response[256];
+        const char *since_value = strstr(path, "since=");
         if (!websocket_accept(request, accept, sizeof(accept))) {
             send_http(fd, 400, "Bad Request", "application/problem+json",
                       "{\"type\":\"about:blank\",\"title\":\"Bad Request\","
@@ -1682,6 +1744,8 @@ static void handle_request(int fd, BlitRuntime *runtime,
         send_websocket_text(fd,
             "{\"type\":\"diagnostic\",\"severity\":\"info\","
             "\"code\":\"stream_connected\",\"detail\":\"blit stream ready\"}");
+        if (since_value != NULL)
+            replay_stream(runtime, fd, strtoull(since_value + 6, NULL, 10));
         return;
     }
 

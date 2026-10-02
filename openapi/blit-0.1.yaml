@@ -267,6 +267,12 @@ paths:
     get:
       tags: [diagnostics]
       operationId: openEventStream
+      parameters:
+        - name: since
+          in: query
+          required: false
+          description: Replay retained broadcast events after this sequence.
+          schema: {$ref: '#/components/schemas/Revision'}
       summary: Open the bidirectional blit WebSocket stream
       description: >-
         Clients upgrade this HTTP request to WebSocket. Stream messages use

@@ -154,5 +154,7 @@ sessions. A `surface_delta` includes the current surface revision, cursor, and
 bounded damage rectangle. Input messages identify `session_id` and carry
 terminal data inside the event object. Broadcast surface, terminal-output, and
 frame events carry a monotonic server `sequence`; clients can detect missed
-events when a reconnect produces a gap. Replay cursors are not implemented
-yet.
+events when a reconnect produces a gap. Reconnect with
+`/v1/stream?since=<last-sequence>` to replay the bounded retained history. If
+the cursor is older than retention, the stream emits `replay_gap`; clients
+must resynchronize from the HTTP resources.
