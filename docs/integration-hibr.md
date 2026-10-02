@@ -64,11 +64,9 @@ not duplicate layout, revision, style, cursor, or frame semantics.
 
 ## Desktop and pane orchestration
 
-Each `desktop --join` invocation is an independent Hibr desktop session. The
-primary desktop is the first session placed on the primary Blit surface;
-joined desktops are placed on explicitly named Blit surfaces or layout panes.
-A physical display may therefore expose two or four logical terminal panes
-without changing Hibr's session model:
+Blit internally splits a physical display into logical cell panes and assigns
+opaque, server-owned pane identifiers. The split may produce two or four
+auxiliary panes without exposing pixel geometry or naming policy to Hibr:
 
 ```text
 display-1 / primary       <- hibr desktop
@@ -78,20 +76,24 @@ display-2 / pane-3        <- hibr desktop --join
 display-2 / pane-4        <- hibr desktop --join
 ```
 
-Blit owns authoritative pane geometry and placement. Hibr selects or requests
-a named surface through the Blit API, then remains responsible for desktop
-lifecycle, detachment, reconnection, and recovery when a pane or display
-disappears. A missing pane must not cause Blit to invent a replacement
-desktop, and Blit must not restart Hibr processes.
+Blit owns authoritative pane geometry, placement, and pane naming. The API
+reports the available panes and their logical cell bounds. Hibr uses that
+inventory to attach sessions, but does not calculate or rename panes. Hibr
+remains responsible for desktop lifecycle, detachment, reconnection, and
+recovery when a pane or display disappears. A missing pane must not cause
+Blit to invent a replacement desktop, and Blit must not restart Hibr
+processes.
 
 The production join flow is:
 
-1. Hibr starts the primary desktop and requests a named primary surface.
-2. Hibr starts each `desktop --join` session independently.
-3. Hibr assigns each joined session to a Blit surface or pane through the API.
-4. Blit applies the layout and reports authoritative dimensions and revisions.
-5. Hibr handles disconnect, reconnect, and process recovery while the Blit
-   surface remains an addressable resource.
+1. The Blit API configures or discovers the physical-display split.
+2. The Blit API starts the primary Hibr desktop on the primary pane.
+3. The primary desktop queries Blit's pane inventory and discovers auxiliaries.
+4. The primary Hibr session starts one `desktop --join` session per auxiliary
+   pane and attaches each through the Blit API.
+5. Blit reports authoritative cell dimensions and revisions for every pane.
+6. Hibr handles disconnect, reconnect, and process recovery while Blit keeps
+   the pane topology stable.
 
 ## Current blocker
 

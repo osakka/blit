@@ -15,7 +15,11 @@ font change an application-level event.
 Blit layouts are expressed in logical terminal cells. A layout policy defines
 the arrangement of panes, such as a two-column or two-by-two grid. Blit uses
 the active display mode and font profile to calculate the available cell grid,
-derives each pane's cell bounds, and resizes the assigned Hibr session.
+derives each pane's cell bounds, assigns opaque pane identifiers, and resizes
+the attached Hibr session.
+
+Pane identifiers and split geometry are Blit-owned. Hibr discovers them from
+the topology API; it does not invent names or calculate physical placement.
 
 Font metrics and physical pixel bounds remain Blit rendering concerns. They
 are not part of Hibr's placement contract.
