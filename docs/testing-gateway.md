@@ -60,8 +60,19 @@ curl --fail --request POST \
 ```
 
 Use the returned numeric session id with `GET` or `PATCH` to inspect or update
-its display placement. The current slice accepts the command and surface
-dimensions; argument/environment policy is intentionally still pending.
+its display placement. Pass an enumerated `display_id` at creation time to
+route that session's surface to one output:
+
+```sh
+curl --fail --request POST \
+  --header 'Content-Type: application/json' \
+  --data '{"command":"/bin/sh","display_id":"display-2","surface":{"width":80,"height":24}}' \
+  http://127.0.0.1:8080/v1/terminal-sessions
+```
+
+An omitted `display_id` targets the first output for compatibility. Unknown
+display IDs are rejected with `display_not_found`; argument/environment policy
+is intentionally still pending.
 
 ## Apply cells and present a frame
 

@@ -426,6 +426,22 @@ static BlitSession *find_session_id(BlitRuntime *runtime,
     return NULL;
 }
 
+static int display_id_is_known(const BlitRuntime *runtime, const char *display_id)
+{
+    char expected[128];
+    int i;
+
+    if (display_id == NULL || display_id[0] == '\0')
+        return 1;
+    for (i = 0; i < runtime->display_count; ++i) {
+        snprintf(expected, sizeof(expected), "display-%llu",
+                 runtime->displays[i].id);
+        if (strcmp(display_id, expected) == 0)
+            return 1;
+    }
+    return 0;
+}
+
 static BlitSession *find_session(BlitRuntime *runtime, const char *path)
 {
     const char *prefix = "/v1/terminal-sessions/";
@@ -508,6 +524,8 @@ static int create_session(BlitRuntime *runtime, const char *json,
         return 0;
     memset(display_id, 0, sizeof(display_id));
     json_string(json, "display_id", display_id, sizeof(display_id));
+    if (!display_id_is_known(runtime, display_id))
+        return 0;
     memset(&size, 0, sizeof(size));
     size.ws_col = (unsigned short)width;
     size.ws_row = (unsigned short)height;
@@ -975,10 +993,18 @@ static void handle_request(int fd, BlitRuntime *runtime,
     if (strcmp(path, "/v1/terminal-sessions") == 0 &&
         strcmp(method, "POST") == 0) {
         BlitSession *session;
+        char requested_display_id[128];
         if (strstr(payload, "\"arguments\"") != NULL ||
             strstr(payload, "\"environment\"") != NULL) {
             send_problem(fd, 501, "Not Implemented", "session_options_pending",
                          "Arguments and environment policy are not implemented yet.");
+            return;
+        }
+        if (json_string(payload, "display_id", requested_display_id,
+                        sizeof(requested_display_id)) &&
+            !display_id_is_known(runtime, requested_display_id)) {
+            send_problem(fd, 404, "Not Found", "display_not_found",
+                         "The requested display does not exist.");
             return;
         }
         if (!create_session(runtime, payload, &session)) {
@@ -1077,6 +1103,11 @@ static void handle_request(int fd, BlitRuntime *runtime,
             }
             if (json_string(payload, "display_id", display_id,
                             sizeof(display_id))) {
+                if (!display_id_is_known(runtime, display_id)) {
+                    send_problem(fd, 404, "Not Found", "display_not_found",
+                                 "The requested display does not exist.");
+                    return;
+                }
                 snprintf(session->display_id, sizeof(session->display_id),
                          "%s", display_id);
             }
@@ -1213,11 +1244,25 @@ static void render_outputs(BlitRuntime *runtime)
         for (surface_index = 0; surface_index < BLIT_MAX_SESSIONS;
              ++surface_index) {
             BlitSurface *surface = &runtime->surfaces[surface_index];
+            BlitSession *session;
+            char display_id[128];
             char line[BLIT_MAX_CELL_COLS + 1];
             int column;
 
             if (!surface->used)
                 continue;
+            session = find_session_id(runtime, surface->owner_session_id);
+            if (session == NULL)
+                continue;
+            if (session->display_id[0] == '\0') {
+                if (output_index != 0)
+                    continue;
+            } else {
+                snprintf(display_id, sizeof(display_id), "display-%llu",
+                         runtime->outputs[output_index].display_id);
+                if (strcmp(session->display_id, display_id) != 0)
+                    continue;
+            }
             for (row = 0; row < surface->height && row < BLIT_MAX_CELL_ROWS;
                  ++row) {
                 for (column = 0; column < surface->width &&
