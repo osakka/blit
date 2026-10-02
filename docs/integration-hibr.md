@@ -95,6 +95,24 @@ The production join flow is:
 6. Hibr handles disconnect, reconnect, and process recovery while Blit keeps
    the pane topology stable.
 
+## Primary/auxiliary probe
+
+The current API-level orchestration path has been exercised with two
+TCC-built Hibr desktop processes:
+
+1. `PUT /v1/topology` selects `{"columns":2,"rows":1}`.
+2. `POST /v1/terminal-sessions` starts the primary desktop with the first
+   discovered `pane_id`.
+3. A second `POST /v1/terminal-sessions` starts the auxiliary desktop with
+   the second discovered `pane_id`.
+4. `GET /v1/topology` reports both attached surface IDs and both sessions
+   remain independently running.
+
+This proves the Blit side of the primary/auxiliary model. The remaining Hibr
+side work is to make the primary desktop discover the auxiliary pane inventory
+and invoke its own `desktop --join` lifecycle rather than requiring two
+independent API callers.
+
 ## Current blocker
 
 The standalone PTY route is operational. The remaining integration work is the
