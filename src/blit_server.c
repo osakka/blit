@@ -51,6 +51,12 @@ typedef struct {
 } BlitStream;
 
 typedef struct {
+    SDL_Window *window;
+    SDL_Renderer *renderer;
+    unsigned long long display_id;
+} BlitOutput;
+
+typedef struct {
     int used;
     unsigned long long id;
     pid_t process_id;
@@ -71,6 +77,8 @@ typedef struct {
     unsigned long long next_frame_id;
     unsigned long long frame_revision;
     BlitStream streams[BLIT_MAX_STREAMS];
+    BlitOutput outputs[BLIT_MAX_DISPLAYS];
+    int output_count;
     int sdl_ready;
     char sdl_error[256];
 } BlitRuntime;
@@ -145,7 +153,8 @@ static void server_json(const BlitRuntime *runtime, char *body, size_t capacity)
              "{\"id\":\"blit\",\"name\":\"blit\","
              "\"api_version\":\"0.1\",\"revision\":1,"
              "\"capabilities\":[\"http-control\",\"websocket-stream\","
-             "\"terminal-sessions\",\"topology\",\"diagnostics\"],"
+             "\"terminal-sessions\",\"topology\","
+             "\"native-presentation\",\"diagnostics\"],"
              "\"display_backend\":{\"ready\":%s,\"error\":\"%s\"}}",
              runtime->sdl_ready ? "true" : "false", runtime->sdl_error);
 }
@@ -1102,6 +1111,50 @@ static void discover_displays(BlitRuntime *runtime)
     SDL_free(ids);
 }
 
+static void initialize_outputs(BlitRuntime *runtime)
+{
+    int i;
+
+    for (i = 0; i < runtime->display_count; ++i) {
+        SDL_Window *window;
+        SDL_Renderer *renderer;
+        BlitDisplay *display = &runtime->displays[i];
+
+        window = SDL_CreateWindow("blit", display->bounds.w, display->bounds.h,
+                                 SDL_WINDOW_BORDERLESS);
+        if (window == NULL) {
+            snprintf(runtime->sdl_error, sizeof(runtime->sdl_error),
+                     "display %llu window: %s", display->id, SDL_GetError());
+            continue;
+        }
+        SDL_SetWindowPosition(window, display->bounds.x, display->bounds.y);
+        renderer = SDL_CreateRenderer(window, NULL);
+        if (renderer == NULL) {
+            snprintf(runtime->sdl_error, sizeof(runtime->sdl_error),
+                     "display %llu renderer: %s", display->id, SDL_GetError());
+            SDL_DestroyWindow(window);
+            continue;
+        }
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+        SDL_RenderClear(renderer);
+        SDL_RenderPresent(renderer);
+        runtime->outputs[runtime->output_count].window = window;
+        runtime->outputs[runtime->output_count].renderer = renderer;
+        runtime->outputs[runtime->output_count].display_id = display->id;
+        ++runtime->output_count;
+    }
+}
+
+static void destroy_outputs(BlitRuntime *runtime)
+{
+    int i;
+    for (i = 0; i < runtime->output_count; ++i) {
+        SDL_DestroyRenderer(runtime->outputs[i].renderer);
+        SDL_DestroyWindow(runtime->outputs[i].window);
+    }
+    runtime->output_count = 0;
+}
+
 int main(int argc, char **argv)
 {
     int port = 8080;
@@ -1124,6 +1177,8 @@ int main(int argc, char **argv)
     signal(SIGINT, stop_server);
     signal(SIGTERM, stop_server);
     discover_displays(&runtime);
+    if (runtime.sdl_ready)
+        initialize_outputs(&runtime);
 
     server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd < 0) {
@@ -1213,6 +1268,7 @@ int main(int argc, char **argv)
     }
     close(server_fd);
     stop_sessions(&runtime);
+    destroy_outputs(&runtime);
     if (runtime.sdl_ready)
         SDL_Quit();
     return 0;

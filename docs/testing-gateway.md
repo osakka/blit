@@ -30,6 +30,11 @@ LD_LIBRARY_PATH=build/sdl3-kms \
 The development listener defaults to loopback. The gateway has no TLS or
 authentication yet; do not set `BLIT_BIND_ADDRESS` to a non-loopback address.
 
+When SDL3 reports displays, the gateway creates one borderless SDL window and
+renderer per output, positions each window at the reported bounds, and presents
+an initial black frame. Renderer initialization failures remain in the server
+diagnostic state; they are not hidden by a second rendering path.
+
 ## Exercise discovery
 
 ```sh

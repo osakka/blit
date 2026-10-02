@@ -12,8 +12,11 @@ The platform capability gate is passing in the deterministic VKMS fixture:
 - One DRM card exposes two virtual outputs.
 - A fullscreen SDL window is created successfully across that fixture.
 
-The product itself has not started: there is no canonical schema, transport,
-authoritative state engine, or long-lived blit server yet.
+The initial product slice is now running: the OpenAPI contract, loopback TCP
+gateway, PTY sessions, revisioned surfaces, persistent WebSocket stream, and
+SDL3 output initialization are implemented. Native text rasterization, effects,
+multi-output frame planning, authentication, and VKMS gateway integration
+remain open.
 
 ## Milestone 1: contract vertical slice
 
@@ -73,6 +76,6 @@ suite on VKMS and then on a physical DRM/KMS host.
 
 ## Immediate next action
 
-Implement the TCC server gateway against the OpenAPI artifact: start with
-`GET /v1/server`, `GET /v1/displays`, `GET /v1/topology`, and the WebSocket
-stream handshake. No renderer feature or effect should precede that contract.
+Implement the renderer-neutral frame plan and text rasterization boundary. It
+must consume the existing surface revisions, drive the SDL3 output adapter, and
+be exercised against the two-output VKMS fixture before CRT effects are added.
