@@ -182,6 +182,33 @@ when the process exit status is zero.
 Set `BLIT_KMSDRM_ENUM_ONLY=1` to stop after output enumeration. This is a
 diagnostic mode of the same probe, not a second display implementation.
 
+## Gateway integration in QEMU
+
+The original tiny VKMS kernel is intentionally network-free. To test the
+actual TCP gateway in the fixture, rebuild it with built-in `NET`, `INET`,
+`PACKET`, `UNIX`, `E1000`, and `IP_PNP` support, then add QEMU user networking:
+
+```sh
+qemu-system-x86_64 ... \
+  -netdev user,id=n0,hostfwd=tcp:127.0.0.1:18091-:18091 \
+  -device e1000,netdev=n0
+```
+
+Inside the guest, mount `proc`, `sysfs`, `devtmpfs`, and `devpts`, configure
+`eth0` as `10.0.2.15/24`, and create the two-output VKMS topology above. Run
+the staged server with the test-only network bind and GBM path:
+
+```sh
+BLIT_BIND_ADDRESS=0.0.0.0 \
+GBM_BACKENDS_PATH=/blit-stage/gbm \
+/blit-stage/ld-linux-x86-64.so.2 --library-path /blit-stage \
+/blit-stage/blit-server 18091
+```
+
+The host can then exercise `http://127.0.0.1:18091`. The validated sequence
+returns both displays, creates a PTY session, applies a cell update, accepts a
+frame, and upgrades the WebSocket stream.
+
 ## Failure interpretation
 
 - `kmsdrm not available`: SDL3 was built without KMSDRM, or its dynamic
