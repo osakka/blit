@@ -439,6 +439,28 @@ static int utf8_decode(const unsigned char *text, size_t length,
     return 0;
 }
 
+static int unicode_cell_width(uint32_t codepoint)
+{
+    if ((codepoint >= 0x0300 && codepoint <= 0x036f) ||
+        (codepoint >= 0x1ab0 && codepoint <= 0x1aff) ||
+        (codepoint >= 0x1dc0 && codepoint <= 0x1dff) ||
+        (codepoint >= 0x20d0 && codepoint <= 0x20ff) ||
+        (codepoint >= 0xfe20 && codepoint <= 0xfe2f))
+        return 0;
+    if (codepoint == 0x2329 || codepoint == 0x232a ||
+        (codepoint >= 0x1100 && codepoint <= 0x115f) ||
+        (codepoint >= 0x2e80 && codepoint <= 0xa4c6) ||
+        (codepoint >= 0xac00 && codepoint <= 0xd7a3) ||
+        (codepoint >= 0xf900 && codepoint <= 0xfaff) ||
+        (codepoint >= 0xfe10 && codepoint <= 0xfe19) ||
+        (codepoint >= 0xfe30 && codepoint <= 0xfe6f) ||
+        (codepoint >= 0xff00 && codepoint <= 0xff60) ||
+        (codepoint >= 0xffe0 && codepoint <= 0xffe6) ||
+        (codepoint >= 0x1f300 && codepoint <= 0x1faff))
+        return 2;
+    return 1;
+}
+
 static int decode_text_cells(const char *text, uint32_t *codepoints,
                              size_t *count)
 {
@@ -455,7 +477,7 @@ static int decode_text_cells(const char *text, uint32_t *codepoints,
                          length - offset, &consumed, &codepoint))
             return 0;
         if (codepoint == '\n' || codepoint == '\r' || codepoint < 0x20 ||
-            (codepoint >= 0x0300 && codepoint <= 0x036f))
+            codepoint == 0x7f || unicode_cell_width(codepoint) != 1)
             return 0;
         codepoints[*count] = codepoint;
         ++*count;
@@ -899,6 +921,8 @@ static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
             if (!utf8_decode(data + offset, length - offset, &consumed,
                              &codepoint)) {
                 consumed = 1;
+                codepoint = '?';
+            } else if (unicode_cell_width(codepoint) != 1) {
                 codepoint = '?';
             }
             terminal_put_codepoint(surface, codepoint);

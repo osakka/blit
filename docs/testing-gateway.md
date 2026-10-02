@@ -104,12 +104,15 @@ colors are rejected. Text is validated as UTF-8 and decoded as one
 non-combining code point per cell; malformed UTF-8 and combining marks are
 rejected until the grapheme policy is expanded. A cell update may also carry a
 bounded `{x,y,visible}` cursor object; session GET responses report the current
-cursor, and out-of-bounds cursor positions are rejected. PTY-driven cursor
-movement now updates the canonical surface for printable UTF-8 output, CR/LF,
+cursor, and out-of-bounds cursor positions are rejected. The API accepts only
+code points classified as one cell wide; combining and known wide ranges are
+rejected until grapheme shaping is added. PTY-driven cursor movement now
+updates the canonical surface for printable UTF-8 output, CR/LF,
 backspace, tab, and the core ANSI cursor/erase commands `A`, `B`, `C`, `D`,
 `H`, `f`, `J`, and `K`. Output reaching the bottom row scrolls the surface by
 one row and marks the full surface dirty. Selection and blink timing remain
-later layers.
+later layers. Unsupported PTY widths become a visible replacement cell so
+cursor positioning remains deterministic.
 
 Unsupported inventories are returned as empty arrays until their native
 backends are implemented. Display discovery is sourced from SDL3.
