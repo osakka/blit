@@ -460,7 +460,7 @@ components:
       additionalProperties: false
     Topology:
       type: object
-      required: [id, revision, outputs]
+      required: [id, revision, outputs, panes]
       properties:
         id: {$ref: '#/components/schemas/ResourceId'}
         revision: {$ref: '#/components/schemas/Revision'}
@@ -475,6 +475,22 @@ components:
               rotation: {type: integer, enum: [0, 90, 180, 270]}
               scale: {type: number, exclusiveMinimum: 0}
             additionalProperties: false
+        panes:
+          type: array
+          items:
+            $ref: '#/components/schemas/Pane'
+      additionalProperties: false
+    Pane:
+      type: object
+      required: [id, display_id, bounds, surface_id]
+      properties:
+        id: {$ref: '#/components/schemas/ResourceId'}
+        display_id: {$ref: '#/components/schemas/ResourceId'}
+        bounds: {$ref: '#/components/schemas/Bounds'}
+        surface_id:
+          oneOf:
+            - {$ref: '#/components/schemas/ResourceId'}
+            - {type: 'null'}
       additionalProperties: false
     CreateTerminalSession:
       type: object
@@ -495,11 +511,13 @@ components:
             height: {type: integer, minimum: 1}
           additionalProperties: false
         display_id: {$ref: '#/components/schemas/ResourceId'}
+        pane_id: {$ref: '#/components/schemas/ResourceId'}
       additionalProperties: false
     UpdateTerminalSession:
       type: object
       properties:
         display_id: {$ref: '#/components/schemas/ResourceId'}
+        pane_id: {$ref: '#/components/schemas/ResourceId'}
         surface:
           type: object
           required: [width, height]
@@ -522,6 +540,7 @@ components:
           enum: [starting, running, stopped, failed]
         surface_id: {$ref: '#/components/schemas/ResourceId'}
         display_id: {$ref: '#/components/schemas/ResourceId'}
+        pane_id: {$ref: '#/components/schemas/ResourceId'}
         process_id: {type: integer, minimum: 1}
         exit_code: {type: integer}
         cursor: {$ref: '#/components/schemas/Cursor'}

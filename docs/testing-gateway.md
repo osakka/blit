@@ -85,6 +85,25 @@ An omitted `display_id` targets the first output for compatibility. Unknown
 display IDs are rejected with `display_not_found`; argument/environment policy
 is intentionally still pending.
 
+## Discover and attach to Blit panes
+
+Blit derives logical panes internally and exposes their opaque identifiers from
+topology discovery. A session attached to a pane is automatically sized to the
+pane's cell bounds:
+
+```sh
+curl --fail http://127.0.0.1:8080/v1/topology
+
+curl --fail --request POST \
+  --header 'Content-Type: application/json' \
+  --data '{"command":"/opt/bin/hibr-desktop","pane_id":"pane-display-1-1","surface":{"width":80,"height":24}}' \
+  http://127.0.0.1:8080/v1/terminal-sessions
+```
+
+The pane identifier and dimensions in the topology response are authoritative;
+clients must not derive pane names or pixel geometry. For development, the
+initial grid can be selected with `BLIT_PANE_LAYOUT=1x1`, `2x1`, or `2x2`.
+
 Resize a running terminal through the same session resource. The gateway
 updates the PTY window size, resets the canonical surface to the requested
 dimensions, increments `surface_revision`, and emits a surface-delta event:

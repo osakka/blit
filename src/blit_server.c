@@ -18,6 +18,7 @@
 #include <pty.h>
 
 #define BLIT_MAX_DISPLAYS 16
+#define BLIT_MAX_PANES 64
 #define BLIT_MAX_SESSIONS 16
 #define BLIT_MAX_STREAMS 16
 #define BLIT_REQUEST_SIZE 8192
@@ -43,6 +44,16 @@ typedef struct {
     char name[128];
     SDL_Rect bounds;
 } BlitDisplay;
+
+typedef struct {
+    int used;
+    char id[128];
+    char display_id[128];
+    int x;
+    int y;
+    int width;
+    int height;
+} BlitPane;
 
 typedef struct {
     int used;
@@ -122,6 +133,7 @@ typedef struct {
     int pty_fd;
     unsigned long long revision;
     char display_id[128];
+    char pane_id[128];
     char state[16];
     char surface_id[128];
     int terminal_escape;
@@ -132,6 +144,9 @@ typedef struct {
 typedef struct {
     int display_count;
     BlitDisplay displays[BLIT_MAX_DISPLAYS];
+    int pane_count;
+    BlitPane panes[BLIT_MAX_PANES];
+    unsigned long long topology_revision;
     int session_count;
     unsigned long long next_session_id;
     BlitSession sessions[BLIT_MAX_SESSIONS];
@@ -153,6 +168,8 @@ typedef struct {
 static volatile sig_atomic_t blit_running = 1;
 
 static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan);
+static const char *pane_surface_id(const BlitRuntime *runtime,
+                                   const BlitPane *pane);
 
 static void stop_server(int signal_number)
 {
@@ -257,9 +274,14 @@ static void topology_json(const BlitRuntime *runtime, char *body, size_t capacit
     size_t used = 0;
     int i;
 
-    used += (size_t)snprintf(body + used, capacity - used,
-                             "{\"id\":\"topology-0\",\"revision\":1,"
-                             "\"outputs\":[");
+    {
+        char revision_prefix[64];
+        snprintf(revision_prefix, sizeof(revision_prefix),
+                 "{\"id\":\"topology-0\",\"revision\":%llu,"
+                 "\"outputs\":[", runtime->topology_revision);
+        snprintf(body, capacity, "%s", revision_prefix);
+        used = strlen(body);
+    }
     for (i = 0; i < runtime->display_count && used < capacity; ++i) {
         used += (size_t)snprintf(
             body + used, capacity - used,
@@ -269,6 +291,21 @@ static void topology_json(const BlitRuntime *runtime, char *body, size_t capacit
             i == 0 ? "" : ",", runtime->displays[i].id,
             runtime->displays[i].bounds.x, runtime->displays[i].bounds.y,
             runtime->displays[i].bounds.w, runtime->displays[i].bounds.h);
+    }
+    used += (size_t)snprintf(body + used, capacity - used, "],\"panes\":[");
+    for (i = 0; i < runtime->pane_count && used < capacity; ++i) {
+        const BlitPane *pane = &runtime->panes[i];
+        const char *surface_id = pane_surface_id(runtime, pane);
+        used += (size_t)snprintf(
+            body + used, capacity - used,
+            "%s{\"id\":\"%s\",\"display_id\":\"%s\","
+            "\"bounds\":{\"x\":%d,\"y\":%d,\"width\":%d,\"height\":%d},"
+            "\"surface_id\":%s%s%s}",
+            i == 0 ? "" : ",", pane->id, pane->display_id, pane->x,
+            pane->y, pane->width, pane->height,
+            surface_id != NULL ? "\"" : "null",
+            surface_id != NULL ? surface_id : "",
+            surface_id != NULL ? "\"" : "");
     }
     snprintf(body + used, capacity - used, "]}");
 }
@@ -1094,6 +1131,18 @@ static int display_id_is_known(const BlitRuntime *runtime, const char *display_i
     return 0;
 }
 
+static BlitPane *find_pane_id(BlitRuntime *runtime, const char *pane_id)
+{
+    int i;
+
+    if (pane_id == NULL || pane_id[0] == '\0')
+        return NULL;
+    for (i = 0; i < runtime->pane_count; ++i)
+        if (runtime->panes[i].used && strcmp(runtime->panes[i].id, pane_id) == 0)
+            return &runtime->panes[i];
+    return NULL;
+}
+
 static BlitSession *find_session(BlitRuntime *runtime, const char *path)
 {
     const char *prefix = "/v1/terminal-sessions/";
@@ -1144,6 +1193,10 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
                                  ",\"display_id\":\"%s\"",
                                  session->display_id);
     }
+    if (session->pane_id[0]) {
+        used += (size_t)snprintf(body + used, capacity - used,
+                                 ",\"pane_id\":\"%s\"", session->pane_id);
+    }
     if (surface != NULL) {
         used += (size_t)snprintf(body + used, capacity - used,
                                  ",\"cursor\":{\"x\":%d,\"y\":%d,"
@@ -1152,6 +1205,18 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
                                  surface->cursor_visible ? "true" : "false");
     }
     snprintf(body + used, capacity - used, "}");
+}
+
+static const char *pane_surface_id(const BlitRuntime *runtime,
+                                   const BlitPane *pane)
+{
+    int i;
+
+    for (i = 0; i < BLIT_MAX_SESSIONS; ++i)
+        if (runtime->sessions[i].used &&
+            strcmp(runtime->sessions[i].pane_id, pane->id) == 0)
+            return runtime->sessions[i].surface_id;
+    return NULL;
 }
 
 static void send_problem(int fd, int status, const char *reason,
@@ -1246,6 +1311,8 @@ static int create_session(BlitRuntime *runtime, const char *json,
     struct winsize size;
     char command[256];
     char display_id[128];
+    char pane_id[128];
+    BlitPane *pane = NULL;
     int width = 80;
     int height = 24;
     int master_fd;
@@ -1263,6 +1330,17 @@ static int create_session(BlitRuntime *runtime, const char *json,
     json_string(json, "display_id", display_id, sizeof(display_id));
     if (!display_id_is_known(runtime, display_id))
         return 0;
+    memset(pane_id, 0, sizeof(pane_id));
+    if (json_string(json, "pane_id", pane_id, sizeof(pane_id))) {
+        pane = find_pane_id(runtime, pane_id);
+        if (pane == NULL)
+            return 0;
+        if (display_id[0] != '\0' && strcmp(display_id, pane->display_id) != 0)
+            return 0;
+        snprintf(display_id, sizeof(display_id), "%s", pane->display_id);
+        width = pane->width;
+        height = pane->height;
+    }
     memset(&size, 0, sizeof(size));
     size.ws_col = (unsigned short)width;
     size.ws_row = (unsigned short)height;
@@ -1288,6 +1366,7 @@ static int create_session(BlitRuntime *runtime, const char *json,
                      "surface-%llu", session->id);
             snprintf(session->display_id, sizeof(session->display_id), "%s",
                      display_id);
+            snprintf(session->pane_id, sizeof(session->pane_id), "%s", pane_id);
             {
                 BlitSurface *surface = &runtime->surfaces[i];
                 memset(surface, 0, sizeof(*surface));
@@ -1301,6 +1380,8 @@ static int create_session(BlitRuntime *runtime, const char *json,
                 snprintf(surface->state, sizeof(surface->state), "available");
             }
             ++runtime->session_count;
+            if (pane != NULL)
+                ++runtime->topology_revision;
             *created = session;
             return 1;
         }
@@ -1855,6 +1936,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
         strcmp(method, "POST") == 0) {
         BlitSession *session;
         char requested_display_id[128];
+        char requested_pane_id[128];
         if (idempotency_replay(runtime, fd, request, method, path, payload))
             return;
         if (strstr(payload, "\"arguments\"") != NULL ||
@@ -1868,6 +1950,13 @@ static void handle_request(int fd, BlitRuntime *runtime,
             !display_id_is_known(runtime, requested_display_id)) {
             send_problem(fd, 404, "Not Found", "display_not_found",
                          "The requested display does not exist.");
+            return;
+        }
+        if (json_string(payload, "pane_id", requested_pane_id,
+                        sizeof(requested_pane_id)) &&
+            find_pane_id(runtime, requested_pane_id) == NULL) {
+            send_problem(fd, 404, "Not Found", "pane_not_found",
+                         "The requested Blit pane does not exist.");
             return;
         }
         if (!create_session(runtime, payload, &session)) {
@@ -1986,6 +2075,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
         }
         if (strcmp(method, "PATCH") == 0) {
             char display_id[128];
+            char pane_id[128];
             BlitSurface *surface = find_surface_id(runtime, session->id);
             int resize_requested = strstr(payload, "\"surface\"") != NULL;
             int width = 0;
@@ -1993,13 +2083,39 @@ static void handle_request(int fd, BlitRuntime *runtime,
             int resized = 0;
             int display_requested = json_string(payload, "display_id",
                                                 display_id, sizeof(display_id));
+            int pane_requested = json_string(payload, "pane_id", pane_id,
+                                             sizeof(pane_id));
+            BlitPane *pane = pane_requested ? find_pane_id(runtime, pane_id) : NULL;
             if (strstr(payload, "\"input_route\"") != NULL ||
                 strstr(payload, "\"focused\"") != NULL) {
                 send_problem(fd, 501, "Not Implemented", "input_policy_pending",
                              "Input routing and focus policy are not implemented yet.");
                 return;
             }
-            if (resize_requested &&
+            if (pane_requested && pane == NULL) {
+                send_problem(fd, 404, "Not Found", "pane_not_found",
+                             "The requested Blit pane does not exist.");
+                return;
+            }
+            if (pane_requested) {
+                if (display_requested && strcmp(display_id, pane->display_id) != 0) {
+                    send_problem(fd, 409, "Conflict", "pane_display_conflict",
+                                 "The pane belongs to a different display.");
+                    return;
+                }
+                if (resize_requested &&
+                    (width != pane->width || height != pane->height)) {
+                    send_problem(fd, 400, "Bad Request", "pane_resize_conflict",
+                                 "A pane attachment determines surface dimensions.");
+                    return;
+                }
+                width = pane->width;
+                height = pane->height;
+                resize_requested = 1;
+                display_requested = 1;
+                snprintf(display_id, sizeof(display_id), "%s", pane->display_id);
+            }
+            if (resize_requested && !pane_requested &&
                 (!json_int(payload, "width", &width) ||
                  !json_int(payload, "height", &height))) {
                 send_problem(fd, 400, "Bad Request", "invalid_surface_resize",
@@ -2032,6 +2148,10 @@ static void handle_request(int fd, BlitRuntime *runtime,
                          runtime->outputs[output_index].initialized = 0;
                 }
             }
+            if (pane_requested)
+                snprintf(session->pane_id, sizeof(session->pane_id), "%s", pane_id);
+            if (pane_requested)
+                ++runtime->topology_revision;
             if (resized) {
                 int output_index;
                 for (output_index = 0; output_index < runtime->output_count;
@@ -2115,6 +2235,54 @@ static void discover_displays(BlitRuntime *runtime)
         }
     }
     SDL_free(ids);
+}
+
+static void discover_panes(BlitRuntime *runtime)
+{
+    const char *layout = getenv("BLIT_PANE_LAYOUT");
+    int columns = 1;
+    int rows = 1;
+    int display_index;
+
+    if (layout != NULL)
+        sscanf(layout, "%dx%d", &columns, &rows);
+    if (columns < 1 || columns > 2 || rows < 1 || rows > 2) {
+        columns = 1;
+        rows = 1;
+    }
+    for (display_index = 0; display_index < runtime->display_count;
+         ++display_index) {
+        BlitDisplay *display = &runtime->displays[display_index];
+        int grid_width = display->bounds.w > 0 ? display->bounds.w / 8 : 80;
+        int grid_height = display->bounds.h > 0 ? display->bounds.h / 8 : 24;
+        int pane_width = grid_width / columns;
+        int pane_height = grid_height / rows;
+        int row;
+        int column;
+
+        if (pane_width < 1) pane_width = 1;
+        if (pane_height < 1) pane_height = 1;
+        if (pane_width > BLIT_MAX_CELL_COLS) pane_width = BLIT_MAX_CELL_COLS;
+        if (pane_height > BLIT_MAX_CELL_ROWS) pane_height = BLIT_MAX_CELL_ROWS;
+        for (row = 0; row < rows; ++row) {
+            for (column = 0; column < columns; ++column) {
+                BlitPane *pane;
+                if (runtime->pane_count >= BLIT_MAX_PANES)
+                    return;
+                pane = &runtime->panes[runtime->pane_count++];
+                memset(pane, 0, sizeof(*pane));
+                pane->used = 1;
+                snprintf(pane->display_id, sizeof(pane->display_id),
+                         "display-%llu", display->id);
+                snprintf(pane->id, sizeof(pane->id), "pane-display-%llu-%d",
+                         display->id, row * columns + column + 1);
+                pane->x = column * pane_width;
+                pane->y = row * pane_height;
+                pane->width = pane_width;
+                pane->height = pane_height;
+            }
+        }
+    }
 }
 
 static void initialize_outputs(BlitRuntime *runtime)
@@ -2219,7 +2387,9 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
             BlitSurface *surface = find_surface_id(
                 runtime, plan->surfaces[plan_index].surface_id);
             BlitSession *session;
+            BlitPane *pane;
             char display_id[128];
+            float surface_origin_x = 4.0f;
             int surface_origin_y = 4;
             int prior_index;
             int first_row = 0;
@@ -2234,6 +2404,11 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
             session = find_session_id(runtime, surface->owner_session_id);
             if (session == NULL)
                 continue;
+            pane = find_pane_id(runtime, session->pane_id);
+            if (pane != NULL) {
+                surface_origin_x = (float)(pane->x * 8 + 4);
+                surface_origin_y = pane->y * 8 + 4;
+            }
             if (session->display_id[0] == '\0') {
                 if (output_index != 0)
                     continue;
@@ -2243,12 +2418,14 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
                 if (strcmp(session->display_id, display_id) != 0)
                     continue;
             }
-            for (prior_index = 0; prior_index < plan_index; ++prior_index) {
-                BlitSurface *prior = find_surface_id(
-                    runtime, plan->surfaces[prior_index].surface_id);
-                if (prior != NULL && prior->used &&
-                    surface_targets_output(runtime, prior, output_index))
-                    surface_origin_y += prior->height * 8 + 4;
+            if (pane == NULL) {
+                for (prior_index = 0; prior_index < plan_index; ++prior_index) {
+                    BlitSurface *prior = find_surface_id(
+                        runtime, plan->surfaces[prior_index].surface_id);
+                    if (prior != NULL && prior->used &&
+                        surface_targets_output(runtime, prior, output_index))
+                        surface_origin_y += prior->height * 8 + 4;
+                }
             }
             if (!full_redraw) {
                 if (!plan->surfaces[plan_index].damage_valid)
@@ -2258,7 +2435,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
                     plan->surfaces[plan_index].damage_height;
                 {
                     SDL_FRect damage;
-                    damage.x = 4.0f + plan->surfaces[plan_index].damage_x * 8.0f;
+                    damage.x = surface_origin_x +
+                        plan->surfaces[plan_index].damage_x * 8.0f;
                     damage.y = (float)surface_origin_y + first_row * 8.0f;
                     damage.w = plan->surfaces[plan_index].damage_width * 8.0f;
                     damage.h = plan->surfaces[plan_index].damage_height * 8.0f;
@@ -2290,7 +2468,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
                     if (attributes & BLIT_ATTR_DIM)
                         foreground = ((foreground & 0xfefefeU) >> 1);
                     if (background != 0) {
-                        cell_background.x = 4.0f + column * 8.0f;
+                        cell_background.x = surface_origin_x + column * 8.0f;
                         cell_background.y = (float)surface_origin_y + row * 8.0f;
                         cell_background.w = 8.0f;
                         cell_background.h = 8.0f;
@@ -2306,13 +2484,13 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
                         (unsigned char)foreground, 255);
                     utf8_encode(surface->codepoints[row][column] ?
                         surface->codepoints[row][column] : ' ', glyph);
-                    SDL_RenderDebugText(renderer, 4.0f + column * 8.0f,
+                    SDL_RenderDebugText(renderer, surface_origin_x + column * 8.0f,
                         (float)surface_origin_y + row * 8.0f, glyph);
                     if (attributes & BLIT_ATTR_BOLD)
-                        SDL_RenderDebugText(renderer, 5.0f + column * 8.0f,
+                        SDL_RenderDebugText(renderer, surface_origin_x + 1.0f + column * 8.0f,
                             (float)surface_origin_y + row * 8.0f, glyph);
                     if (attributes & BLIT_ATTR_UNDERLINE)
-                        SDL_RenderLine(renderer, 4.0f + column * 8.0f,
+                        SDL_RenderLine(renderer, surface_origin_x + column * 8.0f,
                             (float)surface_origin_y + row * 8.0f + 7.0f,
                             11.0f + column * 8.0f,
                             (float)surface_origin_y + row * 8.0f + 7.0f);
@@ -2324,7 +2502,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
                     (unsigned char)(BLIT_DEFAULT_FOREGROUND >> 16),
                     (unsigned char)(BLIT_DEFAULT_FOREGROUND >> 8),
                     (unsigned char)BLIT_DEFAULT_FOREGROUND, 255);
-                SDL_RenderLine(renderer, 4.0f + surface->cursor_x * 8.0f,
+                SDL_RenderLine(renderer, surface_origin_x + surface->cursor_x * 8.0f,
                     (float)surface_origin_y + surface->cursor_y * 8.0f,
                     4.0f + surface->cursor_x * 8.0f,
                     (float)surface_origin_y + surface->cursor_y * 8.0f + 7.0f);
@@ -2355,6 +2533,7 @@ int main(int argc, char **argv)
     runtime.next_session_id = 1;
     runtime.next_frame_id = 1;
     runtime.next_event_sequence = 1;
+    runtime.topology_revision = 1;
     {
         const char *auth_token = getenv("BLIT_AUTH_TOKEN");
         if (auth_token != NULL)
@@ -2364,6 +2543,7 @@ int main(int argc, char **argv)
     signal(SIGINT, stop_server);
     signal(SIGTERM, stop_server);
     discover_displays(&runtime);
+    discover_panes(&runtime);
     if (runtime.sdl_ready)
         initialize_outputs(&runtime);
 
