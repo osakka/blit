@@ -103,6 +103,50 @@ not expose a DRM node for that device. The remaining VM-specific suspect is
 the TCG plus virtio-GPU plus software-Mesa presentation path, not TCC linking
 or SDL display enumeration.
 
+## Reproducible multi-display QEMU fixture
+
+The reliable fixture uses Alpine userspace with a small Linux test kernel that
+has VKMS built in. QEMU's virtio-GPU `max_outputs` setting exposes capacity but
+does not create multiple active connectors; separate virtio GPUs create
+separate DRM cards and are not one multi-output device. VKMS configfs creates
+two connectors on one DRM card, which matches the topology blit must test.
+
+The test kernel must include at least:
+
+```text
+CONFIG_DRM=y
+CONFIG_DRM_KMS_HELPER=y
+CONFIG_DRM_VKMS=y
+CONFIG_CONFIGFS_FS=y
+CONFIG_DEVTMPFS=y
+CONFIG_DEVTMPFS_MOUNT=y
+CONFIG_BLK_DEV_INITRD=y
+CONFIG_RD_GZIP=y
+CONFIG_FUTEX=y
+```
+
+Boot it with the Alpine initramfs and disable VKMS's default device:
+
+```sh
+qemu-system-x86_64 -M q35 -m 1024 -smp 2 \
+  -kernel arch/x86/boot/bzImage \
+  -initrd alpine-vkms-initramfs.gz \
+  -append 'console=ttyS0 init=/bin/sh vkms.create_default_dev=0' \
+  -display none -serial stdio -monitor none -no-reboot
+```
+
+Inside the guest, mount configfs and create two plane/CRTC/encoder/connector
+pipelines under `/sys/kernel/config/vkms/blit`; each connector must be marked
+connected and linked to its encoder, and each encoder/plane linked to its CRTC.
+Set `enabled` to `1`, mount devtmpfs on `/dev`, then run the TCC-built probe
+with `SDL_VIDEODRIVER=kmsdrm`. With the current fixture the probe reports two
+outputs at `0,0 1024x768` and `1024,0 1024x768`, creates the fullscreen window,
+and exits successfully. The VKMS teardown may log `Could not restore CRTC`; it
+does not indicate a failed probe when the process exit status is zero.
+
+Set `BLIT_KMSDRM_ENUM_ONLY=1` to stop after output enumeration. This is a
+diagnostic mode of the same probe, not a second display implementation.
+
 ## Failure interpretation
 
 - `kmsdrm not available`: SDL3 was built without KMSDRM, or its dynamic

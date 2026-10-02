@@ -1,4 +1,5 @@
 #include <SDL3/SDL.h>
+#include <stdlib.h>
 
 int main(void)
 {
@@ -35,6 +36,11 @@ int main(void)
         }
     }
     SDL_free(displays);
+
+    if (getenv("BLIT_KMSDRM_ENUM_ONLY") != NULL) {
+        SDL_Quit();
+        return 0;
+    }
 
     window = SDL_CreateWindow("blit KMSDRM probe", 640, 480,
                               SDL_WINDOW_FULLSCREEN);
