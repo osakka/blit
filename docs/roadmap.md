@@ -31,6 +31,8 @@ payload conflict detection, preventing duplicate PTY creation on retries.
 Broadcast stream events carry monotonic sequences with a bounded replay cursor
 and explicit `replay_gap` recovery behavior. Surface snapshots provide the
 authoritative HTTP resynchronization path, including text, styles, and cursor.
+The hibr desktop has also passed a TCC-built PTY compatibility probe; the
+production `console-blit` module remains planned. The SDL adapter uses
 single-surface incremental frames and conservatively redraws multi-surface
 outputs with deterministic vertical stacking.
 
@@ -94,7 +96,7 @@ suite on VKMS and then on a physical DRM/KMS host.
 
 ## Immediate next action
 
-Extend the renderer-neutral frame plan with richer damage composition and text
-rasterization boundaries. It must consume the existing surface revisions,
-preserve the explicit output mapping, drive the SDL3 output adapter, and be
-exercised against the two-output VKMS fixture before CRT effects are added.
+Implement the `console-blit` hibr adapter against the OpenAPI/WebSocket
+contract, then run it through the two-output VKMS fixture. It must consume the
+existing surface revisions, preserve the explicit output mapping, and keep
+hibr as a client rather than a second state owner.

@@ -31,11 +31,14 @@ relevant documentation and schema in the same change.
   Linux host without X11 or Wayland.
 - [Gateway testing](testing-gateway.md) — how to build and exercise the first
   TCP/OpenAPI/WebSocket gateway slice.
+- [hibr integration](integration-hibr.md) — standalone-service decision,
+  PTY compatibility probe, and the planned console-module adapter.
 - [ADR index](adr/README.md) — decisions that constrain implementation.
 
 ## Working status
 
-The project is in the discovery and contract-definition phase. The documents
-describe an initial direction, not a completed implementation. Items marked
-as open questions should be resolved through an ADR before they become hidden
+The project has a running TCC-built vertical slice and deterministic VKMS
+coverage. The hibr PTY compatibility probe is passing; the production hibr
+console adapter and operational hardening remain planned work. Items marked as
+open questions should be resolved through an ADR before they become hidden
 implementation assumptions.
