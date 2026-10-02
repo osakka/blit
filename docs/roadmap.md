@@ -28,6 +28,8 @@ Session responses expose the current surface revision so clients can perform
 optimistic updates and retry cleanly after PTY races.
 Session, cell, and frame mutations have bounded idempotency-key replay with
 payload conflict detection, preventing duplicate PTY creation on retries.
+Broadcast stream events carry monotonic sequences for gap detection; bounded
+replay cursors and reconnect recovery remain open.
 single-surface incremental frames and conservatively redraws multi-surface
 outputs with deterministic vertical stacking.
 

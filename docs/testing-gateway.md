@@ -152,4 +152,7 @@ receive pong responses; surface deltas and frame receipts are the currently
 implemented event types, along with `terminal_output` events from PTY-backed
 sessions. A `surface_delta` includes the current surface revision, cursor, and
 bounded damage rectangle. Input messages identify `session_id` and carry
-terminal data inside the event object.
+terminal data inside the event object. Broadcast surface, terminal-output, and
+frame events carry a monotonic server `sequence`; clients can detect missed
+events when a reconnect produces a gap. Replay cursors are not implemented
+yet.

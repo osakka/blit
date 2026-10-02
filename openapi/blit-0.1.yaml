@@ -601,19 +601,21 @@ components:
       additionalProperties: false
     StreamTerminalOutput:
       type: object
-      required: [type, session_id, data]
+      required: [type, session_id, data, sequence]
       properties:
         type: {type: string, const: terminal_output}
         session_id: {$ref: '#/components/schemas/ResourceId'}
         data: {type: string}
+        sequence: {$ref: '#/components/schemas/Revision'}
       additionalProperties: false
     StreamSurfaceDelta:
       type: object
-      required: [type, surface_id, revision, cursor]
+      required: [type, surface_id, revision, cursor, sequence]
       properties:
         type: {type: string, const: surface_delta}
         surface_id: {$ref: '#/components/schemas/ResourceId'}
         revision: {$ref: '#/components/schemas/Revision'}
+        sequence: {$ref: '#/components/schemas/Revision'}
         cursor: {$ref: '#/components/schemas/Cursor'}
         damage:
           type: object
@@ -627,10 +629,11 @@ components:
       additionalProperties: false
     StreamFrameEvent:
       type: object
-      required: [type, frame]
+      required: [type, frame, sequence]
       properties:
         type: {type: string, const: frame}
         frame: {$ref: '#/components/schemas/FrameReceipt'}
+        sequence: {$ref: '#/components/schemas/Revision'}
       additionalProperties: false
     StreamDiagnosticEvent:
       type: object

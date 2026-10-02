@@ -130,6 +130,7 @@ typedef struct {
     BlitSurface surfaces[BLIT_MAX_SESSIONS];
     unsigned long long next_frame_id;
     unsigned long long frame_revision;
+    unsigned long long next_event_sequence;
     BlitStream streams[BLIT_MAX_STREAMS];
     BlitOutput outputs[BLIT_MAX_DISPLAYS];
     BlitIdempotency idempotency[BLIT_MAX_IDEMPOTENCY];
@@ -1468,11 +1469,20 @@ static void remove_stream(BlitRuntime *runtime, int fd)
 static void broadcast_stream(BlitRuntime *runtime, const char *message,
                              unsigned int subscription)
 {
+    char sequenced[2304];
+    size_t length = strlen(message);
+    unsigned long long sequence = runtime->next_event_sequence++;
     int i;
+
+    if (length < 2 || message[length - 1] != '}' ||
+        length + 32 >= sizeof(sequenced))
+        return;
+    snprintf(sequenced, sizeof(sequenced), "%.*s,\"sequence\":%llu}",
+             (int)(length - 1), message, sequence);
     for (i = 0; i < BLIT_MAX_STREAMS; ++i) {
         if (runtime->streams[i].used &&
             (runtime->streams[i].subscriptions & subscription) &&
-            !send_websocket_text(runtime->streams[i].fd, message))
+            !send_websocket_text(runtime->streams[i].fd, sequenced))
             remove_stream(runtime, runtime->streams[i].fd);
     }
 }
@@ -2139,6 +2149,7 @@ int main(int argc, char **argv)
     memset(&runtime, 0, sizeof(runtime));
     runtime.next_session_id = 1;
     runtime.next_frame_id = 1;
+    runtime.next_event_sequence = 1;
     signal(SIGINT, stop_server);
     signal(SIGTERM, stop_server);
     discover_displays(&runtime);
