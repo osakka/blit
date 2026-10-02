@@ -594,6 +594,28 @@ static void mutation_receipt_json(const BlitSurface *surface, char *body,
              surface->revision);
 }
 
+static void surface_delta_json(const BlitSurface *surface, char *body,
+                               size_t capacity)
+{
+    size_t used;
+
+    snprintf(body, capacity,
+             "{\"type\":\"surface_delta\",\"surface_id\":"
+             "\"surface-%llu\",\"revision\":%llu,"
+             "\"cursor\":{\"x\":%d,\"y\":%d,\"visible\":%s}",
+             surface->id, surface->revision, surface->cursor_x,
+             surface->cursor_y, surface->cursor_visible ? "true" : "false");
+    used = strlen(body);
+    if (surface->damage_valid) {
+        used += (size_t)snprintf(body + used, capacity - used,
+                                 ",\"damage\":{\"x\":%d,\"y\":%d,"
+                                 "\"width\":%d,\"height\":%d}",
+                                 surface->damage_x, surface->damage_y,
+                                 surface->damage_width, surface->damage_height);
+    }
+    snprintf(body + used, capacity - used, "}");
+}
+
 static void mark_surface_damage(BlitSurface *surface, int x, int y)
 {
     int right = x + 1;
@@ -1372,16 +1394,14 @@ static void service_session_output(BlitRuntime *runtime, int fd)
         if (runtime->sessions[i].used && runtime->sessions[i].pty_fd == fd) {
             BlitSurface *surface = find_surface_id(runtime,
                 runtime->sessions[i].id);
-            char surface_event[256];
+            char surface_event[512];
 
             if (surface != NULL && terminal_consume_output(
                     &runtime->sessions[i], surface, output,
                     (size_t)received)) {
                 ++surface->revision;
-                snprintf(surface_event, sizeof(surface_event),
-                         "{\"type\":\"surface_delta\",\"surface_id\":"
-                         "\"surface-%llu\",\"revision\":%llu}",
-                         surface->id, surface->revision);
+                surface_delta_json(surface, surface_event,
+                                   sizeof(surface_event));
                 broadcast_stream(runtime, surface_event, BLIT_STREAM_SURFACES);
             }
             snprintf(event, sizeof(event),
@@ -1599,11 +1619,8 @@ static void handle_request(int fd, BlitRuntime *runtime,
         mutation_receipt_json(surface, body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
         {
-            char event[256];
-            snprintf(event, sizeof(event),
-                     "{\"type\":\"surface_delta\",\"surface_id\":"
-                     "\"surface-%llu\",\"revision\":%llu}",
-                     surface->id, surface->revision);
+            char event[512];
+            surface_delta_json(surface, event, sizeof(event));
             broadcast_stream(runtime, event, BLIT_STREAM_SURFACES);
         }
         return;

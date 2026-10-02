@@ -609,12 +609,21 @@ components:
       additionalProperties: false
     StreamSurfaceDelta:
       type: object
-      required: [type, surface_id, revision, update]
+      required: [type, surface_id, revision, cursor]
       properties:
         type: {type: string, const: surface_delta}
         surface_id: {$ref: '#/components/schemas/ResourceId'}
         revision: {$ref: '#/components/schemas/Revision'}
-        update: {$ref: '#/components/schemas/CellUpdate'}
+        cursor: {$ref: '#/components/schemas/Cursor'}
+        damage:
+          type: object
+          required: [x, y, width, height]
+          properties:
+            x: {type: integer, minimum: 0}
+            y: {type: integer, minimum: 0}
+            width: {type: integer, minimum: 1}
+            height: {type: integer, minimum: 1}
+          additionalProperties: false
       additionalProperties: false
     StreamFrameEvent:
       type: object
