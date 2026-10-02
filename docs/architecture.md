@@ -1,0 +1,122 @@
+# Initial architecture
+
+## Runtime shape
+
+```text
+API clients
+    |
+    v
+API transport and protocol adapter
+    |
+    v
+Command validation -> authoritative scene state -> event journal
+                              |
+                              v
+                     layout and damage planning
+                              |
+                              v
+                    effect graph / frame assembly
+                              |
+                              v
+                 SDL3 platform and renderer adapter
+                              |
+                              v
+                   direct display outputs (e.g. DRM/KMS)
+```
+
+The public API must terminate at the protocol adapter. No client should need
+to link against SDL3, access renderer objects, or understand a particular
+display backend.
+
+## Toolchain boundary
+
+blit production code and first-party contract tooling are compiled with the
+pinned TCC toolchain. The boundary to SDL3 and other dependencies is an
+ordinary, narrow C ABI. TCC compatibility is a release gate for that boundary;
+it is not acceptable to develop against one compiler and discover TCC failures
+later.
+
+The project may use a host compiler to build external dependencies or bootstrap
+TCC, but that does not create a second blit implementation. The exact
+exception and artifact provenance must be recorded in the build documentation.
+
+## Proposed subsystems
+
+### API gateway
+
+Owns transport listeners, authentication/authorization hooks, request
+decoding, schema validation, capability negotiation, error responses, and
+subscriptions. The first transport should be chosen for local automation and
+diagnostics; a remote transport can be added without changing resource
+semantics.
+
+### State engine
+
+Maintains the authoritative model of outputs, canvases, surfaces, styles,
+effects, input routes, and frame lifecycle. Mutations are applied in a defined
+order and produce typed events.
+
+### Terminal model
+
+Represents a Unicode-aware grid, cell attributes, cursor/selection state,
+scrolling, and damage regions. PTY integration, if added, should be an adapter
+that feeds this model rather than defining it.
+
+### Layout and output manager
+
+Discovers outputs, records their capabilities, and maps them into a logical
+canvas. It must represent gaps, offsets, rotations, scaling, and unavailable
+outputs explicitly. A canvas may span outputs without requiring one giant
+physical framebuffer.
+
+### Effect engine
+
+Evaluates a versioned effect graph at frame time. Effects should declare their
+inputs, parameters, supported color formats, and cost characteristics. The
+engine needs a bounded policy for expensive effects and a clear behavior when
+an effect cannot run.
+
+### SDL3 adapter
+
+Translates the renderer-neutral frame plan into SDL3 resources and presentation
+operations. Platform initialization, input polling, GPU selection, and direct
+display integration belong here. SDL3 failures must be converted into stable
+blit errors and events.
+
+### Persistence and observability
+
+Configuration, snapshots, structured logs, metrics, and diagnostic frame data
+should be separate from the hot rendering path. A server restart must have a
+documented policy for restoring or discarding scene state.
+
+## Frame lifecycle
+
+1. A client submits a validated scene mutation or content update.
+2. The state engine applies it and marks affected regions as damaged.
+3. The layout manager resolves logical regions against current outputs.
+4. The effect engine builds a bounded render plan from the scene snapshot.
+5. The SDL3 adapter renders and presents the plan to each active output.
+6. The server emits acknowledgement, timing, presentation, and failure events.
+
+The exact threading model is intentionally open. The contract must define
+ordering and visibility first; implementation can then use one or more worker
+threads without changing client behavior.
+
+## Multi-monitor model
+
+blit should model an output arrangement as a named topology, not infer a
+single rectangular desktop. Each output has a stable server-local identity,
+physical bounds, logical bounds, transform, and presentation status. The
+canvas-to-output mapping should be queryable and mutable through the API.
+
+Initial policy questions include whether a frame is committed atomically
+across outputs, how refresh-rate differences are handled, and what happens
+when an output disappears mid-frame.
+
+## Security boundary
+
+Binding a process directly to display hardware is privileged. The design must
+separate the API's authorization model from SDL3/OS privileges and should
+support a least-privilege deployment model. Authentication, client identity,
+capabilities, and destructive operations need schema-level representation even
+if the first local transport uses operating-system credentials.

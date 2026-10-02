@@ -1,0 +1,10 @@
+# Generated build trees and probe binaries.
+/build/
+
+# Locally staged third-party dependency sources and build inputs.
+/vendor/deps/
+
+# Host/editor noise.
+*.swp
+*~
+.DS_Store
