@@ -715,6 +715,42 @@ static void terminal_clear_line(BlitSurface *surface, int y, int start)
         terminal_clear_cell(surface, x, y);
 }
 
+static void terminal_scroll_up(BlitSurface *surface)
+{
+    int y;
+
+    if (surface->height < 1)
+        return;
+    for (y = 1; y < surface->height; ++y) {
+        memcpy(surface->cells[y - 1], surface->cells[y],
+               sizeof(surface->cells[y - 1]));
+        memcpy(surface->codepoints[y - 1], surface->codepoints[y],
+               sizeof(surface->codepoints[y - 1]));
+        memcpy(surface->foreground[y - 1], surface->foreground[y],
+               sizeof(surface->foreground[y - 1]));
+        memcpy(surface->background[y - 1], surface->background[y],
+               sizeof(surface->background[y - 1]));
+        memcpy(surface->attributes[y - 1], surface->attributes[y],
+               sizeof(surface->attributes[y - 1]));
+    }
+    memset(surface->cells[surface->height - 1], 0,
+           sizeof(surface->cells[surface->height - 1]));
+    memset(surface->codepoints[surface->height - 1], 0,
+           sizeof(surface->codepoints[surface->height - 1]));
+    memset(surface->foreground[surface->height - 1], 0,
+           sizeof(surface->foreground[surface->height - 1]));
+    memset(surface->background[surface->height - 1], 0,
+           sizeof(surface->background[surface->height - 1]));
+    memset(surface->attributes[surface->height - 1], 0,
+           sizeof(surface->attributes[surface->height - 1]));
+    surface->damage_valid = 1;
+    surface->damage_x = 0;
+    surface->damage_y = 0;
+    surface->damage_width = surface->width;
+    surface->damage_height = surface->height;
+    surface->cursor_y = surface->height - 1;
+}
+
 static int terminal_number(const char **cursor, int *value)
 {
     char *end;
@@ -786,6 +822,8 @@ static void terminal_put_codepoint(BlitSurface *surface, uint32_t codepoint)
         surface->cursor_x = 0;
         if (surface->cursor_y + 1 < surface->height)
             ++surface->cursor_y;
+        else
+            terminal_scroll_up(surface);
     }
     terminal_clear_cell(surface, surface->cursor_x, surface->cursor_y);
     surface->codepoints[surface->cursor_y][surface->cursor_x] = codepoint;
@@ -842,6 +880,8 @@ static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
             mark_surface_damage(surface, surface->cursor_x, surface->cursor_y);
             if (surface->cursor_y + 1 < surface->height)
                 ++surface->cursor_y;
+            else
+                terminal_scroll_up(surface);
             ++offset;
         } else if (byte == '\b') {
             if (surface->cursor_x > 0)

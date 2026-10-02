@@ -107,7 +107,9 @@ bounded `{x,y,visible}` cursor object; session GET responses report the current
 cursor, and out-of-bounds cursor positions are rejected. PTY-driven cursor
 movement now updates the canonical surface for printable UTF-8 output, CR/LF,
 backspace, tab, and the core ANSI cursor/erase commands `A`, `B`, `C`, `D`,
-`H`, `f`, `J`, and `K`. Selection and blink timing remain later layers.
+`H`, `f`, `J`, and `K`. Output reaching the bottom row scrolls the surface by
+one row and marks the full surface dirty. Selection and blink timing remain
+later layers.
 
 Unsupported inventories are returned as empty arrays until their native
 backends are implemented. Display discovery is sourced from SDL3.
