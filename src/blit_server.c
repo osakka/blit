@@ -29,6 +29,7 @@
 #define BLIT_STREAM_INPUT 8
 #define BLIT_STREAM_HARDWARE 16
 #define BLIT_STREAM_TERMINALS 32
+#define BLIT_MAX_FRAME_SURFACES 16
 
 typedef struct {
     unsigned long long id;
@@ -46,6 +47,17 @@ typedef struct {
     char state[16];
     char cells[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
 } BlitSurface;
+
+typedef struct {
+    unsigned long long surface_id;
+    unsigned long long surface_revision;
+} BlitFrameSurface;
+
+typedef struct {
+    unsigned long long revision;
+    int surface_count;
+    BlitFrameSurface surfaces[BLIT_MAX_FRAME_SURFACES];
+} BlitFramePlan;
 
 typedef struct {
     int used;
@@ -88,7 +100,7 @@ typedef struct {
 
 static volatile sig_atomic_t blit_running = 1;
 
-static void render_outputs(BlitRuntime *runtime);
+static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan);
 
 static void stop_server(int signal_number)
 {
@@ -338,11 +350,14 @@ static BlitSurface *find_surface(BlitRuntime *runtime, const char *path)
     return find_surface_id(runtime, surface_id);
 }
 
-static int surface_ids_are_valid(BlitRuntime *runtime, const char *json,
-                                 unsigned long long revision)
+static int build_frame_plan(BlitRuntime *runtime, const char *json,
+                            unsigned long long revision, BlitFramePlan *plan)
 {
     const char *cursor = json;
     int found = 0;
+
+    memset(plan, 0, sizeof(*plan));
+    plan->revision = revision;
 
     while ((cursor = strstr(cursor, "\"surface-")) != NULL) {
         char id[64];
@@ -361,8 +376,13 @@ static int surface_ids_are_valid(BlitRuntime *runtime, const char *json,
         if (sscanf(id, "surface-%llu", &surface_id) != 1)
             return 0;
         surface = find_surface_id(runtime, surface_id);
-        if (surface == NULL || surface->revision != revision)
+        if (surface == NULL || surface->revision != revision ||
+            plan->surface_count >= BLIT_MAX_FRAME_SURFACES)
             return 0;
+        plan->surfaces[plan->surface_count].surface_id = surface_id;
+        plan->surfaces[plan->surface_count].surface_revision =
+            surface->revision;
+        ++plan->surface_count;
         found = 1;
         cursor = end + 1;
     }
@@ -1045,7 +1065,6 @@ static void handle_request(int fd, BlitRuntime *runtime,
         ++surface->revision;
         mutation_receipt_json(surface, body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
-        render_outputs(runtime);
         {
             char event[256];
             snprintf(event, sizeof(event),
@@ -1058,10 +1077,11 @@ static void handle_request(int fd, BlitRuntime *runtime,
     }
     if (strcmp(path, "/v1/frames") == 0 && strcmp(method, "POST") == 0) {
         int base_revision;
+        BlitFramePlan plan;
 
         if (!json_int(payload, "base_revision", &base_revision) ||
-            !surface_ids_are_valid(runtime, payload,
-                                   (unsigned long long)base_revision)) {
+            !build_frame_plan(runtime, payload,
+                              (unsigned long long)base_revision, &plan)) {
             send_problem(fd, 400, "Bad Request", "invalid_frame_request",
                          "A base revision and existing surface ids are required.");
             return;
@@ -1074,7 +1094,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
         ++runtime->frame_revision;
         ++runtime->next_frame_id;
         frame_receipt_json(runtime, body, sizeof(body));
-        render_outputs(runtime);
+        render_outputs(runtime, &plan);
         send_http(fd, 202, "Accepted", "application/json", body);
         {
             char event[256];
@@ -1229,10 +1249,10 @@ static void destroy_outputs(BlitRuntime *runtime)
     runtime->output_count = 0;
 }
 
-static void render_outputs(BlitRuntime *runtime)
+static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
 {
     int output_index;
-    int surface_index;
+    int plan_index;
     int row;
 
     for (output_index = 0; output_index < runtime->output_count;
@@ -1241,15 +1261,17 @@ static void render_outputs(BlitRuntime *runtime)
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderClear(renderer);
         SDL_SetRenderDrawColor(renderer, 190, 210, 190, 255);
-        for (surface_index = 0; surface_index < BLIT_MAX_SESSIONS;
-             ++surface_index) {
-            BlitSurface *surface = &runtime->surfaces[surface_index];
+        for (plan_index = 0; plan_index < plan->surface_count;
+             ++plan_index) {
+            BlitSurface *surface = find_surface_id(
+                runtime, plan->surfaces[plan_index].surface_id);
             BlitSession *session;
             char display_id[128];
             char line[BLIT_MAX_CELL_COLS + 1];
             int column;
 
-            if (!surface->used)
+            if (surface == NULL || !surface->used ||
+                surface->revision != plan->surfaces[plan_index].surface_revision)
                 continue;
             session = find_session_id(runtime, surface->owner_session_id);
             if (session == NULL)

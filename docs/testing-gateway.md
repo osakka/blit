@@ -92,8 +92,9 @@ curl --fail --request POST \
   http://127.0.0.1:8080/v1/frames
 ```
 
-Stale cell revisions are rejected with `409 Conflict`. Frame receipts currently
-record acceptance and trigger the SDL3 output adapter. The initial renderer uses
+Stale cell revisions are rejected with `409 Conflict`. Cell mutations update
+authoritative state; frame receipts record acceptance and trigger the SDL3
+output adapter from an immutable surface/revision plan. The initial renderer uses
 SDL3's deterministic built-in bitmap text primitive; font selection, cell
 attributes, damage tracking, and CRT effects remain later renderer layers.
 

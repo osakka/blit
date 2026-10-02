@@ -15,8 +15,10 @@ The platform capability gate is passing in the deterministic VKMS fixture:
 The initial product slice is now running: the OpenAPI contract, loopback TCP
 gateway, PTY sessions, revisioned surfaces, persistent WebSocket stream, SDL3
 output initialization, and explicit session-to-display routing are implemented.
-Native text rasterization, effects, renderer-neutral frame planning,
-authentication, and VKMS gateway integration remain open.
+The first renderer-neutral frame plan is now also implemented: a frame request
+captures the selected surface revisions before the SDL adapter presents them.
+Native text rasterization, effects, damage tracking, authentication, and VKMS
+gateway integration remain open.
 
 ## Milestone 1: contract vertical slice
 
@@ -78,7 +80,7 @@ suite on VKMS and then on a physical DRM/KMS host.
 
 ## Immediate next action
 
-Implement the renderer-neutral frame plan and text rasterization boundary. It
-must consume the existing surface revisions, preserve the explicit output
-mapping, drive the SDL3 output adapter, and be exercised against the two-output
-VKMS fixture before CRT effects are added.
+Extend the renderer-neutral frame plan with damage regions and text
+rasterization boundaries. It must consume the existing surface revisions,
+preserve the explicit output mapping, drive the SDL3 output adapter, and be
+exercised against the two-output VKMS fixture before CRT effects are added.
