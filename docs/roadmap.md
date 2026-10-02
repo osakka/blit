@@ -26,8 +26,8 @@ dirty rows. PTY output now feeds that same surface model for printable text,
 core controls, basic ANSI cursor/erase commands, and bounded upward scrolling.
 Session responses expose the current surface revision so clients can perform
 optimistic updates and retry cleanly after PTY races.
-Cell and frame mutations also have bounded idempotency-key replay with payload
-conflict detection.
+Session, cell, and frame mutations have bounded idempotency-key replay with
+payload conflict detection, preventing duplicate PTY creation on retries.
 single-surface incremental frames and conservatively redraws multi-surface
 outputs with deterministic vertical stacking.
 

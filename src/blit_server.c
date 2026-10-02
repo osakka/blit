@@ -1679,6 +1679,8 @@ static void handle_request(int fd, BlitRuntime *runtime,
         strcmp(method, "POST") == 0) {
         BlitSession *session;
         char requested_display_id[128];
+        if (idempotency_replay(runtime, fd, request, method, path, payload))
+            return;
         if (strstr(payload, "\"arguments\"") != NULL ||
             strstr(payload, "\"environment\"") != NULL) {
             send_problem(fd, 501, "Not Implemented", "session_options_pending",
@@ -1699,6 +1701,8 @@ static void handle_request(int fd, BlitRuntime *runtime,
         }
         session_json(runtime, session, body, sizeof(body));
         send_http(fd, 201, "Created", "application/json", body);
+        idempotency_store(runtime, request, method, path, payload, 201,
+                          "Created", "application/json", body);
         return;
     }
     if (strncmp(path, "/v1/surfaces/", strlen("/v1/surfaces/")) == 0 &&
