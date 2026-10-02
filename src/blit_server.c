@@ -1310,6 +1310,38 @@ static int create_session(BlitRuntime *runtime, const char *json,
     return 0;
 }
 
+static int resize_session_surface(BlitSession *session, BlitSurface *surface,
+                                  int width, int height)
+{
+    struct winsize size;
+
+    if (width < 1 || height < 1 || width > BLIT_MAX_CELL_COLS ||
+        height > BLIT_MAX_CELL_ROWS)
+        return 0;
+    memset(&size, 0, sizeof(size));
+    size.ws_col = (unsigned short)width;
+    size.ws_row = (unsigned short)height;
+    if (session->pty_fd >= 0 && ioctl(session->pty_fd, TIOCSWINSZ, &size) < 0)
+        return 0;
+    memset(surface->cells, 0, sizeof(surface->cells));
+    memset(surface->codepoints, 0, sizeof(surface->codepoints));
+    memset(surface->foreground, 0, sizeof(surface->foreground));
+    memset(surface->background, 0, sizeof(surface->background));
+    memset(surface->attributes, 0, sizeof(surface->attributes));
+    surface->width = width;
+    surface->height = height;
+    surface->cursor_x = 0;
+    surface->cursor_y = 0;
+    surface->cursor_visible = 1;
+    surface->damage_valid = 1;
+    surface->damage_x = 0;
+    surface->damage_y = 0;
+    surface->damage_width = width;
+    surface->damage_height = height;
+    ++surface->revision;
+    return 1;
+}
+
 static void stop_sessions(BlitRuntime *runtime)
 {
     int i;
@@ -1954,29 +1986,64 @@ static void handle_request(int fd, BlitRuntime *runtime,
         }
         if (strcmp(method, "PATCH") == 0) {
             char display_id[128];
+            BlitSurface *surface = find_surface_id(runtime, session->id);
+            int resize_requested = strstr(payload, "\"surface\"") != NULL;
+            int width = 0;
+            int height = 0;
+            int resized = 0;
+            int display_requested = json_string(payload, "display_id",
+                                                display_id, sizeof(display_id));
             if (strstr(payload, "\"input_route\"") != NULL ||
                 strstr(payload, "\"focused\"") != NULL) {
                 send_problem(fd, 501, "Not Implemented", "input_policy_pending",
                              "Input routing and focus policy are not implemented yet.");
                 return;
             }
-            if (json_string(payload, "display_id", display_id,
-                            sizeof(display_id))) {
+            if (resize_requested &&
+                (!json_int(payload, "width", &width) ||
+                 !json_int(payload, "height", &height))) {
+                send_problem(fd, 400, "Bad Request", "invalid_surface_resize",
+                             "A surface resize requires width and height.");
+                return;
+            }
+            if (display_requested) {
                 if (!display_id_is_known(runtime, display_id)) {
                     send_problem(fd, 404, "Not Found", "display_not_found",
                                  "The requested display does not exist.");
                     return;
                 }
+            }
+            if (resize_requested) {
+                if (surface == NULL || !resize_session_surface(session, surface,
+                                                                 width, height)) {
+                    send_problem(fd, 400, "Bad Request", "invalid_surface_resize",
+                                 "The requested surface dimensions are not supported.");
+                    return;
+                }
+                resized = 1;
+            }
+            if (display_requested) {
                 snprintf(session->display_id, sizeof(session->display_id),
                          "%s", display_id);
                 {
                     int output_index;
                     for (output_index = 0;
                          output_index < runtime->output_count; ++output_index)
-                        runtime->outputs[output_index].initialized = 0;
+                         runtime->outputs[output_index].initialized = 0;
                 }
             }
+            if (resized) {
+                int output_index;
+                for (output_index = 0; output_index < runtime->output_count;
+                     ++output_index)
+                    runtime->outputs[output_index].initialized = 0;
+            }
             ++session->revision;
+            if (resized) {
+                char event[512];
+                surface_delta_json(surface, event, sizeof(event));
+                broadcast_stream(runtime, event, BLIT_STREAM_SURFACES);
+            }
         }
         session_json(runtime, session, body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);

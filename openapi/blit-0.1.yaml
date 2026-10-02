@@ -500,6 +500,13 @@ components:
       type: object
       properties:
         display_id: {$ref: '#/components/schemas/ResourceId'}
+        surface:
+          type: object
+          required: [width, height]
+          properties:
+            width: {type: integer, minimum: 1}
+            height: {type: integer, minimum: 1}
+          additionalProperties: false
         input_route: {$ref: '#/components/schemas/ResourceId'}
         focused: {type: boolean}
       additionalProperties: false

@@ -85,6 +85,20 @@ An omitted `display_id` targets the first output for compatibility. Unknown
 display IDs are rejected with `display_not_found`; argument/environment policy
 is intentionally still pending.
 
+Resize a running terminal through the same session resource. The gateway
+updates the PTY window size, resets the canonical surface to the requested
+dimensions, increments `surface_revision`, and emits a surface-delta event:
+
+```sh
+curl --fail --request PATCH \
+  --header 'Content-Type: application/json' \
+  --data '{"surface":{"width":120,"height":40}}' \
+  http://127.0.0.1:8080/v1/terminal-sessions/1
+```
+
+Dimensions outside the bounded surface policy are rejected with
+`invalid_surface_resize`.
+
 ## Apply cells and present a frame
 
 The created session owns a surface whose initial revision is `1`. Cell updates
