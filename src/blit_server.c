@@ -21,6 +21,11 @@
 #define BLIT_MAX_SESSIONS 16
 #define BLIT_MAX_STREAMS 16
 #define BLIT_REQUEST_SIZE 8192
+#define BLIT_STREAM_DIAGNOSTICS 1
+#define BLIT_STREAM_SURFACES 2
+#define BLIT_STREAM_FRAMES 4
+#define BLIT_STREAM_INPUT 8
+#define BLIT_STREAM_HARDWARE 16
 
 typedef struct {
     unsigned long long id;
@@ -41,6 +46,7 @@ typedef struct {
 typedef struct {
     int used;
     int fd;
+    unsigned int subscriptions;
 } BlitStream;
 
 typedef struct {
@@ -662,6 +668,9 @@ static int add_stream(BlitRuntime *runtime, int fd)
         if (!runtime->streams[i].used) {
             runtime->streams[i].used = 1;
             runtime->streams[i].fd = fd;
+            runtime->streams[i].subscriptions = BLIT_STREAM_DIAGNOSTICS |
+                BLIT_STREAM_SURFACES | BLIT_STREAM_FRAMES |
+                BLIT_STREAM_INPUT | BLIT_STREAM_HARDWARE;
             return 1;
         }
     }
@@ -680,30 +689,95 @@ static void remove_stream(BlitRuntime *runtime, int fd)
     }
 }
 
-static void broadcast_stream(BlitRuntime *runtime, const char *message)
+static void broadcast_stream(BlitRuntime *runtime, const char *message,
+                             unsigned int subscription)
 {
     int i;
     for (i = 0; i < BLIT_MAX_STREAMS; ++i) {
         if (runtime->streams[i].used &&
+            (runtime->streams[i].subscriptions & subscription) &&
             !send_websocket_text(runtime->streams[i].fd, message))
             remove_stream(runtime, runtime->streams[i].fd);
     }
 }
 
+static void send_websocket_control(int fd, unsigned char opcode,
+                                   const unsigned char *payload, size_t length)
+{
+    unsigned char header[2];
+
+    if (length > 125)
+        return;
+    header[0] = (unsigned char)(0x80 | opcode);
+    header[1] = (unsigned char)length;
+    send_all(fd, header, sizeof(header));
+    send_all(fd, payload, length);
+}
+
+static unsigned int subscription_mask(const char *payload)
+{
+    unsigned int mask = 0;
+
+    if (strstr(payload, "diagnostics") != NULL) mask |= BLIT_STREAM_DIAGNOSTICS;
+    if (strstr(payload, "surfaces") != NULL) mask |= BLIT_STREAM_SURFACES;
+    if (strstr(payload, "frames") != NULL) mask |= BLIT_STREAM_FRAMES;
+    if (strstr(payload, "input") != NULL) mask |= BLIT_STREAM_INPUT;
+    if (strstr(payload, "hardware") != NULL) mask |= BLIT_STREAM_HARDWARE;
+    return mask;
+}
+
 static void service_stream(BlitRuntime *runtime, int fd)
 {
-    unsigned char frame[1024];
-    ssize_t received = recv(fd, frame, sizeof(frame), 0);
+    unsigned char frame[1025];
+    ssize_t received = recv(fd, frame, sizeof(frame) - 1, 0);
+    size_t offset;
+    size_t length;
+    unsigned char opcode;
+    int masked;
+    unsigned char mask[4];
+    size_t i;
 
     if (received <= 0) {
         remove_stream(runtime, fd);
         return;
     }
-    if (received >= 2 && (frame[0] & 0x0f) == 0x8) {
+    if (received < 2)
+        return;
+    opcode = (unsigned char)(frame[0] & 0x0f);
+    masked = (frame[1] & 0x80) != 0;
+    length = frame[1] & 0x7f;
+    offset = 2;
+    if (length == 126 || length == 127 || length + offset > (size_t)received)
+        return;
+    if (masked) {
+        if (length + offset + 4 > (size_t)received)
+            return;
+        memcpy(mask, frame + offset, sizeof(mask));
+        offset += sizeof(mask);
+        for (i = 0; i < length; ++i)
+            frame[offset + i] ^= mask[i % 4];
+    }
+    if (opcode == 0x8) {
+        send_websocket_control(fd, 0x8, NULL, 0);
         remove_stream(runtime, fd);
         return;
     }
-    if (received >= 2 && (frame[0] & 0x0f) == 0x1) {
+    if (opcode == 0x9) {
+        send_websocket_control(fd, 0xA, frame + offset, length);
+        return;
+    }
+    if (opcode == 0x1) {
+        frame[offset + length] = '\0';
+        if (strstr((char *)frame + offset, "subscribe") != NULL) {
+            int i;
+            for (i = 0; i < BLIT_MAX_STREAMS; ++i) {
+                if (runtime->streams[i].used && runtime->streams[i].fd == fd) {
+                    runtime->streams[i].subscriptions =
+                        subscription_mask((char *)frame + offset);
+                    break;
+                }
+            }
+        }
         send_websocket_text(fd,
             "{\"type\":\"diagnostic\",\"severity\":\"info\","
             "\"code\":\"subscription_received\","
@@ -801,7 +875,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
                      "{\"type\":\"surface_delta\",\"surface_id\":"
                      "\"surface-%llu\",\"revision\":%llu}",
                      surface->id, surface->revision);
-            broadcast_stream(runtime, event);
+            broadcast_stream(runtime, event, BLIT_STREAM_SURFACES);
         }
         return;
     }
@@ -828,7 +902,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
             char event[256];
             snprintf(event, sizeof(event),
                      "{\"type\":\"frame\",\"frame\":%s}", body);
-            broadcast_stream(runtime, event);
+            broadcast_stream(runtime, event, BLIT_STREAM_FRAMES);
         }
         return;
     }

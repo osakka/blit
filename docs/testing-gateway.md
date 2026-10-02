@@ -98,6 +98,7 @@ curl --include --no-buffer \
 ```
 
 Clients may send a text WebSocket message to receive a subscription diagnostic
-acknowledgement. The current event fan-out includes surface deltas and frame
-receipts; subscription filtering and masked-frame payload decoding remain
-bounded follow-up work in the same stream implementation.
+acknowledgement, for example a `frames`-only subscription. Event fan-out is
+filtered by subscription, and client text frames are unmasked. Ping frames
+receive pong responses; surface deltas and frame receipts are the currently
+implemented event types.
