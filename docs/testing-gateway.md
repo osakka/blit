@@ -84,8 +84,9 @@ backends are implemented. Display discovery is sourced from SDL3.
 
 ## Exercise the stream upgrade
 
-The current slice accepts a WebSocket opening handshake and sends one
-diagnostic text frame before closing the connection:
+The current slice accepts a WebSocket opening handshake, keeps the connection
+open, and sends an initial diagnostic text frame. HTTP surface mutations are
+then broadcast to connected streams:
 
 ```sh
 curl --include --no-buffer \
@@ -96,6 +97,7 @@ curl --include --no-buffer \
   http://127.0.0.1:8080/v1/stream
 ```
 
-The persistent stream, subscriptions, event fan-out, and terminal/session
-commands are the next gateway implementation slice. They must be added to the
-same contract and runtime rather than introduced as a parallel protocol.
+Clients may send a text WebSocket message to receive a subscription diagnostic
+acknowledgement. The current event fan-out includes surface deltas and frame
+receipts; subscription filtering and masked-frame payload decoding remain
+bounded follow-up work in the same stream implementation.

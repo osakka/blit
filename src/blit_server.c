@@ -19,6 +19,7 @@
 
 #define BLIT_MAX_DISPLAYS 16
 #define BLIT_MAX_SESSIONS 16
+#define BLIT_MAX_STREAMS 16
 #define BLIT_REQUEST_SIZE 8192
 
 typedef struct {
@@ -36,6 +37,11 @@ typedef struct {
     int height;
     char state[16];
 } BlitSurface;
+
+typedef struct {
+    int used;
+    int fd;
+} BlitStream;
 
 typedef struct {
     int used;
@@ -57,6 +63,7 @@ typedef struct {
     BlitSurface surfaces[BLIT_MAX_SESSIONS];
     unsigned long long next_frame_id;
     unsigned long long frame_revision;
+    BlitStream streams[BLIT_MAX_STREAMS];
     int sdl_ready;
     char sdl_error[256];
 } BlitRuntime;
@@ -191,6 +198,35 @@ static const char *request_body(const char *request)
 {
     const char *separator = strstr(request, "\r\n\r\n");
     return separator ? separator + 4 : "";
+}
+
+static ssize_t receive_request(int fd, char *request, size_t capacity)
+{
+    ssize_t received = 0;
+
+    while ((size_t)received + 1 < capacity) {
+        ssize_t count = recv(fd, request + received,
+                             capacity - (size_t)received - 1, 0);
+        const char *headers_end;
+        size_t header_length;
+        size_t content_length = 0;
+        const char *length_header;
+
+        if (count <= 0)
+            return count;
+        received += count;
+        request[received] = '\0';
+        headers_end = strstr(request, "\r\n\r\n");
+        if (headers_end == NULL)
+            continue;
+        header_length = (size_t)(headers_end - request) + 4;
+        length_header = strstr(request, "Content-Length:");
+        if (length_header != NULL)
+            content_length = (size_t)strtoul(length_header + 15, NULL, 10);
+        if ((size_t)received >= header_length + content_length)
+            return received;
+    }
+    return -1;
 }
 
 static int json_string(const char *json, const char *key, char *value,
@@ -597,17 +633,82 @@ static int websocket_accept(const char *request, char *accept, size_t capacity)
     return 1;
 }
 
-static void send_websocket_text(int fd, const char *text)
+static int send_websocket_text(int fd, const char *text)
 {
     unsigned char header[2];
     size_t length = strlen(text);
 
     if (length > 125)
-        return;
+        return 0;
     header[0] = 0x81;
     header[1] = (unsigned char)length;
     send_all(fd, header, sizeof(header));
-    send_all(fd, text, length);
+    return send_all(fd, text, length);
+}
+
+static int stream_contains(const BlitRuntime *runtime, int fd)
+{
+    int i;
+    for (i = 0; i < BLIT_MAX_STREAMS; ++i)
+        if (runtime->streams[i].used && runtime->streams[i].fd == fd)
+            return 1;
+    return 0;
+}
+
+static int add_stream(BlitRuntime *runtime, int fd)
+{
+    int i;
+    for (i = 0; i < BLIT_MAX_STREAMS; ++i) {
+        if (!runtime->streams[i].used) {
+            runtime->streams[i].used = 1;
+            runtime->streams[i].fd = fd;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void remove_stream(BlitRuntime *runtime, int fd)
+{
+    int i;
+    for (i = 0; i < BLIT_MAX_STREAMS; ++i) {
+        if (runtime->streams[i].used && runtime->streams[i].fd == fd) {
+            close(fd);
+            runtime->streams[i].used = 0;
+            return;
+        }
+    }
+}
+
+static void broadcast_stream(BlitRuntime *runtime, const char *message)
+{
+    int i;
+    for (i = 0; i < BLIT_MAX_STREAMS; ++i) {
+        if (runtime->streams[i].used &&
+            !send_websocket_text(runtime->streams[i].fd, message))
+            remove_stream(runtime, runtime->streams[i].fd);
+    }
+}
+
+static void service_stream(BlitRuntime *runtime, int fd)
+{
+    unsigned char frame[1024];
+    ssize_t received = recv(fd, frame, sizeof(frame), 0);
+
+    if (received <= 0) {
+        remove_stream(runtime, fd);
+        return;
+    }
+    if (received >= 2 && (frame[0] & 0x0f) == 0x8) {
+        remove_stream(runtime, fd);
+        return;
+    }
+    if (received >= 2 && (frame[0] & 0x0f) == 0x1) {
+        send_websocket_text(fd,
+            "{\"type\":\"diagnostic\",\"severity\":\"info\","
+            "\"code\":\"subscription_received\","
+            "\"detail\":\"stream subscription accepted\"}");
+    }
 }
 
 static void handle_request(int fd, BlitRuntime *runtime,
@@ -634,6 +735,11 @@ static void handle_request(int fd, BlitRuntime *runtime,
                       "{\"type\":\"about:blank\",\"title\":\"Bad Request\","
                       "\"status\":400,\"code\":\"websocket_key_missing\","
                       "\"detail\":\"Sec-WebSocket-Key is required.\"}");
+            return;
+        }
+        if (!add_stream(runtime, fd)) {
+            send_problem(fd, 503, "Service Unavailable", "stream_capacity",
+                         "The stream connection limit has been reached.");
             return;
         }
         snprintf(response, sizeof(response),
@@ -689,6 +795,14 @@ static void handle_request(int fd, BlitRuntime *runtime,
         ++surface->revision;
         mutation_receipt_json(surface, body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
+        {
+            char event[256];
+            snprintf(event, sizeof(event),
+                     "{\"type\":\"surface_delta\",\"surface_id\":"
+                     "\"surface-%llu\",\"revision\":%llu}",
+                     surface->id, surface->revision);
+            broadcast_stream(runtime, event);
+        }
         return;
     }
     if (strcmp(path, "/v1/frames") == 0 && strcmp(method, "POST") == 0) {
@@ -710,6 +824,12 @@ static void handle_request(int fd, BlitRuntime *runtime,
         ++runtime->next_frame_id;
         frame_receipt_json(runtime, body, sizeof(body));
         send_http(fd, 202, "Accepted", "application/json", body);
+        {
+            char event[256];
+            snprintf(event, sizeof(event),
+                     "{\"type\":\"frame\",\"frame\":%s}", body);
+            broadcast_stream(runtime, event);
+        }
         return;
     }
     if (strncmp(path, "/v1/terminal-sessions/",
@@ -861,28 +981,49 @@ int main(int argc, char **argv)
 
     while (blit_running) {
         int client_fd;
+        int max_fd = server_fd;
+        int ready;
+        int i;
         fd_set readable;
         struct timeval timeout;
-        char request[BLIT_REQUEST_SIZE];
-        ssize_t received;
 
         FD_ZERO(&readable);
         FD_SET(server_fd, &readable);
+        for (i = 0; i < BLIT_MAX_STREAMS; ++i) {
+            if (runtime.streams[i].used) {
+                FD_SET(runtime.streams[i].fd, &readable);
+                if (runtime.streams[i].fd > max_fd)
+                    max_fd = runtime.streams[i].fd;
+            }
+        }
         timeout.tv_sec = 1;
         timeout.tv_usec = 0;
-        if (select(server_fd + 1, &readable, NULL, NULL, &timeout) < 1)
+        ready = select(max_fd + 1, &readable, NULL, NULL, &timeout);
+        if (ready < 1)
             continue;
-        client_fd = accept(server_fd, NULL, NULL);
-        if (client_fd < 0) {
-            if (errno == EINTR) continue;
-            break;
+        if (FD_ISSET(server_fd, &readable)) {
+            char request[BLIT_REQUEST_SIZE];
+            ssize_t received;
+
+            client_fd = accept(server_fd, NULL, NULL);
+            if (client_fd < 0) {
+                if (errno == EINTR) continue;
+                break;
+            }
+            received = receive_request(client_fd, request, sizeof(request));
+            if (received > 0) {
+                request[received] = '\0';
+                handle_request(client_fd, &runtime, request);
+            }
+            if (!stream_contains(&runtime, client_fd))
+                close(client_fd);
         }
-        received = recv(client_fd, request, sizeof(request) - 1, 0);
-        if (received > 0) {
-            request[received] = '\0';
-            handle_request(client_fd, &runtime, request);
+        for (i = 0; i < BLIT_MAX_STREAMS; ++i) {
+            if (runtime.streams[i].used &&
+                FD_ISSET(runtime.streams[i].fd, &readable)) {
+                service_stream(&runtime, runtime.streams[i].fd);
+            }
         }
-        close(client_fd);
     }
     close(server_fd);
     stop_sessions(&runtime);
