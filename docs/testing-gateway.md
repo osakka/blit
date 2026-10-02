@@ -82,7 +82,9 @@ curl --fail --request POST \
 ```
 
 Stale cell revisions are rejected with `409 Conflict`. Frame receipts currently
-record acceptance; native presentation and stream fan-out are the next layer.
+record acceptance and trigger the SDL3 output adapter. The initial renderer uses
+SDL3's deterministic built-in bitmap text primitive; font selection, cell
+attributes, damage tracking, and CRT effects remain later renderer layers.
 
 Unsupported inventories are returned as empty arrays until their native
 backends are implemented. Display discovery is sourced from SDL3.

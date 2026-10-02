@@ -21,6 +21,8 @@
 #define BLIT_MAX_SESSIONS 16
 #define BLIT_MAX_STREAMS 16
 #define BLIT_REQUEST_SIZE 8192
+#define BLIT_MAX_CELL_COLS 160
+#define BLIT_MAX_CELL_ROWS 100
 #define BLIT_STREAM_DIAGNOSTICS 1
 #define BLIT_STREAM_SURFACES 2
 #define BLIT_STREAM_FRAMES 4
@@ -42,6 +44,7 @@ typedef struct {
     int width;
     int height;
     char state[16];
+    char cells[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
 } BlitSurface;
 
 typedef struct {
@@ -84,6 +87,8 @@ typedef struct {
 } BlitRuntime;
 
 static volatile sig_atomic_t blit_running = 1;
+
+static void render_outputs(BlitRuntime *runtime);
 
 static void stop_server(int signal_number)
 {
@@ -371,6 +376,36 @@ static void mutation_receipt_json(const BlitSurface *surface, char *body,
              surface->revision);
 }
 
+static int apply_cell_update(BlitSurface *surface, const char *json)
+{
+    const char *cursor = strstr(json, "\"cells\"");
+    int updated = 0;
+
+    if (cursor == NULL)
+        return 0;
+    while ((cursor = strstr(cursor, "\"x\"")) != NULL) {
+        char text[BLIT_MAX_CELL_COLS];
+        int x, y;
+        size_t i;
+
+        if (!json_int(cursor, "x", &x) || !json_int(cursor, "y", &y) ||
+            !json_string(cursor, "text", text, sizeof(text)))
+            break;
+        if (x >= 0 && y >= 0 && x < BLIT_MAX_CELL_COLS &&
+            y < BLIT_MAX_CELL_ROWS) {
+            for (i = 0; text[i] != '\0' && x + (int)i < BLIT_MAX_CELL_COLS;
+                 ++i) {
+                if (text[i] == '\n' || text[i] == '\r')
+                    break;
+                surface->cells[y][x + i] = text[i];
+            }
+            updated += 1;
+        }
+        cursor += 3;
+    }
+    return updated;
+}
+
 static void frame_receipt_json(BlitRuntime *runtime, char *body,
                                size_t capacity)
 {
@@ -468,7 +503,8 @@ static int create_session(BlitRuntime *runtime, const char *json,
         return 0;
     json_int(json, "width", &width);
     json_int(json, "height", &height);
-    if (width < 1 || height < 1 || width > 1000 || height > 1000)
+    if (width < 1 || height < 1 || width > BLIT_MAX_CELL_COLS ||
+        height > BLIT_MAX_CELL_ROWS)
         return 0;
     memset(display_id, 0, sizeof(display_id));
     json_string(json, "display_id", display_id, sizeof(display_id));
@@ -975,9 +1011,15 @@ static void handle_request(int fd, BlitRuntime *runtime,
                          "The surface revision does not match the requested update.");
             return;
         }
+        if (!apply_cell_update(surface, payload)) {
+            send_problem(fd, 400, "Bad Request", "invalid_cell_update",
+                         "The cells array contains no usable text updates.");
+            return;
+        }
         ++surface->revision;
         mutation_receipt_json(surface, body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
+        render_outputs(runtime);
         {
             char event[256];
             snprintf(event, sizeof(event),
@@ -1006,6 +1048,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
         ++runtime->frame_revision;
         ++runtime->next_frame_id;
         frame_receipt_json(runtime, body, sizeof(body));
+        render_outputs(runtime);
         send_http(fd, 202, "Accepted", "application/json", body);
         {
             char event[256];
@@ -1153,6 +1196,41 @@ static void destroy_outputs(BlitRuntime *runtime)
         SDL_DestroyWindow(runtime->outputs[i].window);
     }
     runtime->output_count = 0;
+}
+
+static void render_outputs(BlitRuntime *runtime)
+{
+    int output_index;
+    int surface_index;
+    int row;
+
+    for (output_index = 0; output_index < runtime->output_count;
+         ++output_index) {
+        SDL_Renderer *renderer = runtime->outputs[output_index].renderer;
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+        SDL_RenderClear(renderer);
+        SDL_SetRenderDrawColor(renderer, 190, 210, 190, 255);
+        for (surface_index = 0; surface_index < BLIT_MAX_SESSIONS;
+             ++surface_index) {
+            BlitSurface *surface = &runtime->surfaces[surface_index];
+            char line[BLIT_MAX_CELL_COLS + 1];
+            int column;
+
+            if (!surface->used)
+                continue;
+            for (row = 0; row < surface->height && row < BLIT_MAX_CELL_ROWS;
+                 ++row) {
+                for (column = 0; column < surface->width &&
+                     column < BLIT_MAX_CELL_COLS; ++column)
+                    line[column] = surface->cells[row][column] ?
+                        surface->cells[row][column] : ' ';
+                line[column] = '\0';
+                SDL_RenderDebugText(renderer, 4.0f, 4.0f + row * 8.0f,
+                                    line);
+            }
+        }
+        SDL_RenderPresent(renderer);
+    }
 }
 
 int main(int argc, char **argv)
