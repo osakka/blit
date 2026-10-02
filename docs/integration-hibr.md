@@ -62,6 +62,37 @@ The hibr module should be a transport adapter only:
 The OpenAPI schema remains normative for all wire messages. The module must
 not duplicate layout, revision, style, cursor, or frame semantics.
 
+## Desktop and pane orchestration
+
+Each `desktop --join` invocation is an independent Hibr desktop session. The
+primary desktop is the first session placed on the primary Blit surface;
+joined desktops are placed on explicitly named Blit surfaces or layout panes.
+A physical display may therefore expose two or four logical terminal panes
+without changing Hibr's session model:
+
+```text
+display-1 / primary       <- hibr desktop
+display-2 / pane-1        <- hibr desktop --join
+display-2 / pane-2        <- hibr desktop --join
+display-2 / pane-3        <- hibr desktop --join
+display-2 / pane-4        <- hibr desktop --join
+```
+
+Blit owns authoritative pane geometry and placement. Hibr selects or requests
+a named surface through the Blit API, then remains responsible for desktop
+lifecycle, detachment, reconnection, and recovery when a pane or display
+disappears. A missing pane must not cause Blit to invent a replacement
+desktop, and Blit must not restart Hibr processes.
+
+The production join flow is:
+
+1. Hibr starts the primary desktop and requests a named primary surface.
+2. Hibr starts each `desktop --join` session independently.
+3. Hibr assigns each joined session to a Blit surface or pane through the API.
+4. Blit applies the layout and reports authoritative dimensions and revisions.
+5. Hibr handles disconnect, reconnect, and process recovery while the Blit
+   surface remains an addressable resource.
+
 ## Current blocker
 
 The standalone PTY route is operational. The remaining integration work is the
