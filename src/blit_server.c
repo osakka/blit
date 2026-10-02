@@ -103,6 +103,9 @@ typedef struct {
     char display_id[128];
     char state[16];
     char surface_id[128];
+    int terminal_escape;
+    char terminal_csi[32];
+    int terminal_csi_length;
 } BlitSession;
 
 typedef struct {
@@ -692,6 +695,181 @@ static int apply_cell_update(BlitSurface *surface, const char *json)
     return updated;
 }
 
+static void terminal_clear_cell(BlitSurface *surface, int x, int y)
+{
+    if (x < 0 || y < 0 || x >= surface->width || y >= surface->height)
+        return;
+    surface->cells[y][x] = 0;
+    surface->codepoints[y][x] = 0;
+    surface->foreground[y][x] = 0;
+    surface->background[y][x] = 0;
+    surface->attributes[y][x] = 0;
+    mark_surface_damage(surface, x, y);
+}
+
+static void terminal_clear_line(BlitSurface *surface, int y, int start)
+{
+    int x;
+
+    for (x = start; x < surface->width; ++x)
+        terminal_clear_cell(surface, x, y);
+}
+
+static int terminal_number(const char **cursor, int *value)
+{
+    char *end;
+
+    if (**cursor == ';') {
+        *value = 0;
+        return 1;
+    }
+    *value = (int)strtol(*cursor, &end, 10);
+    if (end == *cursor)
+        return 0;
+    *cursor = end;
+    return 1;
+}
+
+static void terminal_apply_csi(BlitSurface *surface, const char *sequence)
+{
+    const char *cursor = sequence;
+    int first = 0;
+    int second = 0;
+    int has_first = 0;
+    int has_second = 0;
+    char command;
+
+    while (*cursor >= '0' && *cursor <= '9') {
+        has_first = terminal_number(&cursor, &first);
+        break;
+    }
+    if (*cursor == ';') {
+        ++cursor;
+        has_second = terminal_number(&cursor, &second);
+    }
+    command = *cursor;
+    if (command == 'H' || command == 'f') {
+        surface->cursor_y = has_first && first > 0 ? first - 1 : 0;
+        surface->cursor_x = has_second && second > 0 ? second - 1 : 0;
+        if (surface->cursor_y >= surface->height)
+            surface->cursor_y = surface->height - 1;
+        if (surface->cursor_x >= surface->width)
+            surface->cursor_x = surface->width - 1;
+        mark_surface_damage(surface, surface->cursor_x, surface->cursor_y);
+    } else if (command == 'A' || command == 'B' ||
+               command == 'C' || command == 'D') {
+        int amount = has_first && first > 0 ? first : 1;
+        mark_surface_damage(surface, surface->cursor_x, surface->cursor_y);
+        if (command == 'A') surface->cursor_y -= amount;
+        if (command == 'B') surface->cursor_y += amount;
+        if (command == 'C') surface->cursor_x += amount;
+        if (command == 'D') surface->cursor_x -= amount;
+        if (surface->cursor_x < 0) surface->cursor_x = 0;
+        if (surface->cursor_y < 0) surface->cursor_y = 0;
+        if (surface->cursor_x >= surface->width)
+            surface->cursor_x = surface->width - 1;
+        if (surface->cursor_y >= surface->height)
+            surface->cursor_y = surface->height - 1;
+        mark_surface_damage(surface, surface->cursor_x, surface->cursor_y);
+    } else if (command == 'J' && (!has_first || first == 2)) {
+        int y;
+        for (y = 0; y < surface->height; ++y)
+            terminal_clear_line(surface, y, 0);
+    } else if (command == 'K') {
+        terminal_clear_line(surface, surface->cursor_y, surface->cursor_x);
+    }
+}
+
+static void terminal_put_codepoint(BlitSurface *surface, uint32_t codepoint)
+{
+    if (surface->cursor_x >= surface->width) {
+        surface->cursor_x = 0;
+        if (surface->cursor_y + 1 < surface->height)
+            ++surface->cursor_y;
+    }
+    terminal_clear_cell(surface, surface->cursor_x, surface->cursor_y);
+    surface->codepoints[surface->cursor_y][surface->cursor_x] = codepoint;
+    surface->cells[surface->cursor_y][surface->cursor_x] =
+        codepoint < 0x80 ? (char)codepoint : '?';
+    mark_surface_damage(surface, surface->cursor_x, surface->cursor_y);
+    ++surface->cursor_x;
+}
+
+static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
+                                   const unsigned char *data, size_t length)
+{
+    size_t offset = 0;
+
+    while (offset < length) {
+        unsigned char byte = data[offset];
+        if (session->terminal_escape == 1) {
+            if (byte == '[') {
+                session->terminal_escape = 2;
+                session->terminal_csi_length = 0;
+            } else {
+                session->terminal_escape = 0;
+            }
+            ++offset;
+            continue;
+        }
+        if (session->terminal_escape == 2) {
+            if (byte >= 0x40 && byte <= 0x7e) {
+                if (session->terminal_csi_length <
+                    (int)sizeof(session->terminal_csi) - 1)
+                    session->terminal_csi[session->terminal_csi_length++] =
+                        (char)byte;
+                session->terminal_csi[session->terminal_csi_length] = '\0';
+                terminal_apply_csi(surface, session->terminal_csi);
+                session->terminal_escape = 0;
+            } else if (session->terminal_csi_length <
+                       (int)sizeof(session->terminal_csi) - 1) {
+                session->terminal_csi[session->terminal_csi_length++] =
+                    (char)byte;
+            } else {
+                session->terminal_escape = 0;
+            }
+            ++offset;
+            continue;
+        }
+        if (byte == 0x1b) {
+            session->terminal_escape = 1;
+            ++offset;
+        } else if (byte == '\r') {
+            mark_surface_damage(surface, surface->cursor_x, surface->cursor_y);
+            surface->cursor_x = 0;
+            ++offset;
+        } else if (byte == '\n') {
+            mark_surface_damage(surface, surface->cursor_x, surface->cursor_y);
+            if (surface->cursor_y + 1 < surface->height)
+                ++surface->cursor_y;
+            ++offset;
+        } else if (byte == '\b') {
+            if (surface->cursor_x > 0)
+                --surface->cursor_x;
+            mark_surface_damage(surface, surface->cursor_x, surface->cursor_y);
+            ++offset;
+        } else if (byte == '\t') {
+            surface->cursor_x = (surface->cursor_x + 8) & ~7;
+            if (surface->cursor_x >= surface->width)
+                surface->cursor_x = surface->width - 1;
+            ++offset;
+        } else if (byte >= 0x20) {
+            size_t consumed;
+            uint32_t codepoint;
+            if (!utf8_decode(data + offset, length - offset, &consumed,
+                             &codepoint)) {
+                consumed = 1;
+                codepoint = '?';
+            }
+            terminal_put_codepoint(surface, codepoint);
+            offset += consumed;
+        } else {
+            ++offset;
+        }
+    }
+    return 1;
+}
+
 static void frame_receipt_json(BlitRuntime *runtime, char *body,
                                size_t capacity)
 {
@@ -1127,6 +1305,20 @@ static void service_session_output(BlitRuntime *runtime, int fd)
     json_escape((char *)output, escaped, sizeof(escaped));
     for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
         if (runtime->sessions[i].used && runtime->sessions[i].pty_fd == fd) {
+            BlitSurface *surface = find_surface_id(runtime,
+                runtime->sessions[i].id);
+            char surface_event[256];
+
+            if (surface != NULL && terminal_consume_output(
+                    &runtime->sessions[i], surface, output,
+                    (size_t)received)) {
+                ++surface->revision;
+                snprintf(surface_event, sizeof(surface_event),
+                         "{\"type\":\"surface_delta\",\"surface_id\":"
+                         "\"surface-%llu\",\"revision\":%llu}",
+                         surface->id, surface->revision);
+                broadcast_stream(runtime, surface_event, BLIT_STREAM_SURFACES);
+            }
             snprintf(event, sizeof(event),
                      "{\"type\":\"terminal_output\","
                      "\"session_id\":\"%llu\",\"data\":\"%s\"}",

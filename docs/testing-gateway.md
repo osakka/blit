@@ -105,7 +105,9 @@ non-combining code point per cell; malformed UTF-8 and combining marks are
 rejected until the grapheme policy is expanded. A cell update may also carry a
 bounded `{x,y,visible}` cursor object; session GET responses report the current
 cursor, and out-of-bounds cursor positions are rejected. PTY-driven cursor
-movement, selection, and blink timing remain later layers.
+movement now updates the canonical surface for printable UTF-8 output, CR/LF,
+backspace, tab, and the core ANSI cursor/erase commands `A`, `B`, `C`, `D`,
+`H`, `f`, `J`, and `K`. Selection and blink timing remain later layers.
 
 Unsupported inventories are returned as empty arrays until their native
 backends are implemented. Display discovery is sourced from SDL3.

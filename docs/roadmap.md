@@ -22,7 +22,8 @@ rasterization, richer grapheme/cursor composition, effects, authentication,
 and VKMS gateway integration remain open. The SDL adapter now validates UTF-8,
 stores one non-combining code point per cell, renders schema-defined cell
 colors and basic attributes, carries explicit bounded cursor state, and uses
-dirty rows for
+dirty rows. PTY output now feeds that same surface model for printable text,
+core controls, and basic ANSI cursor/erase commands.
 single-surface incremental frames and conservatively redraws multi-surface
 outputs with deterministic vertical stacking.
 
