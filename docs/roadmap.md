@@ -29,7 +29,8 @@ optimistic updates and retry cleanly after PTY races.
 Session, cell, and frame mutations have bounded idempotency-key replay with
 payload conflict detection, preventing duplicate PTY creation on retries.
 Broadcast stream events carry monotonic sequences with a bounded replay cursor
-and explicit `replay_gap` recovery behavior.
+and explicit `replay_gap` recovery behavior. Surface snapshots provide the
+authoritative HTTP resynchronization path, including text, styles, and cursor.
 single-surface incremental frames and conservatively redraws multi-surface
 outputs with deterministic vertical stacking.
 

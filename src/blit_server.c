@@ -664,6 +664,59 @@ static void surface_delta_json(const BlitSurface *surface, char *body,
     snprintf(body + used, capacity - used, "}");
 }
 
+static void surface_snapshot_json(const BlitSurface *surface, char *body,
+                                  size_t capacity)
+{
+    size_t used;
+    int x;
+    int y;
+    int first = 1;
+
+    used = (size_t)snprintf(body, capacity,
+        "{\"id\":\"surface-%llu\",\"revision\":%llu,"
+        "\"width\":%d,\"height\":%d,\"cursor\":{\"x\":%d,"
+        "\"y\":%d,\"visible\":%s},\"cells\":[",
+        surface->id, surface->revision, surface->width, surface->height,
+        surface->cursor_x, surface->cursor_y,
+        surface->cursor_visible ? "true" : "false");
+    for (y = 0; y < surface->height; ++y) {
+        for (x = 0; x < surface->width; ++x) {
+            char text[5];
+            char escaped[16];
+            uint32_t codepoint = surface->codepoints[y][x];
+            unsigned char attributes = surface->attributes[y][x];
+            int styled = surface->foreground[y][x] != 0 ||
+                surface->background[y][x] != 0 || attributes != 0;
+
+            if (codepoint == 0 && !styled)
+                continue;
+            utf8_encode(codepoint ? codepoint : ' ', text);
+            json_escape(text, escaped, sizeof(escaped));
+            used += (size_t)snprintf(body + used, capacity - used,
+                "%s{\"x\":%d,\"y\":%d,\"text\":\"%s\"",
+                first ? "" : ",", x, y, escaped);
+            first = 0;
+            if (styled) {
+                uint32_t foreground = surface->foreground[y][x] ?
+                    surface->foreground[y][x] - 1 : BLIT_DEFAULT_FOREGROUND;
+                uint32_t background = surface->background[y][x] ?
+                    surface->background[y][x] - 1 : 0;
+                used += (size_t)snprintf(body + used, capacity - used,
+                    ",\"style\":{\"foreground\":\"#%06x\","
+                    "\"background\":\"#%06x\",\"bold\":%s,"
+                    "\"dim\":%s,\"underline\":%s,\"inverse\":%s}",
+                    (unsigned int)foreground, (unsigned int)background,
+                    attributes & BLIT_ATTR_BOLD ? "true" : "false",
+                    attributes & BLIT_ATTR_DIM ? "true" : "false",
+                    attributes & BLIT_ATTR_UNDERLINE ? "true" : "false",
+                    attributes & BLIT_ATTR_INVERSE ? "true" : "false");
+            }
+            used += (size_t)snprintf(body + used, capacity - used, "}");
+        }
+    }
+    snprintf(body + used, capacity - used, "]}");
+}
+
 static void mark_surface_damage(BlitSurface *surface, int x, int y)
 {
     int right = x + 1;
@@ -1706,7 +1759,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
 {
     char method[16];
     char path[256];
-    char body[16384];
+    static char body[4194304];
     const char *payload = request_body(request);
 
     if (sscanf(request, "%15s %255s", method, path) != 2) {
@@ -1780,18 +1833,22 @@ static void handle_request(int fd, BlitRuntime *runtime,
         return;
     }
     if (strncmp(path, "/v1/surfaces/", strlen("/v1/surfaces/")) == 0 &&
-        strcmp(method, "PUT") == 0) {
+        (strcmp(method, "PUT") == 0 || strcmp(method, "GET") == 0)) {
         BlitSurface *surface = find_surface(runtime, path);
         int base_revision;
-
-        if (idempotency_replay(runtime, fd, request, method, path, payload))
-            return;
 
         if (surface == NULL) {
             send_problem(fd, 404, "Not Found", "surface_not_found",
                          "The text surface does not exist.");
             return;
         }
+        if (strcmp(method, "GET") == 0) {
+            surface_snapshot_json(surface, body, sizeof(body));
+            send_http(fd, 200, "OK", "application/json", body);
+            return;
+        }
+        if (idempotency_replay(runtime, fd, request, method, path, payload))
+            return;
         if (!json_int(payload, "base_revision", &base_revision) ||
             !strstr(payload, "\"cells\"")) {
             send_problem(fd, 400, "Bad Request", "invalid_cell_update",

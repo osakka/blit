@@ -241,6 +241,19 @@ paths:
                 $ref: '#/components/schemas/MutationReceipt'
         default:
           $ref: '#/components/responses/Problem'
+    get:
+      tags: [terminals]
+      operationId: getSurfaceSnapshot
+      summary: Read the current revisioned surface snapshot
+      responses:
+        '200':
+          description: Current text surface state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SurfaceSnapshot'
+        default:
+          $ref: '#/components/responses/Problem'
   /v1/frames:
     post:
       tags: [frames]
@@ -507,6 +520,27 @@ components:
         x: {type: integer, minimum: 0}
         y: {type: integer, minimum: 0}
         visible: {type: boolean}
+      additionalProperties: false
+    SurfaceSnapshot:
+      type: object
+      required: [id, revision, width, height, cursor, cells]
+      properties:
+        id: {$ref: '#/components/schemas/ResourceId'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        width: {type: integer, minimum: 1}
+        height: {type: integer, minimum: 1}
+        cursor: {$ref: '#/components/schemas/Cursor'}
+        cells:
+          type: array
+          items:
+            type: object
+            required: [x, y, text]
+            properties:
+              x: {type: integer, minimum: 0}
+              y: {type: integer, minimum: 0}
+              text: {type: string, minLength: 1}
+              style: {$ref: '#/components/schemas/CellStyle'}
+            additionalProperties: false
       additionalProperties: false
     CellStyle:
       type: object

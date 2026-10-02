@@ -158,3 +158,12 @@ events when a reconnect produces a gap. Reconnect with
 `/v1/stream?since=<last-sequence>` to replay the bounded retained history. If
 the cursor is older than retention, the stream emits `replay_gap`; clients
 must resynchronize from the HTTP resources.
+
+The canonical resynchronization endpoint is:
+
+```sh
+curl --fail http://127.0.0.1:8080/v1/surfaces/surface-1/cells
+```
+
+It returns the current surface revision, cursor, non-empty cells, Unicode text,
+and cell styles.
