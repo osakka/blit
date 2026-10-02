@@ -2,31 +2,48 @@
 
 ## One-sentence definition
 
-blit is an API-controlled, text-only display server that owns one or more
-physical displays, renders terminal-like surfaces with programmable visual
-effects, and exposes the whole system through a versioned schema.
+blit is a network-programmable terminal and display service that owns direct
+display outputs, runs PTY-backed terminal sessions, routes input and output,
+and composes text surfaces with optional graphic overlays and programmable
+effects across one or more physical displays.
+
+## Mission
+
+Give a client complete, observable, policy-controlled access to a text-first
+display environment over the network without requiring X11, Wayland, or a
+desktop compositor. A client can discover the machine, create and control
+terminal sessions, place them across displays, route keyboard and pointer
+input, observe diagnostics, and add bounded graphic canvases when text alone
+is insufficient.
 
 ## Goals
 
-1. Provide a text-first display primitive rather than a general-purpose
-   desktop compositor.
+1. Provide a text-first terminal/display environment rather than a
+   general-purpose desktop compositor.
 2. Run directly against a native display path, with no dependency on X11,
    Wayland, or another window-system server.
-3. Treat terminal content, geometry, monitor topology, input, timing, and
-   visual effects as API-visible resources.
-4. Support a logical canvas that can span multiple monitors and preserve an
+3. Make server, graphics, displays, audio, input devices, terminal sessions,
+   surfaces, overlays, timing, effects, and diagnostics API-visible resources.
+4. Run PTY-backed terminal sessions as first-class managed resources, while
+   keeping terminal state canonical in blit rather than in a shell or GUI.
+5. Support a logical canvas that can span multiple monitors and preserve an
    explicit mapping from logical coordinates to physical outputs.
-5. Make retro-terminal effects reproducible, configurable, and composable.
-6. Allow clients to control the server locally or remotely without depending
-   on SDL3 types or implementation details.
-7. Keep the renderer replaceable: SDL3 is the initial platform/rendering
+6. Provide explicit input routing for keyboards, pointers, focus, selection,
+   and terminal mouse reporting.
+7. Make retro-terminal effects reproducible, configurable, and composable.
+8. Allow clients to control the server over a network without depending on
+   SDL3 types or implementation details.
+9. Keep the renderer replaceable: SDL3 is the initial platform/rendering
    integration, not the public API.
 
 ## Non-goals for the first release
 
 - A full X11 or Wayland compatibility layer.
-- Arbitrary pixel-oriented application windows.
-- A shell, terminal emulator, or PTY manager bundled into the core server.
+- A general-purpose desktop window manager or compositor.
+- Arbitrary pixel-oriented application windows with unrestricted stacking,
+  focus, and lifecycle semantics.
+- A promise that blit provides a complete remote desktop protocol.
+- Unbounded graphic overlays that displace the text model as canonical state.
 - A promise that every SDL3 backend can operate without a window-system
   integration. The deployment must select and validate a direct display path
   such as DRM/KMS where appropriate.
@@ -36,10 +53,16 @@ effects, and exposes the whole system through a versioned schema.
 ## Initial vocabulary
 
 - **Server**: the long-lived blit process and its public API.
+- **Terminal session**: a managed PTY-backed process/session with input,
+  output, lifecycle, identity, and policy state.
 - **Surface**: a logical text plane with a grid, style state, and content.
 - **Canvas**: the logical coordinate space containing one or more surfaces and
   outputs.
 - **Output**: a physical display target, including its mode and placement.
+- **Overlay canvas**: a bounded optional graphic plane composed with text
+  surfaces under an explicit lifecycle and capability policy.
+- **Input route**: the policy binding an input device, seat, or event source
+  to a terminal session, surface, overlay, or API stream.
 - **Effect**: a named, parameterized transformation applied during rendering.
 - **Scene**: the ordered set of surfaces, overlays, effects, and output
   mappings rendered for a frame.
@@ -51,8 +74,20 @@ effects, and exposes the whole system through a versioned schema.
 ### Text is the primary data model
 
 The server should preserve cells, graphemes, attributes, cursor state, and
-damage information as long as possible. Rasterized pixels are a renderer
-concern, not the canonical state.
+damage information as long as possible. Rasterized pixels and overlay buffers
+are renderer concerns, not the canonical terminal state.
+
+### Terminal sessions are managed resources
+
+PTY processes, terminal emulation state, output flow control, input routing,
+and lifecycle are explicit resources. A shell is one possible session payload,
+not the definition of the server.
+
+### Hardware capabilities are discoverable
+
+Graphics, displays, audio, pointer devices, keyboard devices, modes, formats,
+and acceleration capabilities must be queryable and must gate operations.
+Unsupported behavior produces a typed capability error.
 
 ### Control is explicit
 

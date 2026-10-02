@@ -23,8 +23,13 @@ defined.
 The initial schema should eventually cover:
 
 - server identity, API version, and capabilities;
-- outputs, modes, topology, hotplug, and presentation state;
+- graphics cards, render capabilities, displays, modes, topology, hotplug, and
+  presentation state;
+- audio devices, formats, routing, and playback/capture capabilities;
+- keyboard, pointer, seat, focus, and input-route resources;
+- terminal sessions, PTY lifecycle, flow control, and process identity;
 - canvases, surfaces, layers, and z-order;
+- bounded graphic overlays and their composition policy;
 - text cells, styles, cursor state, and incremental updates;
 - effect definitions, parameters, presets, and effect graphs;
 - input devices, focus, routing, and input events;

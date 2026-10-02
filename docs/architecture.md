@@ -59,8 +59,16 @@ order and produce typed events.
 ### Terminal model
 
 Represents a Unicode-aware grid, cell attributes, cursor/selection state,
-scrolling, and damage regions. PTY integration, if added, should be an adapter
-that feeds this model rather than defining it.
+scrolling, and damage regions. Managed PTY sessions feed terminal input and
+output through this model; the PTY is a process boundary, not the canonical
+display state.
+
+### Session and input manager
+
+Owns terminal-session lifecycle, PTY attachment, flow control, device/seat
+identity, focus, pointer reporting, keyboard routing, selection, and input
+permissions. It emits typed input and lifecycle events to the API stream and
+feeds terminal output into the authoritative state engine.
 
 ### Layout and output manager
 
@@ -75,6 +83,12 @@ Evaluates a versioned effect graph at frame time. Effects should declare their
 inputs, parameters, supported color formats, and cost characteristics. The
 engine needs a bounded policy for expensive effects and a clear behavior when
 an effect cannot run.
+
+### Overlay compositor
+
+Owns bounded graphic canvases that are explicitly attached to a topology or
+surface. Overlays can be used for diagnostics, status, images, or visual
+instrumentation, but may not silently replace terminal or layout state.
 
 ### SDL3 adapter
 
