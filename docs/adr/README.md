@@ -10,6 +10,7 @@ Accepted decisions:
 
 1. [TCC is the project compiler](0001-tcc-toolchain.md).
 2. [OpenAPI control plane and network streaming plane](0002-network-api-and-streaming.md).
+3. [Logical cell-based pane layouts](0003-logical-cell-layouts.md).
 
 Pending decisions:
 
