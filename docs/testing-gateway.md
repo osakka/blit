@@ -102,7 +102,8 @@ curl --fail --request POST \
 
 The pane identifier and dimensions in the topology response are authoritative;
 clients must not derive pane names or pixel geometry. For development, the
-initial grid can be selected with `BLIT_PANE_LAYOUT=1x1`, `2x1`, or `2x2`.
+initial grid can be selected with `BLIT_PANE_LAYOUT=1x1`, `2x1`, `1x2`, or
+`2x2`.
 
 Resize a running terminal through the same session resource. The gateway
 updates the PTY window size, resets the canonical surface to the requested

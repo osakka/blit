@@ -13,7 +13,7 @@ font change an application-level event.
 ## Decision
 
 Blit layouts are expressed in logical terminal cells. A layout policy defines
-the arrangement of panes, such as a two-column or two-by-two grid. Blit uses
+the arrangement of panes, such as a two-column, two-row, or two-by-two grid. Blit uses
 the active display mode and font profile to calculate the available cell grid,
 derives each pane's cell bounds, assigns opaque pane identifiers, and resizes
 the attached Hibr session.
