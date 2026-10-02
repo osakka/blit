@@ -491,6 +491,15 @@ components:
         display_id: {$ref: '#/components/schemas/ResourceId'}
         process_id: {type: integer, minimum: 1}
         exit_code: {type: integer}
+        cursor: {$ref: '#/components/schemas/Cursor'}
+      additionalProperties: false
+    Cursor:
+      type: object
+      required: [x, y, visible]
+      properties:
+        x: {type: integer, minimum: 0}
+        y: {type: integer, minimum: 0}
+        visible: {type: boolean}
       additionalProperties: false
     CellStyle:
       type: object
@@ -525,6 +534,7 @@ components:
                 description: UTF-8 text; this version maps one non-combining code point to one cell.
               style: {$ref: '#/components/schemas/CellStyle'}
             additionalProperties: false
+        cursor: {$ref: '#/components/schemas/Cursor'}
       additionalProperties: false
     FrameRequest:
       type: object

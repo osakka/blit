@@ -102,8 +102,10 @@ SDL3's built-in bitmap text primitive. Cell styles accept six-digit foreground
 and background colors plus bold, dim, underline, and inverse flags; invalid
 colors are rejected. Text is validated as UTF-8 and decoded as one
 non-combining code point per cell; malformed UTF-8 and combining marks are
-rejected until the grapheme policy is expanded. Font selection, cursor state,
-and CRT effects remain later layers.
+rejected until the grapheme policy is expanded. A cell update may also carry a
+bounded `{x,y,visible}` cursor object; session GET responses report the current
+cursor, and out-of-bounds cursor positions are rejected. PTY-driven cursor
+movement, selection, and blink timing remain later layers.
 
 Unsupported inventories are returned as empty arrays until their native
 backends are implemented. Display discovery is sourced from SDL3.

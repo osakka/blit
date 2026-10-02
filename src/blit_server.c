@@ -55,6 +55,9 @@ typedef struct {
     uint32_t foreground[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
     uint32_t background[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
     unsigned char attributes[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
+    int cursor_x;
+    int cursor_y;
+    int cursor_visible;
     int damage_valid;
     int damage_x;
     int damage_y;
@@ -592,6 +595,7 @@ static void mark_surface_damage(BlitSurface *surface, int x, int y)
 static int apply_cell_update(BlitSurface *surface, const char *json)
 {
     const char *cursor = strstr(json, "\"cells\"");
+    const char *cursor_state = strstr(json, "\"cursor\"");
     int updated = 0;
 
     if (cursor == NULL)
@@ -669,6 +673,22 @@ static int apply_cell_update(BlitSurface *surface, const char *json)
         }
         cursor += 3;
     }
+    if (cursor_state != NULL) {
+        int x;
+        int y;
+        int visible;
+
+        if (!json_int(cursor_state, "x", &x) ||
+            !json_int(cursor_state, "y", &y) ||
+            !json_bool(cursor_state, "visible", &visible) ||
+            x < 0 || y < 0 || x >= surface->width || y >= surface->height)
+            return -1;
+        mark_surface_damage(surface, surface->cursor_x, surface->cursor_y);
+        surface->cursor_x = x;
+        surface->cursor_y = y;
+        surface->cursor_visible = visible;
+        mark_surface_damage(surface, surface->cursor_x, surface->cursor_y);
+    }
     return updated;
 }
 
@@ -738,8 +758,10 @@ static void refresh_session_state(BlitSession *session)
     }
 }
 
-static void session_json(BlitSession *session, char *body, size_t capacity)
+static void session_json(BlitRuntime *runtime, BlitSession *session,
+                         char *body, size_t capacity)
 {
+    BlitSurface *surface = find_surface_id(runtime, session->id);
     size_t used;
 
     refresh_session_state(session);
@@ -754,6 +776,13 @@ static void session_json(BlitSession *session, char *body, size_t capacity)
         used += (size_t)snprintf(body + used, capacity - used,
                                  ",\"display_id\":\"%s\"",
                                  session->display_id);
+    }
+    if (surface != NULL) {
+        used += (size_t)snprintf(body + used, capacity - used,
+                                 ",\"cursor\":{\"x\":%d,\"y\":%d,"
+                                 "\"visible\":%s}", surface->cursor_x,
+                                 surface->cursor_y,
+                                 surface->cursor_visible ? "true" : "false");
     }
     snprintf(body + used, capacity - used, "}");
 }
@@ -826,6 +855,7 @@ static int create_session(BlitRuntime *runtime, const char *json,
                 surface->owner_session_id = session->id;
                 surface->width = width;
                 surface->height = height;
+                surface->cursor_visible = 1;
                 snprintf(surface->state, sizeof(surface->state), "available");
             }
             ++runtime->session_count;
@@ -1278,7 +1308,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
                          "The command, surface dimensions, or PTY could not be created.");
             return;
         }
-        session_json(session, body, sizeof(body));
+        session_json(runtime, session, body, sizeof(body));
         send_http(fd, 201, "Created", "application/json", body);
         return;
     }
@@ -1303,7 +1333,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
                          "The surface revision does not match the requested update.");
             return;
         }
-        if (!apply_cell_update(surface, payload)) {
+        if (apply_cell_update(surface, payload) <= 0) {
             send_problem(fd, 400, "Bad Request", "invalid_cell_update",
                          "The cells array contains no usable text updates.");
             return;
@@ -1385,7 +1415,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
             }
             ++session->revision;
         }
-        session_json(session, body, sizeof(body));
+        session_json(runtime, session, body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
         return;
     }
@@ -1657,6 +1687,17 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
                             11.0f + column * 8.0f,
                             (float)surface_origin_y + row * 8.0f + 7.0f);
                 }
+            }
+            if (surface->cursor_visible &&
+                surface->cursor_y >= first_row && surface->cursor_y < last_row) {
+                SDL_SetRenderDrawColor(renderer,
+                    (unsigned char)(BLIT_DEFAULT_FOREGROUND >> 16),
+                    (unsigned char)(BLIT_DEFAULT_FOREGROUND >> 8),
+                    (unsigned char)BLIT_DEFAULT_FOREGROUND, 255);
+                SDL_RenderLine(renderer, 4.0f + surface->cursor_x * 8.0f,
+                    (float)surface_origin_y + surface->cursor_y * 8.0f,
+                    4.0f + surface->cursor_x * 8.0f,
+                    (float)surface_origin_y + surface->cursor_y * 8.0f + 7.0f);
             }
         }
         SDL_RenderPresent(renderer);

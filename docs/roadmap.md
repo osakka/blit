@@ -21,7 +21,8 @@ The plan now carries each surface's accumulated dirty rectangle. Native text
 rasterization, richer grapheme/cursor composition, effects, authentication,
 and VKMS gateway integration remain open. The SDL adapter now validates UTF-8,
 stores one non-combining code point per cell, renders schema-defined cell
-colors and basic attributes, and uses dirty rows for
+colors and basic attributes, carries explicit bounded cursor state, and uses
+dirty rows for
 single-surface incremental frames and conservatively redraws multi-surface
 outputs with deterministic vertical stacking.
 
