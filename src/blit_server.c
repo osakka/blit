@@ -30,6 +30,7 @@
 #define BLIT_STREAM_HARDWARE 16
 #define BLIT_STREAM_TERMINALS 32
 #define BLIT_MAX_FRAME_SURFACES 16
+#define BLIT_MAX_IDEMPOTENCY 16
 #define BLIT_DEFAULT_FOREGROUND 0xbed2beU
 #define BLIT_ATTR_BOLD 1
 #define BLIT_ATTR_DIM 2
@@ -96,6 +97,18 @@ typedef struct {
 
 typedef struct {
     int used;
+    char key[129];
+    char method[8];
+    char path[256];
+    char payload[1024];
+    int status;
+    char reason[32];
+    char content_type[64];
+    char response[2048];
+} BlitIdempotency;
+
+typedef struct {
+    int used;
     unsigned long long id;
     pid_t process_id;
     int pty_fd;
@@ -119,6 +132,7 @@ typedef struct {
     unsigned long long frame_revision;
     BlitStream streams[BLIT_MAX_STREAMS];
     BlitOutput outputs[BLIT_MAX_DISPLAYS];
+    BlitIdempotency idempotency[BLIT_MAX_IDEMPOTENCY];
     int output_count;
     int sdl_ready;
     char sdl_error[256];
@@ -257,6 +271,25 @@ static const char *request_body(const char *request)
 {
     const char *separator = strstr(request, "\r\n\r\n");
     return separator ? separator + 4 : "";
+}
+
+static int request_header(const char *request, const char *name,
+                          char *value, size_t capacity)
+{
+    const char *cursor = strstr(request, name);
+    size_t length = 0;
+
+    if (cursor == NULL)
+        return 0;
+    cursor += strlen(name);
+    while (*cursor == ' ' || *cursor == '\t')
+        ++cursor;
+    while (cursor[length] != '\0' && cursor[length] != '\r' &&
+           cursor[length] != '\n' && length + 1 < capacity)
+        ++length;
+    memcpy(value, cursor, length);
+    value[length] = '\0';
+    return length > 0;
 }
 
 static ssize_t receive_request(int fd, char *request, size_t capacity)
@@ -1067,6 +1100,68 @@ static void send_problem(int fd, int status, const char *reason,
     send_http(fd, status, reason, "application/problem+json", body);
 }
 
+static int idempotency_replay(BlitRuntime *runtime, int fd,
+                              const char *request, const char *method,
+                              const char *path, const char *payload)
+{
+    char key[129];
+    size_t payload_length = strlen(payload);
+    int i;
+
+    if (!request_header(request, "Idempotency-Key:", key, sizeof(key)))
+        return 0;
+    for (i = 0; i < BLIT_MAX_IDEMPOTENCY; ++i) {
+        BlitIdempotency *record = &runtime->idempotency[i];
+        if (!record->used || strcmp(record->key, key) != 0 ||
+            strcmp(record->method, method) != 0 ||
+            strcmp(record->path, path) != 0)
+            continue;
+        if (payload_length >= sizeof(record->payload) ||
+            strcmp(record->payload, payload) != 0) {
+            send_problem(fd, 409, "Conflict", "idempotency_conflict",
+                         "The idempotency key was reused with a different request.");
+            return 1;
+        }
+        send_http(fd, record->status, record->reason, record->content_type,
+                  record->response);
+        return 1;
+    }
+    return 0;
+}
+
+static void idempotency_store(BlitRuntime *runtime, const char *request,
+                              const char *method, const char *path,
+                              const char *payload, int status,
+                              const char *reason, const char *content_type,
+                              const char *response)
+{
+    char key[129];
+    int i;
+
+    if (!request_header(request, "Idempotency-Key:", key, sizeof(key)) ||
+        strlen(payload) >= sizeof(runtime->idempotency[0].payload) ||
+        strlen(response) >= sizeof(runtime->idempotency[0].response))
+        return;
+    for (i = 0; i < BLIT_MAX_IDEMPOTENCY; ++i)
+        if (!runtime->idempotency[i].used)
+            break;
+    if (i == BLIT_MAX_IDEMPOTENCY)
+        return;
+    {
+        BlitIdempotency *record = &runtime->idempotency[i];
+        record->used = 1;
+        snprintf(record->key, sizeof(record->key), "%s", key);
+        snprintf(record->method, sizeof(record->method), "%s", method);
+        snprintf(record->path, sizeof(record->path), "%s", path);
+        snprintf(record->payload, sizeof(record->payload), "%s", payload);
+        record->status = status;
+        snprintf(record->reason, sizeof(record->reason), "%s", reason);
+        snprintf(record->content_type, sizeof(record->content_type), "%s",
+                 content_type);
+        snprintf(record->response, sizeof(record->response), "%s", response);
+    }
+}
+
 static void send_revision_problem(int fd, const char *code,
                                   const char *detail,
                                   unsigned long long revision)
@@ -1611,6 +1706,9 @@ static void handle_request(int fd, BlitRuntime *runtime,
         BlitSurface *surface = find_surface(runtime, path);
         int base_revision;
 
+        if (idempotency_replay(runtime, fd, request, method, path, payload))
+            return;
+
         if (surface == NULL) {
             send_problem(fd, 404, "Not Found", "surface_not_found",
                          "The text surface does not exist.");
@@ -1636,6 +1734,8 @@ static void handle_request(int fd, BlitRuntime *runtime,
         ++surface->revision;
         mutation_receipt_json(surface, body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
+        idempotency_store(runtime, request, method, path, payload, 200,
+                          "OK", "application/json", body);
         {
             char event[512];
             surface_delta_json(surface, event, sizeof(event));
@@ -1648,6 +1748,9 @@ static void handle_request(int fd, BlitRuntime *runtime,
         int plan_status;
         unsigned long long conflict_revision = 0;
         BlitFramePlan plan;
+
+        if (idempotency_replay(runtime, fd, request, method, path, payload))
+            return;
 
         if (!json_int(payload, "base_revision", &base_revision)) {
             send_problem(fd, 400, "Bad Request", "invalid_frame_request",
@@ -1678,6 +1781,8 @@ static void handle_request(int fd, BlitRuntime *runtime,
         frame_receipt_json(runtime, body, sizeof(body));
         render_outputs(runtime, &plan);
         send_http(fd, 202, "Accepted", "application/json", body);
+        idempotency_store(runtime, request, method, path, payload, 202,
+                          "Accepted", "application/json", body);
         {
             char event[256];
             snprintf(event, sizeof(event),

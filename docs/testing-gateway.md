@@ -121,6 +121,11 @@ current revision in `Problem.revision`, so clients can retry without another
 discovery request when PTY output wins the race. The same revision-bearing
 conflict applies when a frame references stale surfaces.
 
+Cell mutations and frame commits also accept the documented `Idempotency-Key`
+header. Within the bounded in-memory replay window, an identical request
+returns its original receipt without applying state again; reusing a key with a
+different payload returns `idempotency_conflict`.
+
 Unsupported inventories are returned as empty arrays until their native
 backends are implemented. Display discovery is sourced from SDL3.
 
