@@ -23,6 +23,8 @@ relevant documentation and schema in the same change.
   non-negotiable development constraints.
 - [Toolchain baseline](toolchain.md) — the compiler and dependency gates for
   this workspace.
+- [Roadmap](roadmap.md) — the ordered implementation milestones and exit
+  criteria.
 - [Bare-metal testing](testing-baremetal.md) — how to test direct KMSDRM on a
   Linux host without X11 or Wayland.
 - [ADR index](adr/README.md) — decisions that constrain implementation.
