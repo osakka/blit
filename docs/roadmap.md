@@ -19,7 +19,8 @@ The first renderer-neutral frame plan is now also implemented: a frame request
 captures the selected surface revisions before the SDL adapter presents them.
 The plan now carries each surface's accumulated dirty rectangle. Native text
 rasterization, richer damage composition, effects, authentication, and VKMS
-gateway integration remain open. The SDL adapter now uses dirty rows for
+gateway integration remain open. The SDL adapter now stores and renders
+schema-defined cell colors and basic attributes, and uses dirty rows for
 single-surface incremental frames and conservatively redraws multi-surface
 outputs with deterministic vertical stacking.
 

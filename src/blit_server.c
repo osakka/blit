@@ -30,6 +30,11 @@
 #define BLIT_STREAM_HARDWARE 16
 #define BLIT_STREAM_TERMINALS 32
 #define BLIT_MAX_FRAME_SURFACES 16
+#define BLIT_DEFAULT_FOREGROUND 0xbed2beU
+#define BLIT_ATTR_BOLD 1
+#define BLIT_ATTR_DIM 2
+#define BLIT_ATTR_UNDERLINE 4
+#define BLIT_ATTR_INVERSE 8
 
 typedef struct {
     unsigned long long id;
@@ -46,6 +51,9 @@ typedef struct {
     int height;
     char state[16];
     char cells[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
+    uint32_t foreground[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
+    uint32_t background[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
+    unsigned char attributes[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
     int damage_valid;
     int damage_x;
     int damage_y;
@@ -335,6 +343,45 @@ static int json_int(const char *json, const char *key, int *value)
     return end != cursor;
 }
 
+static int json_bool(const char *json, const char *key, int *value)
+{
+    char needle[128];
+    const char *cursor;
+
+    snprintf(needle, sizeof(needle), "\"%s\"", key);
+    cursor = strstr(json, needle);
+    if (cursor == NULL)
+        return 0;
+    cursor += strlen(needle);
+    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
+           *cursor == '\n') ++cursor;
+    if (*cursor != ':')
+        return 0;
+    ++cursor;
+    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
+           *cursor == '\n') ++cursor;
+    if (strncmp(cursor, "true", 4) == 0) {
+        *value = 1;
+        return 1;
+    }
+    if (strncmp(cursor, "false", 5) == 0) {
+        *value = 0;
+        return 1;
+    }
+    return 0;
+}
+
+static int parse_color(const char *text, uint32_t *color)
+{
+    unsigned int value;
+
+    if (text[0] != '#' || strlen(text) != 7 ||
+        sscanf(text + 1, "%06x", &value) != 1)
+        return 0;
+    *color = (uint32_t)value;
+    return 1;
+}
+
 static BlitSurface *find_surface_id(BlitRuntime *runtime,
                                     unsigned long long surface_id)
 {
@@ -447,11 +494,47 @@ static int apply_cell_update(BlitSurface *surface, const char *json)
         return 0;
     while ((cursor = strstr(cursor, "\"x\"")) != NULL) {
         char text[BLIT_MAX_CELL_COLS];
+        char color_text[32];
+        uint32_t foreground = 0;
+        uint32_t background = 0;
+        unsigned char attributes = 0;
+        int foreground_set = 0;
+        int background_set = 0;
+        const char *next_cell = strstr(cursor + 3, "\"x\"");
+        const char *style_cursor = strstr(cursor, "\"style\"");
+        int style_seen = style_cursor != NULL &&
+            (next_cell == NULL || style_cursor < next_cell);
+        int style_valid = 1;
+        int flag;
         int x, y;
         size_t i;
 
         if (!json_int(cursor, "x", &x) || !json_int(cursor, "y", &y) ||
             !json_string(cursor, "text", text, sizeof(text)))
+            break;
+        if (style_seen) {
+            if (json_string(cursor, "foreground", color_text,
+                            sizeof(color_text))) {
+                foreground_set = 1;
+                if (!parse_color(color_text, &foreground))
+                    style_valid = 0;
+            }
+            if (json_string(cursor, "background", color_text,
+                            sizeof(color_text))) {
+                background_set = 1;
+                if (!parse_color(color_text, &background))
+                    style_valid = 0;
+            }
+            if (json_bool(cursor, "bold", &flag) && flag)
+                attributes |= BLIT_ATTR_BOLD;
+            if (json_bool(cursor, "dim", &flag) && flag)
+                attributes |= BLIT_ATTR_DIM;
+            if (json_bool(cursor, "underline", &flag) && flag)
+                attributes |= BLIT_ATTR_UNDERLINE;
+            if (json_bool(cursor, "inverse", &flag) && flag)
+                attributes |= BLIT_ATTR_INVERSE;
+        }
+        if (!style_valid)
             break;
         if (x >= 0 && y >= 0 && x < BLIT_MAX_CELL_COLS &&
             y < BLIT_MAX_CELL_ROWS) {
@@ -460,6 +543,13 @@ static int apply_cell_update(BlitSurface *surface, const char *json)
                 if (text[i] == '\n' || text[i] == '\r')
                     break;
                 surface->cells[y][x + i] = text[i];
+                if (style_seen) {
+                    if (foreground_set)
+                        surface->foreground[y][x + i] = foreground + 1;
+                    if (background_set)
+                        surface->background[y][x + i] = background + 1;
+                    surface->attributes[y][x + i] = attributes;
+                }
                 mark_surface_damage(surface, x + (int)i, y);
             }
             if (surface->width > x) {
@@ -1362,7 +1452,6 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
                 runtime, plan->surfaces[plan_index].surface_id);
             BlitSession *session;
             char display_id[128];
-            char line[BLIT_MAX_CELL_COLS + 1];
             int surface_origin_y = 4;
             int prior_index;
             int first_row = 0;
@@ -1415,13 +1504,52 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
                 last_row = BLIT_MAX_CELL_ROWS;
             for (row = first_row; row < last_row; ++row) {
                 for (column = 0; column < surface->width &&
-                     column < BLIT_MAX_CELL_COLS; ++column)
-                    line[column] = surface->cells[row][column] ?
+                     column < BLIT_MAX_CELL_COLS; ++column) {
+                    uint32_t foreground = surface->foreground[row][column] ?
+                        surface->foreground[row][column] - 1 :
+                        BLIT_DEFAULT_FOREGROUND;
+                    uint32_t background = surface->background[row][column] ?
+                        surface->background[row][column] - 1 : 0;
+                    unsigned char attributes = surface->attributes[row][column];
+                    char glyph[2];
+                    SDL_FRect cell_background;
+
+                    if (attributes & BLIT_ATTR_INVERSE) {
+                        uint32_t swapped = foreground;
+                        foreground = background ? background : 0;
+                        background = swapped;
+                    }
+                    if (attributes & BLIT_ATTR_DIM)
+                        foreground = ((foreground & 0xfefefeU) >> 1);
+                    if (background != 0) {
+                        cell_background.x = 4.0f + column * 8.0f;
+                        cell_background.y = (float)surface_origin_y + row * 8.0f;
+                        cell_background.w = 8.0f;
+                        cell_background.h = 8.0f;
+                        SDL_SetRenderDrawColor(renderer,
+                            (unsigned char)(background >> 16),
+                            (unsigned char)(background >> 8),
+                            (unsigned char)background, 255);
+                        SDL_RenderFillRect(renderer, &cell_background);
+                    }
+                    SDL_SetRenderDrawColor(renderer,
+                        (unsigned char)(foreground >> 16),
+                        (unsigned char)(foreground >> 8),
+                        (unsigned char)foreground, 255);
+                    glyph[0] = surface->cells[row][column] ?
                         surface->cells[row][column] : ' ';
-                line[column] = '\0';
-                SDL_RenderDebugText(renderer, 4.0f,
-                                    (float)surface_origin_y + row * 8.0f,
-                                    line);
+                    glyph[1] = '\0';
+                    SDL_RenderDebugText(renderer, 4.0f + column * 8.0f,
+                        (float)surface_origin_y + row * 8.0f, glyph);
+                    if (attributes & BLIT_ATTR_BOLD)
+                        SDL_RenderDebugText(renderer, 5.0f + column * 8.0f,
+                            (float)surface_origin_y + row * 8.0f, glyph);
+                    if (attributes & BLIT_ATTR_UNDERLINE)
+                        SDL_RenderLine(renderer, 4.0f + column * 8.0f,
+                            (float)surface_origin_y + row * 8.0f + 7.0f,
+                            11.0f + column * 8.0f,
+                            (float)surface_origin_y + row * 8.0f + 7.0f);
+                }
             }
         }
         SDL_RenderPresent(renderer);

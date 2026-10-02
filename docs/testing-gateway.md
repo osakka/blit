@@ -98,8 +98,9 @@ output adapter from an immutable surface/revision plan. The first frame for an
 output is a full draw; subsequent single-surface frames use the captured dirty
 rows, while multi-surface frames conservatively redraw the output. The renderer
 uses deterministic vertical stacking for multiple surfaces on one output and
-SDL3's built-in bitmap text primitive; font selection, cell attributes, and CRT
-effects remain later layers.
+SDL3's built-in bitmap text primitive. Cell styles accept six-digit foreground
+and background colors plus bold, dim, underline, and inverse flags; invalid
+colors are rejected. Font selection and CRT effects remain later layers.
 
 Unsupported inventories are returned as empty arrays until their native
 backends are implemented. Display discovery is sourced from SDL3.
