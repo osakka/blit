@@ -1063,6 +1063,19 @@ static void send_problem(int fd, int status, const char *reason,
     send_http(fd, status, reason, "application/problem+json", body);
 }
 
+static void send_revision_problem(int fd, const char *code,
+                                  const char *detail,
+                                  unsigned long long revision)
+{
+    char body[1024];
+
+    snprintf(body, sizeof(body),
+             "{\"type\":\"about:blank\",\"title\":\"Conflict\","
+             "\"status\":409,\"code\":\"%s\",\"detail\":\"%s\","
+             "\"revision\":%llu}", code, detail, revision);
+    send_http(fd, 409, "Conflict", "application/problem+json", body);
+}
+
 static int create_session(BlitRuntime *runtime, const char *json,
                            BlitSession **created)
 {
@@ -1606,8 +1619,9 @@ static void handle_request(int fd, BlitRuntime *runtime,
             return;
         }
         if ((unsigned long long)base_revision != surface->revision) {
-            send_problem(fd, 409, "Conflict", "revision_conflict",
-                         "The surface revision does not match the requested update.");
+            send_revision_problem(fd, "revision_conflict",
+                                  "The surface revision does not match the requested update.",
+                                  surface->revision);
             return;
         }
         if (apply_cell_update(surface, payload) <= 0) {

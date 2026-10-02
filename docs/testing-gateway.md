@@ -116,8 +116,9 @@ cursor positioning remains deterministic.
 
 Session responses expose `surface_revision` separately from the session
 configuration `revision`. Clients should use that value as `base_revision` for
-cell updates and retry after `409 revision_conflict` when PTY output wins the
-race.
+cell updates. A `409 revision_conflict` response also carries the authoritative
+current revision in `Problem.revision`, so clients can retry without another
+discovery request when PTY output wins the race.
 
 Unsupported inventories are returned as empty arrays until their native
 backends are implemented. Display discovery is sourced from SDL3.
