@@ -135,14 +135,49 @@ qemu-system-x86_64 -M q35 -m 1024 -smp 2 \
   -display none -serial stdio -monitor none -no-reboot
 ```
 
-Inside the guest, mount configfs and create two plane/CRTC/encoder/connector
-pipelines under `/sys/kernel/config/vkms/blit`; each connector must be marked
-connected and linked to its encoder, and each encoder/plane linked to its CRTC.
-Set `enabled` to `1`, mount devtmpfs on `/dev`, then run the TCC-built probe
-with `SDL_VIDEODRIVER=kmsdrm`. With the current fixture the probe reports two
-outputs at `0,0 1024x768` and `1024,0 1024x768`, creates the fullscreen window,
-and exits successfully. The VKMS teardown may log `Could not restore CRTC`; it
-does not indicate a failed probe when the process exit status is zero.
+Inside the guest, mount configfs and create two
+plane/CRTC/encoder/connector pipelines. The following uses the initramfs's
+explicit BusyBox path because the direct shell has no useful `PATH`:
+
+```sh
+/usr/bin/busybox mkdir -p /sys/kernel/config
+/usr/bin/busybox mount -t configfs none /sys/kernel/config
+/usr/bin/busybox mkdir -p \
+  /sys/kernel/config/vkms/blit/planes/plane0 \
+  /sys/kernel/config/vkms/blit/planes/plane1 \
+  /sys/kernel/config/vkms/blit/crtcs/crtc0 \
+  /sys/kernel/config/vkms/blit/crtcs/crtc1 \
+  /sys/kernel/config/vkms/blit/encoders/encoder0 \
+  /sys/kernel/config/vkms/blit/encoders/encoder1 \
+  /sys/kernel/config/vkms/blit/connectors/connector0 \
+  /sys/kernel/config/vkms/blit/connectors/connector1
+echo 1 > /sys/kernel/config/vkms/blit/planes/plane0/type
+echo 1 > /sys/kernel/config/vkms/blit/planes/plane1/type
+echo 1 > /sys/kernel/config/vkms/blit/connectors/connector0/status
+echo 1 > /sys/kernel/config/vkms/blit/connectors/connector1/status
+/usr/bin/busybox ln -s /sys/kernel/config/vkms/blit/crtcs/crtc0 \
+  /sys/kernel/config/vkms/blit/planes/plane0/possible_crtcs
+/usr/bin/busybox ln -s /sys/kernel/config/vkms/blit/crtcs/crtc1 \
+  /sys/kernel/config/vkms/blit/planes/plane1/possible_crtcs
+/usr/bin/busybox ln -s /sys/kernel/config/vkms/blit/crtcs/crtc0 \
+  /sys/kernel/config/vkms/blit/encoders/encoder0/possible_crtcs
+/usr/bin/busybox ln -s /sys/kernel/config/vkms/blit/crtcs/crtc1 \
+  /sys/kernel/config/vkms/blit/encoders/encoder1/possible_crtcs
+/usr/bin/busybox ln -s /sys/kernel/config/vkms/blit/encoders/encoder0 \
+  /sys/kernel/config/vkms/blit/connectors/connector0/possible_encoders
+/usr/bin/busybox ln -s /sys/kernel/config/vkms/blit/encoders/encoder1 \
+  /sys/kernel/config/vkms/blit/connectors/connector1/possible_encoders
+echo 1 > /sys/kernel/config/vkms/blit/enabled
+/usr/bin/busybox mount -t devtmpfs devtmpfs /dev
+GBM_BACKENDS_PATH=/blit-stage/gbm \
+  /blit-stage/ld-linux-x86-64.so.2 --library-path /blit-stage \
+  /blit-stage/kmsdrm_display
+```
+
+With the current fixture the probe reports two outputs at `0,0 1024x768` and
+`1024,0 1024x768`, creates the KMSDRM window, and exits successfully. The VKMS
+teardown may log `Could not restore CRTC`; it does not indicate a failed probe
+when the process exit status is zero.
 
 Set `BLIT_KMSDRM_ENUM_ONLY=1` to stop after output enumeration. This is a
 diagnostic mode of the same probe, not a second display implementation.
