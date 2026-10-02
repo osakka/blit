@@ -519,7 +519,10 @@ components:
             properties:
               x: {type: integer, minimum: 0}
               y: {type: integer, minimum: 0}
-              text: {type: string, minLength: 1}
+              text:
+                type: string
+                minLength: 1
+                description: UTF-8 text; this version maps one non-combining code point to one cell.
               style: {$ref: '#/components/schemas/CellStyle'}
             additionalProperties: false
       additionalProperties: false

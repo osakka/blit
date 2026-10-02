@@ -18,9 +18,10 @@ output initialization, and explicit session-to-display routing are implemented.
 The first renderer-neutral frame plan is now also implemented: a frame request
 captures the selected surface revisions before the SDL adapter presents them.
 The plan now carries each surface's accumulated dirty rectangle. Native text
-rasterization, richer damage composition, effects, authentication, and VKMS
-gateway integration remain open. The SDL adapter now stores and renders
-schema-defined cell colors and basic attributes, and uses dirty rows for
+rasterization, richer grapheme/cursor composition, effects, authentication,
+and VKMS gateway integration remain open. The SDL adapter now validates UTF-8,
+stores one non-combining code point per cell, renders schema-defined cell
+colors and basic attributes, and uses dirty rows for
 single-surface incremental frames and conservatively redraws multi-surface
 outputs with deterministic vertical stacking.
 

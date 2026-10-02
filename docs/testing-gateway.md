@@ -100,7 +100,10 @@ rows, while multi-surface frames conservatively redraw the output. The renderer
 uses deterministic vertical stacking for multiple surfaces on one output and
 SDL3's built-in bitmap text primitive. Cell styles accept six-digit foreground
 and background colors plus bold, dim, underline, and inverse flags; invalid
-colors are rejected. Font selection and CRT effects remain later layers.
+colors are rejected. Text is validated as UTF-8 and decoded as one
+non-combining code point per cell; malformed UTF-8 and combining marks are
+rejected until the grapheme policy is expanded. Font selection, cursor state,
+and CRT effects remain later layers.
 
 Unsupported inventories are returned as empty arrays until their native
 backends are implemented. Display discovery is sourced from SDL3.

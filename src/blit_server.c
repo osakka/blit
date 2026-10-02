@@ -51,6 +51,7 @@ typedef struct {
     int height;
     char state[16];
     char cells[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
+    uint32_t codepoints[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
     uint32_t foreground[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
     uint32_t background[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
     unsigned char attributes[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
@@ -382,6 +383,109 @@ static int parse_color(const char *text, uint32_t *color)
     return 1;
 }
 
+static int utf8_decode(const unsigned char *text, size_t length,
+                       size_t *consumed, uint32_t *codepoint)
+{
+    unsigned char first;
+    uint32_t value;
+
+    if (length == 0)
+        return 0;
+    first = text[0];
+    if (first < 0x80) {
+        *consumed = 1;
+        *codepoint = first;
+        return 1;
+    }
+    if (first >= 0xc2 && first <= 0xdf) {
+        if (length < 2 || (text[1] & 0xc0) != 0x80)
+            return 0;
+        *consumed = 2;
+        *codepoint = ((uint32_t)(first & 0x1f) << 6) |
+            (text[1] & 0x3f);
+        return 1;
+    }
+    if (first >= 0xe0 && first <= 0xef) {
+        if (length < 3 || (text[1] & 0xc0) != 0x80 ||
+            (text[2] & 0xc0) != 0x80 ||
+            (first == 0xe0 && text[1] < 0xa0) ||
+            (first == 0xed && text[1] >= 0xa0))
+            return 0;
+        value = ((uint32_t)(first & 0x0f) << 12) |
+            ((uint32_t)(text[1] & 0x3f) << 6) | (text[2] & 0x3f);
+        *consumed = 3;
+        *codepoint = value;
+        return 1;
+    }
+    if (first >= 0xf0 && first <= 0xf4) {
+        if (length < 4 || (text[1] & 0xc0) != 0x80 ||
+            (text[2] & 0xc0) != 0x80 || (text[3] & 0xc0) != 0x80 ||
+            (first == 0xf0 && text[1] < 0x90) ||
+            (first == 0xf4 && text[1] >= 0x90))
+            return 0;
+        value = ((uint32_t)(first & 0x07) << 18) |
+            ((uint32_t)(text[1] & 0x3f) << 12) |
+            ((uint32_t)(text[2] & 0x3f) << 6) | (text[3] & 0x3f);
+        *consumed = 4;
+        *codepoint = value;
+        return 1;
+    }
+    return 0;
+}
+
+static int decode_text_cells(const char *text, uint32_t *codepoints,
+                             size_t *count)
+{
+    size_t offset = 0;
+    size_t length = strlen(text);
+
+    *count = 0;
+    while (offset < length) {
+        size_t consumed;
+        uint32_t codepoint;
+
+        if (*count >= BLIT_MAX_CELL_COLS ||
+            !utf8_decode((const unsigned char *)text + offset,
+                         length - offset, &consumed, &codepoint))
+            return 0;
+        if (codepoint == '\n' || codepoint == '\r' || codepoint < 0x20 ||
+            (codepoint >= 0x0300 && codepoint <= 0x036f))
+            return 0;
+        codepoints[*count] = codepoint;
+        ++*count;
+        offset += consumed;
+    }
+    return *count > 0;
+}
+
+static size_t utf8_encode(uint32_t codepoint, char output[5])
+{
+    if (codepoint < 0x80) {
+        output[0] = (char)codepoint;
+        output[1] = '\0';
+        return 1;
+    }
+    if (codepoint < 0x800) {
+        output[0] = (char)(0xc0 | (codepoint >> 6));
+        output[1] = (char)(0x80 | (codepoint & 0x3f));
+        output[2] = '\0';
+        return 2;
+    }
+    if (codepoint < 0x10000) {
+        output[0] = (char)(0xe0 | (codepoint >> 12));
+        output[1] = (char)(0x80 | ((codepoint >> 6) & 0x3f));
+        output[2] = (char)(0x80 | (codepoint & 0x3f));
+        output[3] = '\0';
+        return 3;
+    }
+    output[0] = (char)(0xf0 | (codepoint >> 18));
+    output[1] = (char)(0x80 | ((codepoint >> 12) & 0x3f));
+    output[2] = (char)(0x80 | ((codepoint >> 6) & 0x3f));
+    output[3] = (char)(0x80 | (codepoint & 0x3f));
+    output[4] = '\0';
+    return 4;
+}
+
 static BlitSurface *find_surface_id(BlitRuntime *runtime,
                                     unsigned long long surface_id)
 {
@@ -507,6 +611,8 @@ static int apply_cell_update(BlitSurface *surface, const char *json)
         int style_valid = 1;
         int flag;
         int x, y;
+        uint32_t decoded[BLIT_MAX_CELL_COLS];
+        size_t decoded_count;
         size_t i;
 
         if (!json_int(cursor, "x", &x) || !json_int(cursor, "y", &y) ||
@@ -536,13 +642,15 @@ static int apply_cell_update(BlitSurface *surface, const char *json)
         }
         if (!style_valid)
             break;
+        if (!decode_text_cells(text, decoded, &decoded_count))
+            break;
         if (x >= 0 && y >= 0 && x < BLIT_MAX_CELL_COLS &&
             y < BLIT_MAX_CELL_ROWS) {
-            for (i = 0; text[i] != '\0' && x + (int)i < BLIT_MAX_CELL_COLS;
+            for (i = 0; i < decoded_count && x + (int)i < BLIT_MAX_CELL_COLS;
                  ++i) {
-                if (text[i] == '\n' || text[i] == '\r')
-                    break;
-                surface->cells[y][x + i] = text[i];
+                surface->codepoints[y][x + i] = decoded[i];
+                surface->cells[y][x + i] = decoded[i] < 0x80 ?
+                    (char)decoded[i] : '?';
                 if (style_seen) {
                     if (foreground_set)
                         surface->foreground[y][x + i] = foreground + 1;
@@ -1511,7 +1619,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
                     uint32_t background = surface->background[row][column] ?
                         surface->background[row][column] - 1 : 0;
                     unsigned char attributes = surface->attributes[row][column];
-                    char glyph[2];
+                    char glyph[5];
                     SDL_FRect cell_background;
 
                     if (attributes & BLIT_ATTR_INVERSE) {
@@ -1536,9 +1644,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
                         (unsigned char)(foreground >> 16),
                         (unsigned char)(foreground >> 8),
                         (unsigned char)foreground, 255);
-                    glyph[0] = surface->cells[row][column] ?
-                        surface->cells[row][column] : ' ';
-                    glyph[1] = '\0';
+                    utf8_encode(surface->codepoints[row][column] ?
+                        surface->codepoints[row][column] : ' ', glyph);
                     SDL_RenderDebugText(renderer, 4.0f + column * 8.0f,
                         (float)surface_origin_y + row * 8.0f, glyph);
                     if (attributes & BLIT_ATTR_BOLD)
