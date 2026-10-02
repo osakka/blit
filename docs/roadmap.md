@@ -31,6 +31,9 @@ payload conflict detection, preventing duplicate PTY creation on retries.
 Broadcast stream events carry monotonic sequences with a bounded replay cursor
 and explicit `replay_gap` recovery behavior. Surface snapshots provide the
 authoritative HTTP resynchronization path, including text, styles, and cursor.
+Optional bearer authentication now protects HTTP and WebSocket upgrades when
+`BLIT_AUTH_TOKEN` is configured; TLS and token rotation remain deployment
+work.
 The hibr desktop has also passed a TCC-built PTY compatibility probe; the
 production `console-blit` module remains planned. The SDL adapter uses
 single-surface incremental frames and conservatively redraws multi-surface

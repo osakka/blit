@@ -307,6 +307,12 @@ paths:
           - $ref: '#/components/schemas/StreamDiagnosticEvent'
 
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: Required when the server is configured with BLIT_AUTH_TOKEN.
   parameters:
     IfMatch:
       name: If-Match

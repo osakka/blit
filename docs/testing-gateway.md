@@ -27,8 +27,19 @@ LD_LIBRARY_PATH=build/sdl3-kms \
   ./build/blit/blit-server 8080
 ```
 
-The development listener defaults to loopback. The gateway has no TLS or
-authentication yet; do not set `BLIT_BIND_ADDRESS` to a non-loopback address.
+The development listener defaults to loopback. Authentication is disabled when
+`BLIT_AUTH_TOKEN` is unset. For a network-bound instance, configure the token
+and send `Authorization: Bearer <token>` on HTTP and WebSocket upgrades:
+
+```sh
+BLIT_BIND_ADDRESS=0.0.0.0 BLIT_AUTH_TOKEN='replace-me' \
+  ./build/blit/blit-server 8080
+curl --fail -H 'Authorization: Bearer replace-me' \
+  http://127.0.0.1:8080/v1/server
+```
+
+TLS termination, token rotation, and per-client authorization remain
+deployment responsibilities; do not expose an unauthenticated listener.
 
 When SDL3 reports displays, the gateway creates one borderless SDL window and
 renderer per output, positions each window at the reported bounds, and presents

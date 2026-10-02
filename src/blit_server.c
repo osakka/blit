@@ -144,6 +144,7 @@ typedef struct {
     BlitIdempotency idempotency[BLIT_MAX_IDEMPOTENCY];
     BlitEventRecord event_history[BLIT_MAX_EVENT_HISTORY];
     unsigned int next_event_history;
+    char auth_token[256];
     int output_count;
     int sdl_ready;
     char sdl_error[256];
@@ -1769,6 +1770,22 @@ static void handle_request(int fd, BlitRuntime *runtime,
                   "\"detail\":\"The request line is invalid.\"}");
         return;
     }
+    if (runtime->auth_token[0] != '\0') {
+        char authorization[320];
+        char expected[320];
+        if (!request_header(request, "Authorization:", authorization,
+                            sizeof(authorization))) {
+            send_problem(fd, 401, "Unauthorized", "authentication_required",
+                         "A bearer token is required.");
+            return;
+        }
+        snprintf(expected, sizeof(expected), "Bearer %s", runtime->auth_token);
+        if (strcmp(authorization, expected) != 0) {
+            send_problem(fd, 401, "Unauthorized", "authentication_failed",
+                         "The bearer token is not valid.");
+            return;
+        }
+    }
 
     if (strncmp(path, "/v1/stream", strlen("/v1/stream")) == 0 &&
         (path[strlen("/v1/stream")] == '\0' ||
@@ -2271,6 +2288,12 @@ int main(int argc, char **argv)
     runtime.next_session_id = 1;
     runtime.next_frame_id = 1;
     runtime.next_event_sequence = 1;
+    {
+        const char *auth_token = getenv("BLIT_AUTH_TOKEN");
+        if (auth_token != NULL)
+            snprintf(runtime.auth_token, sizeof(runtime.auth_token), "%s",
+                     auth_token);
+    }
     signal(SIGINT, stop_server);
     signal(SIGTERM, stop_server);
     discover_displays(&runtime);
