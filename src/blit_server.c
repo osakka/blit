@@ -8,10 +8,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
+#include <sys/select.h>
 #include <sys/socket.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
+#include <pty.h>
 
 #define BLIT_MAX_DISPLAYS 16
+#define BLIT_MAX_SESSIONS 16
 #define BLIT_REQUEST_SIZE 8192
 
 typedef struct {
@@ -21,8 +27,22 @@ typedef struct {
 } BlitDisplay;
 
 typedef struct {
+    int used;
+    unsigned long long id;
+    pid_t process_id;
+    int pty_fd;
+    unsigned long long revision;
+    char display_id[128];
+    char state[16];
+    char surface_id[128];
+} BlitSession;
+
+typedef struct {
     int display_count;
     BlitDisplay displays[BLIT_MAX_DISPLAYS];
+    int session_count;
+    unsigned long long next_session_id;
+    BlitSession sessions[BLIT_MAX_SESSIONS];
     int sdl_ready;
     char sdl_error[256];
 } BlitRuntime;
@@ -151,6 +171,190 @@ static void empty_inventory_json(char *body, size_t capacity,
                                  const char *key)
 {
     snprintf(body, capacity, "{\"revision\":1,\"%s\":[]}", key);
+}
+
+static const char *request_body(const char *request)
+{
+    const char *separator = strstr(request, "\r\n\r\n");
+    return separator ? separator + 4 : "";
+}
+
+static int json_string(const char *json, const char *key, char *value,
+                       size_t capacity)
+{
+    char needle[128];
+    const char *cursor;
+    size_t out = 0;
+
+    snprintf(needle, sizeof(needle), "\"%s\":\"", key);
+    cursor = strstr(json, needle);
+    if (cursor == NULL)
+        return 0;
+    cursor += strlen(needle);
+    while (*cursor != '\0' && *cursor != '"' && out + 1 < capacity) {
+        if (*cursor == '\\' && cursor[1] != '\0')
+            ++cursor;
+        value[out++] = *cursor++;
+    }
+    if (*cursor != '"')
+        return 0;
+    value[out] = '\0';
+    return out > 0;
+}
+
+static int json_int(const char *json, const char *key, int *value)
+{
+    char needle[128];
+    const char *cursor;
+    char *end;
+
+    snprintf(needle, sizeof(needle), "\"%s\":", key);
+    cursor = strstr(json, needle);
+    if (cursor == NULL)
+        return 0;
+    cursor += strlen(needle);
+    *value = (int)strtol(cursor, &end, 10);
+    return end != cursor;
+}
+
+static BlitSession *find_session(BlitRuntime *runtime, const char *path)
+{
+    const char *prefix = "/v1/terminal-sessions/";
+    const char *id;
+    unsigned long long session_id;
+    int i;
+
+    if (strncmp(path, prefix, strlen(prefix)) != 0)
+        return NULL;
+    id = path + strlen(prefix);
+    session_id = strtoull(id, NULL, 10);
+    for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
+        if (runtime->sessions[i].used && runtime->sessions[i].id == session_id)
+            return &runtime->sessions[i];
+    }
+    return NULL;
+}
+
+static void refresh_session_state(BlitSession *session)
+{
+    int status;
+    pid_t result;
+
+    if (!session->used || strcmp(session->state, "running") != 0)
+        return;
+    result = waitpid(session->process_id, &status, WNOHANG);
+    if (result == session->process_id) {
+        snprintf(session->state, sizeof(session->state), "stopped");
+        if (session->pty_fd >= 0) {
+            close(session->pty_fd);
+            session->pty_fd = -1;
+        }
+    }
+}
+
+static void session_json(BlitSession *session, char *body, size_t capacity)
+{
+    size_t used;
+
+    refresh_session_state(session);
+    snprintf(body, capacity,
+             "{\"id\":\"%llu\",\"revision\":%llu,"
+             "\"state\":\"%s\",\"surface_id\":\"%s\","
+             "\"process_id\":%ld",
+             session->id, session->revision, session->state,
+             session->surface_id, (long)session->process_id);
+    used = strlen(body);
+    if (session->display_id[0]) {
+        used += (size_t)snprintf(body + used, capacity - used,
+                                 ",\"display_id\":\"%s\"",
+                                 session->display_id);
+    }
+    snprintf(body + used, capacity - used, "}");
+}
+
+static void send_problem(int fd, int status, const char *reason,
+                         const char *code, const char *detail)
+{
+    char body[1024];
+    snprintf(body, sizeof(body),
+             "{\"type\":\"about:blank\",\"title\":\"%s\","
+             "\"status\":%d,\"code\":\"%s\",\"detail\":\"%s\"}",
+             reason, status, code, detail);
+    send_http(fd, status, reason, "application/problem+json", body);
+}
+
+static int create_session(BlitRuntime *runtime, const char *json,
+                           BlitSession **created)
+{
+    struct winsize size;
+    char command[256];
+    char display_id[128];
+    int width = 80;
+    int height = 24;
+    int master_fd;
+    pid_t process_id;
+    int i;
+
+    if (!json_string(json, "command", command, sizeof(command)))
+        return 0;
+    json_int(json, "width", &width);
+    json_int(json, "height", &height);
+    if (width < 1 || height < 1 || width > 1000 || height > 1000)
+        return 0;
+    memset(display_id, 0, sizeof(display_id));
+    json_string(json, "display_id", display_id, sizeof(display_id));
+    memset(&size, 0, sizeof(size));
+    size.ws_col = (unsigned short)width;
+    size.ws_row = (unsigned short)height;
+    process_id = forkpty(&master_fd, NULL, NULL, &size);
+    if (process_id < 0)
+        return 0;
+    if (process_id == 0) {
+        execl(command, command, (char *)NULL);
+        _exit(127);
+    }
+    for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
+        if (!runtime->sessions[i].used) {
+            BlitSession *session = &runtime->sessions[i];
+            memset(session, 0, sizeof(*session));
+            session->used = 1;
+            session->id = runtime->next_session_id++;
+            session->process_id = process_id;
+            session->pty_fd = master_fd;
+            session->revision = 1;
+            snprintf(session->state, sizeof(session->state), "running");
+            snprintf(session->surface_id, sizeof(session->surface_id),
+                     "surface-%llu", session->id);
+            snprintf(session->display_id, sizeof(session->display_id), "%s",
+                     display_id);
+            ++runtime->session_count;
+            *created = session;
+            return 1;
+        }
+    }
+    kill(process_id, SIGTERM);
+    close(master_fd);
+    return 0;
+}
+
+static void stop_sessions(BlitRuntime *runtime)
+{
+    int i;
+
+    for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
+        BlitSession *session = &runtime->sessions[i];
+        if (!session->used)
+            continue;
+        refresh_session_state(session);
+        if (strcmp(session->state, "running") == 0) {
+            kill(-session->process_id, SIGTERM);
+            waitpid(session->process_id, NULL, 0);
+            snprintf(session->state, sizeof(session->state), "stopped");
+        }
+        if (session->pty_fd >= 0)
+            close(session->pty_fd);
+        session->pty_fd = -1;
+    }
 }
 
 /* Minimal SHA-1 implementation for the WebSocket opening handshake. */
@@ -308,12 +512,13 @@ static void send_websocket_text(int fd, const char *text)
     send_all(fd, text, length);
 }
 
-static void handle_request(int fd, const BlitRuntime *runtime,
+static void handle_request(int fd, BlitRuntime *runtime,
                            const char *request)
 {
     char method[16];
     char path[256];
     char body[16384];
+    const char *payload = request_body(request);
 
     if (sscanf(request, "%15s %255s", method, path) != 2) {
         send_http(fd, 400, "Bad Request", "application/problem+json",
@@ -344,11 +549,55 @@ static void handle_request(int fd, const BlitRuntime *runtime,
         return;
     }
 
+    if (strcmp(path, "/v1/terminal-sessions") == 0 &&
+        strcmp(method, "POST") == 0) {
+        BlitSession *session;
+        if (strstr(payload, "\"arguments\"") != NULL ||
+            strstr(payload, "\"environment\"") != NULL) {
+            send_problem(fd, 501, "Not Implemented", "session_options_pending",
+                         "Arguments and environment policy are not implemented yet.");
+            return;
+        }
+        if (!create_session(runtime, payload, &session)) {
+            send_problem(fd, 400, "Bad Request", "session_create_failed",
+                         "The command, surface dimensions, or PTY could not be created.");
+            return;
+        }
+        session_json(session, body, sizeof(body));
+        send_http(fd, 201, "Created", "application/json", body);
+        return;
+    }
+    if (strncmp(path, "/v1/terminal-sessions/",
+                strlen("/v1/terminal-sessions/")) == 0 &&
+        (strcmp(method, "GET") == 0 || strcmp(method, "PATCH") == 0)) {
+        BlitSession *session = find_session(runtime, path);
+        if (session == NULL) {
+            send_problem(fd, 404, "Not Found", "session_not_found",
+                         "The terminal session does not exist.");
+            return;
+        }
+        if (strcmp(method, "PATCH") == 0) {
+            char display_id[128];
+            if (strstr(payload, "\"input_route\"") != NULL ||
+                strstr(payload, "\"focused\"") != NULL) {
+                send_problem(fd, 501, "Not Implemented", "input_policy_pending",
+                             "Input routing and focus policy are not implemented yet.");
+                return;
+            }
+            if (json_string(payload, "display_id", display_id,
+                            sizeof(display_id))) {
+                snprintf(session->display_id, sizeof(session->display_id),
+                         "%s", display_id);
+            }
+            ++session->revision;
+        }
+        session_json(session, body, sizeof(body));
+        send_http(fd, 200, "OK", "application/json", body);
+        return;
+    }
     if (strcmp(method, "GET") != 0) {
-        send_http(fd, 405, "Method Not Allowed", "application/problem+json",
-                  "{\"type\":\"about:blank\",\"title\":\"Method Not Allowed\","
-                  "\"status\":405,\"code\":\"method_not_allowed\","
-                  "\"detail\":\"This gateway slice accepts GET and WebSocket upgrade requests.\"}");
+        send_problem(fd, 405, "Method Not Allowed", "method_not_allowed",
+                     "This gateway route does not support the requested method.");
         return;
     }
     if (strcmp(path, "/v1/server") == 0) {
@@ -418,6 +667,7 @@ int main(int argc, char **argv)
 {
     int port = 8080;
     int server_fd;
+    const char *bind_address = getenv("BLIT_BIND_ADDRESS");
     struct sockaddr_in address;
     BlitRuntime runtime;
 
@@ -427,7 +677,10 @@ int main(int argc, char **argv)
         fprintf(stderr, "usage: %s [port]\n", argv[0]);
         return 2;
     }
+    if (bind_address == NULL || bind_address[0] == '\0')
+        bind_address = "127.0.0.1";
     memset(&runtime, 0, sizeof(runtime));
+    runtime.next_session_id = 1;
     signal(SIGINT, stop_server);
     signal(SIGTERM, stop_server);
     discover_displays(&runtime);
@@ -443,7 +696,11 @@ int main(int argc, char **argv)
     }
     memset(&address, 0, sizeof(address));
     address.sin_family = AF_INET;
-    address.sin_addr.s_addr = htonl(INADDR_ANY);
+    if (inet_pton(AF_INET, bind_address, &address.sin_addr) != 1) {
+        fprintf(stderr, "invalid BLIT_BIND_ADDRESS: %s\n", bind_address);
+        close(server_fd);
+        return 2;
+    }
     address.sin_port = htons((unsigned short)port);
     if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0 ||
         listen(server_fd, 16) < 0) {
@@ -456,9 +713,19 @@ int main(int argc, char **argv)
     fflush(stdout);
 
     while (blit_running) {
-        int client_fd = accept(server_fd, NULL, NULL);
+        int client_fd;
+        fd_set readable;
+        struct timeval timeout;
         char request[BLIT_REQUEST_SIZE];
         ssize_t received;
+
+        FD_ZERO(&readable);
+        FD_SET(server_fd, &readable);
+        timeout.tv_sec = 1;
+        timeout.tv_usec = 0;
+        if (select(server_fd + 1, &readable, NULL, NULL, &timeout) < 1)
+            continue;
+        client_fd = accept(server_fd, NULL, NULL);
         if (client_fd < 0) {
             if (errno == EINTR) continue;
             break;
@@ -471,6 +738,7 @@ int main(int argc, char **argv)
         close(client_fd);
     }
     close(server_fd);
+    stop_sessions(&runtime);
     if (runtime.sdl_ready)
         SDL_Quit();
     return 0;
