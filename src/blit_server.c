@@ -1010,9 +1010,10 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
     snprintf(body, capacity,
              "{\"id\":\"%llu\",\"revision\":%llu,"
              "\"state\":\"%s\",\"surface_id\":\"%s\","
-             "\"process_id\":%ld",
+             "\"process_id\":%ld,\"surface_revision\":%llu",
              session->id, session->revision, session->state,
-             session->surface_id, (long)session->process_id);
+             session->surface_id, (long)session->process_id,
+             surface != NULL ? surface->revision : 0);
     used = strlen(body);
     if (session->display_id[0]) {
         used += (size_t)snprintf(body + used, capacity - used,

@@ -480,10 +480,11 @@ components:
       additionalProperties: false
     TerminalSession:
       type: object
-      required: [id, revision, state, surface_id]
+      required: [id, revision, surface_revision, state, surface_id]
       properties:
         id: {$ref: '#/components/schemas/ResourceId'}
         revision: {$ref: '#/components/schemas/Revision'}
+        surface_revision: {$ref: '#/components/schemas/Revision'}
         state:
           type: string
           enum: [starting, running, stopped, failed]

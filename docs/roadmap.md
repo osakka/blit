@@ -24,6 +24,8 @@ stores one single-cell-width code point per cell, renders schema-defined cell
 colors and basic attributes, carries explicit bounded cursor state, and uses
 dirty rows. PTY output now feeds that same surface model for printable text,
 core controls, basic ANSI cursor/erase commands, and bounded upward scrolling.
+Session responses expose the current surface revision so clients can perform
+optimistic updates and retry cleanly after PTY races.
 single-surface incremental frames and conservatively redraws multi-surface
 outputs with deterministic vertical stacking.
 

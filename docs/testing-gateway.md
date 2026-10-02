@@ -114,6 +114,11 @@ one row and marks the full surface dirty. Selection and blink timing remain
 later layers. Unsupported PTY widths become a visible replacement cell so
 cursor positioning remains deterministic.
 
+Session responses expose `surface_revision` separately from the session
+configuration `revision`. Clients should use that value as `base_revision` for
+cell updates and retry after `409 revision_conflict` when PTY output wins the
+race.
+
 Unsupported inventories are returned as empty arrays until their native
 backends are implemented. Display discovery is sourced from SDL3.
 
