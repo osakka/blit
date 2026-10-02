@@ -95,6 +95,14 @@ not include a usable network driver in the direct-shell boot path. Test
 artifacts were therefore supplied through a second read-only ISO rather than
 through guest networking.
 
+Additional fixture checks did not change the result. Giving QEMU a VNC
+scanout still allowed display enumeration but did not complete
+`SDL_CreateWindow`; increasing guest memory from 1 GiB to 2 GiB also did not
+help. QEMU standard VGA was not a substitute because this Alpine kernel did
+not expose a DRM node for that device. The remaining VM-specific suspect is
+the TCG plus virtio-GPU plus software-Mesa presentation path, not TCC linking
+or SDL display enumeration.
+
 ## Failure interpretation
 
 - `kmsdrm not available`: SDL3 was built without KMSDRM, or its dynamic
