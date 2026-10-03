@@ -1131,6 +1131,11 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
     int has_second = 0;
     char command;
 
+    /* The final byte is the CSI command.  SGR is allowed to carry more
+       than two parameters (Hibr uses 0;38;2;r;g;b for truecolor), so do not
+       infer the command from only the first two parameters. */
+    command = sequence[strlen(sequence) - 1];
+
     while (*cursor >= '0' && *cursor <= '9') {
         has_first = terminal_number(&cursor, &first);
         break;
@@ -1139,7 +1144,6 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         ++cursor;
         has_second = terminal_number(&cursor, &second);
     }
-    command = *cursor;
     if (command == 'm') {
         terminal_apply_sgr(session, sequence);
     } else if (command == 'H' || command == 'f') {
