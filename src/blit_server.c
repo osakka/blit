@@ -174,6 +174,30 @@ static const char *pane_surface_id(const BlitRuntime *runtime,
                                    const BlitPane *pane);
 static void discover_panes(BlitRuntime *runtime);
 
+static void render_current_surfaces(BlitRuntime *runtime)
+{
+    BlitFramePlan plan;
+    int i;
+
+    memset(&plan, 0, sizeof(plan));
+    plan.revision = runtime->frame_revision;
+    for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
+        BlitSurface *surface = &runtime->surfaces[i];
+        if (!surface->used || plan.surface_count >= BLIT_MAX_FRAME_SURFACES)
+            continue;
+        plan.surfaces[plan.surface_count].surface_id = surface->id;
+        plan.surfaces[plan.surface_count].surface_revision = surface->revision;
+        plan.surfaces[plan.surface_count].damage_valid = surface->damage_valid;
+        plan.surfaces[plan.surface_count].damage_x = surface->damage_x;
+        plan.surfaces[plan.surface_count].damage_y = surface->damage_y;
+        plan.surfaces[plan.surface_count].damage_width = surface->damage_width;
+        plan.surfaces[plan.surface_count].damage_height = surface->damage_height;
+        ++plan.surface_count;
+    }
+    if (plan.surface_count > 0)
+        render_outputs(runtime, &plan);
+}
+
 static void stop_server(int signal_number)
 {
     (void)signal_number;
@@ -1755,6 +1779,7 @@ static void service_session_output(BlitRuntime *runtime, int fd)
                 surface_delta_json(surface, surface_event,
                                    sizeof(surface_event));
                 broadcast_stream(runtime, surface_event, BLIT_STREAM_SURFACES);
+                render_current_surfaces(runtime);
             }
             snprintf(event, sizeof(event),
                      "{\"type\":\"terminal_output\","
