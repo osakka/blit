@@ -1,4 +1,5 @@
 #include <SDL3/SDL.h>
+#include <linux/input.h>
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -164,6 +165,9 @@ typedef struct {
     unsigned long long frame_revision;
     unsigned long long next_event_sequence;
     int mouse_button;
+    int evdev_mouse_fd;
+    float evdev_mouse_x;
+    float evdev_mouse_y;
     BlitStream streams[BLIT_MAX_STREAMS];
     BlitOutput outputs[BLIT_MAX_DISPLAYS];
     BlitIdempotency idempotency[BLIT_MAX_IDEMPOTENCY];
@@ -2431,6 +2435,11 @@ static void discover_displays(BlitRuntime *runtime)
     int count = 0;
     int i;
 
+    {
+        const char *evdev_devices = getenv("SDL_EVDEV_DEVICES");
+        if (evdev_devices != NULL && evdev_devices[0] != '\0')
+            SDL_SetHint("SDL_EVDEV_DEVICES", evdev_devices);
+    }
     runtime->sdl_ready = SDL_Init(SDL_INIT_VIDEO) ? 1 : 0;
     if (!runtime->sdl_ready) {
         snprintf(runtime->sdl_error, sizeof(runtime->sdl_error), "%s",
@@ -2819,6 +2828,34 @@ static void send_mouse_report(BlitRuntime *runtime, SDL_WindowID window_id,
     write(session->pty_fd, report, strlen(report));
 }
 
+static void service_evdev_mouse(BlitRuntime *runtime)
+{
+    struct input_event event;
+    ssize_t received;
+
+    if (runtime->evdev_mouse_fd < 0)
+        return;
+    while ((received = read(runtime->evdev_mouse_fd, &event, sizeof(event))) ==
+           (ssize_t)sizeof(event)) {
+        if (event.type == EV_REL) {
+            if (event.code == REL_X)
+                runtime->evdev_mouse_x += event.value;
+            else if (event.code == REL_Y)
+                runtime->evdev_mouse_y += event.value;
+            if (runtime->evdev_mouse_x < 0) runtime->evdev_mouse_x = 0;
+            if (runtime->evdev_mouse_y < 0) runtime->evdev_mouse_y = 0;
+        } else if (event.type == EV_KEY &&
+                   event.code >= BTN_LEFT && event.code <= BTN_RIGHT) {
+            int button = (int)event.code - BTN_LEFT;
+            int release = event.value == 0;
+            if (!release) runtime->mouse_button = button + 1;
+            send_mouse_report(runtime, 0, runtime->evdev_mouse_x,
+                              runtime->evdev_mouse_y, button, release);
+            if (release) runtime->mouse_button = 0;
+        }
+    }
+}
+
 static void service_sdl_events(BlitRuntime *runtime)
 {
     SDL_Event event;
@@ -2873,6 +2910,7 @@ int main(int argc, char **argv)
     if (bind_address == NULL || bind_address[0] == '\0')
         bind_address = "127.0.0.1";
     memset(&runtime, 0, sizeof(runtime));
+    runtime.evdev_mouse_fd = -1;
     runtime.next_session_id = 1;
     runtime.next_frame_id = 1;
     runtime.next_event_sequence = 1;
@@ -2887,6 +2925,11 @@ int main(int argc, char **argv)
     signal(SIGTERM, stop_server);
     discover_displays(&runtime);
     discover_panes(&runtime);
+    {
+        const char *mouse_device = getenv("BLIT_EVDEV_MOUSE");
+        if (mouse_device != NULL && mouse_device[0] != '\0')
+            runtime.evdev_mouse_fd = open(mouse_device, O_RDONLY | O_NONBLOCK);
+    }
     if (runtime.sdl_ready)
         initialize_outputs(&runtime);
 
@@ -2928,6 +2971,7 @@ int main(int argc, char **argv)
 
         if (runtime.sdl_ready)
             service_sdl_events(&runtime);
+        service_evdev_mouse(&runtime);
         FD_ZERO(&readable);
         FD_SET(server_fd, &readable);
         for (i = 0; i < BLIT_MAX_STREAMS; ++i) {
@@ -2986,6 +3030,8 @@ int main(int argc, char **argv)
     }
     close(server_fd);
     stop_sessions(&runtime);
+    if (runtime.evdev_mouse_fd >= 0)
+        close(runtime.evdev_mouse_fd);
     destroy_outputs(&runtime);
     if (runtime.sdl_ready)
         SDL_Quit();
