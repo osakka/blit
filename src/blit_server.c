@@ -2591,12 +2591,12 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
                 ++target_count;
         }
         if (target_count == 0) {
-            if (!runtime->outputs[output_index].initialized) {
-                SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-                SDL_RenderClear(renderer);
-                SDL_RenderPresent(renderer);
-                runtime->outputs[output_index].initialized = 1;
-            }
+            SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+            SDL_RenderClear(renderer);
+            SDL_RenderPresent(renderer);
+            /* A later session needs a full first frame, even if this output
+               was previously presenting the empty desktop. */
+            runtime->outputs[output_index].initialized = 0;
             continue;
         }
         full_redraw = !runtime->outputs[output_index].initialized ||
@@ -2932,9 +2932,7 @@ int main(int argc, char **argv)
         timeout.tv_sec = 0;
         timeout.tv_usec = 10000;
         ready = select(max_fd + 1, &readable, NULL, NULL, &timeout);
-        if (ready < 1)
-            continue;
-        if (FD_ISSET(server_fd, &readable)) {
+        if (ready > 0 && FD_ISSET(server_fd, &readable)) {
             char request[BLIT_REQUEST_SIZE];
             ssize_t received;
 
@@ -2951,16 +2949,18 @@ int main(int argc, char **argv)
             if (!stream_contains(&runtime, client_fd))
                 close(client_fd);
         }
-        for (i = 0; i < BLIT_MAX_STREAMS; ++i) {
-            if (runtime.streams[i].used &&
-                FD_ISSET(runtime.streams[i].fd, &readable)) {
-                service_stream(&runtime, runtime.streams[i].fd);
+        if (ready > 0) {
+            for (i = 0; i < BLIT_MAX_STREAMS; ++i) {
+                if (runtime.streams[i].used &&
+                    FD_ISSET(runtime.streams[i].fd, &readable)) {
+                    service_stream(&runtime, runtime.streams[i].fd);
+                }
             }
-        }
-        for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
-            if (runtime.sessions[i].used && runtime.sessions[i].pty_fd >= 0 &&
-                FD_ISSET(runtime.sessions[i].pty_fd, &readable))
-                service_session_output(&runtime, runtime.sessions[i].pty_fd);
+            for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
+                if (runtime.sessions[i].used && runtime.sessions[i].pty_fd >= 0 &&
+                    FD_ISSET(runtime.sessions[i].pty_fd, &readable))
+                    service_session_output(&runtime, runtime.sessions[i].pty_fd);
+            }
         }
         if (runtime.render_pending &&
             (SDL_GetTicks() - runtime.render_last_ticks >= 33)) {
