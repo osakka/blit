@@ -22,7 +22,7 @@
 #define BLIT_MAX_SESSIONS 16
 #define BLIT_MAX_STREAMS 16
 #define BLIT_REQUEST_SIZE 8192
-#define BLIT_MAX_CELL_COLS 160
+#define BLIT_MAX_CELL_COLS 512
 #define BLIT_MAX_CELL_ROWS 100
 #define BLIT_STREAM_DIAGNOSTICS 1
 #define BLIT_STREAM_SURFACES 2
@@ -155,6 +155,7 @@ typedef struct {
     int pane_rows;
     unsigned long long topology_revision;
     int render_pending;
+    uint64_t render_last_ticks;
     int session_count;
     unsigned long long next_session_id;
     BlitSession sessions[BLIT_MAX_SESSIONS];
@@ -2957,9 +2958,11 @@ int main(int argc, char **argv)
                 FD_ISSET(runtime.sessions[i].pty_fd, &readable))
                 service_session_output(&runtime, runtime.sessions[i].pty_fd);
         }
-        if (runtime.render_pending) {
+        if (runtime.render_pending &&
+            (SDL_GetTicks() - runtime.render_last_ticks >= 33)) {
             render_current_surfaces(&runtime);
             runtime.render_pending = 0;
+            runtime.render_last_ticks = SDL_GetTicks();
         }
     }
     close(server_fd);
