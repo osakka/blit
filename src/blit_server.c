@@ -139,6 +139,11 @@ typedef struct {
     int terminal_escape;
     char terminal_csi[32];
     int terminal_csi_length;
+    uint32_t terminal_foreground;
+    uint32_t terminal_background;
+    unsigned char terminal_attributes;
+    int terminal_foreground_set;
+    int terminal_background_set;
 } BlitSession;
 
 typedef struct {
@@ -149,6 +154,7 @@ typedef struct {
     int pane_columns;
     int pane_rows;
     unsigned long long topology_revision;
+    int render_pending;
     int session_count;
     unsigned long long next_session_id;
     BlitSession sessions[BLIT_MAX_SESSIONS];
@@ -978,7 +984,143 @@ static int terminal_number(const char **cursor, int *value)
     return 1;
 }
 
-static void terminal_apply_csi(BlitSurface *surface, const char *sequence)
+static uint32_t terminal_ansi_palette(int index)
+{
+    static const uint32_t colors[8] = {
+        0x000000U, 0xcd0000U, 0x00cd00U, 0xcdcd00U,
+        0x0000eeU, 0xcd00cdU, 0x00cdcdU, 0xe5e5e5U
+    };
+
+    if (index < 0 || index > 7)
+        return 0;
+    return colors[index];
+}
+
+static void terminal_apply_sgr(BlitSession *session, const char *sequence)
+{
+    int params[32];
+    int count = 0;
+    const char *cursor = sequence;
+    int i;
+
+    while (*cursor != '\0' && *cursor != 'm' && count < 32) {
+        char *end;
+        int value;
+        if (*cursor == ';') {
+            params[count++] = 0;
+            ++cursor;
+            continue;
+        }
+        value = (int)strtol(cursor, &end, 10);
+        if (end == cursor) {
+            ++cursor;
+            continue;
+        }
+        params[count++] = value;
+        cursor = end;
+        if (*cursor == ';')
+            ++cursor;
+    }
+    if (count == 0)
+        params[count++] = 0;
+    for (i = 0; i < count; ++i) {
+        int value = params[i];
+        int bright = 0;
+        if (value == 0) {
+            session->terminal_foreground = 0;
+            session->terminal_background = 0;
+            session->terminal_attributes = 0;
+            session->terminal_foreground_set = 0;
+            session->terminal_background_set = 0;
+        } else if (value == 1) {
+            session->terminal_attributes |= BLIT_ATTR_BOLD;
+        } else if (value == 2) {
+            session->terminal_attributes |= BLIT_ATTR_DIM;
+        } else if (value == 4) {
+            session->terminal_attributes |= BLIT_ATTR_UNDERLINE;
+        } else if (value == 7) {
+            session->terminal_attributes |= BLIT_ATTR_INVERSE;
+        } else if (value == 22) {
+            session->terminal_attributes &= (unsigned char)~(BLIT_ATTR_BOLD | BLIT_ATTR_DIM);
+        } else if (value == 24) {
+            session->terminal_attributes &= (unsigned char)~BLIT_ATTR_UNDERLINE;
+        } else if (value == 27) {
+            session->terminal_attributes &= (unsigned char)~BLIT_ATTR_INVERSE;
+        } else if (value == 39) {
+            session->terminal_foreground_set = 0;
+        } else if (value == 49) {
+            session->terminal_background_set = 0;
+        } else if (value >= 30 && value <= 37) {
+            session->terminal_foreground = terminal_ansi_palette(value - 30);
+            session->terminal_foreground_set = 1;
+        } else if (value >= 40 && value <= 47) {
+            session->terminal_background = terminal_ansi_palette(value - 40);
+            session->terminal_background_set = 1;
+        } else if (value >= 90 && value <= 97) {
+            bright = value - 90;
+            session->terminal_foreground = terminal_ansi_palette(bright);
+            session->terminal_foreground =
+                ((session->terminal_foreground & 0x7f7f7fU) | 0x303030U);
+            session->terminal_foreground_set = 1;
+        } else if (value >= 100 && value <= 107) {
+            bright = value - 100;
+            session->terminal_background = terminal_ansi_palette(bright);
+            session->terminal_background =
+                ((session->terminal_background & 0x7f7f7fU) | 0x303030U);
+            session->terminal_background_set = 1;
+        } else if ((value == 38 || value == 48) && i + 1 < count) {
+            int mode = params[++i];
+            uint32_t color = 0;
+            int valid = 0;
+            if (mode == 5 && i + 1 < count) {
+                int index = params[++i];
+                if (index < 16) {
+                    int base = index % 8;
+                    color = terminal_ansi_palette(base);
+                    if (index >= 8)
+                        color = (color & 0x7f7f7fU) | 0x303030U;
+                    valid = 1;
+                } else if (index < 232) {
+                    int cube = index - 16;
+                    int r = cube / 36;
+                    int g = (cube / 6) % 6;
+                    int b = cube % 6;
+                    color = (uint32_t)((r ? 55 + r * 40 : 0) << 16) |
+                        (uint32_t)((g ? 55 + g * 40 : 0) << 8) |
+                        (uint32_t)(b ? 55 + b * 40 : 0);
+                    valid = 1;
+                } else if (index < 256) {
+                    int shade = 8 + (index - 232) * 10;
+                    color = (uint32_t)(shade << 16) |
+                        (uint32_t)(shade << 8) | (uint32_t)shade;
+                    valid = 1;
+                }
+            } else if (mode == 2 && i + 3 < count) {
+                int r = params[++i];
+                int g = params[++i];
+                int b = params[++i];
+                if (r >= 0 && r <= 255 && g >= 0 && g <= 255 &&
+                    b >= 0 && b <= 255) {
+                    color = (uint32_t)(r << 16) | (uint32_t)(g << 8) |
+                        (uint32_t)b;
+                    valid = 1;
+                }
+            }
+            if (valid) {
+                if (value == 38) {
+                    session->terminal_foreground = color;
+                    session->terminal_foreground_set = 1;
+                } else {
+                    session->terminal_background = color;
+                    session->terminal_background_set = 1;
+                }
+            }
+        }
+    }
+}
+
+static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
+                               const char *sequence)
 {
     const char *cursor = sequence;
     int first = 0;
@@ -996,7 +1138,9 @@ static void terminal_apply_csi(BlitSurface *surface, const char *sequence)
         has_second = terminal_number(&cursor, &second);
     }
     command = *cursor;
-    if (command == 'H' || command == 'f') {
+    if (command == 'm') {
+        terminal_apply_sgr(session, sequence);
+    } else if (command == 'H' || command == 'f') {
         surface->cursor_y = has_first && first > 0 ? first - 1 : 0;
         surface->cursor_x = has_second && second > 0 ? second - 1 : 0;
         if (surface->cursor_y >= surface->height)
@@ -1028,7 +1172,8 @@ static void terminal_apply_csi(BlitSurface *surface, const char *sequence)
     }
 }
 
-static void terminal_put_codepoint(BlitSurface *surface, uint32_t codepoint)
+static void terminal_put_codepoint(BlitSession *session, BlitSurface *surface,
+                                   uint32_t codepoint)
 {
     if (surface->cursor_x >= surface->width) {
         surface->cursor_x = 0;
@@ -1041,6 +1186,14 @@ static void terminal_put_codepoint(BlitSurface *surface, uint32_t codepoint)
     surface->codepoints[surface->cursor_y][surface->cursor_x] = codepoint;
     surface->cells[surface->cursor_y][surface->cursor_x] =
         codepoint < 0x80 ? (char)codepoint : '?';
+    if (session->terminal_foreground_set)
+        surface->foreground[surface->cursor_y][surface->cursor_x] =
+            session->terminal_foreground + 1;
+    if (session->terminal_background_set)
+        surface->background[surface->cursor_y][surface->cursor_x] =
+            session->terminal_background + 1;
+    surface->attributes[surface->cursor_y][surface->cursor_x] =
+        session->terminal_attributes;
     mark_surface_damage(surface, surface->cursor_x, surface->cursor_y);
     ++surface->cursor_x;
 }
@@ -1069,7 +1222,7 @@ static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
                     session->terminal_csi[session->terminal_csi_length++] =
                         (char)byte;
                 session->terminal_csi[session->terminal_csi_length] = '\0';
-                terminal_apply_csi(surface, session->terminal_csi);
+                terminal_apply_csi(session, surface, session->terminal_csi);
                 session->terminal_escape = 0;
             } else if (session->terminal_csi_length <
                        (int)sizeof(session->terminal_csi) - 1) {
@@ -1115,7 +1268,7 @@ static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
             } else if (unicode_cell_width(codepoint) != 1) {
                 codepoint = '?';
             }
-            terminal_put_codepoint(surface, codepoint);
+            terminal_put_codepoint(session, surface, codepoint);
             offset += consumed;
         } else {
             ++offset;
@@ -1779,7 +1932,7 @@ static void service_session_output(BlitRuntime *runtime, int fd)
                 surface_delta_json(surface, surface_event,
                                    sizeof(surface_event));
                 broadcast_stream(runtime, surface_event, BLIT_STREAM_SURFACES);
-                render_current_surfaces(runtime);
+                runtime->render_pending = 1;
             }
             snprintf(event, sizeof(event),
                      "{\"type\":\"terminal_output\","
@@ -2696,6 +2849,10 @@ int main(int argc, char **argv)
             if (runtime.sessions[i].used && runtime.sessions[i].pty_fd >= 0 &&
                 FD_ISSET(runtime.sessions[i].pty_fd, &readable))
                 service_session_output(&runtime, runtime.sessions[i].pty_fd);
+        }
+        if (runtime.render_pending) {
+            render_current_surfaces(&runtime);
+            runtime.render_pending = 0;
         }
     }
     close(server_fd);
