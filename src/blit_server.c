@@ -2515,7 +2515,14 @@ static void discover_panes(BlitRuntime *runtime)
 
 static void initialize_outputs(BlitRuntime *runtime)
 {
+    const char *renderer_name = getenv("BLIT_RENDERER");
     int i;
+
+    /* KMSDRM text output must also work on software VKMS hosts.  SDL's
+       automatic renderer selection probes kmsro there and can stall; the
+       software renderer is the portable baseline and remains overridable. */
+    if (renderer_name == NULL || renderer_name[0] == '\0')
+        renderer_name = "software";
 
     for (i = 0; i < runtime->display_count; ++i) {
         SDL_Window *window;
@@ -2530,7 +2537,7 @@ static void initialize_outputs(BlitRuntime *runtime)
             continue;
         }
         SDL_SetWindowPosition(window, display->bounds.x, display->bounds.y);
-        renderer = SDL_CreateRenderer(window, NULL);
+        renderer = SDL_CreateRenderer(window, renderer_name);
         if (renderer == NULL) {
             snprintf(runtime->sdl_error, sizeof(runtime->sdl_error),
                      "display %llu renderer: %s", display->id, SDL_GetError());
