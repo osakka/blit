@@ -1570,6 +1570,10 @@ static int create_session(BlitRuntime *runtime, const char *json,
             ++runtime->session_count;
             if (pane != NULL)
                 ++runtime->topology_revision;
+            /* Session creation can succeed before the PTY has produced its
+               first byte.  The newly attached pane still needs a complete
+               first frame and must not wait for a later terminal write. */
+            runtime->render_pending = 1;
             *created = session;
             return 1;
         }
@@ -2744,6 +2748,10 @@ static int mouse_output_index(const BlitRuntime *runtime, SDL_WindowID window_id
     for (i = 0; i < runtime->output_count; ++i)
         if (SDL_GetWindowID(runtime->outputs[i].window) == window_id)
             return i;
+    /* Some KMSDRM event paths report a zero window id.  With one physical
+       output the target is unambiguous, so retain pointer input there. */
+    if (runtime->output_count == 1)
+        return 0;
     return -1;
 }
 
