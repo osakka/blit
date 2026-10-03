@@ -162,6 +162,7 @@ typedef struct {
     unsigned long long next_frame_id;
     unsigned long long frame_revision;
     unsigned long long next_event_sequence;
+    int mouse_button;
     BlitStream streams[BLIT_MAX_STREAMS];
     BlitOutput outputs[BLIT_MAX_DISPLAYS];
     BlitIdempotency idempotency[BLIT_MAX_IDEMPOTENCY];
@@ -2720,14 +2721,118 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
                     (unsigned char)(BLIT_DEFAULT_FOREGROUND >> 16),
                     (unsigned char)(BLIT_DEFAULT_FOREGROUND >> 8),
                     (unsigned char)BLIT_DEFAULT_FOREGROUND, 255);
-                SDL_RenderLine(renderer, surface_origin_x + surface->cursor_x * 8.0f,
-                    (float)surface_origin_y + surface->cursor_y * 8.0f,
-                    4.0f + surface->cursor_x * 8.0f,
+                    SDL_RenderLine(renderer, surface_origin_x + surface->cursor_x * 8.0f,
+                        (float)surface_origin_y + surface->cursor_y * 8.0f,
+                        surface_origin_x + surface->cursor_x * 8.0f,
                     (float)surface_origin_y + surface->cursor_y * 8.0f + 7.0f);
             }
         }
         SDL_RenderPresent(renderer);
         runtime->outputs[output_index].initialized = 1;
+    }
+}
+
+static int mouse_output_index(const BlitRuntime *runtime, SDL_WindowID window_id)
+{
+    int i;
+
+    for (i = 0; i < runtime->output_count; ++i)
+        if (SDL_GetWindowID(runtime->outputs[i].window) == window_id)
+            return i;
+    return -1;
+}
+
+static BlitSession *mouse_target(BlitRuntime *runtime, int output_index,
+                                float pixel_x, float pixel_y,
+                                int *column, int *row)
+{
+    char display_id[128];
+    int i;
+
+    if (output_index < 0 || output_index >= runtime->output_count)
+        return NULL;
+    snprintf(display_id, sizeof(display_id), "display-%llu",
+             runtime->outputs[output_index].display_id);
+    for (i = 0; i < runtime->pane_count; ++i) {
+        BlitPane *pane = &runtime->panes[i];
+        int pane_x;
+        int pane_y;
+        int j;
+        if (!pane->used || strcmp(pane->display_id, display_id) != 0)
+            continue;
+        pane_x = pane->x * 8;
+        pane_y = pane->y * 8;
+        if (pixel_x < pane_x || pixel_y < pane_y ||
+            pixel_x >= pane_x + pane->width * 8 ||
+            pixel_y >= pane_y + pane->height * 8)
+            continue;
+        *column = (int)((pixel_x - pane_x) / 8.0f) + 1;
+        *row = (int)((pixel_y - pane_y) / 8.0f) + 1;
+        for (j = 0; j < BLIT_MAX_SESSIONS; ++j)
+            if (runtime->sessions[j].used &&
+                strcmp(runtime->sessions[j].pane_id, pane->id) == 0)
+                return &runtime->sessions[j];
+        return NULL;
+    }
+    return NULL;
+}
+
+static void send_mouse_report(BlitRuntime *runtime, SDL_WindowID window_id,
+                              float pixel_x, float pixel_y, int button,
+                              int release)
+{
+    char report[64];
+    int output_index = mouse_output_index(runtime, window_id);
+    int column = 0;
+    int row = 0;
+    BlitSession *session = mouse_target(runtime, output_index, pixel_x,
+                                        pixel_y, &column, &row);
+    int code;
+
+    if (session == NULL || session->pty_fd < 0)
+        return;
+    code = button;
+    if (!release && runtime->mouse_button != 0)
+        code += 32;
+    snprintf(report, sizeof(report), "\033[<%d;%d;%d%c", code, column, row,
+             release ? 'm' : 'M');
+    write(session->pty_fd, report, strlen(report));
+}
+
+static void service_sdl_events(BlitRuntime *runtime)
+{
+    SDL_Event event;
+
+    while (SDL_PollEvent(&event)) {
+        if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+            int button = event.button.button == 1 ? 0 :
+                event.button.button == 2 ? 1 :
+                event.button.button == 3 ? 2 : -1;
+            if (button >= 0) {
+                runtime->mouse_button = button + 1;
+                send_mouse_report(runtime, event.button.windowID,
+                                  event.button.x, event.button.y, button, 0);
+            }
+        } else if (event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
+            int button = event.button.button == 1 ? 0 :
+                event.button.button == 2 ? 1 :
+                event.button.button == 3 ? 2 : -1;
+            if (button >= 0) {
+            send_mouse_report(runtime, event.button.windowID,
+                              event.button.x, event.button.y, button, 1);
+                runtime->mouse_button = 0;
+            }
+        } else if (event.type == SDL_EVENT_MOUSE_MOTION &&
+                   runtime->mouse_button != 0) {
+            send_mouse_report(runtime, event.motion.windowID,
+                              event.motion.x, event.motion.y,
+                              runtime->mouse_button - 1, 0);
+        } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
+            int button = event.wheel.y > 0 ? 64 : 65;
+            send_mouse_report(runtime, event.wheel.windowID,
+                              event.wheel.mouse_x, event.wheel.mouse_y,
+                              button, 0);
+        }
     }
 }
 
@@ -2801,6 +2906,8 @@ int main(int argc, char **argv)
         fd_set readable;
         struct timeval timeout;
 
+        if (runtime.sdl_ready)
+            service_sdl_events(&runtime);
         FD_ZERO(&readable);
         FD_SET(server_fd, &readable);
         for (i = 0; i < BLIT_MAX_STREAMS; ++i) {
@@ -2817,8 +2924,8 @@ int main(int argc, char **argv)
                     max_fd = runtime.sessions[i].pty_fd;
             }
         }
-        timeout.tv_sec = 1;
-        timeout.tv_usec = 0;
+        timeout.tv_sec = 0;
+        timeout.tv_usec = 10000;
         ready = select(max_fd + 1, &readable, NULL, NULL, &timeout);
         if (ready < 1)
             continue;

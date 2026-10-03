@@ -188,6 +188,11 @@ or applying state again; reusing a key with a different payload returns
 Unsupported inventories are returned as empty arrays until their native
 backends are implemented. Display discovery is sourced from SDL3.
 
+SDL3 mouse clicks, drags, and wheel events are routed to the Blit pane under
+the pointer and encoded as SGR mouse reports for the owning PTY. Hibr's
+console mouse mode controls whether the joined desktop consumes those reports.
+Pointer capture, touch, and keyboard focus policy remain follow-up work.
+
 ## Exercise the stream upgrade
 
 The current slice accepts a WebSocket opening handshake, keeps the connection
