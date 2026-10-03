@@ -2828,6 +2828,25 @@ static void send_mouse_report(BlitRuntime *runtime, SDL_WindowID window_id,
     write(session->pty_fd, report, strlen(report));
 }
 
+static void send_mouse_motion_report(BlitRuntime *runtime,
+                                     SDL_WindowID window_id,
+                                     float pixel_x, float pixel_y)
+{
+    int output_index = mouse_output_index(runtime, window_id);
+    int column = 0;
+    int row = 0;
+    BlitSession *session = mouse_target(runtime, output_index, pixel_x,
+                                        pixel_y, &column, &row);
+    int button = runtime->mouse_button != 0 ? runtime->mouse_button - 1 : 3;
+    char report[64];
+
+    if (session == NULL || session->pty_fd < 0)
+        return;
+    snprintf(report, sizeof(report), "\033[<%d;%d;%dM", button + 32,
+             column, row);
+    write(session->pty_fd, report, strlen(report));
+}
+
 static void service_evdev_mouse(BlitRuntime *runtime)
 {
     struct input_event event;
@@ -2844,6 +2863,12 @@ static void service_evdev_mouse(BlitRuntime *runtime)
                 runtime->evdev_mouse_y += event.value;
             if (runtime->evdev_mouse_x < 0) runtime->evdev_mouse_x = 0;
             if (runtime->evdev_mouse_y < 0) runtime->evdev_mouse_y = 0;
+            if (runtime->output_count > 0)
+                SDL_WarpMouseInWindow(runtime->outputs[0].window,
+                                      runtime->evdev_mouse_x,
+                                      runtime->evdev_mouse_y);
+            send_mouse_motion_report(runtime, 0, runtime->evdev_mouse_x,
+                                     runtime->evdev_mouse_y);
         } else if (event.type == EV_KEY &&
                    event.code >= BTN_LEFT && event.code <= BTN_RIGHT) {
             int button = (int)event.code - BTN_LEFT;
@@ -2879,11 +2904,9 @@ static void service_sdl_events(BlitRuntime *runtime)
                               event.button.x, event.button.y, button, 1);
                 runtime->mouse_button = 0;
             }
-        } else if (event.type == SDL_EVENT_MOUSE_MOTION &&
-                   runtime->mouse_button != 0) {
-            send_mouse_report(runtime, event.motion.windowID,
-                              event.motion.x, event.motion.y,
-                              runtime->mouse_button - 1, 0);
+        } else if (event.type == SDL_EVENT_MOUSE_MOTION) {
+            send_mouse_motion_report(runtime, event.motion.windowID,
+                                     event.motion.x, event.motion.y);
         } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
             int button = event.wheel.y > 0 ? 64 : 65;
             send_mouse_report(runtime, event.wheel.windowID,
