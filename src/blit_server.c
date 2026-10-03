@@ -2843,7 +2843,7 @@ int main(int argc, char **argv)
     int server_fd;
     const char *bind_address = getenv("BLIT_BIND_ADDRESS");
     struct sockaddr_in address;
-    BlitRuntime runtime;
+    static BlitRuntime runtime;
 
     if (argc > 1)
         port = atoi(argv[1]);
