@@ -20,6 +20,8 @@ static int make_device(const char *name, int mouse)
         ioctl(fd, UI_SET_RELBIT, REL_WHEEL);
         ioctl(fd, UI_SET_EVBIT, EV_KEY);
         ioctl(fd, UI_SET_KEYBIT, BTN_LEFT);
+        ioctl(fd, UI_SET_KEYBIT, BTN_MIDDLE);
+        ioctl(fd, UI_SET_KEYBIT, BTN_RIGHT);
     } else {
         ioctl(fd, UI_SET_KEYBIT, KEY_A);
         ioctl(fd, UI_SET_KEYBIT, KEY_ENTER);
@@ -80,7 +82,9 @@ int main(void)
        five-event, two-second cadence verified delivery but could not expose
        a renderer that repainted the whole terminal for every motion. */
     for (i = 0; i < 180; ++i) {
-        emit_event(mouse, EV_REL, REL_X, (i & 1) ? 8 : -8);
+        int delta_x = (i == 1) ? 1200 : (i == 2 ? -1200 :
+            ((i & 1) ? 8 : -8));
+        emit_event(mouse, EV_REL, REL_X, delta_x);
         emit_event(mouse, EV_REL, REL_Y, (i & 2) ? 4 : -4);
         sync_event(mouse);
         if ((i % 30) == 0) {
@@ -90,7 +94,17 @@ int main(void)
             sync_event(keyboard);
             emit_event(mouse, EV_KEY, BTN_LEFT, 1);
             sync_event(mouse);
+            emit_event(mouse, EV_KEY, BTN_RIGHT, 1);
+            sync_event(mouse);
+            emit_event(mouse, EV_KEY, BTN_MIDDLE, 1);
+            sync_event(mouse);
             emit_event(mouse, EV_KEY, BTN_LEFT, 0);
+            sync_event(mouse);
+            emit_event(mouse, EV_REL, REL_X, 1);
+            sync_event(mouse);
+            emit_event(mouse, EV_KEY, BTN_RIGHT, 0);
+            sync_event(mouse);
+            emit_event(mouse, EV_KEY, BTN_MIDDLE, 0);
             sync_event(mouse);
             emit_event(mouse, EV_REL, REL_WHEEL, 1);
             sync_event(mouse);

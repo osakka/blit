@@ -260,7 +260,7 @@ typedef struct {
     unsigned long long next_frame_id;
     unsigned long long frame_revision;
     unsigned long long next_event_sequence;
-    int mouse_button;
+    unsigned int mouse_buttons;
     int font_scale;
     int pointer_valid;
     int pointer_output;
@@ -5132,6 +5132,14 @@ static BlitSession *mouse_target(BlitRuntime *runtime, int output_index,
     return NULL;
 }
 
+static int active_mouse_button(const BlitRuntime *runtime)
+{
+    if (runtime->mouse_buttons & 1U) return 0;
+    if (runtime->mouse_buttons & 2U) return 1;
+    if (runtime->mouse_buttons & 4U) return 2;
+    return 3;
+}
+
 static void focus_session(BlitRuntime *runtime, BlitSession *target)
 {
     int i;
@@ -5167,7 +5175,7 @@ static void send_mouse_report(BlitRuntime *runtime, SDL_WindowID window_id,
     if (session->terminal_mouse_mode == 0)
         return;
     code = button;
-    if (!release && code < 64 && runtime->mouse_button != 0)
+    if (!release && code < 64 && runtime->mouse_buttons != 0)
         code += 32;
     if (session->terminal_mouse_sgr)
         snprintf(report, sizeof(report), "\033[<%d;%d;%d%c", code, column,
@@ -5188,7 +5196,7 @@ static void send_mouse_motion_report(BlitRuntime *runtime,
     BlitSession *session = mouse_target(runtime, output_index, pixel_x,
                                         pixel_y, &column, &row);
     BlitSession *routed = input_route_target(runtime, "evdev-pointer");
-    int button = runtime->mouse_button != 0 ? runtime->mouse_button - 1 : 3;
+    int button = active_mouse_button(runtime);
     char report[64];
 
     if (routed != NULL) {
@@ -5379,12 +5387,12 @@ static void service_evdev_mouse(BlitRuntime *runtime)
                 else
                     button = 2;
                 int release = event.value == 0;
-                if (!release) runtime->mouse_button = button + 1;
+                if (!release) runtime->mouse_buttons |= 1U << button;
                 broadcast_evdev_pointer(runtime, "pointer_button", button,
                                          !release, 0);
                 send_mouse_report(runtime, 0, runtime->evdev_mouse_x,
                                   runtime->evdev_mouse_y, button, release);
-                if (release) runtime->mouse_button = 0;
+                if (release) runtime->mouse_buttons &= ~(1U << button);
             }
         }
     }
@@ -5594,7 +5602,7 @@ static void service_sdl_events(BlitRuntime *runtime)
                 event.button.button == 2 ? 1 :
                 event.button.button == 3 ? 2 : -1;
             if (button >= 0) {
-                runtime->mouse_button = button + 1;
+                runtime->mouse_buttons |= 1U << button;
                 send_mouse_report(runtime, event.button.windowID,
                                   event.button.x, event.button.y, button, 0);
             }
@@ -5605,7 +5613,7 @@ static void service_sdl_events(BlitRuntime *runtime)
             if (button >= 0) {
             send_mouse_report(runtime, event.button.windowID,
                               event.button.x, event.button.y, button, 1);
-                runtime->mouse_button = 0;
+                runtime->mouse_buttons &= ~(1U << button);
             }
         } else if (event.type == SDL_EVENT_MOUSE_MOTION) {
             runtime->previous_pointer_x = runtime->pointer_x;

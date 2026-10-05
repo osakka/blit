@@ -131,3 +131,8 @@ glyph-draw, and page-flip intervals. The optimized PSF rasterizer's current
 two-output Hibr fixture measured 56 samples with a maximum 147.739 ms glyph
 draw and 154.447 ms total present under QEMU TCG; the acceptance marker and
 pixel gate must still pass when timing is enabled.
+The input fixture also crosses the synthetic pointer from output 1 to output
+2 and verifies that streamed motion changes from the first PTY session to the
+second rather than being broadcast to both. It overlaps left, middle, and
+right button presses, verifies motion while buttons remain held, and checks
+that each release preserves the remaining-button state.

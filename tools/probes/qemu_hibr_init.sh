@@ -143,18 +143,17 @@ if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
         echo BLIT_INPUT_HELPERS_MISSING
         finish 1
     fi
-    $b wget -qO /tmp/input-key.json --post-data="{\"command\":\"/blit-stage/pty-input-echo\",\"surface_mode\":\"terminal\",\"pane_id\":\"$pane1\",\"width\":128,\"height\":48}" --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
-    $b wget -qO /tmp/input-pointer.json --post-data="{\"command\":\"/blit-stage/pty-input-echo\",\"surface_mode\":\"terminal\",\"pane_id\":\"$pane2\",\"width\":128,\"height\":48}" --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
+    $b wget -qO /tmp/input-key.json --post-data="{\"command\":\"/blit-stage/pty-input-echo\",\"arguments\":[\"--key\"],\"surface_mode\":\"terminal\",\"pane_id\":\"$pane1\",\"width\":128,\"height\":48}" --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
+    $b wget -qO /tmp/input-pointer.json --post-data="{\"command\":\"/blit-stage/pty-input-echo\",\"arguments\":[\"--mouse\"],\"surface_mode\":\"terminal\",\"pane_id\":\"$pane2\",\"width\":128,\"height\":48}" --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
     input_key_id=$($b sed -n 's/.*"id":"\([0-9][0-9]*\)".*/\1/p' /tmp/input-key.json)
     input_pointer_id=$($b sed -n 's/.*"id":"\([0-9][0-9]*\)".*/\1/p' /tmp/input-pointer.json)
     /blit-stage/ws-input-probe >/tmp/stream-input.log 2>&1 &
     stream_probe_pid=$!
     echo INPUT_STREAM_PROBE_PID=$stream_probe_pid
     /blit-stage/http-put 19191 /v1/input/routes/input-key "{\"device_id\":\"evdev-keyboard\",\"target_session_id\":\"session-$input_key_id\",\"enabled\":true}" > /tmp/input-key-route.json || true
-    /blit-stage/http-put 19191 /v1/input/routes/input-pointer "{\"device_id\":\"evdev-pointer\",\"target_session_id\":\"session-$input_pointer_id\",\"enabled\":true}" > /tmp/input-pointer-route.json || true
     echo BLIT_INPUT_READY
     $b cat /tmp/input-key.json; $b cat /tmp/input-pointer.json
-    $b cat /tmp/input-key-route.json; $b cat /tmp/input-pointer-route.json
+    $b cat /tmp/input-key-route.json
     input_wait=30
     input_wait_arg=$($b cat /proc/cmdline 2>/dev/null | $b sed -n 's/.*blit.input_wait=\([0-9][0-9]*\).*/\1/p')
     [ -n "$input_wait_arg" ] && input_wait=$input_wait_arg
@@ -180,6 +179,8 @@ if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
        $b grep -q '"pressed":false' /tmp/stream-input.log &&
        $b grep -q '"kind":"pointer_button"' /tmp/stream-input.log &&
        $b grep -q '"kind":"pointer_wheel"' /tmp/stream-input.log &&
+       $b grep -q "\"session_id\":\"session-$input_key_id\".*\"kind\":\"pointer_motion\"" /tmp/stream-input.log &&
+       $b grep -q "\"session_id\":\"session-$input_pointer_id\".*\"kind\":\"pointer_motion\"" /tmp/stream-input.log &&
        [ "$keypad_pass" -eq 1 ]; then
         echo BLIT_INPUT_STREAM_PASS
     else
