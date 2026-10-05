@@ -1,0 +1,22 @@
+#!/usr/bin/env hibr
+
+d=${0%/*}
+[ "$d" = "$0" ] && d=.
+mod load "$d/mods/console-blit.so" || exit 1
+console open || exit 1
+console pen "#ffffff" "#000080" bold
+console put 0 0 "INPUT PROBE READY"
+console flush || exit 1
+console mouse drag
+
+while true; do
+	key := console key 500
+	if [ -n "$key" ]; then
+		console pen "#ffffff" "#008000" bold
+		case "$key" in
+		mouse\ *) console put 0 3 "MOUSE: $key" ;;
+		*) console put 0 2 "KEY: $key" ;;
+		esac
+		console flush || exit 1
+	fi
+done

@@ -28,7 +28,7 @@
 - A missing dependency is a blocked capability gate, not a reason to add a
   compatibility implementation.
 
-## Immediate next gate
+## Baseline gate record
 
 On a host exposing a DRM device, validate with TCC:
 

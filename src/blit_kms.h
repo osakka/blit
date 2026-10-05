@@ -1,0 +1,60 @@
+#ifndef BLIT_KMS_H
+#define BLIT_KMS_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+typedef struct BlitKms BlitKms;
+
+typedef struct {
+    unsigned long long surface_id;
+    unsigned long long surface_revision;
+    unsigned long long display_id;
+    int width;
+    int height;
+    int origin_x;
+    int origin_y;
+    int cell_width;
+    int cell_height;
+    int columns;
+    int rows;
+    const uint32_t *codepoints;
+    const uint32_t *combining;
+    const unsigned char *combining_count;
+    const uint32_t *foreground;
+    const uint32_t *background;
+    const unsigned char *attributes;
+    int stride;
+    int cursor_x;
+    int cursor_y;
+    int cursor_visible;
+    int damage_valid;
+    int damage_x;
+    int damage_y;
+    int damage_width;
+    int damage_height;
+} BlitKmsSurfaceView;
+
+typedef struct {
+    unsigned long long id;
+    char name[128];
+    int x;
+    int y;
+    int width;
+    int height;
+    double refresh_hz;
+} BlitKmsDisplayInfo;
+
+BlitKms *blit_kms_new(void);
+int blit_kms_open(BlitKms *kms, char *error, size_t error_capacity);
+int blit_kms_display_count(const BlitKms *kms);
+int blit_kms_display_info(const BlitKms *kms, int index,
+                          BlitKmsDisplayInfo *info);
+int blit_kms_cell_width(const BlitKms *kms);
+int blit_kms_cell_height(const BlitKms *kms);
+int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views,
+                     int view_count, float pointer_x, float pointer_y,
+                     int pointer_visible);
+void blit_kms_close(BlitKms *kms);
+
+#endif

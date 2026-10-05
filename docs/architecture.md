@@ -18,10 +18,14 @@ Command validation -> authoritative scene state -> event journal
                     effect graph / frame assembly
                               |
                               v
-                 SDL3 platform and renderer adapter
-                              |
-                              v
-                   direct display outputs (e.g. DRM/KMS)
+                 renderer-neutral frame plan
+                    /                 \
+                   v                   v
+          direct DRM/KMS text       SDL3 canvas/effects
+             presentation              adapter
+                   \                   /
+                    v                 v
+                     physical outputs
 ```
 
 The public API must terminate at the protocol adapter. No client should need
@@ -90,12 +94,16 @@ Owns bounded graphic canvases that are explicitly attached to a topology or
 surface. Overlays can be used for diagnostics, status, images, or visual
 instrumentation, but may not silently replace terminal or layout state.
 
-### SDL3 adapter
+### Direct display and SDL3 adapters
 
-Translates the renderer-neutral frame plan into SDL3 resources and presentation
-operations. Platform initialization, input polling, GPU selection, and direct
-display integration belong here. SDL3 failures must be converted into stable
-blit errors and events.
+The direct DRM/KMS adapter is the correctness-critical terminal presentation
+path. It owns connectors, modes, buffers, page flips, output recovery, and the
+software/hardware cursor policy. It consumes the renderer-neutral terminal
+frame plan and never parses PTY bytes.
+
+The SDL3 adapter translates only graphic canvases and effects into SDL3
+resources and presentation operations. SDL3 failures must be converted into
+stable blit errors and events; they must not change terminal state.
 
 ### Persistence and observability
 

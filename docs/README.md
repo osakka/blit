@@ -27,18 +27,21 @@ relevant documentation and schema in the same change.
   this workspace.
 - [Roadmap](roadmap.md) — the ordered implementation milestones and exit
   criteria.
+- [Implementation and verification contract](implementation-and-verification.md)
+  — normative requirements, release gates, test matrix, and handover package.
 - [Bare-metal testing](testing-baremetal.md) — how to test direct KMSDRM on a
   Linux host without X11 or Wayland.
 - [Gateway testing](testing-gateway.md) — how to build and exercise the first
   TCP/OpenAPI/WebSocket gateway slice.
 - [hibr integration](integration-hibr.md) — standalone-service decision,
-  PTY compatibility probe, and the planned console-module adapter.
+  PTY compatibility probe, and the operational console-module adapter.
 - [ADR index](adr/README.md) — decisions that constrain implementation.
 
 ## Working status
 
-The project has a running TCC-built vertical slice and deterministic VKMS
-coverage. The hibr PTY compatibility probe is passing; the production hibr
-console adapter and operational hardening remain planned work. Items marked as
-open questions should be resolved through an ADR before they become hidden
-implementation assumptions.
+The project has a running TCC-built vertical slice, deterministic VKMS
+coverage, and an operational Hibr console adapter. Terminal conformance,
+complete topology/input coverage, physical-host acceptance, effects, and
+operational hardening remain gated work. Items marked as open questions should
+be resolved through an ADR before they become hidden implementation
+assumptions.

@@ -1,0 +1,3 @@
+# Blit's display provider is loaded before desktop.hibr asks for `display`.
+# Blit exports the session/surface identity into this Hibr process.
+mod load console-blit

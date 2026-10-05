@@ -1,0 +1,31 @@
+#!/usr/bin/env hibr
+# Blit's Hibr integration workload for control-socket acceptance tests.
+# It uses Hibr's canonical desktop library and creates one ordinary window;
+# it does not implement or replace any desktop behavior.
+
+strict
+
+d=${0%/*}
+[ "$d" = "$0" ] && d=.
+session=blit
+join=0
+name=
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--session|-s) session=$2; shift 2 ;;
+	--join|-j) join=1; shift ;;
+	--name|-n) name=$2; shift 2 ;;
+	*) shift ;;
+	esac
+done
+
+for m in console pty term hold; do
+	mod load "$d/mods/$m.so" || exit 1
+done
+. "$d/desktop.hibr"
+
+dt_autohold "$session" 0 "$join" "$name" 0
+dt_open || exit 1
+dt_new "Blit Control Probe" 10 40 2 2
+dt_run
+dt_close

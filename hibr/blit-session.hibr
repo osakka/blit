@@ -1,0 +1,28 @@
+#!/usr/bin/env hibr
+# Blit's ordinary-console Hibr entrypoint.
+#
+# This entrypoint is used for held desktop sessions.  Hibr owns the desktop
+# terminal stream and hold fans that stream out to every joined client.  Blit
+# owns one terminal session/pty per surface and renders each client locally.
+# Do not load console-blit here: that would make the held desktop write only
+# to the primary HTTP surface and leave joined surfaces empty.
+
+d=${0%/*}
+[ "$d" = "$0" ] && d=.
+moddir=${BLIT_HIBR_MODPATH:-$d/mods}
+desktop=${BLIT_HIBR_DESKTOP_SESSION:-}
+if [ -z "$desktop" ] && [ -f "$d/session.hibr" ]; then
+	desktop=$d/session.hibr
+fi
+if [ -z "$desktop" ]; then
+	desktop=/usr/share/hibr/desktop/session.hibr
+fi
+
+for m in console pty term hold; do
+	mod load "$moddir/$m.so" || exit 1
+done
+if [ ! -f "$desktop" ]; then
+	lg HIBR_LERR "blit-session: desktop session not found: $desktop"
+	exit 1
+fi
+source "$desktop" "$@"

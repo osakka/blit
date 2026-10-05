@@ -1,0 +1,19 @@
+#!/usr/bin/env hibr
+# Deterministic transport-contract probe.  This intentionally exercises only
+# the production Blit display provider: open, one styled cell, and flush.
+
+d=${0%/*}
+[ "$d" = "$0" ] && d=.
+exec 2> /tmp/blit-adapter-probe.log
+echo probe-start >&2
+mod load "$d/mods/console-blit.so" || exit 1
+echo module-loaded >&2
+console open || exit 1
+echo console-opened >&2
+console pen "#ffffff" "#000080" bold
+console put 0 0 "BLIT ADAPTER OK"
+echo cell-pending >&2
+console flush || exit 1
+echo flushed >&2
+console close
+echo probe-done >&2

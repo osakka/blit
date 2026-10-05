@@ -34,10 +34,13 @@ authoritative HTTP resynchronization path, including text, styles, and cursor.
 Optional bearer authentication now protects HTTP and WebSocket upgrades when
 `BLIT_AUTH_TOKEN` is configured; TLS and token rotation remain deployment
 work.
-The hibr desktop has also passed a TCC-built PTY compatibility probe; the
-production `console-blit` module remains planned. The SDL adapter uses
-single-surface incremental frames and conservatively redraws multi-surface
-outputs with deterministic vertical stacking.
+The hibr desktop has also passed a TCC-built PTY compatibility probe, and the
+production `console-blit` module is operational over the OpenAPI/WebSocket
+contract. Explicit focus and the first versioned input routes are now exposed
+by the API. The SDL adapter uses single-surface incremental frames and
+conservatively redraws multi-surface outputs with deterministic vertical
+stacking. The remaining acceptance risk is terminal fidelity under the full
+Hibr desktop and the complete topology/input matrix.
 
 ## Milestone 1: contract vertical slice
 
@@ -99,7 +102,9 @@ suite on VKMS and then on a physical DRM/KMS host.
 
 ## Immediate next action
 
-Implement the `console-blit` hibr adapter against the OpenAPI/WebSocket
-contract, then run it through the two-output VKMS fixture. It must consume the
-existing surface revisions, preserve the explicit output mapping, and keep
-hibr as a client rather than a second state owner.
+Run terminal conformance against the canonical PTY surface engine before adding
+effects or packaging. The suite must cover Hibr's clear/redraw workload,
+alternate screen, cursor movement, colors, resize, scrolling, and malformed
+or fragmented escape sequences. Then repeat the 1x1, 2x1, 1x2, and 2x2 VKMS
+matrix with one primary and the required `--join` clients, including explicit
+keyboard and pointer routes.

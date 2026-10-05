@@ -98,6 +98,20 @@ paths:
                       $ref: '#/components/schemas/AudioDevice'
         default:
           $ref: '#/components/responses/Problem'
+  /v1/diagnostics:
+    get:
+      tags: [diagnostics]
+      operationId: getDiagnostics
+      summary: Get current backend, resource, render, and input diagnostics
+      responses:
+        '200':
+          description: Current diagnostic snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Diagnostics'
+        default:
+          $ref: '#/components/responses/Problem'
   /v1/input/devices:
     get:
       tags: [hardware]
@@ -118,6 +132,57 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/InputDevice'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/input/routes:
+    get:
+      tags: [hardware]
+      operationId: listInputRoutes
+      summary: List configured input routes
+      responses:
+        '200':
+          description: Input-route inventory
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [revision, routes]
+                properties:
+                  revision: {$ref: '#/components/schemas/Revision'}
+                  routes:
+                    type: array
+                    items: {$ref: '#/components/schemas/InputRoute'}
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/input/routes/{route_id}:
+    parameters:
+      - name: route_id
+        in: path
+        required: true
+        schema: {$ref: '#/components/schemas/ResourceId'}
+    put:
+      tags: [hardware]
+      operationId: replaceInputRoute
+      summary: Bind an input device source to a terminal session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateInputRoute'
+      responses:
+        '200':
+          description: Updated input routes
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [revision, routes]
+                properties:
+                  revision: {$ref: '#/components/schemas/Revision'}
+                  routes:
+                    type: array
+                    items: {$ref: '#/components/schemas/InputRoute'}
         default:
           $ref: '#/components/responses/Problem'
   /v1/topology:
@@ -146,7 +211,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Topology'
+              $ref: '#/components/schemas/TopologyUpdate'
       responses:
         '200':
           description: Applied topology
@@ -214,6 +279,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TerminalSession'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      tags: [terminals]
+      operationId: deleteTerminalSession
+      summary: Stop and release a terminal session and its surface
+      responses:
+        '204':
+          description: Terminal session released
         default:
           $ref: '#/components/responses/Problem'
   /v1/surfaces/{surface_id}/cells:
@@ -317,10 +391,10 @@ components:
     IfMatch:
       name: If-Match
       in: header
-      required: true
+      required: false
       schema:
         type: string
-      description: Expected current resource revision.
+      description: Optional expected current resource revision. When supplied, a stale value is rejected with 409.
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -369,7 +443,7 @@ components:
       additionalProperties: false
     ServerDetails:
       type: object
-      required: [id, name, api_version, revision, capabilities, display_backend]
+      required: [id, name, api_version, revision, capabilities, display_count, display_backend, resources]
       properties:
         id: {$ref: '#/components/schemas/ResourceId'}
         name: {type: string}
@@ -378,12 +452,26 @@ components:
         capabilities:
           type: array
           items: {type: string}
+        display_count: {type: integer, minimum: 0}
         display_backend:
           type: object
-          required: [ready, error]
+          required: [name, ready, error]
           properties:
+            name: {type: string, enum: [drm-kms, sdl3, unavailable]}
             ready: {type: boolean}
             error: {type: string}
+          additionalProperties: false
+        resources:
+          type: object
+          required: [graphics, displays, audio, input_devices, input_routes, topology, diagnostics]
+          properties:
+            graphics: {type: string}
+            displays: {type: string}
+            audio: {type: string}
+            input_devices: {type: string}
+            input_routes: {type: string}
+            topology: {type: string}
+            diagnostics: {type: string}
           additionalProperties: false
       additionalProperties: false
     GraphicsCard:
@@ -443,6 +531,48 @@ components:
           type: array
           items: {type: integer, minimum: 1}
       additionalProperties: false
+    Diagnostics:
+      type: object
+      required: [revision, health, resources, render, errors, warnings]
+      properties:
+        revision: {$ref: '#/components/schemas/Revision'}
+        health:
+          type: object
+          required: [ready, backend, error]
+          properties:
+            ready: {type: boolean}
+            backend: {type: string, enum: [drm-kms, sdl3, unavailable]}
+            error: {type: string}
+          additionalProperties: false
+        resources:
+          type: object
+          required: [displays, outputs, sessions, surfaces, streams, input_routes, keyboards, pointers]
+          properties:
+            displays: {type: integer, minimum: 0}
+            outputs: {type: integer, minimum: 0}
+            sessions: {type: integer, minimum: 0}
+            surfaces: {type: integer, minimum: 0}
+            streams: {type: integer, minimum: 0}
+            input_routes: {type: integer, minimum: 0}
+            keyboards: {type: integer, minimum: 0}
+            pointers: {type: integer, minimum: 0}
+          additionalProperties: false
+        render:
+          type: object
+          required: [pending, interval_ms, font_scale, direct_kms]
+          properties:
+            pending: {type: boolean}
+            interval_ms: {type: integer, minimum: 1}
+            font_scale: {type: integer, minimum: 1}
+            direct_kms: {type: boolean}
+          additionalProperties: false
+        errors:
+          type: array
+          items: {type: string}
+        warnings:
+          type: array
+          items: {type: string}
+      additionalProperties: false
     InputDevice:
       type: object
       required: [id, name, kinds, capabilities]
@@ -457,6 +587,27 @@ components:
         capabilities:
           type: array
           items: {type: string}
+      additionalProperties: false
+    UpdateInputRoute:
+      type: object
+      required: [device_id, target_session_id, enabled]
+      properties:
+        device_id:
+          type: string
+          enum: [evdev-keyboard, evdev-pointer]
+        target_session_id: {$ref: '#/components/schemas/ResourceId'}
+        enabled: {type: boolean}
+      additionalProperties: false
+    InputRoute:
+      type: object
+      required: [id, device_id, target_session_id, enabled]
+      properties:
+        id: {$ref: '#/components/schemas/ResourceId'}
+        device_id:
+          type: string
+          enum: [evdev-keyboard, evdev-pointer]
+        target_session_id: {$ref: '#/components/schemas/ResourceId'}
+        enabled: {type: boolean}
       additionalProperties: false
     Topology:
       type: object
@@ -486,6 +637,19 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Pane'
+      additionalProperties: false
+    TopologyUpdate:
+      type: object
+      required: [layout]
+      properties:
+        revision: {$ref: '#/components/schemas/Revision'}
+        layout:
+          type: object
+          required: [columns, rows]
+          properties:
+            columns: {type: integer, minimum: 1, maximum: 2}
+            rows: {type: integer, minimum: 1, maximum: 2}
+          additionalProperties: false
       additionalProperties: false
     Pane:
       type: object
@@ -519,6 +683,15 @@ components:
           additionalProperties: false
         display_id: {$ref: '#/components/schemas/ResourceId'}
         pane_id: {$ref: '#/components/schemas/ResourceId'}
+        surface_mode:
+          type: string
+          enum: [terminal, external, mirror]
+          default: terminal
+          description: >-
+            terminal lets Blit parse ordinary PTY output into the surface.
+            external keeps the PTY for lifecycle and input while an adapter
+            owns all surface mutations and revisions. mirror lets Blit parse
+            a joined Hibr/hold stream copied from a primary desktop.
       additionalProperties: false
     UpdateTerminalSession:
       type: object
@@ -532,12 +705,16 @@ components:
             width: {type: integer, minimum: 1}
             height: {type: integer, minimum: 1}
           additionalProperties: false
-        input_route: {$ref: '#/components/schemas/ResourceId'}
-        focused: {type: boolean}
+        input_route:
+          description: Bind this session to an existing input-route resource.
+          $ref: '#/components/schemas/ResourceId'
+        focused:
+          type: boolean
+          description: Make this session the keyboard-focus target; a primary-button click also focuses its pane.
       additionalProperties: false
     TerminalSession:
       type: object
-      required: [id, revision, surface_revision, state, surface_id]
+      required: [id, revision, surface_revision, state, surface_id, title]
       properties:
         id: {$ref: '#/components/schemas/ResourceId'}
         revision: {$ref: '#/components/schemas/Revision'}
@@ -546,10 +723,17 @@ components:
           type: string
           enum: [starting, running, stopped, failed]
         surface_id: {$ref: '#/components/schemas/ResourceId'}
+        title:
+          type: string
+          description: >-
+            Current terminal title from OSC 0, OSC 1, or OSC 2. Empty until
+            the PTY emits a title control.
         display_id: {$ref: '#/components/schemas/ResourceId'}
         pane_id: {$ref: '#/components/schemas/ResourceId'}
         process_id: {type: integer, minimum: 1}
         exit_code: {type: integer}
+        focused: {type: boolean}
+        surface_mode: {type: string, enum: [terminal, external, mirror]}
         cursor: {$ref: '#/components/schemas/Cursor'}
       additionalProperties: false
     Cursor:

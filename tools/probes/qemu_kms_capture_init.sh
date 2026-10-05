@@ -1,0 +1,59 @@
+#!/bin/sh
+set -eu
+b=/usr/bin/busybox
+finish() { $b poweroff -f 2>/dev/null || $b halt -f 2>/dev/null || true; exit "$1"; }
+$b mkdir -p /sys /proc /tmp /tmp/guest-screenshots /tmp/host-screenshots
+$b mount -t sysfs sysfs /sys 2>/dev/null || true
+$b mount -t proc proc /proc 2>/dev/null || true
+$b mount -t configfs configfs /sys/kernel/config 2>/dev/null || true
+$b mkdir -p /sys/kernel/config/vkms/blit/planes/plane0 /sys/kernel/config/vkms/blit/planes/plane1 /sys/kernel/config/vkms/blit/crtcs/crtc0 /sys/kernel/config/vkms/blit/crtcs/crtc1 /sys/kernel/config/vkms/blit/encoders/encoder0 /sys/kernel/config/vkms/blit/encoders/encoder1 /sys/kernel/config/vkms/blit/connectors/connector0 /sys/kernel/config/vkms/blit/connectors/connector1
+echo 1 > /sys/kernel/config/vkms/blit/planes/plane0/type
+echo 1 > /sys/kernel/config/vkms/blit/planes/plane1/type
+echo 1 > /sys/kernel/config/vkms/blit/connectors/connector0/status
+echo 1 > /sys/kernel/config/vkms/blit/connectors/connector1/status
+$b ln -s /sys/kernel/config/vkms/blit/crtcs/crtc0 /sys/kernel/config/vkms/blit/planes/plane0/possible_crtcs 2>/dev/null || true
+$b ln -s /sys/kernel/config/vkms/blit/crtcs/crtc1 /sys/kernel/config/vkms/blit/planes/plane1/possible_crtcs 2>/dev/null || true
+$b ln -s /sys/kernel/config/vkms/blit/crtcs/crtc0 /sys/kernel/config/vkms/blit/encoders/encoder0/possible_crtcs 2>/dev/null || true
+$b ln -s /sys/kernel/config/vkms/blit/crtcs/crtc1 /sys/kernel/config/vkms/blit/encoders/encoder1/possible_crtcs 2>/dev/null || true
+$b ln -s /sys/kernel/config/vkms/blit/encoders/encoder0 /sys/kernel/config/vkms/blit/connectors/connector0/possible_encoders 2>/dev/null || true
+$b ln -s /sys/kernel/config/vkms/blit/encoders/encoder1 /sys/kernel/config/vkms/blit/connectors/connector1/possible_encoders 2>/dev/null || true
+echo 1 > /sys/kernel/config/vkms/blit/enabled
+$b mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
+$b ifconfig lo 127.0.0.1 up 2>/dev/null || true
+$b mkdir -p /dev/pts
+$b mount -t devpts devpts /dev/pts 2>/dev/null || true
+$b mkdir -p /lib64 /usr/lib/x86_64-linux-gnu
+$b cp /blit-stage/ld-linux-x86-64.so.2 /lib64/ld-linux-x86-64.so.2
+$b cp /blit-stage/libc.so.6 /usr/lib/x86_64-linux-gnu/libc.so.6
+$b mount -t 9p -o trans=virtio,version=9p2000.L blitshots /tmp/host-screenshots 2>/dev/null || true
+export BLIT_KMS_SCREENSHOT_DIR=/tmp/guest-screenshots
+export BLIT_KMS_SCREENSHOT_AFTER=0
+export BLIT_KMS_TRACE_TIMING=1
+if [ -e /dev/dri/card1 ]; then export BLIT_DRM_DEVICE=/dev/dri/card1; else export BLIT_DRM_DEVICE=/dev/dri/card0; fi
+BLIT_DISPLAY_BACKEND=kms BLIT_BIND_ADDRESS=127.0.0.1 /blit-stage/ld-linux-x86-64.so.2 --library-path /blit-stage:/blit-stage/lib /blit-stage/blit-server 19191 >/tmp/blit.log 2>&1 &
+ready=0
+for n in 1 2 3 4 5 6 7 8 9 10; do
+    if $b wget -qO /tmp/server.json http://127.0.0.1:19191/v1/server; then ready=1; break; fi
+    $b sleep 1
+done
+echo SERVER; $b cat /tmp/server.json 2>/dev/null || true
+if [ "$ready" -ne 1 ]; then $b cat /tmp/blit.log; finish 1; fi
+$b wget -qO /tmp/one.json --post-data='{"command":"/blit-stage/pty-input-echo","surface_mode":"terminal","display_id":"display-47","width":128,"height":48}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
+$b wget -qO /tmp/two.json --post-data='{"command":"/blit-stage/pty-input-echo","surface_mode":"terminal","display_id":"display-48","width":128,"height":48}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
+$b sleep 5
+echo ONE; $b cat /tmp/one.json; echo TWO; $b cat /tmp/two.json
+echo BLIT_LOG; $b cat /tmp/blit.log
+echo GUEST_SCREENSHOTS; $b ls -l /tmp/guest-screenshots 2>/dev/null || true
+for shot in /tmp/guest-screenshots/display-47.ppm /tmp/guest-screenshots/display-48.ppm; do
+    if [ -f "$shot" ]; then
+        echo FRAME_FILE; $b sha256sum "$shot"; $b od -An -t u1 -N 32 "$shot"
+    fi
+done
+$b cp /tmp/guest-screenshots/display-*.ppm /tmp/host-screenshots/ 2>/dev/null || true
+size1=$($b wc -c < /tmp/guest-screenshots/display-47.ppm 2>/dev/null || echo 0)
+size2=$($b wc -c < /tmp/guest-screenshots/display-48.ppm 2>/dev/null || echo 0)
+hash1=$($b sha256sum /tmp/guest-screenshots/display-47.ppm 2>/dev/null | $b cut -d ' ' -f 1 || true)
+hash2=$($b sha256sum /tmp/guest-screenshots/display-48.ppm 2>/dev/null | $b cut -d ' ' -f 1 || true)
+if [ "$size1" -gt 2359296 ] && [ "$size2" -gt 2359296 ] && [ "$hash1" != "$hash2" ]; then echo KMS_CAPTURE_PASS; finish 0; fi
+echo KMS_CAPTURE_FAIL
+finish 1
