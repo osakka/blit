@@ -53,6 +53,7 @@ if [ -f /blit-stage/fonts/Lat15-Terminus16.psf ]; then
     export BLIT_PSF_FONT=/blit-stage/fonts/Lat15-Terminus16.psf
 fi
 export TERM=xterm-256color
+export BLIT_KMS_TRACE_PHASES=1
 export TMPDIR=/tmp
 export HOME=/root
 export XDG_STATE_HOME=/tmp/hibr-state

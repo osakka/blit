@@ -185,24 +185,24 @@ static void swap_buffers(KmsOutput *output)
     output->back = temporary;
 }
 
-static void put_pixel(KmsOutput *output, int x, int y, uint32_t color)
-{
-    uint32_t *pixels;
-    if (x < 0 || y < 0 || x >= output->mode.hdisplay ||
-        y >= output->mode.vdisplay) return;
-    pixels = (uint32_t *)((unsigned char *)output->back.map +
-                          y * output->back.pitch);
-    pixels[x] = color;
-}
-
 static void fill_rect(KmsOutput *output, int x, int y, int width, int height,
                       uint32_t color)
 {
     int row;
     int column;
-    for (row = 0; row < height; ++row)
-        for (column = 0; column < width; ++column)
-            put_pixel(output, x + column, y + row, color);
+    int first_x = x < 0 ? 0 : x;
+    int first_y = y < 0 ? 0 : y;
+    int last_x = x + width;
+    int last_y = y + height;
+    if (last_x > output->mode.hdisplay) last_x = output->mode.hdisplay;
+    if (last_y > output->mode.vdisplay) last_y = output->mode.vdisplay;
+    if (first_x >= last_x || first_y >= last_y) return;
+    for (row = first_y; row < last_y; ++row) {
+        uint32_t *pixels = (uint32_t *)((unsigned char *)output->back.map +
+                                        row * output->back.pitch);
+        for (column = first_x; column < last_x; ++column)
+            pixels[column] = color;
+    }
 }
 
 static uint32_t read_u32(const unsigned char *p)
@@ -387,30 +387,81 @@ static void font_load(KmsFont *font)
     fprintf(stderr, "blit: KMS font unavailable; using built-in fallback\n");
 }
 
-static int font_pixel(const KmsFont *font, uint32_t codepoint, int row, int col)
+static size_t font_glyph_index(const KmsFont *font, uint32_t codepoint)
 {
     size_t i;
-    size_t row_bytes;
-    if (font == NULL || font->data == NULL || row < 0 || col < 0 ||
-        row >= font->height || col >= font->width) return 0;
+    if (font == NULL || font->glyph_count == 0) return 0;
     if (codepoint < 256 && font->ascii_glyph[codepoint] >= 0) {
-        i = (size_t)font->ascii_glyph[codepoint];
-        goto glyph_found;
+        return (size_t)font->ascii_glyph[codepoint];
     }
     if (font->unicode_map != NULL) {
         for (i = 0; i < font->unicode_count; ++i)
             if (font->unicode_map[i].codepoint == codepoint) {
-                i = font->unicode_map[i].glyph;
-                goto glyph_found;
+                return font->unicode_map[i].glyph;
             }
     }
     for (i = 0; i < font->glyph_count; ++i)
         if (font->codepoints[i] == codepoint) break;
     if (i == font->glyph_count) i = codepoint < font->glyph_count ? codepoint : 0;
-glyph_found:
+    return i;
+}
+
+static int font_pixel_glyph(const KmsFont *font, size_t glyph, int row, int col)
+{
+    size_t row_bytes;
+    if (font == NULL || font->data == NULL || glyph >= font->glyph_count ||
+        row < 0 || col < 0 || row >= font->height || col >= font->width)
+        return 0;
     row_bytes = (size_t)((font->width + 7) / 8);
-    return (font->data[font->glyph_offset + i * font->glyph_bytes +
+    return (font->data[font->glyph_offset + glyph * font->glyph_bytes +
                        row * row_bytes + col / 8] & (0x80 >> (col % 8))) != 0;
+}
+
+static int glyph_bit(unsigned int codepoint, int row, int column);
+
+static void draw_glyph(KmsOutput *output, const KmsFont *font,
+                       uint32_t codepoint, int x, int y, int cw, int ch,
+                       uint32_t color)
+{
+    int glyph_row;
+    int glyph_column;
+    int font_width = font != NULL && font->data ? font->width : 5;
+    int font_height = font != NULL && font->data ? font->height : 7;
+    size_t glyph = font != NULL && font->data ?
+        font_glyph_index(font, codepoint) : 0;
+
+    for (glyph_row = 0; glyph_row < font_height && glyph_row < ch;
+         ++glyph_row) {
+        uint32_t *pixels;
+        int py = y + glyph_row;
+        unsigned int row_bits = 0;
+        size_t row_bytes = 0;
+        if (py < 0 || py >= output->mode.vdisplay) continue;
+        if (font != NULL && font->data) {
+            row_bytes = (size_t)((font->width + 7) / 8);
+            if (row_bytes == 1)
+                row_bits = font->data[font->glyph_offset +
+                    glyph * font->glyph_bytes + glyph_row];
+        }
+        pixels = (uint32_t *)((unsigned char *)output->back.map +
+                              py * output->back.pitch);
+        for (glyph_column = 0; glyph_column < font_width && glyph_column < cw;
+             ++glyph_column) {
+            int source_column = cw < font_width ?
+                glyph_column * font_width / cw : glyph_column;
+            int px = x + glyph_column;
+            int set;
+            if (font != NULL && font->data && row_bytes == 1)
+                set = (row_bits & (0x80U >> source_column)) != 0;
+            else if (font != NULL && font->data)
+                set = font_pixel_glyph(font, glyph, glyph_row,
+                                       source_column);
+            else
+                set = glyph_bit(codepoint, glyph_row, glyph_column);
+            if (set && px >= 0 && px < output->mode.hdisplay)
+                pixels[px] = color;
+        }
+    }
 }
 
 /* Deliberately small built-in glyphs keep the first KMS backend dependency-free.
@@ -457,8 +508,6 @@ static void draw_view(KmsOutput *output, const KmsFont *font,
 {
     int row;
     int column;
-    int glyph_row;
-    int glyph_column;
     int cw = view->cell_width > 0 ? view->cell_width :
         (font != NULL && font->width > 0 ? font->width : KMS_FONT_W);
     int ch = view->cell_height > 0 ? view->cell_height :
@@ -499,35 +548,14 @@ static void draw_view(KmsOutput *output, const KmsFont *font,
                 continue;
             if (bg) fill_rect(output, x, y, cw, ch, bg);
             if (!(attr & 64)) {
-                for (glyph_row = 0; glyph_row < (font != NULL && font->data ?
-                     font->height : 7) && glyph_row < ch; ++glyph_row)
-                    for (glyph_column = 0; glyph_column < (font != NULL && font->data ?
-                         cw : 5) && glyph_column < cw;
-                         ++glyph_column)
-                        if (font != NULL && font->data ?
-                            font_pixel(font, cp, glyph_row,
-                                       cw < font->width ?
-                                       glyph_column * font->width / cw : glyph_column) :
-                            glyph_bit(cp, glyph_row, glyph_column))
-                            put_pixel(output, x + glyph_column, y + glyph_row, fg);
+                draw_glyph(output, font, cp, x, y, cw, ch, fg);
             }
             if (!(attr & 64) && (attr & 4))
                 fill_rect(output, x, y + ch - 1, cw, 1, underline);
             if (!(attr & 64) && (attr & 512))
                 fill_rect(output, x, y + ch / 2, cw, 1, fg);
             if (!(attr & 64) && (attr & 1))
-                for (glyph_row = 0; glyph_row < (font != NULL && font->data ?
-                     font->height : 7) && glyph_row < ch; ++glyph_row)
-                    for (glyph_column = 0; glyph_column < (font != NULL && font->data ?
-                     cw : 5) && glyph_column < cw;
-                         ++glyph_column)
-                        if (font != NULL && font->data ?
-                            font_pixel(font, cp, glyph_row,
-                                       cw < font->width ?
-                                       glyph_column * font->width / cw : glyph_column) :
-                        glyph_bit(cp, glyph_row, glyph_column))
-                        put_pixel(output, x + glyph_column + 1,
-                                      y + glyph_row, fg);
+                draw_glyph(output, font, cp, x + 1, y, cw, ch, fg);
             if (!(attr & 64) && view->combining != NULL &&
                 view->combining_count != NULL) {
                 int combining_index;
@@ -535,17 +563,7 @@ static void draw_view(KmsOutput *output, const KmsFont *font,
                      combining_index < view->combining_count[index] &&
                      combining_index < 4; ++combining_index) {
                     uint32_t mark = view->combining[index * 4 + combining_index];
-                    for (glyph_row = 0; glyph_row < (font != NULL && font->data ?
-                         font->height : 7) && glyph_row < ch; ++glyph_row)
-                        for (glyph_column = 0; glyph_column < (font != NULL && font->data ?
-                             cw : 5) && glyph_column < cw; ++glyph_column)
-                            if (font != NULL && font->data ?
-                                font_pixel(font, mark, glyph_row,
-                                           cw < font->width ?
-                                           glyph_column * font->width / cw : glyph_column) :
-                                glyph_bit(mark, glyph_row, glyph_column))
-                                put_pixel(output, x + glyph_column,
-                                          y + glyph_row, fg);
+                    draw_glyph(output, font, mark, x, y, cw, ch, fg);
                 }
             }
         }
@@ -870,6 +888,12 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         KmsOutput *output = &kms->outputs[i];
         int view_index;
         int output_view_count = 0;
+        long long output_started = 0;
+        long long draw_started = 0;
+        long long flip_started = 0;
+        int trace_phases = getenv("BLIT_KMS_TRACE_PHASES") != NULL;
+        if (trace_phases)
+            output_started = kms_now_us();
         int output_changed;
         full_redraw = !output->initialized;
         for (view_index = 0; view_index < view_count; ++view_index)
@@ -920,10 +944,15 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         } else {
             output->flip_pending = 0;
         }
+        if (trace_phases)
+            fprintf(stderr, "blit: KMS phase connector=%u wait_us=%lld\n",
+                    output->connector, kms_now_us() - output_started);
         if (full_redraw)
             memset(output->back.map, 0, output->back.size);
         else
             memcpy(output->back.map, output->front.map, output->back.size);
+        if (trace_phases)
+            draw_started = kms_now_us();
         if (pointer_changed) {
             clear_pointer_rect(output, kms->previous_pointer_x,
                                kms->previous_pointer_y,
@@ -994,6 +1023,8 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
             fill_rect(output, x, y, 2, 18, 0xffffffU);
             fill_rect(output, x, y, 12, 2, 0xffffffU);
         }
+        if (trace_phases)
+            flip_started = kms_now_us();
         if (capture)
             write_screenshot(kms, output);
         {
@@ -1025,6 +1056,12 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         output->flip_pending = 1;
         swap_buffers(output);
         output->initialized = 1;
+        if (trace_phases)
+            fprintf(stderr,
+                    "blit: KMS phase connector=%u draw_us=%lld flip_us=%lld total_us=%lld\n",
+                    output->connector, flip_started - draw_started,
+                    kms_now_us() - flip_started,
+                    kms_now_us() - output_started);
         output->last_view_count = output_view_count;
         {
             int stored = 0;

@@ -29,6 +29,7 @@ $b mount -t 9p -o trans=virtio,version=9p2000.L blitshots /tmp/host-screenshots 
 export BLIT_KMS_SCREENSHOT_DIR=/tmp/guest-screenshots
 export BLIT_KMS_SCREENSHOT_AFTER=0
 export BLIT_KMS_TRACE_TIMING=1
+export BLIT_KMS_TRACE_PHASES=1
 if [ -e /dev/dri/card1 ]; then export BLIT_DRM_DEVICE=/dev/dri/card1; else export BLIT_DRM_DEVICE=/dev/dri/card0; fi
 BLIT_DISPLAY_BACKEND=kms BLIT_BIND_ADDRESS=127.0.0.1 /blit-stage/ld-linux-x86-64.so.2 --library-path /blit-stage:/blit-stage/lib /blit-stage/blit-server 19191 >/tmp/blit.log 2>&1 &
 ready=0

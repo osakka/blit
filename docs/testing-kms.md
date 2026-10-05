@@ -126,3 +126,8 @@ both `BLIT_INPUT_KEYPAD_PASS` and `BLIT_INPUT_STREAM_PASS`. With
 `BLIT_KMS_TRACE_TIMING=1`, the renderer's per-present timings are also retained
 in the serial log; the current TCG/VKMS run stayed below 103 ms for the normal
 stress frames, with one 482 ms fixture outlier, and no multi-second redraw.
+For phase diagnosis, `BLIT_KMS_TRACE_PHASES=1` additionally records wait,
+glyph-draw, and page-flip intervals. The optimized PSF rasterizer's current
+two-output Hibr fixture measured 56 samples with a maximum 147.739 ms glyph
+draw and 154.447 ms total present under QEMU TCG; the acceptance marker and
+pixel gate must still pass when timing is enabled.
