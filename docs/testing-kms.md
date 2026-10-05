@@ -116,3 +116,13 @@ for the two outputs. The current run passed with hashes beginning `0588af44`
 and `a397ab92`. The tiny VKMS kernel does not include 9p, so the PPMs are
 validated over the serial log; an empty host screenshot directory is not
 evidence that the frames were absent.
+
+## Pointer stress gate
+
+The input-only QEMU variant starts two terminal surfaces, routes the synthetic
+evdev keyboard and pointer independently, and emits 180 pointer motions at
+16 ms intervals with periodic primary-button and wheel events. It must report
+both `BLIT_INPUT_KEYPAD_PASS` and `BLIT_INPUT_STREAM_PASS`. With
+`BLIT_KMS_TRACE_TIMING=1`, the renderer's per-present timings are also retained
+in the serial log; the current TCG/VKMS run stayed below 103 ms for the normal
+stress frames, with one 482 ms fixture outlier, and no multi-second redraw.

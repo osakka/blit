@@ -60,6 +60,7 @@ export XDG_CONFIG_HOME=/tmp/hibr-config
 export XDG_DATA_HOME=/tmp/hibr-data
 export BLIT_KMS_SCREENSHOT_DIR=/tmp/guest-screenshots
 export BLIT_KMS_SCREENSHOT_AFTER=30
+export BLIT_KMS_TRACE_TIMING=1
 $b mkdir -p /root /tmp/hibr-state /tmp/hibr-config /tmp/hibr-data
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
     *" blit.input_only=1 "*) BLIT_INPUT_ONLY_TEST=1 ;;

@@ -76,21 +76,26 @@ int main(void)
     sync_event(keyboard);
     emit_event(keyboard, EV_KEY, KEY_KP1, 0);
     sync_event(keyboard);
-    for (i = 0; i < 5; ++i) {
-        emit_event(keyboard, EV_KEY, KEY_A, 1);
-        sync_event(keyboard);
-        emit_event(keyboard, EV_KEY, KEY_A, 0);
-        sync_event(keyboard);
-        emit_event(mouse, EV_REL, REL_X, 24);
-        emit_event(mouse, EV_REL, REL_Y, 8);
+    /* Exercise the presentation path at a deterministic 60 Hz.  The old
+       five-event, two-second cadence verified delivery but could not expose
+       a renderer that repainted the whole terminal for every motion. */
+    for (i = 0; i < 180; ++i) {
+        emit_event(mouse, EV_REL, REL_X, (i & 1) ? 8 : -8);
+        emit_event(mouse, EV_REL, REL_Y, (i & 2) ? 4 : -4);
         sync_event(mouse);
-        emit_event(mouse, EV_KEY, BTN_LEFT, 1);
-        sync_event(mouse);
-        emit_event(mouse, EV_KEY, BTN_LEFT, 0);
-        sync_event(mouse);
-        emit_event(mouse, EV_REL, REL_WHEEL, 1);
-        sync_event(mouse);
-        sleep(2);
+        if ((i % 30) == 0) {
+            emit_event(keyboard, EV_KEY, KEY_A, 1);
+            sync_event(keyboard);
+            emit_event(keyboard, EV_KEY, KEY_A, 0);
+            sync_event(keyboard);
+            emit_event(mouse, EV_KEY, BTN_LEFT, 1);
+            sync_event(mouse);
+            emit_event(mouse, EV_KEY, BTN_LEFT, 0);
+            sync_event(mouse);
+            emit_event(mouse, EV_REL, REL_WHEEL, 1);
+            sync_event(mouse);
+        }
+        usleep(16000);
     }
     ioctl(keyboard, UI_DEV_DESTROY);
     ioctl(mouse, UI_DEV_DESTROY);
