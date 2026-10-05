@@ -321,6 +321,17 @@ snapshot = run_case(base, 'attribute-reset-sgr',
 cells = cell_map(snapshot)
 raise 'attribute reset left B styled' if cells.fetch([1, 0]).key?('style')
 
+snapshot = run_case(base, 'extended-sgr-attributes',
+                    "printf '\\033[3mI\\033[5mB\\033[9mS\\033[23;25;29mN'")
+cells = cell_map(snapshot)
+assert_equal(true, cells.fetch([0, 0]).fetch('style').fetch('italic'),
+             'italic set')
+assert_equal(true, cells.fetch([1, 0]).fetch('style').fetch('blink'),
+             'blink set')
+assert_equal(true, cells.fetch([2, 0]).fetch('style').fetch('strike'),
+             'strike set')
+raise 'extended SGR reset left N styled' if cells.fetch([3, 0]).key?('style')
+
 snapshot = run_case(base, 'concealed-sgr',
                     "printf 'a\\033[8mb\\033[28mc'")
 cells = cell_map(snapshot)

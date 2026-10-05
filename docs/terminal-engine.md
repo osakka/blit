@@ -47,6 +47,9 @@ shell conformance path is stable.
    and DEC soft reset. Colon SGR forms, underline colour (`58`/`59`), and
    Hibr's modifyOtherKeys/cursor push-pop prefixes are parsed without leaking
    their control parameters into cell attributes.
+   SGR italic (`3`/`23`), blink (`5`/`6`/`25`), and strike (`9`/`29`) are
+   retained in the canonical style and exposed consistently through the API,
+   SDL, and KMS paths.
    Device status replies include DA1/DA2, XTVERSION, CPR, window size,
    DECRQSS, and XTGETTCAP; erase operations preserve the active background
    colour according to BCE semantics.

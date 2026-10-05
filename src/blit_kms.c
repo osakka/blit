@@ -488,7 +488,7 @@ static void draw_view(KmsOutput *output, const KmsFont *font,
                 view->underline_color[index] ?
                 view->underline_color[index] - 1 : fg;
             uint32_t cp = view->codepoints[index] ? view->codepoints[index] : ' ';
-            unsigned char attr = view->attributes[index];
+            uint16_t attr = view->attributes[index];
             int x = view->origin_x + column * cw;
             int y = view->origin_y + row * ch;
             if (attr & 8) { uint32_t t = fg; fg = bg; bg = t; }
@@ -513,6 +513,8 @@ static void draw_view(KmsOutput *output, const KmsFont *font,
             }
             if (!(attr & 64) && (attr & 4))
                 fill_rect(output, x, y + ch - 1, cw, 1, underline);
+            if (!(attr & 64) && (attr & 512))
+                fill_rect(output, x, y + ch / 2, cw, 1, fg);
             if (!(attr & 64) && (attr & 1))
                 for (glyph_row = 0; glyph_row < (font != NULL && font->data ?
                      font->height : 7) && glyph_row < ch; ++glyph_row)

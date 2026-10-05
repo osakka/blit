@@ -24,7 +24,7 @@ typedef struct {
     const uint32_t *foreground;
     const uint32_t *background;
     const uint32_t *underline_color;
-    const unsigned char *attributes;
+    const uint16_t *attributes;
     int stride;
     int cursor_x;
     int cursor_y;

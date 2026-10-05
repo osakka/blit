@@ -46,6 +46,9 @@ extern char **environ;
 #define BLIT_ATTR_WIDE 16
 #define BLIT_ATTR_CONTINUATION 32
 #define BLIT_ATTR_CONCEAL 64
+#define BLIT_ATTR_ITALIC 128
+#define BLIT_ATTR_BLINK 256
+#define BLIT_ATTR_STRIKE 512
 #define BLIT_MAX_COMBINING 4
 
 typedef struct {
@@ -71,7 +74,7 @@ typedef struct {
     int y;
     uint32_t foreground;
     uint32_t background;
-    unsigned char attributes;
+    uint16_t attributes;
     int foreground_set;
     int background_set;
     uint32_t underline_color;
@@ -98,7 +101,7 @@ typedef struct {
     uint32_t foreground[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
     uint32_t background[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
     uint32_t underline_color[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
-    unsigned char attributes[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
+    uint16_t attributes[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
     char alternate_cells[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
     uint32_t alternate_codepoints[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
     uint32_t alternate_combining[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS][BLIT_MAX_COMBINING];
@@ -106,7 +109,7 @@ typedef struct {
     uint32_t alternate_foreground[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
     uint32_t alternate_background[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
     uint32_t alternate_underline_color[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
-    unsigned char alternate_attributes[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
+    uint16_t alternate_attributes[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
     int cursor_x;
     int cursor_y;
     int cursor_visible;
@@ -205,7 +208,7 @@ typedef struct {
     int terminal_last_width;
     uint32_t terminal_foreground;
     uint32_t terminal_background;
-    unsigned char terminal_attributes;
+    uint16_t terminal_attributes;
     int terminal_foreground_set;
     int terminal_background_set;
     int terminal_alternate;
@@ -1222,7 +1225,7 @@ static void surface_snapshot_json(const BlitSurface *surface, char *body,
             char text[5];
             char escaped[16];
             uint32_t codepoint = surface->codepoints[y][x];
-            unsigned char attributes = surface->attributes[y][x];
+            uint16_t attributes = surface->attributes[y][x];
             int styled = surface->foreground[y][x] != 0 ||
                 surface->background[y][x] != 0 ||
                 surface->underline_color[y][x] != 0 || attributes != 0;
@@ -1243,13 +1246,17 @@ static void surface_snapshot_json(const BlitSurface *surface, char *body,
                 used += (size_t)snprintf(body + used, capacity - used,
                     ",\"style\":{\"foreground\":\"#%06x\","
                     "\"background\":\"#%06x\",\"bold\":%s,"
-                    "\"dim\":%s,\"underline\":%s,\"inverse\":%s,"
+                    "\"dim\":%s,\"italic\":%s,\"underline\":%s,"
+                    "\"blink\":%s,\"inverse\":%s,\"strike\":%s,"
                     "\"concealed\":%s,\"underline_color\":\"#%06x\"}",
                     (unsigned int)foreground, (unsigned int)background,
                     attributes & BLIT_ATTR_BOLD ? "true" : "false",
                     attributes & BLIT_ATTR_DIM ? "true" : "false",
+                    attributes & BLIT_ATTR_ITALIC ? "true" : "false",
                     attributes & BLIT_ATTR_UNDERLINE ? "true" : "false",
+                    attributes & BLIT_ATTR_BLINK ? "true" : "false",
                     attributes & BLIT_ATTR_INVERSE ? "true" : "false",
+                    attributes & BLIT_ATTR_STRIKE ? "true" : "false",
                     attributes & BLIT_ATTR_CONCEAL ? "true" : "false",
                     (unsigned int)(surface->underline_color[y][x] ?
                         surface->underline_color[y][x] - 1 : 0));
@@ -1297,7 +1304,7 @@ static int apply_cell_update(BlitSurface *surface, const char *json)
         uint32_t foreground = 0;
         uint32_t background = 0;
         uint32_t underline_color = 0;
-        unsigned char attributes = 0;
+        uint16_t attributes = 0;
         int foreground_set = 0;
         int background_set = 0;
         int underline_color_set = 0;
@@ -1332,10 +1339,16 @@ static int apply_cell_update(BlitSurface *surface, const char *json)
                 attributes |= BLIT_ATTR_BOLD;
             if (json_bool(cursor, "dim", &flag) && flag)
                 attributes |= BLIT_ATTR_DIM;
+            if (json_bool(cursor, "italic", &flag) && flag)
+                attributes |= BLIT_ATTR_ITALIC;
             if (json_bool(cursor, "underline", &flag) && flag)
                 attributes |= BLIT_ATTR_UNDERLINE;
+            if (json_bool(cursor, "blink", &flag) && flag)
+                attributes |= BLIT_ATTR_BLINK;
             if (json_bool(cursor, "inverse", &flag) && flag)
                 attributes |= BLIT_ATTR_INVERSE;
+            if (json_bool(cursor, "strike", &flag) && flag)
+                attributes |= BLIT_ATTR_STRIKE;
             if (json_bool(cursor, "concealed", &flag) && flag)
                 attributes |= BLIT_ATTR_CONCEAL;
             if (json_string(cursor, "underline_color", color_text,
@@ -1881,10 +1894,16 @@ static void terminal_apply_string(BlitSession *session, BlitSurface *surface)
                 used += snprintf(reply + used, sizeof(reply) - (size_t)used, ";1");
             if (session->terminal_attributes & BLIT_ATTR_DIM)
                 used += snprintf(reply + used, sizeof(reply) - (size_t)used, ";2");
+            if (session->terminal_attributes & BLIT_ATTR_ITALIC)
+                used += snprintf(reply + used, sizeof(reply) - (size_t)used, ";3");
             if (session->terminal_attributes & BLIT_ATTR_UNDERLINE)
                 used += snprintf(reply + used, sizeof(reply) - (size_t)used, ";4");
+            if (session->terminal_attributes & BLIT_ATTR_BLINK)
+                used += snprintf(reply + used, sizeof(reply) - (size_t)used, ";5");
             if (session->terminal_attributes & BLIT_ATTR_INVERSE)
                 used += snprintf(reply + used, sizeof(reply) - (size_t)used, ";7");
+            if (session->terminal_attributes & BLIT_ATTR_STRIKE)
+                used += snprintf(reply + used, sizeof(reply) - (size_t)used, ";9");
             if (session->terminal_attributes & BLIT_ATTR_CONCEAL)
                 used += snprintf(reply + used, sizeof(reply) - (size_t)used, ";8");
             snprintf(reply + used, sizeof(reply) - (size_t)used, "m\033\\");
@@ -1943,12 +1962,14 @@ static void terminal_apply_sgr(BlitSession *session, const char *sequence)
             session->terminal_attributes |= BLIT_ATTR_BOLD;
         } else if (value == 2) {
             session->terminal_attributes |= BLIT_ATTR_DIM;
+        } else if (value == 3) {
+            session->terminal_attributes |= BLIT_ATTR_ITALIC;
         } else if (value == 4) {
             session->terminal_attributes |= BLIT_ATTR_UNDERLINE;
             if (strchr(sequence, ':') != NULL && i + 1 < count) {
                 if (params[i + 1] == 0) {
                     session->terminal_attributes &=
-                        (unsigned char)~BLIT_ATTR_UNDERLINE;
+                        (uint16_t)~BLIT_ATTR_UNDERLINE;
                     ++i;
                 } else if (params[i + 1] == 3) {
                     /* Curly underline is represented by the canonical
@@ -1956,18 +1977,29 @@ static void terminal_apply_sgr(BlitSession *session, const char *sequence)
                     ++i;
                 }
             }
+        } else if (value == 5 || value == 6) {
+            session->terminal_attributes |= BLIT_ATTR_BLINK;
         } else if (value == 7) {
             session->terminal_attributes |= BLIT_ATTR_INVERSE;
         } else if (value == 22) {
-            session->terminal_attributes &= (unsigned char)~(BLIT_ATTR_BOLD | BLIT_ATTR_DIM);
+            session->terminal_attributes &=
+                (uint16_t)~(BLIT_ATTR_BOLD | BLIT_ATTR_DIM);
+        } else if (value == 23) {
+            session->terminal_attributes &= (uint16_t)~BLIT_ATTR_ITALIC;
         } else if (value == 24) {
-            session->terminal_attributes &= (unsigned char)~BLIT_ATTR_UNDERLINE;
+            session->terminal_attributes &= (uint16_t)~BLIT_ATTR_UNDERLINE;
+        } else if (value == 25) {
+            session->terminal_attributes &= (uint16_t)~BLIT_ATTR_BLINK;
         } else if (value == 27) {
-            session->terminal_attributes &= (unsigned char)~BLIT_ATTR_INVERSE;
+            session->terminal_attributes &= (uint16_t)~BLIT_ATTR_INVERSE;
         } else if (value == 8) {
             session->terminal_attributes |= BLIT_ATTR_CONCEAL;
         } else if (value == 28) {
-            session->terminal_attributes &= (unsigned char)~BLIT_ATTR_CONCEAL;
+            session->terminal_attributes &= (uint16_t)~BLIT_ATTR_CONCEAL;
+        } else if (value == 9) {
+            session->terminal_attributes |= BLIT_ATTR_STRIKE;
+        } else if (value == 29) {
+            session->terminal_attributes &= (uint16_t)~BLIT_ATTR_STRIKE;
         } else if (value == 39) {
             session->terminal_foreground_set = 0;
         } else if (value == 49) {
@@ -4927,7 +4959,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
                         BLIT_DEFAULT_FOREGROUND;
                     uint32_t background = surface->background[row][column] ?
                         surface->background[row][column] - 1 : 0;
-                    unsigned char attributes = surface->attributes[row][column];
+                    uint16_t attributes = surface->attributes[row][column];
                     char glyph[5];
                     SDL_FRect cell_background;
 
@@ -4979,6 +5011,9 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
                         if (attributes & BLIT_ATTR_BOLD)
                             SDL_RenderDebugText(renderer, surface_origin_x + 1.0f + column * 8.0f,
                                 (float)surface_origin_y + row * 8.0f, glyph);
+                        if (attributes & BLIT_ATTR_ITALIC)
+                            SDL_RenderDebugText(renderer, surface_origin_x + 1.0f + column * 8.0f,
+                                (float)surface_origin_y + row * 8.0f, glyph);
                         if (attributes & BLIT_ATTR_UNDERLINE)
                             SDL_SetRenderDrawColor(renderer,
                                 (unsigned char)(underline_color >> 16),
@@ -4989,6 +5024,11 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
                                 (float)surface_origin_y + row * 8.0f + 7.0f,
                                 11.0f + column * 8.0f,
                                 (float)surface_origin_y + row * 8.0f + 7.0f);
+                        if (attributes & BLIT_ATTR_STRIKE)
+                            SDL_RenderLine(renderer, surface_origin_x + column * 8.0f,
+                                (float)surface_origin_y + row * 8.0f + 4.0f,
+                                11.0f + column * 8.0f,
+                                (float)surface_origin_y + row * 8.0f + 4.0f);
                     }
                     }
                 }

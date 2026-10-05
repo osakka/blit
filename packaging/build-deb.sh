@@ -5,7 +5,7 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 BUNDLE=$ROOT/build/blit-desktop-current
 OUT=${1:-$ROOT}
 
-if [ ! -x "$BUNDLE/bin/run-desktop" ] || [ ! -x "$BUNDLE/bin/blit-server" ]; then
+if [ ! -x "$BUNDLE/bin/blit-server" ]; then
 	echo "blit: build/blit-desktop-current is incomplete" >&2
 	exit 1
 fi
@@ -23,6 +23,17 @@ trap 'rm -rf "$stage"' EXIT HUP INT TERM
 mkdir -p "$stage/usr/lib/blit" "$stage/usr/bin" \
 	"$stage/usr/share/doc/blit"
 cp -a "$BUNDLE/." "$stage/usr/lib/blit/"
+# Shell launchers are test/deployment conveniences, not part of the server
+# runtime.  Keep the installed boundary to the TCC-built executable and the
+# data/configuration it consumes; Hibr is an external executable.
+rm -f "$stage/usr/lib/blit/bin/attach-join" \
+	"$stage/usr/lib/blit/bin/attach-primary" \
+	"$stage/usr/lib/blit/bin/blit-diagnose" \
+	"$stage/usr/lib/blit/bin/hibr-display" \
+	"$stage/usr/lib/blit/bin/hibr-join" \
+	"$stage/usr/lib/blit/bin/run-desktop" \
+	"$stage/usr/lib/blit/bin/run-shell" \
+	"$stage/usr/lib/blit/bin/start-blit"
 # The repository documentation and OpenAPI schema are authoritative.  The
 # bundle is an installable runtime artifact, not a second documentation tree.
 if [ -d "$ROOT/docs" ]; then
@@ -33,15 +44,10 @@ if [ -d "$ROOT/openapi" ]; then
 	rm -rf "$stage/usr/lib/blit/openapi"
 	cp -a "$ROOT/openapi" "$stage/usr/lib/blit/openapi"
 fi
-cat > "$stage/usr/bin/blit" <<'EOF'
-#!/bin/sh
-exec /usr/lib/blit/bin/run-desktop "$@"
-EOF
-cat > "$stage/usr/bin/blit-shell" <<'EOF'
-#!/bin/sh
-exec /usr/lib/blit/bin/run-shell "$@"
-EOF
-chmod 0755 "$stage/usr/bin/blit" "$stage/usr/bin/blit-shell"
+cp -a "$BUNDLE/lib/libSDL3.so.0.4.16" "$stage/usr/lib/"
+ln -s /usr/lib/libSDL3.so.0.4.16 "$stage/usr/lib/libSDL3.so.0"
+ln -s /usr/lib/libSDL3.so.0 "$stage/usr/lib/libSDL3.so"
+ln -s /usr/lib/blit/bin/blit-server "$stage/usr/bin/blit"
 cp -a "$BUNDLE/README.md" "$BUNDLE/VERSION" "$stage/usr/share/doc/blit/"
 if [ -d "$ROOT/docs" ]; then
 	cp -a "$ROOT/docs" "$stage/usr/share/doc/blit/"

@@ -784,8 +784,11 @@ components:
           pattern: '^#[0-9A-Fa-f]{6}$'
         bold: {type: boolean}
         dim: {type: boolean}
+        italic: {type: boolean}
         underline: {type: boolean}
+        blink: {type: boolean}
         inverse: {type: boolean}
+        strike: {type: boolean}
         concealed: {type: boolean}
         underline_color:
           type: string
