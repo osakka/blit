@@ -87,6 +87,12 @@ int main(void)
         emit_event(mouse, EV_REL, REL_X, delta_x);
         emit_event(mouse, EV_REL, REL_Y, (i & 2) ? 4 : -4);
         sync_event(mouse);
+        if (i == 1) {
+            emit_event(mouse, EV_KEY, BTN_LEFT, 1);
+            sync_event(mouse);
+            emit_event(mouse, EV_KEY, BTN_LEFT, 0);
+            sync_event(mouse);
+        }
         if ((i % 30) == 0) {
             emit_event(keyboard, EV_KEY, KEY_A, 1);
             sync_event(keyboard);

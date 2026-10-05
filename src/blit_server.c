@@ -4304,10 +4304,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
             if (pane_requested)
                 ++runtime->topology_revision;
             if (focused_requested) {
-                if (focused)
-                    focus_session(runtime, session);
-                else
-                    session->focused = 0;
+                focus_session(runtime, focused ? session : NULL);
             }
             if (route_requested) {
                 snprintf(input_route->target_session_id,
@@ -5140,14 +5137,30 @@ static int active_mouse_button(const BlitRuntime *runtime)
     return 3;
 }
 
+static void send_focus_report(BlitSession *session, int focused)
+{
+    const char *report;
+    if (session == NULL || session->pty_fd < 0 ||
+        !session->terminal_focus_reporting)
+        return;
+    report = focused ? "\033[I" : "\033[O";
+    write(session->pty_fd, report, strlen(report));
+}
+
 static void focus_session(BlitRuntime *runtime, BlitSession *target)
 {
     int i;
 
-    for (i = 0; i < BLIT_MAX_SESSIONS; ++i)
+    for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
+        if (runtime->sessions[i].used &&
+            runtime->sessions[i].focused !=
+            (target != NULL && &runtime->sessions[i] == target))
+            send_focus_report(&runtime->sessions[i],
+                              target != NULL && &runtime->sessions[i] == target);
         if (runtime->sessions[i].used)
             runtime->sessions[i].focused =
                 target != NULL && &runtime->sessions[i] == target;
+    }
 }
 
 static void send_mouse_report(BlitRuntime *runtime, SDL_WindowID window_id,

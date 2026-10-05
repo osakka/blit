@@ -32,6 +32,8 @@ shell conformance path is stable.
    BEL and ST termination.
    Evdev motion is committed
    at `SYN_REPORT`, so one physical input packet produces one pointer update;
+   DEC focus reporting (`CSI ? 1004 h/l`) emits focus-in/focus-out reports
+   when the single focused pane changes.
    DEC origin-mode cursor motion is constrained to the active scroll region.
    Insert mode (`CSI 4 h/l`), legacy alternate-screen mode (`CSI ?47 h/l`),
    DEC soft reset (`CSI !p`), and cursor style selection (`DECSCUSR`,

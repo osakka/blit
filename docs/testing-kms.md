@@ -135,4 +135,6 @@ The input fixture also crosses the synthetic pointer from output 1 to output
 2 and verifies that streamed motion changes from the first PTY session to the
 second rather than being broadcast to both. It overlaps left, middle, and
 right button presses, verifies motion while buttons remain held, and checks
-that each release preserves the remaining-button state.
+that each release preserves the remaining-button state. The pointer PTY also
+enables DEC focus reporting and must receive the focus-in sequence after the
+cross-display click.

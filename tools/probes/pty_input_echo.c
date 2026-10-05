@@ -9,7 +9,13 @@ int main(int argc, char **argv)
     struct termios saved;
     struct termios raw;
     unsigned char byte;
-    int mouse = argc > 1 && strcmp(argv[1], "--mouse") == 0;
+    int mouse = 0;
+    int focus = 0;
+    int argument;
+    for (argument = 1; argument < argc; ++argument) {
+        if (strcmp(argv[argument], "--mouse") == 0) mouse = 1;
+        if (strcmp(argv[argument], "--focus") == 0) focus = 1;
+    }
     if (tcgetattr(STDIN_FILENO, &saved) == 0) {
         raw = saved;
         cfmakeraw(&raw);
@@ -21,6 +27,8 @@ int main(int argc, char **argv)
     fputs("\033=", stdout);
     if (mouse)
         fputs("\033[?1003h\033[?1006h", stdout);
+    if (focus)
+        fputs("\033[?1004h", stdout);
     fputs("READY\r\n", stdout);
     fflush(stdout);
     while (read(STDIN_FILENO, &byte, 1) == 1) {

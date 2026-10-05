@@ -144,7 +144,7 @@ if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
         finish 1
     fi
     $b wget -qO /tmp/input-key.json --post-data="{\"command\":\"/blit-stage/pty-input-echo\",\"arguments\":[\"--key\"],\"surface_mode\":\"terminal\",\"pane_id\":\"$pane1\",\"width\":128,\"height\":48}" --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
-    $b wget -qO /tmp/input-pointer.json --post-data="{\"command\":\"/blit-stage/pty-input-echo\",\"arguments\":[\"--mouse\"],\"surface_mode\":\"terminal\",\"pane_id\":\"$pane2\",\"width\":128,\"height\":48}" --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
+    $b wget -qO /tmp/input-pointer.json --post-data="{\"command\":\"/blit-stage/pty-input-echo\",\"arguments\":[\"--mouse\",\"--focus\"],\"surface_mode\":\"terminal\",\"pane_id\":\"$pane2\",\"width\":128,\"height\":48}" --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
     input_key_id=$($b sed -n 's/.*"id":"\([0-9][0-9]*\)".*/\1/p' /tmp/input-key.json)
     input_pointer_id=$($b sed -n 's/.*"id":"\([0-9][0-9]*\)".*/\1/p' /tmp/input-pointer.json)
     /blit-stage/ws-input-probe >/tmp/stream-input.log 2>&1 &
@@ -170,7 +170,11 @@ if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
     echo BLIT_INPUT_SURFACE_KEY
     $b cat /tmp/input-key-surface.json | $b cut -c 1-4000
     echo BLIT_INPUT_SURFACE_POINTER
-    $b wget -qO- http://127.0.0.1:19191/v1/surfaces/surface-$input_pointer_id/cells | $b cut -c 1-4000
+    pointer_surface=$($b wget -qO- http://127.0.0.1:19191/v1/surfaces/surface-$input_pointer_id/cells)
+    pointer_text=$(echo "$pointer_surface" | $b tr ',' '\n' | \
+        $b sed -n 's/.*"text":"\([^"]*\)".*/\1/p' | $b tr -d '\n')
+    echo INPUT_POINTER_TEXT=$pointer_text
+    echo "$pointer_surface" | $b cut -c 1-4000
     echo BLIT_INPUT_LOG
     $b cat /tmp/blit.log
     echo BLIT_INPUT_STREAM
@@ -179,6 +183,7 @@ if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
        $b grep -q '"pressed":false' /tmp/stream-input.log &&
        $b grep -q '"kind":"pointer_button"' /tmp/stream-input.log &&
        $b grep -q '"kind":"pointer_wheel"' /tmp/stream-input.log &&
+       echo "$pointer_text" | $b grep -q 'BYTE 49' &&
        $b grep -q "\"session_id\":\"session-$input_key_id\".*\"kind\":\"pointer_motion\"" /tmp/stream-input.log &&
        $b grep -q "\"session_id\":\"session-$input_pointer_id\".*\"kind\":\"pointer_motion\"" /tmp/stream-input.log &&
        [ "$keypad_pass" -eq 1 ]; then
