@@ -338,6 +338,9 @@ assert_equal(true, snapshot.fetch('cursor').fetch('visible'),
 snapshot = run_case(base, 'cursor-hidden', "printf '\\033[?25lX'")
 assert_equal(false, snapshot.fetch('cursor').fetch('visible'), 'cursor hidden')
 
+snapshot = run_case(base, 'cursor-style', "printf '\\033[2 qX\\033[4 q'")
+assert_equal(4, snapshot.fetch('cursor').fetch('style'), 'DECSCUSR steady underline')
+
 snapshot = run_case(base, 'malformed-csi-recovery', "printf 'A\\033[12;X B'")
 cells = cell_map(snapshot)
 assert_equal('A', cells.fetch([0, 0]).fetch('text'), 'malformed CSI prefix')

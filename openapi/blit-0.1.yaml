@@ -743,6 +743,14 @@ components:
         x: {type: integer, minimum: 0}
         y: {type: integer, minimum: 0}
         visible: {type: boolean}
+        style:
+          type: integer
+          minimum: 0
+          maximum: 6
+          description: >-
+            VT DECSCUSR style: 0/1 blinking block, 2 steady block,
+            3 blinking underline, 4 steady underline, 5 blinking bar,
+            or 6 steady bar. Backends may render blinking styles steadily.
       additionalProperties: false
     SurfaceSnapshot:
       type: object

@@ -28,6 +28,7 @@ typedef struct {
     int cursor_x;
     int cursor_y;
     int cursor_visible;
+    int cursor_style;
     int damage_valid;
     int damage_x;
     int damage_y;

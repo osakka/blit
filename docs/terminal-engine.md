@@ -34,7 +34,10 @@ shell conformance path is stable.
    at `SYN_REPORT`, so one physical input packet produces one pointer update;
    DEC origin-mode cursor motion is constrained to the active scroll region.
    Insert mode (`CSI 4 h/l`), legacy alternate-screen mode (`CSI ?47 h/l`),
-   and DEC soft reset (`CSI !p`) are covered by the conformance vectors.
+   DEC soft reset (`CSI !p`), and cursor style selection (`DECSCUSR`,
+   `CSI Ps SP q`) are covered by the conformance vectors. Cursor styles are
+   carried through the surface API and consumed by both renderers; blinking
+   styles retain their VT identity even when a backend presents them steadily.
 
 The direct KMS test remains the hardware oracle; the terminal engine must not
 introduce a second display or terminal implementation.

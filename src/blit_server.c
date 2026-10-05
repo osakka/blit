@@ -89,6 +89,7 @@ typedef struct {
     int cursor_x;
     int cursor_y;
     int cursor_visible;
+    int cursor_style;
     int scroll_top;
     int scroll_bottom;
     unsigned char tab_stops[BLIT_MAX_CELL_COLS];
@@ -1149,9 +1150,11 @@ static void surface_delta_json(const BlitSurface *surface, char *body,
     snprintf(body, capacity,
              "{\"type\":\"surface_delta\",\"surface_id\":"
              "\"surface-%llu\",\"revision\":%llu,"
-             "\"cursor\":{\"x\":%d,\"y\":%d,\"visible\":%s}",
+             "\"cursor\":{\"x\":%d,\"y\":%d,\"visible\":%s,"
+             "\"style\":%d}",
              surface->id, surface->revision, surface->cursor_x,
-             surface->cursor_y, surface->cursor_visible ? "true" : "false");
+             surface->cursor_y, surface->cursor_visible ? "true" : "false",
+             surface->cursor_style);
     used = strlen(body);
     if (surface->damage_valid) {
         used += (size_t)snprintf(body + used, capacity - used,
@@ -1174,10 +1177,10 @@ static void surface_snapshot_json(const BlitSurface *surface, char *body,
     used = (size_t)snprintf(body, capacity,
         "{\"id\":\"surface-%llu\",\"revision\":%llu,"
         "\"width\":%d,\"height\":%d,\"cursor\":{\"x\":%d,"
-        "\"y\":%d,\"visible\":%s},\"cells\":[",
+        "\"y\":%d,\"visible\":%s,\"style\":%d},\"cells\":[",
         surface->id, surface->revision, surface->width, surface->height,
         surface->cursor_x, surface->cursor_y,
-        surface->cursor_visible ? "true" : "false");
+        surface->cursor_visible ? "true" : "false", surface->cursor_style);
     for (y = 0; y < surface->height; ++y) {
         for (x = 0; x < surface->width; ++x) {
             char text[5];
@@ -1324,16 +1327,21 @@ static int apply_cell_update(BlitSurface *surface, const char *json)
         int x;
         int y;
         int visible;
+        int style = surface->cursor_style;
 
         if (!json_int(cursor_state, "x", &x) ||
             !json_int(cursor_state, "y", &y) ||
             !json_bool(cursor_state, "visible", &visible) ||
             x < 0 || y < 0 || x >= surface->width || y >= surface->height)
             return -1;
+        if (strstr(cursor_state, "\"style\"") != NULL &&
+            (!json_int(cursor_state, "style", &style) || style < 0 || style > 6))
+            return -1;
         mark_surface_damage(surface, surface->cursor_x, surface->cursor_y);
         surface->cursor_x = x;
         surface->cursor_y = y;
         surface->cursor_visible = visible;
+        surface->cursor_style = style;
         mark_surface_damage(surface, surface->cursor_x, surface->cursor_y);
         if (updated == 0)
             updated = 1;
@@ -1374,6 +1382,7 @@ static void terminal_alignment_test(BlitSurface *surface)
     surface->cursor_x = 0;
     surface->cursor_y = 0;
     surface->cursor_visible = 1;
+    surface->cursor_style = 1;
     surface->damage_valid = 1;
     surface->damage_x = 0;
     surface->damage_y = 0;
@@ -1407,6 +1416,7 @@ static void terminal_enter_alternate(BlitSession *session,
     surface->cursor_x = 0;
     surface->cursor_y = 0;
     surface->cursor_visible = 1;
+    surface->cursor_style = 1;
 }
 
 static void terminal_leave_alternate(BlitSession *session,
@@ -1987,6 +1997,7 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         session->terminal_bracketed_paste = 0;
         session->terminal_mouse_mode = 0;
         session->terminal_mouse_sgr = 0;
+        surface->cursor_style = 1;
         surface->cursor_visible = 1;
         surface->scroll_top = 0;
         surface->scroll_bottom = surface->height - 1;
@@ -2091,6 +2102,15 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         }
     } else if (command == 'm') {
         terminal_apply_sgr(session, sequence);
+    } else if (!private_mode && command == 'q') {
+        int style = has_first ? first : 0;
+        if (style >= 0 && style <= 6) {
+            /* DECSCUSR: 0 is the terminal's default blinking block.  Blit
+               records the VT style even when the backend does not animate
+               the blinking variants. */
+            surface->cursor_style = style == 0 ? 1 : style;
+            mark_surface_damage(surface, surface->cursor_x, surface->cursor_y);
+        }
     } else if (command == 'H' || command == 'f') {
         surface->cursor_y = has_first && first > 0 ? first - 1 : 0;
         if (session->terminal_origin_mode)
@@ -2445,6 +2465,7 @@ static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
                 surface->cursor_x = 0;
                 surface->cursor_y = 0;
                 surface->cursor_visible = 1;
+                surface->cursor_style = 1;
                 surface->scroll_top = 0;
                 surface->scroll_bottom = surface->height - 1;
                 terminal_reset_tabs(surface);
@@ -2822,9 +2843,10 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
     if (surface != NULL) {
         used += (size_t)snprintf(body + used, capacity - used,
                                  ",\"cursor\":{\"x\":%d,\"y\":%d,"
-                                 "\"visible\":%s}", surface->cursor_x,
+                                 "\"visible\":%s,\"style\":%d}", surface->cursor_x,
                                  surface->cursor_y,
-                                 surface->cursor_visible ? "true" : "false");
+                                 surface->cursor_visible ? "true" : "false",
+                                 surface->cursor_style);
     }
     snprintf(body + used, capacity - used, "}");
 }
@@ -3089,6 +3111,7 @@ static int create_session(BlitRuntime *runtime, const char *json,
                 surface->width = width;
                 surface->height = height;
                 surface->cursor_visible = 1;
+                surface->cursor_style = 1;
                 surface->scroll_top = 0;
                 surface->scroll_bottom = height - 1;
                 terminal_reset_tabs(surface);
@@ -3133,6 +3156,7 @@ static int resize_session_surface(BlitSession *session, BlitSurface *surface,
     surface->cursor_x = 0;
     surface->cursor_y = 0;
     surface->cursor_visible = 1;
+    surface->cursor_style = 1;
     surface->scroll_top = 0;
     surface->scroll_bottom = height - 1;
     terminal_reset_tabs(surface);
@@ -4466,6 +4490,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
             views[view_count].cursor_x = surface->cursor_x;
             views[view_count].cursor_y = surface->cursor_y;
             views[view_count].cursor_visible = surface->cursor_visible;
+            views[view_count].cursor_style = surface->cursor_style;
             views[view_count].damage_valid = surface->damage_valid;
             views[view_count].damage_x = surface->damage_x;
             views[view_count].damage_y = surface->damage_y;
@@ -4649,14 +4674,26 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
             }
             if (surface->cursor_visible &&
                 surface->cursor_y >= first_row && surface->cursor_y < last_row) {
+                float cursor_x = surface_origin_x + surface->cursor_x * 8.0f;
+                float cursor_y = (float)surface_origin_y + surface->cursor_y * 8.0f;
                 SDL_SetRenderDrawColor(renderer,
                     (unsigned char)(BLIT_DEFAULT_FOREGROUND >> 16),
                     (unsigned char)(BLIT_DEFAULT_FOREGROUND >> 8),
                     (unsigned char)BLIT_DEFAULT_FOREGROUND, 255);
-                    SDL_RenderLine(renderer, surface_origin_x + surface->cursor_x * 8.0f,
-                        (float)surface_origin_y + surface->cursor_y * 8.0f,
-                        surface_origin_x + surface->cursor_x * 8.0f,
-                    (float)surface_origin_y + surface->cursor_y * 8.0f + 7.0f);
+                if (surface->cursor_style == 3 || surface->cursor_style == 4)
+                    SDL_RenderLine(renderer, cursor_x, cursor_y + 7.0f,
+                                   cursor_x + 7.0f, cursor_y + 7.0f);
+                else if (surface->cursor_style == 5 || surface->cursor_style == 6)
+                    SDL_RenderLine(renderer, cursor_x, cursor_y,
+                                   cursor_x, cursor_y + 7.0f);
+                else {
+                    SDL_FRect cursor_rect;
+                    cursor_rect.x = cursor_x;
+                    cursor_rect.y = cursor_y;
+                    cursor_rect.w = 8.0f;
+                    cursor_rect.h = 8.0f;
+                    SDL_RenderFillRect(renderer, &cursor_rect);
+                }
             }
         }
         render_pointer(runtime, output_index);

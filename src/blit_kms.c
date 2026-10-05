@@ -541,9 +541,16 @@ static void draw_view(KmsOutput *output, const KmsFont *font,
             }
         }
     }
-    if (view->cursor_visible && view->cursor_x >= 0 && view->cursor_y >= 0)
-        fill_rect(output, view->origin_x + view->cursor_x * cw,
-                  view->origin_y + view->cursor_y * ch + ch - 1, cw, 1, KMS_WHITE);
+    if (view->cursor_visible && view->cursor_x >= 0 && view->cursor_y >= 0) {
+        int cursor_x = view->origin_x + view->cursor_x * cw;
+        int cursor_y = view->origin_y + view->cursor_y * ch;
+        if (view->cursor_style == 3 || view->cursor_style == 4)
+            fill_rect(output, cursor_x, cursor_y + ch - 1, cw, 1, KMS_WHITE);
+        else if (view->cursor_style == 5 || view->cursor_style == 6)
+            fill_rect(output, cursor_x, cursor_y, 1, ch, KMS_WHITE);
+        else
+            fill_rect(output, cursor_x, cursor_y, cw, ch, KMS_WHITE);
+    }
 }
 
 static int wait_flip(BlitKms *kms, KmsOutput *output)
