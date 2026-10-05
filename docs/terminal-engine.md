@@ -47,6 +47,9 @@ shell conformance path is stable.
    and DEC soft reset. Colon SGR forms, underline colour (`58`/`59`), and
    Hibr's modifyOtherKeys/cursor push-pop prefixes are parsed without leaking
    their control parameters into cell attributes.
+   Device status replies include DA1/DA2, XTVERSION, CPR, window size,
+   DECRQSS, and XTGETTCAP; erase operations preserve the active background
+   colour according to BCE semantics.
 
 The direct KMS test remains the hardware oracle; the terminal engine must not
 introduce a second display or terminal implementation.

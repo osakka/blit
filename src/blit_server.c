@@ -1514,6 +1514,25 @@ static void terminal_clear_line(BlitSurface *surface, int y, int start)
         terminal_clear_cell(surface, x, y);
 }
 
+static void terminal_erase_cell(BlitSession *session, BlitSurface *surface,
+                                int x, int y)
+{
+    terminal_clear_cell(surface, x, y);
+    if (x < 0 || y < 0 || x >= surface->width || y >= surface->height)
+        return;
+    if (session->terminal_background_set)
+        surface->background[y][x] = session->terminal_background + 1;
+}
+
+static void terminal_erase_line(BlitSession *session, BlitSurface *surface,
+                                int y, int start)
+{
+    int x;
+
+    for (x = start; x < surface->width; ++x)
+        terminal_erase_cell(session, surface, x, y);
+}
+
 static void terminal_copy_cell(BlitSurface *surface, int destination,
                                int source, int y)
 {
@@ -1746,6 +1765,50 @@ static void terminal_apply_osc(BlitSession *session)
     }
 }
 
+static void terminal_apply_string(BlitSession *session, BlitSurface *surface)
+{
+    const char *payload = session->terminal_string;
+    char reply[512];
+    int used;
+
+    session->terminal_string[session->terminal_string_length] = '\0';
+    if (session->terminal_string_type != 'P')
+        return;
+    if (strncmp(payload, "$q", 2) == 0) {
+        const char *query = payload + 2;
+        if (strcmp(query, "r") == 0) {
+            snprintf(reply, sizeof(reply), "\033P1$r%d;%dr\033\\",
+                     surface->scroll_top + 1, surface->scroll_bottom + 1);
+            terminal_write_reply(session, reply);
+        } else if (strcmp(query, " q") == 0) {
+            snprintf(reply, sizeof(reply), "\033P1$r%d q\033\\",
+                     surface->cursor_style == 3 || surface->cursor_style == 4 ?
+                     4 : surface->cursor_style == 5 || surface->cursor_style == 6 ?
+                     6 : 2);
+            terminal_write_reply(session, reply);
+        } else if (strcmp(query, "m") == 0) {
+            used = snprintf(reply, sizeof(reply), "\033P1$r0");
+            if (session->terminal_attributes & BLIT_ATTR_BOLD)
+                used += snprintf(reply + used, sizeof(reply) - (size_t)used, ";1");
+            if (session->terminal_attributes & BLIT_ATTR_DIM)
+                used += snprintf(reply + used, sizeof(reply) - (size_t)used, ";2");
+            if (session->terminal_attributes & BLIT_ATTR_UNDERLINE)
+                used += snprintf(reply + used, sizeof(reply) - (size_t)used, ";4");
+            if (session->terminal_attributes & BLIT_ATTR_INVERSE)
+                used += snprintf(reply + used, sizeof(reply) - (size_t)used, ";7");
+            if (session->terminal_attributes & BLIT_ATTR_CONCEAL)
+                used += snprintf(reply + used, sizeof(reply) - (size_t)used, ";8");
+            snprintf(reply + used, sizeof(reply) - (size_t)used, "m\033\\");
+            terminal_write_reply(session, reply);
+        } else {
+            terminal_write_reply(session, "\033P0$r\033\\");
+        }
+    } else if (strncmp(payload, "+q", 2) == 0) {
+        snprintf(reply, sizeof(reply), "\033P0+r%s\033\\", payload + 2);
+        terminal_write_reply(session, reply);
+    }
+}
+
 static void terminal_put_codepoint(BlitSession *session, BlitSurface *surface,
                                    uint32_t codepoint, int cell_width);
 
@@ -1962,6 +2025,14 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         }
         return;
     }
+    if (prefix == '>' && command == 'c' && (!has_first || first == 0)) {
+        terminal_write_reply(session, "\033[>1;10;0c");
+        return;
+    }
+    if (prefix == '>' && command == 'q') {
+        terminal_write_reply(session, "\033P>|blit-term 0.1\033\\");
+        return;
+    }
     /* CSI > ... m is the modifyOtherKeys family, not SGR.  It changes
        keyboard encoding and must never alter the cell attributes. */
     if (prefix == '>')
@@ -2128,17 +2199,23 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         if (count > surface->width - surface->cursor_x)
             count = surface->width - surface->cursor_x;
         for (x = 0; x < count; ++x)
-            terminal_clear_cell(surface, surface->cursor_x + x,
+            terminal_erase_cell(session, surface, surface->cursor_x + x,
                                 surface->cursor_y);
         mark_surface_damage(surface, surface->cursor_x, surface->cursor_y);
     } else if (!private_mode && command == 'c') {
-        terminal_write_reply(session, "\033[?62;1;2;6;7;8;9c");
+        if (!has_first || first == 0)
+            terminal_write_reply(session, "\033[?62;1;2;6;7;8;9c");
     } else if (!private_mode && command == 'n' && has_first && first == 5) {
         terminal_write_reply(session, "\033[0n");
     } else if (!private_mode && command == 'n' && has_first && first == 6) {
         char reply[64];
         snprintf(reply, sizeof(reply), "\033[%d;%dR",
                  surface->cursor_y + 1, surface->cursor_x + 1);
+        terminal_write_reply(session, reply);
+    } else if (!private_mode && command == 't' && has_first && first == 18) {
+        char reply[64];
+        snprintf(reply, sizeof(reply), "\033[8;%d;%dt",
+                 surface->height, surface->width);
         terminal_write_reply(session, reply);
     } else if (!private_mode && command == 's') {
         session->terminal_cursor_saved = 1;
@@ -2413,30 +2490,30 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         int y;
         int start;
         if (mode == 0) {
-            terminal_clear_line(surface, surface->cursor_y,
+            terminal_erase_line(session, surface, surface->cursor_y,
                                 surface->cursor_x);
             for (y = surface->cursor_y + 1; y < surface->height; ++y)
-                terminal_clear_line(surface, y, 0);
+                terminal_erase_line(session, surface, y, 0);
         } else if (mode == 1) {
             for (y = 0; y < surface->cursor_y; ++y)
-                terminal_clear_line(surface, y, 0);
+                terminal_erase_line(session, surface, y, 0);
             for (start = 0; start <= surface->cursor_x; ++start)
-                terminal_clear_cell(surface, start, surface->cursor_y);
+                terminal_erase_cell(session, surface, start, surface->cursor_y);
         } else if (mode == 2 || mode == 3) {
             for (y = 0; y < surface->height; ++y)
-                terminal_clear_line(surface, y, 0);
+                terminal_erase_line(session, surface, y, 0);
         }
     } else if (command == 'K') {
         int mode = has_first ? first : 0;
         int x;
         if (mode == 0)
-            terminal_clear_line(surface, surface->cursor_y,
+            terminal_erase_line(session, surface, surface->cursor_y,
                                 surface->cursor_x);
         else if (mode == 1) {
             for (x = 0; x <= surface->cursor_x; ++x)
-                terminal_clear_cell(surface, x, surface->cursor_y);
+                terminal_erase_cell(session, surface, x, surface->cursor_y);
         } else if (mode == 2)
-            terminal_clear_line(surface, surface->cursor_y, 0);
+            terminal_erase_line(session, surface, surface->cursor_y, 0);
     }
 }
 
@@ -2617,14 +2694,19 @@ static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
             continue;
         }
         if (session->terminal_escape == 3) {
-            if (byte == '\a' || byte == 0x9c) {
+            if (byte == 0x9c) {
+                if (session->terminal_string_type == ']')
+                    terminal_apply_osc(session);
+                else
+                    terminal_apply_string(session, surface);
+                session->terminal_escape = 0;
+            } else if (byte == '\a' && session->terminal_string_type == ']') {
                 terminal_apply_osc(session);
                 session->terminal_escape = 0;
             } else if (byte == 0x1b)
                 session->terminal_escape = 4;
-            else if (session->terminal_string_type == ']' &&
-                     session->terminal_string_length <
-                         (int)sizeof(session->terminal_string) - 1)
+            else if (session->terminal_string_length <
+                     (int)sizeof(session->terminal_string) - 1)
                 session->terminal_string[
                     session->terminal_string_length++] = (char)byte;
             ++offset;
@@ -2632,7 +2714,10 @@ static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
         }
         if (session->terminal_escape == 4) {
             if (byte == '\\') {
-                terminal_apply_osc(session);
+                if (session->terminal_string_type == ']')
+                    terminal_apply_osc(session);
+                else
+                    terminal_apply_string(session, surface);
                 session->terminal_escape = 0;
             } else {
                 session->terminal_escape = 3;

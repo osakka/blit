@@ -36,6 +36,11 @@ def cell_map(snapshot)
   end
 end
 
+def row_text(snapshot, row = 0)
+  cells = cell_map(snapshot)
+  cells.keys.select { |x, y| y == row }.sort.map { |x, y| cells.fetch([x, y]).fetch('text') }.join
+end
+
 def assert_equal(expected, actual, detail)
   return if expected == actual
 
@@ -316,6 +321,33 @@ snapshot = run_case(base, 'synchronized-output',
 cells = cell_map(snapshot)
 assert_equal('A', cells.fetch([0, 0]).fetch('text'), 'sync prefix')
 assert_equal('B', cells.fetch([1, 0]).fetch('text'), 'sync release')
+
+snapshot = run_case(base, 'background-color-erase',
+                    "printf '\\033[44m\\033[2J\\033[0mx'")
+cells = cell_map(snapshot)
+assert_equal('#0000ee', cells.fetch([1, 0]).fetch('style').fetch('background'),
+             'BCE erase background')
+
+snapshot = run_case(base, 'da2-query',
+                    "stty -icanon -echo min 0 time 5; printf '\\033[>c'; dd if=/dev/tty bs=1 count=10 2>/dev/null | od -An -tx1 | tr -d ' \\n'")
+assert_equal('1b5b3e313b31303b3063', row_text(snapshot), 'DA2 reply')
+
+snapshot = run_case(base, 'xtversion-query',
+                    "stty -icanon -echo min 0 time 5; printf '\\033[>q'; dd if=/dev/tty bs=1 count=19 2>/dev/null | od -An -tx1 | tr -d ' \\n'", width: 80)
+assert_equal('1b503e7c626c69742d7465726d20302e311b5c', row_text(snapshot),
+             'XTVERSION reply')
+
+snapshot = run_case(base, 'window-size-query',
+                    "stty -icanon -echo min 0 time 5; printf '\\033[18t'; dd if=/dev/tty bs=1 count=11 2>/dev/null | od -An -tx1 | tr -d ' \\n'")
+assert_equal('1b5b383b343b323074', row_text(snapshot), 'window size reply')
+
+snapshot = run_case(base, 'decrqss-scroll-query',
+                    "stty -icanon -echo min 0 time 5; printf '\\033P$qr\\033\\\\'; dd if=/dev/tty bs=1 count=11 2>/dev/null | od -An -tx1 | tr -d ' \\n'", width: 80)
+assert_equal('1b50312472313b34721b5c', row_text(snapshot), 'DECRQSS reply')
+
+snapshot = run_case(base, 'xtgettcap-query',
+                    "stty -icanon -echo min 0 time 5; printf '\\033P+q544e\\033\\\\'; dd if=/dev/tty bs=1 count=11 2>/dev/null | od -An -tx1 | tr -d ' \\n'", width: 80)
+assert_equal('1b50302b72353434651b5c', row_text(snapshot), 'XTGETTCAP reply')
 
 snapshot = run_case(base, 'modify-other-keys-prefix',
                     "printf 'a\\033[>4;2mb\\033[>4mc'")
