@@ -44,7 +44,9 @@ shell conformance path is stable.
    style and suppressed by both renderers while preserving the cell background.
    Synchronized output (`CSI ? 2026 h/l`) gates presentation until the
    application releases the update batch; its terminal state is reset by RIS
-   and DEC soft reset.
+   and DEC soft reset. Colon SGR forms, underline colour (`58`/`59`), and
+   Hibr's modifyOtherKeys/cursor push-pop prefixes are parsed without leaking
+   their control parameters into cell attributes.
 
 The direct KMS test remains the hardware oracle; the terminal engine must not
 introduce a second display or terminal implementation.

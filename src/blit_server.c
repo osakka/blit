@@ -79,6 +79,7 @@ typedef struct {
     unsigned char combining_count[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
     uint32_t foreground[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
     uint32_t background[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
+    uint32_t underline_color[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
     unsigned char attributes[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
     char alternate_cells[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
     uint32_t alternate_codepoints[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
@@ -86,6 +87,7 @@ typedef struct {
     unsigned char alternate_combining_count[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
     uint32_t alternate_foreground[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
     uint32_t alternate_background[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
+    uint32_t alternate_underline_color[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
     unsigned char alternate_attributes[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
     int cursor_x;
     int cursor_y;
@@ -208,6 +210,8 @@ typedef struct {
     int terminal_mouse_mode;
     int terminal_mouse_sgr;
     int terminal_synchronized;
+    uint32_t terminal_underline_color;
+    int terminal_underline_color_set;
 } BlitSession;
 
 enum {
@@ -1201,7 +1205,8 @@ static void surface_snapshot_json(const BlitSurface *surface, char *body,
             uint32_t codepoint = surface->codepoints[y][x];
             unsigned char attributes = surface->attributes[y][x];
             int styled = surface->foreground[y][x] != 0 ||
-                surface->background[y][x] != 0 || attributes != 0;
+                surface->background[y][x] != 0 ||
+                surface->underline_color[y][x] != 0 || attributes != 0;
 
             if (codepoint == 0 && !styled)
                 continue;
@@ -1220,13 +1225,15 @@ static void surface_snapshot_json(const BlitSurface *surface, char *body,
                     ",\"style\":{\"foreground\":\"#%06x\","
                     "\"background\":\"#%06x\",\"bold\":%s,"
                     "\"dim\":%s,\"underline\":%s,\"inverse\":%s,"
-                    "\"concealed\":%s}",
+                    "\"concealed\":%s,\"underline_color\":\"#%06x\"}",
                     (unsigned int)foreground, (unsigned int)background,
                     attributes & BLIT_ATTR_BOLD ? "true" : "false",
                     attributes & BLIT_ATTR_DIM ? "true" : "false",
                     attributes & BLIT_ATTR_UNDERLINE ? "true" : "false",
                     attributes & BLIT_ATTR_INVERSE ? "true" : "false",
-                    attributes & BLIT_ATTR_CONCEAL ? "true" : "false");
+                    attributes & BLIT_ATTR_CONCEAL ? "true" : "false",
+                    (unsigned int)(surface->underline_color[y][x] ?
+                        surface->underline_color[y][x] - 1 : 0));
             }
             used += (size_t)snprintf(body + used, capacity - used, "}");
         }
@@ -1270,9 +1277,11 @@ static int apply_cell_update(BlitSurface *surface, const char *json)
         char color_text[32];
         uint32_t foreground = 0;
         uint32_t background = 0;
+        uint32_t underline_color = 0;
         unsigned char attributes = 0;
         int foreground_set = 0;
         int background_set = 0;
+        int underline_color_set = 0;
         const char *next_cell = strstr(cursor + 3, "\"x\"");
         const char *style_cursor = strstr(cursor, "\"style\"");
         int style_seen = style_cursor != NULL &&
@@ -1310,6 +1319,12 @@ static int apply_cell_update(BlitSurface *surface, const char *json)
                 attributes |= BLIT_ATTR_INVERSE;
             if (json_bool(cursor, "concealed", &flag) && flag)
                 attributes |= BLIT_ATTR_CONCEAL;
+            if (json_string(cursor, "underline_color", color_text,
+                            sizeof(color_text))) {
+                underline_color_set = parse_color(color_text, &underline_color);
+                if (!underline_color_set)
+                    style_valid = 0;
+            }
         }
         if (!style_valid)
             break;
@@ -1327,6 +1342,8 @@ static int apply_cell_update(BlitSurface *surface, const char *json)
                         surface->foreground[y][x + i] = foreground + 1;
                     if (background_set)
                         surface->background[y][x + i] = background + 1;
+                    if (underline_color_set)
+                        surface->underline_color[y][x + i] = underline_color + 1;
                     surface->attributes[y][x + i] = attributes;
                 }
                 mark_surface_damage(surface, x + (int)i, y);
@@ -1393,6 +1410,7 @@ static void terminal_alignment_test(BlitSurface *surface)
             surface->codepoints[y][x] = 'E';
             surface->foreground[y][x] = 0;
             surface->background[y][x] = 0;
+            surface->underline_color[y][x] = 0;
             surface->attributes[y][x] = 0;
         }
     }
@@ -1424,6 +1442,8 @@ static void terminal_enter_alternate(BlitSession *session,
            sizeof(surface->foreground));
     memcpy(surface->alternate_background, surface->background,
            sizeof(surface->background));
+    memcpy(surface->alternate_underline_color, surface->underline_color,
+           sizeof(surface->underline_color));
     memcpy(surface->alternate_attributes, surface->attributes,
            sizeof(surface->attributes));
     session->terminal_saved_x = surface->cursor_x;
@@ -1453,6 +1473,8 @@ static void terminal_leave_alternate(BlitSession *session,
            sizeof(surface->foreground));
     memcpy(surface->background, surface->alternate_background,
            sizeof(surface->background));
+    memcpy(surface->underline_color, surface->alternate_underline_color,
+           sizeof(surface->underline_color));
     memcpy(surface->attributes, surface->alternate_attributes,
            sizeof(surface->attributes));
     session->terminal_alternate = 0;
@@ -1479,6 +1501,7 @@ static void terminal_clear_cell(BlitSurface *surface, int x, int y)
     surface->combining_count[y][x] = 0;
     surface->foreground[y][x] = 0;
     surface->background[y][x] = 0;
+    surface->underline_color[y][x] = 0;
     surface->attributes[y][x] = 0;
     mark_surface_damage(surface, x, y);
 }
@@ -1502,6 +1525,8 @@ static void terminal_copy_cell(BlitSurface *surface, int destination,
         surface->combining_count[y][source];
     surface->foreground[y][destination] = surface->foreground[y][source];
     surface->background[y][destination] = surface->background[y][source];
+    surface->underline_color[y][destination] =
+        surface->underline_color[y][source];
     surface->attributes[y][destination] = surface->attributes[y][source];
 }
 
@@ -1527,6 +1552,8 @@ static void terminal_scroll_up(BlitSurface *surface)
                sizeof(surface->foreground[y - 1]));
         memcpy(surface->background[y - 1], surface->background[y],
                sizeof(surface->background[y - 1]));
+        memcpy(surface->underline_color[y - 1], surface->underline_color[y],
+               sizeof(surface->underline_color[y - 1]));
         memcpy(surface->attributes[y - 1], surface->attributes[y],
                sizeof(surface->attributes[y - 1]));
     }
@@ -1541,6 +1568,8 @@ static void terminal_scroll_up(BlitSurface *surface)
            sizeof(surface->foreground[bottom]));
     memset(surface->background[bottom], 0,
            sizeof(surface->background[bottom]));
+    memset(surface->underline_color[bottom], 0,
+           sizeof(surface->underline_color[bottom]));
     memset(surface->attributes[bottom], 0,
            sizeof(surface->attributes[bottom]));
     surface->damage_valid = 1;
@@ -1566,6 +1595,9 @@ static void terminal_copy_row(BlitSurface *surface, int destination, int source)
            sizeof(surface->foreground[destination]));
     memcpy(surface->background[destination], surface->background[source],
            sizeof(surface->background[destination]));
+    memcpy(surface->underline_color[destination],
+           surface->underline_color[source],
+           sizeof(surface->underline_color[destination]));
     memcpy(surface->attributes[destination], surface->attributes[source],
            sizeof(surface->attributes[destination]));
 }
@@ -1579,6 +1611,8 @@ static void terminal_blank_row(BlitSurface *surface, int row)
            sizeof(surface->combining_count[row]));
     memset(surface->foreground[row], 0, sizeof(surface->foreground[row]));
     memset(surface->background[row], 0, sizeof(surface->background[row]));
+    memset(surface->underline_color[row], 0,
+           sizeof(surface->underline_color[row]));
     memset(surface->attributes[row], 0, sizeof(surface->attributes[row]));
 }
 
@@ -1748,15 +1782,28 @@ static void terminal_apply_sgr(BlitSession *session, const char *sequence)
         if (value == 0) {
             session->terminal_foreground = 0;
             session->terminal_background = 0;
+            session->terminal_underline_color = 0;
             session->terminal_attributes = 0;
             session->terminal_foreground_set = 0;
             session->terminal_background_set = 0;
+            session->terminal_underline_color_set = 0;
         } else if (value == 1) {
             session->terminal_attributes |= BLIT_ATTR_BOLD;
         } else if (value == 2) {
             session->terminal_attributes |= BLIT_ATTR_DIM;
         } else if (value == 4) {
             session->terminal_attributes |= BLIT_ATTR_UNDERLINE;
+            if (strchr(sequence, ':') != NULL && i + 1 < count) {
+                if (params[i + 1] == 0) {
+                    session->terminal_attributes &=
+                        (unsigned char)~BLIT_ATTR_UNDERLINE;
+                    ++i;
+                } else if (params[i + 1] == 3) {
+                    /* Curly underline is represented by the canonical
+                       underline bit until a richer glyph decoration exists. */
+                    ++i;
+                }
+            }
         } else if (value == 7) {
             session->terminal_attributes |= BLIT_ATTR_INVERSE;
         } else if (value == 22) {
@@ -1773,6 +1820,8 @@ static void terminal_apply_sgr(BlitSession *session, const char *sequence)
             session->terminal_foreground_set = 0;
         } else if (value == 49) {
             session->terminal_background_set = 0;
+        } else if (value == 59) {
+            session->terminal_underline_color_set = 0;
         } else if (value >= 30 && value <= 37) {
             session->terminal_foreground = terminal_ansi_palette(value - 30);
             session->terminal_foreground_set = 1;
@@ -1791,7 +1840,8 @@ static void terminal_apply_sgr(BlitSession *session, const char *sequence)
             session->terminal_background =
                 ((session->terminal_background & 0x7f7f7fU) | 0x303030U);
             session->terminal_background_set = 1;
-        } else if ((value == 38 || value == 48) && i + 1 < count) {
+        } else if ((value == 38 || value == 48 || value == 58) &&
+                   i + 1 < count) {
             int mode = params[++i];
             uint32_t color = 0;
             int valid = 0;
@@ -1833,9 +1883,12 @@ static void terminal_apply_sgr(BlitSession *session, const char *sequence)
                 if (value == 38) {
                     session->terminal_foreground = color;
                     session->terminal_foreground_set = 1;
-                } else {
+                } else if (value == 48) {
                     session->terminal_background = color;
                     session->terminal_background_set = 1;
+                } else {
+                    session->terminal_underline_color = color;
+                    session->terminal_underline_color_set = 1;
                 }
             }
         }
@@ -1876,10 +1929,12 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
     int second = 0;
     int has_first = 0;
     int has_second = 0;
+    char prefix = 0;
     char command;
 
-    if (*cursor == '?') {
-        private_mode = 1;
+    if (*cursor == '?' || *cursor == '>' || *cursor == '<') {
+        prefix = *cursor;
+        private_mode = prefix == '?';
         ++cursor;
     }
     /* The final byte is the CSI command.  SGR is allowed to carry more
@@ -1895,6 +1950,22 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         ++cursor;
         has_second = terminal_number(&cursor, &second);
     }
+    if ((prefix == '>' || prefix == '<') && command == 'u') {
+        if (prefix == '>') {
+            session->terminal_cursor_saved = 1;
+            session->terminal_cursor_saved_x = surface->cursor_x;
+            session->terminal_cursor_saved_y = surface->cursor_y;
+        } else if (session->terminal_cursor_saved) {
+            surface->cursor_x = session->terminal_cursor_saved_x;
+            surface->cursor_y = session->terminal_cursor_saved_y;
+            mark_surface_damage(surface, surface->cursor_x, surface->cursor_y);
+        }
+        return;
+    }
+    /* CSI > ... m is the modifyOtherKeys family, not SGR.  It changes
+       keyboard encoding and must never alter the cell attributes. */
+    if (prefix == '>')
+        return;
     if (private_mode && (command == 'h' || command == 'l')) {
         int enabled = command == 'h';
         if (terminal_csi_has_mode(sequence, 47) ||
@@ -2024,6 +2095,8 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         session->terminal_attributes = 0;
         session->terminal_foreground_set = 0;
         session->terminal_background_set = 0;
+        session->terminal_underline_color = 0;
+        session->terminal_underline_color_set = 0;
         session->terminal_application_cursor = 0;
         session->terminal_application_keypad = 0;
         session->terminal_origin_mode = 0;
@@ -2207,6 +2280,8 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
                     surface->foreground[surface->cursor_y][source];
                 surface->background[surface->cursor_y][x] =
                     surface->background[surface->cursor_y][source];
+                surface->underline_color[surface->cursor_y][x] =
+                    surface->underline_color[surface->cursor_y][source];
                 surface->attributes[surface->cursor_y][x] =
                     surface->attributes[surface->cursor_y][source];
             }
@@ -2229,6 +2304,8 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
                     surface->foreground[surface->cursor_y][source];
                 surface->background[surface->cursor_y][x] =
                     surface->background[surface->cursor_y][source];
+                surface->underline_color[surface->cursor_y][x] =
+                    surface->underline_color[surface->cursor_y][source];
                 surface->attributes[surface->cursor_y][x] =
                     surface->attributes[surface->cursor_y][source];
             }
@@ -2425,6 +2502,9 @@ static void terminal_put_codepoint(BlitSession *session, BlitSurface *surface,
     if (session->terminal_background_set)
         surface->background[surface->cursor_y][surface->cursor_x] =
             session->terminal_background + 1;
+    if (session->terminal_underline_color_set)
+        surface->underline_color[surface->cursor_y][surface->cursor_x] =
+            session->terminal_underline_color + 1;
     surface->attributes[surface->cursor_y][surface->cursor_x] =
         session->terminal_attributes | (cell_width == 2 ? BLIT_ATTR_WIDE : 0);
     if (cell_width == 2) {
@@ -2524,6 +2604,8 @@ static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
                 session->terminal_synchronized = 0;
                 session->terminal_foreground = 0;
                 session->terminal_background = 0;
+                session->terminal_underline_color = 0;
+                session->terminal_underline_color_set = 0;
                 session->terminal_attributes = 0;
                 session->terminal_foreground_set = 0;
                 session->terminal_background_set = 0;
@@ -4556,6 +4638,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
             views[view_count].combining_count = &surface->combining_count[0][0];
             views[view_count].foreground = &surface->foreground[0][0];
             views[view_count].background = &surface->background[0][0];
+            views[view_count].underline_color =
+                &surface->underline_color[0][0];
             views[view_count].attributes = &surface->attributes[0][0];
             views[view_count].cursor_x = surface->cursor_x;
             views[view_count].cursor_y = surface->cursor_y;
@@ -4711,6 +4795,11 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
                             (unsigned char)background, 255);
                         SDL_RenderFillRect(renderer, &cell_background);
                     }
+                    {
+                        uint32_t underline_color =
+                            surface->underline_color[row][column] ?
+                            surface->underline_color[row][column] - 1 :
+                            foreground;
                     SDL_SetRenderDrawColor(renderer,
                         (unsigned char)(foreground >> 16),
                         (unsigned char)(foreground >> 8),
@@ -4737,10 +4826,16 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
                             SDL_RenderDebugText(renderer, surface_origin_x + 1.0f + column * 8.0f,
                                 (float)surface_origin_y + row * 8.0f, glyph);
                         if (attributes & BLIT_ATTR_UNDERLINE)
+                            SDL_SetRenderDrawColor(renderer,
+                                (unsigned char)(underline_color >> 16),
+                                (unsigned char)(underline_color >> 8),
+                                (unsigned char)underline_color, 255);
+                        if (attributes & BLIT_ATTR_UNDERLINE)
                             SDL_RenderLine(renderer, surface_origin_x + column * 8.0f,
                                 (float)surface_origin_y + row * 8.0f + 7.0f,
                                 11.0f + column * 8.0f,
                                 (float)surface_origin_y + row * 8.0f + 7.0f);
+                    }
                     }
                 }
             }

@@ -23,6 +23,7 @@ typedef struct {
     const unsigned char *combining_count;
     const uint32_t *foreground;
     const uint32_t *background;
+    const uint32_t *underline_color;
     const unsigned char *attributes;
     int stride;
     int cursor_x;

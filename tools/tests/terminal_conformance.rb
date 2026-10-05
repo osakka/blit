@@ -317,6 +317,26 @@ cells = cell_map(snapshot)
 assert_equal('A', cells.fetch([0, 0]).fetch('text'), 'sync prefix')
 assert_equal('B', cells.fetch([1, 0]).fetch('text'), 'sync release')
 
+snapshot = run_case(base, 'modify-other-keys-prefix',
+                    "printf 'a\\033[>4;2mb\\033[>4mc'")
+cells = cell_map(snapshot)
+raise 'modifyOtherKeys changed cell style' if cells.fetch([1, 0]).key?('style')
+
+snapshot = run_case(base, 'cursor-push-pop-prefix',
+                    "printf 'a\\033[>1ub\\033[1;1HX\\033[<uY'")
+cells = cell_map(snapshot)
+assert_equal('Y', cells.fetch([1, 0]).fetch('text'), 'cursor pop target')
+
+snapshot = run_case(base, 'colon-sgr-and-underline-color',
+                    "printf '\\033[38:5:196mA\\033[38:2::10:20:30mB\\033[58;5;196;4mC\\033[59mD\\033[0m'")
+cells = cell_map(snapshot)
+assert_equal('#ff0000', cells.fetch([0, 0]).fetch('style').fetch('foreground'),
+             'colon indexed foreground')
+assert_equal('#0a141e', cells.fetch([1, 0]).fetch('style').fetch('foreground'),
+             'colon rgb foreground')
+assert_equal('#ff0000', cells.fetch([2, 0]).fetch('style').fetch('underline_color'),
+             'underline colour')
+
 snapshot = run_case(base, 'fragmented-csi', "printf '\\033['; sleep 0.02; printf '2;3'; sleep 0.02; printf 'H'; printf 'F'")
 cells = cell_map(snapshot)
 assert_equal('F', cells.fetch([2, 1]).fetch('text'), 'fragmented CSI')

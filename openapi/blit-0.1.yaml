@@ -787,6 +787,9 @@ components:
         underline: {type: boolean}
         inverse: {type: boolean}
         concealed: {type: boolean}
+        underline_color:
+          type: string
+          pattern: '^#[0-9a-fA-F]{6}$'
       additionalProperties: false
     CellUpdate:
       type: object
