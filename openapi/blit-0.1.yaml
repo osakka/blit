@@ -786,6 +786,7 @@ components:
         dim: {type: boolean}
         underline: {type: boolean}
         inverse: {type: boolean}
+        concealed: {type: boolean}
       additionalProperties: false
     CellUpdate:
       type: object

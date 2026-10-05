@@ -495,19 +495,22 @@ static void draw_view(KmsOutput *output, const KmsFont *font,
                  view->combining_count[index] == 0))
                 continue;
             if (bg) fill_rect(output, x, y, cw, ch, bg);
-            for (glyph_row = 0; glyph_row < (font != NULL && font->data ?
-                 font->height : 7) && glyph_row < ch; ++glyph_row)
-                for (glyph_column = 0; glyph_column < (font != NULL && font->data ?
-                     cw : 5) && glyph_column < cw;
-                     ++glyph_column)
-                    if (font != NULL && font->data ?
-                        font_pixel(font, cp, glyph_row,
-                                   cw < font->width ?
-                                   glyph_column * font->width / cw : glyph_column) :
-                        glyph_bit(cp, glyph_row, glyph_column))
-                        put_pixel(output, x + glyph_column, y + glyph_row, fg);
-            if (attr & 4) fill_rect(output, x, y + ch - 1, cw, 1, fg);
-            if (attr & 1)
+            if (!(attr & 64)) {
+                for (glyph_row = 0; glyph_row < (font != NULL && font->data ?
+                     font->height : 7) && glyph_row < ch; ++glyph_row)
+                    for (glyph_column = 0; glyph_column < (font != NULL && font->data ?
+                         cw : 5) && glyph_column < cw;
+                         ++glyph_column)
+                        if (font != NULL && font->data ?
+                            font_pixel(font, cp, glyph_row,
+                                       cw < font->width ?
+                                       glyph_column * font->width / cw : glyph_column) :
+                            glyph_bit(cp, glyph_row, glyph_column))
+                            put_pixel(output, x + glyph_column, y + glyph_row, fg);
+            }
+            if (!(attr & 64) && (attr & 4))
+                fill_rect(output, x, y + ch - 1, cw, 1, fg);
+            if (!(attr & 64) && (attr & 1))
                 for (glyph_row = 0; glyph_row < (font != NULL && font->data ?
                      font->height : 7) && glyph_row < ch; ++glyph_row)
                     for (glyph_column = 0; glyph_column < (font != NULL && font->data ?
@@ -520,7 +523,8 @@ static void draw_view(KmsOutput *output, const KmsFont *font,
                         glyph_bit(cp, glyph_row, glyph_column))
                         put_pixel(output, x + glyph_column + 1,
                                       y + glyph_row, fg);
-            if (view->combining != NULL && view->combining_count != NULL) {
+            if (!(attr & 64) && view->combining != NULL &&
+                view->combining_count != NULL) {
                 int combining_index;
                 for (combining_index = 0;
                      combining_index < view->combining_count[index] &&

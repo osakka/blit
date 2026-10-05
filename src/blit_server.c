@@ -45,6 +45,7 @@ extern char **environ;
 #define BLIT_ATTR_INVERSE 8
 #define BLIT_ATTR_WIDE 16
 #define BLIT_ATTR_CONTINUATION 32
+#define BLIT_ATTR_CONCEAL 64
 #define BLIT_MAX_COMBINING 4
 
 typedef struct {
@@ -206,6 +207,7 @@ typedef struct {
     int terminal_bracketed_paste;
     int terminal_mouse_mode;
     int terminal_mouse_sgr;
+    int terminal_synchronized;
 } BlitSession;
 
 enum {
@@ -317,6 +319,17 @@ static void clear_previous_pointer(BlitRuntime *runtime, int output_index)
     SDL_SetRenderDrawColor(runtime->outputs[output_index].renderer,
                            0, 0, 0, 255);
     SDL_RenderFillRect(runtime->outputs[output_index].renderer, &area);
+}
+
+static int runtime_has_synchronized_output(const BlitRuntime *runtime)
+{
+    int index;
+
+    for (index = 0; index < BLIT_MAX_SESSIONS; ++index)
+        if (runtime->sessions[index].used &&
+            runtime->sessions[index].terminal_synchronized)
+            return 1;
+    return 0;
 }
 
 static void render_current_surfaces(BlitRuntime *runtime)
@@ -1206,12 +1219,14 @@ static void surface_snapshot_json(const BlitSurface *surface, char *body,
                 used += (size_t)snprintf(body + used, capacity - used,
                     ",\"style\":{\"foreground\":\"#%06x\","
                     "\"background\":\"#%06x\",\"bold\":%s,"
-                    "\"dim\":%s,\"underline\":%s,\"inverse\":%s}",
+                    "\"dim\":%s,\"underline\":%s,\"inverse\":%s,"
+                    "\"concealed\":%s}",
                     (unsigned int)foreground, (unsigned int)background,
                     attributes & BLIT_ATTR_BOLD ? "true" : "false",
                     attributes & BLIT_ATTR_DIM ? "true" : "false",
                     attributes & BLIT_ATTR_UNDERLINE ? "true" : "false",
-                    attributes & BLIT_ATTR_INVERSE ? "true" : "false");
+                    attributes & BLIT_ATTR_INVERSE ? "true" : "false",
+                    attributes & BLIT_ATTR_CONCEAL ? "true" : "false");
             }
             used += (size_t)snprintf(body + used, capacity - used, "}");
         }
@@ -1293,6 +1308,8 @@ static int apply_cell_update(BlitSurface *surface, const char *json)
                 attributes |= BLIT_ATTR_UNDERLINE;
             if (json_bool(cursor, "inverse", &flag) && flag)
                 attributes |= BLIT_ATTR_INVERSE;
+            if (json_bool(cursor, "concealed", &flag) && flag)
+                attributes |= BLIT_ATTR_CONCEAL;
         }
         if (!style_valid)
             break;
@@ -1748,6 +1765,10 @@ static void terminal_apply_sgr(BlitSession *session, const char *sequence)
             session->terminal_attributes &= (unsigned char)~BLIT_ATTR_UNDERLINE;
         } else if (value == 27) {
             session->terminal_attributes &= (unsigned char)~BLIT_ATTR_INVERSE;
+        } else if (value == 8) {
+            session->terminal_attributes |= BLIT_ATTR_CONCEAL;
+        } else if (value == 28) {
+            session->terminal_attributes &= (unsigned char)~BLIT_ATTR_CONCEAL;
         } else if (value == 39) {
             session->terminal_foreground_set = 0;
         } else if (value == 49) {
@@ -1930,6 +1951,8 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         }
         if (terminal_csi_has_mode(sequence, 1006))
             session->terminal_mouse_sgr = enabled;
+        if (terminal_csi_has_mode(sequence, 2026))
+            session->terminal_synchronized = enabled;
         if (terminal_csi_has_mode(sequence, 25)) {
             surface->cursor_visible = enabled;
             mark_surface_damage(surface, surface->cursor_x, surface->cursor_y);
@@ -2011,6 +2034,7 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         session->terminal_bracketed_paste = 0;
         session->terminal_mouse_mode = 0;
         session->terminal_mouse_sgr = 0;
+        session->terminal_synchronized = 0;
         surface->cursor_style = 1;
         surface->cursor_visible = 1;
         surface->scroll_top = 0;
@@ -2497,6 +2521,7 @@ static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
                 session->terminal_bracketed_paste = 0;
                 session->terminal_mouse_mode = 0;
                 session->terminal_mouse_sgr = 0;
+                session->terminal_synchronized = 0;
                 session->terminal_foreground = 0;
                 session->terminal_background = 0;
                 session->terminal_attributes = 0;
@@ -4692,29 +4717,31 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
                         (unsigned char)foreground, 255);
                     utf8_encode(surface->codepoints[row][column] ?
                         surface->codepoints[row][column] : ' ', glyph);
-                    SDL_RenderDebugText(renderer, surface_origin_x + column * 8.0f,
-                        (float)surface_origin_y + row * 8.0f, glyph);
-                    if (surface->combining_count[row][column] > 0) {
-                        int combining_index;
-                        for (combining_index = 0;
-                             combining_index < surface->combining_count[row][column] &&
-                             combining_index < BLIT_MAX_COMBINING;
-                             ++combining_index) {
-                            utf8_encode(surface->combining[row][column][combining_index],
-                                        glyph);
-                            SDL_RenderDebugText(renderer,
-                                surface_origin_x + column * 8.0f,
-                                (float)surface_origin_y + row * 8.0f, glyph);
-                        }
-                    }
-                    if (attributes & BLIT_ATTR_BOLD)
-                        SDL_RenderDebugText(renderer, surface_origin_x + 1.0f + column * 8.0f,
+                    if (!(attributes & BLIT_ATTR_CONCEAL)) {
+                        SDL_RenderDebugText(renderer, surface_origin_x + column * 8.0f,
                             (float)surface_origin_y + row * 8.0f, glyph);
-                    if (attributes & BLIT_ATTR_UNDERLINE)
-                        SDL_RenderLine(renderer, surface_origin_x + column * 8.0f,
-                            (float)surface_origin_y + row * 8.0f + 7.0f,
-                            11.0f + column * 8.0f,
-                            (float)surface_origin_y + row * 8.0f + 7.0f);
+                        if (surface->combining_count[row][column] > 0) {
+                            int combining_index;
+                            for (combining_index = 0;
+                                 combining_index < surface->combining_count[row][column] &&
+                                 combining_index < BLIT_MAX_COMBINING;
+                                 ++combining_index) {
+                                utf8_encode(surface->combining[row][column][combining_index],
+                                            glyph);
+                                SDL_RenderDebugText(renderer,
+                                    surface_origin_x + column * 8.0f,
+                                    (float)surface_origin_y + row * 8.0f, glyph);
+                            }
+                        }
+                        if (attributes & BLIT_ATTR_BOLD)
+                            SDL_RenderDebugText(renderer, surface_origin_x + 1.0f + column * 8.0f,
+                                (float)surface_origin_y + row * 8.0f, glyph);
+                        if (attributes & BLIT_ATTR_UNDERLINE)
+                            SDL_RenderLine(renderer, surface_origin_x + column * 8.0f,
+                                (float)surface_origin_y + row * 8.0f + 7.0f,
+                                11.0f + column * 8.0f,
+                                (float)surface_origin_y + row * 8.0f + 7.0f);
+                    }
                 }
             }
             if (surface->cursor_visible &&
@@ -5509,6 +5536,7 @@ int main(int argc, char **argv)
             }
         }
         if (runtime.render_pending &&
+            !runtime_has_synchronized_output(&runtime) &&
             (SDL_GetTicks() - runtime.render_last_ticks >=
              (uint32_t)runtime.render_interval_ms)) {
             render_current_surfaces(&runtime);

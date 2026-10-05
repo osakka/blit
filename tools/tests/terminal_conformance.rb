@@ -304,6 +304,19 @@ snapshot = run_case(base, 'attribute-reset-sgr',
 cells = cell_map(snapshot)
 raise 'attribute reset left B styled' if cells.fetch([1, 0]).key?('style')
 
+snapshot = run_case(base, 'concealed-sgr',
+                    "printf 'a\\033[8mb\\033[28mc'")
+cells = cell_map(snapshot)
+assert_equal(true, cells.fetch([1, 0]).fetch('style').fetch('concealed'),
+             'SGR conceal set')
+raise 'SGR conceal reset left c styled' if cells.fetch([2, 0]).key?('style')
+
+snapshot = run_case(base, 'synchronized-output',
+                    "printf '\\033[?2026hA\\033[?2026lB'")
+cells = cell_map(snapshot)
+assert_equal('A', cells.fetch([0, 0]).fetch('text'), 'sync prefix')
+assert_equal('B', cells.fetch([1, 0]).fetch('text'), 'sync release')
+
 snapshot = run_case(base, 'fragmented-csi', "printf '\\033['; sleep 0.02; printf '2;3'; sleep 0.02; printf 'H'; printf 'F'")
 cells = cell_map(snapshot)
 assert_equal('F', cells.fetch([2, 1]).fetch('text'), 'fragmented CSI')

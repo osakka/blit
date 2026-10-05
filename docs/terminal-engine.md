@@ -40,7 +40,11 @@ shell conformance path is stable.
    styles retain their VT identity even when a backend presents them steadily.
    Kitty-compatible cursor restore (`CSI ? u`) and the ECMA-48 rule that C0
    controls execute inside CSI are also covered, including CAN/SUB sequence
-   cancellation.
+   cancellation. SGR conceal (`8`/`28`) is retained in the canonical cell
+   style and suppressed by both renderers while preserving the cell background.
+   Synchronized output (`CSI ? 2026 h/l`) gates presentation until the
+   application releases the update batch; its terminal state is reset by RIS
+   and DEC soft reset.
 
 The direct KMS test remains the hardware oracle; the terminal engine must not
 introduce a second display or terminal implementation.
