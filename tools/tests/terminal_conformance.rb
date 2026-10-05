@@ -236,6 +236,12 @@ snapshot = run_case(base, 'legacy-alternate-screen',
 cells = cell_map(snapshot)
 assert_equal('m', cells.fetch([0, 0]).fetch('text'), 'legacy alternate restore')
 
+snapshot = run_case(base, 'per-screen-saved-cursor',
+                    "printf '\\033[31mA\\0337\\033[?1049h\\033[32mB\\0337\\033[?1049l\\0338C'")
+cells = cell_map(snapshot)
+assert_equal('#cd0000', cells.fetch([1, 0]).fetch('style').fetch('foreground'),
+             'main saved cursor survived alternate save')
+
 snapshot = run_case(base, 'soft-reset', "printf '\\033[31mA\\033[!pB'")
 cells = cell_map(snapshot)
 assert_equal('A', cells.fetch([0, 0]).fetch('text'), 'soft reset prefix')
@@ -247,6 +253,12 @@ cells = cell_map(snapshot)
 assert_equal('A', cells.fetch([0, 0]).fetch('text'), 'saved cursor prefix')
 assert_equal('Y', cells.fetch([1, 0]).fetch('text'), 'saved cursor restore')
 assert_equal('X', cells.fetch([2, 1]).fetch('text'), 'saved cursor moved text')
+
+snapshot = run_case(base, 'saved-cursor-pen',
+                    "printf '\\033[31mA\\0337\\033[0mB\\0338C'")
+cells = cell_map(snapshot)
+assert_equal('#cd0000', cells.fetch([1, 0]).fetch('style').fetch('foreground'),
+             'DECSC restored pen')
 
 snapshot = run_case(base, 'dec-saved-cursor-mode',
                     "printf 'A\\033[?1048h\\033[2;3HX\\033[?1048lY'")
