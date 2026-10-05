@@ -623,6 +623,91 @@ static int output_view_unchanged(const KmsOutput *output,
     return 0;
 }
 
+static int pointer_intersects_output(const KmsOutput *output,
+                                     float x, float y, int visible)
+{
+    int local_x;
+    int local_y;
+    if (!visible) return 0;
+    local_x = (int)x - output->info.x;
+    local_y = (int)y - output->info.y;
+    return local_x < output->mode.hdisplay && local_x + 12 > 0 &&
+        local_y < output->mode.vdisplay && local_y + 18 > 0;
+}
+
+static void include_pointer_damage(const KmsOutput *output,
+                                   const BlitKmsSurfaceView *view,
+                                   float x, float y, int visible,
+                                   int *damage_valid, int *damage_x,
+                                   int *damage_y, int *damage_width,
+                                   int *damage_height)
+{
+    int local_x;
+    int local_y;
+    int left;
+    int top;
+    int right;
+    int bottom;
+    int first_column;
+    int first_row;
+    int last_column;
+    int last_row;
+    int cw;
+    int ch;
+    if (!pointer_intersects_output(output, x, y, visible)) return;
+    local_x = (int)x - output->info.x;
+    local_y = (int)y - output->info.y;
+    cw = view->cell_width > 0 ? view->cell_width : KMS_FONT_W;
+    ch = view->cell_height > 0 ? view->cell_height : KMS_FONT_H;
+    left = local_x > view->origin_x ? local_x : view->origin_x;
+    top = local_y > view->origin_y ? local_y : view->origin_y;
+    right = local_x + 12 < view->origin_x + view->columns * cw ?
+        local_x + 12 : view->origin_x + view->columns * cw;
+    bottom = local_y + 18 < view->origin_y + view->rows * ch ?
+        local_y + 18 : view->origin_y + view->rows * ch;
+    if (left >= right || top >= bottom) return;
+    first_column = (left - view->origin_x) / cw;
+    first_row = (top - view->origin_y) / ch;
+    last_column = (right - view->origin_x + cw - 1) / cw;
+    last_row = (bottom - view->origin_y + ch - 1) / ch;
+    if (first_column < 0) first_column = 0;
+    if (first_row < 0) first_row = 0;
+    if (last_column > view->columns) last_column = view->columns;
+    if (last_row > view->rows) last_row = view->rows;
+    if (first_column >= last_column || first_row >= last_row) return;
+    if (!*damage_valid) {
+        *damage_valid = 1;
+        *damage_x = first_column;
+        *damage_y = first_row;
+        *damage_width = last_column - first_column;
+        *damage_height = last_row - first_row;
+        return;
+    }
+    if (first_column < *damage_x) {
+        *damage_width += *damage_x - first_column;
+        *damage_x = first_column;
+    }
+    if (first_row < *damage_y) {
+        *damage_height += *damage_y - first_row;
+        *damage_y = first_row;
+    }
+    if (last_column > *damage_x + *damage_width)
+        *damage_width = last_column - *damage_x;
+    if (last_row > *damage_y + *damage_height)
+        *damage_height = last_row - *damage_y;
+}
+
+static void clear_pointer_rect(KmsOutput *output, float x, float y,
+                               int visible)
+{
+    int local_x;
+    int local_y;
+    if (!pointer_intersects_output(output, x, y, visible)) return;
+    local_x = (int)x - output->info.x;
+    local_y = (int)y - output->info.y;
+    fill_rect(output, local_x, local_y, 12, 18, 0);
+}
+
 static int view_has_content(const BlitKmsSurfaceView *view)
 {
     int y;
@@ -770,13 +855,19 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         int view_index;
         int output_view_count = 0;
         int output_changed;
-        full_redraw = !output->initialized || pointer_changed;
+        full_redraw = !output->initialized;
         for (view_index = 0; view_index < view_count; ++view_index)
             if (views[view_index].display_id == output->info.id)
                 ++output_view_count;
         if (output_view_count != output->last_view_count)
             full_redraw = 1;
-        output_changed = full_redraw || capture;
+        output_changed = full_redraw || capture ||
+            (pointer_changed &&
+             (pointer_intersects_output(output, kms->previous_pointer_x,
+                                        kms->previous_pointer_y,
+                                        kms->previous_pointer_visible) ||
+              pointer_intersects_output(output, pointer_x, pointer_y,
+                                         pointer_visible)));
         if (!output_changed) {
             for (view_index = 0; view_index < view_count; ++view_index) {
                 if (views[view_index].display_id != output->info.id)
@@ -815,24 +906,64 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         }
         if (full_redraw)
             memset(output->back.map, 0, output->back.size);
+        else
+            memcpy(output->back.map, output->front.map, output->back.size);
+        if (pointer_changed) {
+            clear_pointer_rect(output, kms->previous_pointer_x,
+                               kms->previous_pointer_y,
+                               kms->previous_pointer_visible);
+            clear_pointer_rect(output, pointer_x, pointer_y, pointer_visible);
+        }
         for (view_index = 0; view_index < view_count; ++view_index)
             if (views[view_index].display_id == output->info.id) {
                 BlitKmsSurfaceView draw = views[view_index];
+                int pointer_damage = 0;
+                if (pointer_changed) {
+                    include_pointer_damage(output, &views[view_index],
+                                           kms->previous_pointer_x,
+                                           kms->previous_pointer_y,
+                                           kms->previous_pointer_visible,
+                                           &pointer_damage, &draw.damage_x,
+                                           &draw.damage_y, &draw.damage_width,
+                                           &draw.damage_height);
+                    include_pointer_damage(output, &views[view_index],
+                                           pointer_x, pointer_y,
+                                           pointer_visible, &pointer_damage,
+                                           &draw.damage_x, &draw.damage_y,
+                                           &draw.damage_width,
+                                           &draw.damage_height);
+                }
                 if (!full_redraw && output_view_unchanged(output,
-                                                           &views[view_index]))
+                                                           &views[view_index]) &&
+                    !pointer_damage)
                     continue;
+                if (pointer_damage) draw.damage_valid = 1;
                 if (!full_redraw && views[view_index].damage_valid) {
+                    int damage_x = views[view_index].damage_x;
+                    int damage_y = views[view_index].damage_y;
+                    int damage_right = damage_x + views[view_index].damage_width;
+                    int damage_bottom = damage_y + views[view_index].damage_height;
                     int cw = views[view_index].cell_width > 0 ?
                         views[view_index].cell_width : KMS_FONT_W;
                     int ch = views[view_index].cell_height > 0 ?
                         views[view_index].cell_height : KMS_FONT_H;
+                    if (pointer_damage) {
+                        if (damage_x > draw.damage_x) damage_x = draw.damage_x;
+                        if (damage_y > draw.damage_y) damage_y = draw.damage_y;
+                        if (damage_right < draw.damage_x + draw.damage_width)
+                            damage_right = draw.damage_x + draw.damage_width;
+                        if (damage_bottom < draw.damage_y + draw.damage_height)
+                            damage_bottom = draw.damage_y + draw.damage_height;
+                        draw.damage_x = damage_x;
+                        draw.damage_y = damage_y;
+                        draw.damage_width = damage_right - damage_x;
+                        draw.damage_height = damage_bottom - damage_y;
+                    }
                     fill_rect(output,
-                              views[view_index].origin_x +
-                                  views[view_index].damage_x * cw,
-                              views[view_index].origin_y +
-                                  views[view_index].damage_y * ch,
-                              views[view_index].damage_width * cw,
-                              views[view_index].damage_height * ch, 0);
+                              views[view_index].origin_x + damage_x * cw,
+                              views[view_index].origin_y + damage_y * ch,
+                              (damage_right - damage_x) * cw,
+                              (damage_bottom - damage_y) * ch, 0);
                 }
                 if (full_redraw)
                     draw.damage_valid = 0;

@@ -50,8 +50,11 @@ budget from 1 to 1000 ms.
 
 After the first complete composition, direct KMS preserves each scanout back
 buffer and uses the canonical surface revision/damage rectangle to repaint only
-changed cells. A complete redraw is retained for the first frame, output/view
-set changes, and software-pointer movement so stale pixels cannot survive.
+changed cells. A complete redraw is retained for the first frame and
+output/view set changes. Pointer movement preserves the displayed front buffer,
+repaints the old and new pointer rectangles at cell granularity, and does not
+redraw the entire terminal; this prevents mouse motion from monopolizing a
+slow DRM driver or leaving pointer trails.
 
 Expected output identifies every usable card and connected connector, then
 lists its modes and preferred mode. A missing card, connector, or mode is a
