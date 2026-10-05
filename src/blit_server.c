@@ -1961,6 +1961,20 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         }
         return;
     }
+    if (private_mode && command == 'u') {
+        /* Kitty's cursor query/restore form.  Hibr treats the query as the
+           restore operation for the xterm-compatible terminal contract. */
+        if (session->terminal_cursor_saved) {
+            surface->cursor_x = session->terminal_cursor_saved_x;
+            surface->cursor_y = session->terminal_cursor_saved_y;
+            if (surface->cursor_x >= surface->width)
+                surface->cursor_x = surface->width - 1;
+            if (surface->cursor_y >= surface->height)
+                surface->cursor_y = surface->height - 1;
+            mark_surface_damage(surface, surface->cursor_x, surface->cursor_y);
+        }
+        return;
+    }
     if (!private_mode && command == 'p' && has_first &&
         strstr(sequence, "$p") != NULL) {
         int state = 0;
@@ -2537,6 +2551,37 @@ static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
             continue;
         }
         if (session->terminal_escape == 2) {
+            if (byte == 0x18 || byte == 0x1a) {
+                /* CAN and SUB abandon an incomplete control sequence. */
+                session->terminal_escape = 0;
+                session->terminal_csi_length = 0;
+                ++offset;
+                continue;
+            }
+            if (byte == '\r' || byte == '\n' || byte == '\b' || byte == '\t') {
+                /* ECMA-48 permits C0 controls to execute inside CSI without
+                   terminating the sequence. */
+                if (byte == '\r') {
+                    mark_surface_damage(surface, surface->cursor_x,
+                                        surface->cursor_y);
+                    surface->cursor_x = 0;
+                } else if (byte == '\n') {
+                    mark_surface_damage(surface, surface->cursor_x,
+                                        surface->cursor_y);
+                    if (session->terminal_newline_mode)
+                        surface->cursor_x = 0;
+                    terminal_index(surface);
+                } else if (byte == '\b') {
+                    if (surface->cursor_x > 0) --surface->cursor_x;
+                    mark_surface_damage(surface, surface->cursor_x,
+                                        surface->cursor_y);
+                } else {
+                    surface->cursor_x = terminal_next_tab(surface,
+                                                          surface->cursor_x);
+                }
+                ++offset;
+                continue;
+            }
             if ((byte == '?' || byte == '>' || byte == '!') &&
                 session->terminal_csi_length == 0) {
                 session->terminal_csi[session->terminal_csi_length++] =

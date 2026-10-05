@@ -341,6 +341,23 @@ assert_equal(false, snapshot.fetch('cursor').fetch('visible'), 'cursor hidden')
 snapshot = run_case(base, 'cursor-style', "printf '\\033[2 qX\\033[4 q'")
 assert_equal(4, snapshot.fetch('cursor').fetch('style'), 'DECSCUSR steady underline')
 
+snapshot = run_case(base, 'kitty-cursor-restore',
+                    "printf '\\033[3;4H\\0337\\033[1;1HAB\\033[?uCD'",
+                    width: 8, height: 4)
+cells = cell_map(snapshot)
+assert_equal('C', cells.fetch([3, 2]).fetch('text'), 'kitty restore prefix')
+assert_equal('D', cells.fetch([4, 2]).fetch('text'), 'kitty restore target')
+
+snapshot = run_case(base, 'c0-inside-csi', "printf '\\033[2\\n;5HX'")
+cells = cell_map(snapshot)
+assert_equal('X', cells.fetch([4, 1]).fetch('text'), 'C0 control inside CSI')
+
+snapshot = run_case(base, 'cancel-csi', "printf '\\033[31\\030X'")
+assert_equal('X', cell_map(snapshot).fetch([0, 0]).fetch('text'), 'CAN cancels CSI')
+
+snapshot = run_case(base, 'substitute-csi', "printf '\\033[31\\032X'")
+assert_equal('X', cell_map(snapshot).fetch([0, 0]).fetch('text'), 'SUB cancels CSI')
+
 snapshot = run_case(base, 'malformed-csi-recovery', "printf 'A\\033[12;X B'")
 cells = cell_map(snapshot)
 assert_equal('A', cells.fetch([0, 0]).fetch('text'), 'malformed CSI prefix')

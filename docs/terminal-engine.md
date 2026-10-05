@@ -38,6 +38,9 @@ shell conformance path is stable.
    `CSI Ps SP q`) are covered by the conformance vectors. Cursor styles are
    carried through the surface API and consumed by both renderers; blinking
    styles retain their VT identity even when a backend presents them steadily.
+   Kitty-compatible cursor restore (`CSI ? u`) and the ECMA-48 rule that C0
+   controls execute inside CSI are also covered, including CAN/SUB sequence
+   cancellation.
 
 The direct KMS test remains the hardware oracle; the terminal engine must not
 introduce a second display or terminal implementation.
