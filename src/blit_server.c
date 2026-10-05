@@ -2444,6 +2444,22 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         if (surface->cursor_y >= surface->height)
             surface->cursor_y = surface->height - 1;
         mark_surface_damage(surface, surface->cursor_x, surface->cursor_y);
+    } else if (command == 'a') {
+        int amount = has_first && first > 0 ? first : 1;
+        surface->cursor_x += amount;
+        if (surface->cursor_x >= surface->width)
+            surface->cursor_x = surface->width - 1;
+        mark_surface_damage(surface, surface->cursor_x, surface->cursor_y);
+    } else if (command == 'e') {
+        int amount = has_first && first > 0 ? first : 1;
+        surface->cursor_y += amount;
+        if (session->terminal_origin_mode) {
+            if (surface->cursor_y > surface->scroll_bottom)
+                surface->cursor_y = surface->scroll_bottom;
+        } else if (surface->cursor_y >= surface->height) {
+            surface->cursor_y = surface->height - 1;
+        }
+        mark_surface_damage(surface, surface->cursor_x, surface->cursor_y);
     } else if (command == '@' || command == 'P') {
         int amount = has_first && first > 0 ? first : 1;
         int x;

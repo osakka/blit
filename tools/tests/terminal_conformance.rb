@@ -183,6 +183,13 @@ snapshot = run_case(base, 'cursor-line-movement', "printf 'a\\nb\\033[1A\\033[1C
 cells = cell_map(snapshot)
 assert_equal('X', cells.fetch([2, 0]).fetch('text'), 'cursor line movement')
 
+snapshot = run_case(base, 'relative-cursor-movement',
+                    "printf 'A\\033[2aX\\033[2eY'", width: 8, height: 6)
+cells = cell_map(snapshot)
+assert_equal('A', cells.fetch([0, 0]).fetch('text'), 'HPR prefix')
+assert_equal('X', cells.fetch([3, 0]).fetch('text'), 'HPR target')
+assert_equal('Y', cells.fetch([4, 2]).fetch('text'), 'VPR target')
+
 snapshot = run_case(base, 'origin-mode-scroll-region',
                     "printf 'A\\033[2;4r\\033[?6h\\033[1;1HB'")
 cells = cell_map(snapshot)
