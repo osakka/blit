@@ -725,6 +725,29 @@ static void empty_inventory_json(char *body, size_t capacity,
     snprintf(body, capacity, "{\"revision\":1,\"%s\":[]}", key);
 }
 
+static int read_text_file(const char *path, char *value, size_t capacity)
+{
+    FILE *file;
+    size_t length;
+
+    if (capacity == 0)
+        return 0;
+    file = fopen(path, "r");
+    if (file == NULL)
+        return 0;
+    if (fgets(value, (int)capacity, file) == NULL) {
+        fclose(file);
+        value[0] = '\0';
+        return 0;
+    }
+    fclose(file);
+    length = strlen(value);
+    while (length > 0 &&
+           (value[length - 1] == '\n' || value[length - 1] == '\r'))
+        value[--length] = '\0';
+    return length > 0;
+}
+
 static int input_bit(const unsigned long *bits, int code)
 {
     return (bits[code / (int)(sizeof(unsigned long) * 8)] &
@@ -741,20 +764,65 @@ static void graphics_json(char *body, size_t capacity)
                              "{\"revision\":1,\"graphics_cards\":[");
     for (card = 0; card < 32 && used < capacity; ++card) {
         char path[64];
+        char sysfs_path[128];
+        char vendor[64] = "unknown";
+        char device[64] = "unknown";
+        char driver[128] = "unknown";
+        char driver_link[256];
+        char render_node[64] = "";
+        ssize_t driver_length;
+        int render_available = 0;
         int length;
 
         snprintf(path, sizeof(path), "/dev/dri/card%d", card);
         if (access(path, R_OK | W_OK) != 0)
             continue;
+        snprintf(sysfs_path, sizeof(sysfs_path),
+                 "/sys/class/drm/card%d/device/vendor", card);
+        read_text_file(sysfs_path, vendor, sizeof(vendor));
+        snprintf(sysfs_path, sizeof(sysfs_path),
+                 "/sys/class/drm/card%d/device/device", card);
+        read_text_file(sysfs_path, device, sizeof(device));
+        snprintf(sysfs_path, sizeof(sysfs_path),
+                 "/sys/class/drm/card%d/device/driver", card);
+        driver_length = readlink(sysfs_path, driver_link,
+                                 sizeof(driver_link) - 1);
+        if (driver_length > 0) {
+            const char *last_slash;
+            driver_link[driver_length] = '\0';
+            last_slash = strrchr(driver_link, '/');
+            snprintf(driver, sizeof(driver), "%s",
+                     last_slash != NULL ? last_slash + 1 : driver_link);
+        }
+        {
+            int render_index;
+            for (render_index = 128; render_index < 160; ++render_index) {
+                snprintf(render_node, sizeof(render_node),
+                         "/dev/dri/renderD%d", render_index);
+                if (access(render_node, R_OK | W_OK) == 0) {
+                    render_available = 1;
+                    break;
+                }
+            }
+            if (!render_available)
+                render_node[0] = '\0';
+        }
         length = snprintf(body + used, capacity - used,
                           "%s{\"id\":\"card-%d\","
-                          "\"vendor\":\"linux-drm\","
+                          "\"vendor\":\"%s\","
                           "\"device\":\"%s\","
                           "\"render_apis\":[\"drm\",\"kms\"],"
                           "\"formats\":[\"xrgb8888\",\"argb8888\"],"
-                          "\"capabilities\":{\"page_flipping\":true,"
-                          "\"direct_scanout\":true}}",
-                          found ? "," : "", card, path);
+                          "\"capabilities\":{\"driver\":\"%s\","
+                          "\"device_node\":\"%s\","
+                          "\"page_flipping\":true,"
+                          "\"direct_scanout\":true,"
+                          "\"hardware_acceleration\":%s%s%s%s}}",
+                          found ? "," : "", card, vendor, device, driver,
+                          path, render_available ? "true" : "false",
+                          render_available ? ",\"render_node\":\"" : "",
+                          render_available ? render_node : "",
+                          render_available ? "\"" : "");
         if (length < 0 || (size_t)length >= capacity - used)
             break;
         used += (size_t)length;

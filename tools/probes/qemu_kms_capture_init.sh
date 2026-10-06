@@ -44,6 +44,14 @@ for n in 1 2 3 4 5 6 7 8 9 10; do
 done
 echo SERVER; $b cat /tmp/server.json 2>/dev/null || true
 if [ "$ready" -ne 1 ]; then $b cat /tmp/blit.log; finish 1; fi
+graphics_inventory=$($b wget -qO- http://127.0.0.1:19191/v1/graphics || true)
+echo GRAPHICS; echo "$graphics_inventory"
+graphics_pass=1
+echo "$graphics_inventory" | $b grep -q '"graphics_cards":\[' || graphics_pass=0
+echo "$graphics_inventory" | $b grep -q '"vendor":"' || graphics_pass=0
+echo "$graphics_inventory" | $b grep -q '"device":"' || graphics_pass=0
+echo "$graphics_inventory" | $b grep -q '"driver":"' || graphics_pass=0
+echo "$graphics_inventory" | $b grep -q '"hardware_acceleration":' || graphics_pass=0
 $b wget -qO /tmp/one.json --post-data='{"command":"/blit-stage/pty-input-echo","surface_mode":"terminal","display_id":"display-47","surface":{"width":128,"height":48}}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
 $b wget -qO /tmp/two.json --post-data='{"command":"/blit-stage/pty-input-echo","surface_mode":"terminal","display_id":"display-48","surface":{"width":128,"height":48}}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
 [ "$loss_test" -eq 1 ] && ( $b sleep 2; echo 0 > /sys/kernel/config/vkms/blit/connectors/connector0/status ) &
@@ -74,6 +82,6 @@ size1=$($b wc -c < /tmp/guest-screenshots/display-47.ppm 2>/dev/null || echo 0)
 size2=$($b wc -c < /tmp/guest-screenshots/display-48.ppm 2>/dev/null || echo 0)
 hash1=$($b sha256sum /tmp/guest-screenshots/display-47.ppm 2>/dev/null | $b cut -d ' ' -f 1 || true)
 hash2=$($b sha256sum /tmp/guest-screenshots/display-48.ppm 2>/dev/null | $b cut -d ' ' -f 1 || true)
-if [ "$size1" -gt 2359296 ] && [ "$size2" -gt 2359296 ] && [ "$hash1" != "$hash2" ] && [ "$loss_pass" -eq 1 ]; then echo KMS_CAPTURE_PASS; finish 0; fi
+if [ "$size1" -gt 2359296 ] && [ "$size2" -gt 2359296 ] && [ "$hash1" != "$hash2" ] && [ "$loss_pass" -eq 1 ] && [ "$graphics_pass" -eq 1 ]; then echo KMS_CAPTURE_PASS; finish 0; fi
 echo KMS_CAPTURE_FAIL
 finish 1

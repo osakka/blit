@@ -151,7 +151,10 @@ also checks black background pixels and a known `READY` glyph in the expected
 cell origin on both displays; distinct SHA-256 hashes remain an additional
 check that the two outputs are not the same buffer. The tiny VKMS kernel does
 not include 9p, so the PPMs are validated over the serial log; an empty host
-screenshot directory is not evidence that the frames were absent.
+screenshot directory is not evidence that the frames were absent. The same
+gate checks `/v1/graphics` for the VKMS vendor/device IDs, driver, DRM device
+node, and hardware-acceleration capability fields; unavailable sysfs values
+are reported as `unknown` rather than invented.
 
 The same fixture accepts `blit.output_loss=1` on the kernel command line. It
 disables connector 47 during the run and requires `OUTPUT_LOSS_PASS`: the
