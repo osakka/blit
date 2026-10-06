@@ -52,6 +52,10 @@ The DRM file descriptor is part of the gateway's main `select()` set. A
 pending page flip is serviced there; while one connector owns its back buffer,
 Blit skips only that connector and continues servicing HTTP, PTY, input, and
 the other displays. This prevents a slow monitor from blocking the gateway.
+The descriptor is opened nonblocking as well, so a driver or virtual display
+cannot turn page-flip submission itself into a process-wide blocking call.
+Readiness, per-output pending state, and the bounded flip timeout remain the
+only waiting mechanisms.
 The bounded timeout still moves a connector to the explicit modeset fallback
 if its completion event does not arrive.
 

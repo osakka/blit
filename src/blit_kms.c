@@ -769,8 +769,13 @@ int blit_kms_open(BlitKms *kms, char *error, size_t error_capacity)
     int used_count = 0;
     int i;
     if (kms == NULL) return -1;
+    /* Page-flip submission belongs to the gateway's event loop.  A blocking
+       DRM descriptor lets a slow driver or virtual vblank stall every other
+       output, PTY, and input device while drmModePageFlip waits in the ioctl.
+       Keep submission and event draining nonblocking; readiness and the
+       bounded per-output timeout remain the only sources of waiting. */
     kms->fd = open(getenv("BLIT_DRM_DEVICE") ? getenv("BLIT_DRM_DEVICE") :
-                   "/dev/dri/card0", O_RDWR | O_CLOEXEC);
+                   "/dev/dri/card0", O_RDWR | O_CLOEXEC | O_NONBLOCK);
     if (kms->fd < 0) { set_error(error, error_capacity, strerror(errno)); return -1; }
     {
         const char *screenshot_dir = getenv("BLIT_KMS_SCREENSHOT_DIR");
