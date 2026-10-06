@@ -393,6 +393,8 @@ typedef struct {
     unsigned long sdl_frame;
     uint64_t started_us;
     unsigned long long diagnostic_frames;
+    double diagnostic_last_frame_gap_ms;
+    double diagnostic_max_frame_gap_ms;
     double diagnostic_last_render_ms;
     double diagnostic_max_render_ms;
     double diagnostic_last_terminal_ms;
@@ -890,7 +892,8 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
     diagnostics_json(runtime, snapshot, sizeof(snapshot));
     used = (size_t)snprintf(body, capacity,
         "{\"snapshot\":%s,\"performance\":{\"uptime_ms\":%llu,"
-        "\"frames\":%llu,\"last_render_ms\":%.3f,"
+        "\"frames\":%llu,\"last_frame_gap_ms\":%.3f,"
+        "\"max_frame_gap_ms\":%.3f,\"last_render_ms\":%.3f,"
         "\"max_render_ms\":%.3f,\"missed_deadlines\":%llu,"
         "\"last_terminal_ms\":%.3f,\"max_terminal_ms\":%.3f,"
         "\"terminal_bytes\":%llu},"
@@ -898,7 +901,9 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         snapshot,
         runtime->started_us > 0 && now >= runtime->started_us ?
             (unsigned long long)((now - runtime->started_us) / 1000ULL) : 0,
-        runtime->diagnostic_frames, runtime->diagnostic_last_render_ms,
+        runtime->diagnostic_frames, runtime->diagnostic_last_frame_gap_ms,
+        runtime->diagnostic_max_frame_gap_ms,
+        runtime->diagnostic_last_render_ms,
         runtime->diagnostic_max_render_ms,
         diagnostic_missed_deadlines(runtime),
         runtime->diagnostic_last_terminal_ms,
@@ -7739,6 +7744,13 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
     Uint64 render_started = 0;
     uint64_t diagnostic_render_started = monotonic_us();
 
+    if (runtime->render_last_us != 0) {
+        double gap = (double)(diagnostic_render_started -
+                              runtime->render_last_us) / 1000.0;
+        runtime->diagnostic_last_frame_gap_ms = gap;
+        if (gap > runtime->diagnostic_max_frame_gap_ms)
+            runtime->diagnostic_max_frame_gap_ms = gap;
+    }
     ++runtime->diagnostic_frames;
 
     if (!runtime->direct_kms) {
@@ -9217,11 +9229,13 @@ int main(int argc, char **argv)
         int wait_ms;
         uint64_t now;
         uint32_t output_mask;
+        int pending_before_events;
 
         reconnect_evdev_devices(&runtime);
         for (i = 0; i < BLIT_MAX_SESSIONS; ++i)
             refresh_session_state(&runtime, &runtime.sessions[i]);
 
+        pending_before_events = runtime.render_pending;
         if (runtime.sdl_ready && !runtime.direct_kms)
             service_sdl_events(&runtime);
         now = monotonic_us();
@@ -9328,6 +9342,12 @@ int main(int argc, char **argv)
             }
         }
         now = monotonic_us();
+        /* A refresh schedule is only meaningful while work is pending.  If
+           the display was idle and a new terminal/input event arrived, start
+           a fresh phase at that event instead of reporting every idle refresh
+           period as a missed deadline. */
+        if (!pending_before_events && runtime.render_pending)
+            reset_render_schedule(&runtime, now);
         if (runtime.render_pending &&
             (output_mask = due_output_mask(&runtime, now)) != 0) {
             render_current_surfaces(&runtime, output_mask);
