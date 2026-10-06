@@ -9370,6 +9370,9 @@ static void service_update_upload(BlitRuntime *runtime, BlitHttpClient *client)
     if (remaining > sizeof(chunk)) remaining = sizeof(chunk);
     received = recv(client->fd, chunk, remaining, 0);
     if (received <= 0) {
+        snprintf(runtime->update_state, sizeof(runtime->update_state), "failed");
+        snprintf(runtime->update_detail, sizeof(runtime->update_detail),
+                 "update upload interrupted");
         remove_http_client(runtime, (int)(client - runtime->http_clients));
         return;
     }
@@ -9712,6 +9715,7 @@ int main(int argc, char **argv)
         now = monotonic_us();
         for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i)
             if (runtime.http_clients[i].used &&
+                runtime.http_clients[i].update_fd < 0 &&
                 now > runtime.http_clients[i].accepted_us &&
                 now - runtime.http_clients[i].accepted_us > 5000000ULL)
                 remove_http_client(&runtime, i);
