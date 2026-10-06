@@ -783,6 +783,7 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
     int pointer_changed;
     int full_redraw;
     int deferred = 0;
+    int failed = 0;
     long long started = 0;
     if (kms == NULL) return -1;
     for (i = 0; i < view_count; ++i)
@@ -950,7 +951,8 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                 if (flip_result < 0) {
                     output->info.presentation_state =
                         BLIT_KMS_PRESENTATION_FAILED;
-                    return -1;
+                    failed = 1;
+                    continue;
                 }
                 if (output->modeset_fallback) {
                     fprintf(stderr,
@@ -985,7 +987,8 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
             if (flip_result < 0) {
                 output->info.presentation_state =
                     BLIT_KMS_PRESENTATION_FAILED;
-                return -1;
+                failed = 1;
+                continue;
             }
         }
         output->flip_pending = 1;
@@ -1016,7 +1019,7 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
     if (started != 0)
         fprintf(stderr, "blit: KMS present views=%d outputs=%d duration_us=%lld\n",
                 view_count, kms->output_count, kms_now_us() - started);
-    return 0;
+    return failed ? -1 : 0;
 }
 
 void blit_kms_close(BlitKms *kms)

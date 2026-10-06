@@ -32,6 +32,10 @@ export BLIT_KMS_SCREENSHOT_AFTER=0
 export BLIT_KMS_TRACE_TIMING=1
 export BLIT_KMS_TRACE_PHASES=1
 if [ -e /dev/dri/card1 ]; then export BLIT_DRM_DEVICE=/dev/dri/card1; else export BLIT_DRM_DEVICE=/dev/dri/card0; fi
+loss_test=0
+case " $($b cat /proc/cmdline 2>/dev/null || true) " in
+    *" blit.output_loss=1 "*) loss_test=1 ;;
+esac
 BLIT_DISPLAY_BACKEND=kms BLIT_BIND_ADDRESS=127.0.0.1 /blit-stage/ld-linux-x86-64.so.2 --library-path /blit-stage:/blit-stage/lib /blit-stage/blit-server 19191 >/tmp/blit.log 2>&1 &
 ready=0
 for n in 1 2 3 4 5 6 7 8 9 10; do
@@ -42,8 +46,20 @@ echo SERVER; $b cat /tmp/server.json 2>/dev/null || true
 if [ "$ready" -ne 1 ]; then $b cat /tmp/blit.log; finish 1; fi
 $b wget -qO /tmp/one.json --post-data='{"command":"/blit-stage/pty-input-echo","surface_mode":"terminal","display_id":"display-47","width":128,"height":48}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
 $b wget -qO /tmp/two.json --post-data='{"command":"/blit-stage/pty-input-echo","surface_mode":"terminal","display_id":"display-48","width":128,"height":48}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
+[ "$loss_test" -eq 1 ] && ( $b sleep 2; echo 0 > /sys/kernel/config/vkms/blit/connectors/connector0/status ) &
 $b sleep 5
 echo ONE; $b cat /tmp/one.json; echo TWO; $b cat /tmp/two.json
+loss_pass=1
+if [ "$loss_test" -eq 1 ]; then
+    loss_displays=$($b wget -qO- http://127.0.0.1:19191/v1/displays || true)
+    loss_diagnostics=$($b wget -qO- http://127.0.0.1:19191/v1/diagnostics || true)
+    echo LOSS_DISPLAYS; echo "$loss_displays"
+    echo LOSS_DIAGNOSTICS; echo "$loss_diagnostics"
+    echo "$loss_displays" | $b grep -q '"presentation_state":"failed"' || loss_pass=0
+    echo "$loss_displays" | $b grep -q '"presentation_state":"presenting"' || loss_pass=0
+    echo "$loss_diagnostics" | $b grep -q 'display_presentation_failed' || loss_pass=0
+    [ "$loss_pass" -eq 1 ] && echo OUTPUT_LOSS_PASS || echo OUTPUT_LOSS_FAIL
+fi
 echo BLIT_LOG; $b cat /tmp/blit.log
 echo GUEST_SCREENSHOTS; $b ls -l /tmp/guest-screenshots 2>/dev/null || true
 for shot in /tmp/guest-screenshots/display-47.ppm /tmp/guest-screenshots/display-48.ppm; do
@@ -58,6 +74,6 @@ size1=$($b wc -c < /tmp/guest-screenshots/display-47.ppm 2>/dev/null || echo 0)
 size2=$($b wc -c < /tmp/guest-screenshots/display-48.ppm 2>/dev/null || echo 0)
 hash1=$($b sha256sum /tmp/guest-screenshots/display-47.ppm 2>/dev/null | $b cut -d ' ' -f 1 || true)
 hash2=$($b sha256sum /tmp/guest-screenshots/display-48.ppm 2>/dev/null | $b cut -d ' ' -f 1 || true)
-if [ "$size1" -gt 2359296 ] && [ "$size2" -gt 2359296 ] && [ "$hash1" != "$hash2" ]; then echo KMS_CAPTURE_PASS; finish 0; fi
+if [ "$size1" -gt 2359296 ] && [ "$size2" -gt 2359296 ] && [ "$hash1" != "$hash2" ] && [ "$loss_pass" -eq 1 ]; then echo KMS_CAPTURE_PASS; finish 0; fi
 echo KMS_CAPTURE_FAIL
 finish 1

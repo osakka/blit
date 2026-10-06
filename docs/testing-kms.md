@@ -150,6 +150,12 @@ check that the two outputs are not the same buffer. The tiny VKMS kernel does
 not include 9p, so the PPMs are validated over the serial log; an empty host
 screenshot directory is not evidence that the frames were absent.
 
+The same fixture accepts `blit.output_loss=1` on the kernel command line. It
+disables connector 47 during the run and requires `OUTPUT_LOSS_PASS`: the
+failed connector remains in `/v1/displays` as `failed`, the other connector
+remains `presenting`, and `/v1/diagnostics` reports
+`display_presentation_failed` while the server stays ready.
+
 ## Pointer stress gate
 
 The input-only QEMU variant starts two terminal surfaces, routes the synthetic
