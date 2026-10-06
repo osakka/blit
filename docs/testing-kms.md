@@ -4,7 +4,7 @@ The production server now owns this boundary in `src/blit_kms.c`. Build it
 with the TCC toolchain:
 
 ```sh
-tcc -std=c99 -Ivendor/SDL3/include \
+tcc -O2 -std=c99 -Ivendor/SDL3/include \
   -Ibuild/deps/prefix/include -Ibuild/deps/prefix/include/libdrm \
   src/blit_server.c src/blit_kms.c src/blit_font.c \
   -Lbuild/sdl3-kms -Lbuild/deps/prefix/lib/x86_64-linux-gnu \

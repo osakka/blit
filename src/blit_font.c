@@ -218,7 +218,7 @@ void blit_font_load(BlitFont *font)
     fprintf(stderr, "blit: font unavailable; using built-in fallback\n");
 }
 
-static size_t font_glyph_index(const BlitFont *font, uint32_t codepoint)
+size_t blit_font_glyph_index(const BlitFont *font, uint32_t codepoint)
 {
     BlitFontGlyphMap *map;
     size_t i;
@@ -278,18 +278,23 @@ static int fallback_pixel(uint32_t codepoint, int row, int column)
     return 0;
 }
 
-int blit_font_pixel(const BlitFont *font, uint32_t codepoint, int row, int column)
+int blit_font_glyph_pixel(const BlitFont *font, size_t glyph,
+                          uint32_t codepoint, int row, int column)
 {
-    size_t glyph;
     size_t row_bytes;
     if (font == NULL || font->data == NULL)
         return fallback_pixel(codepoint, row, column);
     if (row < 0 || column < 0 ||
         row >= font->height || column >= font->width) return 0;
-    glyph = font_glyph_index(font, codepoint);
     row_bytes = (size_t)((font->width + 7) / 8);
     return (font->data[font->glyph_offset + glyph * font->glyph_bytes +
                         row * row_bytes + column / 8] & (0x80 >> (column % 8))) != 0;
+}
+
+int blit_font_pixel(const BlitFont *font, uint32_t codepoint, int row, int column)
+{
+    return blit_font_glyph_pixel(font, blit_font_glyph_index(font, codepoint),
+                                 codepoint, row, column);
 }
 
 int blit_font_width(const BlitFont *font)

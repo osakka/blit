@@ -5356,6 +5356,7 @@ static void render_sdl_glyph(SDL_Renderer *renderer, const BlitFont *font,
 {
     int source_width = font != NULL && font->data ? font->width : 5;
     int source_height = font != NULL && font->data ? font->height : 7;
+    size_t glyph = blit_font_glyph_index(font, codepoint);
     int source_row;
     for (source_row = 0; source_row < source_height; ++source_row) {
         int source_column = 0;
@@ -5363,13 +5364,13 @@ static void render_sdl_glyph(SDL_Renderer *renderer, const BlitFont *font,
             int run_start;
             int run_end;
             while (source_column < source_width &&
-                   !blit_font_pixel(font, codepoint, source_row,
-                                    source_column))
+                   !blit_font_glyph_pixel(font, glyph, codepoint, source_row,
+                                          source_column))
                 ++source_column;
             run_start = source_column;
             while (source_column < source_width &&
-                   blit_font_pixel(font, codepoint, source_row,
-                                   source_column))
+                   blit_font_glyph_pixel(font, glyph, codepoint, source_row,
+                                         source_column))
                 ++source_column;
             run_end = source_column;
             if (run_end > run_start) {

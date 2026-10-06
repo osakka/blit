@@ -79,7 +79,7 @@ From the repository root:
 
 ```sh
 mkdir -p build/blit
-tcc -std=c99 \
+tcc -O2 -std=c99 \
   -Ivendor/SDL3/include \
   -Ibuild/deps/prefix/include \
   -Ibuild/deps/prefix/include/libdrm \

@@ -229,8 +229,10 @@ static void draw_glyph(KmsOutput *output, const BlitFont *font,
 {
     int glyph_row;
     int glyph_column;
+    size_t glyph;
     int font_width = font != NULL && font->data ? font->width : 5;
     int font_height = font != NULL && font->data ? font->height : 7;
+    glyph = blit_font_glyph_index(font, codepoint);
     for (glyph_row = 0; glyph_row < ch; ++glyph_row) {
         uint32_t *pixels;
         int py = y + glyph_row;
@@ -242,7 +244,8 @@ static void draw_glyph(KmsOutput *output, const BlitFont *font,
         for (glyph_column = 0; glyph_column < cw; ++glyph_column) {
             int source_column = glyph_column * font_width / cw;
             int px = x + glyph_column;
-            if (blit_font_pixel(font, codepoint, source_row, source_column) &&
+            if (blit_font_glyph_pixel(font, glyph, codepoint, source_row,
+                                      source_column) &&
                 px >= 0 && px < output->mode.hdisplay)
                 pixels[px] = color;
         }
