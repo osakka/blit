@@ -5528,6 +5528,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
     for (output_index = 0; output_index < runtime->output_count;
          ++output_index) {
         int target_count = 0;
+        int target_changed = 0;
         int full_redraw;
         SDL_Renderer *renderer = runtime->outputs[output_index].renderer;
 
@@ -5538,10 +5539,19 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
 
             if (surface == NULL || !surface->used)
                 continue;
-            if (surface_targets_output(runtime, surface, output_index))
+            if (surface_targets_output(runtime, surface, output_index)) {
                 ++target_count;
+                if (surface->damage_valid)
+                    target_changed = 1;
+            }
         }
         if (target_count == 0) {
+            /* The output is already in its empty state.  A pending render
+               can be caused by another display's PTY or by a stream event;
+               do not submit another clear/present for this output. */
+            if (!runtime->outputs[output_index].initialized &&
+                !runtime->pointer_dirty)
+                continue;
             if (!runtime->outputs[output_index].initialized) {
                 SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
                 SDL_RenderClear(renderer);
@@ -5555,6 +5565,13 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
             runtime->outputs[output_index].initialized = 0;
             continue;
         }
+        /* A surface can be present without having changed since the last
+           presentation.  Avoid walking and rasterizing its entire grid, and
+           avoid SDL_RenderPresent, until damage or pointer state requires a
+           new frame. */
+        if (runtime->outputs[output_index].initialized &&
+            !runtime->pointer_dirty && !target_changed)
+            continue;
         full_redraw = !runtime->outputs[output_index].initialized ||
             target_count > 1 || runtime->pointer_dirty;
         if (!runtime->outputs[output_index].initialized) {
