@@ -922,7 +922,8 @@ static void server_json(const BlitRuntime *runtime, char *body, size_t capacity)
              "\"terminal-sessions\",\"topology\","
              "\"native-presentation\",\"graphics-inventory\","
              "\"audio-inventory\",\"input-devices\",\"input-routes\","
-             "\"diagnostics\",\"runtime-diagnostics\",\"effects\",\"overlays\"],\"display_count\":%d,"
+             "\"diagnostics\",\"runtime-diagnostics\",\"lifecycle-control\","
+             "\"effects\",\"overlays\"],\"display_count\":%d,"
              "\"display_backend\":{\"name\":\"%s\",\"ready\":%s,"
              "\"error\":\"%s\"},\"resources\":{"
              "\"graphics\":\"/v1/graphics\",\"displays\":\"/v1/displays\","
@@ -6324,6 +6325,15 @@ static void handle_request(int fd, BlitRuntime *runtime,
                          "The bearer token is not valid.");
             return;
         }
+    }
+
+    if (strcmp(path, "/v1/control/shutdown") == 0 &&
+        strcmp(method, "POST") == 0) {
+        blit_running = 0;
+        send_http(fd, 202, "Accepted", "application/json",
+                  "{\"state\":\"stopping\",\"detail\":\""
+                  "shutdown accepted; cleanup is in progress\"}");
+        return;
     }
 
     if (strncmp(path, "/v1/stream", strlen("/v1/stream")) == 0 &&

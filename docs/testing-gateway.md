@@ -21,6 +21,17 @@ start/stop/restart belongs to the host supervisor (systemd, an init service,
 or SSH). Use that supervisor for lifecycle recovery, then use this endpoint to
 verify readiness.
 
+For a clean API-driven shutdown while the server is alive, call:
+
+```sh
+curl --fail --request POST http://127.0.0.1:8080/v1/control/shutdown
+```
+
+The endpoint acknowledges first, then the event loop terminates child process
+groups and releases SDL/KMS outputs before exiting. Starting a new server still
+belongs to the host supervisor or launch command because a stopped process
+cannot serve its own restart request.
+
 ## Current acceptance evidence
 
 The TCC-built server has been exercised locally with the SDL dummy backend and
@@ -202,6 +213,14 @@ diagnostics endpoint remains responsive:
 ```sh
 BLIT_GATE_BINARY=build/blit/blit-server \
   tools/tests/session_lifecycle_gate.sh
+```
+
+The shutdown gate verifies that `POST /v1/control/shutdown` acknowledges the
+request and the Blit process exits cleanly:
+
+```sh
+BLIT_GATE_BINARY=build/blit/blit-server \
+  tools/tests/shutdown_gate.sh
 ```
 
 It requires `401` without a token and `200` with the configured bearer token.

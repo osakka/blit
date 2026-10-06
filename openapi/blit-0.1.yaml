@@ -18,6 +18,7 @@ tags:
   - name: frames
   - name: effects
   - name: diagnostics
+  - name: control
 paths:
   /v1/server:
     get:
@@ -125,6 +126,29 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RuntimeDiagnostics'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/control/shutdown:
+    post:
+      tags: [control]
+      operationId: requestShutdown
+      summary: Stop Blit and cleanly release its child processes and outputs
+      description: >-
+        Accepts an asynchronous shutdown request. The response is sent before
+        the event loop exits; the process then terminates PTY process groups,
+        destroys SDL/KMS outputs, and exits. Authentication applies when the
+        server has BLIT_AUTH_TOKEN configured.
+      responses:
+        '202':
+          description: Shutdown accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [state, detail]
+                properties:
+                  state: {type: string, const: stopping}
+                  detail: {type: string}
         default:
           $ref: '#/components/responses/Problem'
   /v1/effects:
