@@ -24,6 +24,13 @@ Sixel remains a planned compatibility milestone after Kitty. It will be
 implemented only through the same canonical graphics-object model; it will
 not become a second renderer or a separate terminal state owner.
 
+The initial sixel slice accepts bounded direct-color sixel raster data,
+including color selection, repeated columns, carriage return, and sixel-row
+advance. It creates an owned RGBA graphics object in the same store as Kitty.
+Unsupported sixel extensions, malformed data, and bounds violations are
+rejected diagnostically; the sixel capability remains unadvertised until the
+full compatibility subset is explicitly accepted.
+
 Neither protocol is advertised in `/v1/server` capabilities until its parser,
 bounded image store, placement/clipping behavior, lifecycle semantics, and
 both SDL3 and direct-KMS evidence gates pass. Until then, unsupported graphics

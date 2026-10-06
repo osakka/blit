@@ -58,6 +58,16 @@ static int has_kitty_green_at(FILE *file, int y)
         rgb[0] == 0x00 && rgb[1] == 0xff && rgb[2] == 0x00;
 }
 
+static int has_sixel_pixels(FILE *file)
+{
+    unsigned char red[3];
+    unsigned char green[3];
+    return pixel(file, 16L + ((long)4 * 1024L + 4) * 3L, red) &&
+        pixel(file, 16L + ((long)4 * 1024L + 5) * 3L, green) &&
+        red[0] == 0xff && red[1] == 0x00 && red[2] == 0x00 &&
+        green[0] == 0x00 && green[1] == 0xff && green[2] == 0x00;
+}
+
 static void report_pixel(FILE *file, int y)
 {
     unsigned char rgb[3];
@@ -76,6 +86,7 @@ int main(int argc, char **argv)
     int require_wide = 0;
     int require_kitty = 0;
     int require_green = 0;
+    int require_sixel = 0;
     int argument;
 
     if (argc < 2 || argc > 4) return 2;
@@ -83,6 +94,7 @@ int main(int argc, char **argv)
         if (strcmp(argv[argument], "--wide") == 0) require_wide = 1;
         else if (strcmp(argv[argument], "--kitty") == 0) require_kitty = 1;
         else if (strcmp(argv[argument], "--green") == 0) require_green = 1;
+        else if (strcmp(argv[argument], "--sixel") == 0) require_sixel = 1;
         else return 2;
     }
     file = fopen(argv[1], "rb");
@@ -107,6 +119,7 @@ int main(int argc, char **argv)
         !has_foreground(file) ||
         (require_wide && !has_wide_foreground(file)) ||
         (require_kitty && !has_kitty_red(file)) ||
+        (require_sixel && !has_sixel_pixels(file)) ||
         (require_green && !has_kitty_green_at(file, 4)) ||
         (require_green && !has_kitty_green_at(file, 36))) {
         fclose(file);

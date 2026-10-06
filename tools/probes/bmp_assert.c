@@ -25,10 +25,15 @@ int main(int argc, char **argv)
     uint32_t row;
     long position;
     int require_green = 0;
+    int require_sixel = 0;
 
-    if (argc < 2 || argc > 3) return 2;
+    if (argc < 2 || argc > 4) return 2;
     if (argc == 3) {
         if (strcmp(argv[2], "--green") != 0) return 2;
+        require_green = 1;
+    } else if (argc == 4 && strcmp(argv[2], "--sixel") == 0) {
+        if (strcmp(argv[3], "--green") != 0) return 2;
+        require_sixel = 1;
         require_green = 1;
     }
     file = fopen(argv[1], "rb");
@@ -61,6 +66,15 @@ int main(int argc, char **argv)
                 pixel[1] != 0xff || pixel[2] != 0x00)
                 return 1;
         }
+    }
+    if (require_sixel) {
+        row = (uint32_t)(height - 1 - 4);
+        position = (long)offset +
+            (long)row * (long)(((width * 3U + 3U) / 4U) * 4U) + 5L * 3L;
+        if (fseek(file, position, SEEK_SET) != 0 ||
+            fread(pixel, 1, 3, file) != 3 || pixel[0] != 0x00 ||
+            pixel[1] != 0xff || pixel[2] != 0x00)
+            return 1;
     }
     fclose(file);
     return 0;

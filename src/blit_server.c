@@ -3123,6 +3123,10 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
         return;
     }
     image = graphics_image_find(session, (unsigned int)image_id);
+    if (image != NULL && strcmp(image->protocol, "kitty") != 0) {
+        graphics_reject(session, "image-protocol-mismatch");
+        return;
+    }
     if (image != NULL) {
         if (format == 0) format = image->format;
         if (width == 0) width = image->width;
@@ -3157,6 +3161,7 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
         memset(image, 0, sizeof(*image));
         image->used = 1;
         image->id = (unsigned int)image_id;
+        snprintf(image->protocol, sizeof(image->protocol), "kitty");
         image->width = width;
         image->height = height;
         image->format = format;
@@ -3190,6 +3195,215 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
     }
 }
 
+static int sixel_number(const char **cursor, int fallback)
+{
+    char *end;
+    long value;
+    if (**cursor < '0' || **cursor > '9')
+        return fallback;
+    value = strtol(*cursor, &end, 10);
+    if (value < 0 || value > 2147483647L)
+        return -1;
+    *cursor = end;
+    return (int)value;
+}
+
+static void terminal_apply_sixel(BlitSession *session, BlitSurface *surface)
+{
+    unsigned char *scratch;
+    uint32_t palette[256];
+    const char *cursor = session->terminal_string + 1;
+    int current_color = 0;
+    int x = 0;
+    int y = 0;
+    int maximum_x = 0;
+    int maximum_y = 0;
+    int raster_width = 0;
+    int raster_height = 0;
+    int i;
+    BlitGraphicsImage *image = NULL;
+    int image_id = 1;
+
+    scratch = (unsigned char *)calloc(512U * 512U, 4U);
+    if (scratch == NULL) {
+        graphics_reject(session, "sixel-allocation-failed");
+        return;
+    }
+    for (i = 0; i < 256; ++i)
+        palette[i] = 0xffffffU;
+    palette[0] = 0x000000U;
+    while (*cursor != '\0') {
+        unsigned char command = (unsigned char)*cursor++;
+        if (command == '"') {
+            int aspect_y = sixel_number(&cursor, 1);
+            int aspect_x;
+            int width;
+            int height;
+            if (*cursor == ';') ++cursor;
+            aspect_x = sixel_number(&cursor, 1);
+            if (*cursor == ';') ++cursor;
+            width = sixel_number(&cursor, 0);
+            if (*cursor == ';') ++cursor;
+            height = sixel_number(&cursor, 0);
+            (void)aspect_y;
+            (void)aspect_x;
+            if (width < 0 || height < 0 || width > 512 || height > 512) {
+                free(scratch);
+                graphics_reject(session, "sixel-bounds");
+                return;
+            }
+            raster_width = width;
+            raster_height = height;
+        } else if (command == '#') {
+            int colour = sixel_number(&cursor, -1);
+            if (colour < 0 || colour > 255) {
+                free(scratch);
+                graphics_reject(session, "sixel-colour");
+                return;
+            }
+            current_color = colour;
+            if (*cursor == ';') {
+                int mode;
+                int red;
+                int green;
+                int blue;
+                ++cursor;
+                mode = sixel_number(&cursor, -1);
+                if (*cursor == ';') ++cursor;
+                red = sixel_number(&cursor, -1);
+                if (*cursor == ';') ++cursor;
+                green = sixel_number(&cursor, -1);
+                if (*cursor == ';') ++cursor;
+                blue = sixel_number(&cursor, -1);
+                if (mode != 2 || red < 0 || red > 100 || green < 0 ||
+                    green > 100 || blue < 0 || blue > 100) {
+                    free(scratch);
+                    graphics_reject(session, "sixel-colour");
+                    return;
+                }
+                palette[current_color] =
+                    ((uint32_t)(red * 255 / 100) << 16) |
+                    ((uint32_t)(green * 255 / 100) << 8) |
+                    (uint32_t)(blue * 255 / 100);
+            }
+        } else if (command == '!') {
+            int repeat = sixel_number(&cursor, -1);
+            unsigned char sixel;
+            int bit;
+            if (repeat < 1 || repeat > 512 || *cursor < '?' || *cursor > '~') {
+                free(scratch);
+                graphics_reject(session, "sixel-repeat");
+                return;
+            }
+            sixel = (unsigned char)*cursor++ - 63U;
+            for (i = 0; i < repeat; ++i) {
+                for (bit = 0; bit < 6; ++bit)
+                    if (sixel & (1U << bit)) {
+                        if (x >= 512 || y + bit >= 512) {
+                            free(scratch);
+                            graphics_reject(session, "sixel-bounds");
+                            return;
+                        }
+                        {
+                            size_t pixel_offset = ((size_t)(y + bit) * 512U +
+                                (size_t)x) * 4U;
+                            uint32_t colour = palette[current_color];
+                            scratch[pixel_offset] = (unsigned char)(colour >> 16);
+                            scratch[pixel_offset + 1U] = (unsigned char)(colour >> 8);
+                            scratch[pixel_offset + 2U] = (unsigned char)colour;
+                            scratch[pixel_offset + 3U] = 255;
+                        }
+                        if (x + 1 > maximum_x) maximum_x = x + 1;
+                        if (y + bit + 1 > maximum_y) maximum_y = y + bit + 1;
+                    }
+                ++x;
+            }
+        } else if (command == '$') {
+            x = 0;
+        } else if (command == '-') {
+            x = 0;
+            y += 6;
+        } else if (command >= '?' && command <= '~') {
+            unsigned char sixel = command - 63U;
+            int bit;
+            if (x >= 512 || y >= 512 || y + 5 >= 512) {
+                free(scratch);
+                graphics_reject(session, "sixel-bounds");
+                return;
+            }
+            for (bit = 0; bit < 6; ++bit)
+                if (sixel & (1U << bit)) {
+                    {
+                        size_t pixel_offset = ((size_t)(y + bit) * 512U +
+                            (size_t)x) * 4U;
+                        uint32_t colour = palette[current_color];
+                        scratch[pixel_offset] = (unsigned char)(colour >> 16);
+                        scratch[pixel_offset + 1U] = (unsigned char)(colour >> 8);
+                        scratch[pixel_offset + 2U] = (unsigned char)colour;
+                        scratch[pixel_offset + 3U] = 255;
+                    }
+                    if (x + 1 > maximum_x) maximum_x = x + 1;
+                    if (y + bit + 1 > maximum_y) maximum_y = y + bit + 1;
+                }
+            ++x;
+        }
+    }
+    if (raster_width > 0 && maximum_x > raster_width)
+        maximum_x = raster_width;
+    if (raster_height > 0 && maximum_y > raster_height)
+        maximum_y = raster_height;
+    if (maximum_x < 1 || maximum_y < 1) {
+        free(scratch);
+        graphics_reject(session, "sixel-empty");
+        return;
+    }
+    if (raster_width > maximum_x) maximum_x = raster_width;
+    if (raster_height > maximum_y) maximum_y = raster_height;
+    for (i = 0; i < BLIT_GRAPHICS_MAX_IMAGES; ++i)
+        if (!session->graphics[i].used) {
+            image = &session->graphics[i];
+            break;
+        }
+    if (image == NULL) {
+        free(scratch);
+        graphics_reject(session, "image-store-full");
+        return;
+    }
+    while (graphics_image_find(session, (unsigned int)image_id) != NULL) {
+        ++image_id;
+        if (image_id <= 0) image_id = 1;
+    }
+    memset(image, 0, sizeof(*image));
+    image->pixels = (unsigned char *)malloc((size_t)maximum_x *
+                                             (size_t)maximum_y * 4U);
+    if (image->pixels == NULL) {
+        free(scratch);
+        graphics_reject(session, "sixel-allocation-failed");
+        return;
+    }
+    image->used = 1;
+    image->complete = 1;
+    image->id = (unsigned int)image_id;
+    snprintf(image->protocol, sizeof(image->protocol), "sixel");
+    image->width = maximum_x;
+    image->height = maximum_y;
+    image->format = 32;
+    image->bytes = image->capacity = (size_t)maximum_x *
+        (size_t)maximum_y * 4U;
+    for (y = 0; y < maximum_y; ++y)
+        memcpy(image->pixels + (size_t)y * (size_t)maximum_x * 4U,
+               scratch + (size_t)y * 512U * 4U,
+               (size_t)maximum_x * 4U);
+    image->visible = 1;
+    image->x = surface->cursor_x * 8;
+    image->y = surface->cursor_y * 16;
+    image->placement_width = maximum_x;
+    image->placement_height = maximum_y;
+    image->revision = 1;
+    free(scratch);
+    mark_surface_full_damage(surface);
+}
+
 static void terminal_apply_string(BlitSession *session, BlitSurface *surface)
 {
     const char *payload = session->terminal_string;
@@ -3203,6 +3417,10 @@ static void terminal_apply_string(BlitSession *session, BlitSurface *surface)
     }
     if (session->terminal_string_type != 'P')
         return;
+    if (payload[0] == 'q') {
+        terminal_apply_sixel(session, surface);
+        return;
+    }
     if (strncmp(payload, "$q", 2) == 0) {
         const char *query = payload + 2;
         if (strcmp(query, "r") == 0) {
@@ -4778,12 +4996,12 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
             BlitGraphicsImage *image = &session->graphics[graphics_index];
             if (!image->used) continue;
             used += (size_t)snprintf(body + used, capacity - used,
-                "%s{\"id\":%u,\"complete\":%s,\"visible\":%s,"
+                "%s{\"id\":%u,\"protocol\":\"%s\",\"complete\":%s,\"visible\":%s,"
                 "\"width\":%d,\"height\":%d,\"format\":%d,"
                 "\"bytes\":%lu,\"x\":%d,\"y\":%d,"
                 "\"placement_width\":%d,\"placement_height\":%d,"
                 "\"z\":%d,\"revision\":%llu}",
-                first_graphics ? "" : ",", image->id,
+                first_graphics ? "" : ",", image->id, image->protocol,
                 image->complete ? "true" : "false",
                 image->visible ? "true" : "false", image->width,
                 image->height, image->format, (unsigned long)image->bytes,

@@ -9,12 +9,14 @@
 #define BLIT_GRAPHICS_MAX_HEIGHT 512
 #define BLIT_GRAPHICS_MAX_BYTES (4U * 1024U * 1024U)
 
-/* Renderer-neutral Kitty image record.  Ownership remains with the terminal
-   session; SDL3 and direct KMS receive read-only views of the same pixels. */
+/* Renderer-neutral graphics record.  Kitty and sixel decoders both publish
+   into this store; SDL3 and direct KMS receive read-only views of the same
+   pixels. */
 typedef struct {
     int used;
     int complete;
     unsigned int id;
+    char protocol[8];
     int width;
     int height;
     int format;

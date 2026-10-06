@@ -111,8 +111,10 @@ without mutating terminal cells. Verify equivalent SDL3 and direct-KMS
 results with deterministic pixel fixtures in the two-display VKMS guest.
 
 After Kitty is accepted, add sixel decoding as a compatibility input path into
-the same graphics-object model. Sixel must not introduce a second renderer,
-layout owner, or image lifetime model.
+the same graphics-object model. The first sixel slice is bounded direct-color
+raster decoding with deterministic SDL3/direct-KMS pixel gates; it must not
+introduce a second renderer, layout owner, or image lifetime model. Expand its
+accepted control grammar only with a corresponding parser and pixel fixture.
 
 ## Milestone 6: operational hardening
 

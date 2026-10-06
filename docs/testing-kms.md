@@ -195,6 +195,12 @@ image; the probe records this as `KMS_KITTY_QUERY_PASS` through the session
 title. Query responses follow the Kitty graphics protocol, including quiet
 mode handling, and are not treated as rendered image state.
 
+The fixture accepts `blit.sixel=1` for the initial sixel gate. It sends two
+direct-color sixel columns with six-row raster data and requires
+`PPM_DISPLAY_47_SIXEL_PASS`; the equivalent SDL3 capture passes
+`SDL_SIXEL_PASS`. This validates the shared RGBA graphics object and both
+renderers while the public sixel capability remains unadvertised.
+
 ## Pointer stress gate
 
 The input-only QEMU variant starts two terminal surfaces, routes the synthetic

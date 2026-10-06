@@ -15,6 +15,7 @@ int main(int argc, char **argv)
     int kitty = 0;
     int kitty_limits = 0;
     int kitty_query = 0;
+    int sixel = 0;
     int stack = 0;
     int argument;
     for (argument = 1; argument < argc; ++argument) {
@@ -24,6 +25,7 @@ int main(int argc, char **argv)
         if (strcmp(argv[argument], "--kitty") == 0) kitty = 1;
         if (strcmp(argv[argument], "--kitty-limits") == 0) kitty_limits = 1;
         if (strcmp(argv[argument], "--kitty-query") == 0) kitty_query = 1;
+        if (strcmp(argv[argument], "--sixel") == 0) sixel = 1;
         if (strcmp(argv[argument], "--stack") == 0) stack = 1;
     }
     if (tcgetattr(STDIN_FILENO, &saved) == 0) {
@@ -60,6 +62,8 @@ int main(int argc, char **argv)
     }
     if (kitty_query)
         fputs("\033_Ga=q,i=31,f=24,s=1,v=1;/wAA\033\\", stdout);
+    if (sixel)
+        fputs("\033Pq#1;2;100;0;0~#2;2;0;100;0~\033\\", stdout);
     fputs("READY", stdout);
     if (wide)
         fputs("\342\224\200", stdout);

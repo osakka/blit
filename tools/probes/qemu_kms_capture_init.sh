@@ -37,6 +37,7 @@ stack_test=0
 mixed_refresh_test=0
 kitty_limits_test=0
 kitty_query_test=0
+sixel_test=0
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
     *" blit.output_loss=1 "*) loss_test=1 ;;
 esac
@@ -51,6 +52,9 @@ case " $($b cat /proc/cmdline 2>/dev/null || true) " in
 esac
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
     *" blit.kitty_query=1 "*) kitty_query_test=1 ;;
+esac
+case " $($b cat /proc/cmdline 2>/dev/null || true) " in
+    *" blit.sixel=1 "*) sixel_test=1 ;;
 esac
 if [ "$mixed_refresh_test" -eq 1 ]; then
     export BLIT_TEST_MODE=1
@@ -94,6 +98,8 @@ elif [ "$kitty_limits_test" -eq 1 ]; then
     $b wget -qO /tmp/one.json --post-data='{"command":"/blit-stage/pty-input-echo","arguments":["--kitty-limits"],"surface_mode":"terminal","display_id":"display-47","surface":{"width":128,"height":48}}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
 elif [ "$kitty_query_test" -eq 1 ]; then
     $b wget -qO /tmp/one.json --post-data='{"command":"/blit-stage/pty-input-echo","arguments":["--kitty-query"],"surface_mode":"terminal","display_id":"display-47","surface":{"width":128,"height":48}}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
+elif [ "$sixel_test" -eq 1 ]; then
+    $b wget -qO /tmp/one.json --post-data='{"command":"/blit-stage/pty-input-echo","arguments":["--sixel"],"surface_mode":"terminal","display_id":"display-47","surface":{"width":128,"height":48}}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
 else
     $b wget -qO /tmp/one.json --post-data='{"command":"/blit-stage/pty-input-echo","arguments":["--wide","--kitty"],"surface_mode":"terminal","display_id":"display-47","surface":{"width":128,"height":48}}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
 fi
@@ -144,6 +150,8 @@ if [ "$kitty_query_test" -eq 1 ]; then
 fi
 if [ "$stack_test" -eq 1 ]; then
     /blit-stage/ppm-assert /tmp/guest-screenshots/display-47.ppm --wide --green && echo PPM_DISPLAY_47_WIDE_STACK_CLIP_PASS || { echo PPM_DISPLAY_47_WIDE_STACK_CLIP_FAIL; finish 1; }
+elif [ "$sixel_test" -eq 1 ]; then
+    /blit-stage/ppm-assert /tmp/guest-screenshots/display-47.ppm --sixel && echo PPM_DISPLAY_47_SIXEL_PASS || { echo PPM_DISPLAY_47_SIXEL_FAIL; finish 1; }
 else
     /blit-stage/ppm-assert /tmp/guest-screenshots/display-47.ppm --wide --kitty && echo PPM_DISPLAY_47_WIDE_KITTY_PASS || { echo PPM_DISPLAY_47_WIDE_KITTY_FAIL; finish 1; }
 fi
