@@ -170,6 +170,22 @@ this test local unless the deployment has configured its command policy and
 `BLIT_AUTH_TOKEN`; bearer authentication is enforced whenever that token is
 set.
 
+For a network deployment, set an exact, comma-separated executable allowlist:
+
+```sh
+BLIT_AUTH_TOKEN=change-me \
+BLIT_COMMAND_ALLOWLIST=/usr/bin/hibr,/bin/sh \
+blit 8080
+```
+
+The allowlist compares the complete requested path. Blit does not invoke a
+shell or perform `PATH` lookup, and a denied executable returns `403` with
+problem code `command_not_allowed`. When the variable is unset, command
+policy is open for local development and deterministic tests; production
+network deployments should set it explicitly. Hibr's installed executable
+can therefore be allowed directly while Hibr continues to own `desktop` and
+`desktop --join`.
+
 ```sh
 curl --fail --request POST \
   --header 'Content-Type: application/json' \
@@ -189,8 +205,8 @@ curl --fail --request POST \
 ```
 
 An omitted `display_id` targets the first output for compatibility. Unknown
-display IDs are rejected with `display_not_found`; argument/environment policy
-is intentionally still a deployment responsibility. The nested `surface`
+display IDs are rejected with `display_not_found`; arguments and environment
+are passed only after the executable path passes the configured policy. The nested `surface`
 object and its `width`/`height` members are required by the OpenAPI contract;
 omitting them returns the typed `session_create_failed` problem.
 

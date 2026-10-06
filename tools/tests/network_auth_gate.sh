@@ -11,10 +11,13 @@ AUTH=$(mktemp /tmp/blit-network-auth.XXXXXX)
 DIAGNOSTICS=$(mktemp /tmp/blit-network-diagnostics.XXXXXX)
 GRAPHICS=$(mktemp /tmp/blit-network-graphics.XXXXXX)
 AUDIO=$(mktemp /tmp/blit-network-audio.XXXXXX)
+COMMAND_DENIED=$(mktemp /tmp/blit-network-command-denied.XXXXXX)
+COMMAND_ALLOWED=$(mktemp /tmp/blit-network-command-allowed.XXXXXX)
 server_pid=
 cleanup() {
     if [ -n "$server_pid" ]; then kill "$server_pid" 2>/dev/null || true; fi
-    rm -f "$LOG" "$UNAUTH" "$AUTH" "$DIAGNOSTICS" "$GRAPHICS" "$AUDIO"
+    rm -f "$LOG" "$UNAUTH" "$AUTH" "$DIAGNOSTICS" "$GRAPHICS" "$AUDIO" \
+        "$COMMAND_DENIED" "$COMMAND_ALLOWED"
 }
 trap cleanup EXIT HUP INT TERM
 
@@ -25,6 +28,7 @@ fi
 
 SDL_VIDEODRIVER=dummy LD_LIBRARY_PATH="$ROOT/build/sdl3-kms" \
     BLIT_BIND_ADDRESS=0.0.0.0 BLIT_AUTH_TOKEN="$TOKEN" \
+    BLIT_COMMAND_ALLOWLIST=/bin/true \
     "$BINARY" "$PORT" >"$LOG" 2>&1 &
 server_pid=$!
 ready=0
@@ -65,4 +69,19 @@ if [ "$unauth" != 401 ] || [ "$auth" != 200 ] ||
     echo "network gate: expected unauth=401 auth=200, got $unauth/$auth" >&2
     exit 1
 fi
-echo "NETWORK_AUTH_PASS unauth=$unauth auth=$auth diagnostics=$diagnostics graphics=$graphics audio=$audio"
+command_denied=$(curl -sS -o "$COMMAND_DENIED" -w '%{http_code}' \
+    -H "Authorization: Bearer $TOKEN" \
+    -H 'Content-Type: application/json' \
+    --data '{"command":"/bin/sh","surface":{"width":80,"height":24}}' \
+    "http://127.0.0.1:$PORT/v1/terminal-sessions")
+command_allowed=$(curl -sS -o "$COMMAND_ALLOWED" -w '%{http_code}' \
+    -H "Authorization: Bearer $TOKEN" \
+    -H 'Content-Type: application/json' \
+    --data '{"command":"/bin/true","surface":{"width":80,"height":24}}' \
+    "http://127.0.0.1:$PORT/v1/terminal-sessions")
+if [ "$command_denied" != 403 ] || [ "$command_allowed" != 201 ] ||
+   ! grep -q '"code":"command_not_allowed"' "$COMMAND_DENIED"; then
+    echo "network gate: command policy failed denied=$command_denied allowed=$command_allowed" >&2
+    exit 1
+fi
+echo "NETWORK_AUTH_PASS unauth=$unauth auth=$auth diagnostics=$diagnostics graphics=$graphics audio=$audio command_denied=$command_denied command_allowed=$command_allowed"

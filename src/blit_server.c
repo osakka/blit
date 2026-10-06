@@ -348,6 +348,7 @@ typedef struct {
     BlitOverlay overlays[BLIT_MAX_OVERLAYS];
     unsigned long long next_overlay_id;
     char auth_token[256];
+    char command_allowlist[1024];
     int output_count;
     int sdl_ready;
     int direct_kms;
@@ -4238,6 +4239,41 @@ static void send_problem(int fd, int status, const char *reason,
     send_http(fd, status, reason, "application/problem+json", body);
 }
 
+static int command_allowed(const BlitRuntime *runtime, const char *command)
+{
+    const char *cursor = runtime->command_allowlist;
+
+    /* An unset policy preserves local development and test behavior. */
+    if (*cursor == '\0')
+        return 1;
+    while (*cursor != '\0') {
+        const char *candidate = cursor;
+        size_t length = 0;
+        char value[256];
+
+        while (*candidate == ' ' || *candidate == '\t')
+            ++candidate;
+        while (candidate[length] != '\0' && candidate[length] != ',')
+            ++length;
+        while (length > 0 &&
+               (candidate[length - 1] == ' ' ||
+                candidate[length - 1] == '\t'))
+            --length;
+        if (length > 0 && length < sizeof(value)) {
+            memcpy(value, candidate, length);
+            value[length] = '\0';
+            if (strcmp(value, command) == 0)
+                return 1;
+        }
+        cursor = candidate + length;
+        while (*cursor != '\0' && *cursor != ',')
+            ++cursor;
+        if (*cursor == ',')
+            ++cursor;
+    }
+    return 0;
+}
+
 static int idempotency_replay(BlitRuntime *runtime, int fd,
                               const char *request, const char *method,
                               const char *path, const char *payload)
@@ -5158,10 +5194,22 @@ static void handle_request(int fd, BlitRuntime *runtime,
     if (strcmp(path, "/v1/terminal-sessions") == 0 &&
         strcmp(method, "POST") == 0) {
         BlitSession *session;
+        char requested_command[256];
         char requested_display_id[128];
         char requested_pane_id[128];
         if (idempotency_replay(runtime, fd, request, method, path, payload))
             return;
+        if (!json_string(payload, "command", requested_command,
+                         sizeof(requested_command))) {
+            send_problem(fd, 400, "Bad Request", "invalid_command",
+                         "The command must be a non-empty executable path.");
+            return;
+        }
+        if (!command_allowed(runtime, requested_command)) {
+            send_problem(fd, 403, "Forbidden", "command_not_allowed",
+                         "The requested executable is not in BLIT_COMMAND_ALLOWLIST.");
+            return;
+        }
         if (json_string(payload, "display_id", requested_display_id,
                         sizeof(requested_display_id)) &&
             !display_id_is_known(runtime, requested_display_id)) {
@@ -7422,6 +7470,13 @@ int main(int argc, char **argv)
         if (auth_token != NULL)
             snprintf(runtime.auth_token, sizeof(runtime.auth_token), "%s",
                      auth_token);
+    }
+    {
+        const char *command_allowlist = getenv("BLIT_COMMAND_ALLOWLIST");
+        if (command_allowlist != NULL)
+            snprintf(runtime.command_allowlist,
+                     sizeof(runtime.command_allowlist), "%s",
+                     command_allowlist);
     }
     signal(SIGINT, stop_server);
     signal(SIGTERM, stop_server);

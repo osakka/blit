@@ -334,6 +334,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TerminalSession'
+        '403':
+          description: The executable is not permitted by the server policy
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         default:
           $ref: '#/components/responses/Problem'
   /v1/terminal-sessions/{session_id}:
