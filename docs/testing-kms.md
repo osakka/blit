@@ -108,7 +108,10 @@ The production launcher selects the bundled Unicode Terminus PSF font and the
 server logs the selected font dimensions and glyph count. Presentation is a
 hard refresh invariant: each active output must schedule independently at the
 maximum refresh supported by its selected mode, and no configured render
-interval may intentionally under-run that cadence. `BLIT_RENDER_INTERVAL_MS` remains a diagnostic
+interval may intentionally under-run that cadence. Deadlines use a monotonic
+microsecond clock and preserve each output's cadence phase after late work;
+they are not reset from the completion time of the previous frame.
+`BLIT_RENDER_INTERVAL_MS` remains a diagnostic
 override for measuring a hardware trade-off, but the production scheduler
 must clamp it so it cannot lower an output below its mode refresh. Set
 `BLIT_KMS_TRACE_TIMING=1` to log measured KMS frame durations. The KMS path

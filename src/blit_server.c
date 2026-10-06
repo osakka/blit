@@ -18,6 +18,7 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 #include <pty.h>
 
@@ -314,10 +315,10 @@ typedef struct {
     int pane_rows;
     unsigned long long topology_revision;
     int render_pending;
-    uint64_t render_last_ticks;
+    uint64_t render_last_us;
     int render_interval_ms;
     int render_effective_interval_ms;
-    uint32_t render_next_ticks[BLIT_MAX_DISPLAYS];
+    uint64_t render_next_us[BLIT_MAX_DISPLAYS];
     unsigned long render_missed_deadlines[BLIT_MAX_DISPLAYS];
     int test_refresh_override;
     int session_count;
@@ -550,16 +551,48 @@ static int output_render_period_ms(const BlitRuntime *runtime, int output_index)
         runtime->render_interval_ms : refresh_period;
 }
 
-static void reset_render_schedule(BlitRuntime *runtime, uint32_t now)
+static uint64_t monotonic_us(void)
+{
+    struct timespec now;
+
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+        return 0;
+    return (uint64_t)now.tv_sec * 1000000ULL +
+        (uint64_t)now.tv_nsec / 1000ULL;
+}
+
+static uint64_t output_render_period_us(const BlitRuntime *runtime,
+                                        int output_index)
+{
+    double refresh_hz = output_refresh_hz(runtime, output_index);
+    double period_us;
+    uint64_t configured_period_us;
+
+    if (refresh_hz < 1.0)
+        refresh_hz = 60.0;
+    period_us = 1000000.0 / refresh_hz;
+    configured_period_us = (uint64_t)runtime->render_interval_ms * 1000ULL;
+    /* A configured interval may request more work, never less.  Flooring the
+       hardware period avoids an intentional under-run caused by fractional
+       millisecond refresh periods; the page-flip/vblank remains authoritative
+       for visible presentation. */
+    if (configured_period_us < (uint64_t)period_us)
+        period_us = (double)configured_period_us;
+    if (period_us < 1.0)
+        period_us = 1.0;
+    return (uint64_t)period_us;
+}
+
+static void reset_render_schedule(BlitRuntime *runtime, uint64_t now)
 {
     int i;
     int minimum = 0;
 
     for (i = 0; i < BLIT_MAX_DISPLAYS; ++i)
-        runtime->render_next_ticks[i] = 0;
+        runtime->render_next_us[i] = 0;
     for (i = 0; i < runtime->output_count; ++i) {
         int period = output_render_period_ms(runtime, i);
-        runtime->render_next_ticks[i] = now;
+        runtime->render_next_us[i] = now;
         if (minimum == 0 || period < minimum)
             minimum = period;
     }
@@ -575,14 +608,14 @@ static uint32_t all_output_mask(const BlitRuntime *runtime)
         (1U << runtime->output_count) - 1U : 0;
 }
 
-static uint32_t due_output_mask(const BlitRuntime *runtime, uint32_t now)
+static uint32_t due_output_mask(const BlitRuntime *runtime, uint64_t now)
 {
     uint32_t mask = 0;
     int i;
 
     for (i = 0; i < runtime->output_count; ++i) {
-        if (runtime->render_next_ticks[i] == 0 ||
-            (int32_t)(now - runtime->render_next_ticks[i]) >= 0)
+        if (runtime->render_next_us[i] == 0 ||
+            now >= runtime->render_next_us[i])
             mask |= 1U << i;
     }
     /* Pointer underlay state is shared by the input layer.  Keep the pointer
@@ -593,27 +626,32 @@ static uint32_t due_output_mask(const BlitRuntime *runtime, uint32_t now)
     return mask;
 }
 
-static void advance_render_schedule(BlitRuntime *runtime, uint32_t now,
+static void advance_render_schedule(BlitRuntime *runtime, uint64_t now,
                                     uint32_t output_mask)
 {
     int i;
     for (i = 0; i < runtime->output_count; ++i) {
-        int period;
-        int32_t late;
+        uint64_t period;
+        uint64_t late;
+        uint64_t missed;
         if (!(output_mask & (1U << i)))
             continue;
-        period = output_render_period_ms(runtime, i);
-        late = runtime->render_next_ticks[i] == 0 ? 0 :
-            (int32_t)(now - runtime->render_next_ticks[i]);
-        if (late > period) {
-            runtime->render_missed_deadlines[i] +=
-                (unsigned long)(late / period);
+        period = output_render_period_us(runtime, i);
+        if (runtime->render_next_us[i] == 0 ||
+            now < runtime->render_next_us[i]) {
+            runtime->render_next_us[i] = now + period;
+            continue;
         }
-        runtime->render_next_ticks[i] = now + (uint32_t)period;
+        late = now - runtime->render_next_us[i];
+        missed = late / period;
+        runtime->render_missed_deadlines[i] += (unsigned long)missed;
+        /* Preserve the output's phase.  Advancing from `now` would make every
+           late frame permanently shift the cadence and amplify jitter. */
+        runtime->render_next_us[i] += (missed + 1) * period;
     }
 }
 
-static int render_wait_ms(const BlitRuntime *runtime, uint32_t now)
+static int render_wait_ms(const BlitRuntime *runtime, uint64_t now)
 {
     int wait_ms = 10;
     int i;
@@ -623,11 +661,12 @@ static int render_wait_ms(const BlitRuntime *runtime, uint32_t now)
     if (runtime->pointer_dirty)
         return 0;
     for (i = 0; i < runtime->output_count; ++i) {
-        int32_t delta = (int32_t)(runtime->render_next_ticks[i] - now);
-        if (delta <= 0)
+        uint64_t delta;
+        if (runtime->render_next_us[i] <= now)
             return 0;
-        if (delta < wait_ms)
-            wait_ms = delta;
+        delta = runtime->render_next_us[i] - now;
+        if ((int)((delta + 999ULL) / 1000ULL) < wait_ms)
+            wait_ms = (int)((delta + 999ULL) / 1000ULL);
     }
     return wait_ms;
 }
@@ -8550,7 +8589,7 @@ int main(int argc, char **argv)
     }
     if (runtime.sdl_ready || runtime.direct_kms)
         initialize_outputs(&runtime);
-    reset_render_schedule(&runtime, SDL_GetTicks());
+    reset_render_schedule(&runtime, monotonic_us());
     if (runtime.output_count > 0) {
         runtime.pointer_valid = 1;
         runtime.pointer_output = 0;
@@ -8606,7 +8645,7 @@ int main(int argc, char **argv)
         fd_set readable;
         struct timeval timeout;
         int wait_ms;
-        uint32_t now;
+        uint64_t now;
         uint32_t output_mask;
 
         reconnect_evdev_devices(&runtime);
@@ -8647,7 +8686,7 @@ int main(int argc, char **argv)
             FD_SET(kms_fd, &readable);
             if (kms_fd > max_fd) max_fd = kms_fd;
         }
-        now = SDL_GetTicks();
+        now = monotonic_us();
         wait_ms = render_wait_ms(&runtime, now);
         timeout.tv_sec = wait_ms / 1000;
         timeout.tv_usec = (wait_ms % 1000) * 1000;
@@ -8703,13 +8742,13 @@ int main(int argc, char **argv)
                     service_session_output(&runtime, runtime.sessions[i].pty_fd);
             }
         }
-        now = SDL_GetTicks();
+        now = monotonic_us();
         if (runtime.render_pending &&
             (output_mask = due_output_mask(&runtime, now)) != 0) {
             render_current_surfaces(&runtime, output_mask);
             advance_render_schedule(&runtime, now, output_mask);
             runtime.render_pending = render_work_remains(&runtime);
-            runtime.render_last_ticks = now;
+            runtime.render_last_us = now;
         }
     }
     close(server_fd);
