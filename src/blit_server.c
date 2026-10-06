@@ -8938,7 +8938,7 @@ int main(int argc, char **argv)
         return 2;
     }
     if (bind_address == NULL || bind_address[0] == '\0')
-        bind_address = "127.0.0.1";
+        bind_address = "0.0.0.0";
     memset(&runtime, 0, sizeof(runtime));
     runtime.started_us = monotonic_us();
     diagnostic_log(&runtime, "info", "server_start", "Blit gateway starting");
@@ -8988,6 +8988,11 @@ int main(int argc, char **argv)
             snprintf(runtime.auth_token, sizeof(runtime.auth_token), "%s",
                      auth_token);
     }
+    if (strcmp(bind_address, "127.0.0.1") != 0 &&
+        strcmp(bind_address, "::1") != 0 && runtime.auth_token[0] == '\0')
+        fprintf(stderr,
+                "blit: warning: network listener has no BLIT_AUTH_TOKEN; "
+                "the API is unauthenticated\n");
     {
         const char *command_allowlist = getenv("BLIT_COMMAND_ALLOWLIST");
         if (command_allowlist != NULL)
@@ -9077,8 +9082,8 @@ int main(int argc, char **argv)
         close(server_fd);
         return 1;
     }
-    printf("blit gateway listening on TCP port %d (%d display(s))\n",
-           port, runtime.display_count);
+    printf("blit gateway listening on %s TCP port %d (%d display(s))\n",
+           bind_address, port, runtime.display_count);
     fflush(stdout);
 
     while (blit_running) {

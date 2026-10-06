@@ -12,8 +12,8 @@ The platform capability gate is passing in the deterministic VKMS fixture:
 - One DRM card exposes two virtual outputs.
 - A fullscreen SDL window is created successfully across that fixture.
 
-The initial product slice is now running: the OpenAPI contract, loopback TCP
-gateway, PTY sessions, revisioned surfaces, persistent WebSocket stream, SDL3
+The initial product slice is now running: the OpenAPI contract, TCP gateway
+(network-bound by default, with an explicit bind override), PTY sessions, revisioned surfaces, persistent WebSocket stream, SDL3
 output initialization, and explicit session-to-display routing are implemented.
 The first renderer-neutral frame plan is now also implemented: a frame request
 captures the selected surface revisions before the SDL adapter presents them.

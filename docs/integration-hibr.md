@@ -37,6 +37,10 @@ Start the direct server binary, with no Blit shell launcher involved:
 BLIT_DISPLAY_BACKEND=kms BLIT_BIND_ADDRESS=127.0.0.1 blit 8080
 ```
 
+The packaged default binds to `0.0.0.0` for network clients. Keep the explicit
+loopback override above when Hibr and Blit are intentionally local, or set
+`BLIT_AUTH_TOKEN` and firewall the API when it must be reachable remotely.
+
 The Debian package's `/usr/bin/blit` is only a symlink to the native
 `blit-server` binary. It is not a shell wrapper. When a client creates a
 terminal session, Blit uses the command path and argument vector from the
