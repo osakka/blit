@@ -2,20 +2,20 @@
 
 ## Decision
 
-blit remains the standalone display server. hibr integration is a thin
-loadable hibr module that implements the existing `console`/`display` boundary
-by using blit's OpenAPI and WebSocket contracts.
+blit remains the standalone display server. The Hibr desktop is an external
+client of Blit's OpenAPI and WebSocket contracts. An optional `console-blit`
+Hibr module implements the existing `console`/`display` boundary for Hibr
+programs that explicitly request that provider; it is not a desktop launcher
+and is not required by the held `desktop`/`desktop --join` path.
 
 The SDL3 state engine must not be linked into hibr, and hibr must not become a
 second owner of display state. This preserves process isolation and lets other
 clients use blit without hibr.
 
 ```text
-hibr desktop scripts
+hibr desktop / desktop --join
         |
-console-blit hibr module
-        |
-OpenAPI + WebSocket
+OpenAPI + WebSocket client boundary
         |
 standalone blit server
         |
@@ -172,10 +172,10 @@ Hibr processes:
 5. Hibr's `hold clients blit` reports one logical desktop with `primary` and
    `auxiliary` clients at adjacent logical offsets.
 
-This proves the Blit transport and Hibr shared-session model. The packaged
-launcher now performs that orchestration deterministically from the
-authoritative topology snapshot: it creates the primary, then one join session
-for every other pane. Re-running against an existing held Hibr desktop uses
+This proves the Blit transport and Hibr shared-session model. The orchestration
+is performed by Hibr's installed `desktop` command and its `--join` path, using
+the authoritative topology snapshot supplied by Blit. Blit does not ship or
+invoke a shell launcher. Re-running against an existing held Hibr desktop uses
 the documented `--resume` path, while auxiliary clients always use `--join`.
 
 ## Current integration status

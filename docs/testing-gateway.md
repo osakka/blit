@@ -54,8 +54,9 @@ desktop tree being tested. Refresh an existing initramfs tree with:
 tools/probes/stage_hibr_qemu.sh /tmp/hibr-initroot-current /path/to/hibr
 ```
 
-The staging helper preserves Blit's `console-blit.so` provider and adapter
-files; it does not modify the Hibr checkout.
+The staging helper preserves the optional Blit `console-blit.so` provider and
+adapter files for provider-specific probes; it does not modify the Hibr
+checkout. It does not stage or invoke a Blit shell launcher.
 
 For the isolated input gate, compile the two TCC test helpers into the staged
 tree and boot the fixture with `blit.input_only=1` on the kernel command line:

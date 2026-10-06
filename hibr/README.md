@@ -1,7 +1,8 @@
 # console-blit
 
-`console-blit` is the Hibr `display` provider for a Blit-owned terminal
-surface. It is a transport adapter: Blit remains authoritative for surface
+`console-blit` is an optional Hibr `display` provider for a Blit-owned terminal
+surface. It is a transport adapter for Hibr programs that explicitly load it:
+Blit remains authoritative for surface
 cells, revisions, topology, pane geometry, input routing, and presentation.
 
 The module binds to the PTY identity exported by Blit:
@@ -28,7 +29,9 @@ not send a redundant subscription control frame.
 
 The module also supplies Hibr's `console` command facade, including screen
 operations and named application panes, so the stock Hibr desktop session can
-run without loading a second display implementation.
+run when that program explicitly selects the provider. The normal held Hibr
+desktop path (`desktop` and `desktop --join`) does not load this module; it
+uses Blit's terminal-session API directly.
 
 The `link` callback is intentionally a no-op until Blit's resource-link
 contract is defined; it cannot create a second ownership model for surfaces.
