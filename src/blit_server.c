@@ -416,6 +416,7 @@ static int output_index_for_display_index(const BlitRuntime *runtime,
                                           int display_index);
 
 static volatile sig_atomic_t blit_running = 1;
+static char blit_version[64] = "development";
 
 static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                            uint32_t output_mask);
@@ -799,10 +800,12 @@ static void send_http(int fd, int status, const char *reason,
         header, sizeof(header),
         "HTTP/1.1 %d %s\r\n"
         "Content-Type: %s\r\n"
+        "X-Blit-Version: %s\r\n"
         "Content-Length: %lu\r\n"
         "Connection: close\r\n"
         "Cache-Control: no-store\r\n\r\n",
-        status, reason, content_type, (unsigned long)body_length);
+        status, reason, content_type, blit_version,
+        (unsigned long)body_length);
 
     if (header_length > 0 && (size_t)header_length < sizeof(header)) {
         send_all(fd, header, (size_t)header_length);
@@ -819,10 +822,11 @@ static void send_http_bytes(int fd, int status, const char *reason,
         header, sizeof(header),
         "HTTP/1.1 %d %s\r\n"
         "Content-Type: %s\r\n"
+        "X-Blit-Version: %s\r\n"
         "Content-Length: %lu\r\n"
         "Connection: close\r\n"
         "Cache-Control: no-store\r\n\r\n",
-        status, reason, content_type, (unsigned long)length);
+        status, reason, content_type, blit_version, (unsigned long)length);
 
     if (header_length > 0 && (size_t)header_length < sizeof(header)) {
         send_all(fd, header, (size_t)header_length);
@@ -1053,7 +1057,7 @@ static void server_json(const BlitRuntime *runtime, char *body, size_t capacity)
     json_escape(runtime->sdl_error, escaped_error, sizeof(escaped_error));
     snprintf(body, capacity,
              "{\"id\":\"blit\",\"name\":\"blit\","
-             "\"api_version\":\"0.1\",\"revision\":1,"
+             "\"server_version\":\"%s\",\"api_version\":\"0.1\",\"revision\":1,"
              "\"capabilities\":[\"http-control\",\"websocket-stream\","
              "\"terminal-sessions\",\"topology\","
              "\"native-presentation\",\"graphics-inventory\","
@@ -1069,11 +1073,18 @@ static void server_json(const BlitRuntime *runtime, char *body, size_t capacity)
              "\"runtime_diagnostics\":\"/v1/diagnostics/runtime\","
              "\"effects\":\"/v1/effects\","
              "\"overlays\":\"/v1/overlays\"}}",
-             runtime->display_count, backend,
+             blit_version, runtime->display_count, backend,
              (runtime->direct_kms ? runtime->display_count > 0 :
               runtime->sdl_ready && runtime->output_count > 0 &&
               runtime->output_count == runtime->display_count) ?
                  "true" : "false", escaped_error);
+}
+
+static void version_json(char *body, size_t capacity)
+{
+    snprintf(body, capacity,
+             "{\"server_version\":\"%s\",\"api_version\":\"0.1\"}",
+             blit_version);
 }
 
 static const char *display_presentation_state(const BlitRuntime *runtime,
@@ -6514,7 +6525,8 @@ static void handle_request(int fd, BlitRuntime *runtime,
         snprintf(response, sizeof(response),
                  "HTTP/1.1 101 Switching Protocols\r\n"
                  "Upgrade: websocket\r\nConnection: Upgrade\r\n"
-                 "Sec-WebSocket-Accept: %s\r\n\r\n", accept);
+                 "X-Blit-Version: %s\r\n"
+                 "Sec-WebSocket-Accept: %s\r\n\r\n", blit_version, accept);
         send_all(fd, response, strlen(response));
         send_websocket_text(fd,
             "{\"type\":\"diagnostic\",\"severity\":\"info\","
@@ -7153,6 +7165,9 @@ static void handle_request(int fd, BlitRuntime *runtime,
     }
     if (strcmp(path, "/v1/server") == 0) {
         server_json(runtime, body, sizeof(body));
+        send_http(fd, 200, "OK", "application/json", body);
+    } else if (strcmp(path, "/v1/version") == 0) {
+        version_json(body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
     } else if (strcmp(path, "/v1/diagnostics") == 0) {
         diagnostics_json(runtime, body, sizeof(body));
@@ -9181,6 +9196,27 @@ static void service_http_client(BlitRuntime *runtime, int index)
     remove_http_client(runtime, index);
 }
 
+static void load_server_version(void)
+{
+    const char *environment_version = getenv("BLIT_VERSION");
+    FILE *version_file;
+    char line[sizeof(blit_version)];
+
+    if (environment_version != NULL && environment_version[0] != '\0') {
+        snprintf(blit_version, sizeof(blit_version), "%s", environment_version);
+        return;
+    }
+    version_file = fopen("/usr/share/doc/blit/VERSION", "r");
+    if (version_file == NULL)
+        return;
+    if (fgets(line, sizeof(line), version_file) != NULL) {
+        line[strcspn(line, "\r\n")] = '\0';
+        if (line[0] != '\0')
+            snprintf(blit_version, sizeof(blit_version), "%s", line);
+    }
+    fclose(version_file);
+}
+
 int main(int argc, char **argv)
 {
     int port = 8080;
@@ -9195,6 +9231,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "usage: %s [port]\n", argv[0]);
         return 2;
     }
+    load_server_version();
     if (bind_address == NULL || bind_address[0] == '\0')
         bind_address = "0.0.0.0";
     memset(&runtime, 0, sizeof(runtime));

@@ -34,6 +34,25 @@ paths:
                 $ref: '#/components/schemas/ServerDetails'
         default:
           $ref: '#/components/responses/Problem'
+  /v1/version:
+    get:
+      tags: [diagnostics]
+      operationId: getVersion
+      summary: Get the running Blit and API versions
+      responses:
+        '200':
+          description: Version identity
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [server_version, api_version]
+                properties:
+                  server_version: {type: string}
+                  api_version: {type: string}
+                additionalProperties: false
+        default:
+          $ref: '#/components/responses/Problem'
   /v1/graphics:
     get:
       tags: [hardware]
