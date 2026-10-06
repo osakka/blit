@@ -47,6 +47,8 @@ typedef struct {
     KmsGlyphMap *unicode_map;
     size_t unicode_count;
     size_t unicode_capacity;
+    KmsGlyphMap *unicode_lookup;
+    size_t unicode_lookup_capacity;
 } KmsFont;
 
 typedef struct {
@@ -239,6 +241,7 @@ static void font_free(KmsFont *font)
     if (font == NULL) return;
     free(font->codepoints);
     free(font->unicode_map);
+    free(font->unicode_lookup);
     free(font->data);
     memset(font, 0, sizeof(*font));
 }
@@ -265,6 +268,8 @@ static int font_add_mapping(KmsFont *font, uint32_t codepoint,
     ++font->unicode_count;
     return 1;
 }
+
+static void font_build_lookup(KmsFont *font);
 
 static int font_load_file(KmsFont *font, const char *path)
 {
@@ -364,7 +369,50 @@ static int font_load_file(KmsFont *font, const char *path)
     for (i = 0; i < font->glyph_count && i < 256; ++i)
         if (font->ascii_glyph[i] < 0)
             font->ascii_glyph[i] = (int)i;
+    font_build_lookup(font);
     return 0;
+}
+
+static size_t glyph_hash(uint32_t codepoint)
+{
+    uint32_t value = codepoint;
+    value ^= value >> 16;
+    value *= 0x7feb352dU;
+    value ^= value >> 15;
+    value *= 0x846ca68bU;
+    value ^= value >> 16;
+    return (size_t)value;
+}
+
+static void font_build_lookup(KmsFont *font)
+{
+    size_t capacity;
+    size_t i;
+
+    if (font == NULL || font->unicode_count == 0)
+        return;
+    capacity = 1;
+    while (capacity < font->unicode_count * 2)
+        capacity <<= 1;
+    font->unicode_lookup = (KmsGlyphMap *)malloc(
+        capacity * sizeof(*font->unicode_lookup));
+    if (font->unicode_lookup == NULL)
+        return;
+    font->unicode_lookup_capacity = capacity;
+    for (i = 0; i < capacity; ++i)
+        font->unicode_lookup[i].codepoint = 0xffffffffU;
+    for (i = 0; i < font->unicode_count; ++i) {
+        size_t slot = glyph_hash(font->unicode_map[i].codepoint) &
+            (capacity - 1);
+        while (font->unicode_lookup[slot].codepoint != 0xffffffffU) {
+            if (font->unicode_lookup[slot].codepoint ==
+                font->unicode_map[i].codepoint)
+                break;
+            slot = (slot + 1) & (capacity - 1);
+        }
+        if (font->unicode_lookup[slot].codepoint == 0xffffffffU)
+            font->unicode_lookup[slot] = font->unicode_map[i];
+    }
 }
 
 static void font_load(KmsFont *font)
@@ -394,7 +442,15 @@ static size_t font_glyph_index(const KmsFont *font, uint32_t codepoint)
     if (codepoint < 256 && font->ascii_glyph[codepoint] >= 0) {
         return (size_t)font->ascii_glyph[codepoint];
     }
-    if (font->unicode_map != NULL) {
+    if (font->unicode_lookup != NULL) {
+        size_t slot = glyph_hash(codepoint) &
+            (font->unicode_lookup_capacity - 1);
+        while (font->unicode_lookup[slot].codepoint != 0xffffffffU) {
+            if (font->unicode_lookup[slot].codepoint == codepoint)
+                return font->unicode_lookup[slot].glyph;
+            slot = (slot + 1) & (font->unicode_lookup_capacity - 1);
+        }
+    } else if (font->unicode_map != NULL) {
         for (i = 0; i < font->unicode_count; ++i)
             if (font->unicode_map[i].codepoint == codepoint) {
                 return font->unicode_map[i].glyph;
