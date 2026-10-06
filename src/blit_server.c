@@ -5640,6 +5640,49 @@ static int resize_session_surface(BlitSession *session, BlitSurface *surface,
     return 1;
 }
 
+/* Stop a PTY process group without allowing a misbehaving child to wedge the
+   gateway.  Hibr may keep descendants alive after SIGTERM, so a blocking
+   waitpid here would make DELETE, SIGINT, and SIGTERM unable to return. */
+static int terminate_session_process(pid_t process_id)
+{
+    int status;
+    pid_t result;
+    uint64_t deadline;
+
+    if (process_id <= 0)
+        return 1;
+    if (kill(-process_id, SIGTERM) < 0)
+        kill(process_id, SIGTERM);
+    deadline = monotonic_us() + 100000;
+    for (;;) {
+        result = waitpid(process_id, &status, WNOHANG);
+        if (result == process_id)
+            return 1;
+        if (result < 0 && (errno == ECHILD || errno == ESRCH))
+            return 1;
+        if (monotonic_us() >= deadline)
+            break;
+        usleep(10000);
+    }
+
+    if (kill(-process_id, SIGKILL) < 0)
+        kill(process_id, SIGKILL);
+    deadline = monotonic_us() + 500000;
+    for (;;) {
+        result = waitpid(process_id, &status, WNOHANG);
+        if (result == process_id)
+            return 1;
+        if (result < 0 && (errno == ECHILD || errno == ESRCH))
+            return 1;
+        if (monotonic_us() >= deadline)
+            break;
+        usleep(10000);
+    }
+    fprintf(stderr, "blit: warning: process %ld did not reap after SIGKILL\n",
+            (long)process_id);
+    return 0;
+}
+
 static void stop_sessions(BlitRuntime *runtime)
 {
     int i;
@@ -5649,9 +5692,9 @@ static void stop_sessions(BlitRuntime *runtime)
         if (!session->used)
             continue;
         refresh_session_state(runtime, session);
-        if (strcmp(session->state, "running") == 0) {
-            kill(-session->process_id, SIGTERM);
-            waitpid(session->process_id, NULL, 0);
+        if (strcmp(session->state, "running") == 0 ||
+            strcmp(session->state, "starting") == 0) {
+            terminate_session_process(session->process_id);
             snprintf(session->state, sizeof(session->state), "stopped");
         }
         if (session->pty_fd >= 0)
@@ -5672,10 +5715,7 @@ static void destroy_session(BlitRuntime *runtime, BlitSession *session)
     refresh_session_state(runtime, session);
     if (strcmp(session->state, "running") == 0 ||
         strcmp(session->state, "starting") == 0) {
-        if (kill(-session->process_id, SIGTERM) < 0)
-            kill(session->process_id, SIGTERM);
-        while (waitpid(session->process_id, NULL, 0) < 0 && errno == EINTR)
-            continue;
+        terminate_session_process(session->process_id);
     }
     if (session->pty_fd >= 0)
         close(session->pty_fd);

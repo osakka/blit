@@ -195,6 +195,15 @@ The repeatable bind/auth gate is:
 tools/tests/network_auth_gate.sh
 ```
 
+The session lifecycle gate starts a child that ignores `SIGTERM`, verifies that
+API deletion escalates to a bounded `SIGKILL`, and immediately checks that the
+diagnostics endpoint remains responsive:
+
+```sh
+BLIT_GATE_BINARY=build/blit/blit-server \
+  tools/tests/session_lifecycle_gate.sh
+```
+
 It requires `401` without a token and `200` with the configured bearer token.
 
 TLS termination, token rotation, and per-client authorization remain
