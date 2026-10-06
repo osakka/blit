@@ -14,6 +14,7 @@ int main(int argc, char **argv)
     int wide = 0;
     int kitty = 0;
     int kitty_limits = 0;
+    int kitty_query = 0;
     int stack = 0;
     int argument;
     for (argument = 1; argument < argc; ++argument) {
@@ -22,6 +23,7 @@ int main(int argc, char **argv)
         if (strcmp(argv[argument], "--wide") == 0) wide = 1;
         if (strcmp(argv[argument], "--kitty") == 0) kitty = 1;
         if (strcmp(argv[argument], "--kitty-limits") == 0) kitty_limits = 1;
+        if (strcmp(argv[argument], "--kitty-query") == 0) kitty_query = 1;
         if (strcmp(argv[argument], "--stack") == 0) stack = 1;
     }
     if (tcgetattr(STDIN_FILENO, &saved) == 0) {
@@ -56,11 +58,28 @@ int main(int argc, char **argv)
         fputs("\033_Ga=t,f=24,s=1,v=1,i=9,m=1;/w\033\\"
               "\033_Ga=t,f=24,s=513,v=1,i=10;AAAA\033\\", stdout);
     }
+    if (kitty_query)
+        fputs("\033_Ga=q,i=31,f=24,s=1,v=1;/wAA\033\\", stdout);
     fputs("READY", stdout);
     if (wide)
         fputs("\342\224\200", stdout);
     fputs("\r\n", stdout);
     fflush(stdout);
+    if (kitty_query) {
+        unsigned char response[256];
+        int response_length = 0;
+        while (read(STDIN_FILENO, &byte, 1) == 1) {
+            if (response_length + 1 < (int)sizeof(response))
+                response[response_length++] = byte;
+            response[response_length] = '\0';
+            if (strstr((const char *)response, ";OK\033\\") != NULL) {
+                fputs("\033]0;KITTY_QUERY_RESPONSE_PASS\007", stdout);
+                fflush(stdout);
+                return 0;
+            }
+        }
+        return 1;
+    }
     while (read(STDIN_FILENO, &byte, 1) == 1) {
         printf("BYTE %02X\r\n", (unsigned int)byte);
         fflush(stdout);

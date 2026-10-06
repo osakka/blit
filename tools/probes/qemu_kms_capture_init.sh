@@ -36,6 +36,7 @@ loss_test=0
 stack_test=0
 mixed_refresh_test=0
 kitty_limits_test=0
+kitty_query_test=0
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
     *" blit.output_loss=1 "*) loss_test=1 ;;
 esac
@@ -48,9 +49,15 @@ esac
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
     *" blit.kitty_limits=1 "*) kitty_limits_test=1 ;;
 esac
+case " $($b cat /proc/cmdline 2>/dev/null || true) " in
+    *" blit.kitty_query=1 "*) kitty_query_test=1 ;;
+esac
 if [ "$mixed_refresh_test" -eq 1 ]; then
     export BLIT_TEST_MODE=1
     export BLIT_TEST_REFRESH_HZ=60,120
+fi
+if [ "$kitty_query_test" -eq 1 ]; then
+    export BLIT_KITTY_TRACE=1
 fi
 BLIT_DISPLAY_BACKEND=kms BLIT_BIND_ADDRESS=127.0.0.1 /blit-stage/ld-linux-x86-64.so.2 --library-path /blit-stage:/blit-stage/lib /blit-stage/blit-server 19191 >/tmp/blit.log 2>&1 &
 ready=0
@@ -85,6 +92,8 @@ if [ "$stack_test" -eq 1 ]; then
     $b wget -qO /tmp/one.json --post-data='{"command":"/blit-stage/pty-input-echo","arguments":["--wide","--kitty","--stack"],"surface_mode":"terminal","display_id":"display-47","surface":{"width":128,"height":48}}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
 elif [ "$kitty_limits_test" -eq 1 ]; then
     $b wget -qO /tmp/one.json --post-data='{"command":"/blit-stage/pty-input-echo","arguments":["--kitty-limits"],"surface_mode":"terminal","display_id":"display-47","surface":{"width":128,"height":48}}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
+elif [ "$kitty_query_test" -eq 1 ]; then
+    $b wget -qO /tmp/one.json --post-data='{"command":"/blit-stage/pty-input-echo","arguments":["--kitty-query"],"surface_mode":"terminal","display_id":"display-47","surface":{"width":128,"height":48}}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
 else
     $b wget -qO /tmp/one.json --post-data='{"command":"/blit-stage/pty-input-echo","arguments":["--wide","--kitty"],"surface_mode":"terminal","display_id":"display-47","surface":{"width":128,"height":48}}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
 fi
@@ -124,6 +133,13 @@ if [ "$kitty_limits_test" -eq 1 ]; then
         finish 0
     fi
     echo KMS_KITTY_LIMITS_FAIL
+    finish 1
+fi
+if [ "$kitty_query_test" -eq 1 ]; then
+    query_session=$($b wget -qO- http://127.0.0.1:19191/v1/terminal-sessions/1 || true)
+    echo KITTY_QUERY; echo "$query_session"
+    echo "$query_session" | $b grep -q 'KITTY_QUERY_RESPONSE_PASS' && echo KMS_KITTY_QUERY_PASS && finish 0
+    echo KMS_KITTY_QUERY_FAIL
     finish 1
 fi
 if [ "$stack_test" -eq 1 ]; then

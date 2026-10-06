@@ -189,6 +189,12 @@ and requires `KITTY_LIMITS_PASS` from the session API: one incomplete image
 is evicted, the invalid upload is rejected, and both counts are observable.
 This mode is diagnostic-only and intentionally does not run the pixel oracle.
 
+The fixture accepts `blit.kitty_query=1` for the PTY acknowledgement gate. A
+query-only `a=q` upload must receive `ESC_Gi=31;OK ESC\\` without storing an
+image; the probe records this as `KMS_KITTY_QUERY_PASS` through the session
+title. Query responses follow the Kitty graphics protocol, including quiet
+mode handling, and are not treated as rendered image state.
+
 ## Pointer stress gate
 
 The input-only QEMU variant starts two terminal surfaces, routes the synthetic

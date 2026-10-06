@@ -2899,6 +2899,21 @@ static void graphics_reject(BlitSession *session, const char *reason)
              sizeof(session->graphics_last_error), "%s", reason);
 }
 
+static void kitty_reply(BlitSession *session, int image_id, int quiet,
+                        const char *message)
+{
+    char reply[160];
+    int is_ok = strcmp(message, "OK") == 0;
+
+    if (quiet == 2 || (quiet == 1 && is_ok))
+        return;
+    if (getenv("BLIT_KITTY_TRACE") != NULL)
+        fprintf(stderr, "blit: Kitty reply image=%d quiet=%d message=%s\n",
+                image_id, quiet, message);
+    snprintf(reply, sizeof(reply), "\033_Gi=%d;%s\033\\", image_id, message);
+    terminal_write_reply(session, reply);
+}
+
 static BlitGraphicsImage *graphics_image_find(BlitSession *session,
                                               unsigned int id)
 {
@@ -3016,6 +3031,7 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
     int placement_width = 0;
     int placement_height = 0;
     int z = 0;
+    int quiet = 0;
     BlitGraphicsImage *image;
     int index;
 
@@ -3034,7 +3050,8 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
         !kitty_parameter_int(payload, 'y', y, &y) ||
         !kitty_parameter_int(payload, 'c', 0, &placement_width) ||
         !kitty_parameter_int(payload, 'r', 0, &placement_height) ||
-        !kitty_parameter_int(payload, 'z', 0, &z)) {
+        !kitty_parameter_int(payload, 'z', 0, &z) ||
+        !kitty_parameter_int(payload, 'q', 0, &quiet) || quiet < 0 || quiet > 2) {
         graphics_reject(session, "invalid-parameters");
         return;
     }
@@ -3047,6 +3064,36 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
             if (image != NULL) graphics_image_release(image);
         }
         mark_surface_full_damage(surface);
+        return;
+    }
+    if (strcmp(action, "q") == 0) {
+        BlitGraphicsImage query;
+        char response[64];
+        memset(&query, 0, sizeof(query));
+        if (image_id == 0 || !kitty_parameter_int(payload, 'f', 0, &format) ||
+            !kitty_parameter_int(payload, 's', 0, &width) ||
+            !kitty_parameter_int(payload, 'v', 0, &height) ||
+            (format != 24 && format != 32) || width < 1 ||
+            width > BLIT_GRAPHICS_MAX_WIDTH || height < 1 ||
+            height > BLIT_GRAPHICS_MAX_HEIGHT) {
+            graphics_reject(session, "query-bounds");
+            kitty_reply(session, image_id, quiet, "EINVAL");
+            return;
+        }
+        query.capacity = (size_t)width * (size_t)height *
+            (format == 24 ? 3U : 4U);
+        query.pixels = (unsigned char *)malloc(query.capacity);
+        if (query.pixels == NULL ||
+            !kitty_decode_chunk(&query, separator + 1) ||
+            query.base64_tail_length != 0 || query.bytes != query.capacity) {
+            free(query.pixels);
+            graphics_reject(session, "query-data");
+            kitty_reply(session, image_id, quiet, "EINVAL");
+            return;
+        }
+        free(query.pixels);
+        snprintf(response, sizeof(response), "OK");
+        kitty_reply(session, image_id, quiet, response);
         return;
     }
     if (strcmp(action, "p") == 0) {
