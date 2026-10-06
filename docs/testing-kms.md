@@ -65,8 +65,11 @@ slow DRM driver or leaving pointer trails.
 
 When all cells in an affected view have the same effective background color,
 the renderer fills the view rectangle once before drawing glyphs. Mixed
-backgrounds and inverse cells continue through the per-cell path so color and
-attribute semantics remain exact.
+backgrounds are coalesced into horizontal runs, and inverse cells continue
+through the same effective-color path so color and attribute semantics remain
+exact. Native-size PSF rows are cached in the shared font object and the KMS
+renderer uses a native-size bitmap path; scaled cells retain the general
+scaler. These are bounded hot-path optimizations, not a second renderer.
 
 Surface damage is consumed only after the corresponding view is submitted.
 If a connector is still waiting for its page-flip event, its damage remains

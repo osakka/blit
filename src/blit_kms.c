@@ -203,7 +203,29 @@ static void fill_rect(KmsOutput *output, int x, int y, int width, int height,
     for (row = first_y; row < last_y; ++row) {
         uint32_t *pixels = (uint32_t *)((unsigned char *)output->back.map +
                                         row * output->back.pitch);
-        for (column = first_x; column < last_x; ++column)
+        if ((color & 0xffU) == ((color >> 8) & 0xffU) &&
+            (color & 0xffU) == ((color >> 16) & 0xffU) &&
+            (color & 0xffU) == ((color >> 24) & 0xffU)) {
+            memset((unsigned char *)pixels + first_x * sizeof(*pixels),
+                   (int)(color & 0xffU),
+                   (size_t)(last_x - first_x) * sizeof(*pixels));
+            continue;
+        }
+        column = first_x;
+        if (((uintptr_t)(pixels + column) & (sizeof(uint64_t) - 1)) != 0) {
+            pixels[column] = color;
+            ++column;
+        }
+        {
+            uint64_t pair = (uint64_t)color | ((uint64_t)color << 32);
+            uint64_t *wide = (uint64_t *)(pixels + column);
+            int pairs = (last_x - column) / 2;
+            int pair_index;
+            for (pair_index = 0; pair_index < pairs; ++pair_index)
+                wide[pair_index] = pair;
+            column += pairs * 2;
+        }
+        if (column < last_x)
             pixels[column] = color;
     }
 }
@@ -233,6 +255,25 @@ static void draw_glyph(KmsOutput *output, const BlitFont *font,
     int font_width = font != NULL && font->data ? font->width : 5;
     int font_height = font != NULL && font->data ? font->height : 7;
     glyph = blit_font_glyph_index(font, codepoint);
+    if (font != NULL && font->data != NULL && cw == font_width &&
+        ch == font_height && x >= 0 && y >= 0 &&
+        x + cw <= output->mode.hdisplay && y + ch <= output->mode.vdisplay) {
+        /* The bundled PSF is used at native size in the normal KMS path.
+           Avoid the general scaler's per-pixel divisions and clipping
+           branches when no scaling is required. */
+        for (glyph_row = 0; glyph_row < font_height; ++glyph_row) {
+            uint32_t *pixels = (uint32_t *)((unsigned char *)output->back.map +
+                                            (y + glyph_row) * output->back.pitch);
+            uint32_t row_bits = blit_font_glyph_row(font, glyph, codepoint,
+                                                    glyph_row);
+            uint32_t bit = 1U << (font_width - 1);
+            for (glyph_column = 0; glyph_column < font_width;
+                 ++glyph_column, bit >>= 1)
+                if (row_bits & bit)
+                    pixels[x + glyph_column] = color;
+        }
+        return;
+    }
     for (glyph_row = 0; glyph_row < ch; ++glyph_row) {
         uint32_t *pixels;
         int py = y + glyph_row;
@@ -300,6 +341,31 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
                   view->origin_y + first_row * ch,
                   (last_column - first_column) * cw,
                   (last_row - first_row) * ch, uniform_background);
+    else if (!background_uniform) {
+        /* Mixed Hibr surfaces often use long runs of the same background
+           color.  Fill those runs once per row; a rectangle per cell makes
+           a full-screen redraw needlessly expensive on a dumb KMS buffer. */
+        for (row = first_row; row < last_row; ++row) {
+            int run_column = first_column;
+            while (run_column < last_column) {
+                int run_end = run_column + 1;
+                uint32_t run_background = view_cell_background(
+                    view, row * view->stride + run_column);
+                while (run_end < last_column &&
+                       view_cell_background(view, row * view->stride + run_end) ==
+                       run_background)
+                    ++run_end;
+                if (run_background != 0) {
+                    fill_rect(output,
+                              view->origin_x + run_column * cw,
+                              view->origin_y + row * ch,
+                              (run_end - run_column) * cw, ch,
+                              run_background);
+                }
+                run_column = run_end;
+            }
+        }
+    }
     for (row = first_row; row < last_row; ++row) {
         for (column = first_column; column < last_column; ++column) {
             int index = row * view->stride + column;
@@ -320,8 +386,6 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
                 (view->combining_count == NULL ||
                  view->combining_count[index] == 0))
                 continue;
-            if (bg && (!background_uniform || bg != uniform_background))
-                fill_rect(output, x, y, cw, ch, bg);
             if (!(attr & 64)) {
                 draw_glyph(output, font, cp, x, y, cw, ch, fg);
             }

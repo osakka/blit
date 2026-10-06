@@ -52,10 +52,44 @@ void blit_font_free(BlitFont *font)
 {
     if (font == NULL) return;
     free(font->codepoints);
+    free(font->row_cache);
     free(font->unicode_map);
     free(font->unicode_lookup);
     free(font->data);
     memset(font, 0, sizeof(*font));
+}
+
+static void font_build_row_cache(BlitFont *font)
+{
+    size_t count;
+    size_t glyph;
+    int row;
+    size_t row_bytes;
+    if (font == NULL || font->data == NULL || font->width > 32 ||
+        font->height < 1 || font->glyph_count == 0)
+        return;
+    row_bytes = (size_t)((font->width + 7) / 8);
+    if (font->glyph_bytes < row_bytes * (size_t)font->height)
+        return;
+    count = font->glyph_count * (size_t)font->height;
+    font->row_cache = (uint32_t *)malloc(count * sizeof(*font->row_cache));
+    if (font->row_cache == NULL)
+        return;
+    font->row_cache_count = count;
+    for (glyph = 0; glyph < font->glyph_count; ++glyph) {
+        const unsigned char *source = font->data + font->glyph_offset +
+            glyph * font->glyph_bytes;
+        for (row = 0; row < font->height; ++row) {
+            uint32_t bits = 0;
+            int column;
+            for (column = 0; column < font->width; ++column)
+                if (source[row * row_bytes + column / 8] &
+                    (0x80 >> (column % 8)))
+                    bits |= 1U << (font->width - column - 1);
+            font->row_cache[glyph * (size_t)font->height + (size_t)row] =
+                bits;
+        }
+    }
 }
 
 static int font_add_mapping(BlitFont *font, uint32_t codepoint, size_t glyph)
@@ -194,6 +228,7 @@ static int font_load_file(BlitFont *font, const char *path)
     for (i = 0; i < font->glyph_count && i < 256; ++i)
         if (font->ascii_glyph[i] < 0) font->ascii_glyph[i] = (int)i;
     font_build_lookup(font);
+    font_build_row_cache(font);
     return 0;
 }
 
@@ -287,6 +322,11 @@ uint32_t blit_font_glyph_row(const BlitFont *font, size_t glyph,
     int column;
     if (font != NULL && font->data != NULL && row >= 0 &&
         row < font->height && width <= 32) {
+        if (font->row_cache != NULL && glyph < font->glyph_count &&
+            glyph * (size_t)font->height + (size_t)row <
+            font->row_cache_count)
+            return font->row_cache[glyph * (size_t)font->height +
+                                   (size_t)row];
         size_t row_bytes = (size_t)((width + 7) / 8);
         const unsigned char *source = font->data + font->glyph_offset +
             glyph * font->glyph_bytes + row * row_bytes;

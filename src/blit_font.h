@@ -13,6 +13,8 @@ typedef struct {
     int width;
     int height;
     uint32_t *codepoints;
+    uint32_t *row_cache;
+    size_t row_cache_count;
     int ascii_glyph[256];
     struct BlitFontGlyphMap *unicode_map;
     size_t unicode_count;
