@@ -190,6 +190,11 @@ typedef struct {
     size_t length;
     uint64_t accepted_us;
     char request[BLIT_REQUEST_SIZE];
+    int update_fd;
+    size_t update_expected;
+    size_t update_received;
+    char update_path[256];
+    char update_sha256[65];
 } BlitHttpClient;
 
 typedef struct {
@@ -408,6 +413,9 @@ typedef struct {
     int sdl_screenshot_written;
     char sdl_error[256];
     int listen_port;
+    char update_token[256];
+    char update_state[32];
+    char update_detail[256];
 } BlitRuntime;
 
 static int display_index_for_output(const BlitRuntime *runtime,
@@ -416,6 +424,7 @@ static int output_index_for_display_index(const BlitRuntime *runtime,
                                           int display_index);
 
 static volatile sig_atomic_t blit_running = 1;
+static volatile sig_atomic_t blit_restart_requested = 0;
 static char blit_version[64] = "development";
 
 static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
@@ -428,6 +437,9 @@ static int activate_direct_kms_fallback(BlitRuntime *runtime);
 static uint64_t monotonic_us(void);
 static void diagnostics_json(const BlitRuntime *runtime, char *body,
                              size_t capacity);
+static void remove_http_client(BlitRuntime *runtime, int index);
+static void update_status_json(const BlitRuntime *runtime, char *body,
+                               size_t capacity);
 
 static void effect_json(const BlitRuntime *runtime, char *body,
                         size_t capacity)
@@ -7191,6 +7203,9 @@ static void handle_request(int fd, BlitRuntime *runtime,
     if (strcmp(path, "/v1/server") == 0) {
         server_json(runtime, body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
+    } else if (strcmp(path, "/v1/control/update/status") == 0) {
+        update_status_json(runtime, body, sizeof(body));
+        send_http(fd, 200, "OK", "application/json", body);
     } else if (strcmp(path, "/v1/version") == 0) {
         version_json(body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
@@ -9136,6 +9151,11 @@ static void remove_http_client(BlitRuntime *runtime, int index)
     if (index < 0 || index >= BLIT_MAX_HTTP_CLIENTS ||
         !runtime->http_clients[index].used)
         return;
+    if (runtime->http_clients[index].update_fd >= 0) {
+        close(runtime->http_clients[index].update_fd);
+        if (runtime->http_clients[index].update_path[0] != '\0')
+            unlink(runtime->http_clients[index].update_path);
+    }
     close(runtime->http_clients[index].fd);
     memset(&runtime->http_clients[index], 0,
            sizeof(runtime->http_clients[index]));
@@ -9146,8 +9166,11 @@ static int add_http_client(BlitRuntime *runtime, int fd)
     int i;
     for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i) {
         if (!runtime->http_clients[i].used) {
+            memset(&runtime->http_clients[i], 0,
+                   sizeof(runtime->http_clients[i]));
             runtime->http_clients[i].used = 1;
             runtime->http_clients[i].fd = fd;
+            runtime->http_clients[i].update_fd = -1;
             runtime->http_clients[i].accepted_us = monotonic_us();
             return i;
         }
@@ -9178,15 +9201,201 @@ static int http_request_complete(const BlitHttpClient *client,
     return client->length >= *required ? 1 : 0;
 }
 
+static int update_authorized(const BlitRuntime *runtime, const char *request)
+{
+    char token[256];
+    return runtime->update_token[0] != '\0' &&
+        request_header(request, "X-Blit-Update-Token:", token, sizeof(token)) &&
+        strcmp(token, runtime->update_token) == 0;
+}
+
+static int run_capture_command(const char *command, const char *argument,
+                               char *output, size_t capacity)
+{
+    int pipe_fds[2];
+    pid_t child;
+    int status;
+    ssize_t received;
+    size_t used = 0;
+
+    if (pipe(pipe_fds) < 0)
+        return 0;
+    child = fork();
+    if (child < 0) {
+        close(pipe_fds[0]);
+        close(pipe_fds[1]);
+        return 0;
+    }
+    if (child == 0) {
+        int null_fd = open("/dev/null", O_WRONLY);
+        dup2(pipe_fds[1], STDOUT_FILENO);
+        if (null_fd >= 0) dup2(null_fd, STDERR_FILENO);
+        close(pipe_fds[0]);
+        close(pipe_fds[1]);
+        if (null_fd >= 0) close(null_fd);
+        execlp(command, command, argument, (char *)NULL);
+        _exit(127);
+    }
+    close(pipe_fds[1]);
+    while (used + 1 < capacity) {
+        received = read(pipe_fds[0], output + used, capacity - used - 1);
+        if (received <= 0) break;
+        used += (size_t)received;
+    }
+    close(pipe_fds[0]);
+    output[used] = '\0';
+    if (waitpid(child, &status, 0) != child || !WIFEXITED(status) ||
+        WEXITSTATUS(status) != 0)
+        return 0;
+    return 1;
+}
+
+static int run_capture_command2(const char *command, const char *argument1,
+                                const char *argument2, char *output,
+                                size_t capacity)
+{
+    int pipe_fds[2];
+    pid_t child;
+    int status;
+    ssize_t received;
+    size_t used = 0;
+
+    if (pipe(pipe_fds) < 0) return 0;
+    child = fork();
+    if (child < 0) {
+        close(pipe_fds[0]); close(pipe_fds[1]); return 0;
+    }
+    if (child == 0) {
+        int null_fd = open("/dev/null", O_WRONLY);
+        dup2(pipe_fds[1], STDOUT_FILENO);
+        if (null_fd >= 0) dup2(null_fd, STDERR_FILENO);
+        close(pipe_fds[0]); close(pipe_fds[1]);
+        if (null_fd >= 0) close(null_fd);
+        execlp(command, command, argument1, argument2, (char *)NULL);
+        _exit(127);
+    }
+    close(pipe_fds[1]);
+    while (used + 1 < capacity) {
+        received = read(pipe_fds[0], output + used, capacity - used - 1);
+        if (received <= 0) break;
+        used += (size_t)received;
+    }
+    close(pipe_fds[0]);
+    output[used] = '\0';
+    if (waitpid(child, &status, 0) != child || !WIFEXITED(status) ||
+        WEXITSTATUS(status) != 0)
+        return 0;
+    return 1;
+}
+
+static int update_package_valid(const char *path, const char *expected_sha,
+                                char *detail, size_t detail_capacity)
+{
+    char digest[128];
+    char package_name[128];
+    char *space;
+
+    if (!run_capture_command("sha256sum", path, digest, sizeof(digest)) ||
+        strncmp(digest, expected_sha, 64) != 0) {
+        snprintf(detail, detail_capacity, "SHA-256 verification failed");
+        return 0;
+    }
+    if (!run_capture_command2("dpkg-deb", "--field", path, package_name,
+                              sizeof(package_name))) {
+        snprintf(detail, detail_capacity, "not a readable Debian package");
+        return 0;
+    }
+    /* dpkg-deb --field is selected by the environment wrapper below; retain
+       an explicit package-name check in the update child before install. */
+    space = strchr(package_name, '\n');
+    if (space != NULL) *space = '\0';
+    if (strcmp(package_name, "blit") != 0) {
+        snprintf(detail, detail_capacity, "package is not blit");
+        return 0;
+    }
+    return 1;
+}
+
+static void update_status_json(const BlitRuntime *runtime, char *body,
+                               size_t capacity)
+{
+    snprintf(body, capacity, "{\"state\":\"%s\",\"detail\":\"%s\"}",
+             runtime->update_state[0] != '\0' ? runtime->update_state :
+             "disabled", runtime->update_detail);
+}
+
+static void finish_update_upload(BlitRuntime *runtime, BlitHttpClient *client)
+{
+    char output[512];
+    close(client->update_fd);
+    client->update_fd = -1;
+    if (!update_package_valid(client->update_path, client->update_sha256,
+                              runtime->update_detail,
+                              sizeof(runtime->update_detail))) {
+        snprintf(runtime->update_state, sizeof(runtime->update_state),
+                 "failed");
+        unlink(client->update_path);
+        send_problem(client->fd, 422, "Unprocessable Entity", "update_invalid",
+                     runtime->update_detail);
+        return;
+    }
+    snprintf(runtime->update_state, sizeof(runtime->update_state), "installing");
+    if (!run_capture_command2("dpkg", "--install", client->update_path,
+                              output, sizeof(output))) {
+        snprintf(runtime->update_state, sizeof(runtime->update_state), "failed");
+        snprintf(runtime->update_detail, sizeof(runtime->update_detail),
+                 "dpkg installation failed");
+        unlink(client->update_path);
+        send_problem(client->fd, 500, "Internal Server Error", "update_install_failed",
+                     runtime->update_detail);
+        return;
+    }
+    snprintf(runtime->update_state, sizeof(runtime->update_state), "restarting");
+    snprintf(runtime->update_detail, sizeof(runtime->update_detail),
+             "package installed; restarting Blit");
+    send_http(client->fd, 202, "Accepted", "application/json",
+              "{\"state\":\"restarting\",\"detail\":\"package installed; restarting Blit\"}");
+    blit_restart_requested = 1;
+    blit_running = 0;
+}
+
+static void service_update_upload(BlitRuntime *runtime, BlitHttpClient *client)
+{
+    unsigned char chunk[8192];
+    ssize_t received;
+    size_t remaining = client->update_expected - client->update_received;
+    if (remaining > sizeof(chunk)) remaining = sizeof(chunk);
+    received = recv(client->fd, chunk, remaining, 0);
+    if (received <= 0) {
+        remove_http_client(runtime, (int)(client - runtime->http_clients));
+        return;
+    }
+    if (write(client->update_fd, chunk, (size_t)received) != received) {
+        snprintf(runtime->update_state, sizeof(runtime->update_state), "failed");
+        snprintf(runtime->update_detail, sizeof(runtime->update_detail),
+                 "staged package write failed");
+        remove_http_client(runtime, (int)(client - runtime->http_clients));
+        return;
+    }
+    client->update_received += (size_t)received;
+    if (client->update_received == client->update_expected)
+        finish_update_upload(runtime, client);
+}
+
 static void service_http_client(BlitRuntime *runtime, int index)
 {
     BlitHttpClient *client = &runtime->http_clients[index];
+    const char *headers_end;
     ssize_t received;
     size_t required = 0;
     int complete;
 
     if (!client->used)
         return;
+    if (client->update_fd >= 0) {
+        service_update_upload(runtime, client);
+        return;
+    }
     if (client->length + 1 >= sizeof(client->request)) {
         remove_http_client(runtime, index);
         return;
@@ -9205,6 +9414,63 @@ static void service_http_client(BlitRuntime *runtime, int index)
     }
     client->length += (size_t)received;
     client->request[client->length] = '\0';
+    headers_end = strstr(client->request, "\r\n\r\n");
+    if (headers_end != NULL &&
+        strncmp(client->request, "PUT /v1/control/update ", 23) == 0) {
+        size_t header_length = (size_t)(headers_end - client->request) + 4;
+        size_t content_length = 0;
+        char sha256[65];
+        char temporary[] = "/tmp/blit-update-XXXXXX";
+        int temporary_fd;
+        const char *length_header = strstr(client->request, "Content-Length:");
+        if (runtime->update_token[0] == '\0' ||
+            !update_authorized(runtime, client->request)) {
+            send_problem(client->fd, 403, "Forbidden", "update_disabled",
+                         "A valid update token is required.");
+            remove_http_client(runtime, index);
+            return;
+        }
+        if (length_header != NULL)
+            content_length = (size_t)strtoull(length_header + 15, NULL, 10);
+        if (content_length == 0 || content_length > 64U * 1024U * 1024U ||
+            !request_header(client->request, "X-Blit-SHA256:", sha256,
+                            sizeof(sha256)) || strlen(sha256) != 64) {
+            send_problem(client->fd, 413, "Payload Too Large", "update_invalid",
+                         "A bounded package length and SHA-256 header are required.");
+            remove_http_client(runtime, index);
+            return;
+        }
+        /* Large curl/http clients may wait for this before sending the
+           remainder of the package body. */
+        send_all(client->fd, "HTTP/1.1 100 Continue\r\n\r\n",
+                 strlen("HTTP/1.1 100 Continue\r\n\r\n"));
+        temporary_fd = mkstemp(temporary);
+        if (temporary_fd < 0) {
+            send_problem(client->fd, 500, "Internal Server Error", "update_stage_failed",
+                         "The update package could not be staged.");
+            remove_http_client(runtime, index);
+            return;
+        }
+        client->update_fd = temporary_fd;
+        client->update_expected = content_length;
+        client->update_received = client->length > header_length ?
+            client->length - header_length : 0;
+        snprintf(client->update_path, sizeof(client->update_path), "%s", temporary);
+        snprintf(client->update_sha256, sizeof(client->update_sha256), "%s", sha256);
+        snprintf(runtime->update_state, sizeof(runtime->update_state), "receiving");
+        snprintf(runtime->update_detail, sizeof(runtime->update_detail),
+                 "receiving Debian package");
+        if (client->update_received > content_length ||
+            (client->update_received > 0 &&
+             write(client->update_fd, client->request + header_length,
+                   client->update_received) != (ssize_t)client->update_received)) {
+            remove_http_client(runtime, index);
+            return;
+        }
+        if (client->update_received == client->update_expected)
+            finish_update_upload(runtime, client);
+        return;
+    }
     complete = http_request_complete(client, &required);
     if (complete < 0 || (complete == 0 &&
                          client->length + 1 >= sizeof(client->request))) {
@@ -9307,7 +9573,18 @@ int main(int argc, char **argv)
         if (auth_token != NULL)
             snprintf(runtime.auth_token, sizeof(runtime.auth_token), "%s",
                      auth_token);
+        {
+            const char *update_token = getenv("BLIT_UPDATE_TOKEN");
+            if (update_token != NULL)
+                snprintf(runtime.update_token, sizeof(runtime.update_token), "%s",
+                         update_token);
+        }
     }
+    snprintf(runtime.update_state, sizeof(runtime.update_state),
+             runtime.update_token[0] != '\0' ? "ready" : "disabled");
+    snprintf(runtime.update_detail, sizeof(runtime.update_detail),
+             runtime.update_token[0] != '\0' ?
+             "update API enabled" : "BLIT_UPDATE_TOKEN is not configured");
     if (strcmp(bind_address, "127.0.0.1") != 0 &&
         strcmp(bind_address, "::1") != 0 && runtime.auth_token[0] == '\0')
         fprintf(stderr,
@@ -9564,5 +9841,13 @@ int main(int argc, char **argv)
     blit_font_free(&runtime.font);
     if (runtime.sdl_ready)
         SDL_Quit();
+    if (blit_restart_requested) {
+        char port_text[16];
+        snprintf(port_text, sizeof(port_text), "%d", runtime.listen_port);
+        execl("/usr/lib/blit/bin/blit-server", "blit-server",
+              port_text, (char *)NULL);
+        fprintf(stderr, "blit: update restart failed: %s\n", strerror(errno));
+        return 1;
+    }
     return 0;
 }

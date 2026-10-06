@@ -164,6 +164,56 @@ paths:
                 format: binary
         default:
           $ref: '#/components/responses/Problem'
+  /v1/control/update:
+    put:
+      tags: [control]
+      operationId: uploadUpdatePackage
+      summary: Upload, verify, install, and restart from a Blit Debian package
+      parameters:
+        - in: header
+          name: X-Blit-Update-Token
+          required: true
+          schema: {type: string, minLength: 1}
+        - in: header
+          name: X-Blit-SHA256
+          required: true
+          schema: {type: string, pattern: '^[0-9a-fA-F]{64}$'}
+      requestBody:
+        required: true
+        content:
+          application/vnd.debian.binary-package:
+            schema: {type: string, format: binary}
+      responses:
+        '202':
+          description: Package installed and restart accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [state, detail]
+                properties:
+                  state: {type: string, const: restarting}
+                  detail: {type: string}
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/control/update/status:
+    get:
+      tags: [control]
+      operationId: getUpdateStatus
+      summary: Get package update state
+      responses:
+        '200':
+          description: Current update state
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [state, detail]
+                properties:
+                  state: {type: string}
+                  detail: {type: string}
+        default:
+          $ref: '#/components/responses/Problem'
   /v1/control/shutdown:
     post:
       tags: [control]
