@@ -94,6 +94,15 @@ file, then set `LIBGL_DRIVERS_PATH`, `__EGL_VENDOR_LIBRARY_DIRS`, and
 while EGL window creation fails. A real bare-metal KMS test remains required
 before accepting physical display ownership and hardware timing behavior.
 
+With the same virtio guest and the current TCC-built `blit-server`, the full
+runtime path also passes: `/v1/server` reports `backend: "sdl3"` and ready,
+`/v1/graphics` reports the virtio PCI card, `/v1/diagnostics/runtime` reports
+the 74.99 Hz output and refresh-aware scheduler, and a PTY-backed Hibr
+workload reaches `running` with its surface revision advancing and desktop
+text present. The guest must mount `devtmpfs`, create `/dev/pts` after that
+mount, mount `devpts` with a usable `/dev/ptmx`, and bring up loopback for the
+API readiness check.
+
 The QEMU test also exposed an important fixture rule: the Alpine initramfs did
 not include a usable network driver in the direct-shell boot path. Test
 artifacts were therefore supplied through a second read-only ISO rather than

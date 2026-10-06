@@ -39,6 +39,9 @@ in QEMU with direct DRM/KMS:
   surface output.
 - QEMU direct-KMS mode reports a ready backend, KMS display mode, graphics
   capabilities, evdev keyboard/pointer inventory, and a running PTY session.
+- QEMU virtio-GPU mode reports a ready SDL3 KMSDRM backend, a virtio PCI
+  graphics card, refresh-aware runtime diagnostics, and a running PTY-backed
+  Hibr workload whose surface revision advances with desktop text.
 - The terminal conformance runner passes printable text, cursor addressing,
   styles, erase, scrolling, scroll regions, alternate-screen restoration,
   saved cursors, UTF-8, truecolor SGR, and fragmented CSI sequences over the
