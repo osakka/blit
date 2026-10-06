@@ -63,6 +63,11 @@ repaints the old and new pointer rectangles at cell granularity, and does not
 redraw the entire terminal; this prevents mouse motion from monopolizing a
 slow DRM driver or leaving pointer trails.
 
+When all cells in an affected view have the same effective background color,
+the renderer fills the view rectangle once before drawing glyphs. Mixed
+backgrounds and inverse cells continue through the per-cell path so color and
+attribute semantics remain exact.
+
 Expected output identifies every usable card and connected connector, then
 lists its modes and preferred mode. A missing card, connector, or mode is a
 structured capability result—not a reason to fall back silently to SDL text

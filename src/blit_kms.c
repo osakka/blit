@@ -489,6 +489,21 @@ static int font_pixel_glyph(const KmsFont *font, size_t glyph, int row, int col)
 
 static int glyph_bit(unsigned int codepoint, int row, int column);
 
+static uint32_t view_cell_background(const BlitKmsSurfaceView *view,
+                                     int index)
+{
+    uint32_t fg = view->foreground[index] ?
+        view->foreground[index] - 1 : KMS_WHITE;
+    uint32_t bg = view->background[index] ?
+        view->background[index] - 1 : 0;
+    if (view->attributes[index] & 8) {
+        uint32_t temporary = fg;
+        fg = bg;
+        bg = temporary;
+    }
+    return bg;
+}
+
 static void draw_glyph(KmsOutput *output, const KmsFont *font,
                        uint32_t codepoint, int x, int y, int cw, int ch,
                        uint32_t color)
@@ -586,6 +601,9 @@ static void draw_view(KmsOutput *output, const KmsFont *font,
     int last_row = view->rows;
     int first_column = 0;
     int last_column = view->columns;
+    int background_uniform = 1;
+    int background_seen = 0;
+    uint32_t uniform_background = 0;
     if (view->damage_valid) {
         first_row = view->damage_y;
         last_row = view->damage_y + view->damage_height;
@@ -596,6 +614,27 @@ static void draw_view(KmsOutput *output, const KmsFont *font,
         if (last_row > view->rows) last_row = view->rows;
         if (last_column > view->columns) last_column = view->columns;
     }
+    /* Hibr themes commonly paint a single background across a complete
+       surface.  Detect that case once so the hot cell loop does not invoke
+       fill_rect for every cell; mixed backgrounds retain the exact old path. */
+    for (row = first_row; row < last_row && background_uniform; ++row) {
+        for (column = first_column; column < last_column; ++column) {
+            uint32_t background = view_cell_background(
+                view, row * view->stride + column);
+            if (!background_seen) {
+                uniform_background = background;
+                background_seen = 1;
+            } else if (background != uniform_background) {
+                background_uniform = 0;
+                break;
+            }
+        }
+    }
+    if (background_uniform && background_seen && uniform_background != 0)
+        fill_rect(output, view->origin_x + first_column * cw,
+                  view->origin_y + first_row * ch,
+                  (last_column - first_column) * cw,
+                  (last_row - first_row) * ch, uniform_background);
     for (row = first_row; row < last_row; ++row) {
         for (column = first_column; column < last_column; ++column) {
             int index = row * view->stride + column;
@@ -616,7 +655,8 @@ static void draw_view(KmsOutput *output, const KmsFont *font,
                 (view->combining_count == NULL ||
                  view->combining_count[index] == 0))
                 continue;
-            if (bg) fill_rect(output, x, y, cw, ch, bg);
+            if (bg && (!background_uniform || bg != uniform_background))
+                fill_rect(output, x, y, cw, ch, bg);
             if (!(attr & 64)) {
                 draw_glyph(output, font, cp, x, y, cw, ch, fg);
             }
