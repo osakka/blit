@@ -101,10 +101,12 @@ cell in both axes; it does not merely enlarge the cell while leaving an
 unscaled glyph in its upper-left corner.
 
 The production launcher selects the bundled Unicode Terminus PSF font and the
-server logs the selected font dimensions and glyph count. Pointer and surface
-presentation use a bounded 16 ms render gate by default; set
-`BLIT_RENDER_INTERVAL_MS` between 1 and 100 to measure a different hardware
-trade-off without changing terminal state semantics. Set
+server logs the selected font dimensions and glyph count. Presentation is
+refresh-aware: each active output must schedule independently from its
+selected mode refresh, and no configured render interval may intentionally
+under-run that cadence. `BLIT_RENDER_INTERVAL_MS` remains a diagnostic
+override for measuring a hardware trade-off, but the production scheduler
+must clamp it so it cannot lower an output below its mode refresh. Set
 `BLIT_KMS_TRACE_TIMING=1` to log measured KMS frame durations. The KMS path
 does not submit a page flip when the output has no changed surface, cursor,
 pointer, or topology state; this is the idle CPU/latency guard. A first frame,
@@ -185,6 +187,14 @@ glyph-draw, and page-flip intervals. The optimized PSF rasterizer's current
 two-output Hibr fixture measured 56 samples with a maximum 147.739 ms glyph
 draw and 154.447 ms total present under QEMU TCG; the acceptance marker and
 pixel gate must still pass when timing is enabled.
+
+The refresh gate must record, per output, selected refresh, effective
+scheduler cadence, missed-deadline count, and page-flip wait time. The
+acceptance run uses at least two outputs with different selected refresh
+rates and requires that the faster output is not reduced to the slower
+output's cadence. A result is invalid if it only demonstrates that frames
+were eventually drawn; it must separate scheduler delay from physical
+vblank/page-flip delay.
 The input fixture also crosses the synthetic pointer from output 1 to output
 2 and verifies that streamed motion changes from the first PTY session to the
 second rather than being broadcast to both. It overlaps left, middle, and

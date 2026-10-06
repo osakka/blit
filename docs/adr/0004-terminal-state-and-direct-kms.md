@@ -33,6 +33,13 @@ terminal state machine, one font backend, and one atomic frame submission. It
 will be extended to joined displays only after that slice has deterministic
 input, resize, damage, cursor, and recovery behavior.
 
+Presentation cadence is refresh-aware. Each active output has an independent
+deadline derived from its selected display mode's refresh rate. Blit must not
+impose a lower frame-rate cap than that mode. Rendering faster than the mode
+is permitted only as internal preparation; visible presentation remains
+bounded by the output's page-flip/vblank constraints. A slower output must not
+throttle a faster output.
+
 ## Hibr boundary
 
 - Blit starts and supervises Hibr through a PTY.
@@ -58,6 +65,8 @@ Costs:
 - Blit needs a real terminal state machine and font/rendering boundary.
 - Direct KMS requires explicit device, seat, connector, mode, and page-flip
   handling.
+- Refresh-aware scheduling requires per-output deadlines, measured present
+  timing, and explicit handling of outputs with different refresh rates.
 - The prototype's SDL text path becomes a compatibility/test adapter rather
   than the production path.
 
@@ -78,4 +87,7 @@ real DRM host:
 3. keyboard and pointer routing to the selected pane;
 4. resize updates to both logical cells and PTY dimensions;
 5. renderer/device failure as a structured API diagnostic;
-6. clean output recovery after VT or DRM loss.
+6. clean output recovery after VT or DRM loss;
+7. under sustained damage and pointer motion, each output's effective
+   scheduler cadence is at least its selected mode refresh, with scheduler
+   delay distinguished from physical vblank/page-flip delay.
