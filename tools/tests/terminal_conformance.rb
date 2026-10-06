@@ -80,7 +80,7 @@ rescue StandardError => error
   raise
 end
 
-def run_title_case(base, name, command, expected)
+def run_session_field_case(base, name, command, field, expected)
   created = request(base, 'POST', '/v1/terminal-sessions', {
     'command' => '/bin/sh',
     'arguments' => ['-c', "#{command}; sleep 0.1"],
@@ -96,7 +96,7 @@ def run_title_case(base, name, command, expected)
     end
   end
   state = request(base, 'GET', "/v1/terminal-sessions/#{id}")
-  assert_equal(expected, state.fetch('title'), name)
+  assert_equal(expected, state.fetch(field), name)
   request(base, 'DELETE', "/v1/terminal-sessions/#{id}")
   puts "PASS #{name}"
 rescue StandardError => error
@@ -461,11 +461,20 @@ snapshot = run_case(base, 'c1-string-control',
 cells = cell_map(snapshot)
 assert_equal('X', cells.fetch([0, 0]).fetch('text'), '8-bit OSC isolation')
 
-run_title_case(base, 'osc-title-bel', "printf '\\033]0;bel title\\007'",
-               'bel title')
-run_title_case(base, 'osc-title-st',
+run_session_field_case(base, 'osc-title-bel', "printf '\\033]0;bel title\\007'",
+                       'title', 'bel title')
+run_session_field_case(base, 'osc-title-st',
                "printf '\\033]2;st title\\033'; printf '\\\\'",
-               'st title')
+               'title', 'st title')
+run_session_field_case(base, 'osc-clipboard-set',
+                       "printf '\\033]52;c;SGVsbG8=\\007'",
+                       'clipboard', 'c;SGVsbG8=')
+run_session_field_case(base, 'osc-notification-9',
+                       "printf '\\033]9;hello notice\\007'",
+                       'notification', 'hello notice')
+run_session_field_case(base, 'osc-notification-777',
+                       "printf '\\033]777;notify;title;body\\007'",
+                       'notification', 'title;body')
 
 snapshot = run_case(base, 'scroll-region', "printf 'A\\nB\\n\\033[2;3r\\033[2;1H1\\n2\\n3'", height: 4)
 cells = cell_map(snapshot)

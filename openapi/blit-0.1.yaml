@@ -728,6 +728,17 @@ components:
           description: >-
             Current terminal title from OSC 0, OSC 1, or OSC 2. Empty until
             the PTY emits a title control.
+        clipboard:
+          type: string
+          description: >-
+            Most recent OSC 52 clipboard payload in Hibr's canonical
+            selection;base64 form. Empty until the PTY sets the clipboard;
+            clipboard read queries are never answered.
+        notification:
+          type: string
+          description: >-
+            Most recent OSC 9 or OSC 777 notification payload. OSC 9 numeric
+            progress reports are not exposed as notifications.
         display_id: {$ref: '#/components/schemas/ResourceId'}
         pane_id: {$ref: '#/components/schemas/ResourceId'}
         process_id: {type: integer, minimum: 1}

@@ -197,9 +197,11 @@ typedef struct {
     char terminal_csi[32];
     int terminal_csi_length;
     int terminal_string_type;
-    char terminal_string[256];
+    char terminal_string[4096];
     int terminal_string_length;
     char terminal_title[128];
+    char terminal_clipboard[4096];
+    char terminal_notification[1024];
     int terminal_charset_dec;
     int terminal_charset_g1_dec;
     int terminal_charset_shift;
@@ -1883,6 +1885,7 @@ static void terminal_restore_cursor(BlitSession *session, BlitSurface *surface)
 static void terminal_apply_osc(BlitSession *session)
 {
     char *separator;
+    const char *payload;
     int command;
 
     if (session->terminal_string_type != ']')
@@ -1892,9 +1895,28 @@ static void terminal_apply_osc(BlitSession *session)
     if (separator == NULL)
         return;
     command = atoi(session->terminal_string);
+    payload = separator + 1;
     if (command == 0 || command == 1 || command == 2) {
         snprintf(session->terminal_title, sizeof(session->terminal_title),
-                 "%s", separator + 1);
+                 "%s", payload);
+    } else if (command == 52) {
+        /* Keep OSC 52 in Hibr's canonical selection;base64 form.  A query
+           (selection;?) is deliberately not answered or treated as a set. */
+        char *query = strchr((char *)payload, ';');
+        if (query != NULL && strcmp(query + 1, "?") != 0)
+            snprintf(session->terminal_clipboard,
+                     sizeof(session->terminal_clipboard), "%s", payload);
+    } else if (command == 9) {
+        /* Hibr consumes the next notification as a raw OSC payload.  A
+           numeric OSC 9 progress report is not a user notification. */
+        const char *cursor = payload;
+        while (*cursor >= '0' && *cursor <= '9') ++cursor;
+        if (*cursor != ';')
+            snprintf(session->terminal_notification,
+                     sizeof(session->terminal_notification), "%s", payload);
+    } else if (command == 777 && strncmp(payload, "notify;", 7) == 0) {
+        snprintf(session->terminal_notification,
+                 sizeof(session->terminal_notification), "%s", payload + 7);
     }
 }
 
@@ -3206,6 +3228,8 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
     int route_index;
     size_t used;
     char escaped_title[256];
+    char escaped_clipboard[8192];
+    char escaped_notification[2048];
 
     for (route_index = 0; route_index < 16; ++route_index)
         if (runtime->input_routes[route_index].used &&
@@ -3223,6 +3247,10 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
     refresh_session_state(session);
     json_escape(session->terminal_title, escaped_title,
                 sizeof(escaped_title));
+    json_escape(session->terminal_clipboard, escaped_clipboard,
+                sizeof(escaped_clipboard));
+    json_escape(session->terminal_notification, escaped_notification,
+                sizeof(escaped_notification));
     snprintf(body, capacity,
              "{\"id\":\"%llu\",\"revision\":%llu,"
              "\"state\":\"%s\",\"surface_id\":\"%s\","
@@ -3236,6 +3264,14 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
     used = strlen(body);
     used += (size_t)snprintf(body + used, capacity - used,
                              ",\"title\":\"%s\"", escaped_title);
+    if (session->terminal_clipboard[0] != '\0')
+        used += (size_t)snprintf(body + used, capacity - used,
+                                 ",\"clipboard\":\"%s\"",
+                                 escaped_clipboard);
+    if (session->terminal_notification[0] != '\0')
+        used += (size_t)snprintf(body + used, capacity - used,
+                                 ",\"notification\":\"%s\"",
+                                 escaped_notification);
     if (strcmp(session->state, "running") != 0 &&
         strcmp(session->state, "starting") != 0)
         used += (size_t)snprintf(body + used, capacity - used,
