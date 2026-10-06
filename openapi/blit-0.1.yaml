@@ -837,12 +837,14 @@ components:
               type: array
               items:
                 type: object
-                required: [display_id, refresh_hz, refresh_source, effective_interval_ms, missed_deadlines]
+                required: [display_id, refresh_hz, refresh_source, effective_interval_ms, target_interval_us, target_interval_ms, missed_deadlines]
                 properties:
                   display_id: {type: string}
                   refresh_hz: {type: number, minimum: 1}
                   refresh_source: {type: string, enum: [display-mode, test-override]}
                   effective_interval_ms: {type: integer, minimum: 1}
+                  target_interval_us: {type: integer, minimum: 1}
+                  target_interval_ms: {type: number, minimum: 0}
                   missed_deadlines: {type: integer, minimum: 0}
                 additionalProperties: false
             font_scale: {type: integer, minimum: 1}

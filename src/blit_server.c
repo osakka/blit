@@ -1166,11 +1166,14 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
             body + used, capacity - used,
             "%s{\"display_id\":\"display-%llu\",\"refresh_hz\":%.3f,"
             "\"refresh_source\":\"%s\",\"effective_interval_ms\":%d,"
+            "\"target_interval_us\":%llu,\"target_interval_ms\":%.3f,"
             "\"missed_deadlines\":%lu}",
             i == 0 ? "" : ",", runtime->outputs[i].display_id,
             output_refresh_hz(runtime, i),
             runtime->test_refresh_override ? "test-override" : "display-mode",
             output_render_period_ms(runtime, i),
+            (unsigned long long)output_render_period_us(runtime, i),
+            (double)output_render_period_us(runtime, i) / 1000.0,
             runtime->render_missed_deadlines[i]);
     snprintf(body + used, capacity - used, "]");
 }
