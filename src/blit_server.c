@@ -137,6 +137,8 @@ typedef struct {
     int scrollback_count;
     int scrollback_start;
     int scrollback_view;
+    int scrollback_view_active;
+    int scrollback_saved_cursor_visible;
     int damage_valid;
     int damage_x;
     int damage_y;
@@ -1555,10 +1557,13 @@ static void terminal_alignment_test(BlitSurface *surface)
 
 static void terminal_store_cursor(BlitSavedCursor *saved,
                                   BlitSession *session, BlitSurface *surface);
+static void terminal_scrollback_show_live(BlitSurface *surface);
+static void terminal_scrollback_show_offset(BlitSurface *surface, int view);
 
 static void terminal_enter_alternate(BlitSession *session,
                                      BlitSurface *surface, int save_cursor)
 {
+    terminal_scrollback_show_live(surface);
     if (session->terminal_alternate)
         return;
     if (save_cursor)
@@ -1800,6 +1805,8 @@ static void terminal_scrollback_release(BlitSurface *surface)
     surface->scrollback_count = 0;
     surface->scrollback_start = 0;
     surface->scrollback_view = 0;
+    surface->scrollback_view_active = 0;
+    surface->scrollback_saved_cursor_visible = 0;
 }
 
 static void terminal_copy_cell(BlitSurface *surface, int destination,
@@ -1912,6 +1919,145 @@ static void terminal_blank_row(BlitSurface *surface, int row)
            sizeof(surface->underline_color[row]));
     memset(surface->attributes[row], 0, sizeof(surface->attributes[row]));
     memset(surface->links[row], 0, sizeof(surface->links[row]));
+}
+
+static void terminal_scrollback_backup_live(BlitSurface *surface)
+{
+    memcpy(surface->alternate_cells, surface->cells,
+           sizeof(surface->cells));
+    memcpy(surface->alternate_codepoints, surface->codepoints,
+           sizeof(surface->codepoints));
+    memcpy(surface->alternate_combining, surface->combining,
+           sizeof(surface->combining));
+    memcpy(surface->alternate_combining_count, surface->combining_count,
+           sizeof(surface->combining_count));
+    memcpy(surface->alternate_foreground, surface->foreground,
+           sizeof(surface->foreground));
+    memcpy(surface->alternate_background, surface->background,
+           sizeof(surface->background));
+    memcpy(surface->alternate_underline_color, surface->underline_color,
+           sizeof(surface->underline_color));
+    memcpy(surface->alternate_attributes, surface->attributes,
+           sizeof(surface->attributes));
+    memcpy(surface->alternate_links, surface->links,
+           sizeof(surface->links));
+}
+
+static void terminal_scrollback_show_live(BlitSurface *surface)
+{
+    if (surface == NULL || !surface->scrollback_view_active)
+        return;
+    memcpy(surface->cells, surface->alternate_cells,
+           sizeof(surface->cells));
+    memcpy(surface->codepoints, surface->alternate_codepoints,
+           sizeof(surface->codepoints));
+    memcpy(surface->combining, surface->alternate_combining,
+           sizeof(surface->combining));
+    memcpy(surface->combining_count, surface->alternate_combining_count,
+           sizeof(surface->combining_count));
+    memcpy(surface->foreground, surface->alternate_foreground,
+           sizeof(surface->foreground));
+    memcpy(surface->background, surface->alternate_background,
+           sizeof(surface->background));
+    memcpy(surface->underline_color, surface->alternate_underline_color,
+           sizeof(surface->underline_color));
+    memcpy(surface->attributes, surface->alternate_attributes,
+           sizeof(surface->attributes));
+    memcpy(surface->links, surface->alternate_links,
+           sizeof(surface->links));
+    surface->scrollback_view_active = 0;
+    surface->scrollback_view = 0;
+    surface->cursor_visible = surface->scrollback_saved_cursor_visible;
+    surface->damage_valid = 1;
+    surface->damage_x = 0;
+    surface->damage_y = 0;
+    surface->damage_width = surface->width;
+    surface->damage_height = surface->height;
+}
+
+static void terminal_scrollback_show_offset(BlitSurface *surface, int view)
+{
+    int row;
+    int start;
+
+    if (view <= 0) {
+        terminal_scrollback_show_live(surface);
+        return;
+    }
+    if (view > surface->scrollback_count)
+        view = surface->scrollback_count;
+    if (view < 1)
+        return;
+    if (!surface->scrollback_view_active) {
+        terminal_scrollback_backup_live(surface);
+        surface->scrollback_view_active = 1;
+        surface->scrollback_saved_cursor_visible = surface->cursor_visible;
+        surface->cursor_visible = 0;
+    }
+    start = surface->scrollback_count - view;
+    for (row = 0; row < surface->height; ++row) {
+        int logical = start + row;
+        terminal_blank_row(surface, row);
+        if (logical < surface->scrollback_count) {
+            int index = (surface->scrollback_start + logical) %
+                BLIT_MAX_SCROLLBACK_LINES;
+            BlitScrollbackLine *line = &surface->scrollback[index];
+            int width = line->width < surface->width ? line->width :
+                surface->width;
+            memcpy(surface->cells[row], line->cells,
+                   (size_t)width * sizeof(*line->cells));
+            memcpy(surface->codepoints[row], line->codepoints,
+                   (size_t)width * sizeof(*line->codepoints));
+            memcpy(surface->combining[row], line->combining,
+                   (size_t)width * BLIT_MAX_COMBINING *
+                   sizeof(*line->combining));
+            memcpy(surface->combining_count[row], line->combining_count,
+                   (size_t)width * sizeof(*line->combining_count));
+            memcpy(surface->foreground[row], line->foreground,
+                   (size_t)width * sizeof(*line->foreground));
+            memcpy(surface->background[row], line->background,
+                   (size_t)width * sizeof(*line->background));
+            memcpy(surface->underline_color[row], line->underline_color,
+                   (size_t)width * sizeof(*line->underline_color));
+            memcpy(surface->attributes[row], line->attributes,
+                   (size_t)width * sizeof(*line->attributes));
+            memcpy(surface->links[row], line->links,
+                   (size_t)width * sizeof(*line->links));
+        } else if (logical - surface->scrollback_count < surface->height) {
+            int live_row = logical - surface->scrollback_count;
+            memcpy(surface->cells[row], surface->alternate_cells[live_row],
+                   sizeof(surface->cells[row]));
+            memcpy(surface->codepoints[row],
+                   surface->alternate_codepoints[live_row],
+                   sizeof(surface->codepoints[row]));
+            memcpy(surface->combining[row],
+                   surface->alternate_combining[live_row],
+                   sizeof(surface->combining[row]));
+            memcpy(surface->combining_count[row],
+                   surface->alternate_combining_count[live_row],
+                   sizeof(surface->combining_count[row]));
+            memcpy(surface->foreground[row],
+                   surface->alternate_foreground[live_row],
+                   sizeof(surface->foreground[row]));
+            memcpy(surface->background[row],
+                   surface->alternate_background[live_row],
+                   sizeof(surface->background[row]));
+            memcpy(surface->underline_color[row],
+                   surface->alternate_underline_color[live_row],
+                   sizeof(surface->underline_color[row]));
+            memcpy(surface->attributes[row],
+                   surface->alternate_attributes[live_row],
+                   sizeof(surface->attributes[row]));
+            memcpy(surface->links[row], surface->alternate_links[live_row],
+                   sizeof(surface->links[row]));
+        }
+    }
+    surface->scrollback_view = view;
+    surface->damage_valid = 1;
+    surface->damage_x = 0;
+    surface->damage_y = 0;
+    surface->damage_width = surface->width;
+    surface->damage_height = surface->height;
 }
 
 static void terminal_index(BlitSession *session, BlitSurface *surface)
@@ -3038,6 +3184,10 @@ static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
 {
     size_t offset = 0;
 
+    /* Any program output belongs to the live screen.  A historical view is
+       only a presentation state and must never become the parser's target. */
+    terminal_scrollback_show_live(surface);
+
     while (offset < length) {
         unsigned char byte = data[offset];
         if (session->terminal_escape == 1) {
@@ -3840,6 +3990,7 @@ static int resize_session_surface(BlitSession *session, BlitSurface *surface,
     if (width < 1 || height < 1 || width > BLIT_MAX_CELL_COLS ||
         height > BLIT_MAX_CELL_ROWS)
         return 0;
+    terminal_scrollback_show_live(surface);
     memset(&size, 0, sizeof(size));
     size.ws_col = (unsigned short)width;
     size.ws_row = (unsigned short)height;
@@ -4490,13 +4641,25 @@ static void handle_request(int fd, BlitRuntime *runtime,
         return;
     }
     if (strncmp(path, "/v1/surfaces/", strlen("/v1/surfaces/")) == 0 &&
-        strstr(path, "/scrollback") != NULL && strcmp(method, "GET") == 0) {
+        strstr(path, "/scrollback") != NULL &&
+        (strcmp(method, "GET") == 0 || strcmp(method, "PATCH") == 0)) {
         BlitSurface *surface = find_scrollback_surface(runtime, path);
+        int view;
 
         if (surface == NULL) {
             send_problem(fd, 404, "Not Found", "surface_not_found",
                          "The text surface does not exist.");
             return;
+        }
+        if (strcmp(method, "PATCH") == 0) {
+            if (!json_int(payload, "view", &view) || view < 0 ||
+                view > surface->scrollback_count) {
+                send_problem(fd, 400, "Bad Request", "invalid_scrollback_view",
+                             "view must be between zero and the retained line count.");
+                return;
+            }
+            terminal_scrollback_show_offset(surface, view);
+            ++surface->revision;
         }
         surface_scrollback_json(surface, body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
@@ -5570,6 +5733,31 @@ static int mouse_modifier_bits(const BlitRuntime *runtime)
     return modifiers;
 }
 
+static void terminal_scrollback_wheel(BlitRuntime *runtime,
+                                      BlitSession *session, int button)
+{
+    BlitSurface *surface;
+    int view;
+    char event[512];
+
+    if (runtime == NULL || session == NULL || session->terminal_alternate ||
+        (button != 64 && button != 65))
+        return;
+    surface = find_surface_id(runtime, session->id);
+    if (surface == NULL || surface->scrollback_count == 0)
+        return;
+    view = surface->scrollback_view;
+    view += button == 64 ? 3 : -3;
+    if (view < 0) view = 0;
+    if (view > surface->scrollback_count)
+        view = surface->scrollback_count;
+    terminal_scrollback_show_offset(surface, view);
+    ++surface->revision;
+    surface_delta_json(surface, event, sizeof(event));
+    broadcast_stream(runtime, event, BLIT_STREAM_SURFACES);
+    runtime->render_pending = 1;
+}
+
 static void send_focus_report(BlitSession *session, int focused)
 {
     const char *report;
@@ -5618,8 +5806,13 @@ static void send_mouse_report(BlitRuntime *runtime, SDL_WindowID window_id,
         focus_session(runtime, session);
     if (session == NULL || session->pty_fd < 0)
         return;
-    if (session->terminal_mouse_mode == 0)
+    if (session->terminal_mouse_mode == 0) {
+        if (!release && (button == 64 || button == 65))
+            terminal_scrollback_wheel(runtime, session, button);
+        else
+            terminal_scrollback_show_live(find_surface_id(runtime, session->id));
         return;
+    }
     code = button + mouse_modifier_bits(runtime);
     if (session->terminal_mouse_sgr) {
         /* SGR mouse reports use button numbers 0..2 for press/release,
@@ -5994,6 +6187,7 @@ static void send_evdev_key(BlitRuntime *runtime, unsigned short code)
             sequence[0] = 0x1b;
             ++length;
         }
+        terminal_scrollback_show_live(find_surface_id(runtime, session->id));
         write(session->pty_fd, sequence, (size_t)length);
     }
 }

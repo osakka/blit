@@ -224,10 +224,19 @@ curl --fail \
   http://127.0.0.1:8080/v1/surfaces/surface-1/scrollback
 ```
 
-The response is oldest-first and reports the current `view` position. Output
-from an alternate screen is never added to this history; historical rendering
-and selection are separate terminal-view work and are not inferred from this
-read-only endpoint.
+The response is oldest-first and reports the current `view` position. Set the
+view through the same resource to render history on the display; `view: 0`
+returns to the live screen:
+
+```sh
+curl --fail --request PATCH \
+  --header 'Content-Type: application/json' \
+  --data '{"view":3}' \
+  http://127.0.0.1:8080/v1/surfaces/surface-1/scrollback
+```
+
+Output from an alternate screen is never added to this history. Selection and
+copy remain separate terminal-view work.
 
 ## Apply cells and present a frame
 

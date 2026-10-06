@@ -152,6 +152,19 @@ scrollback = request(base, 'GET',
 assert_equal(1, scrollback.fetch('count'), 'scrollback line count')
 assert_equal('a', scrollback.fetch('lines').fetch(0).fetch('text'),
              'scrollback oldest line')
+request(base, 'PATCH', "/v1/surfaces/surface-#{scrollback_id}/scrollback",
+        { 'view' => 1 })
+historical = request(base, 'GET', "/v1/surfaces/surface-#{scrollback_id}/cells")
+assert_equal('a', cell_map(historical).fetch([0, 0]).fetch('text'),
+             'scrollback historical view renders retained row')
+request(base, 'PATCH', "/v1/surfaces/surface-#{scrollback_id}/scrollback",
+        { 'view' => 0 })
+live = request(base, 'GET', "/v1/surfaces/surface-#{scrollback_id}/cells")
+live_cells = cell_map(live)
+assert_equal('b', live_cells.fetch([0, 0]).fetch('text'),
+             'scrollback view returns to live first row')
+assert_equal('c', live_cells.fetch([0, 1]).fetch('text'),
+             'scrollback view returns to live second row')
 request(base, 'DELETE', "/v1/terminal-sessions/#{scrollback_id}")
 puts 'PASS scrollback-retains-main-screen-lines'
 

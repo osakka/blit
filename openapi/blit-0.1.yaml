@@ -337,12 +337,35 @@ paths:
       summary: Read retained main-screen scrollback lines
       description: >-
         Returns oldest-first lines retained when the main screen scrolls.
-        Alternate-screen output is never retained. `view` is the terminal's
-        reserved scrollback view position; the current implementation exposes
-        the retained history while live rendering remains on the active grid.
+        Alternate-screen output is never retained. `view` is the number of
+        retained lines viewed back from the live screen; PATCH changes it and
+        the same historical view is rendered on the display.
       responses:
         '200':
           description: Retained scrollback
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScrollbackSnapshot'
+        default:
+          $ref: '#/components/responses/Problem'
+    patch:
+      tags: [terminals]
+      operationId: setSurfaceScrollbackView
+      summary: Set the retained terminal view position
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [view]
+              properties:
+                view: {type: integer, minimum: 0, maximum: 1000}
+              additionalProperties: false
+      responses:
+        '200':
+          description: Updated scrollback view and retained lines
           content:
             application/json:
               schema:

@@ -11,6 +11,20 @@ if [ ! -x "$BUNDLE/bin/blit-server" ] || [ ! -f "$VERSION_FILE" ]; then
 	exit 1
 fi
 
+# The ignored build directory is also used by historical tarball workflows,
+# so do not silently accept a stale launcher alongside the native runtime.
+# Hibr owns startup/session orchestration; this package owns only blit-server.
+for runtime_file in "$BUNDLE"/bin/* "$BUNDLE"/lib/*; do
+	[ -e "$runtime_file" ] || continue
+	case "$runtime_file" in
+		"$BUNDLE/bin/blit-server"|"$BUNDLE/lib/libSDL3.so.0.4.16") ;;
+		*)
+			echo "blit: non-runtime artifact in build bundle: $runtime_file" >&2
+			exit 1
+			;;
+	esac
+done
+
 version=$(sed -n '1p' "$VERSION_FILE")
 if [ -z "$version" ]; then
 	echo "blit: cannot determine version from $VERSION_FILE" >&2

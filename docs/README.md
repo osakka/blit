@@ -17,6 +17,12 @@ independently installed executable and is controlled through Blit's API and
 Hibr's own desktop/session commands. Shell files in `tools/` are only
 reproducible build and test fixtures.
 
+Do not distribute `build/blit-desktop-current` as a desktop bundle. It is a
+build staging directory, and the Debian builder rejects stale launchers or
+other non-runtime files found beside the native server. Start Hibr separately
+using Hibr's installed `desktop` command and use Blit's API for surfaces,
+panes, input routing, and diagnostics.
+
 ## Documentation map
 
 - [Vision and scope](vision.md) — what blit is, who it serves, and the
