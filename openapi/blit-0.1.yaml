@@ -113,6 +113,20 @@ paths:
                 $ref: '#/components/schemas/Diagnostics'
         default:
           $ref: '#/components/responses/Problem'
+  /v1/diagnostics/runtime:
+    get:
+      tags: [diagnostics]
+      operationId: getRuntimeDiagnostics
+      summary: Get diagnostics, performance counters, and bounded runtime logs
+      responses:
+        '200':
+          description: Current diagnostic snapshot and recent runtime events
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeDiagnostics'
+        default:
+          $ref: '#/components/responses/Problem'
   /v1/effects:
     get:
       tags: [effects]
@@ -606,7 +620,7 @@ components:
           additionalProperties: false
         resources:
           type: object
-          required: [graphics, displays, audio, input_devices, input_routes, topology, diagnostics]
+          required: [graphics, displays, audio, input_devices, input_routes, topology, diagnostics, runtime_diagnostics]
           properties:
             graphics: {type: string}
             displays: {type: string}
@@ -615,6 +629,7 @@ components:
             input_routes: {type: string}
             topology: {type: string}
             diagnostics: {type: string}
+            runtime_diagnostics: {type: string}
           additionalProperties: false
       additionalProperties: false
     GraphicsCard:
@@ -732,6 +747,33 @@ components:
         warnings:
           type: array
           items: {type: string}
+      additionalProperties: false
+    RuntimeDiagnostics:
+      type: object
+      required: [snapshot, performance, logs]
+      properties:
+        snapshot: {$ref: '#/components/schemas/Diagnostics'}
+        performance:
+          type: object
+          required: [uptime_ms, frames, last_render_ms, max_render_ms, missed_deadlines]
+          properties:
+            uptime_ms: {type: integer, minimum: 0}
+            frames: {type: integer, minimum: 0}
+            last_render_ms: {type: number, minimum: 0}
+            max_render_ms: {type: number, minimum: 0}
+            missed_deadlines: {type: integer, minimum: 0}
+          additionalProperties: false
+        logs:
+          type: array
+          items:
+            type: object
+            required: [sequence, severity, code, detail]
+            properties:
+              sequence: {type: integer, minimum: 1}
+              severity: {type: string, enum: [info, warning, error]}
+              code: {type: string}
+              detail: {type: string}
+            additionalProperties: false
       additionalProperties: false
     EffectState:
       type: object

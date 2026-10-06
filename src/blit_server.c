@@ -42,6 +42,7 @@ extern char **environ;
 #define BLIT_MAX_FRAME_SURFACES 16
 #define BLIT_MAX_IDEMPOTENCY 16
 #define BLIT_MAX_EVENT_HISTORY 64
+#define BLIT_MAX_RUNTIME_LOGS 64
 #define BLIT_MAX_SCROLLBACK_LINES 1000
 #define BLIT_MAX_OVERLAYS 16
 #define BLIT_DEFAULT_FOREGROUND 0xbed2beU
@@ -387,6 +388,14 @@ typedef struct {
     char sdl_screenshot_dir[256];
     unsigned long sdl_screenshot_after;
     unsigned long sdl_frame;
+    uint64_t started_us;
+    unsigned long long diagnostic_frames;
+    double diagnostic_last_render_ms;
+    double diagnostic_max_render_ms;
+    unsigned long long diagnostic_log_sequence;
+    int diagnostic_log_count;
+    int diagnostic_log_next;
+    char diagnostic_logs[BLIT_MAX_RUNTIME_LOGS][512];
     int sdl_screenshot_written;
     char sdl_error[256];
     int listen_port;
@@ -406,6 +415,9 @@ static const char *pane_surface_id(const BlitRuntime *runtime,
 static void discover_panes(BlitRuntime *runtime);
 static void focus_session(BlitRuntime *runtime, BlitSession *target);
 static int activate_direct_kms_fallback(BlitRuntime *runtime);
+static uint64_t monotonic_us(void);
+static void diagnostics_json(const BlitRuntime *runtime, char *body,
+                             size_t capacity);
 
 static void effect_json(const BlitRuntime *runtime, char *body,
                         size_t capacity)
@@ -810,6 +822,74 @@ static void json_escape(const char *input, char *output, size_t capacity)
     output[out] = '\0';
 }
 
+static void diagnostic_log(BlitRuntime *runtime, const char *severity,
+                           const char *code, const char *detail)
+{
+    char escaped[320];
+    int slot;
+    if (runtime == NULL) return;
+    json_escape(detail != NULL ? detail : "", escaped, sizeof(escaped));
+    slot = runtime->diagnostic_log_next;
+    snprintf(runtime->diagnostic_logs[slot],
+             sizeof(runtime->diagnostic_logs[slot]),
+             "{\"sequence\":%llu,\"severity\":\"%s\","
+             "\"code\":\"%s\",\"detail\":\"%s\"}",
+             ++runtime->diagnostic_log_sequence,
+             severity != NULL ? severity : "info",
+             code != NULL ? code : "runtime",
+             escaped);
+    runtime->diagnostic_log_next =
+        (runtime->diagnostic_log_next + 1) % BLIT_MAX_RUNTIME_LOGS;
+    if (runtime->diagnostic_log_count < BLIT_MAX_RUNTIME_LOGS)
+        ++runtime->diagnostic_log_count;
+}
+
+static unsigned long long diagnostic_missed_deadlines(
+    const BlitRuntime *runtime)
+{
+    unsigned long long total = 0;
+    int i;
+    for (i = 0; i < runtime->output_count; ++i)
+        total += runtime->render_missed_deadlines[i];
+    return total;
+}
+
+static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
+                                     size_t capacity)
+{
+    char snapshot[8192];
+    size_t used;
+    int count;
+    int first;
+    int index;
+    uint64_t now = monotonic_us();
+
+    diagnostics_json(runtime, snapshot, sizeof(snapshot));
+    used = (size_t)snprintf(body, capacity,
+        "{\"snapshot\":%s,\"performance\":{\"uptime_ms\":%llu,"
+        "\"frames\":%llu,\"last_render_ms\":%.3f,"
+        "\"max_render_ms\":%.3f,\"missed_deadlines\":%llu},"
+        "\"logs\":[",
+        snapshot,
+        runtime->started_us > 0 && now >= runtime->started_us ?
+            (unsigned long long)((now - runtime->started_us) / 1000ULL) : 0,
+        runtime->diagnostic_frames, runtime->diagnostic_last_render_ms,
+        runtime->diagnostic_max_render_ms,
+        diagnostic_missed_deadlines(runtime));
+    count = runtime->diagnostic_log_count;
+    first = 1;
+    index = (runtime->diagnostic_log_next - count + BLIT_MAX_RUNTIME_LOGS) %
+        BLIT_MAX_RUNTIME_LOGS;
+    while (count-- > 0 && used + 4 < capacity) {
+        used += (size_t)snprintf(body + used, capacity - used, "%s%s",
+                                 first ? "" : ",",
+                                 runtime->diagnostic_logs[index]);
+        first = 0;
+        index = (index + 1) % BLIT_MAX_RUNTIME_LOGS;
+    }
+    snprintf(body + used, capacity - used, "]}");
+}
+
 static void server_json(const BlitRuntime *runtime, char *body, size_t capacity)
 {
     char escaped_error[256];
@@ -823,13 +903,15 @@ static void server_json(const BlitRuntime *runtime, char *body, size_t capacity)
              "\"terminal-sessions\",\"topology\","
              "\"native-presentation\",\"graphics-inventory\","
              "\"audio-inventory\",\"input-devices\",\"input-routes\","
-             "\"diagnostics\",\"effects\",\"overlays\"],\"display_count\":%d,"
+             "\"diagnostics\",\"runtime-diagnostics\",\"effects\",\"overlays\"],\"display_count\":%d,"
              "\"display_backend\":{\"name\":\"%s\",\"ready\":%s,"
              "\"error\":\"%s\"},\"resources\":{"
              "\"graphics\":\"/v1/graphics\",\"displays\":\"/v1/displays\","
              "\"audio\":\"/v1/audio\",\"input_devices\":\"/v1/input/devices\","
              "\"input_routes\":\"/v1/input/routes\",\"topology\":\"/v1/topology\","
-             "\"diagnostics\":\"/v1/diagnostics\",\"effects\":\"/v1/effects\","
+             "\"diagnostics\":\"/v1/diagnostics\","
+             "\"runtime_diagnostics\":\"/v1/diagnostics/runtime\","
+             "\"effects\":\"/v1/effects\","
              "\"overlays\":\"/v1/overlays\"}}",
              runtime->display_count, backend,
              (runtime->direct_kms ? runtime->display_count > 0 :
@@ -6832,6 +6914,9 @@ static void handle_request(int fd, BlitRuntime *runtime,
     } else if (strcmp(path, "/v1/diagnostics") == 0) {
         diagnostics_json(runtime, body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
+    } else if (strcmp(path, "/v1/diagnostics/runtime") == 0) {
+        runtime_diagnostics_json(runtime, body, sizeof(body));
+        send_http(fd, 200, "OK", "application/json", body);
     } else if (strcmp(path, "/v1/displays") == 0) {
         displays_json(runtime, body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
@@ -7139,6 +7224,8 @@ static int activate_direct_kms_fallback(BlitRuntime *runtime)
         snprintf(runtime->sdl_error, sizeof(runtime->sdl_error),
                  "SDL outputs unavailable; direct KMS fallback failed: %s",
                  error[0] ? error : "initialization failed");
+        diagnostic_log(runtime, "error", "sdl_kms_fallback_failed",
+                       runtime->sdl_error);
         return 0;
     }
     runtime->direct_kms = 1;
@@ -7169,6 +7256,8 @@ static int activate_direct_kms_fallback(BlitRuntime *runtime)
     fprintf(stderr,
             "blit: SDL presentation unavailable; using direct KMS fallback "
             "(%d display(s))\n", runtime->display_count);
+    diagnostic_log(runtime, "warning", "sdl_kms_fallback",
+                   "SDL outputs were unavailable; direct KMS is active");
     return runtime->display_count > 0;
 }
 
@@ -7534,6 +7623,9 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
     int cell_width = blit_font_width(&runtime->font);
     int cell_height = blit_font_height(&runtime->font);
     Uint64 render_started = 0;
+    uint64_t diagnostic_render_started = monotonic_us();
+
+    ++runtime->diagnostic_frames;
 
     if (!runtime->direct_kms) {
         ++runtime->sdl_frame;
@@ -7951,6 +8043,9 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
         Uint64 elapsed = SDL_GetPerformanceCounter() - render_started;
         double milliseconds = (double)elapsed * 1000.0 /
             (double)SDL_GetPerformanceFrequency();
+        runtime->diagnostic_last_render_ms = milliseconds;
+        if (milliseconds > runtime->diagnostic_max_render_ms)
+            runtime->diagnostic_max_render_ms = milliseconds;
         fprintf(stderr, "blit: SDL frame=%lu render_ms=%.3f\n",
                 runtime->sdl_frame, milliseconds);
     }
@@ -7975,6 +8070,13 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             surface->damage_valid = 0;
     }
     runtime->pointer_dirty = 0;
+    {
+        uint64_t elapsed = monotonic_us() - diagnostic_render_started;
+        double milliseconds = (double)elapsed / 1000.0;
+        runtime->diagnostic_last_render_ms = milliseconds;
+        if (milliseconds > runtime->diagnostic_max_render_ms)
+            runtime->diagnostic_max_render_ms = milliseconds;
+    }
 }
 
 static int mouse_output_index(const BlitRuntime *runtime, SDL_WindowID window_id)
@@ -8807,6 +8909,8 @@ int main(int argc, char **argv)
     if (bind_address == NULL || bind_address[0] == '\0')
         bind_address = "127.0.0.1";
     memset(&runtime, 0, sizeof(runtime));
+    runtime.started_us = monotonic_us();
+    diagnostic_log(&runtime, "info", "server_start", "Blit gateway starting");
     blit_font_load(&runtime.font);
     runtime.font_scale = 1;
     runtime.render_interval_ms = 16;

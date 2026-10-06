@@ -1,5 +1,26 @@
 # Gateway testing
 
+## Remote runtime diagnostics
+
+Start Blit on an address reachable by the operator, with authentication
+enabled. For example, a system service may set `BLIT_BIND_ADDRESS=0.0.0.0`
+and a secret `BLIT_AUTH_TOKEN`; firewall policy should expose the API port only
+to the trusted management network. Query the runtime snapshot with:
+
+```sh
+curl --fail --silent \
+  -H 'Authorization: Bearer YOUR_TOKEN' \
+  http://DESKTOP_IP:8080/v1/diagnostics/runtime
+```
+
+This endpoint is read-only and reports backend readiness, display/output
+counts, refresh scheduling, frame counters, render duration, missed
+deadlines, and recent bounded runtime events. Blit may create or stop terminal
+sessions through its API, but it cannot start itself after it is dead; daemon
+start/stop/restart belongs to the host supervisor (systemd, an init service,
+or SSH). Use that supervisor for lifecycle recovery, then use this endpoint to
+verify readiness.
+
 ## Current acceptance evidence
 
 The TCC-built server has been exercised locally with the SDL dummy backend and

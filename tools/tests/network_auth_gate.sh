@@ -9,6 +9,7 @@ LOG=$(mktemp /tmp/blit-network-gate.XXXXXX)
 UNAUTH=$(mktemp /tmp/blit-network-unauth.XXXXXX)
 AUTH=$(mktemp /tmp/blit-network-auth.XXXXXX)
 DIAGNOSTICS=$(mktemp /tmp/blit-network-diagnostics.XXXXXX)
+RUNTIME_DIAGNOSTICS=$(mktemp /tmp/blit-network-runtime-diagnostics.XXXXXX)
 GRAPHICS=$(mktemp /tmp/blit-network-graphics.XXXXXX)
 AUDIO=$(mktemp /tmp/blit-network-audio.XXXXXX)
 DISPLAYS=$(mktemp /tmp/blit-network-displays.XXXXXX)
@@ -17,7 +18,7 @@ COMMAND_ALLOWED=$(mktemp /tmp/blit-network-command-allowed.XXXXXX)
 server_pid=
 cleanup() {
     if [ -n "$server_pid" ]; then kill "$server_pid" 2>/dev/null || true; fi
-    rm -f "$LOG" "$UNAUTH" "$AUTH" "$DIAGNOSTICS" "$GRAPHICS" "$AUDIO" \
+    rm -f "$LOG" "$UNAUTH" "$AUTH" "$DIAGNOSTICS" "$RUNTIME_DIAGNOSTICS" "$GRAPHICS" "$AUDIO" \
         "$DISPLAYS" "$COMMAND_DENIED" "$COMMAND_ALLOWED"
 }
 trap cleanup EXIT HUP INT TERM
@@ -60,6 +61,9 @@ auth=$(curl -sS -o "$AUTH" -w '%{http_code}' \
 diagnostics=$(curl -sS -o "$DIAGNOSTICS" -w '%{http_code}' \
     -H "Authorization: Bearer $TOKEN" \
     "http://127.0.0.1:$PORT/v1/diagnostics")
+runtime_diagnostics=$(curl -sS -o "$RUNTIME_DIAGNOSTICS" -w '%{http_code}' \
+    -H "Authorization: Bearer $TOKEN" \
+    "http://127.0.0.1:$PORT/v1/diagnostics/runtime")
 graphics=$(curl -sS -o "$GRAPHICS" -w '%{http_code}' \
     -H "Authorization: Bearer $TOKEN" \
     "http://127.0.0.1:$PORT/v1/graphics")
@@ -70,17 +74,20 @@ displays=$(curl -sS -o "$DISPLAYS" -w '%{http_code}' \
     -H "Authorization: Bearer $TOKEN" \
     "http://127.0.0.1:$PORT/v1/displays")
 if [ "$unauth" != 401 ] || [ "$auth" != 200 ] ||
-   [ "$diagnostics" != 200 ] || [ "$graphics" != 200 ] ||
+   [ "$diagnostics" != 200 ] || [ "$runtime_diagnostics" != 200 ] || [ "$graphics" != 200 ] ||
    [ "$audio" != 200 ] || [ "$displays" != 200 ] ||
    ! grep -q '"health"' "$DIAGNOSTICS" ||
    ! grep -q '"presentation_sync":' "$DIAGNOSTICS" ||
+   ! grep -q '"performance":' "$RUNTIME_DIAGNOSTICS" ||
+   ! grep -q '"logs":' "$RUNTIME_DIAGNOSTICS" ||
    ! grep -q '"graphics_cards"' "$GRAPHICS" ||
    ! grep -q '"devices"' "$AUDIO" ||
    ! grep -q '"modes":\[' "$DISPLAYS" ||
    ! grep -q '"active_mode":' "$DISPLAYS"; then
-    echo "network gate: expected unauth=401 auth=200, got $unauth/$auth" >&2
+    echo "network gate: expected unauth=401 auth=200 and diagnostics routes=200, got $unauth/$auth/$diagnostics/$runtime_diagnostics" >&2
     exit 1
 fi
+ruby -rjson -e 'JSON.parse(File.read(ARGV.fetch(0)))' "$RUNTIME_DIAGNOSTICS"
 command_denied=$(curl -sS -o "$COMMAND_DENIED" -w '%{http_code}' \
     -H "Authorization: Bearer $TOKEN" \
     -H 'Content-Type: application/json' \
@@ -96,4 +103,4 @@ if [ "$command_denied" != 403 ] || [ "$command_allowed" != 201 ] ||
     echo "network gate: command policy failed denied=$command_denied allowed=$command_allowed" >&2
     exit 1
 fi
-echo "NETWORK_AUTH_PASS unauth=$unauth auth=$auth diagnostics=$diagnostics graphics=$graphics audio=$audio displays=$displays command_denied=$command_denied command_allowed=$command_allowed"
+echo "NETWORK_AUTH_PASS unauth=$unauth auth=$auth diagnostics=$diagnostics runtime_diagnostics=$runtime_diagnostics graphics=$graphics audio=$audio displays=$displays command_denied=$command_denied command_allowed=$command_allowed"

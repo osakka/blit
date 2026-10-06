@@ -53,6 +53,12 @@ panes, input routing, and diagnostics.
   PTY compatibility probe, and the operational console-module adapter.
 - [ADR index](adr/README.md) — decisions that constrain implementation.
 
+The authenticated `GET /v1/diagnostics/runtime` endpoint is the canonical
+remote troubleshooting surface. It combines the normal diagnostics snapshot
+with uptime, rendered-frame count, measured render duration, missed refresh
+deadlines, and a bounded in-memory event log. It is intentionally bounded so
+diagnostics cannot consume unbounded server memory.
+
 ## Working status
 
 The project has a running TCC-built vertical slice, deterministic VKMS
