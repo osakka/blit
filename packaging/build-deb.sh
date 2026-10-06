@@ -87,9 +87,21 @@ set -eu
 if command -v addgroup >/dev/null 2>&1; then
     addgroup --system blit >/dev/null 2>&1 || true
 fi
+runtime_user="${SUDO_USER:-}"
+if [ -z "$runtime_user" ] && command -v logname >/dev/null 2>&1; then
+    runtime_user=$(logname 2>/dev/null || true)
+fi
+if [ -n "$runtime_user" ] && id "$runtime_user" >/dev/null 2>&1 &&
+   command -v usermod >/dev/null 2>&1; then
+    usermod -a -G blit "$runtime_user" >/dev/null 2>&1 || true
+fi
 if command -v systemctl >/dev/null 2>&1; then
     systemctl daemon-reload || true
     systemctl enable --now blit-update-helper.service || true
+fi
+if [ ! -S /run/blit/update.sock ] && [ -x /usr/lib/blit/bin/blit-update-helper ]; then
+    mkdir -p /run/blit
+    /usr/lib/blit/bin/blit-update-helper >/var/log/blit-update-helper.log 2>&1 &
 fi
 exit 0
 EOF
