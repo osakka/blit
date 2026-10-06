@@ -916,7 +916,8 @@ int blit_kms_cell_height(const BlitKms *kms)
 }
 
 int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_count,
-                     float pointer_x, float pointer_y, int pointer_visible)
+                     float pointer_x, float pointer_y, int pointer_visible,
+                     uint32_t output_mask)
 {
     int i;
     int capture;
@@ -948,6 +949,8 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         long long flip_started = 0;
         int modeset_frame;
         int trace_phases = getenv("BLIT_KMS_TRACE_PHASES") != NULL;
+        if (!(output_mask & (1U << i)))
+            continue;
         if (trace_phases)
             output_started = kms_now_us();
         int output_changed;

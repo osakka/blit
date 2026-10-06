@@ -702,10 +702,23 @@ components:
           additionalProperties: false
         render:
           type: object
-          required: [pending, interval_ms, font_scale, direct_kms]
+          required: [pending, interval_ms, effective_interval_ms, mode, outputs, font_scale, direct_kms]
           properties:
             pending: {type: boolean}
             interval_ms: {type: integer, minimum: 1}
+            effective_interval_ms: {type: integer, minimum: 1}
+            mode: {type: string, enum: [refresh-aware]}
+            outputs:
+              type: array
+              items:
+                type: object
+                required: [display_id, refresh_hz, effective_interval_ms, missed_deadlines]
+                properties:
+                  display_id: {type: string}
+                  refresh_hz: {type: number, minimum: 1}
+                  effective_interval_ms: {type: integer, minimum: 1}
+                  missed_deadlines: {type: integer, minimum: 0}
+                additionalProperties: false
             font_scale: {type: integer, minimum: 1}
             direct_kms: {type: boolean}
           additionalProperties: false

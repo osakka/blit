@@ -160,6 +160,9 @@ screenshot directory is not evidence that the frames were absent. The same
 gate checks `/v1/graphics` for the VKMS vendor/device IDs, driver, DRM device
 node, and hardware-acceleration capability fields; unavailable sysfs values
 are reported as `unknown` rather than invented.
+The fixture also checks `/v1/diagnostics` for the refresh-aware scheduler
+mode, an effective interval, and one cadence record per output before
+accepting the capture.
 
 The same fixture accepts `blit.output_loss=1` on the kernel command line. It
 disables connector 47 during the run and requires `OUTPUT_LOSS_PASS`: the

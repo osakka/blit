@@ -308,6 +308,9 @@ typedef struct {
     int render_pending;
     uint64_t render_last_ticks;
     int render_interval_ms;
+    int render_effective_interval_ms;
+    uint32_t render_next_ticks[BLIT_MAX_DISPLAYS];
+    unsigned long render_missed_deadlines[BLIT_MAX_DISPLAYS];
     int session_count;
     unsigned long long next_session_id;
     BlitSession sessions[BLIT_MAX_SESSIONS];
@@ -366,7 +369,8 @@ typedef struct {
 
 static volatile sig_atomic_t blit_running = 1;
 
-static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan);
+static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
+                           uint32_t output_mask);
 static const char *pane_surface_id(const BlitRuntime *runtime,
                                    const BlitPane *pane);
 static void discover_panes(BlitRuntime *runtime);
@@ -461,7 +465,145 @@ static void clear_previous_pointer(BlitRuntime *runtime, int output_index)
     SDL_RenderFillRect(runtime->outputs[output_index].renderer, &area);
 }
 
-static void render_current_surfaces(BlitRuntime *runtime)
+static int refresh_period_ms(double refresh_hz)
+{
+    int period;
+
+    if (refresh_hz < 1.0)
+        refresh_hz = 60.0;
+    /* Floor the period so rounding can never turn a requested refresh into
+       an intentionally slower scheduler.  The physical output still limits
+       visible presentation to its selected mode and vblank. */
+    period = (int)(1000.0 / refresh_hz);
+    if (period < 1)
+        period = 1;
+    return period;
+}
+
+static int display_index_for_output(const BlitRuntime *runtime,
+                                    int output_index)
+{
+    int i;
+    if (output_index < 0 || output_index >= runtime->output_count)
+        return -1;
+    for (i = 0; i < runtime->display_count; ++i)
+        if (runtime->displays[i].id == runtime->outputs[output_index].display_id)
+            return i;
+    return output_index < runtime->display_count ? output_index : -1;
+}
+
+static double output_refresh_hz(const BlitRuntime *runtime, int output_index)
+{
+    int display_index = display_index_for_output(runtime, output_index);
+    return display_index >= 0 ? runtime->displays[display_index].refresh_hz : 60.0;
+}
+
+static int output_render_period_ms(const BlitRuntime *runtime, int output_index)
+{
+    int refresh_period;
+
+    refresh_period = refresh_period_ms(output_refresh_hz(runtime, output_index));
+    /* The configured interval may make us render more often, but must never
+       impose a slower cadence than the selected display mode. */
+    return runtime->render_interval_ms < refresh_period ?
+        runtime->render_interval_ms : refresh_period;
+}
+
+static void reset_render_schedule(BlitRuntime *runtime, uint32_t now)
+{
+    int i;
+    int minimum = 0;
+
+    for (i = 0; i < BLIT_MAX_DISPLAYS; ++i)
+        runtime->render_next_ticks[i] = 0;
+    for (i = 0; i < runtime->output_count; ++i) {
+        int period = output_render_period_ms(runtime, i);
+        runtime->render_next_ticks[i] = now;
+        if (minimum == 0 || period < minimum)
+            minimum = period;
+    }
+    runtime->render_effective_interval_ms = minimum > 0 ? minimum :
+        runtime->render_interval_ms;
+}
+
+static uint32_t all_output_mask(const BlitRuntime *runtime)
+{
+    if (runtime->output_count >= 32)
+        return 0xffffffffU;
+    return runtime->output_count > 0 ?
+        (1U << runtime->output_count) - 1U : 0;
+}
+
+static uint32_t due_output_mask(const BlitRuntime *runtime, uint32_t now)
+{
+    uint32_t mask = 0;
+    int i;
+
+    for (i = 0; i < runtime->output_count; ++i) {
+        if (runtime->render_next_ticks[i] == 0 ||
+            (int32_t)(now - runtime->render_next_ticks[i]) >= 0)
+            mask |= 1U << i;
+    }
+    /* Pointer underlay state is shared by the input layer.  Keep the pointer
+       coherent across every output in one pass; content remains independently
+       deadline-driven. */
+    if (runtime->pointer_dirty)
+        mask |= all_output_mask(runtime);
+    return mask;
+}
+
+static void advance_render_schedule(BlitRuntime *runtime, uint32_t now,
+                                    uint32_t output_mask)
+{
+    int i;
+    for (i = 0; i < runtime->output_count; ++i) {
+        int period;
+        int32_t late;
+        if (!(output_mask & (1U << i)))
+            continue;
+        period = output_render_period_ms(runtime, i);
+        late = runtime->render_next_ticks[i] == 0 ? 0 :
+            (int32_t)(now - runtime->render_next_ticks[i]);
+        if (late > period) {
+            runtime->render_missed_deadlines[i] +=
+                (unsigned long)(late / period);
+        }
+        runtime->render_next_ticks[i] = now + (uint32_t)period;
+    }
+}
+
+static int render_wait_ms(const BlitRuntime *runtime, uint32_t now)
+{
+    int wait_ms = 10;
+    int i;
+
+    if (!runtime->render_pending)
+        return wait_ms;
+    if (runtime->pointer_dirty)
+        return 0;
+    for (i = 0; i < runtime->output_count; ++i) {
+        int32_t delta = (int32_t)(runtime->render_next_ticks[i] - now);
+        if (delta <= 0)
+            return 0;
+        if (delta < wait_ms)
+            wait_ms = delta;
+    }
+    return wait_ms;
+}
+
+static int render_work_remains(const BlitRuntime *runtime)
+{
+    int i;
+    if (runtime->pointer_dirty)
+        return 1;
+    for (i = 0; i < BLIT_MAX_SESSIONS; ++i)
+        if (runtime->surfaces[i].used && runtime->surfaces[i].damage_valid)
+            return 1;
+    return 0;
+}
+
+static void render_current_surfaces(BlitRuntime *runtime,
+                                    uint32_t output_mask)
 {
     BlitFramePlan plan;
     int i;
@@ -481,7 +623,7 @@ static void render_current_surfaces(BlitRuntime *runtime)
         plan.surfaces[plan.surface_count].damage_height = surface->damage_height;
         ++plan.surface_count;
     }
-    render_outputs(runtime, &plan);
+    render_outputs(runtime, &plan, output_mask);
 }
 
 static void stop_server(int signal_number)
@@ -603,10 +745,30 @@ static int runtime_has_failed_display(const BlitRuntime *runtime)
     return 0;
 }
 
+static void render_scheduler_json(const BlitRuntime *runtime, char *body,
+                                  size_t capacity)
+{
+    size_t used = 0;
+    int i;
+
+    used += (size_t)snprintf(body + used, capacity - used, "[");
+    for (i = 0; i < runtime->output_count && used < capacity; ++i)
+        used += (size_t)snprintf(
+            body + used, capacity - used,
+            "%s{\"display_id\":\"display-%llu\",\"refresh_hz\":%.3f,"
+            "\"effective_interval_ms\":%d,\"missed_deadlines\":%lu}",
+            i == 0 ? "" : ",", runtime->outputs[i].display_id,
+            output_refresh_hz(runtime, i),
+            output_render_period_ms(runtime, i),
+            runtime->render_missed_deadlines[i]);
+    snprintf(body + used, capacity - used, "]");
+}
+
 static void diagnostics_json(const BlitRuntime *runtime, char *body,
                              size_t capacity)
 {
     char escaped_error[256];
+    char scheduler[4096];
     const char *backend = runtime->direct_kms ? "drm-kms" :
         (runtime->sdl_ready ? "sdl3" : "unavailable");
     int sessions = 0;
@@ -622,6 +784,7 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
         if (runtime->streams[i].used) ++streams;
     for (i = 0; i < 16; ++i)
         if (runtime->input_routes[i].used) ++routes;
+    render_scheduler_json(runtime, scheduler, sizeof(scheduler));
     json_escape(runtime->sdl_error, escaped_error, sizeof(escaped_error));
     snprintf(body, capacity,
              "{\"revision\":1,\"health\":{\"ready\":%s,"
@@ -630,6 +793,8 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              "\"sessions\":%d,\"surfaces\":%d,\"streams\":%d,"
              "\"input_routes\":%d,\"keyboards\":%d,\"pointers\":%d},"
              "\"render\":{\"pending\":%s,\"interval_ms\":%d,"
+             "\"effective_interval_ms\":%d,\"mode\":\"refresh-aware\","
+             "\"outputs\":%s,"
              "\"font_scale\":%d,\"direct_kms\":%s},"
              "\"errors\":%s,\"warnings\":%s}",
              (runtime->direct_kms ? runtime->display_count > 0 :
@@ -638,7 +803,9 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              runtime->display_count, runtime->output_count, sessions, surfaces,
              streams, routes, runtime->evdev_keyboard_count,
              runtime->evdev_mouse_count, runtime->render_pending ? "true" : "false",
-             runtime->render_interval_ms, runtime->font_scale,
+             runtime->render_interval_ms, runtime->render_effective_interval_ms,
+             scheduler,
+             runtime->font_scale,
              runtime->direct_kms ? "true" : "false",
              runtime->sdl_error[0] ? "[\"backend_error\"]" : "[]",
              runtime_has_failed_display(runtime) ?
@@ -5637,7 +5804,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
         ++runtime->frame_revision;
         ++runtime->next_frame_id;
         frame_receipt_json(runtime, body, sizeof(body));
-        render_outputs(runtime, &plan);
+        render_outputs(runtime, &plan, all_output_mask(runtime));
         send_http(fd, 202, "Accepted", "application/json", body);
         idempotency_store(runtime, request, method, path, payload, 202,
                           "Accepted", "application/json", body);
@@ -6206,6 +6373,7 @@ static void discover_displays(BlitRuntime *runtime)
     runtime->sdl_error[0] = '\0';
     for (i = 0; i < count; ++i) {
         const char *name = SDL_GetDisplayName(ids[i]);
+        const SDL_DisplayMode *mode;
         runtime->displays[i].id = (unsigned long long)ids[i];
         snprintf(runtime->displays[i].name, sizeof(runtime->displays[i].name),
                  "%s", name ? name : "unknown");
@@ -6215,7 +6383,11 @@ static void discover_displays(BlitRuntime *runtime)
             runtime->displays[i].bounds.w = 0;
             runtime->displays[i].bounds.h = 0;
         }
-        runtime->displays[i].refresh_hz = 60.0;
+        mode = SDL_GetCurrentDisplayMode(ids[i]);
+        if (mode == NULL)
+            mode = SDL_GetDesktopDisplayMode(ids[i]);
+        runtime->displays[i].refresh_hz = mode != NULL &&
+            mode->refresh_rate > 0.0f ? (double)mode->refresh_rate : 60.0;
     }
     SDL_free(ids);
 }
@@ -6697,7 +6869,8 @@ static void capture_sdl_frame(BlitRuntime *runtime, int output_index,
         runtime->sdl_screenshot_written = 1;
 }
 
-static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
+static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
+                           uint32_t output_mask)
 {
     int output_index;
     int plan_index;
@@ -6787,7 +6960,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
         }
         if (blit_kms_present(runtime->kms, views, view_count,
                              runtime->pointer_x, runtime->pointer_y,
-                             runtime->pointer_valid) < 0)
+                             runtime->pointer_valid, output_mask) < 0)
             fprintf(stderr, "blit: direct KMS present failed\n");
         for (surface_index = 0; surface_index < view_count; ++surface_index)
             if (damage_consumed[surface_index]) {
@@ -6808,6 +6981,9 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
         int target_changed = 0;
         int full_redraw;
         SDL_Renderer *renderer = runtime->outputs[output_index].renderer;
+
+        if (!(output_mask & (1U << output_index)))
+            continue;
 
         for (plan_index = 0; plan_index < plan->surface_count;
              ++plan_index) {
@@ -7116,8 +7292,19 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
             runtime, plan->surfaces[plan_index].surface_id);
         BlitSession *session = surface != NULL ? find_session_id(
             runtime, surface->owner_session_id) : NULL;
+        int rendered = 0;
+        int output_index;
         if (surface != NULL &&
-            (session == NULL || !session->terminal_synchronized))
+            (session == NULL || !session->terminal_synchronized)) {
+            for (output_index = 0; output_index < runtime->output_count;
+                 ++output_index)
+                if ((output_mask & (1U << output_index)) &&
+                    surface_targets_output(runtime, surface, output_index)) {
+                    rendered = 1;
+                    break;
+                }
+        }
+        if (rendered)
             surface->damage_valid = 0;
     }
     runtime->pointer_dirty = 0;
@@ -7898,6 +8085,7 @@ int main(int argc, char **argv)
     }
     if (runtime.sdl_ready || runtime.direct_kms)
         initialize_outputs(&runtime);
+    reset_render_schedule(&runtime, SDL_GetTicks());
     if (runtime.output_count > 0) {
         runtime.pointer_valid = 1;
         runtime.pointer_output = 0;
@@ -7952,6 +8140,9 @@ int main(int argc, char **argv)
         int i;
         fd_set readable;
         struct timeval timeout;
+        int wait_ms;
+        uint32_t now;
+        uint32_t output_mask;
 
         reconnect_evdev_devices(&runtime);
         for (i = 0; i < BLIT_MAX_SESSIONS; ++i)
@@ -7991,8 +8182,10 @@ int main(int argc, char **argv)
             FD_SET(kms_fd, &readable);
             if (kms_fd > max_fd) max_fd = kms_fd;
         }
-        timeout.tv_sec = 0;
-        timeout.tv_usec = 10000;
+        now = SDL_GetTicks();
+        wait_ms = render_wait_ms(&runtime, now);
+        timeout.tv_sec = wait_ms / 1000;
+        timeout.tv_usec = (wait_ms % 1000) * 1000;
         ready = select(max_fd + 1, &readable, NULL, NULL, &timeout);
         if (kms_fd >= 0 && ready > 0 && FD_ISSET(kms_fd, &readable))
             kms_ready = 1;
@@ -8045,12 +8238,13 @@ int main(int argc, char **argv)
                     service_session_output(&runtime, runtime.sessions[i].pty_fd);
             }
         }
+        now = SDL_GetTicks();
         if (runtime.render_pending &&
-            (SDL_GetTicks() - runtime.render_last_ticks >=
-             (uint32_t)runtime.render_interval_ms)) {
-            render_current_surfaces(&runtime);
-            runtime.render_pending = 0;
-            runtime.render_last_ticks = SDL_GetTicks();
+            (output_mask = due_output_mask(&runtime, now)) != 0) {
+            render_current_surfaces(&runtime, output_mask);
+            advance_render_schedule(&runtime, now, output_mask);
+            runtime.render_pending = render_work_remains(&runtime);
+            runtime.render_last_ticks = now;
         }
     }
     close(server_fd);

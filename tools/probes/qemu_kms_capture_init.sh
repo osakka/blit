@@ -48,6 +48,12 @@ for n in 1 2 3 4 5 6 7 8 9 10; do
 done
 echo SERVER; $b cat /tmp/server.json 2>/dev/null || true
 if [ "$ready" -ne 1 ]; then $b cat /tmp/blit.log; finish 1; fi
+diagnostics=$($b wget -qO- http://127.0.0.1:19191/v1/diagnostics || true)
+echo DIAGNOSTICS; echo "$diagnostics"
+scheduler_pass=1
+echo "$diagnostics" | $b grep -q '"mode":"refresh-aware"' || scheduler_pass=0
+echo "$diagnostics" | $b grep -q '"effective_interval_ms":' || scheduler_pass=0
+echo "$diagnostics" | $b grep -q '"outputs":\[' || scheduler_pass=0
 graphics_inventory=$($b wget -qO- http://127.0.0.1:19191/v1/graphics || true)
 echo GRAPHICS; echo "$graphics_inventory"
 graphics_pass=1
@@ -94,6 +100,6 @@ size1=$($b wc -c < /tmp/guest-screenshots/display-47.ppm 2>/dev/null || echo 0)
 size2=$($b wc -c < /tmp/guest-screenshots/display-48.ppm 2>/dev/null || echo 0)
 hash1=$($b sha256sum /tmp/guest-screenshots/display-47.ppm 2>/dev/null | $b cut -d ' ' -f 1 || true)
 hash2=$($b sha256sum /tmp/guest-screenshots/display-48.ppm 2>/dev/null | $b cut -d ' ' -f 1 || true)
-if [ "$size1" -gt 2359296 ] && [ "$size2" -gt 2359296 ] && [ "$hash1" != "$hash2" ] && [ "$loss_pass" -eq 1 ] && [ "$graphics_pass" -eq 1 ]; then echo KMS_CAPTURE_PASS; finish 0; fi
+if [ "$size1" -gt 2359296 ] && [ "$size2" -gt 2359296 ] && [ "$hash1" != "$hash2" ] && [ "$loss_pass" -eq 1 ] && [ "$graphics_pass" -eq 1 ] && [ "$scheduler_pass" -eq 1 ]; then echo KMS_CAPTURE_PASS; finish 0; fi
 echo KMS_CAPTURE_FAIL
 finish 1
