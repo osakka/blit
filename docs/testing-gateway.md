@@ -94,6 +94,22 @@ tcc -std=c99 \
 The dummy video driver is useful for exercising the network contract without
 owning a physical DRM device:
 
+For an SDL-path framebuffer capture and render-cost trace, create a writable
+directory and set the diagnostic variables before starting the server:
+
+```sh
+mkdir -p /tmp/blit-sdl-capture
+BLIT_SDL_SCREENSHOT_DIR=/tmp/blit-sdl-capture \
+BLIT_SDL_SCREENSHOT_AFTER=2 \
+BLIT_SDL_TRACE_TIMING=1 \
+SDL_VIDEODRIVER=dummy \
+./build/blit/blit-server 8080
+```
+
+The server writes one BMP per SDL output after the requested frame and logs
+`render_ms` for each composed frame. This is an opt-in diagnostic path; it is
+not required by the installed runtime and is never enabled by default.
+
 ```sh
 SDL_VIDEODRIVER=dummy \
 LD_LIBRARY_PATH=build/sdl3-kms \

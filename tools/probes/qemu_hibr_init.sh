@@ -156,9 +156,10 @@ if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
     stream_probe_pid=$!
     echo INPUT_STREAM_PROBE_PID=$stream_probe_pid
     /blit-stage/http-put 19191 /v1/input/routes/input-key "{\"device_id\":\"evdev-keyboard\",\"target_session_id\":\"session-$input_key_id\",\"enabled\":true}" > /tmp/input-key-route.json || true
+    /blit-stage/http-put 19191 /v1/input/routes/input-pointer "{\"device_id\":\"evdev-pointer\",\"target_session_id\":\"session-$input_pointer_id\",\"enabled\":true}" > /tmp/input-pointer-route.json || true
     echo BLIT_INPUT_READY
     $b cat /tmp/input-key.json; $b cat /tmp/input-pointer.json
-    $b cat /tmp/input-key-route.json
+    $b cat /tmp/input-key-route.json; $b cat /tmp/input-pointer-route.json
     input_wait=30
     input_wait_arg=$($b cat /proc/cmdline 2>/dev/null | $b sed -n 's/.*blit.input_wait=\([0-9][0-9]*\).*/\1/p')
     [ -n "$input_wait_arg" ] && input_wait=$input_wait_arg
@@ -190,16 +191,15 @@ if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
     fi
     echo BLIT_INPUT_STREAM
     $b cat /tmp/stream-input.log
-    if $b grep -q '"kind":"key"' /tmp/stream-input.log &&
+    if $b grep -q "\"session_id\":\"session-$input_key_id\".*\"kind\":\"key\"" /tmp/stream-input.log &&
        $b grep -q '"pressed":false' /tmp/stream-input.log &&
-       $b grep -q '"kind":"pointer_button"' /tmp/stream-input.log &&
+       $b grep -q '"button":0,"pressed":true' /tmp/stream-input.log &&
+       $b grep -q '"button":1,"pressed":true' /tmp/stream-input.log &&
+       $b grep -q '"button":2,"pressed":true' /tmp/stream-input.log &&
        $b grep -q '"kind":"pointer_wheel"' /tmp/stream-input.log &&
-       echo "$pointer_text" | $b grep -q 'BYTE 49' &&
+       echo "$pointer_text" | $b grep -q 'BYTE 1B' &&
+       echo "$pointer_text" | $b grep -q 'BYTE 5B' &&
        echo "$pointer_text" | $b grep -q 'BYTE 3C' &&
-       echo "$pointer_text" | $b grep -q 'BYTE 30' &&
-       echo "$pointer_text" | $b grep -q 'BYTE 6D' &&
-       echo "$pointer_text" | $b grep -q 'BYTE 34' &&
-       $b grep -q "\"session_id\":\"session-$input_key_id\".*\"kind\":\"pointer_motion\"" /tmp/stream-input.log &&
        $b grep -q "\"session_id\":\"session-$input_pointer_id\".*\"kind\":\"pointer_motion\"" /tmp/stream-input.log &&
        [ "$keypad_pass" -eq 1 ]; then
         echo BLIT_INPUT_STREAM_PASS

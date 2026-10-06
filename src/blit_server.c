@@ -326,6 +326,10 @@ typedef struct {
     int direct_kms;
     BlitKms *kms;
     BlitFont font;
+    char sdl_screenshot_dir[256];
+    unsigned long sdl_screenshot_after;
+    unsigned long sdl_frame;
+    int sdl_screenshot_written;
     char sdl_error[256];
     int listen_port;
 } BlitRuntime;
@@ -5376,6 +5380,33 @@ static void render_sdl_glyph(SDL_Renderer *renderer, const BlitFont *font,
     }
 }
 
+static void capture_sdl_frame(BlitRuntime *runtime, int output_index,
+                              SDL_Renderer *renderer)
+{
+    SDL_Surface *pixels;
+    char path[512];
+    if (runtime->sdl_screenshot_dir[0] == '\0' ||
+        runtime->sdl_screenshot_written ||
+        runtime->sdl_frame < runtime->sdl_screenshot_after)
+        return;
+    pixels = SDL_RenderReadPixels(renderer, NULL);
+    if (pixels == NULL) {
+        fprintf(stderr, "blit: SDL screenshot read failed: %s\n", SDL_GetError());
+        runtime->sdl_screenshot_written = 1;
+        return;
+    }
+    snprintf(path, sizeof(path), "%s/display-%llu.bmp",
+             runtime->sdl_screenshot_dir,
+             runtime->outputs[output_index].display_id);
+    if (!SDL_SaveBMP(pixels, path))
+        fprintf(stderr, "blit: SDL screenshot save failed: %s\n", SDL_GetError());
+    else
+        fprintf(stderr, "blit: SDL screenshot=%s\n", path);
+    SDL_DestroySurface(pixels);
+    if (output_index + 1 >= runtime->output_count)
+        runtime->sdl_screenshot_written = 1;
+}
+
 static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
 {
     int output_index;
@@ -5383,6 +5414,13 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
     int row;
     int cell_width = blit_font_width(&runtime->font);
     int cell_height = blit_font_height(&runtime->font);
+    Uint64 render_started = 0;
+
+    if (!runtime->direct_kms) {
+        ++runtime->sdl_frame;
+        if (getenv("BLIT_SDL_TRACE_TIMING") != NULL)
+            render_started = SDL_GetPerformanceCounter();
+    }
 
     if (runtime->direct_kms) {
         BlitKmsSurfaceView views[BLIT_MAX_SESSIONS];
@@ -5686,8 +5724,16 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
             }
         }
         render_pointer(runtime, output_index);
+        capture_sdl_frame(runtime, output_index, renderer);
         SDL_RenderPresent(renderer);
         runtime->outputs[output_index].initialized = 1;
+    }
+    if (render_started != 0) {
+        Uint64 elapsed = SDL_GetPerformanceCounter() - render_started;
+        double milliseconds = (double)elapsed * 1000.0 /
+            (double)SDL_GetPerformanceFrequency();
+        fprintf(stderr, "blit: SDL frame=%lu render_ms=%.3f\n",
+                runtime->sdl_frame, milliseconds);
     }
     for (plan_index = 0; plan_index < plan->surface_count; ++plan_index) {
         BlitSurface *surface = find_surface_id(
@@ -6363,10 +6409,17 @@ int main(int argc, char **argv)
     {
         const char *font_scale = getenv("BLIT_FONT_SCALE");
         const char *render_interval = getenv("BLIT_RENDER_INTERVAL_MS");
+        const char *screenshot_dir = getenv("BLIT_SDL_SCREENSHOT_DIR");
+        const char *screenshot_after = getenv("BLIT_SDL_SCREENSHOT_AFTER");
         if (font_scale != NULL)
             runtime.font_scale = atoi(font_scale);
         if (render_interval != NULL)
             runtime.render_interval_ms = atoi(render_interval);
+        if (screenshot_dir != NULL)
+            snprintf(runtime.sdl_screenshot_dir,
+                     sizeof(runtime.sdl_screenshot_dir), "%s", screenshot_dir);
+        runtime.sdl_screenshot_after = screenshot_after != NULL ?
+            (unsigned long)strtoul(screenshot_after, NULL, 10) : 1;
         if (runtime.font_scale < 1 || runtime.font_scale > 3)
             runtime.font_scale = 1;
         if (runtime.render_interval_ms < 1 || runtime.render_interval_ms > 100)
