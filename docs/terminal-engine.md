@@ -79,6 +79,10 @@ intervening controls therefore observe the same state as Hibr's terminal
 implementation; the transient flag is cleared by controls and is not part
 of DECSC's saved cursor state.
 
+Writing or erasing either half of a wide cell first invalidates the complete
+wide glyph, including its continuation cell. This keeps the canonical grid
+and both renderers free of orphaned wide-glyph halves.
+
 ## Conformance gate
 
 Run `tools/tests/terminal_conformance.rb` against a TCC-built server with the

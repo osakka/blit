@@ -415,6 +415,31 @@ assert_equal('A', cells.fetch([0, 0]).fetch('text'), 'HPR prefix')
 assert_equal('X', cells.fetch([3, 0]).fetch('text'), 'HPR target')
 assert_equal('Y', cells.fetch([4, 2]).fetch('text'), 'VPR target')
 
+snapshot = run_case(base, 'cursor-forward-tab-stops',
+                    "printf 'a\\033[2Ib'", width: 30)
+cells = cell_map(snapshot)
+assert_equal('b', cells.fetch([16, 0]).fetch('text'), 'CHT target')
+
+snapshot = run_case(base, 'repeat-wraps-like-printing',
+                    "printf 'x\\033[9b'", width: 6, height: 4)
+cells = cell_map(snapshot)
+assert_equal('x', cells.fetch([5, 0]).fetch('text'), 'REP fills first row')
+assert_equal('x', cells.fetch([0, 1]).fetch('text'), 'REP wraps to next row')
+assert_equal('x', cells.fetch([3, 1]).fetch('text'), 'REP wraps expected count')
+
+snapshot = run_case(base, 'combining-character-cell',
+                    "printf 'e\\314\\201X'")
+cells = cell_map(snapshot)
+assert_equal('e', cells.fetch([0, 0]).fetch('text'), 'combining base cell')
+assert_equal('X', cells.fetch([1, 0]).fetch('text'), 'combining cursor advance')
+
+snapshot = run_case(base, 'wide-character-overwrite',
+                    "printf '\\360\\237\\230\\200\\033[1;2Hx'")
+cells = cell_map(snapshot)
+raise 'wide overwrite left original cell' if cells.key?([0, 0])
+assert_equal('x', cells.fetch([1, 0]).fetch('text'),
+             'wide overwrite target')
+
 snapshot = run_case(base, 'origin-mode-scroll-region',
                     "printf 'A\\033[2;4r\\033[?6h\\033[1;1HB'")
 cells = cell_map(snapshot)

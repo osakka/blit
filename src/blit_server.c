@@ -1841,6 +1841,21 @@ static void terminal_clear_cell(BlitSurface *surface, int x, int y)
     mark_surface_damage(surface, x, y);
 }
 
+static void terminal_clear_wide_overlap(BlitSurface *surface, int x, int y)
+{
+    uint16_t attributes;
+
+    if (surface == NULL || x < 0 || y < 0 ||
+        x >= surface->width || y >= surface->height)
+        return;
+    attributes = surface->attributes[y][x];
+    if ((attributes & BLIT_ATTR_CONTINUATION) && x > 0)
+        terminal_clear_cell(surface, x - 1, y);
+    if ((attributes & BLIT_ATTR_WIDE) && x + 1 < surface->width &&
+        (surface->attributes[y][x + 1] & BLIT_ATTR_CONTINUATION))
+        terminal_clear_cell(surface, x + 1, y);
+}
+
 static void terminal_clear_line(BlitSurface *surface, int y, int start)
 {
     int x;
@@ -1852,6 +1867,7 @@ static void terminal_clear_line(BlitSurface *surface, int y, int start)
 static void terminal_erase_cell(BlitSession *session, BlitSurface *surface,
                                 int x, int y)
 {
+    terminal_clear_wide_overlap(surface, x, y);
     terminal_clear_cell(surface, x, y);
     if (x < 0 || y < 0 || x >= surface->width || y >= surface->height)
         return;
@@ -3347,6 +3363,8 @@ static void terminal_put_codepoint(BlitSession *session, BlitSurface *surface,
             terminal_clear_cell(surface, surface->cursor_x + x,
                                 surface->cursor_y);
     }
+    terminal_clear_wide_overlap(surface, surface->cursor_x,
+                                surface->cursor_y);
     terminal_clear_cell(surface, surface->cursor_x, surface->cursor_y);
     surface->codepoints[surface->cursor_y][surface->cursor_x] = codepoint;
     surface->cells[surface->cursor_y][surface->cursor_x] =
