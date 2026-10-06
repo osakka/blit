@@ -791,6 +791,31 @@ static int send_all(int fd, const void *data, size_t length)
     return 1;
 }
 
+static int send_bytes_blocking(int fd, const void *data, size_t length)
+{
+    int flags = fcntl(fd, F_GETFL, 0);
+    const unsigned char *bytes = (const unsigned char *)data;
+    size_t sent = 0;
+
+    if (flags >= 0)
+        fcntl(fd, F_SETFL, flags & ~O_NONBLOCK);
+    while (sent < length) {
+        ssize_t result = send(fd, bytes + sent, length - sent,
+                              MSG_NOSIGNAL);
+        if (result < 0 && errno == EINTR)
+            continue;
+        if (result <= 0) {
+            if (flags >= 0)
+                fcntl(fd, F_SETFL, flags);
+            return 0;
+        }
+        sent += (size_t)result;
+    }
+    if (flags >= 0)
+        fcntl(fd, F_SETFL, flags);
+    return 1;
+}
+
 static void send_http(int fd, int status, const char *reason,
                       const char *content_type, const char *body)
 {
@@ -830,7 +855,7 @@ static void send_http_bytes(int fd, int status, const char *reason,
 
     if (header_length > 0 && (size_t)header_length < sizeof(header)) {
         send_all(fd, header, (size_t)header_length);
-        send_all(fd, body, length);
+        send_bytes_blocking(fd, body, length);
     }
 }
 
