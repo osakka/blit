@@ -11,10 +11,11 @@ Canonical repository: `git.home.arpa/itdlabs/blit`
 This directory is the project contract. Implementation work should update the
 relevant documentation and schema in the same change.
 
-The installed runtime boundary is the TCC-built `blit-server` binary. Shell
-launchers are test/deployment probes only; Hibr remains an independently
-installed executable and is controlled through Blit's API and Hibr's own
-desktop/session commands.
+The installed runtime boundary is the TCC-built `blit-server` binary. No
+shell launcher is shipped in the runtime package: Hibr remains an
+independently installed executable and is controlled through Blit's API and
+Hibr's own desktop/session commands. Shell files in `tools/` are only
+reproducible build and test fixtures.
 
 ## Documentation map
 

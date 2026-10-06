@@ -67,6 +67,11 @@ case " $($b cat /proc/cmdline 2>/dev/null || true) " in
     *" blit.input_only=1 "*) BLIT_INPUT_ONLY_TEST=1 ;;
 esac
 if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
+    # The input-only gate measures routing and PTY bytes, not framebuffer
+    # capture.  Avoid serializing two 1024x768 PPMs on the slow VKMS guest
+    # while the synthetic pointer stress stream is running.
+    unset BLIT_KMS_SCREENSHOT_DIR
+    unset BLIT_KMS_SCREENSHOT_AFTER
     export BLIT_TRACE_KEYS=1
     /blit-stage/emit-uinput >/tmp/uinput.log 2>&1 &
     emit_pid=$!

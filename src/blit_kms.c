@@ -877,6 +877,30 @@ static int view_has_content(const BlitKmsSurfaceView *view)
     return 0;
 }
 
+static int all_outputs_have_content(const BlitKms *kms,
+                                    const BlitKmsSurfaceView *views,
+                                    int view_count)
+{
+    int output_index;
+    int view_index;
+    if (kms == NULL || views == NULL || view_count < 1)
+        return 0;
+    for (output_index = 0; output_index < kms->output_count; ++output_index) {
+        int found = 0;
+        for (view_index = 0; view_index < view_count; ++view_index) {
+            if (views[view_index].display_id !=
+                kms->outputs[output_index].info.id)
+                continue;
+            if (view_has_content(&views[view_index])) {
+                found = 1;
+                break;
+            }
+        }
+        if (!found) return 0;
+    }
+    return 1;
+}
+
 BlitKms *blit_kms_new(void)
 {
     BlitKms *kms = (BlitKms *)calloc(1, sizeof(BlitKms));
@@ -1045,8 +1069,8 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         started = kms_now_us();
 
     capture = kms->screenshot_dir[0] != '\0' && !kms->screenshot_written &&
-        kms->screenshot_frame >= kms->screenshot_after && view_count >= 1 &&
-        view_has_content(&views[0]);
+        kms->screenshot_frame >= kms->screenshot_after &&
+        all_outputs_have_content(kms, views, view_count);
     pointer_changed = !kms->pointer_state_valid ||
         kms->previous_pointer_x != pointer_x ||
         kms->previous_pointer_y != pointer_y ||

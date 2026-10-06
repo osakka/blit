@@ -132,11 +132,12 @@ qemu-system-x86_64 -M q35 -m 1024 -smp 2 \
 ```
 
 `KMS_CAPTURE_PASS` requires two guest-generated PPMs, each with a 1024×768
-header and the exact 24-bit payload size, and requires distinct SHA-256 hashes
-for the two outputs. The current run passed with hashes beginning `0588af44`
-and `a397ab92`. The tiny VKMS kernel does not include 9p, so the PPMs are
-validated over the serial log; an empty host screenshot directory is not
-evidence that the frames were absent.
+header and the exact 24-bit payload size. The TCC-built `ppm-assert` oracle
+also checks black background pixels and a known `READY` glyph in the expected
+cell origin on both displays; distinct SHA-256 hashes remain an additional
+check that the two outputs are not the same buffer. The tiny VKMS kernel does
+not include 9p, so the PPMs are validated over the serial log; an empty host
+screenshot directory is not evidence that the frames were absent.
 
 ## Pointer stress gate
 

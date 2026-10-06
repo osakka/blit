@@ -74,4 +74,11 @@ EOF
 mkdir -p "$OUT"
 output=$OUT/blit_${pkgver}_amd64.deb
 dpkg-deb --build --root-owner-group "$stage" "$output" >/dev/null
+# The runtime boundary is deliberately an allowlist.  Reject the historical
+# shell launchers if they ever reappear in the staged package.
+if dpkg-deb --contents "$output" | grep -Eq ' usr/(bin|lib/blit)/.*(\.sh$|/(start|run|attach|hibr)-)| usr/(bin|lib/blit)/(start|run|attach|hibr)'; then
+	rm -f "$output"
+	echo "blit: runtime package contains a shell/Hibr launcher" >&2
+	exit 1
+fi
 echo "$output"

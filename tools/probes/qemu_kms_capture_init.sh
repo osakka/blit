@@ -25,6 +25,7 @@ $b mount -t devpts devpts /dev/pts 2>/dev/null || true
 $b mkdir -p /lib64 /usr/lib/x86_64-linux-gnu
 $b cp /blit-stage/ld-linux-x86-64.so.2 /lib64/ld-linux-x86-64.so.2
 $b cp /blit-stage/libc.so.6 /usr/lib/x86_64-linux-gnu/libc.so.6
+$b test -x /blit-stage/ppm-assert || { echo PPM_ASSERT_MISSING; finish 1; }
 $b mount -t 9p -o trans=virtio,version=9p2000.L blitshots /tmp/host-screenshots 2>/dev/null || true
 export BLIT_KMS_SCREENSHOT_DIR=/tmp/guest-screenshots
 export BLIT_KMS_SCREENSHOT_AFTER=0
@@ -50,6 +51,8 @@ for shot in /tmp/guest-screenshots/display-47.ppm /tmp/guest-screenshots/display
         echo FRAME_FILE; $b sha256sum "$shot"; $b od -An -t u1 -N 32 "$shot"
     fi
 done
+/blit-stage/ppm-assert /tmp/guest-screenshots/display-47.ppm && echo PPM_DISPLAY_47_PASS || { echo PPM_DISPLAY_47_FAIL; finish 1; }
+/blit-stage/ppm-assert /tmp/guest-screenshots/display-48.ppm && echo PPM_DISPLAY_48_PASS || { echo PPM_DISPLAY_48_FAIL; finish 1; }
 $b cp /tmp/guest-screenshots/display-*.ppm /tmp/host-screenshots/ 2>/dev/null || true
 size1=$($b wc -c < /tmp/guest-screenshots/display-47.ppm 2>/dev/null || echo 0)
 size2=$($b wc -c < /tmp/guest-screenshots/display-48.ppm 2>/dev/null || echo 0)
