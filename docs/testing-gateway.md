@@ -283,6 +283,8 @@ device, preventing duplicate delivery. The Blit-only QEMU gate verifies both
 route records and end-to-end virtual-evdev delivery. SGR button presses use
 button codes 0–2 and releases use the same code with the `m` terminator;
 legacy VT reports use the protocol's button-3 release code and 32-byte offset.
+Evdev Shift, Alt, and Ctrl state contributes the standard SGR/VT modifier bits
+to button, wheel, and drag reports.
 
 ## Exercise the stream upgrade
 

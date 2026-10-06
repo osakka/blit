@@ -187,6 +187,7 @@ if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
        echo "$pointer_text" | $b grep -q 'BYTE 3C' &&
        echo "$pointer_text" | $b grep -q 'BYTE 30' &&
        echo "$pointer_text" | $b grep -q 'BYTE 6D' &&
+       echo "$pointer_text" | $b grep -q 'BYTE 34' &&
        $b grep -q "\"session_id\":\"session-$input_key_id\".*\"kind\":\"pointer_motion\"" /tmp/stream-input.log &&
        $b grep -q "\"session_id\":\"session-$input_pointer_id\".*\"kind\":\"pointer_motion\"" /tmp/stream-input.log &&
        [ "$keypad_pass" -eq 1 ]; then

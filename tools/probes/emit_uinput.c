@@ -28,6 +28,7 @@ static int make_device(const char *name, int mouse)
         ioctl(fd, UI_SET_KEYBIT, KEY_LEFTBRACE);
         ioctl(fd, UI_SET_KEYBIT, KEY_UP);
         ioctl(fd, UI_SET_KEYBIT, KEY_KP1);
+        ioctl(fd, UI_SET_KEYBIT, KEY_LEFTSHIFT);
     }
     memset(&device, 0, sizeof(device));
     snprintf(device.name, sizeof(device.name), "%s", name);
@@ -92,6 +93,17 @@ int main(void)
             sync_event(mouse);
             emit_event(mouse, EV_KEY, BTN_LEFT, 0);
             sync_event(mouse);
+            usleep(500000);
+            emit_event(keyboard, EV_KEY, KEY_LEFTSHIFT, 1);
+            sync_event(keyboard);
+            usleep(500000);
+            emit_event(mouse, EV_KEY, BTN_LEFT, 1);
+            sync_event(mouse);
+            emit_event(mouse, EV_KEY, BTN_LEFT, 0);
+            sync_event(mouse);
+            usleep(500000);
+            emit_event(keyboard, EV_KEY, KEY_LEFTSHIFT, 0);
+            sync_event(keyboard);
         }
         if ((i % 30) == 0) {
             emit_event(keyboard, EV_KEY, KEY_A, 1);

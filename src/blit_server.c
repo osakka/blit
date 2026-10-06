@@ -5184,6 +5184,15 @@ static int active_mouse_button(const BlitRuntime *runtime)
     return 3;
 }
 
+static int mouse_modifier_bits(const BlitRuntime *runtime)
+{
+    int modifiers = 0;
+    if (runtime->evdev_shift) modifiers |= 4;
+    if (runtime->evdev_alt) modifiers |= 8;
+    if (runtime->evdev_ctrl) modifiers |= 16;
+    return modifiers;
+}
+
 static void send_focus_report(BlitSession *session, int focused)
 {
     const char *report;
@@ -5234,7 +5243,7 @@ static void send_mouse_report(BlitRuntime *runtime, SDL_WindowID window_id,
         return;
     if (session->terminal_mouse_mode == 0)
         return;
-    code = button;
+    code = button + mouse_modifier_bits(runtime);
     if (session->terminal_mouse_sgr) {
         /* SGR mouse reports use button numbers 0..2 for press/release,
            32+button for motion, and 64+button for wheels.  The legacy
@@ -5246,8 +5255,8 @@ static void send_mouse_report(BlitRuntime *runtime, SDL_WindowID window_id,
         /* Legacy X10/VT reports encode release as button 3, followed by
            the mandatory 32 offset.  Wheel codes already include their
            64 offset and must not be offset a second time. */
-        if (release && code < 64)
-            code = 3;
+        if (release && button < 64)
+            code = 3 + mouse_modifier_bits(runtime);
         if (code < 64)
             code += 32;
         snprintf(report, sizeof(report), "\033[M%c%c%c", code,
@@ -5279,6 +5288,7 @@ static void send_mouse_motion_report(BlitRuntime *runtime,
     if (session->terminal_mouse_mode != 1002 &&
         session->terminal_mouse_mode != 1003)
         return;
+    button += mouse_modifier_bits(runtime);
     if (session->terminal_mouse_sgr)
         snprintf(report, sizeof(report), "\033[<%d;%d;%dM", button + 32,
                  column, row);
@@ -5910,10 +5920,10 @@ int main(int argc, char **argv)
                 if (runtime.evdev_keyboard_fds[i] >= 0 &&
                     FD_ISSET(runtime.evdev_keyboard_fds[i], &readable))
                     keyboard_ready = 1;
-            if (mouse_ready)
-                service_evdev_mouse(&runtime);
             if (keyboard_ready)
                 service_evdev_keyboard(&runtime);
+            if (mouse_ready)
+                service_evdev_mouse(&runtime);
             for (i = 0; i < BLIT_MAX_STREAMS; ++i) {
                 if (runtime.streams[i].used &&
                     FD_ISSET(runtime.streams[i].fd, &readable)) {
