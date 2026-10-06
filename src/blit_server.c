@@ -9291,6 +9291,45 @@ static int run_capture_command2(const char *command, const char *argument1,
     return 1;
 }
 
+static int run_capture_command3(const char *command, const char *argument1,
+                                const char *argument2, const char *argument3,
+                                char *output, size_t capacity)
+{
+    int pipe_fds[2];
+    pid_t child;
+    int status;
+    ssize_t received;
+    size_t used = 0;
+
+    if (pipe(pipe_fds) < 0) return 0;
+    child = fork();
+    if (child < 0) {
+        close(pipe_fds[0]); close(pipe_fds[1]); return 0;
+    }
+    if (child == 0) {
+        int null_fd = open("/dev/null", O_WRONLY);
+        dup2(pipe_fds[1], STDOUT_FILENO);
+        if (null_fd >= 0) dup2(null_fd, STDERR_FILENO);
+        close(pipe_fds[0]); close(pipe_fds[1]);
+        if (null_fd >= 0) close(null_fd);
+        execlp(command, command, argument1, argument2, argument3,
+               (char *)NULL);
+        _exit(127);
+    }
+    close(pipe_fds[1]);
+    while (used + 1 < capacity) {
+        received = read(pipe_fds[0], output + used, capacity - used - 1);
+        if (received <= 0) break;
+        used += (size_t)received;
+    }
+    close(pipe_fds[0]);
+    output[used] = '\0';
+    if (waitpid(child, &status, 0) != child || !WIFEXITED(status) ||
+        WEXITSTATUS(status) != 0)
+        return 0;
+    return 1;
+}
+
 static int update_package_valid(const char *path, const char *expected_sha,
                                 char *detail, size_t detail_capacity)
 {
@@ -9303,8 +9342,8 @@ static int update_package_valid(const char *path, const char *expected_sha,
         snprintf(detail, detail_capacity, "SHA-256 verification failed");
         return 0;
     }
-    if (!run_capture_command2("dpkg-deb", "--field=Package", path, package_name,
-                              sizeof(package_name))) {
+    if (!run_capture_command3("dpkg-deb", "--field", path, "Package",
+                              package_name, sizeof(package_name))) {
         snprintf(detail, detail_capacity, "not a readable Debian package");
         return 0;
     }
