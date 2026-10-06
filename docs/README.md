@@ -14,8 +14,10 @@ relevant documentation and schema in the same change.
 The installed runtime boundary is the TCC-built `blit-server` binary. No
 shell launcher is shipped in the runtime package: Hibr remains an
 independently installed executable and is controlled through Blit's API and
-Hibr's own desktop/session commands. Shell files in `tools/` are only
-reproducible build and test fixtures.
+Hibr's own desktop/session commands. Blit starts an API-requested command
+directly with `execve`; it does not insert a shell between the PTY and the
+requested executable. Shell files in `tools/` are only reproducible build and
+test fixtures, never runtime dependencies.
 
 Do not distribute `build/blit-desktop-current` as a desktop bundle. It is a
 build staging directory, and the Debian builder rejects stale launchers or

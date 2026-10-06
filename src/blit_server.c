@@ -40,6 +40,7 @@ extern char **environ;
 #define BLIT_MAX_IDEMPOTENCY 16
 #define BLIT_MAX_EVENT_HISTORY 64
 #define BLIT_MAX_SCROLLBACK_LINES 1000
+#define BLIT_MAX_OVERLAYS 16
 #define BLIT_DEFAULT_FOREGROUND 0xbed2beU
 #define BLIT_ATTR_BOLD 1
 #define BLIT_ATTR_DIM 2
@@ -213,6 +214,19 @@ typedef struct {
 typedef struct {
     int used;
     unsigned long long id;
+    unsigned long long revision;
+    char display_id[128];
+    int x;
+    int y;
+    int width;
+    int height;
+    uint32_t color;
+    int opacity;
+} BlitOverlay;
+
+typedef struct {
+    int used;
+    unsigned long long id;
     pid_t process_id;
     int pty_fd;
     unsigned long long revision;
@@ -328,6 +342,8 @@ typedef struct {
     BlitEventRecord event_history[BLIT_MAX_EVENT_HISTORY];
     unsigned int next_event_history;
     BlitEffectState effect;
+    BlitOverlay overlays[BLIT_MAX_OVERLAYS];
+    unsigned long long next_overlay_id;
     char auth_token[256];
     int output_count;
     int sdl_ready;
@@ -362,6 +378,41 @@ static void effect_json(const BlitRuntime *runtime, char *body,
              runtime->effect.preset, runtime->effect.intensity,
              runtime->direct_kms ? "unsupported" :
                  (runtime->sdl_ready ? "sdl3" : "unavailable"));
+}
+
+static void overlay_json(const BlitOverlay *overlay, char *body,
+                         size_t capacity)
+{
+    snprintf(body, capacity,
+             "{\"id\":\"overlay-%llu\",\"revision\":%llu,"
+             "\"display_id\":\"%s\",\"bounds\":{\"x\":%d,"
+             "\"y\":%d,\"width\":%d,\"height\":%d},"
+             "\"color\":\"#%06x\",\"opacity\":%d}",
+             overlay->id, overlay->revision, overlay->display_id,
+             overlay->x, overlay->y, overlay->width, overlay->height,
+             (unsigned int)(overlay->color & 0xffffffU), overlay->opacity);
+}
+
+static void overlays_json(const BlitRuntime *runtime, char *body,
+                          size_t capacity)
+{
+    size_t used = 0;
+    int i;
+
+    used += (size_t)snprintf(body + used, capacity - used,
+                             "{\"revision\":1,\"backend\":\"%s\","
+                             "\"overlays\":[",
+                             runtime->direct_kms ? "unsupported" :
+                                 (runtime->sdl_ready ? "sdl3" : "unavailable"));
+    for (i = 0; i < BLIT_MAX_OVERLAYS; ++i) {
+        char item[768];
+        if (!runtime->overlays[i].used) continue;
+        overlay_json(&runtime->overlays[i], item, sizeof(item));
+        used += (size_t)snprintf(body + used, capacity - used, "%s%s",
+                                 used > 0 && body[used - 1] != '[' ? "," : "",
+                                 item);
+    }
+    snprintf(body + used, capacity - used, "]}");
 }
 
 static void render_pointer(BlitRuntime *runtime, int output_index)
@@ -513,13 +564,14 @@ static void server_json(const BlitRuntime *runtime, char *body, size_t capacity)
              "\"terminal-sessions\",\"topology\","
              "\"native-presentation\",\"graphics-inventory\","
              "\"audio-inventory\",\"input-devices\",\"input-routes\","
-             "\"diagnostics\",\"effects\"],\"display_count\":%d,"
+             "\"diagnostics\",\"effects\",\"overlays\"],\"display_count\":%d,"
              "\"display_backend\":{\"name\":\"%s\",\"ready\":%s,"
              "\"error\":\"%s\"},\"resources\":{"
              "\"graphics\":\"/v1/graphics\",\"displays\":\"/v1/displays\","
              "\"audio\":\"/v1/audio\",\"input_devices\":\"/v1/input/devices\","
              "\"input_routes\":\"/v1/input/routes\",\"topology\":\"/v1/topology\","
-             "\"diagnostics\":\"/v1/diagnostics\",\"effects\":\"/v1/effects\"}}",
+             "\"diagnostics\":\"/v1/diagnostics\",\"effects\":\"/v1/effects\","
+             "\"overlays\":\"/v1/overlays\"}}",
              runtime->display_count, backend,
              (runtime->direct_kms ? runtime->display_count > 0 :
               runtime->sdl_ready && runtime->output_count > 0) ?
@@ -5309,6 +5361,100 @@ static void handle_request(int fd, BlitRuntime *runtime,
         send_http(fd, 200, "OK", "application/json", body);
         return;
     }
+    if (strcmp(path, "/v1/overlays") == 0 &&
+        (strcmp(method, "GET") == 0 || strcmp(method, "POST") == 0)) {
+        if (strcmp(method, "GET") == 0) {
+            overlays_json(runtime, body, sizeof(body));
+            send_http(fd, 200, "OK", "application/json", body);
+            return;
+        }
+        {
+            int x;
+            int y;
+            int width;
+            int height;
+            int opacity;
+            uint32_t color;
+            char display_id[128];
+            int i;
+            BlitOverlay *overlay = NULL;
+
+            if (runtime->direct_kms) {
+                send_problem(fd, 409, "Conflict",
+                             "overlay_backend_unsupported",
+                             "The current direct-KMS backend does not render SDL overlays.");
+                return;
+            }
+            if (!json_string(payload, "display_id", display_id,
+                             sizeof(display_id)) ||
+                !display_id_is_known(runtime, display_id) ||
+                !json_int(payload, "x", &x) || !json_int(payload, "y", &y) ||
+                !json_int(payload, "width", &width) || width < 1 || width > 4096 ||
+                !json_int(payload, "height", &height) || height < 1 || height > 4096 ||
+                !json_string(payload, "color", body, sizeof(body)) ||
+                !parse_color(body, &color) ||
+                !json_int(payload, "opacity", &opacity) ||
+                opacity < 0 || opacity > 100) {
+                send_problem(fd, 400, "Bad Request", "invalid_overlay",
+                             "display_id, x, y, positive width/height, #RRGGBB color, and opacity 0..100 are required.");
+                return;
+            }
+            for (i = 0; i < BLIT_MAX_OVERLAYS; ++i)
+                if (!runtime->overlays[i].used) {
+                    overlay = &runtime->overlays[i];
+                    break;
+                }
+            if (overlay == NULL) {
+                send_problem(fd, 503, "Service Unavailable",
+                             "overlay_capacity",
+                             "The overlay capacity has been reached.");
+                return;
+            }
+            memset(overlay, 0, sizeof(*overlay));
+            overlay->used = 1;
+            overlay->id = runtime->next_overlay_id++;
+            overlay->revision = 1;
+            snprintf(overlay->display_id, sizeof(overlay->display_id), "%s",
+                     display_id);
+            overlay->x = x;
+            overlay->y = y;
+            overlay->width = width;
+            overlay->height = height;
+            overlay->color = color;
+            overlay->opacity = opacity;
+            for (i = 0; i < runtime->output_count; ++i)
+                runtime->outputs[i].initialized = 0;
+            runtime->render_pending = 1;
+            overlay_json(overlay, body, sizeof(body));
+            send_http(fd, 201, "Created", "application/json", body);
+            return;
+        }
+    }
+    if (strncmp(path, "/v1/overlays/", strlen("/v1/overlays/")) == 0 &&
+        strcmp(method, "DELETE") == 0) {
+        unsigned long long overlay_id = strtoull(
+            path + strlen("/v1/overlays/"), NULL, 10);
+        int i;
+        if (runtime->direct_kms) {
+            send_problem(fd, 409, "Conflict",
+                         "overlay_backend_unsupported",
+                         "The current direct-KMS backend does not render SDL overlays.");
+            return;
+        }
+        for (i = 0; i < BLIT_MAX_OVERLAYS; ++i)
+            if (runtime->overlays[i].used &&
+                runtime->overlays[i].id == overlay_id) {
+                memset(&runtime->overlays[i], 0, sizeof(runtime->overlays[i]));
+                for (i = 0; i < runtime->output_count; ++i)
+                    runtime->outputs[i].initialized = 0;
+                runtime->render_pending = 1;
+                send_http(fd, 204, "No Content", "application/json", "");
+                return;
+            }
+        send_problem(fd, 404, "Not Found", "overlay_not_found",
+                     "The requested overlay does not exist.");
+        return;
+    }
     if (strcmp(method, "GET") != 0) {
         send_problem(fd, 405, "Method Not Allowed", "method_not_allowed",
                      "This gateway route does not support the requested method.");
@@ -5692,6 +5838,41 @@ static void render_sdl_effects(const BlitRuntime *runtime,
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
 }
 
+static int overlay_targets_output(const BlitRuntime *runtime,
+                                  const BlitOverlay *overlay, int output_index)
+{
+    char display_id[128];
+    snprintf(display_id, sizeof(display_id), "display-%llu",
+             runtime->outputs[output_index].display_id);
+    return strcmp(overlay->display_id, display_id) == 0;
+}
+
+static void render_sdl_overlays(const BlitRuntime *runtime,
+                                SDL_Renderer *renderer, int output_index)
+{
+    int i;
+
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    for (i = 0; i < BLIT_MAX_OVERLAYS; ++i) {
+        SDL_FRect rectangle;
+        if (!runtime->overlays[i].used ||
+            !overlay_targets_output(runtime, &runtime->overlays[i],
+                                     output_index))
+            continue;
+        rectangle.x = (float)runtime->overlays[i].x;
+        rectangle.y = (float)runtime->overlays[i].y;
+        rectangle.w = (float)runtime->overlays[i].width;
+        rectangle.h = (float)runtime->overlays[i].height;
+        SDL_SetRenderDrawColor(renderer,
+            (unsigned char)(runtime->overlays[i].color >> 16),
+            (unsigned char)(runtime->overlays[i].color >> 8),
+            (unsigned char)runtime->overlays[i].color,
+            (unsigned char)((runtime->overlays[i].opacity * 255) / 100));
+        SDL_RenderFillRect(renderer, &rectangle);
+    }
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+}
+
 static void capture_sdl_frame(BlitRuntime *runtime, int output_index,
                               SDL_Renderer *renderer)
 {
@@ -5818,6 +5999,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
     for (output_index = 0; output_index < runtime->output_count;
          ++output_index) {
         int target_count = 0;
+        int overlay_count = 0;
         int target_changed = 0;
         int full_redraw;
         SDL_Renderer *renderer = runtime->outputs[output_index].renderer;
@@ -5835,7 +6017,16 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
                     target_changed = 1;
             }
         }
-        if (target_count == 0) {
+        {
+            int overlay_index;
+            for (overlay_index = 0; overlay_index < BLIT_MAX_OVERLAYS;
+                 ++overlay_index)
+                if (runtime->overlays[overlay_index].used &&
+                    overlay_targets_output(runtime,
+                        &runtime->overlays[overlay_index], output_index))
+                    ++overlay_count;
+        }
+        if (target_count == 0 && overlay_count == 0) {
             /* The output is already in its empty state.  A pending render
                can be caused by another display's PTY or by a stream event;
                do not submit another clear/present for this output. */
@@ -5853,6 +6044,23 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
             /* A later session needs a full first frame, even if this output
                was previously presenting the empty desktop. */
             runtime->outputs[output_index].initialized = 0;
+            continue;
+        }
+        if (target_count == 0) {
+            if (!runtime->outputs[output_index].initialized)
+                SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+            if (!runtime->outputs[output_index].initialized)
+                SDL_RenderClear(renderer);
+            else if (runtime->pointer_dirty)
+                clear_previous_pointer(runtime, output_index);
+            render_sdl_effects(runtime, renderer,
+                               runtime->displays[output_index].bounds.w,
+                               runtime->displays[output_index].bounds.h);
+            render_sdl_overlays(runtime, renderer, output_index);
+            render_pointer(runtime, output_index);
+            capture_sdl_frame(runtime, output_index, renderer);
+            SDL_RenderPresent(renderer);
+            runtime->outputs[output_index].initialized = 1;
             continue;
         }
         /* A surface can be present without having changed since the last
@@ -6055,6 +6263,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
         render_sdl_effects(runtime, renderer,
                            runtime->displays[output_index].bounds.w,
                            runtime->displays[output_index].bounds.h);
+        render_sdl_overlays(runtime, renderer, output_index);
         render_pointer(runtime, output_index);
         capture_sdl_frame(runtime, output_index, renderer);
         SDL_RenderPresent(renderer);
@@ -6763,6 +6972,7 @@ int main(int argc, char **argv)
     runtime.next_event_sequence = 1;
     runtime.topology_revision = 1;
     runtime.input_routes_revision = 1;
+    runtime.next_overlay_id = 1;
     runtime.effect.revision = 1;
     snprintf(runtime.effect.preset, sizeof(runtime.effect.preset), "none");
     {

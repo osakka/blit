@@ -132,6 +132,26 @@ request(base, 'PUT', '/v1/effects', {
 })
 puts 'PASS bounded-effect-state-and-revision'
 
+overlay_display = topology.fetch('outputs').fetch(0).fetch('display_id')
+overlay = request(base, 'POST', '/v1/overlays', {
+  'display_id' => overlay_display,
+  'x' => 2,
+  'y' => 3,
+  'width' => 8,
+  'height' => 4,
+  'color' => '#ff0000',
+  'opacity' => 75
+})
+assert_equal(overlay_display, overlay.fetch('display_id'),
+             'overlay display target')
+assert_equal(75, overlay.fetch('opacity'), 'overlay opacity')
+overlays = request(base, 'GET', '/v1/overlays')
+assert_equal(1, overlays.fetch('overlays').length, 'overlay listing')
+request(base, 'DELETE', "/v1/overlays/#{overlay.fetch('id').sub('overlay-', '')}")
+assert_equal(0, request(base, 'GET', '/v1/overlays').fetch('overlays').length,
+             'overlay deletion')
+puts 'PASS bounded-overlay-lifecycle'
+
 def run_case(base, name, command, width: 20, height: 4)
   created = request(base, 'POST', '/v1/terminal-sessions', {
     'command' => '/bin/sh',

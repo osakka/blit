@@ -148,6 +148,63 @@ paths:
                 $ref: '#/components/schemas/EffectState'
         default:
           $ref: '#/components/responses/Problem'
+  /v1/overlays:
+    get:
+      tags: [effects]
+      operationId: listOverlays
+      summary: List bounded graphic overlays
+      responses:
+        '200':
+          description: Current overlays
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [revision, backend, overlays]
+                properties:
+                  revision: {$ref: '#/components/schemas/Revision'}
+                  backend:
+                    type: string
+                    enum: [sdl3, unsupported, unavailable]
+                  overlays:
+                    type: array
+                    items: {$ref: '#/components/schemas/Overlay'}
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      tags: [effects]
+      operationId: createOverlay
+      summary: Create a bounded solid-color graphic overlay
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOverlay'
+      responses:
+        '201':
+          description: Created overlay
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Overlay'}
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/overlays/{overlay_id}:
+    parameters:
+      - name: overlay_id
+        in: path
+        required: true
+        schema: {$ref: '#/components/schemas/ResourceId'}
+    delete:
+      tags: [effects]
+      operationId: deleteOverlay
+      summary: Delete a graphic overlay
+      responses:
+        '204': {description: Overlay deleted}
+        default:
+          $ref: '#/components/responses/Problem'
   /v1/input/devices:
     get:
       tags: [hardware]
@@ -677,6 +734,33 @@ components:
           type: string
           enum: [none, scanlines]
         intensity: {type: integer, minimum: 0, maximum: 100}
+      additionalProperties: false
+    Overlay:
+      type: object
+      required: [id, revision, display_id, bounds, color, opacity]
+      properties:
+        id: {$ref: '#/components/schemas/ResourceId'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        display_id: {$ref: '#/components/schemas/ResourceId'}
+        bounds: {$ref: '#/components/schemas/Bounds'}
+        color:
+          type: string
+          pattern: '^#[0-9A-Fa-f]{6}$'
+        opacity: {type: integer, minimum: 0, maximum: 100}
+      additionalProperties: false
+    CreateOverlay:
+      type: object
+      required: [display_id, x, y, width, height, color, opacity]
+      properties:
+        display_id: {$ref: '#/components/schemas/ResourceId'}
+        x: {type: integer}
+        y: {type: integer}
+        width: {type: integer, minimum: 1, maximum: 4096}
+        height: {type: integer, minimum: 1, maximum: 4096}
+        color:
+          type: string
+          pattern: '^#[0-9A-Fa-f]{6}$'
+        opacity: {type: integer, minimum: 0, maximum: 100}
       additionalProperties: false
     InputDevice:
       type: object

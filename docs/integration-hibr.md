@@ -37,6 +37,13 @@ Start the direct server binary, with no Blit shell launcher involved:
 BLIT_DISPLAY_BACKEND=kms BLIT_BIND_ADDRESS=127.0.0.1 blit 8080
 ```
 
+The Debian package's `/usr/bin/blit` is only a symlink to the native
+`blit-server` binary. It is not a shell wrapper. When a client creates a
+terminal session, Blit uses the command path and argument vector from the
+schema directly with `execve(2)`. Hibr therefore remains the executable and
+the owner of desktop/session behavior; the repository's shell probes are
+limited to QEMU staging, build, and regression-test orchestration.
+
 Create it through the API with a surface sized to the PTY:
 
 ```sh
