@@ -93,6 +93,10 @@ native width. The Hibr adapter receives targeted pointer motion and button
 press/release events over the same stream as keyboard input; its session ID is
 normalized to Blit's `session-N` stream identity before filtering.
 
+`BLIT_FONT_SCALE` scales the loaded glyph bitmap into the complete logical
+cell in both axes; it does not merely enlarge the cell while leaving an
+unscaled glyph in its upper-left corner.
+
 The production launcher selects the bundled Unicode Terminus PSF font and the
 server logs the selected font dimensions and glyph count. Pointer and surface
 presentation use a bounded 16 ms render gate by default; set

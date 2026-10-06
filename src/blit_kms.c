@@ -515,34 +515,34 @@ static void draw_glyph(KmsOutput *output, const KmsFont *font,
     size_t glyph = font != NULL && font->data ?
         font_glyph_index(font, codepoint) : 0;
 
-    for (glyph_row = 0; glyph_row < font_height && glyph_row < ch;
-         ++glyph_row) {
+    for (glyph_row = 0; glyph_row < ch; ++glyph_row) {
         uint32_t *pixels;
         int py = y + glyph_row;
+        int source_row = glyph_row * font_height / ch;
         unsigned int row_bits = 0;
         size_t row_bytes = 0;
         if (py < 0 || py >= output->mode.vdisplay) continue;
+        if (source_row < 0 || source_row >= font_height) continue;
         if (font != NULL && font->data) {
             row_bytes = (size_t)((font->width + 7) / 8);
             if (row_bytes == 1)
                 row_bits = font->data[font->glyph_offset +
-                    glyph * font->glyph_bytes + glyph_row];
+                    glyph * font->glyph_bytes + source_row];
         }
         pixels = (uint32_t *)((unsigned char *)output->back.map +
                               py * output->back.pitch);
-        for (glyph_column = 0; glyph_column < font_width && glyph_column < cw;
+        for (glyph_column = 0; glyph_column < cw;
              ++glyph_column) {
-            int source_column = cw < font_width ?
-                glyph_column * font_width / cw : glyph_column;
+            int source_column = glyph_column * font_width / cw;
             int px = x + glyph_column;
             int set;
             if (font != NULL && font->data && row_bytes == 1)
                 set = (row_bits & (0x80U >> source_column)) != 0;
             else if (font != NULL && font->data)
-                set = font_pixel_glyph(font, glyph, glyph_row,
+                set = font_pixel_glyph(font, glyph, source_row,
                                        source_column);
             else
-                set = glyph_bit(codepoint, glyph_row, glyph_column);
+                set = glyph_bit(codepoint, source_row, source_column);
             if (set && px >= 0 && px < output->mode.hdisplay)
                 pixels[px] = color;
         }
