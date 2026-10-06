@@ -10,6 +10,7 @@
 #include <netinet/in.h>
 #include <signal.h>
 #include <stdint.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -821,6 +822,23 @@ static void json_escape(const char *input, char *output, size_t capacity)
         }
     }
     output[out] = '\0';
+}
+
+static int json_appendf(char *body, size_t capacity, size_t *used,
+                        const char *format, ...)
+{
+    int written;
+    va_list arguments;
+
+    if (*used >= capacity)
+        return 0;
+    va_start(arguments, format);
+    written = vsnprintf(body + *used, capacity - *used, format, arguments);
+    va_end(arguments);
+    if (written < 0 || (size_t)written >= capacity - *used)
+        return 0;
+    *used += (size_t)written;
+    return 1;
 }
 
 static void diagnostic_log(BlitRuntime *runtime, const char *severity,
@@ -1898,22 +1916,24 @@ static void surface_delta_json(const BlitSurface *surface, char *body,
     snprintf(body + used, capacity - used, "}");
 }
 
-static void surface_snapshot_json(const BlitSurface *surface,
-                                  const BlitSession *session, char *body,
-                                  size_t capacity)
+static int surface_snapshot_json(const BlitSurface *surface,
+                                 const BlitSession *session, char *body,
+                                 size_t capacity)
 {
     size_t used;
     int x;
     int y;
     int first = 1;
 
-    used = (size_t)snprintf(body, capacity,
+    used = 0;
+    if (!json_appendf(body, capacity, &used,
         "{\"id\":\"surface-%llu\",\"revision\":%llu,"
         "\"width\":%d,\"height\":%d,\"cursor\":{\"x\":%d,"
         "\"y\":%d,\"visible\":%s,\"style\":%d},\"cells\":[",
         surface->id, surface->revision, surface->width, surface->height,
         surface->cursor_x, surface->cursor_y,
-        surface->cursor_visible ? "true" : "false", surface->cursor_style);
+        surface->cursor_visible ? "true" : "false", surface->cursor_style))
+        return 0;
     for (y = 0; y < surface->height; ++y) {
         for (x = 0; x < surface->width; ++x) {
             char text[5];
@@ -1929,16 +1949,17 @@ static void surface_snapshot_json(const BlitSurface *surface,
                 continue;
             utf8_encode(codepoint ? codepoint : ' ', text);
             json_escape(text, escaped, sizeof(escaped));
-            used += (size_t)snprintf(body + used, capacity - used,
+            if (!json_appendf(body, capacity, &used,
                 "%s{\"x\":%d,\"y\":%d,\"text\":\"%s\"",
-                first ? "" : ",", x, y, escaped);
+                first ? "" : ",", x, y, escaped))
+                return 0;
             first = 0;
             if (styled) {
                 uint32_t foreground = surface->foreground[y][x] ?
                     surface->foreground[y][x] - 1 : BLIT_DEFAULT_FOREGROUND;
                 uint32_t background = surface->background[y][x] ?
                     surface->background[y][x] - 1 : 0;
-                used += (size_t)snprintf(body + used, capacity - used,
+                if (!json_appendf(body, capacity, &used,
                     ",\"style\":{\"foreground\":\"#%06x\","
                     "\"background\":\"#%06x\",\"bold\":%s,"
                     "\"dim\":%s,\"italic\":%s,\"underline\":%s,"
@@ -1954,20 +1975,24 @@ static void surface_snapshot_json(const BlitSurface *surface,
                     attributes & BLIT_ATTR_STRIKE ? "true" : "false",
                     attributes & BLIT_ATTR_CONCEAL ? "true" : "false",
                     (unsigned int)(surface->underline_color[y][x] ?
-                        surface->underline_color[y][x] - 1 : 0));
+                        surface->underline_color[y][x] - 1 : 0)))
+                    return 0;
             }
             if (link != 0 && session != NULL && link <= session->terminal_link_count) {
                 char escaped_link[512];
                 json_escape(session->terminal_link_uris[link - 1],
                             escaped_link, sizeof(escaped_link));
-                used += (size_t)snprintf(body + used, capacity - used,
-                                         ",\"link\":\"%s\"",
-                                         escaped_link);
+                if (!json_appendf(body, capacity, &used,
+                                  ",\"link\":\"%s\"", escaped_link))
+                    return 0;
             }
-            used += (size_t)snprintf(body + used, capacity - used, "}");
+            if (!json_appendf(body, capacity, &used, "}"))
+                return 0;
         }
     }
-    snprintf(body + used, capacity - used, "]}");
+    if (!json_appendf(body, capacity, &used, "]}"))
+        return 0;
+    return 1;
 }
 
 static void surface_scrollback_json(const BlitSurface *surface, char *body,
@@ -6413,11 +6438,23 @@ static void handle_request(int fd, BlitRuntime *runtime,
             return;
         }
         if (strcmp(method, "GET") == 0) {
-            surface_snapshot_json(surface,
-                                  find_session_id(runtime,
-                                                  surface->owner_session_id),
-                                  body, sizeof(body));
-            send_http(fd, 200, "OK", "application/json", body);
+            size_t snapshot_capacity = (size_t)surface->width *
+                (size_t)surface->height * 512U + 4096U;
+            char *snapshot = (char *)malloc(snapshot_capacity);
+            int snapshot_ok = snapshot != NULL &&
+                surface_snapshot_json(surface,
+                                      find_session_id(runtime,
+                                                      surface->owner_session_id),
+                                      snapshot, snapshot_capacity);
+            if (!snapshot_ok) {
+                free(snapshot);
+                send_problem(fd, 413, "Payload Too Large",
+                             "surface_snapshot_too_large",
+                             "The surface snapshot exceeds the bounded API response size.");
+                return;
+            }
+            send_http(fd, 200, "OK", "application/json", snapshot);
+            free(snapshot);
             return;
         }
         if (idempotency_replay(runtime, fd, request, method, path, payload))
@@ -8010,10 +8047,10 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                         (unsigned char)(foreground >> 8),
                         (unsigned char)foreground, 255);
                     if (!(attributes & BLIT_ATTR_CONCEAL)) {
-                        if (!(attributes & BLIT_ATTR_CONTINUATION))
+                        if (!(attributes & BLIT_ATTR_CONTINUATION) &&
+                            surface->codepoints[row][column] != 0)
                             render_sdl_glyph(renderer, &runtime->font,
-                                surface->codepoints[row][column] ?
-                                surface->codepoints[row][column] : ' ',
+                                surface->codepoints[row][column],
                                 surface_origin_x + column * (float)cell_width,
                                 (float)surface_origin_y + row * (float)cell_height,
                                 (float)glyph_width, (float)cell_height);
@@ -8030,17 +8067,17 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                                     (float)glyph_width, (float)cell_height);
                             }
                         }
-                        if (attributes & BLIT_ATTR_BOLD)
+                        if (attributes & BLIT_ATTR_BOLD &&
+                            surface->codepoints[row][column] != 0)
                             render_sdl_glyph(renderer, &runtime->font,
-                                surface->codepoints[row][column] ?
-                                surface->codepoints[row][column] : ' ',
+                                surface->codepoints[row][column],
                                 surface_origin_x + 1.0f + column * (float)cell_width,
                                 (float)surface_origin_y + row * (float)cell_height,
                                 (float)glyph_width, (float)cell_height);
-                        if (attributes & BLIT_ATTR_ITALIC)
+                        if (attributes & BLIT_ATTR_ITALIC &&
+                            surface->codepoints[row][column] != 0)
                             render_sdl_glyph(renderer, &runtime->font,
-                                surface->codepoints[row][column] ?
-                                surface->codepoints[row][column] : ' ',
+                                surface->codepoints[row][column],
                                 surface_origin_x + 1.0f + column * (float)cell_width,
                                 (float)surface_origin_y + row * (float)cell_height,
                                 (float)glyph_width, (float)cell_height);
