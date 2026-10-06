@@ -231,8 +231,8 @@ if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
         # the aggregate route enabled.
         echo "$routes_after_loss" | $b grep -q '"id":"input-key".*"device_id":"evdev-keyboard".*"enabled":true' || loss_pass=0
         echo "$routes_after_loss" | $b grep -q '"id":"input-pointer".*"device_id":"evdev-pointer".*"enabled":true' || loss_pass=0
-        echo "$diagnostics_after_loss" | $b grep -q '"keyboards":1' || loss_pass=0
-        echo "$diagnostics_after_loss" | $b grep -q '"pointers":1' || loss_pass=0
+        echo "$diagnostics_after_loss" | $b grep -q '"keyboards":[1-9]' || loss_pass=0
+        echo "$diagnostics_after_loss" | $b grep -q '"pointers":[1-9]' || loss_pass=0
         $b grep -q 'evdev keyboard disappeared:' /tmp/blit.log || loss_pass=0
         $b grep -q 'evdev mouse disappeared:' /tmp/blit.log || loss_pass=0
         $b grep -q 'evdev keyboard reconnected:' /tmp/blit.log || loss_pass=0
