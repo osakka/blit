@@ -58,7 +58,7 @@ The staging helper preserves the optional Blit `console-blit.so` provider and
 adapter files for provider-specific probes; it does not modify the Hibr
 checkout. It does not stage or invoke a Blit shell launcher.
 
-For the isolated input gate, compile the two TCC test helpers into the staged
+For the isolated input gate, compile the three TCC test helpers into the staged
 tree and boot the fixture with `blit.input_only=1` on the kernel command line:
 
 ```sh
@@ -71,6 +71,9 @@ tcc -std=c99 tools/probes/ws_input_probe.c -o /tmp/hibr-initroot-current/blit-st
 # For a bounded run in automation, add `blit.input_wait=8`; the default wait
 # remains 30 seconds. The fixture also enables application keypad mode and
 # verifies that KP1 reaches the PTY as the VT/SS3 sequence `ESC O q`.
+# For the full held-desktop pane matrix, add `blit.hibr_panes=1`; this starts
+# one primary and three `desktop --join` clients across a Blit-owned `2x2`
+# pane layout and requires four attached surfaces.
 ```
 
 ## Build

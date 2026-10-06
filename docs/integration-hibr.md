@@ -94,6 +94,9 @@ The repeatable VKMS QEMU fixture verifies these boundaries independently:
   server-owned revision;
 - a primary desktop and a `--join` client remain attached to separate panes on
   two outputs;
+- the four-pane acceptance mode starts one primary and three `--join` clients
+  in a Blit-owned `2x2` layout and verifies four attached surfaces in one
+  held desktop session;
 - the primary and joined Hibr surfaces receive independent PTY streams through
   Blit's terminal parser;
 - a direct Hibr executable launch is required for `hold` re-exec; launching

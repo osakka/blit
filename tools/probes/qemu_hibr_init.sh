@@ -69,6 +69,9 @@ esac
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
     *" blit.input_loss=1 "*) BLIT_INPUT_LOSS_TEST=1 ;;
 esac
+case " $($b cat /proc/cmdline 2>/dev/null || true) " in
+    *" blit.hibr_panes=1 "*) BLIT_HIBR_PANES_TEST=1 ;;
+esac
 if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
     # The input-only gate measures routing and PTY bytes, not framebuffer
     # capture.  Avoid serializing two 1024x768 PPMs on the slow VKMS guest
@@ -241,6 +244,54 @@ if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
         fi
     fi
     finish 0
+fi
+
+if [ "${BLIT_HIBR_PANES_TEST:-0}" = 1 ]; then
+    # Exercise the production orchestration shape: one held primary desktop
+    # and three --join clients, each bound to a Blit-owned pane.
+    topology=$(/blit-stage/http-put 19191 /v1/topology \
+        '{"layout":{"columns":2,"rows":2}}')
+    panes_cmd=$(echo "$topology" | $b tr ',' '\n' |
+        $b sed -n 's/.*"id":"\(pane-[^"]*\)".*/\1/p')
+    pane1=$(echo "$panes_cmd" | $b sed -n '1p')
+    pane2=$(echo "$panes_cmd" | $b sed -n '2p')
+    pane3=$(echo "$panes_cmd" | $b sed -n '3p')
+    pane4=$(echo "$panes_cmd" | $b sed -n '4p')
+    echo HIBR_PANE_MATRIX_TOPOLOGY; echo "$topology"
+    if [ -z "$pane1" ] || [ -z "$pane2" ] ||
+       [ -z "$pane3" ] || [ -z "$pane4" ]; then
+        echo HIBR_PANE_MATRIX_NOT_READY
+        finish 1
+    fi
+    # Keep argument construction explicit: it is part of the acceptance
+    # evidence for primary versus auxiliary Hibr invocation.
+    $b wget -qO /tmp/hibr-pane-1.json --post-data="{\"command\":\"/blit-stage/hibr\",\"arguments\":[\"/blit-stage/hibr_window_workload.hibr\",\"--session\",\"blit\",\"--name\",\"display-47\"],\"surface_mode\":\"terminal\",\"pane_id\":\"$pane1\",\"width\":64,\"height\":24}" --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
+    primary_id=$($b sed -n 's/.*"id":"\([0-9][0-9]*\)".*/\1/p' /tmp/hibr-pane-1.json)
+    $b sleep 3
+    $b wget -qO /tmp/hibr-pane-2.json --post-data="{\"command\":\"/blit-stage/hibr\",\"arguments\":[\"/blit-stage/hibr_window_workload.hibr\",\"--session\",\"blit\",\"--join\",\"--name\",\"$pane2\"],\"surface_mode\":\"terminal\",\"pane_id\":\"$pane2\",\"width\":64,\"height\":24}" --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
+    $b wget -qO /tmp/hibr-pane-3.json --post-data="{\"command\":\"/blit-stage/hibr\",\"arguments\":[\"/blit-stage/hibr_window_workload.hibr\",\"--session\",\"blit\",\"--join\",\"--name\",\"$pane3\"],\"surface_mode\":\"terminal\",\"pane_id\":\"$pane3\",\"width\":64,\"height\":24}" --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
+    $b wget -qO /tmp/hibr-pane-4.json --post-data="{\"command\":\"/blit-stage/hibr\",\"arguments\":[\"/blit-stage/hibr_window_workload.hibr\",\"--session\",\"blit\",\"--join\",\"--name\",\"$pane4\"],\"surface_mode\":\"terminal\",\"pane_id\":\"$pane4\",\"width\":64,\"height\":24}" --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
+    $b sleep 10
+    pane_matrix_pass=1
+    echo HIBR_PANE_MATRIX_SESSIONS
+    for n in 1 2 3 4; do
+        session_id=$($b sed -n 's/.*"id":"\([0-9][0-9]*\)".*/\1/p' "/tmp/hibr-pane-$n.json")
+        state=$($b wget -qO- "http://127.0.0.1:19191/v1/terminal-sessions/$session_id" |
+            $b sed -n 's/.*"state":"\([^\"]*\)".*/\1/p')
+        echo "pane$n session=$session_id state=$state"
+        [ "$state" = running ] || pane_matrix_pass=0
+    done
+    final_topology=$($b wget -qO- http://127.0.0.1:19191/v1/topology)
+    echo HIBR_PANE_MATRIX_FINAL_TOPOLOGY; echo "$final_topology"
+    surface_count=$(echo "$final_topology" | $b tr ',' '\n' |
+        $b sed -n 's/.*"surface_id":"surface-[0-9][0-9]*".*/x/p' | $b wc -l)
+    [ "$surface_count" -eq 4 ] || pane_matrix_pass=0
+    if [ "$pane_matrix_pass" -eq 1 ]; then
+        echo HIBR_PANE_MATRIX_PASS
+        finish 0
+    fi
+    echo HIBR_PANE_MATRIX_FAIL
+    finish 1
 fi
 
 $b wget -qO /tmp/probe.json --post-data="{\"command\":\"/blit-stage/hibr\",\"arguments\":[\"--agent\",\"/blit-stage/blit-adapter-probe.hibr\"],\"surface_mode\":\"external\",\"display_id\":\"$display1\",\"width\":128,\"height\":48}" --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
