@@ -164,6 +164,13 @@ The fixture also checks `/v1/diagnostics` for the refresh-aware scheduler
 mode, an effective interval, and one cadence record per output before
 accepting the capture.
 
+To exercise the scheduler's mixed-refresh branch, add
+`blit.mixed_refresh=1` to the kernel command line. This enables an explicitly
+test-only `BLIT_TEST_REFRESH_HZ=60,120` metadata override and requires
+`REFRESH_SCHEDULER_MIXED_PASS`; it validates scheduler policy and API
+diagnostics, not physical 120 Hz hardware timing. The normal fixture remains
+the authoritative physical VKMS/pixel test.
+
 The same fixture accepts `blit.output_loss=1` on the kernel command line. It
 disables connector 47 during the run and requires `OUTPUT_LOSS_PASS`: the
 failed connector remains in `/v1/displays` as `failed`, the other connector

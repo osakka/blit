@@ -34,12 +34,20 @@ export BLIT_KMS_TRACE_PHASES=1
 if [ -e /dev/dri/card1 ]; then export BLIT_DRM_DEVICE=/dev/dri/card1; else export BLIT_DRM_DEVICE=/dev/dri/card0; fi
 loss_test=0
 stack_test=0
+mixed_refresh_test=0
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
     *" blit.output_loss=1 "*) loss_test=1 ;;
 esac
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
     *" blit.kitty_stack=1 "*) stack_test=1 ;;
 esac
+case " $($b cat /proc/cmdline 2>/dev/null || true) " in
+    *" blit.mixed_refresh=1 "*) mixed_refresh_test=1 ;;
+esac
+if [ "$mixed_refresh_test" -eq 1 ]; then
+    export BLIT_TEST_MODE=1
+    export BLIT_TEST_REFRESH_HZ=60,120
+fi
 BLIT_DISPLAY_BACKEND=kms BLIT_BIND_ADDRESS=127.0.0.1 /blit-stage/ld-linux-x86-64.so.2 --library-path /blit-stage:/blit-stage/lib /blit-stage/blit-server 19191 >/tmp/blit.log 2>&1 &
 ready=0
 for n in 1 2 3 4 5 6 7 8 9 10; do
@@ -54,6 +62,13 @@ scheduler_pass=1
 echo "$diagnostics" | $b grep -q '"mode":"refresh-aware"' || scheduler_pass=0
 echo "$diagnostics" | $b grep -q '"effective_interval_ms":' || scheduler_pass=0
 echo "$diagnostics" | $b grep -q '"outputs":\[' || scheduler_pass=0
+mixed_refresh_pass=1
+if [ "$mixed_refresh_test" -eq 1 ]; then
+    echo "$diagnostics" | $b grep -q '"refresh_hz":120.000' || mixed_refresh_pass=0
+    echo "$diagnostics" | $b grep -q '"refresh_source":"test-override"' || mixed_refresh_pass=0
+    echo "$diagnostics" | $b grep -q '"effective_interval_ms":8' || mixed_refresh_pass=0
+    [ "$mixed_refresh_pass" -eq 1 ] && echo REFRESH_SCHEDULER_MIXED_PASS || echo REFRESH_SCHEDULER_MIXED_FAIL
+fi
 graphics_inventory=$($b wget -qO- http://127.0.0.1:19191/v1/graphics || true)
 echo GRAPHICS; echo "$graphics_inventory"
 graphics_pass=1
@@ -100,6 +115,6 @@ size1=$($b wc -c < /tmp/guest-screenshots/display-47.ppm 2>/dev/null || echo 0)
 size2=$($b wc -c < /tmp/guest-screenshots/display-48.ppm 2>/dev/null || echo 0)
 hash1=$($b sha256sum /tmp/guest-screenshots/display-47.ppm 2>/dev/null | $b cut -d ' ' -f 1 || true)
 hash2=$($b sha256sum /tmp/guest-screenshots/display-48.ppm 2>/dev/null | $b cut -d ' ' -f 1 || true)
-if [ "$size1" -gt 2359296 ] && [ "$size2" -gt 2359296 ] && [ "$hash1" != "$hash2" ] && [ "$loss_pass" -eq 1 ] && [ "$graphics_pass" -eq 1 ] && [ "$scheduler_pass" -eq 1 ]; then echo KMS_CAPTURE_PASS; finish 0; fi
+if [ "$size1" -gt 2359296 ] && [ "$size2" -gt 2359296 ] && [ "$hash1" != "$hash2" ] && [ "$loss_pass" -eq 1 ] && [ "$graphics_pass" -eq 1 ] && [ "$scheduler_pass" -eq 1 ] && [ "$mixed_refresh_pass" -eq 1 ]; then echo KMS_CAPTURE_PASS; finish 0; fi
 echo KMS_CAPTURE_FAIL
 finish 1

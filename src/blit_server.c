@@ -311,6 +311,7 @@ typedef struct {
     int render_effective_interval_ms;
     uint32_t render_next_ticks[BLIT_MAX_DISPLAYS];
     unsigned long render_missed_deadlines[BLIT_MAX_DISPLAYS];
+    int test_refresh_override;
     int session_count;
     unsigned long long next_session_id;
     BlitSession sessions[BLIT_MAX_SESSIONS];
@@ -496,6 +497,38 @@ static double output_refresh_hz(const BlitRuntime *runtime, int output_index)
 {
     int display_index = display_index_for_output(runtime, output_index);
     return display_index >= 0 ? runtime->displays[display_index].refresh_hz : 60.0;
+}
+
+static void apply_test_refresh_override(BlitRuntime *runtime)
+{
+    const char *configured = getenv("BLIT_TEST_REFRESH_HZ");
+    const char *cursor;
+    int count = 0;
+    double values[BLIT_MAX_DISPLAYS];
+
+    if (getenv("BLIT_TEST_MODE") == NULL ||
+        strcmp(getenv("BLIT_TEST_MODE"), "1") != 0 ||
+        configured == NULL || configured[0] == '\0')
+        return;
+    cursor = configured;
+    while (*cursor != '\0' && count < runtime->display_count) {
+        char *end;
+        while (*cursor == ' ' || *cursor == '\t') ++cursor;
+        values[count] = strtod(cursor, &end);
+        if (end == cursor || values[count] < 1.0)
+            return;
+        cursor = end;
+        while (*cursor == ' ' || *cursor == '\t') ++cursor;
+        ++count;
+        if (*cursor == ',') ++cursor;
+        else if (*cursor != '\0') return;
+    }
+    if (count != runtime->display_count || *cursor != '\0')
+        return;
+    for (count = 0; count < runtime->display_count; ++count)
+        runtime->displays[count].refresh_hz = values[count];
+    runtime->test_refresh_override = 1;
+    fprintf(stderr, "blit: test refresh override active: %s\n", configured);
 }
 
 static int output_render_period_ms(const BlitRuntime *runtime, int output_index)
@@ -756,9 +789,11 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
         used += (size_t)snprintf(
             body + used, capacity - used,
             "%s{\"display_id\":\"display-%llu\",\"refresh_hz\":%.3f,"
-            "\"effective_interval_ms\":%d,\"missed_deadlines\":%lu}",
+            "\"refresh_source\":\"%s\",\"effective_interval_ms\":%d,"
+            "\"missed_deadlines\":%lu}",
             i == 0 ? "" : ",", runtime->outputs[i].display_id,
             output_refresh_hz(runtime, i),
+            runtime->test_refresh_override ? "test-override" : "display-mode",
             output_render_period_ms(runtime, i),
             runtime->render_missed_deadlines[i]);
     snprintf(body + used, capacity - used, "]");
@@ -8048,6 +8083,7 @@ int main(int argc, char **argv)
     signal(SIGTERM, stop_server);
     signal(SIGPIPE, SIG_IGN);
     discover_displays(&runtime);
+    apply_test_refresh_override(&runtime);
     if (runtime.direct_kms && runtime.display_count == 0) {
         fprintf(stderr, "blit: direct KMS backend did not find a usable display\n");
         if (runtime.kms != NULL) blit_kms_close(runtime.kms);
