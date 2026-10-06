@@ -1082,6 +1082,7 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         long long output_started = 0;
         long long draw_started = 0;
         long long flip_started = 0;
+        int modeset_frame;
         int trace_phases = getenv("BLIT_KMS_TRACE_PHASES") != NULL;
         if (trace_phases)
             output_started = kms_now_us();
@@ -1124,7 +1125,12 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
            a CPU and event slot on every display. */
         if (!output_changed)
             continue;
-        if (getenv("BLIT_KMS_MODESET") != NULL || output->modeset_fallback)
+        /* A timeout requests one recovery modeset.  It must not turn the
+           normal frame path into a modeset-per-frame loop: that produces
+           visible blanking and can make a slow KMS driver appear frozen. */
+        modeset_frame = getenv("BLIT_KMS_MODESET") != NULL ||
+            output->modeset_fallback;
+        if (modeset_frame)
             output->flip_pending = 0;
         if (trace_phases)
             fprintf(stderr, "blit: KMS phase connector=%u wait_us=%lld\n",
@@ -1212,13 +1218,18 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         {
             unsigned int flags = DRM_MODE_PAGE_FLIP_EVENT;
             int flip_result;
-            if (getenv("BLIT_KMS_MODESET") != NULL ||
-                output->modeset_fallback) {
+            if (modeset_frame) {
                 flip_result = drmModeSetCrtc(kms->fd, output->crtc,
                                              output->back.fb, 0, 0,
                                              &output->connector, 1,
                                              &output->mode);
                 if (flip_result < 0) return -1;
+                if (output->modeset_fallback) {
+                    fprintf(stderr,
+                            "blit: KMS modeset recovery complete on connector=%u; resuming page flips\n",
+                            output->connector);
+                    output->modeset_fallback = 0;
+                }
                 output->flip_pending = 0;
                 output->flip_started_us = 0;
                 swap_buffers(output);

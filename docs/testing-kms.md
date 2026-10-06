@@ -109,6 +109,12 @@ changed pane, or pointer movement can still incur the physical driver's page
 flip latency, which is reported per present and bounded by
 `BLIT_KMS_FLIP_TIMEOUT_MS`.
 
+If a page-flip event exceeds that timeout, Blit performs one explicit modeset
+recovery for the affected output and then resumes ordinary page flips. A
+timeout must never become a modeset-per-frame loop: repeated modesets blank
+and visibly disturb the display while making pointer and terminal updates
+appear stalled.
+
 Evdev synchronization reports are not treated as pointer motion unless the
 absolute pointer position or output actually changes. This prevents devices
 that emit idle `SYN_REPORT` traffic from scheduling a full pointer redraw on
