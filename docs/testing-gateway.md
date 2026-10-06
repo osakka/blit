@@ -159,6 +159,10 @@ curl --fail http://127.0.0.1:8080/v1/audio
 curl --fail http://127.0.0.1:8080/v1/diagnostics
 ```
 
+The audio inventory is sourced from usable ALSA PCM nodes under `/dev/snd`;
+the API returns an empty device list when no playback or capture PCM exists.
+It does not infer audio capability from the presence of the directory alone.
+
 ## Exercise a PTY-backed session
 
 The first terminal slice starts the requested command under a real PTY. Keep

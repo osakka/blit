@@ -833,15 +833,49 @@ static void graphics_json(char *body, size_t capacity)
 
 static void audio_json(char *body, size_t capacity)
 {
-    if (access("/dev/snd", F_OK) != 0) {
-        empty_inventory_json(body, capacity, "devices");
-        return;
+    size_t used = 0;
+    int card;
+    int found = 0;
+
+    used += (size_t)snprintf(body + used, capacity - used,
+                             "{\"revision\":1,\"devices\":[");
+    for (card = 0; card < 32 && used < capacity; ++card) {
+        char control[64];
+        char pcm[64];
+        char name_path[96];
+        char name[128] = "ALSA card";
+        char escaped_name[256];
+        int playback = 0;
+        int capture = 0;
+        int device;
+        int length;
+
+        snprintf(control, sizeof(control), "/dev/snd/controlC%d", card);
+        for (device = 0; device < 32; ++device) {
+            snprintf(pcm, sizeof(pcm), "/dev/snd/pcmC%dD%dp", card, device);
+            if (access(pcm, R_OK | W_OK) == 0) playback = 1;
+            snprintf(pcm, sizeof(pcm), "/dev/snd/pcmC%dD%dc", card, device);
+            if (access(pcm, R_OK | W_OK) == 0) capture = 1;
+        }
+        if (access(control, R_OK | W_OK) != 0 || (!playback && !capture))
+            continue;
+        snprintf(name_path, sizeof(name_path), "/proc/asound/card%d/id", card);
+        read_text_file(name_path, name, sizeof(name));
+        json_escape(name, escaped_name, sizeof(escaped_name));
+        length = snprintf(body + used, capacity - used,
+                          "%s{\"id\":\"alsa-card-%d\","
+                          "\"name\":\"%s\",\"direction\":\"%s\","
+                          "\"formats\":[%s]}", found ? "," : "", card,
+                          escaped_name,
+                          playback && capture ? "duplex" :
+                          (playback ? "playback" : "capture"),
+                          playback || capture ? "\"s16le\"" : "");
+        if (length < 0 || (size_t)length >= capacity - used)
+            break;
+        used += (size_t)length;
+        found = 1;
     }
-    snprintf(body, capacity,
-             "{\"revision\":1,\"devices\":[{"
-             "\"id\":\"alsa\",\"name\":\"ALSA sound device\","
-             "\"direction\":\"duplex\",\"formats\":[\"s16le\"],"
-             "\"channels\":2,\"sample_rates\":[44100,48000]}]}" );
+    snprintf(body + used, capacity - used, "]}");
 }
 
 static void input_json(char *body, size_t capacity)
