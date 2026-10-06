@@ -1664,6 +1664,30 @@ static void mark_surface_damage(BlitSurface *surface, int x, int y)
         surface->damage_height = bottom - surface->damage_y;
 }
 
+static void mark_surface_damage_width(BlitSurface *surface, int x, int y,
+                                      int width)
+{
+    int right = x + (width > 0 ? width : 1);
+    int bottom = y + 1;
+
+    if (!surface->damage_valid) {
+        surface->damage_valid = 1;
+        surface->damage_x = x;
+        surface->damage_y = y;
+        surface->damage_width = right - x;
+        surface->damage_height = 1;
+        return;
+    }
+    if (x < surface->damage_x)
+        surface->damage_x = x;
+    if (y < surface->damage_y)
+        surface->damage_y = y;
+    if (right > surface->damage_x + surface->damage_width)
+        surface->damage_width = right - surface->damage_x;
+    if (bottom > surface->damage_y + surface->damage_height)
+        surface->damage_height = bottom - surface->damage_y;
+}
+
 static int apply_cell_update(BlitSurface *surface, const char *json)
 {
     const char *cursor = strstr(json, "\"cells\"");
@@ -3465,6 +3489,8 @@ static void terminal_add_combining(BlitSession *session, BlitSurface *surface,
 static void terminal_put_codepoint(BlitSession *session, BlitSurface *surface,
                                    uint32_t codepoint, int cell_width)
 {
+    int glyph_x;
+
     session->terminal_last_codepoint = codepoint;
     if (session->terminal_wrap_pending && session->terminal_autowrap) {
         surface->cursor_x = 0;
@@ -3501,9 +3527,12 @@ static void terminal_put_codepoint(BlitSession *session, BlitSurface *surface,
             terminal_clear_cell(surface, surface->cursor_x + x,
                                 surface->cursor_y);
     }
-    terminal_clear_wide_overlap(surface, surface->cursor_x,
-                                surface->cursor_y);
-    terminal_clear_cell(surface, surface->cursor_x, surface->cursor_y);
+    glyph_x = surface->cursor_x;
+    if (surface->attributes[surface->cursor_y][glyph_x] &
+        BLIT_ATTR_CONTINUATION)
+        mark_surface_damage(surface, glyph_x - 1, surface->cursor_y);
+    terminal_clear_wide_overlap(surface, glyph_x, surface->cursor_y);
+    terminal_clear_cell(surface, glyph_x, surface->cursor_y);
     surface->codepoints[surface->cursor_y][surface->cursor_x] = codepoint;
     surface->cells[surface->cursor_y][surface->cursor_x] =
         codepoint < 0x80 ? (char)codepoint : '?';
@@ -3528,7 +3557,8 @@ static void terminal_put_codepoint(BlitSession *session, BlitSurface *surface,
         surface->links[surface->cursor_y][surface->cursor_x + 1] =
             session->terminal_link;
     }
-    mark_surface_damage(surface, surface->cursor_x, surface->cursor_y);
+    mark_surface_damage_width(surface, glyph_x, surface->cursor_y,
+                              cell_width);
     if (surface->cursor_x + cell_width >= surface->width) {
         surface->cursor_x = surface->width - 1;
         session->terminal_wrap_pending = session->terminal_autowrap;
@@ -6631,6 +6661,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
                         SDL_RenderFillRect(renderer, &cell_background);
                     }
                     {
+                        int glyph_width = (attributes & BLIT_ATTR_WIDE) ?
+                            cell_width * 2 : cell_width;
                         uint32_t underline_color =
                             surface->underline_color[row][column] ?
                             surface->underline_color[row][column] - 1 :
@@ -6640,12 +6672,13 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
                         (unsigned char)(foreground >> 8),
                         (unsigned char)foreground, 255);
                     if (!(attributes & BLIT_ATTR_CONCEAL)) {
-                        render_sdl_glyph(renderer, &runtime->font,
-                            surface->codepoints[row][column] ?
-                            surface->codepoints[row][column] : ' ',
-                            surface_origin_x + column * (float)cell_width,
-                            (float)surface_origin_y + row * (float)cell_height,
-                            (float)cell_width, (float)cell_height);
+                        if (!(attributes & BLIT_ATTR_CONTINUATION))
+                            render_sdl_glyph(renderer, &runtime->font,
+                                surface->codepoints[row][column] ?
+                                surface->codepoints[row][column] : ' ',
+                                surface_origin_x + column * (float)cell_width,
+                                (float)surface_origin_y + row * (float)cell_height,
+                                (float)glyph_width, (float)cell_height);
                         if (surface->combining_count[row][column] > 0) {
                             int combining_index;
                             for (combining_index = 0;
@@ -6656,7 +6689,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
                                     surface->combining[row][column][combining_index],
                                     surface_origin_x + column * (float)cell_width,
                                     (float)surface_origin_y + row * (float)cell_height,
-                                    (float)cell_width, (float)cell_height);
+                                    (float)glyph_width, (float)cell_height);
                             }
                         }
                         if (attributes & BLIT_ATTR_BOLD)
@@ -6665,14 +6698,14 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
                                 surface->codepoints[row][column] : ' ',
                                 surface_origin_x + 1.0f + column * (float)cell_width,
                                 (float)surface_origin_y + row * (float)cell_height,
-                                (float)cell_width, (float)cell_height);
+                                (float)glyph_width, (float)cell_height);
                         if (attributes & BLIT_ATTR_ITALIC)
                             render_sdl_glyph(renderer, &runtime->font,
                                 surface->codepoints[row][column] ?
                                 surface->codepoints[row][column] : ' ',
                                 surface_origin_x + 1.0f + column * (float)cell_width,
                                 (float)surface_origin_y + row * (float)cell_height,
-                                (float)cell_width, (float)cell_height);
+                                (float)glyph_width, (float)cell_height);
                         if (attributes & BLIT_ATTR_UNDERLINE)
                             SDL_SetRenderDrawColor(renderer,
                                 (unsigned char)(underline_color >> 16),
@@ -6681,12 +6714,12 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
                         if (attributes & BLIT_ATTR_UNDERLINE)
                             SDL_RenderLine(renderer, surface_origin_x + column * (float)cell_width,
                                 (float)surface_origin_y + row * (float)cell_height + cell_height - 1.0f,
-                                surface_origin_x + column * (float)cell_width + cell_width - 1.0f,
+                                surface_origin_x + column * (float)cell_width + glyph_width - 1.0f,
                                 (float)surface_origin_y + row * (float)cell_height + cell_height - 1.0f);
                         if (attributes & BLIT_ATTR_STRIKE)
                             SDL_RenderLine(renderer, surface_origin_x + column * (float)cell_width,
                                 (float)surface_origin_y + row * (float)cell_height + cell_height / 2.0f,
-                                surface_origin_x + column * (float)cell_width + cell_width - 1.0f,
+                                surface_origin_x + column * (float)cell_width + glyph_width - 1.0f,
                                 (float)surface_origin_y + row * (float)cell_height + cell_height / 2.0f);
                     }
                     }

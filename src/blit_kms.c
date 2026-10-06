@@ -23,6 +23,8 @@
 #define KMS_POINTER_W 12
 #define KMS_POINTER_H 18
 #define KMS_WHITE 0xbed2beU
+#define KMS_ATTR_WIDE 16
+#define KMS_ATTR_CONTINUATION 64
 
 typedef struct {
     uint32_t fb;
@@ -378,6 +380,7 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
                 view->underline_color[index] - 1 : fg;
             uint32_t cp = view->codepoints[index] ? view->codepoints[index] : ' ';
             uint16_t attr = view->attributes[index];
+            int glyph_width = (attr & KMS_ATTR_WIDE) ? cw * 2 : cw;
             int x = view->origin_x + column * cw;
             int y = view->origin_y + row * ch;
             if (attr & 8) { uint32_t t = fg; fg = bg; bg = t; }
@@ -386,23 +389,23 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
                 (view->combining_count == NULL ||
                  view->combining_count[index] == 0))
                 continue;
-            if (!(attr & 64)) {
-                draw_glyph(output, font, cp, x, y, cw, ch, fg);
+            if (!(attr & KMS_ATTR_CONTINUATION)) {
+                draw_glyph(output, font, cp, x, y, glyph_width, ch, fg);
             }
-            if (!(attr & 64) && (attr & 4))
-                fill_rect(output, x, y + ch - 1, cw, 1, underline);
-            if (!(attr & 64) && (attr & 512))
-                fill_rect(output, x, y + ch / 2, cw, 1, fg);
-            if (!(attr & 64) && (attr & 1))
-                draw_glyph(output, font, cp, x + 1, y, cw, ch, fg);
-            if (!(attr & 64) && view->combining != NULL &&
+            if (!(attr & KMS_ATTR_CONTINUATION) && (attr & 4))
+                fill_rect(output, x, y + ch - 1, glyph_width, 1, underline);
+            if (!(attr & KMS_ATTR_CONTINUATION) && (attr & 512))
+                fill_rect(output, x, y + ch / 2, glyph_width, 1, fg);
+            if (!(attr & KMS_ATTR_CONTINUATION) && (attr & 1))
+                draw_glyph(output, font, cp, x + 1, y, glyph_width, ch, fg);
+            if (!(attr & KMS_ATTR_CONTINUATION) && view->combining != NULL &&
                 view->combining_count != NULL) {
                 int combining_index;
                 for (combining_index = 0;
                      combining_index < view->combining_count[index] &&
                      combining_index < 4; ++combining_index) {
                     uint32_t mark = view->combining[index * 4 + combining_index];
-                    draw_glyph(output, font, mark, x, y, cw, ch, fg);
+                    draw_glyph(output, font, mark, x, y, glyph_width, ch, fg);
                 }
             }
         }

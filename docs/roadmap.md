@@ -42,6 +42,11 @@ conservatively redraws multi-surface outputs with deterministic vertical
 stacking. The remaining acceptance risk is terminal fidelity under the full
 Hibr desktop and the complete topology/input matrix.
 
+Kitty graphics is the first graphics-protocol deliverable. Sixel is a later
+compatibility milestone against the same canonical graphics-object model;
+neither protocol is advertised until its parser, resource limits, placement,
+and SDL3/direct-KMS pixel gates pass.
+
 ## Milestone 1: contract vertical slice
 
 Resolve ADR 0002 before writing server behavior. It must select the canonical
@@ -97,6 +102,18 @@ inputs, overlays, and additional presets only after preserving the same
 revision and capability/error rules. CRT effects are downstream of correct
 text and output semantics; they must not obscure presentation failures.
 
+## Milestone 5a: terminal graphics protocols
+
+Implement the canonical bounded graphics-object store and Kitty graphics
+protocol first. It must support chunked upload, explicit image identifiers,
+placement, clipping, z-order, deletion, diagnostics, and damage integration
+without mutating terminal cells. Verify equivalent SDL3 and direct-KMS
+results with deterministic pixel fixtures in the two-display VKMS guest.
+
+After Kitty is accepted, add sixel decoding as a compatibility input path into
+the same graphics-object model. Sixel must not introduce a second renderer,
+layout owner, or image lifetime model.
+
 ## Milestone 6: operational hardening
 
 Add authentication, leases, persistence policy, hotplug behavior, observability,
@@ -111,3 +128,7 @@ alternate screen, cursor movement, colors, resize, scrolling, and malformed
 or fragmented escape sequences. Then repeat the 1x1, 2x1, 1x2, and 2x2 VKMS
 matrix with one primary and the required `--join` clients, including explicit
 keyboard and pointer routes.
+
+The graphics-protocol work follows the accepted terminal/input and presentation
+gates; do not advertise Kitty or sixel before their pixel and resource-limit
+evidence exists.

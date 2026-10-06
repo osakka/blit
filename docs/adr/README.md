@@ -12,6 +12,7 @@ Accepted decisions:
 2. [OpenAPI control plane and network streaming plane](0002-network-api-and-streaming.md).
 3. [Logical cell-based pane layouts](0003-logical-cell-layouts.md).
 4. [Canonical terminal state and direct KMS presentation](0004-terminal-state-and-direct-kms.md).
+5. [Kitty graphics first, sixel compatibility second](0005-kitty-graphics-first.md).
 
 Pending decisions:
 
