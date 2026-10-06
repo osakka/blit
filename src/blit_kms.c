@@ -761,6 +761,24 @@ static int output_view_unchanged(const KmsOutput *output,
     return 0;
 }
 
+static void remember_output_views(KmsOutput *output,
+                                  const BlitKmsSurfaceView *views,
+                                  int view_count, int output_view_count)
+{
+    int view_index;
+    int stored = 0;
+    output->last_view_count = output_view_count;
+    for (view_index = 0; view_index < view_count &&
+         stored < KMS_MAX_VIEWS; ++view_index) {
+        if (views[view_index].display_id != output->info.id)
+            continue;
+        output->last_surface_ids[stored] = views[view_index].surface_id;
+        output->last_surface_revisions[stored] =
+            views[view_index].surface_revision;
+        ++stored;
+    }
+}
+
 static int pointer_intersects_output(const KmsOutput *output,
                                      float x, float y, int visible)
 {
@@ -1178,11 +1196,15 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                                              &output->mode);
                 if (flip_result < 0) return -1;
                 output->flip_pending = 0;
+                output->flip_started_us = 0;
                 swap_buffers(output);
                 for (view_index = 0; view_index < view_count; ++view_index)
                     if (views[view_index].display_id == output->info.id &&
                         views[view_index].damage_consumed != NULL)
                         *views[view_index].damage_consumed = 1;
+                output->initialized = 1;
+                remember_output_views(output, views, view_count,
+                                      output_view_count);
                 continue;
             }
             if (getenv("BLIT_KMS_ASYNC_PAGEFLIP") != NULL)
@@ -1211,19 +1233,7 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                     output->connector, flip_started - draw_started,
                     kms_now_us() - flip_started,
                     kms_now_us() - output_started);
-        output->last_view_count = output_view_count;
-        {
-            int stored = 0;
-            for (view_index = 0; view_index < view_count &&
-                 stored < KMS_MAX_VIEWS; ++view_index) {
-                if (views[view_index].display_id != output->info.id)
-                    continue;
-                output->last_surface_ids[stored] = views[view_index].surface_id;
-                output->last_surface_revisions[stored] =
-                    views[view_index].surface_revision;
-                ++stored;
-            }
-        }
+        remember_output_views(output, views, view_count, output_view_count);
     }
     if (!deferred) {
         kms->pointer_state_valid = 1;
