@@ -405,6 +405,7 @@ static const char *pane_surface_id(const BlitRuntime *runtime,
                                    const BlitPane *pane);
 static void discover_panes(BlitRuntime *runtime);
 static void focus_session(BlitRuntime *runtime, BlitSession *target);
+static int activate_direct_kms_fallback(BlitRuntime *runtime);
 
 static void effect_json(const BlitRuntime *runtime, char *body,
                         size_t capacity)
@@ -7098,6 +7099,8 @@ static void initialize_outputs(BlitRuntime *runtime)
         runtime->outputs[runtime->output_count].display_id = display->id;
         ++runtime->output_count;
     }
+    if (runtime->output_count != runtime->display_count)
+        activate_direct_kms_fallback(runtime);
 }
 
 static void destroy_outputs(BlitRuntime *runtime)
@@ -7115,6 +7118,57 @@ static void destroy_outputs(BlitRuntime *runtime)
         SDL_DestroyWindow(runtime->outputs[i].window);
     }
     runtime->output_count = 0;
+}
+
+static int activate_direct_kms_fallback(BlitRuntime *runtime)
+{
+    char error[256];
+    int i;
+
+    if (runtime->direct_kms || runtime->display_count == 0)
+        return 0;
+    destroy_outputs(runtime);
+    error[0] = '\0';
+    runtime->kms = blit_kms_new(&runtime->font);
+    if (runtime->kms == NULL || blit_kms_open(runtime->kms, error,
+                                               sizeof(error)) < 0) {
+        if (runtime->kms != NULL) {
+            blit_kms_close(runtime->kms);
+            runtime->kms = NULL;
+        }
+        snprintf(runtime->sdl_error, sizeof(runtime->sdl_error),
+                 "SDL outputs unavailable; direct KMS fallback failed: %s",
+                 error[0] ? error : "initialization failed");
+        return 0;
+    }
+    runtime->direct_kms = 1;
+    runtime->display_count = blit_kms_display_count(runtime->kms);
+    if (runtime->display_count > BLIT_MAX_DISPLAYS)
+        runtime->display_count = BLIT_MAX_DISPLAYS;
+    for (i = 0; i < runtime->display_count; ++i) {
+        BlitKmsDisplayInfo info;
+        if (blit_kms_display_info(runtime->kms, i, &info) < 0)
+            continue;
+        runtime->displays[i].id = info.id;
+        snprintf(runtime->displays[i].name,
+                 sizeof(runtime->displays[i].name), "%s", info.name);
+        runtime->displays[i].bounds.x = info.x;
+        runtime->displays[i].bounds.y = info.y;
+        runtime->displays[i].bounds.w = info.width;
+        runtime->displays[i].bounds.h = info.height;
+        runtime->displays[i].refresh_hz = info.refresh_hz;
+        runtime->displays[i].mode_count = info.mode_count;
+        runtime->displays[i].active_mode = info.active_mode;
+        memcpy(runtime->displays[i].modes, info.modes,
+               sizeof(runtime->displays[i].modes));
+        runtime->outputs[i].display_id = info.id;
+    }
+    runtime->output_count = runtime->display_count;
+    runtime->sdl_error[0] = '\0';
+    fprintf(stderr,
+            "blit: SDL presentation unavailable; using direct KMS fallback "
+            "(%d display(s))\n", runtime->display_count);
+    return runtime->display_count > 0;
 }
 
 static int evdev_has_rel_xy(int fd)
