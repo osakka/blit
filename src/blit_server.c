@@ -455,17 +455,6 @@ static void clear_previous_pointer(BlitRuntime *runtime, int output_index)
     SDL_RenderFillRect(runtime->outputs[output_index].renderer, &area);
 }
 
-static int runtime_has_synchronized_output(const BlitRuntime *runtime)
-{
-    int index;
-
-    for (index = 0; index < BLIT_MAX_SESSIONS; ++index)
-        if (runtime->sessions[index].used &&
-            runtime->sessions[index].terminal_synchronized)
-            return 1;
-    return 0;
-}
-
 static void render_current_surfaces(BlitRuntime *runtime)
 {
     BlitFramePlan plan;
@@ -5931,6 +5920,11 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
             if (!surface->used) continue;
             session = find_session_id(runtime, surface->owner_session_id);
             if (session == NULL) continue;
+            /* Synchronized output retains its last complete frame.  Do not
+               submit its partial damage, but continue presenting unrelated
+               outputs in the same server. */
+            if (session->terminal_synchronized)
+                continue;
             pane = find_pane_id(runtime, session->pane_id);
             if (session->display_id[0] != '\0') {
                 for (output_index_for_surface = 0;
@@ -5999,6 +5993,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
     for (output_index = 0; output_index < runtime->output_count;
          ++output_index) {
         int target_count = 0;
+        int synchronized_count = 0;
         int overlay_count = 0;
         int target_changed = 0;
         int full_redraw;
@@ -6012,6 +6007,12 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
             if (surface == NULL || !surface->used)
                 continue;
             if (surface_targets_output(runtime, surface, output_index)) {
+                BlitSession *session = find_session_id(
+                    runtime, surface->owner_session_id);
+                if (session != NULL && session->terminal_synchronized) {
+                    ++synchronized_count;
+                    continue;
+                }
                 ++target_count;
                 if (surface->damage_valid)
                     target_changed = 1;
@@ -6025,6 +6026,13 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
                     overlay_targets_output(runtime,
                         &runtime->overlays[overlay_index], output_index))
                     ++overlay_count;
+        }
+        if (target_count == 0 && overlay_count == 0 &&
+            synchronized_count > 0) {
+            /* Leave the synchronized output untouched until its owner sends
+               the matching CSI ?2026 l.  In particular, do not clear it
+               merely because another output caused a render pass. */
+            continue;
         }
         if (target_count == 0 && overlay_count == 0) {
             /* The output is already in its empty state.  A pending render
@@ -6100,6 +6108,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
                 continue;
             session = find_session_id(runtime, surface->owner_session_id);
             if (session == NULL)
+                continue;
+            if (session->terminal_synchronized)
                 continue;
             pane = find_pane_id(runtime, session->pane_id);
             if (pane != NULL) {
@@ -6279,7 +6289,10 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
     for (plan_index = 0; plan_index < plan->surface_count; ++plan_index) {
         BlitSurface *surface = find_surface_id(
             runtime, plan->surfaces[plan_index].surface_id);
-        if (surface != NULL)
+        BlitSession *session = surface != NULL ? find_session_id(
+            runtime, surface->owner_session_id) : NULL;
+        if (surface != NULL &&
+            (session == NULL || !session->terminal_synchronized))
             surface->damage_valid = 0;
     }
     runtime->pointer_dirty = 0;
@@ -7169,7 +7182,6 @@ int main(int argc, char **argv)
             }
         }
         if (runtime.render_pending &&
-            !runtime_has_synchronized_output(&runtime) &&
             (SDL_GetTicks() - runtime.render_last_ticks >=
              (uint32_t)runtime.render_interval_ms)) {
             render_current_surfaces(&runtime);

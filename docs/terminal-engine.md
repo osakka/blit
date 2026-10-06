@@ -50,9 +50,11 @@ shell conformance path is stable.
    controls execute inside CSI are also covered, including CAN/SUB sequence
    cancellation. SGR conceal (`8`/`28`) is retained in the canonical cell
    style and suppressed by both renderers while preserving the cell background.
-   Synchronized output (`CSI ? 2026 h/l`) gates presentation until the
-   application releases the update batch; its terminal state is reset by RIS
-   and DEC soft reset. Colon SGR forms, underline colour (`58`/`59`), and
+   Synchronized output (`CSI ? 2026 h/l`) gates presentation of that session's
+   output until the application releases the update batch; unrelated displays
+   continue presenting normally. The synchronized surface retains its last
+   complete frame and its damage until release. Its terminal state is reset by
+   RIS and DEC soft reset. Colon SGR forms, underline colour (`58`/`59`), and
    Hibr's modifyOtherKeys/cursor push-pop prefixes are parsed without leaking
    their control parameters into cell attributes.
    SGR italic (`3`/`23`), blink (`5`/`6`/`25`), and strike (`9`/`29`) are
