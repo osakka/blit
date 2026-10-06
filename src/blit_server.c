@@ -4034,7 +4034,8 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         mark_surface_damage(surface, surface->cursor_x, surface->cursor_y);
     } else if (!private_mode && command == 'c') {
         if (!has_first || first == 0)
-            terminal_write_reply(session, "\033[?62;1;2;6;7;8;9c");
+            /* Match Hibr's VT220-compatible primary device identity. */
+            terminal_write_reply(session, "\033[?62;22c");
     } else if (!private_mode && command == 'n' && has_first && first == 5) {
         terminal_write_reply(session, "\033[0n");
     } else if (!private_mode && command == 'n' && has_first && first == 6) {

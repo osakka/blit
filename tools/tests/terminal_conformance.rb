@@ -713,6 +713,10 @@ snapshot = run_case(base, 'da2-query',
                     "stty -icanon -echo min 0 time 5; printf '\\033[>c'; dd if=/dev/tty bs=1 count=10 2>/dev/null | od -An -tx1 | tr -d ' \\n'")
 assert_equal('1b5b3e313b31303b3063', row_text(snapshot), 'DA2 reply')
 
+snapshot = run_case(base, 'da1-query',
+                    "stty -icanon -echo min 0 time 5; printf '\\033[c'; dd if=/dev/tty bs=1 count=9 2>/dev/null | od -An -tx1 | tr -d ' \\n'")
+assert_equal('1b5b3f36323b323263', row_text(snapshot), 'DA1 reply')
+
 snapshot = run_case(base, 'xtversion-query',
                     "stty -icanon -echo min 0 time 5; printf '\\033[>q'; dd if=/dev/tty bs=1 count=19 2>/dev/null | od -An -tx1 | tr -d ' \\n'", width: 80)
 assert_equal('1b503e7c626c69742d7465726d20302e311b5c', row_text(snapshot),
