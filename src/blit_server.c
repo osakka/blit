@@ -6909,13 +6909,48 @@ static void discover_displays(BlitRuntime *runtime)
             mode = SDL_GetDesktopDisplayMode(ids[i]);
         runtime->displays[i].refresh_hz = mode != NULL &&
             mode->refresh_rate > 0.0f ? (double)mode->refresh_rate : 60.0;
-        runtime->displays[i].mode_count = 1;
-        runtime->displays[i].active_mode = 0;
-        runtime->displays[i].modes[0].width = runtime->displays[i].bounds.w;
-        runtime->displays[i].modes[0].height = runtime->displays[i].bounds.h;
-        runtime->displays[i].modes[0].refresh_hz =
-            runtime->displays[i].refresh_hz;
-        runtime->displays[i].modes[0].preferred = 1;
+        {
+            SDL_DisplayMode **available;
+            int available_count = 0;
+            int mode_index;
+            int target_width = mode != NULL ? mode->w :
+                runtime->displays[i].bounds.w;
+            int target_height = mode != NULL ? mode->h :
+                runtime->displays[i].bounds.h;
+            available = SDL_GetFullscreenDisplayModes(ids[i],
+                                                       &available_count);
+            runtime->displays[i].mode_count = available_count <
+                BLIT_KMS_MAX_MODES ? available_count : BLIT_KMS_MAX_MODES;
+            runtime->displays[i].active_mode = -1;
+            for (mode_index = 0; mode_index < runtime->displays[i].mode_count;
+                 ++mode_index) {
+                SDL_DisplayMode *available_mode = available[mode_index];
+                BlitKmsMode *stored = &runtime->displays[i].modes[mode_index];
+                stored->width = available_mode->w;
+                stored->height = available_mode->h;
+                stored->refresh_hz = available_mode->refresh_rate > 0.0f ?
+                    (double)available_mode->refresh_rate : 60.0;
+                stored->preferred = available_mode->w == target_width &&
+                    available_mode->h == target_height;
+                if (stored->width == target_width &&
+                    stored->height == target_height &&
+                    runtime->displays[i].active_mode < 0)
+                    runtime->displays[i].active_mode = mode_index;
+            }
+            if (available != NULL)
+                SDL_free(available);
+            if (runtime->displays[i].mode_count == 0) {
+                runtime->displays[i].mode_count = 1;
+                runtime->displays[i].active_mode = 0;
+                runtime->displays[i].modes[0].width = target_width;
+                runtime->displays[i].modes[0].height = target_height;
+                runtime->displays[i].modes[0].refresh_hz =
+                    runtime->displays[i].refresh_hz;
+                runtime->displays[i].modes[0].preferred = 1;
+            } else if (runtime->displays[i].active_mode < 0) {
+                runtime->displays[i].active_mode = 0;
+            }
+        }
     }
     SDL_free(ids);
 }

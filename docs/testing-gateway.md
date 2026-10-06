@@ -64,6 +64,11 @@ BLIT_GATE_PORT=19202 BLIT_GATE_TOKEN=blit-network-gate \
 It holds one request fragmented for one second while requiring an independent
 authenticated diagnostics request to complete in under 800 ms.
 
+The SDL3 adapter obtains the complete fullscreen mode list when the backend
+provides it and reports the current/native active mode through the same
+`/v1/displays` contract as direct KMS. If SDL cannot provide a mode list, the
+reported single entry is the observed current mode, not an invented maximum.
+
 Writes use the same bounded policy: HTTP and WebSocket sends are nonblocking.
 If a receiver cannot accept the next bounded write, the HTTP response is
 closed or the WebSocket stream is removed. Blit does not sleep in the gateway
