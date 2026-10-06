@@ -7,6 +7,9 @@ in QEMU with direct DRM/KMS:
 
 - OpenAPI YAML parses as OpenAPI 3 with 13 routes and 30 schemas.
 - The WebSocket upgrade on `/v1/stream` returns `101 Switching Protocols`.
+- The TCC WebSocket probe also delivers a deliberately fragmented, masked
+  subscription message and receives `subscription_received`, proving TCP and
+  WebSocket frame boundaries do not have to align.
 - A live `2x1` topology mutation produces two server-owned panes.
 - A PTY session, revisioned cell update, and coherent frame commit all return
   their schema-defined success responses.

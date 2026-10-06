@@ -32,19 +32,36 @@ static int recv_all(int fd, void *data, size_t length)
     return 1;
 }
 
-static int send_text(int fd, const char *text)
+static int send_fragmented_text(int fd, const char *text)
 {
-    unsigned char frame[512];
-    unsigned char mask[4] = { 0x31, 0x27, 0x19, 0x07 };
+    unsigned char frame[256];
+    unsigned char masks[2][4] = {
+        { 0x31, 0x27, 0x19, 0x07 },
+        { 0x52, 0x16, 0x2a, 0x09 }
+    };
     size_t length = strlen(text);
-    size_t i;
-    if (length > 125) return 0;
-    frame[0] = 0x81;
-    frame[1] = (unsigned char)(0x80 | length);
-    memcpy(frame + 2, mask, sizeof(mask));
-    for (i = 0; i < length; ++i)
-        frame[6 + i] = (unsigned char)text[i] ^ mask[i % 4];
-    return send_all(fd, frame, length + 6);
+    size_t split = length / 2;
+    size_t part;
+    int fragment;
+
+    if (length > 125 || split == 0 || split == length)
+        return 0;
+    for (fragment = 0; fragment < 2; ++fragment) {
+        size_t start = fragment == 0 ? 0 : split;
+        part = fragment == 0 ? split : length - split;
+        frame[0] = fragment == 0 ? 0x01 : 0x80;
+        frame[1] = (unsigned char)(0x80 | part);
+        memcpy(frame + 2, masks[fragment], 4);
+        {
+            size_t i;
+            for (i = 0; i < part; ++i)
+                frame[6 + i] = (unsigned char)text[start + i] ^
+                    masks[fragment][i % 4];
+        }
+        if (!send_all(fd, frame, part + 6))
+            return 0;
+    }
+    return 1;
 }
 
 int main(void)
@@ -81,7 +98,7 @@ int main(void)
         if (used >= 4 && strstr(headers + used - 4, "\r\n\r\n") != NULL)
             break;
     }
-    if (!send_text(fd, "{\"type\":\"subscribe\",\"subscriptions\":[\"input\",\"diagnostics\"]}"))
+    if (!send_fragmented_text(fd, "{\"type\":\"subscribe\",\"subscriptions\":[\"input\",\"diagnostics\"]}"))
         return 1;
     while (time(NULL) < deadline) {
         int ready;

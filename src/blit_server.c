@@ -169,6 +169,11 @@ typedef struct {
     int used;
     int fd;
     unsigned int subscriptions;
+    unsigned char receive_buffer[4096];
+    size_t receive_length;
+    unsigned char fragment_buffer[4096];
+    size_t fragment_length;
+    unsigned char fragment_opcode;
 } BlitStream;
 
 typedef struct {
@@ -5883,84 +5888,165 @@ static unsigned int subscription_mask(const char *payload)
     return mask;
 }
 
+static void service_stream_text(BlitRuntime *runtime, int fd,
+                                const unsigned char *payload, size_t length)
+{
+    char message[1025];
+    if (length >= sizeof(message))
+        return;
+    memcpy(message, payload, length);
+    message[length] = '\0';
+    if (strstr(message, "subscribe") != NULL) {
+        int i;
+        for (i = 0; i < BLIT_MAX_STREAMS; ++i) {
+            if (runtime->streams[i].used && runtime->streams[i].fd == fd) {
+                runtime->streams[i].subscriptions = subscription_mask(message);
+                break;
+            }
+        }
+        send_websocket_text(fd,
+            "{\"type\":\"diagnostic\",\"severity\":\"info\","
+            "\"code\":\"subscription_received\","
+            "\"detail\":\"stream subscription accepted\"}");
+    } else if (strstr(message, "\"input\"") != NULL &&
+               strstr(message, "session_id") != NULL) {
+        char session_id[64];
+        char data[768];
+        unsigned long long numeric_id;
+        BlitSession *session;
+
+        if (json_string(message, "session_id", session_id,
+                        sizeof(session_id)) &&
+            json_string(message, "data", data, sizeof(data)) &&
+            sscanf(session_id, "%llu", &numeric_id) == 1) {
+            session = find_session_id(runtime, numeric_id);
+            if (session != NULL && session->pty_fd >= 0) {
+                write(session->pty_fd, data, strlen(data));
+                send_websocket_text(fd,
+                    "{\"type\":\"diagnostic\",\"severity\":\"info\","
+                    "\"code\":\"input_forwarded\","
+                    "\"detail\":\"input forwarded to terminal session\"}");
+            }
+        }
+    }
+}
+
+static int service_stream_frame(BlitRuntime *runtime, BlitStream *stream,
+                                unsigned char opcode, int final,
+                                const unsigned char *payload, size_t length)
+{
+    if (opcode == 0x8) {
+        send_websocket_control(stream->fd, 0x8, NULL, 0);
+        return 0;
+    }
+    if (opcode == 0x9) {
+        send_websocket_control(stream->fd, 0xA, payload, length);
+        return 1;
+    }
+    if (opcode == 0xA)
+        return 1;
+    if (opcode == 0x1 && !final) {
+        if (length > sizeof(stream->fragment_buffer))
+            return 1;
+        memcpy(stream->fragment_buffer, payload, length);
+        stream->fragment_length = length;
+        stream->fragment_opcode = opcode;
+        return 1;
+    }
+    if (opcode == 0x0) {
+        if (stream->fragment_opcode == 0 ||
+            length > sizeof(stream->fragment_buffer) - stream->fragment_length)
+            return 1;
+        memcpy(stream->fragment_buffer + stream->fragment_length,
+               payload, length);
+        stream->fragment_length += length;
+        if (!final)
+            return 1;
+        opcode = stream->fragment_opcode;
+        payload = stream->fragment_buffer;
+        length = stream->fragment_length;
+        stream->fragment_opcode = 0;
+        stream->fragment_length = 0;
+    }
+    if (opcode == 0x1 && final)
+        service_stream_text(runtime, stream->fd, payload, length);
+    return 1;
+}
+
 static void service_stream(BlitRuntime *runtime, int fd)
 {
-    unsigned char frame[1025];
-    ssize_t received = recv(fd, frame, sizeof(frame) - 1, 0);
-    size_t offset;
-    size_t length;
-    unsigned char opcode;
-    int masked;
-    unsigned char mask[4];
-    size_t i;
+    BlitStream *stream = NULL;
+    unsigned char incoming[1024];
+    ssize_t received;
+    size_t offset = 0;
+    int i;
 
+    for (i = 0; i < BLIT_MAX_STREAMS; ++i)
+        if (runtime->streams[i].used && runtime->streams[i].fd == fd) {
+            stream = &runtime->streams[i];
+            break;
+        }
+    if (stream == NULL)
+        return;
+    received = recv(fd, incoming, sizeof(incoming), 0);
     if (received <= 0) {
         remove_stream(runtime, fd);
         return;
     }
-    if (received < 2)
-        return;
-    opcode = (unsigned char)(frame[0] & 0x0f);
-    masked = (frame[1] & 0x80) != 0;
-    length = frame[1] & 0x7f;
-    offset = 2;
-    if (length == 126 || length == 127 || length + offset > (size_t)received)
-        return;
-    if (masked) {
-        if (length + offset + 4 > (size_t)received)
-            return;
-        memcpy(mask, frame + offset, sizeof(mask));
-        offset += sizeof(mask);
-        for (i = 0; i < length; ++i)
-            frame[offset + i] ^= mask[i % 4];
-    }
-    if (opcode == 0x8) {
-        send_websocket_control(fd, 0x8, NULL, 0);
+    if ((size_t)received > sizeof(stream->receive_buffer) -
+        stream->receive_length) {
         remove_stream(runtime, fd);
         return;
     }
-    if (opcode == 0x9) {
-        send_websocket_control(fd, 0xA, frame + offset, length);
-        return;
-    }
-    if (opcode == 0x1) {
-        frame[offset + length] = '\0';
-        if (strstr((char *)frame + offset, "subscribe") != NULL) {
-            int i;
-            for (i = 0; i < BLIT_MAX_STREAMS; ++i) {
-                if (runtime->streams[i].used && runtime->streams[i].fd == fd) {
-                    runtime->streams[i].subscriptions =
-                        subscription_mask((char *)frame + offset);
-                    break;
-                }
-            }
-        } else if (strstr((char *)frame + offset, "\"input\"") != NULL &&
-                   strstr((char *)frame + offset, "session_id") != NULL) {
-            char session_id[64];
-            char data[768];
-            unsigned long long numeric_id;
-            BlitSession *session;
+    memcpy(stream->receive_buffer + stream->receive_length,
+           incoming, (size_t)received);
+    stream->receive_length += (size_t)received;
+    while (stream->receive_length - offset >= 2) {
+        unsigned char *frame = stream->receive_buffer + offset;
+        unsigned char flags = frame[0];
+        unsigned char length_code = frame[1] & 0x7f;
+        unsigned char mask[4];
+        size_t header = 2;
+        size_t length;
+        size_t total;
+        size_t j;
+        int masked = (frame[1] & 0x80) != 0;
 
-            if (json_string((char *)frame + offset, "session_id",
-                            session_id, sizeof(session_id)) &&
-                json_string((char *)frame + offset, "data",
-                            data, sizeof(data)) &&
-                sscanf(session_id, "%llu", &numeric_id) == 1) {
-                session = find_session_id(runtime, numeric_id);
-                if (session != NULL && session->pty_fd >= 0) {
-                    write(session->pty_fd, data, strlen(data));
-                    send_websocket_text(fd,
-                        "{\"type\":\"diagnostic\",\"severity\":\"info\","
-                        "\"code\":\"input_forwarded\","
-                        "\"detail\":\"input forwarded to terminal session\"}");
-                }
-            }
+        if (length_code == 127) {
+            remove_stream(runtime, fd);
+            return;
         }
-        if (strstr((char *)frame + offset, "subscribe") != NULL)
-            send_websocket_text(fd,
-                "{\"type\":\"diagnostic\",\"severity\":\"info\","
-                "\"code\":\"subscription_received\","
-                "\"detail\":\"stream subscription accepted\"}");
+        if (length_code == 126) {
+            header += 2;
+            if (stream->receive_length - offset < header)
+                break;
+            length = ((size_t)frame[2] << 8) | frame[3];
+        } else {
+            length = length_code;
+        }
+        if (masked) header += 4;
+        if (length > sizeof(stream->receive_buffer) - header) {
+            remove_stream(runtime, fd);
+            return;
+        }
+        total = header + length;
+        if (stream->receive_length - offset < total)
+            break;
+        if (masked) {
+            memcpy(mask, frame + header - 4, sizeof(mask));
+            for (j = 0; j < length; ++j)
+                frame[header + j] ^= mask[j % 4];
+        }
+        if (!service_stream_frame(runtime, stream, flags & 0x0f,
+                                  (flags & 0x80) != 0,
+                                  frame + header, length))
+            return;
+        offset += total;
+    }
+    if (offset > 0) {
+        memmove(stream->receive_buffer, stream->receive_buffer + offset,
+                stream->receive_length - offset);
+        stream->receive_length -= offset;
     }
 }
 
