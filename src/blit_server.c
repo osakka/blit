@@ -4569,6 +4569,10 @@ static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
                 session->terminal_foreground_set = 0;
                 session->terminal_background_set = 0;
                 session->terminal_escape = 0;
+            } else if (byte == 'Z') {
+                /* VT100/VT500 DECID is the legacy spelling of DA1. */
+                terminal_write_reply(session, "\033[?62;22c");
+                session->terminal_escape = 0;
             } else {
                 session->terminal_escape = 0;
             }
@@ -4640,7 +4644,7 @@ static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
                                         surface->cursor_y);
                     surface->cursor_x = 0;
                     session->terminal_wrap_pending = 0;
-                } else if (byte == '\n') {
+                } else if (byte == '\n' || byte == '\v' || byte == '\f') {
                     mark_surface_damage(surface, surface->cursor_x,
                                         surface->cursor_y);
                     if (session->terminal_newline_mode)
@@ -4705,7 +4709,7 @@ static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
             surface->cursor_x = 0;
             session->terminal_wrap_pending = 0;
             ++offset;
-        } else if (byte == '\n') {
+        } else if (byte == '\n' || byte == '\v' || byte == '\f') {
             mark_surface_damage(surface, surface->cursor_x, surface->cursor_y);
             if (session->terminal_newline_mode)
                 surface->cursor_x = 0;

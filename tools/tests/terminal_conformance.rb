@@ -763,6 +763,17 @@ snapshot = run_case(base, 'c1-string-control',
 cells = cell_map(snapshot)
 assert_equal('X', cells.fetch([0, 0]).fetch('text'), '8-bit OSC isolation')
 
+snapshot = run_case(base, 'vt500-vertical-form-feed',
+                    "printf 'A\\vB\\fC'", width: 8, height: 4)
+cells = cell_map(snapshot)
+assert_equal('A', cells.fetch([0, 0]).fetch('text'), 'vertical-tab origin')
+assert_equal('B', cells.fetch([1, 1]).fetch('text'), 'vertical-tab line feed')
+assert_equal('C', cells.fetch([2, 2]).fetch('text'), 'form-feed line feed')
+
+snapshot = run_case(base, 'legacy-decid-query',
+                    "stty -icanon -echo min 0 time 5; printf '\\033Z'; dd if=/dev/tty bs=1 count=9 2>/dev/null | od -An -tx1 | tr -d ' \\n'")
+assert_equal('1b5b3f36323b323263', row_text(snapshot), 'legacy DECID reply')
+
 run_session_field_case(base, 'osc-title-bel', "printf '\\033]0;bel title\\007'",
                        'title', 'bel title')
 run_session_field_case(base, 'osc-title-st',

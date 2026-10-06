@@ -47,6 +47,8 @@ shell conformance path is stable.
    `CSI Ps SP q`) are covered by the conformance vectors. Cursor styles are
    carried through the surface API and consumed by both renderers; blinking
    styles retain their VT identity even when a backend presents them steadily.
+   VT500 C0 vertical-tab/form-feed line feeds and the legacy ESC Z DECID query
+   are handled by the same parser and covered by the conformance gate.
    Kitty-compatible cursor restore (`CSI ? u`) and the ECMA-48 rule that C0
    controls execute inside CSI are also covered, including CAN/SUB sequence
    cancellation. SGR conceal (`8`/`28`) is retained in the canonical cell
@@ -93,7 +95,8 @@ Run `tools/tests/terminal_conformance.rb` against a TCC-built server with the
 dummy video backend. The runner currently asserts printable output, cursor
 addressing, styles, erase, scrolling, scroll regions, alternate-screen
 restoration, saved-cursor state, UTF-8 cells, truecolor SGR, and fragmented CSI input
-through the public PTY/surface contract, plus cursor visibility and malformed
+through the public PTY/surface contract, plus cursor visibility, VT500
+vertical/form-feed controls, legacy DECID, and malformed
 CSI recovery. A missing or failing vector blocks the
 terminal gate; renderer screenshots do not substitute for these canonical-state
 assertions. Broader remaining work is complete VT500 semantic coverage and
