@@ -29,9 +29,10 @@ shell conformance path is stable.
    SO/SI shifts, DEC 1047/1048 alternate-screen/cursor state, autowrap, and
    newline mode, and 8-bit C1 controls are covered.
    OSC terminal titles are retained in the session API and tested for both
-   BEL and ST termination. OSC 52 clipboard sets and OSC 9/777 notifications
-   are retained in the session API in Hibr's raw payload form; clipboard read
-   queries are never answered.
+   BEL and ST termination. OSC 8 hyperlinks, OSC 52 clipboard sets and OSC
+   9/777 notifications are retained in the session API in Hibr's raw payload
+   form; clipboard read queries are never answered. Cells expose the active
+   OSC 8 URI as `link`.
    Evdev motion is committed
    at `SYN_REPORT`, so one physical input packet produces one pointer update;
    DEC focus reporting (`CSI ? 1004 h/l`) emits focus-in/focus-out reports

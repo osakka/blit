@@ -781,6 +781,9 @@ components:
               x: {type: integer, minimum: 0}
               y: {type: integer, minimum: 0}
               text: {type: string, minLength: 1}
+              link:
+                type: string
+                description: URI from the active OSC 8 hyperlink, when present.
               style: {$ref: '#/components/schemas/CellStyle'}
             additionalProperties: false
       additionalProperties: false

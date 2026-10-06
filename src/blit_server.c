@@ -102,6 +102,7 @@ typedef struct {
     uint32_t background[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
     uint32_t underline_color[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
     uint16_t attributes[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
+    uint16_t links[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
     char alternate_cells[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
     uint32_t alternate_codepoints[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
     uint32_t alternate_combining[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS][BLIT_MAX_COMBINING];
@@ -110,6 +111,7 @@ typedef struct {
     uint32_t alternate_background[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
     uint32_t alternate_underline_color[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
     uint16_t alternate_attributes[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
+    uint16_t alternate_links[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
     int cursor_x;
     int cursor_y;
     int cursor_visible;
@@ -202,6 +204,9 @@ typedef struct {
     char terminal_title[128];
     char terminal_clipboard[4096];
     char terminal_notification[1024];
+    char terminal_link_uris[32][256];
+    int terminal_link_count;
+    uint16_t terminal_link;
     int terminal_charset_dec;
     int terminal_charset_g1_dec;
     int terminal_charset_shift;
@@ -1209,7 +1214,8 @@ static void surface_delta_json(const BlitSurface *surface, char *body,
     snprintf(body + used, capacity - used, "}");
 }
 
-static void surface_snapshot_json(const BlitSurface *surface, char *body,
+static void surface_snapshot_json(const BlitSurface *surface,
+                                  const BlitSession *session, char *body,
                                   size_t capacity)
 {
     size_t used;
@@ -1230,11 +1236,12 @@ static void surface_snapshot_json(const BlitSurface *surface, char *body,
             char escaped[16];
             uint32_t codepoint = surface->codepoints[y][x];
             uint16_t attributes = surface->attributes[y][x];
+            uint16_t link = surface->links[y][x];
             int styled = surface->foreground[y][x] != 0 ||
                 surface->background[y][x] != 0 ||
                 surface->underline_color[y][x] != 0 || attributes != 0;
 
-            if (codepoint == 0 && !styled)
+            if (codepoint == 0 && !styled && link == 0)
                 continue;
             utf8_encode(codepoint ? codepoint : ' ', text);
             json_escape(text, escaped, sizeof(escaped));
@@ -1264,6 +1271,14 @@ static void surface_snapshot_json(const BlitSurface *surface, char *body,
                     attributes & BLIT_ATTR_CONCEAL ? "true" : "false",
                     (unsigned int)(surface->underline_color[y][x] ?
                         surface->underline_color[y][x] - 1 : 0));
+            }
+            if (link != 0 && session != NULL && link <= session->terminal_link_count) {
+                char escaped_link[512];
+                json_escape(session->terminal_link_uris[link - 1],
+                            escaped_link, sizeof(escaped_link));
+                used += (size_t)snprintf(body + used, capacity - used,
+                                         ",\"link\":\"%s\"",
+                                         escaped_link);
             }
             used += (size_t)snprintf(body + used, capacity - used, "}");
         }
@@ -1423,6 +1438,7 @@ static void terminal_clear_active_screen(BlitSurface *surface)
     memset(surface->foreground, 0, sizeof(surface->foreground));
     memset(surface->background, 0, sizeof(surface->background));
     memset(surface->attributes, 0, sizeof(surface->attributes));
+    memset(surface->links, 0, sizeof(surface->links));
     surface->damage_valid = 1;
     surface->damage_x = 0;
     surface->damage_y = 0;
@@ -1483,6 +1499,8 @@ static void terminal_enter_alternate(BlitSession *session,
            sizeof(surface->underline_color));
     memcpy(surface->alternate_attributes, surface->attributes,
            sizeof(surface->attributes));
+    memcpy(surface->alternate_links, surface->links,
+           sizeof(surface->links));
     session->terminal_saved_x = surface->cursor_x;
     session->terminal_saved_y = surface->cursor_y;
     session->terminal_alternate = 1;
@@ -1515,6 +1533,8 @@ static void terminal_leave_alternate(BlitSession *session,
            sizeof(surface->underline_color));
     memcpy(surface->attributes, surface->alternate_attributes,
            sizeof(surface->attributes));
+    memcpy(surface->links, surface->alternate_links,
+           sizeof(surface->links));
     session->terminal_alternate = 0;
     session->terminal_wrap_pending = 0;
     if (session->terminal_alternate_saved_cursor.valid) {
@@ -1563,6 +1583,7 @@ static void terminal_clear_cell(BlitSurface *surface, int x, int y)
     surface->background[y][x] = 0;
     surface->underline_color[y][x] = 0;
     surface->attributes[y][x] = 0;
+    surface->links[y][x] = 0;
     mark_surface_damage(surface, x, y);
 }
 
@@ -1607,6 +1628,7 @@ static void terminal_copy_cell(BlitSurface *surface, int destination,
     surface->underline_color[y][destination] =
         surface->underline_color[y][source];
     surface->attributes[y][destination] = surface->attributes[y][source];
+    surface->links[y][destination] = surface->links[y][source];
 }
 
 static void terminal_scroll_up(BlitSurface *surface)
@@ -1635,6 +1657,8 @@ static void terminal_scroll_up(BlitSurface *surface)
                sizeof(surface->underline_color[y - 1]));
         memcpy(surface->attributes[y - 1], surface->attributes[y],
                sizeof(surface->attributes[y - 1]));
+        memcpy(surface->links[y - 1], surface->links[y],
+               sizeof(surface->links[y - 1]));
     }
     memset(surface->cells[bottom], 0, sizeof(surface->cells[bottom]));
     memset(surface->codepoints[bottom], 0,
@@ -1651,6 +1675,7 @@ static void terminal_scroll_up(BlitSurface *surface)
            sizeof(surface->underline_color[bottom]));
     memset(surface->attributes[bottom], 0,
            sizeof(surface->attributes[bottom]));
+    memset(surface->links[bottom], 0, sizeof(surface->links[bottom]));
     surface->damage_valid = 1;
     surface->damage_x = 0;
     surface->damage_y = top;
@@ -1679,6 +1704,8 @@ static void terminal_copy_row(BlitSurface *surface, int destination, int source)
            sizeof(surface->underline_color[destination]));
     memcpy(surface->attributes[destination], surface->attributes[source],
            sizeof(surface->attributes[destination]));
+    memcpy(surface->links[destination], surface->links[source],
+           sizeof(surface->links[destination]));
 }
 
 static void terminal_blank_row(BlitSurface *surface, int row)
@@ -1693,6 +1720,7 @@ static void terminal_blank_row(BlitSurface *surface, int row)
     memset(surface->underline_color[row], 0,
            sizeof(surface->underline_color[row]));
     memset(surface->attributes[row], 0, sizeof(surface->attributes[row]));
+    memset(surface->links[row], 0, sizeof(surface->links[row]));
 }
 
 static void terminal_index(BlitSurface *surface)
@@ -1917,6 +1945,27 @@ static void terminal_apply_osc(BlitSession *session)
     } else if (command == 777 && strncmp(payload, "notify;", 7) == 0) {
         snprintf(session->terminal_notification,
                  sizeof(session->terminal_notification), "%s", payload + 7);
+    } else if (command == 8) {
+        char *uri = strchr((char *)payload, ';');
+        int index;
+        if (uri == NULL || uri[1] == '\0') {
+            session->terminal_link = 0;
+            return;
+        }
+        ++uri;
+        for (index = 0; index < session->terminal_link_count; ++index)
+            if (strcmp(session->terminal_link_uris[index], uri) == 0) {
+                session->terminal_link = (uint16_t)(index + 1);
+                return;
+            }
+        if (session->terminal_link_count >= 32) {
+            session->terminal_link = 0;
+            return;
+        }
+        snprintf(session->terminal_link_uris[session->terminal_link_count],
+                 sizeof(session->terminal_link_uris[0]), "%s", uri);
+        ++session->terminal_link_count;
+        session->terminal_link = (uint16_t)session->terminal_link_count;
     }
 }
 
@@ -2542,6 +2591,8 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
                     surface->underline_color[surface->cursor_y][source];
                 surface->attributes[surface->cursor_y][x] =
                     surface->attributes[surface->cursor_y][source];
+                surface->links[surface->cursor_y][x] =
+                    surface->links[surface->cursor_y][source];
             }
             for (x = surface->cursor_x;
                  x < surface->cursor_x + amount && x < surface->width; ++x)
@@ -2566,6 +2617,8 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
                     surface->underline_color[surface->cursor_y][source];
                 surface->attributes[surface->cursor_y][x] =
                     surface->attributes[surface->cursor_y][source];
+                surface->links[surface->cursor_y][x] =
+                    surface->links[surface->cursor_y][source];
             }
             for (x = surface->width - amount; x < surface->width; ++x)
                 terminal_clear_cell(surface, x, surface->cursor_y);
@@ -2769,11 +2822,15 @@ static void terminal_put_codepoint(BlitSession *session, BlitSurface *surface,
             session->terminal_underline_color + 1;
     surface->attributes[surface->cursor_y][surface->cursor_x] =
         session->terminal_attributes | (cell_width == 2 ? BLIT_ATTR_WIDE : 0);
+    surface->links[surface->cursor_y][surface->cursor_x] =
+        session->terminal_link;
     if (cell_width == 2) {
         terminal_clear_cell(surface, surface->cursor_x + 1,
                             surface->cursor_y);
         surface->attributes[surface->cursor_y][surface->cursor_x + 1] =
             BLIT_ATTR_CONTINUATION;
+        surface->links[surface->cursor_y][surface->cursor_x + 1] =
+            session->terminal_link;
     }
     mark_surface_damage(surface, surface->cursor_x, surface->cursor_y);
     if (surface->cursor_x + cell_width >= surface->width) {
@@ -3624,6 +3681,7 @@ static int resize_session_surface(BlitSession *session, BlitSurface *surface,
             surface->alternate_background[y][x] = 0;
             surface->alternate_underline_color[y][x] = 0;
             surface->alternate_attributes[y][x] = 0;
+            surface->alternate_links[y][x] = 0;
         }
     }
     surface->width = width;
@@ -4247,7 +4305,10 @@ static void handle_request(int fd, BlitRuntime *runtime,
             return;
         }
         if (strcmp(method, "GET") == 0) {
-            surface_snapshot_json(surface, body, sizeof(body));
+            surface_snapshot_json(surface,
+                                  find_session_id(runtime,
+                                                  surface->owner_session_id),
+                                  body, sizeof(body));
             send_http(fd, 200, "OK", "application/json", body);
             return;
         }

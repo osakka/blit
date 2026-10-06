@@ -475,6 +475,11 @@ run_session_field_case(base, 'osc-notification-9',
 run_session_field_case(base, 'osc-notification-777',
                        "printf '\\033]777;notify;title;body\\007'",
                        'notification', 'title;body')
+snapshot = run_case(base, 'osc-hyperlink',
+                    "printf '\\033]8;;https://example.test\\033\\\\linked\\033]8;;\\033\\\\'")
+cells = cell_map(snapshot)
+assert_equal('https://example.test', cells.fetch([0, 0]).fetch('link'),
+             'OSC 8 hyperlink URI')
 
 snapshot = run_case(base, 'scroll-region', "printf 'A\\nB\\n\\033[2;3r\\033[2;1H1\\n2\\n3'", height: 4)
 cells = cell_map(snapshot)
