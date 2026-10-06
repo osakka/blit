@@ -24,7 +24,7 @@
 #define KMS_POINTER_H 18
 #define KMS_WHITE 0xbed2beU
 #define KMS_ATTR_WIDE 16
-#define KMS_ATTR_CONTINUATION 64
+#define KMS_ATTR_CONTINUATION 32
 
 typedef struct {
     uint32_t fb;
