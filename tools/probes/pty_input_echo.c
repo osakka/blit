@@ -11,10 +11,12 @@ int main(int argc, char **argv)
     unsigned char byte;
     int mouse = 0;
     int focus = 0;
+    int wide = 0;
     int argument;
     for (argument = 1; argument < argc; ++argument) {
         if (strcmp(argv[argument], "--mouse") == 0) mouse = 1;
         if (strcmp(argv[argument], "--focus") == 0) focus = 1;
+        if (strcmp(argv[argument], "--wide") == 0) wide = 1;
     }
     if (tcgetattr(STDIN_FILENO, &saved) == 0) {
         raw = saved;
@@ -29,7 +31,10 @@ int main(int argc, char **argv)
         fputs("\033[?1003h\033[?1006h", stdout);
     if (focus)
         fputs("\033[?1004h", stdout);
-    fputs("READY\r\n", stdout);
+    fputs("READY", stdout);
+    if (wide)
+        fputs("\342\224\200", stdout);
+    fputs("\r\n", stdout);
     fflush(stdout);
     while (read(STDIN_FILENO, &byte, 1) == 1) {
         printf("BYTE %02X\r\n", (unsigned int)byte);

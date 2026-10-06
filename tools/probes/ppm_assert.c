@@ -22,6 +22,28 @@ static int has_foreground(FILE *file)
     return 0;
 }
 
+static int has_wide_foreground(FILE *file)
+{
+    int x;
+    int y;
+    int left = 0;
+    int right = 0;
+    unsigned char rgb[3];
+    /* READY occupies columns 0..4. U+2500 starts at column 5 and
+       must paint both halves of its two-cell logical width. */
+    for (y = 0; y < 16; ++y) {
+        for (x = 40; x < 48; ++x)
+            if (pixel(file, 16L + ((long)y * 1024L + x) * 3L, rgb) &&
+                rgb[0] == 0xbe && rgb[1] == 0xd2 && rgb[2] == 0xbe)
+                left = 1;
+        for (x = 48; x < 56; ++x)
+            if (pixel(file, 16L + ((long)y * 1024L + x) * 3L, rgb) &&
+                rgb[0] == 0xbe && rgb[1] == 0xd2 && rgb[2] == 0xbe)
+                right = 1;
+    }
+    return left && right;
+}
+
 int main(int argc, char **argv)
 {
     FILE *file;
@@ -29,7 +51,8 @@ int main(int argc, char **argv)
     long size;
     char header[32];
 
-    if (argc != 2) return 2;
+    if (argc != 2 && argc != 3) return 2;
+    if (argc == 3 && strcmp(argv[2], "--wide") != 0) return 2;
     file = fopen(argv[1], "rb");
     if (file == NULL) return 1;
     if (fgets(header, sizeof(header), file) == NULL ||
@@ -45,7 +68,9 @@ int main(int argc, char **argv)
         !pixel(file, 16L, rgb) || rgb[0] != 0 || rgb[1] != 0 || rgb[2] != 0 ||
         !pixel(file, 16L + ((long)100 * 1024L + 100) * 3L, rgb) ||
         rgb[0] != 0 || rgb[1] != 0 || rgb[2] != 0 ||
-        !has_foreground(file)) {
+        !has_foreground(file) ||
+        (argc == 3 && strcmp(argv[2], "--wide") == 0 &&
+         !has_wide_foreground(file))) {
         fclose(file);
         return 1;
     }
