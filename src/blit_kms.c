@@ -1020,6 +1020,9 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
     int deferred = 0;
     long long started = 0;
     if (kms == NULL) return -1;
+    for (i = 0; i < view_count; ++i)
+        if (views[i].damage_consumed != NULL)
+            *views[i].damage_consumed = 0;
     if (getenv("BLIT_KMS_TRACE_TIMING") != NULL)
         started = kms_now_us();
 
@@ -1176,6 +1179,10 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                 if (flip_result < 0) return -1;
                 output->flip_pending = 0;
                 swap_buffers(output);
+                for (view_index = 0; view_index < view_count; ++view_index)
+                    if (views[view_index].display_id == output->info.id &&
+                        views[view_index].damage_consumed != NULL)
+                        *views[view_index].damage_consumed = 1;
                 continue;
             }
             if (getenv("BLIT_KMS_ASYNC_PAGEFLIP") != NULL)
@@ -1193,6 +1200,10 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         output->flip_pending = 1;
         output->flip_started_us = kms_now_us();
         swap_buffers(output);
+        for (view_index = 0; view_index < view_count; ++view_index)
+            if (views[view_index].display_id == output->info.id &&
+                views[view_index].damage_consumed != NULL)
+                *views[view_index].damage_consumed = 1;
         output->initialized = 1;
         if (trace_phases)
             fprintf(stderr,

@@ -35,6 +35,7 @@ typedef struct {
     int damage_y;
     int damage_width;
     int damage_height;
+    int *damage_consumed;
 } BlitKmsSurfaceView;
 
 typedef struct {

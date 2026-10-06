@@ -68,6 +68,11 @@ the renderer fills the view rectangle once before drawing glyphs. Mixed
 backgrounds and inverse cells continue through the per-cell path so color and
 attribute semantics remain exact.
 
+Surface damage is consumed only after the corresponding view is submitted.
+If a connector is still waiting for its page-flip event, its damage remains
+pending and is retried after that event; a one-cell API mutation therefore
+cannot accumulate into a historical full-row redraw.
+
 Expected output identifies every usable card and connected connector, then
 lists its modes and preferred mode. A missing card, connector, or mode is a
 structured capability result—not a reason to fall back silently to SDL text

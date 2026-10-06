@@ -1381,11 +1381,6 @@ static int apply_cell_update(BlitSurface *surface, const char *json)
                 }
                 mark_surface_damage(surface, x + (int)i, y);
             }
-            if (surface->width > x) {
-                mark_surface_damage(surface, x, y);
-                if (surface->damage_width < surface->width - x)
-                    surface->damage_width = surface->width - x;
-            }
             updated += 1;
         }
         cursor += 3;
@@ -4822,9 +4817,11 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
 
     if (runtime->direct_kms) {
         BlitKmsSurfaceView views[BLIT_MAX_SESSIONS];
+        int damage_consumed[BLIT_MAX_SESSIONS];
         int view_count = 0;
         int surface_index;
         (void)plan;
+        memset(damage_consumed, 0, sizeof(damage_consumed));
         for (surface_index = 0; surface_index < BLIT_MAX_SESSIONS &&
              view_count < BLIT_MAX_SESSIONS; ++surface_index) {
             BlitSurface *surface = &runtime->surfaces[surface_index];
@@ -4880,12 +4877,21 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
             views[view_count].damage_y = surface->damage_y;
             views[view_count].damage_width = surface->damage_width;
             views[view_count].damage_height = surface->damage_height;
+            views[view_count].damage_consumed =
+                &damage_consumed[view_count];
             ++view_count;
         }
         if (blit_kms_present(runtime->kms, views, view_count,
                              runtime->pointer_x, runtime->pointer_y,
                              runtime->pointer_valid) < 0)
             fprintf(stderr, "blit: direct KMS present failed\n");
+        for (surface_index = 0; surface_index < view_count; ++surface_index)
+            if (damage_consumed[surface_index]) {
+                BlitSurface *surface = find_surface_id(
+                    runtime, views[surface_index].surface_id);
+                if (surface != NULL)
+                    surface->damage_valid = 0;
+            }
         runtime->pointer_dirty = 0;
         return;
     }
@@ -5104,6 +5110,12 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
         render_pointer(runtime, output_index);
         SDL_RenderPresent(renderer);
         runtime->outputs[output_index].initialized = 1;
+    }
+    for (plan_index = 0; plan_index < plan->surface_count; ++plan_index) {
+        BlitSurface *surface = find_surface_id(
+            runtime, plan->surfaces[plan_index].surface_id);
+        if (surface != NULL)
+            surface->damage_valid = 0;
     }
     runtime->pointer_dirty = 0;
 }
