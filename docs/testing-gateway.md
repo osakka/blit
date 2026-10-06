@@ -64,6 +64,13 @@ BLIT_GATE_PORT=19202 BLIT_GATE_TOKEN=blit-network-gate \
 It holds one request fragmented for one second while requiring an independent
 authenticated diagnostics request to complete in under 800 ms.
 
+Writes use the same bounded policy: HTTP and WebSocket sends are nonblocking.
+If a receiver cannot accept the next bounded write, the HTTP response is
+closed or the WebSocket stream is removed. Blit does not sleep in the gateway
+loop waiting for a remote reader. The network gate also opens a small receive
+buffer, requests a large surface snapshot without reading it, and verifies
+that an independent diagnostics request completes in under 800 ms.
+
 The Hibr VKMS fixture must stage the exact Hibr executable, modules, and
 desktop tree being tested. Refresh an existing initramfs tree with:
 

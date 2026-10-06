@@ -728,8 +728,18 @@ static int send_all(int fd, const void *data, size_t length)
     size_t sent = 0;
 
     while (sent < length) {
-        ssize_t result = send(fd, bytes + sent, length - sent, 0);
+        ssize_t result = send(fd, bytes + sent, length - sent,
+                             MSG_DONTWAIT | MSG_NOSIGNAL);
 
+        if (result < 0 && (errno == EINTR || errno == EAGAIN ||
+                           errno == EWOULDBLOCK)) {
+            if (errno == EINTR)
+                continue;
+            /* A slow receiver must not hold the single gateway loop.  The
+               caller treats this as a failed connection and removes the
+               stream or closes the HTTP response socket. */
+            return 0;
+        }
         if (result <= 0)
             return 0;
         sent += (size_t)result;

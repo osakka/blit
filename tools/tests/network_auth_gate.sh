@@ -48,6 +48,8 @@ fi
 
 BLIT_GATE_PORT="$PORT" BLIT_GATE_TOKEN="$TOKEN" \
     ruby "$ROOT/tools/tests/http_fragmentation_gate.rb" "$PORT"
+BLIT_GATE_PORT="$PORT" BLIT_GATE_TOKEN="$TOKEN" \
+    ruby "$ROOT/tools/tests/http_backpressure_gate.rb" "$PORT"
 
 unauth=$(curl -sS -o "$UNAUTH" -w '%{http_code}' \
     "http://127.0.0.1:$PORT/v1/server")
