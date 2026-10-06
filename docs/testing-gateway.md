@@ -5,7 +5,7 @@
 The TCC-built server has been exercised locally with the SDL dummy backend and
 in QEMU with direct DRM/KMS:
 
-- OpenAPI YAML parses as OpenAPI 3 with 13 routes and 30 schemas.
+- OpenAPI YAML parses as OpenAPI 3.1 with 18 paths and 40 schemas.
 - The WebSocket upgrade on `/v1/stream` returns `101 Switching Protocols`.
 - The TCC WebSocket probe also delivers a deliberately fragmented, masked
   subscription message and receives `subscription_received`, proving TCP and
