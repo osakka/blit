@@ -24,6 +24,8 @@ typedef struct {
 void blit_font_load(BlitFont *font);
 void blit_font_free(BlitFont *font);
 size_t blit_font_glyph_index(const BlitFont *font, uint32_t codepoint);
+uint32_t blit_font_glyph_row(const BlitFont *font, size_t glyph,
+                             uint32_t codepoint, int row);
 int blit_font_glyph_pixel(const BlitFont *font, size_t glyph,
                           uint32_t codepoint, int row, int column);
 int blit_font_width(const BlitFont *font);

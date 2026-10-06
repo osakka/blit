@@ -237,6 +237,8 @@ static void draw_glyph(KmsOutput *output, const BlitFont *font,
         uint32_t *pixels;
         int py = y + glyph_row;
         int source_row = glyph_row * font_height / ch;
+        uint32_t row_bits = blit_font_glyph_row(font, glyph, codepoint,
+                                                source_row);
         if (py < 0 || py >= output->mode.vdisplay) continue;
         if (source_row < 0 || source_row >= font_height) continue;
         pixels = (uint32_t *)((unsigned char *)output->back.map +
@@ -244,8 +246,7 @@ static void draw_glyph(KmsOutput *output, const BlitFont *font,
         for (glyph_column = 0; glyph_column < cw; ++glyph_column) {
             int source_column = glyph_column * font_width / cw;
             int px = x + glyph_column;
-            if (blit_font_glyph_pixel(font, glyph, codepoint, source_row,
-                                      source_column) &&
+            if ((row_bits & (1U << (font_width - source_column - 1))) &&
                 px >= 0 && px < output->mode.hdisplay)
                 pixels[px] = color;
         }

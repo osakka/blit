@@ -278,17 +278,41 @@ static int fallback_pixel(uint32_t codepoint, int row, int column)
     return 0;
 }
 
+uint32_t blit_font_glyph_row(const BlitFont *font, size_t glyph,
+                             uint32_t codepoint, int row)
+{
+    uint32_t bits = 0;
+    int width = font != NULL && font->data != NULL && font->width > 0 ?
+        font->width : 5;
+    int column;
+    if (font != NULL && font->data != NULL && row >= 0 &&
+        row < font->height && width <= 32) {
+        size_t row_bytes = (size_t)((width + 7) / 8);
+        const unsigned char *source = font->data + font->glyph_offset +
+            glyph * font->glyph_bytes + row * row_bytes;
+        for (column = 0; column < width; ++column)
+            if (source[column / 8] & (0x80 >> (column % 8)))
+                bits |= 1U << (width - column - 1);
+        return bits;
+    }
+    if (width > 32)
+        return 0;
+    for (column = 0; column < width; ++column)
+        if (fallback_pixel(codepoint, row, column))
+            bits |= 1U << (width - column - 1);
+    return bits;
+}
+
 int blit_font_glyph_pixel(const BlitFont *font, size_t glyph,
                           uint32_t codepoint, int row, int column)
 {
-    size_t row_bytes;
     if (font == NULL || font->data == NULL)
         return fallback_pixel(codepoint, row, column);
-    if (row < 0 || column < 0 ||
-        row >= font->height || column >= font->width) return 0;
-    row_bytes = (size_t)((font->width + 7) / 8);
-    return (font->data[font->glyph_offset + glyph * font->glyph_bytes +
-                        row * row_bytes + column / 8] & (0x80 >> (column % 8))) != 0;
+    if (font->width <= 0 || font->width > 32 || row < 0 || column < 0 ||
+        row >= font->height || column >= font->width)
+        return 0;
+    return (blit_font_glyph_row(font, glyph, codepoint, row) &
+            (1U << (font->width - column - 1))) != 0;
 }
 
 int blit_font_pixel(const BlitFont *font, uint32_t codepoint, int row, int column)
