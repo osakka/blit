@@ -45,7 +45,7 @@ mkdir -p "$stage/usr/lib/blit" "$stage/usr/bin" \
 # conveniences, not part of the server runtime; Hibr remains an external
 # executable and session/orchestration layer.
 mkdir -p "$stage/usr/lib/blit/bin" "$stage/usr/lib/blit/lib" \
-    "$stage/usr/lib/blit/fonts" "$stage/bin"
+    "$stage/usr/lib/blit/fonts"
 cp -a "$BUNDLE/bin/blit-server" "$stage/usr/lib/blit/bin/"
 cp -a "$BUNDLE/lib/libSDL3.so.0.4.16" "$stage/usr/lib/blit/lib/"
 cp -a "$BUNDLE/fonts/." "$stage/usr/lib/blit/fonts/"
@@ -60,7 +60,6 @@ fi
 ln -s /usr/lib/blit/lib/libSDL3.so.0.4.16 "$stage/usr/lib/libSDL3.so.0"
 ln -s /usr/lib/libSDL3.so.0 "$stage/usr/lib/libSDL3.so"
 ln -s /usr/lib/blit/bin/blit-server "$stage/usr/bin/blit"
-ln -s /usr/lib/blit/bin/blit-server "$stage/bin/blit"
 cp -a "$BUNDLE/README.md" "$stage/usr/share/doc/blit/"
 cp -a "$VERSION_FILE" "$stage/usr/share/doc/blit/VERSION"
 if [ -d "$ROOT/docs" ]; then
