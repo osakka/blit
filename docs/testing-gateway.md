@@ -68,6 +68,10 @@ The SDL3 adapter obtains the complete fullscreen mode list when the backend
 provides it and reports the current/native active mode through the same
 `/v1/displays` contract as direct KMS. If SDL cannot provide a mode list, the
 reported single entry is the observed current mode, not an invented maximum.
+SDL renderers are explicitly configured for vsync and `/v1/diagnostics`
+reports `presentation_sync` as `sdl-vsync`; unsupported SDL synchronization is
+reported as `scheduler-only` rather than being presented as a hardware timing
+guarantee.
 
 Writes use the same bounded policy: HTTP and WebSocket sends are nonblocking.
 If a receiver cannot accept the next bounded write, the HTTP response is

@@ -202,6 +202,7 @@ typedef struct {
     SDL_Renderer *renderer;
     unsigned long long display_id;
     int initialized;
+    int vsync_enabled;
 } BlitOutput;
 
 typedef struct {
@@ -380,6 +381,7 @@ typedef struct {
     int output_count;
     int sdl_ready;
     int direct_kms;
+    int sdl_vsync_failures;
     BlitKms *kms;
     BlitFont font;
     char sdl_screenshot_dir[256];
@@ -880,6 +882,7 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
     int streams = 0;
     int routes = 0;
     int surfaces = 0;
+    const char *presentation_sync;
     int i;
     for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
         if (runtime->sessions[i].used) ++sessions;
@@ -891,6 +894,8 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
         if (runtime->input_routes[i].used) ++routes;
     render_scheduler_json(runtime, scheduler, sizeof(scheduler));
     json_escape(runtime->sdl_error, escaped_error, sizeof(escaped_error));
+    presentation_sync = runtime->direct_kms ? "drm-page-flip" :
+        (runtime->sdl_vsync_failures > 0 ? "scheduler-only" : "sdl-vsync");
     snprintf(body, capacity,
              "{\"revision\":1,\"health\":{\"ready\":%s,"
              "\"backend\":\"%s\",\"error\":\"%s\"},"
@@ -900,7 +905,8 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              "\"render\":{\"pending\":%s,\"interval_ms\":%d,"
              "\"effective_interval_ms\":%d,\"mode\":\"refresh-aware\","
              "\"outputs\":%s,"
-             "\"font_scale\":%d,\"direct_kms\":%s},"
+             "\"font_scale\":%d,\"direct_kms\":%s,"
+             "\"presentation_sync\":\"%s\"},"
              "\"errors\":%s,\"warnings\":%s}",
              (runtime->direct_kms ? runtime->display_count > 0 :
               runtime->sdl_ready && runtime->output_count > 0) ?
@@ -911,7 +917,7 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              runtime->render_interval_ms, runtime->render_effective_interval_ms,
              scheduler,
              runtime->font_scale,
-             runtime->direct_kms ? "true" : "false",
+             runtime->direct_kms ? "true" : "false", presentation_sync,
              runtime->sdl_error[0] ? "[\"backend_error\"]" : "[]",
              runtime_has_failed_display(runtime) ?
                  "[\"display_presentation_failed\"]" :
@@ -7049,6 +7055,18 @@ static void initialize_outputs(BlitRuntime *runtime)
                      "display %llu renderer: %s", display->id, SDL_GetError());
             SDL_DestroyWindow(window);
             continue;
+        }
+        if (SDL_SetRenderVSync(renderer, 1)) {
+            int vsync = 0;
+            if (SDL_GetRenderVSync(renderer, &vsync) && vsync > 0)
+                runtime->outputs[runtime->output_count].vsync_enabled = 1;
+            else
+                ++runtime->sdl_vsync_failures;
+        } else {
+            ++runtime->sdl_vsync_failures;
+            fprintf(stderr,
+                    "blit: SDL renderer display=%llu cannot enable vsync: %s\n",
+                    display->id, SDL_GetError());
         }
         SDL_SetRenderScale(renderer, (float)runtime->font_scale,
                            (float)runtime->font_scale);

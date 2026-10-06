@@ -73,6 +73,7 @@ if [ "$unauth" != 401 ] || [ "$auth" != 200 ] ||
    [ "$diagnostics" != 200 ] || [ "$graphics" != 200 ] ||
    [ "$audio" != 200 ] || [ "$displays" != 200 ] ||
    ! grep -q '"health"' "$DIAGNOSTICS" ||
+   ! grep -q '"presentation_sync":' "$DIAGNOSTICS" ||
    ! grep -q '"graphics_cards"' "$GRAPHICS" ||
    ! grep -q '"devices"' "$AUDIO" ||
    ! grep -q '"modes":\[' "$DISPLAYS" ||
