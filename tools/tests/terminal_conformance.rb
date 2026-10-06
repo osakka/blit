@@ -152,12 +152,13 @@ assert_equal(0, request(base, 'GET', '/v1/overlays').fetch('overlays').length,
              'overlay deletion')
 puts 'PASS bounded-overlay-lifecycle'
 
-def run_case(base, name, command, width: 20, height: 4)
+def run_case(base, name, command, width: 20, height: 4, environment: {})
   created = request(base, 'POST', '/v1/terminal-sessions', {
     'command' => '/bin/sh',
     # Keep the PTY open long enough for the gateway's nonblocking drain loop
     # to observe the command's final bytes before lifecycle reaping closes it.
     'arguments' => ['-c', "#{command}; sleep 0.1"],
+    'environment' => environment,
     'surface' => { 'width' => width, 'height' => height }
   })
   id = created.fetch('id')
@@ -662,6 +663,14 @@ snapshot = run_case(base, 'osc-hyperlink',
 cells = cell_map(snapshot)
 assert_equal('https://example.test', cells.fetch([0, 0]).fetch('link'),
              'OSC 8 hyperlink URI')
+
+snapshot = run_case(base, 'osc-theme-colour-query',
+                    "stty raw -echo min 0 time 5; printf '\\033]11;?\\033\\\\'; r=$(dd bs=1 count=25 2>/dev/null); printf 'got:%s' \"$(printf %s \"${r}\" | tr '\\033\\\\' EB)\"",
+                    width: 70,
+                    environment: { 'DT_INK' => '#cbd5e0',
+                                    'DT_FACE' => '#101820' })
+assert_equal('got:E]11;rgb:1010/1818/2020EB', row_text(snapshot),
+             'OSC 11 theme background query')
 
 snapshot = run_case(base, 'scroll-region', "printf 'A\\nB\\n\\033[2;3r\\033[2;1H1\\n2\\n3'", height: 4)
 cells = cell_map(snapshot)

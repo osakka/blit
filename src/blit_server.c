@@ -246,6 +246,8 @@ typedef struct {
     char terminal_title[128];
     char terminal_clipboard[4096];
     char terminal_notification[1024];
+    char terminal_default_foreground[32];
+    char terminal_default_background[32];
     char terminal_link_uris[32][256];
     int terminal_link_count;
     uint16_t terminal_link;
@@ -2413,6 +2415,27 @@ static void terminal_restore_cursor(BlitSession *session, BlitSurface *surface)
     mark_surface_damage(surface, surface->cursor_x, surface->cursor_y);
 }
 
+static int terminal_colour_reply(const char *value, char *reply,
+                                 size_t capacity)
+{
+    int index;
+
+    if (value == NULL || strlen(value) != 7 || value[0] != '#')
+        return 0;
+    for (index = 1; index < 7; ++index) {
+        char digit = value[index];
+        if (!((digit >= '0' && digit <= '9') ||
+              (digit >= 'a' && digit <= 'f') ||
+              (digit >= 'A' && digit <= 'F')))
+            return 0;
+    }
+    snprintf(reply, capacity, "rgb:%c%c%c%c/%c%c%c%c/%c%c%c%c",
+             value[1], value[2], value[1], value[2],
+             value[3], value[4], value[3], value[4],
+             value[5], value[6], value[5], value[6]);
+    return 1;
+}
+
 static void terminal_apply_osc(BlitSession *session)
 {
     char *separator;
@@ -2430,6 +2453,18 @@ static void terminal_apply_osc(BlitSession *session)
     if (command == 0 || command == 1 || command == 2) {
         snprintf(session->terminal_title, sizeof(session->terminal_title),
                  "%s", payload);
+    } else if ((command == 10 || command == 11) &&
+               strcmp(payload, "?") == 0) {
+        char colour[32];
+        const char *configured = command == 10 ?
+            session->terminal_default_foreground :
+            session->terminal_default_background;
+        if (terminal_colour_reply(configured, colour, sizeof(colour))) {
+            char reply[96];
+            snprintf(reply, sizeof(reply), "\033]%d;%s\033\\",
+                     command, colour);
+            terminal_write_reply(session, reply);
+        }
     } else if (command == 52) {
         /* Keep OSC 52 in Hibr's canonical selection;base64 form.  A query
            (selection;?) is deliberately not answered or treated as a set. */
@@ -4174,6 +4209,25 @@ static int create_session(BlitRuntime *runtime, const char *json,
             session->revision = 1;
             session->exit_code = -1;
             session->terminal_autowrap = 1;
+            {
+                int environment_index;
+                for (environment_index = 0;
+                     environment_index < environment_count;
+                     ++environment_index) {
+                    const char *key = environment_keys[environment_index];
+                    const char *value = environment_values[environment_index];
+                    if (strcmp(key, "DT_INK") == 0 ||
+                        strcmp(key, "BLIT_TERMINAL_FG") == 0)
+                        snprintf(session->terminal_default_foreground,
+                                 sizeof(session->terminal_default_foreground),
+                                 "%s", value);
+                    else if (strcmp(key, "DT_FACE") == 0 ||
+                             strcmp(key, "BLIT_TERMINAL_BG") == 0)
+                        snprintf(session->terminal_default_background,
+                                 sizeof(session->terminal_default_background),
+                                 "%s", value);
+                }
+            }
             session->surface_mode = strcmp(surface_mode, "external") == 0 ?
                 BLIT_SURFACE_EXTERNAL :
                 (strcmp(surface_mode, "mirror") == 0 ?

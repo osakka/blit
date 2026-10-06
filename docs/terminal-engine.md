@@ -55,6 +55,10 @@ shell conformance path is stable.
    continue presenting normally. The synchronized surface retains its last
    complete frame and its damage until release. Its terminal state is reset by
    RIS and DEC soft reset. Colon SGR forms, underline colour (`58`/`59`), and
+   OSC 10/11 background and foreground queries answer from validated
+   `DT_INK`/`DT_FACE` (or `BLIT_TERMINAL_FG`/`BLIT_TERMINAL_BG`) session
+   environment values, preserving Hibr theme negotiation without a shell
+   wrapper.
    Hibr's modifyOtherKeys/cursor push-pop prefixes are parsed without leaking
    their control parameters into cell attributes.
    SGR italic (`3`/`23`), blink (`5`/`6`/`25`), and strike (`9`/`29`) are
