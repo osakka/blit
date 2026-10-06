@@ -504,6 +504,36 @@ static void server_json(const BlitRuntime *runtime, char *body, size_t capacity)
                  "true" : "false", escaped_error);
 }
 
+static const char *display_presentation_state(const BlitRuntime *runtime,
+                                              int display_index)
+{
+    if (runtime->direct_kms) {
+        BlitKmsDisplayInfo info;
+        if (blit_kms_display_info(runtime->kms, display_index, &info) == 0 &&
+            info.presentation_state == BLIT_KMS_PRESENTATION_FAILED)
+            return "failed";
+        return "presenting";
+    }
+    {
+        int output_index;
+        for (output_index = 0; output_index < runtime->output_count;
+             ++output_index)
+            if (runtime->outputs[output_index].display_id ==
+                runtime->displays[display_index].id)
+                return "presenting";
+    }
+    return "failed";
+}
+
+static int runtime_has_failed_display(const BlitRuntime *runtime)
+{
+    int i;
+    for (i = 0; i < runtime->display_count; ++i)
+        if (strcmp(display_presentation_state(runtime, i), "failed") == 0)
+            return 1;
+    return 0;
+}
+
 static void diagnostics_json(const BlitRuntime *runtime, char *body,
                              size_t capacity)
 {
@@ -542,8 +572,11 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              runtime->render_interval_ms, runtime->font_scale,
              runtime->direct_kms ? "true" : "false",
              runtime->sdl_error[0] ? "[\"backend_error\"]" : "[]",
-             runtime->evdev_keyboard_count == 0 || runtime->evdev_mouse_count == 0 ?
-                 "[\"input_device_missing\"]" : "[]");
+             runtime_has_failed_display(runtime) ?
+                 "[\"display_presentation_failed\"]" :
+                 (runtime->evdev_keyboard_count == 0 ||
+                  runtime->evdev_mouse_count == 0 ?
+                  "[\"input_device_missing\"]" : "[]"));
 }
 
 static void displays_json(const BlitRuntime *runtime, char *body, size_t capacity)
@@ -564,14 +597,15 @@ static void displays_json(const BlitRuntime *runtime, char *body, size_t capacit
             "\"height\":%d},\"modes\":[{\"width\":%d,"
             "\"height\":%d,\"refresh_hz\":%.3f}],"
             "\"active_mode\":{\"width\":%d,\"height\":%d,"
-            "\"refresh_hz\":%.3f},\"presentation_state\":\"presenting\"}",
+            "\"refresh_hz\":%.3f},\"presentation_state\":\"%s\"}",
             i == 0 ? "" : ",", runtime->displays[i].id, escaped_name,
             runtime->displays[i].bounds.x, runtime->displays[i].bounds.y,
             runtime->displays[i].bounds.w, runtime->displays[i].bounds.h,
             runtime->displays[i].bounds.w, runtime->displays[i].bounds.h,
             runtime->displays[i].refresh_hz,
             runtime->displays[i].bounds.w, runtime->displays[i].bounds.h,
-            runtime->displays[i].refresh_hz);
+            runtime->displays[i].refresh_hz,
+            display_presentation_state(runtime, i));
     }
     snprintf(body + used, capacity - used, "]}");
 }

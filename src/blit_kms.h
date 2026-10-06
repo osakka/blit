@@ -48,7 +48,13 @@ typedef struct {
     int width;
     int height;
     double refresh_hz;
+    int presentation_state;
 } BlitKmsDisplayInfo;
+
+#define BLIT_KMS_PRESENTATION_AVAILABLE 0
+#define BLIT_KMS_PRESENTATION_UNAVAILABLE 1
+#define BLIT_KMS_PRESENTATION_PRESENTING 2
+#define BLIT_KMS_PRESENTATION_FAILED 3
 
 BlitKms *blit_kms_new(BlitFont *font);
 int blit_kms_open(BlitKms *kms, char *error, size_t error_capacity);

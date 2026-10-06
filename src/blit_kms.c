@@ -680,6 +680,7 @@ int blit_kms_open(BlitKms *kms, char *error, size_t error_capacity)
         output->info.width = output->mode.hdisplay; output->info.height = output->mode.vdisplay;
         output->info.refresh_hz = output->mode.vrefresh > 0 ?
             (double)output->mode.vrefresh : 60.0;
+        output->info.presentation_state = BLIT_KMS_PRESENTATION_PRESENTING;
     if (make_buffer(kms->fd, output, &output->front) < 0 ||
         make_buffer(kms->fd, output, &output->back) < 0) {
         drmModeFreeConnector(connector); drmModeFreeResources(resources); return -1;
@@ -730,6 +731,7 @@ int blit_kms_service(BlitKms *kms, int readable)
         output->modeset_fallback = 1;
         output->flip_pending = 0;
         output->flip_started_us = 0;
+        output->info.presentation_state = BLIT_KMS_PRESENTATION_FAILED;
         fprintf(stderr,
                 "blit: KMS page-flip timeout on connector=%u; using modeset fallback\n",
                 output->connector);
@@ -945,12 +947,18 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                                              output->back.fb, 0, 0,
                                              &output->connector, 1,
                                              &output->mode);
-                if (flip_result < 0) return -1;
+                if (flip_result < 0) {
+                    output->info.presentation_state =
+                        BLIT_KMS_PRESENTATION_FAILED;
+                    return -1;
+                }
                 if (output->modeset_fallback) {
                     fprintf(stderr,
                             "blit: KMS modeset recovery complete on connector=%u; resuming page flips\n",
                             output->connector);
                     output->modeset_fallback = 0;
+                    output->info.presentation_state =
+                        BLIT_KMS_PRESENTATION_PRESENTING;
                 }
                 output->flip_pending = 0;
                 output->flip_started_us = 0;
@@ -974,7 +982,11 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                                               output->back.fb,
                                               DRM_MODE_PAGE_FLIP_EVENT,
                                               output);
-            if (flip_result < 0) return -1;
+            if (flip_result < 0) {
+                output->info.presentation_state =
+                    BLIT_KMS_PRESENTATION_FAILED;
+                return -1;
+            }
         }
         output->flip_pending = 1;
         output->flip_started_us = kms_now_us();
