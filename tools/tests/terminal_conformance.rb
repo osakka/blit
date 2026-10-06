@@ -273,6 +273,25 @@ assert_equal('b', live_cells.fetch([0, 0]).fetch('text'),
              'scrollback view returns to live first row')
 assert_equal('c', live_cells.fetch([0, 1]).fetch('text'),
              'scrollback view returns to live second row')
+clear_scrollback = request(base, 'POST', '/v1/terminal-sessions', {
+  'command' => '/bin/sh',
+  'arguments' => ['-c', "printf 'a\\nb\\nc\\033[3J'; sleep 1"],
+  'surface' => { 'width' => 4, 'height' => 2 }
+})
+clear_scrollback_id = clear_scrollback.fetch('id')
+Timeout.timeout(5) do
+  loop do
+    state = request(base, 'GET', "/v1/terminal-sessions/#{clear_scrollback_id}")
+    break unless %w[starting running].include?(state.fetch('state'))
+
+    sleep 0.02
+  end
+end
+cleared = request(base, 'GET',
+                  "/v1/surfaces/surface-#{clear_scrollback_id}/scrollback")
+assert_equal(0, cleared.fetch('count'), 'CSI 3 J clears scrollback')
+request(base, 'DELETE', "/v1/terminal-sessions/#{clear_scrollback_id}")
+puts 'PASS csi-3J-clears-scrollback'
 request(base, 'DELETE', "/v1/terminal-sessions/#{scrollback_id}")
 puts 'PASS scrollback-retains-main-screen-lines'
 

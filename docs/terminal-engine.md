@@ -60,7 +60,8 @@ shell conformance path is stable.
    SDL, and KMS paths.
    Device status replies include DA1/DA2, XTVERSION, CPR, window size,
    DECRQSS, and XTGETTCAP; erase operations preserve the active background
-   colour according to BCE semantics.
+   colour according to BCE semantics. `CSI 3 J` also releases retained
+   main-screen scrollback instead of merely clearing visible cells.
 
 The direct KMS test remains the hardware oracle; the terminal engine must not
 introduce a second display or terminal implementation.

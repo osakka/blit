@@ -3198,6 +3198,8 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         } else if (mode == 2 || mode == 3) {
             for (y = 0; y < surface->height; ++y)
                 terminal_erase_line(session, surface, y, 0);
+            if (mode == 3)
+                terminal_scrollback_release(surface);
         }
     } else if (command == 'K') {
         int mode = has_first ? first : 0;
