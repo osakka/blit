@@ -33,8 +33,12 @@ export BLIT_KMS_TRACE_TIMING=1
 export BLIT_KMS_TRACE_PHASES=1
 if [ -e /dev/dri/card1 ]; then export BLIT_DRM_DEVICE=/dev/dri/card1; else export BLIT_DRM_DEVICE=/dev/dri/card0; fi
 loss_test=0
+stack_test=0
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
     *" blit.output_loss=1 "*) loss_test=1 ;;
+esac
+case " $($b cat /proc/cmdline 2>/dev/null || true) " in
+    *" blit.kitty_stack=1 "*) stack_test=1 ;;
 esac
 BLIT_DISPLAY_BACKEND=kms BLIT_BIND_ADDRESS=127.0.0.1 /blit-stage/ld-linux-x86-64.so.2 --library-path /blit-stage:/blit-stage/lib /blit-stage/blit-server 19191 >/tmp/blit.log 2>&1 &
 ready=0
@@ -52,7 +56,11 @@ echo "$graphics_inventory" | $b grep -q '"vendor":"' || graphics_pass=0
 echo "$graphics_inventory" | $b grep -q '"device":"' || graphics_pass=0
 echo "$graphics_inventory" | $b grep -q '"driver":"' || graphics_pass=0
 echo "$graphics_inventory" | $b grep -q '"hardware_acceleration":' || graphics_pass=0
-$b wget -qO /tmp/one.json --post-data='{"command":"/blit-stage/pty-input-echo","arguments":["--wide","--kitty"],"surface_mode":"terminal","display_id":"display-47","surface":{"width":128,"height":48}}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
+if [ "$stack_test" -eq 1 ]; then
+    $b wget -qO /tmp/one.json --post-data='{"command":"/blit-stage/pty-input-echo","arguments":["--wide","--kitty","--stack"],"surface_mode":"terminal","display_id":"display-47","surface":{"width":128,"height":48}}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
+else
+    $b wget -qO /tmp/one.json --post-data='{"command":"/blit-stage/pty-input-echo","arguments":["--wide","--kitty"],"surface_mode":"terminal","display_id":"display-47","surface":{"width":128,"height":48}}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
+fi
 $b wget -qO /tmp/two.json --post-data='{"command":"/blit-stage/pty-input-echo","surface_mode":"terminal","display_id":"display-48","surface":{"width":128,"height":48}}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
 [ "$loss_test" -eq 1 ] && ( $b sleep 2; echo 0 > /sys/kernel/config/vkms/blit/connectors/connector0/status ) &
 $b sleep 5
@@ -75,7 +83,11 @@ for shot in /tmp/guest-screenshots/display-47.ppm /tmp/guest-screenshots/display
         echo FRAME_FILE; $b sha256sum "$shot"; $b od -An -t u1 -N 32 "$shot"
     fi
 done
-/blit-stage/ppm-assert /tmp/guest-screenshots/display-47.ppm --wide --kitty && echo PPM_DISPLAY_47_WIDE_KITTY_PASS || { echo PPM_DISPLAY_47_WIDE_KITTY_FAIL; finish 1; }
+if [ "$stack_test" -eq 1 ]; then
+    /blit-stage/ppm-assert /tmp/guest-screenshots/display-47.ppm --wide --green && echo PPM_DISPLAY_47_WIDE_STACK_CLIP_PASS || { echo PPM_DISPLAY_47_WIDE_STACK_CLIP_FAIL; finish 1; }
+else
+    /blit-stage/ppm-assert /tmp/guest-screenshots/display-47.ppm --wide --kitty && echo PPM_DISPLAY_47_WIDE_KITTY_PASS || { echo PPM_DISPLAY_47_WIDE_KITTY_FAIL; finish 1; }
+fi
 /blit-stage/ppm-assert /tmp/guest-screenshots/display-48.ppm && echo PPM_DISPLAY_48_PASS || { echo PPM_DISPLAY_48_FAIL; finish 1; }
 $b cp /tmp/guest-screenshots/display-*.ppm /tmp/host-screenshots/ 2>/dev/null || true
 size1=$($b wc -c < /tmp/guest-screenshots/display-47.ppm 2>/dev/null || echo 0)

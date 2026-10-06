@@ -13,12 +13,14 @@ int main(int argc, char **argv)
     int focus = 0;
     int wide = 0;
     int kitty = 0;
+    int stack = 0;
     int argument;
     for (argument = 1; argument < argc; ++argument) {
         if (strcmp(argv[argument], "--mouse") == 0) mouse = 1;
         if (strcmp(argv[argument], "--focus") == 0) focus = 1;
         if (strcmp(argv[argument], "--wide") == 0) wide = 1;
         if (strcmp(argv[argument], "--kitty") == 0) kitty = 1;
+        if (strcmp(argv[argument], "--stack") == 0) stack = 1;
     }
     if (tcgetattr(STDIN_FILENO, &saved) == 0) {
         raw = saved;
@@ -33,10 +35,18 @@ int main(int argc, char **argv)
         fputs("\033[?1003h\033[?1006h", stdout);
     if (focus)
         fputs("\033[?1004h", stdout);
-    if (kitty)
+    if (kitty) {
         fputs("\033_Ga=t,f=24,s=1,v=1,i=7,m=1;/w\033\\"
-              "\033_Ga=t,i=7,m=0;AA\033\\"
-              "\033_Ga=p,i=7;\033\\", stdout);
+              "\033_Ga=t,i=7,m=0;AA\033\\", stdout);
+        if (stack)
+            fputs("\033_Ga=t,f=24,s=1,v=1,i=8;AP8A\033\\"
+                  "\033_Ga=p,i=7,z=1;\033\\"
+                  "\033_Ga=p,i=8,z=2;\033\\"
+                  "\033_Ga=t,f=24,s=2,v=1,i=9;/wAAAP8A\033\\"
+                  "\033_Ga=p,i=9,x=-1,y=32,z=3;\033\\", stdout);
+        else
+            fputs("\033_Ga=p,i=7;\033\\", stdout);
+    }
     fputs("READY", stdout);
     if (wide)
         fputs("\342\224\200", stdout);

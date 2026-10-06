@@ -165,6 +165,12 @@ failed connector remains in `/v1/displays` as `failed`, the other connector
 remains `presenting`, and `/v1/diagnostics` reports
 `display_presentation_failed` while the server stays ready.
 
+The fixture also accepts `blit.kitty_stack=1`. This sends two overlapping
+Kitty images with different z values and a two-pixel image positioned partly
+outside the pane. `PPM_DISPLAY_47_WIDE_STACK_CLIP_PASS` requires the higher-z
+pixel and the clipped image's visible second pixel at their exact coordinates;
+the equivalent SDL3 fixture uses the BMP oracle.
+
 ## Pointer stress gate
 
 The input-only QEMU variant starts two terminal surfaces, routes the synthetic

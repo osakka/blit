@@ -1,6 +1,7 @@
 /* Deterministic 24-bit BMP oracle for the SDL3 Kitty pixel fixture. */
 #include <stdio.h>
 #include <stdint.h>
+#include <string.h>
 
 static uint32_t little32(const unsigned char *bytes)
 {
@@ -23,8 +24,13 @@ int main(int argc, char **argv)
     int32_t height;
     uint32_t row;
     long position;
+    int require_green = 0;
 
-    if (argc != 2) return 2;
+    if (argc < 2 || argc > 3) return 2;
+    if (argc == 3) {
+        if (strcmp(argv[2], "--green") != 0) return 2;
+        require_green = 1;
+    }
     file = fopen(argv[1], "rb");
     if (file == NULL || fread(header, 1, sizeof(header), file) != sizeof(header))
         return 1;
@@ -41,8 +47,21 @@ int main(int argc, char **argv)
         fclose(file);
         return 1;
     }
-    fclose(file);
-    if (pixel[0] != 0x00 || pixel[1] != 0x00 || pixel[2] != 0xff)
+    if (!require_green &&
+        (pixel[0] != 0x00 || pixel[1] != 0x00 || pixel[2] != 0xff))
         return 1;
+    if (require_green) {
+        int y;
+        for (y = 4; y <= 36; y += 32) {
+            row = (uint32_t)(height - 1 - y);
+            position = (long)offset +
+                (long)row * (long)(((width * 3U + 3U) / 4U) * 4U) + 4L * 3L;
+            if (fseek(file, position, SEEK_SET) != 0 ||
+                fread(pixel, 1, 3, file) != 3 || pixel[0] != 0x00 ||
+                pixel[1] != 0xff || pixel[2] != 0x00)
+                return 1;
+        }
+    }
+    fclose(file);
     return 0;
 }

@@ -51,6 +51,21 @@ static int has_kitty_red(FILE *file)
         rgb[0] == 0xff && rgb[1] == 0x00 && rgb[2] == 0x00;
 }
 
+static int has_kitty_green_at(FILE *file, int y)
+{
+    unsigned char rgb[3];
+    return pixel(file, 16L + ((long)y * 1024L + 4) * 3L, rgb) &&
+        rgb[0] == 0x00 && rgb[1] == 0xff && rgb[2] == 0x00;
+}
+
+static void report_pixel(FILE *file, int y)
+{
+    unsigned char rgb[3];
+    if (pixel(file, 16L + ((long)y * 1024L + 4) * 3L, rgb))
+        fprintf(stdout, "KITTY_PIXEL y=%d rgb=%u,%u,%u\n", y,
+                rgb[0], rgb[1], rgb[2]);
+}
+
 int main(int argc, char **argv)
 {
     FILE *file;
@@ -60,12 +75,14 @@ int main(int argc, char **argv)
 
     int require_wide = 0;
     int require_kitty = 0;
+    int require_green = 0;
     int argument;
 
     if (argc < 2 || argc > 4) return 2;
     for (argument = 2; argument < argc; ++argument) {
         if (strcmp(argv[argument], "--wide") == 0) require_wide = 1;
         else if (strcmp(argv[argument], "--kitty") == 0) require_kitty = 1;
+        else if (strcmp(argv[argument], "--green") == 0) require_green = 1;
         else return 2;
     }
     file = fopen(argv[1], "rb");
@@ -79,13 +96,19 @@ int main(int argc, char **argv)
         fclose(file);
         return 1;
     }
+    if (require_green) {
+        report_pixel(file, 4);
+        report_pixel(file, 36);
+    }
     if (fseek(file, 0, SEEK_END) != 0 || (size = ftell(file)) != 2359312L ||
         !pixel(file, 16L, rgb) || rgb[0] != 0 || rgb[1] != 0 || rgb[2] != 0 ||
         !pixel(file, 16L + ((long)100 * 1024L + 100) * 3L, rgb) ||
         rgb[0] != 0 || rgb[1] != 0 || rgb[2] != 0 ||
         !has_foreground(file) ||
         (require_wide && !has_wide_foreground(file)) ||
-        (require_kitty && !has_kitty_red(file))) {
+        (require_kitty && !has_kitty_red(file)) ||
+        (require_green && !has_kitty_green_at(file, 4)) ||
+        (require_green && !has_kitty_green_at(file, 36))) {
         fclose(file);
         return 1;
     }
