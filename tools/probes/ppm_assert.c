@@ -44,6 +44,13 @@ static int has_wide_foreground(FILE *file)
     return left && right;
 }
 
+static int has_kitty_red(FILE *file)
+{
+    unsigned char rgb[3];
+    return pixel(file, 16L + ((long)4 * 1024L + 4) * 3L, rgb) &&
+        rgb[0] == 0xff && rgb[1] == 0x00 && rgb[2] == 0x00;
+}
+
 int main(int argc, char **argv)
 {
     FILE *file;
@@ -51,8 +58,16 @@ int main(int argc, char **argv)
     long size;
     char header[32];
 
-    if (argc != 2 && argc != 3) return 2;
-    if (argc == 3 && strcmp(argv[2], "--wide") != 0) return 2;
+    int require_wide = 0;
+    int require_kitty = 0;
+    int argument;
+
+    if (argc < 2 || argc > 4) return 2;
+    for (argument = 2; argument < argc; ++argument) {
+        if (strcmp(argv[argument], "--wide") == 0) require_wide = 1;
+        else if (strcmp(argv[argument], "--kitty") == 0) require_kitty = 1;
+        else return 2;
+    }
     file = fopen(argv[1], "rb");
     if (file == NULL) return 1;
     if (fgets(header, sizeof(header), file) == NULL ||
@@ -69,8 +84,8 @@ int main(int argc, char **argv)
         !pixel(file, 16L + ((long)100 * 1024L + 100) * 3L, rgb) ||
         rgb[0] != 0 || rgb[1] != 0 || rgb[2] != 0 ||
         !has_foreground(file) ||
-        (argc == 3 && strcmp(argv[2], "--wide") == 0 &&
-         !has_wide_foreground(file))) {
+        (require_wide && !has_wide_foreground(file)) ||
+        (require_kitty && !has_kitty_red(file))) {
         fclose(file);
         return 1;
     }

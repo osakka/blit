@@ -2,6 +2,7 @@
 #include <linux/input.h>
 #include "blit_kms.h"
 #include "blit_font.h"
+#include "blit_graphics.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -287,6 +288,7 @@ typedef struct {
     int terminal_synchronized;
     uint32_t terminal_underline_color;
     int terminal_underline_color_set;
+    BlitGraphicsImage graphics[BLIT_GRAPHICS_MAX_IMAGES];
 } BlitSession;
 
 enum {
@@ -1688,6 +1690,15 @@ static void mark_surface_damage_width(BlitSurface *surface, int x, int y,
         surface->damage_height = bottom - surface->damage_y;
 }
 
+static void mark_surface_full_damage(BlitSurface *surface)
+{
+    surface->damage_valid = 1;
+    surface->damage_x = 0;
+    surface->damage_y = 0;
+    surface->damage_width = surface->width;
+    surface->damage_height = surface->height;
+}
+
 static int apply_cell_update(BlitSurface *surface, const char *json)
 {
     const char *cursor = strstr(json, "\"cells\"");
@@ -2669,6 +2680,218 @@ static void terminal_apply_osc(BlitSession *session)
     }
 }
 
+static void graphics_image_release(BlitGraphicsImage *image)
+{
+    if (image == NULL) return;
+    free(image->pixels);
+    memset(image, 0, sizeof(*image));
+}
+
+static BlitGraphicsImage *graphics_image_find(BlitSession *session,
+                                              unsigned int id)
+{
+    int index;
+    for (index = 0; index < BLIT_GRAPHICS_MAX_IMAGES; ++index)
+        if (session->graphics[index].used && session->graphics[index].id == id)
+            return &session->graphics[index];
+    return NULL;
+}
+
+static int kitty_parameter(const char *header, char key, char *value,
+                           size_t capacity)
+{
+    const char *cursor = header;
+    while (*cursor != '\0') {
+        const char *end = strchr(cursor, ',');
+        size_t length = end != NULL ? (size_t)(end - cursor) : strlen(cursor);
+        if (length >= 3 && cursor[0] == key && cursor[1] == '=') {
+            size_t copy = length - 2;
+            if (copy >= capacity) return 0;
+            memcpy(value, cursor + 2, copy);
+            value[copy] = '\0';
+            return 1;
+        }
+        if (end == NULL) break;
+        cursor = end + 1;
+    }
+    return 0;
+}
+
+static int kitty_parameter_int(const char *header, char key, int fallback,
+                               int *value)
+{
+    char text[32];
+    char *end;
+    long parsed;
+    if (!kitty_parameter(header, key, text, sizeof(text))) {
+        *value = fallback;
+        return 1;
+    }
+    parsed = strtol(text, &end, 10);
+    if (*text == '\0' || *end != '\0' || parsed < -2147483647L ||
+        parsed > 2147483647L)
+        return 0;
+    *value = (int)parsed;
+    return 1;
+}
+
+static int kitty_base64_value(unsigned char byte)
+{
+    if (byte >= 'A' && byte <= 'Z') return byte - 'A';
+    if (byte >= 'a' && byte <= 'z') return byte - 'a' + 26;
+    if (byte >= '0' && byte <= '9') return byte - '0' + 52;
+    if (byte == '+') return 62;
+    if (byte == '/') return 63;
+    return -1;
+}
+
+static int kitty_decode_chunk(BlitGraphicsImage *image, const char *payload)
+{
+    unsigned char quartet[4];
+    int quartet_length = image->base64_tail_length;
+    size_t offset = 0;
+    while (offset < strlen(payload)) {
+        int value;
+        unsigned char byte = (unsigned char)payload[offset++];
+        if (byte == '=' || kitty_base64_value(byte) >= 0) {
+            quartet[quartet_length++] = byte;
+            if (quartet_length == 4) {
+                int a = quartet[0] == '=' ? -1 : kitty_base64_value(quartet[0]);
+                int b = quartet[1] == '=' ? -1 : kitty_base64_value(quartet[1]);
+                int c = quartet[2] == '=' ? -1 : kitty_base64_value(quartet[2]);
+                int d = quartet[3] == '=' ? -1 : kitty_base64_value(quartet[3]);
+                if (a < 0 || b < 0 || (c < 0 && quartet[2] != '=') ||
+                    (d < 0 && quartet[3] != '=')) return 0;
+                if (image->bytes + 1 > image->capacity) return 0;
+                image->pixels[image->bytes++] = (unsigned char)((a << 2) | (b >> 4));
+                if (quartet[2] != '=') {
+                    if (image->bytes + 1 > image->capacity) return 0;
+                    image->pixels[image->bytes++] = (unsigned char)((b << 4) | (c >> 2));
+                }
+                if (quartet[3] != '=') {
+                    if (image->bytes + 1 > image->capacity) return 0;
+                    image->pixels[image->bytes++] = (unsigned char)((c << 6) | d);
+                }
+                quartet_length = 0;
+            }
+        } else if (byte != '\n' && byte != '\r' && byte != ' ' && byte != '\t') {
+            return 0;
+        }
+    }
+    if (quartet_length > 0) {
+        memcpy(image->base64_tail, quartet, (size_t)quartet_length);
+        image->base64_tail_length = quartet_length;
+    } else {
+        image->base64_tail_length = 0;
+    }
+    return 1;
+}
+
+static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
+{
+    char *payload = session->terminal_string;
+    char *separator;
+    char action[8];
+    int image_id = 0;
+    int format = 32;
+    int width = 0;
+    int height = 0;
+    int more = 0;
+    int x = surface->cursor_x * 8;
+    int y = surface->cursor_y * 16;
+    int placement_width = 0;
+    int placement_height = 0;
+    int z = 0;
+    BlitGraphicsImage *image;
+    int index;
+
+    payload[session->terminal_string_length] = '\0';
+    if (payload[0] == 'G') ++payload;
+    separator = strchr(payload, ';');
+    if (separator == NULL) return;
+    *separator = '\0';
+    if (!kitty_parameter(payload, 'a', action, sizeof(action)) ||
+        !kitty_parameter_int(payload, 'i', 0, &image_id) || image_id < 0 ||
+        !kitty_parameter_int(payload, 'm', 0, &more) ||
+        !kitty_parameter_int(payload, 'x', x, &x) ||
+        !kitty_parameter_int(payload, 'y', y, &y) ||
+        !kitty_parameter_int(payload, 'c', 0, &placement_width) ||
+        !kitty_parameter_int(payload, 'r', 0, &placement_height) ||
+        !kitty_parameter_int(payload, 'z', 0, &z)) return;
+    if (strcmp(action, "d") == 0) {
+        if (image_id == 0) {
+            for (index = 0; index < BLIT_GRAPHICS_MAX_IMAGES; ++index)
+                graphics_image_release(&session->graphics[index]);
+        } else {
+            image = graphics_image_find(session, (unsigned int)image_id);
+            if (image != NULL) graphics_image_release(image);
+        }
+        mark_surface_full_damage(surface);
+        return;
+    }
+    if (strcmp(action, "p") == 0) {
+        image = graphics_image_find(session, (unsigned int)image_id);
+        if (image == NULL || !image->complete) return;
+        image->visible = 1;
+        image->x = x;
+        image->y = y;
+        image->placement_width = placement_width > 0 ? placement_width : image->width;
+        image->placement_height = placement_height > 0 ? placement_height : image->height;
+        image->z = z;
+        ++image->revision;
+        mark_surface_full_damage(surface);
+        return;
+    }
+    if (strcmp(action, "t") != 0 || image_id == 0 || more < 0 || more > 1)
+        return;
+    if (!kitty_parameter_int(payload, 'f', 32, &format) ||
+        (format != 24 && format != 32)) return;
+    if (!kitty_parameter_int(payload, 's', 0, &width) ||
+        !kitty_parameter_int(payload, 'v', 0, &height) ||
+        width < 1 || width > BLIT_GRAPHICS_MAX_WIDTH ||
+        height < 1 || height > BLIT_GRAPHICS_MAX_HEIGHT)
+        return;
+    image = graphics_image_find(session, (unsigned int)image_id);
+    if (image == NULL) {
+        for (index = 0; index < BLIT_GRAPHICS_MAX_IMAGES; ++index)
+            if (!session->graphics[index].used) {
+                image = &session->graphics[index];
+                break;
+            }
+        if (image == NULL) return;
+        memset(image, 0, sizeof(*image));
+        image->used = 1;
+        image->id = (unsigned int)image_id;
+        image->width = width;
+        image->height = height;
+        image->format = format;
+        image->capacity = (size_t)width * (size_t)height *
+            (format == 24 ? 3U : 4U);
+        if (image->capacity > BLIT_GRAPHICS_MAX_BYTES) {
+            graphics_image_release(image);
+            return;
+        }
+        image->pixels = (unsigned char *)malloc(image->capacity);
+        if (image->pixels == NULL) {
+            graphics_image_release(image);
+            return;
+        }
+        image->revision = 1;
+    }
+    if (image->width != width || image->height != height || image->format != format ||
+        !kitty_decode_chunk(image, separator + 1)) {
+        graphics_image_release(image);
+        return;
+    }
+    if (!more) {
+        if (image->base64_tail_length != 0 || image->bytes != image->capacity) {
+            graphics_image_release(image);
+            return;
+        }
+        image->complete = 1;
+    }
+}
+
 static void terminal_apply_string(BlitSession *session, BlitSurface *surface)
 {
     const char *payload = session->terminal_string;
@@ -2676,6 +2899,10 @@ static void terminal_apply_string(BlitSession *session, BlitSurface *surface)
     int used;
 
     session->terminal_string[session->terminal_string_length] = '\0';
+    if (session->terminal_string_type == '_') {
+        terminal_apply_kitty(session, surface);
+        return;
+    }
     if (session->terminal_string_type != 'P')
         return;
     if (strncmp(payload, "$q", 2) == 0) {
@@ -4243,6 +4470,31 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
                                  surface->cursor_visible ? "true" : "false",
                                  surface->cursor_style);
     }
+    used += (size_t)snprintf(body + used, capacity - used,
+                             ",\"graphics\":[");
+    {
+        int graphics_index;
+        int first_graphics = 1;
+        for (graphics_index = 0; graphics_index < BLIT_GRAPHICS_MAX_IMAGES;
+             ++graphics_index) {
+            BlitGraphicsImage *image = &session->graphics[graphics_index];
+            if (!image->used) continue;
+            used += (size_t)snprintf(body + used, capacity - used,
+                "%s{\"id\":%u,\"complete\":%s,\"visible\":%s,"
+                "\"width\":%d,\"height\":%d,\"format\":%d,"
+                "\"bytes\":%lu,\"x\":%d,\"y\":%d,"
+                "\"placement_width\":%d,\"placement_height\":%d,"
+                "\"z\":%d,\"revision\":%llu}",
+                first_graphics ? "" : ",", image->id,
+                image->complete ? "true" : "false",
+                image->visible ? "true" : "false", image->width,
+                image->height, image->format, (unsigned long)image->bytes,
+                image->x, image->y, image->placement_width,
+                image->placement_height, image->z, image->revision);
+            first_graphics = 0;
+        }
+    }
+    used += (size_t)snprintf(body + used, capacity - used, "]");
     snprintf(body + used, capacity - used, "}");
 }
 
@@ -4695,6 +4947,8 @@ static void destroy_session(BlitRuntime *runtime, BlitSession *session)
         terminal_scrollback_release(surface);
         memset(surface, 0, sizeof(*surface));
     }
+    for (i = 0; i < BLIT_GRAPHICS_MAX_IMAGES; ++i)
+        graphics_image_release(&session->graphics[i]);
     if (session->focused)
         session->focused = 0;
     memset(session, 0, sizeof(*session));
@@ -6285,6 +6539,62 @@ static void render_sdl_glyph(SDL_Renderer *renderer, const BlitFont *font,
     }
 }
 
+static void render_sdl_graphics(SDL_Renderer *renderer,
+                                const BlitGraphicsImage *images,
+                                int image_count, float origin_x, float origin_y)
+{
+    int image_index;
+    for (image_index = 0; image_index < image_count; ++image_index) {
+        const BlitGraphicsImage *image = &images[image_index];
+        int width;
+        int height;
+        int source_bytes;
+        size_t pixel_count;
+        unsigned char *rgba;
+        SDL_Texture *texture;
+        SDL_FRect destination;
+        int pixel_index;
+
+        if (!image->used || !image->complete || !image->visible ||
+            image->pixels == NULL || image->width < 1 || image->height < 1)
+            continue;
+        width = image->placement_width > 0 ? image->placement_width : image->width;
+        height = image->placement_height > 0 ? image->placement_height : image->height;
+        if (width < 1 || height < 1) continue;
+        source_bytes = image->format == 24 ? 3 : 4;
+        pixel_count = (size_t)image->width * (size_t)image->height;
+        rgba = (unsigned char *)malloc(pixel_count * 4U);
+        if (rgba == NULL) continue;
+        for (pixel_index = 0; (size_t)pixel_index < pixel_count; ++pixel_index) {
+            rgba[pixel_index * 4U] = image->pixels[pixel_index * source_bytes];
+            rgba[pixel_index * 4U + 1] = image->pixels[pixel_index * source_bytes + 1];
+            rgba[pixel_index * 4U + 2] = image->pixels[pixel_index * source_bytes + 2];
+            rgba[pixel_index * 4U + 3] = source_bytes == 4 ?
+                image->pixels[pixel_index * source_bytes + 3] : 255;
+        }
+        texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32,
+                                    SDL_TEXTUREACCESS_STATIC,
+                                    image->width, image->height);
+        if (texture == NULL) {
+            free(rgba);
+            continue;
+        }
+        SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+        if (!SDL_UpdateTexture(texture, NULL, rgba, image->width * 4)) {
+            SDL_DestroyTexture(texture);
+            free(rgba);
+            continue;
+        }
+        destination.x = origin_x + image->x;
+        destination.y = origin_y + image->y;
+        destination.w = (float)width;
+        destination.h = (float)height;
+        SDL_RenderTexture(renderer, texture, NULL, &destination);
+        SDL_DestroyTexture(texture);
+        free(rgba);
+    }
+}
+
 static void render_sdl_effects(const BlitRuntime *runtime,
                                SDL_Renderer *renderer, int width, int height)
 {
@@ -6449,6 +6759,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
             views[view_count].damage_height = surface->damage_height;
             views[view_count].damage_consumed =
                 &damage_consumed[view_count];
+            views[view_count].graphics = session->graphics;
+            views[view_count].graphics_count = BLIT_GRAPHICS_MAX_IMAGES;
             ++view_count;
         }
         if (blit_kms_present(runtime->kms, views, view_count,
@@ -6748,6 +7060,9 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
                     SDL_RenderFillRect(renderer, &cursor_rect);
                 }
             }
+            render_sdl_graphics(renderer, session->graphics,
+                                BLIT_GRAPHICS_MAX_IMAGES,
+                                surface_origin_x, (float)surface_origin_y);
         }
         render_sdl_effects(runtime, renderer,
                            runtime->displays[output_index].bounds.w,

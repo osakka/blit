@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "blit_font.h"
+#include "blit_graphics.h"
 
 typedef struct BlitKms BlitKms;
 
@@ -38,6 +39,8 @@ typedef struct {
     int damage_width;
     int damage_height;
     int *damage_consumed;
+    const BlitGraphicsImage *graphics;
+    int graphics_count;
 } BlitKmsSurfaceView;
 
 typedef struct {

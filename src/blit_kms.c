@@ -296,6 +296,55 @@ static void draw_glyph(KmsOutput *output, const BlitFont *font,
     }
 }
 
+static void draw_graphic(KmsOutput *output, const BlitGraphicsImage *image,
+                         int origin_x, int origin_y)
+{
+    int width = image->placement_width > 0 ? image->placement_width : image->width;
+    int height = image->placement_height > 0 ? image->placement_height : image->height;
+    int bytes_per_pixel = image->format == 24 ? 3 : 4;
+    int destination_y;
+
+    if (!image->used || !image->complete || !image->visible || image->pixels == NULL ||
+        image->width < 1 || image->height < 1 || width < 1 || height < 1)
+        return;
+    for (destination_y = 0; destination_y < height; ++destination_y) {
+        int py = origin_y + image->y + destination_y;
+        int source_y = destination_y * image->height / height;
+        int destination_x;
+        if (py < 0 || py >= output->mode.vdisplay) continue;
+        for (destination_x = 0; destination_x < width; ++destination_x) {
+            int px = origin_x + image->x + destination_x;
+            int source_x = destination_x * image->width / width;
+            const unsigned char *source;
+            uint32_t *destination;
+            unsigned int alpha;
+            if (px < 0 || px >= output->mode.hdisplay) continue;
+            source = image->pixels +
+                ((size_t)source_y * (size_t)image->width + (size_t)source_x) *
+                (size_t)bytes_per_pixel;
+            destination = (uint32_t *)((unsigned char *)output->back.map +
+                (size_t)py * output->back.pitch) + px;
+            alpha = image->format == 32 ? source[3] : 255U;
+            if (alpha == 255U) {
+                *destination = ((uint32_t)source[0] << 16) |
+                    ((uint32_t)source[1] << 8) | source[2];
+            } else if (alpha != 0U) {
+                uint32_t old = *destination;
+                unsigned int inverse = 255U - alpha;
+                unsigned int red = (old >> 16) & 0xffU;
+                unsigned int green = (old >> 8) & 0xffU;
+                unsigned int blue = old & 0xffU;
+                *destination = (((unsigned int)source[0] * alpha +
+                                 red * inverse) / 255U << 16) |
+                    (((unsigned int)source[1] * alpha + green * inverse) /
+                     255U << 8) |
+                    (((unsigned int)source[2] * alpha + blue * inverse) /
+                     255U);
+            }
+        }
+    }
+}
+
 static void draw_view(KmsOutput *output, const BlitFont *font,
                       const BlitKmsSurfaceView *view)
 {
@@ -410,6 +459,10 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
             }
         }
     }
+    if (view->graphics != NULL)
+        for (column = 0; column < view->graphics_count; ++column)
+            draw_graphic(output, &view->graphics[column], view->origin_x,
+                         view->origin_y);
     if (view->cursor_visible && view->cursor_x >= 0 && view->cursor_y >= 0) {
         int cursor_x = view->origin_x + view->cursor_x * cw;
         int cursor_y = view->origin_y + view->cursor_y * ch;

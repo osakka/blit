@@ -52,7 +52,7 @@ echo "$graphics_inventory" | $b grep -q '"vendor":"' || graphics_pass=0
 echo "$graphics_inventory" | $b grep -q '"device":"' || graphics_pass=0
 echo "$graphics_inventory" | $b grep -q '"driver":"' || graphics_pass=0
 echo "$graphics_inventory" | $b grep -q '"hardware_acceleration":' || graphics_pass=0
-$b wget -qO /tmp/one.json --post-data='{"command":"/blit-stage/pty-input-echo","arguments":["--wide"],"surface_mode":"terminal","display_id":"display-47","surface":{"width":128,"height":48}}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
+$b wget -qO /tmp/one.json --post-data='{"command":"/blit-stage/pty-input-echo","arguments":["--wide","--kitty"],"surface_mode":"terminal","display_id":"display-47","surface":{"width":128,"height":48}}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
 $b wget -qO /tmp/two.json --post-data='{"command":"/blit-stage/pty-input-echo","surface_mode":"terminal","display_id":"display-48","surface":{"width":128,"height":48}}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
 [ "$loss_test" -eq 1 ] && ( $b sleep 2; echo 0 > /sys/kernel/config/vkms/blit/connectors/connector0/status ) &
 $b sleep 5
@@ -75,7 +75,7 @@ for shot in /tmp/guest-screenshots/display-47.ppm /tmp/guest-screenshots/display
         echo FRAME_FILE; $b sha256sum "$shot"; $b od -An -t u1 -N 32 "$shot"
     fi
 done
-/blit-stage/ppm-assert /tmp/guest-screenshots/display-47.ppm --wide && echo PPM_DISPLAY_47_WIDE_PASS || { echo PPM_DISPLAY_47_WIDE_FAIL; finish 1; }
+/blit-stage/ppm-assert /tmp/guest-screenshots/display-47.ppm --wide --kitty && echo PPM_DISPLAY_47_WIDE_KITTY_PASS || { echo PPM_DISPLAY_47_WIDE_KITTY_FAIL; finish 1; }
 /blit-stage/ppm-assert /tmp/guest-screenshots/display-48.ppm && echo PPM_DISPLAY_48_PASS || { echo PPM_DISPLAY_48_FAIL; finish 1; }
 $b cp /tmp/guest-screenshots/display-*.ppm /tmp/host-screenshots/ 2>/dev/null || true
 size1=$($b wc -c < /tmp/guest-screenshots/display-47.ppm 2>/dev/null || echo 0)
