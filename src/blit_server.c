@@ -20,6 +20,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <sys/un.h>
 #include <time.h>
 #include <unistd.h>
 #include <pty.h>
@@ -9358,6 +9359,40 @@ static int update_package_valid(const char *path, const char *expected_sha,
     return 1;
 }
 
+static int run_update_helper(const char *path, const char *sha256,
+                             char *output, size_t capacity)
+{
+    struct sockaddr_un address;
+    int fd;
+    int length;
+    ssize_t received;
+    size_t used = 0;
+    fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd < 0) return 0;
+    memset(&address, 0, sizeof(address));
+    address.sun_family = AF_UNIX;
+    snprintf(address.sun_path, sizeof(address.sun_path),
+             "/run/blit/update.sock");
+    if (connect(fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
+        close(fd);
+        snprintf(output, capacity, "root update helper is unavailable");
+        return 0;
+    }
+    length = snprintf(output, capacity, "UPDATE %s %s\n", path, sha256);
+    if (write(fd, output, (size_t)length) != length) {
+        close(fd);
+        return 0;
+    }
+    while (used + 1 < capacity) {
+        received = read(fd, output + used, capacity - used - 1);
+        if (received <= 0) break;
+        used += (size_t)received;
+    }
+    close(fd);
+    output[used] = '\0';
+    return strncmp(output, "OK", 2) == 0;
+}
+
 static void update_status_json(const BlitRuntime *runtime, char *body,
                                size_t capacity)
 {
@@ -9382,11 +9417,11 @@ static void finish_update_upload(BlitRuntime *runtime, BlitHttpClient *client)
         return;
     }
     snprintf(runtime->update_state, sizeof(runtime->update_state), "installing");
-    if (!run_capture_command2("dpkg", "--install", client->update_path,
-                              output, sizeof(output))) {
+    if (!run_update_helper(client->update_path, client->update_sha256,
+                           output, sizeof(output))) {
         snprintf(runtime->update_state, sizeof(runtime->update_state), "failed");
         snprintf(runtime->update_detail, sizeof(runtime->update_detail),
-                 "dpkg installation failed");
+                 "privileged update failed: %s", output);
         unlink(client->update_path);
         send_problem(client->fd, 500, "Internal Server Error", "update_install_failed",
                      runtime->update_detail);

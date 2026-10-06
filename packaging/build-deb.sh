@@ -4,10 +4,12 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 BUNDLE=$ROOT/build/blit-desktop-current
 RUNTIME_BINARY=$ROOT/build/blit/blit-server
+UPDATE_HELPER=$ROOT/build/blit/blit-update-helper
 OUT=${1:-$ROOT}
 VERSION_FILE=$ROOT/packaging/VERSION
 
-if [ ! -x "$RUNTIME_BINARY" ] || [ ! -x "$BUNDLE/bin/blit-server" ] ||
+if [ ! -x "$RUNTIME_BINARY" ] || [ ! -x "$UPDATE_HELPER" ] ||
+   [ ! -x "$BUNDLE/bin/blit-server" ] ||
    [ ! -f "$VERSION_FILE" ]; then
 	echo "blit: canonical build outputs are incomplete" >&2
 	exit 1
@@ -51,8 +53,12 @@ mkdir -p "$stage/usr/lib/blit" "$stage/usr/bin" \
 # conveniences, not part of the server runtime; Hibr remains an external
 # executable and session/orchestration layer.
 mkdir -p "$stage/usr/lib/blit/bin" "$stage/usr/lib/blit/lib" \
-    "$stage/usr/lib/blit/fonts"
+    "$stage/usr/lib/blit/fonts" "$stage/lib/systemd/system"
 cp -a "$RUNTIME_BINARY" "$stage/usr/lib/blit/bin/blit-server"
+cp -a "$UPDATE_HELPER" "$stage/usr/lib/blit/bin/blit-update-helper"
+chmod 0755 "$stage/usr/lib/blit/bin/blit-update-helper"
+cp -a "$ROOT/packaging/blit-update-helper.service" \
+    "$stage/lib/systemd/system/"
 cp -a "$BUNDLE/lib/libSDL3.so.0.4.16" "$stage/usr/lib/blit/lib/"
 cp -a "$BUNDLE/fonts/." "$stage/usr/lib/blit/fonts/"
 # The repository documentation and OpenAPI schema are authoritative.  The
@@ -75,6 +81,19 @@ else
 fi
 
 mkdir -p "$stage/DEBIAN"
+cat > "$stage/DEBIAN/postinst" <<'EOF'
+#!/bin/sh
+set -eu
+if command -v addgroup >/dev/null 2>&1; then
+    addgroup --system blit >/dev/null 2>&1 || true
+fi
+if command -v systemctl >/dev/null 2>&1; then
+    systemctl daemon-reload || true
+    systemctl enable --now blit-update-helper.service || true
+fi
+exit 0
+EOF
+chmod 0755 "$stage/DEBIAN/postinst"
 cat > "$stage/DEBIAN/control" <<EOF
 Package: blit
 Version: $pkgver

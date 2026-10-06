@@ -1,0 +1,14 @@
+[Unit]
+Description=Blit privileged package update helper
+After=local-fs.target
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/blit/bin/blit-update-helper
+User=root
+Group=blit
+Restart=on-failure
+NoNewPrivileges=false
+
+[Install]
+WantedBy=multi-user.target
