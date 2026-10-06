@@ -741,7 +741,7 @@ components:
           additionalProperties: false
         render:
           type: object
-          required: [pending, interval_ms, effective_interval_ms, mode, outputs, font_scale, direct_kms, presentation_sync]
+          required: [pending, interval_ms, effective_interval_ms, mode, outputs, font_scale, direct_kms, renderer, presentation_sync]
           properties:
             pending: {type: boolean}
             interval_ms: {type: integer, minimum: 1}
@@ -761,6 +761,7 @@ components:
                 additionalProperties: false
             font_scale: {type: integer, minimum: 1}
             direct_kms: {type: boolean}
+            renderer: {type: string}
             presentation_sync:
               type: string
               enum: [drm-page-flip, sdl-vsync, scheduler-only]

@@ -234,6 +234,11 @@ an initial black frame. For a direct-KMS session on a DRM-capable VT, set
 `BLIT_DISPLAY_BACKEND=kms`; that path owns DRM connectors and page-flips its
 scanout buffers without creating SDL windows.
 
+SDL output uses SDL's automatic renderer selection by default so a physical
+host can use its accelerated renderer. Set `BLIT_RENDERER=software` only for a
+deterministic software/VKMS fixture. The selected renderer is reported by
+`GET /v1/diagnostics/runtime` as `snapshot.render.renderer`.
+
 ## Exercise discovery
 
 ```sh

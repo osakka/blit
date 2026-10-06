@@ -385,6 +385,7 @@ typedef struct {
     int sdl_ready;
     int direct_kms;
     int sdl_vsync_failures;
+    char sdl_renderer_name[64];
     BlitKms *kms;
     BlitFont font;
     char sdl_screenshot_dir[256];
@@ -1003,6 +1004,7 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
     int routes = 0;
     int surfaces = 0;
     const char *presentation_sync;
+    char escaped_renderer[128];
     int i;
     for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
         if (runtime->sessions[i].used) ++sessions;
@@ -1014,6 +1016,8 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
         if (runtime->input_routes[i].used) ++routes;
     render_scheduler_json(runtime, scheduler, sizeof(scheduler));
     json_escape(runtime->sdl_error, escaped_error, sizeof(escaped_error));
+    json_escape(runtime->sdl_renderer_name, escaped_renderer,
+                sizeof(escaped_renderer));
     presentation_sync = runtime->direct_kms ? "drm-page-flip" :
         (runtime->output_count == 0 ||
          runtime->output_count != runtime->display_count ||
@@ -1028,6 +1032,7 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              "\"effective_interval_ms\":%d,\"mode\":\"refresh-aware\","
              "\"outputs\":%s,"
              "\"font_scale\":%d,\"direct_kms\":%s,"
+             "\"renderer\":\"%s\","
              "\"presentation_sync\":\"%s\"},"
              "\"errors\":%s,\"warnings\":%s}",
              (runtime->direct_kms ? runtime->display_count > 0 :
@@ -1040,7 +1045,8 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              runtime->render_interval_ms, runtime->render_effective_interval_ms,
              scheduler,
              runtime->font_scale,
-             runtime->direct_kms ? "true" : "false", presentation_sync,
+             runtime->direct_kms ? "true" : "false", escaped_renderer,
+             presentation_sync,
              runtime->sdl_error[0] ? "[\"backend_error\"]" : "[]",
              runtime_has_failed_display(runtime) ?
                  "[\"display_presentation_failed\"]" :
@@ -7223,11 +7229,11 @@ static void initialize_outputs(BlitRuntime *runtime)
         return;
     }
 
-    /* KMSDRM text output must also work on software VKMS hosts.  SDL's
-       automatic renderer selection probes kmsro there and can stall; the
-       software renderer is the portable baseline and remains overridable. */
-    if (renderer_name == NULL || renderer_name[0] == '\0')
-        renderer_name = "software";
+    /* Let SDL choose the accelerated renderer on real hardware.  Software is
+       still available as an explicit deterministic fallback for VKMS and
+       headless fixtures: BLIT_RENDERER=software. */
+    if (renderer_name != NULL && renderer_name[0] == '\0')
+        renderer_name = NULL;
 
     for (i = 0; i < runtime->display_count; ++i) {
         SDL_Window *window;
@@ -7249,6 +7255,11 @@ static void initialize_outputs(BlitRuntime *runtime)
             SDL_DestroyWindow(window);
             continue;
         }
+        if (runtime->sdl_renderer_name[0] == '\0')
+            snprintf(runtime->sdl_renderer_name,
+                     sizeof(runtime->sdl_renderer_name), "%s",
+                     SDL_GetRendererName(renderer) != NULL ?
+                     SDL_GetRendererName(renderer) : "unknown");
         if (SDL_SetRenderVSync(renderer, 1)) {
             int vsync = 0;
             if (SDL_GetRenderVSync(renderer, &vsync) && vsync > 0)
