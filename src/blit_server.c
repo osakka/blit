@@ -5235,14 +5235,24 @@ static void send_mouse_report(BlitRuntime *runtime, SDL_WindowID window_id,
     if (session->terminal_mouse_mode == 0)
         return;
     code = button;
-    if (!release && code < 64 && runtime->mouse_buttons != 0)
-        code += 32;
-    if (session->terminal_mouse_sgr)
+    if (session->terminal_mouse_sgr) {
+        /* SGR mouse reports use button numbers 0..2 for press/release,
+           32+button for motion, and 64+button for wheels.  The legacy
+           encoding adds its protocol offset in the byte below; neither
+           format uses the current button bitmask as a modifier. */
         snprintf(report, sizeof(report), "\033[<%d;%d;%d%c", code, column,
                  row, release ? 'm' : 'M');
-    else
-        snprintf(report, sizeof(report), "\033[M%c%c%c", code + 32,
+    } else {
+        /* Legacy X10/VT reports encode release as button 3, followed by
+           the mandatory 32 offset.  Wheel codes already include their
+           64 offset and must not be offset a second time. */
+        if (release && code < 64)
+            code = 3;
+        if (code < 64)
+            code += 32;
+        snprintf(report, sizeof(report), "\033[M%c%c%c", code,
                  column + 32, row + 32);
+    }
     write(session->pty_fd, report, strlen(report));
 }
 
