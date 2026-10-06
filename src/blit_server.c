@@ -392,6 +392,11 @@ typedef struct {
     int listen_port;
 } BlitRuntime;
 
+static int display_index_for_output(const BlitRuntime *runtime,
+                                    int output_index);
+static int output_index_for_display_index(const BlitRuntime *runtime,
+                                          int display_index);
+
 static volatile sig_atomic_t blit_running = 1;
 
 static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
@@ -453,15 +458,19 @@ static void overlays_json(const BlitRuntime *runtime, char *body,
 static void render_pointer(BlitRuntime *runtime, int output_index)
 {
     SDL_Renderer *renderer;
+    int display_index;
     float x;
     float y;
 
     if (!runtime->pointer_valid || runtime->pointer_output != output_index)
         return;
+    display_index = display_index_for_output(runtime, output_index);
+    if (display_index < 0)
+        return;
     renderer = runtime->outputs[output_index].renderer;
-    x = (runtime->pointer_x - runtime->displays[output_index].bounds.x) /
+    x = (runtime->pointer_x - runtime->displays[display_index].bounds.x) /
         runtime->font_scale;
-    y = (runtime->pointer_y - runtime->displays[output_index].bounds.y) /
+    y = (runtime->pointer_y - runtime->displays[display_index].bounds.y) /
         runtime->font_scale;
     /* KMSDRM does not reliably provide a hardware cursor.  Draw a small
        high-contrast software cursor so pointer visibility is independent of
@@ -501,6 +510,21 @@ static int display_index_for_output(const BlitRuntime *runtime,
         if (runtime->displays[i].id == runtime->outputs[output_index].display_id)
             return i;
     return output_index < runtime->display_count ? output_index : -1;
+}
+
+static int output_index_for_display_index(const BlitRuntime *runtime,
+                                          int display_index)
+{
+    int output_index;
+
+    if (display_index < 0 || display_index >= runtime->display_count)
+        return -1;
+    for (output_index = 0; output_index < runtime->output_count;
+         ++output_index)
+        if (runtime->outputs[output_index].display_id ==
+            runtime->displays[display_index].id)
+            return output_index;
+    return -1;
 }
 
 static double output_refresh_hz(const BlitRuntime *runtime, int output_index)
@@ -4910,9 +4934,9 @@ static void apply_display_placements(BlitRuntime *runtime,
          ++output_index)
         runtime->outputs[output_index].initialized = 0;
     if (runtime->direct_kms)
-        runtime->pointer_output = display_index_at(runtime,
-                                                   runtime->pointer_x,
-                                                   runtime->pointer_y);
+        runtime->pointer_output = output_index_for_display_index(runtime,
+            display_index_at(runtime, runtime->pointer_x,
+                             runtime->pointer_y));
     runtime->pointer_dirty = 1;
     runtime->render_pending = 1;
 }
@@ -7624,8 +7648,10 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                 SDL_RenderClear(renderer);
             }
             render_sdl_effects(runtime, renderer,
-                               runtime->displays[output_index].bounds.w,
-                               runtime->displays[output_index].bounds.h);
+                               runtime->displays[display_index_for_output(
+                                   runtime, output_index)].bounds.w,
+                               runtime->displays[display_index_for_output(
+                                   runtime, output_index)].bounds.h);
             render_sdl_overlays(runtime, renderer, output_index);
             render_pointer(runtime, output_index);
             capture_sdl_frame(runtime, output_index, renderer);
@@ -7852,8 +7878,10 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             }
         }
         render_sdl_effects(runtime, renderer,
-                           runtime->displays[output_index].bounds.w,
-                           runtime->displays[output_index].bounds.h);
+                           runtime->displays[display_index_for_output(
+                               runtime, output_index)].bounds.w,
+                           runtime->displays[display_index_for_output(
+                               runtime, output_index)].bounds.h);
         render_sdl_overlays(runtime, renderer, output_index);
         render_pointer(runtime, output_index);
         capture_sdl_frame(runtime, output_index, renderer);
@@ -7924,8 +7952,13 @@ static BlitSession *mouse_target(BlitRuntime *runtime, int output_index,
 
     if (output_index < 0 || output_index >= runtime->output_count)
         return NULL;
-    pixel_x -= runtime->displays[output_index].bounds.x;
-    pixel_y -= runtime->displays[output_index].bounds.y;
+    {
+        int display_index = display_index_for_output(runtime, output_index);
+        if (display_index < 0)
+            return NULL;
+        pixel_x -= runtime->displays[display_index].bounds.x;
+        pixel_y -= runtime->displays[display_index].bounds.y;
+    }
     pixel_x /= runtime->font_scale;
     pixel_y /= runtime->font_scale;
     cell_width = runtime->direct_kms ? blit_kms_cell_width(runtime->kms) :
@@ -8152,9 +8185,9 @@ static void update_evdev_pointer(BlitRuntime *runtime)
     runtime->previous_pointer_y = runtime->pointer_y;
     runtime->previous_pointer_output = runtime->pointer_output;
     runtime->pointer_valid = 1;
-    runtime->pointer_output = display_index_at(runtime,
-                                               runtime->evdev_mouse_x,
-                                               runtime->evdev_mouse_y);
+    runtime->pointer_output = output_index_for_display_index(runtime,
+        display_index_at(runtime, runtime->evdev_mouse_x,
+                         runtime->evdev_mouse_y));
     runtime->pointer_x = runtime->evdev_mouse_x;
     runtime->pointer_y = runtime->evdev_mouse_y;
     changed = !old_valid || old_x != runtime->pointer_x ||
@@ -8184,8 +8217,12 @@ static void update_evdev_pointer(BlitRuntime *runtime)
     if (runtime->output_count > 0 && !runtime->direct_kms &&
         runtime->pointer_output >= 0 &&
         runtime->pointer_output < runtime->output_count) {
-        const SDL_Rect *bounds =
-            &runtime->displays[runtime->pointer_output].bounds;
+        int display_index = display_index_for_output(runtime,
+                                                      runtime->pointer_output);
+        const SDL_Rect *bounds;
+        if (display_index < 0)
+            return;
+        bounds = &runtime->displays[display_index].bounds;
         SDL_WarpMouseInWindow(runtime->outputs[runtime->pointer_output].window,
                               runtime->evdev_mouse_x - bounds->x,
                               runtime->evdev_mouse_y - bounds->y);
@@ -8527,8 +8564,12 @@ static void service_sdl_events(BlitRuntime *runtime)
                 float x = event.button.x;
                 float y = event.button.y;
                 if (output_index >= 0) {
-                    x += runtime->displays[output_index].bounds.x;
-                    y += runtime->displays[output_index].bounds.y;
+                    int display_index = display_index_for_output(runtime,
+                                                                  output_index);
+                    if (display_index >= 0) {
+                        x += runtime->displays[display_index].bounds.x;
+                        y += runtime->displays[display_index].bounds.y;
+                    }
                 }
                 runtime->mouse_buttons |= 1U << button;
                 send_mouse_report(runtime, event.button.windowID,
@@ -8544,8 +8585,12 @@ static void service_sdl_events(BlitRuntime *runtime)
                 float x = event.button.x;
                 float y = event.button.y;
                 if (output_index >= 0) {
-                    x += runtime->displays[output_index].bounds.x;
-                    y += runtime->displays[output_index].bounds.y;
+                    int display_index = display_index_for_output(runtime,
+                                                                  output_index);
+                    if (display_index >= 0) {
+                        x += runtime->displays[display_index].bounds.x;
+                        y += runtime->displays[display_index].bounds.y;
+                    }
                 }
                 send_mouse_report(runtime, event.button.windowID,
                                   x, y, button, 1);
@@ -8557,8 +8602,12 @@ static void service_sdl_events(BlitRuntime *runtime)
             float x = event.motion.x;
             float y = event.motion.y;
             if (output_index >= 0) {
-                x += runtime->displays[output_index].bounds.x;
-                y += runtime->displays[output_index].bounds.y;
+                int display_index = display_index_for_output(runtime,
+                                                              output_index);
+                if (display_index >= 0) {
+                    x += runtime->displays[display_index].bounds.x;
+                    y += runtime->displays[display_index].bounds.y;
+                }
             }
             runtime->previous_pointer_x = runtime->pointer_x;
             runtime->previous_pointer_y = runtime->pointer_y;
@@ -8579,8 +8628,12 @@ static void service_sdl_events(BlitRuntime *runtime)
             float x = event.wheel.mouse_x;
             float y = event.wheel.mouse_y;
             if (output_index >= 0) {
-                x += runtime->displays[output_index].bounds.x;
-                y += runtime->displays[output_index].bounds.y;
+                int display_index = display_index_for_output(runtime,
+                                                              output_index);
+                if (display_index >= 0) {
+                    x += runtime->displays[display_index].bounds.x;
+                    y += runtime->displays[display_index].bounds.y;
+                }
             }
             send_mouse_report(runtime, event.wheel.windowID, x, y,
                               button, 0);
