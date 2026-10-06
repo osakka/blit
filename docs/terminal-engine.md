@@ -62,6 +62,13 @@ shell conformance path is stable.
 The direct KMS test remains the hardware oracle; the terminal engine must not
 introduce a second display or terminal implementation.
 
+Printable output follows DEC deferred-wrap semantics: writing the final
+column leaves the cursor on that column with a pending-wrap flag, and only
+the next printable glyph advances to the next line. Cursor reports and
+intervening controls therefore observe the same state as Hibr's terminal
+implementation; the transient flag is cleared by controls and is not part
+of DECSC's saved cursor state.
+
 ## Conformance gate
 
 Run `tools/tests/terminal_conformance.rb` against a TCC-built server with the

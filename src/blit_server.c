@@ -224,6 +224,7 @@ typedef struct {
     int terminal_dec_cursor_saved_y;
     int terminal_application_cursor;
     int terminal_application_keypad;
+    int terminal_wrap_pending;
     int terminal_origin_mode;
     int terminal_autowrap;
     int terminal_newline_mode;
@@ -1483,6 +1484,7 @@ static void terminal_enter_alternate(BlitSession *session,
     session->terminal_saved_x = surface->cursor_x;
     session->terminal_saved_y = surface->cursor_y;
     session->terminal_alternate = 1;
+    session->terminal_wrap_pending = 0;
     terminal_clear_active_screen(surface);
     surface->cursor_x = 0;
     surface->cursor_y = 0;
@@ -1512,6 +1514,7 @@ static void terminal_leave_alternate(BlitSession *session,
     memcpy(surface->attributes, surface->alternate_attributes,
            sizeof(surface->attributes));
     session->terminal_alternate = 0;
+    session->terminal_wrap_pending = 0;
     if (session->terminal_alternate_saved_cursor.valid) {
         BlitSavedCursor *saved = &session->terminal_alternate_saved_cursor;
         surface->cursor_x = saved->x;
@@ -1537,6 +1540,8 @@ static void terminal_leave_alternate(BlitSession *session,
         surface->cursor_x = surface->width - 1;
     if (surface->cursor_y >= surface->height)
         surface->cursor_y = surface->height - 1;
+    /* DECSC/DECRC save the autowrap mode, not its transient pending flag. */
+    session->terminal_wrap_pending = 0;
     surface->damage_valid = 1;
     surface->damage_x = 0;
     surface->damage_y = 0;
@@ -1871,6 +1876,7 @@ static void terminal_restore_cursor(BlitSession *session, BlitSurface *surface)
         surface->cursor_x = surface->width - 1;
     if (surface->cursor_y >= surface->height)
         surface->cursor_y = surface->height - 1;
+    session->terminal_wrap_pending = 0;
     mark_surface_damage(surface, surface->cursor_x, surface->cursor_y);
 }
 
@@ -2140,6 +2146,9 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
     int has_second = 0;
     char prefix = 0;
     char command;
+
+    /* Any cursor-addressing/control sequence consumes a deferred wrap. */
+    session->terminal_wrap_pending = 0;
 
     if (*cursor == '?' || *cursor == '>' || *cursor == '<') {
         prefix = *cursor;
@@ -2667,9 +2676,11 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
     }
 }
 
-static void terminal_add_combining(BlitSurface *surface, uint32_t codepoint)
+static void terminal_add_combining(BlitSession *session, BlitSurface *surface,
+                                   uint32_t codepoint)
 {
-    int x = surface->cursor_x - 1;
+    int x = session->terminal_wrap_pending ? surface->cursor_x :
+        surface->cursor_x - 1;
     int y = surface->cursor_y;
     unsigned char count;
     if (x < 0) return;
@@ -2686,13 +2697,15 @@ static void terminal_put_codepoint(BlitSession *session, BlitSurface *surface,
                                    uint32_t codepoint, int cell_width)
 {
     session->terminal_last_codepoint = codepoint;
+    if (session->terminal_wrap_pending && session->terminal_autowrap) {
+        surface->cursor_x = 0;
+        terminal_index(surface);
+        session->terminal_wrap_pending = 0;
+    }
     if (cell_width == 2 && surface->cursor_x >= surface->width - 1) {
         if (session->terminal_autowrap) {
             surface->cursor_x = 0;
-            if (surface->cursor_y < surface->scroll_bottom)
-                ++surface->cursor_y;
-            else
-                terminal_scroll_up(surface);
+            terminal_index(surface);
         } else {
             cell_width = 1;
         }
@@ -2741,9 +2754,13 @@ static void terminal_put_codepoint(BlitSession *session, BlitSurface *surface,
             BLIT_ATTR_CONTINUATION;
     }
     mark_surface_damage(surface, surface->cursor_x, surface->cursor_y);
-    surface->cursor_x += cell_width;
-    if (!session->terminal_autowrap && surface->cursor_x >= surface->width)
+    if (surface->cursor_x + cell_width >= surface->width) {
         surface->cursor_x = surface->width - 1;
+        session->terminal_wrap_pending = session->terminal_autowrap;
+    } else {
+        surface->cursor_x += cell_width;
+        session->terminal_wrap_pending = 0;
+    }
 }
 
 static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
@@ -2754,6 +2771,7 @@ static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
     while (offset < length) {
         unsigned char byte = data[offset];
         if (session->terminal_escape == 1) {
+            session->terminal_wrap_pending = 0;
             if (byte == '[') {
                 session->terminal_escape = 2;
                 session->terminal_csi_length = 0;
@@ -2817,6 +2835,7 @@ static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
                 session->terminal_title[0] = '\0';
                 session->terminal_application_cursor = 0;
                 session->terminal_application_keypad = 0;
+                session->terminal_wrap_pending = 0;
                 session->terminal_focus_reporting = 0;
                 session->terminal_bracketed_paste = 0;
                 session->terminal_mouse_mode = 0;
@@ -2900,19 +2919,24 @@ static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
                     mark_surface_damage(surface, surface->cursor_x,
                                         surface->cursor_y);
                     surface->cursor_x = 0;
+                    session->terminal_wrap_pending = 0;
                 } else if (byte == '\n') {
                     mark_surface_damage(surface, surface->cursor_x,
                                         surface->cursor_y);
                     if (session->terminal_newline_mode)
                         surface->cursor_x = 0;
                     terminal_index(surface);
+                    session->terminal_wrap_pending = 0;
                 } else if (byte == '\b') {
-                    if (surface->cursor_x > 0) --surface->cursor_x;
+                    if (session->terminal_wrap_pending)
+                        session->terminal_wrap_pending = 0;
+                    else if (surface->cursor_x > 0) --surface->cursor_x;
                     mark_surface_damage(surface, surface->cursor_x,
                                         surface->cursor_y);
                 } else {
                     surface->cursor_x = terminal_next_tab(surface,
                                                           surface->cursor_x);
+                    session->terminal_wrap_pending = 0;
                 }
                 ++offset;
                 continue;
@@ -2941,14 +2965,17 @@ static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
             continue;
         }
         if (byte == 0x1b) {
+            session->terminal_wrap_pending = 0;
             session->terminal_escape = 1;
             ++offset;
         } else if (byte == 0x9b) {
+            session->terminal_wrap_pending = 0;
             session->terminal_escape = 2;
             session->terminal_csi_length = 0;
             ++offset;
         } else if (byte == 0x9d || byte == 0x90 || byte == 0x98 ||
                    byte == 0x9e || byte == 0x9f) {
+            session->terminal_wrap_pending = 0;
             session->terminal_escape = 3;
             session->terminal_string_type = byte == 0x9d ? ']' : byte;
             session->terminal_string_length = 0;
@@ -2956,20 +2983,25 @@ static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
         } else if (byte == '\r') {
             mark_surface_damage(surface, surface->cursor_x, surface->cursor_y);
             surface->cursor_x = 0;
+            session->terminal_wrap_pending = 0;
             ++offset;
         } else if (byte == '\n') {
             mark_surface_damage(surface, surface->cursor_x, surface->cursor_y);
             if (session->terminal_newline_mode)
                 surface->cursor_x = 0;
             terminal_index(surface);
+            session->terminal_wrap_pending = 0;
             ++offset;
         } else if (byte == '\b') {
-            if (surface->cursor_x > 0)
+            if (session->terminal_wrap_pending)
+                session->terminal_wrap_pending = 0;
+            else if (surface->cursor_x > 0)
                 --surface->cursor_x;
             mark_surface_damage(surface, surface->cursor_x, surface->cursor_y);
             ++offset;
         } else if (byte == '\t') {
             surface->cursor_x = terminal_next_tab(surface, surface->cursor_x);
+            session->terminal_wrap_pending = 0;
             ++offset;
         } else if (byte == 0x0e) {
             session->terminal_charset_shift = 1;
@@ -2990,7 +3022,7 @@ static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
                 consumed = 1;
                 codepoint = '?';
             } else if (unicode_cell_width(codepoint) == 0) {
-                terminal_add_combining(surface, codepoint);
+                terminal_add_combining(session, surface, codepoint);
                 offset += consumed;
                 continue;
             }

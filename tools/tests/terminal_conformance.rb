@@ -41,6 +41,11 @@ def row_text(snapshot, row = 0)
   cells.keys.select { |x, y| y == row }.sort.map { |x, y| cells.fetch([x, y]).fetch('text') }.join
 end
 
+def screen_text(snapshot)
+  cells = cell_map(snapshot)
+  cells.keys.map(&:last).uniq.sort.map { |row| row_text(snapshot, row) }.join
+end
+
 def assert_equal(expected, actual, detail)
   return if expected == actual
 
@@ -106,6 +111,12 @@ snapshot = run_case(base, 'automatic-wrap', "printf 'ABCX'", width: 3, height: 2
 cells = cell_map(snapshot)
 assert_equal('C', cells.fetch([2, 0]).fetch('text'), 'wrap final column')
 assert_equal('X', cells.fetch([0, 1]).fetch('text'), 'wrap next row')
+
+snapshot = run_case(base, 'deferred-wrap-cursor-report',
+                    "stty -icanon -echo min 0 time 5; printf 'ABC\\033[6n'; r=$(dd if=/dev/tty bs=1 count=6 2>/dev/null); printf '\\r'; printf '%s' \"$r\" | od -An -tx1 | tr -d ' \\n'",
+                    width: 3)
+assert_equal('1b5b313b3352', screen_text(snapshot),
+             'deferred wrap keeps CPR on the final column')
 
 snapshot = run_case(base, 'autowrap-disabled',
                     "printf '\\033[?7lABCX'", width: 3, height: 2)
