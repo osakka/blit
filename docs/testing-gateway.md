@@ -375,7 +375,11 @@ the pointer and encoded as SGR mouse reports for the owning PTY. A primary
 button press focuses that pane; keyboard input then follows the focused live
 session until the API changes focus. Hibr's console mouse mode controls
 whether the joined desktop consumes those reports. Pointer capture, touch,
-and seat-level policy remain follow-up work. The 0.1 API supports explicit
+and seat-level policy remain follow-up work. SDL windows and evdev devices are
+normalized to the same virtual-desktop coordinate space; only the final SDL
+warp uses per-window local coordinates. This prevents a pointer on an
+auxiliary monitor from being hit-tested or clicked against the primary
+monitor. The 0.1 API supports explicit
 `evdev-keyboard` and `evdev-pointer` routes through `/v1/input/routes/{id}`;
 an explicit route takes precedence over focus or pointer hit-testing for its
 device source. Enabling a route disables any other enabled route for that

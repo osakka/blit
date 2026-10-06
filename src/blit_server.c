@@ -459,8 +459,10 @@ static void render_pointer(BlitRuntime *runtime, int output_index)
     if (!runtime->pointer_valid || runtime->pointer_output != output_index)
         return;
     renderer = runtime->outputs[output_index].renderer;
-    x = runtime->pointer_x / runtime->font_scale;
-    y = runtime->pointer_y / runtime->font_scale;
+    x = (runtime->pointer_x - runtime->displays[output_index].bounds.x) /
+        runtime->font_scale;
+    y = (runtime->pointer_y - runtime->displays[output_index].bounds.y) /
+        runtime->font_scale;
     /* KMSDRM does not reliably provide a hardware cursor.  Draw a small
        high-contrast software cursor so pointer visibility is independent of
        the compositor, desktop shell, or terminal mouse-reporting mode. */
@@ -472,22 +474,6 @@ static void render_pointer(BlitRuntime *runtime, int output_index)
     SDL_RenderLine(renderer, x + 1.0f, y + 1.0f, x + 1.0f, y + 12.0f);
     SDL_RenderLine(renderer, x + 1.0f, y + 1.0f, x + 9.0f, y + 9.0f);
     SDL_RenderLine(renderer, x + 4.0f, y + 10.0f, x + 6.0f, y + 15.0f);
-}
-
-static void clear_previous_pointer(BlitRuntime *runtime, int output_index)
-{
-    SDL_FRect area;
-
-    if (!runtime->pointer_dirty ||
-        runtime->previous_pointer_output != output_index)
-        return;
-    area.x = runtime->previous_pointer_x / runtime->font_scale;
-    area.y = runtime->previous_pointer_y / runtime->font_scale;
-    area.w = 20.0f;
-    area.h = 20.0f;
-    SDL_SetRenderDrawColor(runtime->outputs[output_index].renderer,
-                           0, 0, 0, 255);
-    SDL_RenderFillRect(runtime->outputs[output_index].renderer, &area);
 }
 
 static int refresh_period_ms(double refresh_hz)
@@ -633,11 +619,17 @@ static uint32_t due_output_mask(const BlitRuntime *runtime, uint64_t now)
             now >= runtime->render_next_us[i])
             mask |= 1U << i;
     }
-    /* Pointer underlay state is shared by the input layer.  Keep the pointer
-       coherent across every output in one pass; content remains independently
-       deadline-driven. */
-    if (runtime->pointer_dirty)
-        mask |= all_output_mask(runtime);
+    /* Pointer damage belongs only to the output that lost the pointer and the
+       output that received it. Redrawing every display for one motion makes
+       multi-display pointer input needlessly expensive and visibly choppy. */
+    if (runtime->pointer_dirty) {
+        if (runtime->previous_pointer_output >= 0 &&
+            runtime->previous_pointer_output < runtime->output_count)
+            mask |= 1U << runtime->previous_pointer_output;
+        if (runtime->pointer_output >= 0 &&
+            runtime->pointer_output < runtime->output_count)
+            mask |= 1U << runtime->pointer_output;
+    }
     return mask;
 }
 
@@ -7611,8 +7603,9 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             if (!runtime->outputs[output_index].initialized) {
                 SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
                 SDL_RenderClear(renderer);
-            } else {
-                clear_previous_pointer(runtime, output_index);
+            } else if (runtime->pointer_dirty) {
+                SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+                SDL_RenderClear(renderer);
             }
             render_pointer(runtime, output_index);
             SDL_RenderPresent(renderer);
@@ -7626,8 +7619,10 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                 SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
             if (!runtime->outputs[output_index].initialized)
                 SDL_RenderClear(renderer);
-            else if (runtime->pointer_dirty)
-                clear_previous_pointer(runtime, output_index);
+            else if (runtime->pointer_dirty) {
+                SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+                SDL_RenderClear(renderer);
+            }
             render_sdl_effects(runtime, renderer,
                                runtime->displays[output_index].bounds.w,
                                runtime->displays[output_index].bounds.h);
@@ -7651,7 +7646,11 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
             SDL_RenderClear(renderer);
         } else if (runtime->pointer_dirty) {
-            clear_previous_pointer(runtime, output_index);
+            /* The old cursor is part of the already-present scene. A black
+               rectangle would destroy wallpaper and terminal cells. Start
+               from a clean scene and redraw the complete output instead. */
+            SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+            SDL_RenderClear(renderer);
         }
         SDL_SetRenderDrawColor(renderer, 190, 210, 190, 255);
         for (plan_index = 0; plan_index < plan->surface_count;
@@ -7925,10 +7924,8 @@ static BlitSession *mouse_target(BlitRuntime *runtime, int output_index,
 
     if (output_index < 0 || output_index >= runtime->output_count)
         return NULL;
-    if (runtime->direct_kms) {
-        pixel_x -= runtime->displays[output_index].bounds.x;
-        pixel_y -= runtime->displays[output_index].bounds.y;
-    }
+    pixel_x -= runtime->displays[output_index].bounds.x;
+    pixel_y -= runtime->displays[output_index].bounds.y;
     pixel_x /= runtime->font_scale;
     pixel_y /= runtime->font_scale;
     cell_width = runtime->direct_kms ? blit_kms_cell_width(runtime->kms) :
@@ -8184,10 +8181,15 @@ static void update_evdev_pointer(BlitRuntime *runtime)
                  runtime->pointer_output, target_col, target_row);
         broadcast_stream(runtime, input_event, BLIT_STREAM_INPUT);
     }
-    if (runtime->output_count > 0 && !runtime->direct_kms)
-        SDL_WarpMouseInWindow(runtime->outputs[0].window,
-                              runtime->evdev_mouse_x,
-                              runtime->evdev_mouse_y);
+    if (runtime->output_count > 0 && !runtime->direct_kms &&
+        runtime->pointer_output >= 0 &&
+        runtime->pointer_output < runtime->output_count) {
+        const SDL_Rect *bounds =
+            &runtime->displays[runtime->pointer_output].bounds;
+        SDL_WarpMouseInWindow(runtime->outputs[runtime->pointer_output].window,
+                              runtime->evdev_mouse_x - bounds->x,
+                              runtime->evdev_mouse_y - bounds->y);
+    }
     send_mouse_motion_report(runtime, 0, runtime->evdev_mouse_x,
                              runtime->evdev_mouse_y);
 }
@@ -8520,36 +8522,67 @@ static void service_sdl_events(BlitRuntime *runtime)
                 event.button.button == 2 ? 1 :
                 event.button.button == 3 ? 2 : -1;
             if (button >= 0) {
+                int output_index = mouse_output_index(runtime,
+                                                      event.button.windowID);
+                float x = event.button.x;
+                float y = event.button.y;
+                if (output_index >= 0) {
+                    x += runtime->displays[output_index].bounds.x;
+                    y += runtime->displays[output_index].bounds.y;
+                }
                 runtime->mouse_buttons |= 1U << button;
                 send_mouse_report(runtime, event.button.windowID,
-                                  event.button.x, event.button.y, button, 0);
+                                  x, y, button, 0);
             }
         } else if (event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
             int button = event.button.button == 1 ? 0 :
                 event.button.button == 2 ? 1 :
                 event.button.button == 3 ? 2 : -1;
             if (button >= 0) {
-            send_mouse_report(runtime, event.button.windowID,
-                              event.button.x, event.button.y, button, 1);
+                int output_index = mouse_output_index(runtime,
+                                                      event.button.windowID);
+                float x = event.button.x;
+                float y = event.button.y;
+                if (output_index >= 0) {
+                    x += runtime->displays[output_index].bounds.x;
+                    y += runtime->displays[output_index].bounds.y;
+                }
+                send_mouse_report(runtime, event.button.windowID,
+                                  x, y, button, 1);
                 runtime->mouse_buttons &= ~(1U << button);
             }
         } else if (event.type == SDL_EVENT_MOUSE_MOTION) {
+            int output_index = mouse_output_index(runtime,
+                                                  event.motion.windowID);
+            float x = event.motion.x;
+            float y = event.motion.y;
+            if (output_index >= 0) {
+                x += runtime->displays[output_index].bounds.x;
+                y += runtime->displays[output_index].bounds.y;
+            }
             runtime->previous_pointer_x = runtime->pointer_x;
             runtime->previous_pointer_y = runtime->pointer_y;
             runtime->previous_pointer_output = runtime->pointer_output;
             runtime->pointer_valid = 1;
             runtime->pointer_output = mouse_output_index(runtime,
                                                          event.motion.windowID);
-            runtime->pointer_x = event.motion.x;
-            runtime->pointer_y = event.motion.y;
+            runtime->pointer_x = x;
+            runtime->pointer_y = y;
             runtime->pointer_dirty = 1;
             runtime->render_pending = 1;
             send_mouse_motion_report(runtime, event.motion.windowID,
-                                     event.motion.x, event.motion.y);
+                                     x, y);
         } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
             int button = event.wheel.y > 0 ? 64 : 65;
-            send_mouse_report(runtime, event.wheel.windowID,
-                              event.wheel.mouse_x, event.wheel.mouse_y,
+            int output_index = mouse_output_index(runtime,
+                                                  event.wheel.windowID);
+            float x = event.wheel.mouse_x;
+            float y = event.wheel.mouse_y;
+            if (output_index >= 0) {
+                x += runtime->displays[output_index].bounds.x;
+                y += runtime->displays[output_index].bounds.y;
+            }
+            send_mouse_report(runtime, event.wheel.windowID, x, y,
                               button, 0);
         }
     }
