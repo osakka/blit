@@ -395,6 +395,9 @@ typedef struct {
     unsigned long long diagnostic_frames;
     double diagnostic_last_render_ms;
     double diagnostic_max_render_ms;
+    double diagnostic_last_terminal_ms;
+    double diagnostic_max_terminal_ms;
+    unsigned long long diagnostic_terminal_bytes;
     unsigned long long diagnostic_log_sequence;
     int diagnostic_log_count;
     int diagnostic_log_next;
@@ -888,14 +891,19 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
     used = (size_t)snprintf(body, capacity,
         "{\"snapshot\":%s,\"performance\":{\"uptime_ms\":%llu,"
         "\"frames\":%llu,\"last_render_ms\":%.3f,"
-        "\"max_render_ms\":%.3f,\"missed_deadlines\":%llu},"
+        "\"max_render_ms\":%.3f,\"missed_deadlines\":%llu,"
+        "\"last_terminal_ms\":%.3f,\"max_terminal_ms\":%.3f,"
+        "\"terminal_bytes\":%llu},"
         "\"logs\":[",
         snapshot,
         runtime->started_us > 0 && now >= runtime->started_us ?
             (unsigned long long)((now - runtime->started_us) / 1000ULL) : 0,
         runtime->diagnostic_frames, runtime->diagnostic_last_render_ms,
         runtime->diagnostic_max_render_ms,
-        diagnostic_missed_deadlines(runtime));
+        diagnostic_missed_deadlines(runtime),
+        runtime->diagnostic_last_terminal_ms,
+        runtime->diagnostic_max_terminal_ms,
+        runtime->diagnostic_terminal_bytes);
     count = runtime->diagnostic_log_count;
     first = 1;
     index = (runtime->diagnostic_log_next - count + BLIT_MAX_RUNTIME_LOGS) %
@@ -6066,6 +6074,7 @@ static void service_session_output(BlitRuntime *runtime, int fd)
     char event[1800];
     ssize_t received;
     int i;
+    uint64_t service_started = monotonic_us();
 
     received = read(fd, output, sizeof(output) - 1);
     if (received < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
@@ -6103,6 +6112,13 @@ static void service_session_output(BlitRuntime *runtime, int fd)
                 broadcast_stream(runtime, surface_event, BLIT_STREAM_SURFACES);
                 runtime->render_pending = 1;
             }
+            runtime->diagnostic_terminal_bytes += (unsigned long long)received;
+            runtime->diagnostic_last_terminal_ms =
+                (double)(monotonic_us() - service_started) / 1000.0;
+            if (runtime->diagnostic_last_terminal_ms >
+                runtime->diagnostic_max_terminal_ms)
+                runtime->diagnostic_max_terminal_ms =
+                    runtime->diagnostic_last_terminal_ms;
             snprintf(event, sizeof(event),
                      "{\"type\":\"terminal_output\","
                      "\"session_id\":\"%llu\",\"data\":\"%s\"}",
