@@ -105,6 +105,33 @@ assert_equal('invalid_topology_placements', invalid_response.fetch('code'),
              'incomplete topology placement code')
 puts 'PASS topology-placement-round-trip'
 
+effects = request(base, 'GET', '/v1/effects')
+assert_equal('none', effects.fetch('preset'), 'initial effect preset')
+effect_update = request(base, 'PUT', '/v1/effects', {
+  'revision' => effects.fetch('revision'),
+  'enabled' => true,
+  'preset' => 'scanlines',
+  'intensity' => 40
+})
+assert_equal('scanlines', effect_update.fetch('preset'), 'effect preset update')
+assert_equal(true, effect_update.fetch('enabled'), 'effect enable update')
+stale_effect_status, stale_effect = request_with_status(base, 'PUT', '/v1/effects', {
+  'revision' => effects.fetch('revision'),
+  'enabled' => false,
+  'preset' => 'none',
+  'intensity' => 0
+})
+assert_equal(409, stale_effect_status, 'stale effect revision status')
+assert_equal('revision_conflict', stale_effect.fetch('code'),
+             'stale effect revision code')
+request(base, 'PUT', '/v1/effects', {
+  'revision' => effect_update.fetch('revision'),
+  'enabled' => false,
+  'preset' => 'none',
+  'intensity' => 0
+})
+puts 'PASS bounded-effect-state-and-revision'
+
 def run_case(base, name, command, width: 20, height: 4)
   created = request(base, 'POST', '/v1/terminal-sessions', {
     'command' => '/bin/sh',

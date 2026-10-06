@@ -56,8 +56,9 @@ The first contract should cover only:
 - a frame request and presentation acknowledgement;
 - stable errors and revisions.
 
-Effects, input, persistence, authentication, and PTY integration remain out of
-this slice.
+Effects, persistence, and deployment hardening remain later concerns; the
+first bounded SDL effect is now exposed by the schema and runtime, while
+direct KMS remains an explicit text-only capability.
 
 Exit criteria:
 
@@ -90,9 +91,11 @@ updates. Preserve text and damage as canonical state until the renderer boundary
 
 ## Milestone 5: effects
 
-Add a versioned effect graph with bounded cost, explicit frame/time inputs, and
-deterministic presets. CRT effects are downstream of correct text and output
-semantics; they must not obscure presentation failures.
+The first bounded, deterministic SDL preset is implemented through
+`/v1/effects`. Continue with the versioned effect graph, explicit frame/time
+inputs, overlays, and additional presets only after preserving the same
+revision and capability/error rules. CRT effects are downstream of correct
+text and output semantics; they must not obscure presentation failures.
 
 ## Milestone 6: operational hardening
 

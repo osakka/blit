@@ -16,6 +16,7 @@ tags:
   - name: topology
   - name: terminals
   - name: frames
+  - name: effects
   - name: diagnostics
 paths:
   /v1/server:
@@ -110,6 +111,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Diagnostics'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/effects:
+    get:
+      tags: [effects]
+      operationId: getEffects
+      summary: Get the bounded renderer effect state
+      responses:
+        '200':
+          description: Current effect state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EffectState'
+        default:
+          $ref: '#/components/responses/Problem'
+    put:
+      tags: [effects]
+      operationId: updateEffects
+      summary: Set the bounded renderer effect state
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EffectUpdate'
+      responses:
+        '200':
+          description: Updated effect state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EffectState'
         default:
           $ref: '#/components/responses/Problem'
   /v1/input/devices:
@@ -616,6 +652,31 @@ components:
         warnings:
           type: array
           items: {type: string}
+      additionalProperties: false
+    EffectState:
+      type: object
+      required: [revision, enabled, preset, intensity, backend]
+      properties:
+        revision: {$ref: '#/components/schemas/Revision'}
+        enabled: {type: boolean}
+        preset:
+          type: string
+          enum: [none, scanlines]
+        intensity: {type: integer, minimum: 0, maximum: 100}
+        backend:
+          type: string
+          enum: [sdl3, unsupported, unavailable]
+      additionalProperties: false
+    EffectUpdate:
+      type: object
+      required: [revision, enabled, preset, intensity]
+      properties:
+        revision: {$ref: '#/components/schemas/Revision'}
+        enabled: {type: boolean}
+        preset:
+          type: string
+          enum: [none, scanlines]
+        intensity: {type: integer, minimum: 0, maximum: 100}
       additionalProperties: false
     InputDevice:
       type: object

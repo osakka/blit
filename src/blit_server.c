@@ -204,6 +204,13 @@ typedef struct {
 } BlitEventRecord;
 
 typedef struct {
+    unsigned long long revision;
+    int enabled;
+    char preset[32];
+    int intensity;
+} BlitEffectState;
+
+typedef struct {
     int used;
     unsigned long long id;
     pid_t process_id;
@@ -320,6 +327,7 @@ typedef struct {
     BlitIdempotency idempotency[BLIT_MAX_IDEMPOTENCY];
     BlitEventRecord event_history[BLIT_MAX_EVENT_HISTORY];
     unsigned int next_event_history;
+    BlitEffectState effect;
     char auth_token[256];
     int output_count;
     int sdl_ready;
@@ -341,6 +349,20 @@ static const char *pane_surface_id(const BlitRuntime *runtime,
                                    const BlitPane *pane);
 static void discover_panes(BlitRuntime *runtime);
 static void focus_session(BlitRuntime *runtime, BlitSession *target);
+
+static void effect_json(const BlitRuntime *runtime, char *body,
+                        size_t capacity)
+{
+    snprintf(body, capacity,
+             "{\"revision\":%llu,\"enabled\":%s,"
+             "\"preset\":\"%s\",\"intensity\":%d,"
+             "\"backend\":\"%s\"}",
+             runtime->effect.revision,
+             runtime->effect.enabled ? "true" : "false",
+             runtime->effect.preset, runtime->effect.intensity,
+             runtime->direct_kms ? "unsupported" :
+                 (runtime->sdl_ready ? "sdl3" : "unavailable"));
+}
 
 static void render_pointer(BlitRuntime *runtime, int output_index)
 {
@@ -491,13 +513,13 @@ static void server_json(const BlitRuntime *runtime, char *body, size_t capacity)
              "\"terminal-sessions\",\"topology\","
              "\"native-presentation\",\"graphics-inventory\","
              "\"audio-inventory\",\"input-devices\",\"input-routes\","
-             "\"diagnostics\"],\"display_count\":%d,"
+             "\"diagnostics\",\"effects\"],\"display_count\":%d,"
              "\"display_backend\":{\"name\":\"%s\",\"ready\":%s,"
              "\"error\":\"%s\"},\"resources\":{"
              "\"graphics\":\"/v1/graphics\",\"displays\":\"/v1/displays\","
              "\"audio\":\"/v1/audio\",\"input_devices\":\"/v1/input/devices\","
              "\"input_routes\":\"/v1/input/routes\",\"topology\":\"/v1/topology\","
-             "\"diagnostics\":\"/v1/diagnostics\"}}",
+             "\"diagnostics\":\"/v1/diagnostics\",\"effects\":\"/v1/effects\"}}",
              runtime->display_count, backend,
              (runtime->direct_kms ? runtime->display_count > 0 :
               runtime->sdl_ready && runtime->output_count > 0) ?
@@ -5232,6 +5254,59 @@ static void handle_request(int fd, BlitRuntime *runtime,
         send_http(fd, 200, "OK", "application/json", body);
         return;
     }
+    if (strcmp(path, "/v1/effects") == 0 &&
+        (strcmp(method, "GET") == 0 || strcmp(method, "PUT") == 0)) {
+        int enabled;
+        int intensity;
+        int revision;
+        char preset[32];
+
+        if (strcmp(method, "GET") == 0) {
+            effect_json(runtime, body, sizeof(body));
+            send_http(fd, 200, "OK", "application/json", body);
+            return;
+        }
+        if (runtime->direct_kms) {
+            send_problem(fd, 409, "Conflict", "effect_backend_unsupported",
+                         "The current direct-KMS backend does not render SDL effects.");
+            return;
+        }
+        if (!json_int(payload, "revision", &revision) || revision < 0) {
+            send_problem(fd, 400, "Bad Request", "invalid_effect_revision",
+                         "revision must be a non-negative integer.");
+            return;
+        }
+        if ((unsigned long long)revision != runtime->effect.revision) {
+            send_revision_problem(fd, "revision_conflict",
+                                  "The effect revision is no longer current.",
+                                  runtime->effect.revision);
+            return;
+        }
+        if (!json_bool(payload, "enabled", &enabled) ||
+            !json_string(payload, "preset", preset, sizeof(preset)) ||
+            !json_int(payload, "intensity", &intensity) || intensity < 0 ||
+            intensity > 100 || (strcmp(preset, "none") != 0 &&
+                                strcmp(preset, "scanlines") != 0)) {
+            send_problem(fd, 400, "Bad Request", "invalid_effect",
+                         "revision, enabled, preset, and intensity are required; preset must be none or scanlines and intensity must be 0..100.");
+            return;
+        }
+        runtime->effect.enabled = enabled;
+        snprintf(runtime->effect.preset, sizeof(runtime->effect.preset),
+                 "%s", preset);
+        runtime->effect.intensity = intensity;
+        ++runtime->effect.revision;
+        {
+            int output_index;
+            for (output_index = 0; output_index < runtime->output_count;
+                 ++output_index)
+                runtime->outputs[output_index].initialized = 0;
+        }
+        runtime->render_pending = 1;
+        effect_json(runtime, body, sizeof(body));
+        send_http(fd, 200, "OK", "application/json", body);
+        return;
+    }
     if (strcmp(method, "GET") != 0) {
         send_problem(fd, 405, "Method Not Allowed", "method_not_allowed",
                      "This gateway route does not support the requested method.");
@@ -5597,6 +5672,24 @@ static void render_sdl_glyph(SDL_Renderer *renderer, const BlitFont *font,
     }
 }
 
+static void render_sdl_effects(const BlitRuntime *runtime,
+                               SDL_Renderer *renderer, int width, int height)
+{
+    int y;
+    unsigned char alpha;
+
+    if (!runtime->effect.enabled ||
+        strcmp(runtime->effect.preset, "scanlines") != 0)
+        return;
+    alpha = (unsigned char)((runtime->effect.intensity * 255) / 100);
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, alpha);
+    for (y = 1; y < height; y += 2)
+        SDL_RenderLine(renderer, 0.0f, (float)y,
+                       (float)(width - 1), (float)y);
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+}
+
 static void capture_sdl_frame(BlitRuntime *runtime, int output_index,
                               SDL_Renderer *renderer)
 {
@@ -5957,6 +6050,9 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
                 }
             }
         }
+        render_sdl_effects(runtime, renderer,
+                           runtime->displays[output_index].bounds.w,
+                           runtime->displays[output_index].bounds.h);
         render_pointer(runtime, output_index);
         capture_sdl_frame(runtime, output_index, renderer);
         SDL_RenderPresent(renderer);
@@ -6665,6 +6761,8 @@ int main(int argc, char **argv)
     runtime.next_event_sequence = 1;
     runtime.topology_revision = 1;
     runtime.input_routes_revision = 1;
+    runtime.effect.revision = 1;
+    snprintf(runtime.effect.preset, sizeof(runtime.effect.preset), "none");
     {
         const char *auth_token = getenv("BLIT_AUTH_TOKEN");
         if (auth_token != NULL)

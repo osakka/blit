@@ -45,6 +45,8 @@ panes, input routing, and diagnostics.
   Linux host without X11 or Wayland.
 - [Gateway testing](testing-gateway.md) — how to build and exercise the first
   TCP/OpenAPI/WebSocket gateway slice.
+- [Effect testing](testing-effects.md) — deterministic SDL effect validation
+  and direct-KMS capability behavior.
 - [hibr integration](integration-hibr.md) — standalone-service decision,
   PTY compatibility probe, and the operational console-module adapter.
 - [ADR index](adr/README.md) — decisions that constrain implementation.
