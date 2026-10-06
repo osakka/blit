@@ -328,6 +328,27 @@ paths:
                 $ref: '#/components/schemas/SurfaceSnapshot'
         default:
           $ref: '#/components/responses/Problem'
+  /v1/surfaces/{surface_id}/scrollback:
+    parameters:
+      - $ref: '#/components/parameters/SurfaceId'
+    get:
+      tags: [terminals]
+      operationId: getSurfaceScrollback
+      summary: Read retained main-screen scrollback lines
+      description: >-
+        Returns oldest-first lines retained when the main screen scrolls.
+        Alternate-screen output is never retained. `view` is the terminal's
+        reserved scrollback view position; the current implementation exposes
+        the retained history while live rendering remains on the active grid.
+      responses:
+        '200':
+          description: Retained scrollback
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScrollbackSnapshot'
+        default:
+          $ref: '#/components/responses/Problem'
   /v1/frames:
     post:
       tags: [frames]
@@ -785,6 +806,24 @@ components:
                 type: string
                 description: URI from the active OSC 8 hyperlink, when present.
               style: {$ref: '#/components/schemas/CellStyle'}
+            additionalProperties: false
+      additionalProperties: false
+    ScrollbackSnapshot:
+      type: object
+      required: [id, count, view, lines]
+      properties:
+        id: {$ref: '#/components/schemas/ResourceId'}
+        count: {type: integer, minimum: 0, maximum: 1000}
+        view: {type: integer, minimum: 0, maximum: 1000}
+        lines:
+          type: array
+          items:
+            type: object
+            required: [index, width, text]
+            properties:
+              index: {type: integer, minimum: 0}
+              width: {type: integer, minimum: 1}
+              text: {type: string}
             additionalProperties: false
       additionalProperties: false
     CellStyle:

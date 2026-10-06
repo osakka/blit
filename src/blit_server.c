@@ -38,6 +38,7 @@ extern char **environ;
 #define BLIT_MAX_FRAME_SURFACES 16
 #define BLIT_MAX_IDEMPOTENCY 16
 #define BLIT_MAX_EVENT_HISTORY 64
+#define BLIT_MAX_SCROLLBACK_LINES 1000
 #define BLIT_DEFAULT_FOREGROUND 0xbed2beU
 #define BLIT_ATTR_BOLD 1
 #define BLIT_ATTR_DIM 2
@@ -87,6 +88,19 @@ typedef struct {
 } BlitSavedCursor;
 
 typedef struct {
+    int width;
+    char *cells;
+    uint32_t *codepoints;
+    uint32_t *combining;
+    unsigned char *combining_count;
+    uint32_t *foreground;
+    uint32_t *background;
+    uint32_t *underline_color;
+    uint16_t *attributes;
+    uint16_t *links;
+} BlitScrollbackLine;
+
+typedef struct {
     int used;
     unsigned long long id;
     unsigned long long revision;
@@ -119,6 +133,10 @@ typedef struct {
     int scroll_top;
     int scroll_bottom;
     unsigned char tab_stops[BLIT_MAX_CELL_COLS];
+    BlitScrollbackLine scrollback[BLIT_MAX_SCROLLBACK_LINES];
+    int scrollback_count;
+    int scrollback_start;
+    int scrollback_view;
     int damage_valid;
     int damage_x;
     int damage_y;
@@ -1132,6 +1150,23 @@ static BlitSurface *find_surface(BlitRuntime *runtime, const char *path)
     return find_surface_id(runtime, surface_id);
 }
 
+static BlitSurface *find_scrollback_surface(BlitRuntime *runtime,
+                                            const char *path)
+{
+    const char *prefix = "/v1/surfaces/";
+    const char *id;
+    unsigned long long surface_id;
+
+    if (strncmp(path, prefix, strlen(prefix)) != 0)
+        return NULL;
+    id = path + strlen(prefix);
+    if (sscanf(id, "surface-%llu/scrollback", &surface_id) != 1)
+        return NULL;
+    if (strstr(id, "/scrollback") == NULL)
+        return NULL;
+    return find_surface_id(runtime, surface_id);
+}
+
 static int build_frame_plan(BlitRuntime *runtime, const char *json,
                             unsigned long long revision, BlitFramePlan *plan,
                             unsigned long long *conflict_revision)
@@ -1282,6 +1317,52 @@ static void surface_snapshot_json(const BlitSurface *surface,
             }
             used += (size_t)snprintf(body + used, capacity - used, "}");
         }
+    }
+    snprintf(body + used, capacity - used, "]}");
+}
+
+static void surface_scrollback_json(const BlitSurface *surface, char *body,
+                                    size_t capacity)
+{
+    size_t used;
+    int line_index;
+    int first = 1;
+
+    used = (size_t)snprintf(body, capacity,
+                            "{\"id\":\"surface-%llu\","
+                            "\"count\":%d,\"view\":%d,\"lines\":[",
+                            surface->id, surface->scrollback_count,
+                            surface->scrollback_view);
+    for (line_index = 0; line_index < surface->scrollback_count;
+         ++line_index) {
+        int index = (surface->scrollback_start + line_index) %
+            BLIT_MAX_SCROLLBACK_LINES;
+        const BlitScrollbackLine *line = &surface->scrollback[index];
+        int last = line->width;
+        int column;
+        char text[4096];
+        char escaped[8192];
+        size_t text_used = 0;
+
+        while (last > 0 && line->codepoints[last - 1] == 0) --last;
+        for (column = 0; column < last && text_used + 5 < sizeof(text);
+             ++column) {
+            char glyph[5];
+            int glyph_length = utf8_encode(line->codepoints[column] ?
+                                           line->codepoints[column] : ' ',
+                                           glyph);
+            if (text_used + (size_t)glyph_length >= sizeof(text)) break;
+            memcpy(text + text_used, glyph, (size_t)glyph_length);
+            text_used += (size_t)glyph_length;
+        }
+        text[text_used] = '\0';
+        json_escape(text, escaped, sizeof(escaped));
+        used += (size_t)snprintf(body + used, capacity - used,
+                                 "%s{\"index\":%d,\"width\":%d,"
+                                 "\"text\":\"%s\"}",
+                                 first ? "" : ",", line_index, line->width,
+                                 escaped);
+        first = 0;
     }
     snprintf(body + used, capacity - used, "]}");
 }
@@ -1614,6 +1695,113 @@ static void terminal_erase_line(BlitSession *session, BlitSurface *surface,
         terminal_erase_cell(session, surface, x, y);
 }
 
+static void scrollback_line_release(BlitScrollbackLine *line)
+{
+    free(line->cells);
+    free(line->codepoints);
+    free(line->combining);
+    free(line->combining_count);
+    free(line->foreground);
+    free(line->background);
+    free(line->underline_color);
+    free(line->attributes);
+    free(line->links);
+    memset(line, 0, sizeof(*line));
+}
+
+static int scrollback_line_prepare(BlitScrollbackLine *line, int width)
+{
+    if (line->width != width || line->cells == NULL)
+        scrollback_line_release(line);
+    if (line->cells == NULL) {
+        line->cells = (char *)calloc((size_t)width, sizeof(*line->cells));
+        line->codepoints = (uint32_t *)calloc((size_t)width,
+                                               sizeof(*line->codepoints));
+        line->combining = (uint32_t *)calloc(
+            (size_t)width * BLIT_MAX_COMBINING, sizeof(*line->combining));
+        line->combining_count = (unsigned char *)calloc(
+            (size_t)width, sizeof(*line->combining_count));
+        line->foreground = (uint32_t *)calloc((size_t)width,
+                                              sizeof(*line->foreground));
+        line->background = (uint32_t *)calloc((size_t)width,
+                                              sizeof(*line->background));
+        line->underline_color = (uint32_t *)calloc(
+            (size_t)width, sizeof(*line->underline_color));
+        line->attributes = (uint16_t *)calloc((size_t)width,
+                                              sizeof(*line->attributes));
+        line->links = (uint16_t *)calloc((size_t)width,
+                                          sizeof(*line->links));
+        if (line->cells == NULL || line->codepoints == NULL ||
+            line->combining == NULL || line->combining_count == NULL ||
+            line->foreground == NULL || line->background == NULL ||
+            line->underline_color == NULL || line->attributes == NULL ||
+            line->links == NULL) {
+            scrollback_line_release(line);
+            return 0;
+        }
+        line->width = width;
+    }
+    return 1;
+}
+
+static int scrollback_capture_row(BlitScrollbackLine *line,
+                                  const BlitSurface *surface, int row)
+{
+    if (!scrollback_line_prepare(line, surface->width))
+        return 0;
+    memcpy(line->cells, surface->cells[row],
+           (size_t)surface->width * sizeof(*line->cells));
+    memcpy(line->codepoints, surface->codepoints[row],
+           (size_t)surface->width * sizeof(*line->codepoints));
+    memcpy(line->combining, surface->combining[row],
+           (size_t)surface->width * BLIT_MAX_COMBINING *
+           sizeof(*line->combining));
+    memcpy(line->combining_count, surface->combining_count[row],
+           (size_t)surface->width * sizeof(*line->combining_count));
+    memcpy(line->foreground, surface->foreground[row],
+           (size_t)surface->width * sizeof(*line->foreground));
+    memcpy(line->background, surface->background[row],
+           (size_t)surface->width * sizeof(*line->background));
+    memcpy(line->underline_color, surface->underline_color[row],
+           (size_t)surface->width * sizeof(*line->underline_color));
+    memcpy(line->attributes, surface->attributes[row],
+           (size_t)surface->width * sizeof(*line->attributes));
+    memcpy(line->links, surface->links[row],
+           (size_t)surface->width * sizeof(*line->links));
+    return 1;
+}
+
+static void terminal_scrollback_push(BlitSurface *surface, int row)
+{
+    int index;
+
+    if (surface->scrollback_count < BLIT_MAX_SCROLLBACK_LINES) {
+        index = (surface->scrollback_start + surface->scrollback_count) %
+            BLIT_MAX_SCROLLBACK_LINES;
+    } else {
+        index = surface->scrollback_start;
+    }
+    if (!scrollback_capture_row(&surface->scrollback[index], surface, row))
+        return;
+    if (surface->scrollback_count < BLIT_MAX_SCROLLBACK_LINES)
+        ++surface->scrollback_count;
+    else
+        surface->scrollback_start = (surface->scrollback_start + 1) %
+            BLIT_MAX_SCROLLBACK_LINES;
+    surface->scrollback_view = 0;
+}
+
+static void terminal_scrollback_release(BlitSurface *surface)
+{
+    int index;
+
+    for (index = 0; index < BLIT_MAX_SCROLLBACK_LINES; ++index)
+        scrollback_line_release(&surface->scrollback[index]);
+    surface->scrollback_count = 0;
+    surface->scrollback_start = 0;
+    surface->scrollback_view = 0;
+}
+
 static void terminal_copy_cell(BlitSurface *surface, int destination,
                                int source, int y)
 {
@@ -1631,7 +1819,7 @@ static void terminal_copy_cell(BlitSurface *surface, int destination,
     surface->links[y][destination] = surface->links[y][source];
 }
 
-static void terminal_scroll_up(BlitSurface *surface)
+static void terminal_scroll_up(BlitSession *session, BlitSurface *surface)
 {
     int y;
     int top = surface->scroll_top;
@@ -1640,6 +1828,9 @@ static void terminal_scroll_up(BlitSurface *surface)
     if (surface->height < 1 || top < 0 || bottom >= surface->height ||
         top >= bottom)
         return;
+    if (session != NULL && !session->terminal_alternate && top == 0 &&
+        bottom == surface->height - 1)
+        terminal_scrollback_push(surface, top);
     for (y = top + 1; y <= bottom; ++y) {
         memcpy(surface->cells[y - 1], surface->cells[y],
                sizeof(surface->cells[y - 1]));
@@ -1723,12 +1914,12 @@ static void terminal_blank_row(BlitSurface *surface, int row)
     memset(surface->links[row], 0, sizeof(surface->links[row]));
 }
 
-static void terminal_index(BlitSurface *surface)
+static void terminal_index(BlitSession *session, BlitSurface *surface)
 {
     if (surface->cursor_y < surface->scroll_bottom)
         ++surface->cursor_y;
     else
-        terminal_scroll_up(surface);
+        terminal_scroll_up(session, surface);
 }
 
 static void terminal_reverse_index(BlitSurface *surface)
@@ -2774,13 +2965,13 @@ static void terminal_put_codepoint(BlitSession *session, BlitSurface *surface,
     session->terminal_last_codepoint = codepoint;
     if (session->terminal_wrap_pending && session->terminal_autowrap) {
         surface->cursor_x = 0;
-        terminal_index(surface);
+        terminal_index(session, surface);
         session->terminal_wrap_pending = 0;
     }
     if (cell_width == 2 && surface->cursor_x >= surface->width - 1) {
         if (session->terminal_autowrap) {
             surface->cursor_x = 0;
-            terminal_index(surface);
+            terminal_index(session, surface);
         } else {
             cell_width = 1;
         }
@@ -2791,7 +2982,7 @@ static void terminal_put_codepoint(BlitSession *session, BlitSurface *surface,
             if (surface->cursor_y < surface->scroll_bottom)
                 ++surface->cursor_y;
             else
-                terminal_scroll_up(surface);
+                terminal_scroll_up(session, surface);
         } else {
             surface->cursor_x = surface->width - 1;
         }
@@ -2886,14 +3077,14 @@ static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
                 terminal_restore_cursor(session, surface);
                 session->terminal_escape = 0;
             } else if (byte == 'D') {
-                terminal_index(surface);
+                terminal_index(session, surface);
                 session->terminal_escape = 0;
             } else if (byte == 'M') {
                 terminal_reverse_index(surface);
                 session->terminal_escape = 0;
             } else if (byte == 'E') {
                 surface->cursor_x = 0;
-                terminal_index(surface);
+                terminal_index(session, surface);
                 session->terminal_escape = 0;
             } else if (byte == 'c') {
                 terminal_clear_active_screen(surface);
@@ -2920,6 +3111,7 @@ static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
                 session->terminal_mouse_mode = 0;
                 session->terminal_mouse_sgr = 0;
                 session->terminal_synchronized = 0;
+                terminal_scrollback_release(surface);
                 session->terminal_foreground = 0;
                 session->terminal_background = 0;
                 session->terminal_underline_color = 0;
@@ -3004,7 +3196,7 @@ static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
                                         surface->cursor_y);
                     if (session->terminal_newline_mode)
                         surface->cursor_x = 0;
-                    terminal_index(surface);
+                    terminal_index(session, surface);
                     session->terminal_wrap_pending = 0;
                 } else if (byte == '\b') {
                     if (session->terminal_wrap_pending)
@@ -3068,7 +3260,7 @@ static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
             mark_surface_damage(surface, surface->cursor_x, surface->cursor_y);
             if (session->terminal_newline_mode)
                 surface->cursor_x = 0;
-            terminal_index(surface);
+            terminal_index(session, surface);
             session->terminal_wrap_pending = 0;
             ++offset;
         } else if (byte == '\b') {
@@ -3692,6 +3884,7 @@ static int resize_session_surface(BlitSession *session, BlitSurface *surface,
         surface->cursor_y = height - 1;
     surface->scroll_top = 0;
     surface->scroll_bottom = height - 1;
+    surface->scrollback_view = 0;
     terminal_reset_tabs(surface);
     session->terminal_wrap_pending = 0;
     surface->damage_valid = 1;
@@ -3754,8 +3947,10 @@ static void destroy_session(BlitRuntime *runtime, BlitSession *session)
     }
     if (route_changed)
         ++runtime->input_routes_revision;
-    if (surface != NULL)
+    if (surface != NULL) {
+        terminal_scrollback_release(surface);
         memset(surface, 0, sizeof(*surface));
+    }
     if (session->focused)
         session->focused = 0;
     memset(session, 0, sizeof(*session));
@@ -4292,6 +4487,19 @@ static void handle_request(int fd, BlitRuntime *runtime,
         send_http(fd, 201, "Created", "application/json", body);
         idempotency_store(runtime, request, method, path, payload, 201,
                           "Created", "application/json", body);
+        return;
+    }
+    if (strncmp(path, "/v1/surfaces/", strlen("/v1/surfaces/")) == 0 &&
+        strstr(path, "/scrollback") != NULL && strcmp(method, "GET") == 0) {
+        BlitSurface *surface = find_scrollback_surface(runtime, path);
+
+        if (surface == NULL) {
+            send_problem(fd, 404, "Not Found", "surface_not_found",
+                         "The text surface does not exist.");
+            return;
+        }
+        surface_scrollback_json(surface, body, sizeof(body));
+        send_http(fd, 200, "OK", "application/json", body);
         return;
     }
     if (strncmp(path, "/v1/surfaces/", strlen("/v1/surfaces/")) == 0 &&

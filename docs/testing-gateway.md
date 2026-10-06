@@ -216,6 +216,19 @@ curl --fail --request PATCH \
 Dimensions outside the bounded surface policy are rejected with
 `invalid_surface_resize`.
 
+Main-screen lines that scroll off the top are retained in a bounded 1000-line
+ring and can be inspected without disturbing the live surface:
+
+```sh
+curl --fail \
+  http://127.0.0.1:8080/v1/surfaces/surface-1/scrollback
+```
+
+The response is oldest-first and reports the current `view` position. Output
+from an alternate screen is never added to this history; historical rendering
+and selection are separate terminal-view work and are not inferred from this
+read-only endpoint.
+
 ## Apply cells and present a frame
 
 The created session owns a surface whose initial revision is `1`. Cell updates

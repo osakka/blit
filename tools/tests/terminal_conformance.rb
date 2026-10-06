@@ -133,6 +133,28 @@ end
 request(base, 'DELETE', "/v1/terminal-sessions/#{resize_id}")
 puts 'PASS resize-preserves-grid'
 
+created = request(base, 'POST', '/v1/terminal-sessions', {
+  'command' => '/bin/sh',
+  'arguments' => ['-c', "printf 'a\\nb\\nc'; sleep 1"],
+  'surface' => { 'width' => 4, 'height' => 2 }
+})
+scrollback_id = created.fetch('id')
+Timeout.timeout(5) do
+  loop do
+    state = request(base, 'GET', "/v1/terminal-sessions/#{scrollback_id}")
+    break unless %w[starting running].include?(state.fetch('state'))
+
+    sleep 0.02
+  end
+end
+scrollback = request(base, 'GET',
+                     "/v1/surfaces/surface-#{scrollback_id}/scrollback")
+assert_equal(1, scrollback.fetch('count'), 'scrollback line count')
+assert_equal('a', scrollback.fetch('lines').fetch(0).fetch('text'),
+             'scrollback oldest line')
+request(base, 'DELETE', "/v1/terminal-sessions/#{scrollback_id}")
+puts 'PASS scrollback-retains-main-screen-lines'
+
 snapshot = run_case(base, 'printable-and-newline', "printf 'hello\\r\\nworld'")
 cells = cell_map(snapshot)
 assert_equal('h', cells.fetch([0, 0]).fetch('text'), 'hello[0,0]')
