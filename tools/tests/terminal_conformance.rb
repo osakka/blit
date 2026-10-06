@@ -238,6 +238,13 @@ snapshot = run_case(base, 'alternate-screen', "printf 'main\\033[?1049h\\033[Hal
 cells = cell_map(snapshot)
 assert_equal('m', cells.fetch([0, 0]).fetch('text'), 'alternate screen restore')
 
+snapshot = run_case(base, 'alternate-screen-state-restore',
+                    "printf '\\033[31mA\\033[?1049h\\033[32mB\\033[?1049lC'")
+cells = cell_map(snapshot)
+assert_equal('C', cells.fetch([1, 0]).fetch('text'), '1049 cursor restore')
+assert_equal('#cd0000', cells.fetch([1, 0]).fetch('style').fetch('foreground'),
+             '1049 pen restore')
+
 snapshot = run_case(base, 'legacy-alternate-screen',
                     "printf 'main\\033[?47h\\033[Halt\\033[?47l'")
 cells = cell_map(snapshot)

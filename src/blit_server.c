@@ -218,6 +218,7 @@ typedef struct {
     int terminal_cursor_saved_x;
     int terminal_cursor_saved_y;
     BlitSavedCursor terminal_saved_cursor[2];
+    BlitSavedCursor terminal_alternate_saved_cursor;
     int terminal_dec_cursor_saved;
     int terminal_dec_cursor_saved_x;
     int terminal_dec_cursor_saved_y;
@@ -1457,11 +1458,17 @@ static void terminal_alignment_test(BlitSurface *surface)
     surface->damage_height = surface->height;
 }
 
+static void terminal_store_cursor(BlitSavedCursor *saved,
+                                  BlitSession *session, BlitSurface *surface);
+
 static void terminal_enter_alternate(BlitSession *session,
-                                     BlitSurface *surface)
+                                     BlitSurface *surface, int save_cursor)
 {
     if (session->terminal_alternate)
         return;
+    if (save_cursor)
+        terminal_store_cursor(&session->terminal_alternate_saved_cursor,
+                              session, surface);
     memcpy(surface->alternate_cells, surface->cells,
            sizeof(surface->cells));
     memcpy(surface->alternate_codepoints, surface->codepoints,
@@ -1510,8 +1517,27 @@ static void terminal_leave_alternate(BlitSession *session,
     memcpy(surface->attributes, surface->alternate_attributes,
            sizeof(surface->attributes));
     session->terminal_alternate = 0;
-    surface->cursor_x = session->terminal_saved_x;
-    surface->cursor_y = session->terminal_saved_y;
+    if (session->terminal_alternate_saved_cursor.valid) {
+        BlitSavedCursor *saved = &session->terminal_alternate_saved_cursor;
+        surface->cursor_x = saved->x;
+        surface->cursor_y = saved->y;
+        session->terminal_foreground = saved->foreground;
+        session->terminal_background = saved->background;
+        session->terminal_attributes = saved->attributes;
+        session->terminal_foreground_set = saved->foreground_set;
+        session->terminal_background_set = saved->background_set;
+        session->terminal_underline_color = saved->underline_color;
+        session->terminal_underline_color_set = saved->underline_color_set;
+        session->terminal_charset_dec = saved->charset_dec;
+        session->terminal_charset_g1_dec = saved->charset_g1_dec;
+        session->terminal_charset_shift = saved->charset_shift;
+        session->terminal_origin_mode = saved->origin_mode;
+        session->terminal_autowrap = saved->autowrap;
+        saved->valid = 0;
+    } else {
+        surface->cursor_x = session->terminal_saved_x;
+        surface->cursor_y = session->terminal_saved_y;
+    }
     if (surface->cursor_x >= surface->width)
         surface->cursor_x = surface->width - 1;
     if (surface->cursor_y >= surface->height)
@@ -1784,10 +1810,9 @@ static BlitSavedCursor *terminal_saved_cursor(BlitSession *session)
     return &session->terminal_saved_cursor[session->terminal_alternate ? 1 : 0];
 }
 
-static void terminal_save_cursor(BlitSession *session, BlitSurface *surface)
+static void terminal_store_cursor(BlitSavedCursor *saved,
+                                  BlitSession *session, BlitSurface *surface)
 {
-    BlitSavedCursor *saved = terminal_saved_cursor(session);
-
     saved->valid = 1;
     saved->x = surface->cursor_x;
     saved->y = surface->cursor_y;
@@ -1803,6 +1828,11 @@ static void terminal_save_cursor(BlitSession *session, BlitSurface *surface)
     saved->charset_shift = session->terminal_charset_shift;
     saved->origin_mode = session->terminal_origin_mode;
     saved->autowrap = session->terminal_autowrap;
+}
+
+static void terminal_save_cursor(BlitSession *session, BlitSurface *surface)
+{
+    terminal_store_cursor(terminal_saved_cursor(session), session, surface);
 }
 
 static void terminal_restore_cursor(BlitSession *session, BlitSurface *surface)
@@ -2164,7 +2194,8 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
             terminal_csi_has_mode(sequence, 1047) ||
             terminal_csi_has_mode(sequence, 1049)) {
             if (enabled)
-                terminal_enter_alternate(session, surface);
+                terminal_enter_alternate(session, surface,
+                                         terminal_csi_has_mode(sequence, 1049));
             else
                 terminal_leave_alternate(session, surface);
         }
@@ -2338,7 +2369,7 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
     } else if (private_mode && (command == 'h' || command == 'l') &&
                has_first && (first == 1047 || first == 1049)) {
         if (command == 'h')
-            terminal_enter_alternate(session, surface);
+            terminal_enter_alternate(session, surface, first == 1049);
         else
             terminal_leave_alternate(session, surface);
     } else if (private_mode && (command == 'h' || command == 'l') &&

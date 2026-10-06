@@ -35,6 +35,9 @@ shell conformance path is stable.
    DEC focus reporting (`CSI ? 1004 h/l`) emits focus-in/focus-out reports
    when the single focused pane changes.
    DEC origin-mode cursor motion is constrained to the active scroll region.
+   DEC 1049 alternate-screen entry saves and restores the main-screen cursor,
+   pen, character-set, origin, and autowrap state; legacy 47/1047 switching
+   retains its distinct buffer-switching semantics.
    Insert mode (`CSI 4 h/l`), legacy alternate-screen mode (`CSI ?47 h/l`),
    DEC soft reset (`CSI !p`), and cursor style selection (`DECSCUSR`,
    `CSI Ps SP q`) are covered by the conformance vectors. Cursor styles are
