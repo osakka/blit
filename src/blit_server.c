@@ -832,7 +832,8 @@ static void server_json(const BlitRuntime *runtime, char *body, size_t capacity)
              "\"overlays\":\"/v1/overlays\"}}",
              runtime->display_count, backend,
              (runtime->direct_kms ? runtime->display_count > 0 :
-              runtime->sdl_ready && runtime->output_count > 0) ?
+              runtime->sdl_ready && runtime->output_count > 0 &&
+              runtime->output_count == runtime->display_count) ?
                  "true" : "false", escaped_error);
 }
 
@@ -911,7 +912,9 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
     render_scheduler_json(runtime, scheduler, sizeof(scheduler));
     json_escape(runtime->sdl_error, escaped_error, sizeof(escaped_error));
     presentation_sync = runtime->direct_kms ? "drm-page-flip" :
-        (runtime->sdl_vsync_failures > 0 ? "scheduler-only" : "sdl-vsync");
+        (runtime->output_count == 0 ||
+         runtime->output_count != runtime->display_count ||
+         runtime->sdl_vsync_failures > 0 ? "scheduler-only" : "sdl-vsync");
     snprintf(body, capacity,
              "{\"revision\":1,\"health\":{\"ready\":%s,"
              "\"backend\":\"%s\",\"error\":\"%s\"},"
@@ -925,7 +928,8 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              "\"presentation_sync\":\"%s\"},"
              "\"errors\":%s,\"warnings\":%s}",
              (runtime->direct_kms ? runtime->display_count > 0 :
-              runtime->sdl_ready && runtime->output_count > 0) ?
+              runtime->sdl_ready && runtime->output_count > 0 &&
+              runtime->output_count == runtime->display_count) ?
                  "true" : "false", backend, escaped_error,
              runtime->display_count, runtime->output_count, sessions, surfaces,
              streams, routes, runtime->evdev_keyboard_count,
