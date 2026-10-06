@@ -121,7 +121,7 @@ else
     $b wget -qO /tmp/one.json --post-data='{"command":"/blit-stage/pty-input-echo","arguments":["--wide","--kitty"],"surface_mode":"terminal","display_id":"display-47","surface":{"width":128,"height":48}}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
 fi
 $b wget -qO /tmp/two.json --post-data='{"command":"/blit-stage/pty-input-echo","surface_mode":"terminal","display_id":"display-48","surface":{"width":128,"height":48}}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
-[ "$loss_test" -eq 1 ] && ( $b sleep 2; echo 0 > /sys/kernel/config/vkms/blit/connectors/connector0/status ) &
+[ "$loss_test" -eq 1 ] && ( $b sleep 2; echo 2 > /sys/kernel/config/vkms/blit/connectors/connector0/status ) &
 # Hibr/PTY startup is intentionally asynchronous.  Give both probe sessions
 # enough time to produce their first content before the capture predicate is
 # evaluated; a fixed short sleep made the visual gate depend on QEMU TCG load.
@@ -168,7 +168,9 @@ if [ "$kitty_query_test" -eq 1 ]; then
     echo KMS_KITTY_QUERY_FAIL
     finish 1
 fi
-if [ "$stack_test" -eq 1 ]; then
+if [ "$loss_test" -eq 1 ]; then
+    /blit-stage/ppm-assert /tmp/guest-screenshots/display-48.ppm && echo PPM_DISPLAY_48_SURVIVOR_PASS || { echo PPM_DISPLAY_48_SURVIVOR_FAIL; finish 1; }
+elif [ "$stack_test" -eq 1 ]; then
     /blit-stage/ppm-assert /tmp/guest-screenshots/display-47.ppm --wide --green && echo PPM_DISPLAY_47_WIDE_STACK_CLIP_PASS || { echo PPM_DISPLAY_47_WIDE_STACK_CLIP_FAIL; finish 1; }
 elif [ "$sixel_test" -eq 1 ]; then
     /blit-stage/ppm-assert /tmp/guest-screenshots/display-47.ppm --sixel && echo PPM_DISPLAY_47_SIXEL_PASS || { echo PPM_DISPLAY_47_SIXEL_FAIL; finish 1; }
@@ -179,10 +181,24 @@ else
 fi
 /blit-stage/ppm-assert /tmp/guest-screenshots/display-48.ppm && echo PPM_DISPLAY_48_PASS || { echo PPM_DISPLAY_48_FAIL; finish 1; }
 $b cp /tmp/guest-screenshots/display-*.ppm /tmp/host-screenshots/ 2>/dev/null || true
-size1=$($b wc -c < /tmp/guest-screenshots/display-47.ppm 2>/dev/null || echo 0)
-size2=$($b wc -c < /tmp/guest-screenshots/display-48.ppm 2>/dev/null || echo 0)
-hash1=$($b sha256sum /tmp/guest-screenshots/display-47.ppm 2>/dev/null | $b cut -d ' ' -f 1 || true)
-hash2=$($b sha256sum /tmp/guest-screenshots/display-48.ppm 2>/dev/null | $b cut -d ' ' -f 1 || true)
-if [ "$size1" -gt 2359296 ] && [ "$size2" -gt 2359296 ] && [ "$hash1" != "$hash2" ] && [ "$loss_pass" -eq 1 ] && [ "$graphics_pass" -eq 1 ] && [ "$scheduler_pass" -eq 1 ] && [ "$mixed_refresh_pass" -eq 1 ] && [ "$kitty_limits_pass" -eq 1 ]; then echo KMS_CAPTURE_PASS; finish 0; fi
+size1=0
+size2=0
+hash1=
+hash2=
+if [ -f /tmp/guest-screenshots/display-47.ppm ]; then
+    size1=$($b wc -c /tmp/guest-screenshots/display-47.ppm | $b cut -d ' ' -f 1)
+    hash1=$($b sha256sum /tmp/guest-screenshots/display-47.ppm | $b cut -d ' ' -f 1)
+fi
+if [ -f /tmp/guest-screenshots/display-48.ppm ]; then
+    size2=$($b wc -c /tmp/guest-screenshots/display-48.ppm | $b cut -d ' ' -f 1)
+    hash2=$($b sha256sum /tmp/guest-screenshots/display-48.ppm | $b cut -d ' ' -f 1)
+fi
+capture_pass=0
+if [ "$loss_test" -eq 1 ]; then
+    [ "$size2" -gt 2359296 ] && capture_pass=1
+elif [ "$size1" -gt 2359296 ] && [ "$size2" -gt 2359296 ] && [ "$hash1" != "$hash2" ]; then
+    capture_pass=1
+fi
+if [ "$capture_pass" -eq 1 ] && [ "$loss_pass" -eq 1 ] && [ "$graphics_pass" -eq 1 ] && [ "$scheduler_pass" -eq 1 ] && [ "$mixed_refresh_pass" -eq 1 ] && [ "$kitty_limits_pass" -eq 1 ]; then echo KMS_CAPTURE_PASS; finish 0; fi
 echo KMS_CAPTURE_FAIL
 finish 1

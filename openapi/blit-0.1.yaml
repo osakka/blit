@@ -179,7 +179,7 @@ paths:
                   revision: {$ref: '#/components/schemas/Revision'}
                   backend:
                     type: string
-                    enum: [sdl3, unsupported, unavailable]
+                    enum: [sdl3, drm-kms, unavailable]
                   overlays:
                     type: array
                     items: {$ref: '#/components/schemas/Overlay'}
@@ -787,7 +787,7 @@ components:
         intensity: {type: integer, minimum: 0, maximum: 100}
         backend:
           type: string
-          enum: [sdl3, unsupported, unavailable]
+          enum: [sdl3, drm-kms, unavailable]
       additionalProperties: false
     EffectUpdate:
       type: object

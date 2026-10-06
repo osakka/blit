@@ -63,6 +63,13 @@ The descriptor is opened nonblocking as well, so a driver or virtual display
 cannot turn page-flip submission itself into a process-wide blocking call.
 Readiness, per-output pending state, and the bounded flip timeout remain the
 only waiting mechanisms.
+
+Connector hotplug status is polled from the same bounded DRM output set while
+servicing the descriptor. A disconnected connector is marked `failed` in the
+display API and is removed from the render work for that output; surviving
+outputs continue presenting and servicing the gateway. The VKMS fault fixture
+sets connector status to the DRM `disconnected` value and verifies this
+per-output behavior.
 The bounded timeout still moves a connector to the explicit modeset fallback
 if its completion event does not arrive.
 

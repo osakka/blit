@@ -1000,10 +1000,35 @@ int blit_kms_service(BlitKms *kms, int readable)
             if (!kms->outputs[i].flip_pending)
                 changed = 1;
     }
+    /* DRM hotplug changes are not page-flip events. Poll the bounded
+       connector set so a disconnected output becomes visible to the API even
+       when the driver accepts no subsequent page flip. */
+    for (i = 0; i < kms->output_count; ++i) {
+        KmsOutput *output = &kms->outputs[i];
+        drmModeConnector *connector = drmModeGetConnector(kms->fd,
+                                                            output->connector);
+        int connected = connector != NULL &&
+            connector->connection == DRM_MODE_CONNECTED;
+        if (connector != NULL)
+            drmModeFreeConnector(connector);
+        if (!connected && output->info.presentation_state !=
+                            BLIT_KMS_PRESENTATION_FAILED) {
+            output->flip_pending = 0;
+            output->flip_started_us = 0;
+            output->modeset_fallback = 0;
+            output->info.presentation_state = BLIT_KMS_PRESENTATION_FAILED;
+            fprintf(stderr,
+                    "blit: KMS connector=%u disconnected; marking output failed\n",
+                    output->connector);
+            changed = 1;
+        }
+    }
     now = kms_now_us();
     timeout_us = (long long)kms_flip_timeout_ms() * 1000LL;
     for (i = 0; i < kms->output_count; ++i) {
         KmsOutput *output = &kms->outputs[i];
+        if (output->info.presentation_state == BLIT_KMS_PRESENTATION_FAILED)
+            continue;
         if (!output->flip_pending || output->flip_started_us <= 0 ||
             now - output->flip_started_us < timeout_us)
             continue;
@@ -1058,6 +1083,8 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
     int full_redraw;
     int deferred = 0;
     int failed = 0;
+    int expected_captures = 0;
+    int completed_captures = 0;
     long long started = 0;
     if (kms == NULL) return -1;
     for (i = 0; i < view_count; ++i)
@@ -1069,6 +1096,13 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
     capture = kms->screenshot_dir[0] != '\0' && !kms->screenshot_written &&
         kms->screenshot_frame >= kms->screenshot_after &&
         all_outputs_have_content(kms, views, view_count);
+    if (capture) {
+        for (i = 0; i < kms->output_count; ++i)
+            if ((output_mask & (1U << i)) &&
+                kms->outputs[i].info.presentation_state !=
+                    BLIT_KMS_PRESENTATION_FAILED)
+                ++expected_captures;
+    }
     pointer_changed = !kms->pointer_state_valid ||
         kms->previous_pointer_x != pointer_x ||
         kms->previous_pointer_y != pointer_y ||
@@ -1082,6 +1116,8 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         long long flip_started = 0;
         int modeset_frame;
         int trace_phases = getenv("BLIT_KMS_TRACE_PHASES") != NULL;
+        if (output->info.presentation_state == BLIT_KMS_PRESENTATION_FAILED)
+            continue;
         if (!(output_mask & (1U << i)))
             continue;
         if (trace_phases)
@@ -1217,8 +1253,10 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         }
         if (trace_phases)
             flip_started = kms_now_us();
-        if (capture)
+        if (capture) {
             write_screenshot(kms, output);
+            ++completed_captures;
+        }
         {
             unsigned int flags = DRM_MODE_PAGE_FLIP_EVENT;
             int flip_result;
@@ -1295,7 +1333,7 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         kms->previous_pointer_visible = pointer_visible;
     }
     ++kms->screenshot_frame;
-    if (capture)
+    if (capture && completed_captures >= expected_captures)
         kms->screenshot_written = 1;
     if (started != 0)
         fprintf(stderr, "blit: KMS present views=%d outputs=%d duration_us=%lld\n",
