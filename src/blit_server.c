@@ -8869,6 +8869,8 @@ int main(int argc, char **argv)
         if (runtime.kms != NULL) blit_kms_close(runtime.kms);
         return 1;
     }
+    if (runtime.sdl_ready || runtime.direct_kms)
+        initialize_outputs(&runtime);
     discover_panes(&runtime);
     {
         const char *mouse_device = getenv("BLIT_EVDEV_MOUSE");
@@ -8899,8 +8901,6 @@ int main(int argc, char **argv)
         } else
             fprintf(stderr, "blit: no usable evdev keyboard found\n");
     }
-    if (runtime.sdl_ready || runtime.direct_kms)
-        initialize_outputs(&runtime);
     reset_render_schedule(&runtime, monotonic_us());
     if (runtime.output_count > 0) {
         runtime.pointer_valid = 1;
