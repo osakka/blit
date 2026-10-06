@@ -235,13 +235,15 @@ static int font_load_file(BlitFont *font, const char *path)
 void blit_font_load(BlitFont *font)
 {
     const char *configured = getenv("BLIT_PSF_FONT");
-    const char *paths[4] = { configured,
+    const char *paths[6] = { configured,
+        "/usr/lib/blit/fonts/Lat15-Terminus16.psf",
+        "/usr/lib/blit/fonts/Uni2-Terminus16.psf",
         "/usr/share/consolefonts/Uni2-Terminus16.psf",
         "/usr/share/blit/Uni2-Terminus16.psf",
         "/usr/share/consolefonts/Uni2-Fixed16.psf" };
     int i;
     if (font == NULL) return;
-    for (i = 0; i < 4; ++i) {
+    for (i = 0; i < 6; ++i) {
         if (paths[i] != NULL && font_load_file(font, paths[i]) == 0) {
             fprintf(stderr, "blit: font=%s size=%dx%d glyphs=%lu mappings=%lu\n",
                     paths[i], font->width, font->height,
