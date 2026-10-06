@@ -9,10 +9,11 @@ LOG=$(mktemp /tmp/blit-network-gate.XXXXXX)
 UNAUTH=$(mktemp /tmp/blit-network-unauth.XXXXXX)
 AUTH=$(mktemp /tmp/blit-network-auth.XXXXXX)
 DIAGNOSTICS=$(mktemp /tmp/blit-network-diagnostics.XXXXXX)
+GRAPHICS=$(mktemp /tmp/blit-network-graphics.XXXXXX)
 server_pid=
 cleanup() {
     if [ -n "$server_pid" ]; then kill "$server_pid" 2>/dev/null || true; fi
-    rm -f "$LOG" "$UNAUTH" "$AUTH" "$DIAGNOSTICS"
+    rm -f "$LOG" "$UNAUTH" "$AUTH" "$DIAGNOSTICS" "$GRAPHICS"
 }
 trap cleanup EXIT HUP INT TERM
 
@@ -48,9 +49,14 @@ auth=$(curl -sS -o "$AUTH" -w '%{http_code}' \
 diagnostics=$(curl -sS -o "$DIAGNOSTICS" -w '%{http_code}' \
     -H "Authorization: Bearer $TOKEN" \
     "http://127.0.0.1:$PORT/v1/diagnostics")
-if [ "$unauth" != 401 ] || [ "$auth" != 200 ] || [ "$diagnostics" != 200 ] ||
-   ! grep -q '"health"' "$DIAGNOSTICS"; then
+graphics=$(curl -sS -o "$GRAPHICS" -w '%{http_code}' \
+    -H "Authorization: Bearer $TOKEN" \
+    "http://127.0.0.1:$PORT/v1/graphics")
+if [ "$unauth" != 401 ] || [ "$auth" != 200 ] ||
+   [ "$diagnostics" != 200 ] || [ "$graphics" != 200 ] ||
+   ! grep -q '"health"' "$DIAGNOSTICS" ||
+   ! grep -q '"graphics_cards"' "$GRAPHICS"; then
     echo "network gate: expected unauth=401 auth=200, got $unauth/$auth" >&2
     exit 1
 fi
-echo "NETWORK_AUTH_PASS unauth=$unauth auth=$auth diagnostics=$diagnostics"
+echo "NETWORK_AUTH_PASS unauth=$unauth auth=$auth diagnostics=$diagnostics graphics=$graphics"

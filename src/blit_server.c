@@ -633,18 +633,34 @@ static int input_bit(const unsigned long *bits, int code)
 
 static void graphics_json(char *body, size_t capacity)
 {
-    if (access("/dev/dri/card0", F_OK) != 0) {
-        empty_inventory_json(body, capacity, "graphics_cards");
-        return;
+    size_t used = 0;
+    int card;
+    int found = 0;
+
+    used += (size_t)snprintf(body + used, capacity - used,
+                             "{\"revision\":1,\"graphics_cards\":[");
+    for (card = 0; card < 32 && used < capacity; ++card) {
+        char path[64];
+        int length;
+
+        snprintf(path, sizeof(path), "/dev/dri/card%d", card);
+        if (access(path, R_OK | W_OK) != 0)
+            continue;
+        length = snprintf(body + used, capacity - used,
+                          "%s{\"id\":\"card-%d\","
+                          "\"vendor\":\"linux-drm\","
+                          "\"device\":\"%s\","
+                          "\"render_apis\":[\"drm\",\"kms\"],"
+                          "\"formats\":[\"xrgb8888\",\"argb8888\"],"
+                          "\"capabilities\":{\"page_flipping\":true,"
+                          "\"direct_scanout\":true}}",
+                          found ? "," : "", card, path);
+        if (length < 0 || (size_t)length >= capacity - used)
+            break;
+        used += (size_t)length;
+        found = 1;
     }
-    snprintf(body, capacity,
-             "{\"revision\":1,\"graphics_cards\":[{"
-             "\"id\":\"card-0\",\"vendor\":\"linux-drm\","
-             "\"device\":\"/dev/dri/card0\","
-             "\"render_apis\":[\"drm\",\"kms\"],"
-             "\"formats\":[\"xrgb8888\",\"argb8888\"],"
-             "\"capabilities\":{\"page_flipping\":true,"
-             "\"direct_scanout\":true}}]}" );
+    snprintf(body + used, capacity - used, "]}");
 }
 
 static void audio_json(char *body, size_t capacity)
