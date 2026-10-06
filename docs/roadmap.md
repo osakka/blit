@@ -42,6 +42,12 @@ conservatively redraws multi-surface outputs with deterministic vertical
 stacking. The remaining acceptance risk is terminal fidelity under the full
 Hibr desktop and the complete topology/input matrix.
 
+Display timing is an explicit hard requirement. Each output must schedule at
+its active mode's maximum refresh by default, with per-output deadlines. The
+scheduler may wake more often for input and I/O, but must not intentionally
+present below that rate. A lower cap is an explicit, diagnosed administrative
+policy only. See [ADR 0006](adr/0006-display-refresh-invariant.md).
+
 Kitty graphics is the first graphics-protocol deliverable. Sixel is a later
 compatibility milestone against the same canonical graphics-object model;
 neither protocol is advertised until its parser, resource limits, placement,
@@ -134,3 +140,7 @@ keyboard and pointer routes.
 The graphics-protocol work follows the accepted terminal/input and presentation
 gates; do not advertise Kitty or sixel before their pixel and resource-limit
 evidence exists.
+
+After the current terminal graphics gates, close the final-byte PTY lifecycle
+race exposed by the Kitty query acceptance probe, then add the mixed-refresh
+VKMS scheduler matrix required by ADR 0006 before physical-host validation.

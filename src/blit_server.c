@@ -4994,10 +4994,10 @@ static void refresh_session_state(BlitRuntime *runtime, BlitSession *session)
             session->exit_code = -1;
             snprintf(session->state, sizeof(session->state), "failed");
         }
-        if (session->pty_fd >= 0) {
-            close(session->pty_fd);
-            session->pty_fd = -1;
-        }
+        /* Keep the PTY readable after waitpid reaps the child.  The child may
+           have emitted final terminal bytes (including an OSC title or a
+           protocol reply) immediately before exit.  service_session_output
+           must drain those bytes before it observes EOF and closes the PTY. */
         disable_input_routes_for_target(runtime, target_id);
     } else if (result < 0 && errno != EINTR) {
         session->exit_code = -1;

@@ -13,8 +13,9 @@ Accepted decisions:
 3. [Logical cell-based pane layouts](0003-logical-cell-layouts.md).
 4. [Canonical terminal state and direct KMS presentation](0004-terminal-state-and-direct-kms.md).
 5. [Kitty graphics first, sixel compatibility second](0005-kitty-graphics-first.md).
+6. [Display refresh is an output invariant](0006-display-refresh-invariant.md).
 
 Pending decisions:
 
-1. Multi-monitor frame atomicity and timing policy.
+1. Multi-monitor frame atomicity policy.
 2. Terminal encoding, grapheme, and font-rendering policy.
