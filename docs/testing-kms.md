@@ -183,6 +183,12 @@ outside the pane. `PPM_DISPLAY_47_WIDE_STACK_CLIP_PASS` requires the higher-z
 pixel and the clipped image's visible second pixel at their exact coordinates;
 the equivalent SDL3 fixture uses the BMP oracle.
 
+The fixture accepts `blit.kitty_limits=1` for the resource-lifecycle gate. It
+fills the bounded store with incomplete uploads, submits an oversized upload,
+and requires `KITTY_LIMITS_PASS` from the session API: one incomplete image
+is evicted, the invalid upload is rejected, and both counts are observable.
+This mode is diagnostic-only and intentionally does not run the pixel oracle.
+
 ## Pointer stress gate
 
 The input-only QEMU variant starts two terminal surfaces, routes the synthetic

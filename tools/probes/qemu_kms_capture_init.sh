@@ -35,6 +35,7 @@ if [ -e /dev/dri/card1 ]; then export BLIT_DRM_DEVICE=/dev/dri/card1; else expor
 loss_test=0
 stack_test=0
 mixed_refresh_test=0
+kitty_limits_test=0
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
     *" blit.output_loss=1 "*) loss_test=1 ;;
 esac
@@ -43,6 +44,9 @@ case " $($b cat /proc/cmdline 2>/dev/null || true) " in
 esac
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
     *" blit.mixed_refresh=1 "*) mixed_refresh_test=1 ;;
+esac
+case " $($b cat /proc/cmdline 2>/dev/null || true) " in
+    *" blit.kitty_limits=1 "*) kitty_limits_test=1 ;;
 esac
 if [ "$mixed_refresh_test" -eq 1 ]; then
     export BLIT_TEST_MODE=1
@@ -79,6 +83,8 @@ echo "$graphics_inventory" | $b grep -q '"driver":"' || graphics_pass=0
 echo "$graphics_inventory" | $b grep -q '"hardware_acceleration":' || graphics_pass=0
 if [ "$stack_test" -eq 1 ]; then
     $b wget -qO /tmp/one.json --post-data='{"command":"/blit-stage/pty-input-echo","arguments":["--wide","--kitty","--stack"],"surface_mode":"terminal","display_id":"display-47","surface":{"width":128,"height":48}}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
+elif [ "$kitty_limits_test" -eq 1 ]; then
+    $b wget -qO /tmp/one.json --post-data='{"command":"/blit-stage/pty-input-echo","arguments":["--kitty-limits"],"surface_mode":"terminal","display_id":"display-47","surface":{"width":128,"height":48}}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
 else
     $b wget -qO /tmp/one.json --post-data='{"command":"/blit-stage/pty-input-echo","arguments":["--wide","--kitty"],"surface_mode":"terminal","display_id":"display-47","surface":{"width":128,"height":48}}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
 fi
@@ -86,6 +92,14 @@ $b wget -qO /tmp/two.json --post-data='{"command":"/blit-stage/pty-input-echo","
 [ "$loss_test" -eq 1 ] && ( $b sleep 2; echo 0 > /sys/kernel/config/vkms/blit/connectors/connector0/status ) &
 $b sleep 5
 echo ONE; $b cat /tmp/one.json; echo TWO; $b cat /tmp/two.json
+kitty_limits_pass=1
+if [ "$kitty_limits_test" -eq 1 ]; then
+    limits_session=$($b wget -qO- http://127.0.0.1:19191/v1/terminal-sessions/1 || true)
+    echo KITTY_LIMITS; echo "$limits_session"
+    echo "$limits_session" | $b grep -q '"rejected":1' || kitty_limits_pass=0
+    echo "$limits_session" | $b grep -q '"evicted":1' || kitty_limits_pass=0
+    [ "$kitty_limits_pass" -eq 1 ] && echo KITTY_LIMITS_PASS || echo KITTY_LIMITS_FAIL
+fi
 loss_pass=1
 if [ "$loss_test" -eq 1 ]; then
     loss_displays=$($b wget -qO- http://127.0.0.1:19191/v1/displays || true)
@@ -104,6 +118,14 @@ for shot in /tmp/guest-screenshots/display-47.ppm /tmp/guest-screenshots/display
         echo FRAME_FILE; $b sha256sum "$shot"; $b od -An -t u1 -N 32 "$shot"
     fi
 done
+if [ "$kitty_limits_test" -eq 1 ]; then
+    if [ "$kitty_limits_pass" -eq 1 ]; then
+        echo KMS_KITTY_LIMITS_PASS
+        finish 0
+    fi
+    echo KMS_KITTY_LIMITS_FAIL
+    finish 1
+fi
 if [ "$stack_test" -eq 1 ]; then
     /blit-stage/ppm-assert /tmp/guest-screenshots/display-47.ppm --wide --green && echo PPM_DISPLAY_47_WIDE_STACK_CLIP_PASS || { echo PPM_DISPLAY_47_WIDE_STACK_CLIP_FAIL; finish 1; }
 else
@@ -115,6 +137,6 @@ size1=$($b wc -c < /tmp/guest-screenshots/display-47.ppm 2>/dev/null || echo 0)
 size2=$($b wc -c < /tmp/guest-screenshots/display-48.ppm 2>/dev/null || echo 0)
 hash1=$($b sha256sum /tmp/guest-screenshots/display-47.ppm 2>/dev/null | $b cut -d ' ' -f 1 || true)
 hash2=$($b sha256sum /tmp/guest-screenshots/display-48.ppm 2>/dev/null | $b cut -d ' ' -f 1 || true)
-if [ "$size1" -gt 2359296 ] && [ "$size2" -gt 2359296 ] && [ "$hash1" != "$hash2" ] && [ "$loss_pass" -eq 1 ] && [ "$graphics_pass" -eq 1 ] && [ "$scheduler_pass" -eq 1 ] && [ "$mixed_refresh_pass" -eq 1 ]; then echo KMS_CAPTURE_PASS; finish 0; fi
+if [ "$size1" -gt 2359296 ] && [ "$size2" -gt 2359296 ] && [ "$hash1" != "$hash2" ] && [ "$loss_pass" -eq 1 ] && [ "$graphics_pass" -eq 1 ] && [ "$scheduler_pass" -eq 1 ] && [ "$mixed_refresh_pass" -eq 1 ] && [ "$kitty_limits_pass" -eq 1 ]; then echo KMS_CAPTURE_PASS; finish 0; fi
 echo KMS_CAPTURE_FAIL
 finish 1

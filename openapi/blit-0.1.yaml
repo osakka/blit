@@ -974,6 +974,16 @@ components:
             Bounded Kitty image records observed in this session. The field is
             diagnostic until the protocol capability is advertised.
           items: {$ref: '#/components/schemas/KittyImage'}
+        graphics_diagnostics:
+          $ref: '#/components/schemas/GraphicsDiagnostics'
+      additionalProperties: false
+    GraphicsDiagnostics:
+      type: object
+      required: [rejected, evicted, last_error]
+      properties:
+        rejected: {type: integer, minimum: 0}
+        evicted: {type: integer, minimum: 0}
+        last_error: {type: string}
       additionalProperties: false
     KittyImage:
       type: object

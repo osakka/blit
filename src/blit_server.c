@@ -289,6 +289,9 @@ typedef struct {
     uint32_t terminal_underline_color;
     int terminal_underline_color_set;
     BlitGraphicsImage graphics[BLIT_GRAPHICS_MAX_IMAGES];
+    unsigned long graphics_rejected;
+    unsigned long graphics_evicted;
+    char graphics_last_error[64];
 } BlitSession;
 
 enum {
@@ -2889,6 +2892,13 @@ static void graphics_image_release(BlitGraphicsImage *image)
     memset(image, 0, sizeof(*image));
 }
 
+static void graphics_reject(BlitSession *session, const char *reason)
+{
+    ++session->graphics_rejected;
+    snprintf(session->graphics_last_error,
+             sizeof(session->graphics_last_error), "%s", reason);
+}
+
 static BlitGraphicsImage *graphics_image_find(BlitSession *session,
                                               unsigned int id)
 {
@@ -3012,7 +3022,10 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
     payload[session->terminal_string_length] = '\0';
     if (payload[0] == 'G') ++payload;
     separator = strchr(payload, ';');
-    if (separator == NULL) return;
+    if (separator == NULL) {
+        graphics_reject(session, "missing-payload");
+        return;
+    }
     *separator = '\0';
     if (!kitty_parameter(payload, 'a', action, sizeof(action)) ||
         !kitty_parameter_int(payload, 'i', 0, &image_id) || image_id < 0 ||
@@ -3021,7 +3034,10 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
         !kitty_parameter_int(payload, 'y', y, &y) ||
         !kitty_parameter_int(payload, 'c', 0, &placement_width) ||
         !kitty_parameter_int(payload, 'r', 0, &placement_height) ||
-        !kitty_parameter_int(payload, 'z', 0, &z)) return;
+        !kitty_parameter_int(payload, 'z', 0, &z)) {
+        graphics_reject(session, "invalid-parameters");
+        return;
+    }
     if (strcmp(action, "d") == 0) {
         if (image_id == 0) {
             for (index = 0; index < BLIT_GRAPHICS_MAX_IMAGES; ++index)
@@ -3035,7 +3051,10 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
     }
     if (strcmp(action, "p") == 0) {
         image = graphics_image_find(session, (unsigned int)image_id);
-        if (image == NULL || !image->complete) return;
+        if (image == NULL || !image->complete) {
+            graphics_reject(session, "placement-incomplete");
+            return;
+        }
         image->visible = 1;
         image->x = x;
         image->y = y;
@@ -3046,12 +3065,16 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
         mark_surface_full_damage(surface);
         return;
     }
-    if (strcmp(action, "t") != 0 || image_id == 0 || more < 0 || more > 1)
+    if (strcmp(action, "t") != 0 || image_id == 0 || more < 0 || more > 1) {
+        graphics_reject(session, "unsupported-action");
         return;
+    }
     if (!kitty_parameter_int(payload, 'f', 0, &format) ||
         !kitty_parameter_int(payload, 's', 0, &width) ||
-        !kitty_parameter_int(payload, 'v', 0, &height))
+        !kitty_parameter_int(payload, 'v', 0, &height)) {
+        graphics_reject(session, "invalid-dimensions");
         return;
+    }
     image = graphics_image_find(session, (unsigned int)image_id);
     if (image != NULL) {
         if (format == 0) format = image->format;
@@ -3060,15 +3083,30 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
     }
     if ((format != 24 && format != 32) || width < 1 ||
         width > BLIT_GRAPHICS_MAX_WIDTH || height < 1 ||
-        height > BLIT_GRAPHICS_MAX_HEIGHT)
+        height > BLIT_GRAPHICS_MAX_HEIGHT) {
+        graphics_reject(session, "image-bounds");
         return;
+    }
     if (image == NULL) {
         for (index = 0; index < BLIT_GRAPHICS_MAX_IMAGES; ++index)
             if (!session->graphics[index].used) {
                 image = &session->graphics[index];
                 break;
             }
-        if (image == NULL) return;
+        if (image == NULL) {
+            for (index = 0; index < BLIT_GRAPHICS_MAX_IMAGES; ++index)
+                if (session->graphics[index].used &&
+                    !session->graphics[index].complete) {
+                    graphics_image_release(&session->graphics[index]);
+                    ++session->graphics_evicted;
+                    image = &session->graphics[index];
+                    break;
+                }
+        }
+        if (image == NULL) {
+            graphics_reject(session, "image-store-full");
+            return;
+        }
         memset(image, 0, sizeof(*image));
         image->used = 1;
         image->id = (unsigned int)image_id;
@@ -3084,6 +3122,7 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
         image->pixels = (unsigned char *)malloc(image->capacity);
         if (image->pixels == NULL) {
             graphics_image_release(image);
+            graphics_reject(session, "allocation-failed");
             return;
         }
         image->revision = 1;
@@ -3091,11 +3130,13 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
     if (image->width != width || image->height != height || image->format != format ||
         !kitty_decode_chunk(image, separator + 1)) {
         graphics_image_release(image);
+        graphics_reject(session, "invalid-data");
         return;
     }
     if (!more) {
         if (image->base64_tail_length != 0 || image->bytes != image->capacity) {
             graphics_image_release(image);
+            graphics_reject(session, "incomplete-data");
             return;
         }
         image->complete = 1;
@@ -4705,6 +4746,18 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
         }
     }
     used += (size_t)snprintf(body + used, capacity - used, "]");
+    if (session->graphics_rejected > 0 || session->graphics_evicted > 0 ||
+        session->graphics_last_error[0] != '\0') {
+        char escaped_graphics_error[128];
+        json_escape(session->graphics_last_error, escaped_graphics_error,
+                    sizeof(escaped_graphics_error));
+        used += (size_t)snprintf(
+            body + used, capacity - used,
+            ",\"graphics_diagnostics\":{\"rejected\":%lu,"
+            "\"evicted\":%lu,\"last_error\":\"%s\"}",
+            session->graphics_rejected, session->graphics_evicted,
+            escaped_graphics_error);
+    }
     snprintf(body + used, capacity - used, "}");
 }
 
