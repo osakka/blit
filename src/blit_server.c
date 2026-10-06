@@ -846,8 +846,14 @@ static void send_http(int fd, int status, const char *reason,
         (unsigned long)body_length);
 
     if (header_length > 0 && (size_t)header_length < sizeof(header)) {
-        send_all(fd, header, (size_t)header_length);
-        send_all(fd, body, body_length);
+        /* Finite HTTP responses can be much larger than the socket send
+           buffer (a full Hibr cell snapshot is several megabytes).  The
+           gateway socket is nonblocking for request multiplexing, so the
+           ordinary send_all path may stop at EAGAIN and leave a truncated
+           Content-Length response.  Complete the bounded response before
+           closing the connection, as the screenshot path already does. */
+        send_bytes_blocking(fd, header, (size_t)header_length);
+        send_bytes_blocking(fd, body, body_length);
     }
 }
 
