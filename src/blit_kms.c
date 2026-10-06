@@ -875,6 +875,15 @@ int blit_kms_service(BlitKms *kms, int readable)
     long long timeout_us;
 
     if (kms == NULL) return -1;
+    if (readable) {
+        memset(&context, 0, sizeof(context));
+        context.version = DRM_EVENT_CONTEXT_VERSION;
+        context.page_flip_handler = kms_flip_handler;
+        if (drmHandleEvent(kms->fd, &context) < 0) return -1;
+        for (i = 0; i < kms->output_count; ++i)
+            if (!kms->outputs[i].flip_pending)
+                changed = 1;
+    }
     now = kms_now_us();
     timeout_us = (long long)kms_flip_timeout_ms() * 1000LL;
     for (i = 0; i < kms->output_count; ++i) {
@@ -891,14 +900,6 @@ int blit_kms_service(BlitKms *kms, int readable)
                 output->connector);
         changed = 1;
     }
-    if (!readable) return changed;
-    memset(&context, 0, sizeof(context));
-    context.version = DRM_EVENT_CONTEXT_VERSION;
-    context.page_flip_handler = kms_flip_handler;
-    if (drmHandleEvent(kms->fd, &context) < 0) return -1;
-    for (i = 0; i < kms->output_count; ++i)
-        if (!kms->outputs[i].flip_pending)
-            changed = 1;
     return changed;
 }
 

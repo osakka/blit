@@ -131,6 +131,9 @@ recovery for the affected output and then resumes ordinary page flips. A
 timeout must never become a modeset-per-frame loop: repeated modesets blank
 and visibly disturb the display while making pointer and terminal updates
 appear stalled.
+When the DRM descriptor is readable, Blit drains its page-flip events before
+evaluating timeout age; a ready event is authoritative and cannot be falsely
+classified as a timeout because the event loop reached the check late.
 
 Evdev synchronization reports are not treated as pointer motion unless the
 absolute pointer position or output actually changes. This prevents devices
