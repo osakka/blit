@@ -7163,6 +7163,7 @@ static int activate_direct_kms_fallback(BlitRuntime *runtime)
                sizeof(runtime->displays[i].modes));
         runtime->outputs[i].display_id = info.id;
     }
+    apply_test_refresh_override(runtime);
     runtime->output_count = runtime->display_count;
     runtime->sdl_error[0] = '\0';
     fprintf(stderr,
