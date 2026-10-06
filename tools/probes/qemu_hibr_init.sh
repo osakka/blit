@@ -182,6 +182,12 @@ if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
     echo "$pointer_surface" | $b cut -c 1-4000
     echo BLIT_INPUT_LOG
     $b cat /tmp/blit.log
+    mouse_device_events=$($b grep -c 'evdev mouse events received' /tmp/blit.log || true)
+    if [ "${mouse_device_events:-0}" -ge 2 ]; then
+        echo BLIT_INPUT_MULTI_MOUSE_PASS
+    else
+        echo BLIT_INPUT_MULTI_MOUSE_FAIL
+    fi
     echo BLIT_INPUT_STREAM
     $b cat /tmp/stream-input.log
     if $b grep -q '"kind":"key"' /tmp/stream-input.log &&

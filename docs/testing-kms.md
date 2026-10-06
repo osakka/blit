@@ -166,3 +166,6 @@ right button presses, verifies motion while buttons remain held, and checks
 that each release preserves the remaining-button state. The pointer PTY also
 enables DEC focus reporting and must receive the focus-in sequence after the
 cross-display click.
+The fixture creates two independent relative mice and requires
+`BLIT_INPUT_MULTI_MOUSE_PASS`, proving that Blit services every discovered
+pointer FD instead of silently keeping only the first device.

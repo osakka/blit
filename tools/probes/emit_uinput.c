@@ -64,8 +64,9 @@ int main(void)
 {
     int keyboard = make_device("Blit test keyboard", 0);
     int mouse = make_device("Blit test mouse", 1);
+    int mouse2 = make_device("Blit test mouse 2", 1);
     int i;
-    if (keyboard < 0 || mouse < 0) return 1;
+    if (keyboard < 0 || mouse < 0 || mouse2 < 0) return 1;
     sleep(8);
     emit_event(keyboard, EV_KEY, KEY_LEFTBRACE, 1);
     sync_event(keyboard);
@@ -88,6 +89,11 @@ int main(void)
         emit_event(mouse, EV_REL, REL_X, delta_x);
         emit_event(mouse, EV_REL, REL_Y, (i & 2) ? 4 : -4);
         sync_event(mouse);
+        if ((i % 2) == 0) {
+            emit_event(mouse2, EV_REL, REL_X, (i & 4) ? 2 : -2);
+            emit_event(mouse2, EV_REL, REL_Y, (i & 8) ? 1 : -1);
+            sync_event(mouse2);
+        }
         if (i == 1) {
             emit_event(mouse, EV_KEY, BTN_LEFT, 1);
             sync_event(mouse);
@@ -131,7 +137,9 @@ int main(void)
     }
     ioctl(keyboard, UI_DEV_DESTROY);
     ioctl(mouse, UI_DEV_DESTROY);
+    ioctl(mouse2, UI_DEV_DESTROY);
     close(keyboard);
     close(mouse);
+    close(mouse2);
     return 0;
 }
