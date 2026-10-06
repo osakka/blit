@@ -9303,7 +9303,7 @@ static int update_package_valid(const char *path, const char *expected_sha,
         snprintf(detail, detail_capacity, "SHA-256 verification failed");
         return 0;
     }
-    if (!run_capture_command2("dpkg-deb", "--field", path, package_name,
+    if (!run_capture_command2("dpkg-deb", "--field=Package", path, package_name,
                               sizeof(package_name))) {
         snprintf(detail, detail_capacity, "not a readable Debian package");
         return 0;
