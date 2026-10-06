@@ -8048,7 +8048,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                         (unsigned char)foreground, 255);
                     if (!(attributes & BLIT_ATTR_CONCEAL)) {
                         if (!(attributes & BLIT_ATTR_CONTINUATION) &&
-                            surface->codepoints[row][column] != 0)
+                            surface->codepoints[row][column] != 0 &&
+                            surface->codepoints[row][column] != ' ')
                             render_sdl_glyph(renderer, &runtime->font,
                                 surface->codepoints[row][column],
                                 surface_origin_x + column * (float)cell_width,
@@ -8068,14 +8069,16 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                             }
                         }
                         if (attributes & BLIT_ATTR_BOLD &&
-                            surface->codepoints[row][column] != 0)
+                            surface->codepoints[row][column] != 0 &&
+                            surface->codepoints[row][column] != ' ')
                             render_sdl_glyph(renderer, &runtime->font,
                                 surface->codepoints[row][column],
                                 surface_origin_x + 1.0f + column * (float)cell_width,
                                 (float)surface_origin_y + row * (float)cell_height,
                                 (float)glyph_width, (float)cell_height);
                         if (attributes & BLIT_ATTR_ITALIC &&
-                            surface->codepoints[row][column] != 0)
+                            surface->codepoints[row][column] != 0 &&
+                            surface->codepoints[row][column] != ' ')
                             render_sdl_glyph(renderer, &runtime->font,
                                 surface->codepoints[row][column],
                                 surface_origin_x + 1.0f + column * (float)cell_width,
