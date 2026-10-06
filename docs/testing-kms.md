@@ -67,7 +67,7 @@ Direct KMS normally uses the packaged 8-pixel-wide console font, which gives
 start the server with:
 
 ```sh
-BLIT_KMS_CELL_WIDTH=5 ./bin/start-blit
+BLIT_KMS_CELL_WIDTH=5 BLIT_DISPLAY_BACKEND=kms blit 8080
 ```
 
 The override is authoritative: pane discovery, rendering, cursor placement,

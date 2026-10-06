@@ -24,28 +24,18 @@ direct DRM/KMS outputs (SDL3 is optional for effects)
 
 ## Compatibility probe
 
-The existing Hibr desktop runs inside Blit PTYs through a dedicated entry
-script. The entry script explicitly loads `console-blit.so`, `pty.so`,
-`term.so`, and `hold.so`; `HIBR_RC` is not used because Hibr startup files are
-read only by interactive shells, and a root Hibr process does not search
-`HIBR_MODPATH`. It then sources the canonical Hibr
-`examples/desktop/session.hibr` unchanged.
+The existing Hibr desktop runs inside Blit PTYs through the ordinary Hibr
+desktop command. Blit does not wrap or replace that command: it starts the
+standalone server, then receives the Hibr command through the terminal-session
+API. The complete Hibr desktop tree must remain installed in Hibr's own
+standard locations, including `desktop.hibr`, `wm/`, `widgets/`, themes,
+applications, and control-panel files.
 
-The packaged `run-desktop` launcher starts the production server with
-`BLIT_DISPLAY_BACKEND=kms`, then attaches the primary Hibr session through the
-API. The canonical launch entry is:
+Start the direct server binary, with no Blit shell launcher involved:
 
 ```sh
-#!/bin/sh
-export HIBR_MODPATH=/opt/hibr/build/mods
-exec /opt/hibr/build/hibr /opt/blit/hibr/blit-session.hibr --session blit
+BLIT_DISPLAY_BACKEND=kms BLIT_BIND_ADDRESS=127.0.0.1 blit 8080
 ```
-
-`blit-session.hibr` loads the Blit provider and desktop core modules from its
-sibling `mods/` directory, then sources the unmodified Hibr desktop session.
-The complete Hibr desktop
-tree must be installed beside it, including `desktop.hibr`, `wm/`, `widgets/`,
-themes, applications, and control-panel files.
 
 Create it through the API with a surface sized to the PTY:
 

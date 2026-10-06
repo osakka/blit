@@ -5832,6 +5832,8 @@ int main(int argc, char **argv)
         int client_fd;
         int max_fd = server_fd;
         int ready;
+        int mouse_ready = 0;
+        int keyboard_ready = 0;
         int i;
         fd_set readable;
         struct timeval timeout;
@@ -5841,10 +5843,20 @@ int main(int argc, char **argv)
 
         if (runtime.sdl_ready && !runtime.direct_kms)
             service_sdl_events(&runtime);
-        service_evdev_mouse(&runtime);
-        service_evdev_keyboard(&runtime);
         FD_ZERO(&readable);
         FD_SET(server_fd, &readable);
+        for (i = 0; i < runtime.evdev_mouse_count; ++i) {
+            int input_fd = runtime.evdev_mouse_fds[i];
+            if (input_fd < 0) continue;
+            FD_SET(input_fd, &readable);
+            if (input_fd > max_fd) max_fd = input_fd;
+        }
+        for (i = 0; i < runtime.evdev_keyboard_count; ++i) {
+            int input_fd = runtime.evdev_keyboard_fds[i];
+            if (input_fd < 0) continue;
+            FD_SET(input_fd, &readable);
+            if (input_fd > max_fd) max_fd = input_fd;
+        }
         for (i = 0; i < BLIT_MAX_STREAMS; ++i) {
             if (runtime.streams[i].used) {
                 FD_SET(runtime.streams[i].fd, &readable);
@@ -5880,6 +5892,18 @@ int main(int argc, char **argv)
                 close(client_fd);
         }
         if (ready > 0) {
+            for (i = 0; i < runtime.evdev_mouse_count; ++i)
+                if (runtime.evdev_mouse_fds[i] >= 0 &&
+                    FD_ISSET(runtime.evdev_mouse_fds[i], &readable))
+                    mouse_ready = 1;
+            for (i = 0; i < runtime.evdev_keyboard_count; ++i)
+                if (runtime.evdev_keyboard_fds[i] >= 0 &&
+                    FD_ISSET(runtime.evdev_keyboard_fds[i], &readable))
+                    keyboard_ready = 1;
+            if (mouse_ready)
+                service_evdev_mouse(&runtime);
+            if (keyboard_ready)
+                service_evdev_keyboard(&runtime);
             for (i = 0; i < BLIT_MAX_STREAMS; ++i) {
                 if (runtime.streams[i].used &&
                     FD_ISSET(runtime.streams[i].fd, &readable)) {
