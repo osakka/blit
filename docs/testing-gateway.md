@@ -201,8 +201,10 @@ Blit rejects layout changes while a pane is occupied with
 `topology_in_use`; detach or stop joined sessions before changing the grid.
 
 Resize a running terminal through the same session resource. The gateway
-updates the PTY window size, resets the canonical surface to the requested
-dimensions, increments `surface_revision`, and emits a surface-delta event:
+updates the PTY window size, preserves the overlapping cells on both the main
+and alternate grids, blanks cells outside the new bounds, clamps the cursor,
+resets the scroll region to the full surface, clears deferred wrapping,
+increments `surface_revision`, and emits a surface-delta event:
 
 ```sh
 curl --fail --request PATCH \

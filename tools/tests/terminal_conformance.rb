@@ -11,15 +11,17 @@ require 'uri'
 
 base = URI(ENV.fetch('BLIT_TEST_SERVER', 'http://127.0.0.1:19195'))
 
-def request(base, method, path, body = nil)
+def request(base, method, path, body = nil, headers = {})
   uri = base + path
   klass = {
     'GET' => Net::HTTP::Get,
     'POST' => Net::HTTP::Post,
-    'DELETE' => Net::HTTP::Delete
+    'DELETE' => Net::HTTP::Delete,
+    'PATCH' => Net::HTTP::Patch
   }.fetch(method)
   req = klass.new(uri)
   req['Content-Type'] = 'application/json' if body
+  headers.each { |key, value| req[key] = value }
   req.body = JSON.generate(body) if body
   response = Net::HTTP.start(uri.hostname, uri.port, read_timeout: 5) do |http|
     http.request(req)
@@ -101,6 +103,35 @@ rescue StandardError => error
   warn "FAIL #{name}: #{error.message}"
   raise
 end
+
+created = request(base, 'POST', '/v1/terminal-sessions', {
+  'command' => '/bin/sh',
+  'arguments' => ['-c', "printf 'AB'; sleep 1"],
+  'surface' => { 'width' => 4, 'height' => 2 }
+})
+resize_id = created.fetch('id')
+resize_state = Timeout.timeout(5) do
+  loop do
+    state = request(base, 'GET', "/v1/terminal-sessions/#{resize_id}")
+    break state unless %w[starting].include?(state.fetch('state'))
+
+    sleep 0.02
+  end
+end
+request(base, 'PATCH', "/v1/terminal-sessions/#{resize_id}",
+        { 'surface' => { 'width' => 2, 'height' => 2 } },
+        { 'If-Match' => resize_state.fetch('revision').to_s })
+resize_snapshot = request(base, 'GET', "/v1/surfaces/surface-#{resize_id}/cells")
+resize_cells = cell_map(resize_snapshot)
+assert_equal('A', resize_cells.fetch([0, 0]).fetch('text'),
+             'resize preserves overlapping first cell')
+assert_equal('B', resize_cells.fetch([1, 0]).fetch('text'),
+             'resize preserves overlapping second cell')
+raise 'resize exposed cells outside new bounds' if resize_cells.keys.any? do |x, y|
+  x >= 2 || y >= 2
+end
+request(base, 'DELETE', "/v1/terminal-sessions/#{resize_id}")
+puts 'PASS resize-preserves-grid'
 
 snapshot = run_case(base, 'printable-and-newline', "printf 'hello\\r\\nworld'")
 cells = cell_map(snapshot)

@@ -3549,6 +3549,8 @@ static int resize_session_surface(BlitSession *session, BlitSurface *surface,
                                   int width, int height)
 {
     struct winsize size;
+    int x;
+    int y;
 
     if (width < 1 || height < 1 || width > BLIT_MAX_CELL_COLS ||
         height > BLIT_MAX_CELL_ROWS)
@@ -3558,20 +3560,46 @@ static int resize_session_surface(BlitSession *session, BlitSurface *surface,
     size.ws_row = (unsigned short)height;
     if (session->pty_fd >= 0 && ioctl(session->pty_fd, TIOCSWINSZ, &size) < 0)
         return 0;
-    memset(surface->cells, 0, sizeof(surface->cells));
-    memset(surface->codepoints, 0, sizeof(surface->codepoints));
-    memset(surface->foreground, 0, sizeof(surface->foreground));
-    memset(surface->background, 0, sizeof(surface->background));
-    memset(surface->attributes, 0, sizeof(surface->attributes));
+
+    /* Resize is a grid operation, not a terminal reset.  Preserve the
+       overlapping cells on both screens, and blank only cells which are no
+       longer visible.  Hibr relies on this while resizing an attached
+       desktop: clearing the whole grid here causes a blank frame and leaves
+       stale combining/underline data to reappear after a later redraw. */
+    for (y = 0; y < BLIT_MAX_CELL_ROWS; ++y) {
+        for (x = 0; x < BLIT_MAX_CELL_COLS; ++x) {
+            if (x < width && y < height)
+                continue;
+            surface->cells[y][x] = 0;
+            surface->codepoints[y][x] = 0;
+            memset(surface->combining[y][x], 0,
+                   sizeof(surface->combining[y][x]));
+            surface->combining_count[y][x] = 0;
+            surface->foreground[y][x] = 0;
+            surface->background[y][x] = 0;
+            surface->underline_color[y][x] = 0;
+            surface->attributes[y][x] = 0;
+            surface->alternate_cells[y][x] = 0;
+            surface->alternate_codepoints[y][x] = 0;
+            memset(surface->alternate_combining[y][x], 0,
+                   sizeof(surface->alternate_combining[y][x]));
+            surface->alternate_combining_count[y][x] = 0;
+            surface->alternate_foreground[y][x] = 0;
+            surface->alternate_background[y][x] = 0;
+            surface->alternate_underline_color[y][x] = 0;
+            surface->alternate_attributes[y][x] = 0;
+        }
+    }
     surface->width = width;
     surface->height = height;
-    surface->cursor_x = 0;
-    surface->cursor_y = 0;
-    surface->cursor_visible = 1;
-    surface->cursor_style = 1;
+    if (surface->cursor_x >= width)
+        surface->cursor_x = width - 1;
+    if (surface->cursor_y >= height)
+        surface->cursor_y = height - 1;
     surface->scroll_top = 0;
     surface->scroll_bottom = height - 1;
     terminal_reset_tabs(surface);
+    session->terminal_wrap_pending = 0;
     surface->damage_valid = 1;
     surface->damage_x = 0;
     surface->damage_y = 0;
