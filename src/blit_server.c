@@ -4796,6 +4796,8 @@ static void handle_request(int fd, BlitRuntime *runtime,
             int route_requested = strstr(payload, "\"input_route\"") != NULL;
             char input_route_id[128];
             BlitInputRoute *input_route = NULL;
+            if (idempotency_replay(runtime, fd, request, method, path, payload))
+                return;
             if (!if_match_revision(fd, request, session->revision))
                 return;
             int display_requested = json_string(payload, "display_id",
@@ -4903,6 +4905,9 @@ static void handle_request(int fd, BlitRuntime *runtime,
         }
         session_json(runtime, session, body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
+        if (strcmp(method, "PATCH") == 0)
+            idempotency_store(runtime, request, method, path, payload, 200,
+                              "OK", "application/json", body);
         return;
     }
     if (strcmp(path, "/v1/topology") == 0 && strcmp(method, "PUT") == 0) {

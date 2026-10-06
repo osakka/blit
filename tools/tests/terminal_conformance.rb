@@ -32,6 +32,24 @@ def request(base, method, path, body = nil, headers = {})
   JSON.parse(response.body)
 end
 
+def request_with_status(base, method, path, body = nil, headers = {})
+  uri = base + path
+  klass = {
+    'GET' => Net::HTTP::Get,
+    'POST' => Net::HTTP::Post,
+    'DELETE' => Net::HTTP::Delete,
+    'PATCH' => Net::HTTP::Patch
+  }.fetch(method)
+  req = klass.new(uri)
+  req['Content-Type'] = 'application/json' if body
+  headers.each { |key, value| req[key] = value }
+  req.body = JSON.generate(body) if body
+  response = Net::HTTP.start(uri.hostname, uri.port, read_timeout: 5) do |http|
+    http.request(req)
+  end
+  [response.code.to_i, response.body.empty? ? nil : JSON.parse(response.body)]
+end
+
 def cell_map(snapshot)
   snapshot.fetch('cells').each_with_object({}) do |cell, result|
     result[[cell.fetch('x'), cell.fetch('y')]] = cell
@@ -132,6 +150,36 @@ raise 'resize exposed cells outside new bounds' if resize_cells.keys.any? do |x,
 end
 request(base, 'DELETE', "/v1/terminal-sessions/#{resize_id}")
 puts 'PASS resize-preserves-grid'
+
+created = request(base, 'POST', '/v1/terminal-sessions', {
+  'command' => '/bin/sh',
+  'arguments' => ['-c', 'sleep 1'],
+  'surface' => { 'width' => 4, 'height' => 2 }
+})
+idempotent_id = created.fetch('id')
+idempotent_state = request(base, 'GET', "/v1/terminal-sessions/#{idempotent_id}")
+idempotent_headers = {
+  'If-Match' => idempotent_state.fetch('revision').to_s,
+  'Idempotency-Key' => 'terminal-session-patch-replay'
+}
+idempotent_body = { 'surface' => { 'width' => 3, 'height' => 2 } }
+first_status, first_response = request_with_status(
+  base, 'PATCH', "/v1/terminal-sessions/#{idempotent_id}",
+  idempotent_body, idempotent_headers)
+second_status, second_response = request_with_status(
+  base, 'PATCH', "/v1/terminal-sessions/#{idempotent_id}",
+  idempotent_body, idempotent_headers)
+assert_equal(200, first_status, 'session PATCH idempotency first status')
+assert_equal(200, second_status, 'session PATCH idempotency replay status')
+assert_equal(first_response, second_response, 'session PATCH idempotency replay body')
+conflict_status, conflict_response = request_with_status(
+  base, 'PATCH', "/v1/terminal-sessions/#{idempotent_id}",
+  { 'surface' => { 'width' => 2, 'height' => 2 } }, idempotent_headers)
+assert_equal(409, conflict_status, 'session PATCH idempotency conflict status')
+assert_equal('idempotency_conflict', conflict_response.fetch('code'),
+             'session PATCH idempotency conflict code')
+request(base, 'DELETE', "/v1/terminal-sessions/#{idempotent_id}")
+puts 'PASS terminal-session-patch-idempotency'
 
 created = request(base, 'POST', '/v1/terminal-sessions', {
   'command' => '/bin/sh',
