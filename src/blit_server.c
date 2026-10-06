@@ -3810,6 +3810,71 @@ static void disable_input_routes_for_target(BlitRuntime *runtime,
         ++runtime->input_routes_revision;
 }
 
+static void disable_input_routes_for_device(BlitRuntime *runtime,
+                                            const char *device_id)
+{
+    int i;
+    int changed = 0;
+
+    if (runtime == NULL || device_id == NULL || device_id[0] == '\0')
+        return;
+    for (i = 0; i < 16; ++i) {
+        BlitInputRoute *route = &runtime->input_routes[i];
+        if (route->used && route->enabled &&
+            strcmp(route->device_id, device_id) == 0) {
+            route->enabled = 0;
+            changed = 1;
+        }
+    }
+    if (changed)
+        ++runtime->input_routes_revision;
+}
+
+static void remove_evdev_mouse(BlitRuntime *runtime, int index)
+{
+    int i;
+    if (index < 0 || index >= runtime->evdev_mouse_count)
+        return;
+    if (runtime->evdev_mouse_fds[index] >= 0)
+        close(runtime->evdev_mouse_fds[index]);
+    for (i = index; i + 1 < runtime->evdev_mouse_count; ++i) {
+        runtime->evdev_mouse_fds[i] = runtime->evdev_mouse_fds[i + 1];
+        snprintf(runtime->evdev_mouse_paths[i],
+                 sizeof(runtime->evdev_mouse_paths[i]), "%s",
+                 runtime->evdev_mouse_paths[i + 1]);
+        runtime->evdev_mouse_reported[i] = runtime->evdev_mouse_reported[i + 1];
+    }
+    --runtime->evdev_mouse_count;
+    runtime->evdev_mouse_fds[runtime->evdev_mouse_count] = -1;
+    runtime->evdev_mouse_paths[runtime->evdev_mouse_count][0] = '\0';
+    runtime->evdev_mouse_reported[runtime->evdev_mouse_count] = 0;
+    if (runtime->evdev_mouse_count == 0)
+        disable_input_routes_for_device(runtime, "evdev-pointer");
+}
+
+static void remove_evdev_keyboard(BlitRuntime *runtime, int index)
+{
+    int i;
+    if (index < 0 || index >= runtime->evdev_keyboard_count)
+        return;
+    if (runtime->evdev_keyboard_fds[index] >= 0)
+        close(runtime->evdev_keyboard_fds[index]);
+    for (i = index; i + 1 < runtime->evdev_keyboard_count; ++i) {
+        runtime->evdev_keyboard_fds[i] = runtime->evdev_keyboard_fds[i + 1];
+        snprintf(runtime->evdev_keyboard_paths[i],
+                 sizeof(runtime->evdev_keyboard_paths[i]), "%s",
+                 runtime->evdev_keyboard_paths[i + 1]);
+        runtime->evdev_keyboard_reported[i] =
+            runtime->evdev_keyboard_reported[i + 1];
+    }
+    --runtime->evdev_keyboard_count;
+    runtime->evdev_keyboard_fds[runtime->evdev_keyboard_count] = -1;
+    runtime->evdev_keyboard_paths[runtime->evdev_keyboard_count][0] = '\0';
+    runtime->evdev_keyboard_reported[runtime->evdev_keyboard_count] = 0;
+    if (runtime->evdev_keyboard_count == 0)
+        disable_input_routes_for_device(runtime, "evdev-keyboard");
+}
+
 static int display_id_is_known(const BlitRuntime *runtime, const char *display_id)
 {
     char expected[128];
@@ -6777,6 +6842,7 @@ static void service_evdev_mouse(BlitRuntime *runtime)
 
     for (device_index = 0; device_index < runtime->evdev_mouse_count;
          ++device_index) {
+        int device_lost = 0;
         if (runtime->evdev_mouse_fds[device_index] < 0) continue;
         while ((received = read(runtime->evdev_mouse_fds[device_index],
                                 &event, sizeof(event))) ==
@@ -6824,6 +6890,16 @@ static void service_evdev_mouse(BlitRuntime *runtime)
                                   runtime->evdev_mouse_y, button, release);
                 if (release) runtime->mouse_buttons &= ~(1U << button);
             }
+        }
+        if (received == 0 ||
+            (received < 0 && errno != EAGAIN && errno != EWOULDBLOCK &&
+             errno != EINTR))
+            device_lost = 1;
+        if (device_lost) {
+            fprintf(stderr, "blit: evdev mouse disappeared: %s\n",
+                    runtime->evdev_mouse_paths[device_index]);
+            remove_evdev_mouse(runtime, device_index);
+            --device_index;
         }
     }
 }
@@ -6979,6 +7055,7 @@ static void service_evdev_keyboard(BlitRuntime *runtime)
     int device_index;
     for (device_index = 0; device_index < runtime->evdev_keyboard_count;
          ++device_index) {
+        int device_lost = 0;
         if (runtime->evdev_keyboard_fds[device_index] < 0) continue;
         while ((received = read(runtime->evdev_keyboard_fds[device_index],
                                 &event, sizeof(event))) ==
@@ -7019,6 +7096,16 @@ static void service_evdev_keyboard(BlitRuntime *runtime)
                          runtime->evdev_alt ? "true" : "false");
                 broadcast_stream(runtime, input_event, BLIT_STREAM_INPUT);
             }
+        }
+        if (received == 0 ||
+            (received < 0 && errno != EAGAIN && errno != EWOULDBLOCK &&
+             errno != EINTR))
+            device_lost = 1;
+        if (device_lost) {
+            fprintf(stderr, "blit: evdev keyboard disappeared: %s\n",
+                    runtime->evdev_keyboard_paths[device_index]);
+            remove_evdev_keyboard(runtime, device_index);
+            --device_index;
         }
     }
 }

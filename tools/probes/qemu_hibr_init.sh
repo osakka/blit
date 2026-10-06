@@ -66,6 +66,9 @@ $b mkdir -p /root /tmp/hibr-state /tmp/hibr-config /tmp/hibr-data
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
     *" blit.input_only=1 "*) BLIT_INPUT_ONLY_TEST=1 ;;
 esac
+case " $($b cat /proc/cmdline 2>/dev/null || true) " in
+    *" blit.input_loss=1 "*) BLIT_INPUT_LOSS_TEST=1 ;;
+esac
 if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
     # The input-only gate measures routing and PTY bytes, not framebuffer
     # capture.  Avoid serializing two 1024x768 PPMs on the slow VKMS guest
@@ -205,6 +208,28 @@ if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
         echo BLIT_INPUT_STREAM_PASS
     else
         echo BLIT_INPUT_STREAM_FAIL
+    fi
+    if [ "${BLIT_INPUT_LOSS_TEST:-0}" = 1 ]; then
+        echo BLIT_INPUT_ROUTES_AFTER_DEVICE_LOSS
+        routes_after_loss=$($b wget -qO- http://127.0.0.1:19191/v1/input/routes)
+        diagnostics_after_loss=$($b wget -qO- http://127.0.0.1:19191/v1/diagnostics)
+        echo "$routes_after_loss"
+        echo "$diagnostics_after_loss"
+        loss_pass=1
+        # QEMU also exposes its baseline keyboard and mouse. The synthetic
+        # devices therefore exercise compaction while a surviving device keeps
+        # the aggregate route enabled.
+        echo "$routes_after_loss" | $b grep -q '"id":"input-key".*"device_id":"evdev-keyboard".*"enabled":true' || loss_pass=0
+        echo "$routes_after_loss" | $b grep -q '"id":"input-pointer".*"device_id":"evdev-pointer".*"enabled":true' || loss_pass=0
+        echo "$diagnostics_after_loss" | $b grep -q '"keyboards":1' || loss_pass=0
+        echo "$diagnostics_after_loss" | $b grep -q '"pointers":1' || loss_pass=0
+        $b grep -q 'evdev keyboard disappeared:' /tmp/blit.log || loss_pass=0
+        $b grep -q 'evdev mouse disappeared:' /tmp/blit.log || loss_pass=0
+        if [ "$loss_pass" -eq 1 ]; then
+            echo BLIT_INPUT_DEVICE_LOSS_PASS
+        else
+            echo BLIT_INPUT_DEVICE_LOSS_FAIL
+        fi
     fi
     finish 0
 fi
