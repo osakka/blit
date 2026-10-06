@@ -3790,6 +3790,26 @@ static void input_routes_json(const BlitRuntime *runtime, char *body,
     snprintf(body + used, capacity - used, "]}");
 }
 
+static void disable_input_routes_for_target(BlitRuntime *runtime,
+                                            const char *target_id)
+{
+    int i;
+    int changed = 0;
+
+    if (runtime == NULL || target_id == NULL || target_id[0] == '\0')
+        return;
+    for (i = 0; i < 16; ++i) {
+        BlitInputRoute *route = &runtime->input_routes[i];
+        if (route->used && route->enabled &&
+            strcmp(route->target_session_id, target_id) == 0) {
+            route->enabled = 0;
+            changed = 1;
+        }
+    }
+    if (changed)
+        ++runtime->input_routes_revision;
+}
+
 static int display_id_is_known(const BlitRuntime *runtime, const char *display_id)
 {
     char expected[128];
@@ -3899,15 +3919,17 @@ static BlitSession *find_session(BlitRuntime *runtime, const char *path)
     return find_session_id(runtime, session_id);
 }
 
-static void refresh_session_state(BlitSession *session)
+static void refresh_session_state(BlitRuntime *runtime, BlitSession *session)
 {
     int status;
     pid_t result;
+    char target_id[128];
 
     if (!session->used ||
         (strcmp(session->state, "running") != 0 &&
          strcmp(session->state, "starting") != 0))
         return;
+    snprintf(target_id, sizeof(target_id), "session-%llu", session->id);
     result = waitpid(session->process_id, &status, WNOHANG);
     if (result == session->process_id) {
         if (WIFEXITED(status)) {
@@ -3925,6 +3947,7 @@ static void refresh_session_state(BlitSession *session)
             close(session->pty_fd);
             session->pty_fd = -1;
         }
+        disable_input_routes_for_target(runtime, target_id);
     } else if (result < 0 && errno != EINTR) {
         session->exit_code = -1;
         snprintf(session->state, sizeof(session->state), "failed");
@@ -3932,6 +3955,7 @@ static void refresh_session_state(BlitSession *session)
             close(session->pty_fd);
             session->pty_fd = -1;
         }
+        disable_input_routes_for_target(runtime, target_id);
     }
 }
 
@@ -3953,8 +3977,11 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
     char escaped_clipboard[8192];
     char escaped_notification[2048];
 
+    refresh_session_state(runtime, session);
+
     for (route_index = 0; route_index < 16; ++route_index)
         if (runtime->input_routes[route_index].used &&
+            runtime->input_routes[route_index].enabled &&
             strcmp(runtime->input_routes[route_index].target_session_id,
                    "session-") != 0) {
             char target[128];
@@ -3966,7 +3993,6 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
             }
         }
 
-    refresh_session_state(session);
     json_escape(session->terminal_title, escaped_title,
                 sizeof(escaped_title));
     json_escape(session->terminal_clipboard, escaped_clipboard,
@@ -4397,7 +4423,7 @@ static void stop_sessions(BlitRuntime *runtime)
         BlitSession *session = &runtime->sessions[i];
         if (!session->used)
             continue;
-        refresh_session_state(session);
+        refresh_session_state(runtime, session);
         if (strcmp(session->state, "running") == 0) {
             kill(-session->process_id, SIGTERM);
             waitpid(session->process_id, NULL, 0);
@@ -4415,11 +4441,10 @@ static void destroy_session(BlitRuntime *runtime, BlitSession *session)
     int had_pane = session->pane_id[0] != '\0';
     char target_id[128];
     int i;
-    int route_changed = 0;
 
     snprintf(target_id, sizeof(target_id), "session-%llu", session->id);
 
-    refresh_session_state(session);
+    refresh_session_state(runtime, session);
     if (strcmp(session->state, "running") == 0 ||
         strcmp(session->state, "starting") == 0) {
         if (kill(-session->process_id, SIGTERM) < 0)
@@ -4429,17 +4454,7 @@ static void destroy_session(BlitRuntime *runtime, BlitSession *session)
     }
     if (session->pty_fd >= 0)
         close(session->pty_fd);
-    for (i = 0; i < 16; ++i) {
-        if (runtime->input_routes[i].used &&
-            strcmp(runtime->input_routes[i].target_session_id,
-                   target_id) == 0) {
-            runtime->input_routes[i].enabled = 0;
-            runtime->input_routes[i].target_session_id[0] = '\0';
-            route_changed = 1;
-        }
-    }
-    if (route_changed)
-        ++runtime->input_routes_revision;
+    disable_input_routes_for_target(runtime, target_id);
     if (surface != NULL) {
         terminal_scrollback_release(surface);
         memset(surface, 0, sizeof(*surface));
@@ -5355,6 +5370,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
         char target_session_id[128];
         int enabled;
         BlitInputRoute *route = find_input_route(runtime, route_id);
+        BlitSession *target_session;
         int i;
 
         if (*route_id == '\0' || strlen(route_id) >= sizeof(device_id) ||
@@ -5369,6 +5385,20 @@ static void handle_request(int fd, BlitRuntime *runtime,
                 strtoull(target_session_id + 8, NULL, 10)) == NULL) {
             send_problem(fd, 400, "Bad Request", "invalid_input_route",
                          "A route requires a supported evdev device, a live session target, and enabled boolean.");
+            return;
+        }
+        target_session = find_session_id(runtime,
+            strtoull(target_session_id + 8, NULL, 10));
+        if (target_session == NULL) {
+            send_problem(fd, 400, "Bad Request", "invalid_input_route",
+                         "An input route target session does not exist.");
+            return;
+        }
+        refresh_session_state(runtime, target_session);
+        if (enabled && strcmp(target_session->state, "running") != 0 &&
+            strcmp(target_session->state, "starting") != 0) {
+            send_problem(fd, 409, "Conflict", "input_route_target_stopped",
+                         "An enabled input route requires a live target session.");
             return;
         }
         if (route == NULL) {
@@ -7197,7 +7227,7 @@ int main(int argc, char **argv)
         struct timeval timeout;
 
         for (i = 0; i < BLIT_MAX_SESSIONS; ++i)
-            refresh_session_state(&runtime.sessions[i]);
+            refresh_session_state(&runtime, &runtime.sessions[i]);
 
         if (runtime.sdl_ready && !runtime.direct_kms)
             service_sdl_events(&runtime);

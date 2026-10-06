@@ -264,6 +264,45 @@ puts 'PASS terminal-session-patch-idempotency'
 
 created = request(base, 'POST', '/v1/terminal-sessions', {
   'command' => '/bin/sh',
+  'arguments' => ['-c', 'sleep 1'],
+  'surface' => { 'width' => 4, 'height' => 2 }
+})
+route_exit_id = created.fetch('id')
+request(base, 'PUT', '/v1/input/routes/route-exit', {
+  'device_id' => 'evdev-keyboard',
+  'target_session_id' => "session-#{route_exit_id}",
+  'enabled' => true
+})
+Timeout.timeout(5) do
+  loop do
+    state = request(base, 'GET', "/v1/terminal-sessions/#{route_exit_id}")
+    break unless %w[starting running].include?(state.fetch('state'))
+
+    sleep 0.02
+  end
+end
+route = request(base, 'GET', '/v1/input/routes').fetch('routes').find do |item|
+  item.fetch('id') == 'route-exit'
+end
+raise 'natural session exit removed its input route' if route.nil?
+assert_equal(false, route.fetch('enabled'),
+             'natural session exit disables input route')
+assert_equal("session-#{route_exit_id}", route.fetch('target_session_id'),
+             'disabled route retains target identity')
+stopped_route_status, stopped_route = request_with_status(
+  base, 'PUT', '/v1/input/routes/route-exit', {
+    'device_id' => 'evdev-keyboard',
+    'target_session_id' => "session-#{route_exit_id}",
+    'enabled' => true
+  })
+assert_equal(409, stopped_route_status, 'stopped route target status')
+assert_equal('input_route_target_stopped', stopped_route.fetch('code'),
+             'stopped route target code')
+request(base, 'DELETE', "/v1/terminal-sessions/#{route_exit_id}")
+puts 'PASS input-route-target-exit'
+
+created = request(base, 'POST', '/v1/terminal-sessions', {
+  'command' => '/bin/sh',
   'arguments' => ['-c', "printf 'a\\nb\\nc'; sleep 1"],
   'surface' => { 'width' => 4, 'height' => 2 }
 })

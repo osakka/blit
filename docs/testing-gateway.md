@@ -327,6 +327,11 @@ legacy VT reports use the protocol's button-3 release code and 32-byte offset.
 Evdev Shift, Alt, and Ctrl state contributes the standard SGR/VT modifier bits
 to button, wheel, and drag reports.
 
+When a routed PTY exits, Blit disables the route during lifecycle reaping but
+retains its `target_session_id` for diagnostics and replay-safe reconciliation.
+Re-enabling that route against the stopped session returns the typed
+`input_route_target_stopped` conflict; a new live session must be selected.
+
 ## Exercise the stream upgrade
 
 The current slice accepts a WebSocket opening handshake, keeps the connection
