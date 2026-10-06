@@ -50,6 +50,20 @@ in QEMU with direct DRM/KMS:
 The initial gateway is a TCC-built TCP service. It exposes the discovery
 routes defined by the OpenAPI contract and a first WebSocket upgrade path.
 
+HTTP reads are event-loop bounded: the gateway retains incomplete requests per
+connection, reads at most the bytes available for that readiness event, and
+expires a request that remains incomplete for five seconds. This prevents a
+fragmented or slow TCP client from stalling KMS presentation, PTY draining,
+input routing, or WebSocket servicing. The regression gate is:
+
+```sh
+BLIT_GATE_PORT=19202 BLIT_GATE_TOKEN=blit-network-gate \
+  ruby tools/tests/http_fragmentation_gate.rb 19202
+```
+
+It holds one request fragmented for one second while requiring an independent
+authenticated diagnostics request to complete in under 800 ms.
+
 The Hibr VKMS fixture must stage the exact Hibr executable, modules, and
 desktop tree being tested. Refresh an existing initramfs tree with:
 

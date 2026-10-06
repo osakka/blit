@@ -28,6 +28,7 @@ extern char **environ;
 #define BLIT_MAX_PANES 64
 #define BLIT_MAX_SESSIONS 16
 #define BLIT_MAX_STREAMS 16
+#define BLIT_MAX_HTTP_CLIENTS 32
 #define BLIT_REQUEST_SIZE 8192
 #define BLIT_MAX_CELL_COLS 512
 #define BLIT_MAX_CELL_ROWS 160
@@ -176,6 +177,14 @@ typedef struct {
     size_t fragment_length;
     unsigned char fragment_opcode;
 } BlitStream;
+
+typedef struct {
+    int used;
+    int fd;
+    size_t length;
+    uint64_t accepted_us;
+    char request[BLIT_REQUEST_SIZE];
+} BlitHttpClient;
 
 typedef struct {
     int used;
@@ -353,6 +362,7 @@ typedef struct {
     float evdev_mouse_x;
     float evdev_mouse_y;
     BlitStream streams[BLIT_MAX_STREAMS];
+    BlitHttpClient http_clients[BLIT_MAX_HTTP_CLIENTS];
     BlitInputRoute input_routes[16];
     unsigned long long input_routes_revision;
     BlitOutput outputs[BLIT_MAX_DISPLAYS];
@@ -1213,35 +1223,6 @@ static int request_header(const char *request, const char *name,
     memcpy(value, cursor, length);
     value[length] = '\0';
     return length > 0;
-}
-
-static ssize_t receive_request(int fd, char *request, size_t capacity)
-{
-    ssize_t received = 0;
-
-    while ((size_t)received + 1 < capacity) {
-        ssize_t count = recv(fd, request + received,
-                             capacity - (size_t)received - 1, 0);
-        const char *headers_end;
-        size_t header_length;
-        size_t content_length = 0;
-        const char *length_header;
-
-        if (count <= 0)
-            return count;
-        received += count;
-        request[received] = '\0';
-        headers_end = strstr(request, "\r\n\r\n");
-        if (headers_end == NULL)
-            continue;
-        header_length = (size_t)(headers_end - request) + 4;
-        length_header = strstr(request, "Content-Length:");
-        if (length_header != NULL)
-            content_length = (size_t)strtoul(length_header + 15, NULL, 10);
-        if ((size_t)received >= header_length + content_length)
-            return received;
-    }
-    return -1;
 }
 
 static int json_string(const char *json, const char *key, char *value,
@@ -8477,6 +8458,96 @@ static void service_sdl_events(BlitRuntime *runtime)
     }
 }
 
+static void remove_http_client(BlitRuntime *runtime, int index)
+{
+    if (index < 0 || index >= BLIT_MAX_HTTP_CLIENTS ||
+        !runtime->http_clients[index].used)
+        return;
+    close(runtime->http_clients[index].fd);
+    memset(&runtime->http_clients[index], 0,
+           sizeof(runtime->http_clients[index]));
+}
+
+static int add_http_client(BlitRuntime *runtime, int fd)
+{
+    int i;
+    for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i) {
+        if (!runtime->http_clients[i].used) {
+            runtime->http_clients[i].used = 1;
+            runtime->http_clients[i].fd = fd;
+            runtime->http_clients[i].accepted_us = monotonic_us();
+            return i;
+        }
+    }
+    return -1;
+}
+
+/* Return 1 when a complete HTTP request is buffered, 0 when more bytes are
+   needed, and -1 when the declared body cannot fit in the bounded request. */
+static int http_request_complete(const BlitHttpClient *client,
+                                 size_t *required)
+{
+    const char *headers_end;
+    const char *length_header;
+    size_t header_length;
+    size_t content_length = 0;
+
+    headers_end = strstr(client->request, "\r\n\r\n");
+    if (headers_end == NULL)
+        return 0;
+    header_length = (size_t)(headers_end - client->request) + 4;
+    length_header = strstr(client->request, "Content-Length:");
+    if (length_header != NULL)
+        content_length = (size_t)strtoul(length_header + 15, NULL, 10);
+    if (content_length > sizeof(client->request) - header_length)
+        return -1;
+    *required = header_length + content_length;
+    return client->length >= *required ? 1 : 0;
+}
+
+static void service_http_client(BlitRuntime *runtime, int index)
+{
+    BlitHttpClient *client = &runtime->http_clients[index];
+    ssize_t received;
+    size_t required = 0;
+    int complete;
+
+    if (!client->used)
+        return;
+    if (client->length + 1 >= sizeof(client->request)) {
+        remove_http_client(runtime, index);
+        return;
+    }
+    received = recv(client->fd, client->request + client->length,
+                    sizeof(client->request) - client->length - 1, 0);
+    if (received == 0) {
+        remove_http_client(runtime, index);
+        return;
+    }
+    if (received < 0) {
+        if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
+            return;
+        remove_http_client(runtime, index);
+        return;
+    }
+    client->length += (size_t)received;
+    client->request[client->length] = '\0';
+    complete = http_request_complete(client, &required);
+    if (complete < 0 || (complete == 0 &&
+                         client->length + 1 >= sizeof(client->request))) {
+        remove_http_client(runtime, index);
+        return;
+    }
+    if (complete == 0 || client->length < required)
+        return;
+    handle_request(client->fd, runtime, client->request);
+    if (stream_contains(runtime, client->fd)) {
+        memset(client, 0, sizeof(*client));
+        return;
+    }
+    remove_http_client(runtime, index);
+}
+
 int main(int argc, char **argv)
 {
     int port = 8080;
@@ -8654,6 +8725,12 @@ int main(int argc, char **argv)
 
         if (runtime.sdl_ready && !runtime.direct_kms)
             service_sdl_events(&runtime);
+        now = monotonic_us();
+        for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i)
+            if (runtime.http_clients[i].used &&
+                now > runtime.http_clients[i].accepted_us &&
+                now - runtime.http_clients[i].accepted_us > 5000000ULL)
+                remove_http_client(&runtime, i);
         FD_ZERO(&readable);
         FD_SET(server_fd, &readable);
         for (i = 0; i < runtime.evdev_mouse_count; ++i) {
@@ -8673,6 +8750,13 @@ int main(int argc, char **argv)
                 FD_SET(runtime.streams[i].fd, &readable);
                 if (runtime.streams[i].fd > max_fd)
                     max_fd = runtime.streams[i].fd;
+            }
+        }
+        for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i) {
+            if (runtime.http_clients[i].used) {
+                FD_SET(runtime.http_clients[i].fd, &readable);
+                if (runtime.http_clients[i].fd > max_fd)
+                    max_fd = runtime.http_clients[i].fd;
             }
         }
         for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
@@ -8701,21 +8785,18 @@ int main(int argc, char **argv)
                 runtime.render_pending = 1;
         }
         if (ready > 0 && FD_ISSET(server_fd, &readable)) {
-            char request[BLIT_REQUEST_SIZE];
-            ssize_t received;
-
             client_fd = accept(server_fd, NULL, NULL);
             if (client_fd < 0) {
                 if (errno == EINTR) continue;
                 break;
             }
-            received = receive_request(client_fd, request, sizeof(request));
-            if (received > 0) {
-                request[received] = '\0';
-                handle_request(client_fd, &runtime, request);
-            }
-            if (!stream_contains(&runtime, client_fd))
+            fcntl(client_fd, F_SETFD, FD_CLOEXEC);
+            if (add_http_client(&runtime, client_fd) < 0) {
+                send_problem(client_fd, 503, "Service Unavailable",
+                             "http_capacity",
+                             "The HTTP connection limit has been reached.");
                 close(client_fd);
+            }
         }
         if (ready > 0) {
             for (i = 0; i < runtime.evdev_mouse_count; ++i)
@@ -8740,6 +8821,11 @@ int main(int argc, char **argv)
                 if (runtime.sessions[i].used && runtime.sessions[i].pty_fd >= 0 &&
                     FD_ISSET(runtime.sessions[i].pty_fd, &readable))
                     service_session_output(&runtime, runtime.sessions[i].pty_fd);
+            }
+            for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i) {
+                if (runtime.http_clients[i].used &&
+                    FD_ISSET(runtime.http_clients[i].fd, &readable))
+                    service_http_client(&runtime, i);
             }
         }
         now = monotonic_us();
