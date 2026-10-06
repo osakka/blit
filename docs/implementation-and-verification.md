@@ -53,7 +53,7 @@ automated and hardware acceptance criteria pass.
 ### Displays and topology
 
 - `BLIT-DISPLAY-001`: discover stable display IDs, bounds, modes, refresh, and
-  presentation state.
+  presentation state; expose the complete mode inventory and active mode.
 - `BLIT-DISPLAY-002`: support `1x1`, `2x1`, `1x2`, and `2x2` logical pane
   layouts.
 - `BLIT-DISPLAY-003`: map each pane to exactly one display and authoritative

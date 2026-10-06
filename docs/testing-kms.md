@@ -81,9 +81,11 @@ pending and is retried after that event; a one-cell API mutation therefore
 cannot accumulate into a historical full-row redraw.
 
 Expected output identifies every usable card and connected connector, then
-lists its modes and preferred mode. A missing card, connector, or mode is a
-structured capability result—not a reason to fall back silently to SDL text
-rendering.
+lists every connector mode and the active mode. Blit selects the highest
+refresh mode that preserves the connector's preferred/native geometry; it does
+not silently trade away the display's native geometry for a lower-resolution
+mode with a higher refresh. A missing card, connector, or mode is a structured
+capability result—not a reason to fall back silently to SDL text rendering.
 ## Logical width and pointer input
 
 Direct KMS normally uses the packaged 8-pixel-wide console font, which gives

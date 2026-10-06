@@ -18,6 +18,7 @@
 
 #define KMS_MAX_OUTPUTS 16
 #define KMS_MAX_VIEWS 64
+#define KMS_MAX_MODES BLIT_KMS_MAX_MODES
 #define KMS_FONT_W 8
 #define KMS_FONT_H 8
 #define KMS_POINTER_W 12
@@ -39,6 +40,9 @@ typedef struct {
     uint32_t connector;
     uint32_t crtc;
     drmModeModeInfo mode;
+    int mode_count;
+    int active_mode;
+    BlitKmsMode modes[KMS_MAX_MODES];
     drmModeCrtc *old_crtc;
     KmsBuffer front;
     KmsBuffer back;
@@ -141,6 +145,29 @@ static int choose_crtc(int fd, drmModeRes *resources,
         drmModeFreeEncoder(encoder);
     }
     return -1;
+}
+
+static int choose_mode(const drmModeConnector *connector)
+{
+    int preferred = 0;
+    int index;
+    int selected;
+
+    for (index = 0; index < connector->count_modes; ++index)
+        if (connector->modes[index].type & DRM_MODE_TYPE_PREFERRED) {
+            preferred = index;
+            break;
+        }
+    selected = preferred;
+    for (index = 0; index < connector->count_modes; ++index) {
+        const drmModeModeInfo *candidate = &connector->modes[index];
+        const drmModeModeInfo *current = &connector->modes[selected];
+        if (candidate->hdisplay == current->hdisplay &&
+            candidate->vdisplay == current->vdisplay &&
+            candidate->vrefresh > current->vrefresh)
+            selected = index;
+    }
+    return selected;
 }
 
 static int make_buffer(int fd, KmsOutput *output, KmsBuffer *buffer)
@@ -808,6 +835,7 @@ int blit_kms_open(BlitKms *kms, char *error, size_t error_capacity)
         drmModeConnector *connector = drmModeGetConnector(kms->fd, resources->connectors[i]);
         KmsOutput *output;
         int mode_index;
+        int inventory_index;
         if (connector == NULL || connector->connection != DRM_MODE_CONNECTED || connector->count_modes == 0) {
             if (connector) drmModeFreeConnector(connector);
             continue;
@@ -815,11 +843,23 @@ int blit_kms_open(BlitKms *kms, char *error, size_t error_capacity)
         output = &kms->outputs[kms->output_count];
         memset(output, 0, sizeof(*output));
         output->connector = connector->connector_id;
-        mode_index = 0;
-        for (mode_index = 0; mode_index < connector->count_modes; ++mode_index)
-            if (connector->modes[mode_index].type & DRM_MODE_TYPE_PREFERRED) break;
-        if (mode_index >= connector->count_modes) mode_index = 0;
+        mode_index = choose_mode(connector);
         output->mode = connector->modes[mode_index];
+        output->mode_count = connector->count_modes < KMS_MAX_MODES ?
+            connector->count_modes : KMS_MAX_MODES;
+        output->active_mode = 0;
+        for (inventory_index = 0; inventory_index < output->mode_count;
+             ++inventory_index) {
+            drmModeModeInfo *mode = &connector->modes[inventory_index];
+            output->modes[inventory_index].width = mode->hdisplay;
+            output->modes[inventory_index].height = mode->vdisplay;
+            output->modes[inventory_index].refresh_hz = mode->vrefresh > 0 ?
+                (double)mode->vrefresh : 60.0;
+            output->modes[inventory_index].preferred =
+                (mode->type & DRM_MODE_TYPE_PREFERRED) != 0;
+            if (inventory_index == mode_index)
+                output->active_mode = inventory_index;
+        }
         if (choose_crtc(kms->fd, resources, connector, used, used_count,
                         &output->crtc) < 0) { drmModeFreeConnector(connector); continue; }
         output->old_crtc = drmModeGetCrtc(kms->fd, output->crtc);
@@ -834,6 +874,10 @@ int blit_kms_open(BlitKms *kms, char *error, size_t error_capacity)
         output->info.width = output->mode.hdisplay; output->info.height = output->mode.vdisplay;
         output->info.refresh_hz = output->mode.vrefresh > 0 ?
             (double)output->mode.vrefresh : 60.0;
+        output->info.mode_count = output->mode_count;
+        output->info.active_mode = output->active_mode;
+        memcpy(output->info.modes, output->modes,
+               sizeof(output->info.modes));
         output->info.presentation_state = BLIT_KMS_PRESENTATION_PRESENTING;
     if (make_buffer(kms->fd, output, &output->front) < 0 ||
         make_buffer(kms->fd, output, &output->back) < 0) {

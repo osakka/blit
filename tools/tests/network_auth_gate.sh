@@ -11,13 +11,14 @@ AUTH=$(mktemp /tmp/blit-network-auth.XXXXXX)
 DIAGNOSTICS=$(mktemp /tmp/blit-network-diagnostics.XXXXXX)
 GRAPHICS=$(mktemp /tmp/blit-network-graphics.XXXXXX)
 AUDIO=$(mktemp /tmp/blit-network-audio.XXXXXX)
+DISPLAYS=$(mktemp /tmp/blit-network-displays.XXXXXX)
 COMMAND_DENIED=$(mktemp /tmp/blit-network-command-denied.XXXXXX)
 COMMAND_ALLOWED=$(mktemp /tmp/blit-network-command-allowed.XXXXXX)
 server_pid=
 cleanup() {
     if [ -n "$server_pid" ]; then kill "$server_pid" 2>/dev/null || true; fi
     rm -f "$LOG" "$UNAUTH" "$AUTH" "$DIAGNOSTICS" "$GRAPHICS" "$AUDIO" \
-        "$COMMAND_DENIED" "$COMMAND_ALLOWED"
+        "$DISPLAYS" "$COMMAND_DENIED" "$COMMAND_ALLOWED"
 }
 trap cleanup EXIT HUP INT TERM
 
@@ -65,12 +66,17 @@ graphics=$(curl -sS -o "$GRAPHICS" -w '%{http_code}' \
 audio=$(curl -sS -o "$AUDIO" -w '%{http_code}' \
     -H "Authorization: Bearer $TOKEN" \
     "http://127.0.0.1:$PORT/v1/audio")
+displays=$(curl -sS -o "$DISPLAYS" -w '%{http_code}' \
+    -H "Authorization: Bearer $TOKEN" \
+    "http://127.0.0.1:$PORT/v1/displays")
 if [ "$unauth" != 401 ] || [ "$auth" != 200 ] ||
    [ "$diagnostics" != 200 ] || [ "$graphics" != 200 ] ||
-   [ "$audio" != 200 ] ||
+   [ "$audio" != 200 ] || [ "$displays" != 200 ] ||
    ! grep -q '"health"' "$DIAGNOSTICS" ||
    ! grep -q '"graphics_cards"' "$GRAPHICS" ||
-   ! grep -q '"devices"' "$AUDIO"; then
+   ! grep -q '"devices"' "$AUDIO" ||
+   ! grep -q '"modes":\[' "$DISPLAYS" ||
+   ! grep -q '"active_mode":' "$DISPLAYS"; then
     echo "network gate: expected unauth=401 auth=200, got $unauth/$auth" >&2
     exit 1
 fi
@@ -89,4 +95,4 @@ if [ "$command_denied" != 403 ] || [ "$command_allowed" != 201 ] ||
     echo "network gate: command policy failed denied=$command_denied allowed=$command_allowed" >&2
     exit 1
 fi
-echo "NETWORK_AUTH_PASS unauth=$unauth auth=$auth diagnostics=$diagnostics graphics=$graphics audio=$audio command_denied=$command_denied command_allowed=$command_allowed"
+echo "NETWORK_AUTH_PASS unauth=$unauth auth=$auth diagnostics=$diagnostics graphics=$graphics audio=$audio displays=$displays command_denied=$command_denied command_allowed=$command_allowed"

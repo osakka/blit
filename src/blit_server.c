@@ -62,6 +62,9 @@ typedef struct {
     char name[128];
     SDL_Rect bounds;
     double refresh_hz;
+    int mode_count;
+    int active_mode;
+    BlitKmsMode modes[BLIT_KMS_MAX_MODES];
 } BlitDisplay;
 
 typedef struct {
@@ -926,24 +929,44 @@ static void displays_json(const BlitRuntime *runtime, char *body, size_t capacit
                              "{\"revision\":1,\"displays\":[");
     for (i = 0; i < runtime->display_count && used < capacity; ++i) {
         char escaped_name[256];
+        int mode_index;
+        int active_mode = runtime->displays[i].active_mode;
         json_escape(runtime->displays[i].name, escaped_name,
                     sizeof(escaped_name));
         used += (size_t)snprintf(
             body + used, capacity - used,
             "%s{\"id\":\"display-%llu\",\"name\":\"%s\","
             "\"bounds\":{\"x\":%d,\"y\":%d,\"width\":%d,"
-            "\"height\":%d},\"modes\":[{\"width\":%d,"
-            "\"height\":%d,\"refresh_hz\":%.3f}],"
-            "\"active_mode\":{\"width\":%d,\"height\":%d,"
-            "\"refresh_hz\":%.3f},\"presentation_state\":\"%s\"}",
+            "\"height\":%d},\"modes\":[",
             i == 0 ? "" : ",", runtime->displays[i].id, escaped_name,
             runtime->displays[i].bounds.x, runtime->displays[i].bounds.y,
             runtime->displays[i].bounds.w, runtime->displays[i].bounds.h,
-            runtime->displays[i].bounds.w, runtime->displays[i].bounds.h,
-            runtime->displays[i].refresh_hz,
-            runtime->displays[i].bounds.w, runtime->displays[i].bounds.h,
-            runtime->displays[i].refresh_hz,
-            display_presentation_state(runtime, i));
+            runtime->displays[i].bounds.h);
+        for (mode_index = 0; mode_index < runtime->displays[i].mode_count &&
+             used < capacity; ++mode_index) {
+            BlitKmsMode *mode = &runtime->displays[i].modes[mode_index];
+            used += (size_t)snprintf(
+                body + used, capacity - used,
+                "%s{\"width\":%d,\"height\":%d,\"refresh_hz\":%.3f}",
+                mode_index == 0 ? "" : ",", mode->width, mode->height,
+                mode->refresh_hz);
+        }
+        if (active_mode < 0 || active_mode >= runtime->displays[i].mode_count)
+            active_mode = 0;
+        if (runtime->displays[i].mode_count > 0) {
+            BlitKmsMode *mode = &runtime->displays[i].modes[active_mode];
+            used += (size_t)snprintf(
+                body + used, capacity - used,
+                "],\"active_mode\":{\"width\":%d,\"height\":%d,"
+                "\"refresh_hz\":%.3f},\"presentation_state\":\"%s\"}",
+                mode->width, mode->height, mode->refresh_hz,
+                display_presentation_state(runtime, i));
+        } else {
+            used += (size_t)snprintf(
+                body + used, capacity - used,
+                "],\"active_mode\":null,\"presentation_state\":\"%s\"}",
+                display_presentation_state(runtime, i));
+        }
     }
     snprintf(body + used, capacity - used, "]}");
 }
@@ -6839,6 +6862,10 @@ static void discover_displays(BlitRuntime *runtime)
             runtime->displays[i].bounds.w = info.width;
             runtime->displays[i].bounds.h = info.height;
             runtime->displays[i].refresh_hz = info.refresh_hz;
+            runtime->displays[i].mode_count = info.mode_count;
+            runtime->displays[i].active_mode = info.active_mode;
+            memcpy(runtime->displays[i].modes, info.modes,
+                   sizeof(runtime->displays[i].modes));
         }
         runtime->sdl_error[0] = '\0';
         return;
@@ -6882,6 +6909,13 @@ static void discover_displays(BlitRuntime *runtime)
             mode = SDL_GetDesktopDisplayMode(ids[i]);
         runtime->displays[i].refresh_hz = mode != NULL &&
             mode->refresh_rate > 0.0f ? (double)mode->refresh_rate : 60.0;
+        runtime->displays[i].mode_count = 1;
+        runtime->displays[i].active_mode = 0;
+        runtime->displays[i].modes[0].width = runtime->displays[i].bounds.w;
+        runtime->displays[i].modes[0].height = runtime->displays[i].bounds.h;
+        runtime->displays[i].modes[0].refresh_hz =
+            runtime->displays[i].refresh_hz;
+        runtime->displays[i].modes[0].preferred = 1;
     }
     SDL_free(ids);
 }

@@ -9,6 +9,15 @@
 
 typedef struct BlitKms BlitKms;
 
+#define BLIT_KMS_MAX_MODES 64
+
+typedef struct {
+    int width;
+    int height;
+    double refresh_hz;
+    int preferred;
+} BlitKmsMode;
+
 typedef struct {
     unsigned long long surface_id;
     unsigned long long surface_revision;
@@ -51,6 +60,9 @@ typedef struct {
     int width;
     int height;
     double refresh_hz;
+    int mode_count;
+    int active_mode;
+    BlitKmsMode modes[BLIT_KMS_MAX_MODES];
     int presentation_state;
 } BlitKmsDisplayInfo;
 
