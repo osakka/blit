@@ -301,6 +301,7 @@ typedef struct {
     int terminal_autowrap;
     int terminal_newline_mode;
     int terminal_insert_mode;
+    int terminal_alternate_mode;
     int terminal_focus_reporting;
     int terminal_bracketed_paste;
     int terminal_mouse_mode;
@@ -2199,6 +2200,7 @@ static void terminal_clear_active_screen(BlitSurface *surface)
     memset(surface->combining_count, 0, sizeof(surface->combining_count));
     memset(surface->foreground, 0, sizeof(surface->foreground));
     memset(surface->background, 0, sizeof(surface->background));
+    memset(surface->underline_color, 0, sizeof(surface->underline_color));
     memset(surface->attributes, 0, sizeof(surface->attributes));
     memset(surface->links, 0, sizeof(surface->links));
     surface->damage_valid = 1;
@@ -2239,70 +2241,77 @@ static void terminal_store_cursor(BlitSavedCursor *saved,
 static void terminal_scrollback_show_live(BlitSurface *surface);
 static void terminal_scrollback_show_offset(BlitSurface *surface, int view);
 
+static int terminal_swap_screens(BlitSurface *surface)
+{
+    unsigned char *scratch;
+
+    /* The two screens are fixed-size canonical state.  Swapping them only
+       happens on DEC private-mode transitions, never on the render path;
+       use one heap scratch buffer instead of duplicating a second renderer
+       or relying on a large stack frame. */
+    scratch = (unsigned char *)malloc(sizeof(surface->combining));
+    if (scratch == NULL)
+        return 0;
+#define BLIT_SWAP_SCREEN_FIELD(field) do { \
+        memcpy(scratch, surface->field, sizeof(surface->field)); \
+        memcpy(surface->field, surface->alternate_##field, \
+               sizeof(surface->field)); \
+        memcpy(surface->alternate_##field, scratch, sizeof(surface->field)); \
+    } while (0)
+    BLIT_SWAP_SCREEN_FIELD(cells);
+    BLIT_SWAP_SCREEN_FIELD(codepoints);
+    BLIT_SWAP_SCREEN_FIELD(combining);
+    BLIT_SWAP_SCREEN_FIELD(combining_count);
+    BLIT_SWAP_SCREEN_FIELD(foreground);
+    BLIT_SWAP_SCREEN_FIELD(background);
+    BLIT_SWAP_SCREEN_FIELD(underline_color);
+    BLIT_SWAP_SCREEN_FIELD(attributes);
+    BLIT_SWAP_SCREEN_FIELD(links);
+#undef BLIT_SWAP_SCREEN_FIELD
+    free(scratch);
+    return 1;
+}
+
 static void terminal_enter_alternate(BlitSession *session,
-                                     BlitSurface *surface, int save_cursor)
+                                     BlitSurface *surface, int mode)
 {
     terminal_scrollback_show_live(surface);
     if (session->terminal_alternate)
         return;
-    if (save_cursor)
+    if (mode == 1049)
         terminal_store_cursor(&session->terminal_alternate_saved_cursor,
                               session, surface);
-    memcpy(surface->alternate_cells, surface->cells,
-           sizeof(surface->cells));
-    memcpy(surface->alternate_codepoints, surface->codepoints,
-           sizeof(surface->codepoints));
-    memcpy(surface->alternate_combining, surface->combining,
-           sizeof(surface->combining));
-    memcpy(surface->alternate_combining_count, surface->combining_count,
-           sizeof(surface->combining_count));
-    memcpy(surface->alternate_foreground, surface->foreground,
-           sizeof(surface->foreground));
-    memcpy(surface->alternate_background, surface->background,
-           sizeof(surface->background));
-    memcpy(surface->alternate_underline_color, surface->underline_color,
-           sizeof(surface->underline_color));
-    memcpy(surface->alternate_attributes, surface->attributes,
-           sizeof(surface->attributes));
-    memcpy(surface->alternate_links, surface->links,
-           sizeof(surface->links));
+    if (!terminal_swap_screens(surface)) {
+        fprintf(stderr, "blit: alternate-screen swap allocation failed\n");
+        return;
+    }
     session->terminal_saved_x = surface->cursor_x;
     session->terminal_saved_y = surface->cursor_y;
     session->terminal_alternate = 1;
+    session->terminal_alternate_mode = mode;
     session->terminal_wrap_pending = 0;
-    terminal_clear_active_screen(surface);
-    surface->cursor_x = 0;
-    surface->cursor_y = 0;
-    surface->cursor_visible = 1;
-    surface->cursor_style = 1;
+    if (mode == 1047 || mode == 1049)
+        terminal_clear_active_screen(surface);
 }
 
 static void terminal_leave_alternate(BlitSession *session,
                                      BlitSurface *surface)
 {
+    int mode;
+
     if (!session->terminal_alternate)
         return;
-    memcpy(surface->cells, surface->alternate_cells,
-           sizeof(surface->cells));
-    memcpy(surface->codepoints, surface->alternate_codepoints,
-           sizeof(surface->codepoints));
-    memcpy(surface->combining, surface->alternate_combining,
-           sizeof(surface->combining));
-    memcpy(surface->combining_count, surface->alternate_combining_count,
-           sizeof(surface->combining_count));
-    memcpy(surface->foreground, surface->alternate_foreground,
-           sizeof(surface->foreground));
-    memcpy(surface->background, surface->alternate_background,
-           sizeof(surface->background));
-    memcpy(surface->underline_color, surface->alternate_underline_color,
-           sizeof(surface->underline_color));
-    memcpy(surface->attributes, surface->alternate_attributes,
-           sizeof(surface->attributes));
-    memcpy(surface->links, surface->alternate_links,
-           sizeof(surface->links));
+    mode = session->terminal_alternate_mode;
+    if (mode == 1047)
+        terminal_clear_active_screen(surface);
+    if (!terminal_swap_screens(surface)) {
+        fprintf(stderr, "blit: alternate-screen swap allocation failed\n");
+        return;
+    }
     session->terminal_alternate = 0;
+    session->terminal_alternate_mode = 0;
     session->terminal_wrap_pending = 0;
-    if (session->terminal_alternate_saved_cursor.valid) {
+    if (mode == 1049 && session->terminal_alternate_saved_cursor.valid) {
         BlitSavedCursor *saved = &session->terminal_alternate_saved_cursor;
         surface->cursor_x = saved->x;
         surface->cursor_y = saved->y;
@@ -2319,9 +2328,6 @@ static void terminal_leave_alternate(BlitSession *session,
         session->terminal_origin_mode = saved->origin_mode;
         session->terminal_autowrap = saved->autowrap;
         saved->valid = 0;
-    } else {
-        surface->cursor_x = session->terminal_saved_x;
-        surface->cursor_y = session->terminal_saved_y;
     }
     if (surface->cursor_x >= surface->width)
         surface->cursor_x = surface->width - 1;
@@ -3878,9 +3884,12 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         if (terminal_csi_has_mode(sequence, 47) ||
             terminal_csi_has_mode(sequence, 1047) ||
             terminal_csi_has_mode(sequence, 1049)) {
-            if (enabled)
-                terminal_enter_alternate(session, surface,
-                                         terminal_csi_has_mode(sequence, 1049));
+            if (enabled) {
+                int alternate_mode = terminal_csi_has_mode(sequence, 1049) ?
+                    1049 : terminal_csi_has_mode(sequence, 1047) ?
+                    1047 : 47;
+                terminal_enter_alternate(session, surface, alternate_mode);
+            }
             else
                 terminal_leave_alternate(session, surface);
         }
@@ -4055,7 +4064,7 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
     } else if (private_mode && (command == 'h' || command == 'l') &&
                has_first && (first == 1047 || first == 1049)) {
         if (command == 'h')
-            terminal_enter_alternate(session, surface, first == 1049);
+            terminal_enter_alternate(session, surface, first);
         else
             terminal_leave_alternate(session, surface);
     } else if (private_mode && (command == 'h' || command == 'l') &&
@@ -4537,6 +4546,8 @@ static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
                 terminal_index(session, surface);
                 session->terminal_escape = 0;
             } else if (byte == 'c') {
+                if (session->terminal_alternate)
+                    terminal_leave_alternate(session, surface);
                 terminal_clear_active_screen(surface);
                 surface->cursor_x = 0;
                 surface->cursor_y = 0;
@@ -4561,6 +4572,7 @@ static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
                 session->terminal_mouse_mode = 0;
                 session->terminal_mouse_sgr = 0;
                 session->terminal_synchronized = 0;
+                session->terminal_alternate_mode = 0;
                 terminal_scrollback_release(surface);
                 session->terminal_foreground = 0;
                 session->terminal_background = 0;

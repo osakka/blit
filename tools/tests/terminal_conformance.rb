@@ -594,6 +594,22 @@ snapshot = run_case(base, 'legacy-alternate-screen',
 cells = cell_map(snapshot)
 assert_equal('m', cells.fetch([0, 0]).fetch('text'), 'legacy alternate restore')
 
+snapshot = run_case(base, 'legacy-alternate-screen-persists',
+                    "printf '\\033[?47hA\\033[?47l\\033[?47hB'")
+cells = cell_map(snapshot)
+assert_equal('A', cells.fetch([0, 0]).fetch('text'),
+             'legacy alternate preserved first cell')
+assert_equal('B', cells.fetch([1, 0]).fetch('text'),
+             'legacy alternate preserved cursor state')
+
+snapshot = run_case(base, '1047-alternate-screen-clears-on-leave',
+                    "printf '\\033[?1047hA\\033[?1047l\\033[?1047hB'")
+cells = cell_map(snapshot)
+assert_equal('', cells.fetch([0, 0], { 'text' => '' }).fetch('text'),
+             '1047 alternate was cleared on leave')
+assert_equal('B', cells.fetch([1, 0]).fetch('text'),
+             '1047 preserved the shared cursor position')
+
 snapshot = run_case(base, 'per-screen-saved-cursor',
                     "printf '\\033[31mA\\0337\\033[?1049h\\033[32mB\\0337\\033[?1049l\\0338C'")
 cells = cell_map(snapshot)

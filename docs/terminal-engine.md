@@ -41,7 +41,10 @@ shell conformance path is stable.
    DEC origin-mode cursor motion is constrained to the active scroll region.
    DEC 1049 alternate-screen entry saves and restores the main-screen cursor,
    pen, character-set, origin, and autowrap state; legacy 47/1047 switching
-   retains its distinct buffer-switching semantics.
+   retains its distinct buffer-switching semantics: 47 swaps persistent
+   buffers, while 1047 clears the alternate buffer when it is left. RIS
+   returns to the main buffer before resetting the terminal, and full-screen
+   erases clear underline-colour state along with cell content.
    Insert mode (`CSI 4 h/l`), legacy alternate-screen mode (`CSI ?47 h/l`),
    DEC soft reset (`CSI !p`), and cursor style selection (`DECSCUSR`,
    `CSI Ps SP q`) are covered by the conformance vectors. Cursor styles are
