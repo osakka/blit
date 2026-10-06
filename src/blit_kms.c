@@ -530,6 +530,8 @@ static void write_screenshot(BlitKms *kms, const KmsOutput *output)
 {
     char path[512];
     FILE *file;
+    unsigned char *rgb_row;
+    size_t row_bytes;
     int y;
 
     if (kms == NULL || output == NULL || kms->screenshot_dir[0] == '\0')
@@ -539,6 +541,12 @@ static void write_screenshot(BlitKms *kms, const KmsOutput *output)
     file = fopen(path, "wb");
     if (file == NULL)
         return;
+    row_bytes = (size_t)output->mode.hdisplay * 3U;
+    rgb_row = (unsigned char *)malloc(row_bytes);
+    if (rgb_row == NULL) {
+        fclose(file);
+        return;
+    }
     fprintf(file, "P6\n%d %d\n255\n", output->mode.hdisplay,
             output->mode.vdisplay);
     for (y = 0; y < output->mode.vdisplay; ++y) {
@@ -546,13 +554,14 @@ static void write_screenshot(BlitKms *kms, const KmsOutput *output)
         const unsigned char *row = (const unsigned char *)output->back.map +
             (size_t)y * output->back.pitch;
         for (x = 0; x < output->mode.hdisplay; ++x) {
-            unsigned char rgb[3];
-            rgb[0] = row[x * 4 + 2];
-            rgb[1] = row[x * 4 + 1];
-            rgb[2] = row[x * 4 + 0];
-            fwrite(rgb, 1, sizeof(rgb), file);
+            rgb_row[x * 3 + 0] = row[x * 4 + 2];
+            rgb_row[x * 3 + 1] = row[x * 4 + 1];
+            rgb_row[x * 3 + 2] = row[x * 4 + 0];
         }
+        if (fwrite(rgb_row, 1, row_bytes, file) != row_bytes)
+            break;
     }
+    free(rgb_row);
     fclose(file);
 }
 

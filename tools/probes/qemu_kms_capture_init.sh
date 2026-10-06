@@ -105,7 +105,10 @@ else
 fi
 $b wget -qO /tmp/two.json --post-data='{"command":"/blit-stage/pty-input-echo","surface_mode":"terminal","display_id":"display-48","surface":{"width":128,"height":48}}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
 [ "$loss_test" -eq 1 ] && ( $b sleep 2; echo 0 > /sys/kernel/config/vkms/blit/connectors/connector0/status ) &
-$b sleep 5
+# Hibr/PTY startup is intentionally asynchronous.  Give both probe sessions
+# enough time to produce their first content before the capture predicate is
+# evaluated; a fixed short sleep made the visual gate depend on QEMU TCG load.
+$b sleep 12
 echo ONE; $b cat /tmp/one.json; echo TWO; $b cat /tmp/two.json
 kitty_limits_pass=1
 if [ "$kitty_limits_test" -eq 1 ]; then
