@@ -879,6 +879,53 @@ static int json_bool(const char *json, const char *key, int *value)
     return 0;
 }
 
+/* Parse the bounded topology placement array.  Placement is deliberately a
+   small, closed object rather than a general JSON decoder: every member is
+   required, coordinates are integers, and the caller validates completeness
+   and display identity before mutating runtime state. */
+static int json_output_placements(const char *json, char ids[][128],
+                                  int *xs, int *ys, int limit)
+{
+    const char *cursor = strstr(json, "\"placements\"");
+    int count = 0;
+
+    if (cursor == NULL) return 0;
+    cursor += strlen("\"placements\"");
+    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
+           *cursor == '\n') ++cursor;
+    if (*cursor++ != ':') return -1;
+    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
+           *cursor == '\n') ++cursor;
+    if (*cursor++ != '[') return -1;
+    for (;;) {
+        const char *object_start;
+        const char *object_end;
+        size_t object_length;
+        char object[512];
+
+        while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
+               *cursor == '\n' || *cursor == ',') ++cursor;
+        if (*cursor == ']') return count;
+        if (*cursor != '{' || count >= limit) return -1;
+        object_start = cursor;
+        object_end = strchr(object_start, '}');
+        if (object_end == NULL) return -1;
+        object_length = (size_t)(object_end - object_start + 1);
+        if (object_length >= sizeof(object)) return -1;
+        memcpy(object, object_start, object_length);
+        object[object_length] = '\0';
+        if (!json_string(object, "display_id", ids[count], 128) ||
+            !json_int(object, "x", &xs[count]) ||
+            !json_int(object, "y", &ys[count]))
+            return -1;
+        ++count;
+        cursor = object_end + 1;
+        while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
+               *cursor == '\n') ++cursor;
+        if (*cursor != ',' && *cursor != ']') return -1;
+    }
+}
+
 /* Parse a bounded JSON array of strings.  The API deliberately keeps process
    launch inputs small and explicit: this is not a general JSON implementation
    and must never allocate based on client-controlled counts. */
@@ -3573,6 +3620,74 @@ static int display_id_is_known(const BlitRuntime *runtime, const char *display_i
     return 0;
 }
 
+static int display_index_for_id(const BlitRuntime *runtime,
+                                const char *display_id)
+{
+    char expected[128];
+    int i;
+
+    for (i = 0; i < runtime->display_count; ++i) {
+        snprintf(expected, sizeof(expected), "display-%llu",
+                 runtime->displays[i].id);
+        if (strcmp(display_id, expected) == 0)
+            return i;
+    }
+    return -1;
+}
+
+static int display_index_at(const BlitRuntime *runtime, float x, float y)
+{
+    int i;
+
+    for (i = 0; i < runtime->display_count; ++i) {
+        const SDL_Rect *bounds = &runtime->displays[i].bounds;
+        if (x >= bounds->x && x < bounds->x + bounds->w &&
+            y >= bounds->y && y < bounds->y + bounds->h)
+            return i;
+    }
+    return -1;
+}
+
+static void apply_display_placements(BlitRuntime *runtime,
+                                     char ids[][128], int *xs, int *ys,
+                                     int count)
+{
+    int i;
+    int output_index;
+
+    for (i = 0; i < count; ++i) {
+        int display_index = display_index_for_id(runtime, ids[i]);
+        if (display_index < 0) continue;
+        runtime->displays[display_index].bounds.x = xs[i];
+        runtime->displays[display_index].bounds.y = ys[i];
+        if (runtime->direct_kms)
+            blit_kms_set_display_position(runtime->kms, display_index,
+                                          xs[i], ys[i]);
+    }
+    if (!runtime->direct_kms) {
+        for (output_index = 0; output_index < runtime->output_count;
+             ++output_index) {
+            for (i = 0; i < count; ++i) {
+                int display_index = display_index_for_id(runtime, ids[i]);
+                if (display_index >= 0 &&
+                    runtime->outputs[output_index].display_id ==
+                    runtime->displays[display_index].id)
+                    SDL_SetWindowPosition(runtime->outputs[output_index].window,
+                                          xs[i], ys[i]);
+            }
+        }
+    }
+    for (output_index = 0; output_index < runtime->output_count;
+         ++output_index)
+        runtime->outputs[output_index].initialized = 0;
+    if (runtime->direct_kms)
+        runtime->pointer_output = display_index_at(runtime,
+                                                   runtime->pointer_x,
+                                                   runtime->pointer_y);
+    runtime->pointer_dirty = 1;
+    runtime->render_pending = 1;
+}
+
 static BlitPane *find_pane_id(BlitRuntime *runtime, const char *pane_id)
 {
     int i;
@@ -4931,6 +5046,12 @@ static void handle_request(int fd, BlitRuntime *runtime,
         int rows;
         int requested_revision;
         int has_requested_revision = strstr(payload, "\"revision\"") != NULL;
+        int placements_present = strstr(payload, "\"placements\"") != NULL;
+        int placements_count = 0;
+        char placement_ids[BLIT_MAX_DISPLAYS][128];
+        int placement_x[BLIT_MAX_DISPLAYS];
+        int placement_y[BLIT_MAX_DISPLAYS];
+        int layout_changed;
         int i;
 
         if (idempotency_replay(runtime, fd, request, method, path, payload))
@@ -4959,8 +5080,39 @@ static void handle_request(int fd, BlitRuntime *runtime,
                          "The layout must specify columns and rows from one through two.");
             return;
         }
+        if (placements_present) {
+            placements_count = json_output_placements(
+                payload, placement_ids, placement_x, placement_y,
+                BLIT_MAX_DISPLAYS);
+            if (placements_count < 0 || placements_count != runtime->display_count) {
+                send_problem(fd, 400, "Bad Request", "invalid_topology_placements",
+                             "placements must contain exactly one x/y entry for every display.");
+                return;
+            }
+            for (i = 0; i < placements_count; ++i) {
+                int display_index = display_index_for_id(runtime,
+                                                         placement_ids[i]);
+                int prior;
+                if (display_index < 0) {
+                    send_problem(fd, 404, "Not Found", "display_not_found",
+                                 "A topology placement names an unknown display.");
+                    return;
+                }
+                for (prior = 0; prior < i; ++prior) {
+                    if (strcmp(placement_ids[prior], placement_ids[i]) == 0) {
+                        send_problem(fd, 400, "Bad Request",
+                                     "duplicate_topology_placement",
+                                     "Each display may occur only once in placements.");
+                        return;
+                    }
+                }
+            }
+        }
+        layout_changed = columns != runtime->pane_columns ||
+            rows != runtime->pane_rows;
         for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
-            if (runtime->sessions[i].used && runtime->sessions[i].pane_id[0]) {
+            if (layout_changed && runtime->sessions[i].used &&
+                runtime->sessions[i].pane_id[0]) {
                 send_problem(fd, 409, "Conflict", "topology_in_use",
                              "The topology cannot change while a pane is attached.");
                 return;
@@ -4968,7 +5120,16 @@ static void handle_request(int fd, BlitRuntime *runtime,
         }
         runtime->pane_columns = columns;
         runtime->pane_rows = rows;
-        discover_panes(runtime);
+        if (layout_changed)
+            discover_panes(runtime);
+        if (placements_present)
+            apply_display_placements(runtime, placement_ids, placement_x,
+                                     placement_y, placements_count);
+        else if (layout_changed) {
+            for (i = 0; i < runtime->output_count; ++i)
+                runtime->outputs[i].initialized = 0;
+            runtime->render_pending = 1;
+        }
         ++runtime->topology_revision;
         topology_json(runtime, body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
@@ -6021,43 +6182,35 @@ static void update_evdev_pointer(BlitRuntime *runtime)
     if (runtime->evdev_mouse_x < 0) runtime->evdev_mouse_x = 0;
     if (runtime->evdev_mouse_y < 0) runtime->evdev_mouse_y = 0;
     {
-        int width = runtime->displays[0].bounds.w;
-        int height = runtime->displays[0].bounds.h;
-        if (runtime->direct_kms) {
-            int display_index;
-            width = 0;
-            height = 0;
-            for (display_index = 0; display_index < runtime->output_count;
-                 ++display_index) {
-                width += runtime->displays[display_index].bounds.w;
-                if (runtime->displays[display_index].bounds.h > height)
-                    height = runtime->displays[display_index].bounds.h;
-            }
+        int min_x = runtime->displays[0].bounds.x;
+        int min_y = runtime->displays[0].bounds.y;
+        int max_x = min_x + runtime->displays[0].bounds.w;
+        int max_y = min_y + runtime->displays[0].bounds.h;
+        int display_index;
+        for (display_index = 1; display_index < runtime->display_count;
+             ++display_index) {
+            const SDL_Rect *bounds = &runtime->displays[display_index].bounds;
+            if (bounds->x < min_x) min_x = bounds->x;
+            if (bounds->y < min_y) min_y = bounds->y;
+            if (bounds->x + bounds->w > max_x) max_x = bounds->x + bounds->w;
+            if (bounds->y + bounds->h > max_y) max_y = bounds->y + bounds->h;
         }
-        if (width > 0 && runtime->evdev_mouse_x >= width)
-            runtime->evdev_mouse_x = (float)(width - 1);
-        if (height > 0 && runtime->evdev_mouse_y >= height)
-            runtime->evdev_mouse_y = (float)(height - 1);
+        if (runtime->evdev_mouse_x < min_x)
+            runtime->evdev_mouse_x = (float)min_x;
+        if (runtime->evdev_mouse_y < min_y)
+            runtime->evdev_mouse_y = (float)min_y;
+        if (runtime->evdev_mouse_x >= max_x)
+            runtime->evdev_mouse_x = (float)(max_x - 1);
+        if (runtime->evdev_mouse_y >= max_y)
+            runtime->evdev_mouse_y = (float)(max_y - 1);
     }
     runtime->previous_pointer_x = runtime->pointer_x;
     runtime->previous_pointer_y = runtime->pointer_y;
     runtime->previous_pointer_output = runtime->pointer_output;
     runtime->pointer_valid = 1;
-    runtime->pointer_output = 0;
-    if (runtime->direct_kms) {
-        int output_index;
-        int x_offset = 0;
-        for (output_index = 0; output_index < runtime->output_count;
-             ++output_index) {
-            if (runtime->evdev_mouse_x >= x_offset &&
-                runtime->evdev_mouse_x < x_offset +
-                    runtime->displays[output_index].bounds.w) {
-                runtime->pointer_output = output_index;
-                break;
-            }
-            x_offset += runtime->displays[output_index].bounds.w;
-        }
-    }
+    runtime->pointer_output = display_index_at(runtime,
+                                               runtime->evdev_mouse_x,
+                                               runtime->evdev_mouse_y);
     runtime->pointer_x = runtime->evdev_mouse_x;
     runtime->pointer_y = runtime->evdev_mouse_y;
     changed = !old_valid || old_x != runtime->pointer_x ||
@@ -6528,10 +6681,14 @@ int main(int argc, char **argv)
     if (runtime.output_count > 0) {
         runtime.pointer_valid = 1;
         runtime.pointer_output = 0;
-        runtime.pointer_x = runtime.displays[0].bounds.w > 0 ?
-            runtime.displays[0].bounds.w / 2.0f : 0.0f;
-        runtime.pointer_y = runtime.displays[0].bounds.h > 0 ?
-            runtime.displays[0].bounds.h / 2.0f : 0.0f;
+        runtime.pointer_x = (runtime.direct_kms ?
+            runtime.displays[0].bounds.x : 0) +
+            (runtime.displays[0].bounds.w > 0 ?
+             runtime.displays[0].bounds.w / 2.0f : 0.0f);
+        runtime.pointer_y = (runtime.direct_kms ?
+            runtime.displays[0].bounds.y : 0) +
+            (runtime.displays[0].bounds.h > 0 ?
+             runtime.displays[0].bounds.h / 2.0f : 0.0f);
         runtime.pointer_dirty = 1;
         runtime.render_pending = 1;
     }

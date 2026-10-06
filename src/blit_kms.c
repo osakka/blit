@@ -752,6 +752,14 @@ int blit_kms_display_info(const BlitKms *kms, int index, BlitKmsDisplayInfo *inf
     return 0;
 }
 
+int blit_kms_set_display_position(BlitKms *kms, int index, int x, int y)
+{
+    if (kms == NULL || index < 0 || index >= kms->output_count) return -1;
+    kms->outputs[index].info.x = x;
+    kms->outputs[index].info.y = y;
+    return 0;
+}
+
 int blit_kms_cell_width(const BlitKms *kms)
 {
     if (kms != NULL && kms->cell_width_override > 0)

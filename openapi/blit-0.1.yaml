@@ -694,6 +694,19 @@ components:
             columns: {type: integer, minimum: 1, maximum: 2}
             rows: {type: integer, minimum: 1, maximum: 2}
           additionalProperties: false
+        placements:
+          type: array
+          description: Complete logical placement for every discovered display. Gaps are represented by coordinate differences.
+          items:
+            $ref: '#/components/schemas/OutputPlacement'
+      additionalProperties: false
+    OutputPlacement:
+      type: object
+      required: [display_id, x, y]
+      properties:
+        display_id: {$ref: '#/components/schemas/ResourceId'}
+        x: {type: integer}
+        y: {type: integer}
       additionalProperties: false
     Pane:
       type: object

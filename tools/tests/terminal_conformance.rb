@@ -16,6 +16,7 @@ def request(base, method, path, body = nil, headers = {})
   klass = {
     'GET' => Net::HTTP::Get,
     'POST' => Net::HTTP::Post,
+    'PUT' => Net::HTTP::Put,
     'DELETE' => Net::HTTP::Delete,
     'PATCH' => Net::HTTP::Patch
   }.fetch(method)
@@ -37,6 +38,7 @@ def request_with_status(base, method, path, body = nil, headers = {})
   klass = {
     'GET' => Net::HTTP::Get,
     'POST' => Net::HTTP::Post,
+    'PUT' => Net::HTTP::Put,
     'DELETE' => Net::HTTP::Delete,
     'PATCH' => Net::HTTP::Patch
   }.fetch(method)
@@ -71,6 +73,37 @@ def assert_equal(expected, actual, detail)
 
   raise "#{detail}: expected #{expected.inspect}, got #{actual.inspect}"
 end
+
+topology = request(base, 'GET', '/v1/topology')
+revision = topology.fetch('revision')
+placements = topology.fetch('outputs').map.with_index do |output, index|
+  bounds = output.fetch('bounds')
+  {
+    'display_id' => output.fetch('display_id'),
+    'x' => bounds.fetch('x') + (index.zero? ? 7 : 0),
+    'y' => bounds.fetch('y') + (index.zero? ? 9 : 0)
+  }
+end
+placed = request(base, 'PUT', '/v1/topology', {
+  'revision' => revision,
+  'layout' => topology.fetch('layout'),
+  'placements' => placements
+}, { 'If-Match' => revision.to_s })
+assert_equal(placements.map { |placement| placement.values_at('display_id', 'x', 'y') },
+             placed.fetch('outputs').map { |output|
+               bounds = output.fetch('bounds')
+               [output.fetch('display_id'), bounds.fetch('x'), bounds.fetch('y')]
+             }, 'topology placement round trip')
+invalid_status, invalid_response = request_with_status(
+  base, 'PUT', '/v1/topology', {
+    'revision' => placed.fetch('revision'),
+    'layout' => placed.fetch('layout'),
+    'placements' => []
+  }, { 'If-Match' => placed.fetch('revision').to_s })
+assert_equal(400, invalid_status, 'incomplete topology placement status')
+assert_equal('invalid_topology_placements', invalid_response.fetch('code'),
+             'incomplete topology placement code')
+puts 'PASS topology-placement-round-trip'
 
 def run_case(base, name, command, width: 20, height: 4)
   created = request(base, 'POST', '/v1/terminal-sessions', {
