@@ -3,11 +3,17 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 BUNDLE=$ROOT/build/blit-desktop-current
+RUNTIME_BINARY=$ROOT/build/blit/blit-server
 OUT=${1:-$ROOT}
 VERSION_FILE=$ROOT/packaging/VERSION
 
-if [ ! -x "$BUNDLE/bin/blit-server" ] || [ ! -f "$VERSION_FILE" ]; then
-	echo "blit: build/blit-desktop-current is incomplete" >&2
+if [ ! -x "$RUNTIME_BINARY" ] || [ ! -x "$BUNDLE/bin/blit-server" ] ||
+   [ ! -f "$VERSION_FILE" ]; then
+	echo "blit: canonical build outputs are incomplete" >&2
+	exit 1
+fi
+if ! strings "$RUNTIME_BINARY" | grep -q '/v1/version'; then
+	echo "blit: canonical runtime lacks the version endpoint" >&2
 	exit 1
 fi
 
@@ -46,7 +52,7 @@ mkdir -p "$stage/usr/lib/blit" "$stage/usr/bin" \
 # executable and session/orchestration layer.
 mkdir -p "$stage/usr/lib/blit/bin" "$stage/usr/lib/blit/lib" \
     "$stage/usr/lib/blit/fonts"
-cp -a "$BUNDLE/bin/blit-server" "$stage/usr/lib/blit/bin/"
+cp -a "$RUNTIME_BINARY" "$stage/usr/lib/blit/bin/blit-server"
 cp -a "$BUNDLE/lib/libSDL3.so.0.4.16" "$stage/usr/lib/blit/lib/"
 cp -a "$BUNDLE/fonts/." "$stage/usr/lib/blit/fonts/"
 # The repository documentation and OpenAPI schema are authoritative.  The
