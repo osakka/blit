@@ -162,8 +162,9 @@ curl --fail http://127.0.0.1:8080/v1/diagnostics
 ## Exercise a PTY-backed session
 
 The first terminal slice starts the requested command under a real PTY. Keep
-this test local because command authorization and remote authentication are
-not implemented yet:
+this test local unless the deployment has configured its command policy and
+`BLIT_AUTH_TOKEN`; bearer authentication is enforced whenever that token is
+set.
 
 ```sh
 curl --fail --request POST \
@@ -185,7 +186,9 @@ curl --fail --request POST \
 
 An omitted `display_id` targets the first output for compatibility. Unknown
 display IDs are rejected with `display_not_found`; argument/environment policy
-is intentionally still pending.
+is intentionally still a deployment responsibility. The nested `surface`
+object and its `width`/`height` members are required by the OpenAPI contract;
+omitting them returns the typed `session_create_failed` problem.
 
 ## Discover and attach to Blit panes
 

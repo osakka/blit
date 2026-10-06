@@ -105,6 +105,13 @@ assert_equal('invalid_topology_placements', invalid_response.fetch('code'),
              'incomplete topology placement code')
 puts 'PASS topology-placement-round-trip'
 
+missing_surface_status, missing_surface_response = request_with_status(
+  base, 'POST', '/v1/terminal-sessions', { 'command' => '/bin/true' })
+assert_equal(400, missing_surface_status, 'missing surface status')
+assert_equal('session_create_failed', missing_surface_response.fetch('code'),
+             'missing surface code')
+puts 'PASS schema-required-surface'
+
 effects = request(base, 'GET', '/v1/effects')
 assert_equal('none', effects.fetch('preset'), 'initial effect preset')
 effect_update = request(base, 'PUT', '/v1/effects', {

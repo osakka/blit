@@ -44,8 +44,8 @@ for n in 1 2 3 4 5 6 7 8 9 10; do
 done
 echo SERVER; $b cat /tmp/server.json 2>/dev/null || true
 if [ "$ready" -ne 1 ]; then $b cat /tmp/blit.log; finish 1; fi
-$b wget -qO /tmp/one.json --post-data='{"command":"/blit-stage/pty-input-echo","surface_mode":"terminal","display_id":"display-47","width":128,"height":48}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
-$b wget -qO /tmp/two.json --post-data='{"command":"/blit-stage/pty-input-echo","surface_mode":"terminal","display_id":"display-48","width":128,"height":48}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
+$b wget -qO /tmp/one.json --post-data='{"command":"/blit-stage/pty-input-echo","surface_mode":"terminal","display_id":"display-47","surface":{"width":128,"height":48}}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
+$b wget -qO /tmp/two.json --post-data='{"command":"/blit-stage/pty-input-echo","surface_mode":"terminal","display_id":"display-48","surface":{"width":128,"height":48}}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
 [ "$loss_test" -eq 1 ] && ( $b sleep 2; echo 0 > /sys/kernel/config/vkms/blit/connectors/connector0/status ) &
 $b sleep 5
 echo ONE; $b cat /tmp/one.json; echo TWO; $b cat /tmp/two.json

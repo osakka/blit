@@ -4261,8 +4261,8 @@ static int create_session(BlitRuntime *runtime, const char *json,
     char display_id[128];
     char pane_id[128];
     BlitPane *pane = NULL;
-    int width = 80;
-    int height = 24;
+    int width = 0;
+    int height = 0;
     char surface_mode[32];
     int master_fd;
     pid_t process_id;
@@ -4270,6 +4270,10 @@ static int create_session(BlitRuntime *runtime, const char *json,
     int i;
 
     if (!json_string(json, "command", command, sizeof(command)))
+        return 0;
+    if (strstr(json, "\"surface\"") == NULL ||
+        !json_int(json, "width", &width) ||
+        !json_int(json, "height", &height))
         return 0;
     arguments[0] = command;
     argument_count = json_string_array(json, "arguments", argument_storage,
@@ -4283,8 +4287,6 @@ static int create_session(BlitRuntime *runtime, const char *json,
         return 0;
     ++argument_count;
     arguments[argument_count] = NULL;
-    json_int(json, "width", &width);
-    json_int(json, "height", &height);
     memset(surface_mode, 0, sizeof(surface_mode));
     if (json_string(json, "surface_mode", surface_mode, sizeof(surface_mode)) &&
         strcmp(surface_mode, "terminal") != 0 &&
