@@ -4,17 +4,22 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 BUNDLE=$ROOT/build/blit-desktop-current
 OUT=${1:-$ROOT}
+VERSION_FILE=$ROOT/packaging/VERSION
 
-if [ ! -x "$BUNDLE/bin/blit-server" ]; then
+if [ ! -x "$BUNDLE/bin/blit-server" ] || [ ! -f "$VERSION_FILE" ]; then
 	echo "blit: build/blit-desktop-current is incomplete" >&2
 	exit 1
 fi
 
-version=$(sed -n 's/^blit desktop bundle \([^ -]*\).*/\1/p' "$BUNDLE/VERSION")
+version=$(sed -n '1p' "$VERSION_FILE")
 if [ -z "$version" ]; then
-	echo "blit: cannot determine version from $BUNDLE/VERSION" >&2
+	echo "blit: cannot determine version from $VERSION_FILE" >&2
 	exit 1
 fi
+case "$version" in
+	[0-9]*.[0-9]*.[0-9]*) ;;
+	*) echo "blit: invalid version in $VERSION_FILE" >&2; exit 1 ;;
+esac
 
 pkgver=${version}-1
 stage=$(mktemp -d "${TMPDIR:-/tmp}/blit-deb.XXXXXX")
@@ -41,7 +46,8 @@ fi
 ln -s /usr/lib/blit/lib/libSDL3.so.0.4.16 "$stage/usr/lib/libSDL3.so.0"
 ln -s /usr/lib/libSDL3.so.0 "$stage/usr/lib/libSDL3.so"
 ln -s /usr/lib/blit/bin/blit-server "$stage/usr/bin/blit"
-cp -a "$BUNDLE/README.md" "$BUNDLE/VERSION" "$stage/usr/share/doc/blit/"
+cp -a "$BUNDLE/README.md" "$stage/usr/share/doc/blit/"
+cp -a "$VERSION_FILE" "$stage/usr/share/doc/blit/VERSION"
 if [ -d "$ROOT/docs" ]; then
 	cp -a "$ROOT/docs" "$stage/usr/share/doc/blit/"
 else
