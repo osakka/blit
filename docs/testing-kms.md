@@ -48,6 +48,11 @@ stall; a timeout is logged with the connector and that output moves to the
 explicit modeset fallback. `BLIT_KMS_FLIP_TIMEOUT_MS` may set a diagnostic
 budget from 1 to 1000 ms.
 
+Pending flips from the preceding frame are drained before any output in the
+new frame is composed. Independent CRTCs can therefore be submitted
+back-to-back instead of serializing one monitor's draw behind another
+monitor's refresh.
+
 After the first complete composition, direct KMS preserves each scanout back
 buffer and uses the canonical surface revision/damage rectangle to repaint only
 changed cells. A complete redraw is retained for the first frame and

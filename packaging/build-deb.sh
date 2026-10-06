@@ -22,30 +22,23 @@ trap 'rm -rf "$stage"' EXIT HUP INT TERM
 
 mkdir -p "$stage/usr/lib/blit" "$stage/usr/bin" \
 	"$stage/usr/share/doc/blit"
-cp -a "$BUNDLE/." "$stage/usr/lib/blit/"
-# Shell launchers are test/deployment conveniences, not part of the server
-# runtime.  Keep the installed boundary to the TCC-built executable and the
-# data/configuration it consumes; Hibr is an external executable.
-rm -f "$stage/usr/lib/blit/bin/attach-join" \
-	"$stage/usr/lib/blit/bin/attach-primary" \
-	"$stage/usr/lib/blit/bin/blit-diagnose" \
-	"$stage/usr/lib/blit/bin/hibr-display" \
-	"$stage/usr/lib/blit/bin/hibr-join" \
-	"$stage/usr/lib/blit/bin/run-desktop" \
-	"$stage/usr/lib/blit/bin/run-shell" \
-	"$stage/usr/lib/blit/bin/start-blit"
+# Install only the runtime boundary.  Shell launchers are test/deployment
+# conveniences, not part of the server runtime; Hibr remains an external
+# executable and session/orchestration layer.
+mkdir -p "$stage/usr/lib/blit/bin" "$stage/usr/lib/blit/lib" \
+	"$stage/usr/lib/blit/fonts"
+cp -a "$BUNDLE/bin/blit-server" "$stage/usr/lib/blit/bin/"
+cp -a "$BUNDLE/lib/libSDL3.so.0.4.16" "$stage/usr/lib/blit/lib/"
+cp -a "$BUNDLE/fonts/." "$stage/usr/lib/blit/fonts/"
 # The repository documentation and OpenAPI schema are authoritative.  The
 # bundle is an installable runtime artifact, not a second documentation tree.
 if [ -d "$ROOT/docs" ]; then
-	rm -rf "$stage/usr/lib/blit/docs"
 	cp -a "$ROOT/docs" "$stage/usr/lib/blit/docs"
 fi
 if [ -d "$ROOT/openapi" ]; then
-	rm -rf "$stage/usr/lib/blit/openapi"
 	cp -a "$ROOT/openapi" "$stage/usr/lib/blit/openapi"
 fi
-cp -a "$BUNDLE/lib/libSDL3.so.0.4.16" "$stage/usr/lib/"
-ln -s /usr/lib/libSDL3.so.0.4.16 "$stage/usr/lib/libSDL3.so.0"
+ln -s /usr/lib/blit/lib/libSDL3.so.0.4.16 "$stage/usr/lib/libSDL3.so.0"
 ln -s /usr/lib/libSDL3.so.0 "$stage/usr/lib/libSDL3.so"
 ln -s /usr/lib/blit/bin/blit-server "$stage/usr/bin/blit"
 cp -a "$BUNDLE/README.md" "$BUNDLE/VERSION" "$stage/usr/share/doc/blit/"

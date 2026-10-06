@@ -933,6 +933,30 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
     if (kms == NULL) return -1;
     if (getenv("BLIT_KMS_TRACE_TIMING") != NULL)
         started = kms_now_us();
+
+    /* Drain all page flips from the preceding frame before drawing any new
+       back buffer.  Outputs have independent CRTCs; waiting inside the draw
+       loop serializes otherwise parallel monitors and can make the second
+       output miss a refresh.  Once this pass completes, each output can be
+       composed and submitted back-to-back without touching a pending buffer.
+       A delayed connector is isolated in the same explicit modeset fallback
+       used by the per-output safety path below. */
+    for (i = 0; i < kms->output_count; ++i) {
+        KmsOutput *output = &kms->outputs[i];
+        int wait_result;
+        if (!output->flip_pending || getenv("BLIT_KMS_MODESET") != NULL)
+            continue;
+        wait_result = wait_flip(kms, output);
+        if (wait_result == -2) {
+            output->modeset_fallback = 1;
+            output->flip_pending = 0;
+            fprintf(stderr,
+                    "blit: KMS page-flip timeout on connector=%u; using modeset fallback\n",
+                    output->connector);
+        } else if (wait_result < 0) {
+            return -1;
+        }
+    }
     capture = kms->screenshot_dir[0] != '\0' && !kms->screenshot_written &&
         kms->screenshot_frame >= kms->screenshot_after && view_count >= 1 &&
         view_has_content(&views[0]);
