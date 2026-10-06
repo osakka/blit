@@ -83,6 +83,9 @@ Writing or erasing either half of a wide cell first invalidates the complete
 wide glyph, including its continuation cell. This keeps the canonical grid
 and both renderers free of orphaned wide-glyph halves.
 
+Insert-line and delete-line operations preserve their scroll-region semantics
+and reset the cursor column to zero, matching the Hibr terminal contract.
+
 ## Conformance gate
 
 Run `tools/tests/terminal_conformance.rb` against a TCC-built server with the

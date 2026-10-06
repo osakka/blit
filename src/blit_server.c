@@ -1856,6 +1856,24 @@ static void terminal_clear_wide_overlap(BlitSurface *surface, int x, int y)
         terminal_clear_cell(surface, x + 1, y);
 }
 
+static void terminal_normalize_wide_row(BlitSurface *surface, int y)
+{
+    int x;
+
+    if (surface == NULL || y < 0 || y >= surface->height)
+        return;
+    for (x = 0; x < surface->width; ++x) {
+        uint16_t attributes = surface->attributes[y][x];
+        if ((attributes & BLIT_ATTR_CONTINUATION) &&
+            (x == 0 || !(surface->attributes[y][x - 1] & BLIT_ATTR_WIDE)))
+            terminal_clear_cell(surface, x, y);
+        else if ((attributes & BLIT_ATTR_WIDE) &&
+                 (x + 1 >= surface->width ||
+                  !(surface->attributes[y][x + 1] & BLIT_ATTR_CONTINUATION)))
+            terminal_clear_cell(surface, x, y);
+    }
+}
+
 static void terminal_clear_line(BlitSurface *surface, int y, int start)
 {
     int x;
@@ -3126,31 +3144,44 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         if (amount > surface->width)
             amount = surface->width;
         if (command == '@') {
-            for (x = surface->width - 1; x >= surface->cursor_x + amount; --x) {
-                int source = x - amount;
-                surface->cells[surface->cursor_y][x] =
-                    surface->cells[surface->cursor_y][source];
-                surface->codepoints[surface->cursor_y][x] =
-                    surface->codepoints[surface->cursor_y][source];
-                memcpy(surface->combining[surface->cursor_y][x],
-                       surface->combining[surface->cursor_y][source],
-                       sizeof(surface->combining[surface->cursor_y][x]));
-                surface->combining_count[surface->cursor_y][x] =
-                    surface->combining_count[surface->cursor_y][source];
-                surface->foreground[surface->cursor_y][x] =
-                    surface->foreground[surface->cursor_y][source];
-                surface->background[surface->cursor_y][x] =
-                    surface->background[surface->cursor_y][source];
-                surface->underline_color[surface->cursor_y][x] =
-                    surface->underline_color[surface->cursor_y][source];
-                surface->attributes[surface->cursor_y][x] =
-                    surface->attributes[surface->cursor_y][source];
-                surface->links[surface->cursor_y][x] =
-                    surface->links[surface->cursor_y][source];
+            if (amount == 1 &&
+                (surface->attributes[surface->cursor_y][surface->cursor_x] &
+                 BLIT_ATTR_CONTINUATION)) {
+                /* Inserting at the second half of a wide glyph replaces the
+                   glyph's two-cell footprint; it must not move the following
+                   character left or manufacture an orphan continuation. */
+                terminal_clear_cell(surface, surface->cursor_x - 1,
+                                    surface->cursor_y);
+                terminal_clear_cell(surface, surface->cursor_x,
+                                    surface->cursor_y);
+            } else {
+                for (x = surface->width - 1;
+                     x >= surface->cursor_x + amount; --x) {
+                    int source = x - amount;
+                    surface->cells[surface->cursor_y][x] =
+                        surface->cells[surface->cursor_y][source];
+                    surface->codepoints[surface->cursor_y][x] =
+                        surface->codepoints[surface->cursor_y][source];
+                    memcpy(surface->combining[surface->cursor_y][x],
+                           surface->combining[surface->cursor_y][source],
+                           sizeof(surface->combining[surface->cursor_y][x]));
+                    surface->combining_count[surface->cursor_y][x] =
+                        surface->combining_count[surface->cursor_y][source];
+                    surface->foreground[surface->cursor_y][x] =
+                        surface->foreground[surface->cursor_y][source];
+                    surface->background[surface->cursor_y][x] =
+                        surface->background[surface->cursor_y][source];
+                    surface->underline_color[surface->cursor_y][x] =
+                        surface->underline_color[surface->cursor_y][source];
+                    surface->attributes[surface->cursor_y][x] =
+                        surface->attributes[surface->cursor_y][source];
+                    surface->links[surface->cursor_y][x] =
+                        surface->links[surface->cursor_y][source];
+                }
+                for (x = surface->cursor_x;
+                     x < surface->cursor_x + amount && x < surface->width; ++x)
+                    terminal_clear_cell(surface, x, surface->cursor_y);
             }
-            for (x = surface->cursor_x;
-                 x < surface->cursor_x + amount && x < surface->width; ++x)
-                terminal_clear_cell(surface, x, surface->cursor_y);
         } else {
             for (x = surface->cursor_x; x < surface->width - amount; ++x) {
                 int source = x + amount;
@@ -3177,6 +3208,7 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
             for (x = surface->width - amount; x < surface->width; ++x)
                 terminal_clear_cell(surface, x, surface->cursor_y);
         }
+        terminal_normalize_wide_row(surface, surface->cursor_y);
         mark_surface_damage(surface, 0, surface->cursor_y);
         if (surface->damage_width < surface->width)
             surface->damage_width = surface->width;
@@ -3209,6 +3241,8 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
             for (y = bottom - count + 1; y <= bottom; ++y)
                 terminal_blank_row(surface, y);
         }
+        /* VT line insertion/deletion leaves the cursor at column zero. */
+        surface->cursor_x = 0;
         surface->damage_valid = 1;
         surface->damage_x = 0;
         surface->damage_y = top;

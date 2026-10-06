@@ -440,6 +440,33 @@ raise 'wide overwrite left original cell' if cells.key?([0, 0])
 assert_equal('x', cells.fetch([1, 0]).fetch('text'),
              'wide overwrite target')
 
+snapshot = run_case(base, 'delete-wide-character',
+                    "printf 'a\\346\\274\\242b\\033[1;2H\\033[P|'")
+cells = cell_map(snapshot)
+assert_equal('a', cells.fetch([0, 0]).fetch('text'), 'DCH wide prefix')
+assert_equal('|', cells.fetch([1, 0]).fetch('text'), 'DCH wide target')
+assert_equal('b', cells.fetch([2, 0]).fetch('text'), 'DCH wide shift')
+
+snapshot = run_case(base, 'insert-inside-wide-character',
+                    "printf '\\346\\274\\242ab\\033[1;2H\\033[@|'")
+cells = cell_map(snapshot)
+raise 'ICH wide left a stale base cell' if cells.key?([0, 0])
+assert_equal('|', cells.fetch([1, 0]).fetch('text'), 'ICH wide target')
+assert_equal('a', cells.fetch([2, 0]).fetch('text'), 'ICH wide shift')
+assert_equal('b', cells.fetch([3, 0]).fetch('text'), 'ICH wide tail')
+
+snapshot = run_case(base, 'insert-line-preserves-column',
+                    "printf 'a\\033[2;5HAB\\033[2;5H\\033[LX'", height: 6)
+cells = cell_map(snapshot)
+assert_equal('X', cells.fetch([0, 1]).fetch('text'), 'IL line target')
+assert_equal('A', cells.fetch([4, 2]).fetch('text'), 'IL column preserved')
+
+snapshot = run_case(base, 'delete-line-resets-column',
+                    "printf 'one\\r\\ntwo\\r\\nthree\\033[2;3H\\033[MX'", height: 6)
+cells = cell_map(snapshot)
+assert_equal('X', cells.fetch([0, 1]).fetch('text'), 'DL line target')
+assert_equal('h', cells.fetch([1, 1]).fetch('text'), 'DL shifted text')
+
 snapshot = run_case(base, 'origin-mode-scroll-region',
                     "printf 'A\\033[2;4r\\033[?6h\\033[1;1HB'")
 cells = cell_map(snapshot)
