@@ -27,7 +27,8 @@ shell conformance path is stable.
 6. Verify shell prompt, colors, cursor movement, clear-screen, scroll, and
    alternate-screen behavior before starting Hibr. G0/G1 DEC character sets,
    SO/SI shifts, DEC 1047/1048 alternate-screen/cursor state, autowrap, and
-   newline mode, and 8-bit C1 controls are covered.
+   newline mode, and 8-bit C1 controls (CSI/string dispatch plus IND, NEL,
+   HTS, and RI) are covered.
    OSC terminal titles are retained in the session API and tested for both
    BEL and ST termination. OSC 8 hyperlinks, OSC 52 clipboard sets and OSC
    9/777 notifications are retained in the session API in Hibr's raw payload

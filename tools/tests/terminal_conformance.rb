@@ -530,6 +530,27 @@ cells = cell_map(snapshot)
 assert_equal('Z', cells.fetch([0, 0]).fetch('text'), 'RI inserted row')
 assert_equal('A', cells.fetch([0, 1]).fetch('text'), 'RI shifted row')
 
+snapshot = run_case(base, 'c1-ind', "printf 'A\\204B'")
+cells = cell_map(snapshot)
+assert_equal('A', cells.fetch([0, 0]).fetch('text'), 'C1 IND prefix')
+assert_equal('B', cells.fetch([1, 1]).fetch('text'), 'C1 IND target')
+
+snapshot = run_case(base, 'c1-nel', "printf 'A\\205B'")
+cells = cell_map(snapshot)
+assert_equal('A', cells.fetch([0, 0]).fetch('text'), 'C1 NEL prefix')
+assert_equal('B', cells.fetch([0, 1]).fetch('text'), 'C1 NEL target')
+
+snapshot = run_case(base, 'c1-hts', "printf 'A\\210\\033[1;1H\\tB'")
+cells = cell_map(snapshot)
+assert_equal('A', cells.fetch([0, 0]).fetch('text'), 'C1 HTS prefix')
+assert_equal('B', cells.fetch([1, 0]).fetch('text'), 'C1 HTS target')
+
+snapshot = run_case(base, 'c1-ri',
+                    "printf 'A\\nB\\033[1;2r\\033[1;1H\\215Z'")
+cells = cell_map(snapshot)
+assert_equal('Z', cells.fetch([0, 0]).fetch('text'), 'C1 RI inserted row')
+assert_equal('A', cells.fetch([0, 1]).fetch('text'), 'C1 RI shifted row')
+
 snapshot = run_case(base, 'full-terminal-reset', "printf 'A\\033[31mB\\033cC'")
 cells = cell_map(snapshot)
 assert_equal('C', cells.fetch([0, 0]).fetch('text'), 'RIS reset text')

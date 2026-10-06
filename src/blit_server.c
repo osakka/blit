@@ -4562,6 +4562,31 @@ static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
         } else if (byte == 0x0f) {
             session->terminal_charset_shift = 0;
             ++offset;
+        } else if (byte == 0x84) {
+            /* C1 IND: index without carriage return. */
+            terminal_index(session, surface);
+            session->terminal_wrap_pending = 0;
+            ++offset;
+        } else if (byte == 0x85) {
+            /* C1 NEL: next line, equivalent to CR followed by IND. */
+            mark_surface_damage(surface, surface->cursor_x,
+                                surface->cursor_y);
+            surface->cursor_x = 0;
+            terminal_index(session, surface);
+            session->terminal_wrap_pending = 0;
+            ++offset;
+        } else if (byte == 0x88) {
+            /* C1 HTS: set a tab stop at the current column. */
+            if (surface->cursor_x >= 0 &&
+                surface->cursor_x < surface->width)
+                surface->tab_stops[surface->cursor_x] = 1;
+            session->terminal_wrap_pending = 0;
+            ++offset;
+        } else if (byte == 0x8d) {
+            /* C1 RI: reverse index within the active scroll region. */
+            terminal_reverse_index(surface);
+            session->terminal_wrap_pending = 0;
+            ++offset;
         } else if (byte >= 0x20) {
             size_t consumed;
             uint32_t codepoint;
