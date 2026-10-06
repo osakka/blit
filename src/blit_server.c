@@ -5854,6 +5854,8 @@ int main(int argc, char **argv)
         int ready;
         int mouse_ready = 0;
         int keyboard_ready = 0;
+        int kms_ready = 0;
+        int kms_fd = runtime.direct_kms ? blit_kms_fd(runtime.kms) : -1;
         int i;
         fd_set readable;
         struct timeval timeout;
@@ -5891,9 +5893,22 @@ int main(int argc, char **argv)
                     max_fd = runtime.sessions[i].pty_fd;
             }
         }
+        if (kms_fd >= 0) {
+            FD_SET(kms_fd, &readable);
+            if (kms_fd > max_fd) max_fd = kms_fd;
+        }
         timeout.tv_sec = 0;
         timeout.tv_usec = 10000;
         ready = select(max_fd + 1, &readable, NULL, NULL, &timeout);
+        if (kms_fd >= 0 && ready > 0 && FD_ISSET(kms_fd, &readable))
+            kms_ready = 1;
+        if (runtime.direct_kms && runtime.kms != NULL) {
+            int serviced = blit_kms_service(runtime.kms, kms_ready);
+            if (serviced < 0)
+                fprintf(stderr, "blit: KMS event service failed\n");
+            else if (serviced > 0)
+                runtime.render_pending = 1;
+        }
         if (ready > 0 && FD_ISSET(server_fd, &readable)) {
             char request[BLIT_REQUEST_SIZE];
             ssize_t received;

@@ -52,6 +52,8 @@ int blit_kms_open(BlitKms *kms, char *error, size_t error_capacity);
 int blit_kms_display_count(const BlitKms *kms);
 int blit_kms_display_info(const BlitKms *kms, int index,
                           BlitKmsDisplayInfo *info);
+int blit_kms_fd(const BlitKms *kms);
+int blit_kms_service(BlitKms *kms, int readable);
 int blit_kms_cell_width(const BlitKms *kms);
 int blit_kms_cell_height(const BlitKms *kms);
 int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views,

@@ -48,10 +48,12 @@ stall; a timeout is logged with the connector and that output moves to the
 explicit modeset fallback. `BLIT_KMS_FLIP_TIMEOUT_MS` may set a diagnostic
 budget from 1 to 1000 ms.
 
-Pending flips from the preceding frame are drained before any output in the
-new frame is composed. Independent CRTCs can therefore be submitted
-back-to-back instead of serializing one monitor's draw behind another
-monitor's refresh.
+The DRM file descriptor is part of the gateway's main `select()` set. A
+pending page flip is serviced there; while one connector owns its back buffer,
+Blit skips only that connector and continues servicing HTTP, PTY, input, and
+the other displays. This prevents a slow monitor from blocking the gateway.
+The bounded timeout still moves a connector to the explicit modeset fallback
+if its completion event does not arrive.
 
 After the first complete composition, direct KMS preserves each scanout back
 buffer and uses the canonical surface revision/damage rectangle to repaint only

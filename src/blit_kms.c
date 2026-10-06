@@ -61,6 +61,7 @@ typedef struct {
     KmsBuffer back;
     int flip_pending;
     volatile int flip_done;
+    long long flip_started_us;
     int modeset_fallback;
     int initialized;
     int last_view_count;
@@ -92,6 +93,18 @@ static long long kms_now_us(void)
     return (long long)now.tv_sec * 1000000LL + now.tv_nsec / 1000;
 }
 
+static int kms_flip_timeout_ms(void)
+{
+    const char *timeout_value = getenv("BLIT_KMS_FLIP_TIMEOUT_MS");
+    int timeout_ms = 100;
+    if (timeout_value != NULL && timeout_value[0] != '\0') {
+        int requested = atoi(timeout_value);
+        if (requested >= 1 && requested <= 1000)
+            timeout_ms = requested;
+    }
+    return timeout_ms;
+}
+
 static void kms_flip_handler(int fd, unsigned int frame, unsigned int sec,
                              unsigned int usec, void *data)
 {
@@ -100,6 +113,7 @@ static void kms_flip_handler(int fd, unsigned int frame, unsigned int sec,
     if (output != NULL) {
         output->flip_done = 1;
         output->flip_pending = 0;
+        output->flip_started_us = 0;
     }
 }
 
@@ -643,14 +657,8 @@ static int wait_flip(BlitKms *kms, KmsOutput *output)
     struct timeval timeout;
     int result;
     long long deadline;
-    int timeout_ms = 100;
-    const char *timeout_value = getenv("BLIT_KMS_FLIP_TIMEOUT_MS");
+    int timeout_ms = kms_flip_timeout_ms();
     if (!output->flip_pending) return 0;
-    if (timeout_value != NULL && timeout_value[0] != '\0') {
-        int requested = atoi(timeout_value);
-        if (requested >= 1 && requested <= 1000)
-            timeout_ms = requested;
-    }
     memset(&context, 0, sizeof(context));
     context.version = DRM_EVENT_CONTEXT_VERSION;
     context.page_flip_handler = kms_flip_handler;
@@ -903,6 +911,46 @@ int blit_kms_open(BlitKms *kms, char *error, size_t error_capacity)
 
 int blit_kms_display_count(const BlitKms *kms) { return kms ? kms->output_count : 0; }
 
+int blit_kms_fd(const BlitKms *kms)
+{
+    return kms != NULL ? kms->fd : -1;
+}
+
+int blit_kms_service(BlitKms *kms, int readable)
+{
+    drmEventContext context;
+    int i;
+    int changed = 0;
+    long long now;
+    long long timeout_us;
+
+    if (kms == NULL) return -1;
+    now = kms_now_us();
+    timeout_us = (long long)kms_flip_timeout_ms() * 1000LL;
+    for (i = 0; i < kms->output_count; ++i) {
+        KmsOutput *output = &kms->outputs[i];
+        if (!output->flip_pending || output->flip_started_us <= 0 ||
+            now - output->flip_started_us < timeout_us)
+            continue;
+        output->modeset_fallback = 1;
+        output->flip_pending = 0;
+        output->flip_started_us = 0;
+        fprintf(stderr,
+                "blit: KMS page-flip timeout on connector=%u; using modeset fallback\n",
+                output->connector);
+        changed = 1;
+    }
+    if (!readable) return changed;
+    memset(&context, 0, sizeof(context));
+    context.version = DRM_EVENT_CONTEXT_VERSION;
+    context.page_flip_handler = kms_flip_handler;
+    if (drmHandleEvent(kms->fd, &context) < 0) return -1;
+    for (i = 0; i < kms->output_count; ++i)
+        if (!kms->outputs[i].flip_pending)
+            changed = 1;
+    return changed;
+}
+
 int blit_kms_display_info(const BlitKms *kms, int index, BlitKmsDisplayInfo *info)
 {
     if (kms == NULL || info == NULL || index < 0 || index >= kms->output_count) return -1;
@@ -929,34 +977,12 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
     int capture;
     int pointer_changed;
     int full_redraw;
+    int deferred = 0;
     long long started = 0;
     if (kms == NULL) return -1;
     if (getenv("BLIT_KMS_TRACE_TIMING") != NULL)
         started = kms_now_us();
 
-    /* Drain all page flips from the preceding frame before drawing any new
-       back buffer.  Outputs have independent CRTCs; waiting inside the draw
-       loop serializes otherwise parallel monitors and can make the second
-       output miss a refresh.  Once this pass completes, each output can be
-       composed and submitted back-to-back without touching a pending buffer.
-       A delayed connector is isolated in the same explicit modeset fallback
-       used by the per-output safety path below. */
-    for (i = 0; i < kms->output_count; ++i) {
-        KmsOutput *output = &kms->outputs[i];
-        int wait_result;
-        if (!output->flip_pending || getenv("BLIT_KMS_MODESET") != NULL)
-            continue;
-        wait_result = wait_flip(kms, output);
-        if (wait_result == -2) {
-            output->modeset_fallback = 1;
-            output->flip_pending = 0;
-            fprintf(stderr,
-                    "blit: KMS page-flip timeout on connector=%u; using modeset fallback\n",
-                    output->connector);
-        } else if (wait_result < 0) {
-            return -1;
-        }
-    }
     capture = kms->screenshot_dir[0] != '\0' && !kms->screenshot_written &&
         kms->screenshot_frame >= kms->screenshot_after && view_count >= 1 &&
         view_has_content(&views[0]);
@@ -998,6 +1024,14 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                 }
             }
         }
+        /* A page-flipped buffer is owned by the CRTC until its event arrives.
+           Do not block the gateway waiting for it: leave this output intact
+           and retry it after the main loop services the DRM event. */
+        if (output->flip_pending && getenv("BLIT_KMS_MODESET") == NULL &&
+            !output->modeset_fallback) {
+            deferred = 1;
+            continue;
+        }
         /* A render request can be generated by a PTY or control event that
            does not alter this output.  Do not submit a page flip in that
            case: page flips are not a heartbeat, and repeatedly submitting
@@ -1005,25 +1039,8 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
            a CPU and event slot on every display. */
         if (!output_changed)
             continue;
-        /* The previous page flip must complete before the old front buffer
-           becomes our writable back buffer.  Drawing first can modify the
-           buffer while the CRTC is still scanning it, producing horizontal
-           smear/tearing across the whole output. */
-        if (getenv("BLIT_KMS_MODESET") == NULL &&
-            !output->modeset_fallback) {
-            int wait_result = wait_flip(kms, output);
-            if (wait_result == -2) {
-                output->modeset_fallback = 1;
-                output->flip_pending = 0;
-                fprintf(stderr,
-                        "blit: KMS page-flip timeout on connector=%u; using modeset fallback\n",
-                        output->connector);
-            } else if (wait_result < 0) {
-                return -1;
-            }
-        } else {
+        if (getenv("BLIT_KMS_MODESET") != NULL || output->modeset_fallback)
             output->flip_pending = 0;
-        }
         if (trace_phases)
             fprintf(stderr, "blit: KMS phase connector=%u wait_us=%lld\n",
                     output->connector, kms_now_us() - output_started);
@@ -1134,6 +1151,7 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
             if (flip_result < 0) return -1;
         }
         output->flip_pending = 1;
+        output->flip_started_us = kms_now_us();
         swap_buffers(output);
         output->initialized = 1;
         if (trace_phases)
@@ -1156,10 +1174,12 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
             }
         }
     }
-    kms->pointer_state_valid = 1;
-    kms->previous_pointer_x = pointer_x;
-    kms->previous_pointer_y = pointer_y;
-    kms->previous_pointer_visible = pointer_visible;
+    if (!deferred) {
+        kms->pointer_state_valid = 1;
+        kms->previous_pointer_x = pointer_x;
+        kms->previous_pointer_y = pointer_y;
+        kms->previous_pointer_visible = pointer_visible;
+    }
     ++kms->screenshot_frame;
     if (capture)
         kms->screenshot_written = 1;
