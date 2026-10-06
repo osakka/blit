@@ -68,8 +68,8 @@ The first contract should cover only:
 - stable errors and revisions.
 
 Effects, persistence, and deployment hardening remain later concerns; the
-first bounded SDL effect is now exposed by the schema and runtime, while
-direct KMS remains an explicit text-only capability.
+first bounded SDL and direct-KMS effects/overlay path is now exposed by the
+schema and runtime, with pixel-level VM evidence gates for both outputs.
 
 Exit criteria:
 

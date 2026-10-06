@@ -88,18 +88,18 @@ inputs, parameters, supported color formats, and cost characteristics. The
 engine needs a bounded policy for expensive effects and a clear behavior when
 an effect cannot run.
 
-The first bounded effect contract is exposed at `/v1/effects`: the SDL3 path
-supports the deterministic `scanlines` preset with an explicit 0--100
-intensity and revision. Direct KMS reports the effect backend as unsupported;
-it does not silently claim to have applied a pixel effect. Effect state is
-downstream of terminal state and resets only when explicitly changed by the
-API.
+The first bounded effect contract is exposed at `/v1/effects`: the SDL3 and
+direct KMS paths support the deterministic `scanlines` preset with an explicit
+0--100 intensity and revision. Effect state is downstream of terminal state
+and resets only when explicitly changed by the API.
 
 ### Overlay compositor
 
 Owns bounded graphic canvases that are explicitly attached to a topology or
-surface. Overlays can be used for diagnostics, status, images, or visual
-instrumentation, but may not silently replace terminal or layout state.
+surface. SDL3 and direct KMS composite the canonical overlay records after
+terminal/effect composition. Overlays can be used for diagnostics, status,
+images, or visual instrumentation, but may not silently replace terminal or
+layout state.
 
 ### Direct display and SDL3 adapters
 

@@ -430,7 +430,7 @@ static void effect_json(const BlitRuntime *runtime, char *body,
              runtime->effect.revision,
              runtime->effect.enabled ? "true" : "false",
              runtime->effect.preset, runtime->effect.intensity,
-             runtime->direct_kms ? "unsupported" :
+             runtime->direct_kms ? "drm-kms" :
                  (runtime->sdl_ready ? "sdl3" : "unavailable"));
 }
 
@@ -456,7 +456,7 @@ static void overlays_json(const BlitRuntime *runtime, char *body,
     used += (size_t)snprintf(body + used, capacity - used,
                              "{\"revision\":1,\"backend\":\"%s\","
                              "\"overlays\":[",
-                             runtime->direct_kms ? "unsupported" :
+                             runtime->direct_kms ? "drm-kms" :
                                  (runtime->sdl_ready ? "sdl3" : "unavailable"));
     for (i = 0; i < BLIT_MAX_OVERLAYS; ++i) {
         char item[768];
@@ -6785,11 +6785,6 @@ static void handle_request(int fd, BlitRuntime *runtime,
             send_http(fd, 200, "OK", "application/json", body);
             return;
         }
-        if (runtime->direct_kms) {
-            send_problem(fd, 409, "Conflict", "effect_backend_unsupported",
-                         "The current direct-KMS backend does not render SDL effects.");
-            return;
-        }
         if (!json_int(payload, "revision", &revision) || revision < 0) {
             send_problem(fd, 400, "Bad Request", "invalid_effect_revision",
                          "revision must be a non-negative integer.");
@@ -6844,12 +6839,6 @@ static void handle_request(int fd, BlitRuntime *runtime,
             int i;
             BlitOverlay *overlay = NULL;
 
-            if (runtime->direct_kms) {
-                send_problem(fd, 409, "Conflict",
-                             "overlay_backend_unsupported",
-                             "The current direct-KMS backend does not render SDL overlays.");
-                return;
-            }
             if (!json_string(payload, "display_id", display_id,
                              sizeof(display_id)) ||
                 !display_id_is_known(runtime, display_id) ||
@@ -6900,12 +6889,6 @@ static void handle_request(int fd, BlitRuntime *runtime,
         unsigned long long overlay_id = strtoull(
             path + strlen("/v1/overlays/"), NULL, 10);
         int i;
-        if (runtime->direct_kms) {
-            send_problem(fd, 409, "Conflict",
-                         "overlay_backend_unsupported",
-                         "The current direct-KMS backend does not render SDL overlays.");
-            return;
-        }
         for (i = 0; i < BLIT_MAX_OVERLAYS; ++i)
             if (runtime->overlays[i].used &&
                 runtime->overlays[i].id == overlay_id) {
@@ -7652,11 +7635,37 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
 
     if (runtime->direct_kms) {
         BlitKmsSurfaceView views[BLIT_MAX_SESSIONS];
+        BlitKmsOverlay kms_overlays[BLIT_MAX_OVERLAYS];
         int damage_consumed[BLIT_MAX_SESSIONS];
         int view_count = 0;
+        int kms_overlay_count = 0;
         int surface_index;
+        int overlay_index;
+        unsigned long long visual_revision = runtime->effect.revision ^
+            runtime->next_overlay_id;
         (void)plan;
         memset(damage_consumed, 0, sizeof(damage_consumed));
+        memset(kms_overlays, 0, sizeof(kms_overlays));
+        for (overlay_index = 0; overlay_index < BLIT_MAX_OVERLAYS;
+             ++overlay_index) {
+            BlitOverlay *overlay = &runtime->overlays[overlay_index];
+            if (!overlay->used || kms_overlay_count >= BLIT_MAX_OVERLAYS)
+                continue;
+            kms_overlays[kms_overlay_count].display_id = strtoull(
+                overlay->display_id +
+                    (strncmp(overlay->display_id, "display-", 8) == 0 ? 8 : 0),
+                NULL, 10);
+            kms_overlays[kms_overlay_count].x = overlay->x;
+            kms_overlays[kms_overlay_count].y = overlay->y;
+            kms_overlays[kms_overlay_count].width = overlay->width;
+            kms_overlays[kms_overlay_count].height = overlay->height;
+            kms_overlays[kms_overlay_count].color = overlay->color;
+            kms_overlays[kms_overlay_count].opacity = overlay->opacity;
+            visual_revision ^= overlay->id * 11400714819323198485ULL;
+            visual_revision ^= overlay->revision +
+                ((unsigned long long)overlay->opacity << 32);
+            ++kms_overlay_count;
+        }
         for (surface_index = 0; surface_index < BLIT_MAX_SESSIONS &&
              view_count < BLIT_MAX_SESSIONS; ++surface_index) {
             BlitSurface *surface = &runtime->surfaces[surface_index];
@@ -7725,7 +7734,12 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
         }
         if (blit_kms_present(runtime->kms, views, view_count,
                              runtime->pointer_x, runtime->pointer_y,
-                             runtime->pointer_valid, output_mask) < 0)
+                             runtime->pointer_valid, output_mask,
+                             kms_overlays, kms_overlay_count,
+                             visual_revision,
+                             runtime->effect.enabled &&
+                                 strcmp(runtime->effect.preset, "scanlines") == 0,
+                             runtime->effect.intensity) < 0)
             fprintf(stderr, "blit: direct KMS present failed\n");
         for (surface_index = 0; surface_index < view_count; ++surface_index)
             if (damage_consumed[surface_index]) {

@@ -38,6 +38,7 @@ mixed_refresh_test=0
 kitty_limits_test=0
 kitty_query_test=0
 sixel_test=0
+visuals_test=0
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
     *" blit.output_loss=1 "*) loss_test=1 ;;
 esac
@@ -56,6 +57,14 @@ esac
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
     *" blit.sixel=1 "*) sixel_test=1 ;;
 esac
+case " $($b cat /proc/cmdline 2>/dev/null || true) " in
+    *" blit.visuals=1 "*) visuals_test=1 ;;
+esac
+if [ "$visuals_test" -eq 1 ]; then
+    # Capture after the effect, overlay, and session requests have had time
+    # to reach a presented frame; frame zero is the pre-API blank modeset.
+    export BLIT_KMS_SCREENSHOT_AFTER=8
+fi
 if [ "$mixed_refresh_test" -eq 1 ]; then
     export BLIT_TEST_MODE=1
     export BLIT_TEST_REFRESH_HZ=60,120
@@ -92,6 +101,12 @@ echo "$graphics_inventory" | $b grep -q '"vendor":"' || graphics_pass=0
 echo "$graphics_inventory" | $b grep -q '"device":"' || graphics_pass=0
 echo "$graphics_inventory" | $b grep -q '"driver":"' || graphics_pass=0
 echo "$graphics_inventory" | $b grep -q '"hardware_acceleration":' || graphics_pass=0
+if [ "$visuals_test" -eq 1 ]; then
+    /blit-stage/http-put 19191 /v1/effects '{"revision":1,"enabled":true,"preset":"scanlines","intensity":100}' >/tmp/effect.json || true
+    $b wget -qO /tmp/overlay.json --post-data='{"display_id":"display-47","x":2,"y":32,"width":4,"height":4,"color":"#0000ff","opacity":100}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/overlays || true
+    echo VISUAL_EFFECT; $b cat /tmp/effect.json 2>/dev/null || true
+    echo VISUAL_OVERLAY; $b cat /tmp/overlay.json 2>/dev/null || true
+fi
 if [ "$stack_test" -eq 1 ]; then
     $b wget -qO /tmp/one.json --post-data='{"command":"/blit-stage/pty-input-echo","arguments":["--wide","--kitty","--stack"],"surface_mode":"terminal","display_id":"display-47","surface":{"width":128,"height":48}}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
 elif [ "$kitty_limits_test" -eq 1 ]; then
@@ -100,6 +115,8 @@ elif [ "$kitty_query_test" -eq 1 ]; then
     $b wget -qO /tmp/one.json --post-data='{"command":"/blit-stage/pty-input-echo","arguments":["--kitty-query"],"surface_mode":"terminal","display_id":"display-47","surface":{"width":128,"height":48}}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
 elif [ "$sixel_test" -eq 1 ]; then
     $b wget -qO /tmp/one.json --post-data='{"command":"/blit-stage/pty-input-echo","arguments":["--sixel"],"surface_mode":"terminal","display_id":"display-47","surface":{"width":128,"height":48}}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
+elif [ "$visuals_test" -eq 1 ]; then
+    $b wget -qO /tmp/one.json --post-data='{"command":"/blit-stage/pty-input-echo","arguments":["--wide"],"surface_mode":"terminal","display_id":"display-47","surface":{"width":128,"height":48}}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
 else
     $b wget -qO /tmp/one.json --post-data='{"command":"/blit-stage/pty-input-echo","arguments":["--wide","--kitty"],"surface_mode":"terminal","display_id":"display-47","surface":{"width":128,"height":48}}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
 fi
@@ -155,6 +172,8 @@ if [ "$stack_test" -eq 1 ]; then
     /blit-stage/ppm-assert /tmp/guest-screenshots/display-47.ppm --wide --green && echo PPM_DISPLAY_47_WIDE_STACK_CLIP_PASS || { echo PPM_DISPLAY_47_WIDE_STACK_CLIP_FAIL; finish 1; }
 elif [ "$sixel_test" -eq 1 ]; then
     /blit-stage/ppm-assert /tmp/guest-screenshots/display-47.ppm --sixel && echo PPM_DISPLAY_47_SIXEL_PASS || { echo PPM_DISPLAY_47_SIXEL_FAIL; finish 1; }
+elif [ "$visuals_test" -eq 1 ]; then
+    /blit-stage/ppm-assert /tmp/guest-screenshots/display-47.ppm --visuals && echo PPM_DISPLAY_47_VISUALS_PASS || { echo PPM_DISPLAY_47_VISUALS_FAIL; finish 1; }
 else
     /blit-stage/ppm-assert /tmp/guest-screenshots/display-47.ppm --wide --kitty && echo PPM_DISPLAY_47_WIDE_KITTY_PASS || { echo PPM_DISPLAY_47_WIDE_KITTY_FAIL; finish 1; }
 fi

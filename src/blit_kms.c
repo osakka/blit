@@ -52,6 +52,7 @@ typedef struct {
     int modeset_fallback;
     int initialized;
     int last_view_count;
+    unsigned long long last_visual_revision;
     unsigned long long last_surface_ids[KMS_MAX_VIEWS];
     unsigned long long last_surface_revisions[KMS_MAX_VIEWS];
     unsigned char pointer_background[KMS_POINTER_W * KMS_POINTER_H * 4];
@@ -256,6 +257,77 @@ static void fill_rect(KmsOutput *output, int x, int y, int width, int height,
         }
         if (column < last_x)
             pixels[column] = color;
+    }
+}
+
+static void blend_rect(KmsOutput *output, int x, int y, int width, int height,
+                       uint32_t color, unsigned int alpha)
+{
+    int row;
+    int column;
+    int first_x = x < 0 ? 0 : x;
+    int first_y = y < 0 ? 0 : y;
+    int last_x = x + width;
+    int last_y = y + height;
+
+    if (alpha >= 255U) {
+        fill_rect(output, x, y, width, height, color);
+        return;
+    }
+    if (alpha == 0U)
+        return;
+    if (last_x > output->mode.hdisplay) last_x = output->mode.hdisplay;
+    if (last_y > output->mode.vdisplay) last_y = output->mode.vdisplay;
+    if (first_x >= last_x || first_y >= last_y) return;
+    for (row = first_y; row < last_y; ++row) {
+        uint32_t *pixels = (uint32_t *)((unsigned char *)output->back.map +
+                                        row * output->back.pitch);
+        for (column = first_x; column < last_x; ++column) {
+            uint32_t old = pixels[column];
+            unsigned int inverse = 255U - alpha;
+            unsigned int red = (old >> 16) & 0xffU;
+            unsigned int green = (old >> 8) & 0xffU;
+            unsigned int blue = old & 0xffU;
+            pixels[column] = (((((color >> 16) & 0xffU) * alpha) +
+                               red * inverse) / 255U << 16) |
+                (((((color >> 8) & 0xffU) * alpha) +
+                  green * inverse) / 255U << 8) |
+                ((((color & 0xffU) * alpha) + blue * inverse) / 255U);
+        }
+    }
+}
+
+static void draw_kms_effects(KmsOutput *output, int enabled,
+                             int intensity)
+{
+    int y;
+    unsigned int alpha;
+
+    if (!enabled || intensity <= 0)
+        return;
+    if (intensity > 100) intensity = 100;
+    alpha = (unsigned int)(intensity * 255 / 100);
+    for (y = 1; y < output->mode.vdisplay; y += 2)
+        blend_rect(output, 0, y, output->mode.hdisplay, 1, 0, alpha);
+}
+
+static void draw_kms_overlays(KmsOutput *output,
+                              const BlitKmsOverlay *overlays,
+                              int overlay_count)
+{
+    int index;
+
+    if (overlays == NULL)
+        return;
+    for (index = 0; index < overlay_count; ++index) {
+        const BlitKmsOverlay *overlay = &overlays[index];
+        if (overlay->display_id != output->info.id ||
+            overlay->width < 1 || overlay->height < 1 ||
+            overlay->opacity <= 0)
+            continue;
+        blend_rect(output, overlay->x, overlay->y, overlay->width,
+                   overlay->height, overlay->color,
+                   (unsigned int)(overlay->opacity * 255 / 100));
     }
 }
 
@@ -976,7 +1048,9 @@ int blit_kms_cell_height(const BlitKms *kms)
 
 int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_count,
                      float pointer_x, float pointer_y, int pointer_visible,
-                     uint32_t output_mask)
+                     uint32_t output_mask, const BlitKmsOverlay *overlays,
+                     int overlay_count, unsigned long long visual_revision,
+                     int effect_enabled, int effect_intensity)
 {
     int i;
     int capture;
@@ -1013,7 +1087,8 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         if (trace_phases)
             output_started = kms_now_us();
         int output_changed;
-        full_redraw = !output->initialized;
+        full_redraw = !output->initialized ||
+            output->last_visual_revision != visual_revision;
         for (view_index = 0; view_index < view_count; ++view_index)
             if (views[view_index].display_id == output->info.id)
                 ++output_view_count;
@@ -1127,6 +1202,8 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                 draw_view(output, kms != NULL ? kms->font : NULL,
                           &draw);
             }
+        draw_kms_effects(output, effect_enabled, effect_intensity);
+        draw_kms_overlays(output, overlays, overlay_count);
         if (pointer_visible && pointer_x >= output->info.x &&
             pointer_x < output->info.x + output->info.width &&
             pointer_y >= output->info.y && pointer_y < output->info.y + output->info.height) {
@@ -1172,6 +1249,7 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                         views[view_index].damage_consumed != NULL)
                         *views[view_index].damage_consumed = 1;
                 output->initialized = 1;
+                output->last_visual_revision = visual_revision;
                 remember_output_views(output, views, view_count,
                                       output_view_count);
                 continue;
@@ -1201,6 +1279,7 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                 views[view_index].damage_consumed != NULL)
                 *views[view_index].damage_consumed = 1;
         output->initialized = 1;
+        output->last_visual_revision = visual_revision;
         if (trace_phases)
             fprintf(stderr,
                     "blit: KMS phase connector=%u draw_us=%lld flip_us=%lld total_us=%lld\n",

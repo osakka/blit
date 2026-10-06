@@ -2,10 +2,9 @@
 
 Effects are renderer state, not terminal state. The canonical API is
 `PUT /v1/effects`; the initial bounded preset is `scanlines`, with intensity
-from `0` through `100`. The SDL3 backend applies it after text composition and
-before the software pointer. The direct KMS backend returns
-`effect_backend_unsupported` for effect updates because its correctness path
-is text-only; it never reports a successful effect that it did not render.
+from `0` through `100`. The SDL3 and direct KMS backends apply it after text
+composition and before the software pointer. The response identifies the
+active renderer as `sdl3` or `drm-kms`.
 
 With a TCC-built server using the dummy SDL backend:
 
@@ -28,11 +27,13 @@ the canonical state.
 
 `/v1/overlays` is the schema-first rectangle overlay resource. An overlay is
 attached to one known display and has logical `x`, `y`, `width`, `height`,
-`color`, and `opacity` fields. The SDL3 backend composites up to 16 solid
-rectangles after terminal text and effects and before the software pointer.
+`color`, and `opacity` fields. The SDL3 and direct KMS backends composite up
+to 16 solid rectangles after terminal text and effects and before the software
+pointer.
 The lifecycle is revisioned through the normal resource response and is
 covered by the terminal conformance runner.
 
-Direct KMS is intentionally text-only at this stage. Overlay creation and
-deletion there return `overlay_backend_unsupported`; the API never reports a
-successful overlay that the KMS path did not render.
+The direct KMS capture gate creates an overlay on `display-47` and verifies
+its blue pixel in the captured PPM. It also enables scanlines and verifies
+that a populated row is followed by a suppressed row. This checks that the
+API state reaches KMS pixels rather than only being accepted by the API.

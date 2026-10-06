@@ -53,6 +53,16 @@ typedef struct {
 } BlitKmsSurfaceView;
 
 typedef struct {
+    unsigned long long display_id;
+    int x;
+    int y;
+    int width;
+    int height;
+    uint32_t color;
+    int opacity;
+} BlitKmsOverlay;
+
+typedef struct {
     unsigned long long id;
     char name[128];
     int x;
@@ -83,7 +93,10 @@ int blit_kms_cell_width(const BlitKms *kms);
 int blit_kms_cell_height(const BlitKms *kms);
 int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views,
                      int view_count, float pointer_x, float pointer_y,
-                     int pointer_visible, uint32_t output_mask);
+                     int pointer_visible, uint32_t output_mask,
+                     const BlitKmsOverlay *overlays, int overlay_count,
+                     unsigned long long visual_revision,
+                     int effect_enabled, int effect_intensity);
 void blit_kms_close(BlitKms *kms);
 
 #endif
