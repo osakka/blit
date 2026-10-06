@@ -109,6 +109,11 @@ changed pane, or pointer movement can still incur the physical driver's page
 flip latency, which is reported per present and bounded by
 `BLIT_KMS_FLIP_TIMEOUT_MS`.
 
+The software pointer is an overlay, not terminal content. Each output retains
+the pixels beneath its pointer and restores that underlay before drawing the
+next position; pointer motion therefore cannot paint black trails over Hibr's
+background or wallpaper.
+
 If a page-flip event exceeds that timeout, Blit performs one explicit modeset
 recovery for the affected output and then resumes ordinary page flips. A
 timeout must never become a modeset-per-frame loop: repeated modesets blank

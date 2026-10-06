@@ -19,6 +19,8 @@
 #define KMS_MAX_VIEWS 64
 #define KMS_FONT_W 8
 #define KMS_FONT_H 8
+#define KMS_POINTER_W 12
+#define KMS_POINTER_H 18
 #define KMS_WHITE 0xbed2beU
 
 typedef struct {
@@ -67,6 +69,12 @@ typedef struct {
     int last_view_count;
     unsigned long long last_surface_ids[KMS_MAX_VIEWS];
     unsigned long long last_surface_revisions[KMS_MAX_VIEWS];
+    unsigned char pointer_background[KMS_POINTER_W * KMS_POINTER_H * 4];
+    int pointer_background_valid;
+    int pointer_background_x;
+    int pointer_background_y;
+    int pointer_background_width;
+    int pointer_background_height;
     KmsFont *font;
 } KmsOutput;
 
@@ -791,6 +799,55 @@ static int pointer_intersects_output(const KmsOutput *output,
         local_y < output->mode.vdisplay && local_y + 18 > 0;
 }
 
+static void restore_pointer_background(KmsOutput *output)
+{
+    int row;
+
+    if (output == NULL || !output->pointer_background_valid)
+        return;
+    for (row = 0; row < output->pointer_background_height; ++row) {
+        unsigned char *destination =
+            (unsigned char *)output->back.map +
+            (size_t)(output->pointer_background_y + row) * output->back.pitch +
+            (size_t)output->pointer_background_x * 4;
+        memcpy(destination, output->pointer_background +
+               (size_t)row * KMS_POINTER_W * 4,
+               (size_t)output->pointer_background_width * 4);
+    }
+    output->pointer_background_valid = 0;
+}
+
+static void save_pointer_background(KmsOutput *output, float x, float y)
+{
+    int left = (int)x - output->info.x;
+    int top = (int)y - output->info.y;
+    int right = left + KMS_POINTER_W;
+    int bottom = top + KMS_POINTER_H;
+    int row;
+
+    if (left < 0) left = 0;
+    if (top < 0) top = 0;
+    if (right > output->mode.hdisplay) right = output->mode.hdisplay;
+    if (bottom > output->mode.vdisplay) bottom = output->mode.vdisplay;
+    if (left >= right || top >= bottom) {
+        output->pointer_background_valid = 0;
+        return;
+    }
+    output->pointer_background_x = left;
+    output->pointer_background_y = top;
+    output->pointer_background_width = right - left;
+    output->pointer_background_height = bottom - top;
+    for (row = 0; row < output->pointer_background_height; ++row) {
+        const unsigned char *source =
+            (const unsigned char *)output->back.map +
+            (size_t)(top + row) * output->back.pitch + (size_t)left * 4;
+        memcpy(output->pointer_background +
+               (size_t)row * KMS_POINTER_W * 4, source,
+               (size_t)output->pointer_background_width * 4);
+    }
+    output->pointer_background_valid = 1;
+}
+
 static void include_pointer_damage(const KmsOutput *output,
                                    const BlitKmsSurfaceView *view,
                                    float x, float y, int visible,
@@ -1135,18 +1192,16 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         if (trace_phases)
             fprintf(stderr, "blit: KMS phase connector=%u wait_us=%lld\n",
                     output->connector, kms_now_us() - output_started);
-        if (full_redraw)
+        if (full_redraw) {
             memset(output->back.map, 0, output->back.size);
-        else
+            output->pointer_background_valid = 0;
+        } else {
             memcpy(output->back.map, output->front.map, output->back.size);
+            if (pointer_changed)
+                restore_pointer_background(output);
+        }
         if (trace_phases)
             draw_started = kms_now_us();
-        if (pointer_changed) {
-            clear_pointer_rect(output, kms->previous_pointer_x,
-                               kms->previous_pointer_y,
-                               kms->previous_pointer_visible);
-            clear_pointer_rect(output, pointer_x, pointer_y, pointer_visible);
-        }
         for (view_index = 0; view_index < view_count; ++view_index)
             if (views[view_index].display_id == output->info.id) {
                 BlitKmsSurfaceView draw = views[view_index];
@@ -1208,8 +1263,11 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
             pointer_y >= output->info.y && pointer_y < output->info.y + output->info.height) {
             int x = (int)pointer_x - output->info.x;
             int y = (int)pointer_y - output->info.y;
+            save_pointer_background(output, pointer_x, pointer_y);
             fill_rect(output, x, y, 2, 18, 0xffffffU);
             fill_rect(output, x, y, 12, 2, 0xffffffU);
+        } else {
+            output->pointer_background_valid = 0;
         }
         if (trace_phases)
             flip_started = kms_now_us();
