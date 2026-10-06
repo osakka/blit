@@ -75,33 +75,35 @@ DRM master, then repeat the probe from a clean TTY.
 
 QEMU can validate the guest-side DRM/KMS path without a physical monitor. The
 test used Alpine Linux 3.24.0, QEMU TCG (no `/dev/kvm` was available), and a
-`virtio-gpu-pci` device. The guest created `/dev/dri/card0` and
-`/dev/dri/renderD128`; the TCC-built probe successfully initialized SDL3's
-KMSDRM backend and reported:
+`virtio-gpu-pci,max_outputs=2` device. The test kernel had
+`CONFIG_DRM_VIRTIO_GPU=y`; the guest created a VKMS card and a virtio DRM card
+(`/dev/dri/card0` and `/dev/dri/card1`) plus `/dev/dri/renderD128`. The TCC-built
+probe selected the virtio card and successfully created an SDL3 KMSDRM window:
 
 ```text
 Found 1 display(s)
-display[0] id=1 name=Virtual-1 bounds=0,0 1280x800
+display[0] id=1 name=Virtual-2 bounds=0,0 1280x800
+KMSDRM window created; press Escape or wait five seconds
+VIRTIO_PROBE_STATUS=0
 ```
 
-The current minimal guest did not complete `SDL_CreateWindow` reliably: the
-fullscreen path stalled and the guest reported a kernel soft-lockup. Therefore
-this is a DRM/KMS enumeration smoke test, not yet a passing end-to-end window
-test. A real bare-metal KMS test remains required before accepting display
-ownership behavior.
+This is a passing guest-side end-to-end SDL3/KMSDRM window test. The initramfs
+must stage Mesa's `kms_swrast_dri.so`, its dependencies, and the GLVND vendor
+file, then set `LIBGL_DRIVERS_PATH`, `__EGL_VENDOR_LIBRARY_DIRS`, and
+`SDL_KMSDRM_DEVICE_INDEX=1`. Without those inputs, enumeration can succeed
+while EGL window creation fails. A real bare-metal KMS test remains required
+before accepting physical display ownership and hardware timing behavior.
 
 The QEMU test also exposed an important fixture rule: the Alpine initramfs did
 not include a usable network driver in the direct-shell boot path. Test
 artifacts were therefore supplied through a second read-only ISO rather than
 through guest networking.
 
-Additional fixture checks did not change the result. Giving QEMU a VNC
-scanout still allowed display enumeration but did not complete
-`SDL_CreateWindow`; increasing guest memory from 1 GiB to 2 GiB also did not
-help. QEMU standard VGA was not a substitute because this Alpine kernel did
-not expose a DRM node for that device. The remaining VM-specific suspect is
-the TCG plus virtio-GPU plus software-Mesa presentation path, not TCC linking
-or SDL display enumeration.
+`max_outputs=2` gives the virtio device two scanout slots, but QEMU exposes
+only one active connector in this fixture. It therefore proves the SDL3
+KMSDRM presentation path, not Blit's two-connector topology. The deterministic
+two-output VKMS fixture below remains authoritative for multi-display layout,
+pixel, page-flip, pane, and input testing.
 
 ## Reproducible multi-display QEMU fixture
 
