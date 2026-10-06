@@ -79,6 +79,13 @@ if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
     /blit-stage/emit-uinput >/tmp/uinput.log 2>&1 &
     emit_pid=$!
     echo INPUT_EMITTER_PID=$emit_pid
+    if [ "${BLIT_INPUT_LOSS_TEST:-0}" = 1 ]; then
+        (
+            $b sleep 14
+            /blit-stage/emit-uinput >/tmp/uinput-reconnect.log 2>&1
+        ) &
+        echo INPUT_RECONNECT_SCHEDULER_PID=$!
+    fi
 fi
 # Hibr's desktop scripts invoke mkdir as an external command.  The minimal
 # fixture uses BusyBox directly, so expose the applet under the name Hibr
@@ -225,6 +232,8 @@ if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
         echo "$diagnostics_after_loss" | $b grep -q '"pointers":1' || loss_pass=0
         $b grep -q 'evdev keyboard disappeared:' /tmp/blit.log || loss_pass=0
         $b grep -q 'evdev mouse disappeared:' /tmp/blit.log || loss_pass=0
+        $b grep -q 'evdev keyboard reconnected:' /tmp/blit.log || loss_pass=0
+        $b grep -q 'evdev mouse reconnected:' /tmp/blit.log || loss_pass=0
         if [ "$loss_pass" -eq 1 ]; then
             echo BLIT_INPUT_DEVICE_LOSS_PASS
         else

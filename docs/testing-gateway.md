@@ -340,7 +340,8 @@ through `/v1/diagnostics`. The device-loss path does not silently reattach a
 replacement device; clients must observe `/v1/input/devices` and configure a
 new route when hardware returns. The QEMU input gate exercises descriptor
 removal with `blit.input_loss=1`; QEMU's surviving baseline devices verify
-that aggregate routes remain enabled until the final device disappears.
+that aggregate routes remain enabled until the final device disappears, and
+the fixture recreates the synthetic devices to verify bounded re-enumeration.
 
 ## Exercise the stream upgrade
 

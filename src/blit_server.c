@@ -334,6 +334,7 @@ typedef struct {
     int evdev_shift;
     int evdev_ctrl;
     int evdev_alt;
+    uint64_t evdev_last_scan_ticks;
     float evdev_mouse_x;
     float evdev_mouse_y;
     BlitStream streams[BLIT_MAX_STREAMS];
@@ -5959,6 +5960,63 @@ static int open_evdev_keyboards(int *fds, char paths[][128], int *count)
     return *count;
 }
 
+static int evdev_path_open(const int *fds, char paths[][128], int count,
+                           const char *path)
+{
+    int i;
+    for (i = 0; i < count; ++i)
+        if (fds[i] >= 0 && strcmp(paths[i], path) == 0)
+            return 1;
+    return 0;
+}
+
+static void reconnect_evdev_devices(BlitRuntime *runtime)
+{
+    uint64_t now = SDL_GetTicks();
+    int index;
+
+    if (now - runtime->evdev_last_scan_ticks < 1000)
+        return;
+    runtime->evdev_last_scan_ticks = now;
+    for (index = 0; index < 32; ++index) {
+        char path[64];
+        int fd;
+        snprintf(path, sizeof(path), "/dev/input/event%d", index);
+        if (runtime->evdev_mouse_count < BLIT_MAX_INPUT_DEVICES &&
+            !evdev_path_open(runtime->evdev_mouse_fds,
+                             runtime->evdev_mouse_paths,
+                             runtime->evdev_mouse_count, path)) {
+            fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+            if (fd >= 0 && evdev_has_rel_xy(fd)) {
+                int slot = runtime->evdev_mouse_count++;
+                runtime->evdev_mouse_fds[slot] = fd;
+                snprintf(runtime->evdev_mouse_paths[slot], 128, "%s", path);
+                runtime->evdev_mouse_reported[slot] = 0;
+                fprintf(stderr, "blit: evdev mouse reconnected: %s fd=%d\n",
+                        path, fd);
+                fd = -1;
+            }
+            if (fd >= 0) close(fd);
+        }
+        if (runtime->evdev_keyboard_count < BLIT_MAX_INPUT_DEVICES &&
+            !evdev_path_open(runtime->evdev_keyboard_fds,
+                             runtime->evdev_keyboard_paths,
+                             runtime->evdev_keyboard_count, path)) {
+            fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+            if (fd >= 0 && evdev_has_keyboard(fd)) {
+                int slot = runtime->evdev_keyboard_count++;
+                runtime->evdev_keyboard_fds[slot] = fd;
+                snprintf(runtime->evdev_keyboard_paths[slot], 128, "%s", path);
+                runtime->evdev_keyboard_reported[slot] = 0;
+                fprintf(stderr, "blit: evdev keyboard reconnected: %s fd=%d\n",
+                        path, fd);
+                fd = -1;
+            }
+            if (fd >= 0) close(fd);
+        }
+    }
+}
+
 static int surface_targets_output(BlitRuntime *runtime,
                                   BlitSurface *surface, int output_index)
 {
@@ -7208,6 +7266,7 @@ int main(int argc, char **argv)
     runtime.next_event_sequence = 1;
     runtime.topology_revision = 1;
     runtime.input_routes_revision = 1;
+    runtime.evdev_last_scan_ticks = SDL_GetTicks();
     runtime.next_overlay_id = 1;
     runtime.effect.revision = 1;
     snprintf(runtime.effect.preset, sizeof(runtime.effect.preset), "none");
@@ -7313,6 +7372,7 @@ int main(int argc, char **argv)
         fd_set readable;
         struct timeval timeout;
 
+        reconnect_evdev_devices(&runtime);
         for (i = 0; i < BLIT_MAX_SESSIONS; ++i)
             refresh_session_state(&runtime, &runtime.sessions[i]);
 
