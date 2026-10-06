@@ -6,7 +6,7 @@ with the TCC toolchain:
 ```sh
 tcc -std=c99 -Ivendor/SDL3/include \
   -Ibuild/deps/prefix/include -Ibuild/deps/prefix/include/libdrm \
-  src/blit_server.c src/blit_kms.c \
+  src/blit_server.c src/blit_kms.c src/blit_font.c \
   -Lbuild/sdl3-kms -Lbuild/deps/prefix/lib/x86_64-linux-gnu \
   -lSDL3 -ldrm -lutil -o build/blit/blit-server-kms
 ```

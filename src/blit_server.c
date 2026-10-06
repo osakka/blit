@@ -1,6 +1,7 @@
 #include <SDL3/SDL.h>
 #include <linux/input.h>
 #include "blit_kms.h"
+#include "blit_font.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -324,6 +325,7 @@ typedef struct {
     int sdl_ready;
     int direct_kms;
     BlitKms *kms;
+    BlitFont font;
     char sdl_error[256];
     int listen_port;
 } BlitRuntime;
@@ -5055,7 +5057,7 @@ static void discover_displays(BlitRuntime *runtime)
         char error[256];
         error[0] = '\0';
         runtime->direct_kms = 1;
-        runtime->kms = blit_kms_new();
+        runtime->kms = blit_kms_new(&runtime->font);
         if (runtime->kms == NULL || blit_kms_open(runtime->kms, error,
                                                    sizeof(error)) < 0) {
             snprintf(runtime->sdl_error, sizeof(runtime->sdl_error),
@@ -5140,9 +5142,11 @@ static void discover_panes(BlitRuntime *runtime)
          ++display_index) {
         BlitDisplay *display = &runtime->displays[display_index];
         int cell_width = (runtime->direct_kms ?
-            blit_kms_cell_width(runtime->kms) : 8) * runtime->font_scale;
+            blit_kms_cell_width(runtime->kms) : blit_font_width(&runtime->font)) *
+            runtime->font_scale;
         int cell_height = (runtime->direct_kms ?
-            blit_kms_cell_height(runtime->kms) : 8) * runtime->font_scale;
+            blit_kms_cell_height(runtime->kms) : blit_font_height(&runtime->font)) *
+            runtime->font_scale;
         int grid_width = display->bounds.w > 0 ? display->bounds.w / cell_width : 80;
         int grid_height = display->bounds.h > 0 ? display->bounds.h / cell_height : 24;
         int pane_width = grid_width / columns;
@@ -5337,11 +5341,48 @@ static int surface_targets_output(BlitRuntime *runtime,
     return strcmp(session->display_id, display_id) == 0;
 }
 
+static void render_sdl_glyph(SDL_Renderer *renderer, const BlitFont *font,
+                             uint32_t codepoint, float x, float y,
+                             float cell_width, float cell_height)
+{
+    int source_width = font != NULL && font->data ? font->width : 5;
+    int source_height = font != NULL && font->data ? font->height : 7;
+    int source_row;
+    for (source_row = 0; source_row < source_height; ++source_row) {
+        int source_column = 0;
+        while (source_column < source_width) {
+            int run_start;
+            int run_end;
+            while (source_column < source_width &&
+                   !blit_font_pixel(font, codepoint, source_row,
+                                    source_column))
+                ++source_column;
+            run_start = source_column;
+            while (source_column < source_width &&
+                   blit_font_pixel(font, codepoint, source_row,
+                                   source_column))
+                ++source_column;
+            run_end = source_column;
+            if (run_end > run_start) {
+                SDL_FRect pixel_run;
+                pixel_run.x = x + cell_width * run_start / source_width;
+                pixel_run.y = y + cell_height * source_row / source_height;
+                pixel_run.w = cell_width * (run_end - run_start) /
+                    source_width;
+                pixel_run.h = cell_height / source_height + 0.5f;
+                SDL_RenderFillRect(renderer, &pixel_run);
+            }
+        }
+    }
+}
+
 static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
 {
     int output_index;
     int plan_index;
     int row;
+    int cell_width = blit_font_width(&runtime->font);
+    int cell_height = blit_font_height(&runtime->font);
 
     if (runtime->direct_kms) {
         BlitKmsSurfaceView views[BLIT_MAX_SESSIONS];
@@ -5487,8 +5528,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
                 continue;
             pane = find_pane_id(runtime, session->pane_id);
             if (pane != NULL) {
-                surface_origin_x = (float)(pane->x * 8 + 4);
-                surface_origin_y = pane->y * 8 + 4;
+                surface_origin_x = (float)(pane->x * cell_width + 4);
+                surface_origin_y = pane->y * cell_height + 4;
             }
             if (session->display_id[0] == '\0') {
                 if (output_index != 0)
@@ -5505,7 +5546,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
                         runtime, plan->surfaces[prior_index].surface_id);
                     if (prior != NULL && prior->used &&
                         surface_targets_output(runtime, prior, output_index))
-                        surface_origin_y += prior->height * 8 + 4;
+                        surface_origin_y += prior->height * cell_height + 4;
                 }
             }
             if (!full_redraw) {
@@ -5517,10 +5558,10 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
                 {
                     SDL_FRect damage;
                     damage.x = surface_origin_x +
-                        plan->surfaces[plan_index].damage_x * 8.0f;
-                    damage.y = (float)surface_origin_y + first_row * 8.0f;
-                    damage.w = plan->surfaces[plan_index].damage_width * 8.0f;
-                    damage.h = plan->surfaces[plan_index].damage_height * 8.0f;
+                        plan->surfaces[plan_index].damage_x * (float)cell_width;
+                    damage.y = (float)surface_origin_y + first_row * (float)cell_height;
+                    damage.w = plan->surfaces[plan_index].damage_width * (float)cell_width;
+                    damage.h = plan->surfaces[plan_index].damage_height * (float)cell_height;
                     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
                     SDL_RenderFillRect(renderer, &damage);
                     SDL_SetRenderDrawColor(renderer, 190, 210, 190, 255);
@@ -5538,7 +5579,6 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
                     uint32_t background = surface->background[row][column] ?
                         surface->background[row][column] - 1 : 0;
                     uint16_t attributes = surface->attributes[row][column];
-                    char glyph[5];
                     SDL_FRect cell_background;
 
                     if (attributes & BLIT_ATTR_INVERSE) {
@@ -5549,10 +5589,10 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
                     if (attributes & BLIT_ATTR_DIM)
                         foreground = ((foreground & 0xfefefeU) >> 1);
                     if (background != 0) {
-                        cell_background.x = surface_origin_x + column * 8.0f;
-                        cell_background.y = (float)surface_origin_y + row * 8.0f;
-                        cell_background.w = 8.0f;
-                        cell_background.h = 8.0f;
+                        cell_background.x = surface_origin_x + column * (float)cell_width;
+                        cell_background.y = (float)surface_origin_y + row * (float)cell_height;
+                        cell_background.w = (float)cell_width;
+                        cell_background.h = (float)cell_height;
                         SDL_SetRenderDrawColor(renderer,
                             (unsigned char)(background >> 16),
                             (unsigned char)(background >> 8),
@@ -5568,69 +5608,79 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
                         (unsigned char)(foreground >> 16),
                         (unsigned char)(foreground >> 8),
                         (unsigned char)foreground, 255);
-                    utf8_encode(surface->codepoints[row][column] ?
-                        surface->codepoints[row][column] : ' ', glyph);
                     if (!(attributes & BLIT_ATTR_CONCEAL)) {
-                        SDL_RenderDebugText(renderer, surface_origin_x + column * 8.0f,
-                            (float)surface_origin_y + row * 8.0f, glyph);
+                        render_sdl_glyph(renderer, &runtime->font,
+                            surface->codepoints[row][column] ?
+                            surface->codepoints[row][column] : ' ',
+                            surface_origin_x + column * (float)cell_width,
+                            (float)surface_origin_y + row * (float)cell_height,
+                            (float)cell_width, (float)cell_height);
                         if (surface->combining_count[row][column] > 0) {
                             int combining_index;
                             for (combining_index = 0;
                                  combining_index < surface->combining_count[row][column] &&
                                  combining_index < BLIT_MAX_COMBINING;
                                  ++combining_index) {
-                                utf8_encode(surface->combining[row][column][combining_index],
-                                            glyph);
-                                SDL_RenderDebugText(renderer,
-                                    surface_origin_x + column * 8.0f,
-                                    (float)surface_origin_y + row * 8.0f, glyph);
+                                render_sdl_glyph(renderer, &runtime->font,
+                                    surface->combining[row][column][combining_index],
+                                    surface_origin_x + column * (float)cell_width,
+                                    (float)surface_origin_y + row * (float)cell_height,
+                                    (float)cell_width, (float)cell_height);
                             }
                         }
                         if (attributes & BLIT_ATTR_BOLD)
-                            SDL_RenderDebugText(renderer, surface_origin_x + 1.0f + column * 8.0f,
-                                (float)surface_origin_y + row * 8.0f, glyph);
+                            render_sdl_glyph(renderer, &runtime->font,
+                                surface->codepoints[row][column] ?
+                                surface->codepoints[row][column] : ' ',
+                                surface_origin_x + 1.0f + column * (float)cell_width,
+                                (float)surface_origin_y + row * (float)cell_height,
+                                (float)cell_width, (float)cell_height);
                         if (attributes & BLIT_ATTR_ITALIC)
-                            SDL_RenderDebugText(renderer, surface_origin_x + 1.0f + column * 8.0f,
-                                (float)surface_origin_y + row * 8.0f, glyph);
+                            render_sdl_glyph(renderer, &runtime->font,
+                                surface->codepoints[row][column] ?
+                                surface->codepoints[row][column] : ' ',
+                                surface_origin_x + 1.0f + column * (float)cell_width,
+                                (float)surface_origin_y + row * (float)cell_height,
+                                (float)cell_width, (float)cell_height);
                         if (attributes & BLIT_ATTR_UNDERLINE)
                             SDL_SetRenderDrawColor(renderer,
                                 (unsigned char)(underline_color >> 16),
                                 (unsigned char)(underline_color >> 8),
                                 (unsigned char)underline_color, 255);
                         if (attributes & BLIT_ATTR_UNDERLINE)
-                            SDL_RenderLine(renderer, surface_origin_x + column * 8.0f,
-                                (float)surface_origin_y + row * 8.0f + 7.0f,
-                                11.0f + column * 8.0f,
-                                (float)surface_origin_y + row * 8.0f + 7.0f);
+                            SDL_RenderLine(renderer, surface_origin_x + column * (float)cell_width,
+                                (float)surface_origin_y + row * (float)cell_height + cell_height - 1.0f,
+                                surface_origin_x + column * (float)cell_width + cell_width - 1.0f,
+                                (float)surface_origin_y + row * (float)cell_height + cell_height - 1.0f);
                         if (attributes & BLIT_ATTR_STRIKE)
-                            SDL_RenderLine(renderer, surface_origin_x + column * 8.0f,
-                                (float)surface_origin_y + row * 8.0f + 4.0f,
-                                11.0f + column * 8.0f,
-                                (float)surface_origin_y + row * 8.0f + 4.0f);
+                            SDL_RenderLine(renderer, surface_origin_x + column * (float)cell_width,
+                                (float)surface_origin_y + row * (float)cell_height + cell_height / 2.0f,
+                                surface_origin_x + column * (float)cell_width + cell_width - 1.0f,
+                                (float)surface_origin_y + row * (float)cell_height + cell_height / 2.0f);
                     }
                     }
                 }
             }
             if (surface->cursor_visible &&
                 surface->cursor_y >= first_row && surface->cursor_y < last_row) {
-                float cursor_x = surface_origin_x + surface->cursor_x * 8.0f;
-                float cursor_y = (float)surface_origin_y + surface->cursor_y * 8.0f;
+                float cursor_x = surface_origin_x + surface->cursor_x * (float)cell_width;
+                float cursor_y = (float)surface_origin_y + surface->cursor_y * (float)cell_height;
                 SDL_SetRenderDrawColor(renderer,
                     (unsigned char)(BLIT_DEFAULT_FOREGROUND >> 16),
                     (unsigned char)(BLIT_DEFAULT_FOREGROUND >> 8),
                     (unsigned char)BLIT_DEFAULT_FOREGROUND, 255);
                 if (surface->cursor_style == 3 || surface->cursor_style == 4)
-                    SDL_RenderLine(renderer, cursor_x, cursor_y + 7.0f,
-                                   cursor_x + 7.0f, cursor_y + 7.0f);
+                    SDL_RenderLine(renderer, cursor_x, cursor_y + cell_height - 1.0f,
+                                   cursor_x + cell_width - 1.0f, cursor_y + cell_height - 1.0f);
                 else if (surface->cursor_style == 5 || surface->cursor_style == 6)
                     SDL_RenderLine(renderer, cursor_x, cursor_y,
-                                   cursor_x, cursor_y + 7.0f);
+                                   cursor_x, cursor_y + cell_height - 1.0f);
                 else {
                     SDL_FRect cursor_rect;
                     cursor_rect.x = cursor_x;
                     cursor_rect.y = cursor_y;
-                    cursor_rect.w = 8.0f;
-                    cursor_rect.h = 8.0f;
+                    cursor_rect.w = (float)cell_width;
+                    cursor_rect.h = (float)cell_height;
                     SDL_RenderFillRect(renderer, &cursor_rect);
                 }
             }
@@ -5688,8 +5738,10 @@ static BlitSession *mouse_target(BlitRuntime *runtime, int output_index,
     }
     pixel_x /= runtime->font_scale;
     pixel_y /= runtime->font_scale;
-    cell_width = runtime->direct_kms ? blit_kms_cell_width(runtime->kms) : 8;
-    cell_height = runtime->direct_kms ? blit_kms_cell_height(runtime->kms) : 8;
+    cell_width = runtime->direct_kms ? blit_kms_cell_width(runtime->kms) :
+        blit_font_width(&runtime->font);
+    cell_height = runtime->direct_kms ? blit_kms_cell_height(runtime->kms) :
+        blit_font_height(&runtime->font);
     snprintf(display_id, sizeof(display_id), "display-%llu",
              runtime->outputs[output_index].display_id);
     for (i = 0; i < runtime->pane_count; ++i) {
@@ -6305,6 +6357,7 @@ int main(int argc, char **argv)
     if (bind_address == NULL || bind_address[0] == '\0')
         bind_address = "127.0.0.1";
     memset(&runtime, 0, sizeof(runtime));
+    blit_font_load(&runtime.font);
     runtime.font_scale = 1;
     runtime.render_interval_ms = 16;
     {
@@ -6545,6 +6598,7 @@ int main(int argc, char **argv)
                 close(runtime.evdev_keyboard_fds[input_index]);
     }
     destroy_outputs(&runtime);
+    blit_font_free(&runtime.font);
     if (runtime.sdl_ready)
         SDL_Quit();
     return 0;

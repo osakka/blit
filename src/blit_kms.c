@@ -1,4 +1,5 @@
 #include "blit_kms.h"
+#include "blit_font.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -24,34 +25,12 @@
 #define KMS_WHITE 0xbed2beU
 
 typedef struct {
-    uint32_t codepoint;
-    size_t glyph;
-} KmsGlyphMap;
-
-typedef struct {
     uint32_t fb;
     uint32_t handle;
     uint32_t pitch;
     uint64_t size;
     void *map;
 } KmsBuffer;
-
-typedef struct {
-    unsigned char *data;
-    size_t size;
-    size_t glyph_offset;
-    size_t glyph_bytes;
-    size_t glyph_count;
-    int width;
-    int height;
-    uint32_t *codepoints;
-    int ascii_glyph[256];
-    KmsGlyphMap *unicode_map;
-    size_t unicode_count;
-    size_t unicode_capacity;
-    KmsGlyphMap *unicode_lookup;
-    size_t unicode_lookup_capacity;
-} KmsFont;
 
 typedef struct {
     BlitKmsDisplayInfo info;
@@ -75,14 +54,14 @@ typedef struct {
     int pointer_background_y;
     int pointer_background_width;
     int pointer_background_height;
-    KmsFont *font;
+    BlitFont *font;
 } KmsOutput;
 
 struct BlitKms {
     int fd;
     int output_count;
     KmsOutput outputs[KMS_MAX_OUTPUTS];
-    KmsFont font;
+    BlitFont *font;
     int cell_width_override;
     char screenshot_dir[256];
     unsigned long screenshot_frame;
@@ -229,274 +208,6 @@ static void fill_rect(KmsOutput *output, int x, int y, int width, int height,
     }
 }
 
-static uint32_t read_u32(const unsigned char *p)
-{
-    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
-           ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
-}
-
-static int font_utf8(const unsigned char *p, size_t length, uint32_t *value,
-                     size_t *used)
-{
-    if (length == 0) return 0;
-    if (p[0] < 0x80) { *value = p[0]; *used = 1; return 1; }
-    if ((p[0] & 0xe0) == 0xc0 && length >= 2) {
-        *value = ((uint32_t)(p[0] & 0x1f) << 6) | (p[1] & 0x3f);
-        *used = 2; return 1;
-    }
-    if ((p[0] & 0xf0) == 0xe0 && length >= 3) {
-        *value = ((uint32_t)(p[0] & 0x0f) << 12) |
-            ((uint32_t)(p[1] & 0x3f) << 6) | (p[2] & 0x3f);
-        *used = 3; return 1;
-    }
-    if ((p[0] & 0xf8) == 0xf0 && length >= 4) {
-        *value = ((uint32_t)(p[0] & 7) << 18) |
-            ((uint32_t)(p[1] & 0x3f) << 12) |
-            ((uint32_t)(p[2] & 0x3f) << 6) | (p[3] & 0x3f);
-        *used = 4; return 1;
-    }
-    return 0;
-}
-
-static void font_free(KmsFont *font)
-{
-    if (font == NULL) return;
-    free(font->codepoints);
-    free(font->unicode_map);
-    free(font->unicode_lookup);
-    free(font->data);
-    memset(font, 0, sizeof(*font));
-}
-
-static int font_add_mapping(KmsFont *font, uint32_t codepoint,
-                            size_t glyph)
-{
-    KmsGlyphMap *next;
-    size_t capacity;
-    if (font == NULL || glyph >= font->glyph_count)
-        return 0;
-    if (font->unicode_count == font->unicode_capacity) {
-        capacity = font->unicode_capacity ? font->unicode_capacity * 2 : 256;
-        next = (KmsGlyphMap *)realloc(font->unicode_map,
-                                      capacity * sizeof(*next));
-        if (next == NULL) return 0;
-        font->unicode_map = next;
-        font->unicode_capacity = capacity;
-    }
-    font->unicode_map[font->unicode_count].codepoint = codepoint;
-    font->unicode_map[font->unicode_count].glyph = glyph;
-    if (codepoint < 256)
-        font->ascii_glyph[codepoint] = (int)glyph;
-    ++font->unicode_count;
-    return 1;
-}
-
-static void font_build_lookup(KmsFont *font);
-
-static int font_load_file(KmsFont *font, const char *path)
-{
-    FILE *file;
-    long file_size;
-    unsigned char *data;
-    uint32_t magic;
-    size_t i;
-    file = fopen(path, "rb");
-    if (file == NULL) return -1;
-    if (fseek(file, 0, SEEK_END) != 0) { fclose(file); return -1; }
-    file_size = ftell(file);
-    if (file_size <= 0 || fseek(file, 0, SEEK_SET) != 0) {
-        fclose(file); return -1;
-    }
-    data = (unsigned char *)malloc((size_t)file_size);
-    if (data == NULL || fread(data, 1, (size_t)file_size, file) !=
-        (size_t)file_size) {
-        free(data); fclose(file); return -1;
-    }
-    fclose(file);
-    magic = (uint32_t)data[0] | ((uint32_t)data[1] << 8) |
-        ((uint32_t)data[2] << 16) | ((uint32_t)data[3] << 24);
-    memset(font, 0, sizeof(*font));
-    font->data = data;
-    font->size = (size_t)file_size;
-    if (data[0] == 0x36 && data[1] == 0x04 && file_size >= 4) {
-        font->width = 8;
-        font->height = data[3];
-        /* PSF1 stores mode at byte 2 and bytes-per-glyph at byte 3. */
-        font->glyph_bytes = data[3];
-        font->glyph_count = (size_t)(data[2] & 1 ? 512 : 256);
-        font->glyph_offset = 4;
-        if (font->glyph_offset + font->glyph_bytes * font->glyph_count >
-            (size_t)file_size)
-            font->glyph_count = ((size_t)file_size - font->glyph_offset) /
-                font->glyph_bytes;
-    } else if (magic == 0x864ab572U && file_size >= 32) {
-        uint32_t header = read_u32(data + 8);
-        uint32_t count = read_u32(data + 16);
-        uint32_t bytes = read_u32(data + 20);
-        font->width = (int)read_u32(data + 28);
-        font->height = (int)read_u32(data + 24);
-        font->glyph_count = count;
-        font->glyph_bytes = bytes;
-        font->glyph_offset = header;
-        if (header < 32 || bytes == 0 || count == 0 ||
-            header + (size_t)bytes * count > (size_t)file_size)
-            { font_free(font); return -1; }
-    } else {
-        font_free(font); return -1;
-    }
-    if (font->width < 1 || font->width > 32 || font->height < 1 ||
-        font->height > 64 || font->glyph_count == 0) {
-        font_free(font); return -1;
-    }
-    font->codepoints = (uint32_t *)malloc(font->glyph_count * sizeof(uint32_t));
-    if (font->codepoints == NULL) { font_free(font); return -1; }
-    for (i = 0; i < 256; ++i) font->ascii_glyph[i] = -1;
-    for (i = 0; i < font->glyph_count; ++i) font->codepoints[i] = (uint32_t)i;
-    if (data[0] == 0x36 && data[1] == 0x04 && (data[2] & 2)) {
-        size_t cursor = font->glyph_offset + font->glyph_bytes * font->glyph_count;
-        size_t glyph = 0;
-        while (cursor + 1 < (size_t)file_size && glyph < font->glyph_count) {
-            uint32_t value = (uint32_t)data[cursor] |
-                ((uint32_t)data[cursor + 1] << 8);
-            cursor += 2;
-            if (value == 0xffffU) {
-                ++glyph;
-            } else if (value != 0xfffeU) {
-                if (!font_add_mapping(font, value, glyph)) {
-                    font_free(font);
-                    return -1;
-                }
-            }
-        }
-    } else if (magic == 0x864ab572U && (read_u32(data + 12) & 1U)) {
-        size_t cursor = font->glyph_offset + font->glyph_bytes * font->glyph_count;
-        size_t glyph = 0;
-        while (cursor < (size_t)file_size && glyph < font->glyph_count) {
-            if (data[cursor] == 0xff) { ++glyph; ++cursor; continue; }
-            if (data[cursor] == 0xfe) { ++cursor; continue; }
-            {
-                uint32_t value;
-                size_t used;
-                if (font_utf8(data + cursor, (size_t)file_size - cursor,
-                              &value, &used)) {
-                    if (!font_add_mapping(font, value, glyph)) {
-                        font_free(font);
-                        return -1;
-                    }
-                    cursor += used;
-                } else ++cursor;
-            }
-        }
-    }
-    for (i = 0; i < font->glyph_count && i < 256; ++i)
-        if (font->ascii_glyph[i] < 0)
-            font->ascii_glyph[i] = (int)i;
-    font_build_lookup(font);
-    return 0;
-}
-
-static size_t glyph_hash(uint32_t codepoint)
-{
-    uint32_t value = codepoint;
-    value ^= value >> 16;
-    value *= 0x7feb352dU;
-    value ^= value >> 15;
-    value *= 0x846ca68bU;
-    value ^= value >> 16;
-    return (size_t)value;
-}
-
-static void font_build_lookup(KmsFont *font)
-{
-    size_t capacity;
-    size_t i;
-
-    if (font == NULL || font->unicode_count == 0)
-        return;
-    capacity = 1;
-    while (capacity < font->unicode_count * 2)
-        capacity <<= 1;
-    font->unicode_lookup = (KmsGlyphMap *)malloc(
-        capacity * sizeof(*font->unicode_lookup));
-    if (font->unicode_lookup == NULL)
-        return;
-    font->unicode_lookup_capacity = capacity;
-    for (i = 0; i < capacity; ++i)
-        font->unicode_lookup[i].codepoint = 0xffffffffU;
-    for (i = 0; i < font->unicode_count; ++i) {
-        size_t slot = glyph_hash(font->unicode_map[i].codepoint) &
-            (capacity - 1);
-        while (font->unicode_lookup[slot].codepoint != 0xffffffffU) {
-            if (font->unicode_lookup[slot].codepoint ==
-                font->unicode_map[i].codepoint)
-                break;
-            slot = (slot + 1) & (capacity - 1);
-        }
-        if (font->unicode_lookup[slot].codepoint == 0xffffffffU)
-            font->unicode_lookup[slot] = font->unicode_map[i];
-    }
-}
-
-static void font_load(KmsFont *font)
-{
-    const char *configured = getenv("BLIT_PSF_FONT");
-    const char *paths[4];
-    int i;
-    paths[0] = configured;
-    paths[1] = "/usr/share/consolefonts/Uni2-Terminus16.psf";
-    paths[2] = "/usr/share/blit/Uni2-Terminus16.psf";
-    paths[3] = "/usr/share/consolefonts/Uni2-Fixed16.psf";
-    for (i = 0; i < 4; ++i)
-        if (paths[i] != NULL && font_load_file(font, paths[i]) == 0) {
-            fprintf(stderr, "blit: KMS font=%s size=%dx%d glyphs=%lu mappings=%lu\n",
-                    paths[i], font->width, font->height,
-                    (unsigned long)font->glyph_count,
-                    (unsigned long)font->unicode_count);
-            return;
-        }
-    fprintf(stderr, "blit: KMS font unavailable; using built-in fallback\n");
-}
-
-static size_t font_glyph_index(const KmsFont *font, uint32_t codepoint)
-{
-    size_t i;
-    if (font == NULL || font->glyph_count == 0) return 0;
-    if (codepoint < 256 && font->ascii_glyph[codepoint] >= 0) {
-        return (size_t)font->ascii_glyph[codepoint];
-    }
-    if (font->unicode_lookup != NULL) {
-        size_t slot = glyph_hash(codepoint) &
-            (font->unicode_lookup_capacity - 1);
-        while (font->unicode_lookup[slot].codepoint != 0xffffffffU) {
-            if (font->unicode_lookup[slot].codepoint == codepoint)
-                return font->unicode_lookup[slot].glyph;
-            slot = (slot + 1) & (font->unicode_lookup_capacity - 1);
-        }
-    } else if (font->unicode_map != NULL) {
-        for (i = 0; i < font->unicode_count; ++i)
-            if (font->unicode_map[i].codepoint == codepoint) {
-                return font->unicode_map[i].glyph;
-            }
-    }
-    for (i = 0; i < font->glyph_count; ++i)
-        if (font->codepoints[i] == codepoint) break;
-    if (i == font->glyph_count) i = codepoint < font->glyph_count ? codepoint : 0;
-    return i;
-}
-
-static int font_pixel_glyph(const KmsFont *font, size_t glyph, int row, int col)
-{
-    size_t row_bytes;
-    if (font == NULL || font->data == NULL || glyph >= font->glyph_count ||
-        row < 0 || col < 0 || row >= font->height || col >= font->width)
-        return 0;
-    row_bytes = (size_t)((font->width + 7) / 8);
-    return (font->data[font->glyph_offset + glyph * font->glyph_bytes +
-                       row * row_bytes + col / 8] & (0x80 >> (col % 8))) != 0;
-}
-
-static int glyph_bit(unsigned int codepoint, int row, int column);
-
 static uint32_t view_cell_background(const BlitKmsSurfaceView *view,
                                      int index)
 {
@@ -512,7 +223,7 @@ static uint32_t view_cell_background(const BlitKmsSurfaceView *view,
     return bg;
 }
 
-static void draw_glyph(KmsOutput *output, const KmsFont *font,
+static void draw_glyph(KmsOutput *output, const BlitFont *font,
                        uint32_t codepoint, int x, int y, int cw, int ch,
                        uint32_t color)
 {
@@ -520,83 +231,25 @@ static void draw_glyph(KmsOutput *output, const KmsFont *font,
     int glyph_column;
     int font_width = font != NULL && font->data ? font->width : 5;
     int font_height = font != NULL && font->data ? font->height : 7;
-    size_t glyph = font != NULL && font->data ?
-        font_glyph_index(font, codepoint) : 0;
-
     for (glyph_row = 0; glyph_row < ch; ++glyph_row) {
         uint32_t *pixels;
         int py = y + glyph_row;
         int source_row = glyph_row * font_height / ch;
-        unsigned int row_bits = 0;
-        size_t row_bytes = 0;
         if (py < 0 || py >= output->mode.vdisplay) continue;
         if (source_row < 0 || source_row >= font_height) continue;
-        if (font != NULL && font->data) {
-            row_bytes = (size_t)((font->width + 7) / 8);
-            if (row_bytes == 1)
-                row_bits = font->data[font->glyph_offset +
-                    glyph * font->glyph_bytes + source_row];
-        }
         pixels = (uint32_t *)((unsigned char *)output->back.map +
                               py * output->back.pitch);
-        for (glyph_column = 0; glyph_column < cw;
-             ++glyph_column) {
+        for (glyph_column = 0; glyph_column < cw; ++glyph_column) {
             int source_column = glyph_column * font_width / cw;
             int px = x + glyph_column;
-            int set;
-            if (font != NULL && font->data && row_bytes == 1)
-                set = (row_bits & (0x80U >> source_column)) != 0;
-            else if (font != NULL && font->data)
-                set = font_pixel_glyph(font, glyph, source_row,
-                                       source_column);
-            else
-                set = glyph_bit(codepoint, source_row, source_column);
-            if (set && px >= 0 && px < output->mode.hdisplay)
+            if (blit_font_pixel(font, codepoint, source_row, source_column) &&
+                px >= 0 && px < output->mode.hdisplay)
                 pixels[px] = color;
         }
     }
 }
 
-/* Deliberately small built-in glyphs keep the first KMS backend dependency-free.
-   The terminal state is owned by blit_server; a font provider will replace this
-   rasterizer without changing the KMS contract. */
-static int glyph_bit(unsigned int codepoint, int row, int column)
-{
-    static const unsigned char digits[10][7] = {
-        {14,17,19,21,25,17,14},{4,12,4,4,4,4,14},
-        {14,17,1,2,4,8,31},{30,1,1,14,1,1,30},
-        {2,6,10,18,31,2,2},{31,16,16,30,1,1,30},
-        {14,16,16,30,17,17,14},{31,1,2,4,8,8,8},
-        {14,17,17,14,17,17,14},{14,17,17,15,1,1,14}
-    };
-    static const unsigned char letters[26][7] = {
-        {14,17,17,31,17,17,17},{30,17,17,30,17,17,30},
-        {14,17,16,16,16,17,14},{30,17,17,17,17,17,30},
-        {31,16,16,30,16,16,31},{31,16,16,30,16,16,16},
-        {14,17,16,23,17,17,14},{17,17,17,31,17,17,17},
-        {14,4,4,4,4,4,14},{7,2,2,2,18,18,12},
-        {17,18,20,24,20,18,17},{16,16,16,16,16,16,31},
-        {17,27,21,21,17,17,17},{17,25,21,19,17,17,17},
-        {14,17,17,17,17,17,14},{30,17,17,30,16,16,16},
-        {14,17,17,17,21,18,13},{30,17,17,30,20,18,17},
-        {15,16,16,14,1,1,30},{31,4,4,4,4,4,4},
-        {17,17,17,17,17,17,14},{17,17,17,17,17,10,4},
-        {17,17,17,21,21,27,17},{17,17,10,4,10,17,17},
-        {17,17,10,4,4,4,4},{31,1,2,4,8,16,31}
-    };
-    if (codepoint >= '0' && codepoint <= '9' && row < 7)
-        return (digits[codepoint - '0'][row] >> (4 - column)) & 1;
-    if (codepoint >= 'A' && codepoint <= 'Z' && row < 7)
-        return (letters[codepoint - 'A'][row] >> (4 - column)) & 1;
-    if (codepoint >= 'a' && codepoint <= 'z' && row < 7)
-        return (letters[codepoint - 'a'][row] >> (4 - column)) & 1;
-    if (codepoint == '.' && row == 6 && column == 2) return 1;
-    if (codepoint == ':' && (row == 2 || row == 5) && column == 2) return 1;
-    if (codepoint == '-' && row == 3 && column >= 1 && column <= 3) return 1;
-    return 0;
-}
-
-static void draw_view(KmsOutput *output, const KmsFont *font,
+static void draw_view(KmsOutput *output, const BlitFont *font,
                       const BlitKmsSurfaceView *view)
 {
     int row;
@@ -958,10 +611,10 @@ static int all_outputs_have_content(const BlitKms *kms,
     return 1;
 }
 
-BlitKms *blit_kms_new(void)
+BlitKms *blit_kms_new(BlitFont *font)
 {
     BlitKms *kms = (BlitKms *)calloc(1, sizeof(BlitKms));
-    if (kms != NULL) kms->fd = -1;
+    if (kms != NULL) { kms->fd = -1; kms->font = font; }
     return kms;
 }
 
@@ -975,7 +628,6 @@ int blit_kms_open(BlitKms *kms, char *error, size_t error_capacity)
     kms->fd = open(getenv("BLIT_DRM_DEVICE") ? getenv("BLIT_DRM_DEVICE") :
                    "/dev/dri/card0", O_RDWR | O_CLOEXEC);
     if (kms->fd < 0) { set_error(error, error_capacity, strerror(errno)); return -1; }
-    font_load(&kms->font);
     {
         const char *screenshot_dir = getenv("BLIT_KMS_SCREENSHOT_DIR");
         const char *screenshot_after = getenv("BLIT_KMS_SCREENSHOT_AFTER");
@@ -1101,12 +753,12 @@ int blit_kms_cell_width(const BlitKms *kms)
 {
     if (kms != NULL && kms->cell_width_override > 0)
         return kms->cell_width_override;
-    return kms != NULL && kms->font.width > 0 ? kms->font.width : KMS_FONT_W;
+    return kms != NULL ? blit_font_width(kms->font) : KMS_FONT_W;
 }
 
 int blit_kms_cell_height(const BlitKms *kms)
 {
-    return kms != NULL && kms->font.height > 0 ? kms->font.height : KMS_FONT_H;
+    return kms != NULL ? blit_font_height(kms->font) : KMS_FONT_H;
 }
 
 int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_count,
@@ -1255,7 +907,7 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                 }
                 if (full_redraw)
                     draw.damage_valid = 0;
-                draw_view(output, kms != NULL ? &kms->font : NULL,
+                draw_view(output, kms != NULL ? kms->font : NULL,
                           &draw);
             }
         if (pointer_visible && pointer_x >= output->info.x &&
@@ -1361,6 +1013,5 @@ void blit_kms_close(BlitKms *kms)
         free_buffer(kms->fd, &output->back);
     }
     if (kms->fd >= 0) close(kms->fd);
-    font_free(&kms->font);
     free(kms);
 }

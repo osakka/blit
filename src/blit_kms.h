@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "blit_font.h"
+
 typedef struct BlitKms BlitKms;
 
 typedef struct {
@@ -48,7 +50,7 @@ typedef struct {
     double refresh_hz;
 } BlitKmsDisplayInfo;
 
-BlitKms *blit_kms_new(void);
+BlitKms *blit_kms_new(BlitFont *font);
 int blit_kms_open(BlitKms *kms, char *error, size_t error_capacity);
 int blit_kms_display_count(const BlitKms *kms);
 int blit_kms_display_info(const BlitKms *kms, int index,
