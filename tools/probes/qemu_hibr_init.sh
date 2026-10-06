@@ -237,6 +237,8 @@ if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
         $b grep -q 'evdev mouse disappeared:' /tmp/blit.log || loss_pass=0
         $b grep -q 'evdev keyboard reconnected:' /tmp/blit.log || loss_pass=0
         $b grep -q 'evdev mouse reconnected:' /tmp/blit.log || loss_pass=0
+        $b grep -q '"code":"input_device_lost"' /tmp/stream-input.log || loss_pass=0
+        $b grep -q '"code":"input_device_reconnected"' /tmp/stream-input.log || loss_pass=0
         if [ "$loss_pass" -eq 1 ]; then
             echo BLIT_INPUT_DEVICE_LOSS_PASS
         else

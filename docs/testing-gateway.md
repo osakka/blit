@@ -345,6 +345,8 @@ new route when hardware returns. The QEMU input gate exercises descriptor
 removal with `blit.input_loss=1`; QEMU's surviving baseline devices verify
 that aggregate routes remain enabled until the final device disappears, and
 the fixture recreates the synthetic devices to verify bounded re-enumeration.
+The same run subscribes the WebSocket probe to diagnostics and requires
+sequenced `input_device_lost` and `input_device_reconnected` events.
 
 ## Exercise the stream upgrade
 

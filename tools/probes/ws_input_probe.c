@@ -81,7 +81,7 @@ int main(void)
         if (used >= 4 && strstr(headers + used - 4, "\r\n\r\n") != NULL)
             break;
     }
-    if (!send_text(fd, "{\"type\":\"subscribe\",\"subscriptions\":[\"input\"]}"))
+    if (!send_text(fd, "{\"type\":\"subscribe\",\"subscriptions\":[\"input\",\"diagnostics\"]}"))
         return 1;
     while (time(NULL) < deadline) {
         int ready;

@@ -4767,6 +4767,26 @@ static void broadcast_stream(BlitRuntime *runtime, const char *message,
     }
 }
 
+static void broadcast_input_diagnostic(BlitRuntime *runtime,
+                                       const char *severity,
+                                       const char *code,
+                                       const char *device_id,
+                                       const char *path,
+                                       int active_devices)
+{
+    char escaped_path[256];
+    char event[768];
+
+    json_escape(path, escaped_path, sizeof(escaped_path));
+    snprintf(event, sizeof(event),
+             "{\"type\":\"diagnostic\",\"severity\":\"%s\","
+             "\"code\":\"%s\",\"detail\":\"evdev device state changed\","
+             "\"resource_id\":\"%s\",\"path\":\"%s\","
+             "\"active_devices\":%d}", severity, code, device_id,
+             escaped_path, active_devices);
+    broadcast_stream(runtime, event, BLIT_STREAM_DIAGNOSTICS);
+}
+
 static void replay_stream(BlitRuntime *runtime, int fd,
                           unsigned long long since)
 {
@@ -5970,6 +5990,13 @@ static int evdev_path_open(const int *fds, char paths[][128], int count,
     return 0;
 }
 
+static void broadcast_input_diagnostic(BlitRuntime *runtime,
+                                       const char *severity,
+                                       const char *code,
+                                       const char *device_id,
+                                       const char *path,
+                                       int active_devices);
+
 static void reconnect_evdev_devices(BlitRuntime *runtime)
 {
     uint64_t now = SDL_GetTicks();
@@ -5994,6 +6021,10 @@ static void reconnect_evdev_devices(BlitRuntime *runtime)
                 runtime->evdev_mouse_reported[slot] = 0;
                 fprintf(stderr, "blit: evdev mouse reconnected: %s fd=%d\n",
                         path, fd);
+                broadcast_input_diagnostic(runtime, "info",
+                                            "input_device_reconnected",
+                                            "evdev-pointer", path,
+                                            runtime->evdev_mouse_count);
                 fd = -1;
             }
             if (fd >= 0) close(fd);
@@ -6010,6 +6041,10 @@ static void reconnect_evdev_devices(BlitRuntime *runtime)
                 runtime->evdev_keyboard_reported[slot] = 0;
                 fprintf(stderr, "blit: evdev keyboard reconnected: %s fd=%d\n",
                         path, fd);
+                broadcast_input_diagnostic(runtime, "info",
+                                            "input_device_reconnected",
+                                            "evdev-keyboard", path,
+                                            runtime->evdev_keyboard_count);
                 fd = -1;
             }
             if (fd >= 0) close(fd);
@@ -6956,6 +6991,10 @@ static void service_evdev_mouse(BlitRuntime *runtime)
         if (device_lost) {
             fprintf(stderr, "blit: evdev mouse disappeared: %s\n",
                     runtime->evdev_mouse_paths[device_index]);
+            broadcast_input_diagnostic(runtime, "warning", "input_device_lost",
+                                        "evdev-pointer",
+                                        runtime->evdev_mouse_paths[device_index],
+                                        runtime->evdev_mouse_count - 1);
             remove_evdev_mouse(runtime, device_index);
             --device_index;
         }
@@ -7162,6 +7201,10 @@ static void service_evdev_keyboard(BlitRuntime *runtime)
         if (device_lost) {
             fprintf(stderr, "blit: evdev keyboard disappeared: %s\n",
                     runtime->evdev_keyboard_paths[device_index]);
+            broadcast_input_diagnostic(runtime, "warning", "input_device_lost",
+                                        "evdev-keyboard",
+                                        runtime->evdev_keyboard_paths[device_index],
+                                        runtime->evdev_keyboard_count - 1);
             remove_evdev_keyboard(runtime, device_index);
             --device_index;
         }
