@@ -62,10 +62,12 @@ automated and hardware acceptance criteria pass.
   without corrupting unrelated panes.
 - `BLIT-DISPLAY-005`: never render one session onto two displays unless the API
   explicitly requests that composition.
-- `BLIT-DISPLAY-006`: schedule each active output against its selected mode's
-  refresh rate; Blit must not intentionally present below that rate under
-  sustained damage or pointer motion, and one slow output must not throttle a
-  faster output.
+- `BLIT-DISPLAY-006`: this is a hard timing invariant: schedule each active
+  output at its selected mode's maximum supported refresh rate. Blit must not
+  intentionally present below that rate under sustained damage or pointer
+  motion, and one slow output must not throttle a faster output. Rendering may
+  prepare frames faster internally, but visible presentation remains bounded
+  by the output's physical page-flip/vblank cadence.
 
 ### Terminal and Hibr
 

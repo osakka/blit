@@ -105,10 +105,10 @@ cell in both axes; it does not merely enlarge the cell while leaving an
 unscaled glyph in its upper-left corner.
 
 The production launcher selects the bundled Unicode Terminus PSF font and the
-server logs the selected font dimensions and glyph count. Presentation is
-refresh-aware: each active output must schedule independently from its
-selected mode refresh, and no configured render interval may intentionally
-under-run that cadence. `BLIT_RENDER_INTERVAL_MS` remains a diagnostic
+server logs the selected font dimensions and glyph count. Presentation is a
+hard refresh invariant: each active output must schedule independently at the
+maximum refresh supported by its selected mode, and no configured render
+interval may intentionally under-run that cadence. `BLIT_RENDER_INTERVAL_MS` remains a diagnostic
 override for measuring a hardware trade-off, but the production scheduler
 must clamp it so it cannot lower an output below its mode refresh. Set
 `BLIT_KMS_TRACE_TIMING=1` to log measured KMS frame durations. The KMS path

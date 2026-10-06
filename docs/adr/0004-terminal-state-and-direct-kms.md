@@ -33,12 +33,13 @@ terminal state machine, one font backend, and one atomic frame submission. It
 will be extended to joined displays only after that slice has deterministic
 input, resize, damage, cursor, and recovery behavior.
 
-Presentation cadence is refresh-aware. Each active output has an independent
-deadline derived from its selected display mode's refresh rate. Blit must not
-impose a lower frame-rate cap than that mode. Rendering faster than the mode
-is permitted only as internal preparation; visible presentation remains
-bounded by the output's page-flip/vblank constraints. A slower output must not
-throttle a faster output.
+Presentation cadence is refresh-aware and is a hard product invariant. Each
+active output has an independent deadline derived from the maximum refresh
+supported by its selected display mode. Blit must not impose a lower
+frame-rate cap than that mode. Rendering faster than the mode is permitted
+only as internal preparation; visible presentation remains bounded by the
+output's page-flip/vblank constraints. A slower output must not throttle a
+faster output.
 
 ## Hibr boundary
 
