@@ -17,6 +17,7 @@
 #include <sys/ioctl.h>
 #include <sys/select.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -807,6 +808,127 @@ static void send_http(int fd, int status, const char *reason,
         send_all(fd, header, (size_t)header_length);
         send_all(fd, body, body_length);
     }
+}
+
+static void send_http_bytes(int fd, int status, const char *reason,
+                            const char *content_type,
+                            const unsigned char *body, size_t length)
+{
+    char header[512];
+    int header_length = snprintf(
+        header, sizeof(header),
+        "HTTP/1.1 %d %s\r\n"
+        "Content-Type: %s\r\n"
+        "Content-Length: %lu\r\n"
+        "Connection: close\r\n"
+        "Cache-Control: no-store\r\n\r\n",
+        status, reason, content_type, (unsigned long)length);
+
+    if (header_length > 0 && (size_t)header_length < sizeof(header)) {
+        send_all(fd, header, (size_t)header_length);
+        send_all(fd, body, length);
+    }
+}
+
+static void send_problem(int fd, int status, const char *reason,
+                         const char *code, const char *detail);
+
+static int screenshot_output_index(const BlitRuntime *runtime,
+                                   const char *path)
+{
+    const char *prefix = "/v1/diagnostics/screenshots/";
+    const char *requested;
+    unsigned long long id;
+    int i;
+
+    if (strncmp(path, prefix, strlen(prefix)) != 0)
+        return -1;
+    requested = path + strlen(prefix);
+    if (*requested == '\0' || strchr(requested, '/') != NULL)
+        return -1;
+    id = strtoull(strncmp(requested, "display-", 8) == 0 ?
+                  requested + 8 : requested, NULL, 10);
+    for (i = 0; i < runtime->output_count; ++i)
+        if (runtime->outputs[i].display_id == id)
+            return i;
+    return -1;
+}
+
+static void send_sdl_screenshot(int fd, BlitRuntime *runtime,
+                                const char *path)
+{
+    char temporary[] = "/tmp/blit-api-screenshot-XXXXXX";
+    unsigned char *bytes = NULL;
+    SDL_Surface *pixels;
+    struct stat file_status;
+    int output_index;
+    int temporary_fd;
+    int input_fd;
+    ssize_t received;
+    size_t offset = 0;
+
+    if (runtime->direct_kms || !runtime->sdl_ready) {
+        send_problem(fd, 501, "Not Implemented", "screenshot_backend",
+                     "API screenshots currently require the SDL3 backend.");
+        return;
+    }
+    output_index = screenshot_output_index(runtime, path);
+    if (output_index < 0 || runtime->outputs[output_index].renderer == NULL) {
+        send_problem(fd, 404, "Not Found", "display_not_found",
+                     "The requested display does not exist or has no renderer.");
+        return;
+    }
+    pixels = SDL_RenderReadPixels(runtime->outputs[output_index].renderer, NULL);
+    if (pixels == NULL) {
+        send_problem(fd, 503, "Service Unavailable", "screenshot_failed",
+                     "The SDL renderer could not read the current framebuffer.");
+        return;
+    }
+    temporary_fd = mkstemp(temporary);
+    if (temporary_fd < 0 || !SDL_SaveBMP(pixels, temporary)) {
+        if (temporary_fd >= 0) close(temporary_fd);
+        SDL_DestroySurface(pixels);
+        unlink(temporary);
+        send_problem(fd, 503, "Service Unavailable", "screenshot_failed",
+                     "The framebuffer image could not be encoded.");
+        return;
+    }
+    close(temporary_fd);
+    SDL_DestroySurface(pixels);
+    input_fd = open(temporary, O_RDONLY | O_CLOEXEC);
+    if (input_fd < 0 || fstat(input_fd, &file_status) < 0 ||
+        file_status.st_size <= 0 ||
+        (uintmax_t)file_status.st_size > 64U * 1024U * 1024U) {
+        if (input_fd >= 0) close(input_fd);
+        unlink(temporary);
+        send_problem(fd, 503, "Service Unavailable", "screenshot_failed",
+                     "The encoded framebuffer image could not be read.");
+        return;
+    }
+    bytes = (unsigned char *)malloc((size_t)file_status.st_size);
+    if (bytes == NULL) {
+        close(input_fd);
+        unlink(temporary);
+        send_problem(fd, 503, "Service Unavailable", "screenshot_failed",
+                     "There is not enough memory for the framebuffer image.");
+        return;
+    }
+    while (offset < (size_t)file_status.st_size) {
+        received = read(input_fd, bytes + offset,
+                        (size_t)file_status.st_size - offset);
+        if (received <= 0) break;
+        offset += (size_t)received;
+    }
+    close(input_fd);
+    unlink(temporary);
+    if (offset != (size_t)file_status.st_size) {
+        free(bytes);
+        send_problem(fd, 503, "Service Unavailable", "screenshot_failed",
+                     "The encoded framebuffer image was truncated.");
+        return;
+    }
+    send_http_bytes(fd, 200, "OK", "image/bmp", bytes, offset);
+    free(bytes);
 }
 
 static void json_escape(const char *input, char *output, size_t capacity)
@@ -6360,6 +6482,13 @@ static void handle_request(int fd, BlitRuntime *runtime,
         send_http(fd, 202, "Accepted", "application/json",
                   "{\"state\":\"stopping\",\"detail\":\""
                   "shutdown accepted; cleanup is in progress\"}");
+        return;
+    }
+
+    if (strncmp(path, "/v1/diagnostics/screenshots/",
+                strlen("/v1/diagnostics/screenshots/")) == 0 &&
+        strcmp(method, "GET") == 0) {
+        send_sdl_screenshot(fd, runtime, path);
         return;
     }
 

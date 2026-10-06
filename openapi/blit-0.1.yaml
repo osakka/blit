@@ -128,6 +128,23 @@ paths:
                 $ref: '#/components/schemas/RuntimeDiagnostics'
         default:
           $ref: '#/components/responses/Problem'
+  /v1/diagnostics/screenshots/{display_id}:
+    get:
+      tags: [diagnostics]
+      operationId: captureDisplayScreenshot
+      summary: Capture the current SDL framebuffer for one display
+      parameters:
+        - $ref: '#/components/parameters/DisplayId'
+      responses:
+        '200':
+          description: Current framebuffer encoded as a BMP image
+          content:
+            image/bmp:
+              schema:
+                type: string
+                format: binary
+        default:
+          $ref: '#/components/responses/Problem'
   /v1/control/shutdown:
     post:
       tags: [control]
