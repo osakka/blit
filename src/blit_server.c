@@ -2750,6 +2750,8 @@ static int kitty_decode_chunk(BlitGraphicsImage *image, const char *payload)
     unsigned char quartet[4];
     int quartet_length = image->base64_tail_length;
     size_t offset = 0;
+    if (quartet_length > 0)
+        memcpy(quartet, image->base64_tail, (size_t)quartet_length);
     while (offset < strlen(payload)) {
         int value;
         unsigned char byte = (unsigned char)payload[offset++];
@@ -2793,7 +2795,7 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
     char *separator;
     char action[8];
     int image_id = 0;
-    int format = 32;
+    int format = 0;
     int width = 0;
     int height = 0;
     int more = 0;
@@ -2844,14 +2846,20 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
     }
     if (strcmp(action, "t") != 0 || image_id == 0 || more < 0 || more > 1)
         return;
-    if (!kitty_parameter_int(payload, 'f', 32, &format) ||
-        (format != 24 && format != 32)) return;
-    if (!kitty_parameter_int(payload, 's', 0, &width) ||
-        !kitty_parameter_int(payload, 'v', 0, &height) ||
-        width < 1 || width > BLIT_GRAPHICS_MAX_WIDTH ||
-        height < 1 || height > BLIT_GRAPHICS_MAX_HEIGHT)
+    if (!kitty_parameter_int(payload, 'f', 0, &format) ||
+        !kitty_parameter_int(payload, 's', 0, &width) ||
+        !kitty_parameter_int(payload, 'v', 0, &height))
         return;
     image = graphics_image_find(session, (unsigned int)image_id);
+    if (image != NULL) {
+        if (format == 0) format = image->format;
+        if (width == 0) width = image->width;
+        if (height == 0) height = image->height;
+    }
+    if ((format != 24 && format != 32) || width < 1 ||
+        width > BLIT_GRAPHICS_MAX_WIDTH || height < 1 ||
+        height > BLIT_GRAPHICS_MAX_HEIGHT)
+        return;
     if (image == NULL) {
         for (index = 0; index < BLIT_GRAPHICS_MAX_IMAGES; ++index)
             if (!session->graphics[index].used) {
@@ -6543,9 +6551,14 @@ static void render_sdl_graphics(SDL_Renderer *renderer,
                                 const BlitGraphicsImage *images,
                                 int image_count, float origin_x, float origin_y)
 {
-    int image_index;
-    for (image_index = 0; image_index < image_count; ++image_index) {
-        const BlitGraphicsImage *image = &images[image_index];
+    int drawn[BLIT_GRAPHICS_MAX_IMAGES];
+    int pass;
+    memset(drawn, 0, sizeof(drawn));
+    for (pass = 0; pass < image_count && pass < BLIT_GRAPHICS_MAX_IMAGES;
+         ++pass) {
+        int image_index;
+        int best = -1;
+        const BlitGraphicsImage *image;
         int width;
         int height;
         int source_bytes;
@@ -6555,6 +6568,15 @@ static void render_sdl_graphics(SDL_Renderer *renderer,
         SDL_FRect destination;
         int pixel_index;
 
+        for (image_index = 0; image_index < image_count &&
+             image_index < BLIT_GRAPHICS_MAX_IMAGES; ++image_index)
+            if (!drawn[image_index] && images[image_index].used &&
+                images[image_index].complete && images[image_index].visible &&
+                (best < 0 || images[image_index].z < images[best].z))
+                best = image_index;
+        if (best < 0) break;
+        drawn[best] = 1;
+        image = &images[best];
         if (!image->used || !image->complete || !image->visible ||
             image->pixels == NULL || image->width < 1 || image->height < 1)
             continue;
@@ -7060,9 +7082,18 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan)
                     SDL_RenderFillRect(renderer, &cursor_rect);
                 }
             }
-            render_sdl_graphics(renderer, session->graphics,
-                                BLIT_GRAPHICS_MAX_IMAGES,
-                                surface_origin_x, (float)surface_origin_y);
+            {
+                SDL_Rect graphics_clip;
+                graphics_clip.x = (int)surface_origin_x;
+                graphics_clip.y = surface_origin_y;
+                graphics_clip.w = surface->width * cell_width;
+                graphics_clip.h = surface->height * cell_height;
+                SDL_SetRenderClipRect(renderer, &graphics_clip);
+                render_sdl_graphics(renderer, session->graphics,
+                                    BLIT_GRAPHICS_MAX_IMAGES,
+                                    surface_origin_x, (float)surface_origin_y);
+                SDL_SetRenderClipRect(renderer, NULL);
+            }
         }
         render_sdl_effects(runtime, renderer,
                            runtime->displays[output_index].bounds.w,

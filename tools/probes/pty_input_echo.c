@@ -34,7 +34,8 @@ int main(int argc, char **argv)
     if (focus)
         fputs("\033[?1004h", stdout);
     if (kitty)
-        fputs("\033_Ga=t,f=24,s=1,v=1,i=7;/wAA\033\\"
+        fputs("\033_Ga=t,f=24,s=1,v=1,i=7,m=1;/w\033\\"
+              "\033_Ga=t,i=7,m=0;AA\033\\"
               "\033_Ga=p,i=7;\033\\", stdout);
     fputs("READY", stdout);
     if (wide)
