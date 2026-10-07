@@ -32,6 +32,11 @@ an evidence record, not a claim that the complete product is released.
   --configure` on the local VM. The authorized physical host accepted the
   package through the API, restarted, and reports 0.1.232 ready with no
   runtime errors.
+- The exact 0.1.232 TCC gateway also passed the lifecycle, shutdown,
+  fragmented/back-pressured HTTP, authenticated-network, and authenticated
+  update-cancellation gates. Session deletion completed in 128 ms with
+  responsive diagnostics; unauthenticated requests returned 401, authorized
+  requests returned 200, and unauthorized command creation returned 403.
 - The exact 0.1.232 TCC build passed the 120-second terminal soak with four
   concurrent PTYs, sustained VT/UTF-8 output, 1,460 API snapshots, 133
   revisioned resizes, no runtime errors, no leaked sessions, and 65,996 KiB
