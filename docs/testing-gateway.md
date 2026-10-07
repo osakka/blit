@@ -229,6 +229,17 @@ From the repository root:
 tools/build-tcc.sh build/blit/blit-server
 ```
 
+The stream reconnect/replay gate runs against that exact binary with the
+dummy video backend:
+
+```sh
+BLIT_GATE_PORT=19245 ruby tools/tests/stream_replay_gate.rb
+```
+
+It requires `replay_gap`, replayed `terminal_output`, and the canonical
+`/v1/surfaces/{id}/cells` snapshot repair response after reconnecting with an
+expired cursor.
+
 ## Run locally
 
 The dummy video driver is useful for exercising the network contract without
