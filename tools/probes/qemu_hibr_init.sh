@@ -477,6 +477,18 @@ echo SURFACE3; $b wget -qO- http://127.0.0.1:19191/v1/surfaces/surface-3/cells |
 echo BLIT_LOG; $b cat /tmp/blit.log
 echo HIBR_LOGS; $b find /tmp /root -type f -name '*.log' -exec $b sh -c 'echo --- "$1"; cat "$1"' sh {} \; 2>/dev/null || true
 $b echo GUEST_SCREENSHOTS; $b ls -l /tmp/guest-screenshots 2>/dev/null || true
+$b echo HIBR_TOP_LEFT_PIXELS
+for point in '4 4' '24 24' '32 32'; do
+    px=${point% *}
+    py=${point#* }
+    offset=$((16 + (py * 1024 + px) * 3))
+    for image in /tmp/guest-screenshots/display-*.ppm; do
+        [ -f "$image" ] || continue
+        rgb=$($b dd if="$image" bs=1 skip="$offset" count=3 2>/dev/null |
+            $b od -An -tu1 | $b tr -s ' ' ',' )
+        echo "${image##*/} x=$px y=$py rgb=$rgb"
+    done
+done
 $b cp /tmp/guest-screenshots/display-*.ppm /tmp/host-screenshots/ 2>/dev/null || true
 if [ "$ready" -eq 1 ] && [ "$input_routes_pass" -eq 1 ] && [ "$control_displays_pass" -eq 1 ] && [ "$window_control_pass" -eq 1 ]; then
     echo ACCEPTANCE_PASS
