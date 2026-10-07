@@ -53,7 +53,9 @@ an evidence record, not a claim that the complete product is released.
 - The exact 0.1.217 TCC build passes the two-output KMS pixel gate, the
   four-pane Hibr matrix, and the input-only fixture with
   `blit.input_wait=8`: keypad, multi-mouse, button, wheel, motion, stream, and
-  PTY delivery all pass. Its terminal conformance gate additionally passes
+  PTY delivery all pass. The input-loss variant additionally reports
+  `input_device_lost` diagnostics, retains the configured routes, and passes
+  device-loss/reconnect recovery. Its terminal conformance gate additionally passes
   variation-selector and zero-width-joiner cursor-position vectors, plus the
   Hibr `DT_BIDI`/`HIBR_GFX` defaults and explicit override vectors.
 - Surface and scrollback snapshots preserve complete zero-width UTF-8 cell
