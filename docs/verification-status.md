@@ -63,6 +63,11 @@ an evidence record, not a claim that the complete product is released.
   input stream were exercised during approximately ten seconds of bounded
   UTF-8/VT output. It produced both `BLIT_INPUT_STREAM_PASS` and
   `BLIT_INPUT_RENDER_SOAK_PASS`.
+- The exact 0.1.232 TCC QEMU input-loss fixture passed deterministic evdev
+  fault/reconnect coverage with two KMS outputs: it emitted typed
+  `input_device_lost` diagnostics, retained enabled surviving input routes and
+  ready diagnostics, and produced `BLIT_INPUT_STREAM_PASS` plus
+  `BLIT_INPUT_DEVICE_LOSS_PASS` before powering down cleanly.
 - The exact 0.1.232 TCC build passed the two-output KMS pixel/screenshot gate,
   the four-layout Hibr pane matrix with four running sessions, and the
   one-vCPU input fixture. The input fixture passed keypad bytes, independent
