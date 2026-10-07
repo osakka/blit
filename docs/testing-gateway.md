@@ -149,15 +149,7 @@ tcc -std=c99 tools/probes/ws_input_probe.c -o /tmp/hibr-initroot-current/blit-st
 From the repository root:
 
 ```sh
-mkdir -p build/blit
-tcc -O2 -std=c99 \
-  -Ivendor/SDL3/include \
-  -Ibuild/deps/prefix/include \
-  -Ibuild/deps/prefix/include/libdrm \
-  src/blit_server.c src/blit_kms.c src/blit_font.c \
-  -Lbuild/sdl3-kms -lSDL3 \
-  -Lbuild/deps/prefix/lib/x86_64-linux-gnu -ldrm -lutil \
-  -o build/blit/blit-server
+tools/build-tcc.sh build/blit/blit-server
 ```
 
 ## Run locally

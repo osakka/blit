@@ -22,6 +22,9 @@ an evidence record, not a claim that the complete product is released.
 ## Passing automated evidence
 
 - OpenAPI and TCC build checks pass.
+- The canonical `tools/build-tcc.sh` injects `packaging/VERSION` into the
+  executable; bundle, extracted Debian package, and QEMU KMS runs all report
+  `server_version:0.1.213` with `api_version:0.1`.
 - The stalled-upload gate passes: progress is exposed and authenticated
   cancellation returns 202 without stopping the gateway.
 - Terminal conformance passes, including UTF-8/wide cells, VT controls,

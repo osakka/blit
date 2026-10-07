@@ -458,7 +458,10 @@ static int output_index_for_display_index(const BlitRuntime *runtime,
 
 static volatile sig_atomic_t blit_running = 1;
 static volatile sig_atomic_t blit_restart_requested = 0;
-static char blit_version[64] = "development";
+#ifndef BLIT_BUILD_VERSION
+#define BLIT_BUILD_VERSION "development"
+#endif
+static char blit_version[64] = BLIT_BUILD_VERSION;
 
 static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                            uint32_t output_mask);
