@@ -19,6 +19,10 @@ test -d "$stage/blit-stage/mods"
 cp "$blit_binary" "$stage/blit-stage/blit-server"
 test -x "$stage/blit-stage/blit-server"
 strings "$stage/blit-stage/blit-server" | grep -Fx "$expected_version" >/dev/null
+test -f "$repo_root/assets/fonts/Blit-Hibr-Terminus16.psf"
+mkdir -p "$stage/blit-stage/fonts"
+cp "$repo_root/assets/fonts/Blit-Hibr-Terminus16.psf" \
+    "$stage/blit-stage/fonts/Blit-Hibr-Terminus16.psf"
 
 test -x "$hibr_root/build/hibr"
 test -d "$hibr_root/build/mods"

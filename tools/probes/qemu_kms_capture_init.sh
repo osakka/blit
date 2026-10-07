@@ -31,6 +31,9 @@ export BLIT_KMS_SCREENSHOT_DIR=/tmp/guest-screenshots
 export BLIT_KMS_SCREENSHOT_AFTER=0
 export BLIT_KMS_TRACE_TIMING=1
 export BLIT_KMS_TRACE_PHASES=1
+if [ -f /blit-stage/fonts/Blit-Hibr-Terminus16.psf ]; then
+    export BLIT_PSF_FONT=/blit-stage/fonts/Blit-Hibr-Terminus16.psf
+fi
 if [ -e /dev/dri/card1 ]; then export BLIT_DRM_DEVICE=/dev/dri/card1; else export BLIT_DRM_DEVICE=/dev/dri/card0; fi
 loss_test=0
 stack_test=0

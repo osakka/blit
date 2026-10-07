@@ -49,7 +49,9 @@ elif [ -e /dev/dri/card0 ]; then
 else
     export BLIT_DRM_DEVICE=/dev/dri/card0
 fi
-if [ -f /blit-stage/fonts/Lat15-Terminus16.psf ]; then
+if [ -f /blit-stage/fonts/Blit-Hibr-Terminus16.psf ]; then
+    export BLIT_PSF_FONT=/blit-stage/fonts/Blit-Hibr-Terminus16.psf
+elif [ -f /blit-stage/fonts/Lat15-Terminus16.psf ]; then
     export BLIT_PSF_FONT=/blit-stage/fonts/Lat15-Terminus16.psf
 fi
 export TERM=xterm-256color

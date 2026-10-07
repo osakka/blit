@@ -201,7 +201,9 @@ every run, then stages the optional Blit `console-blit.so` provider and
 adapter files for provider-specific probes. It does not modify the Hibr
 checkout. It also rebuilds the repository-owned HTTP, PTY, WebSocket, and
 uinput probe helpers with TCC, preventing stale binaries from entering the
-initramfs. It does not stage or invoke a Blit shell launcher.
+initramfs. It stages the same checked-in Hibr Unicode font used by the Debian
+package, preventing QEMU from silently falling back to a different font. It
+does not stage or invoke a Blit shell launcher.
 
 For the isolated input gate, use the staging helper, then boot the fixture with
 `blit.input_only=1` on the kernel command line:

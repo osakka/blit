@@ -37,6 +37,8 @@ panes, input routing, and diagnostics.
   network API and stream message schemas.
 - [Engineering constitution](engineering-constitution.md) — the project’s
   non-negotiable development constraints.
+- [Development workflow](development-workflow.md) — ADR, testing, evidence,
+  commit, and push cadence for each implementation cycle.
 - [Toolchain baseline](toolchain.md) — the compiler and dependency gates for
   this workspace.
 - [Roadmap](roadmap.md) — the ordered implementation milestones and exit

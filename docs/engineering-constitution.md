@@ -18,6 +18,11 @@ Every important fact has one canonical owner.
 When two representations are necessary, one must be explicitly identified as
 the source and the other as a generated, cached, or projected form.
 
+The repository is also the source of truth for engineering history: a
+behavioral decision belongs in an ADR, an implemented contract belongs in the
+schema and normative documentation, and a validation claim belongs in the
+verification ledger. See [the development workflow](development-workflow.md).
+
 ## 2. No parallel implementations
 
 There is one implementation of each semantic capability. Adapters may expose
@@ -76,3 +81,10 @@ yes to all of these questions:
 
 If the answer is no, the work is not ready to merge; if the issue is a design
 choice rather than an implementation defect, record it as an ADR first.
+
+## 6. Change hygiene
+
+Every coherent implementation cycle is tested, documented, committed, and
+pushed as one traceable unit. The commit contains only intended files and the
+verification ledger names the exact artifact tested. Failed experiments remain
+visible as diagnostics; they are not silently folded into a later success.

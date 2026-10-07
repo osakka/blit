@@ -19,3 +19,7 @@ Pending decisions:
 
 1. Multi-monitor frame atomicity policy.
 2. Terminal encoding, grapheme, and font-rendering policy.
+
+The implementation cadence, evidence requirements, and commit hygiene are
+defined in [the development workflow](../development-workflow.md), not
+duplicated in individual ADRs.

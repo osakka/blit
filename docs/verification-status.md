@@ -17,6 +17,10 @@ an evidence record, not a claim that the complete product is released.
 - The runtime font is a checked-in PSF2 merge of the bundled Terminus font and
   the missing Hibr Unicode desktop glyphs. Its required glyph manifest is
   validated by `tools/build-hibr-font.py` before packaging.
+- The exact 0.1.225 TCC binary passed the two-output VKMS/KMS capture gate and
+  the Hibr pane matrix with one primary plus three `--join` clients. The same
+  staged fixture reports the merged font, two ready DRM outputs, refresh-aware
+  16 ms scheduling, and `KMS_CAPTURE_PASS`/`HIBR_PANE_MATRIX_PASS`.
 - SDL pointer-only presentation now reuses a per-output scene cache instead of
   forcing a full terminal rasterization on every pointer motion. Runtime
   diagnostics expose pointer-cache hits and misses.
