@@ -266,6 +266,12 @@ The latest reachable observation of the authorized host at
   deadlines, a 17.348 ms maximum event-loop gap, and a 0.076 ms maximum
   evdev scan. The session was deleted after sampling and resources returned
   to zero.
+- A live-host logical-pane check temporarily changed the single output to a
+  2×2 topology, attached four API-created PTYs, and observed four running
+  sessions with a healthy runtime and zero missed deadlines. The topology was
+  restored to 1×1 and sessions, surfaces, streams, and routes returned to
+  zero. This validates logical pane orchestration, not physical multi-monitor
+  behavior.
 
 ## Open release gates
 
