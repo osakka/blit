@@ -187,6 +187,30 @@ rescue StandardError => error
   raise
 end
 
+api_cell_created = request(base, 'POST', '/v1/terminal-sessions', {
+  'command' => '/bin/sh',
+  'arguments' => ['-c', 'sleep 1'],
+  'surface' => { 'width' => 8, 'height' => 2 }
+})
+api_cell_id = api_cell_created.fetch('id')
+request(base, 'PUT', "/v1/surfaces/surface-#{api_cell_id}/cells", {
+  'base_revision' => 1,
+  'cells' => [{ 'x' => 0, 'y' => 0, 'text' => "\u{1F600}\u{FE0F}X" }]
+})
+api_cell_snapshot = request(base, 'GET',
+                            "/v1/surfaces/surface-#{api_cell_id}/cells")
+api_cells = cell_map(api_cell_snapshot)
+assert_equal("\u{1F600}\u{FE0F}", api_cells.fetch([0, 0]).fetch('text'),
+             'API wide UTF-8 cell text')
+assert_equal(2, api_cells.fetch([0, 0]).fetch('width'),
+             'API wide UTF-8 cell width')
+assert_equal(0, api_cells.fetch([1, 0]).fetch('width'),
+             'API wide continuation width')
+assert_equal('X', api_cells.fetch([2, 0]).fetch('text'),
+             'API wide UTF-8 following cell')
+request(base, 'DELETE', "/v1/terminal-sessions/#{api_cell_id}")
+puts 'PASS api-wide-utf8-cell-update'
+
 def run_session_field_case(base, name, command, field, expected)
   created = request(base, 'POST', '/v1/terminal-sessions', {
     'command' => '/bin/sh',

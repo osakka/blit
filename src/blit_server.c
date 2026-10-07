@@ -474,6 +474,8 @@ static uint64_t monotonic_us(void);
 static void diagnostics_json(const BlitRuntime *runtime, char *body,
                              size_t capacity);
 static void remove_http_client(BlitRuntime *runtime, int index);
+static void terminal_clear_cell(BlitSurface *surface, int x, int y);
+static void terminal_clear_wide_overlap(BlitSurface *surface, int x, int y);
 static void update_status_json(const BlitRuntime *runtime, char *body,
                                size_t capacity);
 static int update_authorized(const BlitRuntime *runtime, const char *request);
@@ -1995,7 +1997,8 @@ static int unicode_cell_width(uint32_t codepoint)
 }
 
 static int decode_text_cells(const char *text, uint32_t *codepoints,
-                             size_t *count)
+                             unsigned char *widths, uint32_t *combining,
+                             unsigned char *combining_counts, size_t *count)
 {
     size_t offset = 0;
     size_t length = strlen(text);
@@ -2005,15 +2008,29 @@ static int decode_text_cells(const char *text, uint32_t *codepoints,
         size_t consumed;
         uint32_t codepoint;
 
-        if (*count >= BLIT_MAX_CELL_COLS ||
-            !utf8_decode((const unsigned char *)text + offset,
+        if (!utf8_decode((const unsigned char *)text + offset,
                          length - offset, &consumed, &codepoint))
             return 0;
         if (codepoint == '\n' || codepoint == '\r' || codepoint < 0x20 ||
-            codepoint == 0x7f || unicode_cell_width(codepoint) != 1)
+            codepoint == 0x7f)
             return 0;
-        codepoints[*count] = codepoint;
-        ++*count;
+        {
+            int width = unicode_cell_width(codepoint);
+            if (width == 0) {
+                if (*count == 0 ||
+                    combining_counts[*count - 1] >= BLIT_MAX_COMBINING)
+                    return 0;
+                combining[(*count - 1) * BLIT_MAX_COMBINING +
+                          combining_counts[*count - 1]++] = codepoint;
+            } else {
+                if (*count >= BLIT_MAX_CELL_COLS || (width != 1 && width != 2))
+                    return 0;
+                codepoints[*count] = codepoint;
+                widths[*count] = (unsigned char)width;
+                combining_counts[*count] = 0;
+                ++*count;
+            }
+        }
         offset += consumed;
     }
     return *count > 0;
@@ -2223,6 +2240,8 @@ static int surface_snapshot_json(const BlitSurface *surface,
             unsigned combining_count = surface->combining_count[y][x];
             uint16_t attributes = surface->attributes[y][x];
             uint16_t link = surface->links[y][x];
+            int cell_width = (attributes & BLIT_ATTR_CONTINUATION) ? 0 :
+                ((attributes & BLIT_ATTR_WIDE) ? 2 : 1);
             int styled = surface->foreground[y][x] != 0 ||
                 surface->background[y][x] != 0 ||
                 surface->underline_color[y][x] != 0 || attributes != 0;
@@ -2233,8 +2252,8 @@ static int surface_snapshot_json(const BlitSurface *surface,
                            surface->combining[y][x], combining_count);
             json_escape(text, escaped, sizeof(escaped));
             if (!json_appendf(body, capacity, &used,
-                "%s{\"x\":%d,\"y\":%d,\"text\":\"%s\"",
-                first ? "" : ",", x, y, escaped))
+                "%s{\"x\":%d,\"y\":%d,\"width\":%d,\"text\":\"%s\"",
+                first ? "" : ",", x, y, cell_width, escaped))
                 return 0;
             first = 0;
             if (styled) {
@@ -2407,6 +2426,9 @@ static int apply_cell_update(BlitSurface *surface, const char *json)
         int flag;
         int x, y;
         uint32_t decoded[BLIT_MAX_CELL_COLS];
+        unsigned char decoded_widths[BLIT_MAX_CELL_COLS];
+        uint32_t decoded_combining[BLIT_MAX_CELL_COLS * BLIT_MAX_COMBINING];
+        unsigned char decoded_combining_counts[BLIT_MAX_CELL_COLS];
         size_t decoded_count;
         size_t i;
 
@@ -2451,25 +2473,57 @@ static int apply_cell_update(BlitSurface *surface, const char *json)
         }
         if (!style_valid)
             break;
-        if (!decode_text_cells(text, decoded, &decoded_count))
+        memset(decoded_combining_counts, 0, sizeof(decoded_combining_counts));
+        memset(decoded_combining, 0, sizeof(decoded_combining));
+        if (!decode_text_cells(text, decoded, decoded_widths,
+                               decoded_combining, decoded_combining_counts,
+                               &decoded_count))
             break;
         if (x >= 0 && y >= 0 && x < BLIT_MAX_CELL_COLS &&
             y < BLIT_MAX_CELL_ROWS) {
-            for (i = 0; i < decoded_count && x + (int)i < BLIT_MAX_CELL_COLS;
+            int target_x = x;
+            for (i = 0; i < decoded_count && target_x < surface->width;
                  ++i) {
-                surface->codepoints[y][x + i] = decoded[i];
-                surface->cells[y][x + i] = decoded[i] < 0x80 ?
+                int width = decoded_widths[i];
+                if (target_x + width > surface->width)
+                    break;
+                terminal_clear_wide_overlap(surface, target_x, y);
+                terminal_clear_cell(surface, target_x, y);
+                surface->codepoints[y][target_x] = decoded[i];
+                surface->cells[y][target_x] = decoded[i] < 0x80 ?
                     (char)decoded[i] : '?';
+                memcpy(surface->combining[y][target_x],
+                       &decoded_combining[i * BLIT_MAX_COMBINING],
+                       sizeof(surface->combining[y][target_x]));
+                surface->combining_count[y][target_x] =
+                    decoded_combining_counts[i];
+                surface->attributes[y][target_x] =
+                    attributes | (width == 2 ? BLIT_ATTR_WIDE : 0);
                 if (style_seen) {
                     if (foreground_set)
-                        surface->foreground[y][x + i] = foreground + 1;
+                        surface->foreground[y][target_x] = foreground + 1;
                     if (background_set)
-                        surface->background[y][x + i] = background + 1;
+                        surface->background[y][target_x] = background + 1;
                     if (underline_color_set)
-                        surface->underline_color[y][x + i] = underline_color + 1;
-                    surface->attributes[y][x + i] = attributes;
+                        surface->underline_color[y][target_x] = underline_color + 1;
                 }
-                mark_surface_damage(surface, x + (int)i, y);
+                if (width == 2) {
+                    terminal_clear_wide_overlap(surface, target_x + 1, y);
+                    terminal_clear_cell(surface, target_x + 1, y);
+                    surface->attributes[y][target_x + 1] =
+                        BLIT_ATTR_CONTINUATION;
+                    if (style_seen) {
+                        if (foreground_set)
+                            surface->foreground[y][target_x + 1] = foreground + 1;
+                        if (background_set)
+                            surface->background[y][target_x + 1] = background + 1;
+                        if (underline_color_set)
+                            surface->underline_color[y][target_x + 1] =
+                                underline_color + 1;
+                    }
+                }
+                mark_surface_damage_width(surface, target_x, y, width);
+                target_x += width;
             }
             updated += 1;
         }

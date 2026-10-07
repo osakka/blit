@@ -1257,10 +1257,14 @@ components:
           type: array
           items:
             type: object
-            required: [x, y, text]
+            required: [x, y, width, text]
             properties:
               x: {type: integer, minimum: 0}
               y: {type: integer, minimum: 0}
+              width:
+                type: integer
+                enum: [0, 1, 2]
+                description: Physical cell width; zero marks the continuation column of a wide glyph.
               text:
                 type: string
                 minLength: 1
@@ -1326,7 +1330,7 @@ components:
               text:
                 type: string
                 minLength: 1
-                description: UTF-8 text; this version accepts only code points classified as one cell wide.
+                description: UTF-8 text spanning logical cells; wide glyphs occupy two columns and combining marks, joiners, and variation selectors attach to the preceding glyph.
               style: {$ref: '#/components/schemas/CellStyle'}
             additionalProperties: false
         cursor: {$ref: '#/components/schemas/Cursor'}

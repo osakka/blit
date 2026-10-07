@@ -391,13 +391,14 @@ rows, while multi-surface frames conservatively redraw the output. The renderer
 uses deterministic vertical stacking for multiple surfaces on one output and
 SDL3's built-in bitmap text primitive. Cell styles accept six-digit foreground
 and background colors plus bold, dim, underline, and inverse flags; invalid
-colors are rejected. Text is validated as UTF-8 and decoded as one
-non-combining code point per cell; malformed UTF-8 and combining marks are
-rejected until the grapheme policy is expanded. A cell update may also carry a
+colors are rejected. Text is validated as UTF-8 and decoded into logical
+cells; malformed UTF-8 and zero-width sequences without a preceding base
+glyph are rejected. Wide glyphs occupy two physical columns, and combining
+marks, joiners, and variation selectors remain attached to their base cell.
+A cell update may also carry a
 bounded `{x,y,visible}` cursor object; session GET responses report the current
 cursor, and out-of-bounds cursor positions are rejected. The API accepts only
-code points classified as one cell wide; combining and known wide ranges are
-rejected until grapheme shaping is added. PTY-driven cursor movement now
+valid logical cell sequences. PTY-driven cursor movement now
 updates the canonical surface for printable UTF-8 output, CR/LF,
 backspace, tab, and the core ANSI cursor/erase commands `A`, `B`, `C`, `D`,
 `H`, `f`, `J`, and `K`. Output reaching the bottom row scrolls the surface by

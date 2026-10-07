@@ -47,6 +47,9 @@ an evidence record, not a claim that the complete product is released.
   Hibr `DT_BIDI`/`HIBR_GFX` defaults and explicit override vectors.
 - Surface and scrollback snapshots preserve complete zero-width UTF-8 cell
   sequences; a five-extension combining vector and its cursor position pass.
+- Revisioned API cell updates accept wide UTF-8 glyphs and zero-width
+  extensions, expose continuation width metadata, and pass the public API
+  regression vector.
 
 ## Real-host evidence
 
@@ -65,7 +68,7 @@ The authorized host at `192.168.10.54:8080` currently reports:
 ## Open release gates
 
 1. Recover the legacy receiver through the host’s supervised/manual service
-   path, then install and verify `0.1.212`. The currently installed `0.1.210`
+   path, then install and verify `0.1.213`. The currently installed `0.1.210`
    cannot cancel its own stalled upload, so the new cancellation endpoint is
    not yet available on the physical host.
 2. Validate at least one physical multi-monitor arrangement, including
