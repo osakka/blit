@@ -424,6 +424,12 @@ typedef struct {
     unsigned long long diagnostic_frames;
     double diagnostic_last_frame_gap_ms;
     double diagnostic_max_frame_gap_ms;
+    uint64_t diagnostic_frame_rate_started_us;
+    uint64_t diagnostic_frame_rate_last_us;
+    unsigned long long diagnostic_frame_rate_frames;
+    unsigned long long diagnostic_frame_rate_last_frames;
+    double diagnostic_frame_rate_hz;
+    unsigned long long diagnostic_frame_rate_window_ms;
     double diagnostic_last_render_ms;
     double diagnostic_max_render_ms;
     double diagnostic_last_terminal_ms;
@@ -1140,6 +1146,16 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
     int first;
     int index;
     uint64_t now = monotonic_us();
+    double frame_rate_hz = runtime->diagnostic_frame_rate_hz;
+    unsigned long long frame_rate_age_ms = 0;
+
+    if (runtime->diagnostic_frame_rate_last_us > 0 &&
+        now >= runtime->diagnostic_frame_rate_last_us)
+        frame_rate_age_ms = (now - runtime->diagnostic_frame_rate_last_us) /
+            1000ULL;
+    if (runtime->diagnostic_frame_rate_last_us == 0 ||
+        frame_rate_age_ms > 2000ULL)
+        frame_rate_hz = 0.0;
 
     diagnostics_json(runtime, snapshot, sizeof(snapshot));
     used = (size_t)snprintf(body, capacity,
@@ -1149,7 +1165,9 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"max_render_ms\":%.3f,\"missed_deadlines\":%llu,"
         "\"last_terminal_ms\":%.3f,\"max_terminal_ms\":%.3f,"
         "\"terminal_bytes\":%llu,\"pointer_cache_hits\":%llu,"
-        "\"pointer_cache_misses\":%llu},"
+        "\"pointer_cache_misses\":%llu,\"frame_rate_hz\":%.3f,"
+        "\"frame_rate_frames\":%llu,\"frame_rate_window_ms\":%llu,"
+        "\"frame_rate_age_ms\":%llu},"
         "\"logs\":[",
         snapshot,
         runtime->started_us > 0 && now >= runtime->started_us ?
@@ -1163,7 +1181,9 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         runtime->diagnostic_max_terminal_ms,
         runtime->diagnostic_terminal_bytes,
         runtime->diagnostic_pointer_cache_hits,
-        runtime->diagnostic_pointer_cache_misses);
+        runtime->diagnostic_pointer_cache_misses,
+        frame_rate_hz, runtime->diagnostic_frame_rate_last_frames,
+        runtime->diagnostic_frame_rate_window_ms, frame_rate_age_ms);
     count = runtime->diagnostic_log_count;
     first = 1;
     index = (runtime->diagnostic_log_next - count + BLIT_MAX_RUNTIME_LOGS) %
@@ -8373,6 +8393,24 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             runtime->diagnostic_max_frame_gap_ms = gap;
     }
     ++runtime->diagnostic_frames;
+    if (runtime->diagnostic_frame_rate_started_us == 0)
+        runtime->diagnostic_frame_rate_started_us = diagnostic_render_started;
+    ++runtime->diagnostic_frame_rate_frames;
+    runtime->diagnostic_frame_rate_last_us = diagnostic_render_started;
+    if (diagnostic_render_started >= runtime->diagnostic_frame_rate_started_us &&
+        diagnostic_render_started - runtime->diagnostic_frame_rate_started_us >=
+            500000ULL) {
+        uint64_t elapsed = diagnostic_render_started -
+            runtime->diagnostic_frame_rate_started_us;
+        runtime->diagnostic_frame_rate_hz =
+            (double)runtime->diagnostic_frame_rate_frames * 1000000.0 /
+            (double)elapsed;
+        runtime->diagnostic_frame_rate_window_ms = elapsed / 1000ULL;
+        runtime->diagnostic_frame_rate_last_frames =
+            runtime->diagnostic_frame_rate_frames;
+        runtime->diagnostic_frame_rate_started_us = diagnostic_render_started;
+        runtime->diagnostic_frame_rate_frames = 0;
+    }
 
     if (!runtime->direct_kms) {
         ++runtime->sdl_frame;

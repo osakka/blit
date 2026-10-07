@@ -919,7 +919,7 @@ components:
         snapshot: {$ref: '#/components/schemas/Diagnostics'}
         performance:
           type: object
-          required: [uptime_ms, frames, last_frame_gap_ms, max_frame_gap_ms, last_render_ms, max_render_ms, missed_deadlines, last_terminal_ms, max_terminal_ms, terminal_bytes, pointer_cache_hits, pointer_cache_misses]
+          required: [uptime_ms, frames, last_frame_gap_ms, max_frame_gap_ms, last_render_ms, max_render_ms, missed_deadlines, last_terminal_ms, max_terminal_ms, terminal_bytes, pointer_cache_hits, pointer_cache_misses, frame_rate_hz, frame_rate_frames, frame_rate_window_ms, frame_rate_age_ms]
           properties:
             uptime_ms: {type: integer, minimum: 0}
             frames: {type: integer, minimum: 0}
@@ -933,6 +933,10 @@ components:
             terminal_bytes: {type: integer, minimum: 0}
             pointer_cache_hits: {type: integer, minimum: 0}
             pointer_cache_misses: {type: integer, minimum: 0}
+            frame_rate_hz: {type: number, minimum: 0}
+            frame_rate_frames: {type: integer, minimum: 0}
+            frame_rate_window_ms: {type: integer, minimum: 0}
+            frame_rate_age_ms: {type: integer, minimum: 0}
           additionalProperties: false
         logs:
           type: array

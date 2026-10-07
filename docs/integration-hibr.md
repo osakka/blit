@@ -59,7 +59,7 @@ Create it through the API with a surface sized to the PTY:
 ```sh
 curl --fail --request POST \
   --header 'Content-Type: application/json' \
-  --data '{"command":"/opt/bin/hibr-desktop","display_id":"display-1","surface":{"width":120,"height":40}}' \
+  --data '{"command":"/usr/bin/desktop","arguments":["--session","blit","--name","display-1"],"display_id":"display-1","surface":{"width":120,"height":40}}' \
   http://127.0.0.1:8080/v1/terminal-sessions
 ```
 

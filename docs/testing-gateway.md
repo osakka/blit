@@ -69,12 +69,12 @@ reports the expected server version and `state: "ready"`. Upload only a
 package whose SHA-256 was independently recorded:
 
 ```sh
-sha256sum blit_0.1.232-1_amd64.deb
+sha256sum blit_0.1.234-1_amd64.deb
 curl --fail --request PUT \
   --header 'X-Blit-Update-Token: YOUR_UPDATE_TOKEN' \
   --header 'X-Blit-SHA256: RECORDED_SHA256' \
   --header 'Content-Type: application/vnd.debian.binary-package' \
-  --data-binary @blit_0.1.232-1_amd64.deb \
+  --data-binary @blit_0.1.234-1_amd64.deb \
   http://127.0.0.1:8080/v1/control/update
 ```
 
@@ -88,7 +88,7 @@ the API bearer token, and never retries a rejected credential:
 ```sh
 BLIT_UPDATE_TOKEN_FILE=/secure/path/live-update.token \
   BLIT_AUTH_TOKEN_FILE=/secure/path/live-api.token \
-  tools/deploy/update-live.sh 192.168.10.54 blit_0.1.232-1_amd64.deb
+  tools/deploy/update-live.sh 192.168.10.54 blit_0.1.234-1_amd64.deb
 ```
 
 `BLIT_UPDATE_TOKEN` may be used instead of the update-token file. `thisisatest`
@@ -316,6 +316,20 @@ diagnostics endpoint remains responsive:
 BLIT_GATE_BINARY=build/blit/blit-server \
   tools/tests/session_lifecycle_gate.sh
 ```
+
+The frame-rate gate creates a bounded PTY producer and samples the versioned
+runtime diagnostics endpoint. It requires a completed, nonzero measured frame
+rate and a fresh measurement window; cumulative frame counters alone are not
+treated as a refresh-rate measurement:
+
+```sh
+BLIT_GATE_PORT=19248 ruby tools/tests/frame_rate_gate.rb
+```
+
+The result is exposed by `GET /v1/diagnostics/runtime` under `performance` as
+`frame_rate_hz`, `frame_rate_frames`, `frame_rate_window_ms`, and
+`frame_rate_age_ms`. The rate is measured from presented frames, not inferred
+from the display mode or configured interval.
 
 The shutdown gate verifies that `POST /v1/control/shutdown` acknowledges the
 request and the Blit process exits cleanly:

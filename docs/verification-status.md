@@ -10,7 +10,7 @@ an evidence record, not a claim that the complete product is released.
 - The previous fully validated source build is `0.1.222`, which includes the
   Hibr-compatible Unicode 15.1 width table and regression vectors for
   variation selectors and zero-width joiners.
-- The current TCC source build and turnkey package are `0.1.232`; the complete
+- The current TCC source build and turnkey package are `0.1.234`; the complete
   terminal conformance suite passes with the canonical 16x16 Terminus font.
   The package defaults the Blit service to a UTF-8 locale for Hibr's Unicode
   desktop output.
@@ -177,6 +177,11 @@ an evidence record, not a claim that the complete product is released.
   fresh pane. It emits `HIBR_PRIMARY_RESTART_PASS`,
   `HIBR_JOIN_RECONNECT_PASS`, and `HIBR_PANE_MATRIX_PASS`; Hibr source was
   not modified.
+- The 0.1.234 runtime diagnostics add an explicit measured presentation-rate
+  window to `/v1/diagnostics/runtime`: `frame_rate_hz`,
+  `frame_rate_frames`, `frame_rate_window_ms`, and `frame_rate_age_ms`. The
+  local TCC frame-rate gate passes at 43.432 Hz with a 506 ms window while a
+  continuous PTY producer is active.
 - Surface and scrollback snapshots preserve complete zero-width UTF-8 cell
   sequences; a five-extension combining vector and its cursor position pass.
 - Revisioned API cell updates accept wide UTF-8 glyphs and zero-width
@@ -188,7 +193,7 @@ an evidence record, not a claim that the complete product is released.
 The latest reachable observation of the authorized host at
 `192.168.10.54:8080` reported:
 
-- Blit `0.1.232`, healthy SDL3/OpenGL presentation, reached through the
+- Blit `0.1.234`, healthy SDL3/OpenGL presentation, reached through the
   versioned TCP API.
 - One physical output, `DP-1`, active at 1920×2160 and 59.99 Hz.
 - A fresh API-created PTY session reached `running`, emitted `BLIT_BASH_OK`,
@@ -204,6 +209,12 @@ The latest reachable observation of the authorized host at
   bytes and no pending damage afterward. This is local/QEMU-style evidence,
   not a claim about a physical multi-display arrangement, which this host
   currently does not expose.
+- On the same host, the installed Hibr desktop through the 0.1.234 API
+  measured approximately 0.95–1.95 Hz in successive completed windows, then
+  became stale for several seconds. Last render times were approximately
+  0.6–1.3 ms, while `missed_deadlines` reached 63. This is measured observed
+  behavior, not a claim that the Hibr desktop should be limited to 1 Hz; the
+  presentation/scheduling path is an open host-side defect.
 
 ## Open release gates
 
