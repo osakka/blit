@@ -7,15 +7,16 @@ an evidence record, not a claim that the complete product is released.
 
 - Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The current uncommitted candidate is `0.1.241`. It builds with TCC and
-  passes terminal conformance and the SDL screenshot/overlay pixel gate. Its
-  SDL backend now uses a per-output glyph atlas and suppresses unchanged-cell
-  damage. The dummy frame gate measured 43.861 Hz during its bounded PTY
-  workload; the same gate most recently measured 44.634 Hz; a separate
-  240×135 full-screen wallpaper workload measured a
+- The current candidate is `0.1.242`. It builds with TCC and passes terminal
+  conformance, SDL screenshot/overlay pixels, and the hidden-cursor damage
+  gate. Its SDL backend uses a per-output glyph atlas, suppresses unchanged
+  cell damage, and does not schedule frames for hidden cursor movement. The
+  dummy frame gate measured 42.898 Hz during its bounded PTY workload; that is
+  a software-dummy result, not a physical refresh-rate claim. A bounded
+  wallpaper workload on the prior source-equivalent 0.1.241 build measured
   26.865 ms maximum full render and 61.387 Hz over its active 504 ms window.
-  This candidate is not yet packaged or physically deployed, so these results
-  do not replace the validated 0.1.240 package evidence below.
+  Physical deployment and the required KMS/QEMU acceptance remain pending for
+  this candidate.
 - The previous fully validated source build is `0.1.222`, which includes the
   Hibr-compatible Unicode 15.1 width table and regression vectors for
   variation selectors and zero-width joiners.

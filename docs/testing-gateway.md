@@ -344,6 +344,13 @@ treated as a refresh-rate measurement:
 BLIT_GATE_PORT=19248 ruby tools/tests/frame_rate_gate.rb
 ```
 
+The hidden-cursor damage gate verifies that repeated VT cursor addressing with
+the cursor disabled does not schedule presentation frames:
+
+```sh
+ruby tools/tests/hidden_cursor_damage_gate.rb
+```
+
 The result is exposed by `GET /v1/diagnostics/runtime` under `performance` as
 `frame_rate_hz`, `frame_rate_frames`, `frame_rate_window_ms`, and
 `frame_rate_age_ms`. The same object includes `loop_iterations`,
