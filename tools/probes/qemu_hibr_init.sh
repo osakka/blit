@@ -82,6 +82,10 @@ if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
     /blit-stage/emit-uinput >/tmp/uinput.log 2>&1 &
     emit_pid=$!
     echo INPUT_EMITTER_PID=$emit_pid
+    # uinput creates the keyboard and both synthetic mice asynchronously.
+    # Let all device nodes settle before Blit performs its initial scan; the
+    # runtime still retains reconnect scanning for hotplug after startup.
+    $b sleep 1
     if [ "${BLIT_INPUT_LOSS_TEST:-0}" = 1 ]; then
         (
             $b sleep 14
