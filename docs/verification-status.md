@@ -37,6 +37,9 @@ an evidence record, not a claim that the complete product is released.
   revisioned resizes, no runtime errors, no leaked sessions, and 65,996 KiB
   peak RSS. The reusable gate is
   `tools/tests/terminal_soak_gate.rb`.
+- The same exact build additionally passed a 600-second run of that gate with
+  four concurrent PTYs, 7,300 API snapshots, 664 revisioned resizes, no
+  runtime errors, no leaked sessions, and 65,984 KiB peak RSS.
 - The exact 0.1.232 TCC build passed the two-output KMS pixel/screenshot gate,
   the four-layout Hibr pane matrix with four running sessions, and the
   one-vCPU input fixture. The input fixture passed keypad bytes, independent
