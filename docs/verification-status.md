@@ -36,10 +36,11 @@ an evidence record, not a claim that the complete product is released.
 - The Hibr fixture passes primary plus `--join` sessions, all four logical
   pane layouts, Hibr display/window control, focus, resize, input routes,
   keyboard, pointer, multi-mouse, and WebSocket input checks.
-- The exact 0.1.212 TCC build passes the two-output KMS pixel gate, default
+- The exact 0.1.213 TCC build passes the two-output KMS pixel gate, default
   Hibr acceptance, the four-pane Hibr matrix, and the input-only fixture with
   `blit.input_wait=8`: keypad, multi-mouse, button, wheel, motion, stream, and
-  PTY delivery all pass.
+  PTY delivery all pass. Its terminal conformance gate additionally passes
+  variation-selector and zero-width-joiner cursor-position vectors.
 
 ## Real-host evidence
 
