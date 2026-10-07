@@ -16,6 +16,7 @@ Accepted decisions:
 6. [Display refresh is an output invariant](0006-display-refresh-invariant.md).
 7. [PTY UTF-8 boundaries and Hibr font coverage](0007-terminal-utf8-and-hibr-font-boundary.md).
 8. [API-supervised package lifecycle](0008-api-supervised-package-lifecycle.md).
+9. [Compiled runtime version identity](0009-compiled-runtime-version-identity.md).
 
 Pending decisions:
 

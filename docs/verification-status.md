@@ -24,9 +24,13 @@ an evidence record, not a claim that the complete product is released.
 - The exact 0.1.232 TCC build passes the fragmented-UTF-8 vector and a
   controlled Hibr API launch with zero visible question-mark cells. The parser
   retains valid UTF-8 prefixes across PTY reads instead of replacing them.
+- The version identity gate also passes when the host contains an older
+  installed Blit package: a freshly built 0.1.232 binary reports 0.1.232
+  through both version endpoints. Runtime identity comes from the compiled
+  binary, not from stale host documentation metadata.
 - The Debian artifact built from the current implementation is
   `blit_0.1.232-1_amd64.deb`, SHA-256
-  `d411b975f8d4e494afe67b2f0fbb29b4f96a010b41723f89701489ba279a19aa`.
+  `e6b4e85c56d4761560dd9cd4f7afd8f62fdda564bae3d9c20c004b1b0909c59b`.
 - The exact 0.1.232 update supervisor passed cancellation and idle-timeout
   gates. The package installs through real `dpkg --unpack` and `dpkg
   --configure` on the local VM. The authorized physical host accepted the

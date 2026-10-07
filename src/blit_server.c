@@ -10115,27 +10115,6 @@ static void service_http_client(BlitRuntime *runtime, int index)
     remove_http_client(runtime, index);
 }
 
-static void load_server_version(void)
-{
-    const char *environment_version = getenv("BLIT_VERSION");
-    FILE *version_file;
-    char line[sizeof(blit_version)];
-
-    if (environment_version != NULL && environment_version[0] != '\0') {
-        snprintf(blit_version, sizeof(blit_version), "%s", environment_version);
-        return;
-    }
-    version_file = fopen("/usr/share/doc/blit/VERSION", "r");
-    if (version_file == NULL)
-        return;
-    if (fgets(line, sizeof(line), version_file) != NULL) {
-        line[strcspn(line, "\r\n")] = '\0';
-        if (line[0] != '\0')
-            snprintf(blit_version, sizeof(blit_version), "%s", line);
-    }
-    fclose(version_file);
-}
-
 int main(int argc, char **argv)
 {
     int port = 8080;
@@ -10150,7 +10129,6 @@ int main(int argc, char **argv)
         fprintf(stderr, "usage: %s [port]\n", argv[0]);
         return 2;
     }
-    load_server_version();
     if (bind_address == NULL || bind_address[0] == '\0')
         bind_address = "0.0.0.0";
     memset(&runtime, 0, sizeof(runtime));
