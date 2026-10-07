@@ -90,6 +90,9 @@ combining marks, joiners, and variation selectors attach to the preceding
 cell at width zero, while East Asian wide/full-width characters occupy two
 cells. This is deliberately table-driven; broad guessed ranges are not
 compatible with Hibr's wrapping contract.
+Surface and scrollback snapshots serialize the complete UTF-8 cell sequence,
+not only its base codepoint, so API consumers retain the same combining data
+that the renderer receives.
 
 Writing or erasing either half of a wide cell first invalidates the complete
 wide glyph, including its continuation cell. This keeps the canonical grid

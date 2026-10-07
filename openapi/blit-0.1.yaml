@@ -1261,7 +1261,10 @@ components:
             properties:
               x: {type: integer, minimum: 0}
               y: {type: integer, minimum: 0}
-              text: {type: string, minLength: 1}
+              text:
+                type: string
+                minLength: 1
+                description: Complete UTF-8 cell sequence, including combining marks, joiners, and variation selectors.
               link:
                 type: string
                 description: URI from the active OSC 8 hyperlink, when present.

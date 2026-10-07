@@ -45,6 +45,8 @@ an evidence record, not a claim that the complete product is released.
   PTY delivery all pass. Its terminal conformance gate additionally passes
   variation-selector and zero-width-joiner cursor-position vectors, plus the
   Hibr `DT_BIDI`/`HIBR_GFX` defaults and explicit override vectors.
+- Surface and scrollback snapshots preserve complete zero-width UTF-8 cell
+  sequences; a five-extension combining vector and its cursor position pass.
 
 ## Real-host evidence
 

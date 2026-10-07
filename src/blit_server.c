@@ -61,7 +61,7 @@ extern char **environ;
 #define BLIT_ATTR_ITALIC 128
 #define BLIT_ATTR_BLINK 256
 #define BLIT_ATTR_STRIKE 512
-#define BLIT_MAX_COMBINING 4
+#define BLIT_MAX_COMBINING 16
 
 typedef struct {
     unsigned long long id;
@@ -2148,6 +2148,31 @@ static void mutation_receipt_json(const BlitSurface *surface, char *body,
              surface->revision);
 }
 
+static size_t cell_text_utf8(char *text, size_t capacity, uint32_t codepoint,
+                             const uint32_t *combining,
+                             unsigned combining_count)
+{
+    size_t used = 0;
+    unsigned index;
+    char glyph[5];
+    size_t glyph_length;
+
+    if (capacity == 0) return 0;
+    glyph_length = utf8_encode(codepoint ? codepoint : ' ', glyph);
+    if (glyph_length + 1 > capacity) return 0;
+    memcpy(text + used, glyph, glyph_length);
+    used += glyph_length;
+    for (index = 0; index < combining_count && index < BLIT_MAX_COMBINING;
+         ++index) {
+        glyph_length = utf8_encode(combining[index], glyph);
+        if (used + glyph_length + 1 > capacity) break;
+        memcpy(text + used, glyph, glyph_length);
+        used += glyph_length;
+    }
+    text[used] = '\0';
+    return used;
+}
+
 static void surface_delta_json(const BlitSurface *surface, char *body,
                                size_t capacity)
 {
@@ -2192,18 +2217,20 @@ static int surface_snapshot_json(const BlitSurface *surface,
         return 0;
     for (y = 0; y < surface->height; ++y) {
         for (x = 0; x < surface->width; ++x) {
-            char text[5];
-            char escaped[16];
+            char text[5 + BLIT_MAX_COMBINING * 4];
+            char escaped[256];
             uint32_t codepoint = surface->codepoints[y][x];
+            unsigned combining_count = surface->combining_count[y][x];
             uint16_t attributes = surface->attributes[y][x];
             uint16_t link = surface->links[y][x];
             int styled = surface->foreground[y][x] != 0 ||
                 surface->background[y][x] != 0 ||
                 surface->underline_color[y][x] != 0 || attributes != 0;
 
-            if (codepoint == 0 && !styled && link == 0)
+            if (codepoint == 0 && combining_count == 0 && !styled && link == 0)
                 continue;
-            utf8_encode(codepoint ? codepoint : ' ', text);
+            cell_text_utf8(text, sizeof(text), codepoint,
+                           surface->combining[y][x], combining_count);
             json_escape(text, escaped, sizeof(escaped));
             if (!json_appendf(body, capacity, &used,
                 "%s{\"x\":%d,\"y\":%d,\"text\":\"%s\"",
@@ -2270,20 +2297,21 @@ static void surface_scrollback_json(const BlitSurface *surface, char *body,
         const BlitScrollbackLine *line = &surface->scrollback[index];
         int last = line->width;
         int column;
-        char text[4096];
-        char escaped[8192];
+        char text[32768];
+        char escaped[65536];
         size_t text_used = 0;
 
         while (last > 0 && line->codepoints[last - 1] == 0) --last;
         for (column = 0; column < last && text_used + 5 < sizeof(text);
              ++column) {
-            char glyph[5];
-            int glyph_length = utf8_encode(line->codepoints[column] ?
-                                           line->codepoints[column] : ' ',
-                                           glyph);
-            if (text_used + (size_t)glyph_length >= sizeof(text)) break;
-            memcpy(text + text_used, glyph, (size_t)glyph_length);
-            text_used += (size_t)glyph_length;
+            char cell_text[5 + BLIT_MAX_COMBINING * 4];
+            size_t cell_length = cell_text_utf8(
+                cell_text, sizeof(cell_text), line->codepoints[column],
+                &line->combining[column * BLIT_MAX_COMBINING],
+                line->combining_count[column]);
+            if (text_used + cell_length + 1 >= sizeof(text)) break;
+            memcpy(text + text_used, cell_text, cell_length);
+            text_used += cell_length;
         }
         text[text_used] = '\0';
         json_escape(text, escaped, sizeof(escaped));

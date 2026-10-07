@@ -501,7 +501,8 @@ assert_equal('x', cells.fetch([3, 1]).fetch('text'), 'REP wraps expected count')
 snapshot = run_case(base, 'combining-character-cell',
                     "printf 'e\\314\\201X'")
 cells = cell_map(snapshot)
-assert_equal('e', cells.fetch([0, 0]).fetch('text'), 'combining base cell')
+assert_equal("e\u0301", cells.fetch([0, 0]).fetch('text'),
+             'combining cell retains extension')
 assert_equal('X', cells.fetch([1, 0]).fetch('text'), 'combining cursor advance')
 
 snapshot = run_case(base, 'wide-character-overwrite',
@@ -686,6 +687,15 @@ snapshot = run_case(base, 'utf8-zero-width-joiner',
 cells = cell_map(snapshot)
 assert_equal('X', cells.fetch([4, 0]).fetch('text'),
              'zero-width joiner does not advance cursor')
+
+snapshot = run_case(base, 'utf8-cell-preserves-full-extension',
+                    "printf 'e\\314\\201\\314\\210\\314\\243\\315\\202\\357\\270\\217X'")
+cells = cell_map(snapshot)
+assert_equal("e\u0301\u0308\u0323\u0342\uFE0F",
+             cells.fetch([0, 0]).fetch('text'),
+             'surface cell retains all zero-width UTF-8 extensions')
+assert_equal('X', cells.fetch([1, 0]).fetch('text'),
+             'full extension sequence remains one cell')
 
 snapshot = run_case(base, 'hibr-integration-defaults',
                     "printf '%s/%s' \"$DT_BIDI\" \"$HIBR_GFX\"")
