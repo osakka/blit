@@ -362,7 +362,10 @@ typedef struct {
     int session_count;
     unsigned long long next_session_id;
     BlitSession sessions[BLIT_MAX_SESSIONS];
-    BlitSurface surfaces[BLIT_MAX_SESSIONS];
+    /* Terminal grids are allocated only for live sessions.  Keeping the
+       maximum-size grid inline for every slot made an idle gateway commit a
+       large amount of memory before it had a client. */
+    BlitSurface *surfaces[BLIT_MAX_SESSIONS];
     unsigned long long next_frame_id;
     unsigned long long frame_revision;
     unsigned long long next_event_sequence;
@@ -483,6 +486,7 @@ static void update_status_json(const BlitRuntime *runtime, char *body,
 static int update_authorized(const BlitRuntime *runtime, const char *request);
 static void cancel_update_upload(BlitRuntime *runtime, int fd,
                                  const char *request);
+static int terminate_session_process(pid_t process_id);
 
 static void effect_json(const BlitRuntime *runtime, char *body,
                         size_t capacity)
@@ -793,7 +797,8 @@ static int render_work_remains(const BlitRuntime *runtime)
     if (runtime->pointer_dirty)
         return 1;
     for (i = 0; i < BLIT_MAX_SESSIONS; ++i)
-        if (runtime->surfaces[i].used && runtime->surfaces[i].damage_valid)
+        if (runtime->surfaces[i] != NULL &&
+            runtime->surfaces[i]->used && runtime->surfaces[i]->damage_valid)
             return 1;
     return 0;
 }
@@ -807,8 +812,9 @@ static void render_current_surfaces(BlitRuntime *runtime,
     memset(&plan, 0, sizeof(plan));
     plan.revision = runtime->frame_revision;
     for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
-        BlitSurface *surface = &runtime->surfaces[i];
-        if (!surface->used || plan.surface_count >= BLIT_MAX_FRAME_SURFACES)
+        BlitSurface *surface = runtime->surfaces[i];
+        if (surface == NULL || !surface->used ||
+            plan.surface_count >= BLIT_MAX_FRAME_SURFACES)
             continue;
         plan.surfaces[plan.surface_count].surface_id = surface->id;
         plan.surfaces[plan.surface_count].surface_revision = surface->revision;
@@ -1276,7 +1282,8 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
     int i;
     for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
         if (runtime->sessions[i].used) ++sessions;
-        if (runtime->surfaces[i].used) ++surfaces;
+        if (runtime->surfaces[i] != NULL && runtime->surfaces[i]->used)
+            ++surfaces;
     }
     for (i = 0; i < BLIT_MAX_STREAMS; ++i)
         if (runtime->streams[i].used) ++streams;
@@ -2097,8 +2104,9 @@ static BlitSurface *find_surface_id(BlitRuntime *runtime,
     int i;
 
     for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
-        if (runtime->surfaces[i].used && runtime->surfaces[i].id == surface_id)
-            return &runtime->surfaces[i];
+        if (runtime->surfaces[i] != NULL && runtime->surfaces[i]->used &&
+            runtime->surfaces[i]->id == surface_id)
+            return runtime->surfaces[i];
     }
     return NULL;
 }
@@ -6035,8 +6043,14 @@ static int create_session(BlitRuntime *runtime, const char *json,
                      display_id);
             snprintf(session->pane_id, sizeof(session->pane_id), "%s", pane_id);
             {
-                BlitSurface *surface = &runtime->surfaces[i];
-                memset(surface, 0, sizeof(*surface));
+                BlitSurface *surface = (BlitSurface *)calloc(1, sizeof(*surface));
+                if (surface == NULL) {
+                    terminate_session_process(process_id);
+                    close(master_fd);
+                    memset(session, 0, sizeof(*session));
+                    return 0;
+                }
+                runtime->surfaces[i] = surface;
                 surface->used = 1;
                 surface->id = session->id;
                 surface->revision = 1;
@@ -6218,6 +6232,13 @@ static void destroy_session(BlitRuntime *runtime, BlitSession *session)
     if (surface != NULL) {
         terminal_scrollback_release(surface);
         memset(surface, 0, sizeof(*surface));
+        for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
+            if (runtime->surfaces[i] == surface) {
+                free(surface);
+                runtime->surfaces[i] = NULL;
+                break;
+            }
+        }
     }
     for (i = 0; i < BLIT_GRAPHICS_MAX_IMAGES; ++i)
         graphics_image_release(&session->graphics[i]);
@@ -8342,11 +8363,11 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
         }
         for (surface_index = 0; surface_index < BLIT_MAX_SESSIONS &&
              view_count < BLIT_MAX_SESSIONS; ++surface_index) {
-            BlitSurface *surface = &runtime->surfaces[surface_index];
+            BlitSurface *surface = runtime->surfaces[surface_index];
             BlitSession *session;
             BlitPane *pane;
             int output_index_for_surface = 0;
-            if (!surface->used) continue;
+            if (surface == NULL || !surface->used) continue;
             session = find_session_id(runtime, surface->owner_session_id);
             if (session == NULL) continue;
             /* Synchronized output retains its last complete frame.  Do not

@@ -7,7 +7,7 @@ an evidence record, not a claim that the complete product is released.
 
 - Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The source build for this cycle is `0.1.221`, which includes the
+- The source build for this cycle is `0.1.222`, which includes the
   Hibr-compatible Unicode 15.1 width table and regression vectors for
   variation selectors and zero-width joiners.
 - SDL pointer-only presentation now reuses a per-output scene cache instead of
@@ -24,7 +24,15 @@ an evidence record, not a claim that the complete product is released.
 - OpenAPI and TCC build checks pass.
 - The canonical `tools/build-tcc.sh` injects `packaging/VERSION` into the
   executable; the Debian package, local conformance run, live host, and QEMU
-  KMS run all report `server_version:0.1.221` with `api_version:0.1`.
+  KMS run all report `server_version:0.1.222` with `api_version:0.1`.
+- Terminal grids are allocated per live session rather than embedded in all
+  session slots. The exact 0.1.222 TCC build passed the terminal suite and a
+  100,000-line PTY soak with no diagnostic errors; peak RSS was 25,156 KiB
+  versus 11,256 KiB idle in the comparable local run.
+- The exact 0.1.222 Debian package contains the byte-identical TCC server
+  binary and passes the package allowlist check.
+- The exact 0.1.222 Hibr primary/join QEMU fixture passed two-output KMS
+  presentation, the Hibr session path, and both PPM pixel assertions.
 - The stalled-upload gate passes: progress is exposed and authenticated
   cancellation returns 202 without stopping the gateway.
 - Terminal conformance passes, including UTF-8/wide cells, VT controls,
@@ -76,7 +84,8 @@ an evidence record, not a claim that the complete product is released.
 The latest reachable observation of the authorized host at
 `192.168.10.54:8080` reported:
 
-- Blit `0.1.221`, healthy SDL3/OpenGL presentation.
+- Blit `0.1.221`, healthy SDL3/OpenGL presentation. The 0.1.222 package has
+  not yet been deployed to this host.
 - One physical output, `DP-1`, active at 1920×2160 and 59.99 Hz.
 - A fresh Hibr session reached `running`; its revisioned surface snapshot and
   settled screenshot contained the Hibr desktop bar, icons, controls, and
@@ -88,7 +97,8 @@ The latest reachable observation of the authorized host at
 
 ## Open release gates
 
-1. Validate at least one physical multi-monitor arrangement, including
+1. Deploy and verify 0.1.222 on the physical host, then validate at least one
+   physical multi-monitor arrangement, including
    connector discovery, independent presentation, pointer routing, and Hibr
    primary/join behavior. The current host exposes only one physical output.
 2. Complete the Gate 6 fault/reconnect and multi-hour soak campaign.

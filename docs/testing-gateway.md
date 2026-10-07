@@ -72,12 +72,12 @@ reports the expected server version and `state: "ready"`. Upload only a
 package whose SHA-256 was independently recorded:
 
 ```sh
-sha256sum blit_0.1.221-1_amd64.deb
+sha256sum blit_0.1.222-1_amd64.deb
 curl --fail --request PUT \
   --header 'X-Blit-Update-Token: YOUR_UPDATE_TOKEN' \
   --header 'X-Blit-SHA256: RECORDED_SHA256' \
   --header 'Content-Type: application/vnd.debian.binary-package' \
-  --data-binary @blit_0.1.221-1_amd64.deb \
+  --data-binary @blit_0.1.222-1_amd64.deb \
   http://127.0.0.1:8080/v1/control/update
 ```
 
