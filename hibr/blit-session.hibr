@@ -24,11 +24,13 @@ if [ -z "$desktop" ]; then
 	desktop=/usr/share/hibr/desktop/session.hibr
 fi
 
-for m in console pty term hold; do
-	mod load "$moddir/$m.so" || exit 1
-done
 if [ ! -f "$desktop" ]; then
 	lg HIBR_LERR "blit-session: desktop session not found: $desktop"
 	exit 1
 fi
-source "$desktop" "$@"
+# Run the real desktop file as the Hibr entrypoint.  Sourcing it here would
+# leave $0 pointing at this wrapper, so the desktop's relative desktop.hibr,
+# apps, and control-panel paths would resolve beside the wrapper instead of
+# beside Hibr's installed desktop session.
+export HIBR_MODPATH=${HIBR_MODPATH:-$moddir}
+exec "$HIBR" "$desktop" "$@"
