@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <termios.h>
+#include <fcntl.h>
+#include <sys/select.h>
 #include <unistd.h>
 
 int main(int argc, char **argv)
@@ -17,6 +19,7 @@ int main(int argc, char **argv)
     int kitty_query = 0;
     int sixel = 0;
     int stack = 0;
+    int soak = 0;
     int argument;
     for (argument = 1; argument < argc; ++argument) {
         if (strcmp(argv[argument], "--mouse") == 0) mouse = 1;
@@ -27,6 +30,7 @@ int main(int argc, char **argv)
         if (strcmp(argv[argument], "--kitty-query") == 0) kitty_query = 1;
         if (strcmp(argv[argument], "--sixel") == 0) sixel = 1;
         if (strcmp(argv[argument], "--stack") == 0) stack = 1;
+        if (strcmp(argv[argument], "--soak") == 0) soak = 1;
     }
     if (tcgetattr(STDIN_FILENO, &saved) == 0) {
         raw = saved;
@@ -83,6 +87,38 @@ int main(int argc, char **argv)
             }
         }
         return 1;
+    }
+    if (soak) {
+        int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
+        int tick;
+        if (flags >= 0)
+            fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
+        for (tick = 0; tick < 600; ++tick) {
+            fd_set readable;
+            struct timeval timeout;
+            unsigned char input[64];
+            ssize_t received;
+
+            FD_ZERO(&readable);
+            FD_SET(STDIN_FILENO, &readable);
+            timeout.tv_sec = 0;
+            timeout.tv_usec = 0;
+            if (select(STDIN_FILENO + 1, &readable, NULL, NULL,
+                       &timeout) > 0) {
+                received = read(STDIN_FILENO, input, sizeof(input));
+                if (received > 0) {
+                    ssize_t offset;
+                    for (offset = 0; offset < received; ++offset)
+                        printf("BYTE %02X\\r\\n", (unsigned int)input[offset]);
+                }
+            }
+            printf("SOAK %04d UTF8-€-界\\r\\n", tick);
+            fflush(stdout);
+            usleep(16000);
+        }
+        if (flags >= 0)
+            fcntl(STDIN_FILENO, F_SETFL, flags);
+        return 0;
     }
     while (read(STDIN_FILENO, &byte, 1) == 1) {
         printf("BYTE %02X\r\n", (unsigned int)byte);

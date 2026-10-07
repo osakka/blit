@@ -40,6 +40,12 @@ an evidence record, not a claim that the complete product is released.
 - The same exact build additionally passed a 600-second run of that gate with
   four concurrent PTYs, 7,300 API snapshots, 664 revisioned resizes, no
   runtime errors, no leaked sessions, and 65,984 KiB peak RSS.
+- The exact 0.1.232 TCC QEMU input fixture additionally passed its combined
+  render/input soak: two KMS outputs continued presenting while the existing
+  keyboard, two mice, three buttons, wheel, pointer routes, and WebSocket
+  input stream were exercised during approximately ten seconds of bounded
+  UTF-8/VT output. It produced both `BLIT_INPUT_STREAM_PASS` and
+  `BLIT_INPUT_RENDER_SOAK_PASS`.
 - The exact 0.1.232 TCC build passed the two-output KMS pixel/screenshot gate,
   the four-layout Hibr pane matrix with four running sessions, and the
   one-vCPU input fixture. The input fixture passed keypad bytes, independent

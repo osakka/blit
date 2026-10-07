@@ -68,6 +68,7 @@ $b mkdir -p /root /tmp/hibr-state /tmp/hibr-config /tmp/hibr-data
 $b mkdir -p /tmp/hibr-ctl-0
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
     *" blit.input_only=1 "*) BLIT_INPUT_ONLY_TEST=1 ;;
+    *" blit.input_soak=1 "*) BLIT_INPUT_ONLY_TEST=1; BLIT_INPUT_SOAK_TEST=1 ;;
 esac
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
     *" blit.input_loss=1 "*) BLIT_INPUT_LOSS_TEST=1 ;;
@@ -187,8 +188,10 @@ if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
         echo BLIT_INPUT_HELPERS_MISSING
         finish 1
     fi
-    $b wget -qO /tmp/input-key.json --post-data="{\"command\":\"/blit-stage/pty-input-echo\",\"arguments\":[\"--key\"],\"surface_mode\":\"terminal\",\"pane_id\":\"$pane1\",\"surface\":{\"width\":128,\"height\":48}}" --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
-    $b wget -qO /tmp/input-pointer.json --post-data="{\"command\":\"/blit-stage/pty-input-echo\",\"arguments\":[\"--mouse\",\"--focus\"],\"surface_mode\":\"terminal\",\"pane_id\":\"$pane2\",\"surface\":{\"width\":128,\"height\":48}}" --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
+    input_soak_args=''
+    if [ "${BLIT_INPUT_SOAK_TEST:-0}" = 1 ]; then input_soak_args=',"--soak"'; fi
+    $b wget -qO /tmp/input-key.json --post-data="{\"command\":\"/blit-stage/pty-input-echo\",\"arguments\":[\"--key\"$input_soak_args],\"surface_mode\":\"terminal\",\"pane_id\":\"$pane1\",\"surface\":{\"width\":128,\"height\":48}}" --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
+    $b wget -qO /tmp/input-pointer.json --post-data="{\"command\":\"/blit-stage/pty-input-echo\",\"arguments\":[\"--mouse\",\"--focus\"$input_soak_args],\"surface_mode\":\"terminal\",\"pane_id\":\"$pane2\",\"surface\":{\"width\":128,\"height\":48}}" --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
     input_key_id=$($b sed -n 's/.*"id":"\([0-9][0-9]*\)".*/\1/p' /tmp/input-key.json)
     input_pointer_id=$($b sed -n 's/.*"id":"\([0-9][0-9]*\)".*/\1/p' /tmp/input-pointer.json)
     /blit-stage/http-put 19191 /v1/input/routes/input-key "{\"device_id\":\"evdev-keyboard\",\"target_session_id\":\"session-$input_key_id\",\"enabled\":true}" > /tmp/input-key-route.json || true
@@ -197,6 +200,7 @@ if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
     $b cat /tmp/input-key.json; $b cat /tmp/input-pointer.json
     $b cat /tmp/input-key-route.json; $b cat /tmp/input-pointer-route.json
     input_wait=30
+    [ "${BLIT_INPUT_SOAK_TEST:-0}" = 1 ] && input_wait=12
     input_wait_arg=$($b cat /proc/cmdline 2>/dev/null | $b sed -n 's/.*blit.input_wait=\([0-9][0-9]*\).*/\1/p')
     [ -n "$input_wait_arg" ] && input_wait=$input_wait_arg
     $b sleep "$input_wait"
@@ -224,7 +228,13 @@ if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
     echo "$key_text" | $b grep -q 'BYTE 1B' || keypad_pass=0
     echo "$key_text" | $b grep -q 'BYTE 4F' || keypad_pass=0
     echo "$key_text" | $b grep -q 'BYTE 71' || keypad_pass=0
-    if [ "$keypad_pass" -eq 1 ]; then echo BLIT_INPUT_KEYPAD_PASS; else echo BLIT_INPUT_KEYPAD_FAIL; fi
+    if [ "${BLIT_INPUT_SOAK_TEST:-0}" = 1 ]; then
+        echo BLIT_INPUT_KEYPAD_SOAK_OBSERVED
+    elif [ "$keypad_pass" -eq 1 ]; then
+        echo BLIT_INPUT_KEYPAD_PASS
+    else
+        echo BLIT_INPUT_KEYPAD_FAIL
+    fi
     echo BLIT_INPUT_SURFACE_KEY
     $b cat /tmp/input-key-surface.json | $b cut -c 1-4000
     echo BLIT_INPUT_SURFACE_POINTER
@@ -243,17 +253,24 @@ if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
     fi
     echo BLIT_INPUT_STREAM
     $b cat /tmp/stream-input.log
-    if $b grep -q "\"session_id\":\"session-$input_key_id\".*\"kind\":\"key\"" /tmp/stream-input.log &&
-       $b grep -q '"pressed":false' /tmp/stream-input.log &&
-       $b grep -q '"button":0,"pressed":true' /tmp/stream-input.log &&
-       $b grep -q '"button":1,"pressed":true' /tmp/stream-input.log &&
-       $b grep -q '"button":2,"pressed":true' /tmp/stream-input.log &&
-       $b grep -q '"kind":"pointer_wheel"' /tmp/stream-input.log &&
-       echo "$pointer_text" | $b grep -q 'BYTE 1B' &&
-       echo "$pointer_text" | $b grep -q 'BYTE 5B' &&
-       echo "$pointer_text" | $b grep -q 'BYTE 3C' &&
-       $b grep -q "\"session_id\":\"session-$input_pointer_id\".*\"kind\":\"pointer_motion\"" /tmp/stream-input.log &&
-       [ "$keypad_pass" -eq 1 ]; then
+    stream_pass=1
+    $b grep -q "\"session_id\":\"session-$input_key_id\".*\"kind\":\"key\"" /tmp/stream-input.log || stream_pass=0
+    $b grep -q '"pressed":false' /tmp/stream-input.log || stream_pass=0
+    $b grep -q '"button":0,"pressed":true' /tmp/stream-input.log || stream_pass=0
+    $b grep -q '"button":1,"pressed":true' /tmp/stream-input.log || stream_pass=0
+    $b grep -q '"button":2,"pressed":true' /tmp/stream-input.log || stream_pass=0
+    $b grep -q '"kind":"pointer_wheel"' /tmp/stream-input.log || stream_pass=0
+    $b grep -q "\"session_id\":\"session-$input_pointer_id\".*\"kind\":\"pointer_motion\"" /tmp/stream-input.log || stream_pass=0
+    if [ "${BLIT_INPUT_SOAK_TEST:-0}" != 1 ] &&
+       ! echo "$pointer_text" | $b grep -q 'BYTE 1B'; then stream_pass=0; fi
+    if [ "${BLIT_INPUT_SOAK_TEST:-0}" != 1 ] &&
+       ! echo "$pointer_text" | $b grep -q 'BYTE 5B'; then stream_pass=0; fi
+    if [ "${BLIT_INPUT_SOAK_TEST:-0}" != 1 ] &&
+       ! echo "$pointer_text" | $b grep -q 'BYTE 3C'; then stream_pass=0; fi
+    if [ "${BLIT_INPUT_SOAK_TEST:-0}" != 1 ] && [ "$keypad_pass" -ne 1 ]; then
+        stream_pass=0
+    fi
+    if [ "$stream_pass" -eq 1 ] && [ "${mouse_device_events:-0}" -ge 2 ]; then
         echo BLIT_INPUT_STREAM_PASS
     else
         echo BLIT_INPUT_STREAM_FAIL
@@ -283,6 +300,11 @@ if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
         else
             echo BLIT_INPUT_DEVICE_LOSS_FAIL
         fi
+    fi
+    if [ "${BLIT_INPUT_SOAK_TEST:-0}" = 1 ]; then
+        [ "$stream_pass" -eq 1 ] || { echo BLIT_INPUT_RENDER_SOAK_FAIL; finish 1; }
+        [ "${mouse_device_events:-0}" -ge 2 ] || { echo BLIT_INPUT_RENDER_SOAK_FAIL; finish 1; }
+        echo BLIT_INPUT_RENDER_SOAK_PASS
     fi
     finish 0
 fi

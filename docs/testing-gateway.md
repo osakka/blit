@@ -537,6 +537,14 @@ the fixture recreates the synthetic devices to verify bounded re-enumeration.
 The same run subscribes the WebSocket probe to diagnostics and requires
 sequenced `input_device_lost` and `input_device_reconnected` events.
 
+For the combined presentation/input soak, stage the fixture and boot it with
+`blit.input_soak=1 blit.input_wait=12`. The existing TCC-built input helper
+then emits bounded UTF-8/VT output for approximately ten seconds while the
+keyboard, two mice, buttons, wheel, pointer motion, routes, and WebSocket
+events are exercised. The fixture requires both `BLIT_INPUT_STREAM_PASS` and
+`BLIT_INPUT_RENDER_SOAK_PASS`; scrolling output is not allowed to weaken the
+input assertion by relying on old visible cells.
+
 ## Exercise the stream upgrade
 
 The current slice accepts a WebSocket opening handshake, keeps the connection
