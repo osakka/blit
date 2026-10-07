@@ -48,8 +48,9 @@ The authorized host at `192.168.10.54:8080` currently reports:
   1920×2160 with no diagnostic Kitty overlay; the session was removed after
   capture.
 - A single bounded 0.1.212 upload attempt timed out against the legacy
-  receiver; the host remained on `0.1.210` and its update status is now
-  `receiving`. No second upload or unverified remote shutdown was attempted.
+  receiver; the host remained on `0.1.210`. After the connection cleared, its
+  update status became `failed` while the gateway remained healthy. No second
+  upload or unverified remote shutdown was attempted.
 
 ## Open release gates
 
