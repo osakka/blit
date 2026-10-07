@@ -50,6 +50,7 @@ extern char **environ;
 #define BLIT_MAX_RUNTIME_LOGS 64
 #define BLIT_MAX_SCROLLBACK_LINES 1000
 #define BLIT_MAX_OVERLAYS 16
+#define BLIT_UPDATE_IDLE_TIMEOUT_US 30000000ULL
 #define BLIT_DEFAULT_FOREGROUND 0xbed2beU
 #define BLIT_ATTR_BOLD 1
 #define BLIT_ATTR_DIM 2
@@ -196,6 +197,7 @@ typedef struct {
     int update_fd;
     size_t update_expected;
     size_t update_received;
+    uint64_t update_last_progress_us;
     char update_path[256];
     char update_sha256[65];
     int screenshot_output_index;
@@ -9912,6 +9914,7 @@ static void service_update_upload(BlitRuntime *runtime, BlitHttpClient *client)
         return;
     }
     client->update_received += (size_t)received;
+    client->update_last_progress_us = monotonic_us();
     if (client->update_received == client->update_expected)
         finish_update_upload(runtime, client);
 }
@@ -9989,6 +9992,7 @@ static void service_http_client(BlitRuntime *runtime, int index)
         client->update_expected = content_length;
         client->update_received = client->length > header_length ?
             client->length - header_length : 0;
+        client->update_last_progress_us = monotonic_us();
         snprintf(client->update_path, sizeof(client->update_path), "%s", temporary);
         snprintf(client->update_sha256, sizeof(client->update_sha256), "%s", sha256);
         snprintf(runtime->update_state, sizeof(runtime->update_state), "receiving");
@@ -10252,12 +10256,27 @@ int main(int argc, char **argv)
         if (runtime.sdl_ready && !runtime.direct_kms)
             service_sdl_events(&runtime);
         now = monotonic_us();
-        for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i)
-            if (runtime.http_clients[i].used &&
-                runtime.http_clients[i].update_fd < 0 &&
-                now > runtime.http_clients[i].accepted_us &&
-                now - runtime.http_clients[i].accepted_us > 5000000ULL)
+        for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i) {
+            BlitHttpClient *client = &runtime.http_clients[i];
+            if (!client->used)
+                continue;
+            if (client->update_fd >= 0) {
+                if (now > client->update_last_progress_us &&
+                    now - client->update_last_progress_us >
+                        BLIT_UPDATE_IDLE_TIMEOUT_US) {
+                    snprintf(runtime.update_state,
+                             sizeof(runtime.update_state), "failed");
+                    snprintf(runtime.update_detail,
+                             sizeof(runtime.update_detail),
+                             "update upload idle timeout");
+                    remove_http_client(&runtime, i);
+                }
+                continue;
+            }
+            if (now > client->accepted_us &&
+                now - client->accepted_us > 5000000ULL)
                 remove_http_client(&runtime, i);
+        }
         FD_ZERO(&readable);
         FD_SET(server_fd, &readable);
         for (i = 0; i < runtime.evdev_mouse_count; ++i) {

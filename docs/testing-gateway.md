@@ -72,17 +72,26 @@ reports the expected server version and `state: "ready"`. Upload only a
 package whose SHA-256 was independently recorded:
 
 ```sh
-sha256sum blit_0.1.218-1_amd64.deb
+sha256sum blit_0.1.219-1_amd64.deb
 curl --fail --request PUT \
   --header 'X-Blit-Update-Token: YOUR_UPDATE_TOKEN' \
   --header 'X-Blit-SHA256: RECORDED_SHA256' \
   --header 'Content-Type: application/vnd.debian.binary-package' \
-  --data-binary @blit_0.1.218-1_amd64.deb \
+  --data-binary @blit_0.1.219-1_amd64.deb \
   http://127.0.0.1:8080/v1/control/update
 ```
 
 Poll `/v1/control/update/status` until the supervisor reports the new
 version; an interrupted upload or `403` response is not an installation.
+
+The idle-timeout gate holds a valid upload open without sending its body and
+verifies that the gateway transitions to `update upload idle timeout` instead
+of retaining a dead staged transfer indefinitely:
+
+```sh
+BLIT_GATE_BINARY=build/blit/blit-server \
+  tools/tests/update_idle_timeout_gate.sh
+```
 
 ## Current acceptance evidence
 

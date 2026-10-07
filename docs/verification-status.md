@@ -7,7 +7,7 @@ an evidence record, not a claim that the complete product is released.
 
 - Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The source build for this cycle is `0.1.218`, which includes the
+- The source build for this cycle is `0.1.219`, which includes the
   Hibr-compatible Unicode 15.1 width table and regression vectors for
   variation selectors and zero-width joiners.
 - SDL pointer-only presentation now reuses a per-output scene cache instead of
@@ -24,7 +24,7 @@ an evidence record, not a claim that the complete product is released.
 - OpenAPI and TCC build checks pass.
 - The canonical `tools/build-tcc.sh` injects `packaging/VERSION` into the
   executable; bundle, extracted Debian package, and QEMU KMS runs all report
-  `server_version:0.1.218` with `api_version:0.1`.
+  `server_version:0.1.219` with `api_version:0.1`.
 - The stalled-upload gate passes: progress is exposed and authenticated
   cancellation returns 202 without stopping the gateway.
 - Terminal conformance passes, including UTF-8/wide cells, VT controls,
@@ -50,7 +50,7 @@ an evidence record, not a claim that the complete product is released.
   explicit `blit.hibr_window_control=1` workload additionally passes window
   `move`, `resize`, and `focus` operations. The acceptance predicate now
   distinguishes those two intentional workloads.
-- The exact 0.1.218 TCC build passes the two-output KMS pixel gate, the
+- The exact 0.1.219 TCC build passes the two-output KMS pixel gate, the
   four-pane Hibr matrix, and the input-only fixture with
   `blit.input_wait=8`: keypad, multi-mouse, button, wheel, motion, stream, and
   PTY delivery all pass. The input-loss variant additionally reports
@@ -82,7 +82,7 @@ The latest reachable observation of the authorized host at
   The host reported `renderer:opengl`, `refresh_hz:59.990`, and
   `missed_deadlines:77`, with no API errors. The bounded session was then
   deleted and the host returned to zero sessions.
-- The same stock Hibr desktop, run against the current TCC `0.1.218` build
+- The same stock Hibr desktop, run against the current TCC `0.1.219` build
   with SDL's software renderer, produced a settled screenshot containing the
   desktop bar, wallpaper, icons, and themed cells. This isolates the physical
   failure to the installed old runtime; it is not reproduced by the current
@@ -90,15 +90,15 @@ The latest reachable observation of the authorized host at
 - The captured framebuffer contained no red diagnostic box. Any red box seen
   by an operator must be correlated with a timestamped screenshot and the
   overlay/graphics API state; it is not present in the current capture.
-- A bounded upload of the verified `0.1.218-1` package was rejected with HTTP
-  403 because the host requires `X-Blit-Update-Token`; the host therefore
-  remains on `0.1.210`. No token was guessed and no unverified remote install
-  was attempted.
+- The authorized upload of the verified `0.1.218-1` package using the
+  confirmed update token entered the old host's `receiving` state but never
+  completed; the old 0.1.210 runtime returned 405 for the cancellation route
+  and has no upload idle timeout. The host therefore remains on 0.1.210.
 
 ## Open release gates
 
 1. Provide/use the supervised update token or another authorized service path,
-   then install and verify `0.1.218`. The physical renderer defect cannot be
+   then install and verify `0.1.219`. The physical renderer defect cannot be
    assessed against the current source until the current runtime is actually
    installed.
 2. Validate at least one physical multi-monitor arrangement, including

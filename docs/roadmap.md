@@ -40,7 +40,7 @@ production `console-blit` module is operational over the OpenAPI/WebSocket
 contract. Explicit focus and versioned input routes are exposed by the API.
 The SDL adapter uses single-surface incremental frames and conservatively
 redraws multi-surface outputs with deterministic vertical stacking. The
-current 0.1.218 package passes the complete terminal, graphics, input,
+current 0.1.219 package passes the complete terminal, graphics, input,
 two-display VKMS, and Hibr primary/`--join` acceptance gates. The remaining
 release risk is physical-host installation and validation; the authorized
 physical host is still running 0.1.210.
@@ -133,7 +133,7 @@ suite on VKMS and then on a physical DRM/KMS host.
 
 ## Immediate next action
 
-Install the verified 0.1.218 package on the authorized physical host through
+Install the verified 0.1.219 package on the authorized physical host through
 its supervised update path, then capture settled SDL screenshots and API
 diagnostics. Verify physical pointer/button/wheel routing and refresh cadence,
 followed by a real two-monitor primary/`--join` arrangement. The current host's
