@@ -211,6 +211,7 @@ typedef struct {
 typedef struct {
     SDL_Window *window;
     SDL_Renderer *renderer;
+    SDL_Texture *scene_texture;
     SDL_Surface *screenshot_surface;
     unsigned long long display_id;
     int initialized;
@@ -418,6 +419,8 @@ typedef struct {
     double diagnostic_last_terminal_ms;
     double diagnostic_max_terminal_ms;
     unsigned long long diagnostic_terminal_bytes;
+    unsigned long long diagnostic_pointer_cache_hits;
+    unsigned long long diagnostic_pointer_cache_misses;
     unsigned long long diagnostic_log_sequence;
     int diagnostic_log_count;
     int diagnostic_log_next;
@@ -756,8 +759,15 @@ static int render_wait_ms(const BlitRuntime *runtime, uint64_t now)
 
     if (!runtime->render_pending)
         return wait_ms;
-    if (runtime->pointer_dirty)
-        return 0;
+    if (runtime->pointer_dirty) {
+        /* Direct KMS may still own the output's back buffer until its page
+           flip event arrives.  A zero-timeout select while that flip is
+           pending spins the gateway at 100% CPU and prevents the bounded
+           flip-timeout path from being serviced.  SDL can present the cached
+           scene immediately; KMS yields briefly and still services input
+           and DRM events without adding visible pointer latency. */
+        return runtime->direct_kms ? 1 : 0;
+    }
     for (i = 0; i < runtime->output_count; ++i) {
         uint64_t delta;
         if (runtime->render_next_us[i] <= now)
@@ -1103,7 +1113,8 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"max_frame_gap_ms\":%.3f,\"last_render_ms\":%.3f,"
         "\"max_render_ms\":%.3f,\"missed_deadlines\":%llu,"
         "\"last_terminal_ms\":%.3f,\"max_terminal_ms\":%.3f,"
-        "\"terminal_bytes\":%llu},"
+        "\"terminal_bytes\":%llu,\"pointer_cache_hits\":%llu,"
+        "\"pointer_cache_misses\":%llu},"
         "\"logs\":[",
         snapshot,
         runtime->started_us > 0 && now >= runtime->started_us ?
@@ -1115,7 +1126,9 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         diagnostic_missed_deadlines(runtime),
         runtime->diagnostic_last_terminal_ms,
         runtime->diagnostic_max_terminal_ms,
-        runtime->diagnostic_terminal_bytes);
+        runtime->diagnostic_terminal_bytes,
+        runtime->diagnostic_pointer_cache_hits,
+        runtime->diagnostic_pointer_cache_misses);
     count = runtime->diagnostic_log_count;
     first = 1;
     index = (runtime->diagnostic_log_next - count + BLIT_MAX_RUNTIME_LOGS) %
@@ -7666,6 +7679,9 @@ static void destroy_outputs(BlitRuntime *runtime)
         if (runtime->outputs[i].screenshot_surface != NULL)
             SDL_DestroySurface(runtime->outputs[i].screenshot_surface);
         runtime->outputs[i].screenshot_surface = NULL;
+        if (runtime->outputs[i].scene_texture != NULL)
+            SDL_DestroyTexture(runtime->outputs[i].scene_texture);
+        runtime->outputs[i].scene_texture = NULL;
         SDL_DestroyRenderer(runtime->outputs[i].renderer);
         SDL_DestroyWindow(runtime->outputs[i].window);
     }
@@ -8102,6 +8118,46 @@ static void capture_requested_screenshot(BlitRuntime *runtime,
     runtime->outputs[output_index].screenshot_surface = pixels;
 }
 
+static int ensure_sdl_scene_texture(BlitOutput *output)
+{
+    int width;
+    int height;
+
+    if (output == NULL || output->renderer == NULL)
+        return 0;
+    if (output->scene_texture != NULL)
+        return 1;
+    if (!SDL_GetRenderOutputSize(output->renderer, &width, &height) ||
+        width < 1 || height < 1)
+        return 0;
+    output->scene_texture = SDL_CreateTexture(
+        output->renderer, SDL_PIXELFORMAT_RGBA8888,
+        SDL_TEXTUREACCESS_TARGET, width, height);
+    if (output->scene_texture == NULL) {
+        fprintf(stderr, "blit: SDL scene cache unavailable: %s\n",
+                SDL_GetError());
+        return 0;
+    }
+    SDL_SetTextureBlendMode(output->scene_texture, SDL_BLENDMODE_NONE);
+    return 1;
+}
+
+static void finish_sdl_output(BlitRuntime *runtime, int output_index,
+                              int scene_target)
+{
+    SDL_Renderer *renderer = runtime->outputs[output_index].renderer;
+
+    if (scene_target) {
+        SDL_SetRenderTarget(renderer, NULL);
+        SDL_RenderTexture(renderer, runtime->outputs[output_index].scene_texture,
+                          NULL, NULL);
+    }
+    render_pointer(runtime, output_index);
+    capture_sdl_frame(runtime, output_index, renderer);
+    capture_requested_screenshot(runtime, output_index, renderer);
+    SDL_RenderPresent(renderer);
+}
+
 static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                            uint32_t output_mask)
 {
@@ -8254,6 +8310,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
         int overlay_count = 0;
         int target_changed = 0;
         int full_redraw;
+        int scene_target = 0;
+        int pointer_only;
         SDL_Renderer *renderer = runtime->outputs[output_index].renderer;
 
         if (!(output_mask & (1U << output_index)))
@@ -8287,6 +8345,21 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                         &runtime->overlays[overlay_index], output_index))
                     ++overlay_count;
         }
+        pointer_only = runtime->pointer_dirty &&
+            runtime->outputs[output_index].initialized &&
+            runtime->outputs[output_index].scene_texture != NULL &&
+            !target_changed;
+        if (pointer_only) {
+            ++runtime->diagnostic_pointer_cache_hits;
+            SDL_SetRenderTarget(renderer, NULL);
+            SDL_RenderTexture(renderer,
+                              runtime->outputs[output_index].scene_texture,
+                              NULL, NULL);
+            finish_sdl_output(runtime, output_index, 0);
+            continue;
+        }
+        if (runtime->pointer_dirty)
+            ++runtime->diagnostic_pointer_cache_misses;
         if (target_count == 0 && overlay_count == 0 &&
             synchronized_count > 0) {
             /* Leave the synchronized output untouched until its owner sends
@@ -8294,6 +8367,11 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                merely because another output caused a render pass. */
             continue;
         }
+        scene_target = ensure_sdl_scene_texture(
+            &runtime->outputs[output_index]);
+        if (scene_target)
+            SDL_SetRenderTarget(renderer,
+                                runtime->outputs[output_index].scene_texture);
         if (target_count == 0 && overlay_count == 0) {
             /* The output is already in its empty state.  A pending render
                can be caused by another display's PTY or by a stream event;
@@ -8309,9 +8387,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                 SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
                 SDL_RenderClear(renderer);
             }
-            render_pointer(runtime, output_index);
-            capture_requested_screenshot(runtime, output_index, renderer);
-            SDL_RenderPresent(renderer);
+            finish_sdl_output(runtime, output_index, scene_target);
             /* A later session needs a full first frame, even if this output
                was previously presenting the empty desktop. */
             runtime->outputs[output_index].initialized = 0;
@@ -8332,10 +8408,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                                runtime->displays[display_index_for_output(
                                    runtime, output_index)].bounds.h);
             render_sdl_overlays(runtime, renderer, output_index);
-            render_pointer(runtime, output_index);
-            capture_sdl_frame(runtime, output_index, renderer);
-            capture_requested_screenshot(runtime, output_index, renderer);
-            SDL_RenderPresent(renderer);
+            finish_sdl_output(runtime, output_index, scene_target);
             runtime->outputs[output_index].initialized = 1;
             continue;
         }
@@ -8566,10 +8639,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                            runtime->displays[display_index_for_output(
                                runtime, output_index)].bounds.h);
         render_sdl_overlays(runtime, renderer, output_index);
-        render_pointer(runtime, output_index);
-        capture_sdl_frame(runtime, output_index, renderer);
-        capture_requested_screenshot(runtime, output_index, renderer);
-        SDL_RenderPresent(renderer);
+        finish_sdl_output(runtime, output_index, scene_target);
         runtime->outputs[output_index].initialized = 1;
     }
     if (render_started != 0) {

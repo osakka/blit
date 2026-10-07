@@ -177,13 +177,15 @@ if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
     input_wait_arg=$($b cat /proc/cmdline 2>/dev/null | $b sed -n 's/.*blit.input_wait=\([0-9][0-9]*\).*/\1/p')
     [ -n "$input_wait_arg" ] && input_wait=$input_wait_arg
     $b sleep "$input_wait"
+    echo BLIT_LOG_BEFORE_INPUT_PROBES
+    $b cat /tmp/blit.log 2>/dev/null || true
     # The synthetic producer starts before the gateway and waits before
     # emitting events. Poll the observable PTY surfaces with a bounded
     # deadline instead of assuming a fixed sleep covers slow QEMU scheduling.
     input_probe_wait=20
     while [ "$input_probe_wait" -gt 0 ]; do
-        key_probe=$($b wget -qO- http://127.0.0.1:19191/v1/surfaces/surface-$input_key_id/cells || true)
-        pointer_probe=$($b wget -qO- http://127.0.0.1:19191/v1/surfaces/surface-$input_pointer_id/cells || true)
+        key_probe=$($b timeout 3 $b wget -qO- http://127.0.0.1:19191/v1/surfaces/surface-$input_key_id/cells || true)
+        pointer_probe=$($b timeout 3 $b wget -qO- http://127.0.0.1:19191/v1/surfaces/surface-$input_pointer_id/cells || true)
         if echo "$key_probe" | $b grep -q '"text":"B"' &&
            echo "$pointer_probe" | $b grep -q '"text":"B"'; then
             break
@@ -191,7 +193,7 @@ if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
         $b sleep 1
         input_probe_wait=$((input_probe_wait - 1))
     done
-    $b wget -qO /tmp/input-key-surface.json http://127.0.0.1:19191/v1/surfaces/surface-$input_key_id/cells || true
+    $b timeout 3 $b wget -qO /tmp/input-key-surface.json http://127.0.0.1:19191/v1/surfaces/surface-$input_key_id/cells || true
     key_text=$($b tr ',' '\n' < /tmp/input-key-surface.json | \
         $b sed -n 's/.*"text":"\([^"]*\)".*/\1/p' | $b tr -d '\n')
     keypad_pass=1
@@ -203,7 +205,7 @@ if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
     echo BLIT_INPUT_SURFACE_KEY
     $b cat /tmp/input-key-surface.json | $b cut -c 1-4000
     echo BLIT_INPUT_SURFACE_POINTER
-    pointer_surface=$($b wget -qO- http://127.0.0.1:19191/v1/surfaces/surface-$input_pointer_id/cells)
+    pointer_surface=$($b timeout 3 $b wget -qO- http://127.0.0.1:19191/v1/surfaces/surface-$input_pointer_id/cells || true)
     pointer_text=$(echo "$pointer_surface" | $b tr ',' '\n' | \
         $b sed -n 's/.*"text":"\([^"]*\)".*/\1/p' | $b tr -d '\n')
     echo INPUT_POINTER_TEXT=$pointer_text
@@ -407,10 +409,10 @@ echo "$routes" | $b grep -q '"target_session_id":"session-2"' || input_routes_pa
 echo "$routes" | $b grep -q '"id":"pointer-join"' || input_routes_pass=0
 echo "$routes" | $b grep -q '"target_session_id":"session-3"' || input_routes_pass=0
 
-# Leave the primary keyboard route active long enough for the harness to send
-# a real Hibr menu shortcut before the probe routes take ownership.
-echo READY_FOR_WINDOW_INPUT
-$b sleep 8
+    # Leave the primary keyboard route active long enough for the harness to send
+    # a real Hibr menu shortcut before the probe routes take ownership.
+    echo READY_FOR_WINDOW_INPUT
+    $b sleep 8
 
 $b wget -qO /tmp/input-key.json --post-data="{\"command\":\"/blit-stage/hibr\",\"arguments\":[\"--agent\",\"/blit-stage/input_probe.hibr\"],\"surface_mode\":\"external\",\"display_id\":\"$display1\",\"surface\":{\"width\":128,\"height\":48}}" --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
 $b wget -qO /tmp/input-pointer.json --post-data="{\"command\":\"/blit-stage/hibr\",\"arguments\":[\"--agent\",\"/blit-stage/input_probe.hibr\"],\"surface_mode\":\"external\",\"display_id\":\"$display2\",\"surface\":{\"width\":128,\"height\":48}}" --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
