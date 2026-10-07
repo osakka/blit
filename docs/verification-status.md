@@ -70,6 +70,16 @@ The latest reachable observation of the authorized host at
 - The corresponding physical SDL screenshot was almost entirely black, with
   only a small glyph/pointer visible. This is a confirmed presentation defect
   in the installed `0.1.210` runtime, not evidence of missing Hibr output.
+- A second capture waited 25 seconds after a uniquely named Hibr session
+  reached `running`; the result was still black, with one isolated glyph.
+  The host reported `renderer:opengl`, `refresh_hz:59.990`, and
+  `missed_deadlines:77`, with no API errors. The bounded session was then
+  deleted and the host returned to zero sessions.
+- The same stock Hibr desktop, run against the current TCC `0.1.217` build
+  with SDL's software renderer, produced a settled screenshot containing the
+  desktop bar, wallpaper, icons, and themed cells. This isolates the physical
+  failure to the installed old runtime; it is not reproduced by the current
+  source path.
 - The captured framebuffer contained no red diagnostic box. Any red box seen
   by an operator must be correlated with a timestamped screenshot and the
   overlay/graphics API state; it is not present in the current capture.
