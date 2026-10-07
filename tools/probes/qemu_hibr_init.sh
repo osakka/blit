@@ -77,7 +77,7 @@ case " $($b cat /proc/cmdline 2>/dev/null || true) " in
     *" blit.hibr_panes=1 "*) BLIT_HIBR_PANES_TEST=1 ;;
 esac
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
-    *" blit.hibr_restart=1 "*) BLIT_HIBR_RESTART_TEST=1 ;;
+    *" blit.hibr_restart=1 "*) BLIT_HIBR_PANES_TEST=1; BLIT_HIBR_RESTART_TEST=1 ;;
 esac
 BLIT_HIBR_PANE_WORKLOAD=/blit-stage/hibr_window_workload.hibr
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
