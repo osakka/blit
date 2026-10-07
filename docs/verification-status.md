@@ -10,6 +10,8 @@ an evidence record, not a claim that the complete product is released.
 - The previous fully validated source build is `0.1.222`, which includes the
   Hibr-compatible Unicode 15.1 width table and regression vectors for
   variation selectors and zero-width joiners.
+- The current TCC source build and turnkey package are `0.1.223`; the complete
+  terminal conformance suite passes with the canonical 16x16 Terminus font.
 - SDL pointer-only presentation now reuses a per-output scene cache instead of
   forcing a full terminal rasterization on every pointer motion. Runtime
   diagnostics expose pointer-cache hits and misses.
@@ -23,8 +25,8 @@ an evidence record, not a claim that the complete product is released.
 
 - OpenAPI and TCC build checks pass.
 - The canonical `tools/build-tcc.sh` injects `packaging/VERSION` into the
-  executable; the Debian package, local conformance run, live host, and QEMU
-  KMS run all report `server_version:0.1.222` with `api_version:0.1`.
+  executable; the 0.1.223 local conformance run and live host report
+  `server_version:0.1.223` with `api_version:0.1`.
 - Terminal grids are allocated per live session rather than embedded in all
   session slots. The exact 0.1.222 TCC build passed the terminal suite and a
   100,000-line PTY soak with no diagnostic errors; peak RSS was 25,156 KiB
@@ -84,21 +86,20 @@ an evidence record, not a claim that the complete product is released.
 The latest reachable observation of the authorized host at
 `192.168.10.54:8080` reported:
 
-- Blit `0.1.221`, healthy SDL3/OpenGL presentation. The 0.1.222 package has
-  not yet been deployed to this host.
+- Blit `0.1.223`, healthy SDL3/OpenGL presentation, reached through the
+  versioned TCP API.
 - One physical output, `DP-1`, active at 1920×2160 and 59.99 Hz.
-- A fresh Hibr session reached `running`; its revisioned surface snapshot and
-  settled screenshot contained the Hibr desktop bar, icons, controls, and
-  pointer. Live diagnostics reported one `DP-1` output at 1920×2160 and
-  59.99 Hz, one keyboard, one pointer, no errors, and a 16 ms refresh-aware
-  presentation interval.
+- A fresh API-created PTY session reached `running`, emitted `BLIT_BASH_OK`,
+  and its surface snapshot contained the expected cells; the session was then
+  deleted and resources returned to zero. Live diagnostics report one
+  `DP-1` output at 1920×2160 and 59.99 Hz, one keyboard, one pointer, no
+  errors, and a 16 ms refresh-aware presentation interval.
 - The live host currently exposes one physical output. Multi-display behavior
   is therefore proven by the two-output VKMS/QEMU fixture, not by this host.
 
 ## Open release gates
 
-1. Install and verify 0.1.223 on the physical host, then validate at least one
-   physical multi-monitor arrangement, including
+1. Validate at least one physical multi-monitor arrangement, including
    connector discovery, independent presentation, pointer routing, and Hibr
    primary/join behavior. The current host exposes only one physical output.
 2. Complete the Gate 6 fault/reconnect and multi-hour soak campaign.
