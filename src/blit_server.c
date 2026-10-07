@@ -65,6 +65,8 @@ extern char **environ;
 #define BLIT_ATTR_STRIKE 512
 #define BLIT_MAX_COMBINING 16
 
+#define BLIT_SDL_GRAPHICS_CACHE 32
+
 typedef struct {
     unsigned long long id;
     char name[128];
@@ -217,6 +219,13 @@ typedef struct {
     SDL_Renderer *renderer;
     SDL_Texture *scene_texture;
     SDL_Texture *glyph_atlas;
+    SDL_Texture *graphics_textures[BLIT_SDL_GRAPHICS_CACHE];
+    const BlitGraphicsImage *graphics_sources[BLIT_SDL_GRAPHICS_CACHE];
+    unsigned long long graphics_generations[BLIT_SDL_GRAPHICS_CACHE];
+    unsigned long long graphics_cache_hits;
+    unsigned long long graphics_texture_uploads;
+    unsigned long long last_topology_revision;
+    int last_target_count;
     int glyph_atlas_columns;
     SDL_Surface *screenshot_surface;
     unsigned long long display_id;
@@ -466,6 +475,16 @@ typedef struct {
     char update_detail[256];
 } BlitRuntime;
 
+static unsigned long long blit_graphics_generation;
+
+static unsigned long long next_graphics_generation(void)
+{
+    ++blit_graphics_generation;
+    if (blit_graphics_generation == 0)
+        ++blit_graphics_generation;
+    return blit_graphics_generation;
+}
+
 static int runtime_terminal_cell_width(const BlitRuntime *runtime)
 {
     int value = runtime->direct_kms ? blit_kms_cell_width(runtime->kms) :
@@ -504,6 +523,7 @@ static const char *pane_surface_id(const BlitRuntime *runtime,
 static void discover_panes(BlitRuntime *runtime);
 static void focus_session(BlitRuntime *runtime, BlitSession *target);
 static int activate_direct_kms_fallback(BlitRuntime *runtime);
+static void destroy_sdl_graphics_cache(BlitOutput *output);
 static uint64_t monotonic_us(void);
 static void diagnostics_json(const BlitRuntime *runtime, char *body,
                              size_t capacity);
@@ -1157,6 +1177,26 @@ static unsigned long long diagnostic_missed_deadlines(
     return total;
 }
 
+static unsigned long long diagnostic_graphics_cache_hits(
+    const BlitRuntime *runtime)
+{
+    unsigned long long total = 0;
+    int i;
+    for (i = 0; i < runtime->output_count; ++i)
+        total += runtime->outputs[i].graphics_cache_hits;
+    return total;
+}
+
+static unsigned long long diagnostic_graphics_texture_uploads(
+    const BlitRuntime *runtime)
+{
+    unsigned long long total = 0;
+    int i;
+    for (i = 0; i < runtime->output_count; ++i)
+        total += runtime->outputs[i].graphics_texture_uploads;
+    return total;
+}
+
 static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
                                      size_t capacity)
 {
@@ -1186,6 +1226,7 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"last_terminal_ms\":%.3f,\"max_terminal_ms\":%.3f,"
         "\"terminal_bytes\":%llu,\"pointer_cache_hits\":%llu,"
         "\"pointer_cache_misses\":%llu,\"frame_rate_hz\":%.3f,"
+        "\"graphics_cache_hits\":%llu,\"graphics_texture_uploads\":%llu,"
         "\"frame_rate_frames\":%llu,\"frame_rate_window_ms\":%llu,"
         "\"frame_rate_age_ms\":%llu,\"loop_iterations\":%llu,"
         "\"terminal_reads\":%llu,\"present_calls\":%llu,"
@@ -1207,7 +1248,10 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         runtime->diagnostic_terminal_bytes,
         runtime->diagnostic_pointer_cache_hits,
         runtime->diagnostic_pointer_cache_misses,
-        frame_rate_hz, runtime->diagnostic_frame_rate_last_frames,
+        frame_rate_hz,
+        diagnostic_graphics_cache_hits(runtime),
+        diagnostic_graphics_texture_uploads(runtime),
+        runtime->diagnostic_frame_rate_last_frames,
         runtime->diagnostic_frame_rate_window_ms, frame_rate_age_ms,
         runtime->diagnostic_loop_iterations,
         runtime->diagnostic_terminal_reads,
@@ -3952,6 +3996,7 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
             return;
         }
         image->revision = 1;
+        image->generation = next_graphics_generation();
     }
     if (display_on_complete) {
         /* Preserve a=T's display intent while later q=2 chunks arrive.  The
@@ -3977,6 +4022,7 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
             return;
         }
         image->complete = 1;
+        image->generation = next_graphics_generation();
         if (display_on_complete) {
             image->visible = 1;
             image->x = x;
@@ -3985,6 +4031,10 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
             image->placement_height = placement_height > 0 ? placement_height : image->height;
             image->z = z;
         }
+        /* Image composition is part of the surface scene, not terminal cell
+           state.  Invalidate the scene when the final Kitty chunk arrives so
+           SDL/KMS cannot skip the newly completed image. */
+        mark_surface_full_damage(surface);
     }
 }
 
@@ -4195,6 +4245,7 @@ static void terminal_apply_sixel(BlitSession *session, BlitSurface *surface)
     image->placement_width = maximum_x;
     image->placement_height = maximum_y;
     image->revision = 1;
+    image->generation = next_graphics_generation();
     free(scratch);
     mark_surface_full_damage(surface);
 }
@@ -8014,6 +8065,7 @@ static void destroy_outputs(BlitRuntime *runtime)
         if (runtime->outputs[i].screenshot_surface != NULL)
             SDL_DestroySurface(runtime->outputs[i].screenshot_surface);
         runtime->outputs[i].screenshot_surface = NULL;
+        destroy_sdl_graphics_cache(&runtime->outputs[i]);
         if (runtime->outputs[i].scene_texture != NULL)
             SDL_DestroyTexture(runtime->outputs[i].scene_texture);
         runtime->outputs[i].scene_texture = NULL;
@@ -8416,10 +8468,100 @@ static void render_sdl_glyph(SDL_Renderer *renderer, const BlitFont *font,
     }
 }
 
-static void render_sdl_graphics(SDL_Renderer *renderer,
+static void destroy_sdl_graphics_cache(BlitOutput *output)
+{
+    int index;
+    if (output == NULL) return;
+    for (index = 0; index < BLIT_SDL_GRAPHICS_CACHE; ++index) {
+        if (output->graphics_textures[index] != NULL)
+            SDL_DestroyTexture(output->graphics_textures[index]);
+        output->graphics_textures[index] = NULL;
+        output->graphics_sources[index] = NULL;
+        output->graphics_generations[index] = 0;
+    }
+}
+
+static SDL_Texture *sdl_graphics_texture(BlitOutput *output,
+                                         const BlitGraphicsImage *image)
+{
+    int index;
+    int free_index = -1;
+    int source_bytes;
+    size_t pixel_count;
+    unsigned char *rgba;
+    SDL_Texture *texture;
+    int pixel_index;
+
+    if (output == NULL || output->renderer == NULL || image == NULL ||
+        image->pixels == NULL || image->width < 1 || image->height < 1)
+        return NULL;
+    for (index = 0; index < BLIT_SDL_GRAPHICS_CACHE; ++index) {
+        if (output->graphics_sources[index] == image) {
+            if (output->graphics_generations[index] == image->generation &&
+                output->graphics_textures[index] != NULL) {
+                ++output->graphics_cache_hits;
+                return output->graphics_textures[index];
+            }
+            if (output->graphics_textures[index] != NULL)
+                SDL_DestroyTexture(output->graphics_textures[index]);
+            output->graphics_textures[index] = NULL;
+            free_index = index;
+            break;
+        }
+        if (free_index < 0 && output->graphics_sources[index] == NULL)
+            free_index = index;
+    }
+    if (free_index < 0) free_index = 0;
+    if (output->graphics_sources[free_index] != NULL &&
+        output->graphics_textures[free_index] != NULL)
+        SDL_DestroyTexture(output->graphics_textures[free_index]);
+    output->graphics_textures[free_index] = NULL;
+    output->graphics_sources[free_index] = NULL;
+    output->graphics_generations[free_index] = 0;
+
+    source_bytes = image->format == 24 ? 3 : 4;
+    pixel_count = (size_t)image->width * (size_t)image->height;
+    rgba = (unsigned char *)malloc(pixel_count * 4U);
+    if (rgba == NULL) return NULL;
+    for (pixel_index = 0; (size_t)pixel_index < pixel_count; ++pixel_index) {
+        rgba[pixel_index * 4U] = image->pixels[pixel_index * source_bytes];
+        rgba[pixel_index * 4U + 1] =
+            image->pixels[pixel_index * source_bytes + 1];
+        rgba[pixel_index * 4U + 2] =
+            image->pixels[pixel_index * source_bytes + 2];
+        rgba[pixel_index * 4U + 3] = source_bytes == 4 ?
+            image->pixels[pixel_index * source_bytes + 3] : 255;
+    }
+    texture = SDL_CreateTexture(output->renderer, SDL_PIXELFORMAT_RGBA32,
+                                SDL_TEXTUREACCESS_STATIC,
+                                image->width, image->height);
+    if (texture == NULL) {
+        fprintf(stderr, "blit: SDL graphics texture create failed: %s\n",
+                SDL_GetError());
+        free(rgba);
+        return NULL;
+    }
+    SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+    if (!SDL_UpdateTexture(texture, NULL, rgba, image->width * 4)) {
+        fprintf(stderr, "blit: SDL graphics texture upload failed: %s\n",
+                SDL_GetError());
+        SDL_DestroyTexture(texture);
+        free(rgba);
+        return NULL;
+    }
+    free(rgba);
+    output->graphics_sources[free_index] = image;
+    output->graphics_generations[free_index] = image->generation;
+    output->graphics_textures[free_index] = texture;
+    ++output->graphics_texture_uploads;
+    return texture;
+}
+
+static void render_sdl_graphics(BlitOutput *output,
                                 const BlitGraphicsImage *images,
                                 int image_count, float origin_x, float origin_y)
 {
+    SDL_Renderer *renderer = output != NULL ? output->renderer : NULL;
     int drawn[BLIT_GRAPHICS_MAX_IMAGES];
     int pass;
     memset(drawn, 0, sizeof(drawn));
@@ -8430,12 +8572,8 @@ static void render_sdl_graphics(SDL_Renderer *renderer,
         const BlitGraphicsImage *image;
         int width;
         int height;
-        int source_bytes;
-        size_t pixel_count;
-        unsigned char *rgba;
         SDL_Texture *texture;
         SDL_FRect destination;
-        int pixel_index;
 
         for (image_index = 0; image_index < image_count &&
              image_index < BLIT_GRAPHICS_MAX_IMAGES; ++image_index)
@@ -8452,37 +8590,13 @@ static void render_sdl_graphics(SDL_Renderer *renderer,
         width = image->placement_width > 0 ? image->placement_width : image->width;
         height = image->placement_height > 0 ? image->placement_height : image->height;
         if (width < 1 || height < 1) continue;
-        source_bytes = image->format == 24 ? 3 : 4;
-        pixel_count = (size_t)image->width * (size_t)image->height;
-        rgba = (unsigned char *)malloc(pixel_count * 4U);
-        if (rgba == NULL) continue;
-        for (pixel_index = 0; (size_t)pixel_index < pixel_count; ++pixel_index) {
-            rgba[pixel_index * 4U] = image->pixels[pixel_index * source_bytes];
-            rgba[pixel_index * 4U + 1] = image->pixels[pixel_index * source_bytes + 1];
-            rgba[pixel_index * 4U + 2] = image->pixels[pixel_index * source_bytes + 2];
-            rgba[pixel_index * 4U + 3] = source_bytes == 4 ?
-                image->pixels[pixel_index * source_bytes + 3] : 255;
-        }
-        texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32,
-                                    SDL_TEXTUREACCESS_STATIC,
-                                    image->width, image->height);
-        if (texture == NULL) {
-            free(rgba);
-            continue;
-        }
-        SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
-        if (!SDL_UpdateTexture(texture, NULL, rgba, image->width * 4)) {
-            SDL_DestroyTexture(texture);
-            free(rgba);
-            continue;
-        }
+        texture = sdl_graphics_texture(output, image);
+        if (texture == NULL) continue;
         destination.x = origin_x + image->x;
         destination.y = origin_y + image->y;
         destination.w = (float)width;
         destination.h = (float)height;
         SDL_RenderTexture(renderer, texture, NULL, &destination);
-        SDL_DestroyTexture(texture);
-        free(rgba);
     }
 }
 
@@ -8898,6 +9012,9 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             render_sdl_overlays(runtime, renderer, output_index);
             finish_sdl_output(runtime, output_index, scene_target);
             runtime->outputs[output_index].initialized = 1;
+            runtime->outputs[output_index].last_topology_revision =
+                runtime->topology_revision;
+            runtime->outputs[output_index].last_target_count = target_count;
             continue;
         }
         /* A surface can be present without having changed since the last
@@ -8908,7 +9025,10 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             !runtime->pointer_dirty && !target_changed)
             continue;
         full_redraw = !runtime->outputs[output_index].initialized ||
-            target_count > 1 || runtime->pointer_dirty;
+            runtime->pointer_dirty ||
+            target_count != runtime->outputs[output_index].last_target_count ||
+            runtime->topology_revision !=
+                runtime->outputs[output_index].last_topology_revision;
         if (!runtime->outputs[output_index].initialized) {
             SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
             SDL_RenderClear(renderer);
@@ -9124,7 +9244,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                 graphics_clip.w = surface->width * cell_width;
                 graphics_clip.h = surface->height * cell_height;
                 SDL_SetRenderClipRect(renderer, &graphics_clip);
-                render_sdl_graphics(renderer, session->graphics,
+                render_sdl_graphics(&runtime->outputs[output_index],
+                                    session->graphics,
                                     BLIT_GRAPHICS_MAX_IMAGES,
                                     surface_origin_x, (float)surface_origin_y);
                 SDL_SetRenderClipRect(renderer, NULL);
@@ -9138,6 +9259,9 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
         render_sdl_overlays(runtime, renderer, output_index);
         finish_sdl_output(runtime, output_index, scene_target);
         runtime->outputs[output_index].initialized = 1;
+        runtime->outputs[output_index].last_topology_revision =
+            runtime->topology_revision;
+        runtime->outputs[output_index].last_target_count = target_count;
     }
     if (render_started != 0) {
         Uint64 elapsed = SDL_GetPerformanceCounter() - render_started;

@@ -30,6 +30,9 @@ typedef struct {
     int placement_height;
     int z;
     unsigned long long revision;
+    /* Unique identity for the pixel contents.  SDL output caches use this
+       to discard a texture when a Kitty/Sixel image is replaced or updated. */
+    unsigned long long generation;
     unsigned char base64_tail[4];
     int base64_tail_length;
 } BlitGraphicsImage;

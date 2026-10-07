@@ -360,6 +360,14 @@ the cursor disabled does not schedule presentation frames:
 ruby tools/tests/hidden_cursor_damage_gate.rb
 ```
 
+The SDL graphics-cache gate transmits a Kitty image, then generates repeated
+terminal damage while the image remains unchanged. It requires one initial
+texture upload and subsequent cache hits with no additional uploads:
+
+```sh
+ruby tools/tests/sdl_graphics_cache_gate.rb
+```
+
 The result is exposed by `GET /v1/diagnostics/runtime` under `performance` as
 `frame_rate_hz`, `frame_rate_frames`, `frame_rate_window_ms`, and
 `frame_rate_age_ms`. The same object includes `loop_iterations`,
@@ -370,13 +378,18 @@ SDL event-pump duration is reported as `last_sdl_events_ms` and
 `max_sdl_events_ms`; evdev scan duration is reported as
 `last_evdev_scan_ms` and `max_evdev_scan_ms`. The rate is measured from
 presented frames, not inferred from the display mode or configured interval.
+Graphics composition counters are reported as `graphics_cache_hits` and
+`graphics_texture_uploads`; they make wallpaper upload churn observable through
+the API rather than inferred from screenshots.
 
 The SDL path uses a per-output monochrome glyph atlas and suppresses damage
 for terminal writes whose complete cell state is unchanged. This is especially
 important for Hibr wallpaper themes, which may repeatedly emit the same glyph
 grid. The atlas does not change the canonical surface or direct-KMS renderer;
 the initial full redraw and pointer-only cached-scene paths must be measured
-separately.
+separately. In multi-pane SDL output, the scene cache is also retained across
+ordinary pane damage; full composition is reserved for first frame, pointer,
+topology, and surface-count changes.
 
 The shutdown gate verifies that `POST /v1/control/shutdown` acknowledges the
 request and the Blit process exits cleanly:

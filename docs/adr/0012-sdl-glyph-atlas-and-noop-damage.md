@@ -26,9 +26,22 @@ Pure cursor movement is damage only while the cursor is visible; cell changes,
 cursor visibility changes, and content-affecting control sequences still force
 the required damage.
 
+Kitty and sixel pixel data is cached as a static SDL texture per output. The
+cache is keyed by the image object and its generation, so repeated Hibr
+terminal damage reuses the uploaded wallpaper texture while a completed image
+or replacement image invalidates it. Completing a Kitty image also marks the
+surface damaged; accepting protocol state without scheduling composition is
+not valid presentation behavior.
+
 The atlas is an SDL presentation optimization only. The canonical terminal
 grid, UTF-8 semantics, font mapping, direct-KMS rasterizer, and API surface
 contract remain unchanged.
+
+For SDL scene composition, multiple non-overlapping panes use the cached scene
+and redraw only damaged rows. A full scene redraw remains required for the
+first frame, pointer movement, topology changes, and surface-count changes.
+This preserves correctness when panes are added or moved without making every
+write in a multi-pane desktop pay the cost of rasterizing every pane.
 
 ## Consequences
 
@@ -41,9 +54,14 @@ contract remain unchanged.
 - A full initial redraw can still exceed the frame budget on a slow software
   renderer; the acceptance evidence must measure initial, damage, and
   pointer-only paths separately.
+- Runtime diagnostics expose `graphics_cache_hits` and
+  `graphics_texture_uploads`; the cache gate requires repeated terminal damage
+  to add hits without additional uploads.
+- Multi-pane damage keeps the cached scene and avoids the former unconditional
+  full redraw for every update when more than one surface targets an output.
 - Atlas and no-op damage behavior must be covered by TCC builds, terminal
-  conformance, SDL pixel capture, hidden-cursor damage, and the relevant
-  KMS/QEMU gates.
+  conformance, SDL pixel capture, hidden-cursor damage, graphics-cache
+  regression, and the relevant KMS/QEMU gates.
 
 ## Rejected alternatives
 
