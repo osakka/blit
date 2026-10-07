@@ -61,6 +61,9 @@ cp -a "$ROOT/packaging/blit-update-helper.service" \
     "$stage/lib/systemd/system/"
 cp -a "$BUNDLE/lib/libSDL3.so.0.4.16" "$stage/usr/lib/blit/lib/"
 cp -a "$BUNDLE/fonts/." "$stage/usr/lib/blit/fonts/"
+if [ -d "$ROOT/assets/fonts" ]; then
+	cp -a "$ROOT/assets/fonts/." "$stage/usr/lib/blit/fonts/"
+fi
 # The repository documentation and OpenAPI schema are authoritative.  The
 # bundle is an installable runtime artifact, not a second documentation tree.
 if [ -d "$ROOT/docs" ]; then

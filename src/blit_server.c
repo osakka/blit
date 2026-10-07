@@ -196,6 +196,7 @@ typedef struct {
     size_t update_received;
     char update_path[256];
     char update_sha256[65];
+    int screenshot_output_index;
 } BlitHttpClient;
 
 typedef struct {
@@ -209,6 +210,7 @@ typedef struct {
 typedef struct {
     SDL_Window *window;
     SDL_Renderer *renderer;
+    SDL_Surface *screenshot_surface;
     unsigned long long display_id;
     int initialized;
     int vsync_enabled;
@@ -412,6 +414,7 @@ typedef struct {
     int diagnostic_log_next;
     char diagnostic_logs[BLIT_MAX_RUNTIME_LOGS][512];
     int sdl_screenshot_written;
+    uint32_t screenshot_requested_mask;
     char sdl_error[256];
     int listen_port;
     char update_token[256];
@@ -912,6 +915,7 @@ static void send_sdl_screenshot(int fd, BlitRuntime *runtime,
     int output_index;
     int temporary_fd;
     int input_fd;
+    BlitOutput *output;
     ssize_t received;
     size_t offset = 0;
 
@@ -926,7 +930,12 @@ static void send_sdl_screenshot(int fd, BlitRuntime *runtime,
                      "The requested display does not exist or has no renderer.");
         return;
     }
-    pixels = SDL_RenderReadPixels(runtime->outputs[output_index].renderer, NULL);
+    output = &runtime->outputs[output_index];
+    pixels = output->screenshot_surface;
+    if (pixels != NULL)
+        output->screenshot_surface = NULL;
+    else
+        pixels = SDL_RenderReadPixels(output->renderer, NULL);
     if (pixels == NULL) {
         send_problem(fd, 503, "Service Unavailable", "screenshot_failed",
                      "The SDL renderer could not read the current framebuffer.");
@@ -6503,7 +6512,7 @@ static void service_stream(BlitRuntime *runtime, int fd)
 }
 
 static void handle_request(int fd, BlitRuntime *runtime,
-                           const char *request)
+                           BlitHttpClient *client, const char *request)
 {
     char method[16];
     char path[256];
@@ -6546,7 +6555,17 @@ static void handle_request(int fd, BlitRuntime *runtime,
     if (strncmp(path, "/v1/diagnostics/screenshots/",
                 strlen("/v1/diagnostics/screenshots/")) == 0 &&
         strcmp(method, "GET") == 0) {
-        send_sdl_screenshot(fd, runtime, path);
+        int output_index = screenshot_output_index(runtime, path);
+        if (output_index < 0 || runtime->outputs[output_index].renderer == NULL) {
+            send_problem(fd, 404, "Not Found", "display_not_found",
+                         "The requested display does not exist or has no renderer.");
+            return;
+        }
+        client->screenshot_output_index = output_index + 1;
+        runtime->screenshot_requested_mask |= 1U << output_index;
+        runtime->outputs[output_index].initialized = 0;
+        runtime->render_next_us[output_index] = 0;
+        runtime->render_pending = 1;
         return;
     }
 
@@ -7512,6 +7531,9 @@ static void destroy_outputs(BlitRuntime *runtime)
         return;
     }
     for (i = 0; i < runtime->output_count; ++i) {
+        if (runtime->outputs[i].screenshot_surface != NULL)
+            SDL_DestroySurface(runtime->outputs[i].screenshot_surface);
+        runtime->outputs[i].screenshot_surface = NULL;
         SDL_DestroyRenderer(runtime->outputs[i].renderer);
         SDL_DestroyWindow(runtime->outputs[i].window);
     }
@@ -7927,6 +7949,27 @@ static void capture_sdl_frame(BlitRuntime *runtime, int output_index,
         runtime->sdl_screenshot_written = 1;
 }
 
+static void capture_requested_screenshot(BlitRuntime *runtime,
+                                         int output_index,
+                                         SDL_Renderer *renderer)
+{
+    SDL_Surface *pixels;
+
+    if (!(runtime->screenshot_requested_mask & (1U << output_index)))
+        return;
+    if (runtime->outputs[output_index].screenshot_surface != NULL) {
+        SDL_DestroySurface(runtime->outputs[output_index].screenshot_surface);
+        runtime->outputs[output_index].screenshot_surface = NULL;
+    }
+    pixels = SDL_RenderReadPixels(renderer, NULL);
+    if (pixels == NULL) {
+        fprintf(stderr, "blit: API screenshot read failed: %s\n",
+                SDL_GetError());
+        return;
+    }
+    runtime->outputs[output_index].screenshot_surface = pixels;
+}
+
 static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                            uint32_t output_mask)
 {
@@ -8124,7 +8167,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                can be caused by another display's PTY or by a stream event;
                do not submit another clear/present for this output. */
             if (!runtime->outputs[output_index].initialized &&
-                !runtime->pointer_dirty)
+                !runtime->pointer_dirty &&
+                !(runtime->screenshot_requested_mask & (1U << output_index)))
                 continue;
             if (!runtime->outputs[output_index].initialized) {
                 SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
@@ -8134,6 +8178,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                 SDL_RenderClear(renderer);
             }
             render_pointer(runtime, output_index);
+            capture_requested_screenshot(runtime, output_index, renderer);
             SDL_RenderPresent(renderer);
             /* A later session needs a full first frame, even if this output
                was previously presenting the empty desktop. */
@@ -8157,6 +8202,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             render_sdl_overlays(runtime, renderer, output_index);
             render_pointer(runtime, output_index);
             capture_sdl_frame(runtime, output_index, renderer);
+            capture_requested_screenshot(runtime, output_index, renderer);
             SDL_RenderPresent(renderer);
             runtime->outputs[output_index].initialized = 1;
             continue;
@@ -8390,6 +8436,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
         render_sdl_overlays(runtime, renderer, output_index);
         render_pointer(runtime, output_index);
         capture_sdl_frame(runtime, output_index, renderer);
+        capture_requested_screenshot(runtime, output_index, renderer);
         SDL_RenderPresent(renderer);
         runtime->outputs[output_index].initialized = 1;
     }
@@ -9565,7 +9612,13 @@ static void service_http_client(BlitRuntime *runtime, int index)
     }
     if (complete == 0 || client->length < required)
         return;
-    handle_request(client->fd, runtime, client->request);
+    handle_request(client->fd, runtime, client, client->request);
+    if (client->screenshot_output_index > 0) {
+        client->length = 0;
+        client->request[0] = '\0';
+        client->accepted_us = monotonic_us();
+        return;
+    }
     if (stream_contains(runtime, client->fd)) {
         memset(client, 0, sizeof(*client));
         return;
@@ -9909,6 +9962,24 @@ int main(int argc, char **argv)
             advance_render_schedule(&runtime, now, output_mask);
             runtime.render_pending = render_work_remains(&runtime);
             runtime.render_last_us = now;
+        }
+        for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i) {
+            BlitHttpClient *client = &runtime.http_clients[i];
+            int screenshot_index;
+            char screenshot_path[128];
+            if (!client->used || client->screenshot_output_index <= 0)
+                continue;
+            screenshot_index = client->screenshot_output_index - 1;
+            if (screenshot_index < 0 ||
+                screenshot_index >= runtime.output_count ||
+                runtime.outputs[screenshot_index].screenshot_surface == NULL)
+                continue;
+            snprintf(screenshot_path, sizeof(screenshot_path),
+                     "/v1/diagnostics/screenshots/display-%llu",
+                     runtime.outputs[screenshot_index].display_id);
+            send_sdl_screenshot(client->fd, &runtime, screenshot_path);
+            runtime.screenshot_requested_mask &= ~(1U << screenshot_index);
+            remove_http_client(&runtime, i);
         }
     }
     close(server_fd);
