@@ -177,6 +177,20 @@ if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
     input_wait_arg=$($b cat /proc/cmdline 2>/dev/null | $b sed -n 's/.*blit.input_wait=\([0-9][0-9]*\).*/\1/p')
     [ -n "$input_wait_arg" ] && input_wait=$input_wait_arg
     $b sleep "$input_wait"
+    # The synthetic producer starts before the gateway and waits before
+    # emitting events. Poll the observable PTY surfaces with a bounded
+    # deadline instead of assuming a fixed sleep covers slow QEMU scheduling.
+    input_probe_wait=20
+    while [ "$input_probe_wait" -gt 0 ]; do
+        key_probe=$($b wget -qO- http://127.0.0.1:19191/v1/surfaces/surface-$input_key_id/cells || true)
+        pointer_probe=$($b wget -qO- http://127.0.0.1:19191/v1/surfaces/surface-$input_pointer_id/cells || true)
+        if echo "$key_probe" | $b grep -q '"text":"B"' &&
+           echo "$pointer_probe" | $b grep -q '"text":"B"'; then
+            break
+        fi
+        $b sleep 1
+        input_probe_wait=$((input_probe_wait - 1))
+    done
     $b wget -qO /tmp/input-key-surface.json http://127.0.0.1:19191/v1/surfaces/surface-$input_key_id/cells || true
     key_text=$($b tr ',' '\n' < /tmp/input-key-surface.json | \
         $b sed -n 's/.*"text":"\([^"]*\)".*/\1/p' | $b tr -d '\n')

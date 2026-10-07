@@ -9618,7 +9618,14 @@ static void service_update_upload(BlitRuntime *runtime, BlitHttpClient *client)
     ssize_t received;
     size_t remaining = client->update_expected - client->update_received;
     if (remaining > sizeof(chunk)) remaining = sizeof(chunk);
-    received = recv(client->fd, chunk, remaining, 0);
+    /* The HTTP client is selected as readable, but a partial packet can be
+       consumed by the previous read before the next scheduler turn.  Never
+       let a large package upload block the single gateway/render loop while
+       waiting for the next packet. */
+    received = recv(client->fd, chunk, remaining, MSG_DONTWAIT);
+    if (received < 0 && (errno == EAGAIN || errno == EWOULDBLOCK ||
+                         errno == EINTR))
+        return;
     if (received <= 0) {
         snprintf(runtime->update_state, sizeof(runtime->update_state), "failed");
         snprintf(runtime->update_detail, sizeof(runtime->update_detail),
