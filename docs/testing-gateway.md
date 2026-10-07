@@ -50,13 +50,18 @@ sudo install -d -m 0750 /etc/blit
 sudo sh -c 'umask 077; printf "%s\n" \
   "BLIT_BIND_ADDRESS=0.0.0.0" \
   "BLIT_AUTH_TOKEN=replace-me" \
-  "BLIT_UPDATE_TOKEN=replace-update-me" > /etc/blit/blit.env'
+  "BLIT_UPDATE_TOKEN_FILE=/etc/blit/update.token" > /etc/blit/blit.env
+sudo install -o root -g blit -m 0640 /path/to/update.token /etc/blit/update.token
 sudo systemctl daemon-reload
 sudo systemctl enable --now blit.service
 ```
 
-The update token is deployment configuration and is not generated, returned,
-or logged by Blit. Verify:
+`BLIT_UPDATE_TOKEN_FILE` is preferred for the update token. The file is read
+once at startup, trimmed of trailing whitespace, and never logged or returned;
+the `blit` service account therefore needs read access (the example uses the
+`blit` group). `BLIT_UPDATE_TOKEN` remains supported for protected
+environment-file deployments. The update token is deployment configuration and
+is not generated, returned, or logged by Blit. Verify:
 
 ```sh
 curl --fail http://127.0.0.1:8080/v1/version
@@ -67,12 +72,12 @@ reports the expected server version and `state: "ready"`. Upload only a
 package whose SHA-256 was independently recorded:
 
 ```sh
-sha256sum blit_0.1.217-1_amd64.deb
+sha256sum blit_0.1.218-1_amd64.deb
 curl --fail --request PUT \
   --header 'X-Blit-Update-Token: YOUR_UPDATE_TOKEN' \
   --header 'X-Blit-SHA256: RECORDED_SHA256' \
   --header 'Content-Type: application/vnd.debian.binary-package' \
-  --data-binary @blit_0.1.217-1_amd64.deb \
+  --data-binary @blit_0.1.218-1_amd64.deb \
   http://127.0.0.1:8080/v1/control/update
 ```
 

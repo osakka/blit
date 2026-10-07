@@ -9589,6 +9589,28 @@ static int update_authorized(const BlitRuntime *runtime, const char *request)
         strcmp(token, runtime->update_token) == 0;
 }
 
+static int read_secret_file(const char *path, char *value, size_t capacity)
+{
+    int fd;
+    ssize_t length;
+
+    if (path == NULL || *path == '\0' || value == NULL || capacity < 2)
+        return 0;
+    fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0)
+        return 0;
+    length = read(fd, value, capacity - 1);
+    close(fd);
+    if (length <= 0)
+        return 0;
+    value[length] = '\0';
+    while (length > 0 &&
+           (value[length - 1] == '\n' || value[length - 1] == '\r' ||
+            value[length - 1] == ' ' || value[length - 1] == '\t'))
+        value[--length] = '\0';
+    return length > 0;
+}
+
 static int run_capture_command(const char *command, const char *argument,
                                char *output, size_t capacity)
 {
@@ -10096,6 +10118,11 @@ int main(int argc, char **argv)
             if (update_token != NULL)
                 snprintf(runtime.update_token, sizeof(runtime.update_token), "%s",
                          update_token);
+            if (runtime.update_token[0] == '\0') {
+                const char *update_token_file = getenv("BLIT_UPDATE_TOKEN_FILE");
+                read_secret_file(update_token_file, runtime.update_token,
+                                 sizeof(runtime.update_token));
+            }
         }
     }
     snprintf(runtime.update_state, sizeof(runtime.update_state),

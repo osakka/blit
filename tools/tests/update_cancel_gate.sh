@@ -5,6 +5,7 @@ binary=${BLIT_GATE_BINARY:-build/blit/blit-server}
 port=${BLIT_UPDATE_CANCEL_PORT:-19195}
 log=${TMPDIR:-/tmp}/blit-update-cancel-gate.$$.log
 status=${TMPDIR:-/tmp}/blit-update-cancel-gate.$$.status
+token_file=${TMPDIR:-/tmp}/blit-update-cancel-gate.$$.token
 client_pid=
 pid=
 
@@ -18,11 +19,12 @@ cleanup()
         kill -TERM "${pid}" 2>/dev/null || true
         wait "${pid}" 2>/dev/null || true
     fi
-    rm -f "$log" "$status"
+    rm -f "$log" "$status" "$token_file"
 }
 trap cleanup EXIT INT TERM
 
-BLIT_UPDATE_TOKEN=test-token SDL_VIDEODRIVER=dummy \
+printf '%s\n' test-token >"$token_file"
+BLIT_UPDATE_TOKEN_FILE="$token_file" SDL_VIDEODRIVER=dummy \
     LD_LIBRARY_PATH=build/sdl3-kms "$binary" "$port" >"$log" 2>&1 &
 pid=$!
 ready=0
