@@ -108,9 +108,30 @@ if [ -n "$runtime_user" ] && id "$runtime_user" >/dev/null 2>&1 &&
    command -v usermod >/dev/null 2>&1; then
     usermod -a -G blit "$runtime_user" >/dev/null 2>&1 || true
 fi
+
+# A package install is a complete, runnable deployment. Preserve an operator's
+# existing configuration and token on upgrades; generate them only once.
+if [ ! -f /etc/blit/blit.env ]; then
+    install -d -o root -g blit -m 0750 /etc/blit
+    umask 077
+    cat > /etc/blit/blit.env <<'CONFIG'
+BLIT_BIND_ADDRESS=0.0.0.0
+BLIT_UPDATE_TOKEN_FILE=/etc/blit/update.token
+CONFIG
+    chown root:blit /etc/blit/blit.env
+    chmod 0640 /etc/blit/blit.env
+fi
+if [ ! -s /etc/blit/update.token ]; then
+    install -d -o root -g blit -m 0750 /etc/blit
+    umask 077
+    od -An -N32 -tx1 /dev/urandom | tr -d ' \n' > /etc/blit/update.token
+    chown root:blit /etc/blit/update.token
+    chmod 0640 /etc/blit/update.token
+fi
 if command -v systemctl >/dev/null 2>&1; then
     systemctl daemon-reload || true
     systemctl enable --now blit-update-helper.service || true
+    systemctl enable --now blit.service || true
 fi
 if [ ! -S /run/blit/update.sock ] && [ -x /usr/lib/blit/bin/blit-update-helper ]; then
     mkdir -p /run/blit

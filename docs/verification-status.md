@@ -7,7 +7,7 @@ an evidence record, not a claim that the complete product is released.
 
 - Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The source build for this cycle is `0.1.222`, which includes the
+- The previous fully validated source build is `0.1.222`, which includes the
   Hibr-compatible Unicode 15.1 width table and regression vectors for
   variation selectors and zero-width joiners.
 - SDL pointer-only presentation now reuses a per-output scene cache instead of
@@ -97,7 +97,7 @@ The latest reachable observation of the authorized host at
 
 ## Open release gates
 
-1. Deploy and verify 0.1.222 on the physical host, then validate at least one
+1. Install and verify 0.1.223 on the physical host, then validate at least one
    physical multi-monitor arrangement, including
    connector discovery, independent presentation, pointer routing, and Hibr
    primary/join behavior. The current host exposes only one physical output.

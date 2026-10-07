@@ -40,10 +40,11 @@ production `console-blit` module is operational over the OpenAPI/WebSocket
 contract. Explicit focus and versioned input routes are exposed by the API.
 The SDL adapter uses single-surface incremental frames and conservatively
 redraws multi-surface outputs with deterministic vertical stacking. The
-current 0.1.222 package passes the complete terminal, graphics, input,
+previous 0.1.222 package passes the complete terminal, graphics, input,
 two-display VKMS/QEMU, and Hibr primary/`--join` acceptance gates. The
 authorized physical host is running 0.1.221 and has a healthy one-output
-SDL3/OpenGL presentation; 0.1.222 is packaged and validated locally/QEMU but
+SDL3/OpenGL presentation; 0.1.222 is packaged and validated locally/QEMU, and
+0.1.223 is the turnkey package handoff with automatic service configuration but
 has not yet been deployed there. Physical multi-monitor confirmation remains
 open because that host currently exposes only one connector.
 
@@ -136,7 +137,7 @@ suite on VKMS and then on a physical DRM/KMS host.
 
 ## Immediate next action
 
-Deploy the verified 0.1.222 package to the authorized physical host, then
+Deploy the verified 0.1.223 package to the authorized physical host, then
 capture settled SDL screenshots and API diagnostics. Verify physical
 pointer/button/wheel routing and
 refresh cadence, followed by a real two-monitor primary/`--join` arrangement

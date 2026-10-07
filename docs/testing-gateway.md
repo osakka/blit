@@ -39,21 +39,14 @@ The Debian package installs a root-owned `blit-update-helper` behind
 gateway user: it verifies the package name and SHA-256, then delegates
 installation to that helper and requests a supervised restart.
 
-The package includes an opt-in `blit.service` unit. It runs the server as the
-dedicated `blit` account with `video`, `render`, and `input` supplementary
-groups, and is intentionally not enabled automatically so it cannot collide
-with an existing manually started server. After confirming those device-group
-permissions are appropriate for the host, configure the service and enable it:
+The package includes `blit.service`. Installation creates a root-owned update
+token and starts the server as the dedicated `blit` account with `video`,
+`render`, and `input` supplementary groups. Existing `/etc/blit/blit.env` and
+`/etc/blit/update.token` files are preserved on upgrades. The default package
+configuration binds to `0.0.0.0:8080` for the trusted test LAN:
 
 ```sh
-sudo install -d -m 0750 /etc/blit
-sudo sh -c 'umask 077; printf "%s\n" \
-  "BLIT_BIND_ADDRESS=0.0.0.0" \
-  "BLIT_AUTH_TOKEN=replace-me" \
-  "BLIT_UPDATE_TOKEN_FILE=/etc/blit/update.token" > /etc/blit/blit.env
-sudo install -o root -g blit -m 0640 /path/to/update.token /etc/blit/update.token
-sudo systemctl daemon-reload
-sudo systemctl enable --now blit.service
+sudo systemctl status blit.service
 ```
 
 `BLIT_UPDATE_TOKEN_FILE` is preferred for the update token. The file is read
@@ -72,12 +65,12 @@ reports the expected server version and `state: "ready"`. Upload only a
 package whose SHA-256 was independently recorded:
 
 ```sh
-sha256sum blit_0.1.222-1_amd64.deb
+sha256sum blit_0.1.223-1_amd64.deb
 curl --fail --request PUT \
   --header 'X-Blit-Update-Token: YOUR_UPDATE_TOKEN' \
   --header 'X-Blit-SHA256: RECORDED_SHA256' \
   --header 'Content-Type: application/vnd.debian.binary-package' \
-  --data-binary @blit_0.1.222-1_amd64.deb \
+  --data-binary @blit_0.1.223-1_amd64.deb \
   http://127.0.0.1:8080/v1/control/update
 ```
 
@@ -91,7 +84,7 @@ the API bearer token, and never retries a rejected credential:
 ```sh
 BLIT_UPDATE_TOKEN_FILE=/secure/path/live-update.token \
   BLIT_AUTH_TOKEN_FILE=/secure/path/live-api.token \
-  tools/deploy/update-live.sh 192.168.10.54 blit_0.1.222-1_amd64.deb
+  tools/deploy/update-live.sh 192.168.10.54 blit_0.1.223-1_amd64.deb
 ```
 
 `BLIT_UPDATE_TOKEN` may be used instead of the update-token file. `thisisatest`
