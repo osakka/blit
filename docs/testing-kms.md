@@ -257,3 +257,9 @@ cross-display click.
 The fixture creates two independent relative mice and requires
 `BLIT_INPUT_MULTI_MOUSE_PASS`, proving that Blit services every discovered
 pointer FD instead of silently keeping only the first device.
+
+The input-only invocation uses `-smp 1` with the current tiny VKMS kernel.
+The kernel's SMP boot path can panic in `sched_clock_cpu` before `/init` when
+this synthetic input workload is launched with two vCPUs; that is a fixture
+kernel failure, not a Blit result. The two-output KMS and Hibr pane fixtures
+continue to use two vCPUs.

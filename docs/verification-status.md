@@ -32,6 +32,11 @@ an evidence record, not a claim that the complete product is released.
   --configure` on the local VM. The authorized physical host accepted the
   package through the API, restarted, and reports 0.1.232 ready with no
   runtime errors.
+- The exact 0.1.232 TCC build passed the two-output KMS pixel/screenshot gate,
+  the four-layout Hibr pane matrix with four running sessions, and the
+  one-vCPU input fixture. The input fixture passed keypad bytes, independent
+  multi-mouse routing, three-button presses/releases, wheel, motion,
+  WebSocket stream delivery, and device-loss diagnostics.
 - SDL pointer-only presentation now reuses a per-output scene cache instead of
   forcing a full terminal rasterization on every pointer motion. Runtime
   diagnostics expose pointer-cache hits and misses.
