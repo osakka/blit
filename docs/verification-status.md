@@ -64,6 +64,10 @@ an evidence record, not a claim that the complete product is released.
   four independent VKMS outputs were discovered and presenting, one terminal
   session was attached to each, and the API reported four displays, outputs,
   sessions, and no diagnostics errors.
+- The same four-output fixture additionally passed the Hibr orchestration
+  variant: one primary Hibr desktop plus three `--join` clients produced four
+  running Hibr-backed surfaces across four presenting outputs, with no API
+  diagnostics errors (`KMS_FOUR_HIBR_PASS`). Hibr source was unchanged.
 - The exact 0.1.232 TCC build passed the mixed-refresh fixture with independent
   60 Hz/16 ms and 120 Hz/8 ms output schedules. It also passed the output-loss
   fixture: a failed connector was reported as `display_presentation_failed`,

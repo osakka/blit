@@ -207,6 +207,9 @@ connector/CRTC/encoder/plane paths, starts one API terminal session on each,
 and requires `display_count:4`, four presenting outputs, four sessions, and
 `KMS_FOUR_OUTPUT_PASS`. This validates the public discovery and presentation
 path at the four-monitor case without changing the production display limit.
+Adding `blit.hibr_four=1` to the same kernel command line replaces those probe
+sessions with one primary Hibr desktop and three `desktop --join` clients; the
+fixture then requires `KMS_FOUR_HIBR_PASS` with four Hibr-backed surfaces.
 
 The fixture also accepts `blit.kitty_stack=1`. This sends two overlapping
 Kitty images with different z values and a two-pixel image positioned partly

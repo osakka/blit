@@ -65,6 +65,48 @@ $b grep -q '"displays":4' /tmp/diagnostics.json || finish 1
 
 display_ids=$($b tr ',' '\n' < /tmp/displays.json |
     $b sed -n 's/.*"id":"\(display-[0-9][0-9]*\)".*/\1/p')
+display1=$(echo "$display_ids" | $b sed -n '1p')
+display2=$(echo "$display_ids" | $b sed -n '2p')
+display3=$(echo "$display_ids" | $b sed -n '3p')
+display4=$(echo "$display_ids" | $b sed -n '4p')
+case " $($b cat /proc/cmdline 2>/dev/null || true) " in
+    *" blit.hibr_four=1 "*)
+        export HIBR_MODPATH=/blit-stage/mods
+        export HIBR_RC=/blit-stage/blit-console.hibr
+        export BLIT_SERVER_HOST=127.0.0.1
+        export BLIT_SERVER_PORT=19191
+        export TERM=xterm-256color
+        export TMPDIR=/tmp
+        export HOME=/root
+        export XDG_STATE_HOME=/tmp/hibr-state
+        export XDG_CONFIG_HOME=/tmp/hibr-config
+        export XDG_DATA_HOME=/tmp/hibr-data
+        $b mkdir -p /root /tmp/hibr-state /tmp/hibr-config /tmp/hibr-data /tmp/hibr-ctl-0
+        $b ln -sf pts/ptmx /dev/ptmx
+        $b wget -qO /tmp/hibr-primary.json \
+            --post-data="{\"command\":\"/blit-stage/hibr\",\"arguments\":[\"/blit-stage/blit-session.hibr\",\"--session\",\"blit\",\"--name\",\"$display1\"],\"environment\":{\"CP_THEME\":\"retro_car\",\"DT_CTL\":\"1\",\"DT_CTLPATH\":\"/tmp/hibr-ctl-0/blit.ctl\",\"DT_LOG\":\"/tmp/primary-hibr.log\"},\"surface_mode\":\"terminal\",\"display_id\":\"$display1\",\"surface\":{\"width\":128,\"height\":48}}" \
+            --header='Content-Type: application/json' \
+            http://127.0.0.1:19191/v1/terminal-sessions || finish 1
+        primary_script=/blit-stage/blit-session.hibr
+        for index in 2 3 4; do
+            display_id=$(echo "$display_ids" | $b sed -n "${index}p")
+            $b wget -qO "/tmp/hibr-join-$index.json" \
+                --post-data="{\"command\":\"/blit-stage/hibr\",\"arguments\":[\"$primary_script\",\"--session\",\"blit\",\"--join\",\"--name\",\"$display_id\"],\"environment\":{\"DT_LOG\":\"/tmp/join-$index-hibr.log\"},\"surface_mode\":\"terminal\",\"display_id\":\"$display_id\",\"surface\":{\"width\":128,\"height\":48}}" \
+                --header='Content-Type: application/json' \
+                http://127.0.0.1:19191/v1/terminal-sessions || finish 1
+        done
+        $b sleep 12
+        $b wget -qO /tmp/hibr-four-final.json http://127.0.0.1:19191/v1/diagnostics
+        $b cat /tmp/hibr-four-final.json
+        $b grep -q '"displays":4' /tmp/hibr-four-final.json || finish 1
+        $b grep -q '"sessions":4' /tmp/hibr-four-final.json || finish 1
+        $b grep -q '"surfaces":4' /tmp/hibr-four-final.json || finish 1
+        $b grep -q 'KMS present views=4 outputs=4' /tmp/blit.log || finish 1
+        $b cat /tmp/blit.log
+        echo KMS_FOUR_HIBR_PASS
+        finish 0
+        ;;
+esac
 session_count=0
 for display_id in $display_ids; do
     $b wget -qO "/tmp/session-$session_count.json" \
