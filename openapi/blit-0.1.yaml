@@ -1099,7 +1099,8 @@ components:
       additionalProperties: false
     TerminalSession:
       type: object
-      required: [id, revision, surface_revision, state, surface_id, title]
+      required: [id, revision, surface_revision, state, surface_id, title,
+                 terminal_capabilities]
       properties:
         id: {$ref: '#/components/schemas/ResourceId'}
         revision: {$ref: '#/components/schemas/Revision'}
@@ -1131,6 +1132,8 @@ components:
         focused: {type: boolean}
         surface_mode: {type: string, enum: [terminal, external, mirror]}
         cursor: {$ref: '#/components/schemas/Cursor'}
+        terminal_capabilities:
+          $ref: '#/components/schemas/TerminalCapabilities'
         graphics:
           type: array
           description: >-
@@ -1139,6 +1142,28 @@ components:
           items: {$ref: '#/components/schemas/GraphicsImage'}
         graphics_diagnostics:
           $ref: '#/components/schemas/GraphicsDiagnostics'
+      additionalProperties: false
+    TerminalCapabilities:
+      type: object
+      required: [term, cell_pixels, graphics]
+      properties:
+        term:
+          type: string
+          description: >-
+            Effective TERM value presented to the PTY child. The default
+            xterm-kitty advertises Blit's Kitty-capable terminal contract;
+            an explicit session environment may override it.
+        cell_pixels:
+          type: object
+          required: [width, height]
+          properties:
+            width: {type: integer, minimum: 1}
+            height: {type: integer, minimum: 1}
+          additionalProperties: false
+        graphics:
+          type: array
+          minItems: 2
+          items: {type: string, enum: [kitty, sixel]}
       additionalProperties: false
     GraphicsDiagnostics:
       type: object

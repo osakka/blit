@@ -325,6 +325,7 @@ typedef struct {
        This is the renderer's actual cell size, including font scaling. */
     int terminal_cell_width;
     int terminal_cell_height;
+    char terminal_term[64];
     uint32_t terminal_underline_color;
     int terminal_underline_color_set;
     BlitGraphicsImage graphics[BLIT_GRAPHICS_MAX_IMAGES];
@@ -5460,6 +5461,7 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
     char escaped_title[256];
     char escaped_clipboard[8192];
     char escaped_notification[2048];
+    char escaped_terminal_term[128];
 
     refresh_session_state(runtime, session);
 
@@ -5483,6 +5485,8 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
                 sizeof(escaped_clipboard));
     json_escape(session->terminal_notification, escaped_notification,
                 sizeof(escaped_notification));
+    json_escape(session->terminal_term, escaped_terminal_term,
+                sizeof(escaped_terminal_term));
     snprintf(body, capacity,
              "{\"id\":\"%llu\",\"revision\":%llu,"
              "\"state\":\"%s\",\"surface_id\":\"%s\","
@@ -5528,6 +5532,13 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
                                  surface->cursor_visible ? "true" : "false",
                                  surface->cursor_style);
     }
+    used += (size_t)snprintf(
+        body + used, capacity - used,
+        ",\"terminal_capabilities\":{\"term\":\"%s\","
+        "\"cell_pixels\":{\"width\":%d,\"height\":%d},"
+        "\"graphics\":[\"kitty\",\"sixel\"]}",
+        escaped_terminal_term, session->terminal_cell_width,
+        session->terminal_cell_height);
     used += (size_t)snprintf(body + used, capacity - used,
                              ",\"graphics\":[");
     {
@@ -5851,6 +5862,8 @@ static int create_session(BlitRuntime *runtime, const char *json,
             session->terminal_autowrap = 1;
             session->terminal_cell_width = runtime_terminal_cell_width(runtime);
             session->terminal_cell_height = runtime_terminal_cell_height(runtime);
+            snprintf(session->terminal_term, sizeof(session->terminal_term),
+                     "xterm-kitty");
             {
                 int environment_index;
                 for (environment_index = 0;
@@ -5858,7 +5871,10 @@ static int create_session(BlitRuntime *runtime, const char *json,
                      ++environment_index) {
                     const char *key = environment_keys[environment_index];
                     const char *value = environment_values[environment_index];
-                    if (strcmp(key, "DT_INK") == 0 ||
+                    if (strcmp(key, "TERM") == 0)
+                        snprintf(session->terminal_term,
+                                 sizeof(session->terminal_term), "%s", value);
+                    else if (strcmp(key, "DT_INK") == 0 ||
                         strcmp(key, "BLIT_TERMINAL_FG") == 0)
                         snprintf(session->terminal_default_foreground,
                                  sizeof(session->terminal_default_foreground),

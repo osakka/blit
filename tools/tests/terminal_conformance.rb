@@ -877,6 +877,15 @@ kitty_state = Timeout.timeout(5) do
   end
 end
 kitty_image = kitty_state.fetch('graphics').fetch(0)
+kitty_capabilities = kitty_state.fetch('terminal_capabilities')
+assert_equal('xterm-kitty', kitty_capabilities.fetch('term'),
+             'default terminal TERM advertisement')
+assert_equal(8, kitty_capabilities.fetch('cell_pixels').fetch('width'),
+             'terminal cell pixel width')
+assert_equal(16, kitty_capabilities.fetch('cell_pixels').fetch('height'),
+             'terminal cell pixel height')
+assert_equal(%w[kitty sixel], kitty_capabilities.fetch('graphics'),
+             'terminal graphics capabilities')
 assert_equal('kitty', kitty_image.fetch('protocol'), 'Kitty protocol')
 assert_equal(true, kitty_image.fetch('complete'), 'Kitty continuation completion')
 assert_equal(true, kitty_image.fetch('visible'), 'Kitty transmit-and-display')
@@ -884,6 +893,20 @@ assert_equal(16, kitty_image.fetch('placement_width'), 'Kitty c cell conversion'
 assert_equal(16, kitty_image.fetch('placement_height'), 'Kitty r cell conversion')
 request(base, 'DELETE', "/v1/terminal-sessions/#{kitty_id}")
 puts 'PASS kitty-image-transmit-placement'
+
+override_created = request(base, 'POST', '/v1/terminal-sessions', {
+  'command' => '/bin/sh',
+  'arguments' => ['-c', 'sleep 0.2'],
+  'environment' => { 'TERM' => 'xterm-256color' },
+  'surface' => { 'width' => 20, 'height' => 4 }
+})
+override_id = override_created.fetch('id')
+override_state = request(base, 'GET', "/v1/terminal-sessions/#{override_id}")
+assert_equal('xterm-256color',
+             override_state.fetch('terminal_capabilities').fetch('term'),
+             'explicit terminal TERM override')
+request(base, 'DELETE', "/v1/terminal-sessions/#{override_id}")
+puts 'PASS terminal-capability-term-override'
 
 snapshot = run_case(base, 'c0-inside-csi', "printf '\\033[2\\n;5HX'")
 cells = cell_map(snapshot)
