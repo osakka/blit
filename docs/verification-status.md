@@ -272,11 +272,10 @@ The latest reachable observation of the authorized host at
 1. Validate at least one physical multi-monitor arrangement, including
    connector discovery, independent presentation, pointer routing, and Hibr
    primary/join behavior. The current host exposes only one physical output.
-2. Complete the remaining Gate 6 process-restart cases for any additional
-   production Hibr workloads beyond the validated stock session; the primary supervisor, joined-client
-   reconnect, session termination during writes/resizes, stream
-   reconnect/replay, input-device loss, output loss, and the two-hour PTY soak
-   now have evidence above.
 
-Until both gates have authoritative evidence, the project must not be
+All software-side Gate 6 cases currently in scope—including primary supervisor
+restart, joined-client reconnect, session termination during writes/resizes,
+stream reconnect/replay, input-device loss, output loss, and the two-hour PTY
+soak—have authoritative evidence above. Until the physical-monitor gate has
+authoritative evidence, the project must not be
 described as fully released or physically multi-monitor validated.
