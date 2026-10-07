@@ -203,7 +203,12 @@ checkout. It also rebuilds the repository-owned HTTP, PTY, WebSocket, and
 uinput probe helpers with TCC, preventing stale binaries from entering the
 initramfs. It stages the same checked-in Hibr Unicode font used by the Debian
 package, preventing QEMU from silently falling back to a different font. It
-does not stage or invoke a Blit shell launcher.
+does not stage or invoke a Blit shell launcher. For the stock Hibr session
+gate it stages the repository-owned `blit-stock-session.hibr` integration
+entrypoint; that Hibr script preloads Hibr's canonical `console`, `pty`,
+`term`, and `hold` modules by explicit staged paths, then sources the
+unchanged stock `session.hibr`. The `console-blit` adapter remains isolated to
+its own provider probe.
 
 For the isolated input gate, use the staging helper, then boot the fixture with
 `blit.input_only=1` on the kernel command line:
@@ -224,6 +229,8 @@ tools/probes/stage_hibr_qemu.sh /tmp/hibr-initroot-current /path/to/hibr
 # primary session, then kill an auxiliary join client and attach a fresh join
 # on the next pane. The acceptance markers are `HIBR_PRIMARY_RESTART_PASS`,
 # `HIBR_JOIN_RECONNECT_PASS`, and `HIBR_PANE_MATRIX_PASS`.
+# Add `blit.hibr_stock=1` to exercise that stock-session entrypoint rather
+# than the dedicated window-control workload.
 ```
 
 ## Build

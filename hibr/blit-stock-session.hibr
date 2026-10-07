@@ -1,0 +1,12 @@
+#!/usr/bin/env hibr
+# Blit integration launcher for Hibr's ordinary held desktop session.
+# Load Hibr's canonical display provider in this process, then source the
+# unchanged stock session so hold --join and desktop paths retain their own
+# semantics.  This is a fixture launcher; it is not the console-blit adapter.
+
+mod load /blit-stage/mods/console.so || exit 1
+mod load /blit-stage/mods/pty.so || exit 1
+mod load /blit-stage/mods/term.so || exit 1
+mod load /blit-stage/mods/hold.so || exit 1
+export BLIT_HIBR_DESKTOP_SESSION=/blit-stage/session.hibr
+source /blit-stage/session.hibr "$@"

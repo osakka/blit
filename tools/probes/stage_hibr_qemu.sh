@@ -20,9 +20,17 @@ cp "$blit_binary" "$stage/blit-stage/blit-server"
 test -x "$stage/blit-stage/blit-server"
 strings "$stage/blit-stage/blit-server" | grep -Fx "$expected_version" >/dev/null
 test -f "$repo_root/assets/fonts/Blit-Hibr-Terminus16.psf"
+test -f "$repo_root/hibr/blit-console.hibr"
+test -f "$repo_root/hibr/blit-session.hibr"
+test -f "$repo_root/hibr/blit-hibr-console.hibr"
+test -f "$repo_root/hibr/blit-stock-session.hibr"
 mkdir -p "$stage/blit-stage/fonts"
 cp "$repo_root/assets/fonts/Blit-Hibr-Terminus16.psf" \
     "$stage/blit-stage/fonts/Blit-Hibr-Terminus16.psf"
+cp "$repo_root/hibr/blit-console.hibr" "$stage/blit-stage/blit-console.hibr"
+cp "$repo_root/hibr/blit-session.hibr" "$stage/blit-stage/blit-session.hibr"
+cp "$repo_root/hibr/blit-hibr-console.hibr" "$stage/blit-stage/blit-hibr-console.hibr"
+cp "$repo_root/hibr/blit-stock-session.hibr" "$stage/blit-stage/blit-stock-session.hibr"
 
 test -x "$hibr_root/build/hibr"
 test -d "$hibr_root/build/mods"
@@ -55,6 +63,10 @@ tcc -I"$hibr_root/include" -I"$hibr_root/mods" \
     "$(dirname "$0")/../../hibr/console-blit.c"
 
 test -f "$stage/blit-stage/mods/console-blit.so"
+test -f "$stage/blit-stage/blit-console.hibr"
+test -f "$stage/blit-stage/blit-session.hibr"
+test -f "$stage/blit-stage/blit-hibr-console.hibr"
+test -f "$stage/blit-stage/blit-stock-session.hibr"
 test -f "$stage/blit-stage/lib/ctl.hibr"
 test -x "$stage/blit-stage/emit-uinput"
 test -x "$stage/blit-stage/http-put"

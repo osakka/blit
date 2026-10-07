@@ -1,0 +1,4 @@
+# QEMU/integration RC for Blit's ordinary held-console path.
+# The held desktop uses Hibr's canonical console module; console-blit is for
+# standalone non-held provider probes only.
+mod load /blit-stage/mods/console.so
