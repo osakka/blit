@@ -30,6 +30,9 @@ following variants without modifying Hibr:
 - `OUTPUT_LOSS_PASS` with the surviving output continuing to present.
 - `PPM_DISPLAY_47_WIDE_STACK_CLIP_PASS` for Kitty z-order and clipping.
 - `PPM_DISPLAY_47_SIXEL_PASS` for sixel pixel rendering.
+- The exact 0.1.242 binary also passed the two-output input/render soak:
+  `LAYOUT_MATRIX_PASS`, `BLIT_INPUT_MULTI_MOUSE_PASS`,
+  `BLIT_INPUT_STREAM_PASS`, and `BLIT_INPUT_RENDER_SOAK_PASS`.
 - `KMS_FOUR_HIBR_PASS` with four presenting VKMS outputs, one primary Hibr
   desktop, three unchanged stock `--join` clients, and four running Hibr
   surfaces. Hibr source remained unchanged.
