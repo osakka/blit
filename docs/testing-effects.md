@@ -37,3 +37,13 @@ The direct KMS capture gate creates an overlay on `display-47` and verifies
 its blue pixel in the captured PPM. It also enables scanlines and verifies
 that a populated row is followed by a suppressed row. This checks that the
 API state reaches KMS pixels rather than only being accepted by the API.
+
+The SDL screenshot overlay gate checks the corresponding failure mode reported
+on physical displays: a red rectangle is captured at the top-left, deleted
+through the API, and captured again. The second BMP must not retain the red
+pixel:
+
+```sh
+BLIT_GATE_BINARY=build/blit/blit-server \
+  tools/tests/screenshot_overlay_gate.sh
+```
