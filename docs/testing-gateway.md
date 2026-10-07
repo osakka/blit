@@ -45,6 +45,10 @@ token and starts the server as the dedicated `blit` account with `video`,
 `/etc/blit/update.token` files are preserved on upgrades. The default package
 configuration binds to `0.0.0.0:8080` for the trusted test LAN:
 
+The package also supplies `LANG=C.UTF-8` and `LC_ALL=C.UTF-8` by default so
+Hibr's Unicode desktop glyphs are emitted as UTF-8 through its PTY. Existing
+operator values in `/etc/blit/blit.env` are preserved.
+
 ```sh
 sudo systemctl status blit.service
 ```

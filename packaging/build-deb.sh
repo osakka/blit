@@ -117,9 +117,17 @@ if [ ! -f /etc/blit/blit.env ]; then
     cat > /etc/blit/blit.env <<'CONFIG'
 BLIT_BIND_ADDRESS=0.0.0.0
 BLIT_UPDATE_TOKEN_FILE=/etc/blit/update.token
+LANG=C.UTF-8
+LC_ALL=C.UTF-8
 CONFIG
     chown root:blit /etc/blit/blit.env
     chmod 0640 /etc/blit/blit.env
+fi
+if ! grep -q '^LANG=' /etc/blit/blit.env; then
+    printf '%s\n' 'LANG=C.UTF-8' >> /etc/blit/blit.env
+fi
+if ! grep -q '^LC_ALL=' /etc/blit/blit.env; then
+    printf '%s\n' 'LC_ALL=C.UTF-8' >> /etc/blit/blit.env
 fi
 if [ ! -s /etc/blit/update.token ]; then
     install -d -o root -g blit -m 0750 /etc/blit
