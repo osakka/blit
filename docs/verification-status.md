@@ -41,6 +41,9 @@ an evidence record, not a claim that the complete product is released.
   four concurrent PTYs, 7,296 API snapshots, 664 revisioned resizes, no
   runtime errors, no leaked sessions, and 65,996 KiB peak RSS under the
   enforced 131,072 KiB RSS ceiling.
+- The same exact build additionally passed a 1,800-second run with four
+  concurrent PTYs, 21,888 API snapshots, 1,990 revisioned resizes, no runtime
+  errors, no leaked sessions, and 66,120 KiB peak RSS under that same ceiling.
 - The exact 0.1.232 TCC QEMU input fixture additionally passed its combined
   render/input soak: two KMS outputs continued presenting while the existing
   keyboard, two mice, three buttons, wheel, pointer routes, and WebSocket
