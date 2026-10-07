@@ -14,8 +14,11 @@ require 'uri'
 base = URI(ENV.fetch('BLIT_TEST_SERVER', 'http://127.0.0.1:19195'))
 duration = Integer(ENV.fetch('BLIT_SOAK_SECONDS', '120'), 10)
 session_count = Integer(ENV.fetch('BLIT_SOAK_SESSIONS', '4'), 10)
+soak_pid = ENV.fetch('BLIT_SOAK_PID')
+max_rss_limit = Integer(ENV.fetch('BLIT_SOAK_MAX_RSS_KIB', '131072'), 10)
 raise 'BLIT_SOAK_SECONDS must be positive' unless duration.positive?
 raise 'BLIT_SOAK_SESSIONS must be positive' unless session_count.positive?
+raise 'BLIT_SOAK_MAX_RSS_KIB must be positive' unless max_rss_limit.positive?
 
 def request(base, method, path, body = nil, headers = {})
   uri = base + path
@@ -117,7 +120,10 @@ begin
     end
     assert(stagnant_frame_checks < 50, 'render frame counter stopped')
     last_frames = frames
-    current_rss = rss_kib(ENV['BLIT_SOAK_PID'])
+    current_rss = rss_kib(soak_pid)
+    assert(!current_rss.nil?, 'server RSS became unavailable')
+    assert(current_rss <= max_rss_limit,
+           "server RSS exceeded #{max_rss_limit} KiB: #{current_rss} KiB")
     max_rss = [max_rss, current_rss || 0].max
     sleep 0.02
   end
@@ -136,4 +142,5 @@ assert(runtime.fetch('health').fetch('ready') == true, 'runtime not ready after 
 assert(runtime.fetch('resources').fetch('sessions') == 0, 'sessions leaked after cleanup')
 assert(runtime.fetch('render').fetch('pending') == false, 'render queue did not drain after cleanup')
 puts "TERMINAL_SOAK_PASS seconds=#{duration} sessions=#{session_count} " \
-     "snapshots=#{snapshots} resizes=#{resizes} max_rss_kib=#{max_rss}"
+     "snapshots=#{snapshots} resizes=#{resizes} max_rss_kib=#{max_rss} " \
+     "max_rss_limit_kib=#{max_rss_limit}"

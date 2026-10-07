@@ -38,8 +38,9 @@ an evidence record, not a claim that the complete product is released.
   peak RSS. The reusable gate is
   `tools/tests/terminal_soak_gate.rb`.
 - The same exact build additionally passed a 600-second run of that gate with
-  four concurrent PTYs, 7,300 API snapshots, 664 revisioned resizes, no
-  runtime errors, no leaked sessions, and 65,984 KiB peak RSS.
+  four concurrent PTYs, 7,296 API snapshots, 664 revisioned resizes, no
+  runtime errors, no leaked sessions, and 65,996 KiB peak RSS under the
+  enforced 131,072 KiB RSS ceiling.
 - The exact 0.1.232 TCC QEMU input fixture additionally passed its combined
   render/input soak: two KMS outputs continued presenting while the existing
   keyboard, two mice, three buttons, wheel, pointer routes, and WebSocket

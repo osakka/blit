@@ -232,7 +232,8 @@ Tests:
 The repeatable bounded precursor is `tools/tests/terminal_soak_gate.rb`. It
 must pass with multiple concurrent PTYs, sustained VT/UTF-8 output, snapshots,
 resizes, runtime diagnostics, and zero leaked sessions before a longer soak is
-accepted as evidence.
+accepted as evidence. The caller supplies `BLIT_SOAK_PID`; the gate enforces
+`BLIT_SOAK_MAX_RSS_KIB` (128 MiB by default) throughout the run.
 
 Exit condition: every injected failure has a deterministic state transition,
 typed diagnostic, and documented recovery path.
