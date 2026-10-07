@@ -18,6 +18,7 @@ Accepted decisions:
 8. [API-supervised package lifecycle](0008-api-supervised-package-lifecycle.md).
 9. [Compiled runtime version identity](0009-compiled-runtime-version-identity.md).
 10. [Stock Hibr session launcher](0010-stock-hibr-session-launcher.md).
+11. [Event-driven input-device discovery](0011-event-driven-input-discovery.md).
 
 Pending decisions:
 

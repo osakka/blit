@@ -106,6 +106,26 @@ an evidence record, not a claim that the complete product is released.
   wrappers.
 - Hibr source and files were not modified.
 
+### Current 0.1.240 VKMS evidence
+
+The exact TCC 0.1.240 binary staged with the current Hibr runtime passed the
+following current QEMU fixtures:
+
+- Two-output direct-KMS capture: two independent 1024×768/60 Hz outputs,
+  distinct PPM captures, Kitty pixel assertions, and the API screenshot gate.
+- Four-output boundary: four independent outputs at x=0, 1024, 2048, and
+  3072, with one running terminal surface per output.
+- Mixed refresh: independent 60 Hz/16 ms and 120 Hz/8 ms schedules.
+- Output loss: connector 47 was marked failed, connector 48 remained
+  presenting, the API returned the typed `display_presentation_failed`
+  warning, and the surviving PPM/API capture remained valid.
+- Hibr four-output orchestration: one primary Hibr desktop plus three
+  unchanged stock `desktop --join` clients produced four running Hibr-backed
+  surfaces and four presenting KMS outputs (`KMS_FOUR_HIBR_PASS`).
+
+These are QEMU/VKMS results. They prove the four-output software path, not a
+physical four-monitor arrangement.
+
 ## Passing automated evidence
 
 - OpenAPI and TCC build checks pass.
@@ -221,6 +241,12 @@ The latest reachable observation of the authorized host at
   261 presentation calls in the live-host validation interval, with a 16.459
   ms last frame gap, zero missed deadlines, and a 17.348 ms maximum loop gap. The
   Hibr session and its resources were then deleted cleanly.
+- A later live-host query while Blit was idle reported one active 59.99 Hz
+  physical output, a 16 ms target interval, 0.034 ms maximum evdev scan,
+  0.154 ms maximum SDL event-pump time, and 17.348 ms maximum event-loop gap.
+  Its measured frame-rate window was stale because there were no active
+  sessions; this is intentionally not interpreted as a live frame-rate
+  measurement.
 
 ## Open release gates
 
