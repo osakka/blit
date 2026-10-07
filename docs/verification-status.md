@@ -10,28 +10,28 @@ an evidence record, not a claim that the complete product is released.
 - The previous fully validated source build is `0.1.222`, which includes the
   Hibr-compatible Unicode 15.1 width table and regression vectors for
   variation selectors and zero-width joiners.
-- The current TCC source build and turnkey package are `0.1.230`; the complete
+- The current TCC source build and turnkey package are `0.1.232`; the complete
   terminal conformance suite passes with the canonical 16x16 Terminus font.
   The package defaults the Blit service to a UTF-8 locale for Hibr's Unicode
   desktop output.
 - The runtime font is a checked-in PSF2 merge of the bundled Terminus font and
   the missing Hibr Unicode desktop glyphs. Its required glyph manifest is
   validated by `tools/build-hibr-font.py` before packaging.
-- The exact 0.1.226 TCC binary passed the two-output VKMS/KMS capture gate and
+- The exact 0.1.232 TCC binary passed the two-output VKMS/KMS capture gate and
   the Hibr pane matrix with one primary plus three `--join` clients. The same
   staged fixture reports the merged font, two ready DRM outputs, refresh-aware
   16 ms scheduling, and `KMS_CAPTURE_PASS`/`HIBR_PANE_MATRIX_PASS`.
-- The exact 0.1.226 TCC build passes the fragmented-UTF-8 vector and a
+- The exact 0.1.232 TCC build passes the fragmented-UTF-8 vector and a
   controlled Hibr API launch with zero visible question-mark cells. The parser
   retains valid UTF-8 prefixes across PTY reads instead of replacing them.
 - The Debian artifact built from the current implementation is
-  `blit_0.1.230-1_amd64.deb`, SHA-256
-  `bf6af1b22da2ff5fcf6931c2037508a4ff4507a290861c44b25dce4b09f39e9f`.
-- The exact 0.1.230 update supervisor passed the local cancellation gate. The
-  package installs through real `dpkg --unpack` and `dpkg --configure` on the
-  local VM. The authorized physical-host upload reached its root helper but
-  was rejected by the pre-0.1.230 helper as a blank `ERROR`; the host remains
-  on 0.1.223 and is not claimed as updated.
+  `blit_0.1.232-1_amd64.deb`, SHA-256
+  `d411b975f8d4e494afe67b2f0fbb29b4f96a010b41723f89701489ba279a19aa`.
+- The exact 0.1.232 update supervisor passed cancellation and idle-timeout
+  gates. The package installs through real `dpkg --unpack` and `dpkg
+  --configure` on the local VM. The authorized physical host accepted the
+  package through the API, restarted, and reports 0.1.232 ready with no
+  runtime errors.
 - SDL pointer-only presentation now reuses a per-output scene cache instead of
   forcing a full terminal rasterization on every pointer motion. Runtime
   diagnostics expose pointer-cache hits and misses.
@@ -45,9 +45,9 @@ an evidence record, not a claim that the complete product is released.
 
 - OpenAPI and TCC build checks pass.
 - The canonical `tools/build-tcc.sh` injects `packaging/VERSION` into the
-  executable; the exact 0.1.226 local conformance run reports
-  `server_version:0.1.226` with `api_version:0.1`. The live host remains on
-  0.1.223 until the 0.1.226 package is installed there.
+  executable; the exact 0.1.232 local conformance run reports
+  `server_version:0.1.232` with `api_version:0.1`. The live host now reports
+  the same version through its TCP API.
 - Terminal grids are allocated per live session rather than embedded in all
   session slots. The exact 0.1.222 TCC build passed the terminal suite and a
   100,000-line PTY soak with no diagnostic errors; peak RSS was 25,156 KiB
@@ -107,7 +107,7 @@ an evidence record, not a claim that the complete product is released.
 The latest reachable observation of the authorized host at
 `192.168.10.54:8080` reported:
 
-- Blit `0.1.223`, healthy SDL3/OpenGL presentation, reached through the
+- Blit `0.1.232`, healthy SDL3/OpenGL presentation, reached through the
   versioned TCP API.
 - One physical output, `DP-1`, active at 1920×2160 and 59.99 Hz.
 - A fresh API-created PTY session reached `running`, emitted `BLIT_BASH_OK`,
@@ -117,10 +117,11 @@ The latest reachable observation of the authorized host at
   errors, and a 16 ms refresh-aware presentation interval.
 - The live host currently exposes one physical output. Multi-display behavior
   is therefore proven by the two-output VKMS/QEMU fixture, not by this host.
-- The 0.1.226 local Hibr full-grid workload settled a 240×135 surface in
+- The 0.1.232 local Hibr full-grid workload settled a 240×135 surface in
   approximately three seconds; runtime diagnostics measured 100,264 terminal
   bytes and no pending damage afterward. This is local/QEMU-style evidence,
-  not a claim about the still-running 0.1.223 physical host.
+  not a claim about a physical multi-display arrangement, which this host
+  currently does not expose.
 
 ## Open release gates
 

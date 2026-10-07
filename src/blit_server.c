@@ -10032,7 +10032,16 @@ static void service_http_client(BlitRuntime *runtime, int index)
         size_t header_length = (size_t)(headers_end - client->request) + 4;
         size_t content_length = 0;
         char sha256[65];
-        char temporary[] = "/tmp/blit-update-XXXXXX";
+        /* The update helper is a separate systemd service.  PrivateTmp gives
+           each service a different /tmp, so an upload staged there cannot be
+           seen by the root helper.  Use the package-owned shared directory
+           by default; tests may explicitly select a private staging dir. */
+        char temporary[PATH_MAX];
+        const char *update_directory = getenv("BLIT_UPDATE_DIRECTORY");
+        if (update_directory == NULL || update_directory[0] == '\0')
+            update_directory = "/var/lib/blit/updates";
+        snprintf(temporary, sizeof(temporary), "%s/blit-update-XXXXXX",
+                 update_directory);
         int temporary_fd;
         const char *length_header = strstr(client->request, "Content-Length:");
         if (runtime->update_token[0] == '\0' ||

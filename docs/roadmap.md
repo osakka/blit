@@ -42,7 +42,7 @@ The SDL adapter uses single-surface incremental frames and conservatively
 redraws multi-surface outputs with deterministic vertical stacking. The
 previous 0.1.222 package passes the complete terminal, graphics, input,
 two-display VKMS/QEMU, and Hibr primary/`--join` acceptance gates. The
-authorized physical host is running 0.1.223 and has a healthy one-output
+authorized physical host is running 0.1.232 and has a healthy one-output
 SDL3/OpenGL presentation with a passing API-created PTY smoke test. Physical
 multi-monitor confirmation remains open because that host currently exposes
 only one connector.
@@ -136,7 +136,7 @@ suite on VKMS and then on a physical DRM/KMS host.
 
 ## Immediate next action
 
-Capture settled SDL screenshots and API diagnostics from the deployed 0.1.226
+Capture settled SDL screenshots and API diagnostics from the deployed 0.1.232
 authorized physical host. Verify physical
 pointer/button/wheel routing and
 refresh cadence, followed by a real two-monitor primary/`--join` arrangement

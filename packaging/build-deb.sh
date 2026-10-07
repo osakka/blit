@@ -138,6 +138,7 @@ if [ ! -s /etc/blit/update.token ]; then
     chown root:blit /etc/blit/update.token
     chmod 0640 /etc/blit/update.token
 fi
+install -d -o root -g blit -m 0770 /var/lib/blit/updates
 if command -v systemctl >/dev/null 2>&1; then
     systemctl daemon-reload || true
     # Unit enablement is safe during an API-driven upgrade.  Starting either

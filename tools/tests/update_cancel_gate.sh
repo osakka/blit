@@ -24,7 +24,7 @@ cleanup()
 trap cleanup EXIT INT TERM
 
 printf '%s\n' test-token >"$token_file"
-BLIT_UPDATE_TOKEN_FILE="$token_file" SDL_VIDEODRIVER=dummy \
+BLIT_UPDATE_TOKEN_FILE="$token_file" BLIT_UPDATE_DIRECTORY="${TMPDIR:-/tmp}" SDL_VIDEODRIVER=dummy \
     LD_LIBRARY_PATH=build/sdl3-kms "$binary" "$port" >"$log" 2>&1 &
 pid=$!
 ready=0
