@@ -161,6 +161,12 @@ an evidence record, not a claim that the complete product is released.
 - The exact 0.1.221 Hibr input-loss fixture passes primary/join startup,
   `1x1`/`2x1`/`1x2`/`2x2` pane layouts, route retargeting, device-loss
   diagnostics, device reconnect, and the final Hibr acceptance predicate.
+- The exact 0.1.232 TCC Hibr restart fixture, staged with Hibr 0.99.92,
+  kills the Hibr `[desktop]` process and observes
+  `HIBR_PRIMARY_RESTART_PASS`; it then kills an auxiliary `--join` client,
+  keeps the primary running, attaches a fresh join on the next pane, and
+  observes `HIBR_JOIN_RECONNECT_PASS` and `HIBR_PANE_MATRIX_PASS`. Hibr
+  source was not modified.
 - Surface and scrollback snapshots preserve complete zero-width UTF-8 cell
   sequences; a five-extension combining vector and its cursor position pass.
 - Revisioned API cell updates accept wide UTF-8 glyphs and zero-width
@@ -194,8 +200,9 @@ The latest reachable observation of the authorized host at
 1. Validate at least one physical multi-monitor arrangement, including
    connector discovery, independent presentation, pointer routing, and Hibr
    primary/join behavior. The current host exposes only one physical output.
-2. Complete the remaining Gate 6 process-restart cases for primary and joined
-   Hibr processes; session termination during writes/resizes, stream
+2. Complete the remaining Gate 6 process-restart cases for any additional
+   production Hibr workloads; the primary supervisor, joined-client
+   reconnect, session termination during writes/resizes, stream
    reconnect/replay, input-device loss, output loss, and the two-hour PTY soak
    now have evidence above.
 

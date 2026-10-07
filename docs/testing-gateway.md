@@ -219,6 +219,11 @@ tools/probes/stage_hibr_qemu.sh /tmp/hibr-initroot-current /path/to/hibr
 # For the full held-desktop pane matrix, add `blit.hibr_panes=1`; this starts
 # one primary and three `desktop --join` clients across a Blit-owned `2x2`
 # pane layout and requires four attached surfaces.
+# Add `blit.hibr_restart=1` with `blit.hibr_panes=1` to kill the Hibr
+# `[desktop]` process after startup, require Hibr's supervisor to restore the
+# primary session, then kill an auxiliary join client and attach a fresh join
+# on the next pane. The acceptance markers are `HIBR_PRIMARY_RESTART_PASS`,
+# `HIBR_JOIN_RECONNECT_PASS`, and `HIBR_PANE_MATRIX_PASS`.
 ```
 
 ## Build

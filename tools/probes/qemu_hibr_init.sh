@@ -76,6 +76,9 @@ esac
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
     *" blit.hibr_panes=1 "*) BLIT_HIBR_PANES_TEST=1 ;;
 esac
+case " $($b cat /proc/cmdline 2>/dev/null || true) " in
+    *" blit.hibr_restart=1 "*) BLIT_HIBR_RESTART_TEST=1 ;;
+esac
 if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
     # The input-only gate measures routing and PTY bytes, not framebuffer
     # capture.  Avoid serializing two 1024x768 PPMs on the slow VKMS guest
@@ -320,6 +323,7 @@ if [ "${BLIT_HIBR_PANES_TEST:-0}" = 1 ]; then
     pane2=$(echo "$panes_cmd" | $b sed -n '2p')
     pane3=$(echo "$panes_cmd" | $b sed -n '3p')
     pane4=$(echo "$panes_cmd" | $b sed -n '4p')
+    pane5=$(echo "$panes_cmd" | $b sed -n '5p')
     echo HIBR_PANE_MATRIX_TOPOLOGY; echo "$topology"
     if [ -z "$pane1" ] || [ -z "$pane2" ] ||
        [ -z "$pane3" ] || [ -z "$pane4" ]; then
@@ -344,11 +348,77 @@ if [ "${BLIT_HIBR_PANES_TEST:-0}" = 1 ]; then
         echo "pane$n session=$session_id state=$state"
         [ "$state" = running ] || pane_matrix_pass=0
     done
+    if [ "${BLIT_HIBR_RESTART_TEST:-0}" = 1 ] && [ "$pane_matrix_pass" -eq 1 ]; then
+        primary_session_id=$($b sed -n 's/.*"id":"\([0-9][0-9]*\)".*/\1/p' /tmp/hibr-pane-1.json)
+        primary_detail=$($b wget -qO- "http://127.0.0.1:19191/v1/terminal-sessions/$primary_session_id" 2>/dev/null || true)
+        primary_pid=$(echo "$primary_detail" |
+            $b sed -n 's/.*"process_id"[ ]*:[ ]*\([0-9][0-9]*\).*/\1/p')
+        desktop_pid=
+        for proc in /proc/[0-9]*; do
+            [ -r "$proc/comm" ] || continue
+            comm=$( $b cat "$proc/comm" 2>/dev/null || true )
+            [ "$comm" = 'hibr [desktop]' ] || continue
+            candidate=${proc##*/}
+            [ "$candidate" != "$primary_pid" ] || continue
+            desktop_pid=$candidate
+            break
+        done
+        restart_pass=1
+        [ -n "$desktop_pid" ] || restart_pass=0
+        if [ "$restart_pass" -eq 1 ]; then
+            echo HIBR_PRIMARY_RESTART_TARGET pid=$desktop_pid process_id=$primary_pid
+            $b kill -SEGV "$desktop_pid" 2>/dev/null || restart_pass=0
+            $b sleep 15
+        fi
+        restart_state=$($b wget -qO- "http://127.0.0.1:19191/v1/terminal-sessions/$primary_session_id" |
+            $b sed -n 's/.*"state":"\([^"]*\)".*/\1/p')
+        [ "$restart_state" = running ] || restart_pass=0
+        if [ "$restart_pass" -eq 1 ]; then
+            echo HIBR_PRIMARY_RESTART_PASS
+        else
+            echo HIBR_PRIMARY_RESTART_FAIL target=$desktop_pid process_id=$primary_pid state=$restart_state detail="$primary_detail"
+            pane_matrix_pass=0
+        fi
+        join_reconnect_pass=1
+        join_session_id=$($b sed -n 's/.*"id":"\([0-9][0-9]*\)".*/\1/p' /tmp/hibr-pane-2.json)
+        join_detail=$($b wget -qO- "http://127.0.0.1:19191/v1/terminal-sessions/$join_session_id" 2>/dev/null || true)
+        join_pid=$(echo "$join_detail" |
+            $b sed -n 's/.*"process_id"[ ]*:[ ]*\([0-9][0-9]*\).*/\1/p')
+        [ -n "$join_pid" ] || join_reconnect_pass=0
+        if [ "$join_reconnect_pass" -eq 1 ]; then
+            $b kill -KILL "$join_pid" 2>/dev/null || join_reconnect_pass=0
+            $b sleep 3
+        fi
+        join_state=$($b wget -qO- "http://127.0.0.1:19191/v1/terminal-sessions/$join_session_id" |
+            $b sed -n 's/.*"state":"\([^"]*\)".*/\1/p')
+        primary_after_join=$($b wget -qO- "http://127.0.0.1:19191/v1/terminal-sessions/$primary_session_id" |
+            $b sed -n 's/.*"state":"\([^"]*\)".*/\1/p')
+        [ "$join_state" = failed ] || join_reconnect_pass=0
+        [ "$primary_after_join" = running ] || join_reconnect_pass=0
+        if [ "$join_reconnect_pass" -eq 1 ] && [ -n "$pane5" ]; then
+            $b wget -qO /tmp/hibr-pane-rejoin.json --post-data="{\"command\":\"/blit-stage/hibr\",\"arguments\":[\"/blit-stage/hibr_window_workload.hibr\",\"--session\",\"blit\",\"--join\",\"--name\",\"$pane5\"],\"surface_mode\":\"terminal\",\"pane_id\":\"$pane5\",\"surface\":{\"width\":64,\"height\":24}}" --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
+            rejoin_id=$($b sed -n 's/.*"id":"\([0-9][0-9]*\)".*/\1/p' /tmp/hibr-pane-rejoin.json)
+            $b sleep 8
+            rejoin_state=$($b wget -qO- "http://127.0.0.1:19191/v1/terminal-sessions/$rejoin_id" |
+                $b sed -n 's/.*"state":"\([^"]*\)".*/\1/p')
+            [ "$rejoin_state" = running ] || join_reconnect_pass=0
+        else
+            join_reconnect_pass=0
+        fi
+        if [ "$join_reconnect_pass" -eq 1 ]; then
+            echo HIBR_JOIN_RECONNECT_PASS
+        else
+            echo HIBR_JOIN_RECONNECT_FAIL join_pid=$join_pid join_state=$join_state primary_state=$primary_after_join rejoin_state=${rejoin_state:-}
+            pane_matrix_pass=0
+        fi
+    fi
     final_topology=$($b wget -qO- http://127.0.0.1:19191/v1/topology)
     echo HIBR_PANE_MATRIX_FINAL_TOPOLOGY; echo "$final_topology"
     surface_count=$(echo "$final_topology" | $b tr ',' '\n' |
         $b sed -n 's/.*"surface_id":"surface-[0-9][0-9]*".*/x/p' | $b wc -l)
-    [ "$surface_count" -eq 4 ] || pane_matrix_pass=0
+    expected_surface_count=4
+    [ "${BLIT_HIBR_RESTART_TEST:-0}" = 1 ] && expected_surface_count=5
+    [ "$surface_count" -eq "$expected_surface_count" ] || pane_matrix_pass=0
     if [ "$pane_matrix_pass" -eq 1 ]; then
         echo HIBR_PANE_MATRIX_PASS
         finish 0
