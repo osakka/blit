@@ -9,6 +9,9 @@ require 'net/http'
 require 'uri'
 
 base = URI(ENV.fetch('BLIT_GATE_SERVER', 'http://127.0.0.1:8080'))
+hibr_command = ENV.fetch('BLIT_HIBR_COMMAND', '/usr/bin/desktop')
+hibr_session = ENV.fetch('BLIT_HIBR_SESSION', '/usr/share/hibr/desktop/session.hibr')
+hibr_name = "blit-physical-gate-#{Process.pid}"
 
 def request(base, method, path, body = nil, headers = {})
   uri = base + path
@@ -88,9 +91,15 @@ begin
   displays.each_with_index do |display, index|
     pane = panes.fetch(index)
     bounds = pane.fetch('bounds')
+    arguments = [hibr_session, '--session', hibr_name]
+    arguments += ['--join'] unless index.zero?
+    arguments += ['--name', display.fetch('name')]
     created = request(base, 'POST', '/v1/terminal-sessions', {
-      'command' => '/bin/sh',
-      'arguments' => ['-c', "printf PHYSICAL_DISPLAY_#{index}\\n; sleep 3"],
+      'command' => hibr_command,
+      'arguments' => arguments,
+      'environment' => {
+        'DT_LOG' => "/tmp/#{hibr_name}-#{index}.log"
+      },
       'surface_mode' => 'terminal',
       'pane_id' => pane.fetch('id'),
       'surface' => {
@@ -122,7 +131,7 @@ begin
   raise 'pointer output is outside physical outputs' unless
     pointer.fetch('output') < displays.length
 
-  puts "PHYSICAL_MULTI_DISPLAY_PASS displays=#{displays.length} " \
+  puts "PHYSICAL_MULTI_DISPLAY_HIBR_PASS displays=#{displays.length} " \
        "sessions=#{resources.fetch('sessions')} " \
        "pointer_output=#{pointer.fetch('output')}"
 ensure

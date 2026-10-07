@@ -118,11 +118,13 @@ BLIT_GATE_SERVER=http://127.0.0.1:8080 \
   ruby tools/tests/physical_multi_display_gate.rb
 ```
 
-The gate requires at least two discovered physical displays. It attaches one
-temporary PTY to each display-owned pane, checks runtime health, pointer
-diagnostics, and resource counts, then removes the sessions and restores the
-original topology. Exit status `77` means the host does not currently expose
-enough physical displays and is not a pass.
+The gate requires at least two discovered physical displays. It launches the
+unchanged installed Hibr desktop on the first display and one `desktop --join`
+session on each auxiliary display, then checks runtime health, pointer
+diagnostics, and resource counts. It removes the sessions and restores the
+original topology afterward. `BLIT_HIBR_COMMAND` and `BLIT_HIBR_SESSION` can
+override the installed Hibr paths. Exit status `77` means the host does not
+currently expose enough physical displays and is not a pass.
 
 The TCC-built server has been exercised locally with the SDL dummy backend and
 in QEMU with direct DRM/KMS:
