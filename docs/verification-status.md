@@ -7,8 +7,9 @@ an evidence record, not a claim that the complete product is released.
 
 - Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The source build for this cycle is `0.1.212`; package hash is recorded
-  `05a26d6d33c05602f1e44cc04c1c5c4d3a3ecd9c0a1cfa3b4251a2486ce34057`.
+- The source build for this cycle is `0.1.213`, which includes the
+  Hibr-compatible Unicode 15.1 width table and regression vectors for
+  variation selectors and zero-width joiners.
 - SDL pointer-only presentation now reuses a per-output scene cache instead of
   forcing a full terminal rasterization on every pointer motion. Runtime
   diagnostics expose pointer-cache hits and misses.
@@ -24,6 +25,8 @@ an evidence record, not a claim that the complete product is released.
 - The stalled-upload gate passes: progress is exposed and authenticated
   cancellation returns 202 without stopping the gateway.
 - Terminal conformance passes, including UTF-8/wide cells, VT controls,
+  full Hibr Unicode 15.1 width semantics for combining marks, joiners, and
+  variation selectors,
   alternate screens, colors, fragmented and malformed controls, Kitty image
   placement, ordinary-session graphics isolation, and immediate final PTY
   bytes.

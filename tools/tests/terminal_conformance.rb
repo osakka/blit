@@ -675,6 +675,18 @@ cells = cell_map(snapshot)
 assert_equal("😀", cells.fetch([0, 0]).fetch('text'), 'wide UTF-8 cell')
 assert_equal('X', cells.fetch([2, 0]).fetch('text'), 'wide UTF-8 cursor advance')
 
+snapshot = run_case(base, 'utf8-variation-selector',
+                    "printf '\\360\\237\\230\\200\\357\\270\\217X'")
+cells = cell_map(snapshot)
+assert_equal('X', cells.fetch([2, 0]).fetch('text'),
+             'variation selector does not advance cursor')
+
+snapshot = run_case(base, 'utf8-zero-width-joiner',
+                    "printf '\\360\\237\\221\\251\\342\\200\\215\\360\\237\\222\\273X'")
+cells = cell_map(snapshot)
+assert_equal('X', cells.fetch([4, 0]).fetch('text'),
+             'zero-width joiner does not advance cursor')
+
 snapshot = run_case(base, 'box-drawing-utf8', "printf '\\342\\224\\200\\342\\224\\202'")
 cells = cell_map(snapshot)
 assert_equal('─', cells.fetch([0, 0]).fetch('text'), 'box drawing horizontal')

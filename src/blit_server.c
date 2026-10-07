@@ -3,6 +3,7 @@
 #include "blit_kms.h"
 #include "blit_font.h"
 #include "blit_graphics.h"
+#include "blit_unicode_width.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -1968,23 +1969,25 @@ static int utf8_decode(const unsigned char *text, size_t length,
 
 static int unicode_cell_width(uint32_t codepoint)
 {
-    if ((codepoint >= 0x0300 && codepoint <= 0x036f) ||
-        (codepoint >= 0x1ab0 && codepoint <= 0x1aff) ||
-        (codepoint >= 0x1dc0 && codepoint <= 0x1dff) ||
-        (codepoint >= 0x20d0 && codepoint <= 0x20ff) ||
-        (codepoint >= 0xfe20 && codepoint <= 0xfe2f))
+    size_t low = 0;
+    size_t high = BLIT_UNICODE_WIDTH_COUNT;
+
+    if (codepoint < 0x20 ||
+        (codepoint >= 0x7f && codepoint < 0xa0))
         return 0;
-    if (codepoint == 0x2329 || codepoint == 0x232a ||
-        (codepoint >= 0x1100 && codepoint <= 0x115f) ||
-        (codepoint >= 0x2e80 && codepoint <= 0xa4c6) ||
-        (codepoint >= 0xac00 && codepoint <= 0xd7a3) ||
-        (codepoint >= 0xf900 && codepoint <= 0xfaff) ||
-        (codepoint >= 0xfe10 && codepoint <= 0xfe19) ||
-        (codepoint >= 0xfe30 && codepoint <= 0xfe6f) ||
-        (codepoint >= 0xff00 && codepoint <= 0xff60) ||
-        (codepoint >= 0xffe0 && codepoint <= 0xffe6) ||
-        (codepoint >= 0x1f300 && codepoint <= 0x1faff))
-        return 2;
+    if (codepoint < 0x0300)
+        return 1;
+    while (low < high) {
+        size_t middle = (low + high) / 2;
+        const BlitUnicodeWidthRange *range =
+            &blit_unicode_width_table[middle];
+        if (codepoint < range->first)
+            high = middle;
+        else if (codepoint > range->last)
+            low = middle + 1;
+        else
+            return range->width;
+    }
     return 1;
 }
 
