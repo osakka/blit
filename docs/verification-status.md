@@ -36,8 +36,9 @@ following variants without modifying Hibr:
 
 The QEMU VKMS kernel was rebuilt from the repository's existing Linux VKMS
 source/build tree because the prior `bzImage` artifact was missing. The
-authorized physical host accepted Debian package `0.1.242-1` with SHA-256
-`824ebdc07b11ec3fe894786bc649d07211a7e2960f78aa74de7ca98e042eaded` and
+authorized physical host accepted the final Debian package `0.1.242-1` with
+SHA-256 `7493d8e652c48bde95b4b01e60e948a620c43e71184fcdea600005f2870daca5`
+and
 reports `server_version:0.1.242`, one 1920×2160 output at 59.99 Hz, SDL/OpenGL
 readiness, and no diagnostics errors. During the active Hibr resume workload,
 the runtime window measured 59.903 Hz with zero missed deadlines; the clean
