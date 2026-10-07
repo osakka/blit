@@ -1299,7 +1299,10 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              "\"outputs\":%s,"
              "\"font_scale\":%d,\"direct_kms\":%s,"
              "\"renderer\":\"%s\","
-             "\"presentation_sync\":\"%s\"},"
+             "\"presentation_sync\":\"%s\","
+             "\"pointer\":{\"valid\":%s,\"x\":%.1f,\"y\":%.1f,"
+             "\"output\":%d,\"previous_x\":%.1f,\"previous_y\":%.1f,"
+             "\"previous_output\":%d,\"dirty\":%s}},"
              "\"errors\":%s,\"warnings\":%s}",
              (runtime->direct_kms ? runtime->display_count > 0 :
               runtime->sdl_ready && runtime->output_count > 0 &&
@@ -1313,6 +1316,11 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              runtime->font_scale,
              runtime->direct_kms ? "true" : "false", escaped_renderer,
              presentation_sync,
+             runtime->pointer_valid ? "true" : "false",
+             runtime->pointer_x, runtime->pointer_y, runtime->pointer_output,
+             runtime->previous_pointer_x, runtime->previous_pointer_y,
+             runtime->previous_pointer_output,
+             runtime->pointer_dirty ? "true" : "false",
              runtime->sdl_error[0] ? "[\"backend_error\"]" : "[]",
              runtime_has_failed_display(runtime) ?
                  "[\"display_presentation_failed\"]" :

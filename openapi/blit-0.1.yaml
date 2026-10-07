@@ -862,7 +862,7 @@ components:
           additionalProperties: false
         render:
           type: object
-          required: [pending, interval_ms, effective_interval_ms, mode, outputs, font_scale, direct_kms, renderer, presentation_sync]
+          required: [pending, interval_ms, effective_interval_ms, mode, outputs, font_scale, direct_kms, renderer, presentation_sync, pointer]
           properties:
             pending: {type: boolean}
             interval_ms: {type: integer, minimum: 1}
@@ -888,6 +888,22 @@ components:
             presentation_sync:
               type: string
               enum: [drm-page-flip, sdl-vsync, scheduler-only]
+            pointer:
+              type: object
+              description: >-
+                Compositor pointer state used to correlate pointer trails or
+                stale damage with the captured framebuffer.
+              required: [valid, x, y, output, previous_x, previous_y, previous_output, dirty]
+              properties:
+                valid: {type: boolean}
+                x: {type: number}
+                y: {type: number}
+                output: {type: integer}
+                previous_x: {type: number}
+                previous_y: {type: number}
+                previous_output: {type: integer}
+                dirty: {type: boolean}
+              additionalProperties: false
           additionalProperties: false
         errors:
           type: array

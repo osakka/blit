@@ -117,6 +117,13 @@ assert_equal('invalid_topology_placements', invalid_response.fetch('code'),
              'incomplete topology placement code')
 puts 'PASS topology-placement-round-trip'
 
+pointer_diagnostics = request(base, 'GET', '/v1/diagnostics')
+pointer = pointer_diagnostics.fetch('render').fetch('pointer')
+%w[valid x y output previous_x previous_y previous_output dirty].each do |field|
+  raise "pointer diagnostics missing #{field}" unless pointer.key?(field)
+end
+puts 'PASS pointer-diagnostics'
+
 missing_surface_status, missing_surface_response = request_with_status(
   base, 'POST', '/v1/terminal-sessions', { 'command' => '/bin/true' })
 assert_equal(400, missing_surface_status, 'missing surface status')

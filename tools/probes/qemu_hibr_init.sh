@@ -338,7 +338,7 @@ echo PROBE; $b cat /tmp/probe.json 2>/dev/null || true
 echo PROBE_SURFACE; $b wget -qO- http://127.0.0.1:19191/v1/surfaces/surface-1/cells | $b cut -c 1-1000
 
 $b touch /tmp/primary.json /tmp/join.json
-$b wget -qO /tmp/primary.json --post-data="{\"command\":\"/blit-stage/hibr\",\"arguments\":[\"/blit-stage/hibr_window_workload.hibr\",\"--session\",\"blit\",\"--name\",\"$display1\"],\"environment\":{\"CP_THEME\":\"retro_car\",\"DT_CTL\":\"1\",\"DT_CTLPATH\":\"/tmp/hibr-ctl-0/blit.ctl\",\"DT_LOG\":\"/tmp/primary-hibr.log\"},\"surface_mode\":\"terminal\",\"pane_id\":\"$pane1\",\"surface\":{\"width\":128,\"height\":48}}" --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
+$b wget -qO /tmp/primary.json --post-data="{\"command\":\"/blit-stage/hibr\",\"arguments\":[\"/blit-stage/session.hibr\",\"--session\",\"blit\",\"--name\",\"$display1\"],\"environment\":{\"CP_THEME\":\"retro_car\",\"DT_CTL\":\"1\",\"DT_CTLPATH\":\"/tmp/hibr-ctl-0/blit.ctl\",\"DT_LOG\":\"/tmp/primary-hibr.log\"},\"surface_mode\":\"terminal\",\"pane_id\":\"$pane1\",\"surface\":{\"width\":128,\"height\":48}}" --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
 primary_id=$($b sed -n 's/.*"id":"\([0-9][0-9]*\)".*/\1/p' /tmp/primary.json)
 ready=0
 for n in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
@@ -354,10 +354,19 @@ done
 if [ "$ready" -ne 1 ]; then
     echo PRIMARY_NOT_READY
     echo "$primary_state"
+    echo PRIMARY_SURFACE
+    $b wget -qO- http://127.0.0.1:19191/v1/surfaces/surface-$primary_id/cells 2>/dev/null |
+        $b cut -c 1-6000 || true
+    echo PRIMARY_HIBR_LOG
+    $b cat /tmp/primary-hibr.log 2>/dev/null || true
+    echo HIBR_ADAPTER_ENV
+    $b cat /tmp/blit-adapter-env.log 2>/dev/null || true
+    echo HIBR_STATE_FILES
+    $b find /tmp/hibr-state -type f -maxdepth 4 -print -exec $b cat {} \; 2>/dev/null || true
     echo BLIT_LOG; $b cat /tmp/blit.log
     exec $b sh
 fi
-$b wget -qO /tmp/join.json --post-data="{\"command\":\"/blit-stage/hibr\",\"arguments\":[\"/blit-stage/hibr_window_workload.hibr\",\"--session\",\"blit\",\"--join\",\"--name\",\"$display2\"],\"environment\":{\"DT_LOG\":\"/tmp/hibr-join.log\"},\"surface_mode\":\"terminal\",\"pane_id\":\"$pane2\",\"surface\":{\"width\":128,\"height\":48}}" --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
+$b wget -qO /tmp/join.json --post-data="{\"command\":\"/blit-stage/hibr\",\"arguments\":[\"/blit-stage/session.hibr\",\"--session\",\"blit\",\"--join\",\"--name\",\"$display2\"],\"environment\":{\"DT_LOG\":\"/tmp/hibr-join.log\"},\"surface_mode\":\"terminal\",\"pane_id\":\"$pane2\",\"surface\":{\"width\":128,\"height\":48}}" --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
 join_id=$($b sed -n 's/.*"id":"\([0-9][0-9]*\)".*/\1/p' /tmp/join.json)
 $b sleep 8
 ready=0
@@ -397,6 +406,12 @@ echo "$control_displays" | $b grep -q "\"name\":\"$display2\"" || control_displa
 if [ "$control_displays_pass" -ne 1 ]; then
     echo HIBR_CONTROL_DISPLAYS_FAIL
     $b cat /tmp/hibr-control.err 2>/dev/null || true
+    echo HIBR_ADAPTER_ENV
+    $b cat /tmp/blit-adapter-env.log 2>/dev/null || true
+    echo HIBR_STATE_FILES
+    $b find /tmp/hibr-state -maxdepth 4 -type f -print -exec $b cat {} \; 2>/dev/null || true
+    echo PRIMARY_HIBR_LOG
+    $b cat /tmp/primary-hibr.log 2>/dev/null || true
 fi
 control_windows=$(/blit-stage/hibr /blit-stage/lib/ctl.hibr --session blit windows 2>/tmp/hibr-control-windows.err || true)
 echo HIBR_CONTROL_WINDOWS; echo "$control_windows"
