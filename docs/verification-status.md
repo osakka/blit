@@ -30,6 +30,9 @@ glyph zero. The manifest now covers Hibr's Arabic source characters and the
 242 presentation forms emitted by its `uni` shaping table. The package is
 `blit_0.1.247-1_amd64.deb`, SHA-256
 `2b19daa4d8efb91dcf827ccff3e9851005cd702a005fac7bcb5d3516b828c9e0`.
+With the expanded bundled font selected, the dummy refresh gate measured
+43.975 Hz during its bounded workload and the SDL graphics-cache gate passed
+with five cache hits and no additional texture uploads.
 The physical host has not yet been upgraded to 0.1.247; its accepted runtime
 evidence remains explicitly recorded below for 0.1.245.
 
