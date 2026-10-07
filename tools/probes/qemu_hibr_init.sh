@@ -122,6 +122,25 @@ if [ "$ready" -ne 1 ]; then
     echo BLIT_LOG; $b cat /tmp/blit.log
     finish 1
 fi
+if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
+    # Subscribe before topology/session setup; the synthetic producer can
+    # begin emitting while the deterministic layout matrix is running.
+    /blit-stage/ws-input-probe >/tmp/stream-input.log 2>&1 &
+    stream_probe_pid=$!
+    echo INPUT_STREAM_PROBE_PID=$stream_probe_pid
+    stream_ready=0
+    for stream_attempt in 1 2 3 4 5; do
+        if $b grep -q 'subscription_received' /tmp/stream-input.log 2>/dev/null; then
+            stream_ready=1
+            break
+        fi
+        $b sleep 1
+    done
+    if [ "$stream_ready" -ne 1 ]; then
+        echo BLIT_INPUT_STREAM_NOT_READY
+        finish 1
+    fi
+fi
 topology=$($b wget -qO- http://127.0.0.1:19191/v1/topology)
 layout_matrix_pass=1
 for layout in 1x1 2x1 1x2 2x2; do
@@ -169,9 +188,6 @@ if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
     $b wget -qO /tmp/input-pointer.json --post-data="{\"command\":\"/blit-stage/pty-input-echo\",\"arguments\":[\"--mouse\",\"--focus\"],\"surface_mode\":\"terminal\",\"pane_id\":\"$pane2\",\"surface\":{\"width\":128,\"height\":48}}" --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
     input_key_id=$($b sed -n 's/.*"id":"\([0-9][0-9]*\)".*/\1/p' /tmp/input-key.json)
     input_pointer_id=$($b sed -n 's/.*"id":"\([0-9][0-9]*\)".*/\1/p' /tmp/input-pointer.json)
-    /blit-stage/ws-input-probe >/tmp/stream-input.log 2>&1 &
-    stream_probe_pid=$!
-    echo INPUT_STREAM_PROBE_PID=$stream_probe_pid
     /blit-stage/http-put 19191 /v1/input/routes/input-key "{\"device_id\":\"evdev-keyboard\",\"target_session_id\":\"session-$input_key_id\",\"enabled\":true}" > /tmp/input-key-route.json || true
     /blit-stage/http-put 19191 /v1/input/routes/input-pointer "{\"device_id\":\"evdev-pointer\",\"target_session_id\":\"session-$input_pointer_id\",\"enabled\":true}" > /tmp/input-pointer-route.json || true
     echo BLIT_INPUT_READY
