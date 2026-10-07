@@ -36,6 +36,11 @@ QEMU capture fixture. It reported `server_version:0.1.246`, two ready DRM
 outputs, `PPM_DISPLAY_47_WIDE_KITTY_PASS`, `PPM_DISPLAY_48_PASS`,
 `KMS_API_SCREENSHOT_PASS`, and `KMS_CAPTURE_PASS`. This is new QEMU/KMS
 evidence only; it does not upgrade or replace the physical-host evidence.
+The same exact binary passed the single-vCPU synthetic input/render soak with
+`LAYOUT_MATRIX_PASS`, `BLIT_INPUT_MULTI_MOUSE_PASS`,
+`BLIT_INPUT_STREAM_PASS`, and `BLIT_INPUT_RENDER_SOAK_PASS`; the fixture
+exercised two mice, all three buttons, releases while buttons remained held,
+wheel input, PTY routing, and device-loss diagnostics.
 
 ### Current 0.1.245 QEMU/KMS evidence
 
