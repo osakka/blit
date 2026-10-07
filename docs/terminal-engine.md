@@ -104,7 +104,15 @@ and reset the cursor column to zero, matching the Hibr terminal contract.
 ## Conformance gate
 
 Run `tools/tests/terminal_conformance.rb` against a TCC-built server with the
-dummy video backend. The runner currently asserts printable output, cursor
+dummy video backend and the bundled production font. Start the server with:
+
+```sh
+BLIT_PSF_FONT=build/blit-desktop-current/fonts/Lat15-Terminus16.psf \
+SDL_VIDEODRIVER=dummy LD_LIBRARY_PATH=build/sdl3-kms \
+  build/blit/blit-server 19195
+```
+
+The runner currently asserts printable output, cursor
 addressing, styles, erase, scrolling, scroll regions, alternate-screen
 restoration, saved-cursor state, UTF-8 cells, truecolor SGR, and fragmented CSI input
 through the public PTY/surface contract, plus cursor visibility, VT500
