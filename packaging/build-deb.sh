@@ -81,8 +81,6 @@ fi
 if [ -d "$ROOT/openapi" ]; then
 	cp -a "$ROOT/openapi" "$stage/usr/lib/blit/openapi"
 fi
-ln -s /usr/lib/blit/lib/libSDL3.so.0.4.16 "$stage/usr/lib/libSDL3.so.0"
-ln -s /usr/lib/libSDL3.so.0 "$stage/usr/lib/libSDL3.so"
 ln -s /usr/lib/blit/bin/blit-server "$stage/usr/bin/blit"
 cp -a "$BUNDLE/README.md" "$stage/usr/share/doc/blit/"
 cp -a "$VERSION_FILE" "$stage/usr/share/doc/blit/VERSION"
@@ -142,12 +140,12 @@ if [ ! -s /etc/blit/update.token ]; then
 fi
 if command -v systemctl >/dev/null 2>&1; then
     systemctl daemon-reload || true
-    systemctl enable --now blit-update-helper.service || true
-    systemctl enable --now blit.service || true
-fi
-if [ ! -S /run/blit/update.sock ] && [ -x /usr/lib/blit/bin/blit-update-helper ]; then
-    mkdir -p /run/blit
-    /usr/lib/blit/bin/blit-update-helper >/var/log/blit-update-helper.log 2>&1 &
+    # Unit enablement is safe during an API-driven upgrade.  Starting either
+    # unit here is not: blit is deliberately restarted by the API only after
+    # dpkg has returned its result, and the helper must not restart itself from
+    # inside its own dpkg child.
+    systemctl enable blit-update-helper.service || true
+    systemctl enable blit.service || true
 fi
 exit 0
 EOF
@@ -159,7 +157,7 @@ Section: misc
 Priority: optional
 Architecture: amd64
 Maintainer: ITD Labs <itdlabs@localhost>
-Depends: libc6, libdrm2, libgbm1, libegl1, libgles2, libgl1-mesa-dri
+Depends: libc6, libdrm2
 Suggests: hibr
 Description: API-driven SDL3/KMS text display server
  Blit provides a text-first display server with one terminal surface per

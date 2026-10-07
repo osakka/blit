@@ -15,6 +15,7 @@ Accepted decisions:
 5. [Kitty graphics first, sixel compatibility second](0005-kitty-graphics-first.md).
 6. [Display refresh is an output invariant](0006-display-refresh-invariant.md).
 7. [PTY UTF-8 boundaries and Hibr font coverage](0007-terminal-utf8-and-hibr-font-boundary.md).
+8. [API-supervised package lifecycle](0008-api-supervised-package-lifecycle.md).
 
 Pending decisions:
 

@@ -9,6 +9,7 @@ User=blit
 Group=blit
 SupplementaryGroups=video render input
 EnvironmentFile=-/etc/blit/blit.env
+Environment=LD_LIBRARY_PATH=/usr/lib/blit/lib
 ExecStart=/usr/bin/blit 8080
 Restart=on-failure
 RestartSec=2s

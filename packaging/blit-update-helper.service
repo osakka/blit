@@ -7,7 +7,7 @@ Type=simple
 ExecStart=/usr/lib/blit/bin/blit-update-helper
 User=root
 Group=blit
-Restart=on-failure
+Restart=always
 NoNewPrivileges=false
 
 [Install]

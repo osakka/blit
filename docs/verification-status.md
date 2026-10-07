@@ -10,7 +10,7 @@ an evidence record, not a claim that the complete product is released.
 - The previous fully validated source build is `0.1.222`, which includes the
   Hibr-compatible Unicode 15.1 width table and regression vectors for
   variation selectors and zero-width joiners.
-- The current TCC source build and turnkey package are `0.1.226`; the complete
+- The current TCC source build and turnkey package are `0.1.230`; the complete
   terminal conformance suite passes with the canonical 16x16 Terminus font.
   The package defaults the Blit service to a UTF-8 locale for Hibr's Unicode
   desktop output.
@@ -24,13 +24,14 @@ an evidence record, not a claim that the complete product is released.
 - The exact 0.1.226 TCC build passes the fragmented-UTF-8 vector and a
   controlled Hibr API launch with zero visible question-mark cells. The parser
   retains valid UTF-8 prefixes across PTY reads instead of replacing them.
-- The Debian artifact built from the 0.1.226 implementation is
-  `blit_0.1.226-1_amd64.deb`, SHA-256
-  `7d7f7dc4063d6e8f524f8802d86e41f8afffb5a769e30a87795eeee009038bec`.
-- The exact 0.1.226 update supervisor passed both local cancellation and idle
-  timeout gates. The live host's update API is reachable and idle, but its
-  root-owned update credential is not present in this workspace, so no live
-  upload was attempted.
+- The Debian artifact built from the current implementation is
+  `blit_0.1.230-1_amd64.deb`, SHA-256
+  `bf6af1b22da2ff5fcf6931c2037508a4ff4507a290861c44b25dce4b09f39e9f`.
+- The exact 0.1.230 update supervisor passed the local cancellation gate. The
+  package installs through real `dpkg --unpack` and `dpkg --configure` on the
+  local VM. The authorized physical-host upload reached its root helper but
+  was rejected by the pre-0.1.230 helper as a blank `ERROR`; the host remains
+  on 0.1.223 and is not claimed as updated.
 - SDL pointer-only presentation now reuses a per-output scene cache instead of
   forcing a full terminal rasterization on every pointer motion. Runtime
   diagnostics expose pointer-cache hits and misses.

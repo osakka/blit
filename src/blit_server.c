@@ -9873,6 +9873,7 @@ static void update_status_json(const BlitRuntime *runtime, char *body,
     int active = 0;
     size_t received = 0;
     size_t expected = 0;
+    char escaped_detail[sizeof(runtime->update_detail) * 2];
 
     for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i) {
         const BlitHttpClient *client = &runtime->http_clients[i];
@@ -9882,12 +9883,13 @@ static void update_status_json(const BlitRuntime *runtime, char *body,
         received += client->update_received;
         expected += client->update_expected;
     }
+    json_escape(runtime->update_detail, escaped_detail, sizeof(escaped_detail));
     snprintf(body, capacity,
              "{\"state\":\"%s\",\"detail\":\"%s\","
              "\"upload\":{\"active\":%s,\"received_bytes\":%lu,"
              "\"expected_bytes\":%lu}}",
              runtime->update_state[0] != '\0' ? runtime->update_state :
-             "disabled", runtime->update_detail, active ? "true" : "false",
+             "disabled", escaped_detail, active ? "true" : "false",
              (unsigned long)received, (unsigned long)expected);
 }
 
