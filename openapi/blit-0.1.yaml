@@ -200,7 +200,7 @@ paths:
     get:
       tags: [control]
       operationId: getUpdateStatus
-      summary: Get package update state
+      summary: Get package update state and transfer progress
       responses:
         '200':
           description: Current update state
@@ -211,6 +211,31 @@ paths:
                 required: [state, detail]
                 properties:
                   state: {type: string}
+                  detail: {type: string}
+                  upload:
+                    $ref: '#/components/schemas/UpdateUpload'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/control/update/cancel:
+    post:
+      tags: [control]
+      operationId: cancelUpdateUpload
+      summary: Cancel an in-progress package upload
+      parameters:
+        - in: header
+          name: X-Blit-Update-Token
+          required: true
+          schema: {type: string, minLength: 1}
+      responses:
+        '202':
+          description: Package upload cancelled
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [state, detail]
+                properties:
+                  state: {type: string, const: cancelled}
                   detail: {type: string}
         default:
           $ref: '#/components/responses/Problem'
@@ -690,6 +715,14 @@ components:
           schema:
             $ref: '#/components/schemas/Problem'
   schemas:
+    UpdateUpload:
+      type: object
+      required: [active, received_bytes, expected_bytes]
+      properties:
+        active: {type: boolean}
+        received_bytes: {type: integer, minimum: 0}
+        expected_bytes: {type: integer, minimum: 0}
+      additionalProperties: false
     ResourceId:
       type: string
       minLength: 1

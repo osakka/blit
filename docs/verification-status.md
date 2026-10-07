@@ -5,10 +5,12 @@ an evidence record, not a claim that the complete product is released.
 
 ## Source and package
 
-- Repository: `main` at commit `a328f62`.
+- Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The locally built package is `0.1.210-1`:
-  `70301980df36a22282181a220e665f4580436259d2cf659ee0034086b6c2ef76`.
+- The source build for this cycle is `0.1.211`; package hash is recorded
+  `bd4f821888f738a7569e93f41d8812b34232ba743b5b2c557643e5538d8244cc`.
+- `POST /v1/control/update/cancel` now cancels a stalled authenticated upload,
+  and update status exposes active/received/expected byte counts.
 - The package allowlist rejects runtime shell launchers and Hibr startup
   wrappers.
 - Hibr source and files were not modified.
@@ -16,6 +18,8 @@ an evidence record, not a claim that the complete product is released.
 ## Passing automated evidence
 
 - OpenAPI and TCC build checks pass.
+- The stalled-upload gate passes: progress is exposed and authenticated
+  cancellation returns 202 without stopping the gateway.
 - Terminal conformance passes, including UTF-8/wide cells, VT controls,
   alternate screens, colors, fragmented and malformed controls, Kitty image
   placement, ordinary-session graphics isolation, and immediate final PTY
@@ -26,6 +30,8 @@ an evidence record, not a claim that the complete product is released.
 - The Hibr fixture passes primary plus `--join` sessions, all four logical
   pane layouts, Hibr display/window control, focus, resize, input routes,
   keyboard, pointer, multi-mouse, and WebSocket input checks.
+- The exact 0.1.211 TCC build passes the two-output KMS pixel gate, default
+  Hibr acceptance, multi-device input routing, and the pane matrix.
 
 ## Real-host evidence
 
@@ -39,7 +45,7 @@ The authorized host at `192.168.10.54:8080` currently reports:
 
 ## Open release gates
 
-1. Install and verify `0.1.210` on the real host. The currently installed
+1. Install and verify `0.1.211` on the real host. The currently installed
    `0.1.208` upload handler blocks during large package uploads, so the fixed
    update path cannot bootstrap itself through that process.
 2. Validate at least one physical multi-monitor arrangement, including

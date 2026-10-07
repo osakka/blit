@@ -469,6 +469,9 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
 static void remove_http_client(BlitRuntime *runtime, int index);
 static void update_status_json(const BlitRuntime *runtime, char *body,
                                size_t capacity);
+static int update_authorized(const BlitRuntime *runtime, const char *request);
+static void cancel_update_upload(BlitRuntime *runtime, int fd,
+                                 const char *request);
 
 static void effect_json(const BlitRuntime *runtime, char *body,
                         size_t capacity)
@@ -6675,6 +6678,12 @@ static void handle_request(int fd, BlitRuntime *runtime,
         return;
     }
 
+    if (strcmp(path, "/v1/control/update/cancel") == 0 &&
+        strcmp(method, "POST") == 0) {
+        cancel_update_upload(runtime, fd, request);
+        return;
+    }
+
     if (strncmp(path, "/v1/diagnostics/screenshots/",
                 strlen("/v1/diagnostics/screenshots/")) == 0 &&
         strcmp(method, "GET") == 0) {
@@ -9572,9 +9581,58 @@ static int run_update_helper(const char *path, const char *sha256,
 static void update_status_json(const BlitRuntime *runtime, char *body,
                                size_t capacity)
 {
-    snprintf(body, capacity, "{\"state\":\"%s\",\"detail\":\"%s\"}",
+    int i;
+    int active = 0;
+    size_t received = 0;
+    size_t expected = 0;
+
+    for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i) {
+        const BlitHttpClient *client = &runtime->http_clients[i];
+        if (!client->used || client->update_fd < 0)
+            continue;
+        active = 1;
+        received += client->update_received;
+        expected += client->update_expected;
+    }
+    snprintf(body, capacity,
+             "{\"state\":\"%s\",\"detail\":\"%s\","
+             "\"upload\":{\"active\":%s,\"received_bytes\":%lu,"
+             "\"expected_bytes\":%lu}}",
              runtime->update_state[0] != '\0' ? runtime->update_state :
-             "disabled", runtime->update_detail);
+             "disabled", runtime->update_detail, active ? "true" : "false",
+             (unsigned long)received, (unsigned long)expected);
+}
+
+static void cancel_update_upload(BlitRuntime *runtime, int fd,
+                                 const char *request)
+{
+    int i;
+    int cancelled = 0;
+
+    if (!update_authorized(runtime, request)) {
+        send_problem(fd, 403, "Forbidden", "update_disabled",
+                     "A valid update token is required.");
+        return;
+    }
+    for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i) {
+        if (runtime->http_clients[i].used &&
+            runtime->http_clients[i].update_fd >= 0) {
+            remove_http_client(runtime, i);
+            ++cancelled;
+        }
+    }
+    if (!cancelled) {
+        send_problem(fd, 409, "Conflict", "update_not_active",
+                     "There is no package upload in progress.");
+        return;
+    }
+    snprintf(runtime->update_state, sizeof(runtime->update_state),
+             "cancelled");
+    snprintf(runtime->update_detail, sizeof(runtime->update_detail),
+             "package upload cancelled");
+    send_http(fd, 202, "Accepted", "application/json",
+              "{\"state\":\"cancelled\",\"detail\":\""
+              "package upload cancelled\"}");
 }
 
 static void finish_update_upload(BlitRuntime *runtime, BlitHttpClient *client)
