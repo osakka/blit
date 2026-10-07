@@ -33,6 +33,9 @@ following variants without modifying Hibr:
 - The exact 0.1.242 binary also passed the two-output input/render soak:
   `LAYOUT_MATRIX_PASS`, `BLIT_INPUT_MULTI_MOUSE_PASS`,
   `BLIT_INPUT_STREAM_PASS`, and `BLIT_INPUT_RENDER_SOAK_PASS`.
+- A current-version 30-second four-PTY soak passed 364 API snapshots, 34
+  revisioned resizes, clean session teardown, advancing frames, no runtime
+  errors, and 66,120 KiB peak RSS under the 131,072 KiB limit.
 - `KMS_FOUR_HIBR_PASS` with four presenting VKMS outputs, one primary Hibr
   desktop, three unchanged stock `--join` clients, and four running Hibr
   surfaces. Hibr source remained unchanged.
