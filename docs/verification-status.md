@@ -37,6 +37,11 @@ an evidence record, not a claim that the complete product is released.
   one-vCPU input fixture. The input fixture passed keypad bytes, independent
   multi-mouse routing, three-button presses/releases, wheel, motion,
   WebSocket stream delivery, and device-loss diagnostics.
+- The exact 0.1.232 TCC build passed the mixed-refresh fixture with independent
+  60 Hz/16 ms and 120 Hz/8 ms output schedules. It also passed the output-loss
+  fixture: a failed connector was reported as `display_presentation_failed`,
+  the surviving connector continued presenting, and its API/PPM capture
+  remained valid.
 - SDL pointer-only presentation now reuses a per-output scene cache instead of
   forcing a full terminal rasterization on every pointer motion. Runtime
   diagnostics expose pointer-cache hits and misses.
@@ -72,7 +77,7 @@ an evidence record, not a claim that the complete product is released.
 - Direct-KMS/VKMS passes two-output pixel capture, mixed 60/120 Hz scheduling,
   output-loss recovery, Kitty resource limits, Kitty clipping/z-order, and
   sixel pixel rendering.
-- The exact 0.1.221 capture fixture independently passed the mixed-refresh
+- The exact 0.1.232 capture fixture independently passed the mixed-refresh
   predicate (`60 Hz/16 ms` and `120 Hz/8 ms`) and output-loss predicate
   (failed connector retained, surviving connector presenting, typed diagnostic,
   and surviving screenshot/API capture).
