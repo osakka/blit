@@ -211,6 +211,30 @@ rescue StandardError => error
   raise
 end
 
+def run_immediate_output_case(base)
+  created = request(base, 'POST', '/v1/terminal-sessions', {
+    'command' => '/bin/sh',
+    'arguments' => ['-c', "printf 'FINAL-BYTE'"],
+    'surface' => { 'width' => 20, 'height' => 4 }
+  })
+  id = created.fetch('id')
+  deadline = Time.now + 5
+  snapshot = nil
+  loop do
+    snapshot = request(base, 'GET', "/v1/surfaces/surface-#{id}/cells")
+    break if screen_text(snapshot).include?('FINAL-BYTE')
+    raise 'final PTY bytes were not drained before timeout' if Time.now >= deadline
+
+    sleep 0.02
+  end
+  assert_equal(true, screen_text(snapshot).include?('FINAL-BYTE'),
+               'immediate final PTY bytes')
+  request(base, 'DELETE', "/v1/terminal-sessions/#{id}")
+  puts 'PASS immediate-final-pty-bytes'
+end
+
+run_immediate_output_case(base)
+
 created = request(base, 'POST', '/v1/terminal-sessions', {
   'command' => '/bin/sh',
   'arguments' => ['-c', "printf 'AB'; sleep 1"],
