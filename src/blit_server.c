@@ -279,6 +279,10 @@ typedef struct {
        that sequence in the middle and leaks its tail as terminal text. */
     char terminal_csi[128];
     int terminal_csi_length;
+    /* PTY reads may split a UTF-8 scalar between system calls. Keep a valid
+       leading prefix until the next read instead of converting it to '?'. */
+    unsigned char terminal_utf8_pending[4];
+    int terminal_utf8_pending_length;
     int terminal_string_type;
     char terminal_string[4096];
     int terminal_string_length;
@@ -2004,6 +2008,29 @@ static int utf8_decode(const unsigned char *text, size_t length,
         return 1;
     }
     return 0;
+}
+
+static int utf8_prefix_is_incomplete(const unsigned char *text, size_t length)
+{
+    size_t expected;
+    size_t i;
+
+    if (text == NULL || length == 0 || length >= 4)
+        return 0;
+    if (text[0] >= 0xc2 && text[0] <= 0xdf)
+        expected = 2;
+    else if (text[0] >= 0xe0 && text[0] <= 0xef)
+        expected = 3;
+    else if (text[0] >= 0xf0 && text[0] <= 0xf4)
+        expected = 4;
+    else
+        return 0;
+    if (length >= expected)
+        return 0;
+    for (i = 1; i < length; ++i)
+        if ((text[i] & 0xc0) != 0x80)
+            return 0;
+    return 1;
 }
 
 static int unicode_cell_width(uint32_t codepoint)
@@ -4964,7 +4991,22 @@ static void terminal_put_codepoint(BlitSession *session, BlitSurface *surface,
 static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
                                    const unsigned char *data, size_t length)
 {
+    unsigned char combined[sizeof(session->terminal_utf8_pending) + 768];
     size_t offset = 0;
+
+    /* A PTY is a byte stream, not a message transport. Join a pending UTF-8
+       prefix with this read before parsing controls or printable cells. */
+    if (session->terminal_utf8_pending_length > 0) {
+        size_t pending = (size_t)session->terminal_utf8_pending_length;
+        if (pending > sizeof(session->terminal_utf8_pending) ||
+            length > sizeof(combined) - pending)
+            return 0;
+        memcpy(combined, session->terminal_utf8_pending, pending);
+        memcpy(combined + pending, data, length);
+        data = combined;
+        length += pending;
+        session->terminal_utf8_pending_length = 0;
+    }
 
     /* Any program output belongs to the live screen.  A historical view is
        only a presentation state and must never become the parser's target. */
@@ -5253,7 +5295,17 @@ static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
                 consumed = 1;
                 codepoint = terminal_dec_special(byte);
             } else if (!utf8_decode(data + offset, length - offset,
-                                    &consumed, &codepoint)) {
+                                   &consumed, &codepoint)) {
+                if (utf8_prefix_is_incomplete(data + offset,
+                                              length - offset)) {
+                    size_t pending = length - offset;
+                    if (pending > sizeof(session->terminal_utf8_pending))
+                        pending = sizeof(session->terminal_utf8_pending);
+                    memcpy(session->terminal_utf8_pending, data + offset,
+                           pending);
+                    session->terminal_utf8_pending_length = (int)pending;
+                    break;
+                }
                 consumed = 1;
                 codepoint = '?';
             } else if (unicode_cell_width(codepoint) == 0) {

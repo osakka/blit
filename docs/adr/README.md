@@ -14,11 +14,11 @@ Accepted decisions:
 4. [Canonical terminal state and direct KMS presentation](0004-terminal-state-and-direct-kms.md).
 5. [Kitty graphics first, sixel compatibility second](0005-kitty-graphics-first.md).
 6. [Display refresh is an output invariant](0006-display-refresh-invariant.md).
+7. [PTY UTF-8 boundaries and Hibr font coverage](0007-terminal-utf8-and-hibr-font-boundary.md).
 
 Pending decisions:
 
 1. Multi-monitor frame atomicity policy.
-2. Terminal encoding, grapheme, and font-rendering policy.
 
 The implementation cadence, evidence requirements, and commit hygiene are
 defined in [the development workflow](../development-workflow.md), not

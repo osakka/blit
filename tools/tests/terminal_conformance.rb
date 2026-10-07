@@ -713,6 +713,14 @@ snapshot = run_case(base, 'utf8-cell', "printf 'caf\\303\\251'")
 cells = cell_map(snapshot)
 assert_equal("é", cells.fetch([3, 0]).fetch('text'), 'UTF-8 cell')
 
+snapshot = run_case(base, 'fragmented-utf8',
+                    "printf '\\342'; sleep 0.1; printf '\\224'; sleep 0.1; printf '\\200X'")
+cells = cell_map(snapshot)
+assert_equal('─', cells.fetch([0, 0]).fetch('text'),
+             'fragmented UTF-8 scalar')
+assert_equal('X', cells.fetch([1, 0]).fetch('text'),
+             'fragmented UTF-8 following cell')
+
 snapshot = run_case(base, 'wide-utf8-cell', "printf '\\360\\237\\230\\200X'")
 cells = cell_map(snapshot)
 assert_equal("😀", cells.fetch([0, 0]).fetch('text'), 'wide UTF-8 cell')
