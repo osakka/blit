@@ -45,6 +45,11 @@ an evidence record, not a claim that the complete product is released.
   `windows` response is not treated as a renderer failure. The guest produces
   both 1024×768 PPMs, and their top-left probes are dark theme pixels rather
   than a red diagnostic square.
+- The corrected two-display Hibr fixture passes in both modes: the stock
+  primary/`--join` session accepts an empty application-window list, while the
+  explicit `blit.hibr_window_control=1` workload additionally passes window
+  `move`, `resize`, and `focus` operations. The acceptance predicate now
+  distinguishes those two intentional workloads.
 - The exact 0.1.217 TCC build passes the two-output KMS pixel gate, the
   four-pane Hibr matrix, and the input-only fixture with
   `blit.input_wait=8`: keypad, multi-mouse, button, wheel, motion, stream, and
