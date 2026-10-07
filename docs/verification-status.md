@@ -67,6 +67,9 @@ an evidence record, not a claim that the complete product is released.
   bounded-history gap signaling, replayed terminal output, and the documented
   HTTP surface snapshot repair path: `STREAM_REPLAY_PASS gap=1
   terminal_output=1 snapshot_repair=1 frames=66`.
+- The exact 0.1.232 TCC session fault gate passed active PTY termination during
+  output and six revision-checked resizes: `SESSION_WRITE_RESIZE_PASS
+  writes=1 resizes=6 delete=1 sessions=0`.
 - The exact 0.1.232 TCC QEMU input-loss fixture passed deterministic evdev
   fault/reconnect coverage with two KMS outputs: it emitted typed
   `input_device_lost` diagnostics, retained enabled surviving input routes and
@@ -187,9 +190,10 @@ The latest reachable observation of the authorized host at
 1. Validate at least one physical multi-monitor arrangement, including
    connector discovery, independent presentation, pointer routing, and Hibr
    primary/join behavior. The current host exposes only one physical output.
-2. Complete the remaining Gate 6 process-restart and session-termination
-   cases during writes/resizes; stream reconnect/replay, input-device loss,
-   output loss, and the two-hour PTY soak now have evidence above.
+2. Complete the remaining Gate 6 process-restart cases for primary and joined
+   Hibr processes; session termination during writes/resizes, stream
+   reconnect/replay, input-device loss, output loss, and the two-hour PTY soak
+   now have evidence above.
 
 Until both gates have authoritative evidence, the project must not be
 described as fully released or physically multi-monitor validated.

@@ -240,6 +240,16 @@ It requires `replay_gap`, replayed `terminal_output`, and the canonical
 `/v1/surfaces/{id}/cells` snapshot repair response after reconnecting with an
 expired cursor.
 
+Session termination during active output and resizes is covered by:
+
+```sh
+BLIT_GATE_PORT=19246 ruby tools/tests/session_write_resize_gate.rb
+```
+
+The gate requires six successful `If-Match` resizes while a PTY is writing,
+then deletes the session and waits for the runtime resource count to reach
+zero.
+
 ## Run locally
 
 The dummy video driver is useful for exercising the network contract without
