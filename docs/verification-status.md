@@ -15,8 +15,8 @@ an evidence record, not a claim that the complete product is released.
   a software-dummy result, not a physical refresh-rate claim. A bounded
   wallpaper workload on the prior source-equivalent 0.1.241 build measured
   26.865 ms maximum full render and 61.387 Hz over its active 504 ms window.
-  Physical deployment and the required KMS/QEMU acceptance remain pending for
-  the physical host; the QEMU/KMS acceptance below now passes.
+  The QEMU/KMS acceptance below passes, and the package has now been deployed
+  to the authorized physical host for the live SDL/Hibr check.
 
 ### Current 0.1.242 QEMU/KMS evidence
 
@@ -36,8 +36,15 @@ following variants without modifying Hibr:
 
 The QEMU VKMS kernel was rebuilt from the repository's existing Linux VKMS
 source/build tree because the prior `bzImage` artifact was missing. The
-physical 0.1.242 deployment is still pending because this workspace does not
-contain the live host's update credential.
+authorized physical host accepted Debian package `0.1.242-1` with SHA-256
+`824ebdc07b11ec3fe894786bc649d07211a7e2960f78aa74de7ca98e042eaded` and
+reports `server_version:0.1.242`, one 1920×2160 output at 59.99 Hz, SDL/OpenGL
+readiness, and no diagnostics errors. During the active Hibr resume workload,
+the runtime window measured 59.903 Hz with zero missed deadlines; the clean
+fresh Hibr desktop then became idle and the API correctly aged the cadence
+measurement to zero. The captured clean desktop contained the expected
+wallpaper, icons, pointer, and controls. A stale held Hibr session was observed
+to produce a character matrix and was discarded; Hibr source was not changed.
 - The previous fully validated source build is `0.1.222`, which includes the
   Hibr-compatible Unicode 15.1 width table and regression vectors for
   variation selectors and zero-width joiners.
