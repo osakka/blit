@@ -23,3 +23,6 @@ Pending decisions:
 The implementation cadence, evidence requirements, and commit hygiene are
 defined in [the development workflow](../development-workflow.md), not
 duplicated in individual ADRs.
+
+Use [the ADR template](TEMPLATE.md) for a new decision, then add the accepted
+record to this index.
