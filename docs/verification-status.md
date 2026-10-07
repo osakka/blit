@@ -16,7 +16,28 @@ an evidence record, not a claim that the complete product is released.
   wallpaper workload on the prior source-equivalent 0.1.241 build measured
   26.865 ms maximum full render and 61.387 Hz over its active 504 ms window.
   Physical deployment and the required KMS/QEMU acceptance remain pending for
-  this candidate.
+  the physical host; the QEMU/KMS acceptance below now passes.
+
+### Current 0.1.242 QEMU/KMS evidence
+
+The exact TCC-built 0.1.242 binary was staged into the rebuilt VKMS kernel
+fixture and passed the two-output capture gate with independent 1024×768
+outputs, wide UTF-8 glyphs, Kitty pixels, API BMP capture, graphics inventory,
+refresh-aware scheduling, and `KMS_CAPTURE_PASS`. The same binary passed the
+following variants without modifying Hibr:
+
+- `REFRESH_SCHEDULER_MIXED_PASS` for independent 60 Hz and 120 Hz schedules.
+- `OUTPUT_LOSS_PASS` with the surviving output continuing to present.
+- `PPM_DISPLAY_47_WIDE_STACK_CLIP_PASS` for Kitty z-order and clipping.
+- `PPM_DISPLAY_47_SIXEL_PASS` for sixel pixel rendering.
+- `KMS_FOUR_HIBR_PASS` with four presenting VKMS outputs, one primary Hibr
+  desktop, three unchanged stock `--join` clients, and four running Hibr
+  surfaces. Hibr source remained unchanged.
+
+The QEMU VKMS kernel was rebuilt from the repository's existing Linux VKMS
+source/build tree because the prior `bzImage` artifact was missing. The
+physical 0.1.242 deployment is still pending because this workspace does not
+contain the live host's update credential.
 - The previous fully validated source build is `0.1.222`, which includes the
   Hibr-compatible Unicode 15.1 width table and regression vectors for
   variation selectors and zero-width joiners.
