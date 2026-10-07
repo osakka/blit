@@ -687,6 +687,17 @@ cells = cell_map(snapshot)
 assert_equal('X', cells.fetch([4, 0]).fetch('text'),
              'zero-width joiner does not advance cursor')
 
+snapshot = run_case(base, 'hibr-integration-defaults',
+                    "printf '%s/%s' \"$DT_BIDI\" \"$HIBR_GFX\"")
+assert_equal('on/kitty', row_text(snapshot).strip,
+             'Hibr bidi and graphics defaults')
+
+snapshot = run_case(base, 'hibr-integration-overrides',
+                    "printf '%s/%s' \"$DT_BIDI\" \"$HIBR_GFX\"",
+                    environment: { 'DT_BIDI' => 'off', 'HIBR_GFX' => 'sixel' })
+assert_equal('off/sixel', row_text(snapshot).strip,
+             'Hibr integration environment overrides')
+
 snapshot = run_case(base, 'box-drawing-utf8', "printf '\\342\\224\\200\\342\\224\\202'")
 cells = cell_map(snapshot)
 assert_equal('─', cells.fetch([0, 0]).fetch('text'), 'box drawing horizontal')

@@ -8,6 +8,12 @@ Hibr module implements the existing `console`/`display` boundary for Hibr
 programs that explicitly request that provider; it is not a desktop launcher
 and is not required by the held `desktop`/`desktop --join` path.
 
+Blit starts terminal children with `DT_BIDI=on` and `HIBR_GFX=kitty` by
+default. This is intentional: Blit stores and draws cells in display order,
+so Hibr must perform right-to-left ordering, while Hibr's console still uses
+the Kitty graphics protocol. An API session may explicitly override either
+environment value when integrating a different terminal client.
+
 The SDL3 state engine must not be linked into hibr, and hibr must not become a
 second owner of display state. This preserves process isolation and lets other
 clients use blit without hibr.

@@ -5857,8 +5857,15 @@ static int create_session(BlitRuntime *runtime, const char *json,
             setenv("BLIT_SURFACE_ID", surface_text, 1) != 0 ||
             setenv("BLIT_SERVER_PORT", port_text, 1) != 0 ||
             setenv("TERM", "xterm-kitty", 1) != 0 ||
-            setenv("COLORTERM", "truecolor", 1) != 0)
-            _exit(126);
+            setenv("COLORTERM", "truecolor", 1) != 0 ||
+            /* Hibr's auto bidi probe treats xterm-kitty as a terminal
+               that reorders RTL text. Blit preserves cell order, so Hibr
+               must own bidi ordering while its console selects Kitty
+               graphics. API environment entries below can override either
+               integration default explicitly. */
+            setenv("DT_BIDI", "on", 1) != 0 ||
+            setenv("HIBR_GFX", "kitty", 1) != 0)
+                _exit(126);
         if (pane_id[0] != '\0' && setenv("BLIT_PANE_ID", pane_id, 1) != 0)
             _exit(126);
         for (environment_index = 0; environment_index < environment_count;

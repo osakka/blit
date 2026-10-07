@@ -43,7 +43,8 @@ an evidence record, not a claim that the complete product is released.
   Hibr acceptance, the four-pane Hibr matrix, and the input-only fixture with
   `blit.input_wait=8`: keypad, multi-mouse, button, wheel, motion, stream, and
   PTY delivery all pass. Its terminal conformance gate additionally passes
-  variation-selector and zero-width-joiner cursor-position vectors.
+  variation-selector and zero-width-joiner cursor-position vectors, plus the
+  Hibr `DT_BIDI`/`HIBR_GFX` defaults and explicit override vectors.
 
 ## Real-host evidence
 
