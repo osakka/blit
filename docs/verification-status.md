@@ -38,10 +38,13 @@ an evidence record, not a claim that the complete product is released.
   sixel pixel rendering.
 - The Hibr fixture passes primary plus `--join` sessions, all four logical
   pane layouts, input routes, keyboard, pointer, multi-mouse, and WebSocket
-  input checks. Its full desktop-control acceptance remains open: the staged
-  workload reaches running primary and joined sessions, but the expected Hibr
-  desktop control socket is not listening, so display/window control, focus,
-  resize, and the corresponding visual capture are not claimed as passed.
+  input checks. Against the current Hibr 0.99.86 runtime, the ABI-16 adapter
+  probe, Hibr display-control socket, and dedicated window workload also pass:
+  `move`, `resize`, and `focus` succeed across the joined display. The stock
+  Hibr session intentionally starts with zero application windows; that empty
+  `windows` response is not treated as a renderer failure. The guest produces
+  both 1024×768 PPMs, and their top-left probes are dark theme pixels rather
+  than a red diagnostic square.
 - The exact 0.1.217 TCC build passes the two-output KMS pixel gate, the
   four-pane Hibr matrix, and the input-only fixture with
   `blit.input_wait=8`: keypad, multi-mouse, button, wheel, motion, stream, and
@@ -56,7 +59,8 @@ an evidence record, not a claim that the complete product is released.
 
 ## Real-host evidence
 
-The authorized host at `192.168.10.54:8080` currently reports:
+The last reachable observation of the authorized host at
+`192.168.10.54:8080` reported:
 
 - Blit `0.1.210`, healthy SDL3/OpenGL presentation.
 - One physical output, `DP-1`, active at 1920×2160 and 59.99 Hz.
@@ -71,15 +75,16 @@ The authorized host at `192.168.10.54:8080` currently reports:
 ## Open release gates
 
 1. Recover the legacy receiver through the host’s supervised/manual service
-   path, then install and verify `0.1.217`. The currently installed `0.1.210`
+   path, then install and verify `0.1.217`. The last observed `0.1.210` host
    cannot cancel its own stalled upload, so the new cancellation endpoint is
    not yet available on the physical host.
 2. Validate at least one physical multi-monitor arrangement, including
    connector discovery, independent presentation, pointer routing, and Hibr
    primary/join behavior. The current host exposes only one physical output.
-3. Resolve the staged Hibr desktop-control orchestration so the control socket
-   is live during the primary/join acceptance run, then capture and inspect
-   the resulting framebuffer.
+3. Capture and inspect the complete physical-host framebuffer after installing
+   the current package. The VKMS guest has generated and sampled both PPMs,
+   but its kernel lacks 9p transfer, so binary screenshot inspection remains a
+   separate physical-host gate.
 
 Until all three gates have authoritative runtime evidence, the project must not be
 described as fully released or physically multi-monitor validated.
