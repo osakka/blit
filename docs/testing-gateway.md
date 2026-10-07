@@ -32,6 +32,39 @@ groups and releases SDL/KMS outputs before exiting. Starting a new server still
 belongs to the host supervisor or launch command because a stopped process
 cannot serve its own restart request.
 
+## Supervised package updates
+
+The Debian package installs a root-owned `blit-update-helper` behind
+`/run/blit/update.sock`. The network update API does not write packages as the
+gateway user: it verifies the package name and SHA-256, then delegates
+installation to that helper and requests a supervised restart.
+
+The server must be started by the host supervisor with a secret update token.
+The token is deployment configuration and is not generated, returned, or
+logged by Blit. Configure it in a protected systemd `EnvironmentFile` or an
+equivalent secret manager, then restart the service once to load it. Verify:
+
+```sh
+curl --fail http://127.0.0.1:8080/v1/version
+curl --fail http://127.0.0.1:8080/v1/control/update/status
+```
+
+reports the expected server version and `state: "ready"`. Upload only a
+package whose SHA-256 was independently recorded:
+
+```sh
+sha256sum blit_0.1.217-1_amd64.deb
+curl --fail --request PUT \
+  --header 'X-Blit-Update-Token: YOUR_UPDATE_TOKEN' \
+  --header 'X-Blit-SHA256: RECORDED_SHA256' \
+  --header 'Content-Type: application/vnd.debian.binary-package' \
+  --data-binary @blit_0.1.217-1_amd64.deb \
+  http://127.0.0.1:8080/v1/control/update
+```
+
+Poll `/v1/control/update/status` until the supervisor reports the new
+version; an interrupted upload or `403` response is not an installation.
+
 ## Current acceptance evidence
 
 The TCC-built server has been exercised locally with the SDL dummy backend and
