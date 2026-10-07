@@ -131,6 +131,11 @@ following current QEMU fixtures:
   (`BLIT_INPUT_DEVICE_LOSS_PASS`). The fixture explicitly holds the
   reconnecting synthetic devices open so the assertion cannot sample after a
   second intentional teardown.
+- Current-version Hibr lifecycle: the 0.1.240 pane/restart fixture passed
+  primary supervisor restart, auxiliary `desktop --join` termination and
+  reconnection, and the final five-surface topology
+  (`HIBR_PRIMARY_RESTART_PASS`, `HIBR_JOIN_RECONNECT_PASS`, and
+  `HIBR_PANE_MATRIX_PASS`).
 
 These are QEMU/VKMS results. They prove the four-output software path, not a
 physical four-monitor arrangement.
