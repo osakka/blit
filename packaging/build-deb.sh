@@ -59,6 +59,7 @@ cp -a "$UPDATE_HELPER" "$stage/usr/lib/blit/bin/blit-update-helper"
 chmod 0755 "$stage/usr/lib/blit/bin/blit-update-helper"
 cp -a "$ROOT/packaging/blit-update-helper.service" \
     "$stage/lib/systemd/system/"
+cp -a "$ROOT/packaging/blit.service" "$stage/lib/systemd/system/"
 cp -a "$BUNDLE/lib/libSDL3.so.0.4.16" "$stage/usr/lib/blit/lib/"
 cp -a "$BUNDLE/fonts/." "$stage/usr/lib/blit/fonts/"
 if [ -d "$ROOT/assets/fonts" ]; then
@@ -89,6 +90,11 @@ cat > "$stage/DEBIAN/postinst" <<'EOF'
 set -eu
 if command -v addgroup >/dev/null 2>&1; then
     addgroup --system blit >/dev/null 2>&1 || true
+fi
+if command -v adduser >/dev/null 2>&1 &&
+   ! id blit >/dev/null 2>&1; then
+    adduser --system --ingroup blit --no-create-home --disabled-login \
+        --disabled-password blit >/dev/null 2>&1 || true
 fi
 runtime_user="${SUDO_USER:-}"
 if [ -z "$runtime_user" ] && command -v logname >/dev/null 2>&1; then

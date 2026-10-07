@@ -39,10 +39,24 @@ The Debian package installs a root-owned `blit-update-helper` behind
 gateway user: it verifies the package name and SHA-256, then delegates
 installation to that helper and requests a supervised restart.
 
-The server must be started by the host supervisor with a secret update token.
-The token is deployment configuration and is not generated, returned, or
-logged by Blit. Configure it in a protected systemd `EnvironmentFile` or an
-equivalent secret manager, then restart the service once to load it. Verify:
+The package includes an opt-in `blit.service` unit. It runs the server as the
+dedicated `blit` account with `video`, `render`, and `input` supplementary
+groups, and is intentionally not enabled automatically so it cannot collide
+with an existing manually started server. After confirming those device-group
+permissions are appropriate for the host, configure the service and enable it:
+
+```sh
+sudo install -d -m 0750 /etc/blit
+sudo sh -c 'umask 077; printf "%s\n" \
+  "BLIT_BIND_ADDRESS=0.0.0.0" \
+  "BLIT_AUTH_TOKEN=replace-me" \
+  "BLIT_UPDATE_TOKEN=replace-update-me" > /etc/blit/blit.env'
+sudo systemctl daemon-reload
+sudo systemctl enable --now blit.service
+```
+
+The update token is deployment configuration and is not generated, returned,
+or logged by Blit. Verify:
 
 ```sh
 curl --fail http://127.0.0.1:8080/v1/version

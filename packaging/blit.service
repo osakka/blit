@@ -1,0 +1,19 @@
+[Unit]
+Description=Blit API-driven SDL3/KMS display server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=blit
+Group=blit
+SupplementaryGroups=video render input
+EnvironmentFile=-/etc/blit/blit.env
+ExecStart=/usr/bin/blit 8080
+Restart=on-failure
+RestartSec=2s
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
