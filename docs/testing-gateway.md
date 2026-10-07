@@ -84,6 +84,22 @@ curl --fail --request PUT \
 Poll `/v1/control/update/status` until the supervisor reports the new
 version; an interrupted upload or `403` response is not an installation.
 
+For a bounded operator update with preflight checks, use the repository-only
+helper. It requires the live update credential explicitly, never substitutes
+the API bearer token, and never retries a rejected credential:
+
+```sh
+BLIT_UPDATE_TOKEN_FILE=/secure/path/live-update.token \
+  BLIT_AUTH_TOKEN_FILE=/secure/path/live-api.token \
+  tools/deploy/update-live.sh 192.168.10.54 blit_0.1.222-1_amd64.deb
+```
+
+`BLIT_UPDATE_TOKEN` may be used instead of the update-token file. `thisisatest`
+is not a built-in token; only the value configured on the running host in
+`BLIT_UPDATE_TOKEN` or `BLIT_UPDATE_TOKEN_FILE` is accepted. A `403` means the
+credential is wrong and the package was not installed. The helper also checks
+package metadata, SHA-256, update readiness, and the final running version.
+
 The idle-timeout gate holds a valid upload open without sending its body and
 verifies that the gateway transitions to `update upload idle timeout` instead
 of retaining a dead staged transfer indefinitely:
@@ -183,8 +199,9 @@ desktop tree being tested. Refresh an existing initramfs tree with:
 tools/probes/stage_hibr_qemu.sh /tmp/hibr-initroot-current /path/to/hibr
 ```
 
-The staging helper preserves the optional Blit `console-blit.so` provider and
-adapter files for provider-specific probes; it does not modify the Hibr
+The staging helper replaces and version-checks the canonical Blit binary on
+every run, then stages the optional Blit `console-blit.so` provider and
+adapter files for provider-specific probes. It does not modify the Hibr
 checkout. It also rebuilds the repository-owned HTTP, PTY, WebSocket, and
 uinput probe helpers with TCC, preventing stale binaries from entering the
 initramfs. It does not stage or invoke a Blit shell launcher.
