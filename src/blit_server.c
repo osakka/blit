@@ -7,6 +7,7 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <netinet/in.h>
 #include <signal.h>
 #include <stdint.h>
@@ -320,6 +321,10 @@ typedef struct {
     int terminal_mouse_mode;
     int terminal_mouse_sgr;
     int terminal_synchronized;
+    /* Pixel geometry advertised to child programs and used by Kitty/Sixel.
+       This is the renderer's actual cell size, including font scaling. */
+    int terminal_cell_width;
+    int terminal_cell_height;
     uint32_t terminal_underline_color;
     int terminal_underline_color_set;
     BlitGraphicsImage graphics[BLIT_GRAPHICS_MAX_IMAGES];
@@ -424,6 +429,22 @@ typedef struct {
     char update_state[32];
     char update_detail[256];
 } BlitRuntime;
+
+static int runtime_terminal_cell_width(const BlitRuntime *runtime)
+{
+    int value = runtime->direct_kms ? blit_kms_cell_width(runtime->kms) :
+        blit_font_width(&runtime->font);
+    if (value < 1) value = 8;
+    return value * (runtime->font_scale > 0 ? runtime->font_scale : 1);
+}
+
+static int runtime_terminal_cell_height(const BlitRuntime *runtime)
+{
+    int value = runtime->direct_kms ? blit_kms_cell_height(runtime->kms) :
+        blit_font_height(&runtime->font);
+    if (value < 1) value = 16;
+    return value * (runtime->font_scale > 0 ? runtime->font_scale : 1);
+}
 
 static int display_index_for_output(const BlitRuntime *runtime,
                                     int output_index);
@@ -3324,6 +3345,34 @@ static void kitty_reply(BlitSession *session, int image_id, int quiet,
     terminal_write_reply(session, reply);
 }
 
+static int kitty_cells_to_pixels(const BlitSession *session, int cells,
+                                 int fallback)
+{
+    long long pixels;
+    int cell_width = session->terminal_cell_width > 0 ?
+        session->terminal_cell_width : 8;
+    if (cells <= 0)
+        return fallback;
+    pixels = (long long)cells * cell_width;
+    if (pixels > INT_MAX)
+        return -1;
+    return (int)pixels;
+}
+
+static int kitty_rows_to_pixels(const BlitSession *session, int rows,
+                                int fallback)
+{
+    long long pixels;
+    int cell_height = session->terminal_cell_height > 0 ?
+        session->terminal_cell_height : 16;
+    if (rows <= 0)
+        return fallback;
+    pixels = (long long)rows * cell_height;
+    if (pixels > INT_MAX)
+        return -1;
+    return (int)pixels;
+}
+
 static BlitGraphicsImage *graphics_image_find(BlitSession *session,
                                               unsigned int id)
 {
@@ -3436,12 +3485,18 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
     int width = 0;
     int height = 0;
     int more = 0;
-    int x = surface->cursor_x * 8;
-    int y = surface->cursor_y * 16;
+    int x = surface->cursor_x * (session->terminal_cell_width > 0 ?
+        session->terminal_cell_width : 8);
+    int y = surface->cursor_y * (session->terminal_cell_height > 0 ?
+        session->terminal_cell_height : 16);
+    int placement_columns = 0;
+    int placement_rows = 0;
     int placement_width = 0;
     int placement_height = 0;
     int z = 0;
     int quiet = 0;
+    int display_on_complete = 0;
+    int has_action;
     BlitGraphicsImage *image;
     int index;
 
@@ -3453,17 +3508,31 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
         return;
     }
     *separator = '\0';
-    if (!kitty_parameter(payload, 'a', action, sizeof(action)) ||
-        !kitty_parameter_int(payload, 'i', 0, &image_id) || image_id < 0 ||
+    has_action = kitty_parameter(payload, 'a', action, sizeof(action));
+    if (!has_action) action[0] = '\0';
+    if (!kitty_parameter_int(payload, 'i', 0, &image_id) || image_id < 0 ||
         !kitty_parameter_int(payload, 'm', 0, &more) ||
         !kitty_parameter_int(payload, 'x', x, &x) ||
         !kitty_parameter_int(payload, 'y', y, &y) ||
-        !kitty_parameter_int(payload, 'c', 0, &placement_width) ||
-        !kitty_parameter_int(payload, 'r', 0, &placement_height) ||
+        !kitty_parameter_int(payload, 'c', 0, &placement_columns) ||
+        !kitty_parameter_int(payload, 'r', 0, &placement_rows) ||
         !kitty_parameter_int(payload, 'z', 0, &z) ||
         !kitty_parameter_int(payload, 'q', 0, &quiet) || quiet < 0 || quiet > 2) {
         graphics_reject(session, "invalid-parameters");
         return;
+    }
+    placement_width = kitty_cells_to_pixels(session, placement_columns, 0);
+    placement_height = kitty_rows_to_pixels(session, placement_rows, 0);
+    if (placement_width < 0 || placement_height < 0) {
+        graphics_reject(session, "placement-bounds");
+        return;
+    }
+    /* Hibr emits the protocol's canonical a=T form.  The following chunks
+       deliberately omit a and carry only q=2, so an absent action means a
+       continuation of the already allocated image. */
+    if (strcmp(action, "T") == 0) {
+        display_on_complete = 1;
+        snprintf(action, sizeof(action), "t");
     }
     if (strcmp(action, "d") == 0) {
         if (image_id == 0) {
@@ -3522,17 +3591,23 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
         mark_surface_full_damage(surface);
         return;
     }
-    if (strcmp(action, "t") != 0 || image_id == 0 || more < 0 || more > 1) {
+    if ((action[0] != '\0' && strcmp(action, "t") != 0) ||
+        (action[0] == '\0' && image_id == 0) || more < 0 || more > 1) {
         graphics_reject(session, "unsupported-action");
         return;
     }
-    if (!kitty_parameter_int(payload, 'f', 0, &format) ||
-        !kitty_parameter_int(payload, 's', 0, &width) ||
-        !kitty_parameter_int(payload, 'v', 0, &height)) {
+    image = graphics_image_find(session, (unsigned int)image_id);
+    if (action[0] == '\0' && (image == NULL || image->complete)) {
+        graphics_reject(session, "continuation-incomplete");
+        return;
+    }
+    if (action[0] != '\0' &&
+        (!kitty_parameter_int(payload, 'f', 0, &format) ||
+         !kitty_parameter_int(payload, 's', 0, &width) ||
+         !kitty_parameter_int(payload, 'v', 0, &height))) {
         graphics_reject(session, "invalid-dimensions");
         return;
     }
-    image = graphics_image_find(session, (unsigned int)image_id);
     if (image != NULL && strcmp(image->protocol, "kitty") != 0) {
         graphics_reject(session, "image-protocol-mismatch");
         return;
@@ -3589,6 +3664,17 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
         }
         image->revision = 1;
     }
+    if (display_on_complete) {
+        /* Preserve a=T's display intent while later q=2 chunks arrive.  The
+           renderer still waits for complete, so this cannot expose partial
+           image data. */
+        image->visible = 1;
+        image->x = x;
+        image->y = y;
+        image->placement_width = placement_width > 0 ? placement_width : image->width;
+        image->placement_height = placement_height > 0 ? placement_height : image->height;
+        image->z = z;
+    }
     if (image->width != width || image->height != height || image->format != format ||
         !kitty_decode_chunk(image, separator + 1)) {
         graphics_image_release(image);
@@ -3602,6 +3688,14 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
             return;
         }
         image->complete = 1;
+        if (display_on_complete) {
+            image->visible = 1;
+            image->x = x;
+            image->y = y;
+            image->placement_width = placement_width > 0 ? placement_width : image->width;
+            image->placement_height = placement_height > 0 ? placement_height : image->height;
+            image->z = z;
+        }
     }
 }
 
@@ -3805,8 +3899,10 @@ static void terminal_apply_sixel(BlitSession *session, BlitSurface *surface)
                scratch + (size_t)y * 512U * 4U,
                (size_t)maximum_x * 4U);
     image->visible = 1;
-    image->x = surface->cursor_x * 8;
-    image->y = surface->cursor_y * 16;
+    image->x = surface->cursor_x * (session->terminal_cell_width > 0 ?
+        session->terminal_cell_width : 8);
+    image->y = surface->cursor_y * (session->terminal_cell_height > 0 ?
+        session->terminal_cell_height : 16);
     image->placement_width = maximum_x;
     image->placement_height = maximum_y;
     image->revision = 1;
@@ -5708,6 +5804,8 @@ static int create_session(BlitRuntime *runtime, const char *json,
     memset(&size, 0, sizeof(size));
     size.ws_col = (unsigned short)width;
     size.ws_row = (unsigned short)height;
+    size.ws_xpixel = (unsigned short)(width * runtime_terminal_cell_width(runtime));
+    size.ws_ypixel = (unsigned short)(height * runtime_terminal_cell_height(runtime));
     session_id = runtime->next_session_id;
     process_id = forkpty(&master_fd, NULL, NULL, &size);
     if (process_id < 0) {
@@ -5724,7 +5822,9 @@ static int create_session(BlitRuntime *runtime, const char *json,
         snprintf(port_text, sizeof(port_text), "%d", runtime->listen_port);
         if (setenv("BLIT_SESSION_ID", session_text, 1) != 0 ||
             setenv("BLIT_SURFACE_ID", surface_text, 1) != 0 ||
-            setenv("BLIT_SERVER_PORT", port_text, 1) != 0)
+            setenv("BLIT_SERVER_PORT", port_text, 1) != 0 ||
+            setenv("TERM", "xterm-kitty", 1) != 0 ||
+            setenv("COLORTERM", "truecolor", 1) != 0)
             _exit(126);
         if (pane_id[0] != '\0' && setenv("BLIT_PANE_ID", pane_id, 1) != 0)
             _exit(126);
@@ -5749,6 +5849,8 @@ static int create_session(BlitRuntime *runtime, const char *json,
             session->revision = 1;
             session->exit_code = -1;
             session->terminal_autowrap = 1;
+            session->terminal_cell_width = runtime_terminal_cell_width(runtime);
+            session->terminal_cell_height = runtime_terminal_cell_height(runtime);
             {
                 int environment_index;
                 for (environment_index = 0;
@@ -5824,6 +5926,8 @@ static int resize_session_surface(BlitSession *session, BlitSurface *surface,
     memset(&size, 0, sizeof(size));
     size.ws_col = (unsigned short)width;
     size.ws_row = (unsigned short)height;
+    size.ws_xpixel = (unsigned short)(width * session->terminal_cell_width);
+    size.ws_ypixel = (unsigned short)(height * session->terminal_cell_height);
     if (session->pty_fd >= 0 && ioctl(session->pty_fd, TIOCSWINSZ, &size) < 0)
         return 0;
 

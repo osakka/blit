@@ -5,6 +5,7 @@
 # this tool asserts only the canonical PTY-to-surface contract over HTTP.
 
 require 'json'
+require 'base64'
 require 'net/http'
 require 'timeout'
 require 'uri'
@@ -856,6 +857,33 @@ snapshot = run_case(base, 'kitty-cursor-restore',
 cells = cell_map(snapshot)
 assert_equal('C', cells.fetch([3, 2]).fetch('text'), 'kitty restore prefix')
 assert_equal('D', cells.fetch([4, 2]).fetch('text'), 'kitty restore target')
+
+kitty_data = Base64.strict_encode64("\xFF\x00\x00" * 4)
+kitty_format = "\\033_Ga=T,f=24,s=2,v=2,c=2,r=1,i=77,m=1,q=2;#{kitty_data[0, 4]}" \
+               "\\033\\\\"
+kitty_format += "\\033_Gq=2,i=77,m=0;#{kitty_data[4..]}\\033\\\\"
+kitty_created = request(base, 'POST', '/v1/terminal-sessions', {
+  'command' => '/bin/sh',
+  'arguments' => ['-c', "printf '%b' '#{kitty_format}'; sleep 0.2"],
+  'surface' => { 'width' => 20, 'height' => 4 }
+})
+kitty_id = kitty_created.fetch('id')
+kitty_state = Timeout.timeout(5) do
+  loop do
+    state = request(base, 'GET', "/v1/terminal-sessions/#{kitty_id}")
+    break state unless %w[starting running].include?(state.fetch('state'))
+
+    sleep 0.02
+  end
+end
+kitty_image = kitty_state.fetch('graphics').fetch(0)
+assert_equal('kitty', kitty_image.fetch('protocol'), 'Kitty protocol')
+assert_equal(true, kitty_image.fetch('complete'), 'Kitty continuation completion')
+assert_equal(true, kitty_image.fetch('visible'), 'Kitty transmit-and-display')
+assert_equal(16, kitty_image.fetch('placement_width'), 'Kitty c cell conversion')
+assert_equal(16, kitty_image.fetch('placement_height'), 'Kitty r cell conversion')
+request(base, 'DELETE', "/v1/terminal-sessions/#{kitty_id}")
+puts 'PASS kitty-image-transmit-placement'
 
 snapshot = run_case(base, 'c0-inside-csi', "printf '\\033[2\\n;5HX'")
 cells = cell_map(snapshot)
