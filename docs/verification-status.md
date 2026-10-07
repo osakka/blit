@@ -7,7 +7,7 @@ an evidence record, not a claim that the complete product is released.
 
 - Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The source build for this cycle is `0.1.214`, which includes the
+- The source build for this cycle is `0.1.215`, which includes the
   Hibr-compatible Unicode 15.1 width table and regression vectors for
   variation selectors and zero-width joiners.
 - SDL pointer-only presentation now reuses a per-output scene cache instead of
@@ -24,7 +24,7 @@ an evidence record, not a claim that the complete product is released.
 - OpenAPI and TCC build checks pass.
 - The canonical `tools/build-tcc.sh` injects `packaging/VERSION` into the
   executable; bundle, extracted Debian package, and QEMU KMS runs all report
-  `server_version:0.1.214` with `api_version:0.1`.
+  `server_version:0.1.215` with `api_version:0.1`.
 - The stalled-upload gate passes: progress is exposed and authenticated
   cancellation returns 202 without stopping the gateway.
 - Terminal conformance passes, including UTF-8/wide cells, VT controls,
@@ -39,7 +39,7 @@ an evidence record, not a claim that the complete product is released.
 - The Hibr fixture passes primary plus `--join` sessions, all four logical
   pane layouts, Hibr display/window control, focus, resize, input routes,
   keyboard, pointer, multi-mouse, and WebSocket input checks.
-- The exact 0.1.214 TCC build passes the two-output KMS pixel gate, default
+- The exact 0.1.215 TCC build passes the two-output KMS pixel gate, default
   Hibr acceptance, the four-pane Hibr matrix, and the input-only fixture with
   `blit.input_wait=8`: keypad, multi-mouse, button, wheel, motion, stream, and
   PTY delivery all pass. Its terminal conformance gate additionally passes
@@ -68,7 +68,7 @@ The authorized host at `192.168.10.54:8080` currently reports:
 ## Open release gates
 
 1. Recover the legacy receiver through the host’s supervised/manual service
-   path, then install and verify `0.1.214`. The currently installed `0.1.210`
+   path, then install and verify `0.1.215`. The currently installed `0.1.210`
    cannot cancel its own stalled upload, so the new cancellation endpoint is
    not yet available on the physical host.
 2. Validate at least one physical multi-monitor arrangement, including
