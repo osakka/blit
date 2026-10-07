@@ -52,6 +52,10 @@ an evidence record, not a claim that the complete product is released.
   one-vCPU input fixture. The input fixture passed keypad bytes, independent
   multi-mouse routing, three-button presses/releases, wheel, motion,
   WebSocket stream delivery, and device-loss diagnostics.
+- The exact 0.1.232 TCC build also passed the four-output KMS boundary fixture:
+  four independent VKMS outputs were discovered and presenting, one terminal
+  session was attached to each, and the API reported four displays, outputs,
+  sessions, and no diagnostics errors.
 - The exact 0.1.232 TCC build passed the mixed-refresh fixture with independent
   60 Hz/16 ms and 120 Hz/8 ms output schedules. It also passed the output-loss
   fixture: a failed connector was reported as `display_presentation_failed`,
@@ -141,7 +145,8 @@ The latest reachable observation of the authorized host at
   `DP-1` output at 1920×2160 and 59.99 Hz, one keyboard, one pointer, no
   errors, and a 16 ms refresh-aware presentation interval.
 - The live host currently exposes one physical output. Multi-display behavior
-  is therefore proven by the two-output VKMS/QEMU fixture, not by this host.
+  is therefore proven by the two- and four-output VKMS/QEMU fixtures, not by
+  this host.
 - The 0.1.232 local Hibr full-grid workload settled a 240×135 surface in
   approximately three seconds; runtime diagnostics measured 100,264 terminal
   bytes and no pending damage afterward. This is local/QEMU-style evidence,

@@ -201,6 +201,13 @@ failed connector remains in `/v1/displays` as `failed`, the other connector
 remains `presenting`, and `/v1/diagnostics` reports
 `display_presentation_failed` while the server stays ready.
 
+The four-output boundary is exercised by
+`tools/probes/qemu_kms_four_output_init.sh`. It creates four independent VKMS
+connector/CRTC/encoder/plane paths, starts one API terminal session on each,
+and requires `display_count:4`, four presenting outputs, four sessions, and
+`KMS_FOUR_OUTPUT_PASS`. This validates the public discovery and presentation
+path at the four-monitor case without changing the production display limit.
+
 The fixture also accepts `blit.kitty_stack=1`. This sends two overlapping
 Kitty images with different z values and a two-pixel image positioned partly
 outside the pane. `PPM_DISPLAY_47_WIDE_STACK_CLIP_PASS` requires the higher-z
