@@ -149,6 +149,15 @@ in QEMU with direct DRM/KMS:
   styles, erase, scrolling, scroll regions, alternate-screen restoration,
   saved cursors, UTF-8, truecolor SGR, and fragmented CSI sequences over the
   public API.
+- The runtime PSF manifest gate loads the generator's single required-glyph
+  set, verifies all 73 Hibr glyphs are mapped and non-blank, and checks the
+  fixed 8×16 geometry. Geometric block elements use exact cell-row coverage;
+  they are not accepted merely because a fallback font returned a cropped
+  bitmap:
+
+  ```sh
+  tools/tests/hibr_font_manifest_gate.py
+  ```
 - Two consecutive terminal-conformance runs pass against one server, proving
   explicit session deletion releases bounded session capacity.
 - The reproducible two-display VKMS/QEMU fixture passes the logical pane matrix

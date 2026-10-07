@@ -7,20 +7,23 @@ an evidence record, not a claim that the complete product is released.
 
 - Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The current candidate is `0.1.242`. It builds with TCC and passes terminal
-  conformance, SDL screenshot/overlay pixels, and the hidden-cursor damage
-  gate. Its SDL backend uses a per-output glyph atlas, suppresses unchanged
-  cell damage, and does not schedule frames for hidden cursor movement. The
+- The current candidate is `0.1.243`. It builds with TCC and passes terminal
+  conformance, SDL screenshot/overlay pixels, the hidden-cursor damage gate,
+  and the complete Hibr font manifest gate. Its SDL backend uses a per-output
+  glyph atlas, suppresses unchanged cell damage, and does not schedule frames
+  for hidden cursor movement. The
   dummy frame gate measured 42.898 Hz during its bounded PTY workload; that is
   a software-dummy result, not a physical refresh-rate claim. A bounded
   wallpaper workload on the prior source-equivalent 0.1.241 build measured
   26.865 ms maximum full render and 61.387 Hz over its active 504 ms window.
-  The QEMU/KMS acceptance below passes, and the package has now been deployed
-  to the authorized physical host for the live SDL/Hibr check.
+  The QEMU/KMS acceptance below passes. The physical-host evidence currently
+  refers to the preceding 0.1.242 package; 0.1.243 deployment follows this
+  candidate's package build.
 
-### Current 0.1.242 QEMU/KMS evidence
+### Current 0.1.243 QEMU/KMS evidence
 
-The exact TCC-built 0.1.242 binary was staged into the rebuilt VKMS kernel
+The exact TCC-built 0.1.243 binary and regenerated runtime font were staged
+into the rebuilt VKMS kernel
 fixture and passed the two-output capture gate with independent 1024×768
 outputs, wide UTF-8 glyphs, Kitty pixels, API BMP capture, graphics inventory,
 refresh-aware scheduling, and `KMS_CAPTURE_PASS`. The same binary passed the
@@ -30,7 +33,7 @@ following variants without modifying Hibr:
 - `OUTPUT_LOSS_PASS` with the surviving output continuing to present.
 - `PPM_DISPLAY_47_WIDE_STACK_CLIP_PASS` for Kitty z-order and clipping.
 - `PPM_DISPLAY_47_SIXEL_PASS` for sixel pixel rendering.
-- The exact 0.1.242 binary also passed the two-output input/render soak:
+- The exact 0.1.243 binary also passed the two-output input/render soak:
   `LAYOUT_MATRIX_PASS`, `BLIT_INPUT_MULTI_MOUSE_PASS`,
   `BLIT_INPUT_STREAM_PASS`, and `BLIT_INPUT_RENDER_SOAK_PASS`.
 - A current-version 30-second four-PTY soak passed 364 API snapshots, 34

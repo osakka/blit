@@ -51,6 +51,24 @@ def psf1(path: Path):
 
 
 def render(codepoint: int, font: ImageFont.FreeTypeFont) -> bytes:
+    # DejaVu's block-element glyphs are wider/taller than the 8x16 terminal
+    # cell, so Pillow clips the lower one-eighth blocks out of the bitmap.
+    # These characters are geometric terminal primitives; encode their exact
+    # cell coverage instead of accepting a font-dependent crop.
+    block_rows = {
+        0x2580: range(0, 8),
+        0x2581: range(14, 16),
+        0x2582: range(12, 16),
+        0x2583: range(10, 16),
+        0x2584: range(8, 16),
+        0x2585: range(6, 16),
+        0x2586: range(4, 16),
+        0x2587: range(2, 16),
+        0x2588: range(0, 16),
+    }
+    if codepoint in block_rows:
+        filled = set(block_rows[codepoint])
+        return bytes(0xFF if row in filled else 0 for row in range(16))
     image = Image.new("1", (8, 16), 0)
     draw = ImageDraw.Draw(image)
     character = chr(codepoint)
