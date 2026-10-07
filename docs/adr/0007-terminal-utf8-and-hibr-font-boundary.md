@@ -34,6 +34,11 @@ The canonical cell retains the Unicode codepoint; the same codepoint is used
 by the API snapshot, SDL renderer, direct KMS renderer, and stream events.
 There is no renderer-specific glyph or terminal parser implementation.
 
+If a valid Unicode scalar is not present in the loaded PSF mapping, the font
+boundary selects the mapped ASCII `?` glyph. It never treats an out-of-range
+scalar as a raw glyph index, because that can select PSF glyph zero (normally
+NUL) and silently render a blank cell.
+
 ## Consequences
 
 - PTY chunk boundaries no longer change terminal content.

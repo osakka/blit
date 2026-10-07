@@ -278,7 +278,14 @@ size_t blit_font_glyph_index(const BlitFont *font, uint32_t codepoint)
     }
     for (i = 0; i < font->glyph_count; ++i)
         if (font->codepoints[i] == codepoint) break;
-    return i == font->glyph_count ? (codepoint < font->glyph_count ? codepoint : 0) : i;
+    if (i != font->glyph_count)
+        return i;
+    /* An unmapped Unicode scalar must remain visibly identifiable.  Using
+       glyph zero for codepoints outside the PSF range silently produces a
+       blank cell for fonts whose first glyph is NUL. */
+    if (font->ascii_glyph[(unsigned char)'?'] >= 0)
+        return (size_t)font->ascii_glyph[(unsigned char)'?'];
+    return 0;
 }
 
 static int fallback_pixel(uint32_t codepoint, int row, int column)

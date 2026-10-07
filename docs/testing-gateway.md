@@ -158,6 +158,9 @@ in QEMU with direct DRM/KMS:
   ```sh
   tools/tests/hibr_font_manifest_gate.py
   ```
+- `tools/tests/font_fallback_gate.c` is compiled with TCC and verifies that an
+  unmapped scalar outside the PSF range selects the visible replacement glyph,
+  while an explicitly mapped scalar remains unchanged.
 - Two consecutive terminal-conformance runs pass against one server, proving
   explicit session deletion releases bounded session capacity.
 - The reproducible two-display VKMS/QEMU fixture passes the logical pane matrix

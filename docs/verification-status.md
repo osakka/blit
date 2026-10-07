@@ -7,7 +7,7 @@ an evidence record, not a claim that the complete product is released.
 
 - Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The current candidate is `0.1.245`. It builds with TCC and passes terminal
+- The current candidate is `0.1.246`. It builds with TCC and passes terminal
   conformance, SDL screenshot/overlay pixels, the hidden-cursor damage gate,
   and the complete Hibr font manifest gate. Its SDL backend uses a per-output
   glyph atlas, suppresses unchanged cell damage, and does not schedule frames
@@ -17,8 +17,19 @@ an evidence record, not a claim that the complete product is released.
   wallpaper workload on the prior source-equivalent 0.1.241 build measured
   26.865 ms maximum full render and 61.387 Hz over its active 504 ms window.
   The QEMU/KMS acceptance below is being rerun for the image-cache change. The
-  preceding 0.1.243 package was accepted by the authorized physical host and
+  preceding 0.1.245 package was accepted by the authorized physical host and
   verified through its version endpoint.
+
+### Current 0.1.246 source/package evidence
+
+The exact TCC-built 0.1.246 binary passes the focused font fallback gate,
+the 148-glyph Hibr manifest gate, and the complete terminal conformance
+suite. The fallback gate proves that a valid but unmapped scalar outside the
+PSF range selects the visible `?` glyph rather than blank PSF glyph zero. The
+package is `blit_0.1.246-1_amd64.deb`, SHA-256
+`8e4ff494a50b57f4539ebc80219629d2243f3124f8cf9534070680b9687ecaa9`.
+The physical host has not yet been upgraded to 0.1.246; its accepted runtime
+evidence remains explicitly recorded below for 0.1.245.
 
 ### Current 0.1.245 QEMU/KMS evidence
 
