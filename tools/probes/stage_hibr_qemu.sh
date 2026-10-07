@@ -33,6 +33,14 @@ for probe in \
         -o "$stage/blit-stage/$target"
 done
 
+# The optional Blit display provider is an Hibr ABI client.  Rebuild it from
+# this exact Hibr checkout instead of preserving a module compiled against a
+# previous Hibr ABI; the held desktop path does not load this provider, but
+# the adapter probe must always test the selected Hibr runtime honestly.
+tcc -I"$hibr_root/include" -I"$hibr_root/mods" \
+    -shared -fPIC -o "$stage/blit-stage/mods/console-blit.so" \
+    "$(dirname "$0")/../../hibr/console-blit.c"
+
 test -f "$stage/blit-stage/mods/console-blit.so"
 test -f "$stage/blit-stage/lib/ctl.hibr"
 test -x "$stage/blit-stage/emit-uinput"
