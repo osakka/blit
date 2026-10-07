@@ -24,6 +24,9 @@ an evidence record, not a claim that the complete product is released.
 - The exact 0.1.226 TCC build passes the fragmented-UTF-8 vector and a
   controlled Hibr API launch with zero visible question-mark cells. The parser
   retains valid UTF-8 prefixes across PTY reads instead of replacing them.
+- The Debian artifact built from the 0.1.226 implementation is
+  `blit_0.1.226-1_amd64.deb`, SHA-256
+  `7d7f7dc4063d6e8f524f8802d86e41f8afffb5a769e30a87795eeee009038bec`.
 - SDL pointer-only presentation now reuses a per-output scene cache instead of
   forcing a full terminal rasterization on every pointer motion. Runtime
   diagnostics expose pointer-cache hits and misses.
@@ -37,8 +40,9 @@ an evidence record, not a claim that the complete product is released.
 
 - OpenAPI and TCC build checks pass.
 - The canonical `tools/build-tcc.sh` injects `packaging/VERSION` into the
-  executable; the 0.1.223 local conformance run and live host report
-  `server_version:0.1.223` with `api_version:0.1`.
+  executable; the exact 0.1.226 local conformance run reports
+  `server_version:0.1.226` with `api_version:0.1`. The live host remains on
+  0.1.223 until the 0.1.226 package is installed there.
 - Terminal grids are allocated per live session rather than embedded in all
   session slots. The exact 0.1.222 TCC build passed the terminal suite and a
   100,000-line PTY soak with no diagnostic errors; peak RSS was 25,156 KiB
@@ -108,6 +112,10 @@ The latest reachable observation of the authorized host at
   errors, and a 16 ms refresh-aware presentation interval.
 - The live host currently exposes one physical output. Multi-display behavior
   is therefore proven by the two-output VKMS/QEMU fixture, not by this host.
+- The 0.1.226 local Hibr full-grid workload settled a 240×135 surface in
+  approximately three seconds; runtime diagnostics measured 100,264 terminal
+  bytes and no pending damage afterward. This is local/QEMU-style evidence,
+  not a claim about the still-running 0.1.223 physical host.
 
 ## Open release gates
 
