@@ -124,15 +124,15 @@ tools/probes/stage_hibr_qemu.sh /tmp/hibr-initroot-current /path/to/hibr
 
 The staging helper preserves the optional Blit `console-blit.so` provider and
 adapter files for provider-specific probes; it does not modify the Hibr
-checkout. It does not stage or invoke a Blit shell launcher.
+checkout. It also rebuilds the repository-owned HTTP, PTY, WebSocket, and
+uinput probe helpers with TCC, preventing stale binaries from entering the
+initramfs. It does not stage or invoke a Blit shell launcher.
 
-For the isolated input gate, compile the three TCC test helpers into the staged
-tree and boot the fixture with `blit.input_only=1` on the kernel command line:
+For the isolated input gate, use the staging helper, then boot the fixture with
+`blit.input_only=1` on the kernel command line:
 
 ```sh
-tcc -std=c99 tools/probes/emit_uinput.c -o /tmp/hibr-initroot-current/blit-stage/emit-uinput
-tcc -std=c99 tools/probes/pty_input_echo.c -o /tmp/hibr-initroot-current/blit-stage/pty-input-echo
-tcc -std=c99 tools/probes/ws_input_probe.c -o /tmp/hibr-initroot-current/blit-stage/ws-input-probe
+tools/probes/stage_hibr_qemu.sh /tmp/hibr-initroot-current /path/to/hibr
 # Add `blit.input_only=1` to the QEMU kernel command line. The gate checks
 # PTY delivery while the network input stream also carries key releases,
 # repeats, pointer buttons, and wheel events.
