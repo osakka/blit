@@ -43,6 +43,10 @@ case "$version" in
 	[0-9]*.[0-9]*.[0-9]*) ;;
 	*) echo "blit: invalid version in $VERSION_FILE" >&2; exit 1 ;;
 esac
+if ! strings "$RUNTIME_BINARY" | grep -F -q "$version"; then
+	echo "blit: runtime binary version does not match $VERSION_FILE ($version)" >&2
+	exit 1
+fi
 
 pkgver=${version}-1
 stage=$(mktemp -d "${TMPDIR:-/tmp}/blit-deb.XXXXXX")

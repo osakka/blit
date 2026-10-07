@@ -116,8 +116,10 @@ normalized to Blit's `session-N` stream identity before filtering.
 cell in both axes; it does not merely enlarge the cell while leaving an
 unscaled glyph in its upper-left corner.
 
-The production launcher selects the bundled Unicode Terminus PSF font and the
-server logs the selected font dimensions and glyph count. Presentation is a
+The production launcher selects the bundled `Blit-Hibr-Terminus16.psf` font,
+which preserves Terminus and adds the Hibr Unicode desktop glyphs at the same
+8×16 cell geometry. The server logs the selected font dimensions and glyph
+count. Presentation is a
 hard refresh invariant: each active output must schedule independently at the
 maximum refresh supported by its selected mode, and no configured render
 interval may intentionally under-run that cadence. Deadlines use a monotonic

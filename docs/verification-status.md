@@ -10,10 +10,13 @@ an evidence record, not a claim that the complete product is released.
 - The previous fully validated source build is `0.1.222`, which includes the
   Hibr-compatible Unicode 15.1 width table and regression vectors for
   variation selectors and zero-width joiners.
-- The current TCC source build and turnkey package are `0.1.224`; the complete
+- The current TCC source build and turnkey package are `0.1.225`; the complete
   terminal conformance suite passes with the canonical 16x16 Terminus font.
   The package defaults the Blit service to a UTF-8 locale for Hibr's Unicode
   desktop output.
+- The runtime font is a checked-in PSF2 merge of the bundled Terminus font and
+  the missing Hibr Unicode desktop glyphs. Its required glyph manifest is
+  validated by `tools/build-hibr-font.py` before packaging.
 - SDL pointer-only presentation now reuses a per-output scene cache instead of
   forcing a full terminal rasterization on every pointer motion. Runtime
   diagnostics expose pointer-cache hits and misses.
