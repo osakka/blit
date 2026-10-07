@@ -277,7 +277,9 @@ The latest reachable observation of the authorized host at
 
 1. Validate at least one physical multi-monitor arrangement, including
    connector discovery, independent presentation, pointer routing, and Hibr
-   primary/join behavior. The current host exposes only one physical output.
+   primary/join behavior. The executable
+   `tools/tests/physical_multi_display_gate.rb` is ready for this check; the
+   current host exposes only one physical output and returns exit status 77.
 
 All software-side Gate 6 cases currently in scope—including primary supervisor
 restart, joined-client reconnect, session termination during writes/resizes,

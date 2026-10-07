@@ -108,6 +108,22 @@ BLIT_GATE_BINARY=build/blit/blit-server \
 
 ## Current acceptance evidence
 
+### Physical multi-display gate
+
+Run the hardware gate against a Blit instance that owns the physical DRM
+device:
+
+```sh
+BLIT_GATE_SERVER=http://127.0.0.1:8080 \
+  ruby tools/tests/physical_multi_display_gate.rb
+```
+
+The gate requires at least two discovered physical displays. It attaches one
+temporary PTY to each display-owned pane, checks runtime health, pointer
+diagnostics, and resource counts, then removes the sessions and restores the
+original topology. Exit status `77` means the host does not currently expose
+enough physical displays and is not a pass.
+
 The TCC-built server has been exercised locally with the SDL dummy backend and
 in QEMU with direct DRM/KMS:
 
