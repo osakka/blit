@@ -256,6 +256,11 @@ The latest reachable observation of the authorized host at
   Its measured frame-rate window was stale because there were no active
   sessions; this is intentionally not interpreted as a live frame-rate
   measurement.
+- A fresh active-PTY measurement on the same host reported 46.724 Hz over a
+  513 ms window with 12 ms sample age, 24 measured frames, zero missed
+  deadlines, a 17.348 ms maximum event-loop gap, and a 0.076 ms maximum
+  evdev scan. The session was deleted after sampling and resources returned
+  to zero.
 
 ## Open release gates
 
