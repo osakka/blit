@@ -229,6 +229,11 @@ Tests:
 - run multi-hour PTY output and pointer-motion soak tests under fixed memory
   limits.
 
+The repeatable bounded precursor is `tools/tests/terminal_soak_gate.rb`. It
+must pass with multiple concurrent PTYs, sustained VT/UTF-8 output, snapshots,
+resizes, runtime diagnostics, and zero leaked sessions before a longer soak is
+accepted as evidence.
+
 Exit condition: every injected failure has a deterministic state transition,
 typed diagnostic, and documented recovery path.
 

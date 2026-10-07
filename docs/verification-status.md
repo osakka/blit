@@ -32,6 +32,11 @@ an evidence record, not a claim that the complete product is released.
   --configure` on the local VM. The authorized physical host accepted the
   package through the API, restarted, and reports 0.1.232 ready with no
   runtime errors.
+- The exact 0.1.232 TCC build passed the 120-second terminal soak with four
+  concurrent PTYs, sustained VT/UTF-8 output, 1,460 API snapshots, 133
+  revisioned resizes, no runtime errors, no leaked sessions, and 65,996 KiB
+  peak RSS. The reusable gate is
+  `tools/tests/terminal_soak_gate.rb`.
 - The exact 0.1.232 TCC build passed the two-output KMS pixel/screenshot gate,
   the four-layout Hibr pane matrix with four running sessions, and the
   one-vCPU input fixture. The input fixture passed keypad bytes, independent
