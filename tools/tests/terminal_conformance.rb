@@ -75,6 +75,17 @@ def assert_equal(expected, actual, detail)
   raise "#{detail}: expected #{expected.inspect}, got #{actual.inspect}"
 end
 
+expected_version = ENV['BLIT_EXPECTED_VERSION']
+unless expected_version.nil? || expected_version.empty?
+  version = request(base, 'GET', '/v1/version')
+  assert_equal(expected_version, version.fetch('server_version'),
+               'server version identity')
+  server = request(base, 'GET', '/v1/server')
+  assert_equal(expected_version, server.fetch('server_version'),
+               'server details version identity')
+  puts "PASS version-identity-#{expected_version}"
+end
+
 topology = request(base, 'GET', '/v1/topology')
 revision = topology.fetch('revision')
 placements = topology.fetch('outputs').map.with_index do |output, index|
