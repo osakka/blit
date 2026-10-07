@@ -31,6 +31,12 @@ package is `blit_0.1.246-1_amd64.deb`, SHA-256
 The physical host has not yet been upgraded to 0.1.246; its accepted runtime
 evidence remains explicitly recorded below for 0.1.245.
 
+The exact 0.1.246 TCC binary and bundled font were then staged into the VKMS
+QEMU capture fixture. It reported `server_version:0.1.246`, two ready DRM
+outputs, `PPM_DISPLAY_47_WIDE_KITTY_PASS`, `PPM_DISPLAY_48_PASS`,
+`KMS_API_SCREENSHOT_PASS`, and `KMS_CAPTURE_PASS`. This is new QEMU/KMS
+evidence only; it does not upgrade or replace the physical-host evidence.
+
 ### Current 0.1.245 QEMU/KMS evidence
 
 The exact TCC-built 0.1.245 binary and regenerated runtime font were staged
