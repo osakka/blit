@@ -7,7 +7,7 @@ an evidence record, not a claim that the complete product is released.
 
 - Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The source build for this cycle is `0.1.219`, which includes the
+- The source build for this cycle is `0.1.221`, which includes the
   Hibr-compatible Unicode 15.1 width table and regression vectors for
   variation selectors and zero-width joiners.
 - SDL pointer-only presentation now reuses a per-output scene cache instead of
@@ -23,8 +23,8 @@ an evidence record, not a claim that the complete product is released.
 
 - OpenAPI and TCC build checks pass.
 - The canonical `tools/build-tcc.sh` injects `packaging/VERSION` into the
-  executable; bundle, extracted Debian package, and QEMU KMS runs all report
-  `server_version:0.1.219` with `api_version:0.1`.
+  executable; the Debian package, local conformance run, live host, and QEMU
+  KMS run all report `server_version:0.1.221` with `api_version:0.1`.
 - The stalled-upload gate passes: progress is exposed and authenticated
   cancellation returns 202 without stopping the gateway.
 - Terminal conformance passes, including UTF-8/wide cells, VT controls,
@@ -50,7 +50,7 @@ an evidence record, not a claim that the complete product is released.
   explicit `blit.hibr_window_control=1` workload additionally passes window
   `move`, `resize`, and `focus` operations. The acceptance predicate now
   distinguishes those two intentional workloads.
-- The exact 0.1.219 TCC build passes the two-output KMS pixel gate, the
+- The exact 0.1.221 TCC build passes the two-output KMS pixel gate, the
   four-pane Hibr matrix, and the input-only fixture with
   `blit.input_wait=8`: keypad, multi-mouse, button, wheel, motion, stream, and
   PTY delivery all pass. The input-loss variant additionally reports
@@ -69,45 +69,22 @@ an evidence record, not a claim that the complete product is released.
 The latest reachable observation of the authorized host at
 `192.168.10.54:8080` reported:
 
-- Blit `0.1.210`, healthy SDL3/OpenGL presentation.
+- Blit `0.1.221`, healthy SDL3/OpenGL presentation.
 - One physical output, `DP-1`, active at 1920×2160 and 59.99 Hz.
-- A fresh Hibr session reached `running`; its revisioned surface snapshot
-  contained the complete 240×135 terminal grid with the expected amber theme
-  (`#ffb000` foreground on `#1a0f00` background).
-- The corresponding physical SDL screenshot was almost entirely black, with
-  only a small glyph/pointer visible. This is a confirmed presentation defect
-  in the installed `0.1.210` runtime, not evidence of missing Hibr output.
-- A second capture waited 25 seconds after a uniquely named Hibr session
-  reached `running`; the result was still black, with one isolated glyph.
-  The host reported `renderer:opengl`, `refresh_hz:59.990`, and
-  `missed_deadlines:77`, with no API errors. The bounded session was then
-  deleted and the host returned to zero sessions.
-- The same stock Hibr desktop, run against the current TCC `0.1.219` build
-  with SDL's software renderer, produced a settled screenshot containing the
-  desktop bar, wallpaper, icons, and themed cells. This isolates the physical
-  failure to the installed old runtime; it is not reproduced by the current
-  source path.
-- The captured framebuffer contained no red diagnostic box. Any red box seen
-  by an operator must be correlated with a timestamped screenshot and the
-  overlay/graphics API state; it is not present in the current capture.
-- The authorized upload of the verified `0.1.218-1` package using the
-  confirmed update token entered the old host's `receiving` state but never
-  completed; the old 0.1.210 runtime returned 405 for the cancellation route
-  and has no upload idle timeout. The host therefore remains on 0.1.210.
+- A fresh Hibr session reached `running`; its revisioned surface snapshot and
+  settled screenshot contained the Hibr desktop bar, icons, controls, and
+  pointer. Live diagnostics reported one `DP-1` output at 1920×2160 and
+  59.99 Hz, one keyboard, one pointer, no errors, and a 16 ms refresh-aware
+  presentation interval.
+- The live host currently exposes one physical output. Multi-display behavior
+  is therefore proven by the two-output VKMS/QEMU fixture, not by this host.
 
 ## Open release gates
 
-1. Provide/use the supervised update token or another authorized service path,
-   then install and verify `0.1.219`. The physical renderer defect cannot be
-   assessed against the current source until the current runtime is actually
-   installed.
-2. Validate at least one physical multi-monitor arrangement, including
+1. Validate at least one physical multi-monitor arrangement, including
    connector discovery, independent presentation, pointer routing, and Hibr
    primary/join behavior. The current host exposes only one physical output.
-3. Capture and inspect the complete physical-host framebuffer after installing
-   the current package. The VKMS guest has generated and sampled both PPMs,
-   but its kernel lacks 9p transfer, so binary screenshot inspection remains a
-   separate physical-host gate.
+2. Complete the Gate 6 fault/reconnect and multi-hour soak campaign.
 
-Until all three gates have authoritative runtime evidence, the project must not be
+Until both gates have authoritative evidence, the project must not be
 described as fully released or physically multi-monitor validated.

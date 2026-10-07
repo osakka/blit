@@ -40,10 +40,11 @@ production `console-blit` module is operational over the OpenAPI/WebSocket
 contract. Explicit focus and versioned input routes are exposed by the API.
 The SDL adapter uses single-surface incremental frames and conservatively
 redraws multi-surface outputs with deterministic vertical stacking. The
-current 0.1.219 package passes the complete terminal, graphics, input,
-two-display VKMS, and Hibr primary/`--join` acceptance gates. The remaining
-release risk is physical-host installation and validation; the authorized
-physical host is still running 0.1.210.
+current 0.1.221 package passes the complete terminal, graphics, input,
+two-display VKMS/QEMU, and Hibr primary/`--join` acceptance gates. The
+authorized physical host is now running 0.1.221 and has a healthy one-output
+SDL3/OpenGL presentation. Physical multi-monitor confirmation remains open
+because that host currently exposes only one connector.
 
 Display timing is an explicit hard requirement. Each output must schedule at
 its active mode's maximum refresh by default, with per-output deadlines. The
@@ -51,10 +52,11 @@ scheduler may wake more often for input and I/O, but must not intentionally
 present below that rate. A lower cap is an explicit, diagnosed administrative
 policy only. See [ADR 0006](adr/0006-display-refresh-invariant.md).
 
-Kitty graphics is the first graphics-protocol deliverable. Sixel is a later
-compatibility milestone against the same canonical graphics-object model;
-neither protocol is advertised until its parser, resource limits, placement,
-and SDL3/direct-KMS pixel gates pass.
+Kitty graphics and bounded sixel decoding are now implemented against the
+canonical graphics-object model. Their parser, resource-limit, placement,
+and SDL3/direct-KMS pixel gates pass in the deterministic fixture. Further
+protocol grammar remains an explicit compatibility extension, not a second
+renderer or image-lifetime model.
 
 ## Milestone 1: contract vertical slice
 
@@ -133,17 +135,11 @@ suite on VKMS and then on a physical DRM/KMS host.
 
 ## Immediate next action
 
-Install the verified 0.1.219 package on the authorized physical host through
-its supervised update path, then capture settled SDL screenshots and API
-diagnostics. Verify physical pointer/button/wheel routing and refresh cadence,
-followed by a real two-monitor primary/`--join` arrangement. The current host's
-update API requires its configured update token; no unauthenticated bypass is
-acceptable.
+Capture settled SDL screenshots and API diagnostics from the authorized
+0.1.221 physical host. Verify physical pointer/button/wheel routing and
+refresh cadence, followed by a real two-monitor primary/`--join` arrangement
+when a second connector is available. The update API requires its configured
+update token; no unauthenticated bypass is acceptable.
 
-The graphics-protocol work follows the accepted terminal/input and presentation
-gates; do not advertise Kitty or sixel before their pixel and resource-limit
-evidence exists.
-
-After the current terminal graphics gates, close the final-byte PTY lifecycle
-race exposed by the Kitty query acceptance probe, then add the mixed-refresh
-VKMS scheduler matrix required by ADR 0006 before physical-host validation.
+The remaining release work is physical display/input evidence, mixed-refresh
+coverage for every supported topology, and the Gate 6 fault/soak campaign.
