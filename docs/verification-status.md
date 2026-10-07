@@ -16,9 +16,8 @@ an evidence record, not a claim that the complete product is released.
   a software-dummy result, not a physical refresh-rate claim. A bounded
   wallpaper workload on the prior source-equivalent 0.1.241 build measured
   26.865 ms maximum full render and 61.387 Hz over its active 504 ms window.
-  The QEMU/KMS acceptance below passes. The physical-host evidence currently
-  refers to the preceding 0.1.242 package; 0.1.243 deployment follows this
-  candidate's package build.
+  The QEMU/KMS acceptance below passes. The exact 0.1.243 package was accepted
+  by the authorized physical host and verified through its version endpoint.
 
 ### Current 0.1.243 QEMU/KMS evidence
 
@@ -38,21 +37,22 @@ following variants without modifying Hibr:
   `BLIT_INPUT_STREAM_PASS`, and `BLIT_INPUT_RENDER_SOAK_PASS`.
 - A current-version 30-second four-PTY soak passed 364 API snapshots, 34
   revisioned resizes, clean session teardown, advancing frames, no runtime
-  errors, and 66,120 KiB peak RSS under the 131,072 KiB limit.
+  errors, and 66,292 KiB peak RSS under the 131,072 KiB limit.
 - `KMS_FOUR_HIBR_PASS` with four presenting VKMS outputs, one primary Hibr
   desktop, three unchanged stock `--join` clients, and four running Hibr
   surfaces. Hibr source remained unchanged.
 
 The QEMU VKMS kernel was rebuilt from the repository's existing Linux VKMS
 source/build tree because the prior `bzImage` artifact was missing. The
-authorized physical host accepted the final Debian package `0.1.242-1` and
-reports `server_version:0.1.242`, one 1920×2160 output at 59.99 Hz, SDL/OpenGL
-readiness, and no diagnostics errors. During the active Hibr resume workload,
-the runtime window measured 59.903 Hz with zero missed deadlines; the clean
-fresh Hibr desktop then became idle and the API correctly aged the cadence
-measurement to zero. The captured clean desktop contained the expected
-wallpaper, icons, pointer, and controls. A stale held Hibr session was observed
-to produce a character matrix and was discarded; Hibr source was not changed.
+authorized physical host accepted package `0.1.243-1` and reports
+`server_version:0.1.243`, one 1920×2160 output at 59.99 Hz, SDL/OpenGL
+readiness, zero missed deadlines, and no diagnostics errors. The fresh Hibr
+desktop capture contains the expected wallpaper, icons, pointer, and controls.
+After the desktop became idle, the API correctly reported zero active frame
+rate and an aged last-frame gap; this is idle behavior, not a performance
+failure. The capture also confirms that the new required-glyph font is loaded.
+A stale held Hibr session was observed to produce a character matrix and was
+discarded; Hibr source was not changed.
 - The previous fully validated source build is `0.1.222`, which includes the
   Hibr-compatible Unicode 15.1 width table and regression vectors for
   variation selectors and zero-width joiners.
