@@ -52,6 +52,8 @@ panes, input routing, and diagnostics.
 - [hibr integration](integration-hibr.md) — standalone-service decision,
   PTY compatibility probe, and the operational console-module adapter.
 - [ADR index](adr/README.md) — decisions that constrain implementation.
+- [Verification status](verification-status.md) — the current evidence ledger,
+  release gates, and explicitly unverified items.
 
 The authenticated `GET /v1/diagnostics/runtime` endpoint is the canonical
 remote troubleshooting surface. It combines the normal diagnostics snapshot
@@ -61,9 +63,10 @@ diagnostics cannot consume unbounded server memory.
 
 ## Working status
 
-The project has a running TCC-built vertical slice, deterministic VKMS
-coverage, and an operational Hibr console adapter. Terminal conformance,
-complete topology/input coverage, physical-host acceptance, effects, and
-operational hardening remain gated work. Items marked as open questions should
-be resolved through an ADR before they become hidden implementation
-assumptions.
+The project has a TCC-built server, deterministic VKMS/KMS coverage, passing
+terminal and Hibr acceptance fixtures, and an operational Hibr console
+adapter. Physical-host release acceptance remains open; the exact evidence
+and the two remaining release gates are recorded in
+[verification-status.md](verification-status.md). Items marked as open
+questions should be resolved through an ADR before they become hidden
+implementation assumptions.
