@@ -36,6 +36,10 @@ an evidence record, not a claim that the complete product is released.
 - Direct-KMS/VKMS passes two-output pixel capture, mixed 60/120 Hz scheduling,
   output-loss recovery, Kitty resource limits, Kitty clipping/z-order, and
   sixel pixel rendering.
+- The exact 0.1.221 capture fixture independently passed the mixed-refresh
+  predicate (`60 Hz/16 ms` and `120 Hz/8 ms`) and output-loss predicate
+  (failed connector retained, surviving connector presenting, typed diagnostic,
+  and surviving screenshot/API capture).
 - The Hibr fixture passes primary plus `--join` sessions, all four logical
   pane layouts, input routes, keyboard, pointer, multi-mouse, and WebSocket
   input checks. Against the current Hibr 0.99.86 runtime, the ABI-16 adapter
@@ -58,6 +62,9 @@ an evidence record, not a claim that the complete product is released.
   device-loss/reconnect recovery. Its terminal conformance gate additionally passes
   variation-selector and zero-width-joiner cursor-position vectors, plus the
   Hibr `DT_BIDI`/`HIBR_GFX` defaults and explicit override vectors.
+- The exact 0.1.221 Hibr input-loss fixture passes primary/join startup,
+  `1x1`/`2x1`/`1x2`/`2x2` pane layouts, route retargeting, device-loss
+  diagnostics, device reconnect, and the final Hibr acceptance predicate.
 - Surface and scrollback snapshots preserve complete zero-width UTF-8 cell
   sequences; a five-extension combining vector and its cursor position pass.
 - Revisioned API cell updates accept wide UTF-8 glyphs and zero-width
