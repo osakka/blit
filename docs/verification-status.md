@@ -7,7 +7,7 @@ an evidence record, not a claim that the complete product is released.
 
 - Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The current candidate is `0.1.246`. It builds with TCC and passes terminal
+- The current candidate is `0.1.247`. It builds with TCC and passes terminal
   conformance, SDL screenshot/overlay pixels, the hidden-cursor damage gate,
   and the complete Hibr font manifest gate. Its SDL backend uses a per-output
   glyph atlas, suppresses unchanged cell damage, and does not schedule frames
@@ -20,24 +20,26 @@ an evidence record, not a claim that the complete product is released.
   preceding 0.1.245 package was accepted by the authorized physical host and
   verified through its version endpoint.
 
-### Current 0.1.246 source/package evidence
+### Current 0.1.247 source/package evidence
 
-The exact TCC-built 0.1.246 binary passes the focused font fallback gate,
-the 148-glyph Hibr manifest gate, and the complete terminal conformance
-suite. The fallback gate proves that a valid but unmapped scalar outside the
-PSF range selects the visible `?` glyph rather than blank PSF glyph zero. The
-package is `blit_0.1.246-1_amd64.deb`, SHA-256
-`8e4ff494a50b57f4539ebc80219629d2243f3124f8cf9534070680b9687ecaa9`.
-The physical host has not yet been upgraded to 0.1.246; its accepted runtime
+The exact TCC-built 0.1.247 binary passes the focused font fallback gate,
+the expanded 441-glyph Hibr manifest gate, and the complete terminal
+conformance suite. The fallback gate proves that a valid but unmapped scalar
+outside the PSF range selects the visible `?` glyph rather than blank PSF
+glyph zero. The manifest now covers Hibr's Arabic source characters and the
+242 presentation forms emitted by its `uni` shaping table. The package is
+`blit_0.1.247-1_amd64.deb`, SHA-256
+`2b19daa4d8efb91dcf827ccff3e9851005cd702a005fac7bcb5d3516b828c9e0`.
+The physical host has not yet been upgraded to 0.1.247; its accepted runtime
 evidence remains explicitly recorded below for 0.1.245.
 
-The exact 0.1.246 TCC binary and bundled font were then staged into the VKMS
-QEMU capture fixture. It reported `server_version:0.1.246`, two ready DRM
+The exact 0.1.247 TCC binary and bundled font were then staged into the VKMS
+QEMU capture fixture. It reported `server_version:0.1.247`, two ready DRM
 outputs, `PPM_DISPLAY_47_WIDE_KITTY_PASS`, `PPM_DISPLAY_48_PASS`,
 `KMS_API_SCREENSHOT_PASS`, and `KMS_CAPTURE_PASS`. This is new QEMU/KMS
 evidence only; it does not upgrade or replace the physical-host evidence.
-The same exact binary passed the single-vCPU synthetic input/render soak with
-`LAYOUT_MATRIX_PASS`, `BLIT_INPUT_MULTI_MOUSE_PASS`,
+The same exact 0.1.247 binary passed the single-vCPU synthetic input/render
+soak with `LAYOUT_MATRIX_PASS`, `BLIT_INPUT_MULTI_MOUSE_PASS`,
 `BLIT_INPUT_STREAM_PASS`, and `BLIT_INPUT_RENDER_SOAK_PASS`; the fixture
 exercised two mice, all three buttons, releases while buttons remained held,
 wheel input, PTY routing, and device-loss diagnostics.

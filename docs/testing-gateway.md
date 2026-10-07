@@ -150,7 +150,7 @@ in QEMU with direct DRM/KMS:
   saved cursors, UTF-8, truecolor SGR, and fragmented CSI sequences over the
   public API.
 - The runtime PSF manifest gate loads the generator's single required-glyph
-  set, verifies all 148 Hibr glyphs are mapped and non-blank, and checks the
+  set, verifies all required Hibr glyphs are mapped and non-blank, and checks the
   fixed 8×16 geometry. Geometric block elements use exact cell-row coverage;
   they are not accepted merely because a fallback font returned a cropped
   bitmap:

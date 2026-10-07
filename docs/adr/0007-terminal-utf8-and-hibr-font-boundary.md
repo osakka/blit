@@ -64,3 +64,8 @@ runtime PSF is gated for all required mappings, non-blank bitmaps, and 8×16
 geometry. Block elements U+2580–U+2588 are generated with exact terminal-cell
 row coverage because proportional fallback-font rasterization can crop lower
 blocks out of an 8×16 cell.
+
+The same manifest also includes the Arabic source characters and presentation
+forms emitted by Hibr's `uni` shaping table. This keeps an Arabic/bidi Hibr
+line within the same canonical PSF boundary; it does not add a second shaping
+implementation to Blit.
