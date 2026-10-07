@@ -54,8 +54,11 @@ desktop capture contains the expected wallpaper, icons, pointer, and controls;
 the session remains running and advertises Kitty and sixel capabilities. After
 startup the desktop became idle, so the API correctly reports an aged/zero
 active cadence rather than treating idle time as rendered frames. The QEMU
-four-output Hibr gate above is the authoritative multi-display evidence. Hibr
-source was not changed.
+four-output Hibr gate above is the authoritative multi-display evidence. A
+controlled live renderer probe with the Hibr surface plus a second full-size
+active PTY surface sustained 59.97 Hz, had zero missed deadlines, and reported
+15.177 ms last render time against the 16 ms target; this validates renderer
+throughput, not Hibr's idle cadence. Hibr source was not changed.
 - The previous fully validated source build is `0.1.222`, which includes the
   Hibr-compatible Unicode 15.1 width table and regression vectors for
   variation selectors and zero-width joiners.
