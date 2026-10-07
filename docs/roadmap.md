@@ -13,8 +13,9 @@ The platform capability gate is passing in the deterministic VKMS fixture:
 - A fullscreen SDL window is created successfully across that fixture.
 
 The initial product slice is now running: the OpenAPI contract, TCP gateway
-(network-bound by default, with an explicit bind override), PTY sessions, revisioned surfaces, persistent WebSocket stream, SDL3
-output initialization, and explicit session-to-display routing are implemented.
+(network-bound by default, with an explicit bind override), PTY sessions,
+revisioned surfaces, persistent WebSocket stream, SDL3 output initialization,
+and explicit session-to-display routing are implemented.
 The first renderer-neutral frame plan is now also implemented: a frame request
 captures the selected surface revisions before the SDL adapter presents them.
 The plan now carries each surface's accumulated dirty rectangle. Native text
@@ -34,13 +35,15 @@ authoritative HTTP resynchronization path, including text, styles, and cursor.
 Optional bearer authentication now protects HTTP and WebSocket upgrades when
 `BLIT_AUTH_TOKEN` is configured; TLS and token rotation remain deployment
 work.
-The hibr desktop has also passed a TCC-built PTY compatibility probe, and the
+The Hibr desktop has passed the TCC-built PTY compatibility probe, and the
 production `console-blit` module is operational over the OpenAPI/WebSocket
-contract. Explicit focus and the first versioned input routes are now exposed
-by the API. The SDL adapter uses single-surface incremental frames and
-conservatively redraws multi-surface outputs with deterministic vertical
-stacking. The remaining acceptance risk is terminal fidelity under the full
-Hibr desktop and the complete topology/input matrix.
+contract. Explicit focus and versioned input routes are exposed by the API.
+The SDL adapter uses single-surface incremental frames and conservatively
+redraws multi-surface outputs with deterministic vertical stacking. The
+current 0.1.217 package passes the complete terminal, graphics, input,
+two-display VKMS, and Hibr primary/`--join` acceptance gates. The remaining
+release risk is physical-host installation and validation; the authorized
+physical host is still running 0.1.210.
 
 Display timing is an explicit hard requirement. Each output must schedule at
 its active mode's maximum refresh by default, with per-output deadlines. The
@@ -130,12 +133,12 @@ suite on VKMS and then on a physical DRM/KMS host.
 
 ## Immediate next action
 
-Run terminal conformance against the canonical PTY surface engine before adding
-effects or packaging. The suite must cover Hibr's clear/redraw workload,
-alternate screen, cursor movement, colors, resize, scrolling, and malformed
-or fragmented escape sequences. Then repeat the 1x1, 2x1, 1x2, and 2x2 VKMS
-matrix with one primary and the required `--join` clients, including explicit
-keyboard and pointer routes.
+Install the verified 0.1.217 package on the authorized physical host through
+its supervised update path, then capture settled SDL screenshots and API
+diagnostics. Verify physical pointer/button/wheel routing and refresh cadence,
+followed by a real two-monitor primary/`--join` arrangement. The current host's
+update API requires its configured update token; no unauthenticated bypass is
+acceptable.
 
 The graphics-protocol work follows the accepted terminal/input and presentation
 gates; do not advertise Kitty or sixel before their pixel and resource-limit
