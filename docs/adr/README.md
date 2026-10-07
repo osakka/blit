@@ -19,6 +19,7 @@ Accepted decisions:
 9. [Compiled runtime version identity](0009-compiled-runtime-version-identity.md).
 10. [Stock Hibr session launcher](0010-stock-hibr-session-launcher.md).
 11. [Event-driven input-device discovery](0011-event-driven-input-discovery.md).
+12. [SDL glyph atlas and unchanged-damage suppression](0012-sdl-glyph-atlas-and-noop-damage.md).
 
 Pending decisions:
 

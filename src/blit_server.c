@@ -216,6 +216,8 @@ typedef struct {
     SDL_Window *window;
     SDL_Renderer *renderer;
     SDL_Texture *scene_texture;
+    SDL_Texture *glyph_atlas;
+    int glyph_atlas_columns;
     SDL_Surface *screenshot_surface;
     unsigned long long display_id;
     int initialized;
@@ -494,6 +496,9 @@ static char blit_version[64] = BLIT_BUILD_VERSION;
 
 static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                            uint32_t output_mask);
+static SDL_Texture *create_sdl_glyph_atlas(SDL_Renderer *renderer,
+                                           const BlitFont *font,
+                                           int *columns_out);
 static const char *pane_surface_id(const BlitRuntime *runtime,
                                    const BlitPane *pane);
 static void discover_panes(BlitRuntime *runtime);
@@ -2819,8 +2824,16 @@ static void terminal_leave_alternate(BlitSession *session,
 
 static void terminal_clear_cell(BlitSurface *surface, int x, int y)
 {
+    int changed;
     if (x < 0 || y < 0 || x >= surface->width || y >= surface->height)
         return;
+    changed = surface->cells[y][x] != 0 ||
+        surface->codepoints[y][x] != 0 ||
+        surface->combining_count[y][x] != 0 ||
+        surface->foreground[y][x] != 0 ||
+        surface->background[y][x] != 0 ||
+        surface->underline_color[y][x] != 0 ||
+        surface->attributes[y][x] != 0 || surface->links[y][x] != 0;
     surface->cells[y][x] = 0;
     surface->codepoints[y][x] = 0;
     memset(surface->combining[y][x], 0, sizeof(surface->combining[y][x]));
@@ -2830,7 +2843,56 @@ static void terminal_clear_cell(BlitSurface *surface, int x, int y)
     surface->underline_color[y][x] = 0;
     surface->attributes[y][x] = 0;
     surface->links[y][x] = 0;
-    mark_surface_damage(surface, x, y);
+    if (changed)
+        mark_surface_damage(surface, x, y);
+}
+
+static int terminal_cell_matches(const BlitSession *session,
+                                 const BlitSurface *surface, int x, int y,
+                                 uint32_t codepoint, int cell_width)
+{
+    uint16_t attributes;
+    uint32_t foreground;
+    uint32_t background;
+    uint32_t underline_color;
+
+    if (session == NULL || surface == NULL || x < 0 || y < 0 ||
+        x >= surface->width || y >= surface->height)
+        return 0;
+    if (surface->attributes[y][x] & BLIT_ATTR_CONTINUATION)
+        return 0;
+    attributes = session->terminal_attributes |
+        (cell_width == 2 ? BLIT_ATTR_WIDE : 0);
+    foreground = session->terminal_foreground_set ?
+        session->terminal_foreground + 1 : 0;
+    background = session->terminal_background_set ?
+        session->terminal_background + 1 : 0;
+    underline_color = session->terminal_underline_color_set ?
+        session->terminal_underline_color + 1 : 0;
+    if (surface->codepoints[y][x] != codepoint ||
+        surface->foreground[y][x] != foreground ||
+        surface->background[y][x] != background ||
+        surface->underline_color[y][x] != underline_color ||
+        surface->attributes[y][x] != attributes ||
+        surface->links[y][x] != session->terminal_link ||
+        surface->combining_count[y][x] != 0)
+        return 0;
+    if (cell_width == 2) {
+        if (x + 1 >= surface->width ||
+            surface->codepoints[y][x + 1] != 0 ||
+            surface->combining_count[y][x + 1] != 0 ||
+            surface->foreground[y][x + 1] != 0 ||
+            surface->background[y][x + 1] != 0 ||
+            surface->underline_color[y][x + 1] != 0 ||
+            surface->attributes[y][x + 1] != BLIT_ATTR_CONTINUATION ||
+            surface->links[y][x + 1] != session->terminal_link)
+            return 0;
+    } else if (x + 1 < surface->width &&
+               (surface->attributes[y][x] & BLIT_ATTR_WIDE ||
+                surface->attributes[y][x + 1] & BLIT_ATTR_CONTINUATION)) {
+        return 0;
+    }
+    return 1;
 }
 
 static void terminal_clear_wide_overlap(BlitSurface *surface, int x, int y)
@@ -4960,6 +5022,7 @@ static void terminal_put_codepoint(BlitSession *session, BlitSurface *surface,
                                    uint32_t codepoint, int cell_width)
 {
     int glyph_x;
+    int unchanged = 0;
 
     session->terminal_last_codepoint = codepoint;
     if (session->terminal_wrap_pending && session->terminal_autowrap) {
@@ -4987,6 +5050,13 @@ static void terminal_put_codepoint(BlitSession *session, BlitSurface *surface,
         }
     }
     session->terminal_last_width = cell_width;
+    if (!session->terminal_insert_mode)
+        unchanged = terminal_cell_matches(session, surface,
+                                          surface->cursor_x,
+                                          surface->cursor_y, codepoint,
+                                          cell_width);
+    if (unchanged)
+        goto advance_cursor;
     if (session->terminal_insert_mode) {
         int x;
         for (x = surface->width - 1; x >= surface->cursor_x + cell_width; --x)
@@ -5029,6 +5099,7 @@ static void terminal_put_codepoint(BlitSession *session, BlitSurface *surface,
     }
     mark_surface_damage_width(surface, glyph_x, surface->cursor_y,
                               cell_width);
+advance_cursor:
     if (surface->cursor_x + cell_width >= surface->width) {
         surface->cursor_x = surface->width - 1;
         session->terminal_wrap_pending = session->terminal_autowrap;
@@ -7907,6 +7978,9 @@ static void initialize_outputs(BlitRuntime *runtime)
         SDL_RenderPresent(renderer);
         runtime->outputs[runtime->output_count].window = window;
         runtime->outputs[runtime->output_count].renderer = renderer;
+        runtime->outputs[runtime->output_count].glyph_atlas =
+            create_sdl_glyph_atlas(renderer, &runtime->font,
+                                   &runtime->outputs[runtime->output_count].glyph_atlas_columns);
         runtime->outputs[runtime->output_count].display_id = display->id;
         ++runtime->output_count;
     }
@@ -7931,6 +8005,10 @@ static void destroy_outputs(BlitRuntime *runtime)
         if (runtime->outputs[i].scene_texture != NULL)
             SDL_DestroyTexture(runtime->outputs[i].scene_texture);
         runtime->outputs[i].scene_texture = NULL;
+        if (runtime->outputs[i].glyph_atlas != NULL)
+            SDL_DestroyTexture(runtime->outputs[i].glyph_atlas);
+        runtime->outputs[i].glyph_atlas = NULL;
+        runtime->outputs[i].glyph_atlas_columns = 0;
         SDL_DestroyRenderer(runtime->outputs[i].renderer);
         SDL_DestroyWindow(runtime->outputs[i].window);
     }
@@ -8199,14 +8277,105 @@ static int surface_targets_output(BlitRuntime *runtime,
     return strcmp(session->display_id, display_id) == 0;
 }
 
+static SDL_Texture *create_sdl_glyph_atlas(SDL_Renderer *renderer,
+                                           const BlitFont *font,
+                                           int *columns_out)
+{
+    SDL_Texture *texture;
+    unsigned char *pixels;
+    size_t pixel_bytes;
+    size_t glyph;
+    int columns;
+    int rows;
+    int width;
+    int height;
+    int row;
+    int column;
+
+    if (renderer == NULL || font == NULL || font->glyph_count == 0 ||
+        font->width < 1 || font->height < 1 || font->width > 32 ||
+        font->height > 64)
+        return NULL;
+    /* Keep the atlas compact while leaving room for the bundled Hibr font and
+       future PSF2 additions. Every cell is a white alpha mask; the renderer
+       applies the terminal foreground colour with texture modulation. */
+    columns = 32;
+    rows = (int)((font->glyph_count + (size_t)columns - 1) /
+                 (size_t)columns);
+    width = columns * font->width;
+    height = rows * font->height;
+    pixel_bytes = (size_t)width * (size_t)height * 4U;
+    pixels = (unsigned char *)calloc(1, pixel_bytes);
+    if (pixels == NULL)
+        return NULL;
+    for (glyph = 0; glyph < font->glyph_count; ++glyph) {
+        int atlas_x = (int)(glyph % (size_t)columns) * font->width;
+        int atlas_y = (int)(glyph / (size_t)columns) * font->height;
+        for (row = 0; row < font->height; ++row) {
+            uint32_t bits = blit_font_glyph_row(font, glyph,
+                                                font->codepoints != NULL ?
+                                                    font->codepoints[glyph] : 0,
+                                                row);
+            for (column = 0; column < font->width; ++column) {
+                size_t offset;
+                if (!(bits & (1U << (font->width - column - 1))))
+                    continue;
+                offset = ((size_t)(atlas_y + row) * (size_t)width +
+                          (size_t)(atlas_x + column)) * 4U;
+                pixels[offset] = 255;
+                pixels[offset + 1] = 255;
+                pixels[offset + 2] = 255;
+                pixels[offset + 3] = 255;
+            }
+        }
+    }
+    texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32,
+                                SDL_TEXTUREACCESS_STATIC, width, height);
+    if (texture == NULL || !SDL_UpdateTexture(texture, NULL, pixels,
+                                               width * 4)) {
+        if (texture != NULL)
+            SDL_DestroyTexture(texture);
+        free(pixels);
+        return NULL;
+    }
+    free(pixels);
+    SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+    if (columns_out != NULL)
+        *columns_out = columns;
+    return texture;
+}
+
 static void render_sdl_glyph(SDL_Renderer *renderer, const BlitFont *font,
-                             uint32_t codepoint, float x, float y,
-                             float cell_width, float cell_height)
+                             SDL_Texture *glyph_atlas, int atlas_columns,
+                             uint32_t colour, uint32_t codepoint, float x,
+                             float y, float cell_width, float cell_height)
 {
     int source_width = font != NULL && font->data ? font->width : 5;
     int source_height = font != NULL && font->data ? font->height : 7;
     size_t glyph = blit_font_glyph_index(font, codepoint);
     int source_row;
+
+    if (glyph_atlas != NULL && font != NULL && font->data != NULL &&
+        glyph < font->glyph_count && atlas_columns > 0) {
+        SDL_FRect source;
+        SDL_FRect destination;
+        source.x = (float)((int)(glyph % (size_t)atlas_columns) *
+                           font->width);
+        source.y = (float)((int)(glyph / (size_t)atlas_columns) *
+                           font->height);
+        source.w = (float)font->width;
+        source.h = (float)font->height;
+        destination.x = x;
+        destination.y = y;
+        destination.w = cell_width;
+        destination.h = cell_height;
+        SDL_SetTextureColorMod(glyph_atlas,
+                               (unsigned char)(colour >> 16),
+                               (unsigned char)(colour >> 8),
+                               (unsigned char)colour);
+        SDL_RenderTexture(renderer, glyph_atlas, &source, &destination);
+        return;
+    }
     for (source_row = 0; source_row < source_height; ++source_row) {
         uint32_t row_bits = blit_font_glyph_row(font, glyph, codepoint,
                                                 source_row);
@@ -8852,7 +9021,9 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                             surface->codepoints[row][column] != 0 &&
                             surface->codepoints[row][column] != ' ')
                             render_sdl_glyph(renderer, &runtime->font,
-                                surface->codepoints[row][column],
+                                runtime->outputs[output_index].glyph_atlas,
+                                runtime->outputs[output_index].glyph_atlas_columns,
+                                foreground, surface->codepoints[row][column],
                                 surface_origin_x + column * (float)cell_width,
                                 (float)surface_origin_y + row * (float)cell_height,
                                 (float)glyph_width, (float)cell_height);
@@ -8863,6 +9034,9 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                                  combining_index < BLIT_MAX_COMBINING;
                                  ++combining_index) {
                                 render_sdl_glyph(renderer, &runtime->font,
+                                    runtime->outputs[output_index].glyph_atlas,
+                                    runtime->outputs[output_index].glyph_atlas_columns,
+                                    foreground,
                                     surface->combining[row][column][combining_index],
                                     surface_origin_x + column * (float)cell_width,
                                     (float)surface_origin_y + row * (float)cell_height,
@@ -8873,7 +9047,9 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                             surface->codepoints[row][column] != 0 &&
                             surface->codepoints[row][column] != ' ')
                             render_sdl_glyph(renderer, &runtime->font,
-                                surface->codepoints[row][column],
+                                runtime->outputs[output_index].glyph_atlas,
+                                runtime->outputs[output_index].glyph_atlas_columns,
+                                foreground, surface->codepoints[row][column],
                                 surface_origin_x + 1.0f + column * (float)cell_width,
                                 (float)surface_origin_y + row * (float)cell_height,
                                 (float)glyph_width, (float)cell_height);
@@ -8881,7 +9057,9 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                             surface->codepoints[row][column] != 0 &&
                             surface->codepoints[row][column] != ' ')
                             render_sdl_glyph(renderer, &runtime->font,
-                                surface->codepoints[row][column],
+                                runtime->outputs[output_index].glyph_atlas,
+                                runtime->outputs[output_index].glyph_atlas_columns,
+                                foreground, surface->codepoints[row][column],
                                 surface_origin_x + 1.0f + column * (float)cell_width,
                                 (float)surface_origin_y + row * (float)cell_height,
                                 (float)glyph_width, (float)cell_height);

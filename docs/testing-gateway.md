@@ -355,6 +355,13 @@ SDL event-pump duration is reported as `last_sdl_events_ms` and
 `last_evdev_scan_ms` and `max_evdev_scan_ms`. The rate is measured from
 presented frames, not inferred from the display mode or configured interval.
 
+The SDL path uses a per-output monochrome glyph atlas and suppresses damage
+for terminal writes whose complete cell state is unchanged. This is especially
+important for Hibr wallpaper themes, which may repeatedly emit the same glyph
+grid. The atlas does not change the canonical surface or direct-KMS renderer;
+the initial full redraw and pointer-only cached-scene paths must be measured
+separately.
+
 The shutdown gate verifies that `POST /v1/control/shutdown` acknowledges the
 request and the Blit process exits cleanly:
 
