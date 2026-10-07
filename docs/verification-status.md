@@ -59,25 +59,31 @@ an evidence record, not a claim that the complete product is released.
 
 ## Real-host evidence
 
-The last reachable observation of the authorized host at
+The latest reachable observation of the authorized host at
 `192.168.10.54:8080` reported:
 
 - Blit `0.1.210`, healthy SDL3/OpenGL presentation.
 - One physical output, `DP-1`, active at 1920×2160 and 59.99 Hz.
-- A fresh Hibr session rendered a legible amber desktop framebuffer at
-  1920×2160 with no diagnostic Kitty overlay; the session was removed after
-  capture.
-- A single bounded 0.1.212 upload attempt timed out against the legacy
-  receiver; the host remained on `0.1.210`. After the connection cleared, its
-  update status became `failed` while the gateway remained healthy. No second
-  upload or unverified remote shutdown was attempted.
+- A fresh Hibr session reached `running`; its revisioned surface snapshot
+  contained the complete 240×135 terminal grid with the expected amber theme
+  (`#ffb000` foreground on `#1a0f00` background).
+- The corresponding physical SDL screenshot was almost entirely black, with
+  only a small glyph/pointer visible. This is a confirmed presentation defect
+  in the installed `0.1.210` runtime, not evidence of missing Hibr output.
+- The captured framebuffer contained no red diagnostic box. Any red box seen
+  by an operator must be correlated with a timestamped screenshot and the
+  overlay/graphics API state; it is not present in the current capture.
+- A bounded upload of the verified `0.1.217-1` package was rejected with HTTP
+  403 because the host requires `X-Blit-Update-Token`; the host therefore
+  remains on `0.1.210`. No token was guessed and no unverified remote install
+  was attempted.
 
 ## Open release gates
 
-1. Recover the legacy receiver through the host’s supervised/manual service
-   path, then install and verify `0.1.217`. The last observed `0.1.210` host
-   cannot cancel its own stalled upload, so the new cancellation endpoint is
-   not yet available on the physical host.
+1. Provide/use the supervised update token or another authorized service path,
+   then install and verify `0.1.217`. The physical renderer defect cannot be
+   assessed against the current source until the current runtime is actually
+   installed.
 2. Validate at least one physical multi-monitor arrangement, including
    connector discovery, independent presentation, pointer routing, and Hibr
    primary/join behavior. The current host exposes only one physical output.
