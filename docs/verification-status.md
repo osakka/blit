@@ -34,10 +34,9 @@ an evidence record, not a claim that the complete product is released.
   pane layouts, Hibr display/window control, focus, resize, input routes,
   keyboard, pointer, multi-mouse, and WebSocket input checks.
 - The exact 0.1.212 TCC build passes the two-output KMS pixel gate, default
-  Hibr acceptance, and the four-pane Hibr matrix.
-- The QEMU input-only fixture currently reaches `BLIT_INPUT_READY` but does
-  not reach its completion marker for either 0.1.211 or 0.1.212; this is an
-  unresolved test-harness/runtime gate, not counted as a pass.
+  Hibr acceptance, the four-pane Hibr matrix, and the input-only fixture with
+  `blit.input_wait=8`: keypad, multi-mouse, button, wheel, motion, stream, and
+  PTY delivery all pass.
 
 ## Real-host evidence
 
@@ -54,10 +53,7 @@ The authorized host at `192.168.10.54:8080` currently reports:
 1. Install and verify `0.1.212` on the real host. The currently installed
    `0.1.210` has not yet been replaced by the new package, so the scene-cache
    and pointer diagnostics are not yet physical-host evidence.
-2. Repair or isolate the QEMU input-only fixture after `BLIT_INPUT_READY`, then
-   obtain exact-build evidence for keyboard, pointer, button, wheel, and
-   multi-device routing.
-3. Validate at least one physical multi-monitor arrangement, including
+2. Validate at least one physical multi-monitor arrangement, including
    connector discovery, independent presentation, pointer routing, and Hibr
    primary/join behavior. The current host exposes only one physical output.
 
