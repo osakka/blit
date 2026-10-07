@@ -105,6 +105,9 @@ an evidence record, not a claim that the complete product is released.
 - The package allowlist rejects runtime shell launchers and Hibr startup
   wrappers.
 - Hibr source and files were not modified.
+- A Debian `0.1.240-1` package built from the current TCC binary and source
+  commit `353e051` passed the package allowlist audit. Its SHA-256 is
+  `99d22f41935d75abe15bc7bd3fa5d583fd6a73747d937e2f311e20ba16ddeb26`.
 
 ### Current 0.1.240 VKMS evidence
 
