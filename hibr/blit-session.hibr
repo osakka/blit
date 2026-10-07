@@ -9,7 +9,13 @@
 
 d=${0%/*}
 [ "$d" = "$0" ] && d=.
-moddir=${BLIT_HIBR_MODPATH:-$d/mods}
+moddir=${BLIT_HIBR_MODPATH:-}
+if [ -z "$moddir" ] && [ -d "$d/mods" ]; then
+	moddir=$d/mods
+fi
+if [ -z "$moddir" ]; then
+	moddir=/usr/lib/hibr
+fi
 desktop=${BLIT_HIBR_DESKTOP_SESSION:-}
 if [ -z "$desktop" ] && [ -f "$d/session.hibr" ]; then
 	desktop=$d/session.hibr

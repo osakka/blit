@@ -5,12 +5,13 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 BUNDLE=$ROOT/build/blit-desktop-current
 RUNTIME_BINARY=$ROOT/build/blit/blit-server
 UPDATE_HELPER=$ROOT/build/blit/blit-update-helper
+HIBR_ENTRYPOINT=$ROOT/hibr/blit-session.hibr
 OUT=${1:-$ROOT}
 VERSION_FILE=$ROOT/packaging/VERSION
 
 if [ ! -x "$RUNTIME_BINARY" ] || [ ! -x "$UPDATE_HELPER" ] ||
    [ ! -x "$BUNDLE/bin/blit-server" ] ||
-   [ ! -f "$VERSION_FILE" ]; then
+   [ ! -f "$VERSION_FILE" ] || [ ! -f "$HIBR_ENTRYPOINT" ]; then
 	echo "blit: canonical build outputs are incomplete" >&2
 	exit 1
 fi
@@ -53,9 +54,12 @@ mkdir -p "$stage/usr/lib/blit" "$stage/usr/bin" \
 # conveniences, not part of the server runtime; Hibr remains an external
 # executable and session/orchestration layer.
 mkdir -p "$stage/usr/lib/blit/bin" "$stage/usr/lib/blit/lib" \
-    "$stage/usr/lib/blit/fonts" "$stage/lib/systemd/system"
+    "$stage/usr/lib/blit/fonts" "$stage/usr/share/blit/hibr" \
+    "$stage/lib/systemd/system"
 cp -a "$RUNTIME_BINARY" "$stage/usr/lib/blit/bin/blit-server"
 cp -a "$UPDATE_HELPER" "$stage/usr/lib/blit/bin/blit-update-helper"
+cp -a "$HIBR_ENTRYPOINT" "$stage/usr/share/blit/hibr/blit-session.hibr"
+chmod 0755 "$stage/usr/share/blit/hibr/blit-session.hibr"
 chmod 0755 "$stage/usr/lib/blit/bin/blit-update-helper"
 cp -a "$ROOT/packaging/blit-update-helper.service" \
     "$stage/lib/systemd/system/"
