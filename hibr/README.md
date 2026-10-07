@@ -33,5 +33,11 @@ run when that program explicitly selects the provider. The normal held Hibr
 desktop path (`desktop` and `desktop --join`) does not load this module; it
 uses Blit's terminal-session API directly.
 
+The QEMU/integration fixture for that normal path is
+`blit-stock-session.hibr`. It preloads Hibr's canonical `console`, `pty`,
+`term`, and `hold` modules by staged path, then sources Hibr's unchanged stock
+`examples/desktop/session.hibr`. This keeps the adapter and the ordinary held
+desktop as separate, testable ownership models.
+
 The `link` callback is intentionally a no-op until Blit's resource-link
 contract is defined; it cannot create a second ownership model for surfaces.
