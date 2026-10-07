@@ -27,6 +27,10 @@ an evidence record, not a claim that the complete product is released.
 - The Debian artifact built from the 0.1.226 implementation is
   `blit_0.1.226-1_amd64.deb`, SHA-256
   `7d7f7dc4063d6e8f524f8802d86e41f8afffb5a769e30a87795eeee009038bec`.
+- The exact 0.1.226 update supervisor passed both local cancellation and idle
+  timeout gates. The live host's update API is reachable and idle, but its
+  root-owned update credential is not present in this workspace, so no live
+  upload was attempted.
 - SDL pointer-only presentation now reuses a per-output scene cache instead of
   forcing a full terminal rasterization on every pointer motion. Runtime
   diagnostics expose pointer-cache hits and misses.

@@ -136,7 +136,7 @@ suite on VKMS and then on a physical DRM/KMS host.
 
 ## Immediate next action
 
-Capture settled SDL screenshots and API diagnostics from the deployed 0.1.223
+Capture settled SDL screenshots and API diagnostics from the deployed 0.1.226
 authorized physical host. Verify physical
 pointer/button/wheel routing and
 refresh cadence, followed by a real two-monitor primary/`--join` arrangement

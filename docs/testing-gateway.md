@@ -69,12 +69,12 @@ reports the expected server version and `state: "ready"`. Upload only a
 package whose SHA-256 was independently recorded:
 
 ```sh
-sha256sum blit_0.1.223-1_amd64.deb
+sha256sum blit_0.1.226-1_amd64.deb
 curl --fail --request PUT \
   --header 'X-Blit-Update-Token: YOUR_UPDATE_TOKEN' \
   --header 'X-Blit-SHA256: RECORDED_SHA256' \
   --header 'Content-Type: application/vnd.debian.binary-package' \
-  --data-binary @blit_0.1.223-1_amd64.deb \
+  --data-binary @blit_0.1.226-1_amd64.deb \
   http://127.0.0.1:8080/v1/control/update
 ```
 
@@ -88,7 +88,7 @@ the API bearer token, and never retries a rejected credential:
 ```sh
 BLIT_UPDATE_TOKEN_FILE=/secure/path/live-update.token \
   BLIT_AUTH_TOKEN_FILE=/secure/path/live-api.token \
-  tools/deploy/update-live.sh 192.168.10.54 blit_0.1.223-1_amd64.deb
+  tools/deploy/update-live.sh 192.168.10.54 blit_0.1.226-1_amd64.deb
 ```
 
 `BLIT_UPDATE_TOKEN` may be used instead of the update-token file. `thisisatest`
