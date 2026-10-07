@@ -47,12 +47,16 @@ The authorized host at `192.168.10.54:8080` currently reports:
 - A fresh Hibr session rendered a legible amber desktop framebuffer at
   1920×2160 with no diagnostic Kitty overlay; the session was removed after
   capture.
+- A single bounded 0.1.212 upload attempt timed out against the legacy
+  receiver; the host remained on `0.1.210` and its update status is now
+  `receiving`. No second upload or unverified remote shutdown was attempted.
 
 ## Open release gates
 
-1. Install and verify `0.1.212` on the real host. The currently installed
-   `0.1.210` has not yet been replaced by the new package, so the scene-cache
-   and pointer diagnostics are not yet physical-host evidence.
+1. Recover the legacy receiver through the host’s supervised/manual service
+   path, then install and verify `0.1.212`. The currently installed `0.1.210`
+   cannot cancel its own stalled upload, so the new cancellation endpoint is
+   not yet available on the physical host.
 2. Validate at least one physical multi-monitor arrangement, including
    connector discovery, independent presentation, pointer routing, and Hibr
    primary/join behavior. The current host exposes only one physical output.
