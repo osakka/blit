@@ -682,6 +682,16 @@ snapshot = run_case(base, 'truecolor-sgr', "printf '\\033[38;2;1;2;3mC'")
 cells = cell_map(snapshot)
 assert_equal('#010203', cells.fetch([0, 0]).fetch('style').fetch('foreground'), 'truecolor foreground')
 
+snapshot = run_case(base, 'hibr-combined-truecolor-sgr',
+                    "printf '\\033[0;1;38;2;203;213;224;48;2;16;24;32mX'")
+cells = cell_map(snapshot)
+style = cells.fetch([0, 0]).fetch('style')
+assert_equal('#cbd5e0', style.fetch('foreground'),
+             'Hibr combined truecolor foreground')
+assert_equal('#101820', style.fetch('background'),
+             'Hibr combined truecolor background')
+assert_equal(true, style.fetch('bold'), 'Hibr combined truecolor bold')
+
 snapshot = run_case(base, 'indexed-color-sgr',
                     "printf '\\033[38;5;196;48;5;232mC'")
 cells = cell_map(snapshot)

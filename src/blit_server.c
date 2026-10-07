@@ -269,7 +269,10 @@ typedef struct {
     int focused;
     int surface_mode;
     int terminal_escape;
-    char terminal_csi[32];
+    /* Hibr emits a single SGR containing bold plus truecolor foreground and
+       background (three decimal components each).  A 32-byte buffer cuts
+       that sequence in the middle and leaks its tail as terminal text. */
+    char terminal_csi[128];
     int terminal_csi_length;
     int terminal_string_type;
     char terminal_string[4096];
