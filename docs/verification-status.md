@@ -272,6 +272,11 @@ The latest reachable observation of the authorized host at
   restored to 1×1 and sessions, surfaces, streams, and routes returned to
   zero. This validates logical pane orchestration, not physical multi-monitor
   behavior.
+- The live discovery API reports SDL3 readiness, one AMDGPU DRM/KMS card with
+  page flipping, direct scanout, and hardware acceleration, three input
+  devices (keyboard, pointer, and consumer control), and no audio devices.
+  The absence of audio is an observed host capability, not a missing API
+  response; `/v1/audio` returns an empty device list.
 
 ## Open release gates
 
