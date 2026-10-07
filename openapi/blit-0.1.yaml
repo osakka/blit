@@ -151,12 +151,14 @@ paths:
     get:
       tags: [diagnostics]
       operationId: captureDisplayScreenshot
-      summary: Capture the current SDL framebuffer for one display
+      summary: Capture the current framebuffer for one display
       parameters:
         - $ref: '#/components/parameters/DisplayId'
       responses:
         '200':
-          description: Current framebuffer encoded as a BMP image
+          description: >-
+            Current SDL3 or direct-KMS framebuffer encoded as a BMP image.
+            Direct-KMS captures are 32-bit bottom-up BMP images.
           content:
             image/bmp:
               schema:

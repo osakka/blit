@@ -1032,6 +1032,23 @@ static void send_sdl_screenshot(int fd, BlitRuntime *runtime,
     free(bytes);
 }
 
+static int send_kms_screenshot(int fd, BlitRuntime *runtime, int output_index)
+{
+    unsigned char *bytes = NULL;
+    size_t length = 0;
+    int result = blit_kms_screenshot(runtime->kms, output_index,
+                                     &bytes, &length);
+    if (result == 0) return 0;
+    if (result < 0) {
+        send_problem(fd, 503, "Service Unavailable", "screenshot_failed",
+                     "The KMS framebuffer could not be encoded.");
+        return -1;
+    }
+    send_http_bytes(fd, 200, "OK", "image/bmp", bytes, length);
+    free(bytes);
+    return 1;
+}
+
 static void json_escape(const char *input, char *output, size_t capacity)
 {
     size_t in = 0;
@@ -6796,7 +6813,8 @@ static void handle_request(int fd, BlitRuntime *runtime,
                 strlen("/v1/diagnostics/screenshots/")) == 0 &&
         strcmp(method, "GET") == 0) {
         int output_index = screenshot_output_index(runtime, path);
-        if (output_index < 0 || runtime->outputs[output_index].renderer == NULL) {
+        if (output_index < 0 ||
+            (!runtime->direct_kms && runtime->outputs[output_index].renderer == NULL)) {
             send_problem(fd, 404, "Not Found", "display_not_found",
                          "The requested display does not exist or has no renderer.");
             return;
@@ -10323,14 +10341,21 @@ int main(int argc, char **argv)
             if (!client->used || client->screenshot_output_index <= 0)
                 continue;
             screenshot_index = client->screenshot_output_index - 1;
-            if (screenshot_index < 0 ||
-                screenshot_index >= runtime.output_count ||
-                runtime.outputs[screenshot_index].screenshot_surface == NULL)
+            if (screenshot_index < 0 || screenshot_index >= runtime.output_count)
                 continue;
             snprintf(screenshot_path, sizeof(screenshot_path),
                      "/v1/diagnostics/screenshots/display-%llu",
                      runtime.outputs[screenshot_index].display_id);
-            send_sdl_screenshot(client->fd, &runtime, screenshot_path);
+            if (runtime.direct_kms) {
+                int screenshot_result = send_kms_screenshot(
+                    client->fd, &runtime, screenshot_index);
+                if (screenshot_result == 0)
+                    continue;
+            } else {
+                if (runtime.outputs[screenshot_index].screenshot_surface == NULL)
+                    continue;
+                send_sdl_screenshot(client->fd, &runtime, screenshot_path);
+            }
             runtime.screenshot_requested_mask &= ~(1U << screenshot_index);
             remove_http_client(&runtime, i);
         }

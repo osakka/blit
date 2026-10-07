@@ -1341,6 +1341,80 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
     return failed ? -1 : 0;
 }
 
+static void kms_bmp32(unsigned char *header, uint32_t offset,
+                      uint32_t file_size, int width, int height,
+                      uint32_t image_size)
+{
+    memset(header, 0, 54);
+    header[0] = 'B';
+    header[1] = 'M';
+    header[2] = (unsigned char)file_size;
+    header[3] = (unsigned char)(file_size >> 8);
+    header[4] = (unsigned char)(file_size >> 16);
+    header[5] = (unsigned char)(file_size >> 24);
+    header[10] = (unsigned char)offset;
+    header[11] = (unsigned char)(offset >> 8);
+    header[12] = (unsigned char)(offset >> 16);
+    header[13] = (unsigned char)(offset >> 24);
+    header[14] = 40;
+    header[18] = (unsigned char)width;
+    header[19] = (unsigned char)(width >> 8);
+    header[20] = (unsigned char)(width >> 16);
+    header[21] = (unsigned char)(width >> 24);
+    header[22] = (unsigned char)height;
+    header[23] = (unsigned char)(height >> 8);
+    header[24] = (unsigned char)(height >> 16);
+    header[25] = (unsigned char)(height >> 24);
+    header[26] = 1;
+    header[28] = 32;
+    header[34] = (unsigned char)image_size;
+    header[35] = (unsigned char)(image_size >> 8);
+    header[36] = (unsigned char)(image_size >> 16);
+    header[37] = (unsigned char)(image_size >> 24);
+}
+
+int blit_kms_screenshot(BlitKms *kms, int index,
+                        unsigned char **bytes, size_t *length)
+{
+    KmsOutput *output;
+    size_t row_bytes;
+    size_t image_size;
+    size_t total;
+    unsigned char *result;
+    int y;
+
+    if (bytes == NULL || length == NULL) return -1;
+    *bytes = NULL;
+    *length = 0;
+    if (kms == NULL || index < 0 || index >= kms->output_count)
+        return -1;
+    output = &kms->outputs[index];
+    if (output->front.map == NULL || !output->initialized)
+        return 0;
+    if (output->mode.hdisplay <= 0 || output->mode.vdisplay <= 0)
+        return -1;
+    row_bytes = (size_t)output->mode.hdisplay * 4U;
+    image_size = row_bytes * (size_t)output->mode.vdisplay;
+    total = 54U + image_size;
+    if (row_bytes / 4U != (size_t)output->mode.hdisplay ||
+        image_size / row_bytes != (size_t)output->mode.vdisplay ||
+        total < image_size || total > 64U * 1024U * 1024U)
+        return -1;
+    result = (unsigned char *)malloc(total);
+    if (result == NULL) return -1;
+    kms_bmp32(result, 54U, (uint32_t)total, output->mode.hdisplay,
+              output->mode.vdisplay, (uint32_t)image_size);
+    for (y = 0; y < output->mode.vdisplay; ++y) {
+        const unsigned char *source =
+            (const unsigned char *)output->front.map +
+            (size_t)(output->mode.vdisplay - 1 - y) * output->front.pitch;
+        memcpy(result + 54U + (size_t)y * row_bytes, source, row_bytes);
+    }
+    *bytes = result;
+    *length = total;
+    return 1;
+}
+
 void blit_kms_close(BlitKms *kms)
 {
     int i;

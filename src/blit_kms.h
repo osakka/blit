@@ -97,6 +97,11 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views,
                      const BlitKmsOverlay *overlays, int overlay_count,
                      unsigned long long visual_revision,
                      int effect_enabled, int effect_intensity);
+/* Return a bounded 32-bit BMP snapshot of the currently submitted front
+   buffer. The caller owns *bytes and must free it. Return 1 when ready, 0
+   when the output has not presented a buffer yet, and -1 on failure. */
+int blit_kms_screenshot(BlitKms *kms, int index,
+                        unsigned char **bytes, size_t *length);
 void blit_kms_close(BlitKms *kms);
 
 #endif

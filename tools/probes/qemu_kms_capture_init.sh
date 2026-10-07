@@ -180,6 +180,20 @@ else
     /blit-stage/ppm-assert /tmp/guest-screenshots/display-47.ppm --wide --kitty && echo PPM_DISPLAY_47_WIDE_KITTY_PASS || { echo PPM_DISPLAY_47_WIDE_KITTY_FAIL; finish 1; }
 fi
 /blit-stage/ppm-assert /tmp/guest-screenshots/display-48.ppm && echo PPM_DISPLAY_48_PASS || { echo PPM_DISPLAY_48_FAIL; finish 1; }
+$b wget -qO /tmp/api-display-47.bmp http://127.0.0.1:19191/v1/diagnostics/screenshots/display-47 || true
+api_screenshot_pass=0
+if [ -f /tmp/api-display-47.bmp ]; then
+    api_magic=$($b od -An -t x1 -N 2 /tmp/api-display-47.bmp | $b tr -d ' \n')
+    api_size=$($b wc -c /tmp/api-display-47.bmp | $b cut -d ' ' -f 1)
+    if [ "$api_magic" = "424d" ] && [ "$api_size" -gt 3145728 ] && [ "$api_size" -le 67108864 ]; then
+        api_screenshot_pass=1
+        echo KMS_API_SCREENSHOT_PASS size=$api_size
+    fi
+fi
+if [ "$api_screenshot_pass" -ne 1 ]; then
+    echo KMS_API_SCREENSHOT_FAIL
+    finish 1
+fi
 $b cp /tmp/guest-screenshots/display-*.ppm /tmp/host-screenshots/ 2>/dev/null || true
 size1=0
 size2=0
@@ -199,6 +213,6 @@ if [ "$loss_test" -eq 1 ]; then
 elif [ "$size1" -gt 2359296 ] && [ "$size2" -gt 2359296 ] && [ "$hash1" != "$hash2" ]; then
     capture_pass=1
 fi
-if [ "$capture_pass" -eq 1 ] && [ "$loss_pass" -eq 1 ] && [ "$graphics_pass" -eq 1 ] && [ "$scheduler_pass" -eq 1 ] && [ "$mixed_refresh_pass" -eq 1 ] && [ "$kitty_limits_pass" -eq 1 ]; then echo KMS_CAPTURE_PASS; finish 0; fi
+if [ "$capture_pass" -eq 1 ] && [ "$loss_pass" -eq 1 ] && [ "$graphics_pass" -eq 1 ] && [ "$scheduler_pass" -eq 1 ] && [ "$mixed_refresh_pass" -eq 1 ] && [ "$kitty_limits_pass" -eq 1 ] && [ "$api_screenshot_pass" -eq 1 ]; then echo KMS_CAPTURE_PASS; finish 0; fi
 echo KMS_CAPTURE_FAIL
 finish 1
