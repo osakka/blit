@@ -17,6 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/inotify.h>
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -394,7 +395,8 @@ typedef struct {
     int evdev_shift;
     int evdev_ctrl;
     int evdev_alt;
-    uint64_t evdev_last_scan_ticks;
+    int evdev_watch_fd;
+    int evdev_rescan_requested;
     float evdev_mouse_x;
     float evdev_mouse_y;
     BlitStream streams[BLIT_MAX_STREAMS];
@@ -430,6 +432,18 @@ typedef struct {
     unsigned long long diagnostic_frame_rate_last_frames;
     double diagnostic_frame_rate_hz;
     unsigned long long diagnostic_frame_rate_window_ms;
+    unsigned long long diagnostic_loop_iterations;
+    unsigned long long diagnostic_terminal_reads;
+    unsigned long long diagnostic_present_calls;
+    uint64_t diagnostic_last_loop_us;
+    double diagnostic_last_loop_gap_ms;
+    double diagnostic_max_loop_gap_ms;
+    double diagnostic_last_select_ms;
+    double diagnostic_max_select_ms;
+    double diagnostic_last_sdl_events_ms;
+    double diagnostic_max_sdl_events_ms;
+    double diagnostic_last_evdev_scan_ms;
+    double diagnostic_max_evdev_scan_ms;
     double diagnostic_last_render_ms;
     double diagnostic_max_render_ms;
     double diagnostic_last_terminal_ms;
@@ -1167,7 +1181,12 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"terminal_bytes\":%llu,\"pointer_cache_hits\":%llu,"
         "\"pointer_cache_misses\":%llu,\"frame_rate_hz\":%.3f,"
         "\"frame_rate_frames\":%llu,\"frame_rate_window_ms\":%llu,"
-        "\"frame_rate_age_ms\":%llu},"
+        "\"frame_rate_age_ms\":%llu,\"loop_iterations\":%llu,"
+        "\"terminal_reads\":%llu,\"present_calls\":%llu,"
+        "\"last_loop_gap_ms\":%.3f,\"max_loop_gap_ms\":%.3f,"
+        "\"last_select_ms\":%.3f,\"max_select_ms\":%.3f,"
+        "\"last_sdl_events_ms\":%.3f,\"max_sdl_events_ms\":%.3f,"
+        "\"last_evdev_scan_ms\":%.3f,\"max_evdev_scan_ms\":%.3f},"
         "\"logs\":[",
         snapshot,
         runtime->started_us > 0 && now >= runtime->started_us ?
@@ -1183,7 +1202,18 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         runtime->diagnostic_pointer_cache_hits,
         runtime->diagnostic_pointer_cache_misses,
         frame_rate_hz, runtime->diagnostic_frame_rate_last_frames,
-        runtime->diagnostic_frame_rate_window_ms, frame_rate_age_ms);
+        runtime->diagnostic_frame_rate_window_ms, frame_rate_age_ms,
+        runtime->diagnostic_loop_iterations,
+        runtime->diagnostic_terminal_reads,
+        runtime->diagnostic_present_calls,
+        runtime->diagnostic_last_loop_gap_ms,
+        runtime->diagnostic_max_loop_gap_ms,
+        runtime->diagnostic_last_select_ms,
+        runtime->diagnostic_max_select_ms,
+        runtime->diagnostic_last_sdl_events_ms,
+        runtime->diagnostic_max_sdl_events_ms,
+        runtime->diagnostic_last_evdev_scan_ms,
+        runtime->diagnostic_max_evdev_scan_ms);
     count = runtime->diagnostic_log_count;
     first = 1;
     index = (runtime->diagnostic_log_next - count + BLIT_MAX_RUNTIME_LOGS) %
@@ -5481,6 +5511,7 @@ static void remove_evdev_mouse(BlitRuntime *runtime, int index)
     runtime->evdev_mouse_reported[runtime->evdev_mouse_count] = 0;
     if (runtime->evdev_mouse_count == 0)
         disable_input_routes_for_device(runtime, "evdev-pointer");
+    runtime->evdev_rescan_requested = 1;
 }
 
 static void remove_evdev_keyboard(BlitRuntime *runtime, int index)
@@ -5504,6 +5535,7 @@ static void remove_evdev_keyboard(BlitRuntime *runtime, int index)
     runtime->evdev_keyboard_reported[runtime->evdev_keyboard_count] = 0;
     if (runtime->evdev_keyboard_count == 0)
         disable_input_routes_for_device(runtime, "evdev-keyboard");
+    runtime->evdev_rescan_requested = 1;
 }
 
 static int display_id_is_known(const BlitRuntime *runtime, const char *display_id)
@@ -6637,6 +6669,7 @@ static void service_session_output(BlitRuntime *runtime, int fd)
         }
         return;
     }
+    ++runtime->diagnostic_terminal_reads;
     output[received] = '\0';
     json_escape((char *)output, escaped, sizeof(escaped));
     for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
@@ -8057,14 +8090,53 @@ static void broadcast_input_diagnostic(BlitRuntime *runtime,
                                        const char *path,
                                        int active_devices);
 
+static void open_evdev_watch(BlitRuntime *runtime)
+{
+    int fd;
+
+    if (runtime->evdev_watch_fd >= 0)
+        return;
+    fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+    if (fd < 0)
+        return;
+    if (inotify_add_watch(fd, "/dev/input",
+                          IN_CREATE | IN_DELETE | IN_MOVED_TO |
+                          IN_MOVED_FROM | IN_ATTRIB) < 0) {
+        close(fd);
+        return;
+    }
+    runtime->evdev_watch_fd = fd;
+}
+
+static void service_evdev_watch(BlitRuntime *runtime)
+{
+    char buffer[4096];
+    ssize_t received;
+
+    if (runtime->evdev_watch_fd < 0)
+        return;
+    for (;;) {
+        received = read(runtime->evdev_watch_fd, buffer, sizeof(buffer));
+        if (received > 0) {
+            runtime->evdev_rescan_requested = 1;
+            continue;
+        }
+        if (received < 0 && (errno == EINTR || errno == EAGAIN ||
+                             errno == EWOULDBLOCK))
+            return;
+        close(runtime->evdev_watch_fd);
+        runtime->evdev_watch_fd = -1;
+        return;
+    }
+}
+
 static void reconnect_evdev_devices(BlitRuntime *runtime)
 {
-    uint64_t now = SDL_GetTicks();
     int index;
 
-    if (now - runtime->evdev_last_scan_ticks < 1000)
+    if (!runtime->evdev_rescan_requested)
         return;
-    runtime->evdev_last_scan_ticks = now;
+    runtime->evdev_rescan_requested = 0;
     for (index = 0; index < 32; ++index) {
         char path[64];
         int fd;
@@ -8372,6 +8444,7 @@ static void finish_sdl_output(BlitRuntime *runtime, int output_index,
     capture_sdl_frame(runtime, output_index, renderer);
     capture_requested_screenshot(runtime, output_index, renderer);
     SDL_RenderPresent(renderer);
+    ++runtime->diagnostic_present_calls;
 }
 
 static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
@@ -10170,6 +10243,7 @@ int main(int argc, char **argv)
     if (bind_address == NULL || bind_address[0] == '\0')
         bind_address = "0.0.0.0";
     memset(&runtime, 0, sizeof(runtime));
+    runtime.evdev_watch_fd = -1;
     runtime.started_us = monotonic_us();
     diagnostic_log(&runtime, "info", "server_start", "Blit gateway starting");
     blit_font_load(&runtime.font);
@@ -10208,7 +10282,6 @@ int main(int argc, char **argv)
     runtime.next_event_sequence = 1;
     runtime.topology_revision = 1;
     runtime.input_routes_revision = 1;
-    runtime.evdev_last_scan_ticks = SDL_GetTicks();
     runtime.next_overlay_id = 1;
     runtime.effect.revision = 1;
     snprintf(runtime.effect.preset, sizeof(runtime.effect.preset), "none");
@@ -10288,6 +10361,8 @@ int main(int argc, char **argv)
         } else
             fprintf(stderr, "blit: no usable evdev keyboard found\n");
     }
+    open_evdev_watch(&runtime);
+    runtime.evdev_rescan_requested = 0;
     reset_render_schedule(&runtime, monotonic_us());
     if (runtime.output_count > 0) {
         runtime.pointer_valid = 1;
@@ -10347,14 +10422,42 @@ int main(int argc, char **argv)
         uint64_t now;
         uint32_t output_mask;
         int pending_before_events;
+        uint64_t select_started_us;
+        uint64_t sdl_events_started_us;
 
-        reconnect_evdev_devices(&runtime);
+        ++runtime.diagnostic_loop_iterations;
+        if (runtime.diagnostic_last_loop_us != 0) {
+            double gap = (double)(monotonic_us() -
+                                  runtime.diagnostic_last_loop_us) / 1000.0;
+            runtime.diagnostic_last_loop_gap_ms = gap;
+            if (gap > runtime.diagnostic_max_loop_gap_ms)
+                runtime.diagnostic_max_loop_gap_ms = gap;
+        }
+        runtime.diagnostic_last_loop_us = monotonic_us();
+
+        {
+            uint64_t evdev_scan_started_us = monotonic_us();
+            reconnect_evdev_devices(&runtime);
+            runtime.diagnostic_last_evdev_scan_ms =
+                (double)(monotonic_us() - evdev_scan_started_us) / 1000.0;
+            if (runtime.diagnostic_last_evdev_scan_ms >
+                runtime.diagnostic_max_evdev_scan_ms)
+                runtime.diagnostic_max_evdev_scan_ms =
+                    runtime.diagnostic_last_evdev_scan_ms;
+        }
         for (i = 0; i < BLIT_MAX_SESSIONS; ++i)
             refresh_session_state(&runtime, &runtime.sessions[i]);
 
         pending_before_events = runtime.render_pending;
+        sdl_events_started_us = monotonic_us();
         if (runtime.sdl_ready && !runtime.direct_kms)
             service_sdl_events(&runtime);
+        runtime.diagnostic_last_sdl_events_ms =
+            (double)(monotonic_us() - sdl_events_started_us) / 1000.0;
+        if (runtime.diagnostic_last_sdl_events_ms >
+            runtime.diagnostic_max_sdl_events_ms)
+            runtime.diagnostic_max_sdl_events_ms =
+                runtime.diagnostic_last_sdl_events_ms;
         now = monotonic_us();
         for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i) {
             BlitHttpClient *client = &runtime.http_clients[i];
@@ -10391,6 +10494,11 @@ int main(int argc, char **argv)
             FD_SET(input_fd, &readable);
             if (input_fd > max_fd) max_fd = input_fd;
         }
+        if (runtime.evdev_watch_fd >= 0) {
+            FD_SET(runtime.evdev_watch_fd, &readable);
+            if (runtime.evdev_watch_fd > max_fd)
+                max_fd = runtime.evdev_watch_fd;
+        }
         for (i = 0; i < BLIT_MAX_STREAMS; ++i) {
             if (runtime.streams[i].used) {
                 FD_SET(runtime.streams[i].fd, &readable);
@@ -10420,7 +10528,14 @@ int main(int argc, char **argv)
         wait_ms = render_wait_ms(&runtime, now);
         timeout.tv_sec = wait_ms / 1000;
         timeout.tv_usec = (wait_ms % 1000) * 1000;
+        select_started_us = monotonic_us();
         ready = select(max_fd + 1, &readable, NULL, NULL, &timeout);
+        runtime.diagnostic_last_select_ms =
+            (double)(monotonic_us() - select_started_us) / 1000.0;
+        if (runtime.diagnostic_last_select_ms >
+            runtime.diagnostic_max_select_ms)
+            runtime.diagnostic_max_select_ms =
+                runtime.diagnostic_last_select_ms;
         if (kms_fd >= 0 && ready > 0 && FD_ISSET(kms_fd, &readable))
             kms_ready = 1;
         if (runtime.direct_kms && runtime.kms != NULL) {
@@ -10430,6 +10545,9 @@ int main(int argc, char **argv)
             else if (serviced > 0)
                 runtime.render_pending = 1;
         }
+        if (runtime.evdev_watch_fd >= 0 && ready > 0 &&
+            FD_ISSET(runtime.evdev_watch_fd, &readable))
+            service_evdev_watch(&runtime);
         if (ready > 0 && FD_ISSET(server_fd, &readable)) {
             client_fd = accept(server_fd, NULL, NULL);
             if (client_fd < 0) {
@@ -10515,6 +10633,8 @@ int main(int argc, char **argv)
         }
     }
     close(server_fd);
+    if (runtime.evdev_watch_fd >= 0)
+        close(runtime.evdev_watch_fd);
     stop_sessions(&runtime);
     {
         int input_index;

@@ -919,7 +919,7 @@ components:
         snapshot: {$ref: '#/components/schemas/Diagnostics'}
         performance:
           type: object
-          required: [uptime_ms, frames, last_frame_gap_ms, max_frame_gap_ms, last_render_ms, max_render_ms, missed_deadlines, last_terminal_ms, max_terminal_ms, terminal_bytes, pointer_cache_hits, pointer_cache_misses, frame_rate_hz, frame_rate_frames, frame_rate_window_ms, frame_rate_age_ms]
+          required: [uptime_ms, frames, last_frame_gap_ms, max_frame_gap_ms, last_render_ms, max_render_ms, missed_deadlines, last_terminal_ms, max_terminal_ms, terminal_bytes, pointer_cache_hits, pointer_cache_misses, frame_rate_hz, frame_rate_frames, frame_rate_window_ms, frame_rate_age_ms, loop_iterations, terminal_reads, present_calls, last_loop_gap_ms, max_loop_gap_ms, last_select_ms, max_select_ms, last_sdl_events_ms, max_sdl_events_ms, last_evdev_scan_ms, max_evdev_scan_ms]
           properties:
             uptime_ms: {type: integer, minimum: 0}
             frames: {type: integer, minimum: 0}
@@ -937,6 +937,17 @@ components:
             frame_rate_frames: {type: integer, minimum: 0}
             frame_rate_window_ms: {type: integer, minimum: 0}
             frame_rate_age_ms: {type: integer, minimum: 0}
+            loop_iterations: {type: integer, minimum: 0}
+            terminal_reads: {type: integer, minimum: 0}
+            present_calls: {type: integer, minimum: 0}
+            last_loop_gap_ms: {type: number, minimum: 0}
+            max_loop_gap_ms: {type: number, minimum: 0}
+            last_select_ms: {type: number, minimum: 0}
+            max_select_ms: {type: number, minimum: 0}
+            last_sdl_events_ms: {type: number, minimum: 0}
+            max_sdl_events_ms: {type: number, minimum: 0}
+            last_evdev_scan_ms: {type: number, minimum: 0}
+            max_evdev_scan_ms: {type: number, minimum: 0}
           additionalProperties: false
         logs:
           type: array

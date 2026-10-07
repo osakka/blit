@@ -328,8 +328,14 @@ BLIT_GATE_PORT=19248 ruby tools/tests/frame_rate_gate.rb
 
 The result is exposed by `GET /v1/diagnostics/runtime` under `performance` as
 `frame_rate_hz`, `frame_rate_frames`, `frame_rate_window_ms`, and
-`frame_rate_age_ms`. The rate is measured from presented frames, not inferred
-from the display mode or configured interval.
+`frame_rate_age_ms`. The same object includes `loop_iterations`,
+`terminal_reads`, `present_calls`, `last_loop_gap_ms`, and
+`max_loop_gap_ms`, `last_select_ms`, and `max_select_ms`, which distinguish
+kernel-wait stalls from other event-loop stalls and presentation stalls. The
+SDL event-pump duration is reported as `last_sdl_events_ms` and
+`max_sdl_events_ms`; evdev scan duration is reported as
+`last_evdev_scan_ms` and `max_evdev_scan_ms`. The rate is measured from
+presented frames, not inferred from the display mode or configured interval.
 
 The shutdown gate verifies that `POST /v1/control/shutdown` acknowledges the
 request and the Blit process exits cleanly:
