@@ -438,6 +438,14 @@ if [ -n "$window_id" ]; then
         echo "$focus_window" | $b grep -q '"ok":true' && window_control_pass=1
 else
     echo HIBR_CONTROL_WINDOWS_EMPTY
+    # The stock desktop session deliberately starts without application
+    # windows.  That is a valid primary/join acceptance result; the
+    # move/resize/focus contract is asserted separately by the explicit
+    # blit.hibr_window_control=1 workload.
+    case " $($b cat /proc/cmdline 2>/dev/null || true) " in
+        *" blit.hibr_window_control=1 "*) ;;
+        *) window_control_pass=1 ;;
+    esac
 fi
 if [ "$control_displays_pass" -ne 1 ]; then
     echo HIBR_CONTROL_BLOCKED
