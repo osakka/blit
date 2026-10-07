@@ -122,6 +122,12 @@ following current QEMU fixtures:
 - Hibr four-output orchestration: one primary Hibr desktop plus three
   unchanged stock `desktop --join` clients produced four running Hibr-backed
   surfaces and four presenting KMS outputs (`KMS_FOUR_HIBR_PASS`).
+- Current-version input-loss and reconnect: the 0.1.240 input fixture passed
+  keypad bytes, independent multi-mouse routing, stream delivery, typed loss
+  and reconnect diagnostics, and route re-enablement after reconnect
+  (`BLIT_INPUT_DEVICE_LOSS_PASS`). The fixture explicitly holds the
+  reconnecting synthetic devices open so the assertion cannot sample after a
+  second intentional teardown.
 
 These are QEMU/VKMS results. They prove the four-output software path, not a
 physical four-monitor arrangement.

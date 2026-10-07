@@ -71,7 +71,7 @@ case " $($b cat /proc/cmdline 2>/dev/null || true) " in
     *" blit.input_soak=1 "*) BLIT_INPUT_ONLY_TEST=1; BLIT_INPUT_SOAK_TEST=1 ;;
 esac
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
-    *" blit.input_loss=1 "*) BLIT_INPUT_LOSS_TEST=1 ;;
+    *" blit.input_loss=1 "*) BLIT_INPUT_ONLY_TEST=1; BLIT_INPUT_LOSS_TEST=1 ;;
 esac
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
     *" blit.hibr_panes=1 "*) BLIT_HIBR_PANES_TEST=1 ;;
@@ -105,7 +105,7 @@ if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
     if [ "${BLIT_INPUT_LOSS_TEST:-0}" = 1 ]; then
         (
             $b sleep 14
-            /blit-stage/emit-uinput >/tmp/uinput-reconnect.log 2>&1
+            /blit-stage/emit-uinput --hold >/tmp/uinput-reconnect.log 2>&1
         ) &
         echo INPUT_RECONNECT_SCHEDULER_PID=$!
     fi

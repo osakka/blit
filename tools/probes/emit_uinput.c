@@ -60,12 +60,13 @@ static void sync_event(int fd)
     emit_event(fd, EV_SYN, SYN_REPORT, 0);
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
     int keyboard = make_device("Blit test keyboard", 0);
     int mouse = make_device("Blit test mouse", 1);
     int mouse2 = make_device("Blit test mouse 2", 1);
     int i;
+    int hold_after_events = argc > 1 && strcmp(argv[1], "--hold") == 0;
     if (keyboard < 0 || mouse < 0 || mouse2 < 0) return 1;
     sleep(8);
     emit_event(keyboard, EV_KEY, KEY_LEFTBRACE, 1);
@@ -135,6 +136,7 @@ int main(void)
         }
         usleep(16000);
     }
+    if (hold_after_events) sleep(20);
     ioctl(keyboard, UI_DEV_DESTROY);
     ioctl(mouse, UI_DEV_DESTROY);
     ioctl(mouse2, UI_DEV_DESTROY);
