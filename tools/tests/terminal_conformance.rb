@@ -859,6 +859,8 @@ assert_equal('C', cells.fetch([3, 2]).fetch('text'), 'kitty restore prefix')
 assert_equal('D', cells.fetch([4, 2]).fetch('text'), 'kitty restore target')
 
 kitty_data = Base64.strict_encode64("\xFF\x00\x00" * 4)
+run_session_field_case(base, 'normal-session-has-no-graphics',
+                       "printf 'ordinary terminal'", 'graphics', [])
 kitty_format = "\\033_Ga=T,f=24,s=2,v=2,c=2,r=1,i=77,m=1,q=2;#{kitty_data[0, 4]}" \
                "\\033\\\\"
 kitty_format += "\\033_Gq=2,i=77,m=0;#{kitty_data[4..]}\\033\\\\"
