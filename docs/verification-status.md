@@ -170,6 +170,13 @@ an evidence record, not a claim that the complete product is released.
   the primary running, attaches a fresh join on the next pane, and observes
   `HIBR_JOIN_RECONNECT_PASS` and `HIBR_PANE_MATRIX_PASS`. Hibr source was not
   modified.
+- The same exact TCC/QEMU restart gate also passes the repository's dedicated
+  Hibr window-control workload against Hibr 0.99.92: four sessions reach
+  `running`, the Hibr `[desktop]` supervisor restores the primary after the
+  process is killed, and an auxiliary `--join` client can be replaced on a
+  fresh pane. It emits `HIBR_PRIMARY_RESTART_PASS`,
+  `HIBR_JOIN_RECONNECT_PASS`, and `HIBR_PANE_MATRIX_PASS`; Hibr source was
+  not modified.
 - Surface and scrollback snapshots preserve complete zero-width UTF-8 cell
   sequences; a five-extension combining vector and its cursor position pass.
 - Revisioned API cell updates accept wide UTF-8 glyphs and zero-width
