@@ -7,7 +7,7 @@ an evidence record, not a claim that the complete product is released.
 
 - Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The current candidate is `0.1.244`. It builds with TCC and passes terminal
+- The current candidate is `0.1.245`. It builds with TCC and passes terminal
   conformance, SDL screenshot/overlay pixels, the hidden-cursor damage gate,
   and the complete Hibr font manifest gate. Its SDL backend uses a per-output
   glyph atlas, suppresses unchanged cell damage, and does not schedule frames
@@ -20,9 +20,9 @@ an evidence record, not a claim that the complete product is released.
   preceding 0.1.243 package was accepted by the authorized physical host and
   verified through its version endpoint.
 
-### Current 0.1.244 QEMU/KMS evidence
+### Current 0.1.245 QEMU/KMS evidence
 
-The exact TCC-built 0.1.244 binary and regenerated runtime font were staged
+The exact TCC-built 0.1.245 binary and regenerated runtime font were staged
 into the rebuilt VKMS kernel
 fixture and passed the two-output capture gate with independent 1024×768
 outputs, wide UTF-8 glyphs, Kitty pixels, API BMP capture, graphics inventory,
@@ -33,7 +33,7 @@ following variants without modifying Hibr:
 - `OUTPUT_LOSS_PASS` with the surviving output continuing to present.
 - `PPM_DISPLAY_47_WIDE_STACK_CLIP_PASS` for Kitty z-order and clipping.
 - `PPM_DISPLAY_47_SIXEL_PASS` for sixel pixel rendering.
-- The exact 0.1.244 binary also passed the two-output input/render soak:
+- The exact 0.1.245 binary also passed the two-output input/render soak:
   `LAYOUT_MATRIX_PASS`, `BLIT_INPUT_MULTI_MOUSE_PASS`,
   `BLIT_INPUT_STREAM_PASS`, and `BLIT_INPUT_RENDER_SOAK_PASS`.
 - A current-version 30-second four-PTY soak passed 364 API snapshots, 34
@@ -47,18 +47,14 @@ following variants without modifying Hibr:
 
 The QEMU VKMS kernel was rebuilt from the repository's existing Linux VKMS
 source/build tree because the prior `bzImage` artifact was missing. The
-The authorized physical host accepted package `0.1.244-1` and reports
-`server_version:0.1.244`, one 1920×2160 output at 59.99 Hz, SDL/OpenGL
+The authorized physical host accepted package `0.1.245-1` and reports
+`server_version:0.1.245`, one 1920×2160 output at 59.99 Hz, SDL/OpenGL
 readiness, zero missed deadlines, and no diagnostics errors. A fresh Hibr
-desktop capture contains the expected wallpaper, icons, pointer, and controls;
-the session remains running and advertises Kitty and sixel capabilities. After
-startup the desktop became idle, so the API correctly reports an aged/zero
-active cadence rather than treating idle time as rendered frames. The QEMU
-four-output Hibr gate above is the authoritative multi-display evidence. A
-controlled live renderer probe with the Hibr surface plus a second full-size
-active PTY surface sustained 59.97 Hz, had zero missed deadlines, and reported
-15.177 ms last render time against the 16 ms target; this validates renderer
-throughput, not Hibr's idle cadence. Hibr source was not changed.
+desktop capture remains clean and the session advertises Kitty and sixel
+capabilities. The expanded 148-glyph font is loaded in the runtime. A
+controlled two-surface renderer probe sustained 59.943 Hz with zero missed
+deadlines and 15.504 ms last render time against the 16 ms target. After probe
+cleanup, Hibr remained the sole active session. Hibr source was not changed.
 - The previous fully validated source build is `0.1.222`, which includes the
   Hibr-compatible Unicode 15.1 width table and regression vectors for
   variation selectors and zero-width joiners.

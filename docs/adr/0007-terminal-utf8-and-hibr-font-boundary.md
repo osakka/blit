@@ -51,7 +51,10 @@ runtime, with the Hibr desktop launched through the API, reports zero visible
 question-mark cells after the full initial redraw. The two-output VKMS capture
 also loads the merged font and passes its pixel oracle.
 
-The build-time manifest is the single required-glyph source. The checked-in
+The build-time manifest is the single required-glyph source. It includes the
+codepoints emitted by Hibr's executable desktop scripts, including the Matrix
+halfwidth-katakana alphabet and desktop control icons; zero-width controls are
+not treated as drawable glyphs. The checked-in
 runtime PSF is gated for all required mappings, non-blank bitmaps, and 8×16
 geometry. Block elements U+2580–U+2588 are generated with exact terminal-cell
 row coverage because proportional fallback-font rasterization can crop lower

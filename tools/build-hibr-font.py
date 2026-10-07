@@ -23,6 +23,11 @@ REQUIRED = tuple(ord(c) for c in (
     "—•…←↑→↪↻⌂⏎"
     "─━│┄┆┌┐└┘├┤═║╔╗╚╝╭╮╯╰"
     "▀▁▂▃▄▅▆▇█░▒■□▤▥▯▲▶▸▼▽▾◂◆◉●◢★☐☑♥⚑⚠✓✕✗✱❝"
+    # Additional codepoints emitted by Hibr's executable desktop scripts:
+    # controls/icons, geometry symbols, and the Matrix saver alphabet.  U+200B
+    # is deliberately not included: it is a zero-width control, not a glyph.
+    "±¶⇅∿≡⊞⌘⌨⎘ⓘ╱▞▣▦▭◈◌◎◐◧◫◷☺☾♪⚙⚿✉✎"
+    "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ🔔"
 ))
 
 
