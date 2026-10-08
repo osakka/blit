@@ -157,6 +157,12 @@ The current four-output fixture also passed `KMS_FOUR_HIBR_PASS` with four
 presenting VKMS outputs and one primary plus three joins. Both guests powered
 down cleanly; Hibr remained unchanged.
 
+The unchanged stock Hibr session entrypoint was also exercised with
+`blit.hibr_stock=1` and the four-pane matrix. All four stock Hibr sessions
+reached `running`, attached to Blit-owned panes, and the guest powered down
+cleanly with no reported Hibr errors. This is stock-entrypoint integration
+evidence; it does not replace physical multi-display validation.
+
 The current 0.1.279 two-output high-refresh fixture passed
 `REFRESH_SCHEDULER_240_PASS` and accepted all 240 API pixel frames, but failed
 the strict presentation-rate assertion: QEMU TCG presented 165.222 measured
