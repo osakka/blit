@@ -235,6 +235,8 @@ typedef struct {
     int graphics_formats[BLIT_SDL_GRAPHICS_CACHE];
     unsigned long long graphics_cache_hits;
     unsigned long long graphics_texture_uploads;
+    double last_graphics_upload_ms;
+    double max_graphics_upload_ms;
     unsigned long long last_topology_revision;
     int last_target_count;
     int glyph_atlas_columns;
@@ -1257,6 +1259,26 @@ static unsigned long long diagnostic_graphics_texture_uploads(
     return total;
 }
 
+static double diagnostic_last_graphics_upload_ms(const BlitRuntime *runtime)
+{
+    double value = 0.0;
+    int i;
+    for (i = 0; i < runtime->output_count; ++i)
+        if (runtime->outputs[i].last_graphics_upload_ms > value)
+            value = runtime->outputs[i].last_graphics_upload_ms;
+    return value;
+}
+
+static double diagnostic_max_graphics_upload_ms(const BlitRuntime *runtime)
+{
+    double value = 0.0;
+    int i;
+    for (i = 0; i < runtime->output_count; ++i)
+        if (runtime->outputs[i].max_graphics_upload_ms > value)
+            value = runtime->outputs[i].max_graphics_upload_ms;
+    return value;
+}
+
 static unsigned long long diagnostic_background_batches(
     const BlitRuntime *runtime)
 {
@@ -1340,6 +1362,7 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"stream_dropped_events\":%llu,"
         "\"stream_backpressure_disconnects\":%llu,"
         "\"graphics_cache_hits\":%llu,\"graphics_texture_uploads\":%llu,"
+        "\"last_graphics_upload_ms\":%.3f,\"max_graphics_upload_ms\":%.3f,"
         "\"background_batches\":%llu,\"background_quads\":%llu,"
         "\"pixel_frames_accepted\":%llu,\"pixel_frame_errors\":%llu,"
         "\"frame_rate_frames\":%llu,\"frame_rate_window_ms\":%llu,"
@@ -1378,6 +1401,8 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         runtime->diagnostic_stream_backpressure_disconnects,
         diagnostic_graphics_cache_hits(runtime),
         diagnostic_graphics_texture_uploads(runtime),
+        diagnostic_last_graphics_upload_ms(runtime),
+        diagnostic_max_graphics_upload_ms(runtime),
         diagnostic_background_batches(runtime),
         diagnostic_background_quads(runtime),
         runtime->pixel_frames_accepted,
@@ -9681,10 +9706,12 @@ static SDL_Texture *sdl_graphics_texture(BlitOutput *output,
     SDL_Texture *texture;
     int pixel_index;
     int reuse_texture = 0;
+    uint64_t upload_started_us;
 
     if (output == NULL || output->renderer == NULL || image == NULL ||
         image->pixels == NULL || image->width < 1 || image->height < 1)
         return NULL;
+    upload_started_us = monotonic_us();
     for (index = 0; index < BLIT_SDL_GRAPHICS_CACHE; ++index) {
         if (output->graphics_sources[index] == image) {
             if (output->graphics_generations[index] == image->generation &&
@@ -9762,6 +9789,10 @@ static SDL_Texture *sdl_graphics_texture(BlitOutput *output,
     output->graphics_heights[free_index] = image->height;
     output->graphics_formats[free_index] = image->format;
     output->graphics_textures[free_index] = texture;
+    output->last_graphics_upload_ms =
+        (double)(monotonic_us() - upload_started_us) / 1000.0;
+    if (output->last_graphics_upload_ms > output->max_graphics_upload_ms)
+        output->max_graphics_upload_ms = output->last_graphics_upload_ms;
     ++output->graphics_texture_uploads;
     return texture;
 }

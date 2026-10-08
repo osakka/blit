@@ -463,7 +463,9 @@ Each scheduler output also reports `last_present_ms`, `max_present_ms`, and
 than hiding it in one aggregate server-wide maximum.
 Graphics composition counters are reported as `graphics_cache_hits` and
 `graphics_texture_uploads`; they make wallpaper upload churn observable through
-the API rather than inferred from screenshots.
+the API rather than inferred from screenshots. `last_graphics_upload_ms` and
+`max_graphics_upload_ms` measure the texture creation/update path itself, which
+is required when qualifying high-rate Kitty/Sixel or API pixel streams.
 
 The SDL path uses a per-output monochrome glyph atlas and suppresses damage
 for terminal writes whose complete cell state is unchanged. This is especially
