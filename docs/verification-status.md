@@ -3,7 +3,33 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
-## Current 0.1.355 real-host Hibr handoff evidence
+## Current 0.1.356 live and QEMU evidence
+
+The live host now reports `0.1.356`. The SDL raw-evdev pointer feedback loop
+was removed: raw evdev updates the Blit software cursor directly and no longer
+warps SDL's native pointer into an asynchronous second motion stream. TCC
+pointer-damage, external-composition, and hidden-cursor gates pass after the
+change. API-injected live motion reached five pointer-cache renders with zero
+missed deadlines; physical pointer acceptance remains open because no physical
+event has been observed through the live API capture.
+
+The canonical Hibr QEMU input soak was rerun with the 0.1.356 binary and
+current Hibr staging. It passed `BLIT_INPUT_RENDER_SOAK_PASS`,
+`BLIT_INPUT_STREAM_PASS`, `BLIT_INPUT_GAMEPAD_PASS`,
+`BLIT_INPUT_MULTI_MOUSE_PASS`, and `BLIT_INPUT_RAW_EVDEV_PASS` with `914`
+events, `546` motion events, and `40` button events. The same run passed the
+two-output KMS screenshot checks. No QEMU process remained after shutdown.
+
+The authorized host reports `0.1.356`. A fresh ordinary Hibr desktop started
+through `POST /v1/terminal-sessions` reached the authoritative `240x135`
+surface. Restarting Blit intentionally terminates its child Hibr process; the
+primary desktop was restored through the documented API launch contract after
+deployment. Hibr source was not modified.
+
+Physical pointer/button acceptance, multiple physical monitors, and physical
+high-refresh acceptance remain open.
+
+## Historical 0.1.355 real-host Hibr handoff evidence
 
 The authorized host reports `0.1.355`. A fresh ordinary Hibr desktop started
 through `POST /v1/terminal-sessions` reached the authoritative `240x135`
