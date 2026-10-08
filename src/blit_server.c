@@ -9768,13 +9768,17 @@ static unsigned long long graphics_scene_signature(const BlitRuntime *runtime,
         if (surface == NULL || !surface_targets_output((BlitRuntime *)runtime,
                                                         surface, output_index))
             continue;
-        signature ^= session->id;
-        signature *= 1099511628211ULL;
         for (image_index = 0; image_index < BLIT_GRAPHICS_MAX_IMAGES;
              ++image_index) {
             const BlitGraphicsImage *image = &session->graphics[image_index];
             if (!image->used)
                 continue;
+            /* The signature describes the graphics scene, not session
+             * membership. A session with no images must contribute nothing;
+             * otherwise an ordinary surface/session transition is reported
+             * as graphics_changed and forces a full redraw. */
+            signature ^= session->id;
+            signature *= 1099511628211ULL;
             signature ^= image->id;
             signature *= 1099511628211ULL;
             signature ^= (unsigned long long)(image->complete != 0);
@@ -9798,6 +9802,53 @@ static unsigned long long graphics_scene_signature(const BlitRuntime *runtime,
         }
     }
     return signature;
+}
+
+static int graphics_scene_count(const BlitRuntime *runtime, int output_index)
+{
+    int session_index;
+    int image_index;
+    int count = 0;
+
+    if (runtime == NULL || output_index < 0 ||
+        output_index >= runtime->output_count)
+        return 0;
+    for (session_index = 0; session_index < BLIT_MAX_SESSIONS;
+         ++session_index) {
+        const BlitSession *session = &runtime->sessions[session_index];
+        BlitSurface *surface;
+        if (!session->used)
+            continue;
+        surface = find_surface_id((BlitRuntime *)runtime, session->id);
+        if (surface == NULL || !surface_targets_output((BlitRuntime *)runtime,
+                                                        surface, output_index))
+            continue;
+        for (image_index = 0; image_index < BLIT_GRAPHICS_MAX_IMAGES;
+             ++image_index)
+            if (session->graphics[image_index].used)
+                ++count;
+    }
+    return count;
+}
+
+static int active_output_surface_count(const BlitRuntime *runtime,
+                                       int output_index)
+{
+    int surface_index;
+    int count = 0;
+
+    if (runtime == NULL || output_index < 0 ||
+        output_index >= runtime->output_count)
+        return 0;
+    for (surface_index = 0; surface_index < BLIT_MAX_SESSIONS;
+         ++surface_index) {
+        BlitSurface *surface = runtime->surfaces[surface_index];
+        if (surface != NULL && surface->used &&
+            surface_targets_output((BlitRuntime *)runtime, surface,
+                                   output_index))
+            ++count;
+    }
+    return count;
 }
 
 static SDL_Texture *create_sdl_glyph_atlas(SDL_Renderer *renderer,
@@ -10762,13 +10813,18 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
         if (runtime->pointer_dirty)
             ++runtime->diagnostic_pointer_cache_misses;
         {
-            char detail[160];
+            char detail[256];
             snprintf(detail, sizeof(detail),
-                     "output=%d path=%s target_changed=%d external_changed=%d graphics_changed=%d",
+                     "output=%d path=%s target_count=%d active_surfaces=%d target_changed=%d external_changed=%d initialized=%d graphics_changed=%d graphics_images=%d last_graphics_signature=%llu graphics_signature=%llu",
                      output_index, full_redraw ? "full-redraw" :
                          "incremental-damage",
+                     target_count, active_output_surface_count(runtime, output_index),
                      target_changed, external_target_changed,
-                     graphics_changed);
+                     runtime->outputs[output_index].initialized,
+                     graphics_changed,
+                     graphics_scene_count(runtime, output_index),
+                     runtime->outputs[output_index].last_graphics_signature,
+                     graphics_scene_signature(runtime, output_index));
             diagnostic_trace(runtime, "render_path", detail);
         }
         if (target_count == 0 && overlay_count == 0 &&

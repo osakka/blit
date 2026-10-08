@@ -87,7 +87,8 @@ begin
   raise "external pointer cache was not used: #{performance.inspect}" unless
     pointer_hits >= 5
   raise 'external cell damage did not render incrementally' unless
-    details.any? { |detail| detail.include?('external_changed=1 graphics_changed=0') }
+    details.any? { |detail| detail.include?('external_changed=1') &&
+      detail.include?('graphics_changed=0') }
   raise 'pointer-cache render path was not observed' unless
     details.any? { |detail| detail.include?('path=pointer-cache') }
   puts "EXTERNAL_POINTER_COMPOSITION_PASS pointer_cache_hits=#{pointer_hits} " \

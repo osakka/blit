@@ -21,7 +21,10 @@ tools/diagnostics/capture-live.sh http://192.168.10.54:8080 20 diagnostics/live-
 Use the timing-only form when measuring frame cadence, loop gaps, or input
 latency. Use the default screenshot form when visual evidence is required;
 the screenshot endpoint is intentionally kept separate because its transfer
-can block a single-threaded server for hundreds of milliseconds.
+can block a single-threaded server for hundreds of milliseconds. It also
+requests a fresh scene (`initialized=0`) so the returned image is current;
+therefore do not use screenshot requests inside a pointer-latency or redraw
+cadence measurement. Take screenshots after the interaction window instead.
 
 The output directory contains:
 

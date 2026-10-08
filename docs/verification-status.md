@@ -3,6 +3,24 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## Current 0.1.326 live diagnostic-boundary status
+
+Package `blit_0.1.326-1_amd64.deb` is deployed on the authorized host;
+`/v1/version` reports `0.1.326`. Package SHA-256 is
+`fbbafb832d0465f14b8bd38f2df596bea333c8cd4e41fbb9b22bf6b9431aec8d`.
+
+The live timing-only input probe passed API motion, both button edges, input
+dispatch accounting, pointer position, and render-path evidence. After the
+initial scene transition, the pointer workload stayed on
+`incremental-damage` with `graphics_changed=0`, `graphics_images=0`, a stable
+graphics signature, and zero missed refresh deadlines. The capture mechanism
+now records the session graphics list beside each trace. Screenshot captures
+are explicitly excluded from timing conclusions because the screenshot route
+forces a fresh scene and can block the single-threaded loop during transfer.
+
+The fix is Blit-only: an empty graphics scene no longer incorporates session
+membership into its graphics signature. Hibr source remains unmodified.
+
 ## Current 0.1.320 live graphics-probe status
 
 Package `blit_0.1.320-1_amd64.deb` adds the Blit-owned, non-Hibr-source probe
