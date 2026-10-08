@@ -71,6 +71,13 @@ the 240 Hz result is recorded as a VM capability limit rather than a physical
 hardware result. No scheduler relaxation or asynchronous tearing workaround
 was introduced.
 
+The same 240 Hz run was repeated with QEMU TCG multi-threaded translation
+explicitly enabled. It improved visible presents only from `79` to `81`, but
+still recorded `16` missed deadlines and a `23.473 ms` maximum KMS present.
+This rules out the default TCG threading mode as the sole cause; the result
+remains a virtual VKMS/TCG limitation rather than a production scheduler
+change.
+
 ## Current 0.1.359 live diagnostics and physical-input boundary
 
 The authorized live host reports `0.1.359` and remains reachable at
