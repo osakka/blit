@@ -8690,6 +8690,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
     }
     if (strcmp(path, "/v1/input/inject") == 0 &&
         strcmp(method, "POST") == 0) {
+        uint64_t input_started_us = monotonic_us();
         char kind[64];
         int x;
         int y;
@@ -8736,6 +8737,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
                          "Only pointer_motion, pointer_button, and pointer_wheel are supported.");
             return;
         }
+        record_input_dispatch(runtime, input_started_us);
         snprintf(body, sizeof(body),
                  "{\"accepted\":true,\"kind\":\"%s\"}", kind);
         send_http(fd, 202, "Accepted", "application/json", body);
@@ -11407,6 +11409,14 @@ static void update_pointer_position(BlitRuntime *runtime,
         BlitSession *target = mouse_target(runtime, runtime->pointer_output,
             runtime->pointer_x, runtime->pointer_y, &target_col, &target_row);
         if (routed != NULL) target = routed;
+        {
+            char detail[160];
+            snprintf(detail, sizeof(detail), "x=%.1f y=%.1f output=%d device=%s",
+                     runtime->pointer_x, runtime->pointer_y,
+                     runtime->pointer_output,
+                     device_id != NULL ? device_id : "evdev-pointer");
+            diagnostic_trace(runtime, "pointer_motion", detail);
+        }
         snprintf(input_event, sizeof(input_event),
                  "{\"type\":\"input\",\"session_id\":\"session-%llu\","
                  "\"device_id\":\"%s\",\"event\":{"
