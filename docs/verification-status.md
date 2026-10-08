@@ -57,6 +57,11 @@ builds `pty-input-echo`, `http-put`, and `ppm-assert` from the repository on
 each run, preventing incomplete historical initroots from invalidating the
 visual result.
 
+The exact 0.1.249 four-output VKMS fixture also passed `KMS_FOUR_HIBR_PASS`:
+four independent 60 Hz outputs presented simultaneously with one primary Hibr
+desktop and three unchanged stock `--join` clients. Hibr source remained
+unchanged.
+
 ### Current 0.1.248 source/package evidence
 
 The 0.1.248 provider-bootstrap correction was superseded by 0.1.249 after

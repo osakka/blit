@@ -13,6 +13,7 @@ version=$(sed -n '1p' "$repo_root/packaging/VERSION")
 test -d "$stage/blit-stage"
 test -x "$binary"
 test -n "$version"
+mkdir -p "$stage/blit-stage/fonts"
 cp "$binary" "$stage/blit-stage/blit-server"
 strings "$stage/blit-stage/blit-server" | grep -Fx "$version" >/dev/null
 cp "$repo_root/assets/fonts/Blit-Hibr-Terminus16.psf" \
