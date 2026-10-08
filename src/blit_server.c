@@ -6691,9 +6691,11 @@ static int process_is_descendant(pid_t pid, pid_t ancestor)
 
 static int signal_process_group(pid_t pid)
 {
-    pid_t group = getpgid(pid);
-
-    if (group > 1 && kill(-group, SIGWINCH) == 0)
+    /* Hibr's desktop parent is the process-group leader. Use the exact
+       negative-PID operation that the kernel exposes for that group; a
+       getpgid() round trip is unnecessary and obscures failures on older
+       libc/TCC combinations. */
+    if (pid > 1 && kill(-pid, SIGWINCH) == 0)
         return 1;
     return kill(pid, SIGWINCH) == 0;
 }
