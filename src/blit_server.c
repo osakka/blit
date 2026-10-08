@@ -10840,6 +10840,42 @@ static BlitSession *mouse_target(BlitRuntime *runtime, int output_index,
                 return &runtime->sessions[j];
         return NULL;
     }
+    /* A display-attached session may intentionally have no Blit pane.  This
+       is the API shape used by the primary Hibr desktop: it is rendered at
+       the first available stacked surface, but the old hit test only knew
+       about panes and silently discarded every button report. */
+    {
+        int stack_y = 0;
+        int session_index;
+        for (session_index = 0; session_index < BLIT_MAX_SESSIONS;
+             ++session_index) {
+            BlitSession *session = &runtime->sessions[session_index];
+            BlitSurface *surface;
+            int surface_x = 4;
+            int surface_y = stack_y + 4;
+            if (!session->used || session->pane_id[0] != '\0')
+                continue;
+            if (session->display_id[0] == '\0') {
+                if (output_index != 0)
+                    continue;
+            } else if (strcmp(session->display_id, display_id) != 0) {
+                continue;
+            }
+            surface = find_surface_id(runtime, session->id);
+            if (surface == NULL || !surface->used)
+                continue;
+            if (pixel_x >= surface_x && pixel_y >= surface_y &&
+                pixel_x < surface_x + surface->width * cell_width &&
+                pixel_y < surface_y + surface->height * cell_height) {
+                *column = (int)((pixel_x - surface_x) /
+                                (float)cell_width) + 1;
+                *row = (int)((pixel_y - surface_y) /
+                             (float)cell_height) + 1;
+                return session;
+            }
+            stack_y += surface->height * cell_height + 4;
+        }
+    }
     return NULL;
 }
 
