@@ -668,6 +668,32 @@ static int cb_ws_open(void)
 	}
 	if (strncmp(headers, "HTTP/1.1 101", 12) != 0) { close(fd); return 0; }
 	cb.ws_fd = fd;
+	/* The gateway defaults new streams to all event classes.  This adapter
+	 * consumes only input, and its bounded frame reader must never be exposed
+	 * to large surface/frame messages.  Client-to-server WebSocket messages
+	 * must be masked. */
+	{
+		const char subscription[] = "{\"subscribe\":[\"input\"]}";
+		unsigned char frame[2 + 4 + sizeof(subscription) - 1];
+		unsigned char mask[4];
+		unsigned long seed = (unsigned long)time(NULL) ^
+			(unsigned long)getpid();
+		size_t i;
+		frame[0] = 0x81;
+		frame[1] = (unsigned char)(0x80 | (sizeof(subscription) - 1));
+		mask[0] = (unsigned char)(seed >> 24);
+		mask[1] = (unsigned char)(seed >> 16);
+		mask[2] = (unsigned char)(seed >> 8);
+		mask[3] = (unsigned char)seed;
+		memcpy(frame + 2, mask, sizeof(mask));
+		for (i = 0; i < sizeof(subscription) - 1; ++i)
+			frame[6 + i] = (unsigned char)subscription[i] ^ mask[i % 4];
+		if (!cb_write_all(fd, frame, sizeof(frame))) {
+			close(fd);
+			cb.ws_fd = -1;
+			return 0;
+		}
+	}
 	return 1;
 }
 
