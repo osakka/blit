@@ -20,6 +20,14 @@ composition/presentation issue, not the former incomplete Hibr surface. The
 next capture must correlate pane bounds, cell coordinates, screenshot pixels,
 pointer damage, and physical evdev events in the same timestamped window.
 
+The live API pointer control capture produced five distinct screenshots. Pixel
+deltas were confined to the old and new cursor regions; the API path showed no
+cursor trail or full-screen damage. The TCC-built binary also passed the full
+terminal conformance suite and a five-second two-session soak (`356` snapshots,
+`32` resizes, `53744 KiB` peak RSS). These are API/control-path results, not
+physical mouse acceptance: the real-host physical capture still observed zero
+evdev events.
+
 ## Current 0.1.357 release and live-validation gate
 
 The TCC-built `0.1.357` package contains the attach-time PTY notification

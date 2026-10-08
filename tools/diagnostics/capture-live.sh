@@ -86,7 +86,7 @@ get_session_details() {
         file_name="session-${session_id}.json"
         # A missing session is normal: the API has no list route yet, so this
         # bounded probe discovers live sessions without creating anything.
-        if curl --fail --silent --show-error --connect-timeout 3 --max-time 10 \
+        if curl --fail --silent --connect-timeout 3 --max-time 10 \
             "$base_url/v1/terminal-sessions/$session_id" > "$output_dir/.$file_name.tmp"; then
             mv "$output_dir/.$file_name.tmp" "$output_dir/$file_name"
         else
