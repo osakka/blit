@@ -6860,8 +6860,7 @@ static void service_attach_reasserts(BlitRuntime *runtime, uint64_t now)
             signalled = 1;
         hibr_matches = reassert_hibr_session_processes(session, &size);
         if (hibr_matches > 0) {
-            if (force_hibr_session_resize(session, &size))
-                ++hibr_matches;
+            (void)force_hibr_session_resize(session, &size);
             signalled = 1;
             ++session->attach_reassert_hibr_matches;
         }
