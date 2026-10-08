@@ -112,6 +112,12 @@ The SDL3 adapter translates only graphic canvases and effects into SDL3
 resources and presentation operations. SDL3 failures must be converted into
 stable blit errors and events; they must not change terminal state.
 
+Gamepad evdev devices are discovered independently of keyboards and pointers.
+Their raw button/axis events are routed to a selected session and published on
+the input stream with receipt timestamps. Blit does not invent a universal
+keyboard escape-sequence mapping for gamepads; an emulator or API client owns
+the controller mapping.
+
 ### Persistence and observability
 
 Configuration, snapshots, structured logs, metrics, and diagnostic frame data

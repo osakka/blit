@@ -403,6 +403,10 @@ typedef struct {
     char evdev_keyboard_paths[BLIT_MAX_INPUT_DEVICES][128];
     int evdev_keyboard_count;
     int evdev_keyboard_reported[BLIT_MAX_INPUT_DEVICES];
+    int evdev_gamepad_fds[BLIT_MAX_INPUT_DEVICES];
+    char evdev_gamepad_paths[BLIT_MAX_INPUT_DEVICES][128];
+    int evdev_gamepad_count;
+    int evdev_gamepad_reported[BLIT_MAX_INPUT_DEVICES];
     int evdev_shift;
     int evdev_ctrl;
     int evdev_alt;
@@ -1406,7 +1410,8 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              "\"backend\":\"%s\",\"error\":\"%s\"},"
              "\"resources\":{\"displays\":%d,\"outputs\":%d,"
              "\"sessions\":%d,\"surfaces\":%d,\"streams\":%d,"
-             "\"input_routes\":%d,\"keyboards\":%d,\"pointers\":%d},"
+             "\"input_routes\":%d,\"keyboards\":%d,\"pointers\":%d,"
+             "\"gamepads\":%d},"
              "\"render\":{\"pending\":%s,\"interval_ms\":%d,"
              "\"effective_interval_ms\":%d,\"mode\":\"refresh-aware\","
              "\"outputs\":%s,"
@@ -1423,7 +1428,8 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
                  "true" : "false", backend, escaped_error,
              runtime->display_count, runtime->output_count, sessions, surfaces,
              streams, routes, runtime->evdev_keyboard_count,
-             runtime->evdev_mouse_count, runtime->render_pending ? "true" : "false",
+             runtime->evdev_mouse_count, runtime->evdev_gamepad_count,
+             runtime->render_pending ? "true" : "false",
              runtime->render_interval_ms, runtime->render_effective_interval_ms,
              scheduler,
              runtime->font_scale,
@@ -1708,9 +1714,11 @@ static void input_json(char *body, size_t capacity)
         unsigned long event_bits[4];
         unsigned long key_bits[32];
         unsigned long rel_bits[4];
+        unsigned long abs_bits[4];
         int fd;
         int pointer;
         int keyboard;
+        int gamepad;
         int first_kind = 1;
         int first_capability = 1;
         snprintf(path, sizeof(path), "/dev/input/event%d", index);
@@ -1720,14 +1728,20 @@ static void input_json(char *body, size_t capacity)
         memset(event_bits, 0, sizeof(event_bits));
         memset(key_bits, 0, sizeof(key_bits));
         memset(rel_bits, 0, sizeof(rel_bits));
+        memset(abs_bits, 0, sizeof(abs_bits));
         ioctl(fd, EVIOCGNAME(sizeof(name)), name);
         ioctl(fd, EVIOCGBIT(0, sizeof(event_bits)), event_bits);
         ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(key_bits)), key_bits);
         ioctl(fd, EVIOCGBIT(EV_REL, sizeof(rel_bits)), rel_bits);
+        ioctl(fd, EVIOCGBIT(EV_ABS, sizeof(abs_bits)), abs_bits);
         pointer = input_bit(key_bits, BTN_LEFT) || input_bit(key_bits, BTN_RIGHT) ||
             input_bit(rel_bits, REL_X) || input_bit(rel_bits, REL_Y);
         keyboard = input_bit(key_bits, KEY_A) || input_bit(key_bits, KEY_ENTER);
-        if (!pointer && !keyboard) { close(fd); continue; }
+        gamepad = (input_bit(abs_bits, ABS_X) || input_bit(abs_bits, ABS_Y) ||
+                   input_bit(abs_bits, ABS_RX) || input_bit(abs_bits, ABS_RY)) &&
+            (input_bit(key_bits, BTN_GAMEPAD) ||
+             input_bit(key_bits, BTN_SOUTH) || input_bit(key_bits, BTN_EAST));
+        if (!pointer && !keyboard && !gamepad) { close(fd); continue; }
         used += (size_t)snprintf(body + used, capacity - used,
                                  "%s{\"id\":\"event-%d\",\"name\":\"",
                                  device_count++ > 0 ? "," : "", index);
@@ -1744,11 +1758,21 @@ static void input_json(char *body, size_t capacity)
             used += (size_t)snprintf(body + used, capacity - used, "%s\"pointer\"", first_kind ? "" : ",");
             first_kind = 0;
         }
+        if (gamepad) {
+            used += (size_t)snprintf(body + used, capacity - used, "%s\"gamepad\"", first_kind ? "" : ",");
+            first_kind = 0;
+        }
         used += (size_t)snprintf(body + used, capacity - used, "],\"capabilities\":[");
         if (input_bit(rel_bits, REL_X)) { used += (size_t)snprintf(body + used, capacity - used, "\"rel-x\""); first_capability = 0; }
         if (input_bit(rel_bits, REL_Y)) { used += (size_t)snprintf(body + used, capacity - used, "%s\"rel-y\"", first_capability ? "" : ","); first_capability = 0; }
         if (input_bit(key_bits, BTN_LEFT)) { used += (size_t)snprintf(body + used, capacity - used, "%s\"buttons\"", first_capability ? "" : ","); first_capability = 0; }
         if (keyboard) { used += (size_t)snprintf(body + used, capacity - used, "%s\"keys\"", first_capability ? "" : ","); }
+        if (input_bit(abs_bits, ABS_X) || input_bit(abs_bits, ABS_Y) ||
+            input_bit(abs_bits, ABS_RX) || input_bit(abs_bits, ABS_RY)) {
+            used += (size_t)snprintf(body + used, capacity - used, "%s\"axes\"", first_capability ? "" : ",");
+            first_capability = 0;
+        }
+        if (gamepad) { used += (size_t)snprintf(body + used, capacity - used, "%s\"gamepad-buttons\"", first_capability ? "" : ","); }
         used += (size_t)snprintf(body + used, capacity - used, "]}");
         close(fd);
     }
@@ -5672,6 +5696,29 @@ static void remove_evdev_keyboard(BlitRuntime *runtime, int index)
     runtime->evdev_rescan_requested = 1;
 }
 
+static void remove_evdev_gamepad(BlitRuntime *runtime, int index)
+{
+    int i;
+    if (index < 0 || index >= runtime->evdev_gamepad_count)
+        return;
+    if (runtime->evdev_gamepad_fds[index] >= 0)
+        close(runtime->evdev_gamepad_fds[index]);
+    for (i = index; i + 1 < runtime->evdev_gamepad_count; ++i) {
+        runtime->evdev_gamepad_fds[i] = runtime->evdev_gamepad_fds[i + 1];
+        snprintf(runtime->evdev_gamepad_paths[i],
+                 sizeof(runtime->evdev_gamepad_paths[i]), "%s",
+                 runtime->evdev_gamepad_paths[i + 1]);
+        runtime->evdev_gamepad_reported[i] =
+            runtime->evdev_gamepad_reported[i + 1];
+    }
+    --runtime->evdev_gamepad_count;
+    runtime->evdev_gamepad_fds[runtime->evdev_gamepad_count] = -1;
+    runtime->evdev_gamepad_paths[runtime->evdev_gamepad_count][0] = '\0';
+    runtime->evdev_gamepad_reported[runtime->evdev_gamepad_count] = 0;
+    disable_input_routes_for_device(runtime, "evdev-gamepad");
+    runtime->evdev_rescan_requested = 1;
+}
+
 static int display_id_is_known(const BlitRuntime *runtime, const char *display_id)
 {
     char expected[128];
@@ -7568,7 +7615,8 @@ static void handle_request(int fd, BlitRuntime *runtime,
                          sizeof(target_session_id)) ||
             !json_bool(payload, "enabled", &enabled) ||
             (strcmp(device_id, "evdev-keyboard") != 0 &&
-             strcmp(device_id, "evdev-pointer") != 0) ||
+             strcmp(device_id, "evdev-pointer") != 0 &&
+             strcmp(device_id, "evdev-gamepad") != 0) ||
             strncmp(target_session_id, "session-", 8) != 0 ||
             find_session_id(runtime,
                 strtoull(target_session_id + 8, NULL, 10)) == NULL) {
@@ -8156,6 +8204,26 @@ static int evdev_has_keyboard(int fd)
     return input_bit(keys, KEY_A) && input_bit(keys, KEY_ENTER);
 }
 
+static int evdev_has_gamepad(int fd)
+{
+    unsigned long keys[32];
+    unsigned long absolute[4];
+    int has_axis;
+    int has_button;
+    memset(keys, 0, sizeof(keys));
+    memset(absolute, 0, sizeof(absolute));
+    if (ioctl(fd, EVIOCGBIT(EV_ABS, sizeof(absolute)), absolute) < 0)
+        return 0;
+    if (ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(keys)), keys) < 0)
+        return 0;
+    has_axis = input_bit(absolute, ABS_X) || input_bit(absolute, ABS_Y) ||
+        input_bit(absolute, ABS_RX) || input_bit(absolute, ABS_RY);
+    has_button = input_bit(keys, BTN_GAMEPAD) ||
+        input_bit(keys, BTN_SOUTH) || input_bit(keys, BTN_EAST) ||
+        input_bit(keys, BTN_NORTH) || input_bit(keys, BTN_WEST);
+    return has_axis && has_button;
+}
+
 static int input_path_seen(char paths[][128], int count, const char *path)
 {
     int i;
@@ -8208,6 +8276,24 @@ static int open_evdev_keyboards(int *fds, char paths[][128], int *count)
         fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
         if (fd < 0) continue;
         if (evdev_has_keyboard(fd)) {
+            fds[*count] = fd;
+            snprintf(paths[(*count)++], 128, "%s", path);
+        } else close(fd);
+    }
+    return *count;
+}
+
+static int open_evdev_gamepads(int *fds, char paths[][128], int *count)
+{
+    int index;
+    *count = 0;
+    for (index = 0; index < 32 && *count < BLIT_MAX_INPUT_DEVICES; ++index) {
+        char path[64];
+        int fd;
+        snprintf(path, sizeof(path), "/dev/input/event%d", index);
+        fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+        if (fd < 0) continue;
+        if (evdev_has_gamepad(fd)) {
             fds[*count] = fd;
             snprintf(paths[(*count)++], 128, "%s", path);
         } else close(fd);
@@ -8319,6 +8405,26 @@ static void reconnect_evdev_devices(BlitRuntime *runtime)
                                             "input_device_reconnected",
                                             "evdev-keyboard", path,
                                             runtime->evdev_keyboard_count);
+                fd = -1;
+            }
+            if (fd >= 0) close(fd);
+        }
+        if (runtime->evdev_gamepad_count < BLIT_MAX_INPUT_DEVICES &&
+            !evdev_path_open(runtime->evdev_gamepad_fds,
+                             runtime->evdev_gamepad_paths,
+                             runtime->evdev_gamepad_count, path)) {
+            fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+            if (fd >= 0 && evdev_has_gamepad(fd)) {
+                int slot = runtime->evdev_gamepad_count++;
+                runtime->evdev_gamepad_fds[slot] = fd;
+                snprintf(runtime->evdev_gamepad_paths[slot], 128, "%s", path);
+                runtime->evdev_gamepad_reported[slot] = 0;
+                fprintf(stderr, "blit: evdev gamepad reconnected: %s fd=%d\n",
+                        path, fd);
+                broadcast_input_diagnostic(runtime, "info",
+                                            "input_device_reconnected",
+                                            "evdev-gamepad", path,
+                                            runtime->evdev_gamepad_count);
                 fd = -1;
             }
             if (fd >= 0) close(fd);
@@ -9650,6 +9756,61 @@ static void broadcast_evdev_pointer(BlitRuntime *runtime, const char *kind,
     broadcast_stream(runtime, input_event, BLIT_STREAM_INPUT);
 }
 
+static void broadcast_evdev_gamepad(BlitRuntime *runtime,
+                                    const struct input_event *event)
+{
+    char input_event[384];
+    BlitSession *target = input_route_target(runtime, "evdev-gamepad");
+    const char *kind = event->type == EV_KEY ? "gamepad_button" :
+        (event->type == EV_ABS ? "gamepad_axis" : "gamepad_event");
+    snprintf(input_event, sizeof(input_event),
+             "{\"type\":\"input\",\"session_id\":\"session-%llu\","
+             "\"device_id\":\"evdev-gamepad\",\"event\":{"
+             "\"kind\":\"%s\",\"code\":%u,\"value\":%d,"
+             "\"time_us\":%llu}}",
+             target != NULL ? target->id : 0ULL, kind, event->code,
+             event->value, (unsigned long long)monotonic_us());
+    broadcast_stream(runtime, input_event, BLIT_STREAM_INPUT);
+}
+
+static void service_evdev_gamepad(BlitRuntime *runtime)
+{
+    struct input_event event;
+    ssize_t received;
+    int device_index;
+
+    for (device_index = 0; device_index < runtime->evdev_gamepad_count;
+         ++device_index) {
+        int device_lost = 0;
+        if (runtime->evdev_gamepad_fds[device_index] < 0) continue;
+        while ((received = read(runtime->evdev_gamepad_fds[device_index],
+                                &event, sizeof(event))) ==
+               (ssize_t)sizeof(event)) {
+            if (!runtime->evdev_gamepad_reported[device_index]) {
+                fprintf(stderr, "blit: evdev gamepad events received from %s\n",
+                        runtime->evdev_gamepad_paths[device_index]);
+                runtime->evdev_gamepad_reported[device_index] = 1;
+            }
+            if (event.type == EV_KEY || event.type == EV_ABS)
+                broadcast_evdev_gamepad(runtime, &event);
+        }
+        if (received == 0 ||
+            (received < 0 && errno != EAGAIN && errno != EWOULDBLOCK &&
+             errno != EINTR))
+            device_lost = 1;
+        if (device_lost) {
+            fprintf(stderr, "blit: evdev gamepad disappeared: %s\n",
+                    runtime->evdev_gamepad_paths[device_index]);
+            broadcast_input_diagnostic(runtime, "warning", "input_device_lost",
+                                        "evdev-gamepad",
+                                        runtime->evdev_gamepad_paths[device_index],
+                                        runtime->evdev_gamepad_count - 1);
+            remove_evdev_gamepad(runtime, device_index);
+            --device_index;
+        }
+    }
+}
+
 static void service_evdev_mouse(BlitRuntime *runtime)
 {
     struct input_event event;
@@ -10588,6 +10749,7 @@ int main(int argc, char **argv)
              ++input_index) {
             runtime.evdev_mouse_fds[input_index] = -1;
             runtime.evdev_keyboard_fds[input_index] = -1;
+            runtime.evdev_gamepad_fds[input_index] = -1;
         }
     }
     runtime.next_session_id = 1;
@@ -10675,6 +10837,20 @@ int main(int argc, char **argv)
         } else
             fprintf(stderr, "blit: no usable evdev keyboard found\n");
     }
+    {
+        runtime.evdev_gamepad_count = open_evdev_gamepads(
+            runtime.evdev_gamepad_fds, runtime.evdev_gamepad_paths,
+            &runtime.evdev_gamepad_count);
+        if (runtime.evdev_gamepad_count > 0) {
+            int input_index;
+            for (input_index = 0; input_index < runtime.evdev_gamepad_count;
+                 ++input_index)
+                fprintf(stderr, "blit: evdev gamepad[%d]=%s fd=%d\n",
+                        input_index, runtime.evdev_gamepad_paths[input_index],
+                        runtime.evdev_gamepad_fds[input_index]);
+        } else
+            fprintf(stderr, "blit: no usable evdev gamepad found\n");
+    }
     open_evdev_watch(&runtime);
     runtime.evdev_rescan_requested = 0;
     reset_render_schedule(&runtime, monotonic_us());
@@ -10727,6 +10903,7 @@ int main(int argc, char **argv)
         int ready;
         int mouse_ready = 0;
         int keyboard_ready = 0;
+        int gamepad_ready = 0;
         int kms_ready = 0;
         int kms_fd = runtime.direct_kms ? blit_kms_fd(runtime.kms) : -1;
         int i;
@@ -10808,6 +10985,12 @@ int main(int argc, char **argv)
             FD_SET(input_fd, &readable);
             if (input_fd > max_fd) max_fd = input_fd;
         }
+        for (i = 0; i < runtime.evdev_gamepad_count; ++i) {
+            int input_fd = runtime.evdev_gamepad_fds[i];
+            if (input_fd < 0) continue;
+            FD_SET(input_fd, &readable);
+            if (input_fd > max_fd) max_fd = input_fd;
+        }
         if (runtime.evdev_watch_fd >= 0) {
             FD_SET(runtime.evdev_watch_fd, &readable);
             if (runtime.evdev_watch_fd > max_fd)
@@ -10885,10 +11068,16 @@ int main(int argc, char **argv)
                 if (runtime.evdev_keyboard_fds[i] >= 0 &&
                     FD_ISSET(runtime.evdev_keyboard_fds[i], &readable))
                     keyboard_ready = 1;
+            for (i = 0; i < runtime.evdev_gamepad_count; ++i)
+                if (runtime.evdev_gamepad_fds[i] >= 0 &&
+                    FD_ISSET(runtime.evdev_gamepad_fds[i], &readable))
+                    gamepad_ready = 1;
             if (keyboard_ready)
                 service_evdev_keyboard(&runtime);
             if (mouse_ready)
                 service_evdev_mouse(&runtime);
+            if (gamepad_ready)
+                service_evdev_gamepad(&runtime);
             for (i = 0; i < BLIT_MAX_STREAMS; ++i) {
                 if (runtime.streams[i].used &&
                     FD_ISSET(runtime.streams[i].fd, &readable)) {
@@ -10960,6 +11149,10 @@ int main(int argc, char **argv)
              ++input_index)
             if (runtime.evdev_keyboard_fds[input_index] >= 0)
                 close(runtime.evdev_keyboard_fds[input_index]);
+        for (input_index = 0; input_index < runtime.evdev_gamepad_count;
+             ++input_index)
+            if (runtime.evdev_gamepad_fds[input_index] >= 0)
+                close(runtime.evdev_gamepad_fds[input_index]);
     }
     destroy_outputs(&runtime);
     blit_font_free(&runtime.font);

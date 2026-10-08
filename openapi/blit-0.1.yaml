@@ -849,7 +849,7 @@ components:
           additionalProperties: false
         resources:
           type: object
-          required: [displays, outputs, sessions, surfaces, streams, input_routes, keyboards, pointers]
+          required: [displays, outputs, sessions, surfaces, streams, input_routes, keyboards, pointers, gamepads]
           properties:
             displays: {type: integer, minimum: 0}
             outputs: {type: integer, minimum: 0}
@@ -859,6 +859,7 @@ components:
             input_routes: {type: integer, minimum: 0}
             keyboards: {type: integer, minimum: 0}
             pointers: {type: integer, minimum: 0}
+            gamepads: {type: integer, minimum: 0}
           additionalProperties: false
         render:
           type: object
@@ -1034,7 +1035,7 @@ components:
       properties:
         device_id:
           type: string
-          enum: [evdev-keyboard, evdev-pointer]
+          enum: [evdev-keyboard, evdev-pointer, evdev-gamepad]
         target_session_id: {$ref: '#/components/schemas/ResourceId'}
         enabled: {type: boolean}
       additionalProperties: false
@@ -1045,7 +1046,7 @@ components:
         id: {$ref: '#/components/schemas/ResourceId'}
         device_id:
           type: string
-          enum: [evdev-keyboard, evdev-pointer]
+          enum: [evdev-keyboard, evdev-pointer, evdev-gamepad]
         target_session_id: {$ref: '#/components/schemas/ResourceId'}
         enabled: {type: boolean}
       additionalProperties: false
@@ -1428,7 +1429,12 @@ components:
         type: {type: string, const: input}
         session_id: {$ref: '#/components/schemas/ResourceId'}
         device_id: {$ref: '#/components/schemas/ResourceId'}
-        event: {type: object, additionalProperties: true}
+        event:
+          type: object
+          description: >-
+            For evdev-gamepad, kind is gamepad_button or gamepad_axis and the
+            event includes the Linux evdev code, value, and receipt time_us.
+          additionalProperties: true
       additionalProperties: false
     StreamTerminalOutput:
       type: object

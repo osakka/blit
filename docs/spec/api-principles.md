@@ -27,6 +27,7 @@ The initial schema should eventually cover:
   presentation state;
 - audio devices, formats, routing, and playback/capture capabilities;
 - keyboard, pointer, seat, focus, and input-route resources;
+- gamepad devices and raw timestamped button/axis input events;
 - terminal sessions, PTY lifecycle, flow control, and process identity;
 - canvases, surfaces, layers, and z-order;
 - bounded graphic overlays and their composition policy;

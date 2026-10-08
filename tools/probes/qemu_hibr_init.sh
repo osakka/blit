@@ -208,9 +208,18 @@ if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
     input_pointer_id=$($b sed -n 's/.*"id":"\([0-9][0-9]*\)".*/\1/p' /tmp/input-pointer.json)
     /blit-stage/http-put 19191 /v1/input/routes/input-key "{\"device_id\":\"evdev-keyboard\",\"target_session_id\":\"session-$input_key_id\",\"enabled\":true}" > /tmp/input-key-route.json || true
     /blit-stage/http-put 19191 /v1/input/routes/input-pointer "{\"device_id\":\"evdev-pointer\",\"target_session_id\":\"session-$input_pointer_id\",\"enabled\":true}" > /tmp/input-pointer-route.json || true
+    /blit-stage/http-put 19191 /v1/input/routes/input-gamepad "{\"device_id\":\"evdev-gamepad\",\"target_session_id\":\"session-$input_key_id\",\"enabled\":true}" > /tmp/input-gamepad-route.json || true
+    input_devices=$($b wget -qO- http://127.0.0.1:19191/v1/input/devices || true)
+    echo INPUT_DEVICES; echo "$input_devices"
+    if echo "$input_devices" | $b grep -q '"gamepad"'; then
+        echo BLIT_INPUT_GAMEPAD_DISCOVERY_PASS
+    else
+        echo BLIT_INPUT_GAMEPAD_DISCOVERY_FAIL
+    fi
     echo BLIT_INPUT_READY
     $b cat /tmp/input-key.json; $b cat /tmp/input-pointer.json
     $b cat /tmp/input-key-route.json; $b cat /tmp/input-pointer-route.json
+    $b cat /tmp/input-gamepad-route.json
     input_wait=30
     [ "${BLIT_INPUT_SOAK_TEST:-0}" = 1 ] && input_wait=12
     input_wait_arg=$($b cat /proc/cmdline 2>/dev/null | $b sed -n 's/.*blit.input_wait=\([0-9][0-9]*\).*/\1/p')
@@ -266,12 +275,16 @@ if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
     echo BLIT_INPUT_STREAM
     $b cat /tmp/stream-input.log
     stream_pass=1
+    gamepad_pass=1
     $b grep -q "\"session_id\":\"session-$input_key_id\".*\"kind\":\"key\"" /tmp/stream-input.log || stream_pass=0
     $b grep -q '"pressed":false' /tmp/stream-input.log || stream_pass=0
     $b grep -q '"button":0,"pressed":true' /tmp/stream-input.log || stream_pass=0
     $b grep -q '"button":1,"pressed":true' /tmp/stream-input.log || stream_pass=0
     $b grep -q '"button":2,"pressed":true' /tmp/stream-input.log || stream_pass=0
     $b grep -q '"kind":"pointer_wheel"' /tmp/stream-input.log || stream_pass=0
+    $b grep -q '"kind":"gamepad_button"' /tmp/stream-input.log || stream_pass=0
+    $b grep -q '"kind":"gamepad_axis"' /tmp/stream-input.log || stream_pass=0
+    $b grep -q '"session_id":"session-'"$input_key_id"'.*"kind":"gamepad_' /tmp/stream-input.log || gamepad_pass=0
     $b grep -q "\"session_id\":\"session-$input_pointer_id\".*\"kind\":\"pointer_motion\"" /tmp/stream-input.log || stream_pass=0
     if [ "${BLIT_INPUT_SOAK_TEST:-0}" != 1 ] &&
        ! echo "$pointer_text" | $b grep -q 'BYTE 1B'; then stream_pass=0; fi
@@ -286,6 +299,11 @@ if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
         echo BLIT_INPUT_STREAM_PASS
     else
         echo BLIT_INPUT_STREAM_FAIL
+    fi
+    if [ "$gamepad_pass" -eq 1 ] && $b grep -q 'evdev gamepad events received' /tmp/blit.log; then
+        echo BLIT_INPUT_GAMEPAD_PASS
+    else
+        echo BLIT_INPUT_GAMEPAD_FAIL
     fi
     if [ "${BLIT_INPUT_LOSS_TEST:-0}" = 1 ]; then
         echo BLIT_INPUT_ROUTES_AFTER_DEVICE_LOSS

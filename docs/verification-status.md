@@ -7,7 +7,7 @@ an evidence record, not a claim that the complete product is released.
 
 - Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The current candidate is `0.1.249`. It builds with TCC and passes terminal
+- The current candidate is `0.1.250`. It builds with TCC and passes terminal
   conformance, SDL screenshot/overlay pixels, the hidden-cursor damage gate,
   and the complete Hibr font manifest gate. Its SDL backend uses a per-output
   glyph atlas, suppresses unchanged cell damage, and does not schedule frames
@@ -19,6 +19,24 @@ an evidence record, not a claim that the complete product is released.
   The QEMU/KMS acceptance below is being rerun for the image-cache change. The
   preceding 0.1.245 package was accepted by the authorized physical host and
   verified through its version endpoint.
+
+### Current 0.1.250 source/package evidence
+
+The exact TCC-built 0.1.250 binary preserves the 0.1.249 terminal and KMS
+gates. It adds independent evdev gamepad discovery and a versioned input-route
+value, `evdev-gamepad`. The QEMU/VKMS input fixture passed
+`BLIT_INPUT_GAMEPAD_PASS`: a synthetic gamepad was discovered, routed to the
+selected session, and delivered timestamped axis and button events on the
+input stream. Gamepad loss was also reported through the existing diagnostic
+event path. No keyboard escape-sequence mapping was invented.
+
+The exact 0.1.250 dummy gates passed `terminal conformance: PASS` and
+`FRAME_RATE_PASS`; the direct-KMS capture passed `PPM_DISPLAY_47_WIDE_KITTY_PASS`,
+`PPM_DISPLAY_48_PASS`, `KMS_API_SCREENSHOT_PASS`, and `KMS_CAPTURE_PASS`.
+The package is `blit_0.1.250-1_amd64.deb`; the handoff records its final SHA-256
+outside the package because the ledger itself is packaged. This candidate still
+does not claim the future high-rate pixel canvas for
+graphical emulators; that remains the Milestone 5b implementation.
 
 ### Current 0.1.249 source/package evidence
 
