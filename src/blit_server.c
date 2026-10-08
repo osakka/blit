@@ -8786,6 +8786,10 @@ static void discover_displays(BlitRuntime *runtime)
                  SDL_GetError());
         return;
     }
+    /* Blit owns the evdev input path so every physical event is dispatched
+       exactly once.  SDL may still expose its platform cursor; hide it because
+       the compositor draws the authoritative software cursor below. */
+    SDL_HideCursor();
     ids = SDL_GetDisplays(&count);
     if (ids == NULL) {
         snprintf(runtime->sdl_error, sizeof(runtime->sdl_error), "%s",
@@ -11470,6 +11474,17 @@ static void service_sdl_events(BlitRuntime *runtime)
     SDL_Event event;
 
     while (SDL_PollEvent(&event)) {
+        /* KMSDRM can feed the same evdev device into SDL while Blit is also
+           reading it directly.  The raw path handles motion, buttons, and
+           wheel events with the display-global coordinates required for
+           multi-output routing.  Discard SDL mouse events whenever that path
+           is available, preventing duplicate clicks and cursor trails. */
+        if (runtime->evdev_mouse_count > 0 &&
+            (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
+             event.type == SDL_EVENT_MOUSE_BUTTON_UP ||
+             event.type == SDL_EVENT_MOUSE_MOTION ||
+             event.type == SDL_EVENT_MOUSE_WHEEL))
+            continue;
         if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
             int button = event.button.button == 1 ? 0 :
                 event.button.button == 2 ? 1 :
