@@ -161,7 +161,7 @@ not inferred from HTTP state or the Hibr control path. Stage the current server
 and run:
 
 ```sh
-cp tools/probes/qemu_kms_capture_init.sh /tmp/hibr-initroot-current/init
+tools/probes/stage_kms_qemu.sh /tmp/hibr-initroot-current
 (cd /tmp/hibr-initroot-current && \
   find . -print | cpio -o -H newc | gzip -1 > /tmp/alpine-vkms-capture-initramfs.gz)
 qemu-system-x86_64 -M q35 -m 1024 -smp 2 \

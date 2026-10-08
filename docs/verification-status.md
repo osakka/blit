@@ -49,6 +49,14 @@ The exact 0.1.249 input/render QEMU soak passed
 multiple mice, keyboard and pointer routing, all three buttons, releases,
 wheel input, PTY delivery, and synthetic device-loss handling.
 
+The exact 0.1.249 direct-KMS/VKMS capture fixture, staged with the new
+TCC-built helper set, passed `REFRESH_SCHEDULER_MIXED_PASS`,
+`PPM_DISPLAY_47_WIDE_KITTY_PASS`, `PPM_DISPLAY_48_PASS`,
+`KMS_API_SCREENSHOT_PASS`, and `KMS_CAPTURE_PASS`. The staging helper now
+builds `pty-input-echo`, `http-put`, and `ppm-assert` from the repository on
+each run, preventing incomplete historical initroots from invalidating the
+visual result.
+
 ### Current 0.1.248 source/package evidence
 
 The 0.1.248 provider-bootstrap correction was superseded by 0.1.249 after
