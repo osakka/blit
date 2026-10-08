@@ -46,6 +46,13 @@ desktop plus three joined clients. It records startup deadline misses under
 the virtual 240 Hz workload, so this is topology and presentation evidence,
 not sustained physical 240 Hz acceptance.
 
+The exact current Hibr adapter fixture also completed with `ACCEPTANCE_PASS`.
+It rebuilt `console-blit.so` against Hibr `0.99.100`, loaded the adapter probe,
+started a primary and joined Hibr client, verified both Hibr control displays,
+installed keyboard and pointer routes, and shut the guest down cleanly. This
+closes the software adapter gate; it does not change the rule that Hibr source
+is external and unmodified.
+
 The current pixel-stream matrix is explicit. The 60 Hz producer stream passes
 with all 60 frames accepted, no additional missed deadlines, and
 `KMS_API_PIXEL_PASS`. The 240 Hz producer stream accepts all 240 frames with

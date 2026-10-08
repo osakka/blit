@@ -28,7 +28,7 @@ live_physical_evdev_acceptance: open
 live_incremental_pointer_acceptance: pass
 screenshot_api_acceptance: pass
 native_hibr_layout_acceptance: partial
-production_adapter_acceptance: pending
+production_adapter_acceptance: pass
 physical_mouse_acceptance: open
 physical_multi_monitor_acceptance: open
 physical_high_refresh_acceptance: open
