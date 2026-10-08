@@ -476,6 +476,11 @@ The runtime also reports `sdl_mouse_events_discarded`,
 events are expected to remain zero during normal operation; a nonzero value
 with unchanged raw-evdev counters identifies competing SDL input ownership or
 backend delivery that requires correction before blaming composition.
+`sdl_mouse_fallback_events` counts SDL mouse events accepted while an evdev
+device was present but had never delivered a recent record. This is an
+intentional bounded fallback: recent evdev activity remains authoritative, so
+the fallback cannot duplicate an active raw stream merely because SDL also
+receives it.
 Each scheduler output also reports `last_present_ms`, `max_present_ms`, and
 `present_calls`, which identify per-output KMS/SDL presentation cost rather
 than hiding it in one aggregate server-wide maximum.

@@ -58,6 +58,7 @@ extern char **environ;
 #define BLIT_MAX_SCROLLBACK_LINES 1000
 #define BLIT_MAX_OVERLAYS 16
 #define BLIT_UPDATE_IDLE_TIMEOUT_US 30000000ULL
+#define BLIT_EVDEV_MOUSE_ACTIVITY_US 500000ULL
 #define BLIT_DEFAULT_FOREGROUND 0xbed2beU
 #define BLIT_ATTR_BOLD 1
 #define BLIT_ATTR_DIM 2
@@ -547,6 +548,7 @@ typedef struct {
     unsigned long long diagnostic_sdl_mouse_events_processed;
     unsigned long long diagnostic_sdl_mouse_motion_events;
     unsigned long long diagnostic_sdl_mouse_button_events;
+    unsigned long long diagnostic_sdl_mouse_fallback_events;
     unsigned long long diagnostic_stream_dropped_events;
     unsigned long long diagnostic_stream_backpressure_disconnects;
     unsigned long long diagnostic_stream_queue_peak_bytes;
@@ -1532,6 +1534,7 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"sdl_mouse_events_processed\":%llu,"
         "\"sdl_mouse_motion_events\":%llu,"
         "\"sdl_mouse_button_events\":%llu,"
+        "\"sdl_mouse_fallback_events\":%llu,"
         "\"stream_queue_bytes\":%llu,\"stream_queue_peak_bytes\":%llu,"
         "\"stream_dropped_events\":%llu,"
         "\"stream_backpressure_disconnects\":%llu,"
@@ -1584,6 +1587,7 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         runtime->diagnostic_sdl_mouse_events_processed,
         runtime->diagnostic_sdl_mouse_motion_events,
         runtime->diagnostic_sdl_mouse_button_events,
+        runtime->diagnostic_sdl_mouse_fallback_events,
         diagnostic_stream_queue_bytes(runtime),
         runtime->diagnostic_stream_queue_peak_bytes,
         runtime->diagnostic_stream_dropped_events,
@@ -12092,12 +12096,20 @@ static void service_sdl_events(BlitRuntime *runtime)
     SDL_Event event;
 
     while (SDL_PollEvent(&event)) {
+        int evdev_mouse_active = runtime->evdev_mouse_count > 0 &&
+            runtime->diagnostic_last_evdev_mouse_event_us > 0 &&
+            monotonic_us() >= runtime->diagnostic_last_evdev_mouse_event_us &&
+            monotonic_us() - runtime->diagnostic_last_evdev_mouse_event_us <=
+                BLIT_EVDEV_MOUSE_ACTIVITY_US;
         /* KMSDRM can feed the same evdev device into SDL while Blit is also
            reading it directly.  The raw path handles motion, buttons, and
            wheel events with the display-global coordinates required for
-           multi-output routing.  Discard SDL mouse events whenever that path
-           is available, preventing duplicate clicks and cursor trails. */
-        if (runtime->evdev_mouse_count > 0 &&
+           multi-output routing.  Discard SDL mouse events while that path is
+           active, preventing duplicate clicks and cursor trails.  If the
+           device is present but has never delivered a record, or has gone
+           quiet, retain SDL as a bounded fallback so a backend event cannot
+           be lost solely because an evdev node exists. */
+        if (evdev_mouse_active &&
             (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
              event.type == SDL_EVENT_MOUSE_BUTTON_UP ||
              event.type == SDL_EVENT_MOUSE_MOTION ||
@@ -12108,6 +12120,8 @@ static void service_sdl_events(BlitRuntime *runtime)
         if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
             ++runtime->diagnostic_sdl_mouse_button_events;
             ++runtime->diagnostic_sdl_mouse_events_processed;
+            if (runtime->evdev_mouse_count > 0 && !evdev_mouse_active)
+                ++runtime->diagnostic_sdl_mouse_fallback_events;
             int button = event.button.button == 1 ? 0 :
                 event.button.button == 2 ? 1 :
                 event.button.button == 3 ? 2 : -1;
@@ -12131,6 +12145,8 @@ static void service_sdl_events(BlitRuntime *runtime)
         } else if (event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
             ++runtime->diagnostic_sdl_mouse_button_events;
             ++runtime->diagnostic_sdl_mouse_events_processed;
+            if (runtime->evdev_mouse_count > 0 && !evdev_mouse_active)
+                ++runtime->diagnostic_sdl_mouse_fallback_events;
             int button = event.button.button == 1 ? 0 :
                 event.button.button == 2 ? 1 :
                 event.button.button == 3 ? 2 : -1;
@@ -12154,6 +12170,8 @@ static void service_sdl_events(BlitRuntime *runtime)
         } else if (event.type == SDL_EVENT_MOUSE_MOTION) {
             ++runtime->diagnostic_sdl_mouse_motion_events;
             ++runtime->diagnostic_sdl_mouse_events_processed;
+            if (runtime->evdev_mouse_count > 0 && !evdev_mouse_active)
+                ++runtime->diagnostic_sdl_mouse_fallback_events;
             int output_index = mouse_output_index(runtime,
                                                   event.motion.windowID);
             float x = event.motion.x;
@@ -12187,6 +12205,8 @@ static void service_sdl_events(BlitRuntime *runtime)
                                      x, y);
         } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
             ++runtime->diagnostic_sdl_mouse_events_processed;
+            if (runtime->evdev_mouse_count > 0 && !evdev_mouse_active)
+                ++runtime->diagnostic_sdl_mouse_fallback_events;
             int button = event.wheel.y > 0 ? 64 : 65;
             int output_index = mouse_output_index(runtime,
                                                   event.wheel.windowID);

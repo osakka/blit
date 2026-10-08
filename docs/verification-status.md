@@ -3,16 +3,16 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
-## Current 0.1.330 live diagnostic status
+## Current 0.1.331 live diagnostic status
 
-The 0.1.330 package is deployed on the authorized physical host at
+The 0.1.331 package is deployed on the authorized physical host at
 `192.168.10.54:8080`. A disposable Hibr image probe completed with exit code
 zero and was then deleted. The live API reported one complete `api` graphics
 object (`512x512`, `786432` bytes), `pixel_frames_accepted=1`, and
 `pixel_frame_errors=0`. This proves the packaged Blit-owned Hibr adapter can
 submit and retain a pixel frame without changing Hibr.
 Package SHA-256 is
-`5e40c97d215b0dc66bc2de412689ec238c1665c05bc03647c24a59d30ac98d2f`.
+`4b897ad15cde93c00679ab6d1652797e4e0cabeea3dcac55955d09fadcd63802`.
 
 The same live sample reported `last_render_ms=4.411`, `max_render_ms=30.148`,
 `missed_deadlines=0`, and a 60 Hz display target. Its `input_events` count was
@@ -38,12 +38,18 @@ the pointer and a device that produced no records during the capture.
 It also reports SDL mouse events discarded or processed. A nonzero discarded
 SDL count with unchanged raw-evdev counters identifies backend delivery or
 competing input ownership rather than a compositor failure.
-The exact 0.1.330 TCC binary passes the full terminal conformance suite,
+The exact 0.1.331 TCC binary passes the full terminal conformance suite,
 including VT500 controls, UTF-8/wide glyph handling, Hibr defaults, Kitty
 image placement, synchronized output, and network terminal input.
-The exact binary also passes the two-output VKMS capture with
+The exact 0.1.330 binary also passes the two-output VKMS capture with
 `PPM_DISPLAY_47_WIDE_KITTY_PASS`, `PPM_DISPLAY_48_PASS`,
 `KMS_API_SCREENSHOT_PASS`, and `KMS_CAPTURE_PASS`.
+
+The 0.1.331 live synthetic probe passes with zero missed deadlines. With the
+physical evdev node present but idle, one SDL mouse event was accepted through
+the bounded fallback and reported as `sdl_mouse_fallback_events=1`; this is
+controlled evidence that the fallback is reachable, not physical-mouse
+acceptance evidence.
 
 The exact 0.1.329 binary with the unchanged Hibr checkout also passes the
 QEMU/VKMS Hibr pane matrix: `LAYOUT_MATRIX_PASS` and
