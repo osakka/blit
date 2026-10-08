@@ -45,6 +45,12 @@ rendered 29 frames with zero pixel-frame errors. This is physical one-output
 game-canvas evidence. A physical second connector and physical 120/240 Hz
 hardware remain unverified.
 
+The exact 0.1.262 TCC binary also passed the direct-KMS two-output VKMS capture
+fixture: `PPM_DISPLAY_47_WIDE_KITTY_PASS`, `PPM_DISPLAY_48_PASS`,
+`KMS_API_SCREENSHOT_PASS`, and `KMS_CAPTURE_PASS`. It reported two outputs at
+60 Hz with refresh-aware scheduling and zero initial missed deadlines. This is
+current two-output virtual-KMS evidence, not physical multi-monitor evidence.
+
 ### Current 0.1.260 source and physical evidence
 
 The SDL glyph atlas now explicitly uses nearest-neighbor sampling. SDL3
