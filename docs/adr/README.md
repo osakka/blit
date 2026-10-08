@@ -36,6 +36,7 @@ Accepted decisions:
 26. [Commit external Hibr cell frames atomically](0026-hibr-cell-frame-atomicity.md).
 27. [Ignore evdev mouse-button autorepeat](0039-ignore-evdev-mouse-autorepeat.md).
 28. [Compose pointer motion over cached scene damage](0040-pointer-damage-uses-cached-scene.md).
+29. [Aggregate button state across evdev mice](0041-aggregate-evdev-button-state.md).
 
 Pending decisions:
 

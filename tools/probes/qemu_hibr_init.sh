@@ -311,7 +311,8 @@ if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
     raw_mouse_motion=$(echo "$raw_runtime" | $b sed -n 's/.*"evdev_mouse_motion_events":\([0-9][0-9]*\).*/\1/p')
     raw_mouse_buttons=$(echo "$raw_runtime" | $b sed -n 's/.*"evdev_mouse_button_events":\([0-9][0-9]*\).*/\1/p')
     raw_mouse_repeats=$(echo "$raw_runtime" | $b sed -n 's/.*"evdev_mouse_button_repeats_ignored":\([0-9][0-9]*\).*/\1/p')
-    echo "BLIT_INPUT_RAW_EVDEV events=${raw_mouse_events:-0} syncs=${raw_mouse_syncs:-0} motion=${raw_mouse_motion:-0} buttons=${raw_mouse_buttons:-0} repeats_ignored=${raw_mouse_repeats:-0}"
+    raw_mouse_coalesced=$(echo "$raw_runtime" | $b sed -n 's/.*"evdev_mouse_button_state_coalesced":\([0-9][0-9]*\).*/\1/p')
+    echo "BLIT_INPUT_RAW_EVDEV events=${raw_mouse_events:-0} syncs=${raw_mouse_syncs:-0} motion=${raw_mouse_motion:-0} buttons=${raw_mouse_buttons:-0} repeats_ignored=${raw_mouse_repeats:-0} state_coalesced=${raw_mouse_coalesced:-0}"
     if [ "${raw_mouse_events:-0}" -gt 0 ] &&
        [ "${raw_mouse_syncs:-0}" -gt 0 ] &&
        [ "${raw_mouse_motion:-0}" -gt 0 ] &&
@@ -324,6 +325,11 @@ if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
         echo BLIT_INPUT_MOUSE_REPEAT_PASS
     else
         echo BLIT_INPUT_MOUSE_REPEAT_FAIL
+    fi
+    if [ "${raw_mouse_coalesced:-0}" -gt 0 ]; then
+        echo BLIT_INPUT_MULTI_MOUSE_BUTTON_STATE_PASS
+    else
+        echo BLIT_INPUT_MULTI_MOUSE_BUTTON_STATE_FAIL
     fi
     if [ "${BLIT_INPUT_LOSS_TEST:-0}" = 1 ]; then
         echo BLIT_INPUT_ROUTES_AFTER_DEVICE_LOSS

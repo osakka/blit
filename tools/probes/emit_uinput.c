@@ -141,6 +141,22 @@ int main(int argc, char **argv)
             sync_event(mouse);
             emit_event(mouse, EV_KEY, BTN_LEFT, 0);
             sync_event(mouse);
+            /* Two physical devices share one logical pointer. The second
+               press and the first release must not create duplicate logical
+               transitions while the other device still holds the button. */
+            emit_event(mouse, EV_KEY, BTN_LEFT, 1);
+            sync_event(mouse);
+            usleep(100000);
+            emit_event(mouse2, EV_KEY, BTN_LEFT, 1);
+            sync_event(mouse2);
+            usleep(100000);
+            emit_event(mouse, EV_KEY, BTN_LEFT, 0);
+            sync_event(mouse);
+            usleep(100000);
+            emit_event(mouse, EV_REL, REL_X, 3);
+            sync_event(mouse);
+            emit_event(mouse2, EV_KEY, BTN_LEFT, 0);
+            sync_event(mouse2);
             usleep(500000);
             emit_event(keyboard, EV_KEY, KEY_LEFTSHIFT, 1);
             sync_event(keyboard);

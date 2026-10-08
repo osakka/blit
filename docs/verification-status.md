@@ -78,6 +78,16 @@ temporary session was cleaned up. The live synthetic input probe passes. This
 still does not close physical mouse acceptance because the live evdev counters
 remain zero without a real movement window.
 
+## Current 0.1.362 multi-device button-state correction
+
+The `0.1.362` candidate maintains button state per evdev mouse and emits a
+logical press or release only when the aggregate state changes. A release from
+one mouse can no longer clear a button still held by another. Runtime
+diagnostics expose `evdev_mouse_button_state_coalesced`. The exact QEMU Hibr
+input fixture passes with `state_coalesced=2`, autorepeat rejection, raw evdev
+delivery, and multi-mouse routing. Hibr remains unmodified; physical host
+acceptance remains open.
+
 ## Current 0.1.358 real-host evidence and remaining visual gate
 
 The authorized host now reports `0.1.358`. The attach PTY geometry transition
