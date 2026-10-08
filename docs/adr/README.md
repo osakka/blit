@@ -30,6 +30,7 @@ Accepted decisions:
 20. [Reject unresolved fallback glyphs](0020-font-fallback-coverage.md).
 21. [Advertise the bounded sixel capability](0021-bounded-sixel-capability.md).
 22. [Versioned network terminal input](0022-network-terminal-input.md).
+23. [Bounded stream service for refresh fairness](0023-bounded-stream-service.md).
 
 Pending decisions:
 

@@ -7601,6 +7601,7 @@ static void service_stream(BlitRuntime *runtime, int fd)
     ssize_t received;
     size_t offset = 0;
     int i;
+    int frames_processed = 0;
 
     for (i = 0; i < BLIT_MAX_STREAMS; ++i)
         if (runtime->streams[i].used && runtime->streams[i].fd == fd) {
@@ -7614,39 +7615,51 @@ static void service_stream(BlitRuntime *runtime, int fd)
            MSG_DONTWAIT lets this readiness turn drain all available chunks
            without changing the client's blocking semantics. */
         received = recv(fd, incoming, sizeof(incoming), MSG_DONTWAIT);
-        if (received < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
-            return;
+        if (received < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            /* The previous bounded turn may have left a complete message in
+               the user-space buffer after the kernel socket was drained. It
+               must still reach the parser; only return when no buffered work
+               remains. */
+            if (stream->receive_length == 0)
+                return;
+            received = 0;
+        }
         if (received < 0 && errno == EINTR)
             continue;
-        if (received <= 0) {
+        if (received <= 0 && stream->receive_length == 0) {
             remove_stream(runtime, fd);
             return;
         }
-    if ((size_t)received > stream_receive_capacity(stream) -
-        stream->receive_length) {
-        size_t required = stream->receive_length + (size_t)received;
-        unsigned char *expanded;
-        int had_large = stream->large_receive_buffer != NULL;
-        if (required > (size_t)BLIT_GRAPHICS_MAX_BYTES * 2U + 256U) {
-            remove_stream(runtime, fd);
-            return;
+        if (received > 0) {
+            if ((size_t)received > stream_receive_capacity(stream) -
+                stream->receive_length) {
+                size_t required = stream->receive_length + (size_t)received;
+                unsigned char *expanded;
+                int had_large = stream->large_receive_buffer != NULL;
+                if (required > (size_t)BLIT_GRAPHICS_MAX_BYTES * 2U + 256U) {
+                    remove_stream(runtime, fd);
+                    return;
+                }
+                expanded = (unsigned char *)realloc(
+                    stream->large_receive_buffer, required);
+                if (expanded == NULL) {
+                    remove_stream(runtime, fd);
+                    return;
+                }
+                if (!had_large)
+                    memcpy(expanded, stream->receive_buffer,
+                           stream->receive_length);
+                stream->large_receive_buffer = expanded;
+                stream->large_receive_capacity = required;
+            }
+            memcpy(stream_receive_data(stream) + stream->receive_length,
+                   incoming, (size_t)received);
+            stream->receive_length += (size_t)received;
+            if (stream->receive_length >
+                runtime->diagnostic_stream_queue_peak_bytes)
+                runtime->diagnostic_stream_queue_peak_bytes =
+                    stream->receive_length;
         }
-        expanded = (unsigned char *)realloc(
-            stream->large_receive_buffer, required);
-        if (expanded == NULL) {
-            remove_stream(runtime, fd);
-            return;
-        }
-        if (!had_large)
-            memcpy(expanded, stream->receive_buffer, stream->receive_length);
-        stream->large_receive_buffer = expanded;
-        stream->large_receive_capacity = required;
-    }
-    memcpy(stream_receive_data(stream) + stream->receive_length,
-           incoming, (size_t)received);
-    stream->receive_length += (size_t)received;
-    if (stream->receive_length > runtime->diagnostic_stream_queue_peak_bytes)
-        runtime->diagnostic_stream_queue_peak_bytes = stream->receive_length;
     while (stream->receive_length - offset >= 2) {
         unsigned char *frame = stream_receive_data(stream) + offset;
         unsigned char flags = frame[0];
@@ -7705,6 +7718,14 @@ static void service_stream(BlitRuntime *runtime, int fd)
                                   frame + header, length))
             return;
         offset += total;
+        /* Do not let a continuously producing pixel client drain the entire
+           socket before the main loop can present the newest complete image.
+           A small bounded batch preserves input/PTY fairness and gives the
+           refresh-aware renderer a chance to run. Fragmented messages are
+           still retained in stream state and resume on the next turn. */
+        ++frames_processed;
+        if (frames_processed >= 1)
+            break;
     }
     if (offset > 0) {
         memmove(stream_receive_data(stream), stream_receive_data(stream) + offset,
@@ -7712,6 +7733,8 @@ static void service_stream(BlitRuntime *runtime, int fd)
         stream->receive_length -= offset;
         offset = 0;
     }
+    if (frames_processed > 0)
+        return;
     }
 }
 
@@ -12181,6 +12204,16 @@ int main(int argc, char **argv)
         }
         now = monotonic_us();
         wait_ms = render_wait_ms(&runtime, now);
+        /* A bounded stream service turn may leave complete WebSocket
+           messages in Blit's user-space receive buffer after the kernel socket
+           itself becomes readable=false. Do not sleep for the idle timeout or
+           wait for a new kernel edge in that state; service the buffered work
+           on the next loop after presentation. */
+        for (i = 0; i < BLIT_MAX_STREAMS; ++i)
+            if (runtime.streams[i].used && runtime.streams[i].receive_length > 0) {
+                wait_ms = 0;
+                break;
+            }
         timeout.tv_sec = wait_ms / 1000;
         timeout.tv_usec = (wait_ms % 1000) * 1000;
         select_started_us = monotonic_us();
@@ -12253,6 +12286,13 @@ int main(int argc, char **argv)
                     service_http_client(&runtime, i);
             }
         }
+        /* User-space stream data remains actionable even when select() timed
+           out because the kernel socket was already drained. Service it
+           outside the ready-only block so bounded stream batches cannot spin
+           without making progress. */
+        for (i = 0; i < BLIT_MAX_STREAMS; ++i)
+            if (runtime.streams[i].used && runtime.streams[i].receive_length > 0)
+                service_stream(&runtime, runtime.streams[i].fd);
         now = monotonic_us();
         /* A refresh schedule is only meaningful while work is pending.  If
            the display was idle and a new terminal/input event arrived, start

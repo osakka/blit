@@ -7,18 +7,18 @@ an evidence record, not a claim that the complete product is released.
 
 - Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The current source candidate is `0.1.279`. It builds with TCC and passes
+- The current source candidate is `0.1.281`. It builds with TCC and passes
   the complete terminal conformance suite, SDL screenshot/overlay pixels,
   the hidden-cursor damage gate, and the complete Hibr font manifest gate.
   It includes the versioned network terminal-input endpoint at the canonical
   PTY boundary. Its SDL backend uses a per-output glyph atlas with nearest
   sampling and one-pixel guard borders, suppresses unchanged cell damage, and
   does not schedule frames for hidden cursor movement. The current physical
-  host reports 0.1.279 through its version endpoint and exposes actual
+  host reports 0.1.281 through its version endpoint and exposes actual
   render/viewport dimensions in diagnostics. Its settled Hibr smoke test
   preserved VT500 text, box/block glyphs, combining `Á`, and wide `界`; this
   is one-output evidence, not a multi-monitor or 120/240 Hz claim. The Debian
-  candidate `blit_0.1.279-1_amd64.deb` was built from this binary and passed
+  candidate `blit_0.1.281-1_amd64.deb` was built from this binary and passed
   package allowlist, embedded-version, byte-identity, asset-presence, and
   extracted-runtime checks. The final artifact SHA-256 is recorded in the
   package handoff because this ledger is included inside the package itself.
@@ -27,12 +27,23 @@ an evidence record, not a claim that the complete product is released.
 
 The canonical TCC build entrypoint now has explicit `server` and `helper`
 targets. The exact rebuild produced distinct server and root-update-helper
-artifacts (`b75c9625...e87a` and `65ebfebf...dee0` respectively); the Debian
+artifacts (`b2d8ec4b...9626be` and `65ebfebf...dee0` respectively); the Debian
 packaging allowlist rejects an updater that contains server routes or is byte
 identical to the server. The rebuilt package passed this target-separation
 check. The helper was smoke-checked to its expected privileged socket bind
 boundary; its unprivileged development-shell bind failure is expected because
 `/run/blit` is root-owned in deployment.
+
+The 0.1.281 stream-service correction bounds each WebSocket service turn and
+parses already-buffered data after `EAGAIN`, preventing a fast graphics client
+from starving presentation or spinning on a user-space receive buffer. The
+exact package was installed through the supervised live updater. On the real
+1920×2160@60 OpenGLES2 host, the no-ACK paced pixel gate accepted 30 frames,
+rendered 24, recorded zero pixel-frame errors and zero missed deadlines, and
+  returned to zero sessions/surfaces/routes after cleanup. The package SHA-256
+  is `2cf122c7e1a9340a5c3e95f5fb3d520d962b34777df4d77d96d598e7109df5b3`.
+  This is physical one-output 60 Hz evidence; it does not establish physical
+  120/240 Hz support.
 
 The same live host sustained 59.894 measured frames per second during a
 controlled 120×50 full-screen coloured terminal redraw workload carrying
