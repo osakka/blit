@@ -7,7 +7,7 @@ an evidence record, not a claim that the complete product is released.
 
 - Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The current source candidate is `0.1.275`. It builds with TCC and passes terminal
+- The current source candidate is `0.1.276`. It builds with TCC and passes terminal
   conformance, SDL screenshot/overlay pixels, the hidden-cursor damage gate,
   and the complete Hibr font manifest gate. It adds the versioned network
   terminal-input endpoint at the canonical PTY boundary. Its SDL backend uses a per-output
@@ -66,9 +66,9 @@ and colour placement with no adjacent-atlas bleed. Emoji outside the bundled
 fixed-cell coverage remains an explicit visible fallback; this is not a claim
 of universal Unicode shaping.
 
-### Current 0.1.275 evidence
+### Current 0.1.276 evidence
 
-The exact TCC-built `0.1.275` binary passed the complete terminal
+The exact TCC-built `0.1.276` binary passed the complete terminal
 conformance suite, including the new network-input capability identity, raw
 PTY input, and bracketed-paste framing cases. Session lifecycle, network
 fragmentation/back-pressure/authentication, SDL glyph filtering, and the Hibr
@@ -77,6 +77,13 @@ font manifest gates also passed. No Hibr source was modified.
 The HTTP input endpoint is deliberately bounded to 768 data bytes per request
 and reports the actual PTY write count. It is an API transport into the
 canonical PTY/terminal path, not a second input or terminal implementation.
+
+### Current 0.1.275 evidence
+
+The 0.1.275 network-input implementation was superseded by 0.1.276 after a
+small PTY-boundary correction: API and WebSocket input now return a scrolled
+surface to live view, and interrupted nonblocking writes are retried. The
+public contract is unchanged.
 
 ### Current 0.1.274 evidence
 

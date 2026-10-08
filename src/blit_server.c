@@ -7454,8 +7454,9 @@ static int write_terminal_input(BlitSession *session, const char *data,
             offset += (size_t)count;
             continue;
         }
-        if (count < 0 && (errno == EINTR || errno == EAGAIN ||
-                          errno == EWOULDBLOCK))
+        if (count < 0 && errno == EINTR)
+            continue;
+        if (count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
             break;
         return -2;
     }
@@ -7509,6 +7510,9 @@ static void service_stream_text(BlitRuntime *runtime, int fd,
             json_string(message, "data", data, sizeof(data)) &&
             sscanf(session_id, "%llu", &numeric_id) == 1) {
             session = find_session_id(runtime, numeric_id);
+            if (session != NULL)
+                terminal_scrollback_show_live(find_surface_id(runtime,
+                                                               session->id));
             if (write_terminal_input(session, data, "raw", &requested,
                                      &written, &effective_mode) == 0) {
                 send_websocket_text(fd,
@@ -8003,6 +8007,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
             return;
         }
         refresh_session_state(runtime, session);
+        terminal_scrollback_show_live(find_surface_id(runtime, session->id));
         result = write_terminal_input(session, data, mode, &requested,
                                       &written, &effective_mode);
         if (result != 0) {
