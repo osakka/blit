@@ -57,3 +57,19 @@ curl -X POST http://192.168.10.54:8080/v1/input/inject \
 
 These are synthetic API events and are reported as `api-pointer`; they do not
 claim that the physical evdev device generated the event.
+
+For a repeatable input-to-render check, run the probe. It records the before
+and after runtime counters plus filtered traces, and fails if motion, both
+button edges, dispatch accounting, pointer position, or a render path event is
+missing:
+
+```sh
+tools/diagnostics/verify-live-input.sh http://192.168.10.54:8080
+```
+
+The probe is deliberately synthetic. Physical-device diagnosis uses the same
+capture directory and must additionally show `device_id`/evdev events from
+`/v1/diagnostics/trace` and the corresponding input-device state in
+`/v1/input/devices`. A screenshot request is a large transfer and therefore
+can perturb a single-threaded server; compare its timestamps with
+`max_loop_gap_ms` before treating a captured stall as a rendering stall.
