@@ -62,6 +62,10 @@ four independent 60 Hz outputs presented simultaneously with one primary Hibr
 desktop and three unchanged stock `--join` clients. Hibr source remained
 unchanged.
 
+The exact 0.1.249 direct-KMS graphics fixtures also passed sixel pixel
+rendering (`PPM_DISPLAY_47_SIXEL_PASS`, `KMS_CAPTURE_PASS`) and Kitty
+z-order/clipping (`PPM_DISPLAY_47_WIDE_STACK_CLIP_PASS`, `KMS_CAPTURE_PASS`).
+
 ### Current 0.1.248 source/package evidence
 
 The 0.1.248 provider-bootstrap correction was superseded by 0.1.249 after
