@@ -20,6 +20,13 @@ current Hibr staging. It passed `BLIT_INPUT_RENDER_SOAK_PASS`,
 events, `546` motion events, and `40` button events. The same run passed the
 two-output KMS screenshot checks. No QEMU process remained after shutdown.
 
+The current four-output Hibr fixture also passed `KMS_FOUR_HIBR_PASS` with
+four independent VKMS outputs, one primary Hibr desktop, and three
+`desktop --join` clients reaching four live surfaces and four-output KMS
+presentation. This proves virtual topology/orchestration for 0.1.356; the
+fixture recorded initial deadline misses under the synthetic 240 Hz workload,
+so it is not evidence of physical high-refresh acceptance.
+
 The TCC-built 0.1.356 binary also passed the public PTY conformance suite:
 VT500 controls, fragmented UTF-8, wide/combining cells, colors, alternate
 screens, synchronized output, Kitty graphics, Hibr defaults, and input/report
