@@ -35,6 +35,14 @@ zero missed deadlines, and 60 texture uploads. A live style-scope request
 confirmed that green foreground, red background, inverse, and unstyled cells
 remain independent. The temporary sessions were deleted with HTTP 204.
 
+The current-source four-output VKMS fixture exposed four independent 1024×768
+outputs at 60 Hz, created one terminal session per output, and passed
+`KMS_FOUR_OUTPUT_PASS`. The mixed-refresh fixture then passed
+`REFRESH_SCHEDULER_MIXED_PASS`, the two-output pixel oracles, and
+`KMS_CAPTURE_PASS` with the test scheduler's 60/120 Hz metadata. These are
+virtual-output scheduling results; physical multi-monitor and physical
+120/240 Hz evidence remain open.
+
 ### Current 0.1.253 source evidence
 
 The exact TCC-built 0.1.253 binary passes the full VT/UTF-8/Hibr terminal
