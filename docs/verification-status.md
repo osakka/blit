@@ -52,6 +52,12 @@ Network fragmentation, back-pressure, and authentication gates also passed.
 These are deterministic software-backend measurements and do not replace
 physical 120/240 Hz evidence.
 
+After ADR-0021 aligned the bounded sixel advertisement with the runtime, the
+exact 0.1.274 TCC binary was re-run through terminal conformance; its
+`kitty,sixel` capability assertion, lifecycle termination, nearest-filter, and
+Hibr font-manifest gates all passed. This confirms the documentation correction
+did not diverge from the shipped capability or test contract.
+
 An API screenshot of the live SDL output was also captured with the
 display-derived 240×135 surface geometry at 1920×2160. Visual inspection of
 the enlarged glyph crop showed clean box-drawing, block, combining, wide-cell,
