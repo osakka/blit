@@ -7,7 +7,7 @@ an evidence record, not a claim that the complete product is released.
 
 - Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The current candidate is `0.1.262`. It builds with TCC and passes terminal
+- The current candidate is `0.1.263`. It builds with TCC and passes terminal
   conformance, SDL screenshot/overlay pixels, the hidden-cursor damage gate,
   and the complete Hibr font manifest gate. Its SDL backend uses a per-output
   glyph atlas, suppresses unchanged cell damage, and does not schedule frames
@@ -18,9 +18,18 @@ an evidence record, not a claim that the complete product is released.
   26.865 ms maximum full render and 61.387 Hz over its active 504 ms window.
   The direct-KMS pixel-frame acceptance below was run from the exact current
   0.1.256 TCC build; the newer SDL presentation and geometry work is recorded
-  below. The authorized physical host now reports 0.1.262 through its version
-  endpoint. The 0.1.262 Debian package SHA-256 is
-  `e2661b30156f44816e47c72468b9d07e106111c9748646155df11de981438b66`.
+  below. The authorized physical host now reports 0.1.263 through its version
+  endpoint. The 0.1.263 Debian package SHA-256 is
+  `b80d81b9839e8579d5d8a9bf0064260e91aca46f6239421c9549c2a140f09f18`.
+
+### Current 0.1.263 source and physical evidence
+
+The exact 0.1.263 TCC build passes the complete 0.1.262 regression set plus
+the runtime stream-telemetry schema gate. The live host reports zero current
+stream queue bytes, zero dropped event deliveries, and zero back-pressure
+disconnects at idle. During a real Hibr run it reported 58 SDL background
+batches and 5,960 background quads, with the same 59.990 Hz display mode and
+zero missed deadlines; teardown returned zero sessions, surfaces, and routes.
 
 ### Current 0.1.262 source and physical evidence
 
