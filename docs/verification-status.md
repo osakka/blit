@@ -34,6 +34,16 @@ sample was 17.890 ms against the 16 ms target, so this is stable 60 Hz cadence
 evidence with a remaining worst-case render-budget issue, not a claim of
 unbounded performance.
 
+The focused input/render regression cycle rebuilt the exact 0.1.274 server with
+TCC. Complete terminal conformance passed, including VT500 controls, UTF-8,
+combining and wide cells, box-drawing, truecolour, Hibr integration, Kitty
+graphics, and input-route lifecycle cases. The SDL glyph geometry, nearest
+filter, background batching, graphics-cache, hidden-cursor damage, and stream
+replay gates also passed. The live host reported the same 0.1.274 version,
+60.000 Hz display mode, zero missed deadlines, and zero active sessions after
+the controlled inspection. No input or glyph defect was reproduced in this
+cycle, so no speculative input change was made.
+
 An API screenshot of the live SDL output was also captured with the
 display-derived 240×135 surface geometry at 1920×2160. Visual inspection of
 the enlarged glyph crop showed clean box-drawing, block, combining, wide-cell,
