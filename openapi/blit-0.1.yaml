@@ -429,6 +429,15 @@ paths:
                     items: {$ref: '#/components/schemas/InputRoute'}
         default:
           $ref: '#/components/responses/Problem'
+    delete:
+      tags: [hardware]
+      operationId: deleteInputRoute
+      summary: Remove an input-device route
+      responses:
+        '204':
+          description: Input route deleted
+        default:
+          $ref: '#/components/responses/Problem'
   /v1/topology:
     get:
       tags: [topology]
@@ -1025,7 +1034,7 @@ components:
       additionalProperties: false
     InputDevice:
       type: object
-      required: [id, name, kinds, capabilities]
+      required: [id, name, kinds, route_ids, capabilities]
       properties:
         id: {$ref: '#/components/schemas/ResourceId'}
         name: {type: string}
@@ -1034,6 +1043,15 @@ components:
           items:
             type: string
             enum: [keyboard, pointer, touch, gamepad, other]
+        route_ids:
+          type: array
+          description: >-
+            Canonical input-route identities accepted by UpdateInputRoute for
+            this physical source. All discovered sources of a kind feed the
+            corresponding aggregate route; no discovered source is ignored.
+          items:
+            type: string
+            enum: [evdev-keyboard, evdev-pointer, evdev-gamepad]
         capabilities:
           type: array
           items: {type: string}

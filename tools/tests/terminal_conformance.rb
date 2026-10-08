@@ -50,7 +50,8 @@ def request_with_status(base, method, path, body = nil, headers = {})
   response = Net::HTTP.start(uri.hostname, uri.port, read_timeout: 5) do |http|
     http.request(req)
   end
-  [response.code.to_i, response.body.empty? ? nil : JSON.parse(response.body)]
+  body = response.body.to_s
+  [response.code.to_i, body.empty? ? nil : JSON.parse(body)]
 end
 
 def cell_map(snapshot)
@@ -408,6 +409,12 @@ stopped_route_status, stopped_route = request_with_status(
 assert_equal(409, stopped_route_status, 'stopped route target status')
 assert_equal('input_route_target_stopped', stopped_route.fetch('code'),
              'stopped route target code')
+deleted_route_status, = request_with_status(base, 'DELETE', '/v1/input/routes/route-exit')
+assert_equal(204, deleted_route_status, 'input route delete status')
+remaining_routes = request(base, 'GET', '/v1/input/routes').fetch('routes')
+raise 'deleted input route remains visible' if remaining_routes.any? {
+  |item| item.fetch('id') == 'route-exit'
+}
 request(base, 'DELETE', "/v1/terminal-sessions/#{route_exit_id}")
 puts 'PASS input-route-target-exit'
 

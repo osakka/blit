@@ -1746,6 +1746,7 @@ static void input_json(char *body, size_t capacity)
         int keyboard;
         int gamepad;
         int first_kind = 1;
+        int first_route = 1;
         int first_capability = 1;
         snprintf(path, sizeof(path), "/dev/input/event%d", index);
         fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
@@ -1787,6 +1788,23 @@ static void input_json(char *body, size_t capacity)
         if (gamepad) {
             used += (size_t)snprintf(body + used, capacity - used, "%s\"gamepad\"", first_kind ? "" : ",");
             first_kind = 0;
+        }
+        used += (size_t)snprintf(body + used, capacity - used, "],\"route_ids\":[");
+        if (keyboard) {
+            used += (size_t)snprintf(body + used, capacity - used,
+                                     "\"evdev-keyboard\"");
+            first_route = 0;
+        }
+        if (pointer) {
+            used += (size_t)snprintf(body + used, capacity - used,
+                                     "%s\"evdev-pointer\"",
+                                     first_route ? "" : ",");
+            first_route = 0;
+        }
+        if (gamepad) {
+            used += (size_t)snprintf(body + used, capacity - used,
+                                     "%s\"evdev-gamepad\"",
+                                     first_route ? "" : ",");
         }
         used += (size_t)snprintf(body + used, capacity - used, "],\"capabilities\":[");
         if (input_bit(rel_bits, REL_X)) { used += (size_t)snprintf(body + used, capacity - used, "\"rel-x\""); first_capability = 0; }
@@ -8004,6 +8022,20 @@ static void handle_request(int fd, BlitRuntime *runtime,
         strcmp(method, "GET") == 0) {
         input_routes_json(runtime, body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
+        return;
+    }
+    if (strncmp(path, "/v1/input/routes/", strlen("/v1/input/routes/")) == 0 &&
+        strcmp(method, "DELETE") == 0) {
+        const char *route_id = path + strlen("/v1/input/routes/");
+        BlitInputRoute *route = find_input_route(runtime, route_id);
+        if (*route_id == '\0' || route == NULL) {
+            send_problem(fd, 404, "Not Found", "input_route_not_found",
+                         "The requested input route does not exist.");
+            return;
+        }
+        memset(route, 0, sizeof(*route));
+        ++runtime->input_routes_revision;
+        send_http(fd, 204, "No Content", "", "");
         return;
     }
     if (strncmp(path, "/v1/input/routes/", strlen("/v1/input/routes/")) == 0 &&

@@ -7,7 +7,7 @@ an evidence record, not a claim that the complete product is released.
 
 - Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The current candidate is `0.1.254`. It builds with TCC and passes terminal
+- The current candidate is `0.1.255`. It builds with TCC and passes terminal
   conformance, SDL screenshot/overlay pixels, the hidden-cursor damage gate,
   and the complete Hibr font manifest gate. Its SDL backend uses a per-output
   glyph atlas, suppresses unchanged cell damage, and does not schedule frames
@@ -20,6 +20,16 @@ an evidence record, not a claim that the complete product is released.
   0.1.253 TCC build. The authorized physical host now reports 0.1.253
   through its version endpoint; the 0.1.254 candidate contains the scoped
   cell-style parser fix described below.
+
+### Current 0.1.256 source evidence
+
+The input inventory now exposes `route_ids` alongside each physical
+`event-*` device ID. This makes the canonical aggregate route identity
+explicit to API clients; all discovered sources of a kind remain active and
+feed that route. The OpenAPI schema and live-host route lifecycle were
+  validated without modifying Hibr. Input routes now also support DELETE;
+  the conformance gate proves a removed route is absent from subsequent
+  inventory snapshots.
 
 ### Current 0.1.254 source evidence
 
