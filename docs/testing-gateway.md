@@ -235,10 +235,11 @@ initramfs. It stages the same checked-in Hibr Unicode font used by the Debian
 package, preventing QEMU from silently falling back to a different font. It
 does not stage or invoke a Blit shell launcher. For the stock Hibr session
 gate it stages the repository-owned `blit-stock-session.hibr` integration
-entrypoint; that Hibr script preloads Hibr's canonical `console`, `pty`,
-`term`, and `hold` modules by explicit staged paths, then sources the
-unchanged stock `session.hibr`. The `console-blit` adapter remains isolated to
-its own provider probe.
+entrypoint; that Blit script loads `console-blit` plus Hibr's `pty`, `term`,
+and `hold` modules by explicit staged paths in the API-launched process, then
+sources the unchanged stock `session.hibr`. The `console-blit` provider is
+therefore the active display implementation for the stock desktop, while the
+Hibr checkout remains untouched.
 
 For the isolated input gate, use the staging helper, then boot the fixture with
 `blit.input_only=1` on the kernel command line:

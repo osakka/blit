@@ -14,11 +14,13 @@ loaded interfaces.
 
 ## Decision
 
-Blit's QEMU/integration fixture uses `hibr/blit-stock-session.hibr`. It loads
-Hibr's canonical `console`, `pty`, `term`, and `hold` modules by explicit
-staged paths, then sources the unchanged stock `session.hibr` in the same
-process. The existing `console-blit` module remains limited to its dedicated
-provider/adapter probe and is not used by the stock desktop path.
+Blit's QEMU/integration fixture uses the Blit-owned launcher
+`hibr/blit-hibr-console.hibr`. It loads Blit's `console-blit` provider and
+Hibr's `pty`, `term`, and `hold` modules by explicit staged paths before the
+unchanged stock `session.hibr` is sourced in the same process. The provider
+supplies both Hibr's `display` interface and the `console` commands; loading
+Hibr's local `console` provider alongside it would be ambiguous and would not
+exercise Blit's display path.
 
 ## Consequences
 

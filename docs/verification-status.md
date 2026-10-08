@@ -7,7 +7,7 @@ an evidence record, not a claim that the complete product is released.
 
 - Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The current candidate is `0.1.247`. It builds with TCC and passes terminal
+- The current candidate is `0.1.248`. It builds with TCC and passes terminal
   conformance, SDL screenshot/overlay pixels, the hidden-cursor damage gate,
   and the complete Hibr font manifest gate. Its SDL backend uses a per-output
   glyph atlas, suppresses unchanged cell damage, and does not schedule frames
@@ -19,6 +19,17 @@ an evidence record, not a claim that the complete product is released.
   The QEMU/KMS acceptance below is being rerun for the image-cache change. The
   preceding 0.1.245 package was accepted by the authorized physical host and
   verified through its version endpoint.
+
+### Current 0.1.248 source/package evidence
+
+The exact TCC-built 0.1.248 binary and Blit Hibr entrypoint pass the stock
+Hibr QEMU acceptance path. The fix loads Blit's `console-blit` provider in
+the API-launched Hibr child itself; relying on `HIBR_RC` was invalid because
+non-interactive children do not consume it. The two-output fixture passed
+`LAYOUT_MATRIX_PASS`, started one primary and one unchanged stock `--join`
+desktop, exposed both Hibr control displays, and finished with
+`ACCEPTANCE_PASS`. The primary reached surface revision 152 and the join
+surface revision 10. Hibr source remained unchanged.
 
 ### Current 0.1.247 source/package evidence
 

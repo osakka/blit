@@ -4,8 +4,9 @@
 # This entrypoint is used for held desktop sessions.  Hibr owns the desktop
 # terminal stream and hold fans that stream out to every joined client.  Blit
 # owns one terminal session/pty per surface and renders each client locally.
-# Do not load console-blit here: that would make the held desktop write only
-# to the primary HTTP surface and leave joined surfaces empty.
+# Load the provider in this process. API-launched non-interactive Hibr
+# children do not consume HIBR_RC, so relying on an inherited RC leaves the
+# stock desktop without its display interface.
 
 d=${0%/*}
 [ "$d" = "$0" ] && d=.
@@ -28,9 +29,12 @@ if [ ! -f "$desktop" ]; then
 	lg HIBR_LERR "blit-session: desktop session not found: $desktop"
 	exit 1
 fi
-# Run the real desktop file as the Hibr entrypoint.  Sourcing it here would
-# leave $0 pointing at this wrapper, so the desktop's relative desktop.hibr,
-# apps, and control-panel paths would resolve beside the wrapper instead of
-# beside Hibr's installed desktop session.
+# Run the real desktop file in this same Hibr process.  The launcher RC loads
+# console-blit before this entrypoint; exec-ing a second Hibr process here
+# would discard that provided display interface before desktop.hibr starts.
 export HIBR_MODPATH=${HIBR_MODPATH:-$moddir}
-exec "$HIBR" "$desktop" "$@"
+mod load "$moddir/console-blit.so" || exit 1
+mod load "$moddir/pty.so" || exit 1
+mod load "$moddir/term.so" || exit 1
+mod load "$moddir/hold.so" || exit 1
+source "$desktop" "$@"
