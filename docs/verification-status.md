@@ -3,7 +3,33 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
-## Current 0.1.300 Hibr integration status
+## Current 0.1.318 diagnostic and graphics status
+
+The exact TCC-built server `0.1.318` is deployed on the authorized physical
+host at `192.168.10.54:8080`. The live API reports the active SDL output as
+1920x2160 at 60 Hz with a 16 ms refresh-aware interval and zero missed
+deadlines. The deterministic live input probe passes motion, both button edges,
+dispatch accounting, pointer position, and render-path tracing; input dispatch
+is approximately 0.016 ms. A non-invasive capture mode was added because the
+large screenshot endpoint can block the single-threaded gateway and must not be
+used for timing claims.
+
+The local TCC gates pass the 60 Hz frame-rate workload (54.4 Hz measured,
+zero missed deadlines), glyph rendering, graphics-cache reuse, fragmented
+chunked pixel frames, and session lifecycle. The provider-level Hibr image
+probe accepts one chunked image with `pixel_frames_accepted=1`,
+`graphics_texture_uploads=1`, and zero pixel-frame errors. The exact current
+binary plus unchanged Hibr checkout also passes the QEMU two-output pane
+matrix with `LAYOUT_MATRIX_PASS` and `HIBR_PANE_MATRIX_PASS`.
+
+The physical host still reports approximately 1 Hz of Hibr surface damage
+because the running desktop is producing commits at that cadence; this is not
+an input-dispatch or missed-refresh failure. Its graphics counters remain zero
+because this session has not generated an image command, so live wallpaper
+transport is not claimed as validated. Physical pointer trails/click behavior,
+live image activation, and physical multi-monitor acceptance remain open.
+
+## Superseded 0.1.300 Hibr integration status
 
 The TCC-built server retains the API restart recovery path from 0.1.296 and
 adds a focused SDL scene-cache correction. When Hibr changes DECTCEM cursor
