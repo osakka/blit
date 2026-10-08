@@ -7,7 +7,7 @@ an evidence record, not a claim that the complete product is released.
 
 - Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The current source candidate is `0.1.268`. It builds with TCC and passes terminal
+- The current source candidate is `0.1.269`. It builds with TCC and passes terminal
   conformance, SDL screenshot/overlay pixels, the hidden-cursor damage gate,
   and the complete Hibr font manifest gate. Its SDL backend uses a per-output
   glyph atlas, suppresses unchanged cell damage, and does not schedule frames
@@ -16,7 +16,7 @@ an evidence record, not a claim that the complete product is released.
   16.000 ms target and zero missed deadlines; this is a software-dummy result,
   not a physical refresh-rate claim. The authorized physical host reports
   0.1.265 through its version endpoint. The Debian candidate
-  `blit_0.1.268-1_amd64.deb` was built from
+  `blit_0.1.269-1_amd64.deb` was built from
   this binary and passed package allowlist, embedded-version, byte-identity,
   asset-presence, and extracted-runtime checks. The final artifact SHA-256 is
   recorded externally in the handoff because this ledger is included inside
@@ -24,9 +24,9 @@ an evidence record, not a claim that the complete product is released.
   the real-mode QEMU
   stream gate still fails its strict page-flip deadline requirement.
 
-### Current 0.1.268 evidence
+### Current 0.1.269 evidence
 
-The exact TCC-built `0.1.268` binary was rebuilt from the pushed source and
+The exact TCC-built `0.1.269` binary was rebuilt from the pushed source and
 passed `HIBR_FONT_MANIFEST_PASS` (`required=447`, `mappings=1181`),
 `SDL_GLYPH_RENDER_PASS` (light/heavy/double box geometry, blocks, and wide
 glyphs), three consecutive dummy frame-rate runs (42.935–43.867 Hz,

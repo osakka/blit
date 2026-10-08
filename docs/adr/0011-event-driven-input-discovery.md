@@ -34,6 +34,6 @@ owner, but discovery is no longer performed on every presentation tick.
 
 ## Verification
 
-The exact 0.1.268 TCC binary passed the Hibr VKMS input fixture with keypad
+The exact 0.1.269 TCC binary passed the Hibr VKMS input fixture with keypad
 soak, multi-mouse, stream, gamepad, device-loss/reconnect, and render-soak
 markers. Hibr source was not changed.
