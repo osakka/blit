@@ -7712,11 +7712,15 @@ static void service_session_output(BlitRuntime *runtime, int fd)
                 snprintf(runtime->sessions[i].state,
                          sizeof(runtime->sessions[i].state), "running");
                 ++runtime->sessions[i].revision;
-                if (runtime->sessions[i].surface_mode == BLIT_SURFACE_EXTERNAL) {
-                    runtime->sessions[i].attach_reassert_pending = 1;
-                    runtime->sessions[i].attach_reassert_due_us =
-                        monotonic_us() + 250000ULL;
-                }
+                /* Hibr's held desktop starts with its own 24x80 defaults,
+                   then loads the window-manager files before it observes the
+                   client's real PTY geometry. Reassert the authoritative
+                   pane size after startup for every terminal mode, not only
+                   the external adapter path, so the desktop receives a
+                   deterministic SIGWINCH after its layout is ready. */
+                runtime->sessions[i].attach_reassert_pending = 1;
+                runtime->sessions[i].attach_reassert_due_us =
+                    monotonic_us() + 250000ULL;
             }
             if (runtime->sessions[i].surface_mode != BLIT_SURFACE_EXTERNAL &&
                 surface != NULL &&
