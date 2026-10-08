@@ -45,6 +45,23 @@ Hibr font manifest, and OpenAPI derived-geometry check pass from the same
 Unicode mappings. The full-screen Hibr workload's measured frame rate is
 distinct from the idle diagnostic value: idle servers do not present frames.
 
+The exact same 0.1.258 TCC binary also passed the four-output VKMS fixture:
+four independent 1024×768 outputs were discovered and presented four
+terminal surfaces, producing `KMS_FOUR_OUTPUT_PASS`. The QEMU/VKMS run
+reported one startup deadline miss per output while its page-flip work took
+9–32 ms; this is recorded as virtual-driver timing evidence, not as a claim
+of 60 Hz hardware cadence. The high-refresh fixture produced
+`REFRESH_SCHEDULER_240_PASS`, but its virtual 240 Hz output recorded three
+misses because the emulated page-flip path took tens of milliseconds. It proves
+the 240 Hz deadline calculation and API metadata only; physical 120/240 Hz
+hardware remains unverified.
+
+The live 0.1.258 input inventory and route lifecycle were also exercised with
+the physical keyboard and pointer devices. All discovered sources were
+reported with their aggregate route IDs; a disposable pointer route was bound
+to and removed from a PTY session with HTTP 204, leaving zero routes and no
+diagnostic errors or warnings.
+
 ### Current 0.1.256 source evidence
 
 The input inventory now exposes `route_ids` alongside each physical
