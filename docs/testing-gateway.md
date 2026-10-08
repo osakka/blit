@@ -374,7 +374,11 @@ ruby tools/tests/sdl_graphics_cache_gate.rb
 
 The result is exposed by `GET /v1/diagnostics/runtime` under `performance` as
 `frame_rate_hz`, `frame_rate_frames`, `frame_rate_window_ms`, and
-`frame_rate_age_ms`. The same object includes `loop_iterations`,
+`frame_rate_age_ms`. `frame_rate_hz` is the rate of damage-driven composition
+and presentation passes; it is not the panel scanout rate. Use
+`snapshot.render.outputs[].refresh_hz` and `effective_interval_ms` for the
+selected display cadence and scheduler target. The same object includes
+`loop_iterations`,
 `terminal_reads`, `present_calls`, `last_loop_gap_ms`, and
 `max_loop_gap_ms`, `last_select_ms`, and `max_select_ms`, which distinguish
 kernel-wait stalls from other event-loop stalls and presentation stalls. The

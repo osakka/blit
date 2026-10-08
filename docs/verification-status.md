@@ -31,6 +31,13 @@ disconnects at idle. During a real Hibr run it reported 58 SDL background
 batches and 5,960 background quads, with the same 59.990 Hz display mode and
 zero missed deadlines; teardown returned zero sessions, surfaces, and routes.
 
+The exact 0.1.263 binary also passed the current high-refresh VKMS branch:
+`REFRESH_SCHEDULER_240_PASS`, `PPM_DISPLAY_47_WIDE_KITTY_PASS`,
+`PPM_DISPLAY_48_PASS`, `KMS_API_SCREENSHOT_PASS`, and `KMS_CAPTURE_PASS`.
+The virtual 240 Hz output selected a 4.166 ms target interval; its three
+emulated page-flip misses remain virtual timing evidence, not a physical
+240 Hz claim.
+
 ### Current 0.1.262 source and physical evidence
 
 The exact 0.1.262 TCC binary passes the SDL background-batch screenshot gate,
