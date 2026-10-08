@@ -8267,7 +8267,11 @@ static void handle_request(int fd, BlitRuntime *runtime,
                      "surface=surface-%llu revision=%llu presentation=%s frame_open=%d",
                      surface->id, surface->revision, presentation,
                      surface->frame_open);
-            diagnostic_trace(runtime, "surface_update", detail);
+            /* Deferred cell chunks are transport detail.  Keep the bounded
+               trace focused on actual presentation boundaries so a busy
+               external terminal cannot evict input and render evidence. */
+            if (!presentation_deferred)
+                diagnostic_trace(runtime, "surface_update", detail);
         }
         if (!presentation_deferred)
             runtime->render_pending = 1;
