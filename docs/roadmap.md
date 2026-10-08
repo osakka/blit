@@ -40,10 +40,12 @@ production `console-blit` module is operational over the OpenAPI/WebSocket
 contract. Explicit focus and versioned input routes are exposed by the API.
 The SDL adapter uses single-surface incremental frames and conservatively
 redraws multi-surface outputs with deterministic vertical stacking. The
-current 0.1.265 source passes the complete terminal, graphics, input,
+current 0.1.267 source passes the complete terminal, graphics, input,
 two-display VKMS/QEMU, four-output Hibr primary/`--join`, mixed-refresh,
-output-loss, and emulator-like pixel-stream acceptance gates. The bundled
-Hibr font contains 929 glyphs and 1,182 mappings; its manifest rejects
+output-loss, and emulator-like pixel-stream acceptance gates. SDL wallpaper
+backgrounds are coalesced into horizontal runs before geometry submission;
+the focused 128×48 regression workload now submits four background quads.
+The bundled Hibr font contains 929 glyphs and 1,182 mappings; its manifest rejects
 unresolved `.notdef` fallbacks and checks deterministic box/special-glyph
 bitmaps. The authorized physical host is running 0.1.265 and has a healthy
 one-output SDL3/OpenGL presentation. Its controlled full-screen Hibr workload

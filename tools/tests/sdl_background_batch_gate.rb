@@ -86,5 +86,7 @@ raise "background pixel is not red: #{bgr.inspect}" unless bgr == [0, 0, 255]
 performance = before.fetch('performance')
 raise 'background batch submission counter did not advance' unless
   performance.fetch('background_batches') > 0
+raise "background runs were not coalesced: #{performance.fetch('background_quads')}" unless
+  performance.fetch('background_quads') <= 48
 puts "SDL_BACKGROUND_BATCH_PASS batches=#{performance.fetch('background_batches')} " \
      "quads=#{performance.fetch('background_quads')} render_ms=#{performance.fetch('last_render_ms')}"

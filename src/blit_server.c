@@ -10020,37 +10020,68 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                top, preserving the canonical cell ordering while reducing
                thousands of renderer calls to one geometry submission. */
             for (row = first_row; row < last_row; ++row) {
-                for (column = 0; column < surface->width &&
-                     column < BLIT_MAX_CELL_COLS; ++column) {
+                column = 0;
+                while (column < surface->width &&
+                       column < BLIT_MAX_CELL_COLS) {
                     uint32_t foreground = surface->foreground[row][column] ?
                         surface->foreground[row][column] - 1 :
                         BLIT_DEFAULT_FOREGROUND;
                     uint32_t background = surface->background[row][column] ?
                         surface->background[row][column] - 1 : 0;
                     uint16_t attributes = surface->attributes[row][column];
+                    int run_start;
+                    int run_end;
                     if (attributes & BLIT_ATTR_INVERSE) {
                         uint32_t swapped = foreground;
                         foreground = background ? background : 0;
                         background = swapped;
                     }
-                    if (background != 0) {
-                        if (!queue_sdl_background(
-                                &runtime->outputs[output_index], background,
-                                surface_origin_x + column * (float)cell_width,
-                                (float)surface_origin_y + row * (float)cell_height,
-                                (float)cell_width, (float)cell_height)) {
-                            flush_sdl_background_batch(
-                                &runtime->outputs[output_index]);
-                            SDL_SetRenderDrawColor(renderer,
-                                (unsigned char)(background >> 16),
-                                (unsigned char)(background >> 8),
-                                (unsigned char)background, 255);
-                            SDL_RenderFillRect(renderer, &(SDL_FRect){
-                                surface_origin_x + column * (float)cell_width,
-                                (float)surface_origin_y + row * (float)cell_height,
-                                (float)cell_width, (float)cell_height});
-                        }
+                    if (background == 0) {
+                        ++column;
+                        continue;
                     }
+                    run_start = column;
+                    run_end = column + 1;
+                    while (run_end < surface->width &&
+                           run_end < BLIT_MAX_CELL_COLS) {
+                        uint32_t next_foreground =
+                            surface->foreground[row][run_end] ?
+                            surface->foreground[row][run_end] - 1 :
+                            BLIT_DEFAULT_FOREGROUND;
+                        uint32_t next_background =
+                            surface->background[row][run_end] ?
+                            surface->background[row][run_end] - 1 : 0;
+                        uint16_t next_attributes =
+                            surface->attributes[row][run_end];
+                        if (next_attributes & BLIT_ATTR_INVERSE) {
+                            uint32_t swapped = next_foreground;
+                            next_foreground = next_background ?
+                                next_background : 0;
+                            next_background = swapped;
+                        }
+                        if (next_background != background)
+                            break;
+                        ++run_end;
+                    }
+                    if (!queue_sdl_background(
+                            &runtime->outputs[output_index], background,
+                            surface_origin_x + run_start * (float)cell_width,
+                            (float)surface_origin_y + row * (float)cell_height,
+                            (float)(run_end - run_start) * cell_width,
+                            (float)cell_height)) {
+                        flush_sdl_background_batch(
+                            &runtime->outputs[output_index]);
+                        SDL_SetRenderDrawColor(renderer,
+                            (unsigned char)(background >> 16),
+                            (unsigned char)(background >> 8),
+                            (unsigned char)background, 255);
+                        SDL_RenderFillRect(renderer, &(SDL_FRect){
+                            surface_origin_x + run_start * (float)cell_width,
+                            (float)surface_origin_y + row * (float)cell_height,
+                            (float)(run_end - run_start) * cell_width,
+                            (float)cell_height});
+                    }
+                    column = run_end;
                 }
             }
             flush_sdl_background_batch(&runtime->outputs[output_index]);
