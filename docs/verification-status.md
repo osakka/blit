@@ -21,9 +21,10 @@ an evidence record, not a claim that the complete product is released.
   below. The authorized physical host now reports 0.1.265 through its version
   endpoint. The Debian candidate `blit_0.1.268-1_amd64.deb` was built from
   this binary and passed package allowlist, embedded-version, byte-identity,
-  asset-presence, and extracted-runtime checks. Its SHA-256 is
-  `8b13d29d0e4bd86530f1af083e64abd616e163ade7161b392c5944036a3f9108`.
-  It is not claimed as a fully validated 240 Hz release: the real-mode QEMU
+  asset-presence, and extracted-runtime checks. The final artifact SHA-256 is
+  recorded externally in the handoff because this ledger is included inside
+  the package itself. It is not claimed as a fully validated 240 Hz release:
+  the real-mode QEMU
   stream gate still fails its strict page-flip deadline requirement.
 
 ### Current 0.1.268 evidence
