@@ -88,6 +88,10 @@ through the same effective-color path so color and attribute semantics remain
 exact. Native-size PSF rows are cached in the shared font object and the KMS
 renderer uses a native-size bitmap path; scaled cells retain the general
 scaler. These are bounded hot-path optimizations, not a second renderer.
+API-owned graphic frames use the same principle: an unscaled canvas avoids
+the general source-coordinate scaler while clipped or resized frames retain
+the existing alpha/compositing path. The direct-KMS API pixel gate exercises
+this native-size path.
 
 Surface damage is consumed only after the corresponding view is submitted.
 If a connector is still waiting for its page-flip event, its damage remains

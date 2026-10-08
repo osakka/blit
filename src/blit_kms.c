@@ -458,6 +458,62 @@ static void draw_graphic(KmsOutput *output, const BlitGraphicsImage *image,
     if (!image->used || !image->complete || !image->visible || image->pixels == NULL ||
         image->width < 1 || image->height < 1 || width < 1 || height < 1)
         return;
+    /* Emulator frames normally arrive at their presentation size.  Keep the
+       native-size path free of the scaler's two integer divisions and
+       per-pixel source-coordinate calculation.  Clipping is still applied so
+       a canvas may safely extend beyond a pane or output. */
+    if (width == image->width && height == image->height) {
+        int destination_x = origin_x + image->x;
+        int destination_y = origin_y + image->y;
+        int first_x = destination_x > origin_x ? destination_x : origin_x;
+        int first_y = destination_y > origin_y ? destination_y : origin_y;
+        int last_x = destination_x + width;
+        int last_y = destination_y + height;
+        int clip_last_x = origin_x + clip_width;
+        int clip_last_y = origin_y + clip_height;
+        int y;
+
+        if (last_x > clip_last_x) last_x = clip_last_x;
+        if (last_y > clip_last_y) last_y = clip_last_y;
+        if (first_x < 0) first_x = 0;
+        if (first_y < 0) first_y = 0;
+        if (last_x > output->mode.hdisplay) last_x = output->mode.hdisplay;
+        if (last_y > output->mode.vdisplay) last_y = output->mode.vdisplay;
+        if (first_x >= last_x || first_y >= last_y)
+            return;
+        for (y = first_y; y < last_y; ++y) {
+            int x;
+            int source_y = y - destination_y;
+            int source_x = first_x - destination_x;
+            const unsigned char *source = image->pixels +
+                ((size_t)source_y * (size_t)image->width +
+                 (size_t)source_x) * (size_t)bytes_per_pixel;
+            uint32_t *destination = (uint32_t *)((unsigned char *)output->back.map +
+                (size_t)y * output->back.pitch) + first_x;
+            for (x = first_x; x < last_x; ++x) {
+                unsigned int alpha = image->format == 32 ? source[3] : 255U;
+                if (alpha == 255U) {
+                    *destination = ((uint32_t)source[0] << 16) |
+                        ((uint32_t)source[1] << 8) | source[2];
+                } else if (alpha != 0U) {
+                    uint32_t old = *destination;
+                    unsigned int inverse = 255U - alpha;
+                    unsigned int red = (old >> 16) & 0xffU;
+                    unsigned int green = (old >> 8) & 0xffU;
+                    unsigned int blue = old & 0xffU;
+                    *destination = (((unsigned int)source[0] * alpha +
+                                     red * inverse) / 255U << 16) |
+                        (((unsigned int)source[1] * alpha + green * inverse) /
+                         255U << 8) |
+                        (((unsigned int)source[2] * alpha + blue * inverse) /
+                         255U);
+                }
+                ++destination;
+                source += bytes_per_pixel;
+            }
+        }
+        return;
+    }
     for (destination_y = 0; destination_y < height; ++destination_y) {
         int py = origin_y + image->y + destination_y;
         int source_y = destination_y * image->height / height;
