@@ -89,6 +89,20 @@ missing:
 tools/diagnostics/verify-live-input.sh http://192.168.10.54:8080
 ```
 
+For physical-device acceptance, run the screenshot-free gate while moving the
+real mouse. It rejects API-injected events, requires the pointer device to be
+present in the inventory, and fails distinctly when no physical motion was
+observed:
+
+```sh
+tools/diagnostics/verify-live-physical.sh \
+  http://192.168.10.54:8080 10 diagnostics/physical-test
+```
+
+Exit status `2` means the capture was valid but no physical motion occurred;
+it is not a renderer pass or failure. Exit status `1` means a device,
+render-path, deadline, or empty-graphics redraw invariant failed.
+
 The probe is deliberately synthetic. Physical-device diagnosis uses the same
 capture directory and must additionally show `device_id`/evdev events from
 `/v1/diagnostics/trace` and the corresponding input-device state in
