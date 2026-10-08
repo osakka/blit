@@ -10305,6 +10305,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
         int synchronized_count = 0;
         int overlay_count = 0;
         int target_changed = 0;
+        int external_target_changed = 0;
         int full_redraw;
         int scene_target = 0;
         int pointer_only;
@@ -10329,8 +10330,12 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                     continue;
                 }
                 ++target_count;
-                if (surface->damage_valid)
+                if (surface->damage_valid) {
                     target_changed = 1;
+                    if (session != NULL &&
+                        session->surface_mode == BLIT_SURFACE_EXTERNAL)
+                        external_target_changed = 1;
+                }
             }
         }
         if (runtime->pixel_frames_pending[output_index] > 0)
@@ -10423,6 +10428,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             continue;
         full_redraw = !runtime->outputs[output_index].initialized ||
             runtime->pointer_dirty ||
+            external_target_changed ||
             target_count != runtime->outputs[output_index].last_target_count ||
             runtime->topology_revision !=
                 runtime->outputs[output_index].last_topology_revision;
