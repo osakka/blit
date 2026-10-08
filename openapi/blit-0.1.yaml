@@ -906,7 +906,7 @@ components:
               type: array
               items:
                 type: object
-                required: [display_id, refresh_hz, refresh_source, effective_interval_ms, target_interval_us, target_interval_ms, missed_deadlines, last_present_ms, max_present_ms, present_calls]
+                required: [display_id, refresh_hz, refresh_source, effective_interval_ms, target_interval_us, target_interval_ms, missed_deadlines, last_present_ms, max_present_ms, present_calls, render_width, render_height]
                 properties:
                   display_id: {type: string}
                   refresh_hz: {type: number, minimum: 1}
@@ -918,6 +918,8 @@ components:
                   last_present_ms: {type: number, minimum: 0}
                   max_present_ms: {type: number, minimum: 0}
                   present_calls: {type: integer, minimum: 0}
+                  render_width: {type: integer, minimum: 0}
+                  render_height: {type: integer, minimum: 0}
                 additionalProperties: false
             font_scale: {type: integer, minimum: 1}
             direct_kms: {type: boolean}

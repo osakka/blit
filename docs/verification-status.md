@@ -79,6 +79,37 @@ and colour placement with no adjacent-atlas bleed. Emoji outside the bundled
 fixed-cell coverage remains an explicit visible fallback; this is not a claim
 of universal Unicode shaping.
 
+### Current 0.1.279 evidence
+
+The 0.1.279 correction makes each SDL display window enter exclusive
+fullscreen after it is positioned on its target display. This is required by
+the SDL KMSDRM backend for a complete scanout surface; a borderless window
+alone can leave a startup-sized composition area even when the display mode is
+taller. The versioned diagnostics now expose the actual renderer output size,
+viewport size, and render scale per output. The authorized physical host
+reported `render_width=1920`, `render_height=2160`,
+`viewport_width=1920`, `viewport_height=2160`, and unit scale after the
+upgrade.
+
+A fresh Hibr `retro_car` session reached the settled surface revision 138 in
+three bounded polls. Its API screenshot was 1920×2160 and had no sustained
+black rows; visual inspection showed the wallpaper and desktop content from
+the first through the last output row. Capturing before Hibr reached that
+revision produced a partial startup frame, so the validation procedure now
+waits for the surface revision to settle before treating a screenshot as
+render evidence. The session was deleted and the host returned to zero
+sessions, surfaces, streams, and input routes with no diagnostics errors.
+
+The installed 0.1.279 physical host passed the API-owned pixel-frame gate with
+30 fragmented/reused RGBA frames accepted at 61.034 Hz and zero pixel-frame
+errors, and passed the damage-driven terminal frame gate at 44.498 measured
+frames over a 516 ms window with zero missed deadlines and a 12.304 ms maximum
+render sample against the 16 ms target. These are one-output 60 Hz results;
+they do not claim physical 120/240 Hz support.
+
+The exact TCC build passed the OpenAPI parse, Hibr font manifest, SDL glyph,
+background batching, and graphics-cache gates. No Hibr source was modified.
+
 ### Current 0.1.277 evidence
 
 The exact TCC-built `0.1.277` binary passed complete terminal conformance,

@@ -254,6 +254,12 @@ typedef struct {
     unsigned long long display_id;
     int initialized;
     int vsync_enabled;
+    int render_width;
+    int render_height;
+    int viewport_width;
+    int viewport_height;
+    float scale_x;
+    float scale_y;
 } BlitOutput;
 
 typedef struct {
@@ -1486,7 +1492,10 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
             "\"refresh_source\":\"%s\",\"effective_interval_ms\":%d,"
             "\"target_interval_us\":%llu,\"target_interval_ms\":%.3f,"
             "\"missed_deadlines\":%lu,\"last_present_ms\":%.3f,"
-            "\"max_present_ms\":%.3f,\"present_calls\":%llu}",
+            "\"max_present_ms\":%.3f,\"present_calls\":%llu,"
+            "\"render_width\":%d,\"render_height\":%d,"
+            "\"viewport_width\":%d,\"viewport_height\":%d,"
+            "\"scale_x\":%.3f,\"scale_y\":%.3f}",
             i == 0 ? "" : ",", runtime->outputs[i].display_id,
             output_refresh_hz(runtime, i),
             runtime->test_refresh_override ? "test-override" : "display-mode",
@@ -1499,7 +1508,19 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
             have_kms_info ? kms_info.max_present_ms :
                 runtime->diagnostic_max_kms_present_ms,
             have_kms_info ? kms_info.present_calls :
-                runtime->diagnostic_present_calls);
+                runtime->diagnostic_present_calls,
+            runtime->direct_kms ?
+                runtime->displays[display_index].bounds.w :
+                runtime->outputs[i].render_width,
+            runtime->direct_kms ?
+                runtime->displays[display_index].bounds.h :
+                runtime->outputs[i].render_height,
+            runtime->direct_kms ? runtime->displays[display_index].bounds.w :
+                runtime->outputs[i].viewport_width,
+            runtime->direct_kms ? runtime->displays[display_index].bounds.h :
+                runtime->outputs[i].viewport_height,
+            runtime->direct_kms ? 1.0f : runtime->outputs[i].scale_x,
+            runtime->direct_kms ? 1.0f : runtime->outputs[i].scale_y);
     }
     snprintf(body + used, capacity - used, "]");
 }
@@ -8752,6 +8773,18 @@ static void initialize_outputs(BlitRuntime *runtime)
             continue;
         }
         SDL_SetWindowPosition(window, display->bounds.x, display->bounds.y);
+        /* A borderless window is not sufficient on KMSDRM: the backend can
+           retain its default mode-sized GBM surface even when the requested
+           window dimensions match the display.  Enter exclusive fullscreen
+           after positioning so each output owns its complete scanout mode,
+           including portrait/tall modes such as 1920x2160. */
+        if (!SDL_SetWindowFullscreen(window, true)) {
+            fprintf(stderr,
+                    "blit: SDL fullscreen display=%llu failed: %s\n",
+                    display->id, SDL_GetError());
+            SDL_DestroyWindow(window);
+            continue;
+        }
         renderer = SDL_CreateRenderer(window, renderer_name);
         if (renderer == NULL) {
             snprintf(runtime->sdl_error, sizeof(runtime->sdl_error),
@@ -8764,6 +8797,37 @@ static void initialize_outputs(BlitRuntime *runtime)
                      sizeof(runtime->sdl_renderer_name), "%s",
                      SDL_GetRendererName(renderer) != NULL ?
                      SDL_GetRendererName(renderer) : "unknown");
+        if (!SDL_GetRenderOutputSize(renderer,
+                                     &runtime->outputs[runtime->output_count].render_width,
+                                     &runtime->outputs[runtime->output_count].render_height)) {
+            runtime->outputs[runtime->output_count].render_width = 0;
+            runtime->outputs[runtime->output_count].render_height = 0;
+        }
+        {
+            SDL_Rect viewport;
+            if (SDL_GetRenderViewport(renderer, &viewport)) {
+                runtime->outputs[runtime->output_count].viewport_width =
+                    viewport.w;
+                runtime->outputs[runtime->output_count].viewport_height =
+                    viewport.h;
+            }
+            if (!SDL_GetRenderScale(renderer,
+                                    &runtime->outputs[runtime->output_count].scale_x,
+                                    &runtime->outputs[runtime->output_count].scale_y)) {
+                runtime->outputs[runtime->output_count].scale_x = 0.0f;
+                runtime->outputs[runtime->output_count].scale_y = 0.0f;
+            }
+        }
+        fprintf(stderr, "blit: SDL output display=%llu render=%dx%d\n",
+                display->id,
+                runtime->outputs[runtime->output_count].render_width,
+                runtime->outputs[runtime->output_count].render_height);
+        fprintf(stderr, "blit: SDL viewport display=%llu size=%dx%d scale=%.3fx%.3f\n",
+                display->id,
+                runtime->outputs[runtime->output_count].viewport_width,
+                runtime->outputs[runtime->output_count].viewport_height,
+                runtime->outputs[runtime->output_count].scale_x,
+                runtime->outputs[runtime->output_count].scale_y);
         if (SDL_SetRenderVSync(renderer, 1)) {
             int vsync = 0;
             if (SDL_GetRenderVSync(renderer, &vsync) && vsync > 0)
