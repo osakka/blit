@@ -31,6 +31,14 @@ desktop, exposed both Hibr control displays, and finished with
 `ACCEPTANCE_PASS`. The primary reached surface revision 152 and the join
 surface revision 10. Hibr source remained unchanged.
 
+The full 0.1.248 two-output orchestration variant also passed
+`HIBR_PANE_MATRIX_PASS`: four Hibr clients ran across a Blit-owned 2×2 pane
+layout, the primary desktop supervisor restarted successfully, and an
+auxiliary `--join` client was killed and reconnected on a new pane. The final
+topology contained five attached surfaces. The package is
+`blit_0.1.248-1_amd64.deb`, SHA-256
+`5b980f764c3965396d2dfb45dcf4ee03939308c183575869669d7d1836f1321f`.
+
 ### Current 0.1.247 source/package evidence
 
 The exact TCC-built 0.1.247 binary passes the focused font fallback gate,
