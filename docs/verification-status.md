@@ -27,6 +27,13 @@ an evidence record, not a claim that the complete product is released.
   the real-mode QEMU
   stream gate still fails its strict page-flip deadline requirement.
 
+The same live host sustained 59.894 measured frames per second during a
+controlled 120×50 full-screen coloured terminal redraw workload carrying
+99,433 terminal bytes, with zero missed deadlines. Its maximum observed render
+sample was 17.890 ms against the 16 ms target, so this is stable 60 Hz cadence
+evidence with a remaining worst-case render-budget issue, not a claim of
+unbounded performance.
+
 ### Current 0.1.274 evidence
 
 The exact TCC-built `0.1.274` binary was rebuilt from the pushed source and
