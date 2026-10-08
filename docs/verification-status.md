@@ -26,6 +26,15 @@ The exact 0.1.320 TCC binary also passes the QEMU VKMS primary/`--join`
 restart fixture: `LAYOUT_MATRIX_PASS`, `HIBR_PRIMARY_RESTART_PASS`,
 `HIBR_JOIN_RECONNECT_PASS`, and `HIBR_PANE_MATRIX_PASS`.
 
+The live pointer-artifact transaction reproduced the physical symptom through
+the controlled API path. All sampled render traces used
+`full-redraw target_changed=1 external_changed=1`; pointer-cache hits stayed
+at zero while pointer-cache misses increased. During the four-position sweep
+the reported frame-rate window ranged from 0.65 to 3.32 Hz, with zero missed
+refresh deadlines. This isolates the current bottleneck to external-surface
+recomposition under pointer activity; it does not implicate evdev discovery
+or SDL refresh timing. Capture output was kept outside the repository.
+
 ## Current 0.1.319 terminal lifecycle status
 
 The TCC-built terminal path now preserves the final parsed PTY frame after a
