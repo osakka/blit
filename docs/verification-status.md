@@ -3,16 +3,16 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
-## Current 0.1.329 live diagnostic status
+## Current 0.1.330 live diagnostic status
 
-The 0.1.329 package is deployed on the authorized physical host at
+The 0.1.330 package is deployed on the authorized physical host at
 `192.168.10.54:8080`. A disposable Hibr image probe completed with exit code
 zero and was then deleted. The live API reported one complete `api` graphics
 object (`512x512`, `786432` bytes), `pixel_frames_accepted=1`, and
 `pixel_frame_errors=0`. This proves the packaged Blit-owned Hibr adapter can
 submit and retain a pixel frame without changing Hibr.
 Package SHA-256 is
-`1a95f980d9c52f6b73c3a4e9f02f037006b8a0e65ef9fe4a3e2ea6fc1dc901d0`.
+`5e40c97d215b0dc66bc2de412689ec238c1665c05bc03647c24a59d30ac98d2f`.
 
 The same live sample reported `last_render_ms=4.411`, `max_render_ms=30.148`,
 `missed_deadlines=0`, and a 60 Hz display target. Its `input_events` count was
@@ -35,6 +35,9 @@ post-routing `input_events`: `evdev_mouse_events`, sync, motion, wheel, and
 button counters, plus the last evdev path and event age. This closes the
 diagnostic distinction between a kernel event that was read but did not change
 the pointer and a device that produced no records during the capture.
+It also reports SDL mouse events discarded or processed. A nonzero discarded
+SDL count with unchanged raw-evdev counters identifies backend delivery or
+competing input ownership rather than a compositor failure.
 
 The exact 0.1.329 binary with the unchanged Hibr checkout also passes the
 QEMU/VKMS Hibr pane matrix: `LAYOUT_MATRIX_PASS` and

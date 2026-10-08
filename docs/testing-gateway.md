@@ -470,6 +470,12 @@ changed pointer position; all of them remaining unchanged means the kernel
 device produced no records for Blit during the window. The endpoint also
 reports `last_evdev_mouse_path` and `last_evdev_mouse_event_age_ms` so a stale
 or changing device can be identified without shell access to the desktop.
+The runtime also reports `sdl_mouse_events_discarded`,
+`sdl_mouse_events_processed`, `sdl_mouse_motion_events`, and
+`sdl_mouse_button_events`. With an evdev device present, discarded SDL mouse
+events are expected to remain zero during normal operation; a nonzero value
+with unchanged raw-evdev counters identifies competing SDL input ownership or
+backend delivery that requires correction before blaming composition.
 Each scheduler output also reports `last_present_ms`, `max_present_ms`, and
 `present_calls`, which identify per-output KMS/SDL presentation cost rather
 than hiding it in one aggregate server-wide maximum.

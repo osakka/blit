@@ -543,6 +543,10 @@ typedef struct {
     unsigned long long diagnostic_evdev_mouse_button_events;
     uint64_t diagnostic_last_evdev_mouse_event_us;
     char diagnostic_last_evdev_mouse_path[128];
+    unsigned long long diagnostic_sdl_mouse_events_discarded;
+    unsigned long long diagnostic_sdl_mouse_events_processed;
+    unsigned long long diagnostic_sdl_mouse_motion_events;
+    unsigned long long diagnostic_sdl_mouse_button_events;
     unsigned long long diagnostic_stream_dropped_events;
     unsigned long long diagnostic_stream_backpressure_disconnects;
     unsigned long long diagnostic_stream_queue_peak_bytes;
@@ -1524,6 +1528,10 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"evdev_mouse_button_events\":%llu,"
         "\"last_evdev_mouse_event_age_ms\":%llu,"
         "\"last_evdev_mouse_path\":\"%s\","
+        "\"sdl_mouse_events_discarded\":%llu,"
+        "\"sdl_mouse_events_processed\":%llu,"
+        "\"sdl_mouse_motion_events\":%llu,"
+        "\"sdl_mouse_button_events\":%llu,"
         "\"stream_queue_bytes\":%llu,\"stream_queue_peak_bytes\":%llu,"
         "\"stream_dropped_events\":%llu,"
         "\"stream_backpressure_disconnects\":%llu,"
@@ -1572,6 +1580,10 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
             (unsigned long long)((now -
                 runtime->diagnostic_last_evdev_mouse_event_us) / 1000ULL) : 0,
         runtime->diagnostic_last_evdev_mouse_path,
+        runtime->diagnostic_sdl_mouse_events_discarded,
+        runtime->diagnostic_sdl_mouse_events_processed,
+        runtime->diagnostic_sdl_mouse_motion_events,
+        runtime->diagnostic_sdl_mouse_button_events,
         diagnostic_stream_queue_bytes(runtime),
         runtime->diagnostic_stream_queue_peak_bytes,
         runtime->diagnostic_stream_dropped_events,
@@ -12089,9 +12101,13 @@ static void service_sdl_events(BlitRuntime *runtime)
             (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
              event.type == SDL_EVENT_MOUSE_BUTTON_UP ||
              event.type == SDL_EVENT_MOUSE_MOTION ||
-             event.type == SDL_EVENT_MOUSE_WHEEL))
+             event.type == SDL_EVENT_MOUSE_WHEEL)) {
+            ++runtime->diagnostic_sdl_mouse_events_discarded;
             continue;
+        }
         if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+            ++runtime->diagnostic_sdl_mouse_button_events;
+            ++runtime->diagnostic_sdl_mouse_events_processed;
             int button = event.button.button == 1 ? 0 :
                 event.button.button == 2 ? 1 :
                 event.button.button == 3 ? 2 : -1;
@@ -12113,6 +12129,8 @@ static void service_sdl_events(BlitRuntime *runtime)
                                   x, y, button, 0);
             }
         } else if (event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
+            ++runtime->diagnostic_sdl_mouse_button_events;
+            ++runtime->diagnostic_sdl_mouse_events_processed;
             int button = event.button.button == 1 ? 0 :
                 event.button.button == 2 ? 1 :
                 event.button.button == 3 ? 2 : -1;
@@ -12134,6 +12152,8 @@ static void service_sdl_events(BlitRuntime *runtime)
                 runtime->mouse_buttons &= ~(1U << button);
             }
         } else if (event.type == SDL_EVENT_MOUSE_MOTION) {
+            ++runtime->diagnostic_sdl_mouse_motion_events;
+            ++runtime->diagnostic_sdl_mouse_events_processed;
             int output_index = mouse_output_index(runtime,
                                                   event.motion.windowID);
             float x = event.motion.x;
@@ -12166,6 +12186,7 @@ static void service_sdl_events(BlitRuntime *runtime)
             send_mouse_motion_report(runtime, event.motion.windowID,
                                      x, y);
         } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
+            ++runtime->diagnostic_sdl_mouse_events_processed;
             int button = event.wheel.y > 0 ? 64 : 65;
             int output_index = mouse_output_index(runtime,
                                                   event.wheel.windowID);
