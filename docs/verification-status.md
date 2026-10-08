@@ -3,7 +3,28 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
-## Current 0.1.287 Hibr integration correction
+## Current 0.1.289 Hibr integration status
+
+The authorized physical host reports Hibr `0.99.79 abi 16`, while the local
+development checkout is `0.99.100`. The `console-blit` adapter was therefore
+rebuilt against the exact local `v0.99.79` Hibr worktree without modifying the
+Hibr checkout, and package `0.1.289` was deployed to the host. The exact
+0.99.79 adapter/server combination passes the QEMU Hibr primary/`desktop
+--join` fixture with `ACCEPTANCE_PASS`.
+
+The physical host still does not present a valid desktop: its live surface
+contains repeated `-1` cells and the screenshot is black. This is an open
+physical-host integration failure, not accepted rendering evidence. The
+session was removed after capture. Further diagnosis must identify the host's
+installed Hibr desktop/module/configuration mismatch before another package is
+claimed good.
+
+The exact 0.1.287 high-refresh fixture also completed with
+`REFRESH_SCHEDULER_240_PASS`, `KMS_CAPTURE_PASS`, and the Kitty wide-glyph
+capture markers. Physical 120/240 Hz and physical multi-monitor gates remain
+open.
+
+## Previous 0.1.287 Hibr integration correction
 
 The exact 0.1.287 TCC server and `console-blit.so` adapter were staged with
 the unchanged Hibr checkout into the populated QEMU VKMS initroot. The

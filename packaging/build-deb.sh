@@ -7,13 +7,14 @@ RUNTIME_BINARY=$ROOT/build/blit/blit-server
 UPDATE_HELPER=$ROOT/build/blit/blit-update-helper
 HIBR_ADAPTER=$ROOT/build/blit/console-blit.so
 HIBR_ENTRYPOINT=$ROOT/hibr/blit-session.hibr
+HIBR_VERSION_FILE=$ROOT/packaging/HIBR_VERSION
 OUT=${1:-$ROOT}
 VERSION_FILE=$ROOT/packaging/VERSION
 
 if [ ! -x "$RUNTIME_BINARY" ] || [ ! -x "$UPDATE_HELPER" ] ||
    [ ! -x "$BUNDLE/bin/blit-server" ] ||
    [ ! -f "$VERSION_FILE" ] || [ ! -f "$HIBR_ENTRYPOINT" ] ||
-   [ ! -f "$HIBR_ADAPTER" ]; then
+   [ ! -f "$HIBR_ADAPTER" ] || [ ! -f "$HIBR_VERSION_FILE" ]; then
 	echo "blit: canonical build outputs are incomplete" >&2
 	exit 1
 fi
@@ -79,6 +80,16 @@ cp -a "$UPDATE_HELPER" "$stage/usr/lib/blit/bin/blit-update-helper"
 cp -a "$HIBR_ADAPTER" "$stage/usr/lib/hibr/console-blit.so"
 cp -a "$HIBR_ENTRYPOINT" "$stage/usr/share/blit/hibr/blit-session.hibr"
 chmod 0755 "$stage/usr/share/blit/hibr/blit-session.hibr"
+# Hibr's stock session resolves desktop.hibr and its sibling directories from
+# its own $0 directory. The Blit launcher stays in a separate integration
+# directory, so provide only symlinks back to Hibr's installed tree; never
+# copy or fork Hibr's desktop implementation.
+for desktop_entry in \
+    desktop.hibr session.hibr apps colours control-panel control-strip \
+    desk-accessories img lang lib login savers themes widgets wm; do
+    ln -s "/usr/share/hibr/desktop/$desktop_entry" \
+        "$stage/usr/share/blit/hibr/$desktop_entry"
+done
 chmod 0755 "$stage/usr/lib/blit/bin/blit-update-helper"
 cp -a "$ROOT/packaging/blit-update-helper.service" \
     "$stage/lib/systemd/system/"
@@ -100,6 +111,7 @@ fi
 ln -s /usr/lib/blit/bin/blit-server "$stage/usr/bin/blit"
 cp -a "$BUNDLE/README.md" "$stage/usr/share/doc/blit/"
 cp -a "$VERSION_FILE" "$stage/usr/share/doc/blit/VERSION"
+cp -a "$HIBR_VERSION_FILE" "$stage/usr/share/doc/blit/HIBR_VERSION"
 if [ -d "$ROOT/docs" ]; then
 	cp -a "$ROOT/docs" "$stage/usr/share/doc/blit/"
 else
