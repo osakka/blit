@@ -348,6 +348,7 @@ typedef struct {
     uint64_t attach_reassert_due_us;
     int attach_reassert_attempts;
     int attach_reassert_max_attempts;
+    int attach_reassert_hibr_matches;
     int terminal_escape;
     /* Hibr emits a single SGR containing bold plus truecolor foreground and
        background (three decimal components each).  A 32-byte buffer cuts
@@ -6728,8 +6729,10 @@ static void service_attach_reasserts(BlitRuntime *runtime, uint64_t now)
             signalled = 1;
         {
             int hibr_matches = reassert_hibr_session_processes(session, &size);
-            if (hibr_matches > 0)
+            if (hibr_matches > 0) {
                 signalled = 1;
+                ++session->attach_reassert_hibr_matches;
+            }
         }
         if (!signalled)
             fprintf(stderr, "blit: attach reassert signal for session %llu failed: %s\n",
@@ -6739,9 +6742,13 @@ static void service_attach_reasserts(BlitRuntime *runtime, uint64_t now)
         /* Startup output can arrive before Hibr has installed its resize
            handling.  A single SIGWINCH is therefore not a reliable attach
            contract.  Retry for a bounded two-and-a-half second window; this
-           remains Blit's PTY boundary and never injects user input. */
+           remains Blit's PTY boundary and never injects user input. Keep
+           discovering the detached owner for a bounded startup window, then
+           stop after three successful owner-group reassertions. */
         if (session->attach_reassert_attempts <
-            session->attach_reassert_max_attempts) {
+            session->attach_reassert_max_attempts &&
+            (session->attach_reassert_hibr_matches < 3 ||
+             session->attach_reassert_hibr_matches == 0)) {
             session->attach_reassert_pending = 1;
             session->attach_reassert_due_us = now +
                 (session->attach_reassert_attempts < 2 ? 250000ULL :
@@ -7818,7 +7825,8 @@ static void service_session_output(BlitRuntime *runtime, int fd)
                    deterministic SIGWINCH after its layout is ready. */
                 runtime->sessions[i].attach_reassert_pending = 1;
                 runtime->sessions[i].attach_reassert_attempts = 0;
-                runtime->sessions[i].attach_reassert_max_attempts = 12;
+                runtime->sessions[i].attach_reassert_max_attempts = 32;
+                runtime->sessions[i].attach_reassert_hibr_matches = 0;
                 runtime->sessions[i].attach_reassert_due_us =
                     monotonic_us() + 250000ULL;
             }
