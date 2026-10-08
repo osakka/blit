@@ -28,6 +28,15 @@ terminal conformance suite and a five-second two-session soak (`356` snapshots,
 physical mouse acceptance: the real-host physical capture still observed zero
 evdev events.
 
+The exact TCC-built `0.1.358` binary was rerun through the VKMS QEMU fixture:
+the two-output capture returned `KMS_CAPTURE_PASS`, and the four-output fixture
+returned `KMS_FOUR_HIBR_PASS` with one primary Hibr desktop plus three
+`desktop --join` clients. The four virtual outputs independently reported a
+240 Hz active mode and four KMS presentations; the guest powered down cleanly
+and no QEMU process remained. This is virtual KMS/topology evidence, not
+physical monitor or sustained physical 240 Hz acceptance. The dedicated
+240-frame pixel-stream gate remains open.
+
 ## Current 0.1.357 release and live-validation gate
 
 The TCC-built `0.1.357` package contains the attach-time PTY notification
