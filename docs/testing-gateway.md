@@ -49,6 +49,17 @@ The package also supplies `LANG=C.UTF-8` and `LC_ALL=C.UTF-8` by default so
 Hibr's Unicode desktop glyphs are emitted as UTF-8 through its PTY. Existing
 operator values in `/etc/blit/blit.env` are preserved.
 
+Before publishing a Debian artifact, run the repository-owned package gate:
+
+```sh
+tools/tests/package_artifact_gate.sh \
+  build/packages-335/blit_0.1.335-1_amd64.deb
+```
+
+It verifies the external release-manifest hash, TCC binary identity, embedded
+documentation/OpenAPI, required Hibr adapter assets, and the runtime package
+allowlist.
+
 ```sh
 sudo systemctl status blit.service
 ```
