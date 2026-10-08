@@ -1239,6 +1239,14 @@ The latest reachable observation of the authorized host at
   replay repair, HTTP backpressure, fragmented HTTP requests, authenticated
   network access, clean shutdown, update cancellation, and updater idle
   timeout. No active local test resources remained after the pass.
+- The exact-current 240 Hz producer-driven pixel workload exposes an open
+  high-refresh limitation: all 240 frames are accepted with zero pixel-frame
+  protocol errors, but the synchronized direct-KMS VKMS run presents only
+  89 frames and records 20 additional virtual page-flip deadline misses.
+  Diagnostic async page flips and multi-threaded QEMU TCG produce the same
+  result (86 and 82 presentations respectively). This is not treated as a
+  passing 240 Hz gaming/emulation result; hardware/KVM-backed validation or a
+  runtime fix is still required.
 
 ## Open release gates
 
@@ -1247,6 +1255,10 @@ The latest reachable observation of the authorized host at
    primary/join behavior. The executable
    `tools/tests/physical_multi_display_gate.rb` is ready for this check; the
    current host exposes only one physical output and returns exit status 77.
+2. Validate the producer-driven 240 Hz pixel path on hardware or a
+   KVM-backed VKMS guest. The current host is 60 Hz and the available QEMU
+   TCG guest cannot sustain the 240 Hz page-flip workload without additional
+   deadline misses; the failing result is recorded above.
 
 All software-side Gate 6 cases currently in scope—including primary supervisor
 restart, joined-client reconnect, session termination during writes/resizes,
