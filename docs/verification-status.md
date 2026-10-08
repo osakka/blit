@@ -3,6 +3,24 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## Current 0.1.341 real-host troubleshooting status
+
+The 0.1.339 packaging correction keeps the optional `console-blit.so` provider
+out of `/usr/lib/hibr`, so the ordinary `/usr/bin/desktop` path selects Hibr's
+native console provider. The authorized host now reports `0.1.341`; a fresh
+ordinary desktop starts with `5659` non-empty cells and its Hibr log reports
+`desktop: started` without `console-blit` flush failures. Pointer and keyboard
+routes are configured through the API.
+
+The live timing capture is now topology-aware and records session details,
+surface summaries, runtime timing, filtered traces, input inventory, and route
+state in one directory. The latest four-second capture recorded zero missed
+deadlines and zero physical evdev events; physical mouse acceptance therefore
+remains open until movement is observed on the real machine. The SDL API
+framebuffer snapshot still returns `screenshot_failed` on this host and is
+not claimed as accepted; this is a separate capture-backend issue from the
+clean native Hibr terminal path.
+
 ## Current 0.1.338 Hibr ABI packaging status
 
 The packaging build now requires an explicit `BLIT_HIBR_ROOT` and has a TCC
