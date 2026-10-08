@@ -3,6 +3,25 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## Current 0.1.320 live graphics-probe status
+
+Package `blit_0.1.320-1_amd64.deb` adds the Blit-owned, non-Hibr-source probe
+`/usr/share/blit/probes/blit-live-image-probe.hibr` and is deployed on the
+authorized host. Package SHA-256 is
+`f79f7263bc9bf6c6d79e5aef9dc190d5196a4084b099f5c317533217d0b7e417`.
+
+The live API pixel path passes independently: the TCC-built WebSocket probe
+returns `PIXEL_FRAME_PROBE_PASS`; the real host reports one accepted frame,
+one texture upload, zero pixel-frame errors, and an empty pending queue. A
+1920x2160 live SDL screenshot contains the expected 32x32 red probe image at
+the translated surface origin `(20,20)`.
+
+The live input probe also passes on 0.1.320. An API-launched Hibr probe was
+attempted with both `hibr -c` and the packaged script; both entered Hibr's
+desktop startup path and produced desktop cells but no image upload. This is
+recorded as an unresolved Hibr invocation/configuration boundary, not a Blit
+graphics failure. Hibr source remains unmodified.
+
 ## Current 0.1.319 terminal lifecycle status
 
 The TCC-built terminal path now preserves the final parsed PTY frame after a
