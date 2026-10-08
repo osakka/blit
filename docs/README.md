@@ -68,7 +68,8 @@ diagnostics cannot consume unbounded server memory.
 The project has a TCC-built server, deterministic VKMS/KMS coverage, passing
 terminal and Hibr acceptance fixtures, and an operational Hibr console
 adapter. Physical-host release acceptance remains open; the exact evidence
-and the one remaining hardware gate are recorded in
+and the separate physical pointer, multi-monitor, and 120/240 Hz hardware
+gates are recorded in
 [verification-status.md](verification-status.md). Items marked as open
 questions should be resolved through an ADR before they become hidden
 implementation assumptions.

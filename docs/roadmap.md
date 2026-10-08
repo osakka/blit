@@ -47,11 +47,14 @@ backgrounds are coalesced into horizontal runs before geometry submission;
 the focused 128×48 regression workload now submits four background quads.
 The bundled Hibr font contains 929 glyphs and 1,182 mappings; its manifest rejects
 unresolved `.notdef` fallbacks and checks deterministic box/special-glyph
-bitmaps. The authorized physical host is running 0.1.286 and has a healthy
-one-output SDL3/OpenGL presentation at 60.000 Hz; its active frame gate
-measured 59.991 Hz with zero missed deadlines. Physical multi-monitor
-confirmation remains open because that host currently exposes only one
-connector.
+bitmaps. The authorized physical host is running 0.1.332 and has a healthy
+one-output SDL3/OpenGL presentation at 60.000 Hz with zero missed deadlines
+in the current diagnostic samples. Its input inventory exposes one physical
+pointer and the activity-aware SDL fallback is deployed, but a physical
+movement has not yet been captured by the acceptance harness. Physical
+multi-monitor confirmation remains open because that host currently exposes
+only one connector; physical 120/240 Hz confirmation remains
+hardware-dependent.
 
 The exact-current 240 Hz VKMS scheduler fixture passes mode selection,
 producer-driven frame ingestion, screenshot capture, and KMS capture. The
