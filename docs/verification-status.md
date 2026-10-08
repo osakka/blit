@@ -108,6 +108,15 @@ with zero pixel-frame errors and 16 refresh-bound presentations during the
 bounded test. This validates the game/arcade frame transport independently of
 the terminal-cell glyph path; it is still one physical 60 Hz output evidence.
 
+The exact same 0.1.277 binary was staged into the current one-vCPU VKMS
+four-output fixture with the unchanged Hibr executable
+(`8903e0c1addf065e54646bfbab9db0e532cc6d028feb5b9def94b32e52c2ba06`). It
+reported four 1024×768 outputs at their selected 240 Hz modes, created four
+Hibr-backed sessions and surfaces, rendered one primary plus three unchanged
+`desktop --join` clients, and finished with `KMS_FOUR_HIBR_PASS`. The run
+recorded virtual QEMU deadline misses during startup and is therefore
+multi-output orchestration evidence, not physical 240 Hz timing evidence.
+
 An attempted live Hibr reattach also exposed an important test precondition:
 the host already had a held `blit` desktop, so a fresh primary invocation
 correctly exited with Hibr's "already running" result. Reattaching with
