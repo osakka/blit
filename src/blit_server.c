@@ -1830,18 +1830,63 @@ static int request_header(const char *request, const char *name,
     return length > 0;
 }
 
+/* Find a JSON object key without matching text inside a quoted string.  Blit
+   accepts only small bounded request objects, so this deliberately remains a
+   lightweight key scanner rather than growing a second general JSON parser. */
+static const char *json_key_cursor(const char *json, const char *key)
+{
+    const char *cursor = json;
+    size_t key_length = strlen(key);
+
+    while (*cursor != '\0') {
+        const char *quoted;
+        const char *character;
+        size_t index = 0;
+        int match = 1;
+
+        if (*cursor != '"') {
+            ++cursor;
+            continue;
+        }
+        quoted = cursor++;
+        character = cursor;
+        while (*character != '\0' && *character != '"') {
+            if (*character == '\\' && character[1] != '\0') {
+                match = 0;
+                character += 2;
+                ++index;
+                continue;
+            }
+            if (index >= key_length || *character != key[index])
+                match = 0;
+            ++index;
+            ++character;
+        }
+        if (*character == '"') {
+            const char *after = character + 1;
+            while (*after == ' ' || *after == '\t' || *after == '\r' ||
+                   *after == '\n')
+                ++after;
+            if (match && index == key_length && *after == ':')
+                return quoted;
+            cursor = character + 1;
+        } else {
+            return NULL;
+        }
+    }
+    return NULL;
+}
+
 static int json_string(const char *json, const char *key, char *value,
                        size_t capacity)
 {
-    char needle[128];
     const char *cursor;
     size_t out = 0;
 
-    snprintf(needle, sizeof(needle), "\"%s\"", key);
-    cursor = strstr(json, needle);
+    cursor = json_key_cursor(json, key);
     if (cursor == NULL)
         return 0;
-    cursor += strlen(needle);
+    cursor += strlen(key) + 2;
     while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
            *cursor == '\n') ++cursor;
     if (*cursor != ':')
@@ -1872,15 +1917,13 @@ static int json_string(const char *json, const char *key, char *value,
 
 static int json_int(const char *json, const char *key, int *value)
 {
-    char needle[128];
     const char *cursor;
     char *end;
 
-    snprintf(needle, sizeof(needle), "\"%s\"", key);
-    cursor = strstr(json, needle);
+    cursor = json_key_cursor(json, key);
     if (cursor == NULL)
         return 0;
-    cursor += strlen(needle);
+    cursor += strlen(key) + 2;
     while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
            *cursor == '\n') ++cursor;
     if (*cursor != ':')
@@ -1894,14 +1937,12 @@ static int json_int(const char *json, const char *key, int *value)
 
 static int json_bool(const char *json, const char *key, int *value)
 {
-    char needle[128];
     const char *cursor;
 
-    snprintf(needle, sizeof(needle), "\"%s\"", key);
-    cursor = strstr(json, needle);
+    cursor = json_key_cursor(json, key);
     if (cursor == NULL)
         return 0;
-    cursor += strlen(needle);
+    cursor += strlen(key) + 2;
     while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
            *cursor == '\n') ++cursor;
     if (*cursor++ != ':')
@@ -2691,7 +2732,9 @@ static int apply_cell_update(BlitSurface *surface, const char *json)
 
     if (cursor == NULL)
         return 0;
-    while ((cursor = strstr(cursor, "\"x\"")) != NULL) {
+    cursor = json_key_cursor(cursor, "x");
+    while (cursor != NULL) {
+        char cell_json[4096];
         char text[BLIT_MAX_CELL_COLS];
         char color_text[32];
         uint32_t foreground = 0;
@@ -2701,10 +2744,9 @@ static int apply_cell_update(BlitSurface *surface, const char *json)
         int foreground_set = 0;
         int background_set = 0;
         int underline_color_set = 0;
-        const char *next_cell = strstr(cursor + 3, "\"x\"");
-        const char *style_cursor = strstr(cursor, "\"style\"");
-        int style_seen = style_cursor != NULL &&
-            (next_cell == NULL || style_cursor < next_cell);
+        const char *next_cell;
+        const char *style_cursor;
+        int style_seen;
         int style_valid = 1;
         int flag;
         int x, y;
@@ -2713,41 +2755,52 @@ static int apply_cell_update(BlitSurface *surface, const char *json)
         uint32_t decoded_combining[BLIT_MAX_CELL_COLS * BLIT_MAX_COMBINING];
         unsigned char decoded_combining_counts[BLIT_MAX_CELL_COLS];
         size_t decoded_count;
+        size_t cell_length;
         size_t i;
 
-        if (!json_int(cursor, "x", &x) || !json_int(cursor, "y", &y) ||
-            !json_string(cursor, "text", text, sizeof(text)))
+        next_cell = json_key_cursor(cursor + 3, "x");
+        cell_length = (size_t)((next_cell != NULL ? next_cell :
+                                cursor + strlen(cursor)) - cursor);
+        if (cell_length == 0 || cell_length >= sizeof(cell_json))
+            break;
+        memcpy(cell_json, cursor, cell_length);
+        cell_json[cell_length] = '\0';
+        style_cursor = json_key_cursor(cell_json, "style");
+        style_seen = style_cursor != NULL;
+        if (!json_int(cell_json, "x", &x) ||
+            !json_int(cell_json, "y", &y) ||
+            !json_string(cell_json, "text", text, sizeof(text)))
             break;
         if (style_seen) {
-            if (json_string(cursor, "foreground", color_text,
+            if (json_string(cell_json, "foreground", color_text,
                             sizeof(color_text))) {
                 foreground_set = 1;
                 if (!parse_color(color_text, &foreground))
                     style_valid = 0;
             }
-            if (json_string(cursor, "background", color_text,
+            if (json_string(cell_json, "background", color_text,
                             sizeof(color_text))) {
                 background_set = 1;
                 if (!parse_color(color_text, &background))
                     style_valid = 0;
             }
-            if (json_bool(cursor, "bold", &flag) && flag)
+            if (json_bool(cell_json, "bold", &flag) && flag)
                 attributes |= BLIT_ATTR_BOLD;
-            if (json_bool(cursor, "dim", &flag) && flag)
+            if (json_bool(cell_json, "dim", &flag) && flag)
                 attributes |= BLIT_ATTR_DIM;
-            if (json_bool(cursor, "italic", &flag) && flag)
+            if (json_bool(cell_json, "italic", &flag) && flag)
                 attributes |= BLIT_ATTR_ITALIC;
-            if (json_bool(cursor, "underline", &flag) && flag)
+            if (json_bool(cell_json, "underline", &flag) && flag)
                 attributes |= BLIT_ATTR_UNDERLINE;
-            if (json_bool(cursor, "blink", &flag) && flag)
+            if (json_bool(cell_json, "blink", &flag) && flag)
                 attributes |= BLIT_ATTR_BLINK;
-            if (json_bool(cursor, "inverse", &flag) && flag)
+            if (json_bool(cell_json, "inverse", &flag) && flag)
                 attributes |= BLIT_ATTR_INVERSE;
-            if (json_bool(cursor, "strike", &flag) && flag)
+            if (json_bool(cell_json, "strike", &flag) && flag)
                 attributes |= BLIT_ATTR_STRIKE;
-            if (json_bool(cursor, "concealed", &flag) && flag)
+            if (json_bool(cell_json, "concealed", &flag) && flag)
                 attributes |= BLIT_ATTR_CONCEAL;
-            if (json_string(cursor, "underline_color", color_text,
+            if (json_string(cell_json, "underline_color", color_text,
                             sizeof(color_text))) {
                 underline_color_set = parse_color(color_text, &underline_color);
                 if (!underline_color_set)
@@ -2810,7 +2863,9 @@ static int apply_cell_update(BlitSurface *surface, const char *json)
             }
             updated += 1;
         }
-        cursor += 3;
+        if (next_cell == NULL)
+            break;
+        cursor = next_cell;
     }
     if (cursor_state != NULL) {
         int x;

@@ -229,6 +229,42 @@ assert_equal('X', api_cells.fetch([2, 0]).fetch('text'),
 request(base, 'DELETE', "/v1/terminal-sessions/#{api_cell_id}")
 puts 'PASS api-wide-utf8-cell-update'
 
+scoped_style_created = request(base, 'POST', '/v1/terminal-sessions', {
+  'command' => '/bin/sh',
+  'arguments' => ['-c', 'sleep 1'],
+  'surface_mode' => 'external',
+  'surface' => { 'width' => 8, 'height' => 2 }
+})
+scoped_style_id = scoped_style_created.fetch('id')
+request(base, 'PUT', "/v1/surfaces/surface-#{scoped_style_id}/cells", {
+  'base_revision' => 1,
+  'cells' => [
+    { 'x' => 0, 'y' => 0, 'text' => 'A',
+      'style' => { 'foreground' => '#00FF00' } },
+    { 'x' => 1, 'y' => 0, 'text' => 'B',
+      'style' => { 'background' => '#AA0000' } },
+    { 'x' => 2, 'y' => 0, 'text' => 'C',
+      'style' => { 'inverse' => true } },
+    { 'x' => 3, 'y' => 0, 'text' => 'D' }
+  ]
+})
+scoped_style_cells = cell_map(request(base, 'GET',
+                                      "/v1/surfaces/surface-#{scoped_style_id}/cells"))
+assert_equal('#00ff00', scoped_style_cells.fetch([0, 0]).fetch('style').fetch('foreground'),
+             'cell style foreground scope')
+assert_equal(false, scoped_style_cells.fetch([0, 0]).fetch('style').fetch('inverse'),
+             'cell style inverse does not leak')
+assert_equal('#aa0000', scoped_style_cells.fetch([1, 0]).fetch('style').fetch('background'),
+             'cell style background scope')
+assert_equal(false, scoped_style_cells.fetch([1, 0]).fetch('style').fetch('inverse'),
+             'cell style inverse remains local')
+assert_equal(true, scoped_style_cells.fetch([2, 0]).fetch('style').fetch('inverse'),
+             'cell style inverse applies locally')
+assert_equal(nil, scoped_style_cells.fetch([3, 0])['style'],
+             'unstyled cell remains unstyled')
+request(base, 'DELETE', "/v1/terminal-sessions/#{scoped_style_id}")
+puts 'PASS cell-style-scope'
+
 def run_session_field_case(base, name, command, field, expected)
   created = request(base, 'POST', '/v1/terminal-sessions', {
     'command' => '/bin/sh',

@@ -7,7 +7,7 @@ an evidence record, not a claim that the complete product is released.
 
 - Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The current candidate is `0.1.253`. It builds with TCC and passes terminal
+- The current candidate is `0.1.254`. It builds with TCC and passes terminal
   conformance, SDL screenshot/overlay pixels, the hidden-cursor damage gate,
   and the complete Hibr font manifest gate. Its SDL backend uses a per-output
   glyph atlas, suppresses unchanged cell damage, and does not schedule frames
@@ -17,8 +17,23 @@ an evidence record, not a claim that the complete product is released.
   wallpaper workload on the prior source-equivalent 0.1.241 build measured
   26.865 ms maximum full render and 61.387 Hz over its active 504 ms window.
   The direct-KMS pixel-frame acceptance below was run from the exact current
-  0.1.253 TCC build. The authorized physical host now also reports 0.1.253
-  through its version endpoint.
+  0.1.253 TCC build. The authorized physical host now reports 0.1.253
+  through its version endpoint; the 0.1.254 candidate contains the scoped
+  cell-style parser fix described below.
+
+### Current 0.1.254 source evidence
+
+The 0.1.254 TCC build fixes a JSON-scope defect in API cell updates. Each
+cell's style object is isolated before parsing, so omitted foreground,
+background, and attribute fields cannot inherit values from later cells. A
+regression gate proves independent green foreground, red background, inverse,
+and unstyled cells. The full VT/UTF-8/Hibr suite, pixel-frame gate, and dummy
+frame-rate gate pass after the fix. Direct-KMS and Hibr input fixtures were
+also rerun from this changed source and pass. The physical host now reports
+0.1.254; its live 60 Hz stream accepted 60/60 frames with zero pixel errors,
+zero missed deadlines, and 60 texture uploads. A live style-scope request
+confirmed that green foreground, red background, inverse, and unstyled cells
+remain independent. The temporary sessions were deleted with HTTP 204.
 
 ### Current 0.1.253 source evidence
 

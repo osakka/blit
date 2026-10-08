@@ -25,6 +25,7 @@ tcc "$script_dir/ppm_assert.c" -o "$stage/blit-stage/ppm-assert"
 tcc "$script_dir/bmp_assert.c" -o "$stage/blit-stage/bmp-assert"
 tcc "$script_dir/ws_pixel_frame_probe.c" -o "$stage/blit-stage/ws-pixel-frame-probe"
 cp "$script_dir/qemu_kms_capture_init.sh" "$stage/init"
+chmod 0755 "$stage/init"
 
 test -x "$stage/blit-stage/blit-server"
 test -x "$stage/blit-stage/pty-input-echo"

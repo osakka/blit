@@ -40,9 +40,9 @@ production `console-blit` module is operational over the OpenAPI/WebSocket
 contract. Explicit focus and versioned input routes are exposed by the API.
 The SDL adapter uses single-surface incremental frames and conservatively
 redraws multi-surface outputs with deterministic vertical stacking. The
-current 0.1.253 source passes the complete terminal, graphics, input,
+current 0.1.254 source passes the complete terminal, graphics, input,
 two-display VKMS/QEMU, and Hibr primary/`--join` acceptance gates. The
-authorized physical host is running 0.1.253 and has a healthy one-output
+authorized physical host is running 0.1.254 and has a healthy one-output
 SDL3/OpenGL presentation; its network API accepted a disposable 60 Hz
 external pixel stream at 59.980 Hz with zero missed deadlines. Physical
 multi-monitor confirmation remains open because that host currently exposes
