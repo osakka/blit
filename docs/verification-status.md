@@ -26,6 +26,27 @@ The exact 0.1.320 TCC binary also passes the QEMU VKMS primary/`--join`
 restart fixture: `LAYOUT_MATRIX_PASS`, `HIBR_PRIMARY_RESTART_PASS`,
 `HIBR_JOIN_RECONNECT_PASS`, and `HIBR_PANE_MATRIX_PASS`.
 
+## Current 0.1.322 live composition status
+
+Package `blit_0.1.322-1_amd64.deb` is deployed and `/v1/version` reports
+`0.1.322`. Package SHA-256 is
+`370abcffdae41bb5556348490ed4dccd4450dbc4e7cce9a32e33029bcec70ae8`.
+The authorized host reports a ready SDL3/OpenGL ES 2 renderer, a 60 Hz
+1920x2160 active mode, refresh-aware 16 ms scheduling, and zero missed
+deadlines.
+
+The primary Hibr desktop was restored through the API as external session 1
+with `display-1`, focused input, and the `live-pointer-322` evdev-pointer
+route. A controlled 30-motion live run produced
+`incremental-damage target_changed=1 external_changed=1 graphics_changed=0`
+paths rather than full-scene rebuilds; the affected frames measured about
+3.65 ms render time and the runtime reported zero missed deadlines. The
+controlled HTTP injection rate is not a physical refresh-rate claim. The
+temporary pixel probe image is absent from the restored session.
+
+The exact 0.1.322 TCC binary passes the QEMU VKMS primary restart, join
+reconnect, and 2x2 pane matrix markers. Hibr source remains unmodified.
+
 ## Current 0.1.321 external-pointer composition status
 
 The TCC-built `0.1.321` binary changes the external-surface compositor so
