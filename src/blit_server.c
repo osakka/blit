@@ -491,6 +491,9 @@ typedef struct {
     unsigned long long diagnostic_terminal_bytes;
     unsigned long long diagnostic_pointer_cache_hits;
     unsigned long long diagnostic_pointer_cache_misses;
+    unsigned long long diagnostic_stream_dropped_events;
+    unsigned long long diagnostic_stream_backpressure_disconnects;
+    unsigned long long diagnostic_stream_queue_peak_bytes;
     unsigned long long diagnostic_log_sequence;
     int diagnostic_log_count;
     int diagnostic_log_next;
@@ -1256,6 +1259,17 @@ static unsigned long long diagnostic_background_quads(
     return total;
 }
 
+static unsigned long long diagnostic_stream_queue_bytes(
+    const BlitRuntime *runtime)
+{
+    unsigned long long total = 0;
+    int i;
+    for (i = 0; i < BLIT_MAX_STREAMS; ++i)
+        if (runtime->streams[i].used)
+            total += runtime->streams[i].receive_length;
+    return total;
+}
+
 static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
                                      size_t capacity)
 {
@@ -1285,6 +1299,9 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"last_terminal_ms\":%.3f,\"max_terminal_ms\":%.3f,"
         "\"terminal_bytes\":%llu,\"pointer_cache_hits\":%llu,"
         "\"pointer_cache_misses\":%llu,\"frame_rate_hz\":%.3f,"
+        "\"stream_queue_bytes\":%llu,\"stream_queue_peak_bytes\":%llu,"
+        "\"stream_dropped_events\":%llu,"
+        "\"stream_backpressure_disconnects\":%llu,"
         "\"graphics_cache_hits\":%llu,\"graphics_texture_uploads\":%llu,"
         "\"background_batches\":%llu,\"background_quads\":%llu,"
         "\"pixel_frames_accepted\":%llu,\"pixel_frame_errors\":%llu,"
@@ -1310,6 +1327,10 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         runtime->diagnostic_pointer_cache_hits,
         runtime->diagnostic_pointer_cache_misses,
         frame_rate_hz,
+        diagnostic_stream_queue_bytes(runtime),
+        runtime->diagnostic_stream_queue_peak_bytes,
+        runtime->diagnostic_stream_dropped_events,
+        runtime->diagnostic_stream_backpressure_disconnects,
         diagnostic_graphics_cache_hits(runtime),
         diagnostic_graphics_texture_uploads(runtime),
         diagnostic_background_batches(runtime),
@@ -6991,8 +7012,11 @@ static void broadcast_stream(BlitRuntime *runtime, const char *message,
     for (i = 0; i < BLIT_MAX_STREAMS; ++i) {
         if (runtime->streams[i].used &&
             (runtime->streams[i].subscriptions & subscription) &&
-            !send_websocket_text(runtime->streams[i].fd, sequenced))
+            !send_websocket_text(runtime->streams[i].fd, sequenced)) {
+            ++runtime->diagnostic_stream_dropped_events;
+            ++runtime->diagnostic_stream_backpressure_disconnects;
             remove_stream(runtime, runtime->streams[i].fd);
+        }
     }
 }
 
@@ -7488,6 +7512,8 @@ static void service_stream(BlitRuntime *runtime, int fd)
     memcpy(stream_receive_data(stream) + stream->receive_length,
            incoming, (size_t)received);
     stream->receive_length += (size_t)received;
+    if (stream->receive_length > runtime->diagnostic_stream_queue_peak_bytes)
+        runtime->diagnostic_stream_queue_peak_bytes = stream->receive_length;
     while (stream->receive_length - offset >= 2) {
         unsigned char *frame = stream_receive_data(stream) + offset;
         unsigned char flags = frame[0];

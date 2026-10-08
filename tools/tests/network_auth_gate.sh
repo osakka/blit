@@ -79,6 +79,7 @@ if [ "$unauth" != 401 ] || [ "$auth" != 200 ] ||
    ! grep -q '"health"' "$DIAGNOSTICS" ||
    ! grep -q '"presentation_sync":' "$DIAGNOSTICS" ||
    ! grep -q '"performance":' "$RUNTIME_DIAGNOSTICS" ||
+   ! grep -q '"stream_queue_bytes":' "$RUNTIME_DIAGNOSTICS" ||
    ! grep -q '"logs":' "$RUNTIME_DIAGNOSTICS" ||
    ! grep -q '"graphics_cards"' "$GRAPHICS" ||
    ! grep -q '"devices"' "$AUDIO" ||
