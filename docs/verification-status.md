@@ -45,6 +45,13 @@ page flips do not solve the bottleneck and remain unsuitable as a production
 substitute for atomic presentation. No scheduler change was retained from
 this experiment.
 
+The same fixture's cadence matrix is explicit: `blit.pixel_stream=1` passed
+with `60/60` visible presents and `KMS_CAPTURE_PASS`; the `120` and `240`
+variants accepted every input frame but failed their visible-present count
+under VKMS/QEMU. The current validated boundary is therefore the 60 Hz virtual
+stream, while 120/240 Hz remains an open KMS timing requirement rather than an
+API or terminal-state failure.
+
 ## Current 0.1.357 release and live-validation gate
 
 The TCC-built `0.1.357` package contains the attach-time PTY notification
