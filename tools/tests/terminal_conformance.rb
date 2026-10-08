@@ -132,6 +132,13 @@ performance = runtime_diagnostics.fetch('performance')
 end
 puts 'PASS input-diagnostics'
 
+runtime_diagnostics.fetch('snapshot').fetch('render').fetch('outputs').each do |output|
+  %w[last_present_ms max_present_ms present_calls].each do |field|
+    raise "per-output diagnostics missing #{field}" unless output.key?(field)
+  end
+end
+puts 'PASS per-output-presentation-diagnostics'
+
 missing_surface_status, missing_surface_response = request_with_status(
   base, 'POST', '/v1/terminal-sessions', { 'command' => '/bin/true' })
 assert_equal(400, missing_surface_status, 'missing surface status')

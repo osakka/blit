@@ -1469,20 +1469,32 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
     int i;
 
     used += (size_t)snprintf(body + used, capacity - used, "[");
-    for (i = 0; i < runtime->output_count && used < capacity; ++i)
+    for (i = 0; i < runtime->output_count && used < capacity; ++i) {
+        int display_index = display_index_for_output(runtime, i);
+        BlitKmsDisplayInfo kms_info;
+        int have_kms_info = runtime->direct_kms && display_index >= 0 &&
+            blit_kms_display_info(runtime->kms, display_index, &kms_info) == 0;
         used += (size_t)snprintf(
             body + used, capacity - used,
             "%s{\"display_id\":\"display-%llu\",\"refresh_hz\":%.3f,"
             "\"refresh_source\":\"%s\",\"effective_interval_ms\":%d,"
             "\"target_interval_us\":%llu,\"target_interval_ms\":%.3f,"
-            "\"missed_deadlines\":%lu}",
+            "\"missed_deadlines\":%lu,\"last_present_ms\":%.3f,"
+            "\"max_present_ms\":%.3f,\"present_calls\":%llu}",
             i == 0 ? "" : ",", runtime->outputs[i].display_id,
             output_refresh_hz(runtime, i),
             runtime->test_refresh_override ? "test-override" : "display-mode",
             output_render_period_ms(runtime, i),
             (unsigned long long)output_render_period_us(runtime, i),
             (double)output_render_period_us(runtime, i) / 1000.0,
-            runtime->render_missed_deadlines[i]);
+            runtime->render_missed_deadlines[i],
+            have_kms_info ? kms_info.last_present_ms :
+                runtime->diagnostic_last_kms_present_ms,
+            have_kms_info ? kms_info.max_present_ms :
+                runtime->diagnostic_max_kms_present_ms,
+            have_kms_info ? kms_info.present_calls :
+                runtime->diagnostic_present_calls);
+    }
     snprintf(body + used, capacity - used, "]");
 }
 

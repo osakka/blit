@@ -425,6 +425,9 @@ Input dispatch is independently observable through `input_events`,
 keyboard, pointer, and gamepad events after evdev receipt and through Blit's
 routing path, so input latency can be separated from rendering and scanout
 latency.
+Each scheduler output also reports `last_present_ms`, `max_present_ms`, and
+`present_calls`, which identify per-output KMS/SDL presentation cost rather
+than hiding it in one aggregate server-wide maximum.
 Graphics composition counters are reported as `graphics_cache_hits` and
 `graphics_texture_uploads`; they make wallpaper upload churn observable through
 the API rather than inferred from screenshots.

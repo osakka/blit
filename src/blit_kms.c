@@ -1245,8 +1245,7 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
             continue;
         if (!(output_mask & (1U << i)))
             continue;
-        if (trace_phases)
-            output_started = kms_now_us();
+        output_started = kms_now_us();
         int output_changed;
         full_redraw = !output->initialized ||
             output->last_visual_revision != visual_revision;
@@ -1461,6 +1460,11 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                 output->last_damage_height = output->mode.vdisplay;
                 remember_output_views(output, views, view_count,
                                       output_view_count);
+                output->info.last_present_ms =
+                    (double)(kms_now_us() - output_started) / 1000.0;
+                if (output->info.last_present_ms > output->info.max_present_ms)
+                    output->info.max_present_ms = output->info.last_present_ms;
+                ++output->info.present_calls;
                 continue;
             }
             if (getenv("BLIT_KMS_ASYNC_PAGEFLIP") != NULL)
@@ -1500,6 +1504,11 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                     output->connector, flip_started - draw_started,
                     kms_now_us() - flip_started,
                     kms_now_us() - output_started);
+        output->info.last_present_ms =
+            (double)(kms_now_us() - output_started) / 1000.0;
+        if (output->info.last_present_ms > output->info.max_present_ms)
+            output->info.max_present_ms = output->info.last_present_ms;
+        ++output->info.present_calls;
         remember_output_views(output, views, view_count, output_view_count);
     }
     if (!deferred) {

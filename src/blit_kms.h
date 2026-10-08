@@ -74,6 +74,9 @@ typedef struct {
     int active_mode;
     BlitKmsMode modes[BLIT_KMS_MAX_MODES];
     int presentation_state;
+    double last_present_ms;
+    double max_present_ms;
+    unsigned long long present_calls;
 } BlitKmsDisplayInfo;
 
 #define BLIT_KMS_PRESENTATION_AVAILABLE 0

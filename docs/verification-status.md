@@ -7,7 +7,7 @@ an evidence record, not a claim that the complete product is released.
 
 - Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The current source candidate is `0.1.272`. It builds with TCC and passes terminal
+- The current source candidate is `0.1.273`. It builds with TCC and passes terminal
   conformance, SDL screenshot/overlay pixels, the hidden-cursor damage gate,
   and the complete Hibr font manifest gate. Its SDL backend uses a per-output
   glyph atlas, suppresses unchanged cell damage, and does not schedule frames
@@ -19,7 +19,7 @@ an evidence record, not a claim that the complete product is released.
   rendered VT500 text, box/block glyphs, combining `Á`, and wide `界` at
   60.000 Hz with zero missed deadlines and 10.490 ms maximum render time;
   this is one-output evidence, not a multi-monitor or 120/240 Hz claim. The Debian candidate
-  `blit_0.1.272-1_amd64.deb` was built from
+  `blit_0.1.273-1_amd64.deb` was built from
   this binary and passed package allowlist, embedded-version, byte-identity,
   asset-presence, and extracted-runtime checks. The final artifact SHA-256 is
   recorded externally in the handoff because this ledger is included inside
@@ -27,9 +27,9 @@ an evidence record, not a claim that the complete product is released.
   the real-mode QEMU
   stream gate still fails its strict page-flip deadline requirement.
 
-### Current 0.1.272 evidence
+### Current 0.1.273 evidence
 
-The exact TCC-built `0.1.272` binary was rebuilt from the pushed source and
+The exact TCC-built `0.1.273` binary was rebuilt from the pushed source and
 passed `HIBR_FONT_MANIFEST_PASS` (`required=447`, `mappings=1181`),
 `SDL_GLYPH_RENDER_PASS` (light/heavy/double box geometry, blocks, and wide
 glyphs), three consecutive dummy frame-rate runs (42.935–44.526 Hz,
@@ -43,8 +43,8 @@ The exact same binary passed the direct-KMS two-output visual gate:
 `PPM_DISPLAY_47_WIDE_KITTY_PASS`, `PPM_DISPLAY_48_PASS`,
 `KMS_API_SCREENSHOT_PASS`, and `KMS_CAPTURE_PASS`.
 
-The exact `0.1.272` binary independently re-ran that two-output fixture and
-reported `server_version:"0.1.272"`, two DRM/KMS outputs,
+The exact `0.1.273` binary independently re-ran that two-output fixture and
+reported `server_version:"0.1.273"`, two DRM/KMS outputs,
 `PPM_DISPLAY_47_WIDE_KITTY_PASS`, `PPM_DISPLAY_48_PASS`,
 `KMS_API_SCREENSHOT_PASS`, and `KMS_CAPTURE_PASS`.
 
@@ -67,14 +67,16 @@ and `HIBR_PANE_MATRIX_PASS`. The four-output current-source fixture also passed
 `KMS_FOUR_OUTPUT_PASS`, presenting four independent KMS outputs and four
 attached terminal surfaces.
 
-The exact `0.1.272` binary and unchanged Hibr checkout additionally passed
+The exact `0.1.273` binary and unchanged Hibr checkout additionally passed
 the input/presentation soak: `LAYOUT_MATRIX_PASS`,
 `BLIT_INPUT_GAMEPAD_DISCOVERY_PASS`, `BLIT_INPUT_KEYPAD_SOAK_OBSERVED`,
 `BLIT_INPUT_MULTI_MOUSE_PASS`, `BLIT_INPUT_STREAM_PASS`,
 `BLIT_INPUT_GAMEPAD_PASS`, and `BLIT_INPUT_RENDER_SOAK_PASS`.
 The runtime diagnostics contract additionally exposes `input_events`,
 `last_input_dispatch_ms`, and `max_input_dispatch_ms`; the full terminal
-conformance gate verified their presence through the versioned API.
+conformance gate verified their presence through the versioned API. It also
+exposes per-output `last_present_ms`, `max_present_ms`, and `present_calls` so
+multi-display presentation bottlenecks are attributable to one output.
 
 The forced-timeout KMS recovery fixture also passed `KMS_RECOVERY_PASS`:
 both outputs entered and completed modeset recovery after a one-millisecond
