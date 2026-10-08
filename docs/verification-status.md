@@ -40,6 +40,11 @@ The exact same binary passed the direct-KMS two-output visual gate:
 `PPM_DISPLAY_47_WIDE_KITTY_PASS`, `PPM_DISPLAY_48_PASS`,
 `KMS_API_SCREENSHOT_PASS`, and `KMS_CAPTURE_PASS`.
 
+The exact `0.1.269` binary independently re-ran that two-output fixture and
+reported `server_version:"0.1.269"`, two DRM/KMS outputs,
+`PPM_DISPLAY_47_WIDE_KITTY_PASS`, `PPM_DISPLAY_48_PASS`,
+`KMS_API_SCREENSHOT_PASS`, and `KMS_CAPTURE_PASS`.
+
 The current source also contains the native-size direct-KMS graphic-frame
 copy path. The paced dummy pixel gate accepted 30 frames at 60.953 Hz and
 rendered 27 of them, satisfying its minimum 24-frame presentation bound; the
