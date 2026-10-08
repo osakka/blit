@@ -42,6 +42,9 @@ The exact 0.1.335 input-only QEMU fixture also passed
 `BLIT_INPUT_GAMEPAD_PASS`, and `BLIT_INPUT_RAW_EVDEV_PASS`. Those are
 deterministic uinput/evdev results and remain distinct from physical-host
 mouse evidence.
+The exact 0.1.335 TCC binary also passed a 20-second four-session PTY soak
+with 2,584 snapshots and 235 resizes; maximum RSS was 66,776 KiB against the
+131,072 KiB limit, and all sessions drained cleanly.
 
 ## Current 0.1.334 diagnostic-observability status
 
