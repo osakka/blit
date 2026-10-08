@@ -7,7 +7,7 @@ an evidence record, not a claim that the complete product is released.
 
 - Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The current candidate is `0.1.263`. It builds with TCC and passes terminal
+- The current candidate is `0.1.264`. It builds with TCC and passes terminal
   conformance, SDL screenshot/overlay pixels, the hidden-cursor damage gate,
   and the complete Hibr font manifest gate. Its SDL backend uses a per-output
   glyph atlas, suppresses unchanged cell damage, and does not schedule frames
@@ -19,8 +19,21 @@ an evidence record, not a claim that the complete product is released.
   The direct-KMS pixel-frame acceptance below was run from the exact current
   0.1.256 TCC build; the newer SDL presentation and geometry work is recorded
   below. The authorized physical host now reports 0.1.263 through its version
-  endpoint. The 0.1.263 Debian package SHA-256 is
-  `b80d81b9839e8579d5d8a9bf0064260e91aca46f6239421c9549c2a140f09f18`.
+  endpoint. The 0.1.264 Debian package SHA-256 is
+  `3ae55c14a76f73deca42a4e91b07803cc6c8fb221575e1d25d1c9061d1715129`.
+
+### Current 0.1.264 source evidence
+
+The bundled Hibr font now assigns dedicated deterministic 8×16 glyphs to the
+light, heavy, double, rounded, and dashed box-drawing characters. The font
+manifest gate checks their exact bitmap topology independently of the
+generator, preventing fallback-font aliasing from returning.
+
+The exact 0.1.264 TCC binary passed the full terminal conformance suite,
+SDL background/cache and pixel gates, network/authentication gates, and the
+direct-KMS two-output capture. The latter passed
+`PPM_DISPLAY_47_WIDE_KITTY_PASS`, `PPM_DISPLAY_48_PASS`,
+`KMS_API_SCREENSHOT_PASS`, and `KMS_CAPTURE_PASS` with the regenerated font.
 
 ### Current 0.1.263 source and physical evidence
 

@@ -112,6 +112,74 @@ def check_font() -> tuple[int, int]:
         raise AssertionError(
             "malformed exact block glyphs: " + ", ".join(malformed)
         )
+    # Independent topology oracle for the terminal box-drawing set.  These
+    # bytes intentionally mirror the 8x16 contract, not the generator code,
+    # so a generator regression cannot make its own test pass.
+    def box(style, topology):
+        rows = {"light": (7,), "heavy": (7, 8), "double": (5, 10),
+                "dashed": (7,), "rounded": (7,)}[style]
+        columns = {"light": (3,), "heavy": (2, 3), "double": (2, 5),
+                   "dashed": (3,), "rounded": (3,)}[style]
+        bitmap = [[0] * 8 for _ in range(16)]
+        if topology == "horizontal":
+            xs = (0, 1, 4, 5) if style == "dashed" else range(8)
+            for row in rows:
+                for x in xs:
+                    bitmap[row][x] = 1
+        elif topology == "vertical":
+            ys = range(0, 16, 2) if style == "dashed" else range(16)
+            for y in ys:
+                for column in columns:
+                    bitmap[y][column] = 1
+        else:
+            right = topology in ("right_down", "right_up", "up_down_right")
+            left = topology in ("left_down", "left_up", "up_down_left")
+            down = topology in ("right_down", "left_down", "up_down_right", "up_down_left")
+            up = topology in ("right_up", "left_up", "up_down_right", "up_down_left")
+            if right:
+                for row in rows:
+                    for x in range(3, 8):
+                        bitmap[row][x] = 1
+            if left:
+                for row in rows:
+                    for x in range(4):
+                        bitmap[row][x] = 1
+            if down:
+                for y in range(7, 16):
+                    for column in columns:
+                        bitmap[y][column] = 1
+            if up:
+                for y in range(8):
+                    for column in columns:
+                        bitmap[y][column] = 1
+        return bytes(sum(1 << (7 - x) for x in range(8) if bitmap[y][x])
+                     for y in range(16))
+
+    box_expected = {
+        0x2500: ("light", "horizontal"), 0x2501: ("heavy", "horizontal"),
+        0x2502: ("light", "vertical"), 0x2504: ("dashed", "horizontal"),
+        0x2506: ("dashed", "vertical"), 0x250C: ("light", "right_down"),
+        0x2510: ("light", "left_down"), 0x2514: ("light", "right_up"),
+        0x2518: ("light", "left_up"), 0x251C: ("light", "up_down_right"),
+        0x2524: ("light", "up_down_left"), 0x2550: ("double", "horizontal"),
+        0x2551: ("double", "vertical"), 0x2554: ("double", "right_down"),
+        0x2557: ("double", "left_down"), 0x255A: ("double", "right_up"),
+        0x255D: ("double", "left_up"), 0x2560: ("double", "up_down_right"),
+        0x2563: ("double", "up_down_left"), 0x256D: ("rounded", "right_down"),
+        0x256E: ("rounded", "left_down"), 0x256F: ("rounded", "left_up"),
+        0x2570: ("rounded", "right_up"),
+    }
+    malformed = []
+    for codepoint, description in box_expected.items():
+        index = mapped[codepoint]
+        actual = data[glyph_start + index * glyph_bytes:
+                      glyph_start + (index + 1) * glyph_bytes]
+        if actual != box(*description):
+            malformed.append(f"U+{codepoint:04X}")
+    if malformed:
+        raise AssertionError(
+            "malformed exact box glyphs: " + ", ".join(malformed)
+        )
     return len(required), len(mapped)
 
 

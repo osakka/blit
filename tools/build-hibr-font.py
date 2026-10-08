@@ -38,6 +38,13 @@ REQUIRED = tuple(ord(c) for c in (
     "ﭐﭑﭒﭓﭔﭕﭖﭗﭘﭙﭚﭛﭜﭝﭞﭟﭠﭡﭢﭣﭤﭥﭦﭧﭨﭩﭪﭫﭬﭭﭮﭯﭰﭱﭲﭳﭴﭵﭶﭷﭸﭹﭺﭻﭼﭽﭾﭿﮀﮁﮂﮃﮄﮅﮆﮇﮈﮉﮊﮋﮌﮍﮎﮏﮐﮑﮒﮓﮔﮕﮖﮗﮘﮙﮚﮛﮜﮝﮞﮟﮠﮡﮢﮣﮤﮥﮦﮧﮨﮩﮪﮫﮬﮭﮮﮯﮰﮱﯓﯔﯕﯖﯗﯘﯙﯚﯛﯜﯝﯞﯟﯠﯡﯢﯣﯤﯥﯦﯧﯨﯩﯼﯽﯾﯿﺀﺁﺂﺃﺄﺅﺆﺇﺈﺉﺊﺋﺌﺍﺎﺏﺐﺑﺒﺓﺔﺕﺖﺗﺘﺙﺚﺛﺜﺝﺞﺟﺠﺡﺢﺣﺤﺥﺦﺧﺨﺩﺪﺫﺬﺭﺮﺯﺰﺱﺲﺳﺴﺵﺶﺷﺸﺹﺺﺻﺼﺽﺾﺿﻀﻁﻂﻃﻄﻅﻆﻇﻈﻉﻊﻋﻌﻍﻎﻏﻐﻑﻒﻓﻔﻕﻖﻗﻘﻙﻚﻛﻜﻝﻞﻟﻠﻡﻢﻣﻤﻥﻦﻧﻨﻩﻪﻫﻬﻭﻮﻯﻰﻱﻲﻳﻴ"
 ))
 
+BOX_CODEPOINTS = (
+    0x2500, 0x2501, 0x2502, 0x2504, 0x2506,
+    0x250C, 0x2510, 0x2514, 0x2518, 0x251C, 0x2524,
+    0x2550, 0x2551, 0x2554, 0x2557, 0x255A, 0x255D, 0x2560, 0x2563,
+    0x256D, 0x256E, 0x256F, 0x2570,
+)
+
 
 def psf1(path: Path):
     data = path.read_bytes()
@@ -64,6 +71,88 @@ def psf1(path: Path):
 
 
 def render(codepoint: int, font: ImageFont.FreeTypeFont) -> bytes:
+    # Box drawing characters are terminal geometry, not ordinary text.  The
+    # fallback font aliases several of these characters at 8x16, which makes
+    # light, heavy, double, and dashed borders indistinguishable.  Keep their
+    # topology deterministic so Hibr panels and menus cannot change shape with
+    # the build host's font rasterizer.
+    box = {
+        0x2500: ("light", "horizontal"),  # ─
+        0x2501: ("heavy", "horizontal"),  # ━
+        0x2502: ("light", "vertical"),    # │
+        0x2504: ("dashed", "horizontal"),  # ┄
+        0x2506: ("dashed", "vertical"),    # ┆
+        0x250C: ("light", "right_down"),  # ┌
+        0x2510: ("light", "left_down"),   # ┐
+        0x2514: ("light", "right_up"),    # └
+        0x2518: ("light", "left_up"),     # ┘
+        0x251C: ("light", "up_down_right"),  # ├
+        0x2524: ("light", "up_down_left"),   # ┤
+        0x2550: ("double", "horizontal"),  # ═
+        0x2551: ("double", "vertical"),    # ║
+        0x2554: ("double", "right_down"),  # ╔
+        0x2557: ("double", "left_down"),   # ╗
+        0x255A: ("double", "right_up"),    # ╚
+        0x255D: ("double", "left_up"),     # ╝
+        0x2560: ("double", "up_down_right"),  # ╠
+        0x2563: ("double", "up_down_left"),   # ╣
+        0x256D: ("rounded", "right_down"),  # ╭
+        0x256E: ("rounded", "left_down"),   # ╮
+        0x256F: ("rounded", "left_up"),     # ╯
+        0x2570: ("rounded", "right_up"),    # ╰
+    }
+    if codepoint in box:
+        style, topology = box[codepoint]
+        horizontal_rows = {
+            "light": (7,), "heavy": (7, 8), "double": (5, 10),
+            "dashed": (7,), "rounded": (7,),
+        }[style]
+        vertical_columns = {
+            "light": (3,), "heavy": (2, 3), "double": (2, 5),
+            "dashed": (3,), "rounded": (3,),
+        }[style]
+        bitmap = [[0 for _ in range(8)] for _ in range(16)]
+
+        def horizontal(rows, start, end):
+            for row in rows:
+                for x in range(start, end + 1):
+                    bitmap[row][x] = 1
+
+        def vertical(columns, start, end):
+            for column in columns:
+                for y in range(start, end + 1):
+                    bitmap[y][column] = 1
+
+        if topology == "horizontal":
+            if style == "dashed":
+                for row in horizontal_rows:
+                    for x in (0, 1, 4, 5):
+                        bitmap[row][x] = 1
+            else:
+                horizontal(horizontal_rows, 0, 7)
+        elif topology == "vertical":
+            if style == "dashed":
+                for y in range(0, 16, 2):
+                    for column in vertical_columns:
+                        bitmap[y][column] = 1
+            else:
+                vertical(vertical_columns, 0, 15)
+        else:
+            right = topology.endswith("right") or topology == "right_down" or topology == "right_up"
+            left = topology.endswith("left") or topology == "left_down" or topology == "left_up"
+            down = topology.endswith("down") or topology == "up_down_right" or topology == "up_down_left"
+            up = topology.endswith("up") or topology == "up_down_right" or topology == "up_down_left"
+            if right:
+                horizontal(horizontal_rows, 3, 7)
+            if left:
+                horizontal(horizontal_rows, 0, 3)
+            if down:
+                vertical(vertical_columns, 7, 15)
+            if up:
+                vertical(vertical_columns, 0, 7)
+        return bytes(sum(1 << (7 - x) for x in range(8) if bitmap[y][x])
+                     for y in range(16))
+
     # DejaVu's block-element glyphs are wider/taller than the 8x16 terminal
     # cell, so Pillow clips the lower one-eighth blocks out of the bitmap.
     # These characters are geometric terminal primitives; encode their exact
@@ -116,6 +205,16 @@ def main() -> None:
             present.add(codepoint)
             added.append(codepoint)
 
+    # Terminus already maps part of this set, but its compact aliases do not
+    # preserve line weight/topology. Give every box character its own mapping
+    # entry so the geometric contract applies regardless of base-font aliases.
+    for row in mappings:
+        row[:] = [codepoint for codepoint in row
+                  if codepoint not in BOX_CODEPOINTS]
+    for codepoint in BOX_CODEPOINTS:
+        glyphs.append(render(codepoint, fallback))
+        mappings.append([codepoint])
+
     # PSF2: magic, version, header size, flags(unicode), glyph count,
     # bytes/glyph, height, width.  Unicode tables use UTF-8 and 0xff terminates
     # each glyph's list; 0xfe is the PSF sequence separator.
@@ -130,7 +229,7 @@ def main() -> None:
         table.append(0xFF)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_bytes(header + b"".join(glyphs) + table)
-    print(f"wrote {args.output}: {len(glyphs)} glyphs, added {len(added)}")
+    print(f"wrote {args.output}: {len(glyphs)} glyphs, added {len(added)}, normalized box glyphs={len(BOX_CODEPOINTS)}")
 
 
 if __name__ == "__main__":

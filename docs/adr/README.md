@@ -26,6 +26,7 @@ Accepted decisions:
 16. [Timestamp every streamed input event](0016-timestamped-input-stream.md).
 17. [Batch SDL terminal background geometry](0017-sdl-background-geometry-batching.md).
 18. [Expose bounded stream back-pressure telemetry](0018-stream-backpressure-telemetry.md).
+19. [Deterministic box-drawing glyph geometry](0019-deterministic-box-drawing-glyphs.md).
 
 Pending decisions:
 
