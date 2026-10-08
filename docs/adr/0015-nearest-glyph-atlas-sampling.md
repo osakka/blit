@@ -15,9 +15,12 @@ which presents as malformed box drawing, punctuation, or Hibr desktop icons.
 ## Decision
 
 Set the glyph atlas texture to `SDL_SCALEMODE_NEAREST` immediately after it is
-created. If the renderer cannot provide that mode, discard the atlas and use
-the existing per-pixel fallback path rather than silently rendering filtered
-terminal glyphs.
+created. Each glyph is stored inside a one-pixel guard border whose edge
+texels duplicate the glyph edge. If the renderer cannot provide nearest
+sampling, discard the atlas and use the existing per-pixel fallback path
+rather than silently rendering filtered terminal glyphs. The guard border is
+required even with nearest sampling: normalized geometry can land on a tile
+boundary after scaling, and an unpadded atlas can then leak an adjacent glyph.
 
 This is a sampling policy only. The PSF font, Unicode mapping, terminal cell
 model, and direct-KMS renderer remain the canonical sources of glyph data.

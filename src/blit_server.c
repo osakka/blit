@@ -9039,6 +9039,8 @@ static SDL_Texture *create_sdl_glyph_atlas(SDL_Renderer *renderer,
     int rows;
     int width;
     int height;
+    int tile_width;
+    int tile_height;
     int row;
     int column;
 
@@ -9050,17 +9052,23 @@ static SDL_Texture *create_sdl_glyph_atlas(SDL_Renderer *renderer,
        future PSF2 additions. Every cell is a white alpha mask; the renderer
        applies the terminal foreground colour with texture modulation. */
     columns = 32;
+    /* Keep a transparent/duplicated edge around every bitmap.  Nearest
+       filtering avoids interpolation, but rasterization at a normalized
+       tile boundary can still select a neighbouring texel after scaling.
+       The border makes the atlas tile self-contained. */
+    tile_width = font->width + 2;
+    tile_height = font->height + 2;
     rows = (int)((font->glyph_count + (size_t)columns - 1) /
                  (size_t)columns);
-    width = columns * font->width;
-    height = rows * font->height;
+    width = columns * tile_width;
+    height = rows * tile_height;
     pixel_bytes = (size_t)width * (size_t)height * 4U;
     pixels = (unsigned char *)calloc(1, pixel_bytes);
     if (pixels == NULL)
         return NULL;
     for (glyph = 0; glyph < font->glyph_count; ++glyph) {
-        int atlas_x = (int)(glyph % (size_t)columns) * font->width;
-        int atlas_y = (int)(glyph / (size_t)columns) * font->height;
+        int atlas_x = (int)(glyph % (size_t)columns) * tile_width + 1;
+        int atlas_y = (int)(glyph / (size_t)columns) * tile_height + 1;
         for (row = 0; row < font->height; ++row) {
             uint32_t bits = blit_font_glyph_row(font, glyph,
                                                 font->codepoints != NULL ?
@@ -9077,6 +9085,26 @@ static SDL_Texture *create_sdl_glyph_atlas(SDL_Renderer *renderer,
                 pixels[offset + 2] = 255;
                 pixels[offset + 3] = 255;
             }
+        }
+        /* Duplicate the interior edge texels into the border.  Transparent
+           edge pixels remain transparent; lit edge pixels remain continuous
+           if the sampler lands on the guard texel. */
+        for (row = 0; row < font->height; ++row) {
+            size_t left = ((size_t)(atlas_y + row) * (size_t)width +
+                           (size_t)(atlas_x - 1)) * 4U;
+            size_t right = ((size_t)(atlas_y + row) * (size_t)width +
+                            (size_t)(atlas_x + font->width)) * 4U;
+            memcpy(pixels + left, pixels + left + 4U, 4U);
+            memcpy(pixels + right, pixels + right - 4U, 4U);
+        }
+        for (column = -1; column <= font->width; ++column) {
+            size_t top = ((size_t)(atlas_y - 1) * (size_t)width +
+                          (size_t)(atlas_x + column)) * 4U;
+            size_t bottom = ((size_t)(atlas_y + font->height) *
+                             (size_t)width + (size_t)(atlas_x + column)) * 4U;
+            memcpy(pixels + top, pixels + top + (size_t)width * 4U, 4U);
+            memcpy(pixels + bottom,
+                   pixels + bottom - (size_t)width * 4U, 4U);
         }
     }
     texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32,
@@ -9279,11 +9307,11 @@ static int queue_sdl_glyph(BlitOutput *output, const BlitFont *font,
         return 0;
     columns = output->glyph_atlas_columns;
     rows = ((int)font->glyph_count + columns - 1) / columns;
-    atlas_width = columns * font->width;
-    atlas_height = rows * font->height;
-    source_x = (float)((int)(glyph % (size_t)columns) * font->width) /
+    atlas_width = columns * (font->width + 2);
+    atlas_height = rows * (font->height + 2);
+    source_x = (float)((int)(glyph % (size_t)columns) * (font->width + 2) + 1) /
         (float)atlas_width;
-    source_y = (float)((int)(glyph / (size_t)columns) * font->height) /
+    source_y = (float)((int)(glyph / (size_t)columns) * (font->height + 2) + 1) /
         (float)atlas_height;
     source_w = (float)font->width / (float)atlas_width;
     source_h = (float)font->height / (float)atlas_height;
@@ -9342,9 +9370,9 @@ static void render_sdl_glyph(SDL_Renderer *renderer, const BlitFont *font,
         SDL_FRect source;
         SDL_FRect destination;
         source.x = (float)((int)(glyph % (size_t)atlas_columns) *
-                           font->width);
+                           (font->width + 2) + 1);
         source.y = (float)((int)(glyph / (size_t)atlas_columns) *
-                           font->height);
+                           (font->height + 2) + 1);
         source.w = (float)font->width;
         source.h = (float)font->height;
         destination.x = x;

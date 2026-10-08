@@ -7,10 +7,10 @@ an evidence record, not a claim that the complete product is released.
 
 - Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The current source candidate is `0.1.273`. It builds with TCC and passes terminal
+- The current source candidate is `0.1.274`. It builds with TCC and passes terminal
   conformance, SDL screenshot/overlay pixels, the hidden-cursor damage gate,
   and the complete Hibr font manifest gate. Its SDL backend uses a per-output
-  glyph atlas, suppresses unchanged cell damage, and does not schedule frames
+  glyph atlas with nearest sampling and one-pixel guard borders, suppresses unchanged cell damage, and does not schedule frames
   for hidden cursor movement. The current dummy frame runs measured
   42.935–43.867 Hz with 15.400–15.676 ms maximum render time against a
   16.000 ms target and zero missed deadlines; this is a software-dummy result,
@@ -19,7 +19,7 @@ an evidence record, not a claim that the complete product is released.
   rendered VT500 text, box/block glyphs, combining `Á`, and wide `界` at
   60.000 Hz with zero missed deadlines and 10.490 ms maximum render time;
   this is one-output evidence, not a multi-monitor or 120/240 Hz claim. The Debian candidate
-  `blit_0.1.273-1_amd64.deb` was built from
+  `blit_0.1.274-1_amd64.deb` was built from
   this binary and passed package allowlist, embedded-version, byte-identity,
   asset-presence, and extracted-runtime checks. The final artifact SHA-256 is
   recorded externally in the handoff because this ledger is included inside
@@ -27,17 +27,21 @@ an evidence record, not a claim that the complete product is released.
   the real-mode QEMU
   stream gate still fails its strict page-flip deadline requirement.
 
-### Current 0.1.273 evidence
+### Current 0.1.274 evidence
 
-The exact TCC-built `0.1.273` binary was rebuilt from the pushed source and
+The exact TCC-built `0.1.274` binary was rebuilt from the pushed source and
 passed `HIBR_FONT_MANIFEST_PASS` (`required=447`, `mappings=1181`),
 `SDL_GLYPH_RENDER_PASS` (light/heavy/double box geometry, blocks, and wide
-glyphs), three consecutive dummy frame-rate runs (42.935–44.526 Hz,
-15.180–15.676 ms maximum render time against a 16.000 ms target, zero missed
-deadlines), `PIXEL_FRAME_PASS`, complete terminal conformance, background
+glyphs), `SDL_GLYPH_FILTER_PASS` (`nearest`), dummy frame-rate,
+`PIXEL_FRAME_PASS`, complete terminal conformance, background
 batching, graphics-cache, hidden-cursor damage, and a 20-second four-session
 terminal soak. The soak completed 244 snapshots and 22 resizes with a maximum
 RSS of 66,328 KiB.
+
+The SDL atlas now uses a one-pixel duplicated guard border around each bitmap
+cell. This closes the adjacent-texel leak that can produce stray strokes when
+scaled glyph geometry lands on normalized atlas boundaries. The canonical PSF
+font, cell geometry, and direct-KMS renderer remain unchanged.
 
 The exact same binary passed the direct-KMS two-output visual gate:
 `PPM_DISPLAY_47_WIDE_KITTY_PASS`, `PPM_DISPLAY_48_PASS`,
