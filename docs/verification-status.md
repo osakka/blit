@@ -26,6 +26,12 @@ and `KMS_FOUR_HIBR_PASS` with one Hibr primary plus three `desktop --join`
 clients. These are virtual KMS/topology acceptances; physical multi-monitor
 and physical high-refresh acceptance remain separate open gates.
 
+The current-Hibr QEMU input soak also passed: UTF-8 keyboard output,
+multi-pointer/button/wheel routing, WebSocket input stream, render soak,
+gamepad discovery, and raw evdev delivery (`914` events, `546` motion, `40`
+buttons). Physical input acceptance is still open because virtual evdev does
+not prove the particular host's physical devices or user-visible click path.
+
 Physical pointer/button acceptance, production adapter acceptance, multiple
 physical monitors, and high-refresh physical acceptance remain open; this
 capture records input inventory but no physical user event.
