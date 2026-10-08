@@ -147,6 +147,33 @@ paths:
                 $ref: '#/components/schemas/RuntimeDiagnostics'
         default:
           $ref: '#/components/responses/Problem'
+  /v1/diagnostics/trace:
+    get:
+      tags: [diagnostics]
+      operationId: getDiagnosticTrace
+      summary: Get the bounded input, surface, and render-path trace
+      responses:
+        '200':
+          description: Recent trace events in chronological order
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [revision, events]
+                properties:
+                  revision: {type: integer, minimum: 0}
+                  events:
+                    type: array
+                    items:
+                      type: object
+                      required: [sequence, time_us, kind, detail]
+                      properties:
+                        sequence: {type: integer, minimum: 1}
+                        time_us: {type: integer, minimum: 0}
+                        kind: {type: string}
+                        detail: {type: string}
+        default:
+          $ref: '#/components/responses/Problem'
   /v1/diagnostics/screenshots/{display_id}:
     get:
       tags: [diagnostics]

@@ -49,6 +49,7 @@ extern char **environ;
 #define BLIT_MAX_IDEMPOTENCY 16
 #define BLIT_MAX_EVENT_HISTORY 64
 #define BLIT_MAX_RUNTIME_LOGS 64
+#define BLIT_MAX_TRACE_EVENTS 128
 #define BLIT_PIXEL_FRAME_QUIET_US 100000ULL
 /* A PTY is a byte stream, while a terminal desktop frame is commonly emitted
    as many short writes.  Hold presentation briefly after the latest read so
@@ -537,6 +538,10 @@ typedef struct {
     int diagnostic_log_count;
     int diagnostic_log_next;
     char diagnostic_logs[BLIT_MAX_RUNTIME_LOGS][512];
+    unsigned long long diagnostic_trace_sequence;
+    int diagnostic_trace_count;
+    int diagnostic_trace_next;
+    char diagnostic_trace[BLIT_MAX_TRACE_EVENTS][768];
     int sdl_screenshot_written;
     uint32_t screenshot_requested_mask;
     char sdl_error[256];
@@ -1279,6 +1284,50 @@ static void diagnostic_log(BlitRuntime *runtime, const char *severity,
         (runtime->diagnostic_log_next + 1) % BLIT_MAX_RUNTIME_LOGS;
     if (runtime->diagnostic_log_count < BLIT_MAX_RUNTIME_LOGS)
         ++runtime->diagnostic_log_count;
+}
+
+static void diagnostic_trace(BlitRuntime *runtime, const char *kind,
+                             const char *detail)
+{
+    char escaped[512];
+    int slot;
+
+    if (runtime == NULL)
+        return;
+    json_escape(detail != NULL ? detail : "", escaped, sizeof(escaped));
+    slot = runtime->diagnostic_trace_next;
+    snprintf(runtime->diagnostic_trace[slot],
+             sizeof(runtime->diagnostic_trace[slot]),
+             "{\"sequence\":%llu,\"time_us\":%llu,\"kind\":\"%s\","
+             "\"detail\":\"%s\"}",
+             ++runtime->diagnostic_trace_sequence,
+             (unsigned long long)monotonic_us(),
+             kind != NULL ? kind : "runtime", escaped);
+    runtime->diagnostic_trace_next =
+        (runtime->diagnostic_trace_next + 1) % BLIT_MAX_TRACE_EVENTS;
+    if (runtime->diagnostic_trace_count < BLIT_MAX_TRACE_EVENTS)
+        ++runtime->diagnostic_trace_count;
+}
+
+static void diagnostic_trace_json(BlitRuntime *runtime, char *body,
+                                  size_t capacity)
+{
+    size_t used = 0;
+    int count = runtime->diagnostic_trace_count;
+    int index = (runtime->diagnostic_trace_next - count +
+                 BLIT_MAX_TRACE_EVENTS) % BLIT_MAX_TRACE_EVENTS;
+    int first = 1;
+
+    json_appendf(body, capacity, &used,
+                 "{\"revision\":%llu,\"events\":[",
+                 runtime->diagnostic_trace_sequence);
+    while (count-- > 0 && used + 4 < capacity) {
+        json_appendf(body, capacity, &used, "%s%s", first ? "" : ",",
+                     runtime->diagnostic_trace[index]);
+        first = 0;
+        index = (index + 1) % BLIT_MAX_TRACE_EVENTS;
+    }
+    json_appendf(body, capacity, &used, "]}");
 }
 
 static unsigned long long diagnostic_missed_deadlines(
@@ -8208,6 +8257,14 @@ static void handle_request(int fd, BlitRuntime *runtime,
             surface->frame_open = 1;
         else if (presentation_commit)
             surface->frame_open = 0;
+        {
+            char detail[192];
+            snprintf(detail, sizeof(detail),
+                     "surface=surface-%llu revision=%llu presentation=%s frame_open=%d",
+                     surface->id, surface->revision, presentation,
+                     surface->frame_open);
+            diagnostic_trace(runtime, "surface_update", detail);
+        }
         if (!presentation_deferred)
             runtime->render_pending = 1;
         mutation_receipt_json(surface, body, sizeof(body));
@@ -8812,6 +8869,9 @@ static void handle_request(int fd, BlitRuntime *runtime,
         send_http(fd, 200, "OK", "application/json", body);
     } else if (strcmp(path, "/v1/diagnostics/runtime") == 0) {
         runtime_diagnostics_json(runtime, body, sizeof(body));
+        send_http(fd, 200, "OK", "application/json", body);
+    } else if (strcmp(path, "/v1/diagnostics/trace") == 0) {
+        diagnostic_trace_json(runtime, body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
     } else if (strcmp(path, "/v1/displays") == 0) {
         displays_json(runtime, body, sizeof(body));
@@ -10437,6 +10497,13 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             !target_changed;
         if (pointer_only) {
             ++runtime->diagnostic_pointer_cache_hits;
+            {
+                char detail[160];
+                snprintf(detail, sizeof(detail),
+                         "output=%d path=pointer-cache target_changed=%d",
+                         output_index, target_changed);
+                diagnostic_trace(runtime, "render_path", detail);
+            }
             SDL_SetRenderTarget(renderer, NULL);
             SDL_RenderTexture(renderer,
                               runtime->outputs[output_index].scene_texture,
@@ -10446,6 +10513,13 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
         }
         if (runtime->pointer_dirty)
             ++runtime->diagnostic_pointer_cache_misses;
+        if (runtime->pointer_dirty) {
+            char detail[160];
+            snprintf(detail, sizeof(detail),
+                     "output=%d path=full-redraw target_changed=%d external_changed=%d",
+                     output_index, target_changed, external_target_changed);
+            diagnostic_trace(runtime, "render_path", detail);
+        }
         if (target_count == 0 && overlay_count == 0 &&
             synchronized_count > 0) {
             /* Leave the synchronized output untouched until its owner sends
@@ -11345,7 +11419,7 @@ static void service_evdev_mouse(BlitRuntime *runtime)
                         runtime->evdev_mouse_paths[device_index]);
                 runtime->evdev_mouse_reported[device_index] = 1;
             }
-            if (event.type == EV_REL) {
+        if (event.type == EV_REL) {
                 if (event.code == REL_WHEEL || event.code == REL_HWHEEL) {
                     int button;
                     if (event.code == REL_HWHEEL)
@@ -11378,6 +11452,14 @@ static void service_evdev_mouse(BlitRuntime *runtime)
                 else
                     button = 2;
                 int release = event.value == 0;
+                {
+                    char detail[160];
+                    snprintf(detail, sizeof(detail),
+                             "button=%d pressed=%d x=%.1f y=%.1f",
+                             button, !release, runtime->evdev_mouse_x,
+                             runtime->evdev_mouse_y);
+                    diagnostic_trace(runtime, "pointer_button", detail);
+                }
                 if (!release) runtime->mouse_buttons |= 1U << button;
                 broadcast_evdev_pointer(runtime, "pointer_button", button,
                                          !release, 0);
@@ -11569,6 +11651,15 @@ static void service_evdev_keyboard(BlitRuntime *runtime)
             else if (event.code == KEY_LEFTALT || event.code == KEY_RIGHTALT)
                 runtime->evdev_alt = event.value != 0;
             if (event.value != 0) {
+                {
+                    char detail[160];
+                    snprintf(detail, sizeof(detail),
+                             "code=%u value=%d shift=%d ctrl=%d alt=%d",
+                             (unsigned int)event.code, event.value,
+                             runtime->evdev_shift, runtime->evdev_ctrl,
+                             runtime->evdev_alt);
+                    diagnostic_trace(runtime, "keyboard_key", detail);
+                }
                 if (getenv("BLIT_TRACE_KEYS") != NULL)
                     fprintf(stderr, "blit: key code=%u value=%d shift=%d ctrl=%d alt=%d\n",
                             (unsigned int)event.code, event.value,
@@ -11696,8 +11787,15 @@ static void service_sdl_events(BlitRuntime *runtime)
                                                          event.motion.windowID);
             runtime->pointer_x = x;
             runtime->pointer_y = y;
-            runtime->pointer_dirty = 1;
-            runtime->render_pending = 1;
+    runtime->pointer_dirty = 1;
+    runtime->render_pending = 1;
+    {
+        char detail[160];
+        snprintf(detail, sizeof(detail), "x=%.1f y=%.1f output=%d",
+                 runtime->pointer_x, runtime->pointer_y,
+                 runtime->pointer_output);
+        diagnostic_trace(runtime, "pointer_motion", detail);
+    }
             send_mouse_motion_report(runtime, event.motion.windowID,
                                      x, y);
         } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
