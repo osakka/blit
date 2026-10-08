@@ -16,8 +16,14 @@ Package `blit_0.1.335-1` is built with SHA-256
 `55ffc7e3359b4e3c2c0818b02dc2e7f0a9030147adf8a3ce823f98afa9f5174a`.
 The exact TCC binary passes terminal conformance, frame-rate, HTTP
 backpressure, session-lifecycle, and the slow-reader screenshot gate. The
-physical-host deployment and QEMU/KMS gates for 0.1.335 remain pending; no
-live 0.1.335 claim is made here.
+The package is deployed on the authorized physical host and `/v1/version`
+reports `0.1.335`; the primary Hibr session and focused pointer route were
+restored. The real-host slow-reader gate kept `/v1/version` responsive in
+96 ms while a deliberately throttled screenshot was downloading. The runtime
+then reported zero missed deadlines and a 39.572 ms maximum loop gap. The
+latest physical sample still reports zero raw evdev mouse events, so this is
+not a physical-mouse acceptance result. Exact 0.1.335 QEMU/KMS gates remain
+pending.
 
 ## Current 0.1.334 diagnostic-observability status
 
