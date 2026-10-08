@@ -22,9 +22,18 @@ if [ "$screenshots" = "yes" ]; then
 fi
 
 get() {
-    local name=$1 path=$2
-    curl --fail --silent --show-error --connect-timeout 3 --max-time 30 \
-        "$base_url$path" > "$output_dir/$name"
+    local name=$1 path=$2 tmp attempt
+    tmp="$output_dir/.capture-${name//\//_}.tmp"
+    for attempt in 1 2 3; do
+        if curl --fail --silent --show-error --connect-timeout 3 --max-time 30 \
+            "$base_url$path" > "$tmp"; then
+            mv "$tmp" "$output_dir/$name"
+            return 0
+        fi
+        sleep 0.2
+    done
+    echo "capture: failed to read $path after 3 attempts" >&2
+    return 1
 }
 
 get_surface_summaries() {
