@@ -129,7 +129,7 @@ currently expose enough physical displays and is not a pass.
 The TCC-built server has been exercised locally with the SDL dummy backend and
 in QEMU with direct DRM/KMS:
 
-- OpenAPI YAML parses as OpenAPI 3.1 with 19 paths and 41 schemas.
+- OpenAPI YAML parses as OpenAPI 3.1 with 25 paths and 45 schemas.
 - The WebSocket upgrade on `/v1/stream` returns `101 Switching Protocols`.
 - The TCC WebSocket probe also delivers a deliberately fragmented, masked
   subscription message and receives `subscription_received`, proving TCP and
@@ -149,10 +149,11 @@ in QEMU with direct DRM/KMS:
   styles, erase, scrolling, scroll regions, alternate-screen restoration,
   saved cursors, UTF-8, truecolor SGR, and fragmented CSI sequences over the
   public API.
-- The runtime PSF manifest gate loads the generator's single required-glyph
-  set, verifies all required Hibr glyphs are mapped and non-blank, and checks the
-  fixed 8×16 geometry. Geometric block elements use exact cell-row coverage;
-  they are not accepted merely because a fallback font returned a cropped
+- The runtime PSF manifest gate loads the generator's required-glyph set,
+  verifies all required Hibr glyphs are mapped, non-blank, and not fallback
+  `.notdef` output, and checks the fixed 8×16 geometry. Geometric block
+  elements use exact cell-row coverage; they are not accepted merely because a
+  fallback font returned a cropped
   bitmap:
 
   ```sh
