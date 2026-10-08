@@ -6697,6 +6697,8 @@ static void service_attach_reasserts(BlitRuntime *runtime, uint64_t now)
         BlitSurface *surface;
         struct winsize size;
         int signalled = 0;
+        int hibr_matches;
+        char discovery_detail[160];
 
         if (!session->used || !session->attach_reassert_pending ||
             now < session->attach_reassert_due_us)
@@ -6727,13 +6729,17 @@ static void service_attach_reasserts(BlitRuntime *runtime, uint64_t now)
             signalled = 1;
         else if (kill(session->process_id, SIGWINCH) == 0)
             signalled = 1;
-        {
-            int hibr_matches = reassert_hibr_session_processes(session, &size);
-            if (hibr_matches > 0) {
-                signalled = 1;
-                ++session->attach_reassert_hibr_matches;
-            }
+        hibr_matches = reassert_hibr_session_processes(session, &size);
+        if (hibr_matches > 0) {
+            signalled = 1;
+            ++session->attach_reassert_hibr_matches;
         }
+        snprintf(discovery_detail, sizeof(discovery_detail),
+                 "session=%llu attempt=%d matches=%d groups=%d", session->id,
+                 session->attach_reassert_attempts + 1, hibr_matches,
+                 session->attach_reassert_hibr_matches);
+        diagnostic_log(runtime, "info", "hibr_resize_discovery",
+                       discovery_detail);
         if (!signalled)
             fprintf(stderr, "blit: attach reassert signal for session %llu failed: %s\n",
                     session->id, strerror(errno));
