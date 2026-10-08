@@ -476,6 +476,11 @@ typedef struct {
     unsigned long long diagnostic_frame_rate_last_frames;
     double diagnostic_frame_rate_hz;
     unsigned long long diagnostic_frame_rate_window_ms;
+    double diagnostic_frame_rate_max_render_ms;
+    unsigned long long diagnostic_frame_rate_missed_deadlines;
+    unsigned long long diagnostic_frame_rate_window_sequence;
+    unsigned long long diagnostic_frame_rate_window_missed_start;
+    double diagnostic_frame_rate_window_max_render_ms;
     unsigned long long pixel_frames_accepted;
     unsigned long long pixel_frame_errors;
     unsigned long long diagnostic_loop_iterations;
@@ -1323,6 +1328,9 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"frames\":%llu,\"last_frame_gap_ms\":%.3f,"
         "\"max_frame_gap_ms\":%.3f,\"last_render_ms\":%.3f,"
         "\"max_render_ms\":%.3f,\"missed_deadlines\":%llu,"
+        "\"frame_rate_max_render_ms\":%.3f,"
+        "\"frame_rate_missed_deadlines\":%llu,"
+        "\"frame_rate_window_sequence\":%llu,"
         "\"last_terminal_ms\":%.3f,\"max_terminal_ms\":%.3f,"
         "\"terminal_bytes\":%llu,\"pointer_cache_hits\":%llu,"
         "\"pointer_cache_misses\":%llu,\"frame_rate_hz\":%.3f,"
@@ -1352,6 +1360,9 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         runtime->diagnostic_last_render_ms,
         runtime->diagnostic_max_render_ms,
         diagnostic_missed_deadlines(runtime),
+        runtime->diagnostic_frame_rate_max_render_ms,
+        runtime->diagnostic_frame_rate_missed_deadlines,
+        runtime->diagnostic_frame_rate_window_sequence,
         runtime->diagnostic_last_terminal_ms,
         runtime->diagnostic_max_terminal_ms,
         runtime->diagnostic_terminal_bytes,
@@ -9966,24 +9977,13 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             runtime->diagnostic_max_frame_gap_ms = gap;
     }
     ++runtime->diagnostic_frames;
-    if (runtime->diagnostic_frame_rate_started_us == 0)
+    if (runtime->diagnostic_frame_rate_started_us == 0) {
         runtime->diagnostic_frame_rate_started_us = diagnostic_render_started;
-    ++runtime->diagnostic_frame_rate_frames;
-    runtime->diagnostic_frame_rate_last_us = diagnostic_render_started;
-    if (diagnostic_render_started >= runtime->diagnostic_frame_rate_started_us &&
-        diagnostic_render_started - runtime->diagnostic_frame_rate_started_us >=
-            500000ULL) {
-        uint64_t elapsed = diagnostic_render_started -
-            runtime->diagnostic_frame_rate_started_us;
-        runtime->diagnostic_frame_rate_hz =
-            (double)runtime->diagnostic_frame_rate_frames * 1000000.0 /
-            (double)elapsed;
-        runtime->diagnostic_frame_rate_window_ms = elapsed / 1000ULL;
-        runtime->diagnostic_frame_rate_last_frames =
-            runtime->diagnostic_frame_rate_frames;
-        runtime->diagnostic_frame_rate_started_us = diagnostic_render_started;
-        runtime->diagnostic_frame_rate_frames = 0;
+        runtime->diagnostic_frame_rate_window_missed_start =
+            diagnostic_missed_deadlines(runtime);
+        runtime->diagnostic_frame_rate_window_max_render_ms = 0.0;
     }
+    ++runtime->diagnostic_frame_rate_frames;
 
     if (!runtime->direct_kms) {
         ++runtime->sdl_frame;
@@ -10574,6 +10574,34 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
         runtime->diagnostic_last_render_ms = milliseconds;
         if (milliseconds > runtime->diagnostic_max_render_ms)
             runtime->diagnostic_max_render_ms = milliseconds;
+        if (milliseconds > runtime->diagnostic_frame_rate_window_max_render_ms)
+            runtime->diagnostic_frame_rate_window_max_render_ms = milliseconds;
+    }
+    runtime->diagnostic_frame_rate_last_us = monotonic_us();
+    if (runtime->diagnostic_frame_rate_last_us >=
+            runtime->diagnostic_frame_rate_started_us &&
+        runtime->diagnostic_frame_rate_last_us -
+            runtime->diagnostic_frame_rate_started_us >= 500000ULL) {
+        uint64_t elapsed = runtime->diagnostic_frame_rate_last_us -
+            runtime->diagnostic_frame_rate_started_us;
+        unsigned long long missed = diagnostic_missed_deadlines(runtime);
+        runtime->diagnostic_frame_rate_hz =
+            (double)runtime->diagnostic_frame_rate_frames * 1000000.0 /
+            (double)elapsed;
+        runtime->diagnostic_frame_rate_window_ms = elapsed / 1000ULL;
+        runtime->diagnostic_frame_rate_last_frames =
+            runtime->diagnostic_frame_rate_frames;
+        runtime->diagnostic_frame_rate_max_render_ms =
+            runtime->diagnostic_frame_rate_window_max_render_ms;
+        runtime->diagnostic_frame_rate_missed_deadlines =
+            missed >= runtime->diagnostic_frame_rate_window_missed_start ?
+            missed - runtime->diagnostic_frame_rate_window_missed_start : 0;
+        ++runtime->diagnostic_frame_rate_window_sequence;
+        runtime->diagnostic_frame_rate_started_us =
+            runtime->diagnostic_frame_rate_last_us;
+        runtime->diagnostic_frame_rate_frames = 0;
+        runtime->diagnostic_frame_rate_window_missed_start = missed;
+        runtime->diagnostic_frame_rate_window_max_render_ms = 0.0;
     }
 }
 

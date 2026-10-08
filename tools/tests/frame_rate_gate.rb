@@ -6,15 +6,21 @@ require 'net/http'
 require 'tmpdir'
 require 'timeout'
 
-port = Integer(ENV.fetch('BLIT_GATE_PORT', '19248'))
-base = URI("http://127.0.0.1:#{port}")
-log = File.join(Dir.tmpdir, "blit-frame-rate-#{Process.pid}.log")
-env = {
-  'SDL_VIDEODRIVER' => 'dummy',
-  'LD_LIBRARY_PATH' => 'build/sdl3-kms'
-}
-pid = Process.spawn(env, 'build/blit/blit-server', port.to_s,
-                    out: log, err: [:child, :out])
+remote_server = ENV['BLIT_GATE_SERVER']
+if remote_server
+  base = URI(remote_server)
+  pid = nil
+else
+  port = Integer(ENV.fetch('BLIT_GATE_PORT', '19248'))
+  base = URI("http://127.0.0.1:#{port}")
+  log = File.join(Dir.tmpdir, "blit-frame-rate-#{Process.pid}.log")
+  env = {
+    'SDL_VIDEODRIVER' => 'dummy',
+    'LD_LIBRARY_PATH' => 'build/sdl3-kms'
+  }
+  pid = Process.spawn(env, 'build/blit/blit-server', port.to_s,
+                      out: log, err: [:child, :out])
+end
 
 at_exit do
   if pid
@@ -49,41 +55,64 @@ Timeout.timeout(8) do
   end
 end
 
-session = request(base, Net::HTTP::Post, '/v1/terminal-sessions',
-                 'command' => '/bin/sh',
-                 'arguments' => ['-c',
-                   'i=0; while [ "$i" -lt 180 ]; do printf "BLIT_FRAME_%s\\n" "$i"; i=$((i + 1)); sleep 0.02; done'],
-                 'surface_mode' => 'terminal',
-                 'surface' => {'width' => 80, 'height' => 24})
-session_id = session.fetch('id')
-samples = []
-deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 6
-while Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
-  samples << request(base, Net::HTTP::Get, '/v1/diagnostics/runtime')
+session_id = nil
+begin
+  baseline = request(base, Net::HTTP::Get, '/v1/diagnostics/runtime')
+  baseline_performance = baseline.fetch('performance')
+  baseline_terminal_bytes = baseline_performance.fetch('terminal_bytes')
+  baseline_window_sequence = baseline_performance.fetch('frame_rate_window_sequence')
+  minimum_hz = Float(ENV.fetch('BLIT_GATE_MIN_HZ', '30'))
+  session = request(base, Net::HTTP::Post, '/v1/terminal-sessions',
+                   'command' => '/bin/sh',
+                   'arguments' => ['-c',
+                     "i=0; while [ \"$i\" -lt 1200 ]; do printf 'BLIT_FRAME_%s\\n' \"$i\"; i=$((i + 1)); sleep 0.005; done"],
+                   'surface_mode' => 'terminal',
+                   'surface' => {'width' => 80, 'height' => 24})
+  session_id = session.fetch('id')
+  samples = []
+  deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 12
+  while Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
+    samples << request(base, Net::HTTP::Get, '/v1/diagnostics/runtime')
+    performance = samples.last.fetch('performance')
+    break if performance.fetch('frame_rate_window_sequence') > baseline_window_sequence &&
+              performance.fetch('frame_rate_window_ms').between?(500, 2000) &&
+              performance.fetch('frame_rate_hz') > 0 &&
+              performance.fetch('terminal_bytes') > baseline_terminal_bytes
+    sleep 0.25
+  end
+
   performance = samples.last.fetch('performance')
-  break if performance.fetch('frame_rate_window_ms') >= 500 &&
-            performance.fetch('frame_rate_hz') > 0
-  sleep 0.25
+  outputs = samples.last.fetch('snapshot').fetch('render').fetch('outputs')
+  raise 'no rendered output reported' if outputs.empty?
+  terminal_bytes = performance.fetch('terminal_bytes')
+  raise format('frame-rate workload produced no terminal output: baseline=%d current=%d',
+               baseline_terminal_bytes, terminal_bytes) unless
+    terminal_bytes > baseline_terminal_bytes
+  target_interval_ms = outputs.map { |output| output.fetch('target_interval_ms') }.max
+  raise 'frame-rate window never completed' unless performance.fetch('frame_rate_window_ms') >= 500
+  raise 'frame-rate window did not advance during workload' unless
+    performance.fetch('frame_rate_window_sequence') > baseline_window_sequence
+  raise 'frame-rate measurement is zero' unless performance.fetch('frame_rate_hz') > 0
+  raise format('frame-rate below required minimum: %.3f < %.3f Hz',
+               performance.fetch('frame_rate_hz'), minimum_hz) unless
+    performance.fetch('frame_rate_hz') >= minimum_hz
+  raise 'frame-rate measurement is stale' unless performance.fetch('frame_rate_age_ms') <= 2000
+  raise 'frame-rate frame count invalid' unless performance.fetch('frame_rate_frames') >= 1
+  raise 'refresh deadline was missed' unless performance.fetch('frame_rate_missed_deadlines').zero?
+  puts format('FRAME_RATE_PASS hz=%.3f min_hz=%.3f frames=%d window_ms=%d age_ms=%d window_max_render_ms=%.3f target_interval_ms=%.3f window_missed_deadlines=%d terminal_bytes=%d',
+              performance.fetch('frame_rate_hz'),
+              minimum_hz,
+              performance.fetch('frame_rate_frames'),
+              performance.fetch('frame_rate_window_ms'),
+              performance.fetch('frame_rate_age_ms'),
+              performance.fetch('frame_rate_max_render_ms'), target_interval_ms,
+              performance.fetch('frame_rate_missed_deadlines'), terminal_bytes)
+ensure
+  if session_id
+    begin
+      request(base, Net::HTTP::Delete, "/v1/terminal-sessions/#{session_id}")
+    rescue StandardError => e
+      warn "frame-rate cleanup: #{e.message}"
+    end
+  end
 end
-
-performance = samples.last.fetch('performance')
-outputs = samples.last.fetch('snapshot').fetch('render').fetch('outputs')
-raise 'no rendered output reported' if outputs.empty?
-target_interval_ms = outputs.map { |output| output.fetch('target_interval_ms') }.max
-raise 'frame-rate window never completed' unless performance.fetch('frame_rate_window_ms') >= 500
-raise 'frame-rate measurement is zero' unless performance.fetch('frame_rate_hz') > 0
-raise 'frame-rate measurement is stale' unless performance.fetch('frame_rate_age_ms') <= 2000
-raise 'frame-rate frame count invalid' unless performance.fetch('frame_rate_frames') >= 1
-raise 'refresh deadline was missed' unless performance.fetch('missed_deadlines').zero?
-raise format('render exceeded refresh budget: %.3f > %.3f ms',
-             performance.fetch('max_render_ms'), target_interval_ms) unless
-  performance.fetch('max_render_ms') <= target_interval_ms
-
-request(base, Net::HTTP::Delete, "/v1/terminal-sessions/#{session_id}")
-puts format('FRAME_RATE_PASS hz=%.3f frames=%d window_ms=%d age_ms=%d max_render_ms=%.3f target_interval_ms=%.3f missed_deadlines=%d',
-            performance.fetch('frame_rate_hz'),
-            performance.fetch('frame_rate_frames'),
-            performance.fetch('frame_rate_window_ms'),
-            performance.fetch('frame_rate_age_ms'),
-            performance.fetch('max_render_ms'), target_interval_ms,
-            performance.fetch('missed_deadlines'))

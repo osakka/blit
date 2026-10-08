@@ -368,14 +368,30 @@ physical release acceptance still requires display-mode timing and input
 latency evidence.
 
 The frame-rate gate creates a bounded PTY producer and samples the versioned
-runtime diagnostics endpoint. It requires a completed, nonzero measured frame
-rate and a fresh measurement window; cumulative frame counters alone are not
-treated as a refresh-rate measurement. It also requires zero missed refresh
-deadlines and a maximum measured render duration no greater than the active
-output's target interval:
+runtime diagnostics endpoint. It requires a completed, fresh measurement
+window, a configurable minimum measured rate, and zero missed refresh
+deadlines; cumulative frame counters alone are not treated as a refresh-rate
+measurement. The windowed render maximum is reported for diagnosis. It is not
+used as a hard failure criterion because SDL vsync presentation time can
+include the wait for the next physical vblank; missed deadlines are the
+authoritative cadence failure:
 
 ```sh
 BLIT_GATE_PORT=19248 ruby tools/tests/frame_rate_gate.rb
+```
+
+For a 60 Hz physical output, use a release-level minimum explicitly:
+
+```sh
+BLIT_GATE_SERVER=http://192.168.10.54:8080 BLIT_GATE_MIN_HZ=55 \
+  ruby tools/tests/frame_rate_gate.rb
+```
+
+The same gate can run against an already-running physical host without
+silently starting a local dummy server:
+
+```sh
+BLIT_GATE_SERVER=http://192.168.10.54:8080 ruby tools/tests/frame_rate_gate.rb
 ```
 
 The hidden-cursor damage gate verifies that repeated VT cursor addressing with
@@ -404,7 +420,13 @@ ruby tools/tests/sdl_graphics_cache_gate.rb
 
 The result is exposed by `GET /v1/diagnostics/runtime` under `performance` as
 `frame_rate_hz`, `frame_rate_frames`, `frame_rate_window_ms`, and
-`frame_rate_age_ms`. `frame_rate_hz` is the rate of damage-driven composition
+`frame_rate_age_ms`. The completed measurement window also reports
+`frame_rate_max_render_ms` and `frame_rate_missed_deadlines`; these are
+windowed values and are not contaminated by older lifetime maxima.
+`frame_rate_window_sequence` increments only when a new measurement window
+completes, allowing a remote gate to distinguish its workload from stale
+measurements left by an earlier client.
+`frame_rate_hz` is the rate of damage-driven composition
 and presentation passes; it is not the panel scanout rate. Use
 `snapshot.render.outputs[].refresh_hz` and `effective_interval_ms` for the
 selected display cadence and scheduler target. The same object includes

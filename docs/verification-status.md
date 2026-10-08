@@ -7,23 +7,35 @@ an evidence record, not a claim that the complete product is released.
 
 - Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The current source candidate is `0.1.281`. It builds with TCC and passes
+- The current source candidate is `0.1.283`. It builds with TCC and passes
   the complete terminal conformance suite, SDL screenshot/overlay pixels,
   the hidden-cursor damage gate, and the complete Hibr font manifest gate.
   It includes the versioned network terminal-input endpoint at the canonical
   PTY boundary. Its SDL backend uses a per-output glyph atlas with nearest
   sampling and one-pixel guard borders, suppresses unchanged cell damage, and
   does not schedule frames for hidden cursor movement. The current physical
-  host reports 0.1.281 through its version endpoint and exposes actual
+  host reports 0.1.283 through its version endpoint and exposes actual
   render/viewport dimensions in diagnostics. Its settled Hibr smoke test
   preserved VT500 text, box/block glyphs, combining `Á`, and wide `界`; this
-  is one-output evidence, not a multi-monitor or 120/240 Hz claim. The Debian
-  candidate `blit_0.1.281-1_amd64.deb` was built from this binary and passed
+  is one-output evidence, not a multi-monitor or 120/240 Hz claim. The prior
+  candidate `blit_0.1.281-1_amd64.deb` was built from its matching binary and passed
   package allowlist, embedded-version, byte-identity, asset-presence, and
   extracted-runtime checks. The final artifact SHA-256 is recorded in the
   package handoff because this ledger is included inside the package itself.
   It is not claimed as a fully validated 240 Hz release: the real-mode QEMU
   stream gate still fails its strict page-flip deadline requirement.
+
+The 0.1.283 source change adds windowed performance diagnostics:
+`frame_rate_max_render_ms` and `frame_rate_missed_deadlines`. The frame-rate
+gate now accepts `BLIT_GATE_SERVER` and uses those windowed values, so a remote
+physical-host measurement cannot be mistaken for the local dummy backend or be
+contaminated by an older lifetime maximum. The window sequence counter also
+prevents a remote gate from accepting a stale completed window from a previous
+workload. The rebuilt Debian package is
+`blit_0.1.283-1_amd64.deb`; its SHA-256 is recorded in the external release
+handoff because embedding a package's own hash inside its payload is
+self-referential.
+Its server binary matches the TCC build and the live host reports 0.1.283.
 
 The canonical TCC build entrypoint now has explicit `server` and `helper`
 targets. The exact rebuild produced distinct server and root-update-helper
@@ -50,6 +62,11 @@ with one primary and three joins. Its exact 240 Hz pixel-stream fixture also
 selected 240 Hz and accepted all 240 frames, but strict presentation measured
 117.83 Hz with eight virtual missed deadlines under QEMU TCG, so the fixture
 remains scheduler/ingestion evidence rather than a 240 Hz presentation pass.
+
+The installed 0.1.283 host passed the corrected remote terminal frame-rate
+gate at 60.382 Hz with a 55 Hz minimum, 31 frames in a fresh 513 ms window,
+9,685 terminal bytes, and zero missed deadlines. This is physical one-output
+60 Hz evidence, not 120/240 Hz evidence.
 
 The 0.1.281 release-qualification cycle also passed authenticated network
 authorization, HTTP fragmentation and back-pressure, session lifecycle and
