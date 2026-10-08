@@ -13,7 +13,7 @@ framebuffer download was in progress, `/v1/version` completed in 12 ms.
 This directly protects input and presentation from a slow diagnostic client.
 
 Package `blit_0.1.335-1` is built; its externally recorded SHA-256 and source
-commit are in [the 0.1.335 release manifest](../releases/0.1.335.yaml).
+commit are in [the 0.1.335 release manifest](https://git.home.arpa/itdlabs/blit/src/branch/main/releases/0.1.335.yaml).
 The hash is intentionally kept outside this ledger because the ledger itself
 is included in the Debian package.
 The exact TCC binary passes terminal conformance, frame-rate, HTTP
