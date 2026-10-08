@@ -49,6 +49,13 @@ Hibr VKMS orchestration fixture: `LAYOUT_MATRIX_PASS`,
 `KMS_FOUR_OUTPUT_PASS`, presenting four independent KMS outputs and four
 attached terminal surfaces.
 
+The current Hibr VKMS input fixture also passed keypad soak observation,
+`BLIT_INPUT_MULTI_MOUSE_PASS`, `BLIT_INPUT_STREAM_PASS`,
+`BLIT_INPUT_GAMEPAD_PASS`, `BLIT_INPUT_DEVICE_LOSS_PASS`, and
+`BLIT_INPUT_RENDER_SOAK_PASS`. Input routes survived device reconnect when
+their target sessions remained live; routes targeting the intentionally
+completed soak sessions were correctly disabled by session lifecycle.
+
 The corrected real-mode high-refresh fixture selected 240 Hz from the VKMS
 mode itself (`refresh_source:"display-mode"`) and accepted all 240 pixel
 frames. Its scheduler metadata gate passed, but missed deadlines increased

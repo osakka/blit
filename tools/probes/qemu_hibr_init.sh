@@ -307,16 +307,36 @@ if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
     fi
     if [ "${BLIT_INPUT_LOSS_TEST:-0}" = 1 ]; then
         echo BLIT_INPUT_ROUTES_AFTER_DEVICE_LOSS
+        echo BLIT_INPUT_ROUTE_TARGET_SESSIONS
+        for target_session in 1 2; do
+            $b wget -qO- "http://127.0.0.1:19191/v1/terminal-sessions/$target_session" || true
+        done
         routes_after_loss=$($b wget -qO- http://127.0.0.1:19191/v1/input/routes)
         diagnostics_after_loss=$($b wget -qO- http://127.0.0.1:19191/v1/diagnostics)
         echo "$routes_after_loss"
         echo "$diagnostics_after_loss"
         loss_pass=1
         # QEMU also exposes its baseline keyboard and mouse. The synthetic
-        # devices therefore exercise compaction while a surviving device keeps
-        # the aggregate route enabled.
-        echo "$routes_after_loss" | $b grep -q '"id":"input-key".*"device_id":"evdev-keyboard".*"enabled":true' || loss_pass=0
-        echo "$routes_after_loss" | $b grep -q '"id":"input-pointer".*"device_id":"evdev-pointer".*"enabled":true' || loss_pass=0
+        # devices therefore exercise compaction while a live target keeps its
+        # route enabled. The soak helper intentionally exits after its bounded
+        # workload, so a stopped target must have its route disabled by the
+        # session lifecycle; both outcomes are asserted explicitly.
+        target_one_state=$($b wget -qO- http://127.0.0.1:19191/v1/terminal-sessions/1 |
+            $b sed -n 's/.*"state":"\([^"]*\)".*/\1/p')
+        target_two_state=$($b wget -qO- http://127.0.0.1:19191/v1/terminal-sessions/2 |
+            $b sed -n 's/.*"state":"\([^"]*\)".*/\1/p')
+        if [ "$target_one_state" = running ]; then
+            echo "$routes_after_loss" | $b grep -q '"id":"input-key".*"device_id":"evdev-keyboard".*"enabled":true' || loss_pass=0
+            echo "$routes_after_loss" | $b grep -q '"id":"input-gamepad".*"device_id":"evdev-gamepad".*"enabled":true' || loss_pass=0
+        else
+            echo "$routes_after_loss" | $b grep -q '"id":"input-key".*"device_id":"evdev-keyboard".*"enabled":false' || loss_pass=0
+            echo "$routes_after_loss" | $b grep -q '"id":"input-gamepad".*"device_id":"evdev-gamepad".*"enabled":false' || loss_pass=0
+        fi
+        if [ "$target_two_state" = running ]; then
+            echo "$routes_after_loss" | $b grep -q '"id":"input-pointer".*"device_id":"evdev-pointer".*"enabled":true' || loss_pass=0
+        else
+            echo "$routes_after_loss" | $b grep -q '"id":"input-pointer".*"device_id":"evdev-pointer".*"enabled":false' || loss_pass=0
+        fi
         echo "$diagnostics_after_loss" | $b grep -q '"keyboards":[1-9]' || loss_pass=0
         echo "$diagnostics_after_loss" | $b grep -q '"pointers":[1-9]' || loss_pass=0
         $b grep -q 'evdev keyboard disappeared:' /tmp/blit.log || loss_pass=0

@@ -5853,26 +5853,6 @@ static void disable_input_routes_for_target(BlitRuntime *runtime,
         ++runtime->input_routes_revision;
 }
 
-static void disable_input_routes_for_device(BlitRuntime *runtime,
-                                            const char *device_id)
-{
-    int i;
-    int changed = 0;
-
-    if (runtime == NULL || device_id == NULL || device_id[0] == '\0')
-        return;
-    for (i = 0; i < 16; ++i) {
-        BlitInputRoute *route = &runtime->input_routes[i];
-        if (route->used && route->enabled &&
-            strcmp(route->device_id, device_id) == 0) {
-            route->enabled = 0;
-            changed = 1;
-        }
-    }
-    if (changed)
-        ++runtime->input_routes_revision;
-}
-
 static void remove_evdev_mouse(BlitRuntime *runtime, int index)
 {
     int i;
@@ -5891,8 +5871,9 @@ static void remove_evdev_mouse(BlitRuntime *runtime, int index)
     runtime->evdev_mouse_fds[runtime->evdev_mouse_count] = -1;
     runtime->evdev_mouse_paths[runtime->evdev_mouse_count][0] = '\0';
     runtime->evdev_mouse_reported[runtime->evdev_mouse_count] = 0;
-    if (runtime->evdev_mouse_count == 0)
-        disable_input_routes_for_device(runtime, "evdev-pointer");
+    /* Keep the configured route across hotplug.  Device availability is
+       reported independently; a reconnect should resume the same route
+       without requiring a controller to recreate it. */
     runtime->evdev_rescan_requested = 1;
 }
 
@@ -5915,8 +5896,8 @@ static void remove_evdev_keyboard(BlitRuntime *runtime, int index)
     runtime->evdev_keyboard_fds[runtime->evdev_keyboard_count] = -1;
     runtime->evdev_keyboard_paths[runtime->evdev_keyboard_count][0] = '\0';
     runtime->evdev_keyboard_reported[runtime->evdev_keyboard_count] = 0;
-    if (runtime->evdev_keyboard_count == 0)
-        disable_input_routes_for_device(runtime, "evdev-keyboard");
+    /* Keep the configured route across hotplug; it becomes effective again
+       when a keyboard is discovered. */
     runtime->evdev_rescan_requested = 1;
 }
 
@@ -5939,7 +5920,8 @@ static void remove_evdev_gamepad(BlitRuntime *runtime, int index)
     runtime->evdev_gamepad_fds[runtime->evdev_gamepad_count] = -1;
     runtime->evdev_gamepad_paths[runtime->evdev_gamepad_count][0] = '\0';
     runtime->evdev_gamepad_reported[runtime->evdev_gamepad_count] = 0;
-    disable_input_routes_for_device(runtime, "evdev-gamepad");
+    /* Keep the configured route across hotplug; availability is observable
+       through the device inventory and diagnostics. */
     runtime->evdev_rescan_requested = 1;
 }
 
