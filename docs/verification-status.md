@@ -19,9 +19,12 @@ an evidence record, not a claim that the complete product is released.
   The direct-KMS pixel-frame acceptance below was run from the exact current
   0.1.256 TCC build; the newer SDL presentation and geometry work is recorded
   below. The authorized physical host now reports 0.1.265 through its version
-  endpoint. No Debian package is being claimed for 0.1.268 yet: the real-mode
-  240 Hz QEMU stream gate still fails its strict page-flip deadline
-  requirement.
+  endpoint. The Debian candidate `blit_0.1.268-1_amd64.deb` was built from
+  this binary and passed package allowlist, embedded-version, byte-identity,
+  asset-presence, and extracted-runtime checks. Its SHA-256 is
+  `796b712c85e96482f1cf235dadef8d128be2086225fea58ec637d57bdb61cc41`.
+  It is not claimed as a fully validated 240 Hz release: the real-mode QEMU
+  stream gate still fails its strict page-flip deadline requirement.
 
 ### Current 0.1.268 evidence
 
