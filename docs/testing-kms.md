@@ -286,7 +286,8 @@ The fixture accepts `blit.sixel=1` for the initial sixel gate. It sends two
 direct-color sixel columns with six-row raster data and requires
 `PPM_DISPLAY_47_SIXEL_PASS`; the equivalent SDL3 capture passes
 `SDL_SIXEL_PASS`. This validates the shared RGBA graphics object and both
-renderers while the public sixel capability remains unadvertised.
+renderers for the bounded sixel capability advertised in the session contract.
+Unsupported sixel extensions remain rejected diagnostically.
 
 ## Pointer stress gate
 

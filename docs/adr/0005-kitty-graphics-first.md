@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted
+Accepted as the sequencing decision. The initial unadvertised-sixel phase is
+superseded by [ADR-0021](0021-bounded-sixel-capability.md).
 
 ## Context
 

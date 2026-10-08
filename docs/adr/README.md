@@ -28,6 +28,7 @@ Accepted decisions:
 18. [Expose bounded stream back-pressure telemetry](0018-stream-backpressure-telemetry.md).
 19. [Deterministic box-drawing glyph geometry](0019-deterministic-box-drawing-glyphs.md).
 20. [Reject unresolved fallback glyphs](0020-font-fallback-coverage.md).
+21. [Advertise the bounded sixel capability](0021-bounded-sixel-capability.md).
 
 Pending decisions:
 
