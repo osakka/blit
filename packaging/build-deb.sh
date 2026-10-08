@@ -69,6 +69,7 @@ cp -a "$ROOT/packaging/blit-update-helper.service" \
     "$stage/lib/systemd/system/"
 cp -a "$ROOT/packaging/blit.service" "$stage/lib/systemd/system/"
 cp -a "$BUNDLE/lib/libSDL3.so.0.4.16" "$stage/usr/lib/blit/lib/"
+ln -s libSDL3.so.0.4.16 "$stage/usr/lib/blit/lib/libSDL3.so.0"
 cp -a "$BUNDLE/fonts/." "$stage/usr/lib/blit/fonts/"
 if [ -d "$ROOT/assets/fonts" ]; then
 	cp -a "$ROOT/assets/fonts/." "$stage/usr/lib/blit/fonts/"
