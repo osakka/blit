@@ -65,6 +65,12 @@ reconnect. The device-loss run preserved surviving input routes and reported
 explicit reconnect diagnostics. These are deterministic evdev/QEMU results;
 physical pointer/button/wheel behavior remains a separate hardware gate.
 
+The exact 0.1.267 local lifecycle gates also passed authenticated gateway
+authorization, HTTP fragmentation/backpressure, supervised update cancellation,
+supervised upload idle timeout, and API shutdown. The physical host was not
+updated because no live update credential is present in this development
+environment; its observed version remains 0.1.265.
+
 ### Current 0.1.265 source evidence
 
 The bundled Hibr font now assigns dedicated deterministic 8×16 glyphs to the
