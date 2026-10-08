@@ -96,16 +96,15 @@ while [ "$i" -lt 60 ]; do
         i=$((i + 1))
         continue
     fi
-    case "$status" in
-        *"state":"ready"*"active":false*)
-            if live_version=$(curl_auth --fail "$base_url/v1/version"); then
-                echo "$live_version" | grep -q "\"server_version\":\"$version\"" && {
-                    echo "update verified: Blit $version"
-                    exit 0
-                }
-            fi
-            ;;
-    esac
+    if echo "$status" | grep -q '"state":"ready"' &&
+       echo "$status" | grep -q '"active":false'; then
+        if live_version=$(curl_auth --fail "$base_url/v1/version"); then
+            echo "$live_version" | grep -q "\"server_version\":\"$version\"" && {
+                echo "update verified: Blit $version"
+                exit 0
+            }
+        fi
+    fi
     i=$((i + 1))
 done
 echo "update failed: timed out waiting for Blit $version; inspect update status and diagnostics" >&2
