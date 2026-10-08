@@ -420,6 +420,11 @@ SDL event-pump duration is reported as `last_sdl_events_ms` and
 `max_sdl_events_ms`; evdev scan duration is reported as
 `last_evdev_scan_ms` and `max_evdev_scan_ms`. The rate is measured from
 presented frames, not inferred from the display mode or configured interval.
+Input dispatch is independently observable through `input_events`,
+`last_input_dispatch_ms`, and `max_input_dispatch_ms`. These counters cover
+keyboard, pointer, and gamepad events after evdev receipt and through Blit's
+routing path, so input latency can be separated from rendering and scanout
+latency.
 Graphics composition counters are reported as `graphics_cache_hits` and
 `graphics_texture_uploads`; they make wallpaper upload churn observable through
 the API rather than inferred from screenshots.

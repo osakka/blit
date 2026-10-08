@@ -493,6 +493,9 @@ typedef struct {
     unsigned long long diagnostic_terminal_bytes;
     unsigned long long diagnostic_pointer_cache_hits;
     unsigned long long diagnostic_pointer_cache_misses;
+    unsigned long long diagnostic_input_events;
+    double diagnostic_last_input_dispatch_ms;
+    double diagnostic_max_input_dispatch_ms;
     unsigned long long diagnostic_stream_dropped_events;
     unsigned long long diagnostic_stream_backpressure_disconnects;
     unsigned long long diagnostic_stream_queue_peak_bytes;
@@ -1272,6 +1275,20 @@ static unsigned long long diagnostic_stream_queue_bytes(
     return total;
 }
 
+static void record_input_dispatch(BlitRuntime *runtime, uint64_t started_us)
+{
+    double elapsed;
+    uint64_t now;
+    if (runtime == NULL)
+        return;
+    now = monotonic_us();
+    elapsed = now >= started_us ? (double)(now - started_us) / 1000.0 : 0.0;
+    ++runtime->diagnostic_input_events;
+    runtime->diagnostic_last_input_dispatch_ms = elapsed;
+    if (elapsed > runtime->diagnostic_max_input_dispatch_ms)
+        runtime->diagnostic_max_input_dispatch_ms = elapsed;
+}
+
 static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
                                      size_t capacity)
 {
@@ -1301,6 +1318,8 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"last_terminal_ms\":%.3f,\"max_terminal_ms\":%.3f,"
         "\"terminal_bytes\":%llu,\"pointer_cache_hits\":%llu,"
         "\"pointer_cache_misses\":%llu,\"frame_rate_hz\":%.3f,"
+        "\"input_events\":%llu,\"last_input_dispatch_ms\":%.3f,"
+        "\"max_input_dispatch_ms\":%.3f,"
         "\"stream_queue_bytes\":%llu,\"stream_queue_peak_bytes\":%llu,"
         "\"stream_dropped_events\":%llu,"
         "\"stream_backpressure_disconnects\":%llu,"
@@ -1330,6 +1349,9 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         runtime->diagnostic_pointer_cache_hits,
         runtime->diagnostic_pointer_cache_misses,
         frame_rate_hz,
+        runtime->diagnostic_input_events,
+        runtime->diagnostic_last_input_dispatch_ms,
+        runtime->diagnostic_max_input_dispatch_ms,
         diagnostic_stream_queue_bytes(runtime),
         runtime->diagnostic_stream_queue_peak_bytes,
         runtime->diagnostic_stream_dropped_events,
@@ -10655,13 +10677,16 @@ static void service_evdev_gamepad(BlitRuntime *runtime)
         while ((received = read(runtime->evdev_gamepad_fds[device_index],
                                 &event, sizeof(event))) ==
                (ssize_t)sizeof(event)) {
+            uint64_t input_started_us = monotonic_us();
             if (!runtime->evdev_gamepad_reported[device_index]) {
                 fprintf(stderr, "blit: evdev gamepad events received from %s\n",
                         runtime->evdev_gamepad_paths[device_index]);
                 runtime->evdev_gamepad_reported[device_index] = 1;
             }
-            if (event.type == EV_KEY || event.type == EV_ABS)
+            if (event.type == EV_KEY || event.type == EV_ABS) {
                 broadcast_evdev_gamepad(runtime, &event);
+                record_input_dispatch(runtime, input_started_us);
+            }
         }
         if (received == 0 ||
             (received < 0 && errno != EAGAIN && errno != EWOULDBLOCK &&
@@ -10693,6 +10718,7 @@ static void service_evdev_mouse(BlitRuntime *runtime)
         while ((received = read(runtime->evdev_mouse_fds[device_index],
                                 &event, sizeof(event))) ==
                (ssize_t)sizeof(event)) {
+            uint64_t input_started_us = monotonic_us();
             if (!runtime->evdev_mouse_reported[device_index]) {
                 fprintf(stderr, "blit: evdev mouse events received from %s\n",
                         runtime->evdev_mouse_paths[device_index]);
@@ -10709,6 +10735,7 @@ static void service_evdev_mouse(BlitRuntime *runtime)
                                              1, event.value);
                     send_mouse_report(runtime, 0, runtime->evdev_mouse_x,
                                       runtime->evdev_mouse_y, button, 0);
+                    record_input_dispatch(runtime, input_started_us);
                     continue;
                 }
                 if (event.code == REL_X)
@@ -10717,6 +10744,7 @@ static void service_evdev_mouse(BlitRuntime *runtime)
                     runtime->evdev_mouse_y += event.value;
             } else if (event.type == EV_SYN && event.code == SYN_REPORT) {
                 update_evdev_pointer(runtime);
+                record_input_dispatch(runtime, input_started_us);
             } else if (event.type == EV_KEY &&
                        (event.code == BTN_LEFT ||
                         event.code == BTN_MIDDLE ||
@@ -10735,6 +10763,7 @@ static void service_evdev_mouse(BlitRuntime *runtime)
                 send_mouse_report(runtime, 0, runtime->evdev_mouse_x,
                                   runtime->evdev_mouse_y, button, release);
                 if (release) runtime->mouse_buttons &= ~(1U << button);
+                record_input_dispatch(runtime, input_started_us);
             }
         }
         if (received == 0 ||
@@ -10910,6 +10939,7 @@ static void service_evdev_keyboard(BlitRuntime *runtime)
         while ((received = read(runtime->evdev_keyboard_fds[device_index],
                                 &event, sizeof(event))) ==
                (ssize_t)sizeof(event)) {
+            uint64_t input_started_us = monotonic_us();
             if (event.type != EV_KEY) continue;
             if (event.code == KEY_LEFTSHIFT || event.code == KEY_RIGHTSHIFT)
                 runtime->evdev_shift = event.value != 0;
@@ -10947,6 +10977,7 @@ static void service_evdev_keyboard(BlitRuntime *runtime)
                          runtime->evdev_alt ? "true" : "false");
                 broadcast_stream(runtime, input_event, BLIT_STREAM_INPUT);
             }
+            record_input_dispatch(runtime, input_started_us);
         }
         if (received == 0 ||
             (received < 0 && errno != EAGAIN && errno != EWOULDBLOCK &&

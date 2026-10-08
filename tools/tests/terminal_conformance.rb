@@ -125,6 +125,13 @@ pointer = pointer_diagnostics.fetch('render').fetch('pointer')
 end
 puts 'PASS pointer-diagnostics'
 
+runtime_diagnostics = request(base, 'GET', '/v1/diagnostics/runtime')
+performance = runtime_diagnostics.fetch('performance')
+%w[input_events last_input_dispatch_ms max_input_dispatch_ms].each do |field|
+  raise "runtime diagnostics missing #{field}" unless performance.key?(field)
+end
+puts 'PASS input-diagnostics'
+
 missing_surface_status, missing_surface_response = request_with_status(
   base, 'POST', '/v1/terminal-sessions', { 'command' => '/bin/true' })
 assert_equal(400, missing_surface_status, 'missing surface status')

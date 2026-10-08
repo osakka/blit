@@ -35,7 +35,9 @@ special Hibr launcher or shell wrapper.
 - Outputs present at their selected mode's refresh rate unless an explicit
   lower cap is requested and reported.
 - Input is timestamped from device receipt through routing and presentation,
-  with bounded queue depth and observable dropped-event counts.
+  with bounded queue depth, observable dropped-event counts, and runtime
+  `input_events`, `last_input_dispatch_ms`, and `max_input_dispatch_ms`
+  diagnostics for keyboard, pointer, and gamepad paths.
 - Terminal games pass alternate-screen, cursor, colour, UTF-8, wide/combining
   glyph, mouse-reporting, keyboard, and resize tests without corruption.
 - The pixel path provides frame pacing, damage or buffer reuse, back-pressure,
