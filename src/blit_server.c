@@ -6836,7 +6836,7 @@ static void service_attach_reasserts(BlitRuntime *runtime, uint64_t now)
              session->attach_reassert_hibr_matches == 0)) {
             session->attach_reassert_pending = 1;
             session->attach_reassert_due_us = now +
-                hibr_matches > 0 ? 2000000ULL : 250000ULL;
+                (hibr_matches > 0 ? 2000000ULL : 250000ULL);
         }
     }
 }
