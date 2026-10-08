@@ -63,6 +63,14 @@ The four-output TCG/VKMS run recorded virtual page-flip misses during startup
 and Hibr composition; this is retained as virtual-driver timing evidence and
 is not a physical refresh-rate claim.
 
+The exact 0.1.265 Hibr/VKMS input fixtures passed `LAYOUT_MATRIX_PASS`,
+`BLIT_INPUT_KEYPAD_PASS`, `BLIT_INPUT_MULTI_MOUSE_PASS`,
+`BLIT_INPUT_STREAM_PASS`, `BLIT_INPUT_GAMEPAD_PASS`, and
+`BLIT_INPUT_RENDER_SOAK_PASS`. The device-loss variant additionally passed
+`BLIT_INPUT_DEVICE_LOSS_PASS`, including route continuity for surviving
+devices and input loss/reconnect events. The staged runtime loaded the 929
+glyph / 1,182 mapping font; Hibr source was not modified.
+
 ### Current 0.1.263 source and physical evidence
 
 The exact 0.1.263 TCC build passes the complete 0.1.262 regression set plus
