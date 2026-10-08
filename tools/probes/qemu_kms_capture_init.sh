@@ -94,8 +94,10 @@ if [ "$mixed_refresh_test" -eq 1 ]; then
     export BLIT_TEST_REFRESH_HZ=60,120
 fi
 if [ "$high_refresh_test" -eq 1 ]; then
-    export BLIT_TEST_MODE=1
-    export BLIT_TEST_REFRESH_HZ=60,240
+    if [ "$pixel_stream_240_test" -eq 0 ]; then
+        export BLIT_TEST_MODE=1
+        export BLIT_TEST_REFRESH_HZ=60,240
+    fi
 fi
 if [ "$kitty_query_test" -eq 1 ]; then
     export BLIT_KITTY_TRACE=1
@@ -130,7 +132,13 @@ fi
 high_refresh_pass=1
 if [ "$high_refresh_test" -eq 1 ]; then
     echo "$diagnostics" | $b grep -q '"refresh_hz":240.000' || high_refresh_pass=0
-    echo "$diagnostics" | $b grep -q '"refresh_source":"test-override"' || high_refresh_pass=0
+    if [ "$pixel_stream_240_test" -eq 1 ]; then
+        # The bounded 240 Hz stream test must use a mode reported by KMS.
+        # The test-only metadata override cannot prove that such a mode exists.
+        echo "$diagnostics" | $b grep -q '"refresh_source":"display-mode"' || high_refresh_pass=0
+    else
+        echo "$diagnostics" | $b grep -q '"refresh_source":"test-override"' || high_refresh_pass=0
+    fi
     echo "$diagnostics" | $b grep -q '"effective_interval_ms":4' || high_refresh_pass=0
     [ "$high_refresh_pass" -eq 1 ] && echo REFRESH_SCHEDULER_240_PASS || echo REFRESH_SCHEDULER_240_FAIL
 fi
