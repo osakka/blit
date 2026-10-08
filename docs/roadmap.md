@@ -40,14 +40,16 @@ production `console-blit` module is operational over the OpenAPI/WebSocket
 contract. Explicit focus and versioned input routes are exposed by the API.
 The SDL adapter uses single-surface incremental frames and conservatively
 redraws multi-surface outputs with deterministic vertical stacking. The
-current 0.1.260 source passes the complete terminal, graphics, input,
-two-display VKMS/QEMU, and Hibr primary/`--join` acceptance gates. The
-authorized physical host is running 0.1.258 and has a healthy one-output
-SDL3/OpenGL presentation. Its full-screen Hibr workload now derives a
-240×135 surface from the 1920×2160 display and sustained 59.948 Hz with zero
-missed deadlines after SDL glyph geometry batching. Physical multi-monitor
-confirmation remains open because that host currently exposes only one
-connector.
+current 0.1.265 source passes the complete terminal, graphics, input,
+two-display VKMS/QEMU, four-output Hibr primary/`--join`, mixed-refresh,
+output-loss, and emulator-like pixel-stream acceptance gates. The bundled
+Hibr font contains 929 glyphs and 1,182 mappings; its manifest rejects
+unresolved `.notdef` fallbacks and checks deterministic box/special-glyph
+bitmaps. The authorized physical host is running 0.1.265 and has a healthy
+one-output SDL3/OpenGL presentation. Its controlled full-screen Hibr workload
+reached 17.638 ms maximum render time and zero missed deadlines at a 59.990 Hz
+mode. Physical multi-monitor confirmation remains open because that host
+currently exposes only one connector.
 
 Display timing is an explicit hard requirement. Each output must schedule at
 its active mode's maximum refresh by default, with per-output deadlines. The
@@ -149,11 +151,11 @@ accepted control grammar only with a corresponding parser and pixel fixture.
 Lock down the measurable workload contract first: input timestamps and queue
 depth, frame pacing, back-pressure, damage or buffer reuse, and diagnostics.
 Then add the bounded graphic canvas/frame resource to the schema and implement
-it through the existing SDL3/direct-KMS presentation boundary. The first
-VKMS fixture now exercises a synthetic emulator-like producer at 60 Hz,
+it through the existing SDL3/direct-KMS presentation boundary. The VKMS
+fixture exercises a synthetic emulator-like producer at 60 Hz,
 accepts all timed frames with zero missed deadlines, and proves stable
-presentation on two outputs. Input injection and physical-host presentation
-remain required before release.
+presentation on two outputs. Input injection, physical-host presentation, and
+the physical multi-monitor arrangement remain required before release.
 
 Terminal-native game acceptance is a separate gate and covers alternate
 screen, cursor and colour state, UTF-8/wide/combining glyphs, mouse reporting,
@@ -169,10 +171,8 @@ suite on VKMS and then on a physical DRM/KMS host.
 ## Immediate next action
 
 Capture settled SDL screenshots and API diagnostics from the authorized
-physical host. Verify physical pointer/button/wheel routing and refresh
-cadence, followed by a real two-monitor primary/`--join` arrangement when a
-second connector is available. The update API requires its configured update
-token; no unauthenticated bypass is acceptable.
-
-The remaining release work is physical display/input evidence, mixed-refresh
-coverage for every supported topology, and the Gate 6 fault/soak campaign.
+physical host, then validate physical pointer/button/wheel routing and refresh
+cadence. The sole open release gate is a real two-monitor primary/`--join`
+arrangement with independent connector discovery and presentation; the
+current host exposes only one connector. The update API requires its
+configured update token; no unauthenticated bypass is acceptable.
