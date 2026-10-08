@@ -15,10 +15,10 @@ an evidence record, not a claim that the complete product is released.
   42.935–43.867 Hz with 15.400–15.676 ms maximum render time against a
   16.000 ms target and zero missed deadlines; this is a software-dummy result,
   not a physical refresh-rate claim. The authorized physical host now reports
-  0.1.271 through its version endpoint. Its controlled live API smoke test
-  rendered VT500 text, box/block glyphs, combining `Á`, and wide `界` at
-  60.000 Hz with zero missed deadlines and 10.490 ms maximum render time;
-  this is one-output evidence, not a multi-monitor or 120/240 Hz claim. The Debian candidate
+  0.1.274 through its version endpoint. Its controlled live API smoke test
+  preserved VT500 text, box/block glyphs, combining `Á`, and wide `界` in
+  the surface model at 60.000 Hz with zero missed deadlines; this is
+  one-output evidence, not a multi-monitor or 120/240 Hz claim. The Debian candidate
   `blit_0.1.274-1_amd64.deb` was built from
   this binary and passed package allowlist, embedded-version, byte-identity,
   asset-presence, and extracted-runtime checks. The final artifact SHA-256 is
@@ -147,9 +147,8 @@ physical pointer/button/wheel behavior remains a separate hardware gate.
 
 The exact 0.1.267 local lifecycle gates also passed authenticated gateway
 authorization, HTTP fragmentation/backpressure, supervised update cancellation,
-supervised upload idle timeout, and API shutdown. The physical host was not
-updated because no live update credential is present in this development
-environment; its observed version remains 0.1.265.
+supervised upload idle timeout, and API shutdown. That historical record
+predates the authorized 0.1.274 live deployment documented above.
 
 ### Current 0.1.265 source evidence
 

@@ -47,11 +47,10 @@ backgrounds are coalesced into horizontal runs before geometry submission;
 the focused 128×48 regression workload now submits four background quads.
 The bundled Hibr font contains 929 glyphs and 1,182 mappings; its manifest rejects
 unresolved `.notdef` fallbacks and checks deterministic box/special-glyph
-bitmaps. The authorized physical host is running 0.1.265 and has a healthy
-one-output SDL3/OpenGL presentation. Its controlled full-screen Hibr workload
-reached 17.638 ms maximum render time and zero missed deadlines at a 59.990 Hz
-mode. Physical multi-monitor confirmation remains open because that host
-currently exposes only one connector.
+bitmaps. The authorized physical host is running 0.1.274 and has a healthy
+one-output SDL3/OpenGL presentation at 60.000 Hz with zero missed deadlines.
+Physical multi-monitor confirmation remains open because that host currently
+exposes only one connector.
 
 The current real-mode 240 Hz VKMS stream test proves mode selection and frame
 ingestion, but remains red on strict page-flip deadlines under QEMU TCG/VKMS;
