@@ -73,3 +73,8 @@ capture directory and must additionally show `device_id`/evdev events from
 `/v1/input/devices`. A screenshot request is a large transfer and therefore
 can perturb a single-threaded server; compare its timestamps with
 `max_loop_gap_ms` before treating a captured stall as a rendering stall.
+
+The Hibr adapter batches up to 256 cell mutations per request, while retaining
+deferred updates and one final `commit` per Hibr flush. This bounds transport
+overhead without exposing a partial frame. The batch is still limited by the
+adapter's fixed request buffer and the server's bounded HTTP body policy.

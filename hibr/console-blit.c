@@ -27,8 +27,8 @@
 #include <unistd.h>
 
 #define CB_MAX_PENDING 262144
-#define CB_HTTP_CAP 32768
-#define CB_FLUSH_CELL_LIMIT 24
+#define CB_HTTP_CAP 262144
+#define CB_FLUSH_CELL_LIMIT 256
 #define CB_GLYPH_CAP 16
 #define CB_MAX_PANES 256
 
@@ -247,7 +247,7 @@ static long cb_flush(void)
 			"{\"base_revision\":%llu,\"cells\":[",
 			cb.revision);
 		for (i = 0; i < (int)cb.pending_count && i < CB_FLUSH_CELL_LIMIT &&
-				used + 256 < 7800; ++i) {
+				used + 768 < sizeof(body) - 1; ++i) {
 			char escaped[CB_GLYPH_CAP * 2];
 			char style[512];
 			const char *text = cb.pending[i].text;
