@@ -3,6 +3,24 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## Current 0.1.357 release and live-validation gate
+
+The TCC-built `0.1.357` package contains the attach-time PTY notification
+transaction from ADR 0033. A controlled live resize experiment established the
+causal test: a fresh Hibr desktop initially attached at `240x25` populated only
+the startup rows; changing the authoritative surface to `240x135` caused all
+`32400` cells to become available. A fresh desktop attached directly at
+`240x135` reproduced the partial-row state when only same-size reassertion was
+used. The release therefore forces one real PTY geometry transition after the
+bounded Hibr descendants are identified.
+
+Local TCC pointer-damage, external-pointer-composition, and hidden-cursor gates
+pass for `0.1.357`. The package is built and pushed, but the live host has not
+yet been upgraded and this release is not marked live-accepted until the API
+capture confirms rows `0..134`, stable screenshots, and runtime timing. Physical
+mouse/button, physical multi-monitor, and sustained physical high-refresh gates
+remain open.
+
 ## Current 0.1.356 live and QEMU evidence
 
 The live host now reports `0.1.356`. The SDL raw-evdev pointer feedback loop

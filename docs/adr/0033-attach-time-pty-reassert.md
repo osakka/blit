@@ -23,9 +23,18 @@ per-session token and follows only that bounded descendant tree. The delay
 lets the child finish startup and open the desktop before Hibr handles the
 resize notification. Blit owns this behavior; Hibr source is not modified.
 
+If the canonical geometry is already installed when the held desktop is found,
+Blit performs one bounded PTY geometry transition to a one-row-shorter size and
+immediately restores the canonical size. This is a notification transaction,
+not a surface resize: it forces a real SIGWINCH path when the kernel suppresses
+same-size `TIOCSWINSZ`, while the surface remains at its authoritative geometry.
+
 ## Consequences
 
 Hibr sessions deterministically enter their normal full redraw path on attach
 or restart without signalling stale sessions that reused a numeric ID. No user
 input is synthesized, and ordinary terminal sessions use the same PTY contract.
 The retries are bounded and stop after the desktop owner has been reasserted.
+The transition is scoped to sessions whose token-bearing Hibr descendants have
+been found. Match counts remain process counts; diagnostic telemetry does not
+treat the forced notification as an extra Hibr process.
