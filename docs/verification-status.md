@@ -53,6 +53,14 @@ installed keyboard and pointer routes, and shut the guest down cleanly. This
 closes the software adapter gate; it does not change the rule that Hibr source
 is external and unmodified.
 
+A further ten-second physical observation was run against the same live Hibr
+session on 0.1.362. The session remained running and the surface revision
+continued advancing; the 60 Hz output recorded zero missed deadlines and the
+capture-window maximum loop gap was `9.049 ms`. No physical evdev motion,
+button, or wheel event arrived, so the physical-input gate remains open. The
+result is preserved under
+`diagnostics/live-0.1.362-physical-observation-20261008T234837Z/`.
+
 The current pixel-stream matrix is explicit. The 60 Hz producer stream passes
 with all 60 frames accepted, no additional missed deadlines, and
 `KMS_API_PIXEL_PASS`. The 240 Hz producer stream accepts all 240 frames with
