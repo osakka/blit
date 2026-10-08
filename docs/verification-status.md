@@ -38,6 +38,9 @@ the pointer and a device that produced no records during the capture.
 It also reports SDL mouse events discarded or processed. A nonzero discarded
 SDL count with unchanged raw-evdev counters identifies backend delivery or
 competing input ownership rather than a compositor failure.
+The exact 0.1.330 TCC binary passes the full terminal conformance suite,
+including VT500 controls, UTF-8/wide glyph handling, Hibr defaults, Kitty
+image placement, synchronized output, and network terminal input.
 
 The exact 0.1.329 binary with the unchanged Hibr checkout also passes the
 QEMU/VKMS Hibr pane matrix: `LAYOUT_MATRIX_PASS` and
