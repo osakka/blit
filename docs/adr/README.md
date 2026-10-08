@@ -22,6 +22,7 @@ Accepted decisions:
 12. [SDL glyph atlas and unchanged-damage suppression](0012-sdl-glyph-atlas-and-noop-damage.md).
 13. [Interactive games and emulation are first-class workloads](0013-interactive-games-and-emulation.md).
 14. [SDL glyph geometry batching for full-screen redraws](0014-sdl-glyph-geometry-batching.md).
+15. [Nearest sampling for the SDL glyph atlas](0015-nearest-glyph-atlas-sampling.md).
 
 Pending decisions:
 

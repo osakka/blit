@@ -40,7 +40,7 @@ production `console-blit` module is operational over the OpenAPI/WebSocket
 contract. Explicit focus and versioned input routes are exposed by the API.
 The SDL adapter uses single-surface incremental frames and conservatively
 redraws multi-surface outputs with deterministic vertical stacking. The
-current 0.1.258 source passes the complete terminal, graphics, input,
+current 0.1.259 source passes the complete terminal, graphics, input,
 two-display VKMS/QEMU, and Hibr primary/`--join` acceptance gates. The
 authorized physical host is running 0.1.258 and has a healthy one-output
 SDL3/OpenGL presentation. Its full-screen Hibr workload now derives a
@@ -60,6 +60,10 @@ canonical graphics-object model. Their parser, resource-limit, placement,
 and SDL3/direct-KMS pixel gates pass in the deterministic fixture. Further
 protocol grammar remains an explicit compatibility extension, not a second
 renderer or image-lifetime model.
+
+SDL glyph-atlas sampling is explicitly nearest-neighbor so adjacent bitmap
+glyphs cannot bleed into one another when scaled. The filter policy has its
+own SDL gate and preserves the existing direct-KMS path.
 
 Interactive gaming is also a release requirement. Terminal-native games are
 validated through the ordinary PTY/VT500/input path. Arcade and pixel-oriented

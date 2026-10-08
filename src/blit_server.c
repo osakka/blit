@@ -8976,6 +8976,15 @@ static SDL_Texture *create_sdl_glyph_atlas(SDL_Renderer *renderer,
     }
     free(pixels);
     SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+    /* SDL3 defaults textures to linear filtering. The atlas contains
+       adjacent bitmap glyphs with no padding, so linear sampling can blend
+       neighbouring glyph pixels into scaled cell edges. Terminal glyphs are
+       discrete bitmap cells: use nearest sampling, and fall back to the
+       existing per-pixel renderer if the mode is unavailable. */
+    if (!SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST)) {
+        SDL_DestroyTexture(texture);
+        return NULL;
+    }
     if (columns_out != NULL)
         *columns_out = columns;
     return texture;

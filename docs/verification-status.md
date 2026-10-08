@@ -7,7 +7,7 @@ an evidence record, not a claim that the complete product is released.
 
 - Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The current candidate is `0.1.258`. It builds with TCC and passes terminal
+- The current candidate is `0.1.259`. It builds with TCC and passes terminal
   conformance, SDL screenshot/overlay pixels, the hidden-cursor damage gate,
   and the complete Hibr font manifest gate. Its SDL backend uses a per-output
   glyph atlas, suppresses unchanged cell damage, and does not schedule frames
@@ -21,9 +21,16 @@ an evidence record, not a claim that the complete product is released.
   below. The authorized physical host now reports 0.1.258 through its version
   endpoint.
 
-### Current 0.1.258 source and physical evidence
+### Current 0.1.259 source and physical evidence
 
-The TCC-built 0.1.258 runtime derives a terminal surface's cell geometry from
+The SDL glyph atlas now explicitly uses nearest-neighbor sampling. SDL3
+defaults texture scaling to linear, which can bleed adjacent atlas glyphs into
+scaled cell edges; the new filter gate passes the set/get policy check and the
+renderer falls back to its existing per-pixel path if nearest mode is
+unavailable. This removes a concrete source of malformed glyph shapes without
+changing the canonical font or terminal model.
+
+The TCC-built 0.1.259 runtime derives a terminal surface's cell geometry from
 its authoritative pane or display when the API request omits `surface`. A
 request for the physical host's `display-1` therefore created a 240×135 cell
 surface for its 1920×2160 mode, eliminating the earlier 120×40 partial-screen
@@ -31,7 +38,8 @@ integration mistake. The same request launched the stock `/usr/bin/desktop`
 without modifying Hibr.
 
 The SDL renderer now batches atlas-backed glyph quads with
-`SDL_RenderGeometry`. On that physical Hibr workload the API reported an
+`SDL_RenderGeometry`. On the authorized host's physical 0.1.258 Hibr workload
+before this candidate, the API reported an
 active 517 ms window at 59.948 Hz, last render 16.420 ms, maximum render
 17.234 ms, maximum event-loop gap 17.311 ms, and zero missed deadlines. The
 captured 1920×2160 screenshot filled the output and retained the Hibr
@@ -41,13 +49,14 @@ Hz mode; physical multi-monitor and 120/240 Hz hardware evidence remain open.
 
 The full VT/UTF-8/Hibr terminal suite, SDL frame gate, graphics-cache gate,
 Hibr font manifest, and OpenAPI derived-geometry check pass from the same
-0.1.258 source. The manifest contains 441 required Hibr glyphs and 1,175
+0.1.259 source. The manifest contains 441 required Hibr glyphs and 1,175
 Unicode mappings. The full-screen Hibr workload's measured frame rate is
 distinct from the idle diagnostic value: idle servers do not present frames.
 
-The exact same 0.1.258 TCC binary also passed the four-output VKMS fixture:
-four independent 1024×768 outputs were discovered and presented four
-terminal surfaces, producing `KMS_FOUR_OUTPUT_PASS`. The QEMU/VKMS run
+The exact same 0.1.258 TCC binary also passed the four-output VKMS fixture;
+the nearest-filter change is SDL-only and does not alter that direct-KMS
+path. The fixture discovered and presented four independent 1024×768 outputs,
+producing `KMS_FOUR_OUTPUT_PASS`. The QEMU/VKMS run
 reported one startup deadline miss per output while its page-flip work took
 9–32 ms; this is recorded as virtual-driver timing evidence, not as a claim
 of 60 Hz hardware cadence. The high-refresh fixture produced
