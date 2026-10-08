@@ -7,7 +7,7 @@ the real pointer:
 
 ```sh
 tools/diagnostics/pointer-artifact-capture.sh \
-  http://192.168.10.54:8080 diagnostics/experience-$(date -u +%Y%m%dT%H%M%SZ) yes physical
+  http://192.168.10.54:8080 diagnostics/experience-$(date -u +%Y%m%dT%H%M%SZ) no physical
 ```
 
 Use `api` mode as the independent control path:
@@ -23,7 +23,9 @@ accepted, render traces report pointer-cache versus full-redraw composition,
 and the BMP hashes provide visual evidence. Zero physical evdev events means
 the input/device path is the blocker; accepted events with bad BMPs means the
 Blit presentation path; correct BMPs with incorrect terminal content means
-the terminal surface. It does not start or modify Hibr.
+the terminal surface. Keep screenshots disabled for timing/input captures:
+the SDL screenshot readback is a heavyweight operation and can perturb the
+single-threaded render loop. It does not start or modify Hibr.
 
 The real-host capture harness records Blit's API state without depending on a
 local Hibr shell or a physical keyboard. It collects the hardware/topology
