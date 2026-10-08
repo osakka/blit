@@ -7841,6 +7841,23 @@ static void service_stream_text(BlitRuntime *runtime, int fd,
                 }
                 break;
             }
+    } else if (strstr(message, "\"type\":\"pixel_frame_hide\"") != NULL) {
+        char session_id[64];
+        int image_id;
+        unsigned long long numeric_id;
+        BlitSession *session;
+        BlitGraphicsImage *image;
+        if (json_string(message, "session_id", session_id, sizeof(session_id)) &&
+            json_int(message, "image_id", &image_id) && image_id > 0 &&
+            sscanf(session_id, "session-%llu", &numeric_id) == 1 &&
+            (session = find_session_id(runtime, numeric_id)) != NULL &&
+            (image = graphics_image_find(session, (unsigned int)image_id)) != NULL) {
+            image->visible = 0;
+            {
+                BlitSurface *surface = find_surface_id(runtime, session->id);
+                if (surface != NULL) mark_surface_full_damage(surface);
+            }
+        }
     } else if (strstr(message, "\"input\"") != NULL &&
                strstr(message, "session_id") != NULL) {
         char session_id[64];

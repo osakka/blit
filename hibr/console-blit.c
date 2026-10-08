@@ -51,6 +51,9 @@ typedef struct {
 	int ws_fd;
 	int ws_subscribed;
 	int mouse_mode;
+	unsigned int image_id;
+	int image_valid;
+	int image_row, image_col, image_height, image_width;
 } cb_state;
 
 typedef struct {
@@ -63,6 +66,7 @@ static cb_state cb;
 static cb_pane cb_panes[CB_MAX_PANES];
 
 static long cb_flush(void);
+static int cb_prect(const char *name, int *row, int *col, int *h, int *w);
 
 static int cb_write_all(int fd, const void *data, size_t length)
 {
@@ -74,6 +78,62 @@ static int cb_write_all(int fd, const void *data, size_t length)
 		if (n < 0 && errno == EINTR) continue;
 		return 0;
 	}
+	return 1;
+}
+
+static int cb_ws_send_frame(unsigned char opcode, const void *payload,
+				    size_t length)
+{
+	unsigned char header[14], mask[4];
+	unsigned long seed = (unsigned long)time(NULL) ^
+		(unsigned long)getpid() ^ (unsigned long)length;
+	unsigned char chunk[4096];
+	const unsigned char *bytes = (const unsigned char *)payload;
+	size_t header_length = 2, offset = 0, i, chunk_length;
+	if (cb.ws_fd < 0 || length > 0x7fffffffffffffffULL) return 0;
+	header[0] = (unsigned char)(0x80 | (opcode & 0x0f));
+	if (length <= 125) {
+		header[1] = (unsigned char)(0x80 | length);
+	} else if (length <= 65535) {
+		header[1] = 0x80 | 126;
+		header[2] = (unsigned char)(length >> 8);
+		header[3] = (unsigned char)length;
+		header_length = 4;
+	} else {
+		header[1] = 0x80 | 127;
+		for (i = 0; i < 8; ++i)
+			header[2 + i] = (unsigned char)(length >> (56 - i * 8));
+		header_length = 10;
+	}
+	mask[0] = (unsigned char)(seed >> 24);
+	mask[1] = (unsigned char)(seed >> 16);
+	mask[2] = (unsigned char)(seed >> 8);
+	mask[3] = (unsigned char)seed;
+	memcpy(header + header_length, mask, sizeof(mask));
+	header_length += sizeof(mask);
+	if (!cb_write_all(cb.ws_fd, header, header_length)) return 0;
+	while (offset < length) {
+		chunk_length = length - offset;
+		if (chunk_length > sizeof(chunk)) chunk_length = sizeof(chunk);
+		for (i = 0; i < chunk_length; ++i)
+			chunk[i] = bytes[offset + i] ^ mask[(offset + i) % 4];
+		if (!cb_write_all(cb.ws_fd, chunk, chunk_length)) return 0;
+		offset += chunk_length;
+	}
+	return 1;
+}
+
+static int cb_ws_pixel_hide(void)
+{
+	char message[256];
+	int length;
+	if (cb.ws_fd < 0 || !cb.session[0] || !cb.image_valid) return 1;
+	length = snprintf(message, sizeof(message),
+		"{\"type\":\"pixel_frame_hide\",\"session_id\":\"%s\","
+		"\"image_id\":%u}", cb.session, cb.image_id);
+	if (length < 0 || (size_t)length >= sizeof(message) ||
+		!cb_ws_send_frame(0x1, message, (size_t)length)) return 0;
+	cb.image_valid = 0;
 	return 1;
 }
 
@@ -388,6 +448,7 @@ static void cb_pen(unsigned fg, unsigned bg, unsigned attr)
 static void cb_clear(void)
 {
 	int y, x;
+	cb_ws_pixel_hide();
 	for (y = 0; y < cb.rows; ++y)
 		for (x = 0; x < cb.cols; ++x)
 			cb_add_pending(x, y, " ");
@@ -546,10 +607,7 @@ static int cb_console(sh *s, int ac, char **av)
 		return HIBR_OK;
 	}
 	if (!strcmp(sub, "gfx")) {
-		/* The API accepts Kitty and sixel graphics, but this ABI adapter
-		 * currently exposes the tested cell fallback. Report that explicitly
-		 * so Hibr does not treat a missing capability callback as an error. */
-		cb_return(s, "none 8 16");
+		cb_return(s, "kitty 8 16");
 		return HIBR_OK;
 	}
 	if (!strcmp(sub, "put") || !strcmp(sub, "fill")) {
@@ -818,12 +876,38 @@ static void cb_cellpx(int *w, int *h)
 static int cb_image(sh *s, const char *pane, int row, int col, int h, int w,
 			const unsigned char *rgb, int iw, int ih, unsigned flags)
 {
-	/* Pixel placement remains owned by Blit's graphics-object API. Hibr can
-	 * safely fall back to cell rendering when this optional callback returns
-	 * zero. */
-	(void)s; (void)pane; (void)row; (void)col; (void)h; (void)w;
-	(void)rgb; (void)iw; (void)ih; (void)flags;
-	return 0;
+	char begin[512];
+	int pane_row = 0, pane_col = 0, pane_height = 0, pane_width = 0;
+	int x, y, length;
+	(void)s; (void)flags;
+	if (!cb.opened || !rgb || iw < 1 || ih < 1) return 0;
+	if (pane != NULL && !cb_prect(pane, &pane_row, &pane_col,
+		&pane_height, &pane_width)) return 0;
+	if (pane != NULL) { row += pane_row; col += pane_col; }
+	if (cb.ws_fd < 0 && !cb_ws_open()) return 0;
+	if (!cb.image_id) cb.image_id = 1;
+	x = col * 8; y = row * 16;
+	length = snprintf(begin, sizeof(begin),
+		"{\"type\":\"pixel_frame_begin\",\"session_id\":\"%s\","
+		"\"image_id\":%u,\"width\":%d,\"height\":%d,"
+		"\"format\":24,\"x\":%d,\"y\":%d,\"z\":0}",
+		cb.session, cb.image_id, iw, ih, x, y);
+	if (length < 0 || (size_t)length >= sizeof(begin) ||
+		!cb_ws_send_frame(0x1, begin, (size_t)length) ||
+		!cb_ws_send_frame(0x2, rgb, (size_t)iw * (size_t)ih * 3U)) {
+		cb.image_valid = 0;
+		return 0;
+	}
+	cb.image_valid = 1;
+	cb.image_row = row; cb.image_col = col;
+	cb.image_height = h; cb.image_width = w;
+	return 1;
+}
+static int cb_imgkeep(sh *s, int row, int col, int h, int w)
+{
+	(void)s;
+	return cb.image_valid && cb.image_row == row && cb.image_col == col &&
+		cb.image_height == h && cb.image_width == w;
 }
 static int cb_prect(const char *name, int *row, int *col, int *h, int *w)
 {
@@ -845,7 +929,8 @@ static void cb_link(const char *uri) { (void)uri; }
 static const dp_api cb_api = {
 	cb_open, cb_close, cb_isopen, cb_size, cb_resized, cb_pen,
 	cb_clear, cb_put, cb_fill, cb_cursor, cb_flush, cb_key,
-	cb_colour, cb_attr, cb_mouse, cb_prect, cb_link, cb_image, cb_cellpx
+	cb_colour, cb_attr, cb_mouse, cb_prect, cb_link, cb_image, cb_cellpx,
+	cb_imgkeep
 };
 
 static int cb_ini(sh *s)

@@ -78,3 +78,8 @@ The Hibr adapter batches up to 256 cell mutations per request, while retaining
 deferred updates and one final `commit` per Hibr flush. This bounds transport
 overhead without exposing a partial frame. The batch is still limited by the
 adapter's fixed request buffer and the server's bounded HTTP body policy.
+
+The adapter also advertises Kitty-compatible pixel placement to Hibr and sends
+image frames through Blit's bounded WebSocket pixel protocol. Static under-text
+images use `imgkeep` and are not retransmitted; clearing one hides the cached
+image before the next atomic scene presentation.
