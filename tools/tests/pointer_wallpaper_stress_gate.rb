@@ -4,7 +4,7 @@
 # Regression gate for the live Hibr failure shape: a large, opaque, colourful
 # terminal surface is changing while the pointer moves.  The gate checks the
 # public screenshot boundary for black holes outside the changed cell and
-# requires both pointer-cache and pointer-plus-damage full-redraw paths.
+# requires both pointer-cache and pointer-plus-damage incremental paths.
 
 require 'json'
 require 'net/http'
@@ -141,7 +141,7 @@ begin
 
   runtime = request(base, :get, '/v1/diagnostics/runtime')
   # Isolate the pointer-only path once the damage stress has completed.  The
-  # concurrent iterations must take the full-redraw boundary by design.
+  # concurrent iterations must update only the committed damage boundary.
   request(base, :post, '/v1/input/inject',
           'kind' => 'pointer_motion', 'x' => 900, 'y' => 650)
   sleep 0.05
@@ -151,12 +151,12 @@ begin
   details = trace.fetch('events').map { |event| event.fetch('detail') }
   pointer_cache = performance.fetch('pointer_cache_hits') - pointer_cache_before
   race = details.any? do |detail|
-    detail.include?('path=full-redraw') &&
+    detail.include?('path=incremental-damage') &&
       detail.include?('target_changed=1') &&
       detail.include?('pointer_dirty=1')
   end
   raise 'pointer-cache path was not observed' unless pointer_cache > 0
-  raise 'pointer-plus-damage full-redraw path was not observed' unless race
+  raise 'pointer-plus-damage incremental boundary was not observed' unless race
   puts "POINTER_WALLPAPER_STRESS_PASS samples=#{samples.length} " \
        "pointer_cache_hits=#{pointer_cache}"
 ensure

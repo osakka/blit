@@ -61,6 +61,16 @@ no QEMU process remained. The live host now reports `0.1.360`, and its
 synthetic API input probe passes. Its physical pointer inventory is present,
 but its physical counters remain zero outside an actual movement window.
 
+## Current 0.1.361 cached-scene pointer correction
+
+The `0.1.361` candidate no longer treats pointer motion plus a committed Hibr
+cell damage rectangle as a full-screen SDL redraw. The pointer is composed
+after the complete cached scene is copied, so the renderer updates only the
+committed damage region and presents one complete frame. The atomic pointer
+gate, full-surface wallpaper stress gate, and external-pointer-composition
+gate all pass with the `incremental-damage` trace path and intact untouched
+pixels. Hibr remains unmodified; physical host acceptance remains open.
+
 ## Current 0.1.358 real-host evidence and remaining visual gate
 
 The authorized host now reports `0.1.358`. The attach PTY geometry transition

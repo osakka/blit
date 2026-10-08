@@ -46,7 +46,7 @@ ruby tools/tests/pointer_wallpaper_stress_gate.rb
 It sends the surface in bounded deferred chunks followed by one commit, then
 interleaves pointer motion with further commits. Six samples outside the
 changed cells must remain non-black, the trace must show the pointer-plus-
-damage full-redraw boundary, and a pointer-only update must use the cached
+damage incremental-damage boundary, and a pointer-only update must use the cached
 scene. This reproduces the compositor ordering without changing Hibr or
 requiring a physical device.
 
@@ -246,7 +246,7 @@ ruby tools/tests/pointer_damage_atomic_gate.rb
 ```
 
 It queues pointer input and an external surface commit in the same event-loop
-turn, requires a `pointer_dirty=1` full-redraw trace, and samples pixels outside
+turn, requires a `pointer_dirty=1` incremental-damage trace, and samples pixels outside
 the changed cell. A pass proves that pointer motion cannot expose cleared SDL
 background outside the damage rectangle; the separate external-pointer gate
 continues to prove that pointer-only motion uses the cached scene.

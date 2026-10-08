@@ -35,6 +35,7 @@ Accepted decisions:
 25. [Preserve Hibr startup diagnostics and full-surface writes](0025-hibr-startup-output-and-full-surface-writes.md).
 26. [Commit external Hibr cell frames atomically](0026-hibr-cell-frame-atomicity.md).
 27. [Ignore evdev mouse-button autorepeat](0039-ignore-evdev-mouse-autorepeat.md).
+28. [Compose pointer motion over cached scene damage](0040-pointer-damage-uses-cached-scene.md).
 
 Pending decisions:
 

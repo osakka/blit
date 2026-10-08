@@ -11374,12 +11374,10 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
         }
         full_redraw = !runtime->outputs[output_index].initialized ||
             graphics_changed ||
-            /* The pointer compositor restores the cached scene only when
-             * there is no concurrent surface damage.  If pointer state and
-             * terminal damage arrive in the same frame, the branch below
-             * clears the target before drawing; redraw the complete scene or
-             * the untouched cells become black holes/trails. */
-            runtime->pointer_dirty ||
+            /* The software pointer is composed after the complete cached
+             * scene is copied to the output. It is not part of scene_texture,
+             * so pointer motion must not force a full scene rebuild when a
+             * committed cell damage rectangle arrives in the same frame. */
             target_count != runtime->outputs[output_index].last_target_count ||
             runtime->topology_revision !=
                 runtime->outputs[output_index].last_topology_revision;
@@ -11466,10 +11464,10 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
         if (!runtime->outputs[output_index].initialized) {
             SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
             SDL_RenderClear(renderer);
-        } else if (runtime->pointer_dirty) {
-            /* The old cursor is part of the already-present scene. A black
-               rectangle would destroy wallpaper and terminal cells. Start
-               from a clean scene and redraw the complete output instead. */
+        } else if (full_redraw) {
+            /* A full scene rebuild starts from a clean cache. Pointer-only
+               motion is handled above, while pointer-plus-cell-damage keeps
+               the untouched cached scene and clears only that damage. */
             SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
             SDL_RenderClear(renderer);
         }
