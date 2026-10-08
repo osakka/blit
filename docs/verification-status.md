@@ -35,6 +35,14 @@ direct-KMS two-output capture. The latter passed
 `PPM_DISPLAY_47_WIDE_KITTY_PASS`, `PPM_DISPLAY_48_PASS`,
 `KMS_API_SCREENSHOT_PASS`, and `KMS_CAPTURE_PASS` with the regenerated font.
 
+The authorized live host accepted and restarted on 0.1.264. A controlled
+240×135 Hibr desktop workload produced 43,568 wallpaper background quads in
+91 batches, with 17.379 ms maximum render time, 6.551 ms maximum terminal
+processing time, zero missed deadlines, and no diagnostics errors. The session
+was deleted and the live resource counts returned to zero. Its idle
+`frame_rate_hz=0` sample is not interpreted as a scanout rate: the changed
+content window had expired after Hibr stopped emitting updates.
+
 ### Current 0.1.263 source and physical evidence
 
 The exact 0.1.263 TCC build passes the complete 0.1.262 regression set plus
