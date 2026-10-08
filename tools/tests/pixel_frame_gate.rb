@@ -14,17 +14,23 @@ require 'tmpdir'
 require 'timeout'
 require 'uri'
 
+external_base = ENV['BLIT_TEST_SERVER']
 port = Integer(ENV.fetch('BLIT_GATE_PORT', '19249'))
-base = URI("http://127.0.0.1:#{port}")
+base = external_base ? URI(external_base) : URI("http://127.0.0.1:#{port}")
 log = File.join(Dir.tmpdir, "blit-pixel-frame-#{Process.pid}.log")
-pid = Process.spawn({'SDL_VIDEODRIVER' => 'dummy',
-                     'LD_LIBRARY_PATH' => 'build/sdl3-kms'},
-                    'build/blit/blit-server', port.to_s,
-                    out: log, err: [:child, :out])
+pid = nil
+unless external_base
+  pid = Process.spawn({'SDL_VIDEODRIVER' => 'dummy',
+                       'LD_LIBRARY_PATH' => 'build/sdl3-kms'},
+                      'build/blit/blit-server', port.to_s,
+                      out: log, err: [:child, :out])
+end
 
 at_exit do
-  Process.kill('TERM', pid) rescue nil
-  Process.wait(pid) rescue nil
+  if pid
+    Process.kill('TERM', pid) rescue nil
+    Process.wait(pid) rescue nil
+  end
 end
 
 def http_json(base, method, path, body = nil)
@@ -110,7 +116,8 @@ end
 websocket_send(socket, 1, JSON.generate(
   'type' => 'pixel_frame_begin', 'session_id' => session_id,
   'image_id' => 77, 'width' => 8, 'height' => 4, 'format' => 32,
-  'x' => 3, 'y' => 5, 'z' => 4, 'ack' => false))
+  'x' => 3, 'y' => 5, 'z' => 4,
+  'ack' => ENV['BLIT_PIXEL_ACK'] == '1'))
 ready_reply = websocket_read_text(socket)
 raise "pixel frame was not accepted: #{ready_reply.inspect}" unless ready_reply.include?('pixel_frame_ready')
 
@@ -118,16 +125,23 @@ pixels = 32.times.map do |index|
   [(index * 7) & 255, (index * 11) & 255, (index * 13) & 255, 255]
 end.flatten.pack('C*')
 half = pixels.bytesize / 2
+acknowledge = ENV['BLIT_PIXEL_ACK'] == '1'
 websocket_send(socket, 2, pixels.byteslice(0, half), final: false)
 websocket_send(socket, 0, pixels.byteslice(half, pixels.bytesize - half), final: true)
+websocket_read_text(socket) if acknowledge
 
 frame_count = 1
+runtime_before = http_json(base, :get, '/v1/diagnostics/runtime').fetch('performance')
 started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+pace_hz = ENV['BLIT_PIXEL_PACE_HZ'] && Float(ENV['BLIT_PIXEL_PACE_HZ'])
+pace_interval = pace_hz && pace_hz > 0 ? 1.0 / pace_hz : nil
 29.times do
   # The begin record negotiates the frame format once. Every final binary
   # continuation below is an independent complete frame.
   websocket_send(socket, 2, pixels, final: true)
   frame_count += 1
+  websocket_read_text(socket) if acknowledge
+  sleep pace_interval if pace_interval
 end
 elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
 deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 3
@@ -154,4 +168,5 @@ socket.close
 http_json(base, :delete, "/v1/terminal-sessions/#{session_id}")
 puts format('PIXEL_FRAME_PASS frames=%d ingest_hz=%.3f accepted=%d rendered=%d render_ms=%.3f fragmented_rgba=32bytes reuse=true',
             frame_count, frame_count / elapsed, runtime.fetch('pixel_frames_accepted'),
-            runtime.fetch('frames'), runtime.fetch('last_render_ms'))
+            runtime.fetch('frames') - runtime_before.fetch('frames'),
+            runtime.fetch('last_render_ms'))

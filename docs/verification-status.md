@@ -7,7 +7,7 @@ an evidence record, not a claim that the complete product is released.
 
 - Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The current candidate is `0.1.260`. It builds with TCC and passes terminal
+- The current candidate is `0.1.262`. It builds with TCC and passes terminal
   conformance, SDL screenshot/overlay pixels, the hidden-cursor damage gate,
   and the complete Hibr font manifest gate. Its SDL backend uses a per-output
   glyph atlas, suppresses unchanged cell damage, and does not schedule frames
@@ -18,8 +18,32 @@ an evidence record, not a claim that the complete product is released.
   26.865 ms maximum full render and 61.387 Hz over its active 504 ms window.
   The direct-KMS pixel-frame acceptance below was run from the exact current
   0.1.256 TCC build; the newer SDL presentation and geometry work is recorded
-  below. The authorized physical host now reports 0.1.260 through its version
-  endpoint.
+  below. The authorized physical host now reports 0.1.262 through its version
+  endpoint. The 0.1.262 Debian package SHA-256 is
+  `e2661b30156f44816e47c72468b9d07e106111c9748646155df11de981438b66`.
+
+### Current 0.1.262 source and physical evidence
+
+The exact 0.1.262 TCC binary passes the SDL background-batch screenshot gate,
+SDL graphics-cache gate, fragmented/back-pressure network gates, pixel-frame
+gate, full VT/UTF-8/Hibr terminal conformance, and the 447-glyph font manifest.
+The API now reports `background_batches` and `background_quads` so wallpaper
+optimization is directly observable.
+
+On the authorized physical host, 0.1.262 reports one DP-1 output at 59.990 Hz,
+refresh-aware 16 ms scheduling, and zero missed deadlines. A real Hibr desktop
+run reported 170 background batches and 51,819 background quads, with a last
+render time of 16.477 ms and a changed-content rate of approximately 8.21 Hz.
+The latter is not the panel scanout rate: Blit presents only when terminal
+damage exists, while the display remains synchronized by SDL vsync. The
+changed-content rate is recorded as an unresolved Hibr workload cadence, not
+claimed as 60 Hz animation.
+
+The same 0.1.262 host accepted 30 API pixel frames from a paced 60 Hz producer
+and 30 frames with presentation acknowledgements; the acknowledged run
+rendered 29 frames with zero pixel-frame errors. This is physical one-output
+game-canvas evidence. A physical second connector and physical 120/240 Hz
+hardware remain unverified.
 
 ### Current 0.1.260 source and physical evidence
 
