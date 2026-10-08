@@ -3,14 +3,16 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
-## Current 0.1.328 live diagnostic status
+## Current 0.1.329 live diagnostic status
 
-The 0.1.328 package is deployed on the authorized physical host at
+The 0.1.329 package is deployed on the authorized physical host at
 `192.168.10.54:8080`. A disposable Hibr image probe completed with exit code
 zero and was then deleted. The live API reported one complete `api` graphics
 object (`512x512`, `786432` bytes), `pixel_frames_accepted=1`, and
 `pixel_frame_errors=0`. This proves the packaged Blit-owned Hibr adapter can
 submit and retain a pixel frame without changing Hibr.
+Package SHA-256 is
+`1a95f980d9c52f6b73c3a4e9f02f037006b8a0e65ef9fe4a3e2ea6fc1dc901d0`.
 
 The same live sample reported `last_render_ms=4.411`, `max_render_ms=30.148`,
 `missed_deadlines=0`, and a 60 Hz display target. Its `input_events` count was
@@ -20,6 +22,19 @@ evidence is `tools/diagnostics/verify-live-physical.sh` run while reproducing
 the pointer movement; its exit status 2 means the capture was valid but no
 physical movement was observed, while status 1 identifies an actual invariant
 failure.
+
+The 0.1.329 TCC binary also passes the two-output VKMS capture fixture with
+`PPM_DISPLAY_47_WIDE_KITTY_PASS`, `PPM_DISPLAY_48_PASS`,
+`KMS_API_SCREENSHOT_PASS`, and `KMS_CAPTURE_PASS`. The mixed-refresh and
+high-refresh variants pass `REFRESH_SCHEDULER_MIXED_PASS` and
+`REFRESH_SCHEDULER_240_PASS`. These are deterministic VKMS/QEMU results, not
+claims about physical 120/240 Hz hardware.
+
+The live runtime now exposes raw physical-mouse receipt counters alongside
+post-routing `input_events`: `evdev_mouse_events`, sync, motion, wheel, and
+button counters, plus the last evdev path and event age. This closes the
+diagnostic distinction between a kernel event that was read but did not change
+the pointer and a device that produced no records during the capture.
 
 ## Current 0.1.326 live diagnostic-boundary status
 

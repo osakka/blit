@@ -461,6 +461,15 @@ Input dispatch is independently observable through `input_events`,
 keyboard, pointer, and gamepad events after evdev receipt and through Blit's
 routing path, so input latency can be separated from rendering and scanout
 latency.
+For physical mouse diagnosis, compare the lifetime `evdev_mouse_events`,
+`evdev_mouse_motion_events`, `evdev_mouse_syncs`,
+`evdev_mouse_button_events`, and `evdev_mouse_wheel_events` counters between
+the capture start and end. `evdev_mouse_events` increasing while the filtered
+pointer trace remains empty means records reached Blit but did not produce a
+changed pointer position; all of them remaining unchanged means the kernel
+device produced no records for Blit during the window. The endpoint also
+reports `last_evdev_mouse_path` and `last_evdev_mouse_event_age_ms` so a stale
+or changing device can be identified without shell access to the desktop.
 Each scheduler output also reports `last_present_ms`, `max_present_ms`, and
 `present_calls`, which identify per-output KMS/SDL presentation cost rather
 than hiding it in one aggregate server-wide maximum.

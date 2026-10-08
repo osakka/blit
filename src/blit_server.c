@@ -536,6 +536,13 @@ typedef struct {
     unsigned long long diagnostic_input_events;
     double diagnostic_last_input_dispatch_ms;
     double diagnostic_max_input_dispatch_ms;
+    unsigned long long diagnostic_evdev_mouse_events;
+    unsigned long long diagnostic_evdev_mouse_syncs;
+    unsigned long long diagnostic_evdev_mouse_motion_events;
+    unsigned long long diagnostic_evdev_mouse_wheel_events;
+    unsigned long long diagnostic_evdev_mouse_button_events;
+    uint64_t diagnostic_last_evdev_mouse_event_us;
+    char diagnostic_last_evdev_mouse_path[128];
     unsigned long long diagnostic_stream_dropped_events;
     unsigned long long diagnostic_stream_backpressure_disconnects;
     unsigned long long diagnostic_stream_queue_peak_bytes;
@@ -1510,6 +1517,13 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"pointer_cache_misses\":%llu,\"frame_rate_hz\":%.3f,"
         "\"input_events\":%llu,\"last_input_dispatch_ms\":%.3f,"
         "\"max_input_dispatch_ms\":%.3f,"
+        "\"evdev_mouse_events\":%llu,"
+        "\"evdev_mouse_syncs\":%llu,"
+        "\"evdev_mouse_motion_events\":%llu,"
+        "\"evdev_mouse_wheel_events\":%llu,"
+        "\"evdev_mouse_button_events\":%llu,"
+        "\"last_evdev_mouse_event_age_ms\":%llu,"
+        "\"last_evdev_mouse_path\":\"%s\","
         "\"stream_queue_bytes\":%llu,\"stream_queue_peak_bytes\":%llu,"
         "\"stream_dropped_events\":%llu,"
         "\"stream_backpressure_disconnects\":%llu,"
@@ -1548,6 +1562,16 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         runtime->diagnostic_input_events,
         runtime->diagnostic_last_input_dispatch_ms,
         runtime->diagnostic_max_input_dispatch_ms,
+        runtime->diagnostic_evdev_mouse_events,
+        runtime->diagnostic_evdev_mouse_syncs,
+        runtime->diagnostic_evdev_mouse_motion_events,
+        runtime->diagnostic_evdev_mouse_wheel_events,
+        runtime->diagnostic_evdev_mouse_button_events,
+        runtime->diagnostic_last_evdev_mouse_event_us > 0 &&
+                now >= runtime->diagnostic_last_evdev_mouse_event_us ?
+            (unsigned long long)((now -
+                runtime->diagnostic_last_evdev_mouse_event_us) / 1000ULL) : 0,
+        runtime->diagnostic_last_evdev_mouse_path,
         diagnostic_stream_queue_bytes(runtime),
         runtime->diagnostic_stream_queue_peak_bytes,
         runtime->diagnostic_stream_dropped_events,
@@ -11757,14 +11781,20 @@ static void service_evdev_mouse(BlitRuntime *runtime)
                                 &event, sizeof(event))) ==
                (ssize_t)sizeof(event)) {
             uint64_t input_started_us = monotonic_us();
+            ++runtime->diagnostic_evdev_mouse_events;
+            runtime->diagnostic_last_evdev_mouse_event_us = input_started_us;
+            snprintf(runtime->diagnostic_last_evdev_mouse_path,
+                     sizeof(runtime->diagnostic_last_evdev_mouse_path), "%s",
+                     runtime->evdev_mouse_paths[device_index]);
             if (!runtime->evdev_mouse_reported[device_index]) {
                 fprintf(stderr, "blit: evdev mouse events received from %s\n",
                         runtime->evdev_mouse_paths[device_index]);
                 runtime->evdev_mouse_reported[device_index] = 1;
             }
-        if (event.type == EV_REL) {
+            if (event.type == EV_REL) {
                 if (event.code == REL_WHEEL || event.code == REL_HWHEEL) {
                     int button;
+                    ++runtime->diagnostic_evdev_mouse_wheel_events;
                     if (event.code == REL_HWHEEL)
                         button = event.value > 0 ? 66 : 67;
                     else
@@ -11777,11 +11807,15 @@ static void service_evdev_mouse(BlitRuntime *runtime)
                     record_input_dispatch(runtime, input_started_us);
                     continue;
                 }
-                if (event.code == REL_X)
+                if (event.code == REL_X) {
+                    ++runtime->diagnostic_evdev_mouse_motion_events;
                     runtime->evdev_mouse_x += event.value;
-                else if (event.code == REL_Y)
+                } else if (event.code == REL_Y) {
+                    ++runtime->diagnostic_evdev_mouse_motion_events;
                     runtime->evdev_mouse_y += event.value;
+                }
             } else if (event.type == EV_SYN && event.code == SYN_REPORT) {
+                ++runtime->diagnostic_evdev_mouse_syncs;
                 update_evdev_pointer(runtime);
                 record_input_dispatch(runtime, input_started_us);
             } else if (event.type == EV_KEY &&
@@ -11795,6 +11829,7 @@ static void service_evdev_mouse(BlitRuntime *runtime)
                     button = 1;
                 else
                     button = 2;
+                ++runtime->diagnostic_evdev_mouse_button_events;
                 int release = event.value == 0;
                 dispatch_pointer_button(runtime, button, !release,
                                         "evdev-pointer");
