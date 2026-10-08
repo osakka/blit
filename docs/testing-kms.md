@@ -324,6 +324,10 @@ right button presses, verifies motion while buttons remain held, and checks
 that each release preserves the remaining-button state. The pointer PTY also
 enables DEC focus reporting and must receive the focus-in sequence after the
 cross-display click.
+The fixture additionally requires `BLIT_INPUT_RAW_EVDEV_PASS`, which reads
+`/v1/diagnostics/runtime` and requires raw mouse records, synchronization,
+motion, and button counters to be nonzero. This proves the input test crossed
+the kernel-evdev boundary, not only the network stream and PTY boundary.
 The fixture creates two independent relative mice and requires
 `BLIT_INPUT_MULTI_MOUSE_PASS`, proving that Blit services every discovered
 pointer FD instead of silently keeping only the first device.

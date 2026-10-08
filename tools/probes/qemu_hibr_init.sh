@@ -305,6 +305,20 @@ if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
     else
         echo BLIT_INPUT_GAMEPAD_FAIL
     fi
+    raw_runtime=$($b wget -qO- http://127.0.0.1:19191/v1/diagnostics/runtime || true)
+    raw_mouse_events=$(echo "$raw_runtime" | $b sed -n 's/.*"evdev_mouse_events":\([0-9][0-9]*\).*/\1/p')
+    raw_mouse_syncs=$(echo "$raw_runtime" | $b sed -n 's/.*"evdev_mouse_syncs":\([0-9][0-9]*\).*/\1/p')
+    raw_mouse_motion=$(echo "$raw_runtime" | $b sed -n 's/.*"evdev_mouse_motion_events":\([0-9][0-9]*\).*/\1/p')
+    raw_mouse_buttons=$(echo "$raw_runtime" | $b sed -n 's/.*"evdev_mouse_button_events":\([0-9][0-9]*\).*/\1/p')
+    echo "BLIT_INPUT_RAW_EVDEV events=${raw_mouse_events:-0} syncs=${raw_mouse_syncs:-0} motion=${raw_mouse_motion:-0} buttons=${raw_mouse_buttons:-0}"
+    if [ "${raw_mouse_events:-0}" -gt 0 ] &&
+       [ "${raw_mouse_syncs:-0}" -gt 0 ] &&
+       [ "${raw_mouse_motion:-0}" -gt 0 ] &&
+       [ "${raw_mouse_buttons:-0}" -gt 0 ]; then
+        echo BLIT_INPUT_RAW_EVDEV_PASS
+    else
+        echo BLIT_INPUT_RAW_EVDEV_FAIL
+    fi
     if [ "${BLIT_INPUT_LOSS_TEST:-0}" = 1 ]; then
         echo BLIT_INPUT_ROUTES_AFTER_DEVICE_LOSS
         echo BLIT_INPUT_ROUTE_TARGET_SESSIONS

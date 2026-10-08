@@ -44,6 +44,13 @@ executable SHA-256 was
 `6cec6189cde303a030d6bf8e3936d5c03e2914a47e6c2e80765f62b0cb53356a`.
 Hibr source was not modified.
 
+The 0.1.329 input fixture passes `BLIT_INPUT_MULTI_MOUSE_PASS`,
+`BLIT_INPUT_KEYPAD_PASS`, `BLIT_INPUT_STREAM_PASS`, and
+`BLIT_INPUT_GAMEPAD_PASS`; its new raw-evdev assertion passes with
+`events=680`, `syncs=241`, `motion=399`, and `buttons=34`. This confirms the
+diagnostic counters against deterministic uinput devices, while remaining
+distinct from physical-host mouse evidence.
+
 ## Current 0.1.326 live diagnostic-boundary status
 
 Package `blit_0.1.326-1_amd64.deb` is deployed on the authorized host;
