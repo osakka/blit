@@ -1194,6 +1194,23 @@ The latest reachable observation of the authorized host at
   The absence of audio is an observed host capability, not a missing API
   response; `/v1/audio` returns an empty device list.
 
+- Version 0.1.285 adds per-output graphics-upload timing and a per-output
+  pending pixel-frame scheduler. The physical host accepted a sustained 120
+  frame API stream at 59.568 Hz and produced 125 presentation passes, drained
+  `pixel_frames_pending` to zero, and reported a 0.398 ms maximum texture
+  upload. The same host's refresh gate measured 61.507 Hz with zero missed
+  deadlines; test sessions and streams returned to zero.
+- The physical Hibr smoke test initially exited with status 1 because an
+  existing held Hibr desktop was already running. Using Hibr's documented
+  `--resume --session blit-279-shot --name display-1` invocation reached a
+  running session with surface revision 309 and 279,575 terminal bytes. Blit
+  and Hibr were both left clean after the session was deleted; Hibr source was
+  not modified.
+- Exact-current 0.1.285 QEMU fixtures pass the API pixel/KMS capture gate,
+  Hibr four-pane primary/join matrix, keyboard/multi-mouse/gamepad input
+  matrix, and 240 Hz scheduler gate. These remain virtual-display evidence;
+  the physical host still exposes only one output.
+
 ## Open release gates
 
 1. Validate at least one physical multi-monitor arrangement, including
