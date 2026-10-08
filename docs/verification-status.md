@@ -31,6 +31,13 @@ high-refresh variants pass `REFRESH_SCHEDULER_MIXED_PASS` and
 The dedicated sixel variant also passes `PPM_DISPLAY_47_SIXEL_PASS` and
 `KMS_CAPTURE_PASS`.
 
+The exact 0.1.326 Hibr VKMS fixture also passes `LAYOUT_MATRIX_PASS`,
+`HIBR_PANE_MATRIX_PASS`, `HIBR_PRIMARY_RESTART_PASS`, and
+`HIBR_JOIN_RECONNECT_PASS` with four active Hibr surfaces across the two
+outputs and a final `2x2` pane topology. The staged Hibr tree was unchanged;
+its executable SHA-256 was
+`c2f6522354394bdb443d00d15ec0eb425009c07115fd105f98270eb5c0b040ef`.
+
 ## Current 0.1.320 live graphics-probe status
 
 Package `blit_0.1.320-1_amd64.deb` adds the Blit-owned, non-Hibr-source probe
