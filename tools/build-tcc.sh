@@ -28,8 +28,22 @@ case "$target" in
     helper)
         tcc -O2 -std=c99 -o "$output" "$ROOT/src/blit_update_helper.c"
         ;;
+    adapter)
+        hibr_root=${BLIT_HIBR_ROOT:-}
+        if [ -z "$hibr_root" ]; then
+            echo "blit: BLIT_HIBR_ROOT is required for the Hibr adapter" >&2
+            exit 1
+        fi
+        if [ ! -d "$hibr_root/include" ] || [ ! -d "$hibr_root/mods" ]; then
+            echo "blit: Hibr headers/modules not found under $hibr_root" >&2
+            exit 1
+        fi
+        tcc -O2 -std=c99 -shared -fPIC \
+            -I"$hibr_root/include" -I"$hibr_root/mods" \
+            -o "$output" "$ROOT/hibr/console-blit.c"
+        ;;
     *)
-        echo "blit: unknown TCC target '$target' (use server or helper)" >&2
+        echo "blit: unknown TCC target '$target' (use server, helper, or adapter)" >&2
         exit 1
         ;;
 esac

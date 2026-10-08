@@ -293,7 +293,13 @@ From the repository root:
 ```sh
 tools/build-tcc.sh build/blit/blit-server server
 tools/build-tcc.sh build/blit/blit-update-helper helper
+BLIT_HIBR_ROOT=/path/to/hibr \
+  tools/build-tcc.sh build/blit/console-blit.so adapter
 ```
+
+The adapter is compiled against the exact Hibr checkout that will load it.
+`BLIT_HIBR_ROOT` is mandatory; a package build must not silently reuse an
+adapter compiled against another Hibr ABI.
 
 The stream reconnect/replay gate runs against that exact binary with the
 dummy video backend:

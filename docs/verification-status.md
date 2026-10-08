@@ -3,6 +3,15 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## Current 0.1.338 Hibr ABI packaging status
+
+The packaging build now requires an explicit `BLIT_HIBR_ROOT` and has a TCC
+`adapter` target. This prevents a stale `console-blit.so` from being copied
+into a package after Hibr's headers or modules have changed. The 0.1.337 live
+deployment exposed this gap: its Hibr process ran and produced PTY bytes, but
+the external surface stayed empty. The corrected package must be rebuilt and
+deployed against the current Hibr checkout before Hibr rendering is accepted.
+
 ## Current 0.1.337 atomic pointer-damage status
 
 The renderer now treats pointer state plus concurrent external terminal damage
