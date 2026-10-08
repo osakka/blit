@@ -1247,6 +1247,11 @@ The latest reachable observation of the authorized host at
   result (86 and 82 presentations respectively). This is not treated as a
   passing 240 Hz gaming/emulation result; hardware/KVM-backed validation or a
   runtime fix is still required.
+- An SDL3 isolation run at the same 240-frame producer cadence accepted all
+  240 frames at 227.154 Hz with zero protocol errors and reused the graphics
+  image. The dummy renderer presented 183 frames at its own virtual cadence;
+  this separates network/graphics ingestion from the unresolved direct-KMS
+  page-flip limitation and is not physical 240 Hz evidence.
 
 ## Open release gates
 
