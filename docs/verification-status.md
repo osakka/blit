@@ -43,6 +43,11 @@ outputs at 60 Hz, created one terminal session per output, and passed
 virtual-output scheduling results; physical multi-monitor and physical
 120/240 Hz evidence remain open.
 
+The same current-source four-output fixture was run with Hibr orchestration:
+one primary session and three `--join` sessions produced four Hibr-backed
+surfaces and passed `KMS_FOUR_HIBR_PASS`. Hibr source was copied into the
+guest staging area only; the repository checkout was not modified.
+
 ### Current 0.1.253 source evidence
 
 The exact TCC-built 0.1.253 binary passes the full VT/UTF-8/Hibr terminal
