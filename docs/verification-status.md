@@ -46,6 +46,16 @@ desktop plus three joined clients. It records startup deadline misses under
 the virtual 240 Hz workload, so this is topology and presentation evidence,
 not sustained physical 240 Hz acceptance.
 
+The current pixel-stream matrix is explicit. The 60 Hz producer stream passes
+with all 60 frames accepted, no additional missed deadlines, and
+`KMS_API_PIXEL_PASS`. The 240 Hz producer stream accepts all 240 frames with
+zero frame errors, but the QEMU TCG/VKMS guest presents only 79 before the
+bounded run ends; KMS reports a maximum present duration of `27.137 ms` and
+additional missed deadlines. `/dev/kvm` is unavailable on this test host, so
+the 240 Hz result is recorded as a VM capability limit rather than a physical
+hardware result. No scheduler relaxation or asynchronous tearing workaround
+was introduced.
+
 ## Current 0.1.359 live diagnostics and physical-input boundary
 
 The authorized live host reports `0.1.359` and remains reachable at
