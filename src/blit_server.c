@@ -6859,11 +6859,16 @@ static void service_attach_reasserts(BlitRuntime *runtime, uint64_t now)
         else if (kill(session->process_id, SIGWINCH) == 0)
             signalled = 1;
         hibr_matches = reassert_hibr_session_processes(session, &size);
-        if (hibr_matches > 0) {
-            (void)force_hibr_session_resize(session, &size);
+        /* The attach PTY itself is the authoritative Hibr client boundary.
+           Force one real geometry transition even when the detached hold
+           owner cannot yet be discovered; same-size TIOCSWINSZ is allowed to
+           suppress SIGWINCH, which is exactly the partial-first-layout case
+           this bounded transaction repairs. */
+        if (force_hibr_session_resize(session, &size)) {
             signalled = 1;
-            ++session->attach_reassert_hibr_matches;
         }
+        if (hibr_matches > 0)
+            ++session->attach_reassert_hibr_matches;
         snprintf(discovery_detail, sizeof(discovery_detail),
                  "session=%llu attempt=%d matches=%d groups=%d", session->id,
                  session->attach_reassert_attempts + 1, hibr_matches,
