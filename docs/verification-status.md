@@ -3,6 +3,29 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## Current 0.1.319 terminal lifecycle status
+
+The TCC-built terminal path now preserves the final parsed PTY frame after a
+child exits. `waitpid(WNOHANG)` marks the session stopped but does not clear
+its surface before the PTY reaches EOF; explicit API deletion still releases
+the surface. This fixes the short-lived `stty -echo; dd` race that previously
+made the final `NETWORK` input disappear from snapshots.
+
+The complete terminal-conformance suite passes, including raw and bracketed
+network input, final PTY bytes, VT500 controls, fragmented UTF-8, wide cells,
+truecolor, alternate screens, Kitty queries, Kitty image placement, and Hibr
+integration defaults. Focused TCC gates also pass session write/resize,
+hidden-cursor damage, shutdown, glyph rendering, graphics cache, chunked
+pixel frames, and the 60 Hz frame-rate workload (54.4 Hz measured, zero
+missed deadlines). Package `blit_0.1.319-1_amd64.deb` was built from this
+source state; SHA-256 is
+`46b4a88b03fc3918deada6d203aa25b9fde36ccc11d18564c2a170e8c8961c4f`.
+
+The physical host remains on the previously deployed 0.1.318 until the new
+package is deployed and its live input/capture checks are repeated. Physical
+pointer trails/click behavior, live image activation, and physical
+multi-monitor acceptance remain open.
+
 ## Current 0.1.318 diagnostic and graphics status
 
 The exact TCC-built server `0.1.318` is deployed on the authorized physical

@@ -326,6 +326,8 @@ typedef struct {
     char state[16];
     char surface_id[128];
     int exit_code;
+    int child_exited;
+    int surface_retired;
     int focused;
     int surface_mode;
     /* External Hibr surfaces need the same attach-time reassert that a real
@@ -6050,6 +6052,8 @@ static void retire_session_surface(BlitRuntime *runtime,
 
     if (runtime == NULL || session == NULL)
         return;
+    if (session->surface_retired)
+        return;
     surface = find_surface_id(runtime, session->id);
     if (surface != NULL && surface->used) {
         terminal_clear_active_screen(surface);
@@ -6060,6 +6064,7 @@ static void retire_session_surface(BlitRuntime *runtime,
     snprintf(target_id, sizeof(target_id), "session-%llu", session->id);
     disable_input_routes_for_target(runtime, target_id);
     session->focused = 0;
+    session->surface_retired = 1;
     runtime->render_pending = 1;
 }
 
@@ -6346,21 +6351,23 @@ static void refresh_session_state(BlitRuntime *runtime, BlitSession *session)
             session->exit_code = -1;
             snprintf(session->state, sizeof(session->state), "failed");
         }
-        retire_session_surface(runtime, session);
+        session->child_exited = 1;
         /* Keep the PTY readable after waitpid reaps the child.  The child may
            have emitted final terminal bytes (including an OSC title or a
-           protocol reply) immediately before exit.  service_session_output
-           must drain those bytes before it observes EOF and closes the PTY. */
+           protocol reply) immediately before exit.  Do not retire the
+           surface here: service_session_output must drain those bytes before
+           it observes EOF and closes the PTY. */
         disable_input_routes_for_target(runtime, target_id);
         remove_session_streams(runtime, target_id);
     } else if (result < 0 && errno != EINTR) {
         session->exit_code = -1;
         snprintf(session->state, sizeof(session->state), "failed");
-        retire_session_surface(runtime, session);
+        session->child_exited = 1;
         if (session->pty_fd >= 0) {
             close(session->pty_fd);
             session->pty_fd = -1;
         }
+        retire_session_surface(runtime, session);
         disable_input_routes_for_target(runtime, target_id);
         remove_session_streams(runtime, target_id);
     }
@@ -7448,6 +7455,11 @@ static void service_session_output(BlitRuntime *runtime, int fd)
             if (runtime->sessions[i].used && runtime->sessions[i].pty_fd == fd) {
                 close(fd);
                 runtime->sessions[i].pty_fd = -1;
+                /* A stopped terminal keeps its final parsed frame available
+                   for API snapshots and diagnostics.  The caller releases
+                   that surface explicitly with DELETE; clearing it here
+                   would race the final PTY read and turn a valid last frame
+                   into a blank one. */
                 return;
             }
         }
