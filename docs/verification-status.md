@@ -52,6 +52,13 @@ not physical multi-monitor evidence; the fixture recorded two virtual
 page-flip deadline misses during startup/composition, which remain visible in
 diagnostics and are not treated as physical refresh evidence.
 
+The exact 0.1.267 Hibr input fixtures passed layout-matrix discovery,
+multi-mouse routing, keypad delivery, stream delivery, gamepad discovery and
+button delivery, render soak, and synthetic keyboard/mouse/gamepad loss and
+reconnect. The device-loss run preserved surviving input routes and reported
+explicit reconnect diagnostics. These are deterministic evdev/QEMU results;
+physical pointer/button/wheel behavior remains a separate hardware gate.
+
 ### Current 0.1.265 source evidence
 
 The bundled Hibr font now assigns dedicated deterministic 8×16 glyphs to the
