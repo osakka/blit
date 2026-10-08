@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-base_url=${1:?usage: pointer-artifact-capture.sh http://host:8080 [output-dir] [screenshots]}
+base_url=${1:?usage: pointer-artifact-capture.sh http://host:8080 [output-dir] [screenshots] [physical|api]}
 output_dir=${2:-"diagnostics/pointer-$(date -u +%Y%m%dT%H%M%SZ)"}
 screenshots=${3:-no}
+mode=${4:-physical}
 
 case "$screenshots" in
     yes|no) ;;
     *) echo "screenshots must be yes or no" >&2; exit 2 ;;
+esac
+case "$mode" in
+    physical|api) ;;
+    *) echo "mode must be physical or api" >&2; exit 2 ;;
 esac
 
 mkdir -p "$output_dir"
@@ -50,18 +55,24 @@ get input-routes.json /v1/input/routes
 get session.json /v1/terminal-sessions/1
 capture before
 
-for point in '300 300' '900 900' '1500 1500' '1100 1100'; do
-    x=${point% *}
-    y=${point#* }
-    curl --fail --silent --show-error --max-time 5 \
-        -X POST "$base_url/v1/input/inject" \
-        -H 'Content-Type: application/json' \
-        --data "{\"kind\":\"pointer_motion\",\"x\":$x,\"y\":$y}" \
-        > "$output_dir/inject-$x-$y.json"
-    sleep 0.2
-    capture "motion-$x-$y"
-done
+if [ "$mode" = api ]; then
+    for point in '300 300' '900 900' '1500 1500' '1100 1100'; do
+        x=${point% *}
+        y=${point#* }
+        curl --fail --silent --show-error --max-time 5 \
+            -X POST "$base_url/v1/input/inject" \
+            -H 'Content-Type: application/json' \
+            --data "{\"kind\":\"pointer_motion\",\"x\":$x,\"y\":$y}" \
+            > "$output_dir/inject-$x-$y.json"
+        sleep 0.2
+        capture "motion-$x-$y"
+    done
+else
+    echo "Move and click the physical pointer now; capture is running for 5 seconds." >&2
+    sleep 5
+    capture physical
+fi
 
 get runtime-end.json /v1/diagnostics/runtime
 get trace-end.json /v1/diagnostics/trace
-printf 'capture_dir=%s screenshots=%s\n' "$output_dir" "$screenshots"
+printf 'capture_dir=%s screenshots=%s mode=%s\n' "$output_dir" "$screenshots" "$mode"

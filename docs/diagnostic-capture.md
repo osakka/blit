@@ -1,5 +1,30 @@
 # Live diagnostic capture
 
+## Reproducing a physical-pointer report
+
+Use the pointer artifact capture in `physical` mode while moving and clicking
+the real pointer:
+
+```sh
+tools/diagnostics/pointer-artifact-capture.sh \
+  http://192.168.10.54:8080 diagnostics/experience-$(date -u +%Y%m%dT%H%M%SZ) yes physical
+```
+
+Use `api` mode as the independent control path:
+
+```sh
+tools/diagnostics/pointer-artifact-capture.sh \
+  http://192.168.10.54:8080 diagnostics/experience-api-$(date -u +%Y%m%dT%H%M%SZ) yes api
+```
+
+The capture separates the failure classes: `runtime-physical.json` reports
+whether evdev mouse counters increased, pointer traces report what Blit
+accepted, render traces report pointer-cache versus full-redraw composition,
+and the BMP hashes provide visual evidence. Zero physical evdev events means
+the input/device path is the blocker; accepted events with bad BMPs means the
+Blit presentation path; correct BMPs with incorrect terminal content means
+the terminal surface. It does not start or modify Hibr.
+
 The real-host capture harness records Blit's API state without depending on a
 local Hibr shell or a physical keyboard. It collects the hardware/topology
 inventory, runtime counters, bounded event trace, and synchronized framebuffer
