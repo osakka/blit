@@ -15,6 +15,7 @@ get() {
 capture() {
     local label=$1
     get "runtime-$label.json" /v1/diagnostics/runtime
+    get "session-$label.json" /v1/terminal-sessions/1
     get "trace-pointer-motion-$label.json" \
         '/v1/diagnostics/trace?kind=pointer_motion'
     get "trace-pointer-button-$label.json" \

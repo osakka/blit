@@ -29,6 +29,9 @@ The output directory contains:
   path decisions;
 - `runtime-*.json`: frame timing, input counters, stream health, and session
   resources;
+- `session-*.json`: the selected terminal session's surface revision and
+  graphics objects, including whether an image is being replaced, hidden, or
+  repeatedly recreated;
 - `screenshots/*.bmp` and `screenshot-sha256.txt`: framebuffer evidence;
 - the start/end hardware and topology snapshots.
 
@@ -36,6 +39,10 @@ Interpretation is causal: a physical click must appear as `pointer_button`,
 the associated Hibr surface activity must follow a `commit`, and the renderer
 must report the path used for the resulting presentation. Missing events or a
 hash change without a corresponding commit are distinct, actionable failures.
+A `render_path` event with `graphics_changed=1` must correlate with a change
+in the matching `session-*.json` graphics list; otherwise the compositor's
+graphics-scene boundary is wrong. A `pointer-cache` path should not require
+a full scene rebuild.
 
 The general trace is intentionally bounded, and a busy Hibr surface can fill
 it with surface updates. The harness therefore also requests filtered views:
