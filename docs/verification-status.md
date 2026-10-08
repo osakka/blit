@@ -94,6 +94,12 @@ middle / right buttons, wheel events, held-button motion, and gamepad
 discovery. This is deterministic evdev evidence; physical click behavior on a
 second real connector remains open.
 
+The exact 0.1.260 four-output Hibr orchestration fixture also passed
+`KMS_FOUR_HIBR_PASS`: one primary and three `desktop --join` clients reached
+four Hibr-backed presented surfaces. The TCG/VKMS run recorded six timing
+misses per output under that workload; this is retained as virtual page-flip
+evidence and is not presented as physical refresh-rate evidence.
+
 With Hibr staged from its existing checkout only, the same four-output fixture
 then launched one primary Hibr desktop and three `desktop --join` clients.
 All four Hibr-backed surfaces reached the running/presented state and the
