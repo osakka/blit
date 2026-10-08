@@ -108,6 +108,20 @@ with zero pixel-frame errors and 16 refresh-bound presentations during the
 bounded test. This validates the game/arcade frame transport independently of
 the terminal-cell glyph path; it is still one physical 60 Hz output evidence.
 
+The exact staged 0.1.277 binary and unchanged Hibr checkout also passed the
+current one-vCPU QEMU input/presentation soak with
+`LAYOUT_MATRIX_PASS`, `BLIT_INPUT_GAMEPAD_DISCOVERY_PASS`,
+`BLIT_INPUT_KEYPAD_SOAK_OBSERVED`, `BLIT_INPUT_MULTI_MOUSE_PASS`,
+`BLIT_INPUT_STREAM_PASS`, `BLIT_INPUT_GAMEPAD_PASS`, and
+`BLIT_INPUT_RENDER_SOAK_PASS`. The fixture exercised two synthetic mice,
+keyboard VT/UTF-8 traffic, three mouse buttons, wheel events, pointer motion,
+gamepad buttons and axes, API input routes, and the WebSocket input stream.
+It used Blit SHA-256
+`2a6762189e5ea3c1d8da93c498a4d63b47d699beda728a9e55dfec7cb8eae82d` and the
+same Hibr SHA-256 recorded above, then powered the guest down cleanly. This is
+end-to-end protocol and routing evidence for terminal games and API-owned
+game input; QEMU TCG timing in this run is not physical refresh-rate evidence.
+
 The exact same 0.1.277 binary was staged into the current one-vCPU VKMS
 four-output fixture with the unchanged Hibr executable
 (`8903e0c1addf065e54646bfbab9db0e532cc6d028feb5b9def94b32e52c2ba06`). It
