@@ -3,7 +3,31 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
-## Current 0.1.341 real-host troubleshooting status
+## Current 0.1.345 real-host boundary evidence
+
+The authorized host reports `0.1.345` and the reproducible capture is in
+`diagnostics/live-345-snapshot/`. The SDL3 output is `1920x2160` at `60 Hz`,
+uses the refresh-aware `16 ms` interval, and recorded zero missed deadlines
+over the capture window. The screenshot API returned two identical valid
+`1920x2160` BMPs, proving that framebuffer capture and presentation are
+observable independently of the user's visual report.
+
+The remaining rendering defect is now isolated to the Hibr handoff: the live
+surface is `240x135`, but only `5659` cells are populated and the desktop
+cursor remains at row `23`. The PTY and Hibr held-client reports both say
+`135x240`; Hibr's `desktop` command creates a detached `hold` owner, so a
+resize signal sent only to Blit's attach client cannot resize the actual held
+desktop state. Blit's bounded retry does not change that result. This is not
+currently evidence of an SDL frame-rate failure or a missing physical mouse
+event.
+
+The capture recorded zero physical evdev events because no physical movement
+or click occurred during that interval. Physical input acceptance remains
+open and must be tested with the capture running. The production adapter path
+also remains open: its stream connects, but its surface received no cell
+commit in this host run, so it is not being called accepted.
+
+## Historical 0.1.341 real-host troubleshooting status
 
 The 0.1.339 packaging correction keeps the optional `console-blit.so` provider
 out of `/usr/lib/hibr`, so the ordinary `/usr/bin/desktop` path selects Hibr's
