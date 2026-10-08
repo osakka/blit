@@ -15,4 +15,6 @@ tools/build-hibr-font.py assets/fonts/Uni2-Terminus16.psf \
 ```
 
 The generated PSF is checked in so runtime installations have no font-tool or
-font-package dependency.
+font-package dependency. The manifest includes Hibr glyphs plus common
+terminal shading symbols and combining marks; it does not claim universal
+Unicode or CJK shaping in an 8×16 cell.

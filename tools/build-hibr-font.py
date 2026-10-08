@@ -19,14 +19,17 @@ from PIL import Image, ImageDraw, ImageFont
 # Hibr's unicode desktop glyphs plus its wallpaper palette.  Nerd-font PUA
 # glyphs are deliberately excluded: they are a separate Hibr glyph set.
 REQUIRED = tuple(ord(c) for c in (
-    "·░▒⋅"
+    "·░▒▓⋅"
     "—•…←↑→↪↻⌂⏎"
     "─━│┄┆┌┐└┘├┤═║╔╗╚╝╭╮╯╰"
     "▀▁▂▃▄▅▆▇█░▒■□▤▥▯▲▶▸▼▽▾◂◆◉●◢★☐☑♥⚑⚠✓✕✗✱❝"
     # Additional codepoints emitted by Hibr's executable desktop scripts:
     # controls/icons, geometry symbols, and the Matrix saver alphabet.  U+200B
     # is deliberately not included: it is a zero-width control, not a glyph.
-    "±¶⇅∿≡⊞⌘⌨⎘ⓘ╱▞▣▦▭◈◌◎◐◧◫◷☺☾♪⚙⚿✉✎"
+    "±¶⇅∿≡⊞⌘⌨⎘ⓘ╱▞▣▦▭◈◌◎◐◧◫◷☺☀☾♪♫⚙⚿✉✎"
+    # Common combining marks are retained as drawable overlays by the
+    # terminal cell model; they must not fall back to a visible question mark.
+    "́̃̊"
     "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ🔔"
     # Hibr's optional Arabic catalogue is shaped by its uni module before
     # console output. Keep both the source letters/marks and the exact

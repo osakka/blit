@@ -7,7 +7,7 @@ an evidence record, not a claim that the complete product is released.
 
 - Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The current candidate is `0.1.259`. It builds with TCC and passes terminal
+- The current candidate is `0.1.260`. It builds with TCC and passes terminal
   conformance, SDL screenshot/overlay pixels, the hidden-cursor damage gate,
   and the complete Hibr font manifest gate. Its SDL backend uses a per-output
   glyph atlas, suppresses unchanged cell damage, and does not schedule frames
@@ -21,7 +21,7 @@ an evidence record, not a claim that the complete product is released.
   below. The authorized physical host now reports 0.1.258 through its version
   endpoint.
 
-### Current 0.1.259 source and physical evidence
+### Current 0.1.260 source and physical evidence
 
 The SDL glyph atlas now explicitly uses nearest-neighbor sampling. SDL3
 defaults texture scaling to linear, which can bleed adjacent atlas glyphs into
@@ -30,7 +30,21 @@ renderer falls back to its existing per-pixel path if nearest mode is
 unavailable. This removes a concrete source of malformed glyph shapes without
 changing the canonical font or terminal model.
 
-The TCC-built 0.1.259 runtime derives a terminal surface's cell geometry from
+An isolated live 0.1.260 screenshot of box drawing, block shading, arrows,
+common symbols, and combining acute/tilde/ring marks showed those mapped shapes
+without replacement `?` cells. Emoji and CJK samples still select the explicit
+visible fallback glyph; they are not represented as universal Unicode shaping
+support by this fixed-cell PSF renderer.
+
+After the supervised 0.1.260 upgrade, the physical host's existing held Hibr
+state was correctly recovered with `/usr/bin/desktop --resume`: the session
+reached `running`, reported 59.922 Hz over its active window, and recorded zero
+missed deadlines. A bare `desktop` invocation exited 1 because that held state
+already existed; this is Hibr's documented lifecycle distinction, not a Blit
+rendering failure. Deleting the Blit session then returned the host to zero
+sessions, surfaces, routes, errors, and warnings.
+
+The TCC-built 0.1.260 runtime derives a terminal surface's cell geometry from
 its authoritative pane or display when the API request omits `surface`. A
 request for the physical host's `display-1` therefore created a 240×135 cell
 surface for its 1920×2160 mode, eliminating the earlier 120×40 partial-screen
@@ -49,8 +63,9 @@ Hz mode; physical multi-monitor and 120/240 Hz hardware evidence remain open.
 
 The full VT/UTF-8/Hibr terminal suite, SDL frame gate, graphics-cache gate,
 Hibr font manifest, and OpenAPI derived-geometry check pass from the same
-0.1.259 source. The manifest contains 441 required Hibr glyphs and 1,175
-Unicode mappings. The full-screen Hibr workload's measured frame rate is
+0.1.260 source. The manifest contains 447 required glyphs and 1,181 Unicode
+mappings, including exact row-shape assertions for U+2580–U+2588. The
+full-screen Hibr workload's measured frame rate is
 distinct from the idle diagnostic value: idle servers do not present frames.
 
 The exact 0.1.259 TCC binary was staged into the two-output VKMS/QEMU capture

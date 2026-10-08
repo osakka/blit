@@ -93,6 +93,25 @@ def check_font() -> tuple[int, int]:
     if blank:
         formatted = ", ".join(f"U+{value:04X}" for value in blank)
         raise AssertionError(f"blank required Hibr glyphs: {formatted}")
+    block_rows = {
+        0x2580: range(0, 8), 0x2581: range(14, 16),
+        0x2582: range(12, 16), 0x2583: range(10, 16),
+        0x2584: range(8, 16), 0x2585: range(6, 16),
+        0x2586: range(4, 16), 0x2587: range(2, 16),
+        0x2588: range(0, 16),
+    }
+    malformed = []
+    for codepoint, rows in block_rows.items():
+        index = mapped[codepoint]
+        expected = bytes(0xFF if row in rows else 0 for row in range(16))
+        actual = data[glyph_start + index * glyph_bytes:
+                      glyph_start + (index + 1) * glyph_bytes]
+        if actual != expected:
+            malformed.append(f"U+{codepoint:04X}")
+    if malformed:
+        raise AssertionError(
+            "malformed exact block glyphs: " + ", ".join(malformed)
+        )
     return len(required), len(mapped)
 
 

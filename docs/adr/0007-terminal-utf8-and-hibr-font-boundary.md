@@ -69,3 +69,9 @@ The same manifest also includes the Arabic source characters and presentation
 forms emitted by Hibr's `uni` shaping table. This keeps an Arabic/bidi Hibr
 line within the same canonical PSF boundary; it does not add a second shaping
 implementation to Blit.
+
+The manifest also includes standard terminal shading symbols and common
+combining acute, tilde, and ring marks. These are rendered by the existing
+cell-overlay path rather than becoming visible `?` replacement glyphs. Unicode
+outside the manifest remains explicitly represented by the visible fallback
+glyph; this is coverage policy, not a claim of universal Unicode shaping.
