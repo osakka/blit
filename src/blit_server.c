@@ -345,6 +345,8 @@ typedef struct {
        user key such as Escape, which has desktop meaning. */
     int attach_reassert_pending;
     uint64_t attach_reassert_due_us;
+    int attach_reassert_attempts;
+    int attach_reassert_max_attempts;
     int terminal_escape;
     /* Hibr emits a single SGR containing bold plus truecolor foreground and
        background (three decimal components each).  A 32-byte buffer cuts
@@ -6649,6 +6651,19 @@ static void service_attach_reasserts(BlitRuntime *runtime, uint64_t now)
         if (!signalled)
             fprintf(stderr, "blit: attach reassert signal for session %llu failed: %s\n",
                     session->id, strerror(errno));
+
+        ++session->attach_reassert_attempts;
+        /* Startup output can arrive before Hibr has installed its resize
+           handling.  A single SIGWINCH is therefore not a reliable attach
+           contract.  Retry for a bounded two-and-a-half second window; this
+           remains Blit's PTY boundary and never injects user input. */
+        if (session->attach_reassert_attempts <
+            session->attach_reassert_max_attempts) {
+            session->attach_reassert_pending = 1;
+            session->attach_reassert_due_us = now +
+                (session->attach_reassert_attempts < 2 ? 250000ULL :
+                 500000ULL);
+        }
     }
 }
 
@@ -7719,6 +7734,8 @@ static void service_session_output(BlitRuntime *runtime, int fd)
                    the external adapter path, so the desktop receives a
                    deterministic SIGWINCH after its layout is ready. */
                 runtime->sessions[i].attach_reassert_pending = 1;
+                runtime->sessions[i].attach_reassert_attempts = 0;
+                runtime->sessions[i].attach_reassert_max_attempts = 6;
                 runtime->sessions[i].attach_reassert_due_us =
                     monotonic_us() + 250000ULL;
             }
