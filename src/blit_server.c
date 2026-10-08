@@ -593,6 +593,8 @@ static const char *pane_surface_id(const BlitRuntime *runtime,
                                    const BlitPane *pane);
 static void discover_panes(BlitRuntime *runtime);
 static void focus_session(BlitRuntime *runtime, BlitSession *target);
+static void disable_input_routes_for_target(BlitRuntime *runtime,
+                                            const char *target_id);
 static int activate_direct_kms_fallback(BlitRuntime *runtime);
 static void destroy_sdl_graphics_cache(BlitOutput *output);
 static uint64_t monotonic_us(void);
@@ -603,6 +605,7 @@ static void terminal_clear_cell(BlitSurface *surface, int x, int y);
 static void terminal_clear_wide_overlap(BlitSurface *surface, int x, int y);
 static void mark_cursor_damage(BlitSurface *surface, int x, int y);
 static void mark_surface_full_damage(BlitSurface *surface);
+static void terminal_clear_active_screen(BlitSurface *surface);
 static BlitSurface *find_surface_id(BlitRuntime *runtime,
                                     unsigned long long surface_id);
 static BlitSession *find_session_id(BlitRuntime *runtime,
@@ -5952,6 +5955,27 @@ static BlitSession *find_session_id(BlitRuntime *runtime,
     return NULL;
 }
 
+static void retire_session_surface(BlitRuntime *runtime,
+                                   BlitSession *session)
+{
+    BlitSurface *surface;
+    char target_id[128];
+
+    if (runtime == NULL || session == NULL)
+        return;
+    surface = find_surface_id(runtime, session->id);
+    if (surface != NULL && surface->used) {
+        terminal_clear_active_screen(surface);
+        surface->frame_open = 0;
+        surface->cursor_visible = 0;
+        ++surface->revision;
+    }
+    snprintf(target_id, sizeof(target_id), "session-%llu", session->id);
+    disable_input_routes_for_target(runtime, target_id);
+    session->focused = 0;
+    runtime->render_pending = 1;
+}
+
 static BlitInputRoute *find_input_route(BlitRuntime *runtime,
                                         const char *route_id)
 {
@@ -6235,6 +6259,7 @@ static void refresh_session_state(BlitRuntime *runtime, BlitSession *session)
             session->exit_code = -1;
             snprintf(session->state, sizeof(session->state), "failed");
         }
+        retire_session_surface(runtime, session);
         /* Keep the PTY readable after waitpid reaps the child.  The child may
            have emitted final terminal bytes (including an OSC title or a
            protocol reply) immediately before exit.  service_session_output
@@ -6243,6 +6268,7 @@ static void refresh_session_state(BlitRuntime *runtime, BlitSession *session)
     } else if (result < 0 && errno != EINTR) {
         session->exit_code = -1;
         snprintf(session->state, sizeof(session->state), "failed");
+        retire_session_surface(runtime, session);
         if (session->pty_fd >= 0) {
             close(session->pty_fd);
             session->pty_fd = -1;
