@@ -148,6 +148,15 @@ render-soak checks, then powered down cleanly. This matters because the stale
 init script omitted the gamepad route and could otherwise produce a misleading
 partial input result. Hibr source remained unchanged.
 
+With the same staged artifacts, the pane lifecycle fixture passed
+`HIBR_PRIMARY_RESTART_PASS`, `HIBR_JOIN_RECONNECT_PASS`, and
+`HIBR_PANE_MATRIX_PASS`: one primary desktop and three `desktop --join`
+clients were placed across the Blit-owned pane matrix, the primary was
+restarted through Hibr's supervisor, and an auxiliary join was reconnected.
+The current four-output fixture also passed `KMS_FOUR_HIBR_PASS` with four
+presenting VKMS outputs and one primary plus three joins. Both guests powered
+down cleanly; Hibr remained unchanged.
+
 The current 0.1.279 two-output high-refresh fixture passed
 `REFRESH_SCHEDULER_240_PASS` and accepted all 240 API pixel frames, but failed
 the strict presentation-rate assertion: QEMU TCG presented 165.222 measured
