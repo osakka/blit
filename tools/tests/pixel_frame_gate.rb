@@ -65,6 +65,16 @@ session = http_json(base, :post, '/v1/terminal-sessions',
                     'surface_mode' => 'external',
                     'surface' => {'width' => 80, 'height' => 24})
 session_id = session.fetch('id')
+socket = nil
+at_exit do
+  socket.close if socket && !socket.closed?
+  begin
+    http_json(base, :delete, "/v1/terminal-sessions/#{session_id}")
+  rescue StandardError
+    # The server may already have been stopped; the test result is reported
+    # by the original failure and cleanup must remain best-effort.
+  end
+end
 socket = TCPSocket.new(base.host, base.port)
 key = Base64.strict_encode64(SecureRandom.random_bytes(16))
 socket.write("GET /v1/stream HTTP/1.1\r\nHost: #{base.host}:#{base.port}\r\n" \
@@ -130,12 +140,14 @@ websocket_send(socket, 2, pixels.byteslice(0, half), final: false)
 websocket_send(socket, 0, pixels.byteslice(half, pixels.bytesize - half), final: true)
 websocket_read_text(socket) if acknowledge
 
+target_frame_count = Integer(ENV.fetch('BLIT_PIXEL_FRAME_COUNT', '30'))
+raise 'pixel frame count must be at least 2' if target_frame_count < 2
 frame_count = 1
 runtime_before = http_json(base, :get, '/v1/diagnostics/runtime').fetch('performance')
 started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 pace_hz = ENV['BLIT_PIXEL_PACE_HZ'] && Float(ENV['BLIT_PIXEL_PACE_HZ'])
 pace_interval = pace_hz && pace_hz > 0 ? 1.0 / pace_hz : nil
-29.times do
+(target_frame_count - 1).times do
   # The begin record negotiates the frame format once. Every final binary
   # continuation below is an independent complete frame.
   websocket_send(socket, 2, pixels, final: true)
@@ -172,7 +184,7 @@ raise 'pixel image is incomplete' unless image.fetch('complete') && image.fetch(
 raise 'pixel image dimensions are wrong' unless image.values_at('width', 'height', 'format') == [8, 4, 32]
 
 socket.close
-http_json(base, :delete, "/v1/terminal-sessions/#{session_id}")
+socket = nil
 puts format('PIXEL_FRAME_PASS frames=%d ingest_hz=%.3f accepted=%d rendered=%d render_ms=%.3f fragmented_rgba=32bytes reuse=true',
             frame_count, frame_count / elapsed, runtime.fetch('pixel_frames_accepted'),
             rendered,

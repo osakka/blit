@@ -358,14 +358,19 @@ the presentation loop instead of remaining permanently coalesced:
 
 ```sh
 BLIT_PIXEL_PACE_HZ=60 \
-BLIT_PIXEL_MIN_RENDERED=24 \
-BLIT_GATE_PORT=19249 ruby tools/tests/pixel_frame_gate.rb
+  BLIT_PIXEL_MIN_RENDERED=24 \
+  BLIT_GATE_PORT=19249 ruby tools/tests/pixel_frame_gate.rb
 ```
+
+Set `BLIT_PIXEL_FRAME_COUNT` for a longer sustained workload when diagnosing
+physical presentation cadence; the default is 30 frames.
 
 The paced assertion requires at least 24 of 30 accepted frames to be rendered.
 It is deliberately below 30 to allow scheduler jitter in the dummy backend;
 physical release acceptance still requires display-mode timing and input
-latency evidence.
+latency evidence. The gate registers session cleanup immediately after the
+session is created, so a failed assertion cannot leave a test surface running
+on a remote host.
 
 The frame-rate gate creates a bounded PTY producer and samples the versioned
 runtime diagnostics endpoint. It requires a completed, fresh measurement
