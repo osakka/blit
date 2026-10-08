@@ -466,6 +466,11 @@ typedef struct {
     char evdev_mouse_paths[BLIT_MAX_INPUT_DEVICES][128];
     int evdev_mouse_count;
     int evdev_mouse_reported[BLIT_MAX_INPUT_DEVICES];
+    unsigned long long diagnostic_evdev_mouse_device_events[BLIT_MAX_INPUT_DEVICES];
+    unsigned long long diagnostic_evdev_mouse_device_syncs[BLIT_MAX_INPUT_DEVICES];
+    unsigned long long diagnostic_evdev_mouse_device_motion[BLIT_MAX_INPUT_DEVICES];
+    unsigned long long diagnostic_evdev_mouse_device_wheel[BLIT_MAX_INPUT_DEVICES];
+    unsigned long long diagnostic_evdev_mouse_device_buttons[BLIT_MAX_INPUT_DEVICES];
     int evdev_keyboard_fds[BLIT_MAX_INPUT_DEVICES];
     char evdev_keyboard_paths[BLIT_MAX_INPUT_DEVICES][128];
     int evdev_keyboard_count;
@@ -1635,6 +1640,8 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
     int count;
     int first;
     int index;
+    char mouse_devices[4096];
+    size_t mouse_used = 0;
     uint64_t now = monotonic_us();
     double frame_rate_hz = runtime->diagnostic_frame_rate_hz;
     unsigned long long frame_rate_age_ms = 0;
@@ -1646,6 +1653,25 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
     if (runtime->diagnostic_frame_rate_last_us == 0 ||
         frame_rate_age_ms > 2000ULL)
         frame_rate_hz = 0.0;
+
+    mouse_used += (size_t)snprintf(mouse_devices + mouse_used,
+                                   sizeof(mouse_devices) - mouse_used, "[");
+    for (index = 0; index < runtime->evdev_mouse_count; ++index) {
+        mouse_used += (size_t)snprintf(
+            mouse_devices + mouse_used, sizeof(mouse_devices) - mouse_used,
+            "%s{\"path\":\"%s\",\"fd\":%d,\"events\":%llu,"
+            "\"syncs\":%llu,\"motion\":%llu,\"wheel\":%llu,"
+            "\"buttons\":%llu}", index > 0 ? "," : "",
+            runtime->evdev_mouse_paths[index],
+            runtime->evdev_mouse_fds[index],
+            runtime->diagnostic_evdev_mouse_device_events[index],
+            runtime->diagnostic_evdev_mouse_device_syncs[index],
+            runtime->diagnostic_evdev_mouse_device_motion[index],
+            runtime->diagnostic_evdev_mouse_device_wheel[index],
+            runtime->diagnostic_evdev_mouse_device_buttons[index]);
+    }
+    snprintf(mouse_devices + mouse_used, sizeof(mouse_devices) - mouse_used,
+             "]");
 
     diagnostics_json(runtime, snapshot, sizeof(snapshot));
     used = (size_t)snprintf(body, capacity,
@@ -1668,6 +1694,7 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"evdev_mouse_button_events\":%llu,"
         "\"last_evdev_mouse_event_age_ms\":%llu,"
         "\"last_evdev_mouse_path\":\"%s\","
+        "\"evdev_mouse_devices\":%s,"
         "\"sdl_mouse_events_discarded\":%llu,"
         "\"sdl_mouse_events_processed\":%llu,"
         "\"sdl_mouse_motion_events\":%llu,"
@@ -1724,6 +1751,7 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
             (unsigned long long)((now -
                 runtime->diagnostic_last_evdev_mouse_event_us) / 1000ULL) : 0,
         runtime->diagnostic_last_evdev_mouse_path,
+        mouse_devices,
         runtime->diagnostic_sdl_mouse_events_discarded,
         runtime->diagnostic_sdl_mouse_events_processed,
         runtime->diagnostic_sdl_mouse_motion_events,
@@ -6398,11 +6426,26 @@ static void remove_evdev_mouse(BlitRuntime *runtime, int index)
                  sizeof(runtime->evdev_mouse_paths[i]), "%s",
                  runtime->evdev_mouse_paths[i + 1]);
         runtime->evdev_mouse_reported[i] = runtime->evdev_mouse_reported[i + 1];
+        runtime->diagnostic_evdev_mouse_device_events[i] =
+            runtime->diagnostic_evdev_mouse_device_events[i + 1];
+        runtime->diagnostic_evdev_mouse_device_syncs[i] =
+            runtime->diagnostic_evdev_mouse_device_syncs[i + 1];
+        runtime->diagnostic_evdev_mouse_device_motion[i] =
+            runtime->diagnostic_evdev_mouse_device_motion[i + 1];
+        runtime->diagnostic_evdev_mouse_device_wheel[i] =
+            runtime->diagnostic_evdev_mouse_device_wheel[i + 1];
+        runtime->diagnostic_evdev_mouse_device_buttons[i] =
+            runtime->diagnostic_evdev_mouse_device_buttons[i + 1];
     }
     --runtime->evdev_mouse_count;
     runtime->evdev_mouse_fds[runtime->evdev_mouse_count] = -1;
     runtime->evdev_mouse_paths[runtime->evdev_mouse_count][0] = '\0';
     runtime->evdev_mouse_reported[runtime->evdev_mouse_count] = 0;
+    runtime->diagnostic_evdev_mouse_device_events[runtime->evdev_mouse_count] = 0;
+    runtime->diagnostic_evdev_mouse_device_syncs[runtime->evdev_mouse_count] = 0;
+    runtime->diagnostic_evdev_mouse_device_motion[runtime->evdev_mouse_count] = 0;
+    runtime->diagnostic_evdev_mouse_device_wheel[runtime->evdev_mouse_count] = 0;
+    runtime->diagnostic_evdev_mouse_device_buttons[runtime->evdev_mouse_count] = 0;
     /* Keep the configured route across hotplug.  Device availability is
        reported independently; a reconnect should resume the same route
        without requiring a controller to recreate it. */
@@ -10191,6 +10234,11 @@ static void reconnect_evdev_devices(BlitRuntime *runtime)
                 runtime->evdev_mouse_fds[slot] = fd;
                 snprintf(runtime->evdev_mouse_paths[slot], 128, "%s", path);
                 runtime->evdev_mouse_reported[slot] = 0;
+                runtime->diagnostic_evdev_mouse_device_events[slot] = 0;
+                runtime->diagnostic_evdev_mouse_device_syncs[slot] = 0;
+                runtime->diagnostic_evdev_mouse_device_motion[slot] = 0;
+                runtime->diagnostic_evdev_mouse_device_wheel[slot] = 0;
+                runtime->diagnostic_evdev_mouse_device_buttons[slot] = 0;
                 fprintf(stderr, "blit: evdev mouse reconnected: %s fd=%d\n",
                         path, fd);
                 broadcast_input_diagnostic(runtime, "info",
@@ -12274,6 +12322,7 @@ static void service_evdev_mouse(BlitRuntime *runtime)
                (ssize_t)sizeof(event)) {
             uint64_t input_started_us = monotonic_us();
             ++runtime->diagnostic_evdev_mouse_events;
+            ++runtime->diagnostic_evdev_mouse_device_events[device_index];
             runtime->diagnostic_last_evdev_mouse_event_us = input_started_us;
             snprintf(runtime->diagnostic_last_evdev_mouse_path,
                      sizeof(runtime->diagnostic_last_evdev_mouse_path), "%s",
@@ -12287,6 +12336,7 @@ static void service_evdev_mouse(BlitRuntime *runtime)
                 if (event.code == REL_WHEEL || event.code == REL_HWHEEL) {
                     int button;
                     ++runtime->diagnostic_evdev_mouse_wheel_events;
+                    ++runtime->diagnostic_evdev_mouse_device_wheel[device_index];
                     if (event.code == REL_HWHEEL)
                         button = event.value > 0 ? 66 : 67;
                     else
@@ -12301,13 +12351,16 @@ static void service_evdev_mouse(BlitRuntime *runtime)
                 }
                 if (event.code == REL_X) {
                     ++runtime->diagnostic_evdev_mouse_motion_events;
+                    ++runtime->diagnostic_evdev_mouse_device_motion[device_index];
                     runtime->evdev_mouse_x += event.value;
                 } else if (event.code == REL_Y) {
                     ++runtime->diagnostic_evdev_mouse_motion_events;
+                    ++runtime->diagnostic_evdev_mouse_device_motion[device_index];
                     runtime->evdev_mouse_y += event.value;
                 }
             } else if (event.type == EV_SYN && event.code == SYN_REPORT) {
                 ++runtime->diagnostic_evdev_mouse_syncs;
+                ++runtime->diagnostic_evdev_mouse_device_syncs[device_index];
                 update_evdev_pointer(runtime);
                 record_input_dispatch(runtime, input_started_us);
             } else if (event.type == EV_KEY &&
@@ -12322,6 +12375,7 @@ static void service_evdev_mouse(BlitRuntime *runtime)
                 else
                     button = 2;
                 ++runtime->diagnostic_evdev_mouse_button_events;
+                ++runtime->diagnostic_evdev_mouse_device_buttons[device_index];
                 int release = event.value == 0;
                 dispatch_pointer_button(runtime, button, !release,
                                         "evdev-pointer");

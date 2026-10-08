@@ -1091,7 +1091,7 @@ components:
         snapshot: {$ref: '#/components/schemas/Diagnostics'}
         performance:
           type: object
-          required: [uptime_ms, frames, last_frame_gap_ms, max_frame_gap_ms, last_render_ms, max_render_ms, missed_deadlines, frame_rate_max_render_ms, frame_rate_missed_deadlines, frame_rate_window_sequence, last_terminal_ms, max_terminal_ms, terminal_bytes, pointer_cache_hits, pointer_cache_misses, frame_rate_hz, input_events, last_input_dispatch_ms, max_input_dispatch_ms, stream_queue_bytes, stream_queue_peak_bytes, stream_dropped_events, stream_backpressure_disconnects, graphics_cache_hits, graphics_texture_uploads, last_graphics_upload_ms, max_graphics_upload_ms, background_batches, background_quads, pixel_frames_accepted, pixel_frame_errors, pixel_frames_pending, frame_rate_frames, frame_rate_window_ms, frame_rate_age_ms, loop_iterations, terminal_reads, present_calls, last_loop_gap_ms, max_loop_gap_ms, loop_gap_window_ms, loop_gap_window_sequence, loop_gap_window_max_ms, last_kms_present_ms, max_kms_present_ms, last_sdl_present_ms, max_sdl_present_ms, last_select_ms, max_select_ms, last_sdl_events_ms, max_sdl_events_ms, last_evdev_scan_ms, max_evdev_scan_ms]
+          required: [uptime_ms, frames, last_frame_gap_ms, max_frame_gap_ms, last_render_ms, max_render_ms, missed_deadlines, frame_rate_max_render_ms, frame_rate_missed_deadlines, frame_rate_window_sequence, last_terminal_ms, max_terminal_ms, terminal_bytes, pointer_cache_hits, pointer_cache_misses, frame_rate_hz, input_events, last_input_dispatch_ms, max_input_dispatch_ms, evdev_mouse_events, evdev_mouse_syncs, evdev_mouse_motion_events, evdev_mouse_wheel_events, evdev_mouse_button_events, last_evdev_mouse_event_age_ms, last_evdev_mouse_path, evdev_mouse_devices, sdl_mouse_events_discarded, sdl_mouse_events_processed, sdl_mouse_motion_events, sdl_mouse_button_events, sdl_mouse_fallback_events, stream_queue_bytes, stream_queue_peak_bytes, stream_dropped_events, stream_backpressure_disconnects, graphics_cache_hits, graphics_texture_uploads, last_graphics_upload_ms, max_graphics_upload_ms, background_batches, background_quads, pixel_frames_accepted, pixel_frame_errors, pixel_frames_pending, frame_rate_frames, frame_rate_window_ms, frame_rate_age_ms, loop_iterations, terminal_reads, present_calls, last_loop_gap_ms, max_loop_gap_ms, loop_gap_window_ms, loop_gap_window_sequence, loop_gap_window_max_ms, last_kms_present_ms, max_kms_present_ms, last_sdl_present_ms, max_sdl_present_ms, last_select_ms, max_select_ms, last_sdl_events_ms, max_sdl_events_ms, last_evdev_scan_ms, max_evdev_scan_ms]
           properties:
             uptime_ms: {type: integer, minimum: 0}
             frames: {type: integer, minimum: 0}
@@ -1112,6 +1112,32 @@ components:
             input_events: {type: integer, minimum: 0}
             last_input_dispatch_ms: {type: number, minimum: 0}
             max_input_dispatch_ms: {type: number, minimum: 0}
+            evdev_mouse_events: {type: integer, minimum: 0}
+            evdev_mouse_syncs: {type: integer, minimum: 0}
+            evdev_mouse_motion_events: {type: integer, minimum: 0}
+            evdev_mouse_wheel_events: {type: integer, minimum: 0}
+            evdev_mouse_button_events: {type: integer, minimum: 0}
+            last_evdev_mouse_event_age_ms: {type: integer, minimum: 0}
+            last_evdev_mouse_path: {type: string}
+            evdev_mouse_devices:
+              type: array
+              items:
+                type: object
+                required: [path, fd, events, syncs, motion, wheel, buttons]
+                properties:
+                  path: {type: string}
+                  fd: {type: integer}
+                  events: {type: integer, minimum: 0}
+                  syncs: {type: integer, minimum: 0}
+                  motion: {type: integer, minimum: 0}
+                  wheel: {type: integer, minimum: 0}
+                  buttons: {type: integer, minimum: 0}
+                additionalProperties: false
+            sdl_mouse_events_discarded: {type: integer, minimum: 0}
+            sdl_mouse_events_processed: {type: integer, minimum: 0}
+            sdl_mouse_motion_events: {type: integer, minimum: 0}
+            sdl_mouse_button_events: {type: integer, minimum: 0}
+            sdl_mouse_fallback_events: {type: integer, minimum: 0}
             stream_queue_bytes: {type: integer, minimum: 0}
             stream_queue_peak_bytes: {type: integer, minimum: 0}
             stream_dropped_events: {type: integer, minimum: 0}

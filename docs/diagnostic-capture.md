@@ -222,6 +222,11 @@ or a missing runtime response is not accepted as physical-input evidence.
 It reports both the maximum loop gap observed during the capture and the
 runtime's lifetime maximum; an old screenshot or diagnostic stall therefore
 cannot be mistaken for a stall caused by the current physical-input test.
+For machines with multiple pointer nodes, inspect `performance.evdev_mouse_devices`
+in `/v1/diagnostics/runtime`: each entry reports the opened path, file
+descriptor, and event/motion/button/wheel counters. This distinguishes an
+unmoved node from a wrong-node or duplicate-device diagnosis without guessing
+from the aggregate counter.
 
 The Hibr adapter batches up to 256 cell mutations per request, while retaining
 deferred updates and one final `commit` per Hibr flush. This bounds transport

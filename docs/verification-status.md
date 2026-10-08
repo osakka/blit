@@ -3,6 +3,33 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## Current 0.1.359 live diagnostics and physical-input boundary
+
+The authorized live host reports `0.1.359` and remains reachable at
+`192.168.10.54:8080`. The release adds per-device evdev counters to the
+runtime diagnostics endpoint. The live service currently discovers one pointer
+at `/dev/input/event5` (fd `8`), but the capture window recorded zero events,
+zero motion events, zero wheel events, and zero button events. Consequently,
+the physical mouse symptom is still open: this evidence proves device
+discovery, not that a physical event reached Blit's process.
+
+The live synthetic API input probe passes motion, button, dispatch, pointer
+position, and render-path checks. The renderer reports SDL OpenGL ES 2 with a
+60 Hz display mode, a 16 ms refresh-aware target interval, no missed deadlines,
+and sub-14 ms maximum observed loop/render gaps in the current window. The
+reported frame rate is damage-driven and is zero while idle; it must not be
+interpreted as a monitor-refresh measurement.
+
+The TCC-built `0.1.359` package passed the local pointer-damage,
+external-pointer-composition, hidden-cursor, glyph, wallpaper-stress, and
+terminal-soak gates. The corrected two-output VKMS QEMU fixture passed KMS
+capture, the wide Kitty grid, the 48-cell display capture, and the API
+screenshot gate. QEMU was powered down and no QEMU process remains. Physical
+mouse, physical multi-monitor, and sustained physical high-refresh acceptance
+remain open.
+
+Package SHA-256: `faecc11058d4d19c6d0b28f4650d44c033af744bff31c3702d0f1d84abac255a`.
+
 ## Current 0.1.358 real-host evidence and remaining visual gate
 
 The authorized host now reports `0.1.358`. The attach PTY geometry transition
