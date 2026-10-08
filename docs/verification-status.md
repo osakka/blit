@@ -14,8 +14,11 @@ an evidence record, not a claim that the complete product is released.
   for hidden cursor movement. The current dummy frame runs measured
   42.935–43.867 Hz with 15.400–15.676 ms maximum render time against a
   16.000 ms target and zero missed deadlines; this is a software-dummy result,
-  not a physical refresh-rate claim. The authorized physical host reports
-  0.1.265 through its version endpoint. The Debian candidate
+  not a physical refresh-rate claim. The authorized physical host now reports
+  0.1.271 through its version endpoint. Its controlled live API smoke test
+  rendered VT500 text, box/block glyphs, combining `Á`, and wide `界` at
+  60.000 Hz with zero missed deadlines and 10.490 ms maximum render time;
+  this is one-output evidence, not a multi-monitor or 120/240 Hz claim. The Debian candidate
   `blit_0.1.271-1_amd64.deb` was built from
   this binary and passed package allowlist, embedded-version, byte-identity,
   asset-presence, and extracted-runtime checks. The final artifact SHA-256 is
