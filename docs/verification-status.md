@@ -3,18 +3,22 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
-## Current 0.1.296 Hibr integration status
+## Current 0.1.297 Hibr integration status
 
-The TCC-built server adds `POST /v1/control/restart`, which uses the same
-clean-up and self-reexec path as a supervised package restart. This closes the
-operational gap where an API shutdown left a systemd `Restart=on-failure` unit
-stopped and unreachable. The update-reset and restart control contracts are
-schema-documented; local reset, lifecycle, refresh, and QEMU Hibr acceptance
-gates pass.
+The TCC-built server retains the API restart recovery path from 0.1.296 and
+adds a focused SDL scene-cache correction. When Hibr changes DECTCEM cursor
+visibility, the affected surface is fully redrawn once; ordinary cursor
+movement remains incremental. A live 0.1.296 screenshot proved that the API
+could report a hidden cursor and blank canonical cells while the old cursor
+pixels remained in the cached scene. The new screenshot assertion reproduces
+that boundary and passes on the TCC-built 0.1.297 binary.
 
-The `.296` package has not yet been installed on the physical host because the
-authorized host is currently unreachable. No physical screenshot or live
-frame-rate claim is made for this version.
+Local 0.1.297 evidence: full terminal conformance, hidden-cursor pixel and
+frame-suppression gate, and frame-rate gate pass. The authorized physical host
+is now running 0.1.297; its live settled screenshot no longer contains the
+stale left-edge cursor artifact, and runtime reports zero missed deadlines at
+the active 60 Hz mode. Physical multi-monitor and physical 120/240 Hz gates
+remain open.
 
 ## Superseded 0.1.295 Hibr integration status
 
@@ -117,7 +121,7 @@ source or installed Hibr file was modified.
 
 - Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The current source candidate is `0.1.296`. It builds with TCC and passes
+- The current source candidate is `0.1.297`. It builds with TCC and passes
   the complete terminal conformance suite, SDL screenshot/overlay pixels,
   the hidden-cursor damage gate, and the complete Hibr font manifest gate.
   It includes the versioned network terminal-input endpoint at the canonical

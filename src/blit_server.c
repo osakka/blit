@@ -5009,9 +5009,16 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         if (terminal_csi_has_mode(sequence, 2026))
             session->terminal_synchronized = enabled;
         if (terminal_csi_has_mode(sequence, 25)) {
+            int cursor_was_visible = surface->cursor_visible;
             mark_cursor_damage(surface, surface->cursor_x, surface->cursor_y);
             surface->cursor_visible = enabled;
             mark_cursor_damage(surface, surface->cursor_x, surface->cursor_y);
+            /* The cursor is composited into the cached scene texture.  A
+             * visibility transition must invalidate the complete surface:
+             * the old cursor can otherwise survive as pixels even though the
+             * canonical cell state and cursor state are already hidden. */
+            if (cursor_was_visible != enabled)
+                mark_surface_full_damage(surface);
         }
         if (terminal_csi_has_mode(sequence, 7))
             session->terminal_autowrap = enabled;
@@ -5177,9 +5184,12 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         session->terminal_mouse_sgr = command == 'h';
     } else if (private_mode && (command == 'h' || command == 'l') &&
                has_first && first == 25) {
+        int cursor_was_visible = surface->cursor_visible;
         mark_cursor_damage(surface, surface->cursor_x, surface->cursor_y);
         surface->cursor_visible = command == 'h';
         mark_cursor_damage(surface, surface->cursor_x, surface->cursor_y);
+        if (cursor_was_visible != surface->cursor_visible)
+            mark_surface_full_damage(surface);
     } else if (!private_mode && command == 'r') {
         int top = has_first && first > 0 ? first - 1 : 0;
         int bottom = has_second && second > 0 ? second - 1 :
