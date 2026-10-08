@@ -12084,24 +12084,12 @@ static void update_pointer_position(BlitRuntime *runtime,
                  runtime->pointer_output, target_col, target_row);
         broadcast_stream(runtime, input_event, BLIT_STREAM_INPUT);
     }
-    if (runtime->output_count > 0 && !runtime->direct_kms &&
-        runtime->pointer_output >= 0 &&
-        runtime->pointer_output < runtime->output_count) {
-        int display_index = display_index_for_output(runtime,
-                                                      runtime->pointer_output);
-        const SDL_Rect *bounds;
-        if (display_index < 0)
-            return;
-        bounds = &runtime->displays[display_index].bounds;
-        runtime->sdl_warp_pending = 1;
-        runtime->sdl_warp_x = runtime->evdev_mouse_x;
-        runtime->sdl_warp_y = runtime->evdev_mouse_y;
-        runtime->sdl_warp_output = runtime->pointer_output;
-        runtime->sdl_warp_us = monotonic_us();
-        SDL_WarpMouseInWindow(runtime->outputs[runtime->pointer_output].window,
-                              runtime->evdev_mouse_x - bounds->x,
-                              runtime->evdev_mouse_y - bounds->y);
-    }
+    /* Raw evdev is authoritative when it is available.  Do not warp SDL's
+       native pointer in response: SDL then emits an asynchronous synthetic
+       motion event, and a single pending-warp flag cannot distinguish a
+       delayed event from a real fallback event during high-rate movement.
+       The software cursor is composed from the global evdev coordinates, so
+       SDL has no presentation state that needs synchronising here. */
     send_mouse_motion_report(runtime, 0, runtime->evdev_mouse_x,
                              runtime->evdev_mouse_y);
 }
