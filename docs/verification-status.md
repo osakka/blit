@@ -54,6 +54,14 @@ The subsequent probe after warp-echo suppression reports
 `sdl_mouse_fallback_events=0`, confirming that Blit's own cursor warp is not
 re-injected as user motion.
 
+The latest live Hibr timing sample contained 128 incremental render paths over
+20.778 seconds; the largest path-to-path gap was 1.205 seconds, while the
+reported render samples remained in the millisecond range and missed deadlines
+stayed at zero. This is damage-driven composition: a static terminal scene is
+not presented continuously at the panel refresh rate. `frame_rate_hz` must
+therefore be read together with the display's `refresh_hz`, render timings, and
+deadline counters; it is not evidence that the renderer itself took seconds.
+
 The exact 0.1.329 binary with the unchanged Hibr checkout also passes the
 QEMU/VKMS Hibr pane matrix: `LAYOUT_MATRIX_PASS` and
 `HIBR_PANE_MATRIX_PASS`. The restart variant additionally passes
