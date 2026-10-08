@@ -7,7 +7,7 @@ an evidence record, not a claim that the complete product is released.
 
 - Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The current candidate is `0.1.267`. It builds with TCC and passes terminal
+- The current source candidate is `0.1.268`. It builds with TCC and passes terminal
   conformance, SDL screenshot/overlay pixels, the hidden-cursor damage gate,
   and the complete Hibr font manifest gate. Its SDL backend uses a per-output
   glyph atlas, suppresses unchanged cell damage, and does not schedule frames
@@ -19,9 +19,34 @@ an evidence record, not a claim that the complete product is released.
   The direct-KMS pixel-frame acceptance below was run from the exact current
   0.1.256 TCC build; the newer SDL presentation and geometry work is recorded
   below. The authorized physical host now reports 0.1.265 through its version
-  endpoint. The 0.1.267 Debian package was rebuilt and verified locally;
-  its artifact hash is recorded by the build command rather than embedded in
-  this ledger, because package timestamps are not part of the runtime contract.
+  endpoint. No Debian package is being claimed for 0.1.268 yet: the real-mode
+  240 Hz QEMU stream gate still fails its strict page-flip deadline
+  requirement.
+
+### Current 0.1.268 evidence
+
+The exact TCC-built `0.1.268` binary was rebuilt from the pushed source and
+passed `HIBR_FONT_MANIFEST_PASS` (`required=447`, `mappings=1181`),
+`SDL_GLYPH_RENDER_PASS` (light/heavy/double box geometry, blocks, and wide
+glyphs), three consecutive dummy frame-rate runs (42.935–43.867 Hz,
+15.400–15.676 ms maximum render time against a 16.000 ms target, zero missed
+deadlines), `PIXEL_FRAME_PASS`, complete terminal conformance, background
+batching, graphics-cache, hidden-cursor damage, and a 20-second four-session
+terminal soak. The soak completed 244 snapshots and 22 resizes with a maximum
+RSS of 66,328 KiB.
+
+The exact same binary passed the direct-KMS two-output visual gate:
+`PPM_DISPLAY_47_WIDE_KITTY_PASS`, `PPM_DISPLAY_48_PASS`,
+`KMS_API_SCREENSHOT_PASS`, and `KMS_CAPTURE_PASS`.
+
+The corrected real-mode high-refresh fixture selected 240 Hz from the VKMS
+mode itself (`refresh_source:"display-mode"`) and accepted all 240 pixel
+frames. Its scheduler metadata gate passed, but missed deadlines increased
+from 6 to 11 per output and `max_kms_present_ms` reached 24.215 ms under QEMU
+TCG/VKMS. Therefore 240 Hz presentation is not yet validated and no package
+claim is made for it. The result identifies the remaining bottleneck as the
+virtual KMS/presentation path rather than WebSocket ingestion or terminal
+glyph rendering.
 
 ### Current 0.1.267 release-candidate evidence
 

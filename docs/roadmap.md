@@ -40,9 +40,9 @@ production `console-blit` module is operational over the OpenAPI/WebSocket
 contract. Explicit focus and versioned input routes are exposed by the API.
 The SDL adapter uses single-surface incremental frames and conservatively
 redraws multi-surface outputs with deterministic vertical stacking. The
-current 0.1.267 source passes the complete terminal, graphics, input,
+current 0.1.268 source passes the complete terminal, graphics, input,
 two-display VKMS/QEMU, four-output Hibr primary/`--join`, mixed-refresh,
-output-loss, and emulator-like pixel-stream acceptance gates. SDL wallpaper
+output-loss, and the 60 Hz emulator-like pixel-stream acceptance gates. SDL wallpaper
 backgrounds are coalesced into horizontal runs before geometry submission;
 the focused 128×48 regression workload now submits four background quads.
 The bundled Hibr font contains 929 glyphs and 1,182 mappings; its manifest rejects
@@ -52,6 +52,10 @@ one-output SDL3/OpenGL presentation. Its controlled full-screen Hibr workload
 reached 17.638 ms maximum render time and zero missed deadlines at a 59.990 Hz
 mode. Physical multi-monitor confirmation remains open because that host
 currently exposes only one connector.
+
+The current real-mode 240 Hz VKMS stream test proves mode selection and frame
+ingestion, but remains red on strict page-flip deadlines under QEMU TCG/VKMS;
+this is an open performance validation item, not a reason to weaken the gate.
 
 Display timing is an explicit hard requirement. Each output must schedule at
 its active mode's maximum refresh by default, with per-output deadlines. The
