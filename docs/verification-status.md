@@ -68,6 +68,14 @@ gate at 60.382 Hz with a 55 Hz minimum, 31 frames in a fresh 513 ms window,
 9,685 terminal bytes, and zero missed deadlines. This is physical one-output
 60 Hz evidence, not 120/240 Hz evidence.
 
+The exact 0.1.283 staged binary and unchanged Hibr executable passed the
+QEMU/VKMS four-pane fixture: one primary plus three `desktop --join` sessions
+were running, each surface reached 1,537 cells, and the guest powered down
+cleanly. The exact high-refresh fixture selected the 240 Hz branch and passed
+its scheduler gate. Its 60-frame pixel-stream variant accepted all 60 frames,
+but strict presentation failed under QEMU TCG with virtual deadline misses;
+this remains scheduler/ingestion evidence, not a physical 240 Hz claim.
+
 The 0.1.281 release-qualification cycle also passed authenticated network
 authorization, HTTP fragmentation and back-pressure, session lifecycle and
 write/resize, stream replay/snapshot repair, hidden-cursor damage, screenshot
