@@ -1667,6 +1667,10 @@ components:
           type: boolean
           default: false
           description: Request one presentation receipt for every completed frame.
+        chunked:
+          type: boolean
+          default: false
+          description: Send the binary pixels as bounded WebSocket chunks followed by pixel_frame_end.
       additionalProperties: false
     StreamPixelFrameReceipt:
       type: object

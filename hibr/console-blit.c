@@ -29,6 +29,7 @@
 #define CB_MAX_PENDING 262144
 #define CB_HTTP_CAP 262144
 #define CB_FLUSH_CELL_LIMIT 256
+#define CB_PIXEL_CHUNK 60000
 #define CB_GLYPH_CAP 16
 #define CB_MAX_PANES 256
 
@@ -879,6 +880,7 @@ static int cb_image(sh *s, const char *pane, int row, int col, int h, int w,
 	char begin[512];
 	int pane_row = 0, pane_col = 0, pane_height = 0, pane_width = 0;
 	int x, y, length;
+	size_t total, offset, chunk;
 	(void)s; (void)flags;
 	if (!cb.opened || !rgb || iw < 1 || ih < 1) return 0;
 	if (pane != NULL && !cb_prect(pane, &pane_row, &pane_col,
@@ -890,11 +892,24 @@ static int cb_image(sh *s, const char *pane, int row, int col, int h, int w,
 	length = snprintf(begin, sizeof(begin),
 		"{\"type\":\"pixel_frame_begin\",\"session_id\":\"%s\","
 		"\"image_id\":%u,\"width\":%d,\"height\":%d,"
-		"\"format\":24,\"x\":%d,\"y\":%d,\"z\":0}",
+		"\"format\":24,\"x\":%d,\"y\":%d,\"z\":0,\"chunked\":true}",
 		cb.session, cb.image_id, iw, ih, x, y);
+	total = (size_t)iw * (size_t)ih * 3U;
 	if (length < 0 || (size_t)length >= sizeof(begin) ||
-		!cb_ws_send_frame(0x1, begin, (size_t)length) ||
-		!cb_ws_send_frame(0x2, rgb, (size_t)iw * (size_t)ih * 3U)) {
+		!cb_ws_send_frame(0x1, begin, (size_t)length)) {
+		cb.image_valid = 0;
+		return 0;
+	}
+	for (offset = 0; offset < total; offset += chunk) {
+		chunk = total - offset;
+		if (chunk > CB_PIXEL_CHUNK) chunk = CB_PIXEL_CHUNK;
+		if (!cb_ws_send_frame(0x2, rgb + offset, chunk)) {
+			cb.image_valid = 0;
+			return 0;
+		}
+	}
+	if (!cb_ws_send_frame(0x1, "{\"type\":\"pixel_frame_end\"}",
+		strlen("{\"type\":\"pixel_frame_end\"}"))) {
 		cb.image_valid = 0;
 		return 0;
 	}

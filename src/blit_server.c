@@ -208,6 +208,7 @@ typedef struct {
     size_t pixel_frame_received;
     int pixel_frame_active;
     int pixel_frame_ack;
+    int pixel_frame_chunked;
 } BlitStream;
 
 typedef struct {
@@ -7547,6 +7548,7 @@ static void pixel_frame_reset(BlitRuntime *runtime, BlitStream *stream,
     stream->pixel_frame_received = 0;
     stream->pixel_frame_active = 0;
     stream->pixel_frame_ack = 0;
+    stream->pixel_frame_chunked = 0;
 }
 
 static int pixel_frame_begin(BlitRuntime *runtime, BlitStream *stream,
@@ -7562,6 +7564,7 @@ static int pixel_frame_begin(BlitRuntime *runtime, BlitStream *stream,
     int y = 0;
     int z = 0;
     int acknowledge = 0;
+    int chunked = 0;
     size_t bytes;
     BlitSession *session;
     BlitSurface *surface;
@@ -7596,6 +7599,8 @@ static int pixel_frame_begin(BlitRuntime *runtime, BlitStream *stream,
     if (json_int(message, "z", &z) == 0) z = 0;
     if (json_bool(message, "ack", &acknowledge) == 0)
         acknowledge = 0;
+    if (json_bool(message, "chunked", &chunked) == 0)
+        chunked = 0;
     /* A new begin record changes the stream's frame format.  Keep the old
        API image allocation available so same-sized frames can be reused. */
     pixel_frame_reset(runtime, stream, 0);
@@ -7659,6 +7664,7 @@ static int pixel_frame_begin(BlitRuntime *runtime, BlitStream *stream,
     stream->pixel_frame_received = 0;
     stream->pixel_frame_active = 1;
     stream->pixel_frame_ack = acknowledge;
+    stream->pixel_frame_chunked = chunked;
     send_websocket_text(stream->fd,
         "{\"type\":\"pixel_frame_ready\",\"state\":\"ready\"}");
     return 1;
@@ -7858,6 +7864,21 @@ static void service_stream_text(BlitRuntime *runtime, int fd,
                 if (surface != NULL) mark_surface_full_damage(surface);
             }
         }
+    } else if (strstr(message, "\"type\":\"pixel_frame_end\"") != NULL) {
+        int i;
+        for (i = 0; i < BLIT_MAX_STREAMS; ++i) {
+            if (runtime->streams[i].used && runtime->streams[i].fd == fd) {
+                if (!runtime->streams[i].pixel_frame_active ||
+                    !runtime->streams[i].pixel_frame_chunked ||
+                    !service_pixel_frame_binary(runtime, &runtime->streams[i],
+                                                1, NULL, 0)) {
+                    ++runtime->pixel_frame_errors;
+                    send_websocket_text(fd,
+                        "{\"type\":\"pixel_frame_error\",\"code\":\"invalid_end\"}");
+                }
+                break;
+            }
+        }
     } else if (strstr(message, "\"input\"") != NULL &&
                strstr(message, "session_id") != NULL) {
         char session_id[64];
@@ -7927,7 +7948,8 @@ static int service_stream_frame(BlitRuntime *runtime, BlitStream *stream,
     if (opcode == 0x1 && final)
         service_stream_text(runtime, stream->fd, payload, length);
     else if (opcode == 0x2)
-        service_pixel_frame_binary(runtime, stream, final, payload, length);
+        service_pixel_frame_binary(runtime, stream,
+            stream->pixel_frame_chunked ? 0 : final, payload, length);
     return 1;
 }
 

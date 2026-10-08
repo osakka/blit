@@ -1,0 +1,8 @@
+# Minimal provider-level image probe. It exercises Hibr's dp_api.image path
+# without changing Hibr source or invoking the desktop window manager.
+mod load /tmp/console-blit-probe.so
+mod load /home/osakka/hibr/build/mods/img.so
+console open
+img draw /home/osakka/hibr/examples/desktop/themes/retro_car.png 0 0 32 64 -u
+console flush
+sleep 1
