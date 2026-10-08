@@ -1268,15 +1268,26 @@ static int send_sdl_screenshot(BlitHttpClient *client, BlitRuntime *runtime,
         return -1;
     }
     temporary_fd = mkstemp(temporary);
-    if (temporary_fd < 0 || !SDL_SaveBMP(pixels, temporary)) {
-        if (temporary_fd >= 0) close(temporary_fd);
+    if (temporary_fd < 0) {
         SDL_DestroySurface(pixels);
         unlink(temporary);
         send_problem(client->fd, 503, "Service Unavailable", "screenshot_failed",
+                     "The temporary framebuffer file could not be created.");
+        return -1;
+    }
+    /* SDL_SaveBMP opens the path itself.  Close the descriptor returned by
+       mkstemp first; keeping the placeholder open makes the SDL3 encoder
+       fail on some real SDL backends even though readback succeeded. */
+    close(temporary_fd);
+    temporary_fd = -1;
+    if (!SDL_SaveBMP(pixels, temporary)) {
+        SDL_DestroySurface(pixels);
+        unlink(temporary);
+        send_problem(client->fd, 503, "Service Unavailable", "screenshot_failed",
+                     SDL_GetError()[0] != '\0' ? SDL_GetError() :
                      "The framebuffer image could not be encoded.");
         return -1;
     }
-    close(temporary_fd);
     SDL_DestroySurface(pixels);
     input_fd = open(temporary, O_RDONLY | O_CLOEXEC);
     if (input_fd < 0 || fstat(input_fd, &file_status) < 0 ||
