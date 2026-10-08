@@ -51,6 +51,11 @@ raw_events = delta("evdev_mouse_events")
 raw_motion = delta("evdev_mouse_motion_events")
 raw_buttons = delta("evdev_mouse_button_events")
 raw_wheel = delta("evdev_mouse_wheel_events")
+runtime_samples = [read("runtime-start.json"), read("runtime-end.json")]
+runtime_samples += [read(path.name) for path in sorted(root.glob("runtime-*.json"))]
+sample_gaps = [sample.get("performance", {}).get("last_loop_gap_ms", 0) or 0
+               for sample in runtime_samples]
+capture_max_loop_gap = max(sample_gaps, default=0)
 
 print("physical_motion_events=%d physical_button_events=%d render_events=%d" %
       (len(physical_motion), len(physical_buttons), len(render)))
@@ -59,6 +64,8 @@ print("raw_evdev_delta events=%d motion=%d buttons=%d wheel=%d" %
 print("missed_deadlines=%s last_render_ms=%s max_loop_gap_ms=%s" %
       (runtime.get("missed_deadlines"), runtime.get("last_render_ms"),
        runtime.get("max_loop_gap_ms")))
+print("capture_max_loop_gap_ms=%s historical_max_loop_gap_ms=%s" %
+      (capture_max_loop_gap, runtime.get("max_loop_gap_ms")))
 
 if not pointer_devices:
     print("FAIL physical-pointer-device-not-inventory")

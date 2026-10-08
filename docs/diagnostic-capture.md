@@ -146,6 +146,9 @@ can perturb a single-threaded server; compare its timestamps with
 The verifier also compares the start/end runtime counters and requires positive
 `evdev_mouse_events` and `evdev_mouse_motion_events` deltas. A trace-only event
 or a missing runtime response is not accepted as physical-input evidence.
+It reports both the maximum loop gap observed during the capture and the
+runtime's lifetime maximum; an old screenshot or diagnostic stall therefore
+cannot be mistaken for a stall caused by the current physical-input test.
 
 The Hibr adapter batches up to 256 cell mutations per request, while retaining
 deferred updates and one final `commit` per Hibr flush. This bounds transport
