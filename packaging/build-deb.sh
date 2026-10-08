@@ -70,6 +70,7 @@ mkdir -p "$stage/usr/lib/blit" "$stage/usr/bin" \
 # executable and session/orchestration layer.
 mkdir -p "$stage/usr/lib/blit/bin" "$stage/usr/lib/blit/lib" \
     "$stage/usr/lib/hibr" \
+    "$stage/usr/share/blit/probes" \
     "$stage/usr/lib/blit/fonts" "$stage/usr/share/blit/hibr" \
     "$stage/lib/systemd/system"
 cp -a "$RUNTIME_BINARY" "$stage/usr/lib/blit/bin/blit-server"
@@ -79,7 +80,10 @@ cp -a "$UPDATE_HELPER" "$stage/usr/lib/blit/bin/blit-update-helper"
 # Hibr remains external and its source/session tree is never copied here.
 cp -a "$HIBR_ADAPTER" "$stage/usr/lib/hibr/console-blit.so"
 cp -a "$HIBR_ENTRYPOINT" "$stage/usr/share/blit/hibr/blit-session.hibr"
+cp -a "$ROOT/hibr/blit-live-image-probe.hibr" \
+    "$stage/usr/share/blit/probes/blit-live-image-probe.hibr"
 chmod 0755 "$stage/usr/share/blit/hibr/blit-session.hibr"
+chmod 0755 "$stage/usr/share/blit/probes/blit-live-image-probe.hibr"
 # Hibr's stock session resolves desktop.hibr and its sibling directories from
 # its own $0 directory. The Blit launcher stays in a separate integration
 # directory, so provide only symlinks back to Hibr's installed tree; never
