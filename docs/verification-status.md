@@ -37,6 +37,9 @@ The exact 0.1.326 Hibr VKMS fixture also passes `LAYOUT_MATRIX_PASS`,
 outputs and a final `2x2` pane topology. The staged Hibr tree was unchanged;
 its executable SHA-256 was
 `c2f6522354394bdb443d00d15ec0eb425009c07115fd105f98270eb5c0b040ef`.
+The exact-version input-only fixture also passes
+`BLIT_INPUT_MULTI_MOUSE_PASS`, `BLIT_INPUT_STREAM_PASS`,
+`BLIT_INPUT_GAMEPAD_PASS`, and the keypad/PTTY delivery checks.
 
 ## Current 0.1.320 live graphics-probe status
 
