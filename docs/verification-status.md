@@ -7,7 +7,7 @@ an evidence record, not a claim that the complete product is released.
 
 - Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The current candidate is `0.1.255`. It builds with TCC and passes terminal
+- The current candidate is `0.1.256`. It builds with TCC and passes terminal
   conformance, SDL screenshot/overlay pixels, the hidden-cursor damage gate,
   and the complete Hibr font manifest gate. Its SDL backend uses a per-output
   glyph atlas, suppresses unchanged cell damage, and does not schedule frames
@@ -17,9 +17,9 @@ an evidence record, not a claim that the complete product is released.
   wallpaper workload on the prior source-equivalent 0.1.241 build measured
   26.865 ms maximum full render and 61.387 Hz over its active 504 ms window.
   The direct-KMS pixel-frame acceptance below was run from the exact current
-  0.1.253 TCC build. The authorized physical host now reports 0.1.253
-  through its version endpoint; the 0.1.254 candidate contains the scoped
-  cell-style parser fix described below.
+  0.1.256 TCC build. The authorized physical host now reports 0.1.256
+  through its version endpoint; the scoped cell-style parser fix and input
+  route inventory changes are recorded below.
 
 ### Current 0.1.256 source evidence
 
