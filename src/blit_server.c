@@ -6782,6 +6782,41 @@ static int reassert_hibr_session_processes(BlitSession *session,
     return matched;
 }
 
+/* TIOCSWINSZ is permitted to suppress SIGWINCH when the geometry is already
+   equal to the requested value.  A held Hibr desktop can start on its
+   24-row fallback, while Blit's canonical pane is already installed on the
+   attach PTY; repeating the canonical size then leaves Hibr's first layout
+   at the fallback height.  Use one bounded, ownership-scoped geometry
+   transition to force the hold client to publish the canonical size.  The
+   surface never exposes the temporary size; this is only a PTY notification
+   transaction and is used after Hibr's token-bearing processes are found. */
+static int force_hibr_session_resize(BlitSession *session,
+                                      const struct winsize *size)
+{
+    struct winsize kick;
+
+    if (session == NULL || size == NULL || session->pty_fd < 0)
+        return 0;
+    kick = *size;
+    if (kick.ws_row > 1)
+        --kick.ws_row;
+    else if (kick.ws_col > 1)
+        --kick.ws_col;
+    else
+        return 0;
+    if (size->ws_ypixel > 0 && size->ws_row > 0)
+        kick.ws_ypixel = (unsigned short)((unsigned long long)size->ws_ypixel *
+                                          kick.ws_row / size->ws_row);
+    if (kick.ws_xpixel > 0 && size->ws_xpixel > 0 && size->ws_col > 0 &&
+        kick.ws_col != size->ws_col)
+        kick.ws_xpixel = (unsigned short)((unsigned long long)size->ws_xpixel *
+                                          kick.ws_col / size->ws_col);
+    if (ioctl(session->pty_fd, TIOCSWINSZ, &kick) < 0 ||
+        ioctl(session->pty_fd, TIOCSWINSZ, size) < 0)
+        return 0;
+    return 1;
+}
+
 static void service_attach_reasserts(BlitRuntime *runtime, uint64_t now)
 {
     int i;
@@ -6825,6 +6860,8 @@ static void service_attach_reasserts(BlitRuntime *runtime, uint64_t now)
             signalled = 1;
         hibr_matches = reassert_hibr_session_processes(session, &size);
         if (hibr_matches > 0) {
+            if (force_hibr_session_resize(session, &size))
+                ++hibr_matches;
             signalled = 1;
             ++session->attach_reassert_hibr_matches;
         }
