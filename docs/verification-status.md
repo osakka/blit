@@ -3,7 +3,7 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
-## Current 0.1.298 Hibr integration status
+## Current 0.1.299 Hibr integration status
 
 The TCC-built server retains the API restart recovery path from 0.1.296 and
 adds a focused SDL scene-cache correction. When Hibr changes DECTCEM cursor
@@ -19,10 +19,11 @@ was then running 0.1.297; its settled screenshot no longer contained the
 stale left-edge cursor artifact, and runtime reported zero missed deadlines at
 the active 60 Hz mode. The live 0.1.297 diagnostics then exposed a separate
 input ownership defect: KMSDRM SDL and Blit both consumed the same evdev pointer.
-0.1.298 makes raw evdev the single pointer owner, hides SDL's native cursor,
+0.1.299 makes raw evdev the single pointer owner, hides SDL's native cursor
+after each output window is created,
 and retains SDL mouse handling only as a no-evdev fallback. This directly
 addresses duplicate clicks, two initial pointers, and pointer trails. The
-physical host now reports 0.1.298 with the Hibr session running; human click
+physical host now reports 0.1.299 with the Hibr session running; human click
 validation remains the final physical check for this fix.
 
 ## Superseded 0.1.295 Hibr integration status
@@ -126,7 +127,7 @@ source or installed Hibr file was modified.
 
 - Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The current source candidate is `0.1.298`. It builds with TCC and passes
+- The current source candidate is `0.1.299`. It builds with TCC and passes
   the complete terminal conformance suite, SDL screenshot/overlay pixels,
   the hidden-cursor damage gate, and the complete Hibr font manifest gate.
   It includes the versioned network terminal-input endpoint at the canonical

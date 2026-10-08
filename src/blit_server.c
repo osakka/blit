@@ -8786,10 +8786,6 @@ static void discover_displays(BlitRuntime *runtime)
                  SDL_GetError());
         return;
     }
-    /* Blit owns the evdev input path so every physical event is dispatched
-       exactly once.  SDL may still expose its platform cursor; hide it because
-       the compositor draws the authoritative software cursor below. */
-    SDL_HideCursor();
     ids = SDL_GetDisplays(&count);
     if (ids == NULL) {
         snprintf(runtime->sdl_error, sizeof(runtime->sdl_error), "%s",
@@ -8970,6 +8966,10 @@ static void initialize_outputs(BlitRuntime *runtime)
             SDL_DestroyWindow(window);
             continue;
         }
+        /* Hide after the window exists.  Some SDL video backends do not apply
+           the global cursor state to a window created later, which leaves a
+           native cursor competing with Blit's software cursor. */
+        SDL_HideCursor();
         if (runtime->sdl_renderer_name[0] == '\0')
             snprintf(runtime->sdl_renderer_name,
                      sizeof(runtime->sdl_renderer_name), "%s",
