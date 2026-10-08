@@ -51,6 +51,13 @@ selected 240 Hz and accepted all 240 frames, but strict presentation measured
 117.83 Hz with eight virtual missed deadlines under QEMU TCG, so the fixture
 remains scheduler/ingestion evidence rather than a 240 Hz presentation pass.
 
+The 0.1.281 release-qualification cycle also passed authenticated network
+authorization, HTTP fragmentation and back-pressure, session lifecycle and
+write/resize, stream replay/snapshot repair, hidden-cursor damage, screenshot
+overlay, API shutdown, font manifest, glyph geometry, and full terminal
+conformance gates. These checks ran against the exact TCC-built binary; no
+Hibr source was modified.
+
 The same live host sustained 59.894 measured frames per second during a
 controlled 120×50 full-screen coloured terminal redraw workload carrying
 99,433 terminal bytes, with zero missed deadlines. Its maximum observed render
