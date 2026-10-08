@@ -67,14 +67,23 @@ while Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
 end
 
 performance = samples.last.fetch('performance')
+outputs = samples.last.fetch('snapshot').fetch('render').fetch('outputs')
+raise 'no rendered output reported' if outputs.empty?
+target_interval_ms = outputs.map { |output| output.fetch('target_interval_ms') }.max
 raise 'frame-rate window never completed' unless performance.fetch('frame_rate_window_ms') >= 500
 raise 'frame-rate measurement is zero' unless performance.fetch('frame_rate_hz') > 0
 raise 'frame-rate measurement is stale' unless performance.fetch('frame_rate_age_ms') <= 2000
 raise 'frame-rate frame count invalid' unless performance.fetch('frame_rate_frames') >= 1
+raise 'refresh deadline was missed' unless performance.fetch('missed_deadlines').zero?
+raise format('render exceeded refresh budget: %.3f > %.3f ms',
+             performance.fetch('max_render_ms'), target_interval_ms) unless
+  performance.fetch('max_render_ms') <= target_interval_ms
 
 request(base, Net::HTTP::Delete, "/v1/terminal-sessions/#{session_id}")
-puts format('FRAME_RATE_PASS hz=%.3f frames=%d window_ms=%d age_ms=%d',
+puts format('FRAME_RATE_PASS hz=%.3f frames=%d window_ms=%d age_ms=%d max_render_ms=%.3f target_interval_ms=%.3f missed_deadlines=%d',
             performance.fetch('frame_rate_hz'),
             performance.fetch('frame_rate_frames'),
             performance.fetch('frame_rate_window_ms'),
-            performance.fetch('frame_rate_age_ms'))
+            performance.fetch('frame_rate_age_ms'),
+            performance.fetch('max_render_ms'), target_interval_ms,
+            performance.fetch('missed_deadlines'))

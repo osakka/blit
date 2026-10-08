@@ -7,7 +7,7 @@ an evidence record, not a claim that the complete product is released.
 
 - Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The current candidate is `0.1.265`. It builds with TCC and passes terminal
+- The current candidate is `0.1.266`. It builds with TCC and passes terminal
   conformance, SDL screenshot/overlay pixels, the hidden-cursor damage gate,
   and the complete Hibr font manifest gate. Its SDL backend uses a per-output
   glyph atlas, suppresses unchanged cell damage, and does not schedule frames
@@ -19,8 +19,31 @@ an evidence record, not a claim that the complete product is released.
   The direct-KMS pixel-frame acceptance below was run from the exact current
   0.1.256 TCC build; the newer SDL presentation and geometry work is recorded
   below. The authorized physical host now reports 0.1.265 through its version
-  endpoint. The 0.1.265 Debian package SHA-256 is
-  `6bd9fb4e1293893bd6840104478522dc434c15fdcedfd99e26efbe61ebbf468e`.
+  endpoint. The 0.1.266 Debian package was rebuilt and verified locally;
+  its artifact hash is recorded by the build command rather than embedded in
+  this ledger, because package timestamps are not part of the runtime contract.
+
+### Current 0.1.266 release-candidate evidence
+
+The exact 0.1.266 TCC binary passed the strengthened frame-rate gate with
+44.963 measured damage-driven frames per second, 15.413 ms maximum render time
+against a 16.000 ms target interval, and zero missed deadlines. The gate now
+fails if the runtime reports a missed deadline or a render over the active
+output budget; this is a scheduler-budget assertion, not a claim that a
+60 Hz panel scans at 44.963 Hz.
+
+The same exact binary passed the complete terminal conformance suite and the
+Hibr font manifest gate (`required=447`, `mappings=1181`). The conformance
+vectors include combining marks, wide cells, variation selectors, zero-width
+joiners, box drawing, DEC special graphics, cursor state, and malformed
+control recovery.
+
+The exact 0.1.266 direct-KMS QEMU fixture passed `KMS_CAPTURE_PASS`, including
+two distinct output captures, wide-glyph pixels, API screenshot validation,
+and the 929-glyph/1,182-mapping bundled font. The exact four-output Hibr
+fixture passed `KMS_FOUR_HIBR_PASS` with one primary and three
+`desktop --join` clients and four rendered views. These are VKMS/QEMU results,
+not physical multi-monitor evidence.
 
 ### Current 0.1.265 source evidence
 

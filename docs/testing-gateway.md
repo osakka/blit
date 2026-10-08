@@ -352,7 +352,9 @@ BLIT_GATE_BINARY=build/blit/blit-server \
 The frame-rate gate creates a bounded PTY producer and samples the versioned
 runtime diagnostics endpoint. It requires a completed, nonzero measured frame
 rate and a fresh measurement window; cumulative frame counters alone are not
-treated as a refresh-rate measurement:
+treated as a refresh-rate measurement. It also requires zero missed refresh
+deadlines and a maximum measured render duration no greater than the active
+output's target interval:
 
 ```sh
 BLIT_GATE_PORT=19248 ruby tools/tests/frame_rate_gate.rb
