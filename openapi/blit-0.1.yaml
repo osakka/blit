@@ -1146,7 +1146,7 @@ components:
       additionalProperties: false
     CreateTerminalSession:
       type: object
-      required: [command, surface]
+      required: [command]
       properties:
         command: {type: string, minLength: 1}
         arguments:
@@ -1162,6 +1162,11 @@ components:
             width: {type: integer, minimum: 1}
             height: {type: integer, minimum: 1}
           additionalProperties: false
+          description: >-
+            Optional when pane_id or display_id is supplied. In that case Blit
+            derives the complete logical cell geometry from the authoritative
+            pane or physical display bounds. Supplying surface explicitly is
+            required for an unplaced session.
         display_id: {$ref: '#/components/schemas/ResourceId'}
         pane_id: {$ref: '#/components/schemas/ResourceId'}
         surface_mode:

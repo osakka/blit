@@ -21,6 +21,7 @@ Accepted decisions:
 11. [Event-driven input-device discovery](0011-event-driven-input-discovery.md).
 12. [SDL glyph atlas and unchanged-damage suppression](0012-sdl-glyph-atlas-and-noop-damage.md).
 13. [Interactive games and emulation are first-class workloads](0013-interactive-games-and-emulation.md).
+14. [SDL glyph geometry batching for full-screen redraws](0014-sdl-glyph-geometry-batching.md).
 
 Pending decisions:
 

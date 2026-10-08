@@ -7,7 +7,7 @@ an evidence record, not a claim that the complete product is released.
 
 - Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The current candidate is `0.1.256`. It builds with TCC and passes terminal
+- The current candidate is `0.1.258`. It builds with TCC and passes terminal
   conformance, SDL screenshot/overlay pixels, the hidden-cursor damage gate,
   and the complete Hibr font manifest gate. Its SDL backend uses a per-output
   glyph atlas, suppresses unchanged cell damage, and does not schedule frames
@@ -17,9 +17,33 @@ an evidence record, not a claim that the complete product is released.
   wallpaper workload on the prior source-equivalent 0.1.241 build measured
   26.865 ms maximum full render and 61.387 Hz over its active 504 ms window.
   The direct-KMS pixel-frame acceptance below was run from the exact current
-  0.1.256 TCC build. The authorized physical host now reports 0.1.256
-  through its version endpoint; the scoped cell-style parser fix and input
-  route inventory changes are recorded below.
+  0.1.256 TCC build; the newer SDL presentation and geometry work is recorded
+  below. The authorized physical host now reports 0.1.258 through its version
+  endpoint.
+
+### Current 0.1.258 source and physical evidence
+
+The TCC-built 0.1.258 runtime derives a terminal surface's cell geometry from
+its authoritative pane or display when the API request omits `surface`. A
+request for the physical host's `display-1` therefore created a 240×135 cell
+surface for its 1920×2160 mode, eliminating the earlier 120×40 partial-screen
+integration mistake. The same request launched the stock `/usr/bin/desktop`
+without modifying Hibr.
+
+The SDL renderer now batches atlas-backed glyph quads with
+`SDL_RenderGeometry`. On that physical Hibr workload the API reported an
+active 517 ms window at 59.948 Hz, last render 16.420 ms, maximum render
+17.234 ms, maximum event-loop gap 17.311 ms, and zero missed deadlines. The
+captured 1920×2160 screenshot filled the output and retained the Hibr
+wallpaper, desktop icons, menu controls, and pointer without visible geometry
+corruption. This is physical one-output evidence at the host's active 59.990
+Hz mode; physical multi-monitor and 120/240 Hz hardware evidence remain open.
+
+The full VT/UTF-8/Hibr terminal suite, SDL frame gate, graphics-cache gate,
+Hibr font manifest, and OpenAPI derived-geometry check pass from the same
+0.1.258 source. The manifest contains 441 required Hibr glyphs and 1,175
+Unicode mappings. The full-screen Hibr workload's measured frame rate is
+distinct from the idle diagnostic value: idle servers do not present frames.
 
 ### Current 0.1.256 source evidence
 

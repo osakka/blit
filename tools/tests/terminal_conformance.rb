@@ -132,6 +132,21 @@ assert_equal('session_create_failed', missing_surface_response.fetch('code'),
              'missing surface code')
 puts 'PASS schema-required-surface'
 
+derived_session = request(base, 'POST', '/v1/terminal-sessions', {
+  'command' => '/bin/sh',
+  'arguments' => ['-c', 'sleep 1'],
+  'display_id' => topology.fetch('outputs').fetch(0).fetch('display_id')
+})
+derived_surface = request(base, 'GET',
+                          "/v1/surfaces/surface-#{derived_session.fetch('id')}/cells")
+display_bounds = topology.fetch('outputs').fetch(0).fetch('bounds')
+assert_equal(display_bounds.fetch('width') / 8,
+             derived_surface.fetch('width'), 'display-derived surface width')
+assert_equal(display_bounds.fetch('height') / 16,
+             derived_surface.fetch('height'), 'display-derived surface height')
+request(base, 'DELETE', "/v1/terminal-sessions/#{derived_session.fetch('id')}")
+puts 'PASS display-derived-surface-geometry'
+
 effects = request(base, 'GET', '/v1/effects')
 assert_equal('none', effects.fetch('preset'), 'initial effect preset')
 effect_update = request(base, 'PUT', '/v1/effects', {

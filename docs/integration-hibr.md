@@ -54,12 +54,14 @@ schema directly with `execve(2)`. Hibr therefore remains the executable and
 the owner of desktop/session behavior; the repository's shell probes are
 limited to QEMU staging, build, and regression-test orchestration.
 
-Create it through the API with a surface sized to the PTY:
+Create it through the API by selecting the authoritative pane. Blit derives
+the complete PTY and surface geometry from that pane; do not guess a fixed
+`120x40` surface:
 
 ```sh
 curl --fail --request POST \
   --header 'Content-Type: application/json' \
-  --data '{"command":"/usr/bin/desktop","arguments":["--session","blit","--name","display-1"],"display_id":"display-1","surface":{"width":120,"height":40}}' \
+  --data '{"command":"/usr/bin/desktop","arguments":["--session","blit","--name","display-1"],"pane_id":"pane-display-1-1"}' \
   http://127.0.0.1:8080/v1/terminal-sessions
 ```
 
