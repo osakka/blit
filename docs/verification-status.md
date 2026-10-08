@@ -76,6 +76,13 @@ its scheduler gate. Its 60-frame pixel-stream variant accepted all 60 frames,
 but strict presentation failed under QEMU TCG with virtual deadline misses;
 this remains scheduler/ingestion evidence, not a physical 240 Hz claim.
 
+The exact current 0.1.283 direct-KMS pixel-stream fixture also passed its
+standard acceptance path: 60 frames were accepted at a 60 Hz producer cadence,
+there were no additional missed deadlines beyond the startup baseline, and
+the KMS pixel/screenshot oracles passed for both outputs. The VKMS mode exposed
+240 Hz in that run, but the producer remained 60 Hz; this is not a 240 Hz
+presentation claim.
+
 The 0.1.281 release-qualification cycle also passed authenticated network
 authorization, HTTP fragmentation and back-pressure, session lifecycle and
 write/resize, stream replay/snapshot repair, hidden-cursor damage, screenshot
