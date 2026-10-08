@@ -16,7 +16,7 @@ an evidence record, not a claim that the complete product is released.
   42.935–43.867 Hz with 15.400–15.676 ms maximum render time against a
   16.000 ms target and zero missed deadlines; this is a software-dummy result,
   not a physical refresh-rate claim. The authorized physical host now reports
-  0.1.276 through its version endpoint. Its controlled live API smoke test
+  0.1.277 through its version endpoint. Its controlled live API smoke test
   preserved VT500 text, box/block glyphs, combining `Á`, and wide `界` in
   the surface model at 60.000 Hz with zero missed deadlines; this is
   one-output evidence, not a multi-monitor or 120/240 Hz claim. The Debian candidate
@@ -101,6 +101,20 @@ zero missed deadlines, `max_render_ms=17.378`,
 `max_sdl_present_ms=17.259`, and returned to zero sessions and surfaces after
 cleanup. This confirms that the observed worst-case sample is at the SDL
 presentation boundary; it does not claim physical 120/240 Hz support.
+
+The same live host passed the API-owned pixel-frame gate against the installed
+0.1.277 service: 30 fragmented/reused RGBA frames were accepted at 61.058 Hz,
+with zero pixel-frame errors and 16 refresh-bound presentations during the
+bounded test. This validates the game/arcade frame transport independently of
+the terminal-cell glyph path; it is still one physical 60 Hz output evidence.
+
+An attempted live Hibr reattach also exposed an important test precondition:
+the host already had a held `blit` desktop, so a fresh primary invocation
+correctly exited with Hibr's "already running" result. Reattaching with
+`desktop --session blit --resume` remained running, but the existing held
+session's attached surface was blank in the API cell snapshot. This is not
+treated as a rendering pass; the held-session lifecycle/state must be reset or
+inspected through Hibr before using that host run as current glyph evidence.
 
 ### Current 0.1.276 evidence
 
