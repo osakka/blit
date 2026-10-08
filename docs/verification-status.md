@@ -29,8 +29,8 @@ an evidence record, not a claim that the complete product is released.
 The exact TCC-built `0.1.269` binary was rebuilt from the pushed source and
 passed `HIBR_FONT_MANIFEST_PASS` (`required=447`, `mappings=1181`),
 `SDL_GLYPH_RENDER_PASS` (light/heavy/double box geometry, blocks, and wide
-glyphs), three consecutive dummy frame-rate runs (42.935–43.867 Hz,
-15.400–15.676 ms maximum render time against a 16.000 ms target, zero missed
+glyphs), three consecutive dummy frame-rate runs (42.935–44.526 Hz,
+15.180–15.676 ms maximum render time against a 16.000 ms target, zero missed
 deadlines), `PIXEL_FRAME_PASS`, complete terminal conformance, background
 batching, graphics-cache, hidden-cursor damage, and a 20-second four-session
 terminal soak. The soak completed 244 snapshots and 22 resizes with a maximum
@@ -58,6 +58,12 @@ Hibr VKMS orchestration fixture: `LAYOUT_MATRIX_PASS`,
 `HIBR_PANE_MATRIX_PASS`. The four-output current-source fixture also passed
 `KMS_FOUR_OUTPUT_PASS`, presenting four independent KMS outputs and four
 attached terminal surfaces.
+
+The exact `0.1.269` binary and unchanged Hibr checkout additionally passed
+the input/presentation soak: `LAYOUT_MATRIX_PASS`,
+`BLIT_INPUT_GAMEPAD_DISCOVERY_PASS`, `BLIT_INPUT_KEYPAD_SOAK_OBSERVED`,
+`BLIT_INPUT_MULTI_MOUSE_PASS`, `BLIT_INPUT_STREAM_PASS`,
+`BLIT_INPUT_GAMEPAD_PASS`, and `BLIT_INPUT_RENDER_SOAK_PASS`.
 
 The current Hibr VKMS input fixture also passed keypad soak observation,
 `BLIT_INPUT_MULTI_MOUSE_PASS`, `BLIT_INPUT_STREAM_PASS`,
