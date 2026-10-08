@@ -1,10 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-base_url=${1:?usage: pointer-artifact-capture.sh http://host:8080 [output-dir]}
+base_url=${1:?usage: pointer-artifact-capture.sh http://host:8080 [output-dir] [screenshots]}
 output_dir=${2:-"diagnostics/pointer-$(date -u +%Y%m%dT%H%M%SZ)"}
+screenshots=${3:-no}
 
-mkdir -p "$output_dir/screenshots"
+case "$screenshots" in
+    yes|no) ;;
+    *) echo "screenshots must be yes or no" >&2; exit 2 ;;
+esac
+
+mkdir -p "$output_dir"
+if [ "$screenshots" = yes ]; then
+    mkdir -p "$output_dir/screenshots"
+fi
 
 get() {
     local name=$1 path=$2
@@ -24,11 +33,13 @@ capture() {
         '/v1/diagnostics/trace?kind=render_path'
     get "trace-surface-update-$label.json" \
         '/v1/diagnostics/trace?kind=surface_update'
-    curl --fail --silent --show-error --max-time 30 \
-        "$base_url/v1/diagnostics/screenshots/display-1" \
-        > "$output_dir/screenshots/$label.bmp"
-    sha256sum "$output_dir/screenshots/$label.bmp" \
-        >> "$output_dir/screenshot-sha256.txt"
+    if [ "$screenshots" = yes ]; then
+        curl --fail --silent --show-error --max-time 30 \
+            "$base_url/v1/diagnostics/screenshots/display-1" \
+            > "$output_dir/screenshots/$label.bmp"
+        sha256sum "$output_dir/screenshots/$label.bmp" \
+            >> "$output_dir/screenshot-sha256.txt"
+    fi
 }
 
 get version.json /v1/version
@@ -53,4 +64,4 @@ done
 
 get runtime-end.json /v1/diagnostics/runtime
 get trace-end.json /v1/diagnostics/trace
-printf 'capture_dir=%s\n' "$output_dir"
+printf 'capture_dir=%s screenshots=%s\n' "$output_dir" "$screenshots"

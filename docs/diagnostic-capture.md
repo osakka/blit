@@ -163,12 +163,16 @@ reachable client:
 
 ```sh
 tools/diagnostics/pointer-artifact-capture.sh \
-  http://192.168.10.54:8080 diagnostics/pointer-live
+  http://192.168.10.54:8080 diagnostics/pointer-live no
 ```
 
 The transaction records the deployed version and topology, the active session,
-runtime timing before and after each motion, filtered pointer/render/surface
-traces, and a screenshot plus SHA-256 after every injected pointer position.
+runtime timing before and after each motion, and filtered
+pointer/render/surface traces. It is screenshot-free by default so the
+diagnostic transaction cannot be confused with a renderer stall caused by a
+large framebuffer transfer. Pass `yes` as the third argument to capture a
+screenshot after each injected position; use that only after the timing
+transaction has completed, or interpret the resulting transfer separately.
 The injected events use the same API dispatch path as physical input and are
 labelled `api-pointer`; they are a controlled comparator, not evidence about
 the physical evdev device. Compare `render_path` with the screenshots: a
