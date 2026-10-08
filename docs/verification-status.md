@@ -52,6 +52,15 @@ hidden-cursor, full-surface wallpaper stress, and glyph gates. Physical host
 mouse acceptance remains open because the live device capture has not observed
 a physical evdev event.
 
+The exact `0.1.360` binary also passes terminal conformance and the bounded
+two-session PTY soak (`356` snapshots, `32` resizes, `53580 KiB` peak RSS).
+The exact binary passes the two-output VKMS capture with
+`PPM_DISPLAY_47_WIDE_KITTY_PASS`, `PPM_DISPLAY_48_PASS`,
+`KMS_API_SCREENSHOT_PASS`, and `KMS_CAPTURE_PASS`; the guest powered down and
+no QEMU process remained. The live host now reports `0.1.360`, and its
+synthetic API input probe passes. Its physical pointer inventory is present,
+but its physical counters remain zero outside an actual movement window.
+
 ## Current 0.1.358 real-host evidence and remaining visual gate
 
 The authorized host now reports `0.1.358`. The attach PTY geometry transition

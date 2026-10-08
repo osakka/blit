@@ -10,6 +10,10 @@ live_host: 192.168.10.54:8080
 live_version: 0.1.360
 qemu_input_repeat_acceptance: pass
 qemu_multi_mouse_acceptance: pass
+qemu_kms_capture_acceptance: pass
+pty_conformance_acceptance: pass
+terminal_soak_acceptance: pass
+live_synthetic_input_acceptance: pass
 screenshot_api_acceptance: pass
 native_hibr_layout_acceptance: partial
 production_adapter_acceptance: pending
