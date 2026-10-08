@@ -673,22 +673,31 @@ static int cb_ws_open(void)
 	 * to large surface/frame messages.  Client-to-server WebSocket messages
 	 * must be masked. */
 	{
-		const char subscription[] = "{\"subscribe\":[\"input\"]}";
-		unsigned char frame[2 + 4 + sizeof(subscription) - 1];
+		char subscription[160];
+		unsigned char frame[2 + 4 + sizeof(subscription)];
 		unsigned char mask[4];
 		unsigned long seed = (unsigned long)time(NULL) ^
 			(unsigned long)getpid();
+		int subscription_length;
 		size_t i;
+		subscription_length = snprintf(subscription, sizeof(subscription),
+			"{\"subscribe\":[\"input\"],\"owner_session_id\":\"%s\"}",
+			cb.session);
+		if (subscription_length < 0 ||
+		    (size_t)subscription_length >= sizeof(subscription)) {
+			close(fd);
+			return 0;
+		}
 		frame[0] = 0x81;
-		frame[1] = (unsigned char)(0x80 | (sizeof(subscription) - 1));
+		frame[1] = (unsigned char)(0x80 | subscription_length);
 		mask[0] = (unsigned char)(seed >> 24);
 		mask[1] = (unsigned char)(seed >> 16);
 		mask[2] = (unsigned char)(seed >> 8);
 		mask[3] = (unsigned char)seed;
 		memcpy(frame + 2, mask, sizeof(mask));
-		for (i = 0; i < sizeof(subscription) - 1; ++i)
+		for (i = 0; i < (size_t)subscription_length; ++i)
 			frame[6 + i] = (unsigned char)subscription[i] ^ mask[i % 4];
-		if (!cb_write_all(fd, frame, sizeof(frame))) {
+		if (!cb_write_all(fd, frame, (size_t)subscription_length + 6)) {
 			close(fd);
 			cb.ws_fd = -1;
 			return 0;

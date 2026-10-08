@@ -193,6 +193,7 @@ typedef struct {
 typedef struct {
     int used;
     int fd;
+    char owner_session_id[64];
     unsigned int subscriptions;
     unsigned char receive_buffer[4096];
     unsigned char *large_receive_buffer;
@@ -633,6 +634,8 @@ static void cancel_update_upload(BlitRuntime *runtime, int fd,
 static void reset_update_state(BlitRuntime *runtime, int fd,
                                const char *request);
 static int terminate_session_process(pid_t process_id);
+static void remove_session_streams(BlitRuntime *runtime,
+                                   const char *session_id);
 
 static void effect_json(const BlitRuntime *runtime, char *body,
                         size_t capacity)
@@ -6338,6 +6341,7 @@ static void refresh_session_state(BlitRuntime *runtime, BlitSession *session)
            protocol reply) immediately before exit.  service_session_output
            must drain those bytes before it observes EOF and closes the PTY. */
         disable_input_routes_for_target(runtime, target_id);
+        remove_session_streams(runtime, target_id);
     } else if (result < 0 && errno != EINTR) {
         session->exit_code = -1;
         snprintf(session->state, sizeof(session->state), "failed");
@@ -6347,6 +6351,7 @@ static void refresh_session_state(BlitRuntime *runtime, BlitSession *session)
             session->pty_fd = -1;
         }
         disable_input_routes_for_target(runtime, target_id);
+        remove_session_streams(runtime, target_id);
     }
 }
 
@@ -7065,6 +7070,7 @@ static void destroy_session(BlitRuntime *runtime, BlitSession *session)
     if (session->pty_fd >= 0)
         close(session->pty_fd);
     disable_input_routes_for_target(runtime, target_id);
+    remove_session_streams(runtime, target_id);
     if (surface != NULL) {
         terminal_scrollback_release(surface);
         memset(surface, 0, sizeof(*surface));
@@ -7304,6 +7310,18 @@ static void remove_stream(BlitRuntime *runtime, int fd)
             return;
         }
     }
+}
+
+static void remove_session_streams(BlitRuntime *runtime,
+                                   const char *session_id)
+{
+    int i;
+    if (session_id == NULL || session_id[0] == '\0')
+        return;
+    for (i = 0; i < BLIT_MAX_STREAMS; ++i)
+        if (runtime->streams[i].used &&
+            strcmp(runtime->streams[i].owner_session_id, session_id) == 0)
+            remove_stream(runtime, runtime->streams[i].fd);
 }
 
 static void broadcast_stream(BlitRuntime *runtime, const char *message,
@@ -7792,6 +7810,9 @@ static void service_stream_text(BlitRuntime *runtime, int fd,
         for (i = 0; i < BLIT_MAX_STREAMS; ++i) {
             if (runtime->streams[i].used && runtime->streams[i].fd == fd) {
                 runtime->streams[i].subscriptions = subscription_mask(message);
+                json_string(message, "owner_session_id",
+                            runtime->streams[i].owner_session_id,
+                            sizeof(runtime->streams[i].owner_session_id));
                 break;
             }
         }
