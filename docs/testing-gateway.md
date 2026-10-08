@@ -78,6 +78,16 @@ curl --fail --request PUT \
   http://127.0.0.1:8080/v1/control/update
 ```
 
+The screenshot route is nonblocking with respect to the display loop. Verify
+this with a deliberately slow reader during local or live diagnostics:
+
+```sh
+tools/tests/screenshot_nonblocking_gate.sh http://DESKTOP_IP:8080 display-1
+```
+
+The gate requires the version endpoint to respond within one second while a
+framebuffer-sized screenshot is still being downloaded.
+
 Poll `/v1/control/update/status` until the supervisor reports the new
 version; an interrupted upload or `403` response is not an installation.
 

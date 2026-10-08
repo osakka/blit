@@ -226,6 +226,12 @@ typedef struct {
     char update_path[256];
     char update_sha256[65];
     int screenshot_output_index;
+    char response_header[512];
+    size_t response_header_length;
+    size_t response_header_offset;
+    unsigned char *response_body;
+    size_t response_body_length;
+    size_t response_body_offset;
 } BlitHttpClient;
 
 typedef struct {
@@ -1120,13 +1126,18 @@ static void send_http(int fd, int status, const char *reason,
     }
 }
 
-static void send_http_bytes(int fd, int status, const char *reason,
-                            const char *content_type,
-                            const unsigned char *body, size_t length)
+static int queue_http_bytes(BlitHttpClient *client, int status,
+                            const char *reason, const char *content_type,
+                            unsigned char *body, size_t length)
 {
-    char header[512];
-    int header_length = snprintf(
-        header, sizeof(header),
+    int header_length;
+
+    if (client == NULL || body == NULL || length == 0)
+        return 0;
+    if (client->response_body != NULL)
+        return 0;
+    header_length = snprintf(
+        client->response_header, sizeof(client->response_header),
         "HTTP/1.1 %d %s\r\n"
         "Content-Type: %s\r\n"
         "X-Blit-Version: %s\r\n"
@@ -1134,11 +1145,61 @@ static void send_http_bytes(int fd, int status, const char *reason,
         "Connection: close\r\n"
         "Cache-Control: no-store\r\n\r\n",
         status, reason, content_type, blit_version, (unsigned long)length);
+    if (header_length <= 0 ||
+        (size_t)header_length >= sizeof(client->response_header))
+        return 0;
+    client->response_header_length = (size_t)header_length;
+    client->response_header_offset = 0;
+    client->response_body = body;
+    client->response_body_length = length;
+    client->response_body_offset = 0;
+    return 1;
+}
 
-    if (header_length > 0 && (size_t)header_length < sizeof(header)) {
-        send_all(fd, header, (size_t)header_length);
-        send_bytes_blocking(fd, body, length);
+static void remove_http_client(BlitRuntime *runtime, int index);
+
+static int service_http_response(BlitRuntime *runtime, int index)
+{
+    BlitHttpClient *client;
+    ssize_t sent;
+
+    if (runtime == NULL || index < 0 || index >= BLIT_MAX_HTTP_CLIENTS ||
+        !runtime->http_clients[index].used)
+        return 0;
+    client = &runtime->http_clients[index];
+    while (client->response_header_offset < client->response_header_length) {
+        sent = send(client->fd,
+                    client->response_header + client->response_header_offset,
+                    client->response_header_length -
+                        client->response_header_offset,
+                    MSG_DONTWAIT | MSG_NOSIGNAL);
+        if (sent < 0 && (errno == EINTR))
+            continue;
+        if (sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+            return 1;
+        if (sent <= 0) {
+            remove_http_client(runtime, index);
+            return 0;
+        }
+        client->response_header_offset += (size_t)sent;
     }
+    while (client->response_body_offset < client->response_body_length) {
+        sent = send(client->fd,
+                    client->response_body + client->response_body_offset,
+                    client->response_body_length - client->response_body_offset,
+                    MSG_DONTWAIT | MSG_NOSIGNAL);
+        if (sent < 0 && (errno == EINTR))
+            continue;
+        if (sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+            return 1;
+        if (sent <= 0) {
+            remove_http_client(runtime, index);
+            return 0;
+        }
+        client->response_body_offset += (size_t)sent;
+    }
+    remove_http_client(runtime, index);
+    return 0;
 }
 
 static void send_problem(int fd, int status, const char *reason,
@@ -1165,8 +1226,8 @@ static int screenshot_output_index(const BlitRuntime *runtime,
     return -1;
 }
 
-static void send_sdl_screenshot(int fd, BlitRuntime *runtime,
-                                const char *path)
+static int send_sdl_screenshot(BlitHttpClient *client, BlitRuntime *runtime,
+                               const char *path)
 {
     char temporary[] = "/tmp/blit-api-screenshot-XXXXXX";
     unsigned char *bytes = NULL;
@@ -1180,15 +1241,15 @@ static void send_sdl_screenshot(int fd, BlitRuntime *runtime,
     size_t offset = 0;
 
     if (runtime->direct_kms || !runtime->sdl_ready) {
-        send_problem(fd, 501, "Not Implemented", "screenshot_backend",
+        send_problem(client->fd, 501, "Not Implemented", "screenshot_backend",
                      "API screenshots currently require the SDL3 backend.");
-        return;
+        return -1;
     }
     output_index = screenshot_output_index(runtime, path);
     if (output_index < 0 || runtime->outputs[output_index].renderer == NULL) {
-        send_problem(fd, 404, "Not Found", "display_not_found",
+        send_problem(client->fd, 404, "Not Found", "display_not_found",
                      "The requested display does not exist or has no renderer.");
-        return;
+        return -1;
     }
     output = &runtime->outputs[output_index];
     pixels = output->screenshot_surface;
@@ -1197,18 +1258,18 @@ static void send_sdl_screenshot(int fd, BlitRuntime *runtime,
     else
         pixels = SDL_RenderReadPixels(output->renderer, NULL);
     if (pixels == NULL) {
-        send_problem(fd, 503, "Service Unavailable", "screenshot_failed",
+        send_problem(client->fd, 503, "Service Unavailable", "screenshot_failed",
                      "The SDL renderer could not read the current framebuffer.");
-        return;
+        return -1;
     }
     temporary_fd = mkstemp(temporary);
     if (temporary_fd < 0 || !SDL_SaveBMP(pixels, temporary)) {
         if (temporary_fd >= 0) close(temporary_fd);
         SDL_DestroySurface(pixels);
         unlink(temporary);
-        send_problem(fd, 503, "Service Unavailable", "screenshot_failed",
+        send_problem(client->fd, 503, "Service Unavailable", "screenshot_failed",
                      "The framebuffer image could not be encoded.");
-        return;
+        return -1;
     }
     close(temporary_fd);
     SDL_DestroySurface(pixels);
@@ -1218,17 +1279,17 @@ static void send_sdl_screenshot(int fd, BlitRuntime *runtime,
         (uintmax_t)file_status.st_size > 64U * 1024U * 1024U) {
         if (input_fd >= 0) close(input_fd);
         unlink(temporary);
-        send_problem(fd, 503, "Service Unavailable", "screenshot_failed",
+        send_problem(client->fd, 503, "Service Unavailable", "screenshot_failed",
                      "The encoded framebuffer image could not be read.");
-        return;
+        return -1;
     }
     bytes = (unsigned char *)malloc((size_t)file_status.st_size);
     if (bytes == NULL) {
         close(input_fd);
         unlink(temporary);
-        send_problem(fd, 503, "Service Unavailable", "screenshot_failed",
+        send_problem(client->fd, 503, "Service Unavailable", "screenshot_failed",
                      "There is not enough memory for the framebuffer image.");
-        return;
+        return -1;
     }
     while (offset < (size_t)file_status.st_size) {
         received = read(input_fd, bytes + offset,
@@ -1240,15 +1301,21 @@ static void send_sdl_screenshot(int fd, BlitRuntime *runtime,
     unlink(temporary);
     if (offset != (size_t)file_status.st_size) {
         free(bytes);
-        send_problem(fd, 503, "Service Unavailable", "screenshot_failed",
+        send_problem(client->fd, 503, "Service Unavailable", "screenshot_failed",
                      "The encoded framebuffer image was truncated.");
-        return;
+        return -1;
     }
-    send_http_bytes(fd, 200, "OK", "image/bmp", bytes, offset);
-    free(bytes);
+    if (!queue_http_bytes(client, 200, "OK", "image/bmp", bytes, offset)) {
+        free(bytes);
+        send_problem(client->fd, 503, "Service Unavailable", "screenshot_failed",
+                     "The framebuffer response could not be queued.");
+        return -1;
+    }
+    return 1;
 }
 
-static int send_kms_screenshot(int fd, BlitRuntime *runtime, int output_index)
+static int send_kms_screenshot(BlitHttpClient *client, BlitRuntime *runtime,
+                               int output_index)
 {
     unsigned char *bytes = NULL;
     size_t length = 0;
@@ -1256,12 +1323,16 @@ static int send_kms_screenshot(int fd, BlitRuntime *runtime, int output_index)
                                      &bytes, &length);
     if (result == 0) return 0;
     if (result < 0) {
-        send_problem(fd, 503, "Service Unavailable", "screenshot_failed",
+        send_problem(client->fd, 503, "Service Unavailable", "screenshot_failed",
                      "The KMS framebuffer could not be encoded.");
         return -1;
     }
-    send_http_bytes(fd, 200, "OK", "image/bmp", bytes, length);
-    free(bytes);
+    if (!queue_http_bytes(client, 200, "OK", "image/bmp", bytes, length)) {
+        free(bytes);
+        send_problem(client->fd, 503, "Service Unavailable", "screenshot_failed",
+                     "The framebuffer response could not be queued.");
+        return -1;
+    }
     return 1;
 }
 
@@ -12374,6 +12445,7 @@ static void remove_http_client(BlitRuntime *runtime, int index)
         if (runtime->http_clients[index].update_path[0] != '\0')
             unlink(runtime->http_clients[index].update_path);
     }
+    free(runtime->http_clients[index].response_body);
     close(runtime->http_clients[index].fd);
     memset(&runtime->http_clients[index], 0,
            sizeof(runtime->http_clients[index]));
@@ -12793,6 +12865,8 @@ static void service_http_client(BlitRuntime *runtime, int index)
 
     if (!client->used)
         return;
+    if (client->response_body != NULL)
+        return;
     if (client->update_fd >= 0) {
         service_update_upload(runtime, client);
         return;
@@ -13111,6 +13185,7 @@ int main(int argc, char **argv)
         int kms_fd = runtime.direct_kms ? blit_kms_fd(runtime.kms) : -1;
         int i;
         fd_set readable;
+        fd_set writable;
         struct timeval timeout;
         int wait_ms;
         uint64_t now;
@@ -13175,6 +13250,7 @@ int main(int argc, char **argv)
                 remove_http_client(&runtime, i);
         }
         FD_ZERO(&readable);
+        FD_ZERO(&writable);
         FD_SET(server_fd, &readable);
         for (i = 0; i < runtime.evdev_mouse_count; ++i) {
             int input_fd = runtime.evdev_mouse_fds[i];
@@ -13209,6 +13285,8 @@ int main(int argc, char **argv)
         for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i) {
             if (runtime.http_clients[i].used) {
                 FD_SET(runtime.http_clients[i].fd, &readable);
+                if (runtime.http_clients[i].response_body != NULL)
+                    FD_SET(runtime.http_clients[i].fd, &writable);
                 if (runtime.http_clients[i].fd > max_fd)
                     max_fd = runtime.http_clients[i].fd;
             }
@@ -13250,7 +13328,7 @@ int main(int argc, char **argv)
         timeout.tv_sec = wait_ms / 1000;
         timeout.tv_usec = (wait_ms % 1000) * 1000;
         select_started_us = monotonic_us();
-        ready = select(max_fd + 1, &readable, NULL, NULL, &timeout);
+        ready = select(max_fd + 1, &readable, &writable, NULL, &timeout);
         runtime.diagnostic_last_select_ms =
             (double)(monotonic_us() - select_started_us) / 1000.0;
         if (runtime.diagnostic_last_select_ms >
@@ -13318,6 +13396,12 @@ int main(int argc, char **argv)
                     FD_ISSET(runtime.http_clients[i].fd, &readable))
                     service_http_client(&runtime, i);
             }
+            for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i) {
+                if (runtime.http_clients[i].used &&
+                    runtime.http_clients[i].response_body != NULL &&
+                    FD_ISSET(runtime.http_clients[i].fd, &writable))
+                    service_http_response(&runtime, i);
+            }
         }
         /* User-space stream data remains actionable even when select() timed
            out because the kernel socket was already drained. Service it
@@ -13356,16 +13440,23 @@ int main(int argc, char **argv)
                      runtime.outputs[screenshot_index].display_id);
             if (runtime.direct_kms) {
                 int screenshot_result = send_kms_screenshot(
-                    client->fd, &runtime, screenshot_index);
+                    client, &runtime, screenshot_index);
                 if (screenshot_result == 0)
                     continue;
+                if (screenshot_result < 0) {
+                    remove_http_client(&runtime, i);
+                    continue;
+                }
             } else {
                 if (runtime.outputs[screenshot_index].screenshot_surface == NULL)
                     continue;
-                send_sdl_screenshot(client->fd, &runtime, screenshot_path);
+                if (send_sdl_screenshot(client, &runtime, screenshot_path) < 0) {
+                    remove_http_client(&runtime, i);
+                    continue;
+                }
             }
             runtime.screenshot_requested_mask &= ~(1U << screenshot_index);
-            remove_http_client(&runtime, i);
+            client->screenshot_output_index = 0;
         }
     }
     close(server_fd);

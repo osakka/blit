@@ -20,6 +20,12 @@ surface and must not be used in timing loops.
 capture. Set `BLIT_SURFACE_IDS=surface-1,surface-2` when collecting multiple
 known surfaces; the capture remains bounded and does not download their full
 cell grids.
+The capture harness requests eight newest trace events by default; set
+`BLIT_TRACE_LIMIT=1..128` to choose another bounded window.
+During the timed interval it polls only runtime counters and the compact
+surface summary. The filtered trace views are taken at the start and end so
+the capture itself does not repeatedly serialize diagnostic history on the
+single-threaded gateway.
 
 Run it from a machine that can reach Blit:
 
@@ -137,6 +143,9 @@ capture directory and must additionally show `device_id`/evdev events from
 `/v1/input/devices`. A screenshot request is a large transfer and therefore
 can perturb a single-threaded server; compare its timestamps with
 `max_loop_gap_ms` before treating a captured stall as a rendering stall.
+The verifier also compares the start/end runtime counters and requires positive
+`evdev_mouse_events` and `evdev_mouse_motion_events` deltas. A trace-only event
+or a missing runtime response is not accepted as physical-input evidence.
 
 The Hibr adapter batches up to 256 cell mutations per request, while retaining
 deferred updates and one final `commit` per Hibr flush. This bounds transport

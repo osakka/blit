@@ -39,12 +39,23 @@ full_empty = [event for event in render
               if "graphics_changed=1" in event.get("detail", "") and
                  "graphics_images=0" in event.get("detail", "")]
 runtime = read("runtime-end.json").get("performance", {})
+runtime_start = read("runtime-start.json").get("performance", {})
 devices = read("input-devices.json").get("devices", [])
 pointer_devices = [device for device in devices
                    if "pointer" in device.get("kinds", [])]
 
+def delta(name):
+    return (runtime.get(name, 0) or 0) - (runtime_start.get(name, 0) or 0)
+
+raw_events = delta("evdev_mouse_events")
+raw_motion = delta("evdev_mouse_motion_events")
+raw_buttons = delta("evdev_mouse_button_events")
+raw_wheel = delta("evdev_mouse_wheel_events")
+
 print("physical_motion_events=%d physical_button_events=%d render_events=%d" %
       (len(physical_motion), len(physical_buttons), len(render)))
+print("raw_evdev_delta events=%d motion=%d buttons=%d wheel=%d" %
+      (raw_events, raw_motion, raw_buttons, raw_wheel))
 print("missed_deadlines=%s last_render_ms=%s max_loop_gap_ms=%s" %
       (runtime.get("missed_deadlines"), runtime.get("last_render_ms"),
        runtime.get("max_loop_gap_ms")))
@@ -52,7 +63,7 @@ print("missed_deadlines=%s last_render_ms=%s max_loop_gap_ms=%s" %
 if not pointer_devices:
     print("FAIL physical-pointer-device-not-inventory")
     raise SystemExit(1)
-if not physical_motion:
+if raw_events <= 0 or raw_motion <= 0 or not physical_motion:
     print("PHYSICAL_INPUT_NOT_OBSERVED move the real mouse during the capture")
     raise SystemExit(2)
 if not render:
