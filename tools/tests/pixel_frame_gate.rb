@@ -167,9 +167,17 @@ begin
 end while Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
 sleep 0.7
 runtime = http_json(base, :get, '/v1/diagnostics/runtime').fetch('performance')
+drain_deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 3
+while runtime.fetch('pixel_frames_pending') > 0 &&
+      Process.clock_gettime(Process::CLOCK_MONOTONIC) < drain_deadline
+  sleep 0.05
+  runtime = http_json(base, :get, '/v1/diagnostics/runtime').fetch('performance')
+end
 if runtime.fetch('pixel_frames_accepted') < frame_count
   raise "pixel frame acceptance counter is short: #{runtime.inspect} image=#{image.inspect}"
 end
+raise "pixel frame presentation backlog was not drained: #{runtime.inspect}" unless
+  runtime.fetch('pixel_frames_pending').zero?
 
 minimum_rendered = Integer(ENV.fetch('BLIT_PIXEL_MIN_RENDERED', '0'))
 rendered = runtime.fetch('frames') - runtime_before.fetch('frames')

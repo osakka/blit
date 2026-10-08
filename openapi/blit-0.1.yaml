@@ -958,7 +958,7 @@ components:
         snapshot: {$ref: '#/components/schemas/Diagnostics'}
         performance:
           type: object
-          required: [uptime_ms, frames, last_frame_gap_ms, max_frame_gap_ms, last_render_ms, max_render_ms, missed_deadlines, frame_rate_max_render_ms, frame_rate_missed_deadlines, frame_rate_window_sequence, last_terminal_ms, max_terminal_ms, terminal_bytes, pointer_cache_hits, pointer_cache_misses, frame_rate_hz, input_events, last_input_dispatch_ms, max_input_dispatch_ms, stream_queue_bytes, stream_queue_peak_bytes, stream_dropped_events, stream_backpressure_disconnects, graphics_cache_hits, graphics_texture_uploads, last_graphics_upload_ms, max_graphics_upload_ms, background_batches, background_quads, pixel_frames_accepted, pixel_frame_errors, frame_rate_frames, frame_rate_window_ms, frame_rate_age_ms, loop_iterations, terminal_reads, present_calls, last_loop_gap_ms, max_loop_gap_ms, last_kms_present_ms, max_kms_present_ms, last_sdl_present_ms, max_sdl_present_ms, last_select_ms, max_select_ms, last_sdl_events_ms, max_sdl_events_ms, last_evdev_scan_ms, max_evdev_scan_ms]
+          required: [uptime_ms, frames, last_frame_gap_ms, max_frame_gap_ms, last_render_ms, max_render_ms, missed_deadlines, frame_rate_max_render_ms, frame_rate_missed_deadlines, frame_rate_window_sequence, last_terminal_ms, max_terminal_ms, terminal_bytes, pointer_cache_hits, pointer_cache_misses, frame_rate_hz, input_events, last_input_dispatch_ms, max_input_dispatch_ms, stream_queue_bytes, stream_queue_peak_bytes, stream_dropped_events, stream_backpressure_disconnects, graphics_cache_hits, graphics_texture_uploads, last_graphics_upload_ms, max_graphics_upload_ms, background_batches, background_quads, pixel_frames_accepted, pixel_frame_errors, pixel_frames_pending, frame_rate_frames, frame_rate_window_ms, frame_rate_age_ms, loop_iterations, terminal_reads, present_calls, last_loop_gap_ms, max_loop_gap_ms, last_kms_present_ms, max_kms_present_ms, last_sdl_present_ms, max_sdl_present_ms, last_select_ms, max_select_ms, last_sdl_events_ms, max_sdl_events_ms, last_evdev_scan_ms, max_evdev_scan_ms]
           properties:
             uptime_ms: {type: integer, minimum: 0}
             frames: {type: integer, minimum: 0}
@@ -991,6 +991,7 @@ components:
             background_quads: {type: integer, minimum: 0}
             pixel_frames_accepted: {type: integer, minimum: 0}
             pixel_frame_errors: {type: integer, minimum: 0}
+            pixel_frames_pending: {type: integer, minimum: 0}
             frame_rate_frames: {type: integer, minimum: 0}
             frame_rate_window_ms: {type: integer, minimum: 0}
             frame_rate_age_ms: {type: integer, minimum: 0}

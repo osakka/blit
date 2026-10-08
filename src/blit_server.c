@@ -49,6 +49,7 @@ extern char **environ;
 #define BLIT_MAX_IDEMPOTENCY 16
 #define BLIT_MAX_EVENT_HISTORY 64
 #define BLIT_MAX_RUNTIME_LOGS 64
+#define BLIT_PIXEL_FRAME_QUIET_US 100000ULL
 #define BLIT_MAX_SCROLLBACK_LINES 1000
 #define BLIT_MAX_OVERLAYS 16
 #define BLIT_UPDATE_IDLE_TIMEOUT_US 30000000ULL
@@ -485,6 +486,8 @@ typedef struct {
     double diagnostic_frame_rate_window_max_render_ms;
     unsigned long long pixel_frames_accepted;
     unsigned long long pixel_frame_errors;
+    unsigned long long pixel_frames_pending[BLIT_MAX_DISPLAYS];
+    uint64_t pixel_frames_last_accepted_us;
     unsigned long long diagnostic_loop_iterations;
     unsigned long long diagnostic_terminal_reads;
     unsigned long long diagnostic_present_calls;
@@ -591,6 +594,8 @@ static BlitSession *find_session_id(BlitRuntime *runtime,
 static BlitGraphicsImage *graphics_image_find(BlitSession *session,
                                               unsigned int id);
 static void graphics_image_release(BlitGraphicsImage *image);
+static int surface_targets_output(BlitRuntime *runtime,
+                                  BlitSurface *surface, int output_index);
 static void pixel_frame_reset(BlitRuntime *runtime, BlitStream *stream,
                               int release_image);
 static void update_status_json(const BlitRuntime *runtime, char *body,
@@ -848,6 +853,9 @@ static uint32_t due_output_mask(const BlitRuntime *runtime, uint64_t now)
             runtime->pointer_output < runtime->output_count)
             mask |= 1U << runtime->pointer_output;
     }
+    for (i = 0; i < runtime->output_count; ++i)
+        if (runtime->pixel_frames_pending[i] > 0)
+            mask |= 1U << i;
     return mask;
 }
 
@@ -908,11 +916,26 @@ static int render_work_remains(const BlitRuntime *runtime)
     int i;
     if (runtime->pointer_dirty)
         return 1;
+    for (i = 0; i < runtime->output_count; ++i)
+        if (runtime->pixel_frames_pending[i] > 0)
+            return 1;
     for (i = 0; i < BLIT_MAX_SESSIONS; ++i)
         if (runtime->surfaces[i] != NULL &&
             runtime->surfaces[i]->used && runtime->surfaces[i]->damage_valid)
             return 1;
     return 0;
+}
+
+static void expire_pixel_frame_pending(BlitRuntime *runtime, uint64_t now)
+{
+    int i;
+    if (runtime->pixel_frames_last_accepted_us == 0 ||
+        now < runtime->pixel_frames_last_accepted_us ||
+        now - runtime->pixel_frames_last_accepted_us <
+            BLIT_PIXEL_FRAME_QUIET_US)
+        return;
+    for (i = 0; i < runtime->output_count; ++i)
+        runtime->pixel_frames_pending[i] = 0;
 }
 
 static void render_current_surfaces(BlitRuntime *runtime,
@@ -1259,6 +1282,16 @@ static unsigned long long diagnostic_graphics_texture_uploads(
     return total;
 }
 
+static unsigned long long diagnostic_pixel_frames_pending(
+    const BlitRuntime *runtime)
+{
+    unsigned long long total = 0;
+    int i;
+    for (i = 0; i < runtime->output_count; ++i)
+        total += runtime->pixel_frames_pending[i];
+    return total;
+}
+
 static double diagnostic_last_graphics_upload_ms(const BlitRuntime *runtime)
 {
     double value = 0.0;
@@ -1365,6 +1398,7 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"last_graphics_upload_ms\":%.3f,\"max_graphics_upload_ms\":%.3f,"
         "\"background_batches\":%llu,\"background_quads\":%llu,"
         "\"pixel_frames_accepted\":%llu,\"pixel_frame_errors\":%llu,"
+        "\"pixel_frames_pending\":%llu,"
         "\"frame_rate_frames\":%llu,\"frame_rate_window_ms\":%llu,"
         "\"frame_rate_age_ms\":%llu,\"loop_iterations\":%llu,"
         "\"terminal_reads\":%llu,\"present_calls\":%llu,"
@@ -1407,6 +1441,7 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         diagnostic_background_quads(runtime),
         runtime->pixel_frames_accepted,
         runtime->pixel_frame_errors,
+        diagnostic_pixel_frames_pending(runtime),
         runtime->diagnostic_frame_rate_last_frames,
         runtime->diagnostic_frame_rate_window_ms, frame_rate_age_ms,
         runtime->diagnostic_loop_iterations,
@@ -7465,7 +7500,17 @@ static int service_pixel_frame_binary(BlitRuntime *runtime,
     if (surface != NULL)
         ++surface->revision;
     runtime->render_pending = 1;
+    if (surface != NULL) {
+        int output_index;
+        for (output_index = 0; output_index < runtime->output_count;
+             ++output_index)
+            if (surface_targets_output(runtime, surface, output_index)) {
+                ++runtime->pixel_frames_pending[output_index];
+                break;
+            }
+    }
     ++runtime->pixel_frames_accepted;
+    runtime->pixel_frames_last_accepted_us = monotonic_us();
     if (stream->pixel_frame_ack)
         send_websocket_text(stream->fd,
             "{\"type\":\"pixel_frame_present\",\"state\":\"accepted\"}");
@@ -9797,12 +9842,13 @@ static SDL_Texture *sdl_graphics_texture(BlitOutput *output,
     return texture;
 }
 
-static void render_sdl_graphics(BlitOutput *output,
-                                const BlitGraphicsImage *images,
-                                int image_count, float origin_x, float origin_y)
+static int render_sdl_graphics(BlitOutput *output,
+                               const BlitGraphicsImage *images,
+                               int image_count, float origin_x, float origin_y)
 {
     SDL_Renderer *renderer = output != NULL ? output->renderer : NULL;
     int drawn[BLIT_GRAPHICS_MAX_IMAGES];
+    int api_images_drawn = 0;
     int pass;
     memset(drawn, 0, sizeof(drawn));
     for (pass = 0; pass < image_count && pass < BLIT_GRAPHICS_MAX_IMAGES;
@@ -9837,7 +9883,10 @@ static void render_sdl_graphics(BlitOutput *output,
         destination.w = (float)width;
         destination.h = (float)height;
         SDL_RenderTexture(renderer, texture, NULL, &destination);
+        if (strcmp(image->protocol, "api") == 0)
+            ++api_images_drawn;
     }
+    return api_images_drawn;
 }
 
 static void render_sdl_effects(const BlitRuntime *runtime,
@@ -10145,6 +10194,11 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                 if (surface != NULL)
                     surface->damage_valid = 0;
             }
+        for (surface_index = 0; surface_index < runtime->output_count;
+             ++surface_index)
+            if ((output_mask & (1U << surface_index)) &&
+                runtime->pixel_frames_pending[surface_index] > 0)
+                --runtime->pixel_frames_pending[surface_index];
         runtime->pointer_dirty = 0;
         return;
     }
@@ -10158,6 +10212,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
         int full_redraw;
         int scene_target = 0;
         int pointer_only;
+        int api_images_drawn = 0;
         SDL_Renderer *renderer = runtime->outputs[output_index].renderer;
 
         if (!(output_mask & (1U << output_index)))
@@ -10182,6 +10237,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                     target_changed = 1;
             }
         }
+        if (runtime->pixel_frames_pending[output_index] > 0)
+            target_changed = 1;
         {
             int overlay_index;
             for (overlay_index = 0; overlay_index < BLIT_MAX_OVERLAYS;
@@ -10549,10 +10606,10 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                 graphics_clip.w = surface->width * cell_width;
                 graphics_clip.h = surface->height * cell_height;
                 SDL_SetRenderClipRect(renderer, &graphics_clip);
-                render_sdl_graphics(&runtime->outputs[output_index],
-                                    session->graphics,
-                                    BLIT_GRAPHICS_MAX_IMAGES,
-                                    surface_origin_x, (float)surface_origin_y);
+                api_images_drawn += render_sdl_graphics(
+                    &runtime->outputs[output_index], session->graphics,
+                    BLIT_GRAPHICS_MAX_IMAGES, surface_origin_x,
+                    (float)surface_origin_y);
                 SDL_SetRenderClipRect(renderer, NULL);
             }
         }
@@ -10563,6 +10620,9 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                                runtime, output_index)].bounds.h);
         render_sdl_overlays(runtime, renderer, output_index);
         finish_sdl_output(runtime, output_index, scene_target);
+        if (api_images_drawn > 0 &&
+            runtime->pixel_frames_pending[output_index] > 0)
+            --runtime->pixel_frames_pending[output_index];
         runtime->outputs[output_index].initialized = 1;
         runtime->outputs[output_index].last_topology_revision =
             runtime->topology_revision;
@@ -12363,6 +12423,7 @@ int main(int argc, char **argv)
             (output_mask = due_output_mask(&runtime, now)) != 0) {
             render_current_surfaces(&runtime, output_mask);
             advance_render_schedule(&runtime, now, output_mask);
+            expire_pixel_frame_pending(&runtime, monotonic_us());
             runtime.render_pending = render_work_remains(&runtime);
             runtime.render_last_us = now;
         }

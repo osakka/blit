@@ -433,7 +433,10 @@ completes, allowing a remote gate to distinguish its workload from stale
 measurements left by an earlier client.
 `frame_rate_hz` is the rate of damage-driven composition
 and presentation passes; it is not the panel scanout rate. Use
-`snapshot.render.outputs[].refresh_hz` and `effective_interval_ms` for the
+`pixel_frames_pending` to detect an API pixel producer that is outrunning
+presentation; the scheduler drains that pending work at the selected
+output refresh instead of silently clearing the only boolean render flag.
+Use `snapshot.render.outputs[].refresh_hz` and `effective_interval_ms` for the
 selected display cadence and scheduler target. The same object includes
 `loop_iterations`,
 `terminal_reads`, `present_calls`, `last_loop_gap_ms`, and
