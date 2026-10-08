@@ -7,7 +7,7 @@ hibr_adapter_sha256: d84e4637defaebccb08e43429b9be48286e024205d31af2009f90712c17
 hibr_root: /home/osakka/hibr
 hibr_version: 0.99.100
 live_host: 192.168.10.54:8080
-live_version: 0.1.362
+live_version: 0.1.363
 qemu_input_repeat_acceptance: pass
 qemu_multi_mouse_acceptance: pass
 qemu_multi_mouse_button_state_acceptance: pass
