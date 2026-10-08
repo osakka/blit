@@ -88,6 +88,13 @@ keypad delivery, pointer motion/buttons with SGR mouse reports, two-mouse
 routing, WebSocket input delivery, and gamepad discovery/routing. The PTY
 probes received the expected bytes and the guest powered down cleanly.
 
+The authorized physical host also ran the installed Hibr desktop through the
+public API on its single DP-1 output. `/usr/bin/desktop` reached `running`,
+the surface revision advanced to 69, the API captured a 1920×2160 BMP, and
+the active workload measured 59.848 Hz with zero missed deadlines. Cleanup
+returned the host to zero sessions, surfaces, streams, and routes with no
+diagnostic errors. This is physical single-display 60 Hz evidence only.
+
 The 0.1.281 release-qualification cycle also passed authenticated network
 authorization, HTTP fragmentation and back-pressure, session lifecycle and
 write/resize, stream replay/snapshot repair, hidden-cursor damage, screenshot
