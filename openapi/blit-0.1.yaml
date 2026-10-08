@@ -160,6 +160,15 @@ paths:
           schema:
             type: string
             enum: [pointer_button, pointer_motion, keyboard_key, surface_update, render_path]
+        - in: query
+          name: limit
+          required: false
+          description: Maximum number of newest matching events to return; defaults to 32 and is capped at 128.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 128
+            default: 32
       responses:
         '200':
           description: Recent trace events in chronological order

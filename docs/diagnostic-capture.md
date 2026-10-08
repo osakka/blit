@@ -77,6 +77,18 @@ it with surface updates. The harness therefore also requests filtered views:
 Filtering changes only the diagnostic response; it does not alter input,
 routing, Hibr, or presentation.
 
+Trace responses are also bounded at the HTTP boundary: the default is the 32
+newest matching events, and callers may request `limit=1..128`. This prevents a
+diagnostic client or a slow network from turning observation into a large
+single-threaded response. For example:
+
+```text
+/v1/diagnostics/trace?kind=render_path&limit=16
+```
+
+Use the smallest limit that answers the question. A missing or invalid limit
+uses the safe default; the oldest matching events are discarded first.
+
 `surface_update` records the `immediate` and `commit` boundaries, not every
 deferred cell chunk. This keeps the bounded trace useful under high-volume
 terminal output while preserving the atomic-frame evidence.

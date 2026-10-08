@@ -3,6 +3,29 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## Current 0.1.334 diagnostic-observability status
+
+The source change for 0.1.334 makes diagnostic observation independently
+bounded: `GET /v1/diagnostics/trace` returns the 32 newest matching events by
+default and accepts `limit=1..128`. A TCC-built local server returned exactly
+one event for `kind=render_path&limit=1`; the version endpoint reported
+`0.1.334`. This prevents a trace read from becoming an unnecessarily large
+single-threaded HTTP response while investigating live pointer artifacts.
+
+The exact 0.1.333 Hibr QEMU restart fixture completed with
+`LAYOUT_MATRIX_PASS`, `HIBR_PANE_MATRIX_PASS`, `HIBR_PRIMARY_RESTART_PASS`,
+and `HIBR_JOIN_RECONNECT_PASS`. The staged Hibr executable SHA-256 was
+`f8dbc10779193c27d2eb47f0e858cf656912f8b96f56a45af820ad05d18cdb7e`;
+Hibr source was not modified, and no QEMU process remained after the fixture.
+
+On the authorized physical host, the currently deployed 0.1.333 runtime
+reports one 60 Hz output, 1,677 present calls, zero missed deadlines, and
+millisecond-scale rendering. It also reports zero physical evdev mouse events
+in the latest sample. That is not a physical-mouse pass: the remaining live
+step is to capture while the real mouse is moved and correlate raw evdev
+receipt, input routing, pointer state, render-path trace, and post-interaction
+pixels using `docs/diagnostic-capture.md`.
+
 ## Current 0.1.333 live diagnostic status
 
 The 0.1.333 package is deployed on the authorized physical host at
@@ -72,8 +95,9 @@ deadline counters; it is not evidence that the renderer itself took seconds.
 
 The 0.1.333 package adds the read-only OpenAPI
 `GET /v1/surfaces/{surface_id}/summary` endpoint. The live Hibr surface
-returned a compact response with revision `5530`, dimensions `240x135`, and
-28,522 non-empty cells; the full `/cells` repair endpoint remains separate.
+returned a compact response of 214 bytes with the current observed revision
+`111633`, dimensions `240x135`, and 32,400 non-empty cells; the full `/cells`
+repair endpoint remains separate.
 
 The exact 0.1.329 binary with the unchanged Hibr checkout also passes the
 QEMU/VKMS Hibr pane matrix: `LAYOUT_MATRIX_PASS` and

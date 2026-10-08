@@ -50,6 +50,7 @@ extern char **environ;
 #define BLIT_MAX_EVENT_HISTORY 64
 #define BLIT_MAX_RUNTIME_LOGS 64
 #define BLIT_MAX_TRACE_EVENTS 128
+#define BLIT_DEFAULT_TRACE_LIMIT 32
 #define BLIT_PIXEL_FRAME_QUIET_US 100000ULL
 /* A PTY is a byte stream, while a terminal desktop frame is commonly emitted
    as many short writes.  Hold presentation briefly after the latest read so
@@ -1358,7 +1359,8 @@ static void diagnostic_trace(BlitRuntime *runtime, const char *kind,
 }
 
 static void diagnostic_trace_json(BlitRuntime *runtime, char *body,
-                                  size_t capacity, const char *kind_filter)
+                                  size_t capacity, const char *kind_filter,
+                                  int limit)
 {
     size_t used = 0;
     int critical = kind_filter != NULL && kind_filter[0] != '\0' &&
@@ -1372,6 +1374,24 @@ static void diagnostic_trace_json(BlitRuntime *runtime, char *body,
     int index = (next - count +
                  BLIT_MAX_TRACE_EVENTS) % BLIT_MAX_TRACE_EVENTS;
     int first = 1;
+    int matching = 0;
+    int skip;
+
+    if (limit < 1)
+        limit = BLIT_DEFAULT_TRACE_LIMIT;
+    if (limit > BLIT_MAX_TRACE_EVENTS)
+        limit = BLIT_MAX_TRACE_EVENTS;
+    {
+        int scan_count = count;
+        int scan_index = index;
+        while (scan_count-- > 0) {
+            if (kind_filter == NULL || kind_filter[0] == '\0' ||
+                strstr(events[scan_index], kind_filter) != NULL)
+                ++matching;
+            scan_index = (scan_index + 1) % BLIT_MAX_TRACE_EVENTS;
+        }
+    }
+    skip = matching > limit ? matching - limit : 0;
 
     json_appendf(body, capacity, &used,
                  "{\"revision\":%llu,\"events\":[",
@@ -1380,9 +1400,13 @@ static void diagnostic_trace_json(BlitRuntime *runtime, char *body,
         int include = kind_filter == NULL || kind_filter[0] == '\0' ||
             strstr(events[index], kind_filter) != NULL;
         if (include) {
-            json_appendf(body, capacity, &used, "%s%s",
-                         first ? "" : ",", events[index]);
-            first = 0;
+            if (skip > 0)
+                --skip;
+            else {
+                json_appendf(body, capacity, &used, "%s%s",
+                             first ? "" : ",", events[index]);
+                first = 0;
+            }
         }
         index = (index + 1) % BLIT_MAX_TRACE_EVENTS;
     }
@@ -9155,7 +9179,9 @@ static void handle_request(int fd, BlitRuntime *runtime,
                 path[strlen("/v1/diagnostics/trace")] == '?')) {
         char kind[64];
         const char *kind_value = strstr(path, "kind=");
+        const char *limit_value = strstr(path, "limit=");
         size_t kind_length = 0;
+        int trace_limit = BLIT_DEFAULT_TRACE_LIMIT;
         kind[0] = '\0';
         if (kind_value != NULL) {
             kind_value += strlen("kind=");
@@ -9166,7 +9192,16 @@ static void handle_request(int fd, BlitRuntime *runtime,
             memcpy(kind, kind_value, kind_length);
             kind[kind_length] = '\0';
         }
-        diagnostic_trace_json(runtime, body, sizeof(body), kind);
+        if (limit_value != NULL) {
+            char *end = NULL;
+            long parsed;
+            limit_value += strlen("limit=");
+            parsed = strtol(limit_value, &end, 10);
+            if (end != limit_value && parsed > 0 && parsed <= INT_MAX)
+                trace_limit = (int)parsed;
+        }
+        diagnostic_trace_json(runtime, body, sizeof(body), kind,
+                              trace_limit);
         send_http(fd, 200, "OK", "application/json", body);
     } else if (strcmp(path, "/v1/displays") == 0) {
         displays_json(runtime, body, sizeof(body));
