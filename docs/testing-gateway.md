@@ -349,6 +349,23 @@ BLIT_GATE_BINARY=build/blit/blit-server \
   tools/tests/session_lifecycle_gate.sh
 ```
 
+The API-owned pixel-frame gate covers the binary canvas path used by
+arcade/emulation clients. Its default burst workload proves that every frame
+can be accepted without blocking the API while the renderer coalesces to the
+newest complete frame. A paced workload additionally verifies that frames reach
+the presentation loop instead of remaining permanently coalesced:
+
+```sh
+BLIT_PIXEL_PACE_HZ=60 \
+BLIT_PIXEL_MIN_RENDERED=24 \
+BLIT_GATE_PORT=19249 ruby tools/tests/pixel_frame_gate.rb
+```
+
+The paced assertion requires at least 24 of 30 accepted frames to be rendered.
+It is deliberately below 30 to allow scheduler jitter in the dummy backend;
+physical release acceptance still requires display-mode timing and input
+latency evidence.
+
 The frame-rate gate creates a bounded PTY producer and samples the versioned
 runtime diagnostics endpoint. It requires a completed, nonzero measured frame
 rate and a fresh measurement window; cumulative frame counters alone are not

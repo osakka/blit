@@ -159,6 +159,13 @@ if runtime.fetch('pixel_frames_accepted') < frame_count
   raise "pixel frame acceptance counter is short: #{runtime.inspect} image=#{image.inspect}"
 end
 
+minimum_rendered = Integer(ENV.fetch('BLIT_PIXEL_MIN_RENDERED', '0'))
+rendered = runtime.fetch('frames') - runtime_before.fetch('frames')
+if minimum_rendered > 0 && rendered < minimum_rendered
+  raise "paced pixel presentation was short: rendered=#{rendered} " \
+        "minimum=#{minimum_rendered} runtime=#{runtime.inspect}"
+end
+
 raise 'pixel image missing from session snapshot' unless image
 raise "pixel frame backlog was not drained: #{image.inspect}" unless image.fetch('revision') >= frame_count + 1
 raise 'pixel image is incomplete' unless image.fetch('complete') && image.fetch('visible')
@@ -168,5 +175,5 @@ socket.close
 http_json(base, :delete, "/v1/terminal-sessions/#{session_id}")
 puts format('PIXEL_FRAME_PASS frames=%d ingest_hz=%.3f accepted=%d rendered=%d render_ms=%.3f fragmented_rgba=32bytes reuse=true',
             frame_count, frame_count / elapsed, runtime.fetch('pixel_frames_accepted'),
-            runtime.fetch('frames') - runtime_before.fetch('frames'),
+            rendered,
             runtime.fetch('last_render_ms'))
