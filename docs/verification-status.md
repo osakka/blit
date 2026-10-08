@@ -18,7 +18,7 @@ an evidence record, not a claim that the complete product is released.
   26.865 ms maximum full render and 61.387 Hz over its active 504 ms window.
   The direct-KMS pixel-frame acceptance below was run from the exact current
   0.1.256 TCC build; the newer SDL presentation and geometry work is recorded
-  below. The authorized physical host now reports 0.1.263 through its version
+  below. The authorized physical host now reports 0.1.265 through its version
   endpoint. The 0.1.265 Debian package SHA-256 is
   `6bd9fb4e1293893bd6840104478522dc434c15fdcedfd99e26efbe61ebbf468e`.
 
@@ -39,7 +39,7 @@ direct-KMS two-output capture. The latter passed
 `KMS_API_SCREENSHOT_PASS`, and `KMS_CAPTURE_PASS` with the regenerated font;
 the guest loaded 929 glyphs and 1,182 mappings.
 
-The authorized live host accepted and restarted on 0.1.264. A controlled
+The authorized live host accepted and restarted on 0.1.265. A controlled
 240×135 Hibr desktop workload produced 43,568 wallpaper background quads in
 91 batches, with 17.379 ms maximum render time, 6.551 ms maximum terminal
 processing time, zero missed deadlines, and no diagnostics errors. The session
@@ -47,7 +47,14 @@ was deleted and the live resource counts returned to zero. Its idle
 `frame_rate_hz=0` sample is not interpreted as a scanout rate: the changed
 content window had expired after Hibr stopped emitting updates.
 
-The exact 0.1.264 direct-KMS fixtures additionally passed the 60 Hz
+The follow-up 0.1.265 live Hibr run produced 43,413 wallpaper background
+quads in 93 batches, with 17.638 ms maximum render time, 7.189 ms maximum
+terminal processing time, zero missed deadlines, and no diagnostics errors.
+Its active changed-content sample measured 5.284 Hz; after Hibr became idle,
+the rate correctly aged out to zero. Cleanup returned sessions, surfaces, and
+input routes to zero.
+
+The exact 0.1.265 direct-KMS fixtures additionally passed the 60 Hz
 emulator-like stream (`PIXEL_FRAME_STREAM_SENT frames=60`,
 `PIXEL_FRAME_RATE_PASS`, `KMS_API_PIXEL_PASS`), the 240 Hz scheduler branch
 (`REFRESH_SCHEDULER_240_PASS`), and the four-output Hibr orchestration
