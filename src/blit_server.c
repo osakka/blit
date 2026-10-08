@@ -1231,19 +1231,83 @@ static int screenshot_output_index(const BlitRuntime *runtime,
     return -1;
 }
 
+static void bmp_u16(unsigned char *p, uint16_t value)
+{
+    p[0] = (unsigned char)(value & 0xffU);
+    p[1] = (unsigned char)((value >> 8) & 0xffU);
+}
+
+static void bmp_u32(unsigned char *p, uint32_t value)
+{
+    p[0] = (unsigned char)(value & 0xffU);
+    p[1] = (unsigned char)((value >> 8) & 0xffU);
+    p[2] = (unsigned char)((value >> 16) & 0xffU);
+    p[3] = (unsigned char)((value >> 24) & 0xffU);
+}
+
+/* Encode the readback directly. SDL_SaveBMP performs the same conversion but
+   its IO failure path is silent on the real GLES2 renderer. Keeping this
+   bounded encoder here makes the diagnostic snapshot independent of SDL's
+   filesystem/IO implementation while preserving a conventional 24-bit BMP. */
+static int encode_bmp_surface(SDL_Surface *source, unsigned char **encoded,
+                              size_t *encoded_length)
+{
+    SDL_Surface *surface;
+    size_t row_bytes;
+    size_t stride;
+    size_t total;
+    int y;
+    unsigned char *data;
+
+    if (source == NULL || source->w < 1 || source->h < 1)
+        return 0;
+    row_bytes = (size_t)source->w * 3U;
+    stride = (row_bytes + 3U) & ~((size_t)3U);
+    if ((size_t)source->h > (SIZE_MAX - 54U) / stride)
+        return 0;
+    total = 54U + stride * (size_t)source->h;
+    if (total > UINT32_MAX)
+        return 0;
+    surface = SDL_ConvertSurface(source, SDL_PIXELFORMAT_BGR24);
+    if (surface == NULL || surface->pixels == NULL) {
+        if (surface != NULL) SDL_DestroySurface(surface);
+        return 0;
+    }
+    data = (unsigned char *)calloc(1, total);
+    if (data == NULL) {
+        SDL_DestroySurface(surface);
+        return 0;
+    }
+    data[0] = 'B'; data[1] = 'M';
+    bmp_u32(data + 2, (uint32_t)total);
+    bmp_u32(data + 10, 54U);
+    bmp_u32(data + 14, 40U);
+    bmp_u32(data + 18, (uint32_t)surface->w);
+    bmp_u32(data + 22, (uint32_t)surface->h);
+    bmp_u16(data + 26, 1U);
+    bmp_u16(data + 28, 24U);
+    bmp_u32(data + 34, (uint32_t)(stride * (size_t)surface->h));
+    bmp_u32(data + 38, 2835U);
+    bmp_u32(data + 42, 2835U);
+    for (y = 0; y < surface->h; ++y) {
+        const unsigned char *row = (const unsigned char *)surface->pixels +
+            (size_t)(surface->h - 1 - y) * (size_t)surface->pitch;
+        memcpy(data + 54U + (size_t)y * stride, row, row_bytes);
+    }
+    SDL_DestroySurface(surface);
+    *encoded = data;
+    *encoded_length = total;
+    return 1;
+}
+
 static int send_sdl_screenshot(BlitHttpClient *client, BlitRuntime *runtime,
                                const char *path)
 {
-    char temporary[] = "/tmp/blit-api-screenshot-XXXXXX";
     unsigned char *bytes = NULL;
     SDL_Surface *pixels;
-    struct stat file_status;
     int output_index;
-    int temporary_fd;
-    int input_fd;
     BlitOutput *output;
-    ssize_t received;
-    size_t offset = 0;
+    size_t length = 0;
 
     if (runtime->direct_kms || !runtime->sdl_ready) {
         send_problem(client->fd, 501, "Not Implemented", "screenshot_backend",
@@ -1267,69 +1331,14 @@ static int send_sdl_screenshot(BlitHttpClient *client, BlitRuntime *runtime,
                      "The SDL renderer could not read the current framebuffer.");
         return -1;
     }
-    temporary_fd = mkstemp(temporary);
-    if (temporary_fd < 0) {
+    if (!encode_bmp_surface(pixels, &bytes, &length)) {
         SDL_DestroySurface(pixels);
-        unlink(temporary);
         send_problem(client->fd, 503, "Service Unavailable", "screenshot_failed",
-                     "The temporary framebuffer file could not be created.");
-        return -1;
-    }
-    /* SDL_SaveBMP opens the path itself.  Close the descriptor returned by
-       mkstemp first; keeping the placeholder open makes the SDL3 encoder
-       fail on some real SDL backends even though readback succeeded. */
-    close(temporary_fd);
-    temporary_fd = -1;
-    /* SDL_SaveBMP creates the destination itself; remove mkstemp's empty
-       placeholder after closing it so backends that refuse to replace an
-       existing path can still encode the snapshot. */
-    unlink(temporary);
-    if (!SDL_SaveBMP(pixels, temporary)) {
-        char screenshot_error[256];
-        snprintf(screenshot_error, sizeof(screenshot_error),
-                 "SDL_SaveBMP failed: %s",
-                 SDL_GetError()[0] != '\0' ? SDL_GetError() : "no SDL error");
-        fprintf(stderr, "blit: API screenshot %s\n", screenshot_error);
-        SDL_DestroySurface(pixels);
-        unlink(temporary);
-        send_problem(client->fd, 503, "Service Unavailable", "screenshot_failed",
-                     screenshot_error);
+                     "The SDL framebuffer could not be converted to BMP.");
         return -1;
     }
     SDL_DestroySurface(pixels);
-    input_fd = open(temporary, O_RDONLY | O_CLOEXEC);
-    if (input_fd < 0 || fstat(input_fd, &file_status) < 0 ||
-        file_status.st_size <= 0 ||
-        (uintmax_t)file_status.st_size > 64U * 1024U * 1024U) {
-        if (input_fd >= 0) close(input_fd);
-        unlink(temporary);
-        send_problem(client->fd, 503, "Service Unavailable", "screenshot_failed",
-                     "The encoded framebuffer image could not be read.");
-        return -1;
-    }
-    bytes = (unsigned char *)malloc((size_t)file_status.st_size);
-    if (bytes == NULL) {
-        close(input_fd);
-        unlink(temporary);
-        send_problem(client->fd, 503, "Service Unavailable", "screenshot_failed",
-                     "There is not enough memory for the framebuffer image.");
-        return -1;
-    }
-    while (offset < (size_t)file_status.st_size) {
-        received = read(input_fd, bytes + offset,
-                        (size_t)file_status.st_size - offset);
-        if (received <= 0) break;
-        offset += (size_t)received;
-    }
-    close(input_fd);
-    unlink(temporary);
-    if (offset != (size_t)file_status.st_size) {
-        free(bytes);
-        send_problem(client->fd, 503, "Service Unavailable", "screenshot_failed",
-                     "The encoded framebuffer image was truncated.");
-        return -1;
-    }
-    if (!queue_http_bytes(client, 200, "OK", "image/bmp", bytes, offset)) {
+    if (!queue_http_bytes(client, 200, "OK", "image/bmp", bytes, length)) {
         free(bytes);
         send_problem(client->fd, 503, "Service Unavailable", "screenshot_failed",
                      "The framebuffer response could not be queued.");
