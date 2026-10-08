@@ -6612,9 +6612,17 @@ static int create_session(BlitRuntime *runtime, const char *json,
         char session_text[32];
         char surface_text[64];
         char port_text[16];
+        char hibr_log_path[256];
         snprintf(session_text, sizeof(session_text), "%llu", session_id);
         snprintf(surface_text, sizeof(surface_text), "surface-%llu", session_id);
         snprintf(port_text, sizeof(port_text), "%d", runtime->listen_port);
+        /* Hibr writes its startup/restart diagnostics to DT_LOG.  An
+           API-launched child has no login HOME, so Hibr's relative default
+           can fail and stderr then becomes terminal content.  Supply a
+           per-session default; an explicit API environment entry still
+           overrides it below. */
+        snprintf(hibr_log_path, sizeof(hibr_log_path),
+                 "/tmp/blit-hibr-%llu.log", session_id);
         if (setenv("BLIT_SESSION_ID", session_text, 1) != 0 ||
             setenv("BLIT_SURFACE_ID", surface_text, 1) != 0 ||
             setenv("BLIT_SERVER_PORT", port_text, 1) != 0 ||
@@ -6626,7 +6634,8 @@ static int create_session(BlitRuntime *runtime, const char *json,
                graphics. API environment entries below can override either
                integration default explicitly. */
             setenv("DT_BIDI", "on", 1) != 0 ||
-            setenv("HIBR_GFX", "kitty", 1) != 0)
+            setenv("HIBR_GFX", "kitty", 1) != 0 ||
+            setenv("DT_LOG", hibr_log_path, 0) != 0)
                 _exit(126);
         if (pane_id[0] != '\0' && setenv("BLIT_PANE_ID", pane_id, 1) != 0)
             _exit(126);

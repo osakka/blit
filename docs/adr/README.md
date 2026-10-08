@@ -32,6 +32,7 @@ Accepted decisions:
 22. [Versioned network terminal input](0022-network-terminal-input.md).
 23. [Bounded stream service for refresh fairness](0023-bounded-stream-service.md).
 24. [Pixel presentation cadence follows the producer and output path](0024-pixel-presentation-cadence.md).
+25. [Preserve Hibr startup diagnostics and full-surface writes](0025-hibr-startup-output-and-full-surface-writes.md).
 
 Pending decisions:
 

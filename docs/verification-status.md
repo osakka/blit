@@ -3,6 +3,22 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## Current 0.1.287 Hibr integration correction
+
+The exact 0.1.287 TCC server and `console-blit.so` adapter were staged with
+the unchanged Hibr checkout into the populated QEMU VKMS initroot. The
+two-output Hibr primary plus `desktop --join` fixture completed with
+`ACCEPTANCE_PASS`. The corrected adapter handled the full wallpaper write
+followed by Hibr's top-bar writes, and the API-launched child diagnostics did
+not appear as `desktop:` terminal content. The Debian package
+`build/packages-287-final/blit_0.1.287-1_amd64.deb` contains both the server
+and adapter; SHA-256:
+`6b87137c405d028595c188d05f92890917e3c1a4ab2d561773bd7c9f52b8b265`.
+
+This closes the identified queue-overflow and startup-stderr defects in the
+QEMU integration gate. It does not close the separate physical multi-monitor
+or physical 120/240 Hz hardware gates.
+
 ## Current 0.1.286 live Hibr presentation evidence
 
 On 2026-10-08, the installed 0.1.286 TCC build on the authorized physical

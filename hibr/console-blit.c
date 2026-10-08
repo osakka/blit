@@ -26,7 +26,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define CB_MAX_PENDING 16384
+#define CB_MAX_PENDING 65536
 #define CB_HTTP_CAP 32768
 #define CB_FLUSH_CELL_LIMIT 24
 #define CB_GLYPH_CAP 16
@@ -61,6 +61,8 @@ typedef struct {
 
 static cb_state cb;
 static cb_pane cb_panes[CB_MAX_PANES];
+
+static long cb_flush(void);
 
 static int cb_write_all(int fd, const void *data, size_t length)
 {
@@ -169,7 +171,18 @@ static int cb_add_pending(int x, int y, const char *text)
 		return HIBR_FAIL;
 	if (cb.pending_count == cb.pending_capacity) {
 		size_t next = cb.pending_capacity ? cb.pending_capacity * 2 : 128;
+		/* A full-screen Hibr wallpaper is larger than the historical
+		 * 16K queue.  If an unusually large surface still reaches the
+		 * bound, commit the already encoded cells before accepting the
+		 * next one.  Dropping later cells would make the bar/window layer
+		 * disappear after the wallpaper had filled the queue. */
 		if (next > CB_MAX_PENDING) next = CB_MAX_PENDING;
+		if (next <= cb.pending_capacity) {
+			if (cb_flush() < 0 || cb.pending_count == cb.pending_capacity)
+				return HIBR_FAIL;
+			next = cb.pending_capacity ? cb.pending_capacity * 2 : 128;
+			if (next > CB_MAX_PENDING) next = CB_MAX_PENDING;
+		}
 		if (next <= cb.pending_capacity) return HIBR_FAIL;
 		cb.pending = realloc(cb.pending, next * sizeof(*cb.pending));
 		if (!cb.pending) { cb.pending_capacity = 0; cb.pending_count = 0; return HIBR_FAIL; }
