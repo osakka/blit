@@ -138,6 +138,16 @@ Hibr desktop and three `desktop --join` clients, reached four sessions and
 four surfaces, and reported `KMS_FOUR_HIBR_PASS`. This is reproducible
 multi-output orchestration evidence, not physical multi-monitor evidence.
 
+The exact same current binary and Hibr executable passed the corrected QEMU
+input fixture after the staging helper was made to refresh the canonical
+`qemu_hibr_init.sh` entrypoint instead of preserving a historical init script.
+The non-soak run passed layout, gamepad discovery, keypad, multi-mouse, stream,
+and gamepad-routing checks. The 12-second soak passed layout, gamepad
+discovery, keypad observation, multi-mouse, stream, gamepad routing, and
+render-soak checks, then powered down cleanly. This matters because the stale
+init script omitted the gamepad route and could otherwise produce a misleading
+partial input result. Hibr source remained unchanged.
+
 The current 0.1.279 two-output high-refresh fixture passed
 `REFRESH_SCHEDULER_240_PASS` and accepted all 240 API pixel frames, but failed
 the strict presentation-rate assertion: QEMU TCG presented 165.222 measured

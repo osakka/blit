@@ -31,6 +31,12 @@ cp "$repo_root/hibr/blit-console.hibr" "$stage/blit-stage/blit-console.hibr"
 cp "$repo_root/hibr/blit-session.hibr" "$stage/blit-stage/blit-session.hibr"
 cp "$repo_root/hibr/blit-hibr-console.hibr" "$stage/blit-stage/blit-hibr-console.hibr"
 cp "$repo_root/hibr/blit-stock-session.hibr" "$stage/blit-stage/blit-stock-session.hibr"
+# The initramfs entrypoint is part of the canonical Hibr/QEMU probe. Refresh it
+# together with the staged binary and Hibr artifacts; preserving a historical
+# init script can silently omit newly added input routes or acceptance checks.
+cp "$script_dir/qemu_hibr_init.sh" "$stage/init"
+chmod 0755 "$stage/init"
+grep -q 'input-gamepad' "$stage/init"
 
 test -x "$hibr_root/build/hibr"
 test -d "$hibr_root/build/mods"
