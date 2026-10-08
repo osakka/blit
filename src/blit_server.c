@@ -325,6 +325,12 @@ typedef struct {
     int exit_code;
     int focused;
     int surface_mode;
+    /* External Hibr surfaces need the same attach-time reassert that a real
+       terminal performs after establishing its PTY geometry.  Schedule it
+       after startup output has made the desktop session live; do not inject a
+       user key such as Escape, which has desktop meaning. */
+    int attach_reassert_pending;
+    uint64_t attach_reassert_due_us;
     int terminal_escape;
     /* Hibr emits a single SGR containing bold plus truecolor foreground and
        background (three decimal components each).  A 32-byte buffer cuts
@@ -6245,6 +6251,51 @@ static void refresh_session_state(BlitRuntime *runtime, BlitSession *session)
     }
 }
 
+static void service_attach_reasserts(BlitRuntime *runtime, uint64_t now)
+{
+    int i;
+
+    for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
+        BlitSession *session = &runtime->sessions[i];
+        BlitSurface *surface;
+        struct winsize size;
+        int signalled = 0;
+
+        if (!session->used || !session->attach_reassert_pending ||
+            now < session->attach_reassert_due_us)
+            continue;
+        session->attach_reassert_pending = 0;
+        if (strcmp(session->state, "running") != 0 || session->pty_fd < 0)
+            continue;
+        surface = find_surface_id(runtime, session->id);
+        if (surface == NULL)
+            continue;
+        memset(&size, 0, sizeof(size));
+        size.ws_col = (unsigned short)surface->width;
+        size.ws_row = (unsigned short)surface->height;
+        size.ws_xpixel = (unsigned short)(surface->width *
+                                          session->terminal_cell_width);
+        size.ws_ypixel = (unsigned short)(surface->height *
+                                           session->terminal_cell_height);
+        if (ioctl(session->pty_fd, TIOCSWINSZ, &size) < 0) {
+            fprintf(stderr, "blit: attach reassert resize for session %llu failed: %s\n",
+                    session->id, strerror(errno));
+            continue;
+        }
+        /* forkpty makes the child the PTY foreground process group.  The
+           explicit signal is intentional: it makes the PTY resize/reassert
+           contract deterministic for hosts whose kernel/PTY path does not
+           deliver SIGWINCH from the master ioctl. */
+        if (kill(-session->process_id, SIGWINCH) == 0)
+            signalled = 1;
+        else if (kill(session->process_id, SIGWINCH) == 0)
+            signalled = 1;
+        if (!signalled)
+            fprintf(stderr, "blit: attach reassert signal for session %llu failed: %s\n",
+                    session->id, strerror(errno));
+    }
+}
+
 static const char *surface_mode_name(int mode)
 {
     if (mode == BLIT_SURFACE_EXTERNAL) return "external";
@@ -7287,6 +7338,11 @@ static void service_session_output(BlitRuntime *runtime, int fd)
                 snprintf(runtime->sessions[i].state,
                          sizeof(runtime->sessions[i].state), "running");
                 ++runtime->sessions[i].revision;
+                if (runtime->sessions[i].surface_mode == BLIT_SURFACE_EXTERNAL) {
+                    runtime->sessions[i].attach_reassert_pending = 1;
+                    runtime->sessions[i].attach_reassert_due_us =
+                        monotonic_us() + 250000ULL;
+                }
             }
             if (runtime->sessions[i].surface_mode != BLIT_SURFACE_EXTERNAL &&
                 surface != NULL &&
@@ -12499,7 +12555,18 @@ int main(int argc, char **argv)
             if (kms_fd > max_fd) max_fd = kms_fd;
         }
         now = monotonic_us();
+        service_attach_reasserts(&runtime, now);
         wait_ms = render_wait_ms(&runtime, now);
+        for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
+            BlitSession *session = &runtime.sessions[i];
+            if (session->used && session->attach_reassert_pending &&
+                session->attach_reassert_due_us > now) {
+                uint64_t remaining_us = session->attach_reassert_due_us - now;
+                int reassert_wait_ms = (int)((remaining_us + 999ULL) / 1000ULL);
+                if (reassert_wait_ms < wait_ms)
+                    wait_ms = reassert_wait_ms;
+            }
+        }
         /* A bounded stream service turn may leave complete WebSocket
            messages in Blit's user-space receive buffer after the kernel socket
            itself becomes readable=false. Do not sleep for the idle timeout or
