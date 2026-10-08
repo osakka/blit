@@ -1,6 +1,6 @@
 # ADR 0030: Coalesce terminal PTY writes before presentation
 
-Status: Accepted
+Status: Superseded by ADR 0031
 
 ## Context
 

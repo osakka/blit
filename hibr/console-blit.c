@@ -26,7 +26,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define CB_MAX_PENDING 65536
+#define CB_MAX_PENDING 262144
 #define CB_HTTP_CAP 32768
 #define CB_FLUSH_CELL_LIMIT 24
 #define CB_GLYPH_CAP 16
@@ -189,12 +189,12 @@ static int cb_add_pending(int x, int y, const char *text)
 		 * next one.  Dropping later cells would make the bar/window layer
 		 * disappear after the wallpaper had filled the queue. */
 		if (next > CB_MAX_PENDING) next = CB_MAX_PENDING;
-		if (next <= cb.pending_capacity) {
-			if (cb_flush() < 0 || cb.pending_count == cb.pending_capacity)
-				return HIBR_FAIL;
-			next = cb.pending_capacity ? cb.pending_capacity * 2 : 128;
-			if (next > CB_MAX_PENDING) next = CB_MAX_PENDING;
-		}
+            if (next <= cb.pending_capacity)
+                /* A flush is the application's frame boundary.  Never turn
+                 * queue pressure into an implicit commit: that exposes a
+                 * clear/redraw half-frame.  The raised bounded capacity is
+                 * sufficient for the largest supported logical surface. */
+                return HIBR_FAIL;
 		if (next <= cb.pending_capacity) return HIBR_FAIL;
 		cb.pending = realloc(cb.pending, next * sizeof(*cb.pending));
 		if (!cb.pending) { cb.pending_capacity = 0; cb.pending_count = 0; return HIBR_FAIL; }
