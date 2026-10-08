@@ -7,25 +7,22 @@ an evidence record, not a claim that the complete product is released.
 
 - Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The current source candidate is `0.1.277`. It builds with TCC and passes terminal
-  conformance, SDL screenshot/overlay pixels, the hidden-cursor damage gate,
-  and the complete Hibr font manifest gate. It adds the versioned network
-  terminal-input endpoint at the canonical PTY boundary. Its SDL backend uses a per-output
-  glyph atlas with nearest sampling and one-pixel guard borders, suppresses unchanged cell damage, and does not schedule frames
-  for hidden cursor movement. The current dummy frame runs measured
-  42.935–43.867 Hz with 15.400–15.676 ms maximum render time against a
-  16.000 ms target and zero missed deadlines; this is a software-dummy result,
-  not a physical refresh-rate claim. The authorized physical host now reports
-  0.1.277 through its version endpoint. Its controlled live API smoke test
-  preserved VT500 text, box/block glyphs, combining `Á`, and wide `界` in
-  the surface model at 60.000 Hz with zero missed deadlines; this is
-  one-output evidence, not a multi-monitor or 120/240 Hz claim. The Debian candidate
-  `blit_0.1.277-1_amd64.deb` was built from
-  this binary and passed package allowlist, embedded-version, byte-identity,
-  asset-presence, and extracted-runtime checks. The final artifact SHA-256 is
-  recorded externally in the handoff because this ledger is included inside
-  the package itself. It is not claimed as a fully validated 240 Hz release:
-  the real-mode QEMU
+- The current source candidate is `0.1.279`. It builds with TCC and passes
+  the complete terminal conformance suite, SDL screenshot/overlay pixels,
+  the hidden-cursor damage gate, and the complete Hibr font manifest gate.
+  It includes the versioned network terminal-input endpoint at the canonical
+  PTY boundary. Its SDL backend uses a per-output glyph atlas with nearest
+  sampling and one-pixel guard borders, suppresses unchanged cell damage, and
+  does not schedule frames for hidden cursor movement. The current physical
+  host reports 0.1.279 through its version endpoint and exposes actual
+  render/viewport dimensions in diagnostics. Its settled Hibr smoke test
+  preserved VT500 text, box/block glyphs, combining `Á`, and wide `界`; this
+  is one-output evidence, not a multi-monitor or 120/240 Hz claim. The Debian
+  candidate `blit_0.1.279-1_amd64.deb` was built from this binary and passed
+  package allowlist, embedded-version, byte-identity, asset-presence, and
+  extracted-runtime checks. The final artifact SHA-256 is recorded in the
+  package handoff because this ledger is included inside the package itself.
+  It is not claimed as a fully validated 240 Hz release: the real-mode QEMU
   stream gate still fails its strict page-flip deadline requirement.
 
 The same live host sustained 59.894 measured frames per second during a
