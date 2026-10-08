@@ -188,7 +188,9 @@ suite on VKMS and then on a physical DRM/KMS host.
 
 Capture settled SDL screenshots and API diagnostics from the authorized
 physical host, then validate physical pointer/button/wheel routing and refresh
-cadence. The sole open release gate is a real two-monitor primary/`--join`
-arrangement with independent connector discovery and presentation; the
-current host exposes only one connector. The update API requires its
-configured update token; no unauthenticated bypass is acceptable.
+cadence. The remaining hardware gates are a real two-monitor
+primary/`--join` arrangement with independent connector discovery and
+presentation, physical pointer/button/wheel activity, and physical 120/240 Hz
+refresh validation. The current host exposes only one connector. The update
+API requires its configured update token; no unauthenticated bypass is
+acceptable.
