@@ -152,6 +152,14 @@ paths:
       tags: [diagnostics]
       operationId: getDiagnosticTrace
       summary: Get the bounded input, surface, and render-path trace
+      parameters:
+        - in: query
+          name: kind
+          required: false
+          description: Return only events of this kind when supplied.
+          schema:
+            type: string
+            enum: [pointer_button, pointer_motion, keyboard_key, surface_update, render_path]
       responses:
         '200':
           description: Recent trace events in chronological order

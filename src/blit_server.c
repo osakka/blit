@@ -1310,7 +1310,7 @@ static void diagnostic_trace(BlitRuntime *runtime, const char *kind,
 }
 
 static void diagnostic_trace_json(BlitRuntime *runtime, char *body,
-                                  size_t capacity)
+                                  size_t capacity, const char *kind_filter)
 {
     size_t used = 0;
     int count = runtime->diagnostic_trace_count;
@@ -1322,9 +1322,13 @@ static void diagnostic_trace_json(BlitRuntime *runtime, char *body,
                  "{\"revision\":%llu,\"events\":[",
                  runtime->diagnostic_trace_sequence);
     while (count-- > 0 && used + 4 < capacity) {
-        json_appendf(body, capacity, &used, "%s%s", first ? "" : ",",
-                     runtime->diagnostic_trace[index]);
-        first = 0;
+        int include = kind_filter == NULL || kind_filter[0] == '\0' ||
+            strstr(runtime->diagnostic_trace[index], kind_filter) != NULL;
+        if (include) {
+            json_appendf(body, capacity, &used, "%s%s",
+                         first ? "" : ",", runtime->diagnostic_trace[index]);
+            first = 0;
+        }
         index = (index + 1) % BLIT_MAX_TRACE_EVENTS;
     }
     json_appendf(body, capacity, &used, "]}");
@@ -8870,8 +8874,24 @@ static void handle_request(int fd, BlitRuntime *runtime,
     } else if (strcmp(path, "/v1/diagnostics/runtime") == 0) {
         runtime_diagnostics_json(runtime, body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
-    } else if (strcmp(path, "/v1/diagnostics/trace") == 0) {
-        diagnostic_trace_json(runtime, body, sizeof(body));
+    } else if (strncmp(path, "/v1/diagnostics/trace",
+                       strlen("/v1/diagnostics/trace")) == 0 &&
+               (path[strlen("/v1/diagnostics/trace")] == '\0' ||
+                path[strlen("/v1/diagnostics/trace")] == '?')) {
+        char kind[64];
+        const char *kind_value = strstr(path, "kind=");
+        size_t kind_length = 0;
+        kind[0] = '\0';
+        if (kind_value != NULL) {
+            kind_value += strlen("kind=");
+            while (kind_value[kind_length] != '\0' &&
+                   kind_value[kind_length] != '&' &&
+                   kind_length + 1 < sizeof(kind))
+                ++kind_length;
+            memcpy(kind, kind_value, kind_length);
+            kind[kind_length] = '\0';
+        }
+        diagnostic_trace_json(runtime, body, sizeof(body), kind);
         send_http(fd, 200, "OK", "application/json", body);
     } else if (strcmp(path, "/v1/displays") == 0) {
         displays_json(runtime, body, sizeof(body));

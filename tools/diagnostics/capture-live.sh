@@ -22,6 +22,9 @@ get input-routes.json /v1/input/routes
 get diagnostics-start.json /v1/diagnostics
 get runtime-start.json /v1/diagnostics/runtime
 get trace-start.json /v1/diagnostics/trace
+for kind in pointer_button pointer_motion keyboard_key render_path surface_update; do
+    get "trace-${kind}-start.json" "/v1/diagnostics/trace?kind=${kind}"
+done
 
 start=$(date +%s)
 index=0
@@ -29,6 +32,9 @@ while [ $(( $(date +%s) - start )) -lt "$duration" ]; do
     stamp=$(date -u +%Y%m%dT%H%M%S.%3NZ)
     get "runtime-$stamp.json" /v1/diagnostics/runtime
     get "trace-$stamp.json" /v1/diagnostics/trace
+    for kind in pointer_button pointer_motion keyboard_key render_path surface_update; do
+        get "trace-${kind}-$stamp.json" "/v1/diagnostics/trace?kind=${kind}"
+    done
     curl --fail --silent --show-error --max-time 30 \
         "$base_url/v1/diagnostics/screenshots/display-1" \
         > "$output_dir/screenshots/$stamp.bmp" || true
@@ -41,5 +47,8 @@ done
 get diagnostics-end.json /v1/diagnostics
 get runtime-end.json /v1/diagnostics/runtime
 get trace-end.json /v1/diagnostics/trace
+for kind in pointer_button pointer_motion keyboard_key render_path surface_update; do
+    get "trace-${kind}-end.json" "/v1/diagnostics/trace?kind=${kind}"
+done
 
 printf 'capture_dir=%s screenshots=%s\n' "$output_dir" "$index"
