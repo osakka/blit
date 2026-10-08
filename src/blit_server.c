@@ -50,6 +50,10 @@ extern char **environ;
 #define BLIT_MAX_EVENT_HISTORY 64
 #define BLIT_MAX_RUNTIME_LOGS 64
 #define BLIT_PIXEL_FRAME_QUIET_US 100000ULL
+/* A PTY is a byte stream, while a terminal desktop frame is commonly emitted
+   as many short writes.  Hold presentation briefly after the latest read so
+   the renderer never exposes the clear/redraw interval between those writes. */
+#define BLIT_TERMINAL_FRAME_QUIET_US 8000ULL
 #define BLIT_MAX_SCROLLBACK_LINES 1000
 #define BLIT_MAX_OVERLAYS 16
 #define BLIT_UPDATE_IDLE_TIMEOUT_US 30000000ULL
@@ -377,6 +381,7 @@ typedef struct {
     int terminal_mouse_mode;
     int terminal_mouse_sgr;
     int terminal_synchronized;
+    int terminal_frame_batch;
     /* Pixel geometry advertised to child programs and used by Kitty/Sixel.
        This is the renderer's actual cell size, including font scaling. */
     int terminal_cell_width;
@@ -405,6 +410,7 @@ typedef struct {
     int pane_rows;
     unsigned long long topology_revision;
     int render_pending;
+    uint64_t terminal_frame_quiet_until_us;
     uint64_t render_last_us;
     int render_interval_ms;
     int render_effective_interval_ms;
@@ -897,7 +903,14 @@ static int render_wait_ms(const BlitRuntime *runtime, uint64_t now)
 
     if (!runtime->render_pending)
         return wait_ms;
+    if (runtime->terminal_frame_quiet_until_us > now) {
+        uint64_t delta = runtime->terminal_frame_quiet_until_us - now;
+        wait_ms = (int)((delta + 999ULL) / 1000ULL);
+        if (wait_ms < 1) wait_ms = 1;
+    }
     if (runtime->pointer_dirty) {
+        if (runtime->terminal_frame_quiet_until_us > now)
+            return wait_ms;
         /* Direct KMS may still own the output's back buffer until its page
            flip event arrives.  A zero-timeout select while that flip is
            pending spins the gateway at 100% CPU and prevents the bounded
@@ -5449,6 +5462,7 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
             for (start = 0; start <= surface->cursor_x; ++start)
                 terminal_erase_cell(session, surface, start, surface->cursor_y);
         } else if (mode == 2 || mode == 3) {
+            session->terminal_frame_batch = 1;
             for (y = 0; y < surface->height; ++y)
                 terminal_erase_line(session, surface, y, 0);
             if (mode == 3)
@@ -5652,6 +5666,7 @@ static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
                 if (session->terminal_alternate)
                     terminal_leave_alternate(session, surface);
                 terminal_clear_active_screen(surface);
+                session->terminal_frame_batch = 1;
                 surface->cursor_x = 0;
                 surface->cursor_y = 0;
                 surface->cursor_visible = 1;
@@ -7278,6 +7293,9 @@ static void service_session_output(BlitRuntime *runtime, int fd)
                                    sizeof(surface_event));
                 broadcast_stream(runtime, surface_event, BLIT_STREAM_SURFACES);
                 runtime->render_pending = 1;
+                if (runtime->sessions[i].terminal_frame_batch)
+                    runtime->terminal_frame_quiet_until_us = monotonic_us() +
+                        BLIT_TERMINAL_FRAME_QUIET_US;
             }
             runtime->diagnostic_terminal_bytes += (unsigned long long)received;
             runtime->diagnostic_last_terminal_ms =
@@ -10731,6 +10749,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
         }
         if (rendered)
             surface->damage_valid = 0;
+        if (rendered && session != NULL)
+            session->terminal_frame_batch = 0;
     }
     runtime->pointer_dirty = 0;
     {
@@ -12567,6 +12587,7 @@ int main(int argc, char **argv)
         if (!pending_before_events && runtime.render_pending)
             reset_render_schedule(&runtime, now);
         if (runtime.render_pending &&
+            now >= runtime.terminal_frame_quiet_until_us &&
             (output_mask = due_output_mask(&runtime, now)) != 0) {
             render_current_surfaces(&runtime, output_mask);
             advance_render_schedule(&runtime, now, output_mask);
