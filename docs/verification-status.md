@@ -83,6 +83,11 @@ the KMS pixel/screenshot oracles passed for both outputs. The VKMS mode exposed
 240 Hz in that run, but the producer remained 60 Hz; this is not a 240 Hz
 presentation claim.
 
+The exact current 0.1.283 Hibr input fixture also passed: evdev keyboard and
+keypad delivery, pointer motion/buttons with SGR mouse reports, two-mouse
+routing, WebSocket input delivery, and gamepad discovery/routing. The PTY
+probes received the expected bytes and the guest powered down cleanly.
+
 The 0.1.281 release-qualification cycle also passed authenticated network
 authorization, HTTP fragmentation and back-pressure, session lifecycle and
 write/resize, stream replay/snapshot repair, hidden-cursor damage, screenshot
