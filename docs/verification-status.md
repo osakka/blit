@@ -1710,8 +1710,9 @@ The latest reachable observation of the authorized host at
 1. Validate at least one physical multi-monitor arrangement, including
    connector discovery, independent presentation, pointer routing, and Hibr
    primary/join behavior. The executable
-   `tools/tests/physical_multi_display_gate.rb` is ready for this check; the
-   current host exposes only one physical output and returns exit status 77.
+   `BLIT_GATE_SERVER=http://192.168.10.54:8080 tools/tests/physical_multi_display_gate.rb`
+   is ready for this check; the current host exposes only one physical output
+   and returned exit status 77 in the latest run.
 2. Validate the producer-driven 240 Hz pixel path on hardware or a
    KVM-backed VKMS guest. The current host is 60 Hz and the available QEMU
    TCG guest cannot sustain the 240 Hz page-flip workload without additional

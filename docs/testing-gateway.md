@@ -124,8 +124,8 @@ Run the hardware gate against a Blit instance that owns the physical DRM
 device:
 
 ```sh
-BLIT_GATE_SERVER=http://127.0.0.1:8080 \
-  ruby tools/tests/physical_multi_display_gate.rb
+BLIT_GATE_SERVER=http://192.168.10.54:8080 \
+  tools/tests/physical_multi_display_gate.rb
 ```
 
 The gate requires at least two discovered physical displays. It launches the
