@@ -20,7 +20,7 @@ an evidence record, not a claim that the complete product is released.
   preserved VT500 text, box/block glyphs, combining `Á`, and wide `界` in
   the surface model at 60.000 Hz with zero missed deadlines; this is
   one-output evidence, not a multi-monitor or 120/240 Hz claim. The Debian candidate
-  `blit_0.1.274-1_amd64.deb` was built from
+  `blit_0.1.276-1_amd64.deb` was built from
   this binary and passed package allowlist, embedded-version, byte-identity,
   asset-presence, and extracted-runtime checks. The final artifact SHA-256 is
   recorded externally in the handoff because this ledger is included inside
@@ -73,6 +73,18 @@ conformance suite, including the new network-input capability identity, raw
 PTY input, and bracketed-paste framing cases. Session lifecycle, network
 fragmentation/back-pressure/authentication, SDL glyph filtering, and the Hibr
 font manifest gates also passed. No Hibr source was modified.
+
+The exact same staged binary was run through the two-output direct-KMS QEMU
+visual fixture. It reported `server_version:"0.1.276"`, two ready DRM/KMS
+outputs, and the checked-in Hibr font, then passed
+`PPM_DISPLAY_47_VISUALS_PASS`, `PPM_DISPLAY_48_PASS`,
+`KMS_API_SCREENSHOT_PASS`, and `KMS_CAPTURE_PASS`. This proves current
+two-output composition, glyph/colour capture, and API screenshot correctness
+in the reproducible VKMS fixture. The fixture selected 240 Hz with a 4.166 ms
+target interval, but its startup page-flip workload is not a sustained 240 Hz
+timing proof: QEMU TCG recorded virtual deadline misses and a worst-case
+startup present span of 89.732 ms. Physical high-refresh acceptance remains
+open.
 
 The HTTP input endpoint is deliberately bounded to 768 data bytes per request
 and reports the actual PTY write count. It is an API transport into the
