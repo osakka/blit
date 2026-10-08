@@ -23,7 +23,19 @@ restored. The real-host slow-reader gate kept `/v1/version` responsive in
 then reported zero missed deadlines and a 39.572 ms maximum loop gap. The
 latest physical sample still reports zero raw evdev mouse events, so this is
 not a physical-mouse acceptance result. Exact 0.1.335 QEMU/KMS gates remain
-pending.
+now pass. The exact staged TCC binary SHA-256 was
+`ec8657f8cea3adb2deb9507c56a9791b51b6fb5264630606739174c0a58bbd1f`.
+The normal VKMS run passed `PPM_DISPLAY_47_WIDE_KITTY_PASS`,
+`PPM_DISPLAY_48_PASS`, `KMS_API_SCREENSHOT_PASS`, and `KMS_CAPTURE_PASS`.
+The mixed, high-refresh, sixel, and pixel-stream variants passed
+`REFRESH_SCHEDULER_MIXED_PASS`, `REFRESH_SCHEDULER_240_PASS`,
+`PPM_DISPLAY_47_SIXEL_PASS`, `PIXEL_FRAME_RATE_PASS`,
+`KMS_API_PIXEL_PASS`, and their corresponding capture/API markers.
+The exact Hibr QEMU fixture passed `LAYOUT_MATRIX_PASS`,
+`HIBR_PRIMARY_RESTART_PASS`, `HIBR_JOIN_RECONNECT_PASS`, and
+`HIBR_PANE_MATRIX_PASS` with staged Hibr SHA-256
+`f8dbc10779193c27d2eb47f0e858cf656912f8b96f56a45af820ad05d18cdb7e`.
+Hibr source was not modified.
 
 ## Current 0.1.334 diagnostic-observability status
 
