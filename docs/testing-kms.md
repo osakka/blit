@@ -67,11 +67,16 @@ only waiting mechanisms.
 Connector hotplug status is polled from the same bounded DRM output set while
 servicing the descriptor. A disconnected connector is marked `failed` in the
 display API and is removed from the render work for that output; surviving
-outputs continue presenting and servicing the gateway. The VKMS fault fixture
-sets connector status to the DRM `disconnected` value and verifies this
-per-output behavior.
-The bounded timeout still moves a connector to the explicit modeset fallback
-if its completion event does not arrive.
+outputs continue presenting and servicing the gateway. A page-flip timeout is
+reported as `recovering` while one bounded modeset restores the output; it is
+not permanently marked failed unless the connector is actually lost or the
+recovery modeset fails. The VKMS fault fixture sets connector status to the
+DRM `disconnected` value and verifies this per-output behavior.
+
+The recovery regression fixture adds `blit.kms_recovery=1` and
+`blit.kms_timeout_ms=1` to the guest command line. It requires both
+`entering modeset recovery` and `modeset recovery complete` in the server log,
+then requires the ordinary two-output capture gate to pass.
 
 After the first complete composition, direct KMS preserves each scanout back
 buffer and uses the canonical surface revision/damage rectangle to repaint only

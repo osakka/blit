@@ -32,6 +32,11 @@ export BLIT_KMS_SCREENSHOT_DIR=/tmp/guest-screenshots
 export BLIT_KMS_SCREENSHOT_AFTER=0
 export BLIT_KMS_TRACE_TIMING=1
 export BLIT_KMS_TRACE_PHASES=1
+flip_timeout_arg=$($b cat /proc/cmdline 2>/dev/null | \
+    $b sed -n 's/.*blit.kms_timeout_ms=\([0-9][0-9]*\).*/\1/p')
+if [ -n "$flip_timeout_arg" ]; then
+    export BLIT_KMS_FLIP_TIMEOUT_MS=$flip_timeout_arg
+fi
 if [ -f /blit-stage/fonts/Blit-Hibr-Terminus16.psf ]; then
     export BLIT_PSF_FONT=/blit-stage/fonts/Blit-Hibr-Terminus16.psf
 fi
@@ -47,6 +52,7 @@ visuals_test=0
 pixel_test=0
 pixel_stream_test=0
 pixel_stream_240_test=0
+recovery_test=0
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
     *" blit.output_loss=1 "*) loss_test=1 ;;
 esac
@@ -79,6 +85,9 @@ case " $($b cat /proc/cmdline 2>/dev/null || true) " in
 esac
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
     *" blit.pixel_stream_240=1 "*) pixel_test=1; pixel_stream_test=1; pixel_stream_240_test=1; high_refresh_test=1 ;;
+esac
+case " $($b cat /proc/cmdline 2>/dev/null || true) " in
+    *" blit.kms_recovery=1 "*) recovery_test=1 ;;
 esac
 if [ "$visuals_test" -eq 1 ] || [ "$pixel_test" -eq 1 ]; then
     # Capture after the effect, overlay, and session requests have had time
@@ -265,6 +274,16 @@ if [ "$loss_test" -eq 1 ]; then
     [ "$loss_pass" -eq 1 ] && echo OUTPUT_LOSS_PASS || echo OUTPUT_LOSS_FAIL
 fi
 echo BLIT_LOG; $b cat /tmp/blit.log
+recovery_pass=1
+if [ "$recovery_test" -eq 1 ]; then
+    if $b grep -q 'entering modeset recovery' /tmp/blit.log &&
+       $b grep -q 'modeset recovery complete' /tmp/blit.log; then
+        echo KMS_RECOVERY_PASS
+    else
+        echo KMS_RECOVERY_FAIL
+        recovery_pass=0
+    fi
+fi
 echo GUEST_SCREENSHOTS; $b ls -l /tmp/guest-screenshots 2>/dev/null || true
 for shot in /tmp/guest-screenshots/display-47.ppm /tmp/guest-screenshots/display-48.ppm; do
     if [ -f "$shot" ]; then
@@ -333,6 +352,6 @@ if [ "$loss_test" -eq 1 ]; then
 elif [ "$size1" -gt 2359296 ] && [ "$size2" -gt 2359296 ] && [ "$hash1" != "$hash2" ]; then
     capture_pass=1
 fi
-if [ "$capture_pass" -eq 1 ] && [ "$loss_pass" -eq 1 ] && [ "$graphics_pass" -eq 1 ] && [ "$scheduler_pass" -eq 1 ] && [ "$mixed_refresh_pass" -eq 1 ] && [ "$high_refresh_pass" -eq 1 ] && [ "$kitty_limits_pass" -eq 1 ] && [ "$api_screenshot_pass" -eq 1 ]; then echo KMS_CAPTURE_PASS; finish 0; fi
+if [ "$capture_pass" -eq 1 ] && [ "$loss_pass" -eq 1 ] && [ "$graphics_pass" -eq 1 ] && [ "$scheduler_pass" -eq 1 ] && [ "$mixed_refresh_pass" -eq 1 ] && [ "$high_refresh_pass" -eq 1 ] && [ "$kitty_limits_pass" -eq 1 ] && [ "$api_screenshot_pass" -eq 1 ] && [ "$recovery_pass" -eq 1 ]; then echo KMS_CAPTURE_PASS; finish 0; fi
 echo KMS_CAPTURE_FAIL
 finish 1

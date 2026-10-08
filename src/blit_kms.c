@@ -1142,9 +1142,9 @@ int blit_kms_service(BlitKms *kms, int readable)
         output->modeset_fallback = 1;
         output->flip_pending = 0;
         output->flip_started_us = 0;
-        output->info.presentation_state = BLIT_KMS_PRESENTATION_FAILED;
+        output->info.presentation_state = BLIT_KMS_PRESENTATION_RECOVERING;
         fprintf(stderr,
-                "blit: KMS page-flip timeout on connector=%u; using modeset fallback\n",
+                "blit: KMS page-flip timeout on connector=%u; entering modeset recovery\n",
                 output->connector);
         changed = 1;
     }

@@ -80,6 +80,7 @@ typedef struct {
 #define BLIT_KMS_PRESENTATION_UNAVAILABLE 1
 #define BLIT_KMS_PRESENTATION_PRESENTING 2
 #define BLIT_KMS_PRESENTATION_FAILED 3
+#define BLIT_KMS_PRESENTATION_RECOVERING 4
 
 BlitKms *blit_kms_new(BlitFont *font);
 int blit_kms_open(BlitKms *kms, char *error, size_t error_capacity);

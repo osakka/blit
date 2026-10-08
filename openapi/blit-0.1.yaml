@@ -829,7 +829,7 @@ components:
         active_mode: {$ref: '#/components/schemas/DisplayMode'}
         presentation_state:
           type: string
-          enum: [available, unavailable, presenting, failed]
+          enum: [available, unavailable, presenting, recovering, failed]
       additionalProperties: false
     AudioDevice:
       type: object

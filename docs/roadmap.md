@@ -40,7 +40,7 @@ production `console-blit` module is operational over the OpenAPI/WebSocket
 contract. Explicit focus and versioned input routes are exposed by the API.
 The SDL adapter uses single-surface incremental frames and conservatively
 redraws multi-surface outputs with deterministic vertical stacking. The
-current 0.1.270 source passes the complete terminal, graphics, input,
+current 0.1.271 source passes the complete terminal, graphics, input,
 two-display VKMS/QEMU, four-output Hibr primary/`--join`, mixed-refresh,
 output-loss, and the 60 Hz emulator-like pixel-stream acceptance gates. SDL wallpaper
 backgrounds are coalesced into horizontal runs before geometry submission;

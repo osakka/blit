@@ -1434,9 +1434,12 @@ static const char *display_presentation_state(const BlitRuntime *runtime,
 {
     if (runtime->direct_kms) {
         BlitKmsDisplayInfo info;
-        if (blit_kms_display_info(runtime->kms, display_index, &info) == 0 &&
-            info.presentation_state == BLIT_KMS_PRESENTATION_FAILED)
-            return "failed";
+        if (blit_kms_display_info(runtime->kms, display_index, &info) == 0) {
+            if (info.presentation_state == BLIT_KMS_PRESENTATION_FAILED)
+                return "failed";
+            if (info.presentation_state == BLIT_KMS_PRESENTATION_RECOVERING)
+                return "recovering";
+        }
         return "presenting";
     }
     {
