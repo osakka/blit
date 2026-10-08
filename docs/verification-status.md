@@ -21,6 +21,14 @@ forces a fresh scene and can block the single-threaded loop during transfer.
 The fix is Blit-only: an empty graphics scene no longer incorporates session
 membership into its graphics signature. Hibr source remains unmodified.
 
+The exact 0.1.326 TCC binary also passes the two-output VKMS capture fixture:
+`PPM_DISPLAY_47_WIDE_KITTY_PASS`, `PPM_DISPLAY_48_PASS`,
+`KMS_API_SCREENSHOT_PASS`, and `KMS_CAPTURE_PASS`. The mixed-refresh and
+high-refresh variants pass `REFRESH_SCHEDULER_MIXED_PASS` and
+`REFRESH_SCHEDULER_240_PASS`. The fixture used the checked VKMS kernel
+`/tmp/linux-vkms-build/arch/x86/boot/bzImage`, SHA-256
+`17ffba47e1e21d902c71c331bca474fb2de1209f03176d316b333d488bd3fcea`.
+
 ## Current 0.1.320 live graphics-probe status
 
 Package `blit_0.1.320-1_amd64.deb` adds the Blit-owned, non-Hibr-source probe
