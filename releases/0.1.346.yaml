@@ -1,0 +1,16 @@
+release: 0.1.346
+package: blit_0.1.346-1_amd64.deb
+package_sha256: 909ca47185be3c8f54d7a4af70a009561e01fa9d13dd2b748c599ed8e9981623
+source_commit: bba30e3
+server_binary_sha256: 25dfcf0d7778698555d3b412cdc5591be6b7d6dc5bd859766dd7e65c5d309120
+hibr_adapter_sha256: d84e4637defaebccb08e43429b9be48286e024205d31af2009f90712c1713830
+hibr_root: /home/osakka/hibr
+hibr_version: 0.99.100
+live_host: 192.168.10.54:8080
+live_version: pending
+screenshot_api_acceptance: open
+native_hibr_layout_acceptance: open
+production_adapter_acceptance: open
+physical_mouse_acceptance: open
+physical_multi_monitor_acceptance: open
+physical_high_refresh_acceptance: open
