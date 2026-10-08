@@ -34,6 +34,13 @@ sample was 17.890 ms against the 16 ms target, so this is stable 60 Hz cadence
 evidence with a remaining worst-case render-budget issue, not a claim of
 unbounded performance.
 
+An API screenshot of the live SDL output was also captured with the
+display-derived 240×135 surface geometry at 1920×2160. Visual inspection of
+the enlarged glyph crop showed clean box-drawing, block, combining, wide-cell,
+and colour placement with no adjacent-atlas bleed. Emoji outside the bundled
+fixed-cell coverage remains an explicit visible fallback; this is not a claim
+of universal Unicode shaping.
+
 ### Current 0.1.274 evidence
 
 The exact TCC-built `0.1.274` binary was rebuilt from the pushed source and
