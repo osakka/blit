@@ -18,7 +18,7 @@ an evidence record, not a claim that the complete product is released.
   26.865 ms maximum full render and 61.387 Hz over its active 504 ms window.
   The direct-KMS pixel-frame acceptance below was run from the exact current
   0.1.256 TCC build; the newer SDL presentation and geometry work is recorded
-  below. The authorized physical host now reports 0.1.258 through its version
+  below. The authorized physical host now reports 0.1.260 through its version
   endpoint.
 
 ### Current 0.1.260 source and physical evidence
@@ -68,7 +68,7 @@ mappings, including exact row-shape assertions for U+2580–U+2588. The
 full-screen Hibr workload's measured frame rate is
 distinct from the idle diagnostic value: idle servers do not present frames.
 
-The exact 0.1.259 TCC binary was staged into the two-output VKMS/QEMU capture
+The exact 0.1.260 TCC binary was staged into the two-output VKMS/QEMU capture
 fixture. It discovered two 1024×768 KMS outputs, passed the known-glyph and
 pixel assertions on both screenshots, passed the API screenshot assertion, and
 produced `KMS_CAPTURE_PASS`. This confirms the current direct-KMS binary; the
