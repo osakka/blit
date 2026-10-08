@@ -367,6 +367,15 @@ the cursor disabled does not schedule presentation frames:
 ruby tools/tests/hidden_cursor_damage_gate.rb
 ```
 
+The SDL glyph-render gate checks the public screenshot boundary for the
+bundled Hibr font. It asserts deterministic light/heavy/double box geometry,
+vertical geometry, block coverage, and both halves of a wide glyph; terminal
+cell snapshots alone do not prove these pixel shapes:
+
+```sh
+ruby tools/tests/sdl_glyph_render_gate.rb
+```
+
 The SDL graphics-cache gate transmits a Kitty image, then generates repeated
 terminal damage while the image remains unchanged. It requires one initial
 texture upload and subsequent cache hits with no additional uploads:

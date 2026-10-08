@@ -37,6 +37,12 @@ horizontal runs. The focused 128×48 wallpaper-style gate passed with four
 background quads and a pixel-correct screenshot, proving the optimization
 without changing cell colors or damage bounds.
 
+The new SDL glyph-render gate passed through the public screenshot endpoint:
+light/heavy/double box lines, light vertical geometry, full and lower blocks,
+and both halves of a wide glyph all matched their pixel topology. This closes
+the previously missing renderer-boundary assertion for deterministic glyph
+shapes; it does not claim universal Unicode shaping.
+
 The same exact binary passed the complete terminal conformance suite and the
 Hibr font manifest gate (`required=447`, `mappings=1181`). The conformance
 vectors include combining marks, wide cells, variation selectors, zero-width
