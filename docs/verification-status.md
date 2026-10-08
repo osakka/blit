@@ -44,6 +44,10 @@ image placement, synchronized output, and network terminal input.
 The exact 0.1.332 binary also passes the two-output VKMS capture with
 `PPM_DISPLAY_47_WIDE_KITTY_PASS`, `PPM_DISPLAY_48_PASS`,
 `KMS_API_SCREENSHOT_PASS`, and `KMS_CAPTURE_PASS`.
+Its direct-KMS 60-frame pixel-stream workload also passes
+`PIXEL_FRAME_RATE_PASS`, `KMS_API_PIXEL_PASS`, and `KMS_CAPTURE_PASS`; all 60
+frames were accepted with zero additional missed deadlines in the stream
+workload.
 
 The 0.1.332 live synthetic probe passes with zero missed deadlines. With the
 physical evdev node present but idle, one SDL mouse event was accepted through
