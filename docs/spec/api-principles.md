@@ -35,6 +35,8 @@ The initial schema should eventually cover:
 - effect definitions, parameters, presets, and effect graphs;
 - input devices, focus, routing, and input events;
 - frame requests, acknowledgements, timing, and damage;
+- bounded binary pixel-frame streaming with explicit frame boundaries,
+  back-pressure, and presentation receipts;
 - subscriptions, event sequencing, and replay/resynchronization;
 - typed errors and diagnostic details;
 - authentication, authorization, and client leases.

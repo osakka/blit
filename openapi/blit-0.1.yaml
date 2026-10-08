@@ -672,6 +672,11 @@ paths:
           - $ref: '#/components/schemas/StreamTerminalOutput'
           - $ref: '#/components/schemas/StreamSurfaceDelta'
           - $ref: '#/components/schemas/StreamFrameEvent'
+          - $ref: '#/components/schemas/StreamPixelFrameBegin'
+          - description: >-
+              After pixel_frame_begin is accepted, the client sends one or
+              more masked binary WebSocket messages containing tightly packed
+              RGB or RGBA pixels. The final message completes the frame.
           - $ref: '#/components/schemas/StreamDiagnosticEvent'
 
 components:
@@ -920,7 +925,7 @@ components:
         snapshot: {$ref: '#/components/schemas/Diagnostics'}
         performance:
           type: object
-          required: [uptime_ms, frames, last_frame_gap_ms, max_frame_gap_ms, last_render_ms, max_render_ms, missed_deadlines, last_terminal_ms, max_terminal_ms, terminal_bytes, pointer_cache_hits, pointer_cache_misses, frame_rate_hz, frame_rate_frames, frame_rate_window_ms, frame_rate_age_ms, loop_iterations, terminal_reads, present_calls, last_loop_gap_ms, max_loop_gap_ms, last_select_ms, max_select_ms, last_sdl_events_ms, max_sdl_events_ms, last_evdev_scan_ms, max_evdev_scan_ms]
+          required: [uptime_ms, frames, last_frame_gap_ms, max_frame_gap_ms, last_render_ms, max_render_ms, missed_deadlines, last_terminal_ms, max_terminal_ms, terminal_bytes, pointer_cache_hits, pointer_cache_misses, frame_rate_hz, graphics_cache_hits, graphics_texture_uploads, pixel_frames_accepted, pixel_frame_errors, frame_rate_frames, frame_rate_window_ms, frame_rate_age_ms, loop_iterations, terminal_reads, present_calls, last_loop_gap_ms, max_loop_gap_ms, last_select_ms, max_select_ms, last_sdl_events_ms, max_sdl_events_ms, last_evdev_scan_ms, max_evdev_scan_ms]
           properties:
             uptime_ms: {type: integer, minimum: 0}
             frames: {type: integer, minimum: 0}
@@ -935,6 +940,10 @@ components:
             pointer_cache_hits: {type: integer, minimum: 0}
             pointer_cache_misses: {type: integer, minimum: 0}
             frame_rate_hz: {type: number, minimum: 0}
+            graphics_cache_hits: {type: integer, minimum: 0}
+            graphics_texture_uploads: {type: integer, minimum: 0}
+            pixel_frames_accepted: {type: integer, minimum: 0}
+            pixel_frame_errors: {type: integer, minimum: 0}
             frame_rate_frames: {type: integer, minimum: 0}
             frame_rate_window_ms: {type: integer, minimum: 0}
             frame_rate_age_ms: {type: integer, minimum: 0}
@@ -1421,6 +1430,34 @@ components:
           items:
             type: string
             enum: [input, terminals, surfaces, frames, hardware, diagnostics]
+      additionalProperties: false
+    StreamPixelFrameBegin:
+      type: object
+      required: [type, session_id, image_id, width, height, format]
+      properties:
+        type: {type: string, const: pixel_frame_begin}
+        session_id: {$ref: '#/components/schemas/ResourceId'}
+        image_id: {type: integer, minimum: 1}
+        width: {type: integer, minimum: 1, maximum: 512}
+        height: {type: integer, minimum: 1, maximum: 512}
+        format: {type: integer, enum: [24, 32]}
+        x: {type: integer, default: 0}
+        y: {type: integer, default: 0}
+        z: {type: integer, default: 0}
+        ack:
+          type: boolean
+          default: false
+          description: Request one presentation receipt for every completed frame.
+      additionalProperties: false
+    StreamPixelFrameReceipt:
+      type: object
+      required: [type, state]
+      properties:
+        type:
+          type: string
+          enum: [pixel_frame_ready, pixel_frame_present, pixel_frame_error]
+        state: {type: string}
+        code: {type: string}
       additionalProperties: false
     StreamInputEvent:
       type: object

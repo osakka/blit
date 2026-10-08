@@ -7,7 +7,7 @@ an evidence record, not a claim that the complete product is released.
 
 - Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The current candidate is `0.1.250`. It builds with TCC and passes terminal
+- The current candidate is `0.1.251`. It builds with TCC and passes terminal
   conformance, SDL screenshot/overlay pixels, the hidden-cursor damage gate,
   and the complete Hibr font manifest gate. Its SDL backend uses a per-output
   glyph atlas, suppresses unchanged cell damage, and does not schedule frames
@@ -19,6 +19,23 @@ an evidence record, not a claim that the complete product is released.
   The QEMU/KMS acceptance below is being rerun for the image-cache change. The
   preceding 0.1.245 package was accepted by the authorized physical host and
   verified through its version endpoint.
+
+### Current 0.1.251 source evidence
+
+The exact TCC-built 0.1.251 binary passes the full VT/UTF-8/Hibr terminal
+conformance suite, the font manifest gate, and the refresh-aware dummy frame
+gate. Its bounded binary pixel-frame WebSocket gate accepted 30/30 RGBA
+frames, including one fragmented frame, with zero frame errors and reusable
+texture storage. The measured dummy ingest rate was 21,353 frames/second;
+the renderer coalesced those updates into six frames at a measured 16.468 ms
+render time. This is an API-ingest and renderer-path result, not yet a claim
+of physical 60/120/240 Hz presentation. Direct-KMS pixel-frame capture remains
+the next required evidence before calling the graphical emulator path ready.
+
+The pixel path now invalidates only the affected graphics rectangle in cell
+coordinates instead of forcing a full terminal-surface redraw. Optional
+placement fields default to zero as declared by the OpenAPI schema. The
+runtime diagnostics expose `pixel_frames_accepted` and `pixel_frame_errors`.
 
 ### Current 0.1.250 source/package evidence
 

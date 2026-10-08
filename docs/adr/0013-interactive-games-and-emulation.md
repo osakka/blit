@@ -22,7 +22,9 @@ Games have two paths:
 2. Pixel-oriented arcade and emulator workloads use a bounded API-owned
    graphic canvas/frame path. It shares Blit's output scheduler, input routes,
    diagnostics, and display placement, but does not encode every frame as
-   terminal cells or require Kitty/sixel parsing.
+   terminal cells or require Kitty/sixel parsing. The first transport is a
+   binary WebSocket frame stream with a JSON frame-begin record and a final
+   frame boundary.
 
 Both paths remain controlled through the versioned API and use the same output
 and input ownership model. There is no second display implementation and no

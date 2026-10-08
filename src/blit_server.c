@@ -189,6 +189,12 @@ typedef struct {
     unsigned char fragment_buffer[4096];
     size_t fragment_length;
     unsigned char fragment_opcode;
+    unsigned long long pixel_frame_session_id;
+    unsigned int pixel_frame_image_id;
+    size_t pixel_frame_expected;
+    size_t pixel_frame_received;
+    int pixel_frame_active;
+    int pixel_frame_ack;
 } BlitStream;
 
 typedef struct {
@@ -222,6 +228,9 @@ typedef struct {
     SDL_Texture *graphics_textures[BLIT_SDL_GRAPHICS_CACHE];
     const BlitGraphicsImage *graphics_sources[BLIT_SDL_GRAPHICS_CACHE];
     unsigned long long graphics_generations[BLIT_SDL_GRAPHICS_CACHE];
+    int graphics_widths[BLIT_SDL_GRAPHICS_CACHE];
+    int graphics_heights[BLIT_SDL_GRAPHICS_CACHE];
+    int graphics_formats[BLIT_SDL_GRAPHICS_CACHE];
     unsigned long long graphics_cache_hits;
     unsigned long long graphics_texture_uploads;
     unsigned long long last_topology_revision;
@@ -447,6 +456,8 @@ typedef struct {
     unsigned long long diagnostic_frame_rate_last_frames;
     double diagnostic_frame_rate_hz;
     unsigned long long diagnostic_frame_rate_window_ms;
+    unsigned long long pixel_frames_accepted;
+    unsigned long long pixel_frame_errors;
     unsigned long long diagnostic_loop_iterations;
     unsigned long long diagnostic_terminal_reads;
     unsigned long long diagnostic_present_calls;
@@ -535,6 +546,16 @@ static void remove_http_client(BlitRuntime *runtime, int index);
 static void terminal_clear_cell(BlitSurface *surface, int x, int y);
 static void terminal_clear_wide_overlap(BlitSurface *surface, int x, int y);
 static void mark_cursor_damage(BlitSurface *surface, int x, int y);
+static void mark_surface_full_damage(BlitSurface *surface);
+static BlitSurface *find_surface_id(BlitRuntime *runtime,
+                                    unsigned long long surface_id);
+static BlitSession *find_session_id(BlitRuntime *runtime,
+                                    unsigned long long session_id);
+static BlitGraphicsImage *graphics_image_find(BlitSession *session,
+                                              unsigned int id);
+static void graphics_image_release(BlitGraphicsImage *image);
+static void pixel_frame_reset(BlitRuntime *runtime, BlitStream *stream,
+                              int release_image);
 static void update_status_json(const BlitRuntime *runtime, char *body,
                                size_t capacity);
 static int update_authorized(const BlitRuntime *runtime, const char *request);
@@ -1231,6 +1252,7 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"terminal_bytes\":%llu,\"pointer_cache_hits\":%llu,"
         "\"pointer_cache_misses\":%llu,\"frame_rate_hz\":%.3f,"
         "\"graphics_cache_hits\":%llu,\"graphics_texture_uploads\":%llu,"
+        "\"pixel_frames_accepted\":%llu,\"pixel_frame_errors\":%llu,"
         "\"frame_rate_frames\":%llu,\"frame_rate_window_ms\":%llu,"
         "\"frame_rate_age_ms\":%llu,\"loop_iterations\":%llu,"
         "\"terminal_reads\":%llu,\"present_calls\":%llu,"
@@ -1255,6 +1277,8 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         frame_rate_hz,
         diagnostic_graphics_cache_hits(runtime),
         diagnostic_graphics_texture_uploads(runtime),
+        runtime->pixel_frames_accepted,
+        runtime->pixel_frame_errors,
         runtime->diagnostic_frame_rate_last_frames,
         runtime->diagnostic_frame_rate_window_ms, frame_rate_age_ms,
         runtime->diagnostic_loop_iterations,
@@ -2593,6 +2617,68 @@ static void mark_surface_full_damage(BlitSurface *surface)
     surface->damage_y = 0;
     surface->damage_width = surface->width;
     surface->damage_height = surface->height;
+}
+
+static void mark_surface_damage_rect(BlitSurface *surface, int x, int y,
+                                     int width, int height)
+{
+    int right;
+    int bottom;
+
+    if (surface == NULL || width <= 0 || height <= 0)
+        return;
+    right = x + width;
+    bottom = y + height;
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
+    if (right > surface->width) right = surface->width;
+    if (bottom > surface->height) bottom = surface->height;
+    if (x >= right || y >= bottom)
+        return;
+    if (!surface->damage_valid) {
+        surface->damage_valid = 1;
+        surface->damage_x = x;
+        surface->damage_y = y;
+        surface->damage_width = right - x;
+        surface->damage_height = bottom - y;
+        return;
+    }
+    if (x < surface->damage_x)
+        surface->damage_x = x;
+    if (y < surface->damage_y)
+        surface->damage_y = y;
+    if (right > surface->damage_x + surface->damage_width)
+        surface->damage_width = right - surface->damage_x;
+    if (bottom > surface->damage_y + surface->damage_height)
+        surface->damage_height = bottom - surface->damage_y;
+}
+
+static void mark_graphics_damage(BlitSurface *surface, int x, int y,
+                                 int width, int height, int cell_width,
+                                 int cell_height)
+{
+    int pixel_right;
+    int pixel_bottom;
+    int cell_x;
+    int cell_y;
+    int cell_right;
+    int cell_bottom;
+
+    if (surface == NULL || width <= 0 || height <= 0 || cell_width < 1 ||
+        cell_height < 1)
+        return;
+    pixel_right = x + width;
+    pixel_bottom = y + height;
+    x = x < 0 ? 0 : x;
+    y = y < 0 ? 0 : y;
+    if (pixel_right <= 0 || pixel_bottom <= 0)
+        return;
+    cell_x = x / cell_width;
+    cell_y = y / cell_height;
+    cell_right = (pixel_right + cell_width - 1) / cell_width;
+    cell_bottom = (pixel_bottom + cell_height - 1) / cell_height;
+    mark_surface_damage_rect(surface, cell_x, cell_y,
+                              cell_right - cell_x, cell_bottom - cell_y);
 }
 
 static int apply_cell_update(BlitSurface *surface, const char *json)
@@ -6732,6 +6818,7 @@ static void remove_stream(BlitRuntime *runtime, int fd)
     int i;
     for (i = 0; i < BLIT_MAX_STREAMS; ++i) {
         if (runtime->streams[i].used && runtime->streams[i].fd == fd) {
+            pixel_frame_reset(runtime, &runtime->streams[i], 1);
             close(fd);
             runtime->streams[i].used = 0;
             return;
@@ -6917,6 +7004,207 @@ static unsigned int subscription_mask(const char *payload)
     return mask;
 }
 
+static void pixel_frame_reset(BlitRuntime *runtime, BlitStream *stream,
+                              int release_image)
+{
+    BlitSession *session;
+    BlitGraphicsImage *image;
+    if (stream == NULL) return;
+    if (release_image && stream->pixel_frame_active) {
+        session = find_session_id(runtime, stream->pixel_frame_session_id);
+        image = session != NULL ? graphics_image_find(
+            session, stream->pixel_frame_image_id) : NULL;
+        if (image != NULL && strcmp(image->protocol, "api") == 0 &&
+            !image->complete)
+            graphics_image_release(image);
+    }
+    stream->pixel_frame_session_id = 0;
+    stream->pixel_frame_image_id = 0;
+    stream->pixel_frame_expected = 0;
+    stream->pixel_frame_received = 0;
+    stream->pixel_frame_active = 0;
+    stream->pixel_frame_ack = 0;
+}
+
+static int pixel_frame_begin(BlitRuntime *runtime, BlitStream *stream,
+                             const char *message)
+{
+    char session_id[64];
+    unsigned long long session_number;
+    int image_id;
+    int width;
+    int height;
+    int format;
+    int x = 0;
+    int y = 0;
+    int z = 0;
+    int acknowledge = 0;
+    size_t bytes;
+    BlitSession *session;
+    BlitSurface *surface;
+    BlitGraphicsImage *image;
+    int index;
+    int old_x = 0;
+    int old_y = 0;
+    int old_width = 0;
+    int old_height = 0;
+    int old_visible = 0;
+
+    if (!json_string(message, "session_id", session_id, sizeof(session_id)) ||
+        (sscanf(session_id, "session-%llu", &session_number) != 1 &&
+         sscanf(session_id, "%llu", &session_number) != 1) ||
+        !json_int(message, "image_id", &image_id) || image_id < 1 ||
+        !json_int(message, "width", &width) ||
+        !json_int(message, "height", &height) ||
+        !json_int(message, "format", &format) ||
+        (format != 24 && format != 32) || width < 1 ||
+        width > BLIT_GRAPHICS_MAX_WIDTH || height < 1 ||
+        height > BLIT_GRAPHICS_MAX_HEIGHT)
+        return 0;
+    bytes = (size_t)width * (size_t)height * (size_t)(format == 24 ? 3 : 4);
+    if (bytes > BLIT_GRAPHICS_MAX_BYTES)
+        return 0;
+    session = find_session_id(runtime, session_number);
+    surface = session != NULL ? find_surface_id(runtime, session->id) : NULL;
+    if (session == NULL || surface == NULL)
+        return 0;
+    if (json_int(message, "x", &x) == 0) x = 0;
+    if (json_int(message, "y", &y) == 0) y = 0;
+    if (json_int(message, "z", &z) == 0) z = 0;
+    if (json_bool(message, "ack", &acknowledge) == 0)
+        acknowledge = 0;
+    /* A new begin record changes the stream's frame format.  Keep the old
+       API image allocation available so same-sized frames can be reused. */
+    pixel_frame_reset(runtime, stream, 0);
+    image = graphics_image_find(session, (unsigned int)image_id);
+    if (image != NULL && strcmp(image->protocol, "api") != 0)
+        return 0;
+    if (image != NULL) {
+        old_x = image->x;
+        old_y = image->y;
+        old_width = image->placement_width;
+        old_height = image->placement_height;
+        old_visible = image->visible;
+        if (old_visible)
+            mark_graphics_damage(surface, old_x, old_y, old_width, old_height,
+                                 session->terminal_cell_width > 0 ?
+                                     session->terminal_cell_width : 8,
+                                 session->terminal_cell_height > 0 ?
+                                     session->terminal_cell_height : 16);
+    }
+    if (image == NULL) {
+        for (index = 0; index < BLIT_GRAPHICS_MAX_IMAGES; ++index)
+            if (!session->graphics[index].used) {
+                image = &session->graphics[index];
+                break;
+            }
+        if (image == NULL)
+            return 0;
+    }
+    if (image->used && image->pixels != NULL &&
+        image->width == width && image->height == height &&
+        image->format == format && image->capacity == bytes) {
+        image->bytes = 0;
+        image->complete = 0;
+        image->visible = 0;
+    } else {
+        graphics_image_release(image);
+        image->used = 1;
+        image->id = (unsigned int)image_id;
+        snprintf(image->protocol, sizeof(image->protocol), "api");
+        image->width = width;
+        image->height = height;
+        image->format = format;
+        image->capacity = bytes;
+        image->pixels = (unsigned char *)malloc(bytes);
+        if (image->pixels == NULL) {
+            graphics_image_release(image);
+            return 0;
+        }
+    }
+    image->x = x;
+    image->y = y;
+    image->z = z;
+    image->placement_width = width;
+    image->placement_height = height;
+    image->revision = 1;
+    image->generation = next_graphics_generation();
+    stream->pixel_frame_session_id = session_number;
+    stream->pixel_frame_image_id = (unsigned int)image_id;
+    stream->pixel_frame_expected = bytes;
+    stream->pixel_frame_received = 0;
+    stream->pixel_frame_active = 1;
+    stream->pixel_frame_ack = acknowledge;
+    send_websocket_text(stream->fd,
+        "{\"type\":\"pixel_frame_ready\",\"state\":\"ready\"}");
+    return 1;
+}
+
+static int service_pixel_frame_binary(BlitRuntime *runtime,
+                                      BlitStream *stream, int final,
+                                      const unsigned char *payload,
+                                      size_t length)
+{
+    BlitSession *session;
+    BlitSurface *surface;
+    BlitGraphicsImage *image;
+    if (stream == NULL || !stream->pixel_frame_active)
+        return 0;
+    if (length > stream->pixel_frame_expected -
+                 stream->pixel_frame_received) {
+        ++runtime->pixel_frame_errors;
+        pixel_frame_reset(runtime, stream, 1);
+        send_websocket_text(stream->fd,
+            "{\"type\":\"pixel_frame_error\",\"code\":\"frame_size\"}");
+        return 0;
+    }
+    session = find_session_id(runtime, stream->pixel_frame_session_id);
+    image = session != NULL ? graphics_image_find(
+        session, stream->pixel_frame_image_id) : NULL;
+    if (session == NULL || image == NULL ||
+        strcmp(image->protocol, "api") != 0) {
+        pixel_frame_reset(runtime, stream, 0);
+        return 0;
+    }
+    if (stream->pixel_frame_received == 0) {
+        image->complete = 0;
+        image->visible = 0;
+    }
+    memcpy(image->pixels + stream->pixel_frame_received, payload, length);
+    stream->pixel_frame_received += length;
+    if (!final)
+        return 1;
+    if (stream->pixel_frame_received != stream->pixel_frame_expected) {
+        ++runtime->pixel_frame_errors;
+        pixel_frame_reset(runtime, stream, 1);
+        send_websocket_text(stream->fd,
+            "{\"type\":\"pixel_frame_error\",\"code\":\"frame_incomplete\"}");
+        return 0;
+    }
+    image->bytes = stream->pixel_frame_received;
+    image->complete = 1;
+    image->visible = 1;
+    ++image->revision;
+    image->generation = next_graphics_generation();
+    surface = find_surface_id(runtime, session->id);
+    if (surface != NULL)
+        mark_graphics_damage(surface, image->x, image->y,
+                             image->placement_width, image->placement_height,
+                             session->terminal_cell_width > 0 ?
+                                 session->terminal_cell_width : 8,
+                             session->terminal_cell_height > 0 ?
+                                 session->terminal_cell_height : 16);
+    runtime->render_pending = 1;
+    ++runtime->pixel_frames_accepted;
+    if (stream->pixel_frame_ack)
+        send_websocket_text(stream->fd,
+            "{\"type\":\"pixel_frame_present\",\"state\":\"accepted\"}");
+    /* Keep the stream armed for the next binary frame.  The begin record is
+       the negotiated format; each final binary message is one frame. */
+    stream->pixel_frame_received = 0;
+    return 1;
+}
+
 static void service_stream_text(BlitRuntime *runtime, int fd,
                                 const unsigned char *payload, size_t length)
 {
@@ -6937,6 +7225,17 @@ static void service_stream_text(BlitRuntime *runtime, int fd,
             "{\"type\":\"diagnostic\",\"severity\":\"info\","
             "\"code\":\"subscription_received\","
             "\"detail\":\"stream subscription accepted\"}");
+    } else if (strstr(message, "\"type\":\"pixel_frame_begin\"") != NULL) {
+        int i;
+        for (i = 0; i < BLIT_MAX_STREAMS; ++i)
+            if (runtime->streams[i].used && runtime->streams[i].fd == fd) {
+                if (!pixel_frame_begin(runtime, &runtime->streams[i], message)) {
+                    ++runtime->pixel_frame_errors;
+                    send_websocket_text(fd,
+                        "{\"type\":\"pixel_frame_error\",\"code\":\"invalid_begin\"}");
+                }
+                break;
+            }
     } else if (strstr(message, "\"input\"") != NULL &&
                strstr(message, "session_id") != NULL) {
         char session_id[64];
@@ -6974,7 +7273,7 @@ static int service_stream_frame(BlitRuntime *runtime, BlitStream *stream,
     }
     if (opcode == 0xA)
         return 1;
-    if (opcode == 0x1 && !final) {
+    if ((opcode == 0x1 || opcode == 0x2) && !final) {
         if (length > sizeof(stream->fragment_buffer))
             return 1;
         memcpy(stream->fragment_buffer, payload, length);
@@ -6999,6 +7298,8 @@ static int service_stream_frame(BlitRuntime *runtime, BlitStream *stream,
     }
     if (opcode == 0x1 && final)
         service_stream_text(runtime, stream->fd, payload, length);
+    else if (opcode == 0x2)
+        service_pixel_frame_binary(runtime, stream, final, payload, length);
     return 1;
 }
 
@@ -8584,6 +8885,9 @@ static void destroy_sdl_graphics_cache(BlitOutput *output)
         output->graphics_textures[index] = NULL;
         output->graphics_sources[index] = NULL;
         output->graphics_generations[index] = 0;
+        output->graphics_widths[index] = 0;
+        output->graphics_heights[index] = 0;
+        output->graphics_formats[index] = 0;
     }
 }
 
@@ -8597,6 +8901,7 @@ static SDL_Texture *sdl_graphics_texture(BlitOutput *output,
     unsigned char *rgba;
     SDL_Texture *texture;
     int pixel_index;
+    int reuse_texture = 0;
 
     if (output == NULL || output->renderer == NULL || image == NULL ||
         image->pixels == NULL || image->width < 1 || image->height < 1)
@@ -8608,6 +8913,17 @@ static SDL_Texture *sdl_graphics_texture(BlitOutput *output,
                 ++output->graphics_cache_hits;
                 return output->graphics_textures[index];
             }
+            if (output->graphics_textures[index] != NULL &&
+                output->graphics_widths[index] == image->width &&
+                output->graphics_heights[index] == image->height &&
+                output->graphics_formats[index] == image->format) {
+                /* API pixel frames deliberately retain image identity. Update
+                   the existing GPU texture in place instead of destroying and
+                   recreating it for every frame. */
+                free_index = index;
+                reuse_texture = 1;
+                break;
+            }
             if (output->graphics_textures[index] != NULL)
                 SDL_DestroyTexture(output->graphics_textures[index]);
             output->graphics_textures[index] = NULL;
@@ -8618,10 +8934,11 @@ static SDL_Texture *sdl_graphics_texture(BlitOutput *output,
             free_index = index;
     }
     if (free_index < 0) free_index = 0;
-    if (output->graphics_sources[free_index] != NULL &&
+    if (!reuse_texture && output->graphics_sources[free_index] != NULL &&
         output->graphics_textures[free_index] != NULL)
         SDL_DestroyTexture(output->graphics_textures[free_index]);
-    output->graphics_textures[free_index] = NULL;
+    if (!reuse_texture)
+        output->graphics_textures[free_index] = NULL;
     output->graphics_sources[free_index] = NULL;
     output->graphics_generations[free_index] = 0;
 
@@ -8638,26 +8955,33 @@ static SDL_Texture *sdl_graphics_texture(BlitOutput *output,
         rgba[pixel_index * 4U + 3] = source_bytes == 4 ?
             image->pixels[pixel_index * source_bytes + 3] : 255;
     }
-    texture = SDL_CreateTexture(output->renderer, SDL_PIXELFORMAT_RGBA32,
-                                SDL_TEXTUREACCESS_STATIC,
-                                image->width, image->height);
+    texture = output->graphics_textures[free_index];
     if (texture == NULL) {
-        fprintf(stderr, "blit: SDL graphics texture create failed: %s\n",
-                SDL_GetError());
-        free(rgba);
-        return NULL;
+        texture = SDL_CreateTexture(output->renderer, SDL_PIXELFORMAT_RGBA32,
+                                    SDL_TEXTUREACCESS_STATIC,
+                                    image->width, image->height);
+        if (texture == NULL) {
+            fprintf(stderr, "blit: SDL graphics texture create failed: %s\n",
+                    SDL_GetError());
+            free(rgba);
+            return NULL;
+        }
+        SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
     }
-    SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
     if (!SDL_UpdateTexture(texture, NULL, rgba, image->width * 4)) {
         fprintf(stderr, "blit: SDL graphics texture upload failed: %s\n",
                 SDL_GetError());
         SDL_DestroyTexture(texture);
         free(rgba);
+        output->graphics_textures[free_index] = NULL;
         return NULL;
     }
     free(rgba);
     output->graphics_sources[free_index] = image;
     output->graphics_generations[free_index] = image->generation;
+    output->graphics_widths[free_index] = image->width;
+    output->graphics_heights[free_index] = image->height;
+    output->graphics_formats[free_index] = image->format;
     output->graphics_textures[free_index] = texture;
     ++output->graphics_texture_uploads;
     return texture;
