@@ -1285,11 +1285,15 @@ static int send_sdl_screenshot(BlitHttpClient *client, BlitRuntime *runtime,
        existing path can still encode the snapshot. */
     unlink(temporary);
     if (!SDL_SaveBMP(pixels, temporary)) {
+        char screenshot_error[256];
+        snprintf(screenshot_error, sizeof(screenshot_error),
+                 "SDL_SaveBMP failed: %s",
+                 SDL_GetError()[0] != '\0' ? SDL_GetError() : "no SDL error");
+        fprintf(stderr, "blit: API screenshot %s\n", screenshot_error);
         SDL_DestroySurface(pixels);
         unlink(temporary);
         send_problem(client->fd, 503, "Service Unavailable", "screenshot_failed",
-                     SDL_GetError()[0] != '\0' ? SDL_GetError() :
-                     "The framebuffer image could not be encoded.");
+                     screenshot_error);
         return -1;
     }
     SDL_DestroySurface(pixels);
