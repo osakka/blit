@@ -4256,6 +4256,9 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
         image->width = width;
         image->height = height;
         image->format = format;
+        /* Kitty RGBA images may contain transparency; only API pixel frames
+           prove opacity incrementally before using the packed KMS path. */
+        image->opaque = 0;
         image->capacity = (size_t)width * (size_t)height *
             (format == 24 ? 3U : 4U);
         if (image->capacity > BLIT_GRAPHICS_MAX_BYTES) {
@@ -4504,6 +4507,7 @@ static void terminal_apply_sixel(BlitSession *session, BlitSurface *surface)
     image->width = maximum_x;
     image->height = maximum_y;
     image->format = 32;
+    image->opaque = 0;
     image->bytes = image->capacity = (size_t)maximum_x *
         (size_t)maximum_y * 4U;
     for (y = 0; y < maximum_y; ++y)
@@ -7303,6 +7307,7 @@ static int pixel_frame_begin(BlitRuntime *runtime, BlitStream *stream,
     image->x = x;
     image->y = y;
     image->z = z;
+    image->opaque = 1;
     image->placement_width = width;
     image->placement_height = height;
     image->revision = 1;
@@ -7349,6 +7354,16 @@ static int service_pixel_frame_binary(BlitRuntime *runtime,
         image->visible = 0;
     }
     memcpy(image->pixels + stream->pixel_frame_received, payload, length);
+    if (image->format == 32 && image->opaque) {
+        size_t alpha_offset = stream->pixel_frame_received;
+        size_t alpha_index;
+        for (alpha_index = 0; alpha_index < length; ++alpha_index)
+            if (((alpha_offset + alpha_index) & 3U) == 3U &&
+                payload[alpha_index] != 255U) {
+                image->opaque = 0;
+                break;
+            }
+    }
     stream->pixel_frame_received += length;
     if (!final)
         return 1;

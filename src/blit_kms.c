@@ -490,6 +490,16 @@ static void draw_graphic(KmsOutput *output, const BlitGraphicsImage *image,
                  (size_t)source_x) * (size_t)bytes_per_pixel;
             uint32_t *destination = (uint32_t *)((unsigned char *)output->back.map +
                 (size_t)y * output->back.pitch) + first_x;
+            if (image->format == 32 && image->opaque) {
+                const uint32_t *source_pixels = (const uint32_t *)source;
+                for (x = first_x; x < last_x; ++x) {
+                    uint32_t rgba = *source_pixels++;
+                    *destination++ = ((rgba & 0x000000ffU) << 16) |
+                        (rgba & 0x0000ff00U) |
+                        ((rgba & 0x00ff0000U) >> 16);
+                }
+                continue;
+            }
             for (x = first_x; x < last_x; ++x) {
                 unsigned int alpha = image->format == 32 ? source[3] : 255U;
                 if (alpha == 255U) {

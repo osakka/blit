@@ -24,6 +24,7 @@ typedef struct {
     size_t bytes;
     size_t capacity;
     int visible;
+    int opaque;
     int x;
     int y;
     int placement_width;

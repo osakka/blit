@@ -86,6 +86,10 @@ repaints the old and new pointer rectangles at cell granularity, and does not
 redraw the entire terminal; this prevents mouse motion from monopolizing a
 slow DRM driver or leaving pointer trails.
 
+Opaque API RGBA frames use a packed 32-bit channel conversion in the native-size
+direct-KMS path. Translucent API, Kitty, and sixel images retain the alpha-aware
+path; opacity is never assumed for compatibility images.
+
 When all cells in an affected view have the same effective background color,
 the renderer fills the view rectangle once before drawing glyphs. Mixed
 backgrounds are coalesced into horizontal runs, and inverse cells continue
@@ -239,6 +243,10 @@ direct-KMS framebuffer oracle is applied. The baseline and post-stream
 counters are printed because TCG/VKMS startup can miss virtual page flips
 before the producer starts. This is virtual high-refresh timing evidence, not
 a physical 240 Hz hardware claim.
+
+For comparison only, `blit.kms_async=1` enables the existing asynchronous
+page-flip policy in the fixture and reports `drm-page-flip-async`; it may tear
+and does not relax the synchronized production gate.
 
 The same fixture accepts `blit.output_loss=1` on the kernel command line. It
 disables connector 47 during the run and requires `OUTPUT_LOSS_PASS`: the

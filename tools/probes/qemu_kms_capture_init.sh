@@ -53,6 +53,7 @@ pixel_test=0
 pixel_stream_test=0
 pixel_stream_240_test=0
 recovery_test=0
+async_pageflip_test=0
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
     *" blit.output_loss=1 "*) loss_test=1 ;;
 esac
@@ -88,6 +89,9 @@ case " $($b cat /proc/cmdline 2>/dev/null || true) " in
 esac
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
     *" blit.kms_recovery=1 "*) recovery_test=1 ;;
+esac
+case " $($b cat /proc/cmdline 2>/dev/null || true) " in
+    *" blit.kms_async=1 "*) async_pageflip_test=1; export BLIT_KMS_ASYNC_PAGEFLIP=1 ;;
 esac
 if [ "$visuals_test" -eq 1 ] || [ "$pixel_test" -eq 1 ]; then
     # Capture after the effect, overlay, and session requests have had time
