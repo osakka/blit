@@ -121,6 +121,30 @@ $b wget -qO /tmp/diagnostics-final.json http://127.0.0.1:19191/v1/diagnostics
 $b cat /tmp/diagnostics-final.json
 $b grep -q '"sessions":4' /tmp/diagnostics-final.json || finish 1
 $b grep -q 'KMS present views=4 outputs=4' /tmp/blit.log || finish 1
+for display_index in 0 1 2 3; do
+    display_id=$(echo "$display_ids" | $b sed -n "$((display_index + 1))p")
+    case "$display_index" in
+        0) color='#ff0000' ;;
+        1) color='#00ff00' ;;
+        2) color='#0000ff' ;;
+        3) color='#ffff00' ;;
+    esac
+    $b wget -qO "/tmp/overlay-$display_index.json" \
+        --post-data="{\"display_id\":\"$display_id\",\"x\":16,\"y\":16,\"width\":32,\"height\":32,\"color\":\"$color\",\"opacity\":100}" \
+        --header='Content-Type: application/json' \
+        http://127.0.0.1:19191/v1/overlays || finish 1
+done
+$b sleep 2
+for display_index in 0 1 2 3; do
+    display_id=$(echo "$display_ids" | $b sed -n "$((display_index + 1))p")
+    $b wget -qO "/tmp/display-$display_index.bmp" \
+        "http://127.0.0.1:19191/v1/diagnostics/screenshots/$display_id" || finish 1
+done
+/blit-stage/bmp-pixel-assert /tmp/display-0.bmp 24 24 255 0 0 || finish 1
+/blit-stage/bmp-pixel-assert /tmp/display-1.bmp 24 24 0 255 0 || finish 1
+/blit-stage/bmp-pixel-assert /tmp/display-2.bmp 24 24 0 0 255 || finish 1
+/blit-stage/bmp-pixel-assert /tmp/display-3.bmp 24 24 255 255 0 || finish 1
+echo FOUR_OUTPUT_INDEPENDENT_PIXEL_PASS
 $b cat /tmp/blit.log
 echo KMS_FOUR_OUTPUT_PASS
 finish 0

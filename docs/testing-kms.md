@@ -260,6 +260,12 @@ connector/CRTC/encoder/plane paths, starts one API terminal session on each,
 and requires `display_count:4`, four presenting outputs, four sessions, and
 `KMS_FOUR_OUTPUT_PASS`. This validates the public discovery and presentation
 path at the four-monitor case without changing the production display limit.
+The fixture then places distinct red, green, blue, and yellow API overlays on
+the four outputs, captures each output through the screenshot endpoint, and
+checks the marker pixel with `bmp-pixel-assert`, producing
+`FOUR_OUTPUT_INDEPENDENT_PIXEL_PASS`. This proves that the screenshot and
+overlay target remain bound to the selected output rather than merely proving
+that four output objects exist.
 Adding `blit.hibr_four=1` to the same kernel command line replaces those probe
 sessions with one primary Hibr desktop and three `desktop --join` clients; the
 fixture then requires `KMS_FOUR_HIBR_PASS` with four Hibr-backed surfaces.

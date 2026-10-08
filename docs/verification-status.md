@@ -1226,6 +1226,13 @@ The latest reachable observation of the authorized host at
   contiguous placements and four terminal sessions. The direct-KMS cadence
   fix avoids replaying a 60 Hz producer at every 240 Hz slot. These are still
   virtual-display results; the physical multi-monitor gate remains open.
+- The strengthened exact-current four-output fixture additionally placed
+  distinct red, green, blue, and yellow overlays on the four discovered
+  outputs and passed
+  `FOUR_OUTPUT_INDEPENDENT_PIXEL_PASS` through four API screenshot captures.
+  The same binary passed the two-output KMS capture/pixel gate, Hibr pane
+  matrix, keyboard/multi-mouse/gamepad input matrix, and 240 Hz scheduler
+  fixture after restaging.
 
 ## Open release gates
 
