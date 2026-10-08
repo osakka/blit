@@ -68,12 +68,13 @@ completed soak sessions were correctly disabled by session lifecycle.
 
 The corrected real-mode high-refresh fixture selected 240 Hz from the VKMS
 mode itself (`refresh_source:"display-mode"`) and accepted all 240 pixel
-frames. Its scheduler metadata gate passed, but missed deadlines increased
-from 6 to 11 per output and `max_kms_present_ms` reached 24.215 ms under QEMU
-TCG/VKMS. Therefore 240 Hz presentation is not yet validated and no package
-claim is made for it. The result identifies the remaining bottleneck as the
-virtual KMS/presentation path rather than WebSocket ingestion or terminal
-glyph rendering.
+frames. Its scheduler metadata gate passed. The native-size graphic-frame
+path reduced the observed maximum KMS present time to 16.966 ms in this run,
+but missed deadlines still increased from a startup baseline of 3 to 14 per
+output under QEMU TCG/VKMS. Therefore 240 Hz presentation is not yet
+validated and no package claim is made for it. The remaining bottleneck is
+the synchronized virtual KMS/page-flip path rather than WebSocket ingestion,
+terminal glyph rendering, or pixel-frame acceptance.
 
 ### Current 0.1.267 release-candidate evidence
 
