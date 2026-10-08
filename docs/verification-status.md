@@ -43,6 +43,12 @@ topology contained five attached surfaces. The package is
 `blit_0.1.249-1_amd64.deb`; the final artifact hash is recorded with the
 release handoff because this ledger is included inside the package itself.
 
+The exact 0.1.249 input/render QEMU soak passed
+`LAYOUT_MATRIX_PASS`, `BLIT_INPUT_MULTI_MOUSE_PASS`,
+`BLIT_INPUT_STREAM_PASS`, and `BLIT_INPUT_RENDER_SOAK_PASS`. It exercised
+multiple mice, keyboard and pointer routing, all three buttons, releases,
+wheel input, PTY delivery, and synthetic device-loss handling.
+
 ### Current 0.1.248 source/package evidence
 
 The 0.1.248 provider-bootstrap correction was superseded by 0.1.249 after
