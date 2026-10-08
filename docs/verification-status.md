@@ -52,6 +52,12 @@ under VKMS/QEMU. The current validated boundary is therefore the 60 Hz virtual
 stream, while 120/240 Hz remains an open KMS timing requirement rather than an
 API or terminal-state failure.
 
+The exact current Hibr VKMS input fixture also passed on `0.1.358`: layout
+matrix, keypad and keyboard PTY delivery, multi-mouse routing, WebSocket input,
+gamepad discovery/input, and raw evdev input all passed. The raw evdev probe
+recorded `728` events, `431` motion events, and `34` button events. This is
+QEMU input evidence; physical host mouse/button acceptance remains open.
+
 ## Current 0.1.357 release and live-validation gate
 
 The TCC-built `0.1.357` package contains the attach-time PTY notification
