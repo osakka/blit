@@ -1210,6 +1210,14 @@ The latest reachable observation of the authorized host at
   Hibr four-pane primary/join matrix, keyboard/multi-mouse/gamepad input
   matrix, and 240 Hz scheduler gate. These remain virtual-display evidence;
   the physical host still exposes only one output.
+- Exact-current 0.1.286 TCC binaries pass the complete terminal conformance
+  suite, Hibr font manifest and SDL glyph-shape gates, local 54.367 Hz
+  refresh gate with zero missed deadlines, 120-frame pixel gate at 59.502 Hz,
+  graphics-cache reuse, and the four-output VKMS fixture. The four-output
+  fixture reports four independently presented 1024×768@240 outputs with
+  contiguous placements and four terminal sessions. The direct-KMS cadence
+  fix avoids replaying a 60 Hz producer at every 240 Hz slot. These are still
+  virtual-display results; the physical multi-monitor gate remains open.
 
 ## Open release gates
 

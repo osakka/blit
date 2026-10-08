@@ -31,6 +31,7 @@ Accepted decisions:
 21. [Advertise the bounded sixel capability](0021-bounded-sixel-capability.md).
 22. [Versioned network terminal input](0022-network-terminal-input.md).
 23. [Bounded stream service for refresh fairness](0023-bounded-stream-service.md).
+24. [Pixel presentation cadence follows the producer and output path](0024-pixel-presentation-cadence.md).
 
 Pending decisions:
 

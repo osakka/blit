@@ -7500,7 +7500,12 @@ static int service_pixel_frame_binary(BlitRuntime *runtime,
     if (surface != NULL)
         ++surface->revision;
     runtime->render_pending = 1;
-    if (surface != NULL) {
+    if (!runtime->direct_kms && surface != NULL) {
+        /* SDL's scene cache needs a persistent pending count so an external
+           pixel producer cannot be lost between vblanks. Direct KMS already
+           consumes each accepted frame through its page-flip path; replaying
+           the latest 60 Hz image at a 240 Hz mode would create artificial
+           deadline misses in the scheduler. */
         int output_index;
         for (output_index = 0; output_index < runtime->output_count;
              ++output_index)
