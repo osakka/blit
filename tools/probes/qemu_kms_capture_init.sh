@@ -44,6 +44,7 @@ kitty_query_test=0
 sixel_test=0
 visuals_test=0
 pixel_test=0
+pixel_stream_test=0
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
     *" blit.output_loss=1 "*) loss_test=1 ;;
 esac
@@ -67,6 +68,9 @@ case " $($b cat /proc/cmdline 2>/dev/null || true) " in
 esac
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
     *" blit.pixel_frame=1 "*) pixel_test=1 ;;
+esac
+case " $($b cat /proc/cmdline 2>/dev/null || true) " in
+    *" blit.pixel_stream=1 "*) pixel_test=1; pixel_stream_test=1 ;;
 esac
 if [ "$visuals_test" -eq 1 ] || [ "$pixel_test" -eq 1 ]; then
     # Capture after the effect, overlay, and session requests have had time
@@ -137,11 +141,27 @@ fi
 $b wget -qO /tmp/two.json --post-data='{"command":"/blit-stage/pty-input-echo","surface_mode":"terminal","display_id":"display-48","surface":{"width":128,"height":48}}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
 if [ "$pixel_test" -eq 1 ]; then
     pixel_session=$($b sed -n 's/.*"id":"\([^"]*\)".*/\1/p' /tmp/one.json)
-    if [ -n "$pixel_session" ] && /blit-stage/ws-pixel-frame-probe "$pixel_session"; then
+    if [ -n "$pixel_session" ] && {
+        if [ "$pixel_stream_test" -eq 1 ]; then
+            /blit-stage/ws-pixel-frame-probe "$pixel_session" --60hz
+        else
+            /blit-stage/ws-pixel-frame-probe "$pixel_session"
+        fi
+    }; then
         :
     else
         echo PIXEL_FRAME_PROBE_FAIL
         finish 1
+    fi
+    if [ "$pixel_stream_test" -eq 1 ]; then
+        $b wget -qO /tmp/pixel-runtime.json http://127.0.0.1:19191/v1/diagnostics/runtime || true
+        if $b grep -q '"pixel_frames_accepted":60' /tmp/pixel-runtime.json &&
+           $b grep -q '"missed_deadlines":0' /tmp/pixel-runtime.json; then
+            echo PIXEL_FRAME_RATE_PASS
+        else
+            echo PIXEL_FRAME_RATE_FAIL
+            finish 1
+        fi
     fi
     $b touch /tmp/pixel-ready
     $b sleep 2

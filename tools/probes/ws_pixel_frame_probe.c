@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <time.h>
 #include <unistd.h>
 
 static int send_all(int fd, const void *data, size_t length)
@@ -89,9 +90,15 @@ int main(int argc, char **argv)
     unsigned char pixels[32 * 32 * 4];
     const char *session;
     int fd;
+    int stream_mode = 0;
+    int frame;
     size_t i;
 
-    if (argc != 2) return 2;
+    if (argc < 2 || argc > 3) return 2;
+    if (argc == 3) {
+        if (strcmp(argv[2], "--60hz") != 0) return 2;
+        stream_mode = 1;
+    }
     session = argv[1];
     fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) return 1;
@@ -118,7 +125,8 @@ int main(int argc, char **argv)
     snprintf(request, sizeof(request),
              "{\"type\":\"pixel_frame_begin\",\"session_id\":\"%s\","
              "\"image_id\":91,\"width\":32,\"height\":32,"
-             "\"format\":32,\"x\":16,\"y\":16,\"z\":4,\"ack\":true}", session);
+             "\"format\":32,\"x\":16,\"y\":16,\"z\":4,\"ack\":%s}",
+             session, stream_mode ? "false" : "true");
     if (!send_masked(fd, 1, 1, (unsigned char *)request, strlen(request)))
         return 1;
     do {
@@ -131,6 +139,22 @@ int main(int argc, char **argv)
         pixels[i + 3] = 0xff;
     }
     if (!send_masked(fd, 2, 1, pixels, sizeof(pixels))) return 1;
+    if (stream_mode) {
+        struct timespec interval;
+        interval.tv_sec = 0;
+        interval.tv_nsec = 16666667;
+        for (frame = 1; frame < 60; ++frame) {
+            pixels[0] = (unsigned char)(frame * 3);
+            pixels[1] = (unsigned char)(frame * 5);
+            if (!send_masked(fd, 2, 1, pixels, sizeof(pixels))) return 1;
+            nanosleep(&interval, NULL);
+        }
+        /* Leave the stream alive while the gateway drains its socket. */
+        sleep(1);
+        puts("PIXEL_FRAME_STREAM_SENT frames=60 target_hz=60");
+        close(fd);
+        return 0;
+    }
     do {
         if (!read_text(fd, response, sizeof(response))) return 1;
     } while (strstr(response, "pixel_frame_present") == NULL);

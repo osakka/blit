@@ -204,6 +204,12 @@ also validates that a 4,096-byte binary frame is accepted through the bounded
 network receive path and that the graphics update advances the surface
 revision used by direct KMS damage suppression.
 
+Use `blit.pixel_stream=1` for the timed workload variant. It sends 60 complete
+RGBA frames at a 60 Hz producer cadence, requires all 60 to be accepted with
+zero missed deadlines, and then applies the same direct-KMS framebuffer
+oracle. This validates the emulator-facing stream contract at the VKMS
+fixture's 60 Hz mode; it is not a physical 120/240 Hz claim.
+
 The same fixture accepts `blit.output_loss=1` on the kernel command line. It
 disables connector 47 during the run and requires `OUTPUT_LOSS_PASS`: the
 failed connector remains in `/v1/displays` as `failed`, the other connector

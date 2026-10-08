@@ -7344,8 +7344,23 @@ static void service_stream(BlitRuntime *runtime, int fd)
     }
     if ((size_t)received > stream_receive_capacity(stream) -
         stream->receive_length) {
-        remove_stream(runtime, fd);
-        return;
+        size_t required = stream->receive_length + (size_t)received;
+        unsigned char *expanded;
+        int had_large = stream->large_receive_buffer != NULL;
+        if (required > (size_t)BLIT_GRAPHICS_MAX_BYTES * 2U + 256U) {
+            remove_stream(runtime, fd);
+            return;
+        }
+        expanded = (unsigned char *)realloc(
+            stream->large_receive_buffer, required);
+        if (expanded == NULL) {
+            remove_stream(runtime, fd);
+            return;
+        }
+        if (!had_large)
+            memcpy(expanded, stream->receive_buffer, stream->receive_length);
+        stream->large_receive_buffer = expanded;
+        stream->large_receive_capacity = required;
     }
     memcpy(stream_receive_data(stream) + stream->receive_length,
            incoming, (size_t)received);

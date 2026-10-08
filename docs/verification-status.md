@@ -7,7 +7,7 @@ an evidence record, not a claim that the complete product is released.
 
 - Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The current candidate is `0.1.252`. It builds with TCC and passes terminal
+- The current candidate is `0.1.253`. It builds with TCC and passes terminal
   conformance, SDL screenshot/overlay pixels, the hidden-cursor damage gate,
   and the complete Hibr font manifest gate. Its SDL backend uses a per-output
   glyph atlas, suppresses unchanged cell damage, and does not schedule frames
@@ -17,12 +17,12 @@ an evidence record, not a claim that the complete product is released.
   wallpaper workload on the prior source-equivalent 0.1.241 build measured
   26.865 ms maximum full render and 61.387 Hz over its active 504 ms window.
   The direct-KMS pixel-frame acceptance below was run from the exact current
-  0.1.252 TCC build. The preceding 0.1.245 package was accepted by the
+  0.1.253 TCC build. The preceding 0.1.245 package was accepted by the
   authorized physical host and verified through its version endpoint.
 
-### Current 0.1.252 source evidence
+### Current 0.1.253 source evidence
 
-The exact TCC-built 0.1.252 binary passes the full VT/UTF-8/Hibr terminal
+The exact TCC-built 0.1.253 binary passes the full VT/UTF-8/Hibr terminal
 conformance suite, the font manifest gate, and the refresh-aware dummy frame
 gate. Its bounded binary pixel-frame WebSocket gate accepted 30/30 RGBA
 frames, including one fragmented frame, with zero frame errors and reusable
@@ -34,6 +34,13 @@ framebuffer oracle through the direct-KMS screenshot endpoint, preserved the
 second output, and passed `KMS_API_PIXEL_PASS`, `PPM_DISPLAY_48_PASS`, and
 `KMS_CAPTURE_PASS`. This proves the API-to-VKMS pixel path; it does not yet
 claim physical 120/240 Hz hardware presentation.
+
+The timed direct-KMS stream variant sent 60 complete RGBA frames at a 60 Hz
+producer cadence. It accepted all 60 with zero missed deadlines, passed
+`PIXEL_FRAME_RATE_PASS`, and then passed `KMS_API_PIXEL_PASS`,
+`PPM_DISPLAY_48_PASS`, and `KMS_CAPTURE_PASS`. This validates the
+emulator-facing 60 Hz stream and bounded back-pressure path on VKMS; physical
+120/240 Hz hardware evidence remains open.
 
 The pixel path now invalidates only the affected graphics rectangle in cell
 coordinates instead of forcing a full terminal-surface redraw. Optional

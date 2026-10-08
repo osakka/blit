@@ -40,9 +40,9 @@ production `console-blit` module is operational over the OpenAPI/WebSocket
 contract. Explicit focus and versioned input routes are exposed by the API.
 The SDL adapter uses single-surface incremental frames and conservatively
 redraws multi-surface outputs with deterministic vertical stacking. The
-previous 0.1.222 package passes the complete terminal, graphics, input,
+current 0.1.253 source passes the complete terminal, graphics, input,
 two-display VKMS/QEMU, and Hibr primary/`--join` acceptance gates. The
-authorized physical host is running 0.1.232 and has a healthy one-output
+authorized physical host is currently running 0.1.245 and has a healthy one-output
 SDL3/OpenGL presentation with a passing API-created PTY smoke test. Physical
 multi-monitor confirmation remains open because that host currently exposes
 only one connector.
@@ -140,9 +140,10 @@ Lock down the measurable workload contract first: input timestamps and queue
 depth, frame pacing, back-pressure, damage or buffer reuse, and diagnostics.
 Then add the bounded graphic canvas/frame resource to the schema and implement
 it through the existing SDL3/direct-KMS presentation boundary. The first
-fixture must exercise a synthetic emulator-like producer at 60 Hz, inject
-keyboard and pointer events, and prove stable presentation on one and multiple
-outputs.
+VKMS fixture now exercises a synthetic emulator-like producer at 60 Hz,
+accepts all timed frames with zero missed deadlines, and proves stable
+presentation on two outputs. Input injection and physical-host presentation
+remain required before release.
 
 Terminal-native game acceptance is a separate gate and covers alternate
 screen, cursor and colour state, UTF-8/wide/combining glyphs, mouse reporting,
@@ -157,8 +158,8 @@ suite on VKMS and then on a physical DRM/KMS host.
 
 ## Immediate next action
 
-Capture settled SDL screenshots and API diagnostics from the deployed 0.1.232
-authorized physical host. Verify physical
+Deploy 0.1.253 using the configured update credential, then capture settled
+SDL screenshots and API diagnostics from the authorized physical host. Verify physical
 pointer/button/wheel routing and
 refresh cadence, followed by a real two-monitor primary/`--join` arrangement
 when a second connector is available. The update API requires its configured
