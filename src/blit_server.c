@@ -6680,7 +6680,7 @@ static int reassert_hibr_session_processes(BlitSession *session,
             ioctl(fd, TIOCSWINSZ, size);
             close(fd);
         }
-        if (kill(pid, SIGWINCH) == 0)
+        if (kill(-pid, SIGWINCH) == 0 || kill(pid, SIGWINCH) == 0)
             ++matched;
     }
     closedir(directory);
