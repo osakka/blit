@@ -28,6 +28,8 @@ high-refresh variants pass `REFRESH_SCHEDULER_MIXED_PASS` and
 `REFRESH_SCHEDULER_240_PASS`. The fixture used the checked VKMS kernel
 `/tmp/linux-vkms-build/arch/x86/boot/bzImage`, SHA-256
 `17ffba47e1e21d902c71c331bca474fb2de1209f03176d316b333d488bd3fcea`.
+The dedicated sixel variant also passes `PPM_DISPLAY_47_SIXEL_PASS` and
+`KMS_CAPTURE_PASS`.
 
 ## Current 0.1.320 live graphics-probe status
 
