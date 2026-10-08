@@ -416,6 +416,11 @@ direct-KMS duration is reported as `last_kms_present_ms` and
 page-flip submission and driver event servicing. Interpret them alongside
 `snapshot.render.outputs[].missed_deadlines` to separate renderer work from a
 slow KMS or virtual-display backend. The
+SDL presentation duration is reported separately as `last_sdl_present_ms` and
+`max_sdl_present_ms`; these measure the `SDL_RenderPresent` boundary,
+including backend synchronization. The existing `last_render_ms` and
+`max_render_ms` values retain their complete render-path meaning for
+compatibility. The
 SDL event-pump duration is reported as `last_sdl_events_ms` and
 `max_sdl_events_ms`; evdev scan duration is reported as
 `last_evdev_scan_ms` and `max_evdev_scan_ms`. The rate is measured from

@@ -130,7 +130,8 @@ puts 'PASS pointer-diagnostics'
 
 runtime_diagnostics = request(base, 'GET', '/v1/diagnostics/runtime')
 performance = runtime_diagnostics.fetch('performance')
-%w[input_events last_input_dispatch_ms max_input_dispatch_ms].each do |field|
+%w[input_events last_input_dispatch_ms max_input_dispatch_ms
+   last_sdl_present_ms max_sdl_present_ms].each do |field|
   raise "runtime diagnostics missing #{field}" unless performance.key?(field)
 end
 puts 'PASS input-diagnostics'

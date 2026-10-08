@@ -482,6 +482,8 @@ typedef struct {
     double diagnostic_max_select_ms;
     double diagnostic_last_kms_present_ms;
     double diagnostic_max_kms_present_ms;
+    double diagnostic_last_sdl_present_ms;
+    double diagnostic_max_sdl_present_ms;
     double diagnostic_last_sdl_events_ms;
     double diagnostic_max_sdl_events_ms;
     double diagnostic_last_evdev_scan_ms;
@@ -1331,6 +1333,7 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"terminal_reads\":%llu,\"present_calls\":%llu,"
         "\"last_loop_gap_ms\":%.3f,\"max_loop_gap_ms\":%.3f,"
         "\"last_kms_present_ms\":%.3f,\"max_kms_present_ms\":%.3f,"
+        "\"last_sdl_present_ms\":%.3f,\"max_sdl_present_ms\":%.3f,"
         "\"last_select_ms\":%.3f,\"max_select_ms\":%.3f,"
         "\"last_sdl_events_ms\":%.3f,\"max_sdl_events_ms\":%.3f,"
         "\"last_evdev_scan_ms\":%.3f,\"max_evdev_scan_ms\":%.3f},"
@@ -1371,6 +1374,8 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         runtime->diagnostic_max_loop_gap_ms,
         runtime->diagnostic_last_kms_present_ms,
         runtime->diagnostic_max_kms_present_ms,
+        runtime->diagnostic_last_sdl_present_ms,
+        runtime->diagnostic_max_sdl_present_ms,
         runtime->diagnostic_last_select_ms,
         runtime->diagnostic_max_select_ms,
         runtime->diagnostic_last_sdl_events_ms,
@@ -9835,6 +9840,8 @@ static void finish_sdl_output(BlitRuntime *runtime, int output_index,
                               int scene_target)
 {
     SDL_Renderer *renderer = runtime->outputs[output_index].renderer;
+    uint64_t present_started_us;
+    double present_ms;
 
     if (scene_target) {
         SDL_SetRenderTarget(renderer, NULL);
@@ -9844,7 +9851,12 @@ static void finish_sdl_output(BlitRuntime *runtime, int output_index,
     render_pointer(runtime, output_index);
     capture_sdl_frame(runtime, output_index, renderer);
     capture_requested_screenshot(runtime, output_index, renderer);
+    present_started_us = monotonic_us();
     SDL_RenderPresent(renderer);
+    present_ms = (double)(monotonic_us() - present_started_us) / 1000.0;
+    runtime->diagnostic_last_sdl_present_ms = present_ms;
+    if (present_ms > runtime->diagnostic_max_sdl_present_ms)
+        runtime->diagnostic_max_sdl_present_ms = present_ms;
     ++runtime->diagnostic_present_calls;
 }
 

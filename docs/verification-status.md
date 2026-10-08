@@ -7,7 +7,7 @@ an evidence record, not a claim that the complete product is released.
 
 - Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The current source candidate is `0.1.276`. It builds with TCC and passes terminal
+- The current source candidate is `0.1.277`. It builds with TCC and passes terminal
   conformance, SDL screenshot/overlay pixels, the hidden-cursor damage gate,
   and the complete Hibr font manifest gate. It adds the versioned network
   terminal-input endpoint at the canonical PTY boundary. Its SDL backend uses a per-output
@@ -20,7 +20,7 @@ an evidence record, not a claim that the complete product is released.
   preserved VT500 text, box/block glyphs, combining `Á`, and wide `界` in
   the surface model at 60.000 Hz with zero missed deadlines; this is
   one-output evidence, not a multi-monitor or 120/240 Hz claim. The Debian candidate
-  `blit_0.1.276-1_amd64.deb` was built from
+  `blit_0.1.277-1_amd64.deb` was built from
   this binary and passed package allowlist, embedded-version, byte-identity,
   asset-presence, and extracted-runtime checks. The final artifact SHA-256 is
   recorded externally in the handoff because this ledger is included inside
@@ -78,6 +78,29 @@ the enlarged glyph crop showed clean box-drawing, block, combining, wide-cell,
 and colour placement with no adjacent-atlas bleed. Emoji outside the bundled
 fixed-cell coverage remains an explicit visible fallback; this is not a claim
 of universal Unicode shaping.
+
+### Current 0.1.277 evidence
+
+The exact TCC-built `0.1.277` binary passed complete terminal conformance,
+including raw and bracketed-paste network input, the Hibr font manifest,
+SDL glyph geometry/filtering, background batching, graphics-cache reuse, and
+the frame-rate gate. The new runtime fields
+`last_sdl_present_ms` and `max_sdl_present_ms` separate SDL presentation
+synchronization from the existing complete-path render timing. The OpenAPI
+schema and conformance gate require both fields. No Hibr source was modified.
+
+The exact staged binary reported `server_version:"0.1.277"` and passed the
+two-output direct-KMS visual fixture with
+`PPM_DISPLAY_47_VISUALS_PASS`, `PPM_DISPLAY_48_PASS`,
+`KMS_API_SCREENSHOT_PASS`, and `KMS_CAPTURE_PASS`. It was staged with binary
+SHA-256 `2a6762189e5ea3c1d8da93c498a4d63b47d699beda728a9e55dfec7cb8eae82d`.
+
+The authorized physical host was upgraded to 0.1.277 and ran a bounded
+full-screen workload at its 60 Hz mode. The live API measured 59.861 Hz with
+zero missed deadlines, `max_render_ms=17.378`,
+`max_sdl_present_ms=17.259`, and returned to zero sessions and surfaces after
+cleanup. This confirms that the observed worst-case sample is at the SDL
+presentation boundary; it does not claim physical 120/240 Hz support.
 
 ### Current 0.1.276 evidence
 
