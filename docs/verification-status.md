@@ -48,6 +48,10 @@ Its direct-KMS 60-frame pixel-stream workload also passes
 `PIXEL_FRAME_RATE_PASS`, `KMS_API_PIXEL_PASS`, and `KMS_CAPTURE_PASS`; all 60
 frames were accepted with zero additional missed deadlines in the stream
 workload.
+The exact binary's sixel fixture passes `PPM_DISPLAY_47_SIXEL_PASS`,
+`PPM_DISPLAY_48_PASS`, `KMS_API_SCREENSHOT_PASS`, and `KMS_CAPTURE_PASS`.
+Its mixed-refresh and high-refresh scheduler fixtures pass
+`REFRESH_SCHEDULER_MIXED_PASS` and `REFRESH_SCHEDULER_240_PASS` respectively.
 
 The 0.1.332 live synthetic probe passes with zero missed deadlines. With the
 physical evdev node present but idle, one SDL mouse event was accepted through
