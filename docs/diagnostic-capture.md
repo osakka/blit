@@ -27,6 +27,27 @@ the terminal surface. Keep screenshots disabled for timing/input captures:
 the SDL screenshot readback is a heavyweight operation and can perturb the
 single-threaded render loop. It does not start or modify Hibr.
 
+## Deterministic wallpaper/pointer regression
+
+The live Hibr desktop is a large opaque terminal surface, so the small atomic
+pointer test is not sufficient by itself. Run the full-surface stress gate
+after a renderer change:
+
+```sh
+ruby tools/tests/pointer_wallpaper_stress_gate.rb
+```
+
+It sends the surface in bounded deferred chunks followed by one commit, then
+interleaves pointer motion with further commits. Six samples outside the
+changed cells must remain non-black, the trace must show the pointer-plus-
+damage full-redraw boundary, and a pointer-only update must use the cached
+scene. This reproduces the compositor ordering without changing Hibr or
+requiring a physical device.
+
+The gate is a renderer regression test, not physical-input acceptance. The
+physical acceptance boundary remains `verify-live-physical.sh`, run while the
+real pointer is being moved.
+
 The real-host capture harness records Blit's API state without depending on a
 local Hibr shell or a physical keyboard. It collects the hardware/topology
 inventory, runtime counters, bounded event trace, and synchronized framebuffer
