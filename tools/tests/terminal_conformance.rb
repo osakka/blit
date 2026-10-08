@@ -155,6 +155,14 @@ derived_session = request(base, 'POST', '/v1/terminal-sessions', {
   'arguments' => ['-c', 'sleep 1'],
   'display_id' => topology.fetch('outputs').fetch(0).fetch('display_id')
 })
+derived_summary = request(base, 'GET',
+                          "/v1/surfaces/surface-#{derived_session.fetch('id')}/summary")
+%w[id revision width height non_empty_cells cursor graphics_images damage].each do |field|
+  raise "surface summary missing #{field}" unless derived_summary.key?(field)
+end
+assert_equal(derived_session.fetch('surface_id'), derived_summary.fetch('id'),
+             'surface summary identity')
+puts 'PASS surface-summary-diagnostics'
 derived_surface = request(base, 'GET',
                           "/v1/surfaces/surface-#{derived_session.fetch('id')}/cells")
 display_bounds = topology.fetch('outputs').fetch(0).fetch('bounds')

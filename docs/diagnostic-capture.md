@@ -5,6 +5,18 @@ local Hibr shell or a physical keyboard. It collects the hardware/topology
 inventory, runtime counters, bounded event trace, and synchronized framebuffer
 screenshots.
 
+For a low-cost surface check, use the compact summary endpoint instead of the
+full cell snapshot:
+
+```text
+/v1/surfaces/surface-1/summary
+```
+
+It returns revision, dimensions, non-empty-cell count, cursor state, graphics
+count, and the current damage rectangle. The full `/cells` endpoint remains
+the authoritative repair snapshot, but can be megabytes for a desktop-sized
+surface and must not be used in timing loops.
+
 Run it from a machine that can reach Blit:
 
 ```sh

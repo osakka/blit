@@ -2723,6 +2723,21 @@ static BlitSurface *find_surface(BlitRuntime *runtime, const char *path)
     return find_surface_id(runtime, surface_id);
 }
 
+static BlitSurface *find_surface_summary(BlitRuntime *runtime,
+                                         const char *path)
+{
+    const char *prefix = "/v1/surfaces/";
+    const char *id;
+    unsigned long long surface_id;
+
+    if (strncmp(path, prefix, strlen(prefix)) != 0)
+        return NULL;
+    id = path + strlen(prefix);
+    if (sscanf(id, "surface-%llu/summary", &surface_id) != 1)
+        return NULL;
+    return find_surface_id(runtime, surface_id);
+}
+
 static BlitSurface *find_scrollback_surface(BlitRuntime *runtime,
                                             const char *path)
 {
@@ -2928,6 +2943,45 @@ static int surface_snapshot_json(const BlitSurface *surface,
     if (!json_appendf(body, capacity, &used, "]}"))
         return 0;
     return 1;
+}
+
+static void surface_summary_json(const BlitSurface *surface,
+                                 const BlitSession *session, char *body,
+                                 size_t capacity)
+{
+    int x;
+    int y;
+    int non_empty = 0;
+    int graphics = 0;
+
+    for (y = 0; y < surface->height; ++y)
+        for (x = 0; x < surface->width; ++x)
+            if (surface->codepoints[y][x] != 0 ||
+                surface->combining_count[y][x] != 0 ||
+                surface->attributes[y][x] != 0 ||
+                surface->foreground[y][x] != 0 ||
+                surface->background[y][x] != 0 ||
+                surface->underline_color[y][x] != 0 ||
+                surface->links[y][x] != 0)
+                ++non_empty;
+    if (session != NULL)
+        for (x = 0; x < BLIT_GRAPHICS_MAX_IMAGES; ++x)
+            if (session->graphics[x].used && session->graphics[x].complete &&
+                session->graphics[x].visible)
+                ++graphics;
+    snprintf(body, capacity,
+             "{\"id\":\"surface-%llu\",\"revision\":%llu,"
+             "\"width\":%d,\"height\":%d,\"non_empty_cells\":%d,"
+             "\"cursor\":{\"x\":%d,\"y\":%d,\"visible\":%s,"
+             "\"style\":%d},\"graphics_images\":%d,"
+             "\"damage\":{\"valid\":%s,\"x\":%d,\"y\":%d,"
+             "\"width\":%d,\"height\":%d}}",
+             surface->id, surface->revision, surface->width, surface->height,
+             non_empty, surface->cursor_x, surface->cursor_y,
+             surface->cursor_visible ? "true" : "false", surface->cursor_style,
+             graphics, surface->damage_valid ? "true" : "false",
+             surface->damage_x, surface->damage_y, surface->damage_width,
+             surface->damage_height);
 }
 
 static void surface_scrollback_json(const BlitSurface *surface, char *body,
@@ -8333,6 +8387,20 @@ static void handle_request(int fd, BlitRuntime *runtime,
             ++surface->revision;
         }
         surface_scrollback_json(surface, body, sizeof(body));
+        send_http(fd, 200, "OK", "application/json", body);
+        return;
+    }
+    if (strncmp(path, "/v1/surfaces/", strlen("/v1/surfaces/")) == 0 &&
+        strstr(path, "/summary") != NULL && strcmp(method, "GET") == 0) {
+        BlitSurface *surface = find_surface_summary(runtime, path);
+        if (surface == NULL) {
+            send_problem(fd, 404, "Not Found", "surface_not_found",
+                         "The text surface does not exist.");
+            return;
+        }
+        surface_summary_json(surface,
+            find_session_id(runtime, surface->owner_session_id),
+            body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
         return;
     }

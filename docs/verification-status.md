@@ -3,16 +3,16 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
-## Current 0.1.332 live diagnostic status
+## Current 0.1.333 live diagnostic status
 
-The 0.1.332 package is deployed on the authorized physical host at
+The 0.1.333 package is deployed on the authorized physical host at
 `192.168.10.54:8080`. A disposable Hibr image probe completed with exit code
 zero and was then deleted. The live API reported one complete `api` graphics
 object (`512x512`, `786432` bytes), `pixel_frames_accepted=1`, and
 `pixel_frame_errors=0`. This proves the packaged Blit-owned Hibr adapter can
 submit and retain a pixel frame without changing Hibr.
 Package SHA-256 is
-`c54ffc705e333f48afc7a2743246413eefa7ba5b3cf92ab6e79ac51eead69cb6`.
+`0bc069e6245844d85764e1cfd6b0d69ae3ab8bbc172e75ff484db062e8f14cf3`.
 
 The same live sample reported `last_render_ms=4.411`, `max_render_ms=30.148`,
 `missed_deadlines=0`, and a 60 Hz display target. Its `input_events` count was
@@ -69,6 +69,11 @@ stayed at zero. This is damage-driven composition: a static terminal scene is
 not presented continuously at the panel refresh rate. `frame_rate_hz` must
 therefore be read together with the display's `refresh_hz`, render timings, and
 deadline counters; it is not evidence that the renderer itself took seconds.
+
+The 0.1.333 package adds the read-only OpenAPI
+`GET /v1/surfaces/{surface_id}/summary` endpoint. The live Hibr surface
+returned a compact response with revision `5530`, dimensions `240x135`, and
+28,522 non-empty cells; the full `/cells` repair endpoint remains separate.
 
 The exact 0.1.329 binary with the unchanged Hibr checkout also passes the
 QEMU/VKMS Hibr pane matrix: `LAYOUT_MATRIX_PASS` and

@@ -711,6 +711,25 @@ paths:
                 $ref: '#/components/schemas/SurfaceSnapshot'
         default:
           $ref: '#/components/responses/Problem'
+  /v1/surfaces/{surface_id}/summary:
+    parameters:
+      - $ref: '#/components/parameters/SurfaceId'
+    get:
+      tags: [terminals]
+      operationId: getSurfaceSummary
+      summary: Read compact revision and rendering state for a surface
+      description: >-
+        Returns bounded diagnostic state without transferring the full cell
+        snapshot. Use the cells endpoint for authoritative repair.
+      responses:
+        '200':
+          description: Compact current surface state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SurfaceSummary'
+        default:
+          $ref: '#/components/responses/Problem'
   /v1/surfaces/{surface_id}/scrollback:
     parameters:
       - $ref: '#/components/parameters/SurfaceId'
@@ -1527,6 +1546,29 @@ components:
                 description: URI from the active OSC 8 hyperlink, when present.
               style: {$ref: '#/components/schemas/CellStyle'}
             additionalProperties: false
+      additionalProperties: false
+    SurfaceSummary:
+      type: object
+      required: [id, revision, width, height, non_empty_cells, cursor,
+                 graphics_images, damage]
+      properties:
+        id: {$ref: '#/components/schemas/ResourceId'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        width: {type: integer, minimum: 1}
+        height: {type: integer, minimum: 1}
+        non_empty_cells: {type: integer, minimum: 0}
+        cursor: {$ref: '#/components/schemas/Cursor'}
+        graphics_images: {type: integer, minimum: 0}
+        damage:
+          type: object
+          required: [valid, x, y, width, height]
+          properties:
+            valid: {type: boolean}
+            x: {type: integer, minimum: 0}
+            y: {type: integer, minimum: 0}
+            width: {type: integer, minimum: 0}
+            height: {type: integer, minimum: 0}
+          additionalProperties: false
       additionalProperties: false
     ScrollbackSnapshot:
       type: object
