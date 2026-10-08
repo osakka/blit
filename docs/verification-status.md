@@ -78,6 +78,13 @@ This rules out the default TCG threading mode as the sole cause; the result
 remains a virtual VKMS/TCG limitation rather than a production scheduler
 change.
 
+The intervening 120 Hz producer stream has the same boundary: all 120 frames
+were accepted with zero frame errors, but missed deadlines increased from `3`
+to `22`, with a maximum KMS present duration of `35.558 ms`. Therefore the
+current validated virtual cadence is 60 Hz only; 120/240 Hz presentation must
+be validated on hardware or a VM with working KVM acceleration before any
+production claim is made.
+
 ## Current 0.1.359 live diagnostics and physical-input boundary
 
 The authorized live host reports `0.1.359` and remains reachable at
