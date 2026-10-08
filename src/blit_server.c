@@ -243,6 +243,13 @@ typedef struct {
     int glyph_vertex_count;
     int glyph_index_count;
     int glyph_capacity;
+    SDL_Vertex *background_vertices;
+    int *background_indices;
+    int background_vertex_count;
+    int background_index_count;
+    int background_capacity;
+    unsigned long long background_batch_submissions;
+    unsigned long long background_quads;
     SDL_Surface *screenshot_surface;
     unsigned long long display_id;
     int initialized;
@@ -1229,6 +1236,26 @@ static unsigned long long diagnostic_graphics_texture_uploads(
     return total;
 }
 
+static unsigned long long diagnostic_background_batches(
+    const BlitRuntime *runtime)
+{
+    unsigned long long total = 0;
+    int i;
+    for (i = 0; i < runtime->output_count; ++i)
+        total += runtime->outputs[i].background_batch_submissions;
+    return total;
+}
+
+static unsigned long long diagnostic_background_quads(
+    const BlitRuntime *runtime)
+{
+    unsigned long long total = 0;
+    int i;
+    for (i = 0; i < runtime->output_count; ++i)
+        total += runtime->outputs[i].background_quads;
+    return total;
+}
+
 static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
                                      size_t capacity)
 {
@@ -1259,6 +1286,7 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"terminal_bytes\":%llu,\"pointer_cache_hits\":%llu,"
         "\"pointer_cache_misses\":%llu,\"frame_rate_hz\":%.3f,"
         "\"graphics_cache_hits\":%llu,\"graphics_texture_uploads\":%llu,"
+        "\"background_batches\":%llu,\"background_quads\":%llu,"
         "\"pixel_frames_accepted\":%llu,\"pixel_frame_errors\":%llu,"
         "\"frame_rate_frames\":%llu,\"frame_rate_window_ms\":%llu,"
         "\"frame_rate_age_ms\":%llu,\"loop_iterations\":%llu,"
@@ -1284,6 +1312,8 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         frame_rate_hz,
         diagnostic_graphics_cache_hits(runtime),
         diagnostic_graphics_texture_uploads(runtime),
+        diagnostic_background_batches(runtime),
+        diagnostic_background_quads(runtime),
         runtime->pixel_frames_accepted,
         runtime->pixel_frame_errors,
         runtime->diagnostic_frame_rate_last_frames,
@@ -8582,11 +8612,18 @@ static void destroy_outputs(BlitRuntime *runtime)
         runtime->outputs[i].glyph_atlas_columns = 0;
         free(runtime->outputs[i].glyph_vertices);
         free(runtime->outputs[i].glyph_indices);
+        free(runtime->outputs[i].background_vertices);
+        free(runtime->outputs[i].background_indices);
         runtime->outputs[i].glyph_vertices = NULL;
         runtime->outputs[i].glyph_indices = NULL;
         runtime->outputs[i].glyph_vertex_count = 0;
         runtime->outputs[i].glyph_index_count = 0;
         runtime->outputs[i].glyph_capacity = 0;
+        runtime->outputs[i].background_vertices = NULL;
+        runtime->outputs[i].background_indices = NULL;
+        runtime->outputs[i].background_vertex_count = 0;
+        runtime->outputs[i].background_index_count = 0;
+        runtime->outputs[i].background_capacity = 0;
         SDL_DestroyRenderer(runtime->outputs[i].renderer);
         SDL_DestroyWindow(runtime->outputs[i].window);
     }
@@ -8988,6 +9025,104 @@ static SDL_Texture *create_sdl_glyph_atlas(SDL_Renderer *renderer,
     if (columns_out != NULL)
         *columns_out = columns;
     return texture;
+}
+
+static int ensure_sdl_background_batch(BlitOutput *output,
+                                       int additional_quads)
+{
+    SDL_Vertex *vertices;
+    int *indices;
+    int required;
+    int capacity;
+
+    if (output == NULL || additional_quads < 1)
+        return 0;
+    required = output->background_vertex_count + additional_quads * 4;
+    if (required <= output->background_capacity)
+        return 1;
+    capacity = output->background_capacity > 0 ? output->background_capacity : 256;
+    while (capacity < required) {
+        if (capacity > 1000000)
+            return 0;
+        capacity *= 2;
+    }
+    vertices = (SDL_Vertex *)realloc(output->background_vertices,
+                                     (size_t)capacity * sizeof(*vertices));
+    if (vertices == NULL)
+        return 0;
+    indices = (int *)realloc(output->background_indices,
+                             (size_t)(capacity / 4) * 6U * sizeof(*indices));
+    if (indices == NULL) {
+        output->background_vertices = vertices;
+        return 0;
+    }
+    output->background_vertices = vertices;
+    output->background_indices = indices;
+    output->background_capacity = capacity;
+    return 1;
+}
+
+static void flush_sdl_background_batch(BlitOutput *output)
+{
+    if (output == NULL || output->renderer == NULL ||
+        output->background_vertex_count == 0)
+        return;
+    SDL_RenderGeometry(output->renderer, NULL,
+                       output->background_vertices,
+                       output->background_vertex_count,
+                       output->background_indices,
+                       output->background_index_count);
+    ++output->background_batch_submissions;
+    output->background_vertex_count = 0;
+    output->background_index_count = 0;
+}
+
+static int queue_sdl_background(BlitOutput *output, uint32_t colour,
+                                float x, float y, float width, float height)
+{
+    SDL_Vertex *vertices;
+    int *indices;
+    int vertex;
+    int index;
+    float red;
+    float green;
+    float blue;
+
+    if (output == NULL || !ensure_sdl_background_batch(output, 1))
+        return 0;
+    red = (float)((colour >> 16) & 0xffU) / 255.0f;
+    green = (float)((colour >> 8) & 0xffU) / 255.0f;
+    blue = (float)(colour & 0xffU) / 255.0f;
+    vertex = output->background_vertex_count;
+    vertices = output->background_vertices + vertex;
+    vertices[0].position.x = x;
+    vertices[0].position.y = y;
+    vertices[1].position.x = x + width;
+    vertices[1].position.y = y;
+    vertices[2].position.x = x + width;
+    vertices[2].position.y = y + height;
+    vertices[3].position.x = x;
+    vertices[3].position.y = y + height;
+    for (index = 0; index < 4; ++index) {
+        vertices[index].color.r = red;
+        vertices[index].color.g = green;
+        vertices[index].color.b = blue;
+        vertices[index].color.a = 1.0f;
+        vertices[index].tex_coord.x = 0.0f;
+        vertices[index].tex_coord.y = 0.0f;
+    }
+    index = output->background_index_count;
+    indices = output->background_indices + index;
+    indices[0] = vertex;
+    indices[1] = vertex + 1;
+    indices[2] = vertex + 2;
+    indices[3] = vertex;
+    indices[4] = vertex + 2;
+    indices[5] = vertex + 3;
+    output->background_vertex_count += 4;
+    output->background_index_count += 6;
+    ++output->background_quads;
+    return 1;
 }
 
 static int ensure_sdl_glyph_batch(BlitOutput *output, int additional_quads)
@@ -9851,6 +9986,13 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             last_row = full_redraw ? surface->height : last_row;
             if (last_row > BLIT_MAX_CELL_ROWS)
                 last_row = BLIT_MAX_CELL_ROWS;
+
+            /* Wallpaper themes commonly express nearly every terminal cell
+               as a coloured background.  Submitting one SDL rectangle per
+               cell makes a full-screen Hibr redraw CPU-bound.  Build the
+               opaque background quads first, then draw the glyph layer on
+               top, preserving the canonical cell ordering while reducing
+               thousands of renderer calls to one geometry submission. */
             for (row = first_row; row < last_row; ++row) {
                 for (column = 0; column < surface->width &&
                      column < BLIT_MAX_CELL_COLS; ++column) {
@@ -9860,7 +10002,41 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                     uint32_t background = surface->background[row][column] ?
                         surface->background[row][column] - 1 : 0;
                     uint16_t attributes = surface->attributes[row][column];
-                    SDL_FRect cell_background;
+                    if (attributes & BLIT_ATTR_INVERSE) {
+                        uint32_t swapped = foreground;
+                        foreground = background ? background : 0;
+                        background = swapped;
+                    }
+                    if (background != 0) {
+                        if (!queue_sdl_background(
+                                &runtime->outputs[output_index], background,
+                                surface_origin_x + column * (float)cell_width,
+                                (float)surface_origin_y + row * (float)cell_height,
+                                (float)cell_width, (float)cell_height)) {
+                            flush_sdl_background_batch(
+                                &runtime->outputs[output_index]);
+                            SDL_SetRenderDrawColor(renderer,
+                                (unsigned char)(background >> 16),
+                                (unsigned char)(background >> 8),
+                                (unsigned char)background, 255);
+                            SDL_RenderFillRect(renderer, &(SDL_FRect){
+                                surface_origin_x + column * (float)cell_width,
+                                (float)surface_origin_y + row * (float)cell_height,
+                                (float)cell_width, (float)cell_height});
+                        }
+                    }
+                }
+            }
+            flush_sdl_background_batch(&runtime->outputs[output_index]);
+            for (row = first_row; row < last_row; ++row) {
+                for (column = 0; column < surface->width &&
+                     column < BLIT_MAX_CELL_COLS; ++column) {
+                    uint32_t foreground = surface->foreground[row][column] ?
+                        surface->foreground[row][column] - 1 :
+                        BLIT_DEFAULT_FOREGROUND;
+                    uint32_t background = surface->background[row][column] ?
+                        surface->background[row][column] - 1 : 0;
+                    uint16_t attributes = surface->attributes[row][column];
 
                     if (attributes & BLIT_ATTR_INVERSE) {
                         uint32_t swapped = foreground;
@@ -9869,17 +10045,6 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                     }
                     if (attributes & BLIT_ATTR_DIM)
                         foreground = ((foreground & 0xfefefeU) >> 1);
-                    if (background != 0) {
-                        cell_background.x = surface_origin_x + column * (float)cell_width;
-                        cell_background.y = (float)surface_origin_y + row * (float)cell_height;
-                        cell_background.w = (float)cell_width;
-                        cell_background.h = (float)cell_height;
-                        SDL_SetRenderDrawColor(renderer,
-                            (unsigned char)(background >> 16),
-                            (unsigned char)(background >> 8),
-                            (unsigned char)background, 255);
-                        SDL_RenderFillRect(renderer, &cell_background);
-                    }
                     {
                         int glyph_width = (attributes & BLIT_ATTR_WIDE) ?
                             cell_width * 2 : cell_width;

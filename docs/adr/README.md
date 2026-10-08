@@ -24,6 +24,7 @@ Accepted decisions:
 14. [SDL glyph geometry batching for full-screen redraws](0014-sdl-glyph-geometry-batching.md).
 15. [Nearest sampling for the SDL glyph atlas](0015-nearest-glyph-atlas-sampling.md).
 16. [Timestamp every streamed input event](0016-timestamped-input-stream.md).
+17. [Batch SDL terminal background geometry](0017-sdl-background-geometry-batching.md).
 
 Pending decisions:
 
