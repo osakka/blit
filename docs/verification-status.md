@@ -3,6 +3,33 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## Current 0.1.362 live Hibr evidence bundle
+
+The live host was started through Blit's API with the documented primary
+desktop command. The first attempt was intentionally retained as evidence: it
+created a surface containing only 125 non-empty cells and Hibr exited with
+code 1 after reporting that the held desktop was already running. This is a
+launch-state failure, not a renderer failure. Deleting that failed API session
+and retrying with Hibr's `--resume` option produced a running session whose
+`240x135` surface advanced to more than 17,000 non-empty cells.
+
+The synchronized capture is stored under
+`diagnostics/live-0.1.362-hibr-resume-capture-20261008T233122Z/`. Its
+screenshot shows the full-screen animated Hibr scene. During the capture Blit
+recorded `326` presents, zero missed deadlines, and a maximum render duration
+of `22.149 ms` on the physical host's `60 Hz` output. The measured
+damage-driven frame rate is workload-dependent and must not be confused with
+the output scanout rate.
+
+The same evidence bundle recorded zero physical evdev events. Therefore the
+physical pointer/click acceptance gate remains open; no claim is made about
+mouse behavior from this run. The canonical troubleshooting sequence is now:
+capture topology and session state, capture surface summary/revision, capture
+runtime timing and render-path trace, capture a screenshot, then compare raw
+evdev counters and filtered pointer traces over the same window. A failed
+Hibr launch is repaired with `--resume` or Hibr's own lifecycle command; Blit
+does not alter Hibr state or source.
+
 ## Current 0.1.359 live diagnostics and physical-input boundary
 
 The authorized live host reports `0.1.359` and remains reachable at

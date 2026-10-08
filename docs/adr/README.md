@@ -37,6 +37,7 @@ Accepted decisions:
 27. [Ignore evdev mouse-button autorepeat](0039-ignore-evdev-mouse-autorepeat.md).
 28. [Compose pointer motion over cached scene damage](0040-pointer-damage-uses-cached-scene.md).
 29. [Aggregate button state across evdev mice](0041-aggregate-evdev-button-state.md).
+30. [Correlated live evidence bundles](0042-live-evidence-bundle.md).
 
 Pending decisions:
 
