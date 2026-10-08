@@ -89,14 +89,21 @@ echo "polling for supervised installation"
 i=0
 while [ "$i" -lt 60 ]; do
     sleep 1
-    status=$(curl_auth --fail "$base_url/v1/control/update/status") || exit 1
+    if ! status=$(curl_auth --fail "$base_url/v1/control/update/status"); then
+        # The supervised service is expected to close the listening socket
+        # briefly while dpkg and systemd restart it.  Keep polling instead of
+        # reporting a failed deployment during that bounded transition.
+        i=$((i + 1))
+        continue
+    fi
     case "$status" in
         *"state":"ready"*"active":false*)
-            live_version=$(curl_auth --fail "$base_url/v1/version") || exit 1
-            echo "$live_version" | grep -q "\"server_version\":\"$version\"" && {
-                echo "update verified: Blit $version"
-                exit 0
-            }
+            if live_version=$(curl_auth --fail "$base_url/v1/version"); then
+                echo "$live_version" | grep -q "\"server_version\":\"$version\"" && {
+                    echo "update verified: Blit $version"
+                    exit 0
+                }
+            fi
             ;;
     esac
     i=$((i + 1))
