@@ -30,6 +30,14 @@ evdev counters and filtered pointer traces over the same window. A failed
 Hibr launch is repaired with `--resume` or Hibr's own lifecycle command; Blit
 does not alter Hibr state or source.
 
+The exact TCC-built 0.1.362 input fixture was also rerun after making QEMU
+staging self-contained. It passed raw evdev delivery (`800` events, `479`
+motion events, `33` button events), mouse autorepeat rejection, multi-device
+routing, per-device button-state coalescing, keyboard/gamepad delivery, and
+stream routing. The staging helpers now include their Hibr workload probes and
+normalize the guest shell interpreter, so this result does not depend on a
+historical initroot tree.
+
 ## Current 0.1.359 live diagnostics and physical-input boundary
 
 The authorized live host reports `0.1.359` and remains reachable at

@@ -19,6 +19,11 @@ strings "$stage/blit-stage/blit-server" | grep -Fx "$version" >/dev/null
 cp "$repo_root/assets/fonts/Blit-Hibr-Terminus16.psf" \
     "$stage/blit-stage/fonts/Blit-Hibr-Terminus16.psf"
 
+test -x "$stage/usr/bin/busybox"
+find "$stage/usr/bin/sh" -delete 2>/dev/null || true
+cp "$stage/usr/bin/busybox" "$stage/usr/bin/sh"
+chmod 0755 "$stage/usr/bin/sh"
+
 tcc "$script_dir/pty_input_echo.c" -o "$stage/blit-stage/pty-input-echo"
 tcc "$script_dir/http_put.c" -o "$stage/blit-stage/http-put"
 tcc "$script_dir/ppm_assert.c" -o "$stage/blit-stage/ppm-assert"

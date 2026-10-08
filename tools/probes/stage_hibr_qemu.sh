@@ -31,11 +31,21 @@ cp "$repo_root/hibr/blit-console.hibr" "$stage/blit-stage/blit-console.hibr"
 cp "$repo_root/hibr/blit-session.hibr" "$stage/blit-stage/blit-session.hibr"
 cp "$repo_root/hibr/blit-hibr-console.hibr" "$stage/blit-stage/blit-hibr-console.hibr"
 cp "$repo_root/hibr/blit-stock-session.hibr" "$stage/blit-stage/blit-stock-session.hibr"
+cp "$script_dir/hibr_window_workload.hibr" "$stage/blit-stage/hibr_window_workload.hibr"
+cp "$script_dir/input_probe.hibr" "$stage/blit-stage/input_probe.hibr"
 # The initramfs entrypoint is part of the canonical Hibr/QEMU probe. Refresh it
 # together with the staged binary and Hibr artifacts; preserving a historical
 # init script can silently omit newly added input routes or acceptance checks.
 cp "$script_dir/qemu_hibr_init.sh" "$stage/init"
 chmod 0755 "$stage/init"
+
+# Some Alpine initroots retain /bin and /usr/bin symlinks from the host image.
+# The guest kernel must be able to resolve the shell interpreter before it can
+# execute the script init; make that interpreter explicit in the staged tree.
+test -x "$stage/usr/bin/busybox"
+find "$stage/usr/bin/sh" -delete 2>/dev/null || true
+cp "$stage/usr/bin/busybox" "$stage/usr/bin/sh"
+chmod 0755 "$stage/usr/bin/sh"
 grep -q 'input-gamepad' "$stage/init"
 
 test -x "$hibr_root/build/hibr"
@@ -73,6 +83,8 @@ test -f "$stage/blit-stage/blit-console.hibr"
 test -f "$stage/blit-stage/blit-session.hibr"
 test -f "$stage/blit-stage/blit-hibr-console.hibr"
 test -f "$stage/blit-stage/blit-stock-session.hibr"
+test -f "$stage/blit-stage/hibr_window_workload.hibr"
+test -f "$stage/blit-stage/input_probe.hibr"
 test -f "$stage/blit-stage/lib/ctl.hibr"
 test -x "$stage/blit-stage/emit-uinput"
 test -x "$stage/blit-stage/http-put"
