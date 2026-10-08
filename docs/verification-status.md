@@ -3,6 +3,23 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## Current 0.1.358 real-host evidence and remaining visual gate
+
+The authorized host now reports `0.1.358`. The attach PTY geometry transition
+is active: the primary Hibr session surface is `240x135` with all `32400` cells
+populated, correcting the earlier rows `25..132` omission. The six-second
+timing capture recorded zero missed deadlines and render/present calls with
+sub-millisecond steady-state render cost; it recorded zero physical evdev
+events because no physical movement or click occurred during capture.
+
+The API screenshot is a valid `1920x2160` BMP and is saved as
+`diagnostics/live-358-visual/display-1.png`. It still shows a mostly black
+composition with a small Hibr panel at the lower-left, so the surface-layout
+gate is recorded as partial rather than accepted. This is now a visual
+composition/presentation issue, not the former incomplete Hibr surface. The
+next capture must correlate pane bounds, cell coordinates, screenshot pixels,
+pointer damage, and physical evdev events in the same timestamped window.
+
 ## Current 0.1.357 release and live-validation gate
 
 The TCC-built `0.1.357` package contains the attach-time PTY notification
