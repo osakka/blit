@@ -51,6 +51,7 @@ sixel_test=0
 visuals_test=0
 pixel_test=0
 pixel_stream_test=0
+pixel_stream_120_test=0
 pixel_stream_240_test=0
 recovery_test=0
 async_pageflip_test=0
@@ -83,6 +84,9 @@ case " $($b cat /proc/cmdline 2>/dev/null || true) " in
 esac
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
     *" blit.pixel_stream=1 "*) pixel_test=1; pixel_stream_test=1 ;;
+esac
+case " $($b cat /proc/cmdline 2>/dev/null || true) " in
+    *" blit.pixel_stream_120=1 "*) pixel_test=1; pixel_stream_test=1; pixel_stream_120_test=1 ;;
 esac
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
     *" blit.pixel_stream_240=1 "*) pixel_test=1; pixel_stream_test=1; pixel_stream_240_test=1; high_refresh_test=1 ;;
@@ -203,6 +207,8 @@ if [ "$pixel_test" -eq 1 ]; then
     if [ -n "$pixel_session" ] && {
         if [ "$pixel_stream_240_test" -eq 1 ]; then
             /blit-stage/ws-pixel-frame-probe "$pixel_session" --240hz
+        elif [ "$pixel_stream_120_test" -eq 1 ]; then
+            /blit-stage/ws-pixel-frame-probe "$pixel_session" --120hz
         elif [ "$pixel_stream_test" -eq 1 ]; then
             /blit-stage/ws-pixel-frame-probe "$pixel_session" --60hz
         else
@@ -234,9 +240,11 @@ if [ "$pixel_test" -eq 1 ]; then
         pixel_stream_missed=$($b cat /tmp/pixel-runtime.json | $b awk -F '"missed_deadlines":' '{ for (i = 2; i <= NF && i <= 3; ++i) { split($i, a, ","); sub(/[^0-9].*/, "", a[1]); printf "%s%s", (i == 2 ? "" : ","), a[1] } }')
         echo "PIXEL_FRAME_RUNTIME baseline=$baseline_pixel_stream_missed post=$pixel_stream_missed"
         $b cat /tmp/pixel-runtime.json
-        if $b grep -q '"pixel_frames_accepted":60' /tmp/pixel-runtime.json &&
+        expected_pixel_frames=60
+        [ "$pixel_stream_120_test" -eq 1 ] && expected_pixel_frames=120
+        if $b grep -q "\"pixel_frames_accepted\":$expected_pixel_frames" /tmp/pixel-runtime.json &&
            [ "$pixel_stream_missed" = "$baseline_pixel_stream_missed" ]; then
-            echo PIXEL_FRAME_RATE_PASS
+            echo "PIXEL_FRAME_RATE_PASS frames=$expected_pixel_frames"
         else
             echo PIXEL_FRAME_RATE_FAIL
             finish 1

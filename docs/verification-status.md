@@ -1252,6 +1252,10 @@ The latest reachable observation of the authorized host at
   image. The dummy renderer presented 183 frames at its own virtual cadence;
   this separates network/graphics ingestion from the unresolved direct-KMS
   page-flip limitation and is not physical 240 Hz evidence.
+- The new intermediate 120 Hz producer fixture also accepted all 120 frames
+  with zero protocol errors, but the two-vCPU VKMS run increased page-flip
+  misses from 3 to 15 and failed the strict cadence gate. This is diagnostic
+  TCG/VKMS evidence, not a claim that 120 Hz hardware is unsupported.
 
 ## Open release gates
 
