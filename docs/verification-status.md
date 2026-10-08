@@ -71,6 +71,13 @@ The exact 0.1.265 Hibr/VKMS input fixtures passed `LAYOUT_MATRIX_PASS`,
 devices and input loss/reconnect events. The staged runtime loaded the 929
 glyph / 1,182 mapping font; Hibr source was not modified.
 
+The exact 0.1.265 TCC binary also passed the bounded endurance set: the
+120-second four-PTY soak completed 1,460 snapshots and 133 resizes with
+66,492 KiB peak RSS under the 131,072 KiB ceiling and clean teardown;
+session deletion completed in 146 ms, stream replay repaired a one-event gap,
+shutdown exited cleanly, hidden-cursor damage passed, and the screenshot/
+overlay pixel gate passed.
+
 ### Current 0.1.263 source and physical evidence
 
 The exact 0.1.263 TCC build passes the complete 0.1.262 regression set plus
