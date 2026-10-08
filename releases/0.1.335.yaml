@@ -1,7 +1,7 @@
 release: 0.1.335
 package: blit_0.1.335-1_amd64.deb
-package_sha256: 6f53d5d9212997dccfe5c010ccfd5f31e69acd78d22c01312b13fa0a0547c5d5
-source_commit: b07b9f19d466a45266f4d504c20144f4ed0fede5
+package_sha256: 149e15f441411ec25d0bd87661c27956ba3b56bcd2c07993ee412912a25b1bd7
+source_commit: dbb848bc3656a51c805d31edce49e282e55eabef
 server_binary_sha256: ec8657f8cea3adb2deb9507c56a9791b51b6fb5264630606739174c0a58bbd1f
 live_host: 192.168.10.54:8080
 live_version: 0.1.335
