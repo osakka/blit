@@ -42,8 +42,9 @@ The SDL adapter uses single-surface incremental frames and conservatively
 redraws multi-surface outputs with deterministic vertical stacking. The
 current 0.1.253 source passes the complete terminal, graphics, input,
 two-display VKMS/QEMU, and Hibr primary/`--join` acceptance gates. The
-authorized physical host is currently running 0.1.245 and has a healthy one-output
-SDL3/OpenGL presentation with a passing API-created PTY smoke test. Physical
+authorized physical host is running 0.1.253 and has a healthy one-output
+SDL3/OpenGL presentation; its network API accepted a disposable 60 Hz
+external pixel stream at 59.980 Hz with zero missed deadlines. Physical
 multi-monitor confirmation remains open because that host currently exposes
 only one connector.
 
@@ -158,12 +159,11 @@ suite on VKMS and then on a physical DRM/KMS host.
 
 ## Immediate next action
 
-Deploy 0.1.253 using the configured update credential, then capture settled
-SDL screenshots and API diagnostics from the authorized physical host. Verify physical
-pointer/button/wheel routing and
-refresh cadence, followed by a real two-monitor primary/`--join` arrangement
-when a second connector is available. The update API requires its configured
-update token; no unauthenticated bypass is acceptable.
+Capture settled SDL screenshots and API diagnostics from the authorized
+physical host. Verify physical pointer/button/wheel routing and refresh
+cadence, followed by a real two-monitor primary/`--join` arrangement when a
+second connector is available. The update API requires its configured update
+token; no unauthenticated bypass is acceptable.
 
 The remaining release work is physical display/input evidence, mixed-refresh
 coverage for every supported topology, and the Gate 6 fault/soak campaign.

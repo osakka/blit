@@ -1,4 +1,7 @@
-/* TCC-built WebSocket pixel-frame client for the direct-KMS fixture. */
+/* TCC-built WebSocket pixel-frame client for direct-KMS and live-host tests.
+ * Legacy usage: probe SESSION [--60hz]
+ * Remote usage: probe HOST PORT SESSION [--60hz]
+ */
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <stdio.h>
@@ -87,6 +90,8 @@ int main(int argc, char **argv)
     struct sockaddr_in address;
     char request[512];
     char response[1024];
+    const char *host = "127.0.0.1";
+    int port = 19191;
     unsigned char pixels[32 * 32 * 4];
     const char *session;
     int fd;
@@ -94,24 +99,32 @@ int main(int argc, char **argv)
     int frame;
     size_t i;
 
-    if (argc < 2 || argc > 3) return 2;
-    if (argc == 3) {
-        if (strcmp(argv[2], "--60hz") != 0) return 2;
-        stream_mode = 1;
+    if (argc < 2 || argc > 5) return 2;
+    if (argc >= 4) {
+        host = argv[1];
+        port = atoi(argv[2]);
+        session = argv[3];
+        if (port < 1 || port > 65535 || session[0] == '\0') return 2;
+        if (argc == 5 && strcmp(argv[4], "--60hz") != 0) return 2;
+        stream_mode = argc == 5;
+    } else {
+        session = argv[1];
+        if (argc == 3 && strcmp(argv[2], "--60hz") != 0) return 2;
+        stream_mode = argc == 3;
     }
-    session = argv[1];
     fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) return 1;
     memset(&address, 0, sizeof(address));
     address.sin_family = AF_INET;
-    address.sin_port = htons(19191);
-    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    address.sin_port = htons((unsigned short)port);
+    if (inet_pton(AF_INET, host, &address.sin_addr) != 1) return 2;
     if (connect(fd, (struct sockaddr *)&address, sizeof(address)) < 0) return 1;
     snprintf(request, sizeof(request),
-             "GET /v1/stream HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+             "GET /v1/stream HTTP/1.1\r\nHost: %s:%d\r\n"
              "Upgrade: websocket\r\nConnection: Upgrade\r\n"
              "Sec-WebSocket-Version: 13\r\n"
-             "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n");
+             "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n",
+             host, port);
     if (!send_all(fd, request, strlen(request))) return 1;
     /* Consume the HTTP upgrade response. */
     for (i = 0; i < sizeof(response) - 1; ++i) {

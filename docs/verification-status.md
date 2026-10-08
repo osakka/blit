@@ -17,8 +17,8 @@ an evidence record, not a claim that the complete product is released.
   wallpaper workload on the prior source-equivalent 0.1.241 build measured
   26.865 ms maximum full render and 61.387 Hz over its active 504 ms window.
   The direct-KMS pixel-frame acceptance below was run from the exact current
-  0.1.253 TCC build. The preceding 0.1.245 package was accepted by the
-  authorized physical host and verified through its version endpoint.
+  0.1.253 TCC build. The authorized physical host now also reports 0.1.253
+  through its version endpoint.
 
 ### Current 0.1.253 source evidence
 
@@ -46,6 +46,16 @@ The pixel path now invalidates only the affected graphics rectangle in cell
 coordinates instead of forcing a full terminal-surface redraw. Optional
 placement fields default to zero as declared by the OpenAPI schema. The
 runtime diagnostics expose `pixel_frames_accepted` and `pixel_frame_errors`.
+
+The authorized physical host was then exercised through its network API with
+a disposable external surface and a TCC-built remote WebSocket probe. It
+accepted 60/60 RGBA frames from a 60 Hz producer with zero pixel-frame errors,
+reported `frame_rate_hz: 59.980`, `last_frame_gap_ms: 17.042`,
+`last_render_ms: 16.701`, and `missed_deadlines: 0` at the host's active
+59.990 Hz mode. The probe also verified 60 graphics texture uploads. The
+temporary session was deleted with HTTP 204 and the host returned to zero
+sessions and zero surfaces. This is physical one-output evidence; a physical
+multi-monitor and 120/240 Hz result remains open.
 
 ### Current 0.1.250 source/package evidence
 
