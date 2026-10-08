@@ -104,6 +104,11 @@ async page flips are not an acceptable fix and remain comparison-only.
 Therefore 240 Hz presentation is not yet validated and no package claim is
 made for it. The remaining bottleneck is QEMU TCG/VKMS scheduling rather than
 WebSocket ingestion, terminal glyph rendering, or pixel-frame acceptance.
+Changing the VM topology did not produce a usable workaround: four-vCPU
+multi-threaded TCG caused the guest kernel to panic in `sched_clock_cpu` before
+Blit started, while stable one-vCPU TCG presented only 162.714 Hz with a
+17.771 ms maximum select gap and a 47.778 ms maximum KMS span. The two-vCPU
+TCG configuration remains the reproducible baseline for this gate.
 
 ### Current 0.1.267 release-candidate evidence
 
