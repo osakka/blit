@@ -1492,8 +1492,14 @@ components:
         event:
           type: object
           description: >-
-            For evdev-gamepad, kind is gamepad_button or gamepad_axis and the
-            event includes the Linux evdev code, value, and receipt time_us.
+            Every event includes monotonic receipt time_us. For evdev-gamepad,
+            kind is gamepad_button or gamepad_axis and the event also includes
+            the Linux evdev code and value. Pointer events include coordinates
+            and output/cell targeting; keyboard events include modifier and
+            repeat state.
+          required: [time_us]
+          properties:
+            time_us: {type: integer, minimum: 0}
           additionalProperties: true
       additionalProperties: false
     StreamTerminalOutput:

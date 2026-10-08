@@ -23,6 +23,7 @@ Accepted decisions:
 13. [Interactive games and emulation are first-class workloads](0013-interactive-games-and-emulation.md).
 14. [SDL glyph geometry batching for full-screen redraws](0014-sdl-glyph-geometry-batching.md).
 15. [Nearest sampling for the SDL glyph atlas](0015-nearest-glyph-atlas-sampling.md).
+16. [Timestamp every streamed input event](0016-timestamped-input-stream.md).
 
 Pending decisions:
 

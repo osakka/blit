@@ -10335,9 +10335,10 @@ static void update_evdev_pointer(BlitRuntime *runtime)
         snprintf(input_event, sizeof(input_event),
                  "{\"type\":\"input\",\"session_id\":\"session-%llu\","
                  "\"device_id\":\"evdev-pointer\",\"event\":{"
-                 "\"kind\":\"pointer_motion\",\"x\":%.1f,"
+                 "\"kind\":\"pointer_motion\",\"time_us\":%llu,\"x\":%.1f,"
                  "\"y\":%.1f,\"output\":%d,\"column\":%d,\"row\":%d}}",
                  target != NULL ? target->id : 0ULL,
+                 (unsigned long long)monotonic_us(),
                  runtime->pointer_x, runtime->pointer_y,
                  runtime->pointer_output, target_col, target_row);
         broadcast_stream(runtime, input_event, BLIT_STREAM_INPUT);
@@ -10374,19 +10375,21 @@ static void broadcast_evdev_pointer(BlitRuntime *runtime, const char *kind,
         snprintf(input_event, sizeof(input_event),
                  "{\"type\":\"input\",\"session_id\":\"session-%llu\","
                  "\"device_id\":\"evdev-pointer\",\"event\":{"
-                 "\"kind\":\"pointer_wheel\",\"delta\":%d,"
+                 "\"kind\":\"pointer_wheel\",\"time_us\":%llu,\"delta\":%d,"
                  "\"x\":%.1f,\"y\":%.1f,\"output\":%d}}",
-                 target != NULL ? target->id : 0ULL, delta,
+                 target != NULL ? target->id : 0ULL,
+                 (unsigned long long)monotonic_us(), delta,
                  runtime->pointer_x, runtime->pointer_y,
                  runtime->pointer_output);
     } else {
         snprintf(input_event, sizeof(input_event),
                  "{\"type\":\"input\",\"session_id\":\"session-%llu\","
                  "\"device_id\":\"evdev-pointer\",\"event\":{"
-                 "\"kind\":\"pointer_button\",\"button\":%d,"
+                 "\"kind\":\"pointer_button\",\"time_us\":%llu,\"button\":%d,"
                  "\"pressed\":%s,\"x\":%.1f,\"y\":%.1f,"
                  "\"output\":%d,\"column\":%d,\"row\":%d}}",
-                 target != NULL ? target->id : 0ULL, button,
+                 target != NULL ? target->id : 0ULL,
+                 (unsigned long long)monotonic_us(), button,
                  pressed ? "true" : "false", runtime->pointer_x,
                  runtime->pointer_y, runtime->pointer_output, column, row);
     }
@@ -10704,9 +10707,10 @@ static void service_evdev_keyboard(BlitRuntime *runtime)
                 snprintf(input_event, sizeof(input_event),
                          "{\"type\":\"input\",\"session_id\":\"session-%llu\","
                          "\"device_id\":\"evdev-keyboard\",\"event\":{"
-                         "\"kind\":\"key\",\"code\":%u,\"pressed\":%s,"
+                         "\"kind\":\"key\",\"time_us\":%llu,\"code\":%u,\"pressed\":%s,"
                          "\"repeat\":%s,\"shift\":%s,\"ctrl\":%s,\"alt\":%s}}",
                          target != NULL ? target->id : 0ULL,
+                         (unsigned long long)monotonic_us(),
                          (unsigned int)event.code, event.value != 0 ? "true" : "false",
                          event.value == 2 ? "true" : "false",
                          runtime->evdev_shift ? "true" : "false",
