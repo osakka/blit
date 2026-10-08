@@ -45,6 +45,15 @@ zero missed deadlines, and 60 texture uploads. A live style-scope request
 confirmed that green foreground, red background, inverse, and unstyled cells
 remain independent. The temporary sessions were deleted with HTTP 204.
 
+The authorized physical host also ran the real `/usr/bin/desktop` command
+through the API with the stock Hibr session contract. It reached `running`,
+advanced to surface revision 24 after 16,095 terminal bytes, rendered with a
+17.106 ms maximum sample and zero missed deadlines, and produced a readable
+Hibr desktop screenshot containing its wallpaper, icons, and control UI. The
+session was deleted with HTTP 204. This is physical one-output Hibr evidence;
+physical pointer/button interaction and multi-monitor Hibr evidence remain
+open.
+
 The current-source four-output VKMS fixture exposed four independent 1024×768
 outputs at 60 Hz, created one terminal session per output, and passed
 `KMS_FOUR_OUTPUT_PASS`. The mixed-refresh fixture then passed
