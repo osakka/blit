@@ -19,6 +19,13 @@ in a descendant process group. Blit now uses a unique session token, follows
 only that bounded descendant tree, and performs the delayed PTY resize plus
 the proven negative-PID `SIGWINCH` operation. Hibr source was not modified.
 
+The same TCC-built binary passed the VKMS QEMU boundaries using the 6.19.14
+test kernel: `KMS_CAPTURE_PASS` for two outputs,
+`KMS_FOUR_OUTPUT_PASS` with independent red/green/blue/yellow output pixels,
+and `KMS_FOUR_HIBR_PASS` with one Hibr primary plus three `desktop --join`
+clients. These are virtual KMS/topology acceptances; physical multi-monitor
+and physical high-refresh acceptance remain separate open gates.
+
 Physical pointer/button acceptance, production adapter acceptance, multiple
 physical monitors, and high-refresh physical acceptance remain open; this
 capture records input inventory but no physical user event.
