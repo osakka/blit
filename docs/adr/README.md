@@ -38,10 +38,11 @@ Accepted decisions:
 28. [Compose pointer motion over cached scene damage](0040-pointer-damage-uses-cached-scene.md).
 29. [Aggregate button state across evdev mice](0041-aggregate-evdev-button-state.md).
 30. [Correlated live evidence bundles](0042-live-evidence-bundle.md).
+31. [Define multi-monitor frame atomicity at the scene boundary](0043-multi-monitor-frame-atomicity.md).
 
 Pending decisions:
 
-1. Multi-monitor frame atomicity policy.
+No pending architecture decision records.
 
 The implementation cadence, evidence requirements, and commit hygiene are
 defined in [the development workflow](../development-workflow.md), not
