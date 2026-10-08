@@ -564,6 +564,7 @@ typedef struct {
     unsigned long long diagnostic_evdev_mouse_motion_events;
     unsigned long long diagnostic_evdev_mouse_wheel_events;
     unsigned long long diagnostic_evdev_mouse_button_events;
+    unsigned long long diagnostic_evdev_mouse_button_repeats_ignored;
     uint64_t diagnostic_last_evdev_mouse_event_us;
     char diagnostic_last_evdev_mouse_path[128];
     unsigned long long diagnostic_sdl_mouse_events_discarded;
@@ -1692,6 +1693,7 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"evdev_mouse_motion_events\":%llu,"
         "\"evdev_mouse_wheel_events\":%llu,"
         "\"evdev_mouse_button_events\":%llu,"
+        "\"evdev_mouse_button_repeats_ignored\":%llu,"
         "\"last_evdev_mouse_event_age_ms\":%llu,"
         "\"last_evdev_mouse_path\":\"%s\","
         "\"evdev_mouse_devices\":%s,"
@@ -1746,6 +1748,7 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         runtime->diagnostic_evdev_mouse_motion_events,
         runtime->diagnostic_evdev_mouse_wheel_events,
         runtime->diagnostic_evdev_mouse_button_events,
+        runtime->diagnostic_evdev_mouse_button_repeats_ignored,
         runtime->diagnostic_last_evdev_mouse_event_us > 0 &&
                 now >= runtime->diagnostic_last_evdev_mouse_event_us ?
             (unsigned long long)((now -
@@ -12368,6 +12371,14 @@ static void service_evdev_mouse(BlitRuntime *runtime)
                         event.code == BTN_MIDDLE ||
                         event.code == BTN_RIGHT)) {
                 int button;
+                /* Linux input_event.value is 0=release, 1=press, and
+                   2=autorepeat.  Mouse-button autorepeat is not a new
+                   click; forwarding it as a press creates duplicate or
+                   stuck button state in terminal protocols. */
+                if (event.value != 0 && event.value != 1) {
+                    ++runtime->diagnostic_evdev_mouse_button_repeats_ignored;
+                    continue;
+                }
                 if (event.code == BTN_LEFT)
                     button = 0;
                 else if (event.code == BTN_MIDDLE)

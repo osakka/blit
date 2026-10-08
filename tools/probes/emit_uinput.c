@@ -136,6 +136,9 @@ int main(int argc, char **argv)
         if (i == 1) {
             emit_event(mouse, EV_KEY, BTN_LEFT, 1);
             sync_event(mouse);
+            /* EV_KEY value 2 is an autorepeat, not another click. */
+            emit_event(mouse, EV_KEY, BTN_LEFT, 2);
+            sync_event(mouse);
             emit_event(mouse, EV_KEY, BTN_LEFT, 0);
             sync_event(mouse);
             usleep(500000);

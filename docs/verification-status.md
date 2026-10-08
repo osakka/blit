@@ -38,6 +38,20 @@ remain open.
 
 Package SHA-256: `faecc11058d4d19c6d0b28f4650d44c033af744bff31c3702d0f1d84abac255a`.
 
+## Current 0.1.360 input-protocol correction
+
+The TCC-built `0.1.360` candidate ignores Linux mouse `EV_KEY` value `2`
+(autorepeat) instead of forwarding it as another button press. The QEMU Hibr
+input fixture emits this event deliberately and passes
+`BLIT_INPUT_MOUSE_REPEAT_PASS`, while also passing raw evdev delivery and the
+two-mouse routing checks. This addresses a concrete duplicate-click failure
+mode without changing Hibr or the SDL compositor.
+
+The candidate has passed the pointer-damage, external-pointer-composition,
+hidden-cursor, full-surface wallpaper stress, and glyph gates. Physical host
+mouse acceptance remains open because the live device capture has not observed
+a physical evdev event.
+
 ## Current 0.1.358 real-host evidence and remaining visual gate
 
 The authorized host now reports `0.1.358`. The attach PTY geometry transition
