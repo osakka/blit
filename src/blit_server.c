@@ -10578,7 +10578,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
         }
         if (runtime->pointer_dirty)
             ++runtime->diagnostic_pointer_cache_misses;
-        if (runtime->pointer_dirty) {
+        {
             char detail[160];
             snprintf(detail, sizeof(detail),
                      "output=%d path=full-redraw target_changed=%d external_changed=%d",
