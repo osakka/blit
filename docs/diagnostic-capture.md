@@ -91,6 +91,26 @@ deferred updates and one final `commit` per Hibr flush. This bounds transport
 overhead without exposing a partial frame. The batch is still limited by the
 adapter's fixed request buffer and the server's bounded HTTP body policy.
 
+## Pointer-artifact transaction
+
+When pointer movement appears to make an external Hibr desktop blink, trail, or
+repaint inconsistently, capture the complete interaction boundary from a
+reachable client:
+
+```sh
+tools/diagnostics/pointer-artifact-capture.sh \
+  http://192.168.10.54:8080 diagnostics/pointer-live
+```
+
+The transaction records the deployed version and topology, the active session,
+runtime timing before and after each motion, filtered pointer/render/surface
+traces, and a screenshot plus SHA-256 after every injected pointer position.
+The injected events use the same API dispatch path as physical input and are
+labelled `api-pointer`; they are a controlled comparator, not evidence about
+the physical evdev device. Compare `render_path` with the screenshots: a
+pointer-only frame should use `pointer-cache`, while `full-redraw` with
+`external_changed=1` identifies the expensive external-surface boundary.
+
 The adapter also advertises Kitty-compatible pixel placement to Hibr and sends
 image frames through Blit's bounded WebSocket pixel protocol. Static under-text
 images use `imgkeep` and are not retransmitted; clearing one hides the cached
