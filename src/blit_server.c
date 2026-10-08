@@ -542,6 +542,9 @@ typedef struct {
     int diagnostic_trace_count;
     int diagnostic_trace_next;
     char diagnostic_trace[BLIT_MAX_TRACE_EVENTS][768];
+    int diagnostic_critical_trace_count;
+    int diagnostic_critical_trace_next;
+    char diagnostic_critical_trace[BLIT_MAX_TRACE_EVENTS][768];
     int sdl_screenshot_written;
     uint32_t screenshot_requested_mask;
     char sdl_error[256];
@@ -1290,31 +1293,48 @@ static void diagnostic_trace(BlitRuntime *runtime, const char *kind,
                              const char *detail)
 {
     char escaped[512];
+    char (*events)[768];
+    int *event_count;
+    int *event_next;
     int slot;
 
     if (runtime == NULL)
         return;
     json_escape(detail != NULL ? detail : "", escaped, sizeof(escaped));
-    slot = runtime->diagnostic_trace_next;
-    snprintf(runtime->diagnostic_trace[slot],
-             sizeof(runtime->diagnostic_trace[slot]),
+    if (kind != NULL && strcmp(kind, "surface_update") != 0) {
+        events = runtime->diagnostic_critical_trace;
+        event_count = &runtime->diagnostic_critical_trace_count;
+        event_next = &runtime->diagnostic_critical_trace_next;
+    } else {
+        events = runtime->diagnostic_trace;
+        event_count = &runtime->diagnostic_trace_count;
+        event_next = &runtime->diagnostic_trace_next;
+    }
+    slot = *event_next;
+    snprintf(events[slot], sizeof(events[slot]),
              "{\"sequence\":%llu,\"time_us\":%llu,\"kind\":\"%s\","
              "\"detail\":\"%s\"}",
              ++runtime->diagnostic_trace_sequence,
              (unsigned long long)monotonic_us(),
              kind != NULL ? kind : "runtime", escaped);
-    runtime->diagnostic_trace_next =
-        (runtime->diagnostic_trace_next + 1) % BLIT_MAX_TRACE_EVENTS;
-    if (runtime->diagnostic_trace_count < BLIT_MAX_TRACE_EVENTS)
-        ++runtime->diagnostic_trace_count;
+    *event_next = (*event_next + 1) % BLIT_MAX_TRACE_EVENTS;
+    if (*event_count < BLIT_MAX_TRACE_EVENTS)
+        ++*event_count;
 }
 
 static void diagnostic_trace_json(BlitRuntime *runtime, char *body,
                                   size_t capacity, const char *kind_filter)
 {
     size_t used = 0;
-    int count = runtime->diagnostic_trace_count;
-    int index = (runtime->diagnostic_trace_next - count +
+    int critical = kind_filter != NULL && kind_filter[0] != '\0' &&
+        strcmp(kind_filter, "surface_update") != 0;
+    char (*events)[768] = critical ? runtime->diagnostic_critical_trace :
+        runtime->diagnostic_trace;
+    int count = critical ? runtime->diagnostic_critical_trace_count :
+        runtime->diagnostic_trace_count;
+    int next = critical ? runtime->diagnostic_critical_trace_next :
+        runtime->diagnostic_trace_next;
+    int index = (next - count +
                  BLIT_MAX_TRACE_EVENTS) % BLIT_MAX_TRACE_EVENTS;
     int first = 1;
 
@@ -1323,10 +1343,10 @@ static void diagnostic_trace_json(BlitRuntime *runtime, char *body,
                  runtime->diagnostic_trace_sequence);
     while (count-- > 0 && used + 4 < capacity) {
         int include = kind_filter == NULL || kind_filter[0] == '\0' ||
-            strstr(runtime->diagnostic_trace[index], kind_filter) != NULL;
+            strstr(events[index], kind_filter) != NULL;
         if (include) {
             json_appendf(body, capacity, &used, "%s%s",
-                         first ? "" : ",", runtime->diagnostic_trace[index]);
+                         first ? "" : ",", events[index]);
             first = 0;
         }
         index = (index + 1) % BLIT_MAX_TRACE_EVENTS;
