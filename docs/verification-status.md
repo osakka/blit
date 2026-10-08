@@ -56,6 +56,13 @@ misses because the emulated page-flip path took tens of milliseconds. It proves
 the 240 Hz deadline calculation and API metadata only; physical 120/240 Hz
 hardware remains unverified.
 
+With Hibr staged from its existing checkout only, the same four-output fixture
+then launched one primary Hibr desktop and three `desktop --join` clients.
+All four Hibr-backed surfaces reached the running/presented state and the
+fixture produced `KMS_FOUR_HIBR_PASS`. The Hibr checkout was not modified;
+this remains virtual multi-display evidence rather than physical connector
+evidence.
+
 The live 0.1.258 input inventory and route lifecycle were also exercised with
 the physical keyboard and pointer devices. All discovered sources were
 reported with their aggregate route IDs; a disposable pointer route was bound
