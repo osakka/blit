@@ -3,6 +3,23 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## Current 0.1.363 diagnostic correctness
+
+The TCC build corrects the per-output presentation timing source in the API:
+SDL-backed outputs now report SDL present durations, while direct KMS outputs
+continue to report DRM present durations. The terminal conformance suite now
+asserts this distinction when SDL has presented a frame. The local gates pass:
+terminal conformance, pointer-damage atomicity, wallpaper/pointer stress, and
+the 60 Hz frame-rate gate.
+
+The canonical live troubleshooting transaction is
+`tools/diagnostics/experience-capture.sh`. Its timed phase excludes screenshot
+readback; screenshots are collected afterward for every discovered display.
+The first live 0.1.362 capture completed against `192.168.10.54`, but observed
+no physical evdev events because no pointer movement occurred during the
+window. Physical input and physical multi-monitor acceptance therefore remain
+open. This release does not claim those gates are closed.
+
 ## Current 0.1.362 live Hibr evidence bundle
 
 The live host was started through Blit's API with the documented primary
