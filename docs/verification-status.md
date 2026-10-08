@@ -11,15 +11,12 @@ an evidence record, not a claim that the complete product is released.
   conformance, SDL screenshot/overlay pixels, the hidden-cursor damage gate,
   and the complete Hibr font manifest gate. Its SDL backend uses a per-output
   glyph atlas, suppresses unchanged cell damage, and does not schedule frames
-  for hidden cursor movement. The
-  dummy frame gate measured 42.898 Hz during its bounded PTY workload; that is
-  a software-dummy result, not a physical refresh-rate claim. A bounded
-  wallpaper workload on the prior source-equivalent 0.1.241 build measured
-  26.865 ms maximum full render and 61.387 Hz over its active 504 ms window.
-  The direct-KMS pixel-frame acceptance below was run from the exact current
-  0.1.256 TCC build; the newer SDL presentation and geometry work is recorded
-  below. The authorized physical host now reports 0.1.265 through its version
-  endpoint. The Debian candidate `blit_0.1.268-1_amd64.deb` was built from
+  for hidden cursor movement. The current dummy frame runs measured
+  42.935–43.867 Hz with 15.400–15.676 ms maximum render time against a
+  16.000 ms target and zero missed deadlines; this is a software-dummy result,
+  not a physical refresh-rate claim. The authorized physical host reports
+  0.1.265 through its version endpoint. The Debian candidate
+  `blit_0.1.268-1_amd64.deb` was built from
   this binary and passed package allowlist, embedded-version, byte-identity,
   asset-presence, and extracted-runtime checks. The final artifact SHA-256 is
   recorded externally in the handoff because this ledger is included inside
