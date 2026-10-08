@@ -13,13 +13,15 @@ eventually contained the complete desktop.
 
 ## Decision
 
-When terminal parsing sees a full-screen erase (the clear phase used by Hibr's
-desktop redraw), Blit holds presentation for 8 ms after the most recent PTY
-read. Further reads extend the same quiet deadline. The canonical terminal
-grid and API revisions continue advancing immediately; only the renderer is
-coalesced. Pointer-only presentation is held by the same deadline so it cannot
-expose a partial terminal frame. Ordinary streaming terminal output retains
-the normal refresh cadence.
+Blit reads up to 64 KiB per PTY service turn so a normal Hibr desktop flush,
+which is emitted as one write, remains one parser update. When terminal parsing
+sees a full-screen erase (the clear phase used by a desktop redraw), Blit also
+holds presentation for 8 ms after the most recent PTY read. Further reads
+extend the same quiet deadline. The canonical terminal grid and API revisions
+continue advancing immediately; only the renderer is coalesced. Pointer-only
+presentation is held by the same deadline so it cannot expose a partial
+terminal frame. Ordinary streaming terminal output retains the normal refresh
+cadence.
 
 ## Consequences
 

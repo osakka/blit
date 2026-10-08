@@ -7250,7 +7250,11 @@ static void replay_stream(BlitRuntime *runtime, int fd,
 
 static void service_session_output(BlitRuntime *runtime, int fd)
 {
-    unsigned char output[768];
+    /* Hibr emits one logical desktop flush with one write, but a small read
+       buffer would fragment that write into many renderable intermediate
+       states. Keep the PTY stream canonical while retaining the bounded
+       parser contract for ordinary output. */
+    unsigned char output[65536];
     char escaped[1536];
     char event[1800];
     ssize_t received;
