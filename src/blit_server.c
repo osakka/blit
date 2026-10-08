@@ -1280,6 +1280,10 @@ static int send_sdl_screenshot(BlitHttpClient *client, BlitRuntime *runtime,
        fail on some real SDL backends even though readback succeeded. */
     close(temporary_fd);
     temporary_fd = -1;
+    /* SDL_SaveBMP creates the destination itself; remove mkstemp's empty
+       placeholder after closing it so backends that refuse to replace an
+       existing path can still encode the snapshot. */
+    unlink(temporary);
     if (!SDL_SaveBMP(pixels, temporary)) {
         SDL_DestroySurface(pixels);
         unlink(temporary);
