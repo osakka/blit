@@ -110,6 +110,24 @@ they do not claim physical 120/240 Hz support.
 The exact TCC build passed the OpenAPI parse, Hibr font manifest, SDL glyph,
 background batching, and graphics-cache gates. No Hibr source was modified.
 
+The exact staged 0.1.279 binary (SHA-256
+`b75c962524efeb182ff0e83e870c4df02556afb6ffb36535c470c8eb9161e87a`) and the
+unchanged Hibr executable passed the four-output VKMS orchestration fixture.
+The guest selected 1024×768 at 240 Hz on four connectors, started one primary
+Hibr desktop and three `desktop --join` clients, reached four sessions and
+four surfaces, and reported `KMS_FOUR_HIBR_PASS`. This is reproducible
+multi-output orchestration evidence, not physical multi-monitor evidence.
+
+The current 0.1.279 two-output high-refresh fixture passed
+`REFRESH_SCHEDULER_240_PASS` and accepted all 240 API pixel frames, but failed
+the strict presentation-rate assertion: QEMU TCG presented 165.222 measured
+frames per second, recorded 36 missed deadlines, and reached a 19.684 ms
+maximum KMS-present sample. This remains an honest virtual-driver limitation;
+the result does not establish or disprove physical 240 Hz capability. The
+physical multi-display gate returned `PHYSICAL_MULTI_DISPLAY_UNAVAILABLE
+displays=1` on the authorized host, so real multi-display and real
+120/240 Hz acceptance remain open.
+
 ### Current 0.1.277 evidence
 
 The exact TCC-built `0.1.277` binary passed complete terminal conformance,
