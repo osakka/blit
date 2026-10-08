@@ -36,6 +36,14 @@ button counters, plus the last evdev path and event age. This closes the
 diagnostic distinction between a kernel event that was read but did not change
 the pointer and a device that produced no records during the capture.
 
+The exact 0.1.329 binary with the unchanged Hibr checkout also passes the
+QEMU/VKMS Hibr pane matrix: `LAYOUT_MATRIX_PASS` and
+`HIBR_PANE_MATRIX_PASS`. The restart variant additionally passes
+`HIBR_PRIMARY_RESTART_PASS` and `HIBR_JOIN_RECONNECT_PASS`; the staged Hibr
+executable SHA-256 was
+`6cec6189cde303a030d6bf8e3936d5c03e2914a47e6c2e80765f62b0cb53356a`.
+Hibr source was not modified.
+
 ## Current 0.1.326 live diagnostic-boundary status
 
 Package `blit_0.1.326-1_amd64.deb` is deployed on the authorized host;
