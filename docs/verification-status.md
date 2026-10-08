@@ -1233,6 +1233,12 @@ The latest reachable observation of the authorized host at
   The same binary passed the two-output KMS capture/pixel gate, Hibr pane
   matrix, keyboard/multi-mouse/gamepad input matrix, and 240 Hz scheduler
   fixture after restaging.
+- The remaining exact-current local regression gates are also green:
+  wallpaper background batching, hidden-cursor damage suppression, screenshot
+  overlay removal, session lifecycle escalation, write/resize cleanup, stream
+  replay repair, HTTP backpressure, fragmented HTTP requests, authenticated
+  network access, clean shutdown, update cancellation, and updater idle
+  timeout. No active local test resources remained after the pass.
 
 ## Open release gates
 
