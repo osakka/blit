@@ -22,6 +22,10 @@ desktop startup path and produced desktop cells but no image upload. This is
 recorded as an unresolved Hibr invocation/configuration boundary, not a Blit
 graphics failure. Hibr source remains unmodified.
 
+The exact 0.1.320 TCC binary also passes the QEMU VKMS primary/`--join`
+restart fixture: `LAYOUT_MATRIX_PASS`, `HIBR_PRIMARY_RESTART_PASS`,
+`HIBR_JOIN_RECONNECT_PASS`, and `HIBR_PANE_MATRIX_PASS`.
+
 ## Current 0.1.319 terminal lifecycle status
 
 The TCC-built terminal path now preserves the final parsed PTY frame after a
