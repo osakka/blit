@@ -40,21 +40,24 @@ production `console-blit` module is operational over the OpenAPI/WebSocket
 contract. Explicit focus and versioned input routes are exposed by the API.
 The SDL adapter uses single-surface incremental frames and conservatively
 redraws multi-surface outputs with deterministic vertical stacking. The
-current 0.1.274 source passes the complete terminal, graphics, input,
+current 0.1.286 source passes the complete terminal, graphics, input,
 two-display VKMS/QEMU, four-output Hibr primary/`--join`, mixed-refresh,
 output-loss, and the 60 Hz emulator-like pixel-stream acceptance gates. SDL wallpaper
 backgrounds are coalesced into horizontal runs before geometry submission;
 the focused 128×48 regression workload now submits four background quads.
 The bundled Hibr font contains 929 glyphs and 1,182 mappings; its manifest rejects
 unresolved `.notdef` fallbacks and checks deterministic box/special-glyph
-bitmaps. The authorized physical host is running 0.1.274 and has a healthy
-one-output SDL3/OpenGL presentation at 60.000 Hz with zero missed deadlines.
-Physical multi-monitor confirmation remains open because that host currently
-exposes only one connector.
+bitmaps. The authorized physical host is running 0.1.286 and has a healthy
+one-output SDL3/OpenGL presentation at 60.000 Hz; its active frame gate
+measured 59.991 Hz with zero missed deadlines. Physical multi-monitor
+confirmation remains open because that host currently exposes only one
+connector.
 
-The current real-mode 240 Hz VKMS stream test proves mode selection and frame
-ingestion, but remains red on strict page-flip deadlines under QEMU TCG/VKMS;
-this is an open performance validation item, not a reason to weaken the gate.
+The exact-current 240 Hz VKMS scheduler fixture passes mode selection,
+producer-driven frame ingestion, screenshot capture, and KMS capture. The
+direct-KMS path deliberately does not replay a 60 Hz producer at every 240 Hz
+slot; strict physical high-refresh page-flip timing remains hardware-dependent
+and must not be inferred from QEMU TCG timing.
 
 Display timing is an explicit hard requirement. Each output must schedule at
 its active mode's maximum refresh by default, with per-output deadlines. The
