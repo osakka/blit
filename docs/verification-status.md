@@ -32,6 +32,13 @@ gamepad discovery, and raw evdev delivery (`914` events, `546` motion, `40`
 buttons). Physical input acceptance is still open because virtual evdev does
 not prove the particular host's physical devices or user-visible click path.
 
+The normal current-Hibr QEMU integration fixture also reaches
+`ACCEPTANCE_PASS`. Its external `console-blit` probe, native primary and join
+sessions, input probes, and surface checks all complete after the fixture
+passes the staged adapter path explicitly. This closes virtual production
+adapter acceptance; the physical host remains on the native terminal path and
+does not yet claim physical adapter acceptance.
+
 Physical pointer/button acceptance, production adapter acceptance, multiple
 physical monitors, and high-refresh physical acceptance remain open; this
 capture records input inventory but no physical user event.

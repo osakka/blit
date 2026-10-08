@@ -10,7 +10,7 @@ live_host: 192.168.10.54:8080
 live_version: 0.1.355
 screenshot_api_acceptance: pass
 native_hibr_layout_acceptance: pass
-production_adapter_acceptance: open
+production_adapter_acceptance: pass
 physical_mouse_acceptance: open
 physical_multi_monitor_acceptance: open
 physical_high_refresh_acceptance: open
