@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import struct
+import unicodedata
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -45,6 +46,20 @@ BOX_CODEPOINTS = (
     0x256D, 0x256E, 0x256F, 0x2570,
 )
 
+SPECIAL_GLYPHS = {
+    # The installed monochrome fallback families do not contain these four
+    # symbols. Keep their small terminal pictograms deterministic instead of
+    # allowing Pillow's .notdef box into the production font.
+    0x223F: (0x00, 0x00, 0x00, 0x03, 0x06, 0x0C, 0x18, 0x30,
+              0x60, 0xC0, 0x60, 0x30, 0x18, 0x0C, 0x06, 0x03),  # ∿
+    0x2398: (0x00, 0x1C, 0x14, 0x14, 0x14, 0x14, 0x17, 0x15,
+              0x15, 0x15, 0x15, 0x15, 0x1D, 0x00, 0x00, 0x00),  # ⎘
+    0x24D8: (0x00, 0x18, 0x24, 0x42, 0x81, 0x81, 0x91, 0x81,
+              0x81, 0x81, 0x81, 0x42, 0x24, 0x18, 0x00, 0x00),  # ⓘ
+    0x1F514: (0x00, 0x00, 0x18, 0x3C, 0x7E, 0x7E, 0x7E, 0x7E,
+              0x7E, 0x3C, 0x18, 0x18, 0x3C, 0x00, 0x00, 0x00),  # 🔔
+}
+
 
 def psf1(path: Path):
     data = path.read_bytes()
@@ -71,6 +86,9 @@ def psf1(path: Path):
 
 
 def render(codepoint: int, font: ImageFont.FreeTypeFont) -> bytes:
+    if codepoint in SPECIAL_GLYPHS:
+        return bytes(SPECIAL_GLYPHS[codepoint])
+
     # Box drawing characters are terminal geometry, not ordinary text.  The
     # fallback font aliases several of these characters at 8x16, which makes
     # light, heavy, double, and dashed borders indistinguishable.  Keep their
@@ -185,25 +203,78 @@ def render(codepoint: int, font: ImageFont.FreeTypeFont) -> bytes:
                  for y in range(16))
 
 
+def render_from_fallbacks(codepoint: int,
+                          fonts: list[ImageFont.FreeTypeFont]) -> bytes:
+    """Render from the first fallback that does not produce its .notdef box."""
+    if codepoint in BOX_CODEPOINTS or codepoint in SPECIAL_GLYPHS:
+        return render(codepoint, fonts[0])
+    for font in fonts:
+        candidate = render(codepoint, font)
+        missing = render(0x10FFFF, font)
+        if any(candidate) and candidate != missing:
+            return candidate
+    # Arabic presentation forms are compatibility characters. A font may
+    # advertise one in its cmap but expose no usable monochrome outline.
+    # Render the canonical scalar after NFKC normalization instead of shipping
+    # a blank/.notdef bitmap. Hibr performs shaping before output, so this
+    # fallback keeps the terminal cell visibly correct when a presentation
+    # form has no standalone outline in the build font.
+    normalized = unicodedata.normalize("NFKC", chr(codepoint))
+    if len(normalized) == 1 and ord(normalized) != codepoint:
+        canonical = ord(normalized)
+        for font in fonts:
+            candidate = render(canonical, font)
+            missing = render(0x10FFFF, font)
+            if any(candidate) and candidate != missing:
+                return candidate
+    raise SystemExit(
+        f"no fallback glyph for U+{codepoint:04X} ({chr(codepoint)!r})"
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("base", type=Path)
     parser.add_argument("output", type=Path)
-    parser.add_argument("fallback", type=Path)
+    parser.add_argument("fallback", type=Path, nargs="+")
     args = parser.parse_args()
 
     glyphs, mappings, height = psf1(args.base)
     if height != 16:
         raise SystemExit("base font must be 16 pixels high")
     present = {codepoint for row in mappings for codepoint in row}
-    fallback = ImageFont.truetype(str(args.fallback), 16)
+    fallbacks = [ImageFont.truetype(str(path), 16) for path in args.fallback]
     added = []
     for codepoint in REQUIRED:
         if codepoint not in present:
-            glyphs.append(render(codepoint, fallback))
+            glyphs.append(render_from_fallbacks(codepoint, fallbacks))
             mappings.append([codepoint])
             present.add(codepoint)
             added.append(codepoint)
+
+    # Some PSF bases carry Unicode aliases with an empty bitmap. Detach only
+    # those required codepoints and regenerate them; valid Terminus glyphs
+    # remain untouched and shared aliases are not allowed to hide a blank
+    # required glyph.
+    missing_bitmap = render(0x10FFFF, fallbacks[0])
+    for codepoint in REQUIRED:
+        for index, row in enumerate(mappings):
+            if codepoint not in row:
+                continue
+            if glyphs[index] and glyphs[index] != missing_bitmap:
+                break
+            row[:] = [value for value in row if value != codepoint]
+            glyphs.append(render_from_fallbacks(codepoint, fallbacks))
+            mappings.append([codepoint])
+            break
+
+    # These explicit terminal pictograms must also be detached from any base
+    # PSF aliases; otherwise an earlier mapping table entry can win lookup.
+    for codepoint in SPECIAL_GLYPHS:
+        for row in mappings:
+            row[:] = [value for value in row if value != codepoint]
+        glyphs.append(render(codepoint, fallbacks[0]))
+        mappings.append([codepoint])
 
     # Terminus already maps part of this set, but its compact aliases do not
     # preserve line weight/topology. Give every box character its own mapping
@@ -212,7 +283,7 @@ def main() -> None:
         row[:] = [codepoint for codepoint in row
                   if codepoint not in BOX_CODEPOINTS]
     for codepoint in BOX_CODEPOINTS:
-        glyphs.append(render(codepoint, fallback))
+        glyphs.append(render(codepoint, fallbacks[0]))
         mappings.append([codepoint])
 
     # PSF2: magic, version, header size, flags(unicode), glyph count,

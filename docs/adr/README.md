@@ -27,6 +27,7 @@ Accepted decisions:
 17. [Batch SDL terminal background geometry](0017-sdl-background-geometry-batching.md).
 18. [Expose bounded stream back-pressure telemetry](0018-stream-backpressure-telemetry.md).
 19. [Deterministic box-drawing glyph geometry](0019-deterministic-box-drawing-glyphs.md).
+20. [Reject unresolved fallback glyphs](0020-font-fallback-coverage.md).
 
 Pending decisions:
 
