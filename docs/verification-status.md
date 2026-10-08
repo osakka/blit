@@ -41,6 +41,9 @@ competing input ownership rather than a compositor failure.
 The exact 0.1.330 TCC binary passes the full terminal conformance suite,
 including VT500 controls, UTF-8/wide glyph handling, Hibr defaults, Kitty
 image placement, synchronized output, and network terminal input.
+The exact binary also passes the two-output VKMS capture with
+`PPM_DISPLAY_47_WIDE_KITTY_PASS`, `PPM_DISPLAY_48_PASS`,
+`KMS_API_SCREENSHOT_PASS`, and `KMS_CAPTURE_PASS`.
 
 The exact 0.1.329 binary with the unchanged Hibr checkout also passes the
 QEMU/VKMS Hibr pane matrix: `LAYOUT_MATRIX_PASS` and
