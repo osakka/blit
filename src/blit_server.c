@@ -7484,11 +7484,19 @@ static void service_stream(BlitRuntime *runtime, int fd)
         }
     if (stream == NULL)
         return;
-    received = recv(fd, incoming, sizeof(incoming), 0);
-    if (received <= 0) {
-        remove_stream(runtime, fd);
-        return;
-    }
+    for (;;) {
+        /* Pixel frames are larger than the small receive scratch buffer.
+           MSG_DONTWAIT lets this readiness turn drain all available chunks
+           without changing the client's blocking semantics. */
+        received = recv(fd, incoming, sizeof(incoming), MSG_DONTWAIT);
+        if (received < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+            return;
+        if (received < 0 && errno == EINTR)
+            continue;
+        if (received <= 0) {
+            remove_stream(runtime, fd);
+            return;
+        }
     if ((size_t)received > stream_receive_capacity(stream) -
         stream->receive_length) {
         size_t required = stream->receive_length + (size_t)received;
@@ -7577,6 +7585,8 @@ static void service_stream(BlitRuntime *runtime, int fd)
         memmove(stream_receive_data(stream), stream_receive_data(stream) + offset,
                 stream->receive_length - offset);
         stream->receive_length -= offset;
+        offset = 0;
+    }
     }
 }
 

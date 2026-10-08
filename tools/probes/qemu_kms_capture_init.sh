@@ -46,6 +46,7 @@ sixel_test=0
 visuals_test=0
 pixel_test=0
 pixel_stream_test=0
+pixel_stream_240_test=0
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
     *" blit.output_loss=1 "*) loss_test=1 ;;
 esac
@@ -75,6 +76,9 @@ case " $($b cat /proc/cmdline 2>/dev/null || true) " in
 esac
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
     *" blit.pixel_stream=1 "*) pixel_test=1; pixel_stream_test=1 ;;
+esac
+case " $($b cat /proc/cmdline 2>/dev/null || true) " in
+    *" blit.pixel_stream_240=1 "*) pixel_test=1; pixel_stream_test=1; pixel_stream_240_test=1; high_refresh_test=1 ;;
 esac
 if [ "$visuals_test" -eq 1 ] || [ "$pixel_test" -eq 1 ]; then
     # Capture after the effect, overlay, and session requests have had time
@@ -106,6 +110,12 @@ echo SERVER; $b cat /tmp/server.json 2>/dev/null || true
 if [ "$ready" -ne 1 ]; then $b cat /tmp/blit.log; finish 1; fi
 diagnostics=$($b wget -qO- http://127.0.0.1:19191/v1/diagnostics || true)
 echo DIAGNOSTICS; echo "$diagnostics"
+baseline_240_missed=0
+if [ "$high_refresh_test" -eq 1 ]; then
+    baseline_240_missed=$($b echo "$diagnostics" | $b sed -n \
+        's/.*"refresh_hz":240.000.*"missed_deadlines":\([0-9][0-9]*\).*/\1/p')
+    [ -n "$baseline_240_missed" ] || baseline_240_missed=0
+fi
 scheduler_pass=1
 echo "$diagnostics" | $b grep -q '"mode":"refresh-aware"' || scheduler_pass=0
 echo "$diagnostics" | $b grep -q '"effective_interval_ms":' || scheduler_pass=0
@@ -138,6 +148,10 @@ if [ "$visuals_test" -eq 1 ]; then
     echo VISUAL_EFFECT; $b cat /tmp/effect.json 2>/dev/null || true
     echo VISUAL_OVERLAY; $b cat /tmp/overlay.json 2>/dev/null || true
 fi
+pixel_display_id=display-47
+if [ "$pixel_stream_240_test" -eq 1 ]; then
+    pixel_display_id=display-48
+fi
 if [ "$stack_test" -eq 1 ]; then
     $b wget -qO /tmp/one.json --post-data='{"command":"/blit-stage/pty-input-echo","arguments":["--wide","--kitty","--stack"],"surface_mode":"terminal","display_id":"display-47","surface":{"width":128,"height":48}}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
 elif [ "$kitty_limits_test" -eq 1 ]; then
@@ -149,7 +163,7 @@ elif [ "$sixel_test" -eq 1 ]; then
 elif [ "$visuals_test" -eq 1 ]; then
     $b wget -qO /tmp/one.json --post-data='{"command":"/blit-stage/pty-input-echo","arguments":["--wide"],"surface_mode":"terminal","display_id":"display-47","surface":{"width":128,"height":48}}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
 elif [ "$pixel_test" -eq 1 ]; then
-    $b wget -qO /tmp/one.json --post-data='{"command":"/blit-stage/pty-input-echo","arguments":["--wide"],"surface_mode":"terminal","display_id":"display-47","surface":{"width":128,"height":48}}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
+    $b wget -qO /tmp/one.json --post-data="{\"command\":\"/blit-stage/pty-input-echo\",\"arguments\":[\"--wide\"],\"surface_mode\":\"terminal\",\"display_id\":\"$pixel_display_id\",\"surface\":{\"width\":128,\"height\":48}}" --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
 else
     $b wget -qO /tmp/one.json --post-data='{"command":"/blit-stage/pty-input-echo","arguments":["--wide","--kitty"],"surface_mode":"terminal","display_id":"display-47","surface":{"width":128,"height":48}}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
 fi
@@ -157,7 +171,9 @@ $b wget -qO /tmp/two.json --post-data='{"command":"/blit-stage/pty-input-echo","
 if [ "$pixel_test" -eq 1 ]; then
     pixel_session=$($b sed -n 's/.*"id":"\([^"]*\)".*/\1/p' /tmp/one.json)
     if [ -n "$pixel_session" ] && {
-        if [ "$pixel_stream_test" -eq 1 ]; then
+        if [ "$pixel_stream_240_test" -eq 1 ]; then
+            /blit-stage/ws-pixel-frame-probe "$pixel_session" --240hz
+        elif [ "$pixel_stream_test" -eq 1 ]; then
             /blit-stage/ws-pixel-frame-probe "$pixel_session" --60hz
         else
             /blit-stage/ws-pixel-frame-probe "$pixel_session"
@@ -168,7 +184,22 @@ if [ "$pixel_test" -eq 1 ]; then
         echo PIXEL_FRAME_PROBE_FAIL
         finish 1
     fi
-    if [ "$pixel_stream_test" -eq 1 ]; then
+    if [ "$pixel_stream_240_test" -eq 1 ]; then
+        $b wget -qO /tmp/pixel-runtime.json http://127.0.0.1:19191/v1/diagnostics/runtime || true
+        pixel_240_missed=$($b sed -n \
+            's/.*"refresh_hz":240.000.*"missed_deadlines":\([0-9][0-9]*\).*/\1/p' \
+            /tmp/pixel-runtime.json)
+        [ -n "$pixel_240_missed" ] || pixel_240_missed=$baseline_240_missed
+        $b cat /tmp/pixel-runtime.json
+        if $b grep -q '"pixel_frames_accepted":240' /tmp/pixel-runtime.json &&
+           $b grep -q '"pixel_frame_errors":0' /tmp/pixel-runtime.json &&
+           [ "$pixel_240_missed" -eq "$baseline_240_missed" ]; then
+            echo "PIXEL_FRAME_RATE_240_PASS frames=240 baseline_missed=$baseline_240_missed post_missed=$pixel_240_missed"
+        else
+            echo PIXEL_FRAME_RATE_240_FAIL
+            finish 1
+        fi
+    elif [ "$pixel_stream_test" -eq 1 ]; then
         $b wget -qO /tmp/pixel-runtime.json http://127.0.0.1:19191/v1/diagnostics/runtime || true
         if $b grep -q '"pixel_frames_accepted":60' /tmp/pixel-runtime.json &&
            $b grep -q '"missed_deadlines":0' /tmp/pixel-runtime.json; then
@@ -180,7 +211,7 @@ if [ "$pixel_test" -eq 1 ]; then
     fi
     $b touch /tmp/pixel-ready
     $b sleep 2
-    $b wget -qO /tmp/api-pixel.bmp http://127.0.0.1:19191/v1/diagnostics/screenshots/display-47 || true
+    $b wget -qO /tmp/api-pixel.bmp http://127.0.0.1:19191/v1/diagnostics/screenshots/$pixel_display_id || true
     if [ -f /tmp/api-pixel.bmp ] && /blit-stage/bmp-assert /tmp/api-pixel.bmp; then
         echo KMS_API_PIXEL_PASS
     else

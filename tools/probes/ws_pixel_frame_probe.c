@@ -1,6 +1,6 @@
 /* TCC-built WebSocket pixel-frame client for direct-KMS and live-host tests.
- * Legacy usage: probe SESSION [--60hz]
- * Remote usage: probe HOST PORT SESSION [--60hz]
+ * Legacy usage: probe SESSION [--60hz|--240hz]
+ * Remote usage: probe HOST PORT SESSION [--60hz|--240hz]
  */
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -96,6 +96,7 @@ int main(int argc, char **argv)
     const char *session;
     int fd;
     int stream_mode = 0;
+    int stream_rate_hz = 0;
     int frame;
     size_t i;
 
@@ -105,12 +106,18 @@ int main(int argc, char **argv)
         port = atoi(argv[2]);
         session = argv[3];
         if (port < 1 || port > 65535 || session[0] == '\0') return 2;
-        if (argc == 5 && strcmp(argv[4], "--60hz") != 0) return 2;
+        if (argc == 5 && strcmp(argv[4], "--60hz") != 0 &&
+            strcmp(argv[4], "--240hz") != 0) return 2;
         stream_mode = argc == 5;
+        if (stream_mode)
+            stream_rate_hz = strcmp(argv[4], "--240hz") == 0 ? 240 : 60;
     } else {
         session = argv[1];
-        if (argc == 3 && strcmp(argv[2], "--60hz") != 0) return 2;
+        if (argc == 3 && strcmp(argv[2], "--60hz") != 0 &&
+            strcmp(argv[2], "--240hz") != 0) return 2;
         stream_mode = argc == 3;
+        if (stream_mode)
+            stream_rate_hz = strcmp(argv[2], "--240hz") == 0 ? 240 : 60;
     }
     fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) return 1;
@@ -155,8 +162,8 @@ int main(int argc, char **argv)
     if (stream_mode) {
         struct timespec interval;
         interval.tv_sec = 0;
-        interval.tv_nsec = 16666667;
-        for (frame = 1; frame < 60; ++frame) {
+        interval.tv_nsec = stream_rate_hz == 240 ? 4166667 : 16666667;
+        for (frame = 1; frame < stream_rate_hz; ++frame) {
             pixels[0] = (unsigned char)(frame * 3);
             pixels[1] = (unsigned char)(frame * 5);
             if (!send_masked(fd, 2, 1, pixels, sizeof(pixels))) return 1;
@@ -164,7 +171,8 @@ int main(int argc, char **argv)
         }
         /* Leave the stream alive while the gateway drains its socket. */
         sleep(1);
-        puts("PIXEL_FRAME_STREAM_SENT frames=60 target_hz=60");
+        printf("PIXEL_FRAME_STREAM_SENT frames=%d target_hz=%d\n",
+               stream_rate_hz, stream_rate_hz);
         close(fd);
         return 0;
     }

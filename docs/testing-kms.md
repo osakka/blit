@@ -215,6 +215,14 @@ zero missed deadlines, and then applies the same direct-KMS framebuffer
 oracle. This validates the emulator-facing stream contract at the VKMS
 fixture's 60 Hz mode; it is not a physical 120/240 Hz claim.
 
+Use `blit.pixel_stream_240=1` for the bounded high-refresh variant. It sends
+240 complete RGBA frames at a 4.166 ms producer cadence, requires all 240 to
+ be accepted with zero additional missed deadlines over the fixture's initial
+ virtual baseline, and applies the same direct-KMS framebuffer oracle. The
+ baseline and post-stream counters are printed because TCG/VKMS startup can
+ miss virtual page flips before the producer starts. This is virtual
+ high-refresh timing evidence, not a physical 240 Hz hardware claim.
+
 The same fixture accepts `blit.output_loss=1` on the kernel command line. It
 disables connector 47 during the run and requires `OUTPUT_LOSS_PASS`: the
 failed connector remains in `/v1/displays` as `failed`, the other connector
