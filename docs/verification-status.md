@@ -12,8 +12,10 @@ and the slow-reader screenshot gate: while a deliberately throttled
 framebuffer download was in progress, `/v1/version` completed in 12 ms.
 This directly protects input and presentation from a slow diagnostic client.
 
-Package `blit_0.1.335-1` is built with SHA-256
-`55ffc7e3359b4e3c2c0818b02dc2e7f0a9030147adf8a3ce823f98afa9f5174a`.
+Package `blit_0.1.335-1` is built; its externally recorded SHA-256 and source
+commit are in [the 0.1.335 release manifest](../releases/0.1.335.yaml).
+The hash is intentionally kept outside this ledger because the ledger itself
+is included in the Debian package.
 The exact TCC binary passes terminal conformance, frame-rate, HTTP
 backpressure, session-lifecycle, and the slow-reader screenshot gate. The
 The package is deployed on the authorized physical host and `/v1/version`
