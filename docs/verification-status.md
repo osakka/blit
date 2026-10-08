@@ -104,6 +104,17 @@ frames over a 516 ms window with zero missed deadlines and a 12.304 ms maximum
 render sample against the 16 ms target. These are one-output 60 Hz results;
 they do not claim physical 120/240 Hz support.
 
+The exact TCC-built 0.1.279 binary also passed a 12-second four-session SDL
+terminal soak with 747 rendered frames at 60.060 Hz, zero missed deadlines,
+3.999 ms maximum terminal-processing time, and 17.515 ms maximum complete
+render time. Its maximum SDL presentation sample was 17.433 ms, identifying
+the display synchronization boundary—not terminal parsing or glyph
+composition—as the dominant part of the refresh budget in this dummy
+workload. The graphics-cache, background-batch, and SDL glyph gates passed in
+the same cycle; the graphics test recorded five cache hits with no repeated
+texture uploads, and the background test coalesced the wallpaper-like runs.
+These are controlled SDL measurements, not physical 120/240 Hz evidence.
+
 The exact TCC build passed the OpenAPI parse, Hibr font manifest, SDL glyph,
 background batching, and graphics-cache gates. No Hibr source was modified.
 
