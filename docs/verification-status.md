@@ -12,13 +12,16 @@ timing capture recorded zero missed deadlines and render/present calls with
 sub-millisecond steady-state render cost; it recorded zero physical evdev
 events because no physical movement or click occurred during capture.
 
-The API screenshot is a valid `1920x2160` BMP and is saved as
-`diagnostics/live-358-visual/display-1.png`. It still shows a mostly black
-composition with a small Hibr panel at the lower-left, so the surface-layout
-gate is recorded as partial rather than accepted. This is now a visual
-composition/presentation issue, not the former incomplete Hibr surface. The
-next capture must correlate pane bounds, cell coordinates, screenshot pixels,
-pointer damage, and physical evdev events in the same timestamped window.
+An earlier API screenshot is a valid `1920x2160` BMP and is saved as
+`diagnostics/live-358-visual/display-1.png`; that older capture showed a
+mostly black composition with a small Hibr panel at the lower-left. The later
+`diagnostics/live-358-layout/` capture has the complete `240x135` cell grid,
+but its visible scene is Hibr's animated coloured-dot content rather than a
+static desktop reference image. The surface-layout gate therefore remains
+partial rather than accepted. This is now a visual composition/presentation
+investigation, not the former incomplete Hibr surface. A final visual gate
+must correlate pane bounds, cell coordinates, screenshot pixels, pointer
+damage, and physical evdev events in the same timestamped window.
 
 The live API pointer control capture produced five distinct screenshots. Pixel
 deltas were confined to the old and new cursor regions; the API path showed no
@@ -36,6 +39,13 @@ returned `KMS_FOUR_HIBR_PASS` with one primary Hibr desktop plus three
 and no QEMU process remained. This is virtual KMS/topology evidence, not
 physical monitor or sustained physical 240 Hz acceptance. The dedicated
 240-frame pixel-stream gate remains open.
+
+The new TCC-built full-surface pointer stress gate also passes. It submits a
+`120x40` opaque coloured terminal scene in bounded deferred chunks, commits
+updates while moving the pointer, checks six untouched screenshot samples for
+black holes, and requires both the pointer-cache and pointer-plus-damage
+full-redraw trace paths. This closes the deterministic compositor regression
+boundary; it does not close physical mouse acceptance.
 
 The exact `blit.pixel_stream_240=1` gate was rerun on `0.1.358`: all `240`
 frames were accepted without frame errors, but synchronized KMS produced only
