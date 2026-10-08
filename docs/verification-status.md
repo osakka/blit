@@ -86,6 +86,16 @@ timing proof: QEMU TCG recorded virtual deadline misses and a worst-case
 startup present span of 89.732 ms. Physical high-refresh acceptance remains
 open.
 
+The exact 0.1.276 binary and the unchanged Hibr checkout were also run through
+the four-output orchestration fixture using the stable one-vCPU QEMU topology.
+The fixture created four VKMS outputs, started one primary Hibr desktop and
+three `desktop --join` clients, and reached four live sessions and four live
+surfaces before reporting `KMS_FOUR_HIBR_PASS`. The staged Hibr executable
+hash was `8903e0c1addf065e54646bfbab9db0e532cc6d028feb5b9def94b32e52c2ba06`.
+This validates the Blit-owned multi-display/session orchestration boundary;
+the QEMU TCG run recorded virtual deadline misses and is not physical
+high-refresh timing evidence.
+
 The HTTP input endpoint is deliberately bounded to 768 data bytes per request
 and reports the actual PTY write count. It is an API transport into the
 canonical PTY/terminal path, not a second input or terminal implementation.
