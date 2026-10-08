@@ -36,6 +36,12 @@ The exact Hibr QEMU fixture passed `LAYOUT_MATRIX_PASS`,
 `HIBR_PANE_MATRIX_PASS` with staged Hibr SHA-256
 `f8dbc10779193c27d2eb47f0e858cf656912f8b96f56a45af820ad05d18cdb7e`.
 Hibr source was not modified.
+The exact 0.1.335 input-only QEMU fixture also passed
+`BLIT_INPUT_MULTI_MOUSE_PASS`, `BLIT_INPUT_KEYPAD_PASS`,
+`BLIT_INPUT_STREAM_PASS`, `BLIT_INPUT_GAMEPAD_DISCOVERY_PASS`,
+`BLIT_INPUT_GAMEPAD_PASS`, and `BLIT_INPUT_RAW_EVDEV_PASS`. Those are
+deterministic uinput/evdev results and remain distinct from physical-host
+mouse evidence.
 
 ## Current 0.1.334 diagnostic-observability status
 
