@@ -118,6 +118,18 @@ These are controlled SDL measurements, not physical 120/240 Hz evidence.
 The exact TCC build passed the OpenAPI parse, Hibr font manifest, SDL glyph,
 background batching, and graphics-cache gates. No Hibr source was modified.
 
+An additional bounded workload was run against the authorized physical host at
+1920×2160 and 60 Hz. It processed 192,855 terminal bytes, submitted 376
+background batches and 778 coalesced quads, sustained 60.078 Hz, and recorded
+zero missed deadlines. The worst complete render sample was 23.438 ms and the
+worst SDL presentation sample was 18.876 ms. The runtime also reported a
+684.914 ms cumulative historical maximum loop gap; because that counter is not
+reset per workload, it is not attributed to this run. During the observed
+workload the current loop gap was 9.759 ms, maximum select time was 13.989 ms,
+and maximum SDL event-service time was 0.147 ms. This confirms the physical
+60 Hz path is active and measurable while leaving physical 120/240 Hz and
+multi-display validation open.
+
 The exact staged 0.1.279 binary (SHA-256
 `b75c962524efeb182ff0e83e870c4df02556afb6ffb36535c470c8eb9161e87a`) and the
 unchanged Hibr executable passed the four-output VKMS orchestration fixture.
