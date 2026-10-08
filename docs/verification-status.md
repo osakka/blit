@@ -3,6 +3,27 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## Current 0.1.286 live Hibr presentation evidence
+
+On 2026-10-08, the installed 0.1.286 TCC build on the authorized physical
+host was exercised through the public API with the unchanged Hibr executable.
+The request explicitly created a `240x135` terminal surface for the
+1920x2160 `display-1` output. After Hibr startup settled, the surface had
+revision 138, 31,993 non-blank cells, and populated cells through row 133;
+the API screenshot showed the complete Hibr desktop, including its wallpaper,
+top bar, desktop icons, control strip, and pointer. Runtime diagnostics
+reported a 1920x2160 viewport at the physical 60 Hz display mode, refresh-aware
+16 ms scheduling, and zero missed deadlines in the current frame-rate window.
+
+An immediate screenshot taken while the session was still starting was black;
+this is startup timing, not a settled-render result. The live acceptance
+procedure therefore waits for the surface revision and populated cell rows to
+advance before treating a screenshot as presentation evidence. The session
+was deleted through the API and the host returned to zero sessions, surfaces,
+streams, and input routes. This is single-display 60 Hz evidence only; it does
+not close the physical multi-monitor or physical 120/240 Hz gates. No Hibr
+source or installed Hibr file was modified.
+
 ## Source and package
 
 - Repository: `main` at the source commit for this ledger update.
