@@ -68,6 +68,19 @@ static int has_sixel_pixels(FILE *file)
         green[0] == 0x00 && green[1] == 0xff && green[2] == 0x00;
 }
 
+static int has_api_pixel_canvas(FILE *file)
+{
+    int x;
+    int y;
+    unsigned char rgb[3];
+    for (y = 16; y < 48; ++y)
+        for (x = 16; x < 48; ++x)
+            if (pixel(file, 16L + ((long)y * 1024L + x) * 3L, rgb) &&
+                rgb[0] == 0xff && rgb[1] == 0x00 && rgb[2] == 0x00)
+                return 1;
+    return 0;
+}
+
 static int has_scanline_suppression(FILE *file)
 {
     int y;
@@ -105,6 +118,7 @@ int main(int argc, char **argv)
     int require_green = 0;
     int require_sixel = 0;
     int require_visuals = 0;
+    int require_api_pixel = 0;
     int argument;
 
     if (argc < 2 || argc > 4) return 2;
@@ -114,6 +128,7 @@ int main(int argc, char **argv)
         else if (strcmp(argv[argument], "--green") == 0) require_green = 1;
         else if (strcmp(argv[argument], "--sixel") == 0) require_sixel = 1;
         else if (strcmp(argv[argument], "--visuals") == 0) require_visuals = 1;
+        else if (strcmp(argv[argument], "--api-pixel") == 0) require_api_pixel = 1;
         else return 2;
     }
     file = fopen(argv[1], "rb");
@@ -139,6 +154,7 @@ int main(int argc, char **argv)
         (require_wide && !has_wide_foreground(file)) ||
         (require_kitty && !has_kitty_red(file)) ||
         (require_sixel && !has_sixel_pixels(file)) ||
+        (require_api_pixel && !has_api_pixel_canvas(file)) ||
         (require_visuals && !has_scanline_suppression(file)) ||
         (require_green && !has_kitty_green_at(file, 4)) ||
         (require_green && !has_kitty_green_at(file, 36))) {

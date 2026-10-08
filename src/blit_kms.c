@@ -1086,6 +1086,7 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
     int expected_captures = 0;
     int completed_captures = 0;
     long long started = 0;
+    const char *screenshot_ready_file = getenv("BLIT_KMS_SCREENSHOT_READY_FILE");
     if (kms == NULL) return -1;
     for (i = 0; i < view_count; ++i)
         if (views[i].damage_consumed != NULL)
@@ -1095,6 +1096,8 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
 
     capture = kms->screenshot_dir[0] != '\0' && !kms->screenshot_written &&
         kms->screenshot_frame >= kms->screenshot_after &&
+        (screenshot_ready_file == NULL ||
+         access(screenshot_ready_file, F_OK) == 0) &&
         all_outputs_have_content(kms, views, view_count);
     if (capture) {
         for (i = 0; i < kms->output_count; ++i)

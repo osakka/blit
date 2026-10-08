@@ -7,7 +7,7 @@ an evidence record, not a claim that the complete product is released.
 
 - Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The current candidate is `0.1.251`. It builds with TCC and passes terminal
+- The current candidate is `0.1.252`. It builds with TCC and passes terminal
   conformance, SDL screenshot/overlay pixels, the hidden-cursor damage gate,
   and the complete Hibr font manifest gate. Its SDL backend uses a per-output
   glyph atlas, suppresses unchanged cell damage, and does not schedule frames
@@ -16,21 +16,24 @@ an evidence record, not a claim that the complete product is released.
   a software-dummy result, not a physical refresh-rate claim. A bounded
   wallpaper workload on the prior source-equivalent 0.1.241 build measured
   26.865 ms maximum full render and 61.387 Hz over its active 504 ms window.
-  The QEMU/KMS acceptance below is being rerun for the image-cache change. The
-  preceding 0.1.245 package was accepted by the authorized physical host and
-  verified through its version endpoint.
+  The direct-KMS pixel-frame acceptance below was run from the exact current
+  0.1.252 TCC build. The preceding 0.1.245 package was accepted by the
+  authorized physical host and verified through its version endpoint.
 
-### Current 0.1.251 source evidence
+### Current 0.1.252 source evidence
 
-The exact TCC-built 0.1.251 binary passes the full VT/UTF-8/Hibr terminal
+The exact TCC-built 0.1.252 binary passes the full VT/UTF-8/Hibr terminal
 conformance suite, the font manifest gate, and the refresh-aware dummy frame
 gate. Its bounded binary pixel-frame WebSocket gate accepted 30/30 RGBA
 frames, including one fragmented frame, with zero frame errors and reusable
 texture storage. The measured dummy ingest rate was 21,353 frames/second;
 the renderer coalesced those updates into six frames at a measured 16.468 ms
-render time. This is an API-ingest and renderer-path result, not yet a claim
-of physical 60/120/240 Hz presentation. Direct-KMS pixel-frame capture remains
-the next required evidence before calling the graphical emulator path ready.
+render time. The direct-KMS QEMU fixture then accepted a complete 4,096-byte
+RGBA frame through the network API, found the known red canvas in the
+framebuffer oracle through the direct-KMS screenshot endpoint, preserved the
+second output, and passed `KMS_API_PIXEL_PASS`, `PPM_DISPLAY_48_PASS`, and
+`KMS_CAPTURE_PASS`. This proves the API-to-VKMS pixel path; it does not yet
+claim physical 120/240 Hz hardware presentation.
 
 The pixel path now invalidates only the affected graphics rectangle in cell
 coordinates instead of forcing a full terminal-surface redraw. Optional

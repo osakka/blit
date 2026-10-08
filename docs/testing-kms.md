@@ -195,6 +195,15 @@ test-only `BLIT_TEST_REFRESH_HZ=60,120` metadata override and requires
 diagnostics, not physical 120 Hz hardware timing. The normal fixture remains
 the authoritative physical VKMS/pixel test.
 
+To exercise the API-owned pixel canvas, add `blit.pixel_frame=1`. The fixture
+creates a terminal session on display 47, sends a complete 32×32 RGBA frame
+through the WebSocket API using the TCC-built `ws-pixel-frame-probe`, waits for
+`pixel_frame_present`, then calls the direct-KMS screenshot endpoint and
+requires `KMS_API_PIXEL_PASS` from the TCC-built BMP framebuffer oracle. This
+also validates that a 4,096-byte binary frame is accepted through the bounded
+network receive path and that the graphics update advances the surface
+revision used by direct KMS damage suppression.
+
 The same fixture accepts `blit.output_loss=1` on the kernel command line. It
 disables connector 47 during the run and requires `OUTPUT_LOSS_PASS`: the
 failed connector remains in `/v1/displays` as `failed`, the other connector

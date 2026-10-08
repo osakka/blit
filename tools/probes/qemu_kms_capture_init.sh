@@ -26,6 +26,7 @@ $b mkdir -p /lib64 /usr/lib/x86_64-linux-gnu
 $b cp /blit-stage/ld-linux-x86-64.so.2 /lib64/ld-linux-x86-64.so.2
 $b cp /blit-stage/libc.so.6 /usr/lib/x86_64-linux-gnu/libc.so.6
 $b test -x /blit-stage/ppm-assert || { echo PPM_ASSERT_MISSING; finish 1; }
+$b test -x /blit-stage/bmp-assert || { echo BMP_ASSERT_MISSING; finish 1; }
 $b mount -t 9p -o trans=virtio,version=9p2000.L blitshots /tmp/host-screenshots 2>/dev/null || true
 export BLIT_KMS_SCREENSHOT_DIR=/tmp/guest-screenshots
 export BLIT_KMS_SCREENSHOT_AFTER=0
@@ -42,6 +43,7 @@ kitty_limits_test=0
 kitty_query_test=0
 sixel_test=0
 visuals_test=0
+pixel_test=0
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
     *" blit.output_loss=1 "*) loss_test=1 ;;
 esac
@@ -63,10 +65,17 @@ esac
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
     *" blit.visuals=1 "*) visuals_test=1 ;;
 esac
-if [ "$visuals_test" -eq 1 ]; then
+case " $($b cat /proc/cmdline 2>/dev/null || true) " in
+    *" blit.pixel_frame=1 "*) pixel_test=1 ;;
+esac
+if [ "$visuals_test" -eq 1 ] || [ "$pixel_test" -eq 1 ]; then
     # Capture after the effect, overlay, and session requests have had time
     # to reach a presented frame; frame zero is the pre-API blank modeset.
     export BLIT_KMS_SCREENSHOT_AFTER=8
+fi
+if [ "$pixel_test" -eq 1 ]; then
+    export BLIT_KMS_SCREENSHOT_READY_FILE=/tmp/pixel-ready
+    $b rm -f /tmp/pixel-ready
 fi
 if [ "$mixed_refresh_test" -eq 1 ]; then
     export BLIT_TEST_MODE=1
@@ -120,10 +129,30 @@ elif [ "$sixel_test" -eq 1 ]; then
     $b wget -qO /tmp/one.json --post-data='{"command":"/blit-stage/pty-input-echo","arguments":["--sixel"],"surface_mode":"terminal","display_id":"display-47","surface":{"width":128,"height":48}}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
 elif [ "$visuals_test" -eq 1 ]; then
     $b wget -qO /tmp/one.json --post-data='{"command":"/blit-stage/pty-input-echo","arguments":["--wide"],"surface_mode":"terminal","display_id":"display-47","surface":{"width":128,"height":48}}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
+elif [ "$pixel_test" -eq 1 ]; then
+    $b wget -qO /tmp/one.json --post-data='{"command":"/blit-stage/pty-input-echo","arguments":["--wide"],"surface_mode":"terminal","display_id":"display-47","surface":{"width":128,"height":48}}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
 else
     $b wget -qO /tmp/one.json --post-data='{"command":"/blit-stage/pty-input-echo","arguments":["--wide","--kitty"],"surface_mode":"terminal","display_id":"display-47","surface":{"width":128,"height":48}}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
 fi
 $b wget -qO /tmp/two.json --post-data='{"command":"/blit-stage/pty-input-echo","surface_mode":"terminal","display_id":"display-48","surface":{"width":128,"height":48}}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
+if [ "$pixel_test" -eq 1 ]; then
+    pixel_session=$($b sed -n 's/.*"id":"\([^"]*\)".*/\1/p' /tmp/one.json)
+    if [ -n "$pixel_session" ] && /blit-stage/ws-pixel-frame-probe "$pixel_session"; then
+        :
+    else
+        echo PIXEL_FRAME_PROBE_FAIL
+        finish 1
+    fi
+    $b touch /tmp/pixel-ready
+    $b sleep 2
+    $b wget -qO /tmp/api-pixel.bmp http://127.0.0.1:19191/v1/diagnostics/screenshots/display-47 || true
+    if [ -f /tmp/api-pixel.bmp ] && /blit-stage/bmp-assert /tmp/api-pixel.bmp; then
+        echo KMS_API_PIXEL_PASS
+    else
+        echo KMS_API_PIXEL_FAIL
+        finish 1
+    fi
+fi
 [ "$loss_test" -eq 1 ] && ( $b sleep 2; echo 2 > /sys/kernel/config/vkms/blit/connectors/connector0/status ) &
 # Hibr/PTY startup is intentionally asynchronous.  Give both probe sessions
 # enough time to produce their first content before the capture predicate is
@@ -179,6 +208,8 @@ elif [ "$sixel_test" -eq 1 ]; then
     /blit-stage/ppm-assert /tmp/guest-screenshots/display-47.ppm --sixel && echo PPM_DISPLAY_47_SIXEL_PASS || { echo PPM_DISPLAY_47_SIXEL_FAIL; finish 1; }
 elif [ "$visuals_test" -eq 1 ]; then
     /blit-stage/ppm-assert /tmp/guest-screenshots/display-47.ppm --visuals && echo PPM_DISPLAY_47_VISUALS_PASS || { echo PPM_DISPLAY_47_VISUALS_FAIL; finish 1; }
+elif [ "$pixel_test" -eq 1 ]; then
+    echo PPM_DISPLAY_47_API_PIXEL_NOT_USED
 else
     /blit-stage/ppm-assert /tmp/guest-screenshots/display-47.ppm --wide --kitty && echo PPM_DISPLAY_47_WIDE_KITTY_PASS || { echo PPM_DISPLAY_47_WIDE_KITTY_FAIL; finish 1; }
 fi

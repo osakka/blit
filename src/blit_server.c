@@ -185,6 +185,8 @@ typedef struct {
     int fd;
     unsigned int subscriptions;
     unsigned char receive_buffer[4096];
+    unsigned char *large_receive_buffer;
+    size_t large_receive_capacity;
     size_t receive_length;
     unsigned char fragment_buffer[4096];
     size_t fragment_length;
@@ -6796,6 +6798,18 @@ static int stream_contains(const BlitRuntime *runtime, int fd)
     return 0;
 }
 
+static unsigned char *stream_receive_data(BlitStream *stream)
+{
+    return stream->large_receive_buffer != NULL ? stream->large_receive_buffer :
+        stream->receive_buffer;
+}
+
+static size_t stream_receive_capacity(const BlitStream *stream)
+{
+    return stream->large_receive_buffer != NULL ? stream->large_receive_capacity :
+        sizeof(stream->receive_buffer);
+}
+
 static int add_stream(BlitRuntime *runtime, int fd)
 {
     int i;
@@ -6819,6 +6833,9 @@ static void remove_stream(BlitRuntime *runtime, int fd)
     for (i = 0; i < BLIT_MAX_STREAMS; ++i) {
         if (runtime->streams[i].used && runtime->streams[i].fd == fd) {
             pixel_frame_reset(runtime, &runtime->streams[i], 1);
+            free(runtime->streams[i].large_receive_buffer);
+            runtime->streams[i].large_receive_buffer = NULL;
+            runtime->streams[i].large_receive_capacity = 0;
             close(fd);
             runtime->streams[i].used = 0;
             return;
@@ -7194,6 +7211,8 @@ static int service_pixel_frame_binary(BlitRuntime *runtime,
                                  session->terminal_cell_width : 8,
                              session->terminal_cell_height > 0 ?
                                  session->terminal_cell_height : 16);
+    if (surface != NULL)
+        ++surface->revision;
     runtime->render_pending = 1;
     ++runtime->pixel_frames_accepted;
     if (stream->pixel_frame_ack)
@@ -7323,16 +7342,16 @@ static void service_stream(BlitRuntime *runtime, int fd)
         remove_stream(runtime, fd);
         return;
     }
-    if ((size_t)received > sizeof(stream->receive_buffer) -
+    if ((size_t)received > stream_receive_capacity(stream) -
         stream->receive_length) {
         remove_stream(runtime, fd);
         return;
     }
-    memcpy(stream->receive_buffer + stream->receive_length,
+    memcpy(stream_receive_data(stream) + stream->receive_length,
            incoming, (size_t)received);
     stream->receive_length += (size_t)received;
     while (stream->receive_length - offset >= 2) {
-        unsigned char *frame = stream->receive_buffer + offset;
+        unsigned char *frame = stream_receive_data(stream) + offset;
         unsigned char flags = frame[0];
         unsigned char length_code = frame[1] & 0x7f;
         unsigned char mask[4];
@@ -7355,9 +7374,26 @@ static void service_stream(BlitRuntime *runtime, int fd)
             length = length_code;
         }
         if (masked) header += 4;
-        if (length > sizeof(stream->receive_buffer) - header) {
-            remove_stream(runtime, fd);
-            return;
+        if (length > stream_receive_capacity(stream) - header) {
+            size_t required = header + length;
+            unsigned char *expanded;
+            int had_large = stream->large_receive_buffer != NULL;
+            if (required > BLIT_GRAPHICS_MAX_BYTES + 128U) {
+                remove_stream(runtime, fd);
+                return;
+            }
+            expanded = (unsigned char *)realloc(
+                stream->large_receive_buffer, required);
+            if (expanded == NULL) {
+                remove_stream(runtime, fd);
+                return;
+            }
+            if (!had_large)
+                memcpy(expanded, stream->receive_buffer,
+                       stream->receive_length);
+            stream->large_receive_buffer = expanded;
+            stream->large_receive_capacity = required;
+            frame = stream_receive_data(stream) + offset;
         }
         total = header + length;
         if (stream->receive_length - offset < total)
@@ -7374,7 +7410,7 @@ static void service_stream(BlitRuntime *runtime, int fd)
         offset += total;
     }
     if (offset > 0) {
-        memmove(stream->receive_buffer, stream->receive_buffer + offset,
+        memmove(stream_receive_data(stream), stream_receive_data(stream) + offset,
                 stream->receive_length - offset);
         stream->receive_length -= offset;
     }
