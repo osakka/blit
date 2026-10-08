@@ -60,6 +60,11 @@ The exact 0.1.256 TCC build also passed the Hibr/VKMS input fixture with
 surface key/pointer, and device-loss diagnostics. The authorized physical host
 was left with zero sessions, surfaces, streams, and routes.
 
+The current refresh fixture also passed `REFRESH_SCHEDULER_240_PASS` with a
+4 ms deadline on both VKMS outputs, followed by the two framebuffer oracles
+and `KMS_CAPTURE_PASS`. This proves the scheduler's 240 Hz deadline branch in
+the current source; it is not physical 240 Hz hardware evidence.
+
 The current-source four-output VKMS fixture exposed four independent 1024×768
 outputs at 60 Hz, created one terminal session per output, and passed
 `KMS_FOUR_OUTPUT_PASS`. The mixed-refresh fixture then passed

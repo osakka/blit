@@ -39,6 +39,7 @@ if [ -e /dev/dri/card1 ]; then export BLIT_DRM_DEVICE=/dev/dri/card1; else expor
 loss_test=0
 stack_test=0
 mixed_refresh_test=0
+high_refresh_test=0
 kitty_limits_test=0
 kitty_query_test=0
 sixel_test=0
@@ -53,6 +54,9 @@ case " $($b cat /proc/cmdline 2>/dev/null || true) " in
 esac
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
     *" blit.mixed_refresh=1 "*) mixed_refresh_test=1 ;;
+esac
+case " $($b cat /proc/cmdline 2>/dev/null || true) " in
+    *" blit.high_refresh=1 "*) high_refresh_test=1 ;;
 esac
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
     *" blit.kitty_limits=1 "*) kitty_limits_test=1 ;;
@@ -85,6 +89,10 @@ if [ "$mixed_refresh_test" -eq 1 ]; then
     export BLIT_TEST_MODE=1
     export BLIT_TEST_REFRESH_HZ=60,120
 fi
+if [ "$high_refresh_test" -eq 1 ]; then
+    export BLIT_TEST_MODE=1
+    export BLIT_TEST_REFRESH_HZ=60,240
+fi
 if [ "$kitty_query_test" -eq 1 ]; then
     export BLIT_KITTY_TRACE=1
 fi
@@ -108,6 +116,13 @@ if [ "$mixed_refresh_test" -eq 1 ]; then
     echo "$diagnostics" | $b grep -q '"refresh_source":"test-override"' || mixed_refresh_pass=0
     echo "$diagnostics" | $b grep -q '"effective_interval_ms":8' || mixed_refresh_pass=0
     [ "$mixed_refresh_pass" -eq 1 ] && echo REFRESH_SCHEDULER_MIXED_PASS || echo REFRESH_SCHEDULER_MIXED_FAIL
+fi
+high_refresh_pass=1
+if [ "$high_refresh_test" -eq 1 ]; then
+    echo "$diagnostics" | $b grep -q '"refresh_hz":240.000' || high_refresh_pass=0
+    echo "$diagnostics" | $b grep -q '"refresh_source":"test-override"' || high_refresh_pass=0
+    echo "$diagnostics" | $b grep -q '"effective_interval_ms":4' || high_refresh_pass=0
+    [ "$high_refresh_pass" -eq 1 ] && echo REFRESH_SCHEDULER_240_PASS || echo REFRESH_SCHEDULER_240_FAIL
 fi
 graphics_inventory=$($b wget -qO- http://127.0.0.1:19191/v1/graphics || true)
 echo GRAPHICS; echo "$graphics_inventory"
@@ -267,6 +282,6 @@ if [ "$loss_test" -eq 1 ]; then
 elif [ "$size1" -gt 2359296 ] && [ "$size2" -gt 2359296 ] && [ "$hash1" != "$hash2" ]; then
     capture_pass=1
 fi
-if [ "$capture_pass" -eq 1 ] && [ "$loss_pass" -eq 1 ] && [ "$graphics_pass" -eq 1 ] && [ "$scheduler_pass" -eq 1 ] && [ "$mixed_refresh_pass" -eq 1 ] && [ "$kitty_limits_pass" -eq 1 ] && [ "$api_screenshot_pass" -eq 1 ]; then echo KMS_CAPTURE_PASS; finish 0; fi
+if [ "$capture_pass" -eq 1 ] && [ "$loss_pass" -eq 1 ] && [ "$graphics_pass" -eq 1 ] && [ "$scheduler_pass" -eq 1 ] && [ "$mixed_refresh_pass" -eq 1 ] && [ "$high_refresh_pass" -eq 1 ] && [ "$kitty_limits_pass" -eq 1 ] && [ "$api_screenshot_pass" -eq 1 ]; then echo KMS_CAPTURE_PASS; finish 0; fi
 echo KMS_CAPTURE_FAIL
 finish 1

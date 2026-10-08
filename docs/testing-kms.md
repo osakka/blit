@@ -195,6 +195,11 @@ test-only `BLIT_TEST_REFRESH_HZ=60,120` metadata override and requires
 diagnostics, not physical 120 Hz hardware timing. The normal fixture remains
 the authoritative physical VKMS/pixel test.
 
+For the high-refresh deadline branch, add `blit.high_refresh=1`. The fixture
+uses the test-only `BLIT_TEST_REFRESH_HZ=60,240` override and requires
+`REFRESH_SCHEDULER_240_PASS` with a 4 ms deadline. This validates the 240 Hz
+deadline calculation and diagnostics only; it is not a physical 240 Hz claim.
+
 To exercise the API-owned pixel canvas, add `blit.pixel_frame=1`. The fixture
 creates a terminal session on display 47, sends a complete 32×32 RGBA frame
 through the WebSocket API using the TCC-built `ws-pixel-frame-probe`, waits for
