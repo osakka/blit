@@ -3,6 +3,24 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## Current 0.1.328 live diagnostic status
+
+The 0.1.328 package is deployed on the authorized physical host at
+`192.168.10.54:8080`. A disposable Hibr image probe completed with exit code
+zero and was then deleted. The live API reported one complete `api` graphics
+object (`512x512`, `786432` bytes), `pixel_frames_accepted=1`, and
+`pixel_frame_errors=0`. This proves the packaged Blit-owned Hibr adapter can
+submit and retain a pixel frame without changing Hibr.
+
+The same live sample reported `last_render_ms=4.411`, `max_render_ms=30.148`,
+`missed_deadlines=0`, and a 60 Hz display target. Its `input_events` count was
+zero because no physical movement occurred during that capture. Therefore it
+does not claim that physical pointer movement is correct. The required next
+evidence is `tools/diagnostics/verify-live-physical.sh` run while reproducing
+the pointer movement; its exit status 2 means the capture was valid but no
+physical movement was observed, while status 1 identifies an actual invariant
+failure.
+
 ## Current 0.1.326 live diagnostic-boundary status
 
 Package `blit_0.1.326-1_amd64.deb` is deployed on the authorized host;

@@ -66,6 +66,16 @@ typedef struct {
 static cb_state cb;
 static cb_pane cb_panes[CB_MAX_PANES];
 
+static int cb_trace_enabled(void)
+{
+	const char *value = getenv("BLIT_ADAPTER_TRACE");
+	return value != NULL && (!strcmp(value, "1") || !strcmp(value, "yes"));
+}
+
+#define CB_TRACE(...) do { \
+	if (cb_trace_enabled()) lg(HIBR_LERR, __VA_ARGS__); \
+} while (0)
+
 static long cb_flush(void);
 static int cb_prect(const char *name, int *row, int *col, int *h, int *w);
 
@@ -706,14 +716,14 @@ static int cb_ws_open(void)
 	size_t used = 0;
 	int fd, n;
 	fd = hibr_dial(cb.host, cb.port, 0);
-	if (fd < 0) return 0;
+	if (fd < 0) { CB_TRACE("console-blit: WebSocket dial failed %s:%s", cb.host, cb.port); return 0; }
 	n = snprintf(request, sizeof(request),
 		"GET /v1/stream HTTP/1.1\r\nHost: %s\r\n"
 		"Upgrade: websocket\r\nConnection: Upgrade\r\n"
 		"Sec-WebSocket-Key: YmxpdC1jb25zb2xlLXN0cmVhbQ==\r\n"
 		"Sec-WebSocket-Version: 13\r\n\r\n", cb.host);
 	if (n < 0 || (size_t)n >= sizeof(request) || !cb_write_all(fd, request, (size_t)n))
-		{ close(fd); return 0; }
+		{ CB_TRACE("console-blit: WebSocket handshake write failed"); close(fd); return 0; }
 	while (used + 1 < sizeof(headers)) {
 		ssize_t got = read(fd, headers + used, sizeof(headers) - used - 1);
 		if (got > 0) {
@@ -723,9 +733,12 @@ static int cb_ws_open(void)
 			continue;
 		}
 		if (got < 0 && errno == EINTR) continue;
+		CB_TRACE("console-blit: WebSocket handshake read failed"); close(fd); return 0;
+	}
+	if (strncmp(headers, "HTTP/1.1 101", 12) != 0) {
+		CB_TRACE("console-blit: WebSocket handshake rejected: %.160s", headers);
 		close(fd); return 0;
 	}
-	if (strncmp(headers, "HTTP/1.1 101", 12) != 0) { close(fd); return 0; }
 	cb.ws_fd = fd;
 	/* The gateway defaults new streams to all event classes.  This adapter
 	 * consumes only input, and its bounded frame reader must never be exposed
@@ -757,11 +770,13 @@ static int cb_ws_open(void)
 		for (i = 0; i < (size_t)subscription_length; ++i)
 			frame[6 + i] = (unsigned char)subscription[i] ^ mask[i % 4];
 		if (!cb_write_all(fd, frame, (size_t)subscription_length + 6)) {
+			CB_TRACE("console-blit: WebSocket input subscription write failed");
 			close(fd);
 			cb.ws_fd = -1;
 			return 0;
 		}
 	}
+	CB_TRACE("console-blit: WebSocket stream opened session=%s", cb.session);
 	return 1;
 }
 
@@ -882,11 +897,22 @@ static int cb_image(sh *s, const char *pane, int row, int col, int h, int w,
 	int x, y, length;
 	size_t total, offset, chunk;
 	(void)s; (void)flags;
-	if (!cb.opened || !rgb || iw < 1 || ih < 1) return 0;
+	CB_TRACE("console-blit: image request pane=%s row=%d col=%d cells=%dx%d pixels=%dx%d",
+		pane ? pane : "(none)", row, col, h, w, iw, ih);
+	if (!cb.opened || !rgb || iw < 1 || ih < 1) {
+		CB_TRACE("console-blit: image rejected before transport");
+		return 0;
+	}
 	if (pane != NULL && !cb_prect(pane, &pane_row, &pane_col,
-		&pane_height, &pane_width)) return 0;
+		&pane_height, &pane_width)) {
+		CB_TRACE("console-blit: image pane lookup failed: %s", pane);
+		return 0;
+	}
 	if (pane != NULL) { row += pane_row; col += pane_col; }
-	if (cb.ws_fd < 0 && !cb_ws_open()) return 0;
+	if (cb.ws_fd < 0 && !cb_ws_open()) {
+		CB_TRACE("console-blit: image transport unavailable");
+		return 0;
+	}
 	if (!cb.image_id) cb.image_id = 1;
 	x = col * 8; y = row * 16;
 	length = snprintf(begin, sizeof(begin),
@@ -897,6 +923,7 @@ static int cb_image(sh *s, const char *pane, int row, int col, int h, int w,
 	total = (size_t)iw * (size_t)ih * 3U;
 	if (length < 0 || (size_t)length >= sizeof(begin) ||
 		!cb_ws_send_frame(0x1, begin, (size_t)length)) {
+		CB_TRACE("console-blit: pixel_frame_begin write failed");
 		cb.image_valid = 0;
 		return 0;
 	}
@@ -904,18 +931,23 @@ static int cb_image(sh *s, const char *pane, int row, int col, int h, int w,
 		chunk = total - offset;
 		if (chunk > CB_PIXEL_CHUNK) chunk = CB_PIXEL_CHUNK;
 		if (!cb_ws_send_frame(0x2, rgb + offset, chunk)) {
+			CB_TRACE("console-blit: pixel frame chunk write failed offset=%lu",
+				(unsigned long)offset);
 			cb.image_valid = 0;
 			return 0;
 		}
 	}
 	if (!cb_ws_send_frame(0x1, "{\"type\":\"pixel_frame_end\"}",
 		strlen("{\"type\":\"pixel_frame_end\"}"))) {
+		CB_TRACE("console-blit: pixel_frame_end write failed");
 		cb.image_valid = 0;
 		return 0;
 	}
 	cb.image_valid = 1;
 	cb.image_row = row; cb.image_col = col;
 	cb.image_height = h; cb.image_width = w;
+	CB_TRACE("console-blit: image frame submitted session=%s image=%u bytes=%lu",
+		cb.session, cb.image_id, (unsigned long)total);
 	return 1;
 }
 static int cb_imgkeep(sh *s, int row, int col, int h, int w)

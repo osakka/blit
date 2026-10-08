@@ -141,3 +141,17 @@ The adapter also advertises Kitty-compatible pixel placement to Hibr and sends
 image frames through Blit's bounded WebSocket pixel protocol. Static under-text
 images use `imgkeep` and are not retransmitted; clearing one hides the cached
 image before the next atomic scene presentation.
+
+When diagnosing the Hibr adapter itself, enable its opt-in transport trace for
+one disposable probe session:
+
+```sh
+BLIT_ADAPTER_TRACE=1
+```
+
+The trace is emitted by the Blit-owned adapter and reports WebSocket dial and
+handshake failures, image requests, pixel-frame transport failures, and
+successful frame submission. It does not modify Hibr. The authoritative result
+is still the Blit runtime: `pixel_frames_accepted` must increase and
+`pixel_frame_errors` must remain unchanged. Do not enable this continuously on
+a busy desktop; it is a probe aid, not a replacement for the runtime counters.
