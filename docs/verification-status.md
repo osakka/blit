@@ -44,6 +44,14 @@ replay gates also passed. The live host reported the same 0.1.274 version,
 the controlled inspection. No input or glyph defect was reproduced in this
 cycle, so no speculative input change was made.
 
+The follow-up dummy-backend workload passed the pixel-frame gate with all 30
+frames accepted and 27 rendered, including fragmented RGBA input and frame
+reuse. The frame-rate gate measured 43.758 Hz over a 502 ms window with zero
+missed deadlines and a 15.102 ms maximum render sample against a 16 ms target.
+Network fragmentation, back-pressure, and authentication gates also passed.
+These are deterministic software-backend measurements and do not replace
+physical 120/240 Hz evidence.
+
 An API screenshot of the live SDL output was also captured with the
 display-derived 240×135 surface geometry at 1920×2160. Visual inspection of
 the enlarged glyph crop showed clean box-drawing, block, combining, wide-cell,
