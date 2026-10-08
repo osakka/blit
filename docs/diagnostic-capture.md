@@ -27,6 +27,12 @@ the terminal surface. Keep screenshots disabled for timing/input captures:
 the SDL screenshot readback is a heavyweight operation and can perturb the
 single-threaded render loop. It does not start or modify Hibr.
 
+The pointer capture tolerates a host with no active Hibr session: the session
+JSON is recorded as `available:false` and the input/render capture continues.
+This is intentional, because a missing session must not hide a compositor or
+device-inventory failure. A live Hibr visual reproduction still requires a
+session to be present when the physical interaction occurs.
+
 ## Deterministic wallpaper/pointer regression
 
 The live Hibr desktop is a large opaque terminal surface, so the small atomic

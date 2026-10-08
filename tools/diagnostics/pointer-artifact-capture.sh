@@ -26,10 +26,28 @@ get() {
         "$base_url$path" > "$output_dir/$name"
 }
 
+get_optional_session() {
+    local name=$1 path=$2 status
+    status=$(curl --silent --show-error --max-time 30 \
+        -o "$output_dir/$name" -w '%{http_code}' \
+        "$base_url$path")
+    case "$status" in
+        2??) ;;
+        404)
+            printf '{"available":false,"status":404,"path":"%s"}\n' \
+                "$path" > "$output_dir/$name"
+            ;;
+        *)
+            echo "session capture failed: HTTP $status $path" >&2
+            return 1
+            ;;
+    esac
+}
+
 capture() {
     local label=$1
     get "runtime-$label.json" /v1/diagnostics/runtime
-    get "session-$label.json" /v1/terminal-sessions/1
+    get_optional_session "session-$label.json" /v1/terminal-sessions/1
     get "trace-pointer-motion-$label.json" \
         '/v1/diagnostics/trace?kind=pointer_motion'
     get "trace-pointer-button-$label.json" \
@@ -52,7 +70,7 @@ get displays.json /v1/displays
 get topology.json /v1/topology
 get input-devices.json /v1/input/devices
 get input-routes.json /v1/input/routes
-get session.json /v1/terminal-sessions/1
+get_optional_session session.json /v1/terminal-sessions/1
 capture before
 
 if [ "$mode" = api ]; then
