@@ -20,6 +20,14 @@ and sub-14 ms maximum observed loop/render gaps in the current window. The
 reported frame rate is damage-driven and is zero while idle; it must not be
 interpreted as a monitor-refresh measurement.
 
+A real-host renderer isolation run created a temporary API-owned `80x30`
+opaque surface, committed all `2400` cells in bounded batches, moved the API
+pointer through six positions, and captured six distinct screenshots. All
+sampled scene pixels remained non-black, and the temporary session was deleted
+cleanly. This proves the deployed SDL composition path can render and update a
+surface on the real host; it does not prove physical evdev input or Hibr's
+wallpaper/graphics scene.
+
 The TCC-built `0.1.359` package passed the local pointer-damage,
 external-pointer-composition, hidden-cursor, glyph, wallpaper-stress, and
 terminal-soak gates. The corrected two-output VKMS QEMU fixture passed KMS
