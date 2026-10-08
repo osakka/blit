@@ -69,16 +69,17 @@ mkdir -p "$stage/usr/lib/blit" "$stage/usr/bin" \
 # conveniences, not part of the server runtime; Hibr remains an external
 # executable and session/orchestration layer.
 mkdir -p "$stage/usr/lib/blit/bin" "$stage/usr/lib/blit/lib" \
-    "$stage/usr/lib/hibr" \
+    "$stage/usr/lib/blit/hibr" \
     "$stage/usr/share/blit/probes" \
     "$stage/usr/lib/blit/fonts" "$stage/usr/share/blit/hibr" \
     "$stage/lib/systemd/system"
 cp -a "$RUNTIME_BINARY" "$stage/usr/lib/blit/bin/blit-server"
 cp -a "$UPDATE_HELPER" "$stage/usr/lib/blit/bin/blit-update-helper"
 # The adapter is Blit-owned code compiled against the selected external Hibr
-# ABI. Installing it beside Hibr's modules makes the package self-consistent;
-# Hibr remains external and its source/session tree is never copied here.
-cp -a "$HIBR_ADAPTER" "$stage/usr/lib/hibr/console-blit.so"
+# ABI. Keep it outside Hibr's module search directory: the stock desktop's
+# `need display` must continue to select Hibr's native console provider. The
+# explicit Blit entrypoint loads this optional provider by absolute path.
+cp -a "$HIBR_ADAPTER" "$stage/usr/lib/blit/hibr/console-blit.so"
 cp -a "$HIBR_ENTRYPOINT" "$stage/usr/share/blit/hibr/blit-session.hibr"
 cp -a "$ROOT/hibr/blit-live-image-probe.hibr" \
     "$stage/usr/share/blit/probes/blit-live-image-probe.hibr"

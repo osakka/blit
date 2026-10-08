@@ -27,6 +27,12 @@ surface summary. The filtered trace views are taken at the start and end so
 the capture itself does not repeatedly serialize diagnostic history on the
 single-threaded gateway.
 
+Because the current API is resource-oriented and does not expose a broad
+session-list response, the harness also probes the bounded session ID range
+`1..16` and writes `session-N.json` only for sessions that exist. Set
+`BLIT_SESSION_IDS=3,10` when a run should inspect only known sessions. This
+never creates, focuses, resizes, or deletes a session.
+
 Run it from a machine that can reach Blit:
 
 ```sh
@@ -98,6 +104,25 @@ uses the safe default; the oldest matching events are discarded first.
 `surface_update` records the `immediate` and `commit` boundaries, not every
 deferred cell chunk. This keeps the bounded trace useful under high-volume
 terminal output while preserving the atomic-frame evidence.
+
+## Real-host troubleshooting protocol
+
+Use one capture as the evidence packet for each visible failure. Do not infer
+frame rate from how fast the screen appears to change: compare
+`runtime-start.json` and `runtime-end.json`, especially `frame_rate_hz`,
+`frame_rate_frames`, `missed_deadlines`, `max_loop_gap_ms`, and the evdev input
+counters. Classify the failure at the first missing boundary:
+
+1. no physical event;
+2. event not routed;
+3. PTY or surface did not change;
+4. surface changed but no atomic render path followed;
+5. render or presentation missed its budget.
+
+Run a timing-only capture while reproducing the problem, then take a separate
+screenshot capture. Keeping screenshots out of the timing interval matters:
+the framebuffer download is deliberately isolated because it can otherwise
+disturb the single-threaded API/render loop.
 
 For deterministic pointer diagnostics, inject events through the same Blit
 path used by evdev:

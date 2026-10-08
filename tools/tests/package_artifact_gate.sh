@@ -23,7 +23,7 @@ trap cleanup EXIT HUP INT TERM
 dpkg-deb -x "$package" "$stage"
 
 test -x "$stage/usr/lib/blit/bin/blit-server"
-test -f "$stage/usr/lib/hibr/console-blit.so"
+test -f "$stage/usr/lib/blit/hibr/console-blit.so"
 test -x "$stage/usr/share/blit/hibr/blit-session.hibr"
 test -f "$stage/usr/lib/blit/openapi/blit-0.1.yaml"
 strings "$stage/usr/lib/blit/bin/blit-server" | grep -Fx "$release" >/dev/null

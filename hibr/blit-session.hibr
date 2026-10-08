@@ -17,6 +17,7 @@ fi
 if [ -z "$moddir" ]; then
 	moddir=/usr/lib/hibr
 fi
+adapter=${BLIT_HIBR_ADAPTER:-/usr/lib/blit/hibr/console-blit.so}
 desktop=${BLIT_HIBR_DESKTOP_SESSION:-}
 if [ -z "$desktop" ] && [ -f "$d/session.hibr" ]; then
 	desktop=$d/session.hibr
@@ -30,12 +31,12 @@ if [ ! -f "$desktop" ]; then
 	exit 1
 fi
 # Run the real desktop file in this same Hibr process.  The launcher RC loads
-# console-blit before this entrypoint; exec-ing a second Hibr process here
+# the optional Blit provider before this entrypoint; exec-ing a second Hibr process here
 # would discard that provided display interface before desktop.hibr starts.
 # The Debian package supplies symlinks for Hibr's sibling desktop tree beside
 # this launcher, preserving the stock session's relative-import semantics.
 export HIBR_MODPATH=${HIBR_MODPATH:-$moddir}
-mod load "$moddir/console-blit.so" || exit 1
+mod load "$adapter" || exit 1
 mod load "$moddir/pty.so" || exit 1
 mod load "$moddir/term.so" || exit 1
 mod load "$moddir/hold.so" || exit 1
