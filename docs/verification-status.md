@@ -43,6 +43,15 @@ was deleted and the live resource counts returned to zero. Its idle
 `frame_rate_hz=0` sample is not interpreted as a scanout rate: the changed
 content window had expired after Hibr stopped emitting updates.
 
+The exact 0.1.264 direct-KMS fixtures additionally passed the 60 Hz
+emulator-like stream (`PIXEL_FRAME_STREAM_SENT frames=60`,
+`PIXEL_FRAME_RATE_PASS`, `KMS_API_PIXEL_PASS`), the 240 Hz scheduler branch
+(`REFRESH_SCHEDULER_240_PASS`), and the four-output Hibr orchestration
+(`KMS_FOUR_HIBR_PASS`) with one primary and three `desktop --join` clients.
+The four-output TCG/VKMS run recorded virtual page-flip misses during startup
+and Hibr composition; this is retained as virtual-driver timing evidence and
+is not a physical refresh-rate claim.
+
 ### Current 0.1.263 source and physical evidence
 
 The exact 0.1.263 TCC build passes the complete 0.1.262 regression set plus
