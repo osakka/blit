@@ -10754,13 +10754,20 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             finish_sdl_output(runtime, output_index, 0);
             continue;
         }
+        full_redraw = !runtime->outputs[output_index].initialized ||
+            graphics_changed ||
+            target_count != runtime->outputs[output_index].last_target_count ||
+            runtime->topology_revision !=
+                runtime->outputs[output_index].last_topology_revision;
         if (runtime->pointer_dirty)
             ++runtime->diagnostic_pointer_cache_misses;
         {
             char detail[160];
             snprintf(detail, sizeof(detail),
-                     "output=%d path=full-redraw target_changed=%d external_changed=%d graphics_changed=%d",
-                     output_index, target_changed, external_target_changed,
+                     "output=%d path=%s target_changed=%d external_changed=%d graphics_changed=%d",
+                     output_index, full_redraw ? "full-redraw" :
+                         "incremental-damage",
+                     target_changed, external_target_changed,
                      graphics_changed);
             diagnostic_trace(runtime, "render_path", detail);
         }
@@ -10826,12 +10833,6 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
         if (runtime->outputs[output_index].initialized &&
             !runtime->pointer_dirty && !target_changed)
             continue;
-        full_redraw = !runtime->outputs[output_index].initialized ||
-            runtime->pointer_dirty ||
-            graphics_changed ||
-            target_count != runtime->outputs[output_index].last_target_count ||
-            runtime->topology_revision !=
-                runtime->outputs[output_index].last_topology_revision;
         if (!runtime->outputs[output_index].initialized) {
             SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
             SDL_RenderClear(renderer);
