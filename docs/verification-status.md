@@ -26,6 +26,22 @@ The exact 0.1.320 TCC binary also passes the QEMU VKMS primary/`--join`
 restart fixture: `LAYOUT_MATRIX_PASS`, `HIBR_PRIMARY_RESTART_PASS`,
 `HIBR_JOIN_RECONNECT_PASS`, and `HIBR_PANE_MATRIX_PASS`.
 
+## Current 0.1.321 external-pointer composition status
+
+The TCC-built `0.1.321` binary changes the external-surface compositor so
+committed cell damage is applied incrementally to the atomic scene cache.
+Graphics-scene changes still force a complete rebuild, identified by the
+`graphics_changed` diagnostic field. The new
+`EXTERNAL_POINTER_COMPOSITION_PASS` gate records pointer-cache hits after an
+external cell commit, while the full terminal, graphics-cache, glyph, batch,
+frame-rate, and shutdown gates also pass. The package SHA-256 is
+`958e000608ae91e73cfd83341774fd7bb48c1b410f49900420517814abaed9df`.
+
+The exact source state also passes the QEMU VKMS primary/`--join` restart and
+2x2 pane fixture with `LAYOUT_MATRIX_PASS`, `HIBR_PRIMARY_RESTART_PASS`,
+`HIBR_JOIN_RECONNECT_PASS`, and `HIBR_PANE_MATRIX_PASS`. Hibr source remains
+unmodified.
+
 The live pointer-artifact transaction reproduced the physical symptom through
 the controlled API path. All sampled render traces used
 `full-redraw target_changed=1 external_changed=1`; pointer-cache hits stayed

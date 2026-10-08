@@ -1,6 +1,6 @@
 # ADR 0032: Redraw the complete SDL scene for external Hibr commits
 
-Status: Accepted
+Status: Superseded by ADR-0036
 
 ## Context
 
@@ -11,15 +11,12 @@ outside the current damage region and appear to bleed into the next frame.
 
 ## Decision
 
-Whenever an external surface has committed damage, Blit rebuilds the complete
-SDL scene for that output from the canonical surface state before presenting.
-Ordinary terminal surfaces retain incremental damage rendering. The external
-Hibr path is correctness-first because its frame boundary already guarantees a
-complete logical frame.
+This decision was intentionally conservative but made every external Hibr
+cell commit expensive. It is superseded by ADR-0036. The original full-scene
+rule remains the reference for diagnosing stale graphics, but is no longer
+the normal cell-rendering policy.
 
 ## Consequences
 
-External Hibr presentation cannot retain stale pixels across commits. The
-additional work is bounded by the logical display size and is measured through
-the existing render diagnostics; it does not alter the canonical surface or
-create a second renderer.
+The full-scene cost was bounded by the logical display size, but it prevented
+the pointer cache from being used when Hibr committed hover/motion updates.

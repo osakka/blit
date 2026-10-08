@@ -108,8 +108,10 @@ traces, and a screenshot plus SHA-256 after every injected pointer position.
 The injected events use the same API dispatch path as physical input and are
 labelled `api-pointer`; they are a controlled comparator, not evidence about
 the physical evdev device. Compare `render_path` with the screenshots: a
-pointer-only frame should use `pointer-cache`, while `full-redraw` with
-`external_changed=1` identifies the expensive external-surface boundary.
+pointer-only frame should use `pointer-cache`. A full redraw with
+`external_changed=1 graphics_changed=0` identifies an external-cell damage
+path, while `graphics_changed=1` identifies the intentionally expensive image
+or graphics-scene rebuild path.
 
 The adapter also advertises Kitty-compatible pixel placement to Hibr and sends
 image frames through Blit's bounded WebSocket pixel protocol. Static under-text

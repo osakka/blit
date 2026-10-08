@@ -249,6 +249,7 @@ typedef struct {
     unsigned long long graphics_texture_uploads;
     double last_graphics_upload_ms;
     double max_graphics_upload_ms;
+    unsigned long long last_graphics_signature;
     unsigned long long last_topology_revision;
     int last_target_count;
     int glyph_atlas_columns;
@@ -9742,6 +9743,63 @@ static int surface_targets_output(BlitRuntime *runtime,
     return strcmp(session->display_id, display_id) == 0;
 }
 
+/* Cell damage can be composed incrementally from the committed scene cache.
+ * Graphics are different: hiding/replacing an image can expose pixels that
+ * are outside the cell rectangle that caused the render request. Track the
+ * complete graphics scene separately so only graphics changes require a
+ * full scene rebuild for an external Hibr surface. */
+static unsigned long long graphics_scene_signature(const BlitRuntime *runtime,
+                                                   int output_index)
+{
+    unsigned long long signature = 1469598103934665603ULL;
+    int session_index;
+    int image_index;
+
+    if (runtime == NULL || output_index < 0 ||
+        output_index >= runtime->output_count)
+        return signature;
+    for (session_index = 0; session_index < BLIT_MAX_SESSIONS;
+         ++session_index) {
+        const BlitSession *session = &runtime->sessions[session_index];
+        BlitSurface *surface;
+        if (!session->used)
+            continue;
+        surface = find_surface_id((BlitRuntime *)runtime, session->id);
+        if (surface == NULL || !surface_targets_output((BlitRuntime *)runtime,
+                                                        surface, output_index))
+            continue;
+        signature ^= session->id;
+        signature *= 1099511628211ULL;
+        for (image_index = 0; image_index < BLIT_GRAPHICS_MAX_IMAGES;
+             ++image_index) {
+            const BlitGraphicsImage *image = &session->graphics[image_index];
+            if (!image->used)
+                continue;
+            signature ^= image->id;
+            signature *= 1099511628211ULL;
+            signature ^= (unsigned long long)(image->complete != 0);
+            signature *= 1099511628211ULL;
+            signature ^= (unsigned long long)(image->visible != 0);
+            signature *= 1099511628211ULL;
+            signature ^= image->generation;
+            signature *= 1099511628211ULL;
+            signature ^= image->revision;
+            signature *= 1099511628211ULL;
+            signature ^= (unsigned long long)(unsigned int)image->x;
+            signature *= 1099511628211ULL;
+            signature ^= (unsigned long long)(unsigned int)image->y;
+            signature *= 1099511628211ULL;
+            signature ^= (unsigned long long)(unsigned int)image->placement_width;
+            signature *= 1099511628211ULL;
+            signature ^= (unsigned long long)(unsigned int)image->placement_height;
+            signature *= 1099511628211ULL;
+            signature ^= (unsigned long long)(unsigned int)image->z;
+            signature *= 1099511628211ULL;
+        }
+    }
+    return signature;
+}
+
 static SDL_Texture *create_sdl_glyph_atlas(SDL_Renderer *renderer,
                                            const BlitFont *font,
                                            int *columns_out)
@@ -10629,6 +10687,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
         int overlay_count = 0;
         int target_changed = 0;
         int external_target_changed = 0;
+        int graphics_changed;
         int full_redraw;
         int scene_target = 0;
         int pointer_only;
@@ -10663,6 +10722,9 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
         }
         if (runtime->pixel_frames_pending[output_index] > 0)
             target_changed = 1;
+        graphics_changed = runtime->outputs[output_index].initialized == 0 ||
+            runtime->outputs[output_index].last_graphics_signature !=
+                graphics_scene_signature(runtime, output_index);
         {
             int overlay_index;
             for (overlay_index = 0; overlay_index < BLIT_MAX_OVERLAYS;
@@ -10697,8 +10759,9 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
         {
             char detail[160];
             snprintf(detail, sizeof(detail),
-                     "output=%d path=full-redraw target_changed=%d external_changed=%d",
-                     output_index, target_changed, external_target_changed);
+                     "output=%d path=full-redraw target_changed=%d external_changed=%d graphics_changed=%d",
+                     output_index, target_changed, external_target_changed,
+                     graphics_changed);
             diagnostic_trace(runtime, "render_path", detail);
         }
         if (target_count == 0 && overlay_count == 0 &&
@@ -10765,7 +10828,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             continue;
         full_redraw = !runtime->outputs[output_index].initialized ||
             runtime->pointer_dirty ||
-            external_target_changed ||
+            graphics_changed ||
             target_count != runtime->outputs[output_index].last_target_count ||
             runtime->topology_revision !=
                 runtime->outputs[output_index].last_topology_revision;
@@ -11066,6 +11129,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
         runtime->outputs[output_index].last_topology_revision =
             runtime->topology_revision;
         runtime->outputs[output_index].last_target_count = target_count;
+        runtime->outputs[output_index].last_graphics_signature =
+            graphics_scene_signature(runtime, output_index);
     }
     if (render_started != 0) {
         Uint64 elapsed = SDL_GetPerformanceCounter() - render_started;
