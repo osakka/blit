@@ -3,6 +3,23 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## Current 0.1.336 diagnostic-window status
+
+The runtime now exposes a completed bounded event-loop timing window through
+`loop_gap_window_ms`, `loop_gap_window_sequence`, and
+`loop_gap_window_max_ms` in `GET /v1/diagnostics/runtime`. The sequence advances
+once per completed 500 ms interval, so a capture can correlate a user-visible
+artifact with a known observation interval instead of inferring timing from
+unrelated lifetime counters. Existing lifetime and last-sample counters remain
+unchanged for compatibility.
+
+The local TCC server passed terminal conformance, frame-rate, HTTP
+backpressure, session-lifecycle, and slow-reader screenshot checks with the
+new fields present. The 0.1.336 package and physical-host deployment are
+pending the package and live verification gates. The physical mouse,
+multi-monitor, and high-refresh acceptance gates remain open; Hibr source was
+not modified.
+
 ## Current 0.1.335 screenshot-delivery status
 
 The source change for 0.1.335 moves framebuffer screenshot transmission out of

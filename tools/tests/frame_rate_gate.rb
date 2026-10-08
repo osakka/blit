@@ -82,6 +82,14 @@ begin
   end
 
   performance = samples.last.fetch('performance')
+  %w[loop_gap_window_ms loop_gap_window_sequence loop_gap_window_max_ms].each do |name|
+    raise "runtime diagnostics missing #{name}" unless performance.key?(name)
+  end
+  raise 'loop-gap measurement window never completed' unless
+    performance.fetch('loop_gap_window_sequence') >=
+      baseline.fetch('performance').fetch('loop_gap_window_sequence') + 1
+  raise 'loop-gap window duration invalid' unless
+    performance.fetch('loop_gap_window_ms') >= 500
   outputs = samples.last.fetch('snapshot').fetch('render').fetch('outputs')
   raise 'no rendered output reported' if outputs.empty?
   terminal_bytes = performance.fetch('terminal_bytes')

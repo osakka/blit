@@ -524,6 +524,11 @@ typedef struct {
     uint64_t diagnostic_last_loop_us;
     double diagnostic_last_loop_gap_ms;
     double diagnostic_max_loop_gap_ms;
+    uint64_t diagnostic_loop_window_started_us;
+    unsigned long long diagnostic_loop_window_ms;
+    unsigned long long diagnostic_loop_window_sequence;
+    double diagnostic_loop_window_max_gap_ms;
+    double diagnostic_loop_window_current_max_gap_ms;
     double diagnostic_last_select_ms;
     double diagnostic_max_select_ms;
     double diagnostic_last_kms_present_ms;
@@ -1647,6 +1652,9 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"frame_rate_age_ms\":%llu,\"loop_iterations\":%llu,"
         "\"terminal_reads\":%llu,\"present_calls\":%llu,"
         "\"last_loop_gap_ms\":%.3f,\"max_loop_gap_ms\":%.3f,"
+        "\"loop_gap_window_ms\":%llu,"
+        "\"loop_gap_window_sequence\":%llu,"
+        "\"loop_gap_window_max_ms\":%.3f,"
         "\"last_kms_present_ms\":%.3f,\"max_kms_present_ms\":%.3f,"
         "\"last_sdl_present_ms\":%.3f,\"max_sdl_present_ms\":%.3f,"
         "\"last_select_ms\":%.3f,\"max_select_ms\":%.3f,"
@@ -1708,6 +1716,9 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         runtime->diagnostic_present_calls,
         runtime->diagnostic_last_loop_gap_ms,
         runtime->diagnostic_max_loop_gap_ms,
+        runtime->diagnostic_loop_window_ms,
+        runtime->diagnostic_loop_window_sequence,
+        runtime->diagnostic_loop_window_max_gap_ms,
         runtime->diagnostic_last_kms_present_ms,
         runtime->diagnostic_max_kms_present_ms,
         runtime->diagnostic_last_sdl_present_ms,
@@ -13193,16 +13204,34 @@ int main(int argc, char **argv)
         int pending_before_events;
         uint64_t select_started_us;
         uint64_t sdl_events_started_us;
+        uint64_t loop_started_us;
 
         ++runtime.diagnostic_loop_iterations;
+        loop_started_us = monotonic_us();
+        if (runtime.diagnostic_loop_window_started_us == 0)
+            runtime.diagnostic_loop_window_started_us = loop_started_us;
         if (runtime.diagnostic_last_loop_us != 0) {
-            double gap = (double)(monotonic_us() -
+            double gap = (double)(loop_started_us -
                                   runtime.diagnostic_last_loop_us) / 1000.0;
             runtime.diagnostic_last_loop_gap_ms = gap;
             if (gap > runtime.diagnostic_max_loop_gap_ms)
                 runtime.diagnostic_max_loop_gap_ms = gap;
+            if (gap > runtime.diagnostic_loop_window_current_max_gap_ms)
+                runtime.diagnostic_loop_window_current_max_gap_ms = gap;
         }
-        runtime.diagnostic_last_loop_us = monotonic_us();
+        runtime.diagnostic_last_loop_us = loop_started_us;
+        if (loop_started_us >= runtime.diagnostic_loop_window_started_us &&
+            loop_started_us - runtime.diagnostic_loop_window_started_us >=
+                500000ULL) {
+            runtime.diagnostic_loop_window_ms =
+                (loop_started_us - runtime.diagnostic_loop_window_started_us) /
+                1000ULL;
+            ++runtime.diagnostic_loop_window_sequence;
+            runtime.diagnostic_loop_window_max_gap_ms =
+                runtime.diagnostic_loop_window_current_max_gap_ms;
+            runtime.diagnostic_loop_window_current_max_gap_ms = 0.0;
+            runtime.diagnostic_loop_window_started_us = loop_started_us;
+        }
 
         {
             uint64_t evdev_scan_started_us = monotonic_us();

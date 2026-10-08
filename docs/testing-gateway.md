@@ -463,6 +463,10 @@ selected display cadence and scheduler target. The same object includes
 `terminal_reads`, `present_calls`, `last_loop_gap_ms`, and
 `max_loop_gap_ms`, `last_select_ms`, and `max_select_ms`, which distinguish
 kernel-wait stalls from other event-loop stalls and presentation stalls. The
+completed bounded loop-gap window is exposed as `loop_gap_window_ms`,
+`loop_gap_window_sequence`, and `loop_gap_window_max_ms`. The sequence advances
+once per completed 500 ms window; use it to take two runtime samples and avoid
+mistaking a partial or stale sample for the interval being investigated.
 direct-KMS duration is reported as `last_kms_present_ms` and
 `max_kms_present_ms`; these measure the complete KMS present call, including
 page-flip submission and driver event servicing. Interpret them alongside
