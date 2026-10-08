@@ -67,8 +67,8 @@ export BLIT_KMS_TRACE_TIMING=1
 $b mkdir -p /root /tmp/hibr-state /tmp/hibr-config /tmp/hibr-data
 $b mkdir -p /tmp/hibr-ctl-0
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
-    *" blit.input_only=1 "*) BLIT_INPUT_ONLY_TEST=1 ;;
     *" blit.input_soak=1 "*) BLIT_INPUT_ONLY_TEST=1; BLIT_INPUT_SOAK_TEST=1 ;;
+    *" blit.input_only=1 "*) BLIT_INPUT_ONLY_TEST=1 ;;
 esac
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
     *" blit.input_loss=1 "*) BLIT_INPUT_ONLY_TEST=1; BLIT_INPUT_LOSS_TEST=1 ;;
