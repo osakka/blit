@@ -54,6 +54,12 @@ session was deleted with HTTP 204. This is physical one-output Hibr evidence;
 physical pointer/button interaction and multi-monitor Hibr evidence remain
 open.
 
+The exact 0.1.256 TCC build also passed the Hibr/VKMS input fixture with
+`LAYOUT_MATRIX_PASS`, `BLIT_INPUT_MULTI_MOUSE_PASS`,
+`BLIT_INPUT_STREAM_PASS`, and `BLIT_INPUT_GAMEPAD_PASS`, including keypad,
+surface key/pointer, and device-loss diagnostics. The authorized physical host
+was left with zero sessions, surfaces, streams, and routes.
+
 The current-source four-output VKMS fixture exposed four independent 1024×768
 outputs at 60 Hz, created one terminal session per output, and passed
 `KMS_FOUR_OUTPUT_PASS`. The mixed-refresh fixture then passed
