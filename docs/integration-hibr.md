@@ -126,7 +126,10 @@ two-display run completed without that warning.
 The hibr module should be a transport adapter only:
 
 - `console put` becomes revisioned surface cell/style updates.
-- `console flush` becomes a frame commit.
+- `console flush` becomes one atomic frame commit. The adapter sends bounded
+  cell requests with `presentation: defer` and marks only the final request
+  `presentation: commit`; Blit therefore never presents a partial Hibr
+  wallpaper/menu redraw between HTTP chunks.
 - `console key` waits on the WebSocket stream and returns decoded input.
 - `console watch` subscribes to terminal and surface events.
 - console mouse reports become blit input events.

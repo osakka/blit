@@ -111,6 +111,7 @@ static int cb_http(const char *method, const char *path, const char *body,
 	size_t used = 0;
 	int fd, status;
 	int length;
+	if (response && capacity) response[0] = '\0';
 
 	fd = hibr_dial(cb.host, cb.port, 0);
 	if (fd < 0) {
@@ -142,7 +143,18 @@ static int cb_http(const char *method, const char *path, const char *body,
 	}
 	if (sscanf(buffer, "HTTP/%*s %d", &status) != 1 || status < 200 ||
 	    status >= 300) {
-		lg(HIBR_LERR, "console-blit: HTTP failure for %s: %.240s", path, buffer);
+		/* Preserve a structured revision-conflict body for cb_flush.  Do not
+		 * print it to Hibr's stderr: stderr is the same PTY whose terminal
+		 * writes can advance the surface revision, creating a conflict/log
+		 * feedback loop. Other failures remain diagnostic. */
+		content = strstr(buffer, "\r\n\r\n");
+		if (content) {
+			content += 4;
+			if (strlen(content) + 1 <= capacity)
+				memcpy(response, content, strlen(content) + 1);
+		}
+		if (!response[0] || !strstr(response, "revision_conflict"))
+			lg(HIBR_LERR, "console-blit: HTTP failure for %s: %.240s", path, buffer);
 		return 0;
 	}
 	content = strstr(buffer, "\r\n\r\n");
@@ -228,6 +240,7 @@ static long cb_flush(void)
 	size_t used;
 	int i, sent_count;
 	if (!cb.opened) return -1;
+	response[0] = '\0';
 	if (!cb_surface_path(path, sizeof(path))) return -1;
 	while (cb.pending_count > 0) {
 		used = (size_t)snprintf(body, sizeof(body),
@@ -255,9 +268,13 @@ static long cb_flush(void)
 			return -1;
 		}
 		used += (size_t)snprintf(body + used, sizeof(body) - used,
-			"],\"cursor\":{\"x\":%d,\"y\":%d,\"visible\":%s}}",
+			"],\"presentation\":\"%s\",\"cursor\":{\"x\":%d,\"y\":%d,\"visible\":%s}}",
+			i == (int)cb.pending_count ? "commit" : "defer",
 			cb.cursor_x, cb.cursor_y, cb.cursor_visible ? "true" : "false");
 		if (!cb_http("PUT", path, body, response, sizeof(response))) {
+			if (strstr(response, "revision_conflict") &&
+			    cb_json_number(response, "revision", &cb.revision))
+				continue;
 			lg(HIBR_LERR, "console-blit: flush failed surface=%s base_revision=%llu pending=%lu",
 				cb.surface, cb.revision, (unsigned long)cb.pending_count);
 			return -1;
@@ -320,7 +337,11 @@ static int cb_open(sh *s)
 			cb.surface, response);
 		return HIBR_FAIL;
 	}
-	cb.cursor_visible = 1;
+	/* Hibr's native console starts with its cursor hidden (cn_cvis is a
+	 * zero-initialized state).  Match that contract until an explicit
+	 * `console cursor row col` request enables it; otherwise the desktop's
+	 * own drawing cursor appears as a moving block over wallpaper/savers. */
+	cb.cursor_visible = 0;
 	cb.opened = 1;
 	lg(HIBR_LDBG, "console-blit: opened surface=%s session=%s size=%dx%d revision=%llu",
 		cb.surface, cb.session[0] ? cb.session : "(none)",
@@ -522,6 +543,13 @@ static int cb_console(sh *s, int ac, char **av)
 		if (ac > 2 && !strcmp(av[2], "off")) cb_cursor(cb.cursor_y, cb.cursor_x, 0);
 		else if (ac >= 4) cb_cursor(atoi(av[2]), atoi(av[3]), 1);
 		else return HIBR_FAIL;
+		return HIBR_OK;
+	}
+	if (!strcmp(sub, "gfx")) {
+		/* The API accepts Kitty and sixel graphics, but this ABI adapter
+		 * currently exposes the tested cell fallback. Report that explicitly
+		 * so Hibr does not treat a missing capability callback as an error. */
+		cb_return(s, "none 8 16");
 		return HIBR_OK;
 	}
 	if (!strcmp(sub, "put") || !strcmp(sub, "fill")) {
@@ -747,6 +775,21 @@ static int cb_key(int ms, str *out)
 }
 
 static void cb_mouse(int mode) { cb.mouse_mode = mode; }
+static void cb_cellpx(int *w, int *h)
+{
+	if (w) *w = 8;
+	if (h) *h = 16;
+}
+static int cb_image(sh *s, const char *pane, int row, int col, int h, int w,
+			const unsigned char *rgb, int iw, int ih, unsigned flags)
+{
+	/* Pixel placement remains owned by Blit's graphics-object API. Hibr can
+	 * safely fall back to cell rendering when this optional callback returns
+	 * zero. */
+	(void)s; (void)pane; (void)row; (void)col; (void)h; (void)w;
+	(void)rgb; (void)iw; (void)ih; (void)flags;
+	return 0;
+}
 static int cb_prect(const char *name, int *row, int *col, int *h, int *w)
 {
 	char path[64], response[CB_HTTP_CAP], needle[256];
@@ -767,7 +810,7 @@ static void cb_link(const char *uri) { (void)uri; }
 static const dp_api cb_api = {
 	cb_open, cb_close, cb_isopen, cb_size, cb_resized, cb_pen,
 	cb_clear, cb_put, cb_fill, cb_cursor, cb_flush, cb_key,
-	cb_colour, cb_attr, cb_mouse, cb_prect, cb_link
+	cb_colour, cb_attr, cb_mouse, cb_prect, cb_link, cb_image, cb_cellpx
 };
 
 static int cb_ini(sh *s)

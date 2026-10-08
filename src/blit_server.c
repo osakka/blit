@@ -163,6 +163,10 @@ typedef struct {
     int damage_y;
     int damage_width;
     int damage_height;
+    /* External cell producers may submit one logical frame in bounded HTTP
+       chunks. Keep those chunks out of the renderer until the commit chunk
+       arrives, otherwise Hibr's wallpaper/menu redraw is visibly torn. */
+    int frame_open;
 } BlitSurface;
 
 typedef struct {
@@ -603,6 +607,8 @@ static void update_status_json(const BlitRuntime *runtime, char *body,
 static int update_authorized(const BlitRuntime *runtime, const char *request);
 static void cancel_update_upload(BlitRuntime *runtime, int fd,
                                  const char *request);
+static void reset_update_state(BlitRuntime *runtime, int fd,
+                               const char *request);
 static int terminate_session_process(pid_t process_id);
 
 static void effect_json(const BlitRuntime *runtime, char *body,
@@ -921,7 +927,8 @@ static int render_work_remains(const BlitRuntime *runtime)
             return 1;
     for (i = 0; i < BLIT_MAX_SESSIONS; ++i)
         if (runtime->surfaces[i] != NULL &&
-            runtime->surfaces[i]->used && runtime->surfaces[i]->damage_valid)
+            runtime->surfaces[i]->used && !runtime->surfaces[i]->frame_open &&
+            runtime->surfaces[i]->damage_valid)
             return 1;
     return 0;
 }
@@ -7879,6 +7886,11 @@ static void handle_request(int fd, BlitRuntime *runtime,
         cancel_update_upload(runtime, fd, request);
         return;
     }
+    if (strcmp(path, "/v1/control/update/reset") == 0 &&
+        strcmp(method, "POST") == 0) {
+        reset_update_state(runtime, fd, request);
+        return;
+    }
 
     if (strncmp(path, "/v1/diagnostics/screenshots/",
                 strlen("/v1/diagnostics/screenshots/")) == 0 &&
@@ -8004,6 +8016,9 @@ static void handle_request(int fd, BlitRuntime *runtime,
         (strcmp(method, "PUT") == 0 || strcmp(method, "GET") == 0)) {
         BlitSurface *surface = find_surface(runtime, path);
         int base_revision;
+        char presentation[16] = "immediate";
+        int presentation_deferred;
+        int presentation_commit;
 
         if (surface == NULL) {
             send_problem(fd, 404, "Not Found", "surface_not_found",
@@ -8038,6 +8053,22 @@ static void handle_request(int fd, BlitRuntime *runtime,
                          "A base revision and cells array are required.");
             return;
         }
+        if (json_string(payload, "presentation", presentation,
+                        sizeof(presentation)) &&
+            strcmp(presentation, "immediate") != 0 &&
+            strcmp(presentation, "defer") != 0 &&
+            strcmp(presentation, "commit") != 0) {
+            send_problem(fd, 400, "Bad Request", "invalid_presentation_mode",
+                         "presentation must be immediate, defer, or commit.");
+            return;
+        }
+        presentation_deferred = strcmp(presentation, "defer") == 0;
+        presentation_commit = strcmp(presentation, "commit") == 0;
+        if (presentation_commit && !surface->frame_open) {
+            send_problem(fd, 409, "Conflict", "frame_not_open",
+                         "A commit requires a preceding deferred cell update.");
+            return;
+        }
         if ((unsigned long long)base_revision != surface->revision) {
             send_revision_problem(fd, "revision_conflict",
                                   "The surface revision does not match the requested update.",
@@ -8050,6 +8081,12 @@ static void handle_request(int fd, BlitRuntime *runtime,
             return;
         }
         ++surface->revision;
+        if (presentation_deferred)
+            surface->frame_open = 1;
+        else if (presentation_commit)
+            surface->frame_open = 0;
+        if (!presentation_deferred)
+            runtime->render_pending = 1;
         mutation_receipt_json(surface, body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
         idempotency_store(runtime, request, method, path, payload, 200,
@@ -11823,6 +11860,32 @@ static void cancel_update_upload(BlitRuntime *runtime, int fd,
     send_http(fd, 202, "Accepted", "application/json",
               "{\"state\":\"cancelled\",\"detail\":\""
               "package upload cancelled\"}");
+}
+
+static void reset_update_state(BlitRuntime *runtime, int fd,
+                               const char *request)
+{
+    int i;
+
+    if (!update_authorized(runtime, request)) {
+        send_problem(fd, 403, "Forbidden", "update_disabled",
+                     "A valid update token is required.");
+        return;
+    }
+    for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i) {
+        if (runtime->http_clients[i].used &&
+            runtime->http_clients[i].update_fd >= 0) {
+            send_problem(fd, 409, "Conflict", "update_active",
+                         "An update upload is still in progress.");
+            return;
+        }
+    }
+    snprintf(runtime->update_state, sizeof(runtime->update_state), "ready");
+    snprintf(runtime->update_detail, sizeof(runtime->update_detail),
+             "update state reset");
+    send_http(fd, 202, "Accepted", "application/json",
+              "{\"state\":\"ready\",\"detail\":\""
+              "update state reset\"}");
 }
 
 static void finish_update_upload(BlitRuntime *runtime, BlitHttpClient *client)

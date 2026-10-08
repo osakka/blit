@@ -3,7 +3,49 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
-## Current 0.1.289 Hibr integration status
+## Current 0.1.295 Hibr integration status
+
+The current TCC-built server and exact Hibr `0.99.79 abi 16` adapter add an
+atomic cell-frame boundary. Hibr flushes are sent as bounded `defer` requests
+followed by one `commit`; deferred revisions do not set the renderer pending
+state. The focused API gate verified this behavior, and the update-recovery
+gate verified that an invalid package can be reset from `failed` to `ready`
+through the authenticated API without restarting the gateway.
+
+The 0.1.295 QEMU VKMS stock Hibr fixture completed with `ACCEPTANCE_PASS` and
+reported no `flush failed` or `revision_conflict` errors. This is QEMU evidence;
+the physical host still needs the service restarted and 0.1.295 deployed before
+the live screenshot/overlap claim can be made.
+
+## Superseded 0.1.293 Hibr integration status
+
+The current TCC-built server and exact Hibr `0.99.79 abi 16` adapter were
+validated without modifying the Hibr checkout. The two-output VKMS/QEMU stock
+desktop fixture completed with `LAYOUT_MATRIX_PASS` and `ACCEPTANCE_PASS`; it
+started the unchanged primary desktop and `desktop --join` client, exercised
+the control displays, and reported no `flush failed`, `revision_conflict`, or
+`console-blit` adapter errors. Both desktop surfaces reported
+`cursor.visible:false`, confirming that the adapter now matches Hibr's
+zero-initialized hidden-cursor default.
+
+On the authorized physical host, the corrected API request used the schema
+field `arguments` (not the non-contract `args` spelling). It produced a real
+Hibr desktop on the 1920x2160 display: the surface contained the menu bar in
+row 0, a populated row 1, desktop content through row 15, and the control
+strip at row 108. The corresponding 1920x2160 API screenshot was captured
+after the surface settled. Diagnostics reported SDL3/OpenGL presentation at
+60 Hz with zero missed deadlines. This is one-display/60 Hz evidence only;
+physical multi-monitor and physical 120/240 Hz gates remain open.
+
+The revision-conflict retry in `console-blit` is retained as a focused
+correctness fix: a stale surface revision is refreshed from the structured
+409 response and the bounded pending batch is retried without writing the
+error back into the same Hibr PTY. The adapter also now starts with the
+cursor hidden and only exposes it after an explicit Hibr cursor request. The
+package for this source state is `blit_0.1.293-1_amd64.deb`; SHA-256:
+`cdb237081f9d2e8d282a1faf8031a419765d7c9fc91044740f495dfa5dbca046`.
+
+## Historical 0.1.289 Hibr integration status
 
 The authorized physical host reports Hibr `0.99.79 abi 16`, while the local
 development checkout is `0.99.100`. The `console-blit` adapter was therefore
@@ -12,12 +54,9 @@ Hibr checkout, and package `0.1.289` was deployed to the host. The exact
 0.99.79 adapter/server combination passes the QEMU Hibr primary/`desktop
 --join` fixture with `ACCEPTANCE_PASS`.
 
-The physical host still does not present a valid desktop: its live surface
-contains repeated `-1` cells and the screenshot is black. This is an open
-physical-host integration failure, not accepted rendering evidence. The
-session was removed after capture. Further diagnosis must identify the host's
-installed Hibr desktop/module/configuration mismatch before another package is
-claimed good.
+The physical-host `-1`/black screenshot was superseded by the settled `.291`
+through `.293` verification above; it remains historical failure evidence, not a
+current acceptance result.
 
 The exact 0.1.287 high-refresh fixture also completed with
 `REFRESH_SCHEDULER_240_PASS`, `KMS_CAPTURE_PASS`, and the Kitty wide-glyph
@@ -65,7 +104,7 @@ source or installed Hibr file was modified.
 
 - Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The current source candidate is `0.1.283`. It builds with TCC and passes
+- The current source candidate is `0.1.295`. It builds with TCC and passes
   the complete terminal conformance suite, SDL screenshot/overlay pixels,
   the hidden-cursor damage gate, and the complete Hibr font manifest gate.
   It includes the versioned network terminal-input endpoint at the canonical

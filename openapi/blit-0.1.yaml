@@ -241,6 +241,29 @@ paths:
                   detail: {type: string}
         default:
           $ref: '#/components/responses/Problem'
+  /v1/control/update/reset:
+    post:
+      tags: [control]
+      operationId: resetUpdateState
+      summary: Clear a failed update state when no upload is active
+      parameters:
+        - in: header
+          name: X-Blit-Update-Token
+          required: true
+          schema: {type: string, minLength: 1}
+      responses:
+        '202':
+          description: Update state reset and ready for a new upload
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [state, detail]
+                properties:
+                  state: {type: string, const: ready}
+                  detail: {type: string}
+        default:
+          $ref: '#/components/responses/Problem'
   /v1/control/shutdown:
     post:
       tags: [control]
@@ -1469,6 +1492,15 @@ components:
               style: {$ref: '#/components/schemas/CellStyle'}
             additionalProperties: false
         cursor: {$ref: '#/components/schemas/Cursor'}
+        presentation:
+          type: string
+          enum: [immediate, defer, commit]
+          default: immediate
+          description: >-
+            Controls visual presentation of this update. `immediate` applies
+            and presents it normally. `defer` applies the revision but keeps
+            it out of the renderer as part of a bounded multi-request frame.
+            `commit` applies the final chunk and presents the complete frame.
       additionalProperties: false
     FrameRequest:
       type: object
