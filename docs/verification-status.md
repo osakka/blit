@@ -3,6 +3,26 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## Current 0.1.355 real-host Hibr handoff evidence
+
+The authorized host reports `0.1.355`. A fresh ordinary Hibr desktop started
+through `POST /v1/terminal-sessions` reached the authoritative `240x135`
+surface with `32400` non-empty cells automatically. The evidence is in
+`diagnostics/live-355-handoff-1/`; six synchronized `1920x2160` screenshots
+have identical hashes, and the runtime reports a 60 Hz display, a 16 ms
+refresh-aware target, zero missed presentation deadlines, and no renderer
+errors.
+
+The cause of the earlier partial desktop was a Hibr hold-process handoff:
+the exported identity could identify the owner, but the desktop child lived
+in a descendant process group. Blit now uses a unique session token, follows
+only that bounded descendant tree, and performs the delayed PTY resize plus
+the proven negative-PID `SIGWINCH` operation. Hibr source was not modified.
+
+Physical pointer/button acceptance, production adapter acceptance, multiple
+physical monitors, and high-refresh physical acceptance remain open; this
+capture records input inventory but no physical user event.
+
 ## Current 0.1.345 real-host boundary evidence
 
 The authorized host reports `0.1.345` and the reproducible capture is in
