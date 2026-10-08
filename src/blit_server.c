@@ -6650,6 +6650,54 @@ static int process_has_blit_session(pid_t pid, const char *session_token)
     return 0;
 }
 
+static pid_t process_parent_pid(pid_t pid)
+{
+    char path[64];
+    char stat_line[4096];
+    char *close_paren;
+    char state;
+    long parent;
+    int fd;
+    ssize_t length;
+
+    snprintf(path, sizeof(path), "/proc/%ld/stat", (long)pid);
+    fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0)
+        return (pid_t)-1;
+    length = read(fd, stat_line, sizeof(stat_line) - 1);
+    close(fd);
+    if (length <= 0)
+        return (pid_t)-1;
+    stat_line[length] = '\0';
+    close_paren = strrchr(stat_line, ')');
+    if (close_paren == NULL ||
+        sscanf(close_paren + 2, "%c %ld", &state, &parent) != 2 ||
+        parent < 1 || parent > INT_MAX)
+        return (pid_t)-1;
+    return (pid_t)parent;
+}
+
+static int process_is_descendant(pid_t pid, pid_t ancestor)
+{
+    int depth;
+
+    for (depth = 0; depth < 8 && pid > 1; ++depth) {
+        pid = process_parent_pid(pid);
+        if (pid == ancestor)
+            return 1;
+    }
+    return 0;
+}
+
+static int signal_process_group(pid_t pid)
+{
+    pid_t group = getpgid(pid);
+
+    if (group > 1 && kill(-group, SIGWINCH) == 0)
+        return 1;
+    return kill(pid, SIGWINCH) == 0;
+}
+
 static int reassert_hibr_session_processes(BlitSession *session,
                                            const struct winsize *size)
 {
@@ -6682,8 +6730,38 @@ static int reassert_hibr_session_processes(BlitSession *session,
             ioctl(fd, TIOCSWINSZ, size);
             close(fd);
         }
-        if (kill(-pid, SIGWINCH) == 0 || kill(pid, SIGWINCH) == 0)
+        if (signal_process_group(pid))
             ++matched;
+        /* Hibr's hold layer may retain the exported token on its owner while
+           launching the actual desktop in a fresh process group. Follow only
+           that bounded descendant tree so stale sessions and unrelated users
+           cannot receive Blit's resize signal. */
+        {
+            DIR *children = opendir("/proc");
+            struct dirent *child_entry;
+            if (children != NULL) {
+                while ((child_entry = readdir(children)) != NULL) {
+                    char *child_end;
+                    unsigned long child_value;
+                    pid_t child_pid;
+
+                    if (child_entry->d_name[0] < '1' ||
+                        child_entry->d_name[0] > '9')
+                        continue;
+                    child_value = strtoul(child_entry->d_name, &child_end, 10);
+                    if (*child_end != '\0' || child_value == 0 ||
+                        child_value > (unsigned long)INT_MAX)
+                        continue;
+                    child_pid = (pid_t)child_value;
+                    if (child_pid == pid ||
+                        !process_is_descendant(child_pid, pid))
+                        continue;
+                    if (signal_process_group(child_pid))
+                        ++matched;
+                }
+                closedir(children);
+            }
+        }
     }
     closedir(directory);
     return matched;
@@ -6751,10 +6829,10 @@ static void service_attach_reasserts(BlitRuntime *runtime, uint64_t now)
            contract.  Retry for a bounded two-and-a-half second window; this
            remains Blit's PTY boundary and never injects user input. Keep
            discovering the detached owner for a bounded startup window, then
-           stop after three successful owner-group reassertions. */
+           stop after eight successful owner-group reassertions. */
         if (session->attach_reassert_attempts <
             session->attach_reassert_max_attempts &&
-            (session->attach_reassert_hibr_matches < 3 ||
+            (session->attach_reassert_hibr_matches < 8 ||
              session->attach_reassert_hibr_matches == 0)) {
             session->attach_reassert_pending = 1;
             session->attach_reassert_due_us = now +
