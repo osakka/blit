@@ -390,10 +390,19 @@ if [ "${BLIT_HIBR_PANES_TEST:-0}" = 1 ]; then
     echo HIBR_PANE_MATRIX_SESSIONS
     for n in 1 2 3 4; do
         session_id=$($b sed -n 's/.*"id":"\([0-9][0-9]*\)".*/\1/p' "/tmp/hibr-pane-$n.json")
-        state=$($b wget -qO- "http://127.0.0.1:19191/v1/terminal-sessions/$session_id" |
+        session_detail=$($b wget -qO- "http://127.0.0.1:19191/v1/terminal-sessions/$session_id")
+        state=$(echo "$session_detail" |
             $b sed -n 's/.*"state":"\([^\"]*\)".*/\1/p')
-        echo "pane$n session=$session_id state=$state"
+        surface_revision=$(echo "$session_detail" |
+            $b sed -n 's/.*"surface_revision":\([0-9][0-9]*\).*/\1/p')
+        surface_json=$($b wget -qO- \
+            "http://127.0.0.1:19191/v1/surfaces/surface-$session_id/cells")
+        cell_count=$(echo "$surface_json" | $b tr ',' '\n' |
+            $b grep -c '"x":' || true)
+        echo "pane$n session=$session_id state=$state surface_revision=${surface_revision:-0} cells=$cell_count"
         [ "$state" = running ] || pane_matrix_pass=0
+        [ "${surface_revision:-0}" -ge 2 ] || pane_matrix_pass=0
+        [ "${cell_count:-0}" -gt 0 ] || pane_matrix_pass=0
     done
     if [ "$pane_matrix_pass" -ne 1 ]; then
         echo HIBR_PANE_MATRIX_START_RESPONSES

@@ -161,7 +161,11 @@ The unchanged stock Hibr session entrypoint was also exercised with
 `blit.hibr_stock=1` and the four-pane matrix. All four stock Hibr sessions
 reached `running`, attached to Blit-owned panes, and the guest powered down
 cleanly with no reported Hibr errors. This is stock-entrypoint integration
-evidence; it does not replace physical multi-display validation.
+evidence; it does not replace physical multi-display validation. The acceptance
+check now also reads each attached surface: all four sessions advanced their
+surface revision and exposed 1,537 cells each. This proves that the stock
+entrypoint produced populated terminal surfaces, rather than merely creating
+four live processes.
 
 The current 0.1.279 two-output high-refresh fixture passed
 `REFRESH_SCHEDULER_240_PASS` and accepted all 240 API pixel frames, but failed
