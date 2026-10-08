@@ -394,6 +394,11 @@ selected display cadence and scheduler target. The same object includes
 `terminal_reads`, `present_calls`, `last_loop_gap_ms`, and
 `max_loop_gap_ms`, `last_select_ms`, and `max_select_ms`, which distinguish
 kernel-wait stalls from other event-loop stalls and presentation stalls. The
+direct-KMS duration is reported as `last_kms_present_ms` and
+`max_kms_present_ms`; these measure the complete KMS present call, including
+page-flip submission and driver event servicing. Interpret them alongside
+`snapshot.render.outputs[].missed_deadlines` to separate renderer work from a
+slow KMS or virtual-display backend. The
 SDL event-pump duration is reported as `last_sdl_events_ms` and
 `max_sdl_events_ms`; evdev scan duration is reported as
 `last_evdev_scan_ms` and `max_evdev_scan_ms`. The rate is measured from

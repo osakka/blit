@@ -480,6 +480,8 @@ typedef struct {
     double diagnostic_max_loop_gap_ms;
     double diagnostic_last_select_ms;
     double diagnostic_max_select_ms;
+    double diagnostic_last_kms_present_ms;
+    double diagnostic_max_kms_present_ms;
     double diagnostic_last_sdl_events_ms;
     double diagnostic_max_sdl_events_ms;
     double diagnostic_last_evdev_scan_ms;
@@ -1309,6 +1311,7 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"frame_rate_age_ms\":%llu,\"loop_iterations\":%llu,"
         "\"terminal_reads\":%llu,\"present_calls\":%llu,"
         "\"last_loop_gap_ms\":%.3f,\"max_loop_gap_ms\":%.3f,"
+        "\"last_kms_present_ms\":%.3f,\"max_kms_present_ms\":%.3f,"
         "\"last_select_ms\":%.3f,\"max_select_ms\":%.3f,"
         "\"last_sdl_events_ms\":%.3f,\"max_sdl_events_ms\":%.3f,"
         "\"last_evdev_scan_ms\":%.3f,\"max_evdev_scan_ms\":%.3f},"
@@ -1344,6 +1347,8 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         runtime->diagnostic_present_calls,
         runtime->diagnostic_last_loop_gap_ms,
         runtime->diagnostic_max_loop_gap_ms,
+        runtime->diagnostic_last_kms_present_ms,
+        runtime->diagnostic_max_kms_present_ms,
         runtime->diagnostic_last_select_ms,
         runtime->diagnostic_max_select_ms,
         runtime->diagnostic_last_sdl_events_ms,
@@ -9706,6 +9711,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
         int damage_consumed[BLIT_MAX_SESSIONS];
         int view_count = 0;
         int kms_overlay_count = 0;
+        uint64_t kms_present_started;
+        double kms_present_ms;
         int surface_index;
         int overlay_index;
         unsigned long long visual_revision = runtime->effect.revision ^
@@ -9799,6 +9806,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             views[view_count].graphics_count = BLIT_GRAPHICS_MAX_IMAGES;
             ++view_count;
         }
+        kms_present_started = monotonic_us();
         if (blit_kms_present(runtime->kms, views, view_count,
                              runtime->pointer_x, runtime->pointer_y,
                              runtime->pointer_valid, output_mask,
@@ -9808,6 +9816,11 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                                  strcmp(runtime->effect.preset, "scanlines") == 0,
                              runtime->effect.intensity) < 0)
             fprintf(stderr, "blit: direct KMS present failed\n");
+        kms_present_ms = (double)(monotonic_us() - kms_present_started) /
+            1000.0;
+        runtime->diagnostic_last_kms_present_ms = kms_present_ms;
+        if (kms_present_ms > runtime->diagnostic_max_kms_present_ms)
+            runtime->diagnostic_max_kms_present_ms = kms_present_ms;
         for (surface_index = 0; surface_index < view_count; ++surface_index)
             if (damage_consumed[surface_index]) {
                 BlitSurface *surface = find_surface_id(
