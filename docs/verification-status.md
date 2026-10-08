@@ -42,6 +42,13 @@ The exact same binary passed the direct-KMS two-output visual gate:
 `PPM_DISPLAY_47_WIDE_KITTY_PASS`, `PPM_DISPLAY_48_PASS`,
 `KMS_API_SCREENSHOT_PASS`, and `KMS_CAPTURE_PASS`.
 
+The exact same binary and current external Hibr checkout passed the dedicated
+Hibr VKMS orchestration fixture: `LAYOUT_MATRIX_PASS`,
+`HIBR_PRIMARY_RESTART_PASS`, `HIBR_JOIN_RECONNECT_PASS`, and
+`HIBR_PANE_MATRIX_PASS`. The four-output current-source fixture also passed
+`KMS_FOUR_OUTPUT_PASS`, presenting four independent KMS outputs and four
+attached terminal surfaces.
+
 The corrected real-mode high-refresh fixture selected 240 Hz from the VKMS
 mode itself (`refresh_source:"display-mode"`) and accepted all 240 pixel
 frames. Its scheduler metadata gate passed, but missed deadlines increased
