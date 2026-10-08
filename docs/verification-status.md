@@ -3,7 +3,20 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
-## Current 0.1.295 Hibr integration status
+## Current 0.1.296 Hibr integration status
+
+The TCC-built server adds `POST /v1/control/restart`, which uses the same
+clean-up and self-reexec path as a supervised package restart. This closes the
+operational gap where an API shutdown left a systemd `Restart=on-failure` unit
+stopped and unreachable. The update-reset and restart control contracts are
+schema-documented; local reset, lifecycle, refresh, and QEMU Hibr acceptance
+gates pass.
+
+The `.296` package has not yet been installed on the physical host because the
+authorized host is currently unreachable. No physical screenshot or live
+frame-rate claim is made for this version.
+
+## Superseded 0.1.295 Hibr integration status
 
 The current TCC-built server and exact Hibr `0.99.79 abi 16` adapter add an
 atomic cell-frame boundary. Hibr flushes are sent as bounded `defer` requests
@@ -104,7 +117,7 @@ source or installed Hibr file was modified.
 
 - Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The current source candidate is `0.1.295`. It builds with TCC and passes
+- The current source candidate is `0.1.296`. It builds with TCC and passes
   the complete terminal conformance suite, SDL screenshot/overlay pixels,
   the hidden-cursor damage gate, and the complete Hibr font manifest gate.
   It includes the versioned network terminal-input endpoint at the canonical

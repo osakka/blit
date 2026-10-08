@@ -287,6 +287,24 @@ paths:
                   detail: {type: string}
         default:
           $ref: '#/components/responses/Problem'
+  /v1/control/restart:
+    post:
+      tags: [control]
+      operationId: restartServer
+      summary: Request an orderly in-process server restart
+      responses:
+        '202':
+          description: Restart accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [state, detail]
+                properties:
+                  state: {type: string, const: restarting}
+                  detail: {type: string}
+        default:
+          $ref: '#/components/responses/Problem'
   /v1/effects:
     get:
       tags: [effects]

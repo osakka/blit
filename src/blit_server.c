@@ -7880,6 +7880,15 @@ static void handle_request(int fd, BlitRuntime *runtime,
                   "shutdown accepted; cleanup is in progress\"}");
         return;
     }
+    if (strcmp(path, "/v1/control/restart") == 0 &&
+        strcmp(method, "POST") == 0) {
+        blit_restart_requested = 1;
+        blit_running = 0;
+        send_http(fd, 202, "Accepted", "application/json",
+                  "{\"state\":\"restarting\",\"detail\":\""
+                  "restart accepted; cleanup is in progress\"}");
+        return;
+    }
 
     if (strcmp(path, "/v1/control/update/cancel") == 0 &&
         strcmp(method, "POST") == 0) {
