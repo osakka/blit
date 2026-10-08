@@ -14,15 +14,18 @@ has desktop meaning.
 
 ## Decision
 
-When an external session first becomes active, Blit schedules one delayed
-attach reassert.  It reapplies the canonical PTY geometry and sends SIGWINCH
-to the PTY foreground process group, with a process fallback.  The delay lets
-the child finish its startup and open the desktop before Hibr handles the
-resize notification.  Blit owns this adapter behavior; Hibr source is not
-modified.
+When a terminal session first becomes active, Blit schedules bounded delayed
+attach reasserts. It reapplies the canonical PTY geometry and sends SIGWINCH
+to the PTY foreground process group, with a process fallback. Hibr's hold
+layer can retain Blit's exported identity on an owner while launching the
+desktop in a descendant group, so Blit also exports a unique per-server,
+per-session token and follows only that bounded descendant tree. The delay
+lets the child finish startup and open the desktop before Hibr handles the
+resize notification. Blit owns this behavior; Hibr source is not modified.
 
 ## Consequences
 
-External Hibr sessions deterministically enter their normal full redraw path on
-attach or restart.  No user input is synthesized, and ordinary terminal
-sessions are unaffected.  The operation is one-shot per session activation.
+Hibr sessions deterministically enter their normal full redraw path on attach
+or restart without signalling stale sessions that reused a numeric ID. No user
+input is synthesized, and ordinary terminal sessions use the same PTY contract.
+The retries are bounded and stop after the desktop owner has been reasserted.
