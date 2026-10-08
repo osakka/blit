@@ -78,6 +78,12 @@ session deletion completed in 146 ms, stream replay repaired a one-event gap,
 shutdown exited cleanly, hidden-cursor damage passed, and the screenshot/
 overlay pixel gate passed.
 
+The exact 0.1.265 direct-KMS fixture additionally passed the mixed-refresh
+branch (`REFRESH_SCHEDULER_MIXED_PASS`) with independent 60/120 Hz scheduler
+metadata, and the output-loss branch (`OUTPUT_LOSS_PASS`) with the surviving
+second output continuing to capture successfully. Both runs also passed the
+wide-glyph, API-screenshot, and complete KMS capture assertions.
+
 ### Current 0.1.263 source and physical evidence
 
 The exact 0.1.263 TCC build passes the complete 0.1.262 regression set plus
