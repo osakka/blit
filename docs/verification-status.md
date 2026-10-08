@@ -86,6 +86,14 @@ misses because the emulated page-flip path took tens of milliseconds. It proves
 the 240 Hz deadline calculation and API metadata only; physical 120/240 Hz
 hardware remains unverified.
 
+The exact 0.1.260 Hibr input fixture then passed `LAYOUT_MATRIX_PASS`,
+`BLIT_INPUT_KEYPAD_PASS`, `BLIT_INPUT_MULTI_MOUSE_PASS`,
+`BLIT_INPUT_STREAM_PASS`, and `BLIT_INPUT_GAMEPAD_PASS`. It exercised four
+VKMS outputs, independent keyboard and pointer routing, multiple mice, left /
+middle / right buttons, wheel events, held-button motion, and gamepad
+discovery. This is deterministic evdev evidence; physical click behavior on a
+second real connector remains open.
+
 With Hibr staged from its existing checkout only, the same four-output fixture
 then launched one primary Hibr desktop and three `desktop --join` clients.
 All four Hibr-backed surfaces reached the running/presented state and the
