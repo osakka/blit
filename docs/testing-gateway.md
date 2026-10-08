@@ -270,7 +270,8 @@ tools/probes/stage_hibr_qemu.sh /tmp/hibr-initroot-current /path/to/hibr
 From the repository root:
 
 ```sh
-tools/build-tcc.sh build/blit/blit-server
+tools/build-tcc.sh build/blit/blit-server server
+tools/build-tcc.sh build/blit/blit-update-helper helper
 ```
 
 The stream reconnect/replay gate runs against that exact binary with the

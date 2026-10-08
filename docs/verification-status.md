@@ -25,6 +25,15 @@ an evidence record, not a claim that the complete product is released.
   It is not claimed as a fully validated 240 Hz release: the real-mode QEMU
   stream gate still fails its strict page-flip deadline requirement.
 
+The canonical TCC build entrypoint now has explicit `server` and `helper`
+targets. The exact rebuild produced distinct server and root-update-helper
+artifacts (`b75c9625...e87a` and `65ebfebf...dee0` respectively); the Debian
+packaging allowlist rejects an updater that contains server routes or is byte
+identical to the server. The rebuilt package passed this target-separation
+check. The helper was smoke-checked to its expected privileged socket bind
+boundary; its unprivileged development-shell bind failure is expected because
+`/run/blit` is root-owned in deployment.
+
 The same live host sustained 59.894 measured frames per second during a
 controlled 120×50 full-screen coloured terminal redraw workload carrying
 99,433 terminal bytes, with zero missed deadlines. Its maximum observed render
@@ -166,6 +175,9 @@ check now also reads each attached surface: all four sessions advanced their
 surface revision and exposed 1,537 cells each. This proves that the stock
 entrypoint produced populated terminal surfaces, rather than merely creating
 four live processes.
+The same assertions passed again with the exact current TCC rebuild after
+the build-target correction, and the four-output fixture returned
+`KMS_FOUR_HIBR_PASS`; both guests powered down cleanly.
 
 The current 0.1.279 two-output high-refresh fixture passed
 `REFRESH_SCHEDULER_240_PASS` and accepted all 240 API pixel frames, but failed

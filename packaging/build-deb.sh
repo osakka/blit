@@ -19,6 +19,14 @@ if ! strings "$RUNTIME_BINARY" | grep -q '/v1/version'; then
 	echo "blit: canonical runtime lacks the version endpoint" >&2
 	exit 1
 fi
+# The updater is a separate root-owned service.  Reject the historical failure
+# mode where the output-path argument caused the server to be copied twice.
+if cmp -s "$RUNTIME_BINARY" "$UPDATE_HELPER" ||
+   strings "$UPDATE_HELPER" | grep -q '/v1/version' ||
+   strings "$UPDATE_HELPER" | grep -q 'blit gateway listening'; then
+	echo "blit: updater output is the server binary" >&2
+	exit 1
+fi
 
 # The ignored build directory is also used by historical tarball workflows,
 # so do not silently accept a stale launcher alongside the native runtime.
