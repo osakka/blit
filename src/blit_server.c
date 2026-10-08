@@ -11037,6 +11037,12 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
         }
         full_redraw = !runtime->outputs[output_index].initialized ||
             graphics_changed ||
+            /* The pointer compositor restores the cached scene only when
+             * there is no concurrent surface damage.  If pointer state and
+             * terminal damage arrive in the same frame, the branch below
+             * clears the target before drawing; redraw the complete scene or
+             * the untouched cells become black holes/trails. */
+            runtime->pointer_dirty ||
             target_count != runtime->outputs[output_index].last_target_count ||
             runtime->topology_revision !=
                 runtime->outputs[output_index].last_topology_revision;
@@ -11045,11 +11051,12 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
         {
             char detail[256];
             snprintf(detail, sizeof(detail),
-                     "output=%d path=%s target_count=%d active_surfaces=%d target_changed=%d external_changed=%d initialized=%d graphics_changed=%d graphics_images=%d last_graphics_signature=%llu graphics_signature=%llu",
+                     "output=%d path=%s target_count=%d active_surfaces=%d target_changed=%d external_changed=%d pointer_dirty=%d initialized=%d graphics_changed=%d graphics_images=%d last_graphics_signature=%llu graphics_signature=%llu",
                      output_index, full_redraw ? "full-redraw" :
                          "incremental-damage",
                      target_count, active_output_surface_count(runtime, output_index),
                      target_changed, external_target_changed,
+                     runtime->pointer_dirty,
                      runtime->outputs[output_index].initialized,
                      graphics_changed,
                      graphics_scene_count(runtime, output_index),

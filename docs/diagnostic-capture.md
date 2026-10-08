@@ -155,6 +155,18 @@ deferred updates and one final `commit` per Hibr flush. This bounds transport
 overhead without exposing a partial frame. The batch is still limited by the
 adapter's fixed request buffer and the server's bounded HTTP body policy.
 
+The pointer/damage regression gate verifies the SDL atomic boundary directly:
+
+```sh
+ruby tools/tests/pointer_damage_atomic_gate.rb
+```
+
+It queues pointer input and an external surface commit in the same event-loop
+turn, requires a `pointer_dirty=1` full-redraw trace, and samples pixels outside
+the changed cell. A pass proves that pointer motion cannot expose cleared SDL
+background outside the damage rectangle; the separate external-pointer gate
+continues to prove that pointer-only motion uses the cached scene.
+
 ## Pointer-artifact transaction
 
 When pointer movement appears to make an external Hibr desktop blink, trail, or

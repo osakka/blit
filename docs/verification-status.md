@@ -3,6 +3,21 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## Current 0.1.337 atomic pointer-damage status
+
+The renderer now treats pointer state plus concurrent external terminal damage
+as one complete scene boundary. Pointer-only motion continues to use the
+cached scene; when both pointer state and surface damage are present, Blit
+redraws the complete scene after clearing the target. This prevents the black
+holes, trails, and blinking caused by clearing an SDL target and then drawing
+only the damaged rectangle.
+
+The deterministic `POINTER_DAMAGE_ATOMIC_PASS` gate queues pointer input and an
+external commit together, verifies the `pointer_dirty=1` full-redraw trace,
+and checks framebuffer pixels outside the changed cell. The exact TCC gates
+remain required before packaging. Physical mouse, multi-monitor, and
+high-refresh acceptance remain open; Hibr source was not modified.
+
 ## Current 0.1.336 diagnostic-window status
 
 The runtime now exposes a completed bounded event-loop timing window through
