@@ -20,6 +20,7 @@ Accepted decisions:
 10. [Stock Hibr session launcher](0010-stock-hibr-session-launcher.md).
 11. [Event-driven input-device discovery](0011-event-driven-input-discovery.md).
 12. [SDL glyph atlas and unchanged-damage suppression](0012-sdl-glyph-atlas-and-noop-damage.md).
+13. [Interactive games and emulation are first-class workloads](0013-interactive-games-and-emulation.md).
 
 Pending decisions:
 

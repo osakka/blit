@@ -35,6 +35,9 @@ is insufficient.
    SDL3 types or implementation details.
 9. Keep the renderer replaceable: SDL3 is the initial platform/rendering
    integration, not the public API.
+10. Support interactive Hibr workloads, including terminal-native games and
+    pixel-oriented arcade/emulation sessions, with refresh-aware presentation
+    and observable input latency.
 
 ## Non-goals for the first release
 
@@ -49,6 +52,8 @@ is insufficient.
   such as DRM/KMS where appropriate.
 - Unbounded visual effects that can make frame timing or output behavior
   nondeterministic.
+- A claim that Kitty or sixel alone is a high-rate emulator frame transport;
+  graphical emulation requires the bounded API-owned graphic canvas path.
 
 ## Initial vocabulary
 

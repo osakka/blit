@@ -59,6 +59,12 @@ and SDL3/direct-KMS pixel gates pass in the deterministic fixture. Further
 protocol grammar remains an explicit compatibility extension, not a second
 renderer or image-lifetime model.
 
+Interactive gaming is also a release requirement. Terminal-native games are
+validated through the ordinary PTY/VT500/input path. Arcade and pixel-oriented
+emulation require the API-owned graphic canvas/frame path described in
+[ADR 0013](adr/0013-interactive-games-and-emulation.md); Kitty and sixel are
+compatibility paths, not the high-rate emulator transport.
+
 ## Milestone 1: contract vertical slice
 
 Resolve ADR 0002 before writing server behavior. It must select the canonical
@@ -127,6 +133,21 @@ the same graphics-object model. The first sixel slice is bounded direct-color
 raster decoding with deterministic SDL3/direct-KMS pixel gates; it must not
 introduce a second renderer, layout owner, or image lifetime model. Expand its
 accepted control grammar only with a corresponding parser and pixel fixture.
+
+## Milestone 5b: interactive games and emulation
+
+Lock down the measurable workload contract first: input timestamps and queue
+depth, frame pacing, back-pressure, damage or buffer reuse, and diagnostics.
+Then add the bounded graphic canvas/frame resource to the schema and implement
+it through the existing SDL3/direct-KMS presentation boundary. The first
+fixture must exercise a synthetic emulator-like producer at 60 Hz, inject
+keyboard and pointer events, and prove stable presentation on one and multiple
+outputs.
+
+Terminal-native game acceptance is a separate gate and covers alternate
+screen, cursor and colour state, UTF-8/wide/combining glyphs, mouse reporting,
+resize, and the production font. No release note may claim arcade/emulation
+support until both gates pass.
 
 ## Milestone 6: operational hardening
 
