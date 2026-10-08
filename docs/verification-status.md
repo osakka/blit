@@ -16,7 +16,7 @@ an evidence record, not a claim that the complete product is released.
   42.935–43.867 Hz with 15.400–15.676 ms maximum render time against a
   16.000 ms target and zero missed deadlines; this is a software-dummy result,
   not a physical refresh-rate claim. The authorized physical host now reports
-  0.1.274 through its version endpoint. Its controlled live API smoke test
+  0.1.276 through its version endpoint. Its controlled live API smoke test
   preserved VT500 text, box/block glyphs, combining `Á`, and wide `界` in
   the surface model at 60.000 Hz with zero missed deadlines; this is
   one-output evidence, not a multi-monitor or 120/240 Hz claim. The Debian candidate
@@ -34,6 +34,19 @@ controlled 120×50 full-screen coloured terminal redraw workload carrying
 sample was 17.890 ms against the 16 ms target, so this is stable 60 Hz cadence
 evidence with a remaining worst-case render-budget issue, not a claim of
 unbounded performance.
+
+After deployment of 0.1.276, the physical host ran the installed Hibr desktop
+with the `retro_car` theme at a 240×135 terminal surface. The live API reported
+100,574 terminal bytes, 91 background batches, 228 background quads, 138
+presents, zero missed deadlines, and a maximum complete render sample of
+17.272 ms against the 16 ms target. A separate bounded continuous full-screen
+terminal workload measured 59.965 Hz over a fresh 500 ms window with zero
+missed deadlines; it processed 294,038 cumulative terminal bytes, reached 30
+frames in that window, and reported a 20.090 ms maximum complete render sample.
+These are physical one-output results. The maximum sample includes the SDL
+presentation boundary, so it is retained as a budget signal pending separate
+composition/present timing attribution; it is not evidence of a missed display
+refresh when the scheduler reports zero missed deadlines.
 
 The focused input/render regression cycle rebuilt the exact 0.1.274 server with
 TCC. Complete terminal conformance passed, including VT500 controls, UTF-8,
