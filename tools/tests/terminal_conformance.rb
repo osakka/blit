@@ -84,6 +84,9 @@ unless expected_version.nil? || expected_version.empty?
   server = request(base, 'GET', '/v1/server')
   assert_equal(expected_version, server.fetch('server_version'),
                'server details version identity')
+  raise 'server capability missing network-terminal-input' unless
+    server.fetch('capabilities').include?('network-terminal-input')
+  puts 'PASS network-terminal-input-capability'
   puts "PASS version-identity-#{expected_version}"
 end
 
@@ -258,6 +261,74 @@ assert_equal('X', api_cells.fetch([2, 0]).fetch('text'),
              'API wide UTF-8 following cell')
 request(base, 'DELETE', "/v1/terminal-sessions/#{api_cell_id}")
 puts 'PASS api-wide-utf8-cell-update'
+
+network_input = request(base, 'POST', '/v1/terminal-sessions', {
+  'command' => '/bin/sh',
+  'arguments' => ['-c', 'stty -echo; dd bs=1 count=8 2>/dev/null'],
+  'surface' => { 'width' => 32, 'height' => 2 }
+})
+network_input_id = network_input.fetch('id')
+Timeout.timeout(5) do
+  loop do
+    state = request(base, 'GET', "/v1/terminal-sessions/#{network_input_id}")
+    break if %w[starting running].include?(state.fetch('state'))
+
+    sleep 0.02
+  end
+end
+network_receipt = request(base, 'POST',
+                          "/v1/terminal-sessions/#{network_input_id}/input",
+                          { 'data' => "NETWORK\n" })
+assert_equal('raw', network_receipt.fetch('mode'), 'network input mode')
+assert_equal(8, network_receipt.fetch('bytes_requested'),
+             'network input requested bytes')
+assert_equal(8, network_receipt.fetch('bytes_written'),
+             'network input written bytes')
+network_snapshot = nil
+Timeout.timeout(5) do
+  loop do
+    network_snapshot = request(base, 'GET',
+                                "/v1/surfaces/surface-#{network_input_id}/cells")
+    break if screen_text(network_snapshot).include?('NETWORK')
+
+    sleep 0.02
+  end
+end
+raise 'network input did not reach the PTY' unless
+  screen_text(network_snapshot).include?('NETWORK')
+request(base, 'DELETE', "/v1/terminal-sessions/#{network_input_id}")
+puts 'PASS network-terminal-input-raw'
+
+paste_input = request(base, 'POST', '/v1/terminal-sessions', {
+  'command' => '/bin/sh',
+  'arguments' => ['-c',
+                  "stty -echo -icanon min 0 time 5; printf '\\033[?2004h'; dd bs=1 count=13 2>/dev/null | od -An -tx1 | tr -d ' ' | tr -d '\\n'"],
+  'surface' => { 'width' => 40, 'height' => 2 }
+})
+paste_input_id = paste_input.fetch('id')
+sleep 0.1
+paste_receipt = request(base, 'POST',
+                        "/v1/terminal-sessions/#{paste_input_id}/input",
+                        { 'data' => 'P', 'mode' => 'paste' })
+assert_equal('paste', paste_receipt.fetch('mode'), 'network paste mode')
+assert_equal(1, paste_receipt.fetch('bytes_requested'),
+             'network paste requested bytes')
+assert_equal(13, paste_receipt.fetch('bytes_written'),
+             'network paste framed bytes')
+paste_snapshot = nil
+Timeout.timeout(5) do
+  loop do
+    paste_snapshot = request(base, 'GET',
+                             "/v1/surfaces/surface-#{paste_input_id}/cells")
+    break if screen_text(paste_snapshot).include?('1b5b3230307e501b5b3230317e')
+
+    sleep 0.02
+  end
+end
+raise 'network paste framing did not reach the PTY' unless
+  screen_text(paste_snapshot).include?('1b5b3230307e501b5b3230317e')
+request(base, 'DELETE', "/v1/terminal-sessions/#{paste_input_id}")
+puts 'PASS network-terminal-input-paste'
 
 scoped_style_created = request(base, 'POST', '/v1/terminal-sessions', {
   'command' => '/bin/sh',

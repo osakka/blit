@@ -518,6 +518,25 @@ paths:
                 $ref: '#/components/schemas/TerminalSession'
         default:
           $ref: '#/components/responses/Problem'
+    post:
+      tags: [terminals]
+      operationId: sendTerminalInput
+      summary: Send bounded raw or bracketed-paste input to a terminal PTY
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TerminalInput'
+      responses:
+        '202':
+          description: Input accepted by the PTY write path
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TerminalInputReceipt'
+        default:
+          $ref: '#/components/responses/Problem'
     patch:
       tags: [terminals]
       operationId: updateTerminalSession
@@ -1192,6 +1211,32 @@ components:
             external keeps the PTY for lifecycle and input while an adapter
             owns all surface mutations and revisions. mirror lets Blit parse
             a joined Hibr/hold stream copied from a primary desktop.
+      additionalProperties: false
+    TerminalInput:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: string
+          minLength: 1
+          maxLength: 768
+          description: UTF-8 text or terminal escape bytes to write to the PTY.
+        mode:
+          type: string
+          enum: [raw, paste]
+          default: raw
+          description: >-
+            paste wraps data in bracketed-paste delimiters when the session has
+            enabled DEC mode 2004; raw writes data unchanged.
+      additionalProperties: false
+    TerminalInputReceipt:
+      type: object
+      required: [session_id, bytes_requested, bytes_written, mode]
+      properties:
+        session_id: {$ref: '#/components/schemas/ResourceId'}
+        bytes_requested: {type: integer, minimum: 1}
+        bytes_written: {type: integer, minimum: 1}
+        mode: {type: string, enum: [raw, paste, paste-fallback]}
       additionalProperties: false
     UpdateTerminalSession:
       type: object

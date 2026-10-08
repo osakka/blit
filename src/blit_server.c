@@ -1404,7 +1404,8 @@ static void server_json(const BlitRuntime *runtime, char *body, size_t capacity)
              "\"terminal-sessions\",\"topology\","
              "\"native-presentation\",\"graphics-inventory\","
              "\"audio-inventory\",\"input-devices\",\"input-routes\","
-             "\"diagnostics\",\"runtime-diagnostics\",\"lifecycle-control\","
+             "\"network-terminal-input\",\"diagnostics\","
+             "\"runtime-diagnostics\",\"lifecycle-control\","
              "\"effects\",\"overlays\"],\"display_count\":%d,"
              "\"display_backend\":{\"name\":\"%s\",\"ready\":%s,"
              "\"error\":\"%s\"},\"resources\":{"
@@ -7412,6 +7413,56 @@ static int service_pixel_frame_binary(BlitRuntime *runtime,
     return 1;
 }
 
+/* One bounded PTY write boundary for WebSocket and HTTP input adapters. */
+static int write_terminal_input(BlitSession *session, const char *data,
+                                const char *mode, size_t *requested,
+                                size_t *written, const char **effective_mode)
+{
+    char framed[1024];
+    size_t data_length;
+    size_t total;
+    size_t offset = 0;
+    ssize_t count;
+    int bracketed;
+
+    if (session == NULL || session->pty_fd < 0 || data == NULL ||
+        mode == NULL || requested == NULL || written == NULL ||
+        effective_mode == NULL)
+        return -1;
+    data_length = strlen(data);
+    if (data_length == 0 || data_length > 768 ||
+        (strcmp(mode, "raw") != 0 && strcmp(mode, "paste") != 0))
+        return -1;
+    bracketed = strcmp(mode, "paste") == 0 && session->terminal_bracketed_paste;
+    if (bracketed) {
+        memcpy(framed, "\033[200~", 6);
+        memcpy(framed + 6, data, data_length);
+        memcpy(framed + 6 + data_length, "\033[201~", 6);
+        total = data_length + 12;
+        *effective_mode = "paste";
+    } else {
+        memcpy(framed, data, data_length);
+        total = data_length;
+        *effective_mode = strcmp(mode, "paste") == 0 ?
+            "paste-fallback" : "raw";
+    }
+    *requested = data_length;
+    *written = 0;
+    while (offset < total) {
+        count = write(session->pty_fd, framed + offset, total - offset);
+        if (count > 0) {
+            offset += (size_t)count;
+            continue;
+        }
+        if (count < 0 && (errno == EINTR || errno == EAGAIN ||
+                          errno == EWOULDBLOCK))
+            break;
+        return -2;
+    }
+    *written = offset;
+    return offset == total ? 0 : -2;
+}
+
 static void service_stream_text(BlitRuntime *runtime, int fd,
                                 const unsigned char *payload, size_t length)
 {
@@ -7449,14 +7500,17 @@ static void service_stream_text(BlitRuntime *runtime, int fd,
         char data[768];
         unsigned long long numeric_id;
         BlitSession *session;
+        size_t requested;
+        size_t written;
+        const char *effective_mode;
 
         if (json_string(message, "session_id", session_id,
                         sizeof(session_id)) &&
             json_string(message, "data", data, sizeof(data)) &&
             sscanf(session_id, "%llu", &numeric_id) == 1) {
             session = find_session_id(runtime, numeric_id);
-            if (session != NULL && session->pty_fd >= 0) {
-                write(session->pty_fd, data, strlen(data));
+            if (write_terminal_input(session, data, "raw", &requested,
+                                     &written, &effective_mode) == 0) {
                 send_websocket_text(fd,
                     "{\"type\":\"diagnostic\",\"severity\":\"info\","
                     "\"code\":\"input_forwarded\","
@@ -7905,6 +7959,70 @@ static void handle_request(int fd, BlitRuntime *runtime,
                      "{\"type\":\"frame\",\"frame\":%s}", body);
             broadcast_stream(runtime, event, BLIT_STREAM_FRAMES);
         }
+        return;
+    }
+    if (strncmp(path, "/v1/terminal-sessions/",
+                strlen("/v1/terminal-sessions/")) == 0 &&
+        strcmp(path + strlen(path) - 6, "/input") == 0 &&
+        strcmp(method, "POST") == 0) {
+        const char *suffix = path + strlen(path) - 6;
+        char session_path[128];
+        char data[768];
+        char mode[32] = "raw";
+        const char *effective_mode;
+        size_t requested;
+        size_t written;
+        size_t session_path_length = (size_t)(suffix - path);
+        BlitSession *session;
+        int result;
+
+        if (session_path_length == 0 || session_path_length >=
+            sizeof(session_path)) {
+            send_problem(fd, 404, "Not Found", "session_not_found",
+                         "The terminal session does not exist.");
+            return;
+        }
+        memcpy(session_path, path, session_path_length);
+        session_path[session_path_length] = '\0';
+        session = find_session(runtime, session_path);
+        if (session == NULL) {
+            send_problem(fd, 404, "Not Found", "session_not_found",
+                         "The terminal session does not exist.");
+            return;
+        }
+        if (!json_string(payload, "data", data, sizeof(data))) {
+            send_problem(fd, 400, "Bad Request", "invalid_terminal_input",
+                         "data must be a non-empty UTF-8 string of at most 768 bytes.");
+            return;
+        }
+        if (json_string(payload, "mode", mode, sizeof(mode)) == 0)
+            snprintf(mode, sizeof(mode), "raw");
+        if (strcmp(mode, "raw") != 0 && strcmp(mode, "paste") != 0) {
+            send_problem(fd, 400, "Bad Request", "invalid_terminal_input_mode",
+                         "mode must be raw or paste.");
+            return;
+        }
+        refresh_session_state(runtime, session);
+        result = write_terminal_input(session, data, mode, &requested,
+                                      &written, &effective_mode);
+        if (result != 0) {
+            if (session->pty_fd < 0 || strcmp(session->state, "running") != 0) {
+                send_problem(fd, 409, "Conflict", "session_not_running",
+                             "Input requires a running terminal session.");
+            } else {
+                send_problem(fd, 503, "Service Unavailable",
+                             "input_backpressure",
+                             "The terminal PTY cannot accept the complete input request now.");
+            }
+            return;
+        }
+        snprintf(body, sizeof(body),
+                 "{\"session_id\":\"session-%llu\","
+                 "\"bytes_requested\":%lu,\"bytes_written\":%lu,"
+                 "\"mode\":\"%s\"}", session->id,
+                 (unsigned long)requested, (unsigned long)written,
+                 effective_mode);
+        send_http(fd, 202, "Accepted", "application/json", body);
         return;
     }
     if (strncmp(path, "/v1/terminal-sessions/",

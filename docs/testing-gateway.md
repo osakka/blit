@@ -676,6 +676,15 @@ legacy VT reports use the protocol's button-3 release code and 32-byte offset.
 Evdev Shift, Alt, and Ctrl state contributes the standard SGR/VT modifier bits
 to button, wheel, and drag reports.
 
+Network clients can drive a live PTY without synthetic hardware through
+`POST /v1/terminal-sessions/{session_id}` with `{ "data": "...", "mode":
+"raw"|"paste" }`. Requests are limited to 768 bytes. `raw` writes unchanged
+data; `paste` adds DEC bracketed-paste delimiters only when the session enabled
+mode 2004, otherwise the receipt reports `paste-fallback`. The response
+contains requested and written byte counts. This endpoint shares the same PTY
+boundary as evdev and WebSocket input and reports typed errors for stopped
+sessions or PTY back-pressure.
+
 When a routed PTY exits, Blit disables the route during lifecycle reaping but
 retains its `target_session_id` for diagnostics and replay-safe reconciliation.
 Re-enabling that route against the stopped session returns the typed
