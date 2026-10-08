@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-base_url=${1:?usage: capture-live.sh http://host:8080 [seconds] [output-dir]}
+base_url=${1:?usage: capture-live.sh http://host:8080 [seconds] [output-dir] [screenshots]}
 duration=${2:-10}
 output_dir=${3:-"diagnostics/live-$(date -u +%Y%m%dT%H%M%SZ)"}
+screenshots=${4:-yes}
 
-mkdir -p "$output_dir/screenshots"
+mkdir -p "$output_dir"
+if [ "$screenshots" = "yes" ]; then
+    mkdir -p "$output_dir/screenshots"
+fi
 
 get() {
     local name=$1 path=$2
@@ -35,11 +39,13 @@ while [ $(( $(date +%s) - start )) -lt "$duration" ]; do
     for kind in pointer_button pointer_motion keyboard_key render_path surface_update; do
         get "trace-${kind}-$stamp.json" "/v1/diagnostics/trace?kind=${kind}"
     done
-    curl --fail --silent --show-error --max-time 30 \
-        "$base_url/v1/diagnostics/screenshots/display-1" \
-        > "$output_dir/screenshots/$stamp.bmp" || true
-    sha256sum "$output_dir/screenshots/$stamp.bmp" \
-        >> "$output_dir/screenshot-sha256.txt" 2>/dev/null || true
+    if [ "$screenshots" = "yes" ]; then
+        curl --fail --silent --show-error --max-time 30 \
+            "$base_url/v1/diagnostics/screenshots/display-1" \
+            > "$output_dir/screenshots/$stamp.bmp" || true
+        sha256sum "$output_dir/screenshots/$stamp.bmp" \
+            >> "$output_dir/screenshot-sha256.txt" 2>/dev/null || true
+    fi
     index=$((index + 1))
     sleep 1
 done
@@ -51,4 +57,4 @@ for kind in pointer_button pointer_motion keyboard_key render_path surface_updat
     get "trace-${kind}-end.json" "/v1/diagnostics/trace?kind=${kind}"
 done
 
-printf 'capture_dir=%s screenshots=%s\n' "$output_dir" "$index"
+printf 'capture_dir=%s polls=%s screenshots=%s\n' "$output_dir" "$index" "$screenshots"

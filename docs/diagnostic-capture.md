@@ -11,6 +11,18 @@ Run it from a machine that can reach Blit:
 tools/diagnostics/capture-live.sh http://192.168.10.54:8080 20
 ```
 
+For a timing-only run that does not issue the large framebuffer screenshot
+request, pass `no` as the fourth argument:
+
+```sh
+tools/diagnostics/capture-live.sh http://192.168.10.54:8080 20 diagnostics/live-timing no
+```
+
+Use the timing-only form when measuring frame cadence, loop gaps, or input
+latency. Use the default screenshot form when visual evidence is required;
+the screenshot endpoint is intentionally kept separate because its transfer
+can block a single-threaded server for hundreds of milliseconds.
+
 The output directory contains:
 
 - `trace-*.json`: input events, surface presentation boundaries, and renderer
