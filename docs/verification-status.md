@@ -12,17 +12,30 @@ one event for `kind=render_path&limit=1`; the version endpoint reported
 `0.1.334`. This prevents a trace read from becoming an unnecessarily large
 single-threaded HTTP response while investigating live pointer artifacts.
 
+Package `blit_0.1.334-1` is deployed on the authorized physical host;
+`/v1/version` reports `0.1.334`. The bounded live trace check returned one
+event in 306 bytes in 41 ms. Hibr was restored through the API as the primary
+external session and the focused evdev-pointer route was restored.
+
+The live synthetic pointer transaction then injected four motions and captured
+the framebuffer after each one. It observed four input events, zero missed
+deadlines, stable `incremental-damage` paths, and `graphics_changed=0` for
+every motion. The five framebuffer hashes differed as expected for cursor
+movement. This does not prove physical evdev correctness, but it does not
+reproduce the reported artifact through Blit's API input path; the physical
+capture must now correlate raw evdev counters with the same render and pixel
+evidence.
+
 The exact 0.1.333 Hibr QEMU restart fixture completed with
 `LAYOUT_MATRIX_PASS`, `HIBR_PANE_MATRIX_PASS`, `HIBR_PRIMARY_RESTART_PASS`,
 and `HIBR_JOIN_RECONNECT_PASS`. The staged Hibr executable SHA-256 was
 `f8dbc10779193c27d2eb47f0e858cf656912f8b96f56a45af820ad05d18cdb7e`;
 Hibr source was not modified, and no QEMU process remained after the fixture.
 
-On the authorized physical host, the currently deployed 0.1.333 runtime
-reports one 60 Hz output, 1,677 present calls, zero missed deadlines, and
-millisecond-scale rendering. It also reports zero physical evdev mouse events
-in the latest sample. That is not a physical-mouse pass: the remaining live
-step is to capture while the real mouse is moved and correlate raw evdev
+The authorized physical host reports one 60 Hz output, zero missed deadlines,
+and millisecond-scale rendering. The latest physical sample still reports zero
+physical evdev mouse events. That is not a physical-mouse pass: the remaining
+live step is to capture while the real mouse is moved and correlate raw evdev
 receipt, input routing, pointer state, render-path trace, and post-interaction
 pixels using `docs/diagnostic-capture.md`.
 
