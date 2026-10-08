@@ -21,10 +21,11 @@ missed deadlines). Package `blit_0.1.319-1_amd64.deb` was built from this
 source state; SHA-256 is
 `46b4a88b03fc3918deada6d203aa25b9fde36ccc11d18564c2a170e8c8961c4f`.
 
-The physical host remains on the previously deployed 0.1.318 until the new
-package is deployed and its live input/capture checks are repeated. Physical
-pointer trails/click behavior, live image activation, and physical
-multi-monitor acceptance remain open.
+The package is deployed on the physical host and `/v1/version` reports
+`0.1.319`. The live input probe passes again with approximately 0.017 ms
+dispatch latency, zero missed deadlines, and the active 1920x2160/60 Hz
+output. Physical pointer trails/click behavior, live image activation, and
+physical multi-monitor acceptance remain open.
 
 ## Current 0.1.318 diagnostic and graphics status
 
