@@ -37,6 +37,14 @@ and no QEMU process remained. This is virtual KMS/topology evidence, not
 physical monitor or sustained physical 240 Hz acceptance. The dedicated
 240-frame pixel-stream gate remains open.
 
+The exact `blit.pixel_stream_240=1` gate was rerun on `0.1.358`: all `240`
+frames were accepted without frame errors, but synchronized KMS produced only
+`83` visible presents and recorded a `16.661 ms` maximum KMS present. The
+diagnostic-only `blit.kms_async=1` comparison produced `85` presents, so async
+page flips do not solve the bottleneck and remain unsuitable as a production
+substitute for atomic presentation. No scheduler change was retained from
+this experiment.
+
 ## Current 0.1.357 release and live-validation gate
 
 The TCC-built `0.1.357` package contains the attach-time PTY notification
