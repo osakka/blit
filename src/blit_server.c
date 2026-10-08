@@ -1488,7 +1488,9 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
     json_escape(runtime->sdl_error, escaped_error, sizeof(escaped_error));
     json_escape(runtime->sdl_renderer_name, escaped_renderer,
                 sizeof(escaped_renderer));
-    presentation_sync = runtime->direct_kms ? "drm-page-flip" :
+    presentation_sync = runtime->direct_kms ?
+        (getenv("BLIT_KMS_ASYNC_PAGEFLIP") != NULL ?
+             "drm-page-flip-async" : "drm-page-flip") :
         (runtime->output_count == 0 ||
          runtime->output_count != runtime->display_count ||
          runtime->sdl_vsync_failures > 0 ? "scheduler-only" : "sdl-vsync");

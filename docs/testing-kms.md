@@ -45,6 +45,10 @@ the server unready. The API then reports `drm-kms` and
 `outputs` is zero. If both paths fail, startup remains visible as an explicit
 backend error rather than leaving an apparently live black desktop.
 
+If the explicit `BLIT_KMS_ASYNC_PAGEFLIP` diagnostic/test policy is enabled,
+the API reports `drm-page-flip-async`; that mode may tear and is not the
+production default.
+
 The page-flip wait is bounded to 100 ms per output by default. This prevents a
 lost or delayed DRM event from turning one logical frame into a multi-second
 stall; a timeout is logged with the connector and that output moves to the

@@ -902,7 +902,7 @@ components:
             renderer: {type: string}
             presentation_sync:
               type: string
-              enum: [drm-page-flip, sdl-vsync, scheduler-only]
+              enum: [drm-page-flip, drm-page-flip-async, sdl-vsync, scheduler-only]
             pointer:
               type: object
               description: >-
