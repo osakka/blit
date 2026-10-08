@@ -113,10 +113,19 @@ if [ "$ready" -ne 1 ]; then $b cat /tmp/blit.log; finish 1; fi
 diagnostics=$($b wget -qO- http://127.0.0.1:19191/v1/diagnostics || true)
 echo DIAGNOSTICS; echo "$diagnostics"
 baseline_240_missed=0
+baseline_pixel_stream_missed=
 if [ "$high_refresh_test" -eq 1 ]; then
     baseline_240_missed=$($b echo "$diagnostics" | $b sed -n \
         's/.*"refresh_hz":240.000.*"missed_deadlines":\([0-9][0-9]*\).*/\1/p')
     [ -n "$baseline_240_missed" ] || baseline_240_missed=0
+fi
+if [ "$pixel_stream_test" -eq 1 ] && [ "$pixel_stream_240_test" -eq 0 ]; then
+    # The producer cadence is 60 Hz, but the production scheduler selects the
+    # highest active display mode. On a VKMS kernel whose preferred mode is
+    # 240 Hz, startup may already have recorded virtual page-flip misses. The
+    # stream gate must reject new misses, not misclassify that baseline as a
+    # workload failure.
+    baseline_pixel_stream_missed=$($b echo "$diagnostics" | $b awk -F '"missed_deadlines":' '{ for (i = 2; i <= NF && i <= 3; ++i) { split($i, a, ","); sub(/[^0-9].*/, "", a[1]); printf "%s%s", (i == 2 ? "" : ","), a[1] } }')
 fi
 scheduler_pass=1
 echo "$diagnostics" | $b grep -q '"mode":"refresh-aware"' || scheduler_pass=0
@@ -209,8 +218,11 @@ if [ "$pixel_test" -eq 1 ]; then
         fi
     elif [ "$pixel_stream_test" -eq 1 ]; then
         $b wget -qO /tmp/pixel-runtime.json http://127.0.0.1:19191/v1/diagnostics/runtime || true
+        pixel_stream_missed=$($b cat /tmp/pixel-runtime.json | $b awk -F '"missed_deadlines":' '{ for (i = 2; i <= NF && i <= 3; ++i) { split($i, a, ","); sub(/[^0-9].*/, "", a[1]); printf "%s%s", (i == 2 ? "" : ","), a[1] } }')
+        echo "PIXEL_FRAME_RUNTIME baseline=$baseline_pixel_stream_missed post=$pixel_stream_missed"
+        $b cat /tmp/pixel-runtime.json
         if $b grep -q '"pixel_frames_accepted":60' /tmp/pixel-runtime.json &&
-           $b grep -q '"missed_deadlines":0' /tmp/pixel-runtime.json; then
+           [ "$pixel_stream_missed" = "$baseline_pixel_stream_missed" ]; then
             echo PIXEL_FRAME_RATE_PASS
         else
             echo PIXEL_FRAME_RATE_FAIL

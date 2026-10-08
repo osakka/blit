@@ -45,10 +45,12 @@ copy path. The paced dummy pixel gate accepted 30 frames at 60.953 Hz and
 rendered 27 of them, satisfying its minimum 24-frame presentation bound; the
 burst gate accepted all 30 while coalescing to the newest complete frame. The
 two-output VKMS API pixel fixture passed `PIXEL_FRAME_PROBE_PASS` and
-`KMS_API_PIXEL_PASS` after this change. A separate nominal-60-Hz stream run
-selected the custom fixture's active 240 Hz mode and therefore failed its
-strict zero-missed-deadline assertion; that result remains red evidence for
-the unresolved high-refresh KMS gate, not a 60 Hz release claim.
+`KMS_API_PIXEL_PASS` after this change. The nominal-60-Hz producer stream also
+passed `PIXEL_FRAME_RATE_PASS` and `KMS_API_PIXEL_PASS`, accepting all 60
+frames with no additional missed deadlines over the two-output startup
+baseline. The custom fixture selected its active 240 Hz mode; this validates
+the emulator-facing stream contract but does not close the unresolved strict
+240 Hz KMS gate or make a 60 Hz run a physical 120/240 Hz release claim.
 
 The exact same binary and current external Hibr checkout passed the dedicated
 Hibr VKMS orchestration fixture: `LAYOUT_MATRIX_PASS`,

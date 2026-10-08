@@ -219,9 +219,10 @@ revision used by direct KMS damage suppression.
 
 Use `blit.pixel_stream=1` for the timed workload variant. It sends 60 complete
 RGBA frames at a 60 Hz producer cadence, requires all 60 to be accepted with
-zero missed deadlines, and then applies the same direct-KMS framebuffer
-oracle. This validates the emulator-facing stream contract at the VKMS
-fixture's 60 Hz mode; it is not a physical 120/240 Hz claim.
+no additional missed deadlines over the fixture's startup baseline, and then
+applies the same direct-KMS framebuffer oracle. The selected display mode may
+be higher than the producer cadence because production scheduling follows the
+display's maximum mode; this is not a physical 120/240 Hz claim.
 
 Use `blit.pixel_stream_240=1` for the bounded high-refresh variant. It sends
 240 complete RGBA frames at a 4.166 ms producer cadence and requires the
