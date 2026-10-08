@@ -16,6 +16,10 @@ It returns revision, dimensions, non-empty-cell count, cursor state, graphics
 count, and the current damage rectangle. The full `/cells` endpoint remains
 the authoritative repair snapshot, but can be megabytes for a desktop-sized
 surface and must not be used in timing loops.
+`capture-live.sh` records `summary-surface-1.json` at the start and end of a
+capture. Set `BLIT_SURFACE_IDS=surface-1,surface-2` when collecting multiple
+known surfaces; the capture remains bounded and does not download their full
+cell grids.
 
 Run it from a machine that can reach Blit:
 
