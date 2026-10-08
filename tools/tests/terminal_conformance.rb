@@ -141,6 +141,12 @@ runtime_diagnostics.fetch('snapshot').fetch('render').fetch('outputs').each do |
     raise "per-output diagnostics missing #{field}" unless output.key?(field)
   end
 end
+render_snapshot = runtime_diagnostics.fetch('snapshot').fetch('render')
+if !render_snapshot.fetch('direct_kms') &&
+   performance.fetch('max_sdl_present_ms', 0).to_f > 0 &&
+   render_snapshot.fetch('outputs').any? { |output| output.fetch('max_present_ms').to_f <= 0 }
+  raise 'SDL per-output presentation timing is not sourced from SDL diagnostics'
+end
 puts 'PASS per-output-presentation-diagnostics'
 
 missing_surface_status, missing_surface_response = request_with_status(

@@ -1912,10 +1912,14 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
             (unsigned long long)output_render_period_us(runtime, i),
             (double)output_render_period_us(runtime, i) / 1000.0,
             runtime->render_missed_deadlines[i],
-            have_kms_info ? kms_info.last_present_ms :
-                runtime->diagnostic_last_kms_present_ms,
-            have_kms_info ? kms_info.max_present_ms :
-                runtime->diagnostic_max_kms_present_ms,
+            runtime->direct_kms ?
+                (have_kms_info ? kms_info.last_present_ms :
+                    runtime->diagnostic_last_kms_present_ms) :
+                runtime->diagnostic_last_sdl_present_ms,
+            runtime->direct_kms ?
+                (have_kms_info ? kms_info.max_present_ms :
+                    runtime->diagnostic_max_kms_present_ms) :
+                runtime->diagnostic_max_sdl_present_ms,
             have_kms_info ? kms_info.present_calls :
                 runtime->diagnostic_present_calls,
             runtime->direct_kms ?
