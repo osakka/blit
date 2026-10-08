@@ -116,6 +116,17 @@ session's attached surface was blank in the API cell snapshot. This is not
 treated as a rendering pass; the held-session lifecycle/state must be reset or
 inspected through Hibr before using that host run as current glyph evidence.
 
+That stale state was then inspected and removed through Hibr's own `mod load
+hold; hold kill` interface; no Hibr source or installed Hibr file was changed.
+A fresh primary named `blit-clean` reached `running`, advanced its surface to
+revision 138, populated all 135 rows of the 240×135 cell grid, and produced a
+1920×2160 API screenshot with the menu bar, wallpaper grid, desktop icons,
+control strip, and pointer visible. A second clean run processed 860,270
+terminal bytes, 895 background batches, and 3,350 background quads with zero
+missed deadlines. Its complete-path worst sample was 19.027 ms and its SDL
+presentation worst sample was 17.259 ms; this is a successful one-output Hibr
+render validation, not a physical multi-monitor or high-refresh result.
+
 ### Current 0.1.276 evidence
 
 The exact TCC-built `0.1.276` binary passed the complete terminal
