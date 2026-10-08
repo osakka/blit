@@ -20,6 +20,13 @@ current Hibr staging. It passed `BLIT_INPUT_RENDER_SOAK_PASS`,
 events, `546` motion events, and `40` button events. The same run passed the
 two-output KMS screenshot checks. No QEMU process remained after shutdown.
 
+The TCC-built 0.1.356 binary also passed the public PTY conformance suite:
+VT500 controls, fragmented UTF-8, wide/combining cells, colors, alternate
+screens, synchronized output, Kitty graphics, Hibr defaults, and input/report
+queries all passed. A two-session terminal soak passed for five seconds with
+`346` snapshots, `32` resizes, and `53580 KiB` peak RSS under a `131072 KiB`
+limit, with clean session and render-queue teardown.
+
 The authorized host reports `0.1.356`. A fresh ordinary Hibr desktop started
 through `POST /v1/terminal-sessions` reached the authoritative `240x135`
 surface. Restarting Blit intentionally terminates its child Hibr process; the
