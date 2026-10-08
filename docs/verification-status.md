@@ -71,6 +71,13 @@ gate, full-surface wallpaper stress gate, and external-pointer-composition
 gate all pass with the `incremental-damage` trace path and intact untouched
 pixels. Hibr remains unmodified; physical host acceptance remains open.
 
+The deployed live `0.1.361` service also passed an API-owned real-host
+`80x30` surface test: pointer motion and committed cell damage produced the
+`incremental-damage` trace in one attempt, with zero missed deadlines, and the
+temporary session was cleaned up. The live synthetic input probe passes. This
+still does not close physical mouse acceptance because the live evdev counters
+remain zero without a real movement window.
+
 ## Current 0.1.358 real-host evidence and remaining visual gate
 
 The authorized host now reports `0.1.358`. The attach PTY geometry transition
