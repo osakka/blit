@@ -53,6 +53,12 @@ Hibr font manifest, and OpenAPI derived-geometry check pass from the same
 Unicode mappings. The full-screen Hibr workload's measured frame rate is
 distinct from the idle diagnostic value: idle servers do not present frames.
 
+The exact 0.1.259 TCC binary was staged into the two-output VKMS/QEMU capture
+fixture. It discovered two 1024×768 KMS outputs, passed the known-glyph and
+pixel assertions on both screenshots, passed the API screenshot assertion, and
+produced `KMS_CAPTURE_PASS`. This confirms the current direct-KMS binary; the
+fixture's emulated page-flip timing is not physical high-refresh evidence.
+
 The exact same 0.1.258 TCC binary also passed the four-output VKMS fixture;
 the nearest-filter change is SDL-only and does not alter that direct-KMS
 path. The fixture discovered and presented four independent 1024×768 outputs,
