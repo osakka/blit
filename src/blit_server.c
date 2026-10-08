@@ -6756,7 +6756,20 @@ static int reassert_hibr_session_processes(BlitSession *session,
                     if (child_pid == pid ||
                         !process_is_descendant(child_pid, pid))
                         continue;
+                    snprintf(path, sizeof(path), "/proc/%ld/fd/0",
+                             (long)child_pid);
+                    fd = open(path, O_RDWR | O_NONBLOCK | O_CLOEXEC);
+                    if (fd >= 0) {
+                        ioctl(fd, TIOCSWINSZ, size);
+                        close(fd);
+                    }
+                    /* Some Hibr desktop generations install the resize
+                       handler only in the child, not in the process-group
+                       leader. Deliver both forms to make the PTY boundary
+                       deterministic across those generations. */
                     if (signal_process_group(child_pid))
+                        ++matched;
+                    if (kill(child_pid, SIGWINCH) == 0)
                         ++matched;
                 }
                 closedir(children);
