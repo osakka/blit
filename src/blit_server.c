@@ -349,6 +349,7 @@ typedef struct {
     int attach_reassert_attempts;
     int attach_reassert_max_attempts;
     int attach_reassert_hibr_matches;
+    char hibr_session_token[64];
     int terminal_escape;
     /* Hibr emits a single SGR containing bold plus truecolor foreground and
        background (three decimal components each).  A 32-byte buffer cuts
@@ -6615,11 +6616,10 @@ static void refresh_session_state(BlitRuntime *runtime, BlitSession *session)
    owner.  The process initially launched by Blit is then only the attach
    client; its desktop and hold supervisor are reparented to init.  A PTY
    resize delivered to the attach client therefore cannot wake the actual
-   desktop.  Hibr exports BLIT_SESSION_ID to every process in that handoff,
-   which gives Blit a narrow, ownership-scoped way to finish the resize
-   contract without modifying Hibr or signalling unrelated processes. */
-static int process_has_blit_session(pid_t pid,
-                                    unsigned long long session_id)
+   desktop. Hibr inherits BLIT_SESSION_TOKEN through that handoff, which gives
+   Blit a unique, ownership-scoped way to finish the resize contract without
+   modifying Hibr or signalling stale/unrelated processes. */
+static int process_has_blit_session(pid_t pid, const char *session_token)
 {
     char path[64];
     char needle[64];
@@ -6628,7 +6628,7 @@ static int process_has_blit_session(pid_t pid,
     size_t offset;
 
     snprintf(path, sizeof(path), "/proc/%ld/environ", (long)pid);
-    snprintf(needle, sizeof(needle), "BLIT_SESSION_ID=%llu", session_id);
+    snprintf(needle, sizeof(needle), "BLIT_SESSION_TOKEN=%s", session_token);
     {
         int fd = open(path, O_RDONLY | O_CLOEXEC);
         if (fd < 0)
@@ -6673,7 +6673,8 @@ static int reassert_hibr_session_processes(BlitSession *session,
         if (*end != '\0' || value == 0 || value > (unsigned long)INT_MAX)
             continue;
         pid = (pid_t)value;
-        if (pid == getpid() || !process_has_blit_session(pid, session->id))
+        if (pid == getpid() ||
+            !process_has_blit_session(pid, session->hibr_session_token))
             continue;
         snprintf(path, sizeof(path), "/proc/%ld/fd/0", (long)pid);
         fd = open(path, O_RDWR | O_NONBLOCK | O_CLOEXEC);
@@ -6757,8 +6758,7 @@ static void service_attach_reasserts(BlitRuntime *runtime, uint64_t now)
              session->attach_reassert_hibr_matches == 0)) {
             session->attach_reassert_pending = 1;
             session->attach_reassert_due_us = now +
-                (session->attach_reassert_attempts < 2 ? 250000ULL :
-                 500000ULL);
+                hibr_matches > 0 ? 2000000ULL : 250000ULL;
         }
     }
 }
@@ -7088,6 +7088,7 @@ static int create_session(BlitRuntime *runtime, const char *json,
     int master_fd;
     pid_t process_id;
     unsigned long long session_id;
+    char session_token[64];
     int i;
 
     if (!json_string(json, "command", command, sizeof(command)))
@@ -7152,6 +7153,8 @@ static int create_session(BlitRuntime *runtime, const char *json,
     size.ws_xpixel = (unsigned short)(width * runtime_terminal_cell_width(runtime));
     size.ws_ypixel = (unsigned short)(height * runtime_terminal_cell_height(runtime));
     session_id = runtime->next_session_id;
+    snprintf(session_token, sizeof(session_token), "%llu-%llu",
+             (unsigned long long)runtime->started_us, session_id);
     process_id = forkpty(&master_fd, NULL, NULL, &size);
     if (process_id < 0) {
         fprintf(stderr, "blit: forkpty failed: %s\n", strerror(errno));
@@ -7174,6 +7177,7 @@ static int create_session(BlitRuntime *runtime, const char *json,
         snprintf(hibr_log_path, sizeof(hibr_log_path),
                  "/tmp/blit-hibr-%llu.log", session_id);
         if (setenv("BLIT_SESSION_ID", session_text, 1) != 0 ||
+            setenv("BLIT_SESSION_TOKEN", session_token, 1) != 0 ||
             setenv("BLIT_SURFACE_ID", surface_text, 1) != 0 ||
             setenv("BLIT_SERVER_PORT", port_text, 1) != 0 ||
             setenv("TERM", "xterm-kitty", 1) != 0 ||
@@ -7204,6 +7208,8 @@ static int create_session(BlitRuntime *runtime, const char *json,
             memset(session, 0, sizeof(*session));
             session->used = 1;
             session->id = session_id;
+            snprintf(session->hibr_session_token,
+                     sizeof(session->hibr_session_token), "%s", session_token);
             ++runtime->next_session_id;
             session->process_id = process_id;
             session->pty_fd = master_fd;
