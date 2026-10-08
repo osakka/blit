@@ -1,0 +1,10 @@
+release: 0.1.335
+package: blit_0.1.335-1_amd64.deb
+package_sha256: 864ff9474544c70bb2c4eeedd3295341b579b084795da18ac32abcda682dd113
+source_commit: 22dd81d57cd572be4964b4c8638e5e93d56e427b
+server_binary_sha256: ec8657f8cea3adb2deb9507c56a9791b51b6fb5264630606739174c0a58bbd1f
+live_host: 192.168.10.54:8080
+live_version: 0.1.335
+physical_mouse_acceptance: open
+physical_multi_monitor_acceptance: open
+physical_high_refresh_acceptance: open
