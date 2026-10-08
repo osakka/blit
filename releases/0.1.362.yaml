@@ -12,6 +12,7 @@ qemu_input_repeat_acceptance: pass
 qemu_multi_mouse_acceptance: pass
 qemu_multi_mouse_button_state_acceptance: pass
 qemu_kms_capture_acceptance: pass
+qemu_four_output_hibr_acceptance: pass
 qemu_current_bootstrap_acceptance: pass
 pty_conformance_acceptance: pass
 terminal_soak_acceptance: pass

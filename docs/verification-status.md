@@ -38,6 +38,14 @@ stream routing. The staging helpers now include their Hibr workload probes and
 normalize the guest shell interpreter, so this result does not depend on a
 historical initroot tree.
 
+The exact current candidate also passes the refreshed two-output KMS capture
+(`KMS_CAPTURE_PASS`) and the four-output Hibr fixture
+(`KMS_FOUR_HIBR_PASS`). The four-output run reports four independent 240 Hz
+VKMS outputs, four sessions, and four surfaces representing one primary Hibr
+desktop plus three joined clients. It records startup deadline misses under
+the virtual 240 Hz workload, so this is topology and presentation evidence,
+not sustained physical 240 Hz acceptance.
+
 ## Current 0.1.359 live diagnostics and physical-input boundary
 
 The authorized live host reports `0.1.359` and remains reachable at
