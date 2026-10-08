@@ -15,10 +15,16 @@ unchanged for compatibility.
 
 The local TCC server passed terminal conformance, frame-rate, HTTP
 backpressure, session-lifecycle, and slow-reader screenshot checks with the
-new fields present. The 0.1.336 package and physical-host deployment are
-pending the package and live verification gates. The physical mouse,
-multi-monitor, and high-refresh acceptance gates remain open; Hibr source was
-not modified.
+new fields present. The exact package passed the package artifact gate and is
+deployed on the authorized physical host; `/v1/version` reports `0.1.336`.
+The live timing-only capture recorded 49 frame advances in five seconds, zero
+missed deadlines, a 500 ms completed loop window, and a 16.989 ms window
+maximum gap. The primary Hibr session and focused pointer route were restored
+through the API. The physical mouse, multi-monitor, and high-refresh
+acceptance gates remain open; Hibr source was not modified. A screenshot-heavy
+pointer probe was stopped after its 16 MB framebuffer transfer exceeded the
+deliberate 30-second diagnostic transfer bound; this confirms that screenshots
+must be taken outside the timing/input interval.
 
 ## Current 0.1.335 screenshot-delivery status
 

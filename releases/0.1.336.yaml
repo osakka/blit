@@ -1,0 +1,10 @@
+release: 0.1.336
+package: blit_0.1.336-1_amd64.deb
+package_sha256: a6d3a73688f4565fff3f3b5ada2d0b7d35ad7281ad0ec42f1b43478793b865f6
+source_commit: f6744f9
+server_binary_sha256: 82aa3d908f5658f445ebd4d82345b4aaab2b53c9f76683069d3eda9cc32a0329
+live_host: 192.168.10.54:8080
+live_version: 0.1.336
+physical_mouse_acceptance: open
+physical_multi_monitor_acceptance: open
+physical_high_refresh_acceptance: open
