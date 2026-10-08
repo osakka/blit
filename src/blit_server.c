@@ -549,6 +549,11 @@ typedef struct {
     unsigned long long diagnostic_sdl_mouse_motion_events;
     unsigned long long diagnostic_sdl_mouse_button_events;
     unsigned long long diagnostic_sdl_mouse_fallback_events;
+    int sdl_warp_pending;
+    float sdl_warp_x;
+    float sdl_warp_y;
+    int sdl_warp_output;
+    uint64_t sdl_warp_us;
     unsigned long long diagnostic_stream_dropped_events;
     unsigned long long diagnostic_stream_backpressure_disconnects;
     unsigned long long diagnostic_stream_queue_peak_bytes;
@@ -11651,6 +11656,11 @@ static void update_pointer_position(BlitRuntime *runtime,
         if (display_index < 0)
             return;
         bounds = &runtime->displays[display_index].bounds;
+        runtime->sdl_warp_pending = 1;
+        runtime->sdl_warp_x = runtime->evdev_mouse_x;
+        runtime->sdl_warp_y = runtime->evdev_mouse_y;
+        runtime->sdl_warp_output = runtime->pointer_output;
+        runtime->sdl_warp_us = monotonic_us();
         SDL_WarpMouseInWindow(runtime->outputs[runtime->pointer_output].window,
                               runtime->evdev_mouse_x - bounds->x,
                               runtime->evdev_mouse_y - bounds->y);
@@ -12101,6 +12111,31 @@ static void service_sdl_events(BlitRuntime *runtime)
             monotonic_us() >= runtime->diagnostic_last_evdev_mouse_event_us &&
             monotonic_us() - runtime->diagnostic_last_evdev_mouse_event_us <=
                 BLIT_EVDEV_MOUSE_ACTIVITY_US;
+        if (event.type == SDL_EVENT_MOUSE_MOTION &&
+            runtime->sdl_warp_pending) {
+            int output_index = mouse_output_index(runtime,
+                                                  event.motion.windowID);
+            float x = event.motion.x;
+            float y = event.motion.y;
+            int same_position = 0;
+            uint64_t now = monotonic_us();
+            if (output_index >= 0) {
+                int display_index = display_index_for_output(runtime,
+                                                              output_index);
+                if (display_index >= 0) {
+                    x += runtime->displays[display_index].bounds.x;
+                    y += runtime->displays[display_index].bounds.y;
+                }
+            }
+            if (output_index == runtime->sdl_warp_output &&
+                x == runtime->sdl_warp_x && y == runtime->sdl_warp_y &&
+                now >= runtime->sdl_warp_us &&
+                now - runtime->sdl_warp_us <= BLIT_EVDEV_MOUSE_ACTIVITY_US)
+                same_position = 1;
+            runtime->sdl_warp_pending = 0;
+            if (same_position)
+                continue;
+        }
         /* KMSDRM can feed the same evdev device into SDL while Blit is also
            reading it directly.  The raw path handles motion, buttons, and
            wheel events with the display-global coordinates required for
