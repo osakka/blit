@@ -1206,6 +1206,14 @@ The latest reachable observation of the authorized host at
   running session with surface revision 309 and 279,575 terminal bytes. Blit
   and Hibr were both left clean after the session was deleted; Hibr source was
   not modified.
+- The deployed 0.1.286 package was verified through the live API after the
+  supervised restart. The active-PTY frame gate measured 59.991 Hz at the
+  display-mode cadence with zero missed deadlines; the 120-frame pixel gate
+  accepted 120 frames at 59.514 Hz and rendered 121 presentation passes. A
+  real Hibr `--resume` session reached `running`, emitted 52,186 terminal
+  bytes, measured 59.973 Hz with zero missed deadlines, and was deleted cleanly.
+  Live resources returned to zero afterward. The host still exposes one
+  physical output.
 - Exact-current 0.1.285 QEMU fixtures pass the API pixel/KMS capture gate,
   Hibr four-pane primary/join matrix, keyboard/multi-mouse/gamepad input
   matrix, and 240 Hz scheduler gate. These remain virtual-display evidence;
