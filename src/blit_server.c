@@ -1,5 +1,6 @@
 #include <SDL3/SDL.h>
 #include <linux/input.h>
+#include <dirent.h>
 #include "blit_kms.h"
 #include "blit_font.h"
 #include "blit_graphics.h"
@@ -6609,6 +6610,83 @@ static void refresh_session_state(BlitRuntime *runtime, BlitSession *session)
     }
 }
 
+/* Hibr's ordinary desktop path deliberately creates a detached `hold`
+   owner.  The process initially launched by Blit is then only the attach
+   client; its desktop and hold supervisor are reparented to init.  A PTY
+   resize delivered to the attach client therefore cannot wake the actual
+   desktop.  Hibr exports BLIT_SESSION_ID to every process in that handoff,
+   which gives Blit a narrow, ownership-scoped way to finish the resize
+   contract without modifying Hibr or signalling unrelated processes. */
+static int process_has_blit_session(pid_t pid,
+                                    unsigned long long session_id)
+{
+    char path[64];
+    char needle[64];
+    unsigned char environment[16384];
+    ssize_t length;
+    size_t offset;
+
+    snprintf(path, sizeof(path), "/proc/%ld/environ", (long)pid);
+    snprintf(needle, sizeof(needle), "BLIT_SESSION_ID=%llu", session_id);
+    {
+        int fd = open(path, O_RDONLY | O_CLOEXEC);
+        if (fd < 0)
+            return 0;
+        length = read(fd, environment, sizeof(environment) - 1);
+        close(fd);
+    }
+    if (length <= 0)
+        return 0;
+    environment[length] = '\0';
+    offset = 0;
+    while (offset < (size_t)length) {
+        size_t entry_length = strlen((char *)environment + offset);
+        if (entry_length == strlen(needle) &&
+            memcmp(environment + offset, needle, entry_length) == 0)
+            return 1;
+        offset += entry_length + 1;
+    }
+    return 0;
+}
+
+static int reassert_hibr_session_processes(BlitSession *session,
+                                           const struct winsize *size)
+{
+    DIR *directory;
+    struct dirent *entry;
+    int matched = 0;
+
+    directory = opendir("/proc");
+    if (directory == NULL)
+        return 0;
+    while ((entry = readdir(directory)) != NULL) {
+        char *end;
+        unsigned long value;
+        pid_t pid;
+        char path[64];
+        int fd;
+
+        if (entry->d_name[0] < '1' || entry->d_name[0] > '9')
+            continue;
+        value = strtoul(entry->d_name, &end, 10);
+        if (*end != '\0' || value == 0 || value > (unsigned long)INT_MAX)
+            continue;
+        pid = (pid_t)value;
+        if (pid == getpid() || !process_has_blit_session(pid, session->id))
+            continue;
+        snprintf(path, sizeof(path), "/proc/%ld/fd/0", (long)pid);
+        fd = open(path, O_RDWR | O_NONBLOCK | O_CLOEXEC);
+        if (fd >= 0) {
+            ioctl(fd, TIOCSWINSZ, size);
+            close(fd);
+        }
+        if (kill(pid, SIGWINCH) == 0)
+            ++matched;
+    }
+    closedir(directory);
+    return matched;
+}
+
 static void service_attach_reasserts(BlitRuntime *runtime, uint64_t now)
 {
     int i;
@@ -6648,6 +6726,11 @@ static void service_attach_reasserts(BlitRuntime *runtime, uint64_t now)
             signalled = 1;
         else if (kill(session->process_id, SIGWINCH) == 0)
             signalled = 1;
+        {
+            int hibr_matches = reassert_hibr_session_processes(session, &size);
+            if (hibr_matches > 0)
+                signalled = 1;
+        }
         if (!signalled)
             fprintf(stderr, "blit: attach reassert signal for session %llu failed: %s\n",
                     session->id, strerror(errno));
@@ -7735,7 +7818,7 @@ static void service_session_output(BlitRuntime *runtime, int fd)
                    deterministic SIGWINCH after its layout is ready. */
                 runtime->sessions[i].attach_reassert_pending = 1;
                 runtime->sessions[i].attach_reassert_attempts = 0;
-                runtime->sessions[i].attach_reassert_max_attempts = 6;
+                runtime->sessions[i].attach_reassert_max_attempts = 12;
                 runtime->sessions[i].attach_reassert_due_us =
                     monotonic_us() + 250000ULL;
             }
