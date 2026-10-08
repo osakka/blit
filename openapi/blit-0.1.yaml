@@ -454,6 +454,35 @@ paths:
                       $ref: '#/components/schemas/InputDevice'
         default:
           $ref: '#/components/responses/Problem'
+  /v1/input/inject:
+    post:
+      tags: [hardware]
+      operationId: injectPointerInput
+      summary: Inject a deterministic pointer event through the normal input path
+      description: >-
+        Test and API clients may inject pointer motion, button, or wheel events.
+        The event is routed and rendered by the same canonical path as evdev;
+        this endpoint is explicitly synthetic and does not emulate a physical
+        device descriptor.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InjectedPointerEvent'
+      responses:
+        '202':
+          description: Event accepted for routing and presentation
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accepted, kind]
+                properties:
+                  accepted: {type: boolean}
+                  kind: {type: string}
+        default:
+          $ref: '#/components/responses/Problem'
   /v1/input/routes:
     get:
       tags: [hardware]
@@ -1174,6 +1203,19 @@ components:
         capabilities:
           type: array
           items: {type: string}
+      additionalProperties: false
+    InjectedPointerEvent:
+      type: object
+      required: [kind]
+      properties:
+        kind:
+          type: string
+          enum: [pointer_motion, pointer_button, pointer_wheel]
+        x: {type: integer, description: Absolute virtual-desktop X coordinate.}
+        y: {type: integer, description: Absolute virtual-desktop Y coordinate.}
+        button: {type: integer, minimum: 0, maximum: 2}
+        pressed: {type: boolean}
+        delta: {type: integer, description: Wheel direction and magnitude.}
       additionalProperties: false
     UpdateInputRoute:
       type: object

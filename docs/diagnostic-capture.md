@@ -42,3 +42,18 @@ routing, Hibr, or presentation.
 `surface_update` records the `immediate` and `commit` boundaries, not every
 deferred cell chunk. This keeps the bounded trace useful under high-volume
 terminal output while preserving the atomic-frame evidence.
+
+For deterministic pointer diagnostics, inject events through the same Blit
+path used by evdev:
+
+```sh
+curl -X POST http://192.168.10.54:8080/v1/input/inject \
+  -H 'Content-Type: application/json' \
+  -d '{"kind":"pointer_motion","x":960,"y":1080}'
+curl -X POST http://192.168.10.54:8080/v1/input/inject \
+  -H 'Content-Type: application/json' \
+  -d '{"kind":"pointer_button","button":0,"pressed":true}'
+```
+
+These are synthetic API events and are reported as `api-pointer`; they do not
+claim that the physical evdev device generated the event.

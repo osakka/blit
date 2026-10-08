@@ -636,6 +636,16 @@ static void reset_update_state(BlitRuntime *runtime, int fd,
 static int terminate_session_process(pid_t process_id);
 static void remove_session_streams(BlitRuntime *runtime,
                                    const char *session_id);
+static void send_mouse_report(BlitRuntime *runtime, SDL_WindowID window_id,
+                              float pixel_x, float pixel_y, int button,
+                              int release);
+static void update_pointer_position(BlitRuntime *runtime,
+                                    const char *device_id);
+static void broadcast_evdev_pointer(BlitRuntime *runtime, const char *kind,
+                                    int button, int pressed, int delta,
+                                    const char *device_id);
+static void dispatch_pointer_button(BlitRuntime *runtime, int button,
+                                    int pressed, const char *device_id);
 
 static void effect_json(const BlitRuntime *runtime, char *body,
                         size_t capacity)
@@ -8678,6 +8688,59 @@ static void handle_request(int fd, BlitRuntime *runtime,
                           "OK", "application/json", body);
         return;
     }
+    if (strcmp(path, "/v1/input/inject") == 0 &&
+        strcmp(method, "POST") == 0) {
+        char kind[64];
+        int x;
+        int y;
+        int button;
+        int pressed;
+        int delta;
+
+        if (!json_string(payload, "kind", kind, sizeof(kind))) {
+            send_problem(fd, 400, "Bad Request", "invalid_input_event",
+                         "An input event kind is required.");
+            return;
+        }
+        if (strcmp(kind, "pointer_motion") == 0) {
+            if (!json_int(payload, "x", &x) || !json_int(payload, "y", &y)) {
+                send_problem(fd, 400, "Bad Request", "invalid_input_event",
+                             "Pointer motion requires integer x and y coordinates.");
+                return;
+            }
+            runtime->evdev_mouse_x = (float)x;
+            runtime->evdev_mouse_y = (float)y;
+            update_pointer_position(runtime, "api-pointer");
+        } else if (strcmp(kind, "pointer_button") == 0) {
+            if (!json_int(payload, "button", &button) ||
+                !json_bool(payload, "pressed", &pressed) ||
+                button < 0 || button > 2) {
+                send_problem(fd, 400, "Bad Request", "invalid_input_event",
+                             "Pointer buttons require button 0..2 and pressed boolean.");
+                return;
+            }
+            dispatch_pointer_button(runtime, button, pressed, "api-pointer");
+        } else if (strcmp(kind, "pointer_wheel") == 0) {
+            if (!json_int(payload, "delta", &delta) || delta == 0) {
+                send_problem(fd, 400, "Bad Request", "invalid_input_event",
+                             "Pointer wheel requires a non-zero integer delta.");
+                return;
+            }
+            broadcast_evdev_pointer(runtime, "pointer_wheel",
+                                     delta > 0 ? 64 : 65, 1, delta,
+                                     "api-pointer");
+            send_mouse_report(runtime, 0, runtime->pointer_x,
+                              runtime->pointer_y, delta > 0 ? 64 : 65, 0);
+        } else {
+            send_problem(fd, 422, "Unprocessable Entity", "unsupported_input_event",
+                         "Only pointer_motion, pointer_button, and pointer_wheel are supported.");
+            return;
+        }
+        snprintf(body, sizeof(body),
+                 "{\"accepted\":true,\"kind\":\"%s\"}", kind);
+        send_http(fd, 202, "Accepted", "application/json", body);
+        return;
+    }
     if (strcmp(path, "/v1/input/routes") == 0 &&
         strcmp(method, "GET") == 0) {
         input_routes_json(runtime, body, sizeof(body));
@@ -11282,14 +11345,15 @@ static void send_mouse_motion_report(BlitRuntime *runtime,
     write(session->pty_fd, report, strlen(report));
 }
 
-static void update_evdev_pointer(BlitRuntime *runtime)
+static void update_pointer_position(BlitRuntime *runtime,
+                                    const char *device_id)
 {
     float old_x;
     float old_y;
     int old_output;
     int old_valid;
     int changed;
-    if (runtime->evdev_mouse_count <= 0 || runtime->output_count <= 0)
+    if (runtime->output_count <= 0)
         return;
     old_x = runtime->pointer_x;
     old_y = runtime->pointer_y;
@@ -11345,10 +11409,11 @@ static void update_evdev_pointer(BlitRuntime *runtime)
         if (routed != NULL) target = routed;
         snprintf(input_event, sizeof(input_event),
                  "{\"type\":\"input\",\"session_id\":\"session-%llu\","
-                 "\"device_id\":\"evdev-pointer\",\"event\":{"
+                 "\"device_id\":\"%s\",\"event\":{"
                  "\"kind\":\"pointer_motion\",\"time_us\":%llu,\"x\":%.1f,"
                  "\"y\":%.1f,\"output\":%d,\"column\":%d,\"row\":%d}}",
                  target != NULL ? target->id : 0ULL,
+                 device_id != NULL ? device_id : "evdev-pointer",
                  (unsigned long long)monotonic_us(),
                  runtime->pointer_x, runtime->pointer_y,
                  runtime->pointer_output, target_col, target_row);
@@ -11371,8 +11436,16 @@ static void update_evdev_pointer(BlitRuntime *runtime)
                              runtime->evdev_mouse_y);
 }
 
+static void update_evdev_pointer(BlitRuntime *runtime)
+{
+    if (runtime->evdev_mouse_count <= 0)
+        return;
+    update_pointer_position(runtime, "evdev-pointer");
+}
+
 static void broadcast_evdev_pointer(BlitRuntime *runtime, const char *kind,
-                                    int button, int pressed, int delta)
+                                    int button, int pressed, int delta,
+                                    const char *device_id)
 {
     char input_event[384];
     int column = 0;
@@ -11385,26 +11458,48 @@ static void broadcast_evdev_pointer(BlitRuntime *runtime, const char *kind,
     if (strcmp(kind, "pointer_wheel") == 0) {
         snprintf(input_event, sizeof(input_event),
                  "{\"type\":\"input\",\"session_id\":\"session-%llu\","
-                 "\"device_id\":\"evdev-pointer\",\"event\":{"
+                 "\"device_id\":\"%s\",\"event\":{"
                  "\"kind\":\"pointer_wheel\",\"time_us\":%llu,\"delta\":%d,"
                  "\"x\":%.1f,\"y\":%.1f,\"output\":%d}}",
                  target != NULL ? target->id : 0ULL,
+                 device_id != NULL ? device_id : "evdev-pointer",
                  (unsigned long long)monotonic_us(), delta,
                  runtime->pointer_x, runtime->pointer_y,
                  runtime->pointer_output);
     } else {
         snprintf(input_event, sizeof(input_event),
                  "{\"type\":\"input\",\"session_id\":\"session-%llu\","
-                 "\"device_id\":\"evdev-pointer\",\"event\":{"
+                 "\"device_id\":\"%s\",\"event\":{"
                  "\"kind\":\"pointer_button\",\"time_us\":%llu,\"button\":%d,"
                  "\"pressed\":%s,\"x\":%.1f,\"y\":%.1f,"
                  "\"output\":%d,\"column\":%d,\"row\":%d}}",
                  target != NULL ? target->id : 0ULL,
+                 device_id != NULL ? device_id : "evdev-pointer",
                  (unsigned long long)monotonic_us(), button,
                  pressed ? "true" : "false", runtime->pointer_x,
                  runtime->pointer_y, runtime->pointer_output, column, row);
     }
     broadcast_stream(runtime, input_event, BLIT_STREAM_INPUT);
+}
+
+static void dispatch_pointer_button(BlitRuntime *runtime, int button,
+                                    int pressed, const char *device_id)
+{
+    char detail[160];
+    if (button < 0 || button > 2)
+        return;
+    snprintf(detail, sizeof(detail),
+             "button=%d pressed=%d x=%.1f y=%.1f",
+             button, pressed, runtime->pointer_x, runtime->pointer_y);
+    diagnostic_trace(runtime, "pointer_button", detail);
+    if (pressed)
+        runtime->mouse_buttons |= 1U << button;
+    broadcast_evdev_pointer(runtime, "pointer_button", button, pressed, 0,
+                             device_id);
+    send_mouse_report(runtime, 0, runtime->pointer_x, runtime->pointer_y,
+                      button, !pressed);
+    if (!pressed)
+        runtime->mouse_buttons &= ~(1U << button);
 }
 
 static void broadcast_evdev_gamepad(BlitRuntime *runtime,
@@ -11492,7 +11587,8 @@ static void service_evdev_mouse(BlitRuntime *runtime)
                     else
                         button = event.value > 0 ? 64 : 65;
                     broadcast_evdev_pointer(runtime, "pointer_wheel", button,
-                                             1, event.value);
+                                             1, event.value,
+                                             "evdev-pointer");
                     send_mouse_report(runtime, 0, runtime->evdev_mouse_x,
                                       runtime->evdev_mouse_y, button, 0);
                     record_input_dispatch(runtime, input_started_us);
@@ -11517,20 +11613,8 @@ static void service_evdev_mouse(BlitRuntime *runtime)
                 else
                     button = 2;
                 int release = event.value == 0;
-                {
-                    char detail[160];
-                    snprintf(detail, sizeof(detail),
-                             "button=%d pressed=%d x=%.1f y=%.1f",
-                             button, !release, runtime->evdev_mouse_x,
-                             runtime->evdev_mouse_y);
-                    diagnostic_trace(runtime, "pointer_button", detail);
-                }
-                if (!release) runtime->mouse_buttons |= 1U << button;
-                broadcast_evdev_pointer(runtime, "pointer_button", button,
-                                         !release, 0);
-                send_mouse_report(runtime, 0, runtime->evdev_mouse_x,
-                                  runtime->evdev_mouse_y, button, release);
-                if (release) runtime->mouse_buttons &= ~(1U << button);
+                dispatch_pointer_button(runtime, button, !release,
+                                        "evdev-pointer");
                 record_input_dispatch(runtime, input_started_us);
             }
         }
