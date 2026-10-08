@@ -42,8 +42,14 @@ exact package was installed through the supervised live updater. On the real
 rendered 24, recorded zero pixel-frame errors and zero missed deadlines, and
   returned to zero sessions/surfaces/routes after cleanup. The package SHA-256
   is `2cf122c7e1a9340a5c3e95f5fb3d520d962b34777df4d77d96d598e7109df5b3`.
-  This is physical one-output 60 Hz evidence; it does not establish physical
-  120/240 Hz support.
+This is physical one-output 60 Hz evidence; it does not establish physical
+120/240 Hz support.
+
+The exact current 0.1.281 TCC binary passed the four-output VKMS Hibr fixture
+with one primary and three joins. Its exact 240 Hz pixel-stream fixture also
+selected 240 Hz and accepted all 240 frames, but strict presentation measured
+117.83 Hz with eight virtual missed deadlines under QEMU TCG, so the fixture
+remains scheduler/ingestion evidence rather than a 240 Hz presentation pass.
 
 The same live host sustained 59.894 measured frames per second during a
 controlled 120×50 full-screen coloured terminal redraw workload carrying
