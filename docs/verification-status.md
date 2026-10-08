@@ -22,7 +22,7 @@ an evidence record, not a claim that the complete product is released.
   endpoint. The Debian candidate `blit_0.1.268-1_amd64.deb` was built from
   this binary and passed package allowlist, embedded-version, byte-identity,
   asset-presence, and extracted-runtime checks. Its SHA-256 is
-  `796b712c85e96482f1cf235dadef8d128be2086225fea58ec637d57bdb61cc41`.
+  `8b13d29d0e4bd86530f1af083e64abd616e163ade7161b392c5944036a3f9108`.
   It is not claimed as a fully validated 240 Hz release: the real-mode QEMU
   stream gate still fails its strict page-flip deadline requirement.
 
