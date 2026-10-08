@@ -1,5 +1,35 @@
 # Live diagnostic capture
 
+## One-command experience capture
+
+Use this as the canonical evidence transaction for a report from the real
+machine:
+
+```sh
+tools/diagnostics/experience-capture.sh \
+  http://192.168.10.54:8080 10 diagnostics/experience-$(date -u +%Y%m%dT%H%M%SZ) yes
+```
+
+It first records ten seconds of runtime counters, surface summaries, input
+inventory, and filtered traces with screenshots disabled. It then captures one
+current screenshot for every discovered display. This ordering is important:
+the screenshot transfer cannot be mistaken for a rendering stall. The output
+directory is the complete handoff artifact; preserve it unchanged.
+
+Interpret the first missing boundary in this order:
+
+1. `physical_evdev_events` did not increase: device/permissions/seat input;
+2. input increased but no `pointer_motion`/`pointer_button` trace: routing;
+3. input and trace exist but no surface revision/commit: Hibr/PTY surface;
+4. surface changed but no `render_path`: compositor scheduling;
+5. render path exists with missed deadlines or a large loop gap: presentation;
+6. all counters are healthy but the screenshot is wrong: framebuffer composition.
+
+For a pure timing capture use `no` as the final argument. For a controlled
+comparison, run the same command with API-injected pointer events and compare
+it with the physical capture; this separates evdev problems from renderer
+problems without changing Hibr.
+
 ## Reproducing a physical-pointer report
 
 Use the pointer artifact capture in `physical` mode while moving and clicking
