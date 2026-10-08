@@ -7,7 +7,7 @@ an evidence record, not a claim that the complete product is released.
 
 - Repository: `main` at the source commit for this ledger update.
 - Production C was compiled with TCC.
-- The current candidate is `0.1.248`. It builds with TCC and passes terminal
+- The current candidate is `0.1.249`. It builds with TCC and passes terminal
   conformance, SDL screenshot/overlay pixels, the hidden-cursor damage gate,
   and the complete Hibr font manifest gate. Its SDL backend uses a per-output
   glyph atlas, suppresses unchanged cell damage, and does not schedule frames
@@ -20,9 +20,9 @@ an evidence record, not a claim that the complete product is released.
   preceding 0.1.245 package was accepted by the authorized physical host and
   verified through its version endpoint.
 
-### Current 0.1.248 source/package evidence
+### Current 0.1.249 source/package evidence
 
-The exact TCC-built 0.1.248 binary and Blit Hibr entrypoint pass the stock
+The exact TCC-built 0.1.249 binary and Blit Hibr entrypoint pass the stock
 Hibr QEMU acceptance path. The fix loads Blit's `console-blit` provider in
 the API-launched Hibr child itself; relying on `HIBR_RC` was invalid because
 non-interactive children do not consume it. The two-output fixture passed
@@ -31,13 +31,22 @@ desktop, exposed both Hibr control displays, and finished with
 `ACCEPTANCE_PASS`. The primary reached surface revision 152 and the join
 surface revision 10. Hibr source remained unchanged.
 
-The full 0.1.248 two-output orchestration variant also passed
+The launcher now defaults Hibr's `DT_TERMMS` to zero unless explicitly
+overridden, removing Hibr's 70 ms program-redraw throttle while leaving
+Blit's refresh-aware scheduler authoritative. The exact 0.1.249 dummy frame
+gate measured 43.989 Hz over a 500 ms window. The full 0.1.249 two-output
+orchestration variant also passed
 `HIBR_PANE_MATRIX_PASS`: four Hibr clients ran across a Blit-owned 2×2 pane
 layout, the primary desktop supervisor restarted successfully, and an
 auxiliary `--join` client was killed and reconnected on a new pane. The final
 topology contained five attached surfaces. The package is
-`blit_0.1.248-1_amd64.deb`, SHA-256
-`5b980f764c3965396d2dfb45dcf4ee03939308c183575869669d7d1836f1321f`.
+`blit_0.1.249-1_amd64.deb`; the final artifact hash is recorded with the
+release handoff because this ledger is included inside the package itself.
+
+### Current 0.1.248 source/package evidence
+
+The 0.1.248 provider-bootstrap correction was superseded by 0.1.249 after
+the Hibr redraw-throttle fix above.
 
 ### Current 0.1.247 source/package evidence
 

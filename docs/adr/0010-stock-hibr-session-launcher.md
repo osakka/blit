@@ -20,7 +20,10 @@ Hibr's `pty`, `term`, and `hold` modules by explicit staged paths before the
 unchanged stock `session.hibr` is sourced in the same process. The provider
 supplies both Hibr's `display` interface and the `console` commands; loading
 Hibr's local `console` provider alongside it would be ambiguous and would not
-exercise Blit's display path.
+exercise Blit's display path. The launcher defaults Hibr's `DT_TERMMS` to
+zero, unless the caller supplies it, because Blit already enforces the
+display-refresh cadence and Hibr's stock 70 ms terminal throttle would cap
+program-driven redraws below the display rate.
 
 ## Consequences
 
