@@ -220,6 +220,7 @@ int main(void)
                 sizeof(restart_detail));
             (void)run_command("/usr/bin/systemctl",
                 (char *const[]){(char *)"systemctl", (char *)"restart",
+                                 (char *)"--no-block",
                                  (char *)"blit.service", NULL}, restart_detail,
                 sizeof(restart_detail));
             close(server_fd);
