@@ -30,6 +30,8 @@
 #include <time.h>
 #include <unistd.h>
 #include <pty.h>
+/* ADR 0056: DEFLATE for PNG (f=100) and Kitty o=z payloads. */
+#include <zlib.h>
 
 extern char **environ;
 
@@ -4760,6 +4762,209 @@ static int kitty_parameter_int(const char *header, char key, int fallback,
     return 1;
 }
 
+/* PNG decoding for the Kitty graphics protocol's f=100 format (ADR 0056).
+   Only the DEFLATE step is delegated, to zlib; chunk walking, unfiltering
+   and colour conversion stay here because they are bounded and simple.
+
+   The accepted subset is 8-bit, non-interlaced, in the five colour types a
+   terminal client realistically sends. Everything decodes to RGBA so the
+   renderer sees one representation. Anything else is refused rather than
+   approximated, because a wrong guess about sample layout produces a
+   plausible-looking wrong image. */
+
+static unsigned int png_be32(const unsigned char *p)
+{
+    return ((unsigned int)p[0] << 24) | ((unsigned int)p[1] << 16) |
+           ((unsigned int)p[2] << 8) | (unsigned int)p[3];
+}
+
+static int png_paeth(int a, int b, int c)
+{
+    int p = a + b - c;
+    int pa = p > a ? p - a : a - p;
+    int pb = p > b ? p - b : b - p;
+    int pc = p > c ? p - c : c - p;
+    if (pa <= pb && pa <= pc) return a;
+    if (pb <= pc) return b;
+    return c;
+}
+
+/* Reverse the per-scanline filters in place over `raw`, which holds
+   `height` rows of one filter byte followed by `stride` sample bytes. */
+static int png_unfilter(unsigned char *raw, int height, size_t stride,
+                        int bytes_per_pixel)
+{
+    int row;
+    size_t i;
+    unsigned char *previous = NULL;
+    for (row = 0; row < height; ++row) {
+        unsigned char *line = raw + (size_t)row * (stride + 1);
+        int filter = line[0];
+        unsigned char *data = line + 1;
+        for (i = 0; i < stride; ++i) {
+            int a = i >= (size_t)bytes_per_pixel ?
+                data[i - (size_t)bytes_per_pixel] : 0;
+            int b = previous != NULL ? previous[i] : 0;
+            int c = (previous != NULL && i >= (size_t)bytes_per_pixel) ?
+                previous[i - (size_t)bytes_per_pixel] : 0;
+            switch (filter) {
+            case 0: break;
+            case 1: data[i] = (unsigned char)(data[i] + a); break;
+            case 2: data[i] = (unsigned char)(data[i] + b); break;
+            case 3: data[i] = (unsigned char)(data[i] + ((a + b) >> 1)); break;
+            case 4: data[i] = (unsigned char)(data[i] + png_paeth(a, b, c)); break;
+            default: return 0;
+            }
+        }
+        previous = data;
+    }
+    return 1;
+}
+
+/* Decode `length` bytes of PNG into a freshly allocated RGBA buffer.
+   Returns 1 on success and fills the out parameters; the caller owns
+   *pixels_out. Returns 0 and allocates nothing on any malformed, oversized
+   or unsupported input. */
+static int png_decode(const unsigned char *data, size_t length,
+                      unsigned char **pixels_out, int *width_out,
+                      int *height_out)
+{
+    static const unsigned char signature[8] =
+        { 0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a };
+    size_t offset = 8;
+    int width = 0, height = 0, depth = 0, colour = 0, interlace = 0;
+    int channels, bytes_per_pixel, have_header = 0;
+    size_t stride, raw_size, compressed_used = 0;
+    unsigned char *compressed = NULL;
+    unsigned char *raw = NULL;
+    unsigned char *rgba = NULL;
+    unsigned char palette[256 * 3];
+    unsigned char palette_alpha[256];
+    int palette_entries = 0;
+    int row, column;
+    uLongf inflated;
+
+    if (length < 8 || memcmp(data, signature, 8) != 0)
+        return 0;
+    memset(palette_alpha, 0xff, sizeof(palette_alpha));
+
+    while (offset + 8 <= length) {
+        unsigned int chunk_length = png_be32(data + offset);
+        const unsigned char *type = data + offset + 4;
+        const unsigned char *body = data + offset + 8;
+        if (chunk_length > length || offset + 12 + chunk_length > length)
+            break;
+        if (memcmp(type, "IHDR", 4) == 0 && chunk_length >= 13) {
+            width = (int)png_be32(body);
+            height = (int)png_be32(body + 4);
+            depth = body[8];
+            colour = body[9];
+            interlace = body[12];
+            have_header = 1;
+            if (width < 1 || width > BLIT_GRAPHICS_MAX_WIDTH ||
+                height < 1 || height > BLIT_GRAPHICS_MAX_HEIGHT ||
+                depth != 8 || interlace != 0)
+                return 0;
+            if (colour != 0 && colour != 2 && colour != 3 &&
+                colour != 4 && colour != 6)
+                return 0;
+        } else if (memcmp(type, "PLTE", 4) == 0) {
+            if (chunk_length > sizeof(palette)) return 0;
+            memcpy(palette, body, chunk_length);
+            palette_entries = (int)(chunk_length / 3);
+        } else if (memcmp(type, "tRNS", 4) == 0 && colour == 3) {
+            if (chunk_length > sizeof(palette_alpha)) return 0;
+            memcpy(palette_alpha, body, chunk_length);
+        } else if (memcmp(type, "IDAT", 4) == 0) {
+            unsigned char *grown;
+            if (!have_header) return 0;
+            if (compressed_used + chunk_length > BLIT_GRAPHICS_MAX_BYTES) {
+                free(compressed);
+                return 0;
+            }
+            grown = (unsigned char *)realloc(compressed,
+                                             compressed_used + chunk_length);
+            if (grown == NULL) { free(compressed); return 0; }
+            compressed = grown;
+            memcpy(compressed + compressed_used, body, chunk_length);
+            compressed_used += chunk_length;
+        } else if (memcmp(type, "IEND", 4) == 0) {
+            break;
+        }
+        offset += 12 + chunk_length;
+    }
+    if (!have_header || compressed == NULL || compressed_used == 0) {
+        free(compressed);
+        return 0;
+    }
+    channels = colour == 0 ? 1 : colour == 2 ? 3 : colour == 3 ? 1 :
+               colour == 4 ? 2 : 4;
+    if (colour == 3 && palette_entries < 1) { free(compressed); return 0; }
+    bytes_per_pixel = channels;
+    stride = (size_t)width * (size_t)channels;
+    raw_size = ((size_t)height) * (stride + 1);
+    /* The inflated size is fixed by IHDR, so a decompression bomb cannot
+       make this allocation grow: zlib is told the exact budget and fails
+       if the stream does not match it. */
+    if (raw_size > BLIT_GRAPHICS_MAX_BYTES) { free(compressed); return 0; }
+    raw = (unsigned char *)malloc(raw_size);
+    if (raw == NULL) { free(compressed); return 0; }
+    inflated = (uLongf)raw_size;
+    if (uncompress(raw, &inflated, compressed, (uLong)compressed_used) != Z_OK ||
+        (size_t)inflated != raw_size) {
+        free(compressed);
+        free(raw);
+        return 0;
+    }
+    free(compressed);
+    if (!png_unfilter(raw, height, stride, bytes_per_pixel)) {
+        free(raw);
+        return 0;
+    }
+    rgba = (unsigned char *)malloc((size_t)width * (size_t)height * 4U);
+    if (rgba == NULL) { free(raw); return 0; }
+    for (row = 0; row < height; ++row) {
+        const unsigned char *line = raw + (size_t)row * (stride + 1) + 1;
+        unsigned char *out = rgba + (size_t)row * (size_t)width * 4U;
+        for (column = 0; column < width; ++column) {
+            const unsigned char *sample = line + (size_t)column * (size_t)channels;
+            unsigned char *pixel = out + (size_t)column * 4U;
+            switch (colour) {
+            case 0:
+                pixel[0] = pixel[1] = pixel[2] = sample[0];
+                pixel[3] = 0xff;
+                break;
+            case 2:
+                pixel[0] = sample[0]; pixel[1] = sample[1];
+                pixel[2] = sample[2]; pixel[3] = 0xff;
+                break;
+            case 3: {
+                int index = sample[0];
+                if (index >= palette_entries) { free(raw); free(rgba); return 0; }
+                pixel[0] = palette[index * 3];
+                pixel[1] = palette[index * 3 + 1];
+                pixel[2] = palette[index * 3 + 2];
+                pixel[3] = palette_alpha[index];
+                break;
+            }
+            case 4:
+                pixel[0] = pixel[1] = pixel[2] = sample[0];
+                pixel[3] = sample[1];
+                break;
+            default:
+                pixel[0] = sample[0]; pixel[1] = sample[1];
+                pixel[2] = sample[2]; pixel[3] = sample[3];
+                break;
+            }
+        }
+    }
+    free(raw);
+    *pixels_out = rgba;
+    *width_out = width;
+    *height_out = height;
+    return 1;
+}
+
 static int kitty_base64_value(unsigned char byte)
 {
     if (byte >= 'A' && byte <= 'Z') return byte - 'A';
@@ -4956,7 +5161,18 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
         if (width == 0) width = image->width;
         if (height == 0) height = image->height;
     }
-    if ((format != 24 && format != 32) || width < 1 ||
+    /* f=100 is PNG. It is the protocol's only self-describing format, so
+       s and v are optional and the real dimensions are not known until the
+       final chunk has arrived and been decoded. ADR 0056. */
+    if (format == 100) {
+        if (width != 0 || height != 0) {
+            if (width < 1 || width > BLIT_GRAPHICS_MAX_WIDTH ||
+                height < 1 || height > BLIT_GRAPHICS_MAX_HEIGHT) {
+                graphics_reject(session, "image-bounds");
+                return;
+            }
+        }
+    } else if ((format != 24 && format != 32) || width < 1 ||
         width > BLIT_GRAPHICS_MAX_WIDTH || height < 1 ||
         height > BLIT_GRAPHICS_MAX_HEIGHT) {
         graphics_reject(session, "image-bounds");
@@ -4992,8 +5208,10 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
         /* Kitty RGBA images may contain transparency; only API pixel frames
            prove opacity incrementally before using the packed KMS path. */
         image->opaque = 0;
-        image->capacity = (size_t)width * (size_t)height *
-            (format == 24 ? 3U : 4U);
+        image->encoded = format == 100;
+        image->capacity = image->encoded ?
+            (size_t)BLIT_GRAPHICS_MAX_ENCODED_BYTES :
+            (size_t)width * (size_t)height * (format == 24 ? 3U : 4U);
         if (image->capacity > BLIT_GRAPHICS_MAX_BYTES) {
             graphics_image_release(image);
             return;
@@ -5025,10 +5243,37 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
         return;
     }
     if (!more) {
-        if (image->base64_tail_length != 0 || image->bytes != image->capacity) {
+        if (image->base64_tail_length != 0 ||
+            (!image->encoded && image->bytes != image->capacity)) {
             graphics_image_release(image);
             graphics_reject(session, "incomplete-data");
             return;
+        }
+        if (image->encoded) {
+            /* The container is complete; replace it with decoded samples.
+               Dimensions and format now come from the image itself, which
+               is the whole point of a self-describing format. */
+            unsigned char *decoded = NULL;
+            int decoded_width = 0;
+            int decoded_height = 0;
+            if (!png_decode(image->pixels, image->bytes, &decoded,
+                            &decoded_width, &decoded_height)) {
+                graphics_image_release(image);
+                graphics_reject(session, "invalid-png");
+                return;
+            }
+            free(image->pixels);
+            image->pixels = decoded;
+            image->width = decoded_width;
+            image->height = decoded_height;
+            image->format = 32;
+            image->bytes = image->capacity =
+                (size_t)decoded_width * (size_t)decoded_height * 4U;
+            image->encoded = 0;
+            if (image->placement_width <= 0)
+                image->placement_width = decoded_width;
+            if (image->placement_height <= 0)
+                image->placement_height = decoded_height;
         }
         image->complete = 1;
         image->generation = next_graphics_generation();
@@ -5060,11 +5305,16 @@ static int sixel_number(const char **cursor, int fallback)
     return (int)value;
 }
 
-static void terminal_apply_sixel(BlitSession *session, BlitSurface *surface)
+/* `body` points at the first sixel data byte, after the introducer's
+   optional P1;P2;P3 parameters and its final 'q'. The caller owns that
+   parsing because the parameters belong to the DCS introducer rather than
+   to the sixel data stream. */
+static void terminal_apply_sixel(BlitSession *session, BlitSurface *surface,
+                                 const char *body)
 {
     unsigned char *scratch;
     uint32_t palette[256];
-    const char *cursor = session->terminal_string + 1;
+    const char *cursor = body;
     int current_color = 0;
     int x = 0;
     int y = 0;
@@ -5273,9 +5523,27 @@ static void terminal_apply_string(BlitSession *session, BlitSurface *surface)
     }
     if (session->terminal_string_type != 'P')
         return;
-    if (payload[0] == 'q') {
-        terminal_apply_sixel(session, surface);
-        return;
+    /* The sixel introducer is `DCS P1 ; P2 ; P3 q`. Its parameters are
+       optional, so a bare `DCS q` is legal, but an encoder that emits them
+       must not be discarded: P2 in particular is how a producer declares
+       that unset pixels are transparent, which is the ordinary choice for
+       an image with an alpha channel. Accept any digits-and-semicolons
+       prefix and hand the decoder the body after the final 'q'.
+
+       A DCS whose prefix is not followed by 'q' is deliberately left alone
+       rather than rejected. `$q` (DECRQSS) and `+q` (XTGETTCAP) are handled
+       below, and a parameterised DCS with some other final byte belongs to
+       another device control string entirely, such as DECDLD; treating it
+       as malformed sixel would diagnose the wrong thing. */
+    {
+        const char *introducer = payload;
+        while ((*introducer >= '0' && *introducer <= '9') ||
+               *introducer == ';')
+            ++introducer;
+        if (*introducer == 'q') {
+            terminal_apply_sixel(session, surface, introducer + 1);
+            return;
+        }
     }
     if (strncmp(payload, "$q", 2) == 0) {
         const char *query = payload + 2;

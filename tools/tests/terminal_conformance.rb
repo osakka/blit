@@ -6,6 +6,7 @@
 
 require 'json'
 require 'base64'
+require 'zlib'
 require 'net/http'
 require 'timeout'
 require 'uri'
@@ -1238,6 +1239,94 @@ assert_equal(16, kitty_image.fetch('placement_width'), 'Kitty c cell conversion'
 assert_equal(16, kitty_image.fetch('placement_height'), 'Kitty r cell conversion')
 request(base, 'DELETE', "/v1/terminal-sessions/#{kitty_id}")
 puts 'PASS kitty-image-transmit-placement'
+
+# ADR 0055/0056 graphics decoding. A helper because each vector is the same
+# shape: run one escape through a short-lived session and read back the
+# graphics array the API publishes.
+def graphics_case(base, name, escape, width: 20, height: 4)
+  created = request(base, 'POST', '/v1/terminal-sessions', {
+    'command' => '/bin/sh',
+    'arguments' => ['-c', "printf '%b' '#{escape}'; sleep 0.3"],
+    'surface' => { 'width' => width, 'height' => height }
+  })
+  id = created.fetch('id')
+  state = Timeout.timeout(5) do
+    loop do
+      current = request(base, 'GET', "/v1/terminal-sessions/#{id}")
+      break current unless %w[starting running].include?(current.fetch('state'))
+
+      sleep 0.02
+    end
+  end
+  request(base, 'DELETE', "/v1/terminal-sessions/#{id}")
+  state.fetch('graphics')
+end
+
+# Issue #7: the sixel introducer is DCS P1;P2;P3 q and its parameters are
+# optional. Every shape must reach the decoder; before this fix only the
+# bare form did, and a parameterised introducer was dropped in silence.
+sixel_body = '#0;2;100;0;0#0~~~~~~~~'
+sixel_forms = {
+  'bare' => "\\033Pq#{sixel_body}\\033\\\\",
+  'p1-p2-p3' => "\\033P0;1;0q#{sixel_body}\\033\\\\",
+  'p1-only' => "\\033P1q#{sixel_body}\\033\\\\",
+  'empty-params' => "\\033P;;q#{sixel_body}\\033\\\\"
+}
+sixel_sizes = sixel_forms.map do |label, escape|
+  images = graphics_case(base, "sixel-#{label}", escape)
+  assert_equal(1, images.length, "sixel introducer #{label} produces one image")
+  assert_equal('sixel', images.fetch(0).fetch('protocol'), "sixel protocol #{label}")
+  [images.fetch(0).fetch('width'), images.fetch(0).fetch('height')]
+end
+assert_equal(1, sixel_sizes.uniq.length,
+             'every sixel introducer form decodes to the same image')
+puts 'PASS sixel-introducer-parameter-forms'
+
+# A DCS that is not sixel must still be left alone rather than treated as a
+# malformed one; DECRQSS shares the 'q' final byte behind a '$' intermediate.
+assert_equal(0, graphics_case(base, 'decrqss-is-not-sixel',
+                              "\\033P$qm\\033\\\\").length,
+             'DECRQSS is not decoded as sixel')
+puts 'PASS sixel-does-not-capture-other-dcs'
+
+# Issue #12 / ADR 0056: f=100 is PNG, the protocol's only self-describing
+# format. The same 2x2 image is transmitted as raw RGBA and as PNG; both
+# must yield an image of identical dimensions.
+rgba_pixels = [255, 0, 0, 255, 0, 255, 0, 255,
+               0, 0, 255, 255, 255, 255, 255, 255].pack('C*')
+
+def png_chunk(type, body)
+  [body.bytesize].pack('N') + type + body +
+    [Zlib.crc32(type + body)].pack('N')
+end
+
+png_raw = (0...2).map { |row| "\x00".b + rgba_pixels[row * 8, 8] }.join
+png_bytes = "\x89PNG\r\n\x1a\n".b +
+            png_chunk('IHDR'.b, [2, 2, 8, 6, 0, 0, 0].pack('NNC5')) +
+            png_chunk('IDAT'.b, Zlib::Deflate.deflate(png_raw)) +
+            png_chunk('IEND'.b, ''.b)
+
+raw_images = graphics_case(base, 'kitty-raw-rgba',
+  "\\033_Ga=T,f=32,s=2,v=2;#{Base64.strict_encode64(rgba_pixels)}\\033\\\\")
+png_images = graphics_case(base, 'kitty-png',
+  "\\033_Ga=T,f=100;#{Base64.strict_encode64(png_bytes)}\\033\\\\")
+assert_equal(1, png_images.length, 'f=100 PNG produces one image')
+assert_equal(raw_images.fetch(0).fetch('width'), png_images.fetch(0).fetch('width'),
+             'PNG width matches the equivalent raw transmission')
+assert_equal(raw_images.fetch(0).fetch('height'), png_images.fetch(0).fetch('height'),
+             'PNG height matches the equivalent raw transmission')
+assert_equal(32, png_images.fetch(0).fetch('format'), 'PNG decodes to RGBA')
+assert_equal(true, png_images.fetch(0).fetch('complete'), 'PNG transmission completes')
+puts 'PASS kitty-png-transmission'
+
+# A container that is not a decodable PNG must be refused, not half-accepted.
+assert_equal(0, graphics_case(base, 'kitty-png-malformed',
+  "\\033_Ga=T,f=100;#{Base64.strict_encode64('this is not a png')}\\033\\\\").length,
+             'a malformed PNG container creates no image')
+assert_equal(0, graphics_case(base, 'kitty-png-truncated',
+  "\\033_Ga=T,f=100;#{Base64.strict_encode64(png_bytes[0, 20])}\\033\\\\").length,
+             'a truncated PNG creates no image')
+puts 'PASS kitty-png-rejects-malformed'
 
 override_created = request(base, 'POST', '/v1/terminal-sessions', {
   'command' => '/bin/sh',

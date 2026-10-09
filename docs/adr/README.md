@@ -6,7 +6,7 @@ and migration impact. The filename is the canonical link. A few historical
 records share a numeric heading because they were developed on parallel
 branches; they remain separate decisions and are all indexed below. They are
 not missing records and must not be silently merged. New ADRs must use a
-unique filename and number greater than 0055.
+unique filename and number greater than 0056.
 
 The index is a navigation aid, not a second decision source. The record itself
 is authoritative for its status and consequences. An implementation may cite
@@ -77,6 +77,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0053 — Expose surface-producer cadence diagnostics](0053-surface-producer-cadence-diagnostics.md)
 - [0054 — Decode JSON string escapes at the API boundary](0054-json-escape-decoding.md)
 - [0055 — The Hibr adapter authenticates with an injected API token](0055-adapter-api-authentication.md)
+- [0056 — Decompress graphics payloads with zlib](0056-zlib-for-graphics-decompression.md)
 
 ## Adding an ADR
 
