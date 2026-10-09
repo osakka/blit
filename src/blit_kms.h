@@ -100,7 +100,9 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views,
                      int pointer_visible, uint32_t output_mask,
                      const BlitKmsOverlay *overlays, int overlay_count,
                      unsigned long long visual_revision,
-                     int effect_enabled, int effect_intensity);
+                     int effect_enabled, int effect_intensity,
+                     uint32_t *submitted_output_mask,
+                     uint32_t *deferred_output_mask);
 /* Return a bounded 32-bit BMP snapshot of the currently submitted front
    buffer. The caller owns *bytes and must free it. Return 1 when ready, 0
    when the output has not presented a buffer yet, and -1 on failure. */

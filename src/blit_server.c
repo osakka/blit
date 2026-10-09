@@ -11420,6 +11420,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
         int kms_overlay_count = 0;
         uint64_t kms_present_started;
         double kms_present_ms;
+        uint32_t kms_submitted_output_mask = 0;
+        uint32_t kms_deferred_output_mask = 0;
         int surface_index;
         int overlay_index;
         unsigned long long visual_revision = runtime->effect.revision ^
@@ -11521,7 +11523,9 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                              visual_revision,
                              runtime->effect.enabled &&
                                  strcmp(runtime->effect.preset, "scanlines") == 0,
-                             runtime->effect.intensity) < 0)
+                             runtime->effect.intensity,
+                             &kms_submitted_output_mask,
+                             &kms_deferred_output_mask) < 0)
             fprintf(stderr, "blit: direct KMS present failed\n");
         kms_present_ms = (double)(monotonic_us() - kms_present_started) /
             1000.0;
@@ -11537,10 +11541,15 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             }
         for (surface_index = 0; surface_index < runtime->output_count;
              ++surface_index)
-            if ((output_mask & (1U << surface_index)) &&
+            if ((kms_submitted_output_mask & (1U << surface_index)) &&
                 runtime->pixel_frames_pending[surface_index] > 0)
                 --runtime->pixel_frames_pending[surface_index];
-        runtime->pointer_dirty = 0;
+        /* A pending DRM page flip means the back buffer is still owned by
+           the CRTC. Keep pointer damage live until every deferred output has
+           had a submission opportunity; otherwise the next pointer position
+           can be lost while the old frame remains on screen. */
+        if (kms_deferred_output_mask == 0)
+            runtime->pointer_dirty = 0;
         return;
     }
 
