@@ -24,7 +24,9 @@ live_deployment_acceptance: pass
 live_hibr_geometry_acceptance: pass
 live_hibr_graphics_acceptance: pass
 live_free_pane_input_fallback_acceptance: pass
+live_pointer_artifact_acceptance: pass
 live_capture: diagnostics/live-0.1.382-experience-20261009T031158Z
+live_pointer_capture: diagnostics/live-0.1.382-pointer-20261009T031414Z
 physical_evdev_acceptance: open
 physical_multi_monitor_acceptance: open
 physical_high_refresh_acceptance: open

@@ -2314,3 +2314,11 @@ and individual presents within the 60 Hz budget. This is an observed cadence
 warning, not proof of a 3 Hz display; the scheduler currently presents on
 damage and input. Physical evdev activity, physical multi-monitor behavior,
 and hardware high-refresh gaming remain open gates.
+
+The API pointer artifact capture at
+`diagnostics/live-0.1.382-pointer-20261009T031414Z` produced four framebuffer
+captures. After the intentional first screenshot initialization, each adjacent
+capture differed in only the cursor region (92 pixels) and had zero changed
+pixels outside the old/new cursor bounds. The render trace also recorded the
+`pointer-cache` path. This proves API pointer motion does not leave trails in
+the live SDL scene; it does not yet prove physical evdev motion on the host.
