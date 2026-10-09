@@ -32,6 +32,28 @@ four-output fixture emitted `KMS_FOUR_HIBR_PASS`. These are virtual QEMU/VKMS
 results; they do not close the physical monitor, physical evdev, or physical
 120/240 Hz scanout gates described below.
 
+## Live host 0.1.398 physical/API observation: 2026-10-09
+
+The authorized read-only/API probe at `192.168.10.54` reported Blit 0.1.398,
+one `1920x2160` output at 60 Hz, SDL3/OpenGL ES2, and one discovered evdev
+pointer. A temporary ordinary `/bin/sh` session was created on `display-1`
+with the display-derived `240x135` cell geometry. Its screenshot was a
+1920x2160 24-bit BMP (SHA-256
+`a10c539a70cb4f4c63a5258b94241b2be13a13460f40844228a9867dedd95153`); visual
+inspection showed legible ANSI-colored text, UTF-8/box-drawing characters, a
+correctly placed cursor, and a correctly placed pointer. Two synthetic API
+input events (motion and button) were accepted and appeared in runtime input
+counters. Physical evdev counters remained zero, as expected for a synthetic
+probe.
+
+The same 0.1.398 host returned `405 method_not_allowed` for the documented
+`POST /v1/terminal-sessions/{id}` terminal-input route. The current 0.1.399
+TCC binary passes the terminal-conformance cases for that route; therefore
+this is recorded as a stale live-deployment/version discrepancy, not silently
+treated as a current-source failure. The temporary session was deleted and a
+follow-up runtime query reported zero sessions, surfaces, streams, and input
+routes. No Hibr process or Hibr source was touched.
+
 ## Current 0.1.399 Hibr singleton-owner and lifecycle acceptance
 
 The TCC-built server now classifies the Hibr desktop entrypoints and enforces
