@@ -31,13 +31,21 @@ from probing the undocumented parent session path; the OpenAPI file and ADR
 API guide, gateway guide, ADR wording, and adds `api_schema_gate.rb`, which
 rejects both the wrong parent POST and a missing `/input` route.
 
-The 0.1.401 contract-correction build is not yet deployed; its package and
-manifest will carry the exact corrected-schema hashes.
+The corrected 0.1.401 package was then deployed through the supervised update
+API and `/v1/version` reported 0.1.401. A valid plain UTF-8/box-drawing live
+capture produced a 1920x2160 24-bit BMP with SHA-256
+`4647a5073882e2040dfca4d255b9f6735d133a8857717a8a50996830800f2d58`.
+The authoritative surface snapshot and framebuffer both showed `BLIT401 TEST`,
+UTF-8 characters, and box-drawing text legibly. The canonical `/input` route
+accepted terminal data, synthetic pointer motion/button events were accepted,
+and cleanup returned sessions, surfaces, streams, and input routes to zero.
+The host still has one physical 60 Hz output; this is not multi-monitor or
+physical-evdev acceptance.
 
 The 0.1.401 TCC binary has SHA-256
 `633167c51397f0a7c129406a5ecb192e24f0fb16919e815d2ac0e991f75a500f`.
-Its corrected-schema Debian artifact has SHA-256
-`5c7eb0af31e97eddde730f86ee931fd3c7c96cf15724271364fddecbcda11934`.
+Its corrected-schema Debian artifact checksum is recorded in
+`releases/0.1.401.yaml`.
 The artifact passes the package gate, API schema gate, terminal conformance,
 font/resize/glyph/pixel/frame gates, singleton ownership, and the 20-second
 four-session soak. Fresh 0.1.401 QEMU images pass the lifecycle/rejoin

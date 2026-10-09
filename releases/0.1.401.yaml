@@ -23,8 +23,8 @@ qemu_input_acceptance: pass
 qemu_four_output_pixel_acceptance: pass
 qemu_four_output_hibr_acceptance: pass
 qemu_hibr_restart_rejoin_acceptance: pass
-live_deployment: not_applicable_401
-live_terminal_input_route: pass_on_0.1.400
+live_deployment: pass
+live_terminal_input_route: pass_on_0.1.401
 live_physical_button_trace_contract: open
 live_hibr_geometry_acceptance: pending
 physical_evdev_acceptance: open
