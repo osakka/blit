@@ -262,6 +262,9 @@ typedef struct {
     unsigned long long last_topology_revision;
     int last_target_count;
     int glyph_atlas_columns;
+    /* Selectable because the live GLES2 geometry path has shown atlas
+       corruption; diagnostics must identify the active glyph path. */
+    int glyph_geometry_enabled;
     SDL_Vertex *glyph_vertices;
     int *glyph_indices;
     int glyph_vertex_count;
@@ -1983,6 +1986,7 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              "\"outputs\":%s,"
              "\"font_scale\":%d,\"direct_kms\":%s,"
              "\"renderer\":\"%s\","
+             "\"glyph_path\":\"%s\","
              "\"presentation_sync\":\"%s\","
              "\"pointer\":{\"valid\":%s,\"x\":%.1f,\"y\":%.1f,"
              "\"output\":%d,\"previous_x\":%.1f,\"previous_y\":%.1f,"
@@ -2000,6 +2004,10 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              scheduler,
              runtime->font_scale,
              runtime->direct_kms ? "true" : "false", escaped_renderer,
+             runtime->direct_kms ? "kms" :
+                 (runtime->output_count > 0 &&
+                  runtime->outputs[0].glyph_geometry_enabled ?
+                      "geometry-batch" : "immediate-texture"),
              presentation_sync,
              runtime->pointer_valid ? "true" : "false",
              runtime->pointer_x, runtime->pointer_y, runtime->pointer_output,
@@ -9919,6 +9927,7 @@ static void discover_panes(BlitRuntime *runtime)
 static void initialize_outputs(BlitRuntime *runtime)
 {
     const char *renderer_name = getenv("BLIT_RENDERER");
+    const char *glyph_batch_mode = getenv("BLIT_SDL_GLYPH_BATCH");
     int i;
 
     if (runtime->direct_kms) {
@@ -10025,6 +10034,18 @@ static void initialize_outputs(BlitRuntime *runtime)
         SDL_RenderPresent(renderer);
         runtime->outputs[runtime->output_count].window = window;
         runtime->outputs[runtime->output_count].renderer = renderer;
+        /* GLES2 geometry atlas sampling is isolated behind an explicit
+           switch because it corrupts glyphs on the live KMSDRM host. */
+        runtime->outputs[runtime->output_count].glyph_geometry_enabled =
+            glyph_batch_mode != NULL && strcmp(glyph_batch_mode, "on") == 0;
+        if (glyph_batch_mode == NULL &&
+            strcmp(runtime->sdl_renderer_name, "opengles2") != 0)
+            runtime->outputs[runtime->output_count].glyph_geometry_enabled = 1;
+        if (glyph_batch_mode != NULL && strcmp(glyph_batch_mode, "off") != 0 &&
+            strcmp(glyph_batch_mode, "on") != 0)
+            fprintf(stderr,
+                    "blit: invalid BLIT_SDL_GLYPH_BATCH=%s (use on/off)\n",
+                    glyph_batch_mode);
         runtime->outputs[runtime->output_count].glyph_atlas =
             create_sdl_glyph_atlas(renderer, &runtime->font,
                                    &runtime->outputs[runtime->output_count].glyph_atlas_columns);
@@ -10903,6 +10924,12 @@ static void render_or_queue_sdl_glyph(BlitOutput *output,
                                       uint32_t codepoint, float x, float y,
                                       float cell_width, float cell_height)
 {
+    if (output != NULL && !output->glyph_geometry_enabled) {
+        render_sdl_glyph(output->renderer, font, output->glyph_atlas,
+                         output->glyph_atlas_columns, colour, codepoint, x, y,
+                         cell_width, cell_height);
+        return;
+    }
     if (queue_sdl_glyph(output, font, colour, codepoint, x, y,
                         cell_width, cell_height))
         return;

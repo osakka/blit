@@ -3,6 +3,21 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## Current 0.1.366 renderer-isolation result
+
+The live API screenshot from 0.1.365 showed the wallpaper/menu correctly but
+the terminal glyphs as coloured dot patterns. A controlled API pointer probe
+changed only the cursor-sized pixel region, so pointer motion was not the
+source of the large corruption. The live renderer is SDL `opengles2`.
+
+0.1.366 adds `render.glyph_path` to `/v1/diagnostics/runtime` and defaults
+GLES2 to the immediate atlas-texture path (`immediate-texture`). The prior
+`SDL_RenderGeometry` path remains selectable with
+`BLIT_SDL_GLYPH_BATCH=on`; `BLIT_SDL_GLYPH_BATCH=off` is explicit. Local TCC
+glyph, pointer-atomicity, and wallpaper stress gates pass. The live visual
+acceptance gate is open until the 0.1.366 package is installed and its
+post-install screenshot confirms legible terminal glyphs.
+
 ## Current 0.1.363 diagnostic correctness
 
 The TCC build corrects the per-output presentation timing source in the API:
