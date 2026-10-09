@@ -40,7 +40,7 @@ production `console-blit` module is operational over the OpenAPI/WebSocket
 contract. Explicit focus and versioned input routes are exposed by the API.
 The SDL adapter uses single-surface incremental frames and conservatively
 redraws multi-surface outputs with deterministic vertical stacking. The
-current 0.1.335 source passes the complete terminal, graphics, input,
+current 0.1.379 source passes the complete terminal, graphics, input,
 two-display VKMS/QEMU, four-output Hibr primary/`--join`, mixed-refresh,
 output-loss, and the 60 Hz emulator-like pixel-stream acceptance gates. SDL wallpaper
 backgrounds are coalesced into horizontal runs before geometry submission;
@@ -61,11 +61,12 @@ so a slow remote evidence download cannot block the render or input loop. The
 live slow-reader gate passed; this is an operational correctness result, not a
 claim of physical mouse activity.
 
-The exact-current 240 Hz VKMS scheduler fixture passes mode selection,
-producer-driven frame ingestion, screenshot capture, and KMS capture. The
-direct-KMS path deliberately does not replay a 60 Hz producer at every 240 Hz
-slot; strict physical high-refresh page-flip timing remains hardware-dependent
-and must not be inferred from QEMU TCG timing.
+The exact-current 240 Hz VKMS scheduler fixture passes mode selection and
+deadline calculation. The 0.1.379 240 Hz pixel-stream run accepted all 240
+frames with zero transport errors but completed only 84 page flips and added
+deadlines under QEMU TCG without `/dev/kvm`; the async-page-flip experiment
+completed 72 and was worse. This is an explicitly open scanout gate, not a
+product pass or a physical 240 Hz claim. See [ADR 0044](adr/0044-high-refresh-evidence-boundary.md).
 
 Display timing is an explicit hard requirement. Each output must schedule at
 its active mode's maximum refresh by default, with per-output deadlines. The

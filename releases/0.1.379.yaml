@@ -23,6 +23,15 @@ qemu_input_state_coalesced: 2
 qemu_four_output_hibr_acceptance: pass
 qemu_four_output_hibr_marker: KMS_FOUR_HIBR_PASS
 qemu_four_output_hibr_kernel_argument: vkms.create_default_dev=0
+qemu_high_refresh_scheduler_240_acceptance: pass
+qemu_pixel_stream_240_transport: pass
+qemu_pixel_stream_240_transport_frames: 240
+qemu_pixel_stream_240_transport_errors: 0
+qemu_pixel_stream_240_scanout_acceptance: open_environment_limit
+qemu_pixel_stream_240_scanout_presents: 84
+qemu_pixel_stream_240_scanout_missed_deadlines: 16
+qemu_pixel_stream_240_acceleration: unavailable_no_kvm
+qemu_pixel_stream_240_async_scanout_presents: 72
 live_update_transaction_acceptance: pass
 live_update_connection_completion: pass
 live_version_endpoint: pass
