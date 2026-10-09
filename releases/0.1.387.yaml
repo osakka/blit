@@ -24,6 +24,7 @@ package_artifact_acceptance: pass
 qemu_input_acceptance: pass
 qemu_input_0_1_387_acceptance: pass
 qemu_four_output_hibr_acceptance: pass
+qemu_four_output_hibr_0_1_387_acceptance: pass
 qemu_high_refresh_scheduler_acceptance: pass
 qemu_high_refresh_acceptance: open
 qemu_high_refresh_observed_visible_presents: 81

@@ -25,6 +25,12 @@ The exact 0.1.387 Hibr/input fixture also passes `LAYOUT_MATRIX_PASS`,
 `BLIT_INPUT_MOUSE_REPEAT_PASS`, and
 `BLIT_INPUT_MULTI_MOUSE_BUTTON_STATE_PASS`; the guest powered down cleanly.
 
+The exact 0.1.387 four-output Hibr fixture passes `KMS_FOUR_HIBR_PASS` with
+four independent 240 Hz VKMS outputs, four Hibr-backed sessions, and four
+surfaces. The guest powered down cleanly. This closes the virtual
+multi-output/orchestration evidence for the release; physical multi-monitor
+and physical high-refresh acceptance remain open.
+
 ## Current 0.1.366 renderer-isolation result
 
 The live API screenshot from 0.1.365 showed the wallpaper/menu correctly but
