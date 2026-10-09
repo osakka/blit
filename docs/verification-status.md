@@ -9,7 +9,7 @@ The current TCC build embeds version `0.1.400` and has server SHA-256
 `73a07f5a0cce7148c77aa673f2b14cf1defab629d36e8011a8660673eef36cf4`.
 The Debian artifact
 `blit_0.1.400-1_amd64.deb` has SHA-256
-`1d87cfcff236720f4fc8331a566cacb38913b3e98022ec5a846e4d72386fca2e` and
+`3881dd591e41e87acd61a973ce47bd37e1636a23957b82ff667ed0572daf9a58` and
 passes the package allowlist, embedded-version, schema, binary, and packaged
 documentation checks. It has not been deployed to the live host, which still
 reports 0.1.398.
