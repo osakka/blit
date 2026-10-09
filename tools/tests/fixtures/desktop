@@ -1,0 +1,3 @@
+#!/bin/sh
+printf 'unresolved resume fixture\n'
+exec env -u BLIT_SESSION_TOKEN sleep 20

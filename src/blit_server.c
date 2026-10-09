@@ -354,6 +354,8 @@ typedef struct {
     int attach_reassert_attempts;
     int attach_reassert_max_attempts;
     int attach_reassert_hibr_matches;
+    int hibr_resume_requested;
+    int hibr_attach_unresolved;
     char hibr_session_token[64];
     int terminal_escape;
     /* Hibr emits a single SGR containing bold plus truecolor foreground and
@@ -7037,6 +7039,30 @@ static void service_attach_reasserts(BlitRuntime *runtime, uint64_t now)
                     session->id, strerror(errno));
 
         ++session->attach_reassert_attempts;
+        if (session->hibr_resume_requested &&
+            session->attach_reassert_attempts >=
+                session->attach_reassert_max_attempts &&
+            session->attach_reassert_hibr_matches == 0 &&
+            !session->hibr_attach_unresolved) {
+            session->hibr_attach_unresolved = 1;
+            diagnostic_log(runtime, "error", "hibr_attach_unresolved",
+                           "resume attachment found no owner process; refusing a misleading running session");
+            terminate_session_process(session->process_id);
+            session->exit_code = 78;
+            session->child_exited = 1;
+            snprintf(session->state, sizeof(session->state), "failed");
+            if (session->pty_fd >= 0) {
+                close(session->pty_fd);
+                session->pty_fd = -1;
+            }
+            retire_session_surface(runtime, session);
+            {
+                char target_id[128];
+                snprintf(target_id, sizeof(target_id), "session-%llu",
+                         session->id);
+                disable_input_routes_for_target(runtime, target_id);
+            }
+        }
         /* Startup output can arrive before Hibr has installed its resize
            handling.  A single SIGWINCH is therefore not a reliable attach
            contract.  Retry for a bounded two-and-a-half second window; this
@@ -7142,6 +7168,15 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
                                  surface->cursor_visible ? "true" : "false",
                                  surface->cursor_style);
     }
+    used += (size_t)snprintf(
+        body + used, capacity - used,
+        ",\"hibr_attachment\":{\"resume_requested\":%s,"
+        "\"reassert_attempts\":%d,\"owner_matches\":%d,"
+        "\"unresolved\":%s}",
+        session->hibr_resume_requested ? "true" : "false",
+        session->attach_reassert_attempts,
+        session->attach_reassert_hibr_matches,
+        session->hibr_attach_unresolved ? "true" : "false");
     used += (size_t)snprintf(
         body + used, capacity - used,
         ",\"terminal_capabilities\":{\"term\":\"%s\","
@@ -7385,6 +7420,8 @@ static int create_session(BlitRuntime *runtime, const char *json,
     pid_t process_id;
     unsigned long long session_id;
     char session_token[64];
+    int hibr_resume_requested = 0;
+    const char *command_name;
     int i;
 
     if (!json_string(json, "command", command, sizeof(command)))
@@ -7417,6 +7454,15 @@ static int create_session(BlitRuntime *runtime, const char *json,
     }
     ++argument_count;
     arguments[argument_count] = NULL;
+    command_name = strrchr(command, '/');
+    command_name = command_name == NULL ? command : command_name + 1;
+    if (strcmp(command_name, "desktop") == 0)
+        for (i = 0; i < argument_count - 1; ++i)
+            if (strcmp(argument_storage[i], "--resume") == 0 ||
+                strcmp(argument_storage[i], "-r") == 0) {
+                hibr_resume_requested = 1;
+                break;
+            }
     memset(surface_mode, 0, sizeof(surface_mode));
     if (json_string(json, "surface_mode", surface_mode, sizeof(surface_mode)) &&
         strcmp(surface_mode, "terminal") != 0 &&
@@ -7530,6 +7576,7 @@ static int create_session(BlitRuntime *runtime, const char *json,
             session->pty_fd = master_fd;
             session->revision = 1;
             session->exit_code = -1;
+            session->hibr_resume_requested = hibr_resume_requested;
             session->terminal_autowrap = 1;
             session->terminal_cell_width = runtime_terminal_cell_width(runtime);
             session->terminal_cell_height = runtime_terminal_cell_height(runtime);

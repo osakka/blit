@@ -94,6 +94,13 @@ reinterpret them:
 - `--standby` waits for a later join request and is appropriate for a display
   that should remain available without joining immediately.
 
+Blit fails a resumed API attachment closedly if its bounded startup discovery
+finds no token-bearing Hibr owner. The session becomes `failed` with the
+`hibr_attach_unresolved` diagnostic instead of remaining `running` with a
+partial surface. Inspect `hibr_attachment` in the session response and the
+diagnostic trace before retrying; do not start another primary against the
+same held name until Hibr's own lifecycle has been resolved.
+
 The probe has been run successfully with the Hibr desktop built by TCC. This
 mode uses the external surface boundary above; it does not depend on Blit's
 ANSI terminal parser for desktop rendering.

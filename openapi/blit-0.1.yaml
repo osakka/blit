@@ -1457,7 +1457,7 @@ components:
     TerminalSession:
       type: object
       required: [id, revision, surface_revision, state, surface_id, title,
-                 terminal_capabilities]
+                 terminal_capabilities, hibr_attachment]
       properties:
         id: {$ref: '#/components/schemas/ResourceId'}
         revision: {$ref: '#/components/schemas/Revision'}
@@ -1491,6 +1491,8 @@ components:
         cursor: {$ref: '#/components/schemas/Cursor'}
         terminal_capabilities:
           $ref: '#/components/schemas/TerminalCapabilities'
+        hibr_attachment:
+          $ref: '#/components/schemas/HibrAttachmentDiagnostics'
         graphics:
           type: array
           description: >-
@@ -1499,6 +1501,15 @@ components:
           items: {$ref: '#/components/schemas/GraphicsImage'}
         graphics_diagnostics:
           $ref: '#/components/schemas/GraphicsDiagnostics'
+      additionalProperties: false
+    HibrAttachmentDiagnostics:
+      type: object
+      required: [resume_requested, reassert_attempts, owner_matches, unresolved]
+      properties:
+        resume_requested: {type: boolean}
+        reassert_attempts: {type: integer, minimum: 0}
+        owner_matches: {type: integer, minimum: 0}
+        unresolved: {type: boolean}
       additionalProperties: false
     TerminalCapabilities:
       type: object
