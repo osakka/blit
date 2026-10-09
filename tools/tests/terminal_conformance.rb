@@ -995,6 +995,18 @@ cells = cell_map(snapshot)
 assert_equal('A', cells.fetch([0, 0]).fetch('text'), 'sync prefix')
 assert_equal('B', cells.fetch([1, 0]).fetch('text'), 'sync release')
 
+snapshot = run_case(base, 'decrqm-alternate-screen-mode',
+                    "stty -icanon -echo min 0 time 5; printf '\\033[?47h\\033[?47$p'; dd if=/dev/tty bs=1 count=9 2>/dev/null | od -An -tx1 | tr -d ' \\n'",
+                    width: 40)
+assert_equal('1b5b3f34373b312479', row_text(snapshot),
+             'DECRQM alternate-screen mode')
+
+snapshot = run_case(base, 'decrqm-x10-mouse-mode',
+                    "stty -icanon -echo min 0 time 5; printf '\\033[?9h\\033[?9$p'; dd if=/dev/tty bs=1 count=8 2>/dev/null | od -An -tx1 | tr -d ' \\n'",
+                    width: 40)
+assert_equal('1b5b3f393b312479', row_text(snapshot),
+             'DECRQM X10 mouse mode')
+
 snapshot = run_case(base, 'background-color-erase',
                     "printf '\\033[44m\\033[2J\\033[0mx'")
 cells = cell_map(snapshot)

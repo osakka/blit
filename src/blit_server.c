@@ -5403,14 +5403,17 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
             session->terminal_bracketed_paste = enabled;
         if (terminal_csi_has_mode(sequence, 1000) ||
             terminal_csi_has_mode(sequence, 1002) ||
-            terminal_csi_has_mode(sequence, 1003)) {
+            terminal_csi_has_mode(sequence, 1003) ||
+            terminal_csi_has_mode(sequence, 9)) {
             if (enabled) {
                 if (terminal_csi_has_mode(sequence, 1003))
                     session->terminal_mouse_mode = 1003;
                 else if (terminal_csi_has_mode(sequence, 1002))
                     session->terminal_mouse_mode = 1002;
-                else
+                else if (terminal_csi_has_mode(sequence, 1000))
                     session->terminal_mouse_mode = 1000;
+                else
+                    session->terminal_mouse_mode = 9;
             } else {
                 session->terminal_mouse_mode = 0;
             }
@@ -5443,8 +5446,10 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         case 6: state = session->terminal_origin_mode ? 1 : 2; break;
         case 7: state = session->terminal_autowrap ? 1 : 2; break;
         case 25: state = surface->cursor_visible ? 1 : 2; break;
+        case 47: case 1047: case 1049:
+            state = session->terminal_alternate ? 1 : 2; break;
         case 66: state = session->terminal_application_keypad ? 1 : 2; break;
-        case 1000: case 1002: case 1003:
+        case 9: case 1000: case 1002: case 1003:
             state = session->terminal_mouse_mode == first ? 1 : 2; break;
         case 1004: state = session->terminal_focus_reporting ? 1 : 2; break;
         case 1006: state = session->terminal_mouse_sgr ? 1 : 2; break;
@@ -5590,6 +5595,9 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
     } else if (private_mode && (command == 'h' || command == 'l') &&
                has_first && (first == 1000 || first == 1002 || first == 1003)) {
         session->terminal_mouse_mode = command == 'h' ? first : 0;
+    } else if (private_mode && (command == 'h' || command == 'l') &&
+               has_first && first == 9) {
+        session->terminal_mouse_mode = command == 'h' ? 9 : 0;
     } else if (private_mode && (command == 'h' || command == 'l') &&
                has_first && first == 1006) {
         session->terminal_mouse_sgr = command == 'h';
