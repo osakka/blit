@@ -34,6 +34,12 @@ failure is at virtual VKMS/TCG page-flip delivery, and enabling asynchronous
 flips would trade correctness for possible tearing. Physical 120/240 Hz
 acceptance remains open and requires the real display hardware.
 
+The fresh 0.1.392 TCC binary also passes the canonical four-output Hibr
+fixture: four 240 Hz VKMS outputs, one primary session plus three joins, four
+independent surfaces, and clean guest shutdown. The tall 240x135 diagnostic
+variant remains intentionally open as the held-session boundary described
+above.
+
 The canonical capture protocol is documented in `docs/diagnostic-capture.md`.
 Hibr source was not modified.
 
