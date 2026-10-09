@@ -61,6 +61,11 @@ begin
   baseline_performance = baseline.fetch('performance')
   baseline_terminal_bytes = baseline_performance.fetch('terminal_bytes')
   baseline_window_sequence = baseline_performance.fetch('frame_rate_window_sequence')
+  # The first measurement window can include SDL renderer/font-atlas startup.
+  # It is useful as a diagnostic, but it is not steady-state presentation
+  # evidence. Require the next completed window so a cold start cannot make a
+  # healthy 60 Hz cadence look like a renderer regression.
+  required_window_sequence = baseline_window_sequence + 2
   minimum_hz = Float(ENV.fetch('BLIT_GATE_MIN_HZ', '30'))
   session = request(base, Net::HTTP::Post, '/v1/terminal-sessions',
                    'command' => '/bin/sh',
@@ -74,7 +79,7 @@ begin
   while Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
     samples << request(base, Net::HTTP::Get, '/v1/diagnostics/runtime')
     performance = samples.last.fetch('performance')
-    break if performance.fetch('frame_rate_window_sequence') > baseline_window_sequence &&
+    break if performance.fetch('frame_rate_window_sequence') >= required_window_sequence &&
               performance.fetch('frame_rate_window_ms').between?(500, 2000) &&
               performance.fetch('frame_rate_hz') > 0 &&
               performance.fetch('terminal_bytes') > baseline_terminal_bytes
@@ -99,7 +104,7 @@ begin
   target_interval_ms = outputs.map { |output| output.fetch('target_interval_ms') }.max
   raise 'frame-rate window never completed' unless performance.fetch('frame_rate_window_ms') >= 500
   raise 'frame-rate window did not advance during workload' unless
-    performance.fetch('frame_rate_window_sequence') > baseline_window_sequence
+    performance.fetch('frame_rate_window_sequence') >= required_window_sequence
   raise 'frame-rate measurement is zero' unless performance.fetch('frame_rate_hz') > 0
   raise format('frame-rate below required minimum: %.3f < %.3f Hz',
                performance.fetch('frame_rate_hz'), minimum_hz) unless
