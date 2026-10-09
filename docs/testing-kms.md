@@ -269,6 +269,13 @@ that four output objects exist.
 Adding `blit.hibr_four=1` to the same kernel command line replaces those probe
 sessions with one primary Hibr desktop and three `desktop --join` clients; the
 fixture then requires `KMS_FOUR_HIBR_PASS` with four Hibr-backed surfaces.
+For the tall-pane lifecycle boundary, add `blit.hibr_tall=1` as well. This is
+a diagnostic-only variant that creates four `240x135` Hibr surfaces and
+checks for styled cells on the final row. The current released Hibr session
+reports `KMS_FOUR_HIBR_TALL_HIBR_BOUNDARY_OPEN`: all four Blit surfaces and
+KMS outputs are healthy, but Hibr's held desktop stream stops at its 24-row
+startup paint. It is intentionally not converted into a Blit pass or hidden
+by changing the compositor's geometry.
 The QEMU command must also include `vkms.create_default_dev=0`. Without that
 parameter VKMS creates its single-output default card before the configfs card;
 forcing Blit to `/dev/dri/card0` then tests the wrong card and reports one

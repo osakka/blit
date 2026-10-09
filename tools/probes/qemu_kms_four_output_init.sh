@@ -77,6 +77,20 @@ display3=$(echo "$display_ids" | $b sed -n '3p')
 display4=$(echo "$display_ids" | $b sed -n '4p')
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
     *" blit.hibr_four=1 "*)
+        hibr_surface_width=128
+        hibr_surface_height=48
+        hibr_tall=0
+        case " $($b cat /proc/cmdline 2>/dev/null || true) " in
+            *" blit.hibr_tall=1 "*)
+                # Diagnostic-only geometry mode. The ordinary four-output
+                # acceptance fixture remains 128x48; this mode deliberately
+                # exercises the tall-pane lifecycle seen on the physical
+                # host and reports row coverage separately.
+                hibr_surface_width=240
+                hibr_surface_height=135
+                hibr_tall=1
+                ;;
+        esac
         export HIBR_MODPATH=/blit-stage/mods
         export HIBR_RC=/blit-stage/blit-console.hibr
         export BLIT_SERVER_HOST=127.0.0.1
@@ -90,14 +104,14 @@ case " $($b cat /proc/cmdline 2>/dev/null || true) " in
         $b mkdir -p /root /tmp/hibr-state /tmp/hibr-config /tmp/hibr-data /tmp/hibr-ctl-0
         $b ln -sf pts/ptmx /dev/ptmx
         $b wget -qO /tmp/hibr-primary.json \
-            --post-data="{\"command\":\"/blit-stage/hibr\",\"arguments\":[\"/blit-stage/blit-session.hibr\",\"--session\",\"blit\",\"--name\",\"$display1\"],\"environment\":{\"CP_THEME\":\"retro_car\",\"DT_CTL\":\"1\",\"DT_CTLPATH\":\"/tmp/hibr-ctl-0/blit.ctl\",\"DT_LOG\":\"/tmp/primary-hibr.log\"},\"surface_mode\":\"terminal\",\"display_id\":\"$display1\",\"surface\":{\"width\":128,\"height\":48}}" \
+            --post-data="{\"command\":\"/blit-stage/hibr\",\"arguments\":[\"/blit-stage/blit-session.hibr\",\"--session\",\"blit\",\"--name\",\"$display1\"],\"environment\":{\"CP_THEME\":\"retro_car\",\"DT_CTL\":\"1\",\"DT_CTLPATH\":\"/tmp/hibr-ctl-0/blit.ctl\",\"DT_LOG\":\"/tmp/primary-hibr.log\"},\"surface_mode\":\"terminal\",\"display_id\":\"$display1\",\"surface\":{\"width\":$hibr_surface_width,\"height\":$hibr_surface_height}}" \
             --header='Content-Type: application/json' \
             http://127.0.0.1:19191/v1/terminal-sessions || finish 1
         primary_script=/blit-stage/blit-session.hibr
         for index in 2 3 4; do
             display_id=$(echo "$display_ids" | $b sed -n "${index}p")
             $b wget -qO "/tmp/hibr-join-$index.json" \
-                --post-data="{\"command\":\"/blit-stage/hibr\",\"arguments\":[\"$primary_script\",\"--session\",\"blit\",\"--join\",\"--name\",\"$display_id\"],\"environment\":{\"DT_LOG\":\"/tmp/join-$index-hibr.log\"},\"surface_mode\":\"terminal\",\"display_id\":\"$display_id\",\"surface\":{\"width\":128,\"height\":48}}" \
+                --post-data="{\"command\":\"/blit-stage/hibr\",\"arguments\":[\"$primary_script\",\"--session\",\"blit\",\"--join\",\"--name\",\"$display_id\"],\"environment\":{\"DT_LOG\":\"/tmp/join-$index-hibr.log\"},\"surface_mode\":\"terminal\",\"display_id\":\"$display_id\",\"surface\":{\"width\":$hibr_surface_width,\"height\":$hibr_surface_height}}" \
                 --header='Content-Type: application/json' \
                 http://127.0.0.1:19191/v1/terminal-sessions || finish 1
         done
@@ -108,6 +122,22 @@ case " $($b cat /proc/cmdline 2>/dev/null || true) " in
         $b grep -q '"sessions":4' /tmp/hibr-four-final.json || finish 1
         $b grep -q '"surfaces":4' /tmp/hibr-four-final.json || finish 1
         $b grep -q 'KMS present views=4 outputs=4' /tmp/blit.log || finish 1
+        if [ "$hibr_tall" -eq 1 ]; then
+            # A complete tall frame must contain at least one styled cell on
+            # its final row. Absence is an explicit Hibr held-session boundary
+            # diagnostic, not a Blit four-output pass.
+            for session_file in /tmp/hibr-primary.json /tmp/hibr-join-2.json \
+                /tmp/hibr-join-3.json /tmp/hibr-join-4.json; do
+                surface_id=$($b sed -n 's/.*"surface_id":"\([^"]*\)".*/\1/p' "$session_file")
+                $b wget -qO "/tmp/${surface_id}-cells.json" \
+                    "http://127.0.0.1:19191/v1/surfaces/$surface_id/cells" || finish 1
+                if ! $b grep -q '"y":134' "/tmp/${surface_id}-cells.json"; then
+                    echo KMS_FOUR_HIBR_TALL_HIBR_BOUNDARY_OPEN
+                    finish 77
+                fi
+            done
+            echo KMS_FOUR_HIBR_TALL_PASS
+        fi
         $b cat /tmp/blit.log
         echo KMS_FOUR_HIBR_PASS
         finish 0
