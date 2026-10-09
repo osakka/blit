@@ -3,7 +3,7 @@
 # the installed Blit display adapter without changing Hibr source or desktop
 # state. The image path is part of the installed Hibr desktop tree.
 
-mod load /usr/lib/hibr/console-blit.so || exit 1
+mod load "${BLIT_HIBR_ADAPTER:-/usr/lib/blit/hibr/console-blit.so}" || exit 1
 mod load /usr/lib/hibr/img.so || exit 1
 console open || exit 1
 img draw /usr/share/hibr/desktop/themes/retro_car.png 0 0 32 64 -u || exit 1

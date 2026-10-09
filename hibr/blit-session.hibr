@@ -37,6 +37,7 @@ fi
 # this launcher, preserving the stock session's relative-import semantics.
 export HIBR_MODPATH=${HIBR_MODPATH:-$moddir}
 mod load "$adapter" || exit 1
+mod load "$moddir/img.so" || exit 1
 mod load "$moddir/pty.so" || exit 1
 mod load "$moddir/term.so" || exit 1
 mod load "$moddir/hold.so" || exit 1
