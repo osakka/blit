@@ -7,6 +7,29 @@ an evidence record, not a claim that the complete product is released.
 
 ## Current 0.1.393 Hibr lifecycle and tall-surface evidence
 
+### Live host boundary capture: 2026-10-09
+
+The live host at `192.168.10.54` was queried through the network API using
+Bash `curl`. It reported 0.1.393, one SDL3/OpenGL ES2 output at 1920x2160 and
+60 Hz, zero missed deadlines, and a 16 ms refresh-aware target. A controlled
+ordinary `/bin/sh` session at the same `240x135` surface size returned
+`stty size` as `135 240`, and its surface cell snapshot contained the marker;
+this proves the Blit PTY geometry and full-height terminal path independently
+of Hibr.
+
+The unchanged packaged Hibr entrypoint was then launched through the API with
+the same `240x135` surface. The captured framebuffer showed Hibr's scene in
+the upper region and a uniformly black lower region. Runtime evidence showed
+the Hibr session running with `xterm-kitty` and Kitty/Sixel capabilities,
+nonzero terminal bytes and surface commits, SDL presents, zero missed
+deadlines, and no physical evdev events during the automated window. The
+capture is retained under
+`diagnostics/live-hibr-screenshot-20261009T084834Z/`; it is a diagnostic
+failure for Hibr full-height geometry, not a Blit renderer pass. Hibr source
+was not modified. The physical Hibr geometry gate therefore remains open and
+requires Hibr-side investigation/support, while Blit retains the evidence and
+the API control path.
+
 The exact TCC-built 0.1.393 source passes terminal conformance and the
 focused atomic pointer, wallpaper, and background-batch gates. The canonical
 four-output VKMS fixture now explicitly stages the Blit Hibr adapter path;

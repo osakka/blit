@@ -457,3 +457,9 @@ acceptance result. The Hibr-side lifecycle defect is tracked in
 [Hibr issue #145](https://git.home.arpa/itdlabs/hibr/issues/145); Blit remains
 responsible for preserving the evidence and must not paper over the missing
 Hibr rows by inventing terminal cells or changing the output geometry.
+
+The same boundary was reproduced against 0.1.393 on 2026-10-09. The ordinary
+shell control returned `stty size` `135 240` and the Hibr capture was saved at
+`diagnostics/live-hibr-screenshot-20261009T084834Z/`. The screenshot is the
+authoritative visual artifact for this run: it shows the Hibr scene above the
+black lower region while the API reports a healthy 1920x2160, 60 Hz SDL output.
