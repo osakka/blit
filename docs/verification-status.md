@@ -30,7 +30,9 @@ launcher, kills the registered primary owner, kills a joined attach client,
 and then creates a replacement join. The primary remains running while the
 dead join becomes `failed`, allowing the replacement join to be accepted.
 The fixture's `qemu_exit=0` is checked alongside all four markers; no Hibr
-source was modified.
+source was modified. The host-side
+`tools/tests/qemu_hibr_lifecycle_gate.sh` wrapper independently asserts the
+four markers, so a guest poweroff cannot mask a missing lifecycle result.
 
 ## Current 0.1.396 live glyph geometry acceptance
 

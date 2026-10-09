@@ -301,10 +301,13 @@ tools/probes/stage_hibr_qemu.sh /tmp/hibr-initroot-current /path/to/hibr
 # one primary and three `desktop --join` clients across a Blit-owned `2x2`
 # pane layout and requires four attached surfaces.
 # Add `blit.hibr_restart=1` with `blit.hibr_panes=1` to kill the Hibr
-# `[desktop]` process after startup, require Hibr's supervisor to restore the
-# primary session, then kill an auxiliary join client and attach a fresh join
-# on the next pane. The acceptance markers are `HIBR_PRIMARY_RESTART_PASS`,
-# `HIBR_JOIN_RECONNECT_PASS`, and `HIBR_PANE_MATRIX_PASS`.
+# registered primary owner after startup, require Hibr's supervisor to restore
+# the primary session, then kill an auxiliary join client and attach a fresh
+# join on the next pane. The acceptance markers are
+# `HIBR_PRIMARY_RESTART_PASS`, `HIBR_JOIN_RECONNECT_PASS`, and
+# `HIBR_PANE_MATRIX_PASS`. The repository-owned host wrapper asserts all
+# markers and rejects a clean QEMU poweroff when any marker is missing:
+tools/tests/qemu_hibr_lifecycle_gate.sh /tmp/blit-0.1.399-input.initramfs.gz
 # Add `blit.hibr_stock=1` to exercise that stock-session entrypoint rather
 # than the dedicated window-control workload.
 ```
