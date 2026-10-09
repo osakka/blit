@@ -71,9 +71,31 @@ handoff:
 - performance/timing changes: diagnostics, measured intervals, CPU/RSS, and a
   bounded workload rather than a subjective “feels faster” claim.
 
-QEMU is the repeatable multi-display oracle. A physical host is evidence for
-that host and its current hardware only; it cannot prove untested monitor
-counts, refresh modes, GPUs, or input devices.
+`tools/run-gates.sh` is that list, executable. Its suite names match the
+categories above, so the narrowest run is one suite and the pre-handoff run is
+`all`:
+
+```sh
+tools/run-gates.sh terminal          # the narrowest gate for a terminal change
+tools/run-gates.sh all               # before handoff
+BLIT_GATE_PACKAGE=blit_X.Y.Z-1_amd64.deb tools/run-gates.sh packaging
+BLIT_GATE_LIVE=http://HOST:8080 tools/run-gates.sh timing
+```
+
+Prefer it over invoking a gate directly. The gates do not share one calling
+convention: some take `BLIT_TEST_SERVER`, some `BLIT_GATE_SERVER`, some
+`BLIT_GATE_PORT`, some a positional argument; `terminal_conformance.rb` and
+`terminal_soak_gate.rb` assert against a server the caller must start; and
+`http_fragmentation_gate.rb` and `http_backpressure_gate.rb` are sub-gates
+that `network_auth_gate.sh` invokes with its own port, so running either
+standalone reports a failure that is not one. The runner owns those details.
+A gate that needs QEMU, physical hardware, a package, or a live host is
+skipped with that reason rather than counted as a pass or a failure.
+
+QEMU is the repeatable multi-display oracle, and the runner never implies it:
+run `tools/tests/qemu_hibr_lifecycle_gate.sh` explicitly. A physical host is
+evidence for that host and its current hardware only; it cannot prove untested
+monitor counts, refresh modes, GPUs, or input devices.
 
 ## Evidence and claims
 
