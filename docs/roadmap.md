@@ -3,7 +3,7 @@
 The roadmap is ordered by dependency. A later milestone must not become a
 second, parallel implementation of an earlier one.
 
-## Current position — release 0.1.409
+## Current position — release 0.1.410
 
 The current candidate closes the production Hibr launch contract by packaging
 an explicit `HIBR_RC` runtime file for API-launched Hibr children. This keeps
@@ -18,8 +18,8 @@ cadence, and soak
 evidence is recorded in [`releases/0.1.409.yaml`](../releases/0.1.409.yaml)
 and [`verification-status.md`](verification-status.md).
 
-This is not a physical-host completion claim. The supplied live host is now
-running 0.1.409 and exposes one output at 60 Hz. Explicit physical evdev
+This is not a physical-host completion claim. The supplied live host is
+running the prior 0.1.409 deployment and exposes one output at 60 Hz. Explicit physical evdev
 routes and live pointer motion have been observed; a source-qualified physical
 button trace, multiple physical monitors, physical 120/240 Hz scanout, and
 broader live Hibr geometry remain open. QEMU/VKMS remains the repeatable

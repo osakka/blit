@@ -446,6 +446,12 @@ synthetic and is useful for deterministic diagnostics; it does not claim that
 a physical device works. Mouse button state is aggregated across opened
 evdev pointers, and the input trace identifies the source and dispatch path.
 
+Terminal-input `data` is a JSON string. Blit decodes JSON escapes before the
+PTY write, so a client may represent an ESC byte as `\\u001b`; the receipt's
+`bytes_requested` counts decoded bytes, not the characters used to encode the
+JSON request. This is important for API clients sending VT controls and is
+covered by the terminal conformance suite.
+
 The normal physical-input transaction is:
 
 ```text

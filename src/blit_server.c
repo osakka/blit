@@ -2559,6 +2559,41 @@ static const char *json_key_cursor(const char *json, const char *key)
     return NULL;
 }
 
+static int json_hex_digit(char c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+static int json_append_codepoint(char *value, size_t capacity, size_t *out,
+                                 unsigned int codepoint)
+{
+    if (codepoint <= 0x7fU) {
+        if (*out + 1 >= capacity) return 0;
+        value[(*out)++] = (char)codepoint;
+    } else if (codepoint <= 0x7ffU) {
+        if (*out + 2 >= capacity) return 0;
+        value[(*out)++] = (char)(0xc0U | (codepoint >> 6));
+        value[(*out)++] = (char)(0x80U | (codepoint & 0x3fU));
+    } else if (codepoint <= 0xffffU) {
+        if (*out + 3 >= capacity) return 0;
+        value[(*out)++] = (char)(0xe0U | (codepoint >> 12));
+        value[(*out)++] = (char)(0x80U | ((codepoint >> 6) & 0x3fU));
+        value[(*out)++] = (char)(0x80U | (codepoint & 0x3fU));
+    } else if (codepoint <= 0x10ffffU) {
+        if (*out + 4 >= capacity) return 0;
+        value[(*out)++] = (char)(0xf0U | (codepoint >> 18));
+        value[(*out)++] = (char)(0x80U | ((codepoint >> 12) & 0x3fU));
+        value[(*out)++] = (char)(0x80U | ((codepoint >> 6) & 0x3fU));
+        value[(*out)++] = (char)(0x80U | (codepoint & 0x3fU));
+    } else {
+        return 0;
+    }
+    return 1;
+}
+
 static int json_string(const char *json, const char *key, char *value,
                        size_t capacity)
 {
@@ -2579,16 +2614,71 @@ static int json_string(const char *json, const char *key, char *value,
     if (*cursor != '"')
         return 0;
     ++cursor;
-    while (*cursor != '\0' && *cursor != '"' && out + 1 < capacity) {
+    while (*cursor != '\0' && *cursor != '"') {
         if (*cursor == '\\' && cursor[1] != '\0') {
+            unsigned int codepoint;
+            int high;
+            int low;
             ++cursor;
-            if (*cursor == 'n') value[out++] = '\n';
-            else if (*cursor == 'r') value[out++] = '\r';
-            else if (*cursor == 't') value[out++] = '\t';
-            else value[out++] = *cursor;
-            ++cursor;
+            if (*cursor == 'n') {
+                if (!json_append_codepoint(value, capacity, &out, '\n')) return 0;
+                ++cursor;
+            } else if (*cursor == 'r') {
+                if (!json_append_codepoint(value, capacity, &out, '\r')) return 0;
+                ++cursor;
+            } else if (*cursor == 't') {
+                if (!json_append_codepoint(value, capacity, &out, '\t')) return 0;
+                ++cursor;
+            } else if (*cursor == 'b') {
+                if (!json_append_codepoint(value, capacity, &out, '\b')) return 0;
+                ++cursor;
+            } else if (*cursor == 'f') {
+                if (!json_append_codepoint(value, capacity, &out, '\f')) return 0;
+                ++cursor;
+            } else if (*cursor == '"' || *cursor == '\\' || *cursor == '/') {
+                if (!json_append_codepoint(value, capacity, &out,
+                                            (unsigned int)*cursor)) return 0;
+                ++cursor;
+            } else if (*cursor == 'u') {
+                high = json_hex_digit(cursor[1]);
+                low = json_hex_digit(cursor[2]);
+                if (high < 0 || low < 0 ||
+                    json_hex_digit(cursor[3]) < 0 ||
+                    json_hex_digit(cursor[4]) < 0)
+                    return 0;
+                codepoint = ((unsigned int)high << 12) |
+                    ((unsigned int)low << 8) |
+                    ((unsigned int)json_hex_digit(cursor[3]) << 4) |
+                    (unsigned int)json_hex_digit(cursor[4]);
+                cursor += 5;
+                if (codepoint >= 0xd800U && codepoint <= 0xdbffU) {
+                    unsigned int trail;
+                    if (cursor[0] != '\\' || cursor[1] != 'u') return 0;
+                    high = json_hex_digit(cursor[2]);
+                    low = json_hex_digit(cursor[3]);
+                    if (high < 0 || low < 0 ||
+                        json_hex_digit(cursor[4]) < 0 ||
+                        json_hex_digit(cursor[5]) < 0)
+                        return 0;
+                    trail = ((unsigned int)high << 12) |
+                        ((unsigned int)low << 8) |
+                        ((unsigned int)json_hex_digit(cursor[4]) << 4) |
+                        (unsigned int)json_hex_digit(cursor[5]);
+                    if (trail < 0xdc00U || trail > 0xdfffU) return 0;
+                    codepoint = 0x10000U +
+                        ((codepoint - 0xd800U) << 10) + trail - 0xdc00U;
+                    cursor += 6;
+                } else if (codepoint >= 0xdc00U && codepoint <= 0xdfffU) {
+                    return 0;
+                }
+                if (!json_append_codepoint(value, capacity, &out, codepoint)) return 0;
+            } else {
+                return 0;
+            }
             continue;
         }
+        if ((unsigned char)*cursor < 0x20U || out + 1 >= capacity)
+            return 0;
         value[out++] = *cursor++;
     }
     if (*cursor != '"')

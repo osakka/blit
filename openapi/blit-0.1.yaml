@@ -1553,7 +1553,10 @@ components:
           type: string
           minLength: 1
           maxLength: 768
-          description: UTF-8 text or terminal escape bytes to write to the PTY.
+          description: >-
+            UTF-8 text or terminal escape bytes to write to the PTY. JSON
+            string escapes, including Unicode escapes such as \u001b, are
+            decoded before the bounded PTY write.
         mode:
           type: string
           enum: [raw, paste]

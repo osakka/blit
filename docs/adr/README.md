@@ -75,6 +75,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0051 — Fail closed when a Hibr desktop owner is not registered](0051-fail-closed-hibr-owner-handshake.md)
 - [0052 — Expose surface content diagnostic counters](0052-surface-content-diagnostic-counters.md)
 - [0053 — Expose surface-producer cadence diagnostics](0053-surface-producer-cadence-diagnostics.md)
+- [0054 — Decode JSON string escapes at the API boundary](0054-json-escape-decoding.md)
 
 ## Adding an ADR
 

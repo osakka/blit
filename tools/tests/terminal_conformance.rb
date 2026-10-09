@@ -317,6 +317,33 @@ raise 'network input did not reach the PTY' unless
 request(base, 'DELETE', "/v1/terminal-sessions/#{network_input_id}")
 puts 'PASS network-terminal-input-raw'
 
+json_escape_input = request(base, 'POST', '/v1/terminal-sessions', {
+  'command' => '/bin/cat',
+  'surface' => { 'width' => 32, 'height' => 2 }
+})
+json_escape_input_id = json_escape_input.fetch('id')
+json_escape_receipt = request(base, 'POST',
+                              "/v1/terminal-sessions/#{json_escape_input_id}/input",
+                              { 'data' => "\eX" })
+assert_equal(2, json_escape_receipt.fetch('bytes_requested'),
+             'JSON escaped terminal input requested bytes')
+assert_equal(2, json_escape_receipt.fetch('bytes_written'),
+             'JSON escaped terminal input written bytes')
+json_escape_snapshot = nil
+Timeout.timeout(5) do
+  loop do
+    json_escape_snapshot = request(base, 'GET',
+                                   "/v1/surfaces/surface-#{json_escape_input_id}/cells")
+    break if screen_text(json_escape_snapshot).include?('^[X')
+
+    sleep 0.02
+  end
+end
+raise 'JSON escaped terminal input did not decode to ESC' unless
+  screen_text(json_escape_snapshot).include?('^[X')
+request(base, 'DELETE', "/v1/terminal-sessions/#{json_escape_input_id}")
+puts 'PASS network-terminal-input-json-escapes'
+
 paste_input = request(base, 'POST', '/v1/terminal-sessions', {
   'command' => '/bin/sh',
   'arguments' => ['-c',

@@ -3,6 +3,18 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 0.1.410 current candidate
+
+The terminal-input JSON decoder now handles the complete bounded JSON escape
+set used by API clients, including Unicode escapes that represent VT control
+bytes. The regression sends JSON `\\u001bX` to a PTY and verifies that the
+terminal receives ESC followed by `X`, rather than the literal characters
+`u001bX`. The full TCC-built terminal conformance suite passes, including
+VT500, UTF-8, Hibr parity, Kitty, Sixel capability, and the new
+`network-terminal-input-json-escapes` case. This candidate has not yet been
+deployed to the physical host; the host remains on 0.1.409 until the package
+and live lifecycle gates complete.
+
 ## 0.1.409 current candidate evidence
 
 The production Hibr launch path now installs and selects an explicit
