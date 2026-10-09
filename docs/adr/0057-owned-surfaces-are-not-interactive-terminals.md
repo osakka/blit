@@ -134,11 +134,26 @@ therefore split deliberately rather than claimed as one gate:
   other unconditional physical-input PTY writer exists. It is reproducible
   with `grep -n "pty_fd" src/blit_server.c | grep -iE "write|send"` and should
   be re-run if a writer is added.
-- **On the live host, by observation.** Typing into the desktop no longer
-  deposits characters on it, Page Up and Page Down no longer blank it, and a
-  click no longer removes the desktop for one to two seconds. This is a
-  recorded run in the release manifest, not an automated gate, for the same
-  reason as ADR 0055's adapter half: it needs Hibr.
+- **On the live host, by measurement.** The keyboard counters added
+  alongside this change make the gate observable, so this is no longer an
+  eyeball check. A synthetic evdev keyboard created through `/dev/uinput`
+  emits six key presses; the same device is then routed to each kind of
+  session in turn:
+
+  | counter | owned desktop | ordinary shell |
+  | --- | --- | --- |
+  | `evdev_keyboard_key_presses` | +6 | +6 |
+  | `evdev_keyboard_keys_delivered` | **0** | **6** |
+  | `evdev_keyboard_keys_undelivered` | **6** | **0** |
+  | surface | unchanged | shows `aaaaaa` |
+
+  Equal press counts on both sides are the control: the keys were read in
+  both cases, so this measures the gate rather than a dead input path. The
+  device must declare `KEY_A` and `KEY_ENTER` or `evdev_has_keyboard`
+  will not open it.
+
+  A click on the owned surface holds its 32,400 printable cells across press
+  and release, where it previously cleared them.
 
 Folding a fake owner registration into the suite was considered and rejected:
 `POST /v1/terminal-sessions/{id}/hibr-owner` would let a test claim the role

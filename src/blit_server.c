@@ -487,6 +487,8 @@ typedef struct {
     unsigned long long diagnostic_evdev_mouse_device_motion[BLIT_MAX_INPUT_DEVICES];
     unsigned long long diagnostic_evdev_mouse_device_wheel[BLIT_MAX_INPUT_DEVICES];
     unsigned long long diagnostic_evdev_mouse_device_buttons[BLIT_MAX_INPUT_DEVICES];
+    unsigned long long diagnostic_evdev_keyboard_device_events[BLIT_MAX_INPUT_DEVICES];
+    unsigned long long diagnostic_evdev_keyboard_device_keys[BLIT_MAX_INPUT_DEVICES];
     int evdev_keyboard_fds[BLIT_MAX_INPUT_DEVICES];
     char evdev_keyboard_paths[BLIT_MAX_INPUT_DEVICES][128];
     int evdev_keyboard_count;
@@ -595,6 +597,16 @@ typedef struct {
     unsigned long long diagnostic_evdev_mouse_button_state_coalesced;
     uint64_t diagnostic_last_evdev_mouse_event_us;
     char diagnostic_last_evdev_mouse_path[128];
+    /* The mouse has per-device counters and the keyboard had none, so a key
+       that was read but not delivered could not be told apart from a device
+       that was never opened. Both are reachable states and they have
+       opposite fixes. */
+    unsigned long long diagnostic_evdev_keyboard_events;
+    unsigned long long diagnostic_evdev_keyboard_key_presses;
+    unsigned long long diagnostic_evdev_keyboard_keys_delivered;
+    unsigned long long diagnostic_evdev_keyboard_keys_undelivered;
+    uint64_t diagnostic_last_evdev_keyboard_event_us;
+    char diagnostic_last_evdev_keyboard_path[128];
     unsigned long long diagnostic_sdl_mouse_events_discarded;
     unsigned long long diagnostic_sdl_mouse_events_processed;
     unsigned long long diagnostic_sdl_mouse_motion_events;
@@ -722,6 +734,7 @@ static void broadcast_evdev_pointer(BlitRuntime *runtime, const char *kind,
                                     int button, int pressed, int delta,
                                     const char *device_id);
 static int session_surface_is_owner_authored(const BlitSession *session);
+static int send_evdev_key(BlitRuntime *runtime, unsigned short code);
 static void dispatch_pointer_button(BlitRuntime *runtime, int button,
                                     int pressed, const char *device_id);
 
@@ -1740,6 +1753,8 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
     int index;
     char mouse_devices[4096];
     size_t mouse_used = 0;
+    char keyboard_devices[4096];
+    size_t keyboard_used = 0;
     uint64_t now = monotonic_us();
     double frame_rate_hz = runtime->diagnostic_frame_rate_hz;
     double surface_commit_hz = runtime->diagnostic_surface_commit_hz;
@@ -1780,6 +1795,23 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
     snprintf(mouse_devices + mouse_used, sizeof(mouse_devices) - mouse_used,
              "]");
 
+    keyboard_used += (size_t)snprintf(keyboard_devices + keyboard_used,
+                                      sizeof(keyboard_devices) - keyboard_used,
+                                      "[");
+    for (index = 0; index < runtime->evdev_keyboard_count; ++index) {
+        keyboard_used += (size_t)snprintf(
+            keyboard_devices + keyboard_used,
+            sizeof(keyboard_devices) - keyboard_used,
+            "%s{\"path\":\"%s\",\"fd\":%d,\"events\":%llu,\"keys\":%llu}",
+            index > 0 ? "," : "",
+            runtime->evdev_keyboard_paths[index],
+            runtime->evdev_keyboard_fds[index],
+            runtime->diagnostic_evdev_keyboard_device_events[index],
+            runtime->diagnostic_evdev_keyboard_device_keys[index]);
+    }
+    snprintf(keyboard_devices + keyboard_used,
+             sizeof(keyboard_devices) - keyboard_used, "]");
+
     diagnostics_json(runtime, snapshot, sizeof(snapshot));
     used = (size_t)snprintf(body, capacity,
         "{\"snapshot\":%s,\"performance\":{\"uptime_ms\":%llu,"
@@ -1803,6 +1835,13 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"evdev_mouse_button_state_coalesced\":%llu,"
         "\"last_evdev_mouse_event_age_ms\":%llu,"
         "\"last_evdev_mouse_path\":\"%s\","
+        "\"evdev_keyboard_events\":%llu,"
+        "\"evdev_keyboard_key_presses\":%llu,"
+        "\"evdev_keyboard_keys_delivered\":%llu,"
+        "\"evdev_keyboard_keys_undelivered\":%llu,"
+        "\"last_evdev_keyboard_event_age_ms\":%llu,"
+        "\"last_evdev_keyboard_path\":\"%s\","
+        "\"evdev_keyboard_devices\":%s,"
         "\"evdev_mouse_devices\":%s,"
         "\"sdl_mouse_events_discarded\":%llu,"
         "\"sdl_mouse_events_processed\":%llu,"
@@ -1870,6 +1909,16 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
             (unsigned long long)((now -
                 runtime->diagnostic_last_evdev_mouse_event_us) / 1000ULL) : 0,
         runtime->diagnostic_last_evdev_mouse_path,
+        runtime->diagnostic_evdev_keyboard_events,
+        runtime->diagnostic_evdev_keyboard_key_presses,
+        runtime->diagnostic_evdev_keyboard_keys_delivered,
+        runtime->diagnostic_evdev_keyboard_keys_undelivered,
+        runtime->diagnostic_last_evdev_keyboard_event_us > 0 &&
+                now >= runtime->diagnostic_last_evdev_keyboard_event_us ?
+            (unsigned long long)((now -
+                runtime->diagnostic_last_evdev_keyboard_event_us) / 1000ULL) : 0ULL,
+        runtime->diagnostic_last_evdev_keyboard_path,
+        keyboard_devices,
         mouse_devices,
         runtime->diagnostic_sdl_mouse_events_discarded,
         runtime->diagnostic_sdl_mouse_events_processed,
@@ -7079,11 +7128,22 @@ static void remove_evdev_keyboard(BlitRuntime *runtime, int index)
                  runtime->evdev_keyboard_paths[i + 1]);
         runtime->evdev_keyboard_reported[i] =
             runtime->evdev_keyboard_reported[i + 1];
+        /* The per-device counters are indexed by slot, so they must follow
+           the device when the array is compacted or a hotplug would
+           attribute one keyboard's events to another. */
+        runtime->diagnostic_evdev_keyboard_device_events[i] =
+            runtime->diagnostic_evdev_keyboard_device_events[i + 1];
+        runtime->diagnostic_evdev_keyboard_device_keys[i] =
+            runtime->diagnostic_evdev_keyboard_device_keys[i + 1];
     }
     --runtime->evdev_keyboard_count;
     runtime->evdev_keyboard_fds[runtime->evdev_keyboard_count] = -1;
     runtime->evdev_keyboard_paths[runtime->evdev_keyboard_count][0] = '\0';
     runtime->evdev_keyboard_reported[runtime->evdev_keyboard_count] = 0;
+    runtime->diagnostic_evdev_keyboard_device_events[
+        runtime->evdev_keyboard_count] = 0;
+    runtime->diagnostic_evdev_keyboard_device_keys[
+        runtime->evdev_keyboard_count] = 0;
     /* Keep the configured route across hotplug; it becomes effective again
        when a keyboard is discovered. */
     runtime->evdev_rescan_requested = 1;
@@ -13678,12 +13738,14 @@ static int session_surface_is_owner_authored(const BlitSession *session)
         (session->hibr_desktop_primary || session->hibr_desktop_join);
 }
 
-static void send_evdev_key(BlitRuntime *runtime, unsigned short code)
+/* Returns 1 when the key was written to a session PTY and 0 when it was
+   not, so the caller can count delivered against undelivered presses. */
+static int send_evdev_key(BlitRuntime *runtime, unsigned short code)
 {
     BlitSession *session = keyboard_target(runtime);
     char sequence[32];
     int length = 0;
-    if (session == NULL || session->pty_fd < 0) return;
+    if (session == NULL || session->pty_fd < 0) return 0;
     /* ADR 0057: an owned surface is not an interactive terminal. The key
        already reaches the owner over the input stream (ADR 0034); writing
        it to the PTY as well gets it echoed back by the line discipline and
@@ -13691,7 +13753,7 @@ static void send_evdev_key(BlitRuntime *runtime, unsigned short code)
        Up/Down into scrollback navigation that replaces the owner's content
        with terminal history. The caller broadcasts the stream event after
        this returns, so the key is not lost. */
-    if (session_surface_is_owner_authored(session)) return;
+    if (session_surface_is_owner_authored(session)) return 0;
     if (runtime->evdev_ctrl && code >= KEY_A && code <= KEY_Z) {
         sequence[0] = (char)(code - KEY_A + 1);
         length = 1;
@@ -13806,6 +13868,7 @@ static void send_evdev_key(BlitRuntime *runtime, unsigned short code)
         terminal_scrollback_show_live(find_surface_id(runtime, session->id));
         write(session->pty_fd, sequence, (size_t)length);
     }
+    return length > 0;
 }
 
 static void service_evdev_keyboard(BlitRuntime *runtime)
@@ -13821,6 +13884,12 @@ static void service_evdev_keyboard(BlitRuntime *runtime)
                                 &event, sizeof(event))) ==
                (ssize_t)sizeof(event)) {
             uint64_t input_started_us = monotonic_us();
+            ++runtime->diagnostic_evdev_keyboard_events;
+            ++runtime->diagnostic_evdev_keyboard_device_events[device_index];
+            runtime->diagnostic_last_evdev_keyboard_event_us = input_started_us;
+            snprintf(runtime->diagnostic_last_evdev_keyboard_path,
+                     sizeof(runtime->diagnostic_last_evdev_keyboard_path), "%s",
+                     runtime->evdev_keyboard_paths[device_index]);
             if (event.type != EV_KEY) continue;
             if (event.code == KEY_LEFTSHIFT || event.code == KEY_RIGHTSHIFT)
                 runtime->evdev_shift = event.value != 0;
@@ -13848,7 +13917,16 @@ static void service_evdev_keyboard(BlitRuntime *runtime)
                             runtime->evdev_keyboard_paths[device_index]);
                     runtime->evdev_keyboard_reported[device_index] = 1;
                 }
-                send_evdev_key(runtime, event.code);
+                ++runtime->diagnostic_evdev_keyboard_key_presses;
+                ++runtime->diagnostic_evdev_keyboard_device_keys[device_index];
+                /* Delivered means the key was written to a session PTY.
+                   An owned surface takes its input from the stream instead
+                   (ADR 0057), so undelivered is the expected state for a
+                   desktop and a fault for an ordinary terminal. */
+                if (send_evdev_key(runtime, event.code))
+                    ++runtime->diagnostic_evdev_keyboard_keys_delivered;
+                else
+                    ++runtime->diagnostic_evdev_keyboard_keys_undelivered;
             }
             {
                 char input_event[256];
