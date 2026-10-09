@@ -198,6 +198,16 @@ paths:
       summary: Capture the current framebuffer for one display
       parameters:
         - $ref: '#/components/parameters/DisplayId'
+        - in: query
+          name: cached
+          required: false
+          description: >-
+            Observe the already-composed scene without forcing a full redraw.
+            Omit this parameter when a deliberate fresh scene rebuild is
+            required.
+          schema:
+            type: string
+            enum: ['1']
       responses:
         '200':
           description: >-
