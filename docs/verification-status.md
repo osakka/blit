@@ -2290,3 +2290,27 @@ The physical visual and physical evdev gates remain open. A live capture
 recorded a 60 Hz display, zero missed deadlines, and zero physical evdev mouse
 events; API-injected pointer motions were accepted and traced. Therefore this
 release does not claim physical mouse or visual acceptance.
+
+# Current 0.1.382 live and QEMU result
+
+The exact TCC-built 0.1.382 binary passed the terminal conformance suite,
+package artifact gate, QEMU input/render soak, and four-output Hibr fixture.
+The four-output fixture reported four independently presented 1024x768@240
+outputs with a 4.166 ms target interval and no diagnostic errors.
+
+The package was supervised-updated on `192.168.10.54`; `/v1/version` reports
+0.1.382. Starting Hibr through the packaged
+`/usr/share/blit/hibr/blit-session.hibr` entrypoint produced a 240x135
+terminal surface and one complete 1920x2160 graphics image. A free topology
+pane no longer swallows input: API motion and both button edges reached the
+active session and were recorded in the trace with `target_session=1`.
+
+The live evidence bundle is
+`diagnostics/live-0.1.382-experience-20261009T031158Z`. Its screenshot shows
+the correctly aligned wallpaper and desktop, plus a reproducible stray
+`0`/block at the left edge. The timing capture measured damage-driven presents,
+not continuous vblank: 32 presents in about 10 seconds, zero missed deadlines,
+and individual presents within the 60 Hz budget. This is an observed cadence
+warning, not proof of a 3 Hz display; the scheduler currently presents on
+damage and input. Physical evdev activity, physical multi-monitor behavior,
+and hardware high-refresh gaming remain open gates.
