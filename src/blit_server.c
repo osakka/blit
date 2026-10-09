@@ -354,6 +354,9 @@ typedef struct {
     int attach_reassert_attempts;
     int attach_reassert_max_attempts;
     int attach_reassert_hibr_matches;
+    int hibr_process;
+    pid_t hibr_owner_pid;
+    int hibr_owner_registered;
     int hibr_resume_requested;
     int hibr_attach_unresolved;
     char hibr_session_token[64];
@@ -6763,14 +6766,17 @@ static void refresh_session_state(BlitRuntime *runtime, BlitSession *session)
     if (result == session->process_id) {
         if (WIFEXITED(status)) {
             session->exit_code = WEXITSTATUS(status);
-            snprintf(session->state, sizeof(session->state),
-                     session->exit_code == 0 ? "stopped" : "failed");
+            if (!session->hibr_process)
+                snprintf(session->state, sizeof(session->state),
+                         session->exit_code == 0 ? "stopped" : "failed");
         } else if (WIFSIGNALED(status)) {
             session->exit_code = 128 + WTERMSIG(status);
-            snprintf(session->state, sizeof(session->state), "failed");
+            if (!session->hibr_process)
+                snprintf(session->state, sizeof(session->state), "failed");
         } else {
             session->exit_code = -1;
-            snprintf(session->state, sizeof(session->state), "failed");
+            if (!session->hibr_process)
+                snprintf(session->state, sizeof(session->state), "failed");
         }
         session->child_exited = 1;
         /* Keep the PTY readable after waitpid reaps the child.  The child may
@@ -6778,19 +6784,24 @@ static void refresh_session_state(BlitRuntime *runtime, BlitSession *session)
            protocol reply) immediately before exit.  Do not retire the
            surface here: service_session_output must drain those bytes before
            it observes EOF and closes the PTY. */
-        disable_input_routes_for_target(runtime, target_id);
-        remove_session_streams(runtime, target_id);
+        if (!session->hibr_process) {
+            disable_input_routes_for_target(runtime, target_id);
+            remove_session_streams(runtime, target_id);
+        }
     } else if (result < 0 && errno != EINTR) {
         session->exit_code = -1;
-        snprintf(session->state, sizeof(session->state), "failed");
+        if (!session->hibr_process)
+            snprintf(session->state, sizeof(session->state), "failed");
         session->child_exited = 1;
         if (session->pty_fd >= 0) {
             close(session->pty_fd);
             session->pty_fd = -1;
         }
-        retire_session_surface(runtime, session);
-        disable_input_routes_for_target(runtime, target_id);
-        remove_session_streams(runtime, target_id);
+        if (!session->hibr_process) {
+            retire_session_surface(runtime, session);
+            disable_input_routes_for_target(runtime, target_id);
+            remove_session_streams(runtime, target_id);
+        }
     }
 }
 
@@ -6882,6 +6893,46 @@ static int signal_process_group(pid_t pid)
     return kill(pid, SIGWINCH) == 0;
 }
 
+static void force_resize_fd(int fd, const struct winsize *size)
+{
+    struct winsize kick;
+
+    if (fd < 0 || size == NULL)
+        return;
+    kick = *size;
+    if (kick.ws_row > 1)
+        --kick.ws_row;
+    else if (kick.ws_col > 1)
+        --kick.ws_col;
+    else
+        return;
+    if (size->ws_ypixel > 0 && size->ws_row > 0)
+        kick.ws_ypixel = (unsigned short)((unsigned long long)size->ws_ypixel *
+                                          kick.ws_row / size->ws_row);
+    if (kick.ws_xpixel > 0 && size->ws_xpixel > 0 && size->ws_col > 0 &&
+        kick.ws_col != size->ws_col)
+        kick.ws_xpixel = (unsigned short)((unsigned long long)size->ws_xpixel *
+                                          kick.ws_col / size->ws_col);
+    ioctl(fd, TIOCSWINSZ, &kick);
+    ioctl(fd, TIOCSWINSZ, size);
+}
+
+static void force_resize_process_fds(pid_t pid, const struct winsize *size)
+{
+    char path[64];
+    int stream;
+    int fd;
+
+    for (stream = 0; stream < 3; ++stream) {
+        snprintf(path, sizeof(path), "/proc/%ld/fd/%d", (long)pid, stream);
+        fd = open(path, O_RDWR | O_NONBLOCK | O_CLOEXEC);
+        if (fd >= 0) {
+            force_resize_fd(fd, size);
+            close(fd);
+        }
+    }
+}
+
 static int reassert_hibr_session_processes(BlitSession *session,
                                            const struct winsize *size)
 {
@@ -6896,8 +6947,6 @@ static int reassert_hibr_session_processes(BlitSession *session,
         char *end;
         unsigned long value;
         pid_t pid;
-        char path[64];
-        int fd;
 
         if (entry->d_name[0] < '1' || entry->d_name[0] > '9')
             continue;
@@ -6906,14 +6955,10 @@ static int reassert_hibr_session_processes(BlitSession *session,
             continue;
         pid = (pid_t)value;
         if (pid == getpid() ||
+            (session->hibr_owner_registered && pid != session->hibr_owner_pid) ||
             !process_has_blit_session(pid, session->hibr_session_token))
             continue;
-        snprintf(path, sizeof(path), "/proc/%ld/fd/0", (long)pid);
-        fd = open(path, O_RDWR | O_NONBLOCK | O_CLOEXEC);
-        if (fd >= 0) {
-            ioctl(fd, TIOCSWINSZ, size);
-            close(fd);
-        }
+        force_resize_process_fds(pid, size);
         if (signal_process_group(pid))
             ++matched;
         /* Hibr's hold layer may retain the exported token on its owner while
@@ -6940,13 +6985,7 @@ static int reassert_hibr_session_processes(BlitSession *session,
                     if (child_pid == pid ||
                         !process_is_descendant(child_pid, pid))
                         continue;
-                    snprintf(path, sizeof(path), "/proc/%ld/fd/0",
-                             (long)child_pid);
-                    fd = open(path, O_RDWR | O_NONBLOCK | O_CLOEXEC);
-                    if (fd >= 0) {
-                        ioctl(fd, TIOCSWINSZ, size);
-                        close(fd);
-                    }
+                    force_resize_process_fds(child_pid, size);
                     /* Some Hibr desktop generations install the resize
                        handler only in the child, not in the process-group
                        leader. Deliver both forms to make the PTY boundary
@@ -7015,8 +7054,15 @@ static void service_attach_reasserts(BlitRuntime *runtime, uint64_t now)
             now < session->attach_reassert_due_us)
             continue;
         session->attach_reassert_pending = 0;
-        if (strcmp(session->state, "running") != 0 || session->pty_fd < 0)
+        if (session->pty_fd < 0 && !session->hibr_process)
             continue;
+        if (strcmp(session->state, "running") != 0) {
+            if (session->hibr_process) {
+                session->attach_reassert_pending = 1;
+                session->attach_reassert_due_us = now + 250000ULL;
+            }
+            continue;
+        }
         surface = find_surface_id(runtime, session->id);
         if (surface == NULL)
             continue;
@@ -7027,7 +7073,7 @@ static void service_attach_reasserts(BlitRuntime *runtime, uint64_t now)
                                           session->terminal_cell_width);
         size.ws_ypixel = (unsigned short)(surface->height *
                                            session->terminal_cell_height);
-        if (ioctl(session->pty_fd, TIOCSWINSZ, &size) < 0) {
+        if (session->pty_fd >= 0 && ioctl(session->pty_fd, TIOCSWINSZ, &size) < 0) {
             fprintf(stderr, "blit: attach reassert resize for session %llu failed: %s\n",
                     session->id, strerror(errno));
             continue;
@@ -7036,9 +7082,9 @@ static void service_attach_reasserts(BlitRuntime *runtime, uint64_t now)
            explicit signal is intentional: it makes the PTY resize/reassert
            contract deterministic for hosts whose kernel/PTY path does not
            deliver SIGWINCH from the master ioctl. */
-        if (kill(-session->process_id, SIGWINCH) == 0)
+        if (!session->child_exited && kill(-session->process_id, SIGWINCH) == 0)
             signalled = 1;
-        else if (kill(session->process_id, SIGWINCH) == 0)
+        else if (!session->child_exited && kill(session->process_id, SIGWINCH) == 0)
             signalled = 1;
         hibr_matches = reassert_hibr_session_processes(session, &size);
         /* The attach PTY itself is the authoritative Hibr client boundary.
@@ -7052,9 +7098,9 @@ static void service_attach_reasserts(BlitRuntime *runtime, uint64_t now)
         if (hibr_matches > 0)
             ++session->attach_reassert_hibr_matches;
         snprintf(discovery_detail, sizeof(discovery_detail),
-                 "session=%llu attempt=%d matches=%d groups=%d", session->id,
+             "session=%llu attempt=%d matches=%d groups=%d", session->id,
                  session->attach_reassert_attempts + 1, hibr_matches,
-                 session->attach_reassert_hibr_matches);
+             session->attach_reassert_hibr_matches);
         diagnostic_log(runtime, "info", "hibr_resize_discovery",
                        discovery_detail);
         if (!signalled)
@@ -7195,11 +7241,14 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
         body + used, capacity - used,
         ",\"hibr_attachment\":{\"resume_requested\":%s,"
         "\"reassert_attempts\":%d,\"owner_matches\":%d,"
-        "\"unresolved\":%s}",
+        "\"unresolved\":%s,\"owner_registered\":%s,"
+        "\"owner_pid\":%ld}",
         session->hibr_resume_requested ? "true" : "false",
         session->attach_reassert_attempts,
         session->attach_reassert_hibr_matches,
-        session->hibr_attach_unresolved ? "true" : "false");
+        session->hibr_attach_unresolved ? "true" : "false",
+        session->hibr_owner_registered ? "true" : "false",
+        (long)session->hibr_owner_pid);
     used += (size_t)snprintf(
         body + used, capacity - used,
         ",\"terminal_capabilities\":{\"term\":\"%s\","
@@ -7444,6 +7493,7 @@ static int create_session(BlitRuntime *runtime, const char *json,
     unsigned long long session_id;
     char session_token[64];
     int hibr_resume_requested = 0;
+    int hibr_process = 0;
     const char *command_name;
     int i;
 
@@ -7479,6 +7529,10 @@ static int create_session(BlitRuntime *runtime, const char *json,
     arguments[argument_count] = NULL;
     command_name = strrchr(command, '/');
     command_name = command_name == NULL ? command : command_name + 1;
+    if (strcmp(command_name, "hibr") == 0 ||
+        strcmp(command_name, "desktop") == 0) {
+        hibr_process = 1;
+    }
     if (strcmp(command_name, "desktop") == 0)
         for (i = 0; i < argument_count - 1; ++i)
             if (strcmp(argument_storage[i], "--resume") == 0 ||
@@ -7600,6 +7654,7 @@ static int create_session(BlitRuntime *runtime, const char *json,
             session->revision = 1;
             session->exit_code = -1;
             session->hibr_resume_requested = hibr_resume_requested;
+            session->hibr_process = hibr_process;
             session->terminal_autowrap = 1;
             session->terminal_cell_width = runtime_terminal_cell_width(runtime);
             session->terminal_cell_height = runtime_terminal_cell_height(runtime);
@@ -7631,7 +7686,20 @@ static int create_session(BlitRuntime *runtime, const char *json,
                 BLIT_SURFACE_EXTERNAL :
                 (strcmp(surface_mode, "mirror") == 0 ?
                  BLIT_SURFACE_MIRROR : BLIT_SURFACE_TERMINAL);
-            snprintf(session->state, sizeof(session->state), "starting");
+            snprintf(session->state, sizeof(session->state), "%s",
+                     hibr_process ? "running" : "starting");
+            if (hibr_process) {
+                /* Hibr's adapter path can publish the initial surface through
+                   Blit's API without writing terminal bytes to the PTY. Arm
+                   the ownership-scoped geometry reassert at creation time so
+                   that path receives the same resize contract as a PTY-first
+                   desktop. Owner discovery remains bounded and retryable. */
+                session->attach_reassert_pending = 1;
+                session->attach_reassert_attempts = 0;
+                session->attach_reassert_max_attempts = 32;
+                session->attach_reassert_hibr_matches = 0;
+                session->attach_reassert_due_us = monotonic_us() + 250000ULL;
+            }
             snprintf(session->surface_id, sizeof(session->surface_id),
                      "surface-%llu", session->id);
             snprintf(session->display_id, sizeof(session->display_id), "%s",
@@ -9215,6 +9283,51 @@ static void handle_request(int fd, BlitRuntime *runtime,
                      "{\"type\":\"frame\",\"frame\":%s}", body);
             broadcast_stream(runtime, event, BLIT_STREAM_FRAMES);
         }
+        return;
+    }
+    if (strncmp(path, "/v1/terminal-sessions/",
+                strlen("/v1/terminal-sessions/")) == 0 &&
+        strcmp(path + strlen(path) - 11, "/hibr-owner") == 0 &&
+        strcmp(method, "POST") == 0) {
+        const char *suffix = path + strlen(path) - 11;
+        char session_path[128];
+        char owner_token[128];
+        int owner_pid;
+        size_t session_path_length = (size_t)(suffix - path);
+        BlitSession *session;
+
+        if (session_path_length == 0 || session_path_length >=
+            sizeof(session_path) ||
+            !json_int(payload, "pid", &owner_pid) || owner_pid <= 1 ||
+            !json_string(payload, "token", owner_token,
+                         sizeof(owner_token))) {
+            send_problem(fd, 400, "Bad Request", "invalid_hibr_owner",
+                         "pid and the Blit session token are required.");
+            return;
+        }
+        memcpy(session_path, path, session_path_length);
+        session_path[session_path_length] = '\0';
+        session = find_session(runtime, session_path);
+        if (session == NULL) {
+            send_problem(fd, 404, "Not Found", "session_not_found",
+                         "The terminal session does not exist.");
+            return;
+        }
+        if (strcmp(owner_token, session->hibr_session_token) != 0 ||
+            kill((pid_t)owner_pid, 0) < 0) {
+            send_problem(fd, 403, "Forbidden", "hibr_owner_rejected",
+                         "The owner PID is not live or the Blit session token is invalid.");
+            return;
+        }
+        session->hibr_owner_pid = (pid_t)owner_pid;
+        session->hibr_owner_registered = 1;
+        session->attach_reassert_pending = 1;
+        session->attach_reassert_attempts = 0;
+        session->attach_reassert_hibr_matches = 0;
+        session->attach_reassert_due_us = monotonic_us();
+        send_http(fd, 202, "Accepted", "application/json",
+                  "{\"state\":\"registered\",\"detail\":\""
+                  "Hibr owner registered for resize reassertion\"}");
         return;
     }
     if (strncmp(path, "/v1/terminal-sessions/",

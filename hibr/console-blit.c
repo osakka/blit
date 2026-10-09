@@ -49,6 +49,7 @@ typedef struct {
 	unsigned long long revision;
 	unsigned pen_fg, pen_bg, pen_attr;
 	char host[128], port[16], surface[128], session[64];
+	char token[128];
 	cb_cell *pending;
 	size_t pending_count, pending_capacity;
 	int ws_fd;
@@ -249,6 +250,25 @@ static int cb_surface_path(char *path, size_t capacity)
 	return snprintf(path, capacity, "/v1/surfaces/%s/cells", cb.surface) > 0;
 }
 
+static int cb_register_owner(void)
+{
+	char path[256], body[256], response[1024];
+
+	if (!cb.session[0] || !cb.token[0])
+		return 1;
+	snprintf(path, sizeof(path), "/v1/terminal-sessions/%s/hibr-owner",
+		cb.session + 8);
+	snprintf(body, sizeof(body), "{\"pid\":%ld,\"token\":\"%s\"}",
+		(long)getpid(), cb.token);
+	if (!cb_http("POST", path, body, response, sizeof(response))) {
+		lg(HIBR_LERR, "console-blit: owner registration failed for %s", path);
+		return 0;
+	}
+	CB_TRACE("console-blit: registered owner pid=%ld session=%s",
+		(long)getpid(), cb.session);
+	return 1;
+}
+
 static int cb_add_pending(int x, int y, const char *text)
 {
 	cb_cell *cell;
@@ -407,6 +427,11 @@ static int cb_open(sh *s)
 		else
 			snprintf(cb.session, sizeof(cb.session), "session-%s", v);
 	}
+	v = getenv("BLIT_SESSION_TOKEN");
+	if (v && *v)
+		snprintf(cb.token, sizeof(cb.token), "%s", v);
+	if (!cb_register_owner())
+		return HIBR_FAIL;
 	snprintf(path, sizeof(path), "/v1/surfaces/%s/cells", cb.surface);
 	if (!cb_http("GET", path, "", response, sizeof(response))) {
 		lg(HIBR_LERR, "console-blit: cannot open surface %s", cb.surface);

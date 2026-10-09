@@ -105,6 +105,13 @@ partial surface. Inspect `hibr_attachment` in the session response and the
 diagnostic trace before retrying; do not start another primary against the
 same held name until Hibr's own lifecycle has been resolved.
 
+For a provider-backed Hibr process, the Blit-owned adapter registers its PID
+at `/v1/terminal-sessions/{id}/hibr-owner` using the per-session token that
+Blit placed in the child environment. This is an internal lifecycle
+handshake, not a second display owner; it only gives Blit an exact process to
+resize and signal. The session response reports `owner_registered` and
+`owner_pid` alongside the bounded fallback discovery counters.
+
 The probe has been run successfully with the Hibr desktop built by TCC. This
 mode uses the external surface boundary above; it does not depend on Blit's
 ANSI terminal parser for desktop rendering.

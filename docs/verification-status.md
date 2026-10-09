@@ -5,6 +5,21 @@ an evidence record, not a claim that the complete product is released.
 
 ## Current 0.1.392 troubleshooting and refresh-boundary evidence
 
+## Current 0.1.393 Hibr lifecycle and tall-surface evidence
+
+The exact TCC-built 0.1.393 source passes terminal conformance and the
+focused atomic pointer, wallpaper, and background-batch gates. The canonical
+four-output VKMS fixture now explicitly stages the Blit Hibr adapter path;
+the tall 240x135 fixture passes `KMS_FOUR_HIBR_TALL_PASS` with one primary and
+three joins. This closes the previously open tall-surface boundary in QEMU.
+
+The fix keeps API-launched Hibr sessions running after the short launcher
+process exits, continues bounded owner reassertion after the launcher PTY is
+closed, and exposes owner registration/discovery state in `hibr_attachment`.
+The adapter registration path is Blit-owned and token-scoped. Hibr source was
+not modified. Physical Hibr geometry, physical multi-monitor behavior,
+physical evdev behavior, and physical high-refresh acceptance remain open.
+
 The exact TCC-built 0.1.392 SDL renderer passes the focused pointer-plus-damage
 atomicity, wallpaper-pointer stress, wallpaper preservation, and batched
 full-screen background gates. These gates exercise the artifact shape reported

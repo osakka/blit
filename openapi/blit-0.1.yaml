@@ -692,6 +692,38 @@ paths:
           description: Terminal session released
         default:
           $ref: '#/components/responses/Problem'
+  /v1/terminal-sessions/{session_id}/hibr-owner:
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+    post:
+      tags: [terminals]
+      operationId: registerHibrOwner
+      summary: Register the Blit-owned Hibr process for geometry reassertion
+      description: >-
+        Internal adapter handshake. The Blit-launched Hibr adapter submits its
+        live PID and the per-session token supplied in its environment. Blit
+        validates the token and uses the registered process, plus its bounded
+        descendants, as the sole resize/signalling target.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HibrOwnerRegistration'
+      responses:
+        '202':
+          description: Hibr owner accepted for resize reassertion
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [state, detail]
+                properties:
+                  state: {type: string, const: registered}
+                  detail: {type: string}
+                additionalProperties: false
+        default:
+          $ref: '#/components/responses/Problem'
   /v1/surfaces/{surface_id}/cells:
     parameters:
       - $ref: '#/components/parameters/SurfaceId'
@@ -1514,12 +1546,22 @@ components:
       additionalProperties: false
     HibrAttachmentDiagnostics:
       type: object
-      required: [resume_requested, reassert_attempts, owner_matches, unresolved]
+      required: [resume_requested, reassert_attempts, owner_matches, unresolved,
+                 owner_registered, owner_pid]
       properties:
         resume_requested: {type: boolean}
         reassert_attempts: {type: integer, minimum: 0}
         owner_matches: {type: integer, minimum: 0}
         unresolved: {type: boolean}
+        owner_registered: {type: boolean}
+        owner_pid: {type: integer, minimum: 0}
+      additionalProperties: false
+    HibrOwnerRegistration:
+      type: object
+      required: [pid, token]
+      properties:
+        pid: {type: integer, minimum: 2}
+        token: {type: string, minLength: 1}
       additionalProperties: false
     TerminalCapabilities:
       type: object

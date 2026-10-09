@@ -104,14 +104,14 @@ case " $($b cat /proc/cmdline 2>/dev/null || true) " in
         $b mkdir -p /root /tmp/hibr-state /tmp/hibr-config /tmp/hibr-data /tmp/hibr-ctl-0
         $b ln -sf pts/ptmx /dev/ptmx
         $b wget -qO /tmp/hibr-primary.json \
-            --post-data="{\"command\":\"/blit-stage/hibr\",\"arguments\":[\"/blit-stage/blit-session.hibr\",\"--session\",\"blit\",\"--name\",\"$display1\"],\"environment\":{\"CP_THEME\":\"retro_car\",\"DT_CTL\":\"1\",\"DT_CTLPATH\":\"/tmp/hibr-ctl-0/blit.ctl\",\"DT_LOG\":\"/tmp/primary-hibr.log\"},\"surface_mode\":\"terminal\",\"display_id\":\"$display1\",\"surface\":{\"width\":$hibr_surface_width,\"height\":$hibr_surface_height}}" \
+            --post-data="{\"command\":\"/blit-stage/hibr\",\"arguments\":[\"/blit-stage/blit-session.hibr\",\"--session\",\"blit\",\"--name\",\"$display1\"],\"environment\":{\"BLIT_HIBR_ADAPTER\":\"/blit-stage/mods/console-blit.so\",\"CP_THEME\":\"retro_car\",\"DT_CTL\":\"1\",\"DT_CTLPATH\":\"/tmp/hibr-ctl-0/blit.ctl\",\"DT_LOG\":\"/tmp/primary-hibr.log\"},\"surface_mode\":\"terminal\",\"display_id\":\"$display1\",\"surface\":{\"width\":$hibr_surface_width,\"height\":$hibr_surface_height}}" \
             --header='Content-Type: application/json' \
             http://127.0.0.1:19191/v1/terminal-sessions || finish 1
         primary_script=/blit-stage/blit-session.hibr
         for index in 2 3 4; do
             display_id=$(echo "$display_ids" | $b sed -n "${index}p")
             $b wget -qO "/tmp/hibr-join-$index.json" \
-                --post-data="{\"command\":\"/blit-stage/hibr\",\"arguments\":[\"$primary_script\",\"--session\",\"blit\",\"--join\",\"--name\",\"$display_id\"],\"environment\":{\"DT_LOG\":\"/tmp/join-$index-hibr.log\"},\"surface_mode\":\"terminal\",\"display_id\":\"$display_id\",\"surface\":{\"width\":$hibr_surface_width,\"height\":$hibr_surface_height}}" \
+                --post-data="{\"command\":\"/blit-stage/hibr\",\"arguments\":[\"$primary_script\",\"--session\",\"blit\",\"--join\",\"--name\",\"$display_id\"],\"environment\":{\"BLIT_HIBR_ADAPTER\":\"/blit-stage/mods/console-blit.so\",\"DT_LOG\":\"/tmp/join-$index-hibr.log\"},\"surface_mode\":\"terminal\",\"display_id\":\"$display_id\",\"surface\":{\"width\":$hibr_surface_width,\"height\":$hibr_surface_height}}" \
                 --header='Content-Type: application/json' \
                 http://127.0.0.1:19191/v1/terminal-sessions || finish 1
         done
