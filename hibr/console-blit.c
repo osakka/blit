@@ -60,6 +60,8 @@ typedef struct {
 	int ws_fd;
 	int ws_subscribed;
 	int mouse_mode;
+	/* Buttons currently held, so drag mode knows when motion is a drag. */
+	unsigned mouse_buttons;
 	unsigned int image_id;
 	int image_valid;
 	int image_row, image_col, image_height, image_width;
@@ -611,8 +613,20 @@ static cb_pane *cb_set_pane(const char *name, int row, int col,
 
 static void cb_return(sh *s, const char *value)
 {
+	/* Return the value to the caller and to nowhere else.
+	 *
+	 * Hibr's native console prints an unbound return to the terminal,
+	 * which is right when the console IS the terminal. This adapter is a
+	 * display provider: its stdout is the session PTY, and Blit renders
+	 * that PTY into the very surface the adapter is drawing into over the
+	 * API. Printing here therefore types the return value onto the
+	 * desktop at the cursor and scrolls the screen -- `console flush`
+	 * returning 0 is the stray "0" that walks down the left edge, and a
+	 * run of queries is the column of characters that climbs it.
+	 *
+	 * The same reasoning is already recorded for stderr in cb_http; it
+	 * applies to stdout for the same reason. */
 	hibr_ret(s, value ? value : "");
-	if (!s->bind && value) printf("%s\n", value);
 }
 
 static int cb_colour_name(const char *text, unsigned *out)
@@ -705,10 +719,27 @@ static int cb_console(sh *s, int ac, char **av)
 		return HIBR_FAIL;
 	}
 	if (!strcmp(sub, "mouse")) {
-		int mode = ac > 2 && !strcmp(av[2], "click") ? 1 :
-			ac > 2 && !strcmp(av[2], "drag") ? 2 :
-			ac > 2 && !strcmp(av[2], "motion") ? 3 : 0;
-		cb_mouse(mode); return HIBR_OK;
+		/* Hibr's native console treats a bare `console mouse` as a query:
+		 * it returns the current mode and leaves it alone (console.c's
+		 * `if (!*m)` branch). Folding the no-argument case into the
+		 * ternary made the query mean "off", so anything that merely
+		 * asked what the mode was silently disabled the pointer -- and
+		 * returned nothing, so the caller read an empty value. */
+		static const char *names[] = { "off", "click", "drag", "motion" };
+		const char *requested = ac > 2 ? av[2] : "";
+		int mode;
+		if (!*requested) {
+			cb_return(s, names[cb.mouse_mode & 3]);
+			return HIBR_OK;
+		}
+		if (!strcmp(requested, "off")) mode = 0;
+		else if (!strcmp(requested, "click")) mode = 1;
+		else if (!strcmp(requested, "drag")) mode = 2;
+		else if (!strcmp(requested, "motion")) mode = 3;
+		else return HIBR_FAIL;
+		cb_mouse(mode);
+		CB_TRACE("console-blit: mouse mode %s(%d)", names[mode], mode);
+		return HIBR_OK;
 	}
 	if (!strcmp(sub, "pane")) {
 		if (ac > 2 && !strcmp(av[2], "clear")) { memset(cb_panes, 0, sizeof(cb_panes)); return HIBR_OK; }
@@ -910,7 +941,12 @@ static int cb_key(int ms, str *out)
 			int x = 0, y = 0, column = 0, row = 0;
 			int have_cell = cb_json_int(frame, "column", &column) &&
 				cb_json_int(frame, "row", &row);
-			if (cb.mouse_mode == 3 && cb_json_int(frame, "x", &x) &&
+			/* motion reports all movement; drag reports it only while
+			 * a button is held, which is what makes dragging work.
+			 * Gating on mode 3 alone left drag with no motion at all. */
+			if ((cb.mouse_mode == 3 ||
+			     (cb.mouse_mode == 2 && cb.mouse_buttons != 0)) &&
+			    cb_json_int(frame, "x", &x) &&
 			    cb_json_int(frame, "y", &y)) {
 				if (!have_cell) { column = x / 8 + 1; row = y / 8 + 1; }
 				s_cat(out, "mouse motion "); s_num(out, row);
@@ -922,11 +958,24 @@ static int cb_key(int ms, str *out)
 		if (strstr(frame, "\"kind\":\"pointer_button\"") != 0) {
 			int button = 0, pressed = 0, x = 0, y = 0;
 			int column = 0, row = 0;
-			const char *name = button == 1 ? "right" : button == 2 ? "middle" : "left";
-			if (cb.mouse_mode == 0 || !cb_json_int(frame, "button", &button) ||
-			    !cb_json_int(frame, "x", &x) || !cb_json_int(frame, "y", &y))
+			const char *name;
+			if (cb.mouse_mode == 0) {
+				CB_TRACE("console-blit: pointer_button dropped, "
+					"mouse reporting is off");
 				continue;
+			}
+			if (!cb_json_int(frame, "button", &button) ||
+			    !cb_json_int(frame, "x", &x) || !cb_json_int(frame, "y", &y)) {
+				CB_TRACE("console-blit: pointer_button missing fields");
+				continue;
+			}
+			CB_TRACE("console-blit: pointer_button accepted mode=%d",
+				cb.mouse_mode);
 			if (strstr(frame, "\"pressed\":true")) pressed = 1;
+			if (button >= 0 && button < 8) {
+				if (pressed) cb.mouse_buttons |= 1U << button;
+				else cb.mouse_buttons &= ~(1U << button);
+			}
 			if (!cb_json_int(frame, "column", &column) ||
 			    !cb_json_int(frame, "row", &row)) {
 				column = x / 8 + 1; row = y / 8 + 1;
@@ -938,6 +987,7 @@ static int cb_key(int ms, str *out)
 			return 1;
 		}
 		if (!strstr(frame, "\"kind\":\"key\"") || !cb_json_number(frame, "code", &code)) continue;
+		CB_TRACE("console-blit: key frame code=%llu", (unsigned long long)code);
 		shift = strstr(frame, "\"shift\":true") != 0;
 		ctrl = strstr(frame, "\"ctrl\":true") != 0;
 		alt = strstr(frame, "\"alt\":true") != 0;
@@ -946,7 +996,17 @@ static int cb_key(int ms, str *out)
 	}
 }
 
-static void cb_mouse(int mode) { cb.mouse_mode = mode; }
+static void cb_mouse(int mode)
+{
+	static const char *names[] = { "off", "click", "drag", "motion" };
+	CB_TRACE("console-blit: mouse hook mode=%s(%d) was=%d",
+		names[mode & 3], mode, cb.mouse_mode);
+	cb.mouse_mode = mode;
+	/* Held-button state is only meaningful while reporting is on. Clearing
+	 * it here stops a button held across a mode change from making the
+	 * next motion look like a drag. */
+	if (mode == 0) cb.mouse_buttons = 0;
+}
 static void cb_cellpx(int *w, int *h)
 {
 	if (w) *w = 8;

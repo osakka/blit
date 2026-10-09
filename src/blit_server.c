@@ -7739,6 +7739,16 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
         "\"graphics\":[\"kitty\",\"sixel\"]}",
         escaped_terminal_term, session->terminal_cell_width,
         session->terminal_cell_height);
+    /* Mouse reporting is a terminal mode the application turns on, and
+       every pointer report Blit sends is gated on it. Without it in the
+       response there is no way to tell "the client never enabled mouse
+       reporting" from "Blit is dropping the events", which are opposite
+       faults with the same symptom. */
+    used += (size_t)snprintf(
+        body + used, capacity - used,
+        ",\"mouse_reporting\":{\"mode\":%d,\"sgr\":%s}",
+        session->terminal_mouse_mode,
+        session->terminal_mouse_sgr ? "true" : "false");
     used += (size_t)snprintf(body + used, capacity - used,
                              ",\"graphics\":[");
     {
