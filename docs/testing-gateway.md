@@ -120,6 +120,27 @@ requires the package name and SHA-256 to match the checked-in
 `releases/<version>.yaml` manifest, then checks package metadata, update
 readiness, and the final running version.
 
+### Bootstrap for legacy staging failures
+
+A host that logs `sha256sum: /tmp/blit-update-...: No such file or directory`
+is running a pre-shared-staging updater. Its gateway and root helper have
+different private `/tmp` namespaces, so the network updater cannot install the
+package that would repair the staging path. This is a bootstrap boundary, not
+an update-token failure. Install the package once from the host console (or
+another already-authorized root channel), then restart the service:
+
+```sh
+sudo dpkg --install blit_0.1.389-1_amd64.deb
+sudo systemctl daemon-reload
+sudo systemctl restart blit.service
+```
+
+Verify `/v1/version` before returning to `tools/deploy/update-live.sh`. Do not
+retry the old network upload repeatedly; it cannot cross the private-`/tmp`
+boundary. The new package stages uploads in `/var/lib/blit/updates`, which is
+shared with the root helper and remains protected by the configured update
+token.
+
 The idle-timeout gate holds a valid upload open without sending its body and
 verifies that the gateway transitions to `update upload idle timeout` instead
 of retaining a dead staged transfer indefinitely:
