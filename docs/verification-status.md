@@ -211,6 +211,17 @@ open and are not inferred from QEMU or synthetic API input. Visual Hibr
 geometry/fidelity remains an open acceptance boundary pending a deliberate
 comparison against the expected desktop image.
 
+A subsequent read-only API framebuffer capture from that same live 0.1.401
+host made the visual boundary concrete. The 1920x2160 image is mostly black
+with sparse colored dot glyphs; its matching `surface-4` snapshot is 240x135,
+revision `1340583`, with 1,114 non-space cells and zero graphics images. The
+capture hash is `5a39acb2fa382e8d52bf843f28a7077ba7d86a49d23793ce3280feca637887d7`
+and it was saved outside the repository at
+`/tmp/blit-live-capture-20261009.bmp`. This proves the API surface and
+framebuffer agree for that scene; it does not prove that an expected Hibr
+wallpaper was delivered to Blit, and it is not evidence for the undeployed
+0.1.405 candidate.
+
 A later read-only runtime sample on the same unchanged 0.1.401 host reports
 `present_calls=12022`, `surface_commits=11964`, `frame_rate_hz=7.190`,
 `missed_deadlines=0`, one 60 Hz output, one session, two input routes, and
