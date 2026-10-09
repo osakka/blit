@@ -21,9 +21,9 @@ package_artifact_acceptance: pass
 qemu_input_acceptance: pending
 qemu_four_output_hibr_acceptance: pending
 qemu_high_refresh_acceptance: open
-live_deployment_acceptance: pending
-live_hibr_geometry_acceptance: pending
-live_hibr_graphics_acceptance: pending
+live_deployment_acceptance: pass
+live_hibr_geometry_acceptance: pass
+live_hibr_graphics_acceptance: pass
 live_free_pane_input_fallback_acceptance: pending
 live_pointer_artifact_acceptance: pending
 physical_evdev_acceptance: open
