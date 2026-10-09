@@ -1,7 +1,7 @@
 release: 0.1.404
 package: blit_0.1.404-1_amd64.deb
 package_sha256: 507c73cea7ab67f1e46cb4d49cf77d9831883beb4b81e01e0b82fd22f6908e46
-source_commit: 37190cb
+source_commit: 7c79375
 server_binary_sha256: 7f44f7aa883fc99a2f987d92473105b0ae62db960b5ac67286aba043df291187
 update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
 hibr_adapter_sha256: c1ac8a2cc2898b27411f79a665ce3c0c3156b227b9a2c4d77347c072b6a70db9
