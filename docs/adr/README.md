@@ -74,6 +74,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0050 — Treat Hibr joins as failing attachments when their client exits](0050-hibr-join-attachment-lifecycle.md)
 - [0051 — Fail closed when a Hibr desktop owner is not registered](0051-fail-closed-hibr-owner-handshake.md)
 - [0052 — Expose surface content diagnostic counters](0052-surface-content-diagnostic-counters.md)
+- [0053 — Expose surface-producer cadence diagnostics](0053-surface-producer-cadence-diagnostics.md)
 
 ## Adding an ADR
 

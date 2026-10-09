@@ -132,7 +132,7 @@ tools/build-tcc.sh build/blit/blit-server server
 ruby tools/tests/hibr_singleton_gate.rb
 tools/tests/api_schema_gate.rb
 tools/tests/restart_gate.sh
-tools/tests/package_artifact_gate.sh /tmp/blit-release-artifacts-0.1.404/blit_0.1.404-1_amd64.deb
+tools/tests/package_artifact_gate.sh /tmp/blit-release-artifacts-0.1.405/blit_0.1.405-1_amd64.deb
 ```
 
 The conformance runner deliberately targets a caller-owned server so the same

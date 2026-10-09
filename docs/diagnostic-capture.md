@@ -86,12 +86,14 @@ the terminal surface. Keep screenshots disabled for timing/input captures:
 the SDL screenshot readback is a heavyweight operation and can perturb the
 single-threaded render loop. It does not start or modify Hibr.
 
-The runtime performance object also reports `surface_commits` and
-`frame_commits`. These are the producer-side boundaries for a terminal
-capture: a low `present_calls` value with a similarly low commit value means
-the producer committed slowly; a high commit count with a low present count
-points at Blit scheduling or presentation. Terminal byte volume alone is not
-a frame-rate measurement.
+The runtime performance object also reports `surface_commits`,
+`surface_commit_hz`, `surface_commit_age_ms`, and `frame_commits`. These are
+the producer-side boundaries for a terminal capture: a low
+`surface_commit_hz` with a healthy output `frame_rate_hz` means the producer
+committed slowly; a high commit rate with a low presentation rate points at
+Blit scheduling or presentation. A zero cadence after the bounded age means
+the producer is idle or stale, not that the display stopped refreshing.
+Terminal byte volume alone is not a frame-rate measurement.
 
 The pointer capture tolerates a host with no active Hibr session: the session
 JSON is recorded as `available:false` and the input/render capture continues.
@@ -404,8 +406,9 @@ Interpret the evidence in this order:
 1. `last_render_ms`, `max_render_ms`, `missed_deadlines`, and `loop_gap` decide
    whether the renderer was late; `present_calls` is damage-driven and is not
    itself a vblank rate.
-2. `terminal_bytes` and `terminal_reads` prove producer activity. `surface_commits`
-   and `frame_commits` apply only to their corresponding API producers.
+2. `terminal_bytes` and `terminal_reads` prove producer activity.
+   `surface_commit_hz`, its window/age/gap fields, `surface_commits`, and
+   `frame_commits` apply only to their corresponding producers.
 3. `graphics_texture_uploads`, `pixel_frames_accepted`, and
    `pixel_frame_errors` distinguish a Hibr/image transport problem from an SDL
    presentation problem.

@@ -3,6 +3,32 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 0.1.405 current candidate evidence
+
+The TCC-built 0.1.405 candidate adds bounded producer-side surface cadence
+diagnostics to `/v1/diagnostics/runtime`: `surface_commit_hz`, its settled
+window counters, age, and inter-commit gaps. This is intentionally separate
+from output presentation cadence, so a slow or idle Hibr producer cannot be
+misreported as an SDL/KMS refresh failure. An explicit eight-update API
+workload measured `surface_commit_hz=7.998` with approximately 158 ms gaps.
+
+The corrected frame-rate gate now discards the cold-start presentation window
+and requires a settled window. The rebuilt 0.1.405 server measured `59.996 Hz`
+at a 60 Hz SDL dummy target with zero missed deadlines. The API schema (33
+paths), full VT/UTF-8/Kitty/Sixel/Hibr terminal conformance, singleton,
+restart, and 20-second four-session soak gates passed; the soak remained below
+the 131072 KiB RSS ceiling.
+
+Fresh QEMU/VKMS images staged with the exact Hibr 0.99.100 checkout passed the
+four-output Hibr window-content gate on all four 1024x768@240 Hz outputs and
+the two-output layout/pane/primary-restart/join-reconnect lifecycle matrix.
+The exact server SHA-256 is
+`3b45d994ac80ae65588e4981546c31ebe6b42a8f664a42c3176a750677e14d46`.
+Physical deployment remains deliberately unperformed; the supplied host is
+still 0.1.401, one 60 Hz output, and its read-only evidence shows 60 Hz
+presentation with zero missed deadlines but roughly 7 Hz Hibr surface commits
+and zero physical evdev mouse events.
+
 ## 0.1.404 current candidate evidence
 
 The TCC-built 0.1.404 candidate adds compact `codepoint_cells` and

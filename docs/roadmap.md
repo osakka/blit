@@ -3,14 +3,15 @@
 The roadmap is ordered by dependency. A later milestone must not become a
 second, parallel implementation of an earlier one.
 
-## Current position — release 0.1.404
+## Current position — release 0.1.405
 
 The current candidate adds surface-content counters and separates the
 four-output Hibr visual gate into two explicit cases: stock Hibr content on
 the primary with intentionally blank auxiliary joins, and a deterministic
 window workload that populates all four outputs. The exact TCC build, package,
-schema, terminal, input, lifecycle, four-output, Hibr, restart, and soak
-evidence is recorded in [`releases/0.1.404.yaml`](../releases/0.1.404.yaml)
+schema, terminal, input, lifecycle, four-output, Hibr, restart, producer
+cadence, and soak
+evidence is recorded in [`releases/0.1.405.yaml`](../releases/0.1.405.yaml)
 and [`verification-status.md`](verification-status.md).
 
 This is not a physical-host completion claim. The live host remains on 0.1.401

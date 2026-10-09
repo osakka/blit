@@ -545,6 +545,15 @@ typedef struct {
     unsigned long long diagnostic_loop_iterations;
     unsigned long long diagnostic_terminal_reads;
     unsigned long long diagnostic_surface_commits;
+    uint64_t diagnostic_surface_rate_started_us;
+    uint64_t diagnostic_last_surface_commit_us;
+    unsigned long long diagnostic_surface_rate_commits;
+    unsigned long long diagnostic_surface_rate_last_commits;
+    double diagnostic_surface_commit_hz;
+    unsigned long long diagnostic_surface_commit_window_ms;
+    unsigned long long diagnostic_surface_commit_window_sequence;
+    double diagnostic_last_surface_commit_gap_ms;
+    double diagnostic_max_surface_commit_gap_ms;
     unsigned long long diagnostic_frame_commits;
     unsigned long long diagnostic_present_calls;
     uint64_t diagnostic_last_loop_us;
@@ -1684,6 +1693,40 @@ static void record_input_dispatch(BlitRuntime *runtime, uint64_t started_us)
         runtime->diagnostic_max_input_dispatch_ms = elapsed;
 }
 
+static void record_surface_commit(BlitRuntime *runtime)
+{
+    uint64_t now;
+
+    if (runtime == NULL)
+        return;
+    now = monotonic_us();
+    if (runtime->diagnostic_last_surface_commit_us > 0 &&
+        now >= runtime->diagnostic_last_surface_commit_us) {
+        double gap = (double)(now -
+            runtime->diagnostic_last_surface_commit_us) / 1000.0;
+        runtime->diagnostic_last_surface_commit_gap_ms = gap;
+        if (gap > runtime->diagnostic_max_surface_commit_gap_ms)
+            runtime->diagnostic_max_surface_commit_gap_ms = gap;
+    }
+    runtime->diagnostic_last_surface_commit_us = now;
+    if (runtime->diagnostic_surface_rate_started_us == 0)
+        runtime->diagnostic_surface_rate_started_us = now;
+    ++runtime->diagnostic_surface_rate_commits;
+    if (now >= runtime->diagnostic_surface_rate_started_us &&
+        now - runtime->diagnostic_surface_rate_started_us >= 500000ULL) {
+        uint64_t elapsed = now - runtime->diagnostic_surface_rate_started_us;
+        runtime->diagnostic_surface_commit_hz =
+            (double)runtime->diagnostic_surface_rate_commits * 1000000.0 /
+            (double)elapsed;
+        runtime->diagnostic_surface_commit_window_ms = elapsed / 1000ULL;
+        runtime->diagnostic_surface_rate_last_commits =
+            runtime->diagnostic_surface_rate_commits;
+        ++runtime->diagnostic_surface_commit_window_sequence;
+        runtime->diagnostic_surface_rate_started_us = now;
+        runtime->diagnostic_surface_rate_commits = 0;
+    }
+}
+
 static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
                                      size_t capacity)
 {
@@ -1696,7 +1739,9 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
     size_t mouse_used = 0;
     uint64_t now = monotonic_us();
     double frame_rate_hz = runtime->diagnostic_frame_rate_hz;
+    double surface_commit_hz = runtime->diagnostic_surface_commit_hz;
     unsigned long long frame_rate_age_ms = 0;
+    unsigned long long surface_commit_age_ms = 0;
 
     if (runtime->diagnostic_frame_rate_last_us > 0 &&
         now >= runtime->diagnostic_frame_rate_last_us)
@@ -1705,6 +1750,13 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
     if (runtime->diagnostic_frame_rate_last_us == 0 ||
         frame_rate_age_ms > 2000ULL)
         frame_rate_hz = 0.0;
+    if (runtime->diagnostic_last_surface_commit_us > 0 &&
+        now >= runtime->diagnostic_last_surface_commit_us)
+        surface_commit_age_ms = (now -
+            runtime->diagnostic_last_surface_commit_us) / 1000ULL;
+    if (runtime->diagnostic_last_surface_commit_us == 0 ||
+        surface_commit_age_ms > 2000ULL)
+        surface_commit_hz = 0.0;
 
     mouse_used += (size_t)snprintf(mouse_devices + mouse_used,
                                    sizeof(mouse_devices) - mouse_used, "[");
@@ -1765,6 +1817,13 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"frame_rate_frames\":%llu,\"frame_rate_window_ms\":%llu,"
         "\"frame_rate_age_ms\":%llu,\"loop_iterations\":%llu,"
         "\"terminal_reads\":%llu,\"surface_commits\":%llu,"
+        "\"surface_commit_hz\":%.3f,"
+        "\"surface_commit_frames\":%llu,"
+        "\"surface_commit_window_ms\":%llu,"
+        "\"surface_commit_window_sequence\":%llu,"
+        "\"surface_commit_age_ms\":%llu,"
+        "\"last_surface_commit_gap_ms\":%.3f,"
+        "\"max_surface_commit_gap_ms\":%.3f,"
         "\"frame_commits\":%llu,\"present_calls\":%llu,"
         "\"last_loop_gap_ms\":%.3f,\"max_loop_gap_ms\":%.3f,"
         "\"loop_gap_window_ms\":%llu,"
@@ -1832,6 +1891,13 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         runtime->diagnostic_loop_iterations,
         runtime->diagnostic_terminal_reads,
         runtime->diagnostic_surface_commits,
+        surface_commit_hz,
+        runtime->diagnostic_surface_rate_last_commits,
+        runtime->diagnostic_surface_commit_window_ms,
+        runtime->diagnostic_surface_commit_window_sequence,
+        surface_commit_age_ms,
+        runtime->diagnostic_last_surface_commit_gap_ms,
+        runtime->diagnostic_max_surface_commit_gap_ms,
         runtime->diagnostic_frame_commits,
         runtime->diagnostic_present_calls,
         runtime->diagnostic_last_loop_gap_ms,
@@ -9552,6 +9618,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
                external terminal cannot evict input and render evidence. */
             if (!presentation_deferred) {
                 ++runtime->diagnostic_surface_commits;
+                record_surface_commit(runtime);
                 diagnostic_trace(runtime, "surface_update", detail);
             }
         }

@@ -353,7 +353,8 @@ evdev pointers, and the input trace identifies the source and dispatch path.
 
 Use `GET /v1/diagnostics` for current health/resource state and
 `GET /v1/diagnostics/runtime` for counters. The runtime response includes
-present calls, measured frame/render intervals, missed deadlines, input
+present calls, measured frame/render intervals, surface-producer cadence,
+missed deadlines, input
 dispatch counters, terminal bytes, surface/frame commits, queue pressure, and
 a bounded event log. `GET /v1/diagnostics/trace?limit=32` provides correlated
 input, surface, and render-path events.
@@ -371,7 +372,7 @@ counters, surface snapshots, and trace events before diagnosing a boundary.
 
 For a performance report, capture `/v1/version`, `/v1/displays`, and
 `/v1/diagnostics/runtime` at the start and end of the same bounded workload.
-Compare `present_calls`, frame/render intervals, missed deadlines, queue
+Compare `present_calls`, `frame_rate_hz`, `surface_commit_hz`, frame/render intervals, missed deadlines, queue
 pressure, and input dispatch counters. Do not report a frame rate from a
 screenshot timestamp or HTTP request latency.
 
