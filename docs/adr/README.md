@@ -4,8 +4,15 @@ ADRs capture decisions that are expensive to reverse or affect multiple
 subsystems. Each record states context, options, the decision, consequences,
 and migration impact. The filename is the canonical link. A few historical
 records share a numeric heading because they were developed on parallel
-branches; they remain separate decisions and are all indexed below. New ADRs
-must use a unique filename and number.
+branches; they remain separate decisions and are all indexed below. They are
+not missing records and must not be silently merged. New ADRs must use a
+unique filename and number greater than 0052.
+
+The index is a navigation aid, not a second decision source. The record itself
+is authoritative for its status and consequences. An implementation may cite
+an existing ADR instead of adding another record when it preserves that
+decision; a changed public contract, ownership boundary, renderer boundary,
+security policy, or compatibility rule requires a new ADR.
 
 ## Accepted decisions
 
@@ -74,4 +81,7 @@ Use [the template](TEMPLATE.md). Add the record to this index in the same
 commit as the decision. An implementation change that alters the public API,
 terminal semantics, rendering boundary, input ownership, display topology,
 security model, or dependency/toolchain policy requires an ADR or an explicit
-reference to an existing one.
+reference to an existing one. Before committing, check that the filename is
+unique, the numeric prefix is unused, the record names its verification gate,
+and the record is linked from this index. Run `git diff --check` and the
+documentation/package gates before pushing.

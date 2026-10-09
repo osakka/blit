@@ -3,24 +3,28 @@
 The roadmap is ordered by dependency. A later milestone must not become a
 second, parallel implementation of an earlier one.
 
-## Current position — release 0.1.401
+## Current position — release 0.1.404
 
-The current release is a contract-correction and evidence release. The
-versioned terminal-input operation is now unambiguously published at
-`POST /v1/terminal-sessions/{session_id}/input`; the parent session resource
-contains lifecycle operations only. The OpenAPI schema gate, TCC build,
-terminal conformance suite, font/scale/glyph gates, resize and soak gates,
-package gate, QEMU input/four-output/Hibr lifecycle gates, and live API
-deployment verification pass for 0.1.401. The exact package and source hashes,
-commands, and limitations are recorded in
-[`releases/0.1.401.yaml`](../releases/0.1.401.yaml) and
-[`verification-status.md`](verification-status.md).
+The current candidate adds surface-content counters and separates the
+four-output Hibr visual gate into two explicit cases: stock Hibr content on
+the primary with intentionally blank auxiliary joins, and a deterministic
+window workload that populates all four outputs. The exact TCC build, package,
+schema, terminal, input, lifecycle, four-output, Hibr, restart, and soak
+evidence is recorded in [`releases/0.1.404.yaml`](../releases/0.1.404.yaml)
+and [`verification-status.md`](verification-status.md).
 
-This is not a physical-host completion claim. The authorized live host
-currently exposes one output. Physical multi-monitor geometry, physical evdev
-button tracing, physical 120/240 Hz scanout, and full live Hibr geometry are
-still open. QEMU/VKMS remains the repeatable multi-output acceptance oracle;
-the physical host remains the final host-specific evidence boundary.
+This is not a physical-host completion claim. The live host remains on 0.1.401
+and currently exposes one output. Physical multi-monitor geometry, physical
+evdev button tracing, physical 120/240 Hz scanout, and full live Hibr geometry
+are still open. QEMU/VKMS remains the repeatable multi-output acceptance
+oracle; the physical host remains the final host-specific evidence boundary.
+
+The next implementation boundary is measured cadence and physical experience:
+separate producer/update rate from presentation/scanout rate, instrument any
+slow Hibr producer path, and only then make a hardware claim. The current
+local dummy-backend frame gate measures about 54 Hz with zero missed deadlines
+under its 60 Hz workload; that is useful evidence, but it is not a 60 Hz
+physical scanout claim and is intentionally not hidden by changing the gate.
 
 The next engineering priority is therefore not another launcher or parallel
 renderer. It is closing those named hardware evidence gaps while preserving

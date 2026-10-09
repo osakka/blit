@@ -8,11 +8,6 @@ and zero or more Hibr `desktop --join` attachments placed by Blit's logical
 topology API. Blit does not patch Hibr, launch competing desktop owners, or
 require an X11/Wayland compositor.
 
-Blit is an API-driven, text-first display server for Linux. It owns terminal
-surfaces, physical outputs, input routes, effects, diagnostics, and bounded
-graphic overlays behind one versioned OpenAPI contract. Its display path is
-SDL3/KMS-oriented and does not require X11 or Wayland.
-
 The project is written and built with TCC at the Blit boundary. Hibr is an
 independent runtime dependency: Blit launches and observes the installed Hibr
 desktop/session commands, but never edits the Hibr source tree.
@@ -137,7 +132,7 @@ tools/build-tcc.sh build/blit/blit-server server
 ruby tools/tests/hibr_singleton_gate.rb
 tools/tests/api_schema_gate.rb
 tools/tests/restart_gate.sh
-tools/tests/package_artifact_gate.sh /tmp/blit-release-artifacts/blit_0.1.401-1_amd64.deb
+tools/tests/package_artifact_gate.sh /tmp/blit-release-artifacts-0.1.404/blit_0.1.404-1_amd64.deb
 ```
 
 The conformance runner deliberately targets a caller-owned server so the same

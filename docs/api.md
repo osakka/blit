@@ -164,6 +164,68 @@ schema-defined precondition, and supply an `Idempotency-Key` for a retryable
 operation. A revision conflict means “resynchronize”: fetch authoritative
 state again, reconcile intent, and retry only if the operation is still valid.
 
+## Operator runbook: prove the server before touching a desktop
+
+Use this sequence when a physical screen is black, stale, or visually
+ambiguous. It is deliberately read-only and uses the API as the source of
+truth; do not start a second Blit process or a second Hibr desktop while
+diagnosing the first one.
+
+```sh
+set -eu
+base=${BLIT_URL:-http://127.0.0.1:8080}
+auth=()
+if [ -n "${BLIT_AUTH_TOKEN:-}" ]; then
+  auth=(--header "Authorization: Bearer $BLIT_AUTH_TOKEN")
+fi
+
+curl --fail --silent --show-error --connect-timeout 2 "${auth[@]}" \
+  "$base/v1/version"; printf '\n'
+curl --fail --silent --show-error --connect-timeout 2 "${auth[@]}" \
+  "$base/v1/server" | jq '{state,backend,display_count,session_count}'; printf '\n'
+curl --fail --silent --show-error --connect-timeout 2 "${auth[@]}" \
+  "$base/v1/displays" | jq '.displays[] | {id,name,state,width,height,refresh_hz,presenting}'; printf '\n'
+curl --fail --silent --show-error --connect-timeout 2 "${auth[@]}" \
+  "$base/v1/diagnostics/runtime" | jq '{performance,input,frames,events}'; printf '\n'
+```
+
+Interpret the result in this order:
+
+1. `/version` proves which binary and API contract answered.
+2. `/server` proves whether the service is ready and how many resources it
+   believes exist.
+3. `/displays` proves discovered outputs and their active modes; it does not
+   prove that a desktop has supplied content.
+4. `/diagnostics/runtime` separates presentation cadence, producer commits,
+   missed deadlines, input dispatch, and recent bounded events.
+5. `/diagnostics/screenshots/{display_id}` proves pixels for one output; pair
+   it with the surface summary and trace rather than treating it as a full
+   diagnosis.
+
+If a desktop is already running, inspect its existing session and Hibr-owner
+state before creating anything. A healthy topology has one primary Hibr owner;
+an auxiliary `desktop --join` is an attachment to that owner, not another
+desktop. If the API reports a stale or failed attachment, repair the resource
+through the documented lifecycle and verify that the session/surface/route
+counts return to the expected values. Never use a launcher as a second source
+of lifecycle state.
+
+For a support bundle, save the JSON responses and a screenshot outside the
+repository, redact credentials and PTY contents, and record the exact
+`server_version`, host, display mode, workload duration, and timestamp. The
+repository accepts the command and interpretation; it does not accept the
+capture itself.
+
+## API guarantees and non-guarantees
+
+The API guarantees typed resource state, opaque IDs, revisions, bounded
+diagnostics, and explicit lifecycle responses. It does not guarantee that a
+successful mutation has already reached physical scanout, that an unchanged
+scene will be re-presented continuously, or that a virtual/QEMU result proves
+physical input or monitor behavior. Use runtime counters and a screenshot to
+distinguish those cases. This distinction is essential when investigating a
+slow Hibr producer, a display-mode mismatch, or a damaged scene.
+
 ## Minimal session transaction
 
 The following is a complete text-session shape. The exact required and
