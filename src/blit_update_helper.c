@@ -208,6 +208,20 @@ int main(void)
             write(client_fd, "OK\n", 3);
         close(client_fd);
         if (updated) {
+            char restart_detail[COMMAND_DETAIL_CAPACITY];
+            /* The package may have changed the service unit itself. Reload
+               the manager and perform a real unit restart so User=, groups,
+               limits, and sandbox changes take effect; an in-process exec of
+               blit-server cannot change those credentials. */
+            restart_detail[0] = '\0';
+            (void)run_command("/usr/bin/systemctl",
+                (char *const[]){(char *)"systemctl", (char *)"daemon-reload",
+                                 NULL}, restart_detail,
+                sizeof(restart_detail));
+            (void)run_command("/usr/bin/systemctl",
+                (char *const[]){(char *)"systemctl", (char *)"restart",
+                                 (char *)"blit.service", NULL}, restart_detail,
+                sizeof(restart_detail));
             close(server_fd);
             unlink(UPDATE_SOCKET);
             return 0;
