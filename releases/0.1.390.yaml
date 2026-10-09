@@ -9,6 +9,9 @@ hibr_version: 0.99.100
 tcc_build_acceptance: pass
 terminal_conformance: pass
 live_input_diagnostics_wheel_trace: pass
+live_active_frame_rate_acceptance: pass
+live_screenshot_capture: pass
+qemu_four_output_pixel_acceptance: pass
 qemu_four_output_hibr_acceptance: pass
 qemu_tall_hibr_boundary_diagnostic: open
 live_hibr_geometry_acceptance: pending
