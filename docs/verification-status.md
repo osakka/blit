@@ -3,6 +3,22 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## Current 0.1.387 terminal-parity and high-refresh boundary
+
+The exact TCC-built 0.1.387 binary passes the complete PTY terminal
+conformance suite, including Hibr-parity `DECRQM` reports for alternate-screen
+modes `47/1047/1049` and legacy X10 mouse mode `9`. The corresponding package
+passed the exact-artifact gate; Hibr source was not modified.
+
+The exact 0.1.387 direct-KMS QEMU rerun selects two 240 Hz VKMS outputs and a
+4.166 ms refresh-aware deadline, and passes `REFRESH_SCHEDULER_240_PASS`. Its
+pixel producer accepts all 240 frames with zero frame errors. The guest
+completes only 81 visible page flips and records 10 missed deadlines under
+QEMU TCG; `/dev/kvm` is absent on this test host. Therefore
+`qemu_high_refresh_acceptance` and physical high-refresh acceptance remain
+open. This result is retained as a virtual-driver/VM-capability boundary, not
+converted into a product pass and not addressed with asynchronous tearing.
+
 ## Current 0.1.366 renderer-isolation result
 
 The live API screenshot from 0.1.365 showed the wallpaper/menu correctly but

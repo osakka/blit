@@ -25,6 +25,9 @@ qemu_input_acceptance: pass
 qemu_four_output_hibr_acceptance: pass
 qemu_high_refresh_scheduler_acceptance: pass
 qemu_high_refresh_acceptance: open
+qemu_high_refresh_observed_visible_presents: 81
+qemu_high_refresh_observed_missed_deadlines: 10
+qemu_high_refresh_environment: qemu-tcg-vkms-no-kvm
 qemu_pixel_stream_240_acceptance: open
 live_deployment_acceptance: pending
 live_hibr_geometry_acceptance: pending
