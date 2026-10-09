@@ -1,7 +1,7 @@
 release: 0.1.389
 package: blit_0.1.389-1_amd64.deb
-package_sha256: 39ba4e7cff4e95ffd2fc969a1741b4784e9f6403cd24d38c057dce71081a2ca0
-source_commit: e7a3f02042c12f63c2ccbc41fc74a33500dd427a
+package_sha256: 030ab6fcc7b3b04511ad5108f1b2e2ee6f0f7c017480b6a04352f13e4fb51750
+source_commit: 5bf64e2
 server_binary_sha256: b40b5545616e42f7bc3c32e96e2d7d70bd362077f118319a64a8e229a36cafcb
 hibr_adapter_sha256: 71b02a70629a5e9a49809f4e602bcf86dbb95bb809dde74f973672f1217cc02f
 hibr_root: /home/osakka/hibr
