@@ -12208,11 +12208,14 @@ static void update_pointer_position(BlitRuntime *runtime,
             runtime->pointer_x, runtime->pointer_y, &target_col, &target_row);
         if (routed != NULL) target = routed;
         {
-            char detail[160];
-            snprintf(detail, sizeof(detail), "x=%.1f y=%.1f output=%d device=%s",
+            char detail[256];
+            snprintf(detail, sizeof(detail),
+                     "x=%.1f y=%.1f output=%d device=%s target_session=%llu routing=%s",
                      runtime->pointer_x, runtime->pointer_y,
                      runtime->pointer_output,
-                     device_id != NULL ? device_id : "evdev-pointer");
+                     device_id != NULL ? device_id : "evdev-pointer",
+                     target != NULL ? target->id : 0ULL,
+                     routed != NULL ? "explicit" : "pane-hit-test");
             diagnostic_trace(runtime, "pointer_motion", detail);
         }
         snprintf(input_event, sizeof(input_event),
@@ -12286,12 +12289,22 @@ static void broadcast_evdev_pointer(BlitRuntime *runtime, const char *kind,
 static void dispatch_pointer_button(BlitRuntime *runtime, int button,
                                     int pressed, const char *device_id)
 {
-    char detail[160];
+    char detail[256];
+    int column = 0;
+    int row = 0;
+    BlitSession *target = mouse_target(runtime, runtime->pointer_output,
+                                       runtime->pointer_x, runtime->pointer_y,
+                                       &column, &row);
+    BlitSession *routed = input_route_target(runtime, "evdev-pointer");
+    if (routed != NULL)
+        target = routed;
     if (button < 0 || button > 2)
         return;
     snprintf(detail, sizeof(detail),
-             "button=%d pressed=%d x=%.1f y=%.1f",
-             button, pressed, runtime->pointer_x, runtime->pointer_y);
+             "button=%d pressed=%d x=%.1f y=%.1f target_session=%llu routing=%s",
+             button, pressed, runtime->pointer_x, runtime->pointer_y,
+             target != NULL ? target->id : 0ULL,
+             routed != NULL ? "explicit" : "pane-hit-test");
     diagnostic_trace(runtime, "pointer_button", detail);
     if (pressed)
         runtime->mouse_buttons |= 1U << button;
