@@ -26,7 +26,9 @@ live_update_transaction_acceptance: pass
 live_update_connection_completion: pass
 live_version_endpoint: pass
 live_post_update_service_health: pass
-live_hibr_image_acceptance: open
+live_hibr_image_control_acceptance: pass
+live_hibr_desktop_graphics_acceptance: open
+live_hibr_image_control_snapshot: diagnostics/live-0.1.378/probe-snapshot-020601/display-1.bmp
 live_physical_evdev_acceptance: open
 physical_multi_monitor_acceptance: open
 physical_high_refresh_acceptance: open
