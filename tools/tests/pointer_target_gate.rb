@@ -91,9 +91,11 @@ begin
   expected_fallback = fallback_details.select do |detail|
     detail.include?("target_session=#{fallback_id}")
   end
-  raise "free pane swallowed display fallback: #{fallback_details.inspect}" if
+raise "free pane swallowed display fallback: #{fallback_details.inspect}" if
     expected_fallback.empty?
-  puts "POINTER_FREE_PANE_FALLBACK_PASS target_session=#{fallback_id}"
+raise "display fallback route was not identified: #{expected_fallback.inspect}" unless
+  expected_fallback.any? { |detail| detail.include?('routing=display-fallback') }
+puts "POINTER_FREE_PANE_FALLBACK_PASS target_session=#{fallback_id}"
 ensure
   begin
     request(base, :delete, "/v1/terminal-sessions/#{id}") if id
