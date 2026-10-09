@@ -1,6 +1,6 @@
 release: 0.1.387
 package: blit_0.1.387-1_amd64.deb
-package_sha256: 4ccdff509cc2af4b8476ec76e335f6ab91963c0f3cfdd17cc80b084530d7d73d
+package_sha256: e5bb73574adf99d42496f3721f067ffaf0c03bbef54ed40201ff9e24467811a6
 source_commit: a95c6fadfccb54f685f1ca2019d23d87b5118a9b
 server_binary_sha256: b6761d55e38a361ea8eab68f2b2888a2ac493e3643c98b508e2c0e267ab0af25
 hibr_adapter_sha256: 71b02a70629a5e9a49809f4e602bcf86dbb95bb809dde74f973672f1217cc02f
@@ -8,6 +8,7 @@ hibr_root: /home/osakka/hibr
 hibr_version: 0.99.100
 tcc_build_acceptance: pass
 terminal_conformance: pass
+hibr_differential_terminal_vectors: pass
 hibr_decrqm_mode_parity: pass
 hibr_x10_mouse_mode_parity: pass
 resume_attachment_guard_acceptance: pass
