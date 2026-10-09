@@ -15,6 +15,13 @@ sessions remain unaffected. The request argument buffer is cleared for every
 request; this prevents a prior `--join` argument from leaking into a later
 shorter request. Hibr source was not modified.
 
+The exact 0.1.398 binary was also staged with the unchanged Hibr 0.99.100
+tree into the four-output VKMS fixture. It reached four displays, one primary
+Hibr desktop plus three `--join` clients, four running sessions and four
+surfaces, and emitted `KMS_FOUR_HIBR_PASS`. The QEMU fixture ran at its
+configured 240 Hz mode but reported TCG scheduling misses; this validates
+topology and ownership, not physical 240 Hz performance.
+
 ## Current 0.1.396 live glyph geometry acceptance
 
 The live host accepted 0.1.396 and reported SDL3/OpenGL ES2 with
