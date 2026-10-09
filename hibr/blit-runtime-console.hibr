@@ -1,14 +1,12 @@
 # Production Hibr startup file for Blit-owned desktop children.
 #
 # Hibr reads HIBR_RC in interactive child shells.  The QEMU fixtures provide
-# their own fixture-specific RC; this file is the installed equivalent and
-# deliberately loads only Blit's adapter plus Hibr's native support modules.
+# their own fixture-specific RC; this file is the installed equivalent.
+# The parent Blit entrypoint already loads Hibr's native support modules, so
+# this child RC must load only the Blit adapter and must not duplicate them.
 # It does not modify Hibr or replace Hibr's desktop/session files.
 
 adapter=${BLIT_HIBR_ADAPTER:-/usr/lib/blit/hibr/console-blit.so}
 moddir=${BLIT_HIBR_MODPATH:-/usr/lib/hibr}
 
 mod load "$adapter" || exit 1
-mod load "$moddir/pty.so" || mod load pty || exit 1
-mod load "$moddir/term.so" || mod load term || exit 1
-mod load "$moddir/hold.so" || mod load hold || exit 1

@@ -3,7 +3,7 @@
 The roadmap is ordered by dependency. A later milestone must not become a
 second, parallel implementation of an earlier one.
 
-## Current position — release 0.1.406
+## Current position — release 0.1.407
 
 The current candidate closes the production Hibr launch contract by packaging
 an explicit `HIBR_RC` runtime file for API-launched Hibr children. This keeps
