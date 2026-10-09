@@ -1239,6 +1239,73 @@ assert_equal('A', cells.fetch([0, 0]).fetch('text'), 'malformed CSI prefix')
 assert_equal(' ', cells.fetch([1, 0]).fetch('text'), 'malformed CSI recovery space')
 assert_equal('B', cells.fetch([2, 0]).fetch('text'), 'malformed CSI recovery')
 
+snapshot = run_case(base, 'erase-pending-wrap-hibr',
+                    "printf '0123456789012345678901234567890123456789\\033[KZ'",
+                    width: 40, height: 6)
+assert_equal('012345678901234567890123456789012345678Z',
+             row_text(snapshot).rstrip,
+             'EL clears the pending-wrap cell')
+
+snapshot = run_case(base, 'repeat-wrap-hibr', "printf 'x\\033[9b'",
+                    width: 6, height: 4)
+assert_equal('xxxx', row_text(snapshot, 1).rstrip,
+             'REP wraps like printable output')
+
+snapshot = run_case(base, 'dec-special-graphics-hibr',
+                    "printf '\\033(0lqqk\\033(B ok'")
+assert_equal('┌──┐ ok', row_text(snapshot).rstrip,
+             'DEC Special Graphics')
+
+snapshot = run_case(base, 'dec-special-shift-hibr',
+                    "printf '\\033)0\\016lqk\\017 plain'")
+assert_equal('┌─┐ plain', row_text(snapshot).rstrip,
+             'SO/SI DEC Special Graphics')
+
+snapshot = run_case(base, 'cursor-forward-tab-hibr',
+                    "printf 'a\\033[2Ib'")
+cells = cell_map(snapshot)
+assert_equal('a', cells.fetch([0, 0]).fetch('text'), 'CHT prefix')
+assert_equal('b', cells.fetch([16, 0]).fetch('text'),
+             'CHT advances by tab stops')
+
+snapshot = run_case(base, 'insert-line-column-hibr',
+                    "printf '\\033[2;5HAB\\033[2;5H\\033[LX'",
+                    width: 20, height: 6)
+cells = cell_map(snapshot)
+assert_equal('X', cells.fetch([0, 1]).fetch('text'),
+             'IL returns cursor to line home')
+assert_equal('A', cells.fetch([4, 2]).fetch('text'),
+             'IL preserves the column for shifted content')
+
+snapshot = run_case(base, 'delete-line-column-hibr',
+                    "printf 'one\\r\\ntwo\\r\\nthree\\033[2;3H\\033[MX'",
+                    width: 20, height: 6)
+cells = cell_map(snapshot)
+assert_equal('X', cells.fetch([0, 1]).fetch('text'),
+             'DL returns cursor to line home')
+assert_equal('h', cells.fetch([1, 1]).fetch('text'),
+             'DL preserves shifted content')
+
+snapshot = run_case(base, 'wide-half-overwrite-hibr',
+                    "printf '\\360\\237\\230\\200\\033[1;2Hx|'")
+cells = cell_map(snapshot)
+raise 'wide overwrite left original cell' if cells.key?([0, 0])
+assert_equal('x', cells.fetch([1, 0]).fetch('text'),
+             'wide overwrite target')
+assert_equal('|', cells.fetch([2, 0]).fetch('text'),
+             'wide overwrite tail')
+
+snapshot = run_case(base, 'wide-half-insert-hibr',
+                    "printf '\\360\\237\\230\\200ab\\033[1;2H\\033[@|'")
+cells = cell_map(snapshot)
+raise 'wide insert left original cell' if cells.key?([0, 0])
+assert_equal('|', cells.fetch([1, 0]).fetch('text'),
+             'wide insert target')
+assert_equal('a', cells.fetch([2, 0]).fetch('text'),
+             'wide insert shift')
+assert_equal('b', cells.fetch([3, 0]).fetch('text'),
+             'wide insert tail')
+
 snapshot = run_case(base, 'string-controls-do-not-leak',
                     "printf 'A\\033]0;desktop title\\007B\\033P1;ignored\\033\\\\C'")
 cells = cell_map(snapshot)

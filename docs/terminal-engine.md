@@ -119,11 +119,14 @@ through the public PTY/surface contract, plus cursor visibility, VT500
 vertical/form-feed controls, legacy DECID, and malformed
 CSI recovery. Malformed UTF-8 is represented as one U+FFFD replacement
 cell per invalid leading byte, matching Hibr's xterm/VTE differential
-contract. A missing or failing vector blocks the
-terminal gate; renderer screenshots do not substitute for these canonical-state
-assertions. Broader remaining work is complete VT500 semantic coverage and
-additional full Hibr redraw/input workloads; these are tracked separately from
-the implemented conformance gate and are not claimed by the current package.
+contract. The Hibr differential set also covers deferred-wrap `EL`, wrapping
+`REP`, DEC Special Graphics and SO/SI shifts, `CHT`, column-preserving `IL`
+and `DL`, and overwriting or inserting through either half of a wide cell. A
+missing or failing vector blocks the terminal gate; renderer screenshots do
+not substitute for these canonical-state assertions. Broader remaining work
+is complete VT500 semantic coverage and additional full Hibr redraw/input
+workloads; these are tracked separately from the implemented conformance gate
+and are not claimed by the current package.
 
 The runner deletes each session after its snapshot and is run twice against the
 same server as a bounded-reclamation check. Completed sessions must not exhaust
