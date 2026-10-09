@@ -3,6 +3,35 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 0.1.399 focused local acceptance after commit 6888dc5
+
+The canonical TCC rebuild produced the 0.1.399 server binary with SHA-256
+`dd7095814328ed384027ccfc90969ad5dab81af96827ffa2889ed37d65fc4071`.
+The following local SDL dummy/software gates passed against that binary:
+
+- pointer composition, pane hit-testing, free-pane fallback, hidden-cursor
+  damage, pointer-plus-terminal damage atomicity, and wallpaper-pointer stress;
+- SDL background batching, graphics-image cache reuse, and wallpaper damage;
+- authenticated network access, HTTP fragmentation/back-pressure, WebSocket
+  stream replay, session deletion escalation, clean API shutdown, update
+  cancellation/idle timeout/reset, and screenshot overlay invalidation;
+- font selection/scale reflow, session write/resize, SDL glyph rendering,
+  frame-rate scheduling (`54.373 Hz` over a `30 Hz` minimum), and binary pixel
+  frames (`30/30` accepted with `0` ingest errors);
+- the complete terminal conformance suite, Hibr singleton ownership, and a
+  20-second four-session terminal soak (`2240` snapshots, `204` resizes,
+  peak RSS `80652 KiB` under the `131072 KiB` limit).
+
+The QEMU reruns used the exact current staged 0.1.399 fixtures and exited
+cleanly. The two-output lifecycle fixture emitted
+`LAYOUT_MATRIX_PASS`, `HIBR_PRIMARY_RESTART_PASS`,
+`HIBR_JOIN_RECONNECT_PASS`, and `HIBR_PANE_MATRIX_PASS`. The input fixture
+emitted `BLIT_INPUT_RAW_EVDEV_PASS`, `BLIT_INPUT_MOUSE_REPEAT_PASS`, and
+`BLIT_INPUT_MULTI_MOUSE_BUTTON_STATE_PASS` with 800 raw events. The
+four-output fixture emitted `KMS_FOUR_HIBR_PASS`. These are virtual QEMU/VKMS
+results; they do not close the physical monitor, physical evdev, or physical
+120/240 Hz scanout gates described below.
+
 ## Current 0.1.399 Hibr singleton-owner and lifecycle acceptance
 
 The TCC-built server now classifies the Hibr desktop entrypoints and enforces
