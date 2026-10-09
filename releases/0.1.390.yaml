@@ -7,7 +7,7 @@ hibr_adapter_sha256: 71b02a70629a5e9a49809f4e602bcf86dbb95bb809dde74f973672f1217
 hibr_root: /home/osakka/hibr
 hibr_version: 0.99.100
 tcc_build_acceptance: pass
-terminal_conformance: pending
+terminal_conformance: pass
 live_input_diagnostics_wheel_trace: pass
 qemu_four_output_hibr_acceptance: pass
 qemu_tall_hibr_boundary_diagnostic: open
