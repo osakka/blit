@@ -1583,7 +1583,7 @@ components:
     TerminalSession:
       type: object
       required: [id, revision, surface_revision, state, surface_id, title,
-                 terminal_capabilities, hibr_attachment]
+                 terminal_capabilities, hibr_attachment, hibr_desktop]
       properties:
         id: {$ref: '#/components/schemas/ResourceId'}
         revision: {$ref: '#/components/schemas/Revision'}
