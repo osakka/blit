@@ -146,13 +146,16 @@ int main(int argc, char **argv)
                transitions while the other device still holds the button. */
             emit_event(mouse, EV_KEY, BTN_LEFT, 1);
             sync_event(mouse);
-            usleep(100000);
+            /* Cross-device uinput delivery is asynchronous under QEMU/TCG;
+               keep both physical buttons held long enough for the reader to
+               observe the overlap before releasing the first device. */
+            usleep(1000000);
             emit_event(mouse2, EV_KEY, BTN_LEFT, 1);
             sync_event(mouse2);
-            usleep(100000);
+            usleep(1000000);
             emit_event(mouse, EV_KEY, BTN_LEFT, 0);
             sync_event(mouse);
-            usleep(100000);
+            usleep(1000000);
             emit_event(mouse, EV_REL, REL_X, 3);
             sync_event(mouse);
             emit_event(mouse2, EV_KEY, BTN_LEFT, 0);

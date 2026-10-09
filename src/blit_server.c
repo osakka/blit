@@ -6530,6 +6530,12 @@ static void dispatch_evdev_mouse_button(BlitRuntime *runtime, int device_index,
     else
         runtime->evdev_mouse_buttons[device_index] &= ~bit;
     after = evdev_mouse_button_aggregate(runtime);
+    if (getenv("BLIT_TRACE_MOUSE_BUTTONS") != NULL)
+        fprintf(stderr,
+                "blit: evdev button device=%d path=%s button=%d pressed=%d "
+                "before=0x%x after=0x%x\n",
+                device_index, runtime->evdev_mouse_paths[device_index],
+                button, pressed, before, after);
     if ((before & bit) == (after & bit)) {
         ++runtime->diagnostic_evdev_mouse_button_state_coalesced;
         return;

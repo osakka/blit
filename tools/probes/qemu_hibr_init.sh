@@ -95,6 +95,7 @@ if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
     unset BLIT_KMS_SCREENSHOT_DIR
     unset BLIT_KMS_SCREENSHOT_AFTER
     export BLIT_TRACE_KEYS=1
+    export BLIT_TRACE_MOUSE_BUTTONS=1
     /blit-stage/emit-uinput >/tmp/uinput.log 2>&1 &
     emit_pid=$!
     echo INPUT_EMITTER_PID=$emit_pid
