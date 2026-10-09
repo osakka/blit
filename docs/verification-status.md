@@ -22,6 +22,12 @@ surfaces, and emitted `KMS_FOUR_HIBR_PASS`. The QEMU fixture ran at its
 configured 240 Hz mode but reported TCG scheduling misses; this validates
 topology and ownership, not physical 240 Hz performance.
 
+The separate restart/rejoin stress variant currently emits
+`HIBR_PRIMARY_RESTART_FAIL` and `HIBR_JOIN_RECONNECT_FAIL`; its fixture exits
+with failure markers and is not counted as acceptance. This remains an open
+Hibr lifecycle test boundary. The successful four-output result above is the
+only current claim for primary-plus-join topology.
+
 ## Current 0.1.396 live glyph geometry acceptance
 
 The live host accepted 0.1.396 and reported SDL3/OpenGL ES2 with

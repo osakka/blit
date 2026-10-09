@@ -82,14 +82,17 @@ important. The schema should distinguish static parameters from runtime inputs
 such as elapsed time, frame number, noise seed, and display scale. Presets are
 named schema resources rather than undocumented renderer constants.
 
-## Open schema decisions
+## Current contract decisions
 
-These are intentionally not decided yet:
+OpenAPI 3.1 in `openapi/blit-0.1.yaml` is the canonical HTTP contract.
+JSON is the request/response encoding, and WebSocket is the streaming
+transport described by the `x-blit-stream` extension in that same document.
+Terminal text crosses the PTY boundary as UTF-8 and is represented internally
+as revisioned cells. Multi-output frame atomicity is defined at the scene
+commit boundary; physical scanout timing remains a capability/evidence
+question, not an excuse to weaken the state contract. Bitmap assets are
+supported only through explicitly bounded overlay/pixel-frame resources.
 
-- serialization format and wire framing;
-- request/response versus command/event-only interaction;
-- whether the first schema is OpenAPI, Protocol Buffers, JSON Schema, or a
-  purpose-built combination;
-- text encoding and grapheme segmentation policy;
-- atomicity guarantees for multi-output presentation;
-- whether surfaces may carry bitmap assets in addition to text.
+Future transport or encoding additions must preserve these resource semantics,
+be added to the schema and API guide together, and receive an ADR when they
+change compatibility or ownership.

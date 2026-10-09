@@ -31,6 +31,8 @@ panes, input routing, and diagnostics.
   initial non-goals.
 - [Architecture](architecture.md) — the proposed runtime model and the major
   boundaries between API, terminal state, effects, layout, and rendering.
+- [API guide](api.md) — endpoint purpose, safe call ordering, Hibr orchestration,
+  diagnostics, streaming, errors, and client rules.
 - [API principles](spec/api-principles.md) — schema-first rules for designing
   the public API.
 - [OpenAPI contract](../openapi/blit-0.1.yaml) — the canonical version 0.1

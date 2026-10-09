@@ -8,3 +8,14 @@
 *.swp
 *~
 .DS_Store
+
+# Local release and diagnostic artifacts; provenance belongs in releases/*.yaml.
+*.deb
+*.tar.gz
+*.log
+diagnostics/
+test-artifacts/
+tools/__pycache__/
+tools/diagnostics/__pycache__/
+server
+build-tcc-ignore
