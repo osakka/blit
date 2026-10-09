@@ -106,6 +106,35 @@ or firewall policy. Use a restricted management network and a real token. The
 update credential is separate from the API bearer token and is accepted only
 by the package-update headers.
 
+### The version handshake is mandatory
+
+Every client begins with `GET /v1/version`. The response identifies both the
+running server and the API contract:
+
+```json
+{"server_version":"0.1.409","api_version":"0.1"}
+```
+
+`server_version` answers “which binary is serving this request?”;
+`api_version` answers “which schema family may I use?”. A client must reject
+an unsupported API version before mutating state. Record both values with the
+host, display mode, and time in every incident report.
+
+### Four API planes
+
+| Plane | Endpoints | Meaning |
+| --- | --- | --- |
+| Discovery | `/version`, `/server`, `/graphics`, `/displays`, `/audio`, `/fonts`, `/topology` | What exists and what it can do now |
+| State and control | `/terminal-sessions`, `/surfaces`, `/frames`, `/effects`, `/overlays` | What Blit owns and how it changes |
+| Input and observation | `/input/*`, `/stream`, `/diagnostics/*` | What entered, what was rendered, and what was measured |
+| Supervision | `/control/shutdown`, `/control/restart`, `/control/update/*` | How an operator stops, restarts, or replaces the service |
+
+These planes are related but not interchangeable. A successful terminal-input
+receipt proves that bytes entered the PTY path; it does not prove that a
+desktop reacted, that a surface committed, or that a pixel was presented. Use
+the corresponding revision, trace, runtime counter, and screenshot to prove
+each later boundary.
+
 ## Discovery order
 
 Clients should discover before mutating:
@@ -197,6 +226,26 @@ For mutations, first fetch the resource revision, send the revision using the
 schema-defined precondition, and supply an `Idempotency-Key` for a retryable
 operation. A revision conflict means “resynchronize”: fetch authoritative
 state again, reconcile intent, and retry only if the operation is still valid.
+
+For a single deterministic health record, collect these responses together
+outside the repository:
+
+```sh
+set -eu
+base=${BLIT_URL:-http://127.0.0.1:8080}
+stamp=$(date -u +%Y%m%dT%H%M%SZ)
+mkdir -p "blit-support-$stamp"
+for resource in version server graphics displays audio topology fonts diagnostics/runtime 'diagnostics/trace?limit=32'; do
+  file=$(printf '%s' "$resource" | tr '/?' '__')
+  curl --fail --silent --show-error --connect-timeout 2 \
+    "$base/v1/$resource" > "blit-support-$stamp/$file.json"
+done
+```
+
+Add one screenshot per display using
+`GET /v1/diagnostics/screenshots/{display_id}`. Redact bearer and update
+credentials, PTY contents, and private host paths before sharing the bundle.
+The bundle is evidence for a named run, not a new source of truth.
 
 ## Operator runbook: prove the server before touching a desktop
 
@@ -339,6 +388,20 @@ launcher child exits; a joined client is an attachment, so a dead join is
 reported as `failed` and its surface/routes are released. A replacement join
 can then be created against the still-running primary.
 
+The intended topology is therefore:
+
+```text
+one Blit service
+  └─ one primary Hibr desktop owner
+       ├─ primary display/pane
+       └─ zero or more Hibr desktop --join attachments
+            └─ Blit-owned logical pane placement
+```
+
+A physical monitor is not itself a Hibr desktop owner, and a logical 1x2 or
+2x2 pane split does not imply additional physical connectors. `/v1/displays`
+reports physical outputs; `/v1/topology` reports logical placement.
+
 ## Displays, topology, and fonts
 
 `GET /v1/displays` reports physical outputs, active modes, supported modes,
@@ -382,6 +445,26 @@ Physical keyboards, pointers, and gamepads are discovered through
 synthetic and is useful for deterministic diagnostics; it does not claim that
 a physical device works. Mouse button state is aggregated across opened
 evdev pointers, and the input trace identifies the source and dispatch path.
+
+The normal physical-input transaction is:
+
+```text
+GET /v1/input/devices
+  -> identify the canonical device_id and capabilities
+GET /v1/input/routes
+  -> inspect existing ownership; do not duplicate a route
+PUT /v1/input/routes/{route_id}
+  -> set target_session_id and enabled=true
+GET /v1/diagnostics/runtime
+GET /v1/diagnostics/trace?kind=pointer_motion&limit=32
+  -> prove dispatch and target ownership
+```
+
+Use `kind=pointer_button` and `kind=pointer_wheel` for those acceptance
+checks. An API-injected event proves the downstream route and dispatch path, but
+only a trace entry identifying an evdev source proves physical-device
+delivery. There must be one deliberate pointer owner for a
+display-attached session; competing routes are a configuration error.
 
 ## Diagnostics and screenshots
 
@@ -452,6 +535,18 @@ Unknown response fields should be ignored. Resource IDs are opaque. Events and
 snapshots carry revisions/sequences so clients can detect gaps and resync from
 the authoritative GET endpoint. A schema or semantic breaking change requires
 a new API version and ADR; changing a renderer implementation does not.
+
+### Recovery table
+
+| Observation | First check | Correct response |
+| --- | --- | --- |
+| Connection refused | supervisor/process and `/v1/version` | Start or repair the service; do not start a second server on the same port |
+| `404 route_not_found` | API version and OpenAPI path | Correct the route; this is not evidence that rendering failed |
+| `409` ownership/revision | resource `GET` and `hibr-owner` | Resynchronize, then retry with the current revision or repair the stale owner |
+| black or stale display | `/displays`, runtime, screenshot, surface summary | Separate output discovery, producer commits, renderer cadence, and pixels |
+| motion but no click | routes plus `pointer_button` trace | Verify source, button capability, target session, and aggregate state |
+| duplicate desktop | diagnostics and Hibr-owner resources | Retire the stale attachment and keep one primary owner |
+| slow scene updates | `surface_commit_hz` versus `frame_rate_hz` | Fix the producer boundary; do not label producer cadence as display refresh |
 
 ## Safe client checklist
 

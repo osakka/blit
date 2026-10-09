@@ -15,14 +15,16 @@ the primary with intentionally blank auxiliary joins, and a deterministic
 window workload that populates all four outputs. The exact TCC build, package,
 schema, terminal, input, lifecycle, four-output, Hibr, restart, producer
 cadence, and soak
-evidence is recorded in [`releases/0.1.406.yaml`](../releases/0.1.406.yaml)
+evidence is recorded in [`releases/0.1.409.yaml`](../releases/0.1.409.yaml)
 and [`verification-status.md`](verification-status.md).
 
-This is not a physical-host completion claim. The live host remains on 0.1.401
-and currently exposes one output. Physical multi-monitor geometry, physical
-evdev button tracing, physical 120/240 Hz scanout, and full live Hibr geometry
-are still open. QEMU/VKMS remains the repeatable multi-output acceptance
-oracle; the physical host remains the final host-specific evidence boundary.
+This is not a physical-host completion claim. The supplied live host is now
+running 0.1.409 and exposes one output at 60 Hz. Explicit physical evdev
+routes and live pointer motion have been observed; a source-qualified physical
+button trace, multiple physical monitors, physical 120/240 Hz scanout, and
+broader live Hibr geometry remain open. QEMU/VKMS remains the repeatable
+multi-output acceptance oracle; the physical host remains the final
+host-specific evidence boundary.
 
 The next implementation boundary is measured cadence and physical experience:
 separate producer/update rate from presentation/scanout rate, instrument any
@@ -31,8 +33,9 @@ slow Hibr producer path, and only then make a hardware claim. The current
 missed deadlines under its 60 Hz workload; that is useful renderer evidence,
 but it is not a 60 Hz physical scanout claim and is intentionally not hidden
 by changing the gate. The supplied live host remains separately measured at
-60 Hz presentation with a slow/idle Hibr producer and no physical evdev
-events.
+60 Hz presentation with zero missed deadlines. Hibr producer cadence is
+workload-dependent and must be reported separately from presentation cadence;
+current live input evidence is recorded in the verification ledger.
 
 The next engineering priority is therefore not another launcher or parallel
 renderer. It is closing those named hardware evidence gaps while preserving

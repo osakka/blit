@@ -45,6 +45,16 @@ line. A versioned API input write was accepted while the owner remained
 registered. This is live one-output evidence; physical pointer events and
 additional physical outputs remain open.
 
+The same live 0.1.409 service now has explicit API routes for the discovered
+physical pointer and keyboard to the single primary session. The runtime
+reported 2,505 evdev mouse events, including 1,573 motion events and 10 button
+events, with 927 dispatched input events and no missed presentation deadlines.
+The filtered trace showed API-injected button delivery to the primary; the
+physical button trace contract remains open until a button event is captured
+with an evdev source in the trace. Device counters prove that Blit read input;
+the source-qualified trace proves which device and target session received a
+specific event.
+
 ## 0.1.405 current candidate evidence
 
 The TCC-built 0.1.405 candidate adds bounded producer-side surface cadence

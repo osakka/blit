@@ -36,6 +36,25 @@ OpenAPI/HTTP + WebSocket
           +---- SDL3/KMS presentation
 ```
 
+## What Blit owns—and what it does not
+
+Blit owns the network contract, terminal state, logical display topology,
+input routing, diagnostics, and presentation. Hibr remains the desktop/session
+owner. The intended deployment has one primary Hibr desktop and zero or more
+`desktop --join` attachments orchestrated through Blit's API; Blit does not
+patch Hibr or start competing desktop owners.
+
+Keep these evidence boundaries separate:
+
+| Boundary | What proves it | What it does not prove |
+| --- | --- | --- |
+| API/state | versions, resources, revisions, routes, diagnostics | pixels reached scanout |
+| Renderer/presentation | cadence counters, missed deadlines, screenshots | Hibr supplied the expected scene |
+| Host acceptance | the exact binary on named hardware | behavior on another GPU, monitor, or input device |
+
+The [verification ledger](docs/verification-status.md) is the single place
+where these claims are separated.
+
 ## Five-minute operator path
 
 The package installs a systemd service and the native `blit` executable. The
@@ -132,7 +151,7 @@ tools/build-tcc.sh build/blit/blit-server server
 ruby tools/tests/hibr_singleton_gate.rb
 tools/tests/api_schema_gate.rb
 tools/tests/restart_gate.sh
-tools/tests/package_artifact_gate.sh /tmp/blit-release-artifacts-0.1.405/blit_0.1.405-1_amd64.deb
+tools/tests/package_artifact_gate.sh /path/to/blit_<version>-1_amd64.deb
 ```
 
 The conformance runner deliberately targets a caller-owned server so the same

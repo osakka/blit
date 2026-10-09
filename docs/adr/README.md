@@ -6,7 +6,7 @@ and migration impact. The filename is the canonical link. A few historical
 records share a numeric heading because they were developed on parallel
 branches; they remain separate decisions and are all indexed below. They are
 not missing records and must not be silently merged. New ADRs must use a
-unique filename and number greater than 0052.
+unique filename and number greater than 0053.
 
 The index is a navigation aid, not a second decision source. The record itself
 is authoritative for its status and consequences. An implementation may cite
