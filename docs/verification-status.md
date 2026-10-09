@@ -19,6 +19,12 @@ QEMU TCG; `/dev/kvm` is absent on this test host. Therefore
 open. This result is retained as a virtual-driver/VM-capability boundary, not
 converted into a product pass and not addressed with asynchronous tearing.
 
+The exact 0.1.387 Hibr/input fixture also passes `LAYOUT_MATRIX_PASS`,
+`BLIT_INPUT_RAW_EVDEV_PASS`, `BLIT_INPUT_KEYPAD_PASS`,
+`BLIT_INPUT_STREAM_PASS`, `BLIT_INPUT_GAMEPAD_PASS`,
+`BLIT_INPUT_MOUSE_REPEAT_PASS`, and
+`BLIT_INPUT_MULTI_MOUSE_BUTTON_STATE_PASS`; the guest powered down cleanly.
+
 ## Current 0.1.366 renderer-isolation result
 
 The live API screenshot from 0.1.365 showed the wallpaper/menu correctly but
