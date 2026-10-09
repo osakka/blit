@@ -6501,7 +6501,11 @@ static void dispatch_evdev_mouse_button(BlitRuntime *runtime, int device_index,
         button < 0 || button > 2)
         return;
     bit = 1U << button;
-    before = runtime->mouse_buttons;
+    /* The per-device masks are the authoritative evdev state.  Do not use
+       the logical mask here: SDL/API input may update that mask between two
+       evdev devices, which can suppress a transition without recording the
+       duplicate as a coalesced multi-device event. */
+    before = evdev_mouse_button_aggregate(runtime);
     if (pressed)
         runtime->evdev_mouse_buttons[device_index] |= bit;
     else
