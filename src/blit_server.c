@@ -12177,6 +12177,18 @@ static BlitSession *mouse_target(BlitRuntime *runtime, int output_index,
     return NULL;
 }
 
+static const char *pointer_routing_name(const BlitSession *target,
+                                        const BlitSession *routed)
+{
+    if (routed != NULL)
+        return "explicit";
+    if (target == NULL)
+        return "unmatched";
+    if (target->pane_id[0] == '\0')
+        return "display-fallback";
+    return "pane-hit-test";
+}
+
 static int active_mouse_button(const BlitRuntime *runtime)
 {
     if (runtime->mouse_buttons & 1U) return 0;
@@ -12399,7 +12411,7 @@ static void update_pointer_position(BlitRuntime *runtime,
                      runtime->pointer_output,
                      device_id != NULL ? device_id : "evdev-pointer",
                      target != NULL ? target->id : 0ULL,
-                     routed != NULL ? "explicit" : "pane-hit-test");
+                     pointer_routing_name(target, routed));
             diagnostic_trace(runtime, "pointer_motion", detail);
         }
         snprintf(input_event, sizeof(input_event),
@@ -12488,7 +12500,7 @@ static void dispatch_pointer_button(BlitRuntime *runtime, int button,
              "button=%d pressed=%d x=%.1f y=%.1f target_session=%llu routing=%s",
              button, pressed, runtime->pointer_x, runtime->pointer_y,
              target != NULL ? target->id : 0ULL,
-             routed != NULL ? "explicit" : "pane-hit-test");
+             pointer_routing_name(target, routed));
     diagnostic_trace(runtime, "pointer_button", detail);
     if (pressed)
         runtime->mouse_buttons |= 1U << button;
