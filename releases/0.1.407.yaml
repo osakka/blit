@@ -1,7 +1,7 @@
 release: 0.1.407
 package: blit_0.1.407-1_amd64.deb
 package_sha256: c72737783b944d880e85c405acbc2656fdcefe7c1833117d68c6489d2bb0c3f3
-source_commit: pending
+source_commit: e95109c
 server_binary_sha256: 42b5e20be74ff23dae3866c193d67a46e9a09181d322bffe2eea035232347196
 update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
 hibr_adapter_sha256: c1ac8a2cc2898b27411f79a665ce3c0c3156b227b9a2c4d77347c072b6a70db9
