@@ -6316,7 +6316,11 @@ static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
                     break;
                 }
                 consumed = 1;
-                codepoint = '?';
+                /* Malformed UTF-8 remains terminal data.  Preserve one
+                   replacement cell per invalid leading byte so the
+                   canonical surface matches Hibr/xterm/VTE instead of
+                   inventing an ASCII question mark. */
+                codepoint = 0xfffdU;
             } else if (codepoint == 0x009bU) {
                 /* UTF-8 encodes the C1 CSI control as C2 9B.  Hibr emits
                    controls through the UTF-8 PTY contract, so recognize the

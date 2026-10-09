@@ -893,6 +893,18 @@ assert_equal('─', cells.fetch([0, 0]).fetch('text'),
 assert_equal('X', cells.fetch([1, 0]).fetch('text'),
              'fragmented UTF-8 following cell')
 
+snapshot = run_case(base, 'invalid-utf8-replacement',
+                    "printf 'a\\377\\376b'")
+cells = cell_map(snapshot)
+assert_equal('a', cells.fetch([0, 0]).fetch('text'),
+             'invalid UTF-8 prefix')
+assert_equal("\uFFFD", cells.fetch([1, 0]).fetch('text'),
+             'invalid UTF-8 first byte replacement')
+assert_equal("\uFFFD", cells.fetch([2, 0]).fetch('text'),
+             'invalid UTF-8 second byte replacement')
+assert_equal('b', cells.fetch([3, 0]).fetch('text'),
+             'invalid UTF-8 following cell')
+
 snapshot = run_case(base, 'wide-utf8-cell', "printf '\\360\\237\\230\\200X'")
 cells = cell_map(snapshot)
 assert_equal("😀", cells.fetch([0, 0]).fetch('text'), 'wide UTF-8 cell')

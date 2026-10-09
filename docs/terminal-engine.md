@@ -117,7 +117,9 @@ addressing, styles, erase, scrolling, scroll regions, alternate-screen
 restoration, saved-cursor state, UTF-8 cells, truecolor SGR, and fragmented CSI input
 through the public PTY/surface contract, plus cursor visibility, VT500
 vertical/form-feed controls, legacy DECID, and malformed
-CSI recovery. A missing or failing vector blocks the
+CSI recovery. Malformed UTF-8 is represented as one U+FFFD replacement
+cell per invalid leading byte, matching Hibr's xterm/VTE differential
+contract. A missing or failing vector blocks the
 terminal gate; renderer screenshots do not substitute for these canonical-state
 assertions. Broader remaining work is complete VT500 semantic coverage and
 additional full Hibr redraw/input workloads; these are tracked separately from
