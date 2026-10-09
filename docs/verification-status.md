@@ -99,6 +99,15 @@ open and are not inferred from QEMU or synthetic API input. Visual Hibr
 geometry/fidelity remains an open acceptance boundary pending a deliberate
 comparison against the expected desktop image.
 
+A later read-only runtime sample on the same unchanged 0.1.401 host reports
+`present_calls=12022`, `surface_commits=11964`, `frame_rate_hz=7.190`,
+`missed_deadlines=0`, one 60 Hz output, one session, two input routes, and
+zero physical evdev events during the sample. This is consistent with the
+earlier finding: the service can schedule/present at the display cadence, but
+the active Hibr producer is only committing changed scenes at roughly 7 Hz
+in this workload. It is live evidence for 0.1.401, not validation of the
+un-deployed 0.1.402 artifact.
+
 ## 0.1.400 deployed baseline and 0.1.401 contract correction (historical)
 
 The deployed baseline TCC build embeds version `0.1.400` and has server SHA-256
