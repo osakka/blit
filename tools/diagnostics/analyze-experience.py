@@ -54,6 +54,8 @@ def main():
     motion_delta = delta(end, start, "evdev_mouse_motion_events")
     button_delta = delta(end, start, "evdev_mouse_button_events")
     wheel_delta = delta(end, start, "evdev_mouse_wheel_events")
+    terminal_bytes_delta = delta(end, start, "terminal_bytes")
+    graphics_upload_delta = delta(end, start, "graphics_texture_uploads")
 
     rate = (present_delta / elapsed_s) if elapsed_s else 0.0
     output_rates = []
@@ -75,8 +77,15 @@ def main():
         warnings.append("missed_render_deadlines")
     if present_delta == 0:
         warnings.append("no_present_counter_progress")
-    if output_rates and rate < max(1.0, float(output_rates[0].get("refresh_hz") or 0) * 0.5):
-        warnings.append("present_rate_below_half_refresh")
+    # Blit is damage-driven: an unchanged scene is intentionally not
+    # re-presented, so present_calls is not a vblank/frame-rate counter. Only
+    # classify a low present rate as suspicious while the capture observed
+    # active terminal, graphics, or input work.
+    active_work = (terminal_bytes_delta > 0 or graphics_upload_delta > 0 or
+                   input_delta > 0 or evdev_delta > 0 or frame_delta > 0)
+    if (active_work and output_rates and
+            rate < max(1.0, float(output_rates[0].get("refresh_hz") or 0) * 0.5)):
+        warnings.append("active_present_rate_below_half_refresh")
     if evdev_delta == 0:
         warnings.append("no_physical_evdev_mouse_events")
 
@@ -94,6 +103,8 @@ def main():
             "evdev_mouse_motion_events": motion_delta,
             "evdev_mouse_button_events": button_delta,
             "evdev_mouse_wheel_events": wheel_delta,
+            "terminal_bytes": terminal_bytes_delta,
+            "graphics_texture_uploads": graphics_upload_delta,
         },
         "resources": resources(end),
         "outputs": output_rates,
@@ -102,6 +113,8 @@ def main():
             for kind in ("pointer_motion", "pointer_button", "keyboard_key", "surface_update", "render_path")
         },
         "warnings": warnings,
+        "present_rate_semantics": "damage-driven-present-calls-not-vblank-rate",
+        "active_work_observed": active_work,
         "result": "observation_complete",
     }
     (root / "analysis.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")

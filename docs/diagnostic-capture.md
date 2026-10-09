@@ -18,7 +18,11 @@ directory is the complete handoff artifact; preserve it unchanged. The command
 also writes `analysis.json` and `analysis.txt`. That report calculates present
 rate from the `present_calls` counter delta divided by the runtime-uptime delta;
 it does not use the server's cumulative maximum gap or rolling rate as a
-short-capture FPS measurement. Warnings are observations, not pass/fail claims.
+short-capture FPS measurement. `present_calls` is damage-driven: an unchanged
+scene is intentionally not re-presented. The analyzer therefore labels this
+as `damage-driven-present-calls-not-vblank-rate` and only warns about a low
+present rate when terminal, graphics, or input work was observed. Warnings are
+observations, not pass/fail claims.
 
 Interpret the first missing boundary in this order:
 
