@@ -3,6 +3,30 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## Current 0.1.388 compositor and multi-output evidence
+
+The exact TCC-built 0.1.388 binary passes terminal conformance, including
+malformed UTF-8 replacement as one U+FFFD cell per invalid leading byte. The
+SDL wallpaper-damage gate, external-pointer composition gate, pointer-damage
+atomicity gate, wallpaper pointer-stress gate, background batching gate,
+60 Hz frame-rate gate, and API pixel-frame gate all pass.
+
+The exact 0.1.388 Hibr-staged QEMU input fixture passes the layout matrix,
+keypad, stream, gamepad, raw evdev, mouse-repeat, and multi-mouse button
+state markers. The exact four-output fixture passes with four 240 Hz VKMS
+outputs, four Hibr-backed surfaces, and one primary plus three
+`desktop --join` clients. The exact KMS fixture passes the 240 Hz scheduler,
+wide Kitty pixel oracle, two-output capture, and API screenshot checks.
+
+The sustained 240 Hz pixel-stream acceptance remains open: QEMU is running
+without `/dev/kvm`, and TCG/VKMS misses visible page-flip deadlines. This is
+not converted into a product pass. The physical host at `192.168.10.54`
+remains on 0.1.385, so live deployment, physical input, and physical
+multi-monitor acceptance remain open. The live 0.1.385 screenshot evidence
+showed sparse scene corruption; commit `0053a34` restores under-text
+wallpaper during incremental damage and is included in 0.1.388. Hibr source
+was not modified.
+
 ## Current 0.1.387 terminal-parity and high-refresh boundary
 
 The exact TCC-built 0.1.387 binary passes the complete PTY terminal
