@@ -11093,7 +11093,8 @@ static SDL_Texture *sdl_graphics_texture(BlitOutput *output,
 
 static int render_sdl_graphics(BlitOutput *output,
                                const BlitGraphicsImage *images,
-                               int image_count, float origin_x, float origin_y)
+                               int image_count, float origin_x, float origin_y,
+                               int under_text)
 {
     SDL_Renderer *renderer = output != NULL ? output->renderer : NULL;
     int drawn[BLIT_GRAPHICS_MAX_IMAGES];
@@ -11114,6 +11115,8 @@ static int render_sdl_graphics(BlitOutput *output,
              image_index < BLIT_GRAPHICS_MAX_IMAGES; ++image_index)
             if (!drawn[image_index] && images[image_index].used &&
                 images[image_index].complete && images[image_index].visible &&
+                ((under_text && images[image_index].z < 0) ||
+                 (!under_text && images[image_index].z >= 0)) &&
                 (best < 0 || images[image_index].z < images[best].z))
                 best = image_index;
         if (best < 0) break;
@@ -11694,6 +11697,19 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             last_row = full_redraw ? surface->height : last_row;
             if (last_row > BLIT_MAX_CELL_ROWS)
                 last_row = BLIT_MAX_CELL_ROWS;
+            if (full_redraw) {
+                SDL_Rect graphics_clip;
+                graphics_clip.x = (int)surface_origin_x;
+                graphics_clip.y = surface_origin_y;
+                graphics_clip.w = surface->width * cell_width;
+                graphics_clip.h = surface->height * cell_height;
+                SDL_SetRenderClipRect(renderer, &graphics_clip);
+                api_images_drawn += render_sdl_graphics(
+                    &runtime->outputs[output_index], session->graphics,
+                    BLIT_GRAPHICS_MAX_IMAGES, surface_origin_x,
+                    (float)surface_origin_y, 1);
+                SDL_SetRenderClipRect(renderer, NULL);
+            }
 
             /* Wallpaper themes commonly express nearly every terminal cell
                as a coloured background.  Submitting one SDL rectangle per
@@ -11894,7 +11910,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                 api_images_drawn += render_sdl_graphics(
                     &runtime->outputs[output_index], session->graphics,
                     BLIT_GRAPHICS_MAX_IMAGES, surface_origin_x,
-                    (float)surface_origin_y);
+                    (float)surface_origin_y, 0);
                 SDL_SetRenderClipRect(renderer, NULL);
             }
         }
