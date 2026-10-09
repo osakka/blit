@@ -73,8 +73,16 @@ while IFS= read -r display_id; do
     curl --fail --silent --show-error --connect-timeout 3 --max-time 30 \
         "$base_url/v1/diagnostics/screenshots/$display_id?cached=1" \
         > "$output_dir/screenshots/$display_id.bmp"
+    # BMP is the lossless API contract. Emit a portable inspection copy when
+    # ffmpeg is available; keep the raw capture authoritative.
+    if command -v ffmpeg >/dev/null 2>&1; then
+        ffmpeg -hide_banner -loglevel error -y \
+            -i "$output_dir/screenshots/$display_id.bmp" \
+            "$output_dir/screenshots/$display_id.png"
+    fi
 done < "$output_dir/display-ids.txt"
 sha256sum "$output_dir"/screenshots/*.bmp > "$output_dir/screenshot-sha256.txt" 2>/dev/null || true
+sha256sum "$output_dir"/screenshots/*.png > "$output_dir/screenshot-png-sha256.txt" 2>/dev/null || true
 
 python3 tools/diagnostics/analyze-troubleshoot.py "$output_dir" \
     | tee "$output_dir/verdict.txt"

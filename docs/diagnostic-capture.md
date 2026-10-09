@@ -184,7 +184,10 @@ The output directory contains:
 - `session-*.json`: the selected terminal session's surface revision and
   graphics objects, including whether an image is being replaced, hidden, or
   repeatedly recreated;
-- `screenshots/*.bmp` and `screenshot-sha256.txt`: framebuffer evidence;
+- `screenshots/*.bmp` and `screenshot-sha256.txt`: authoritative lossless
+  framebuffer evidence. When `ffmpeg` is installed, matching
+  `screenshots/*.png` and `screenshot-png-sha256.txt` are also emitted for
+  direct inspection;
 - the start/end hardware and topology snapshots.
 
 Interpretation is causal: a physical click must appear as `pointer_button`,
