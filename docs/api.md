@@ -70,6 +70,12 @@ should keep the returned session IDs and inspect `hibr_desktop.role` before
 starting auxiliary joins. Delete all Blit sessions at the end and confirm
 `/v1/diagnostics` reports zero sessions and surfaces.
 
+Primary and join lifetimes are intentionally different: the primary may keep
+its Blit session running while Hibr's detached owner restarts after the
+launcher child exits; a joined client is an attachment, so a dead join is
+reported as `failed` and its surface/routes are released. A replacement join
+can then be created against the still-running primary.
+
 ## Displays, topology, and fonts
 
 `GET /v1/displays` reports physical outputs, active modes, supported modes,

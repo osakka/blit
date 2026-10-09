@@ -80,6 +80,12 @@ case " $($b cat /proc/cmdline 2>/dev/null || true) " in
     *" blit.hibr_restart=1 "*) BLIT_HIBR_PANES_TEST=1; BLIT_HIBR_RESTART_TEST=1 ;;
 esac
 BLIT_HIBR_PANE_WORKLOAD=/blit-stage/hibr_window_workload.hibr
+if [ "${BLIT_HIBR_RESTART_TEST:-0}" = 1 ]; then
+    # The lifecycle variant must exercise the real held Hibr desktop and its
+    # --join path. The small window workload is intentionally retained for the
+    # pane matrix because it is faster and does not claim desktop ownership.
+    BLIT_HIBR_PANE_WORKLOAD=/blit-stage/blit-session.hibr
+fi
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
     *" blit.hibr_stock=1 "*)
         BLIT_HIBR_PANE_WORKLOAD=/blit-stage/blit-stock-session.hibr
@@ -406,12 +412,12 @@ if [ "${BLIT_HIBR_PANES_TEST:-0}" = 1 ]; then
     fi
     # Keep argument construction explicit: it is part of the acceptance
     # evidence for primary versus auxiliary Hibr invocation.
-    $b wget -qO /tmp/hibr-pane-1.json --post-data="{\"command\":\"/blit-stage/hibr\",\"arguments\":[\"$BLIT_HIBR_PANE_WORKLOAD\",\"--session\",\"blit\",\"--name\",\"display-47\"],\"surface_mode\":\"terminal\",\"pane_id\":\"$pane1\",\"surface\":{\"width\":64,\"height\":24}}" --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
+    $b wget -qO /tmp/hibr-pane-1.json --post-data="{\"command\":\"/blit-stage/hibr\",\"arguments\":[\"$BLIT_HIBR_PANE_WORKLOAD\",\"--session\",\"blit\",\"--name\",\"display-47\"],\"environment\":{\"BLIT_HIBR_ADAPTER\":\"/blit-stage/mods/console-blit.so\",\"DT_LOG\":\"/tmp/hibr-pane-1.log\"},\"surface_mode\":\"terminal\",\"pane_id\":\"$pane1\",\"surface\":{\"width\":64,\"height\":24}}" --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
     primary_id=$($b sed -n 's/.*"id":"\([0-9][0-9]*\)".*/\1/p' /tmp/hibr-pane-1.json)
     $b sleep 3
-    $b wget -qO /tmp/hibr-pane-2.json --post-data="{\"command\":\"/blit-stage/hibr\",\"arguments\":[\"$BLIT_HIBR_PANE_WORKLOAD\",\"--session\",\"blit\",\"--join\",\"--name\",\"$pane2\"],\"surface_mode\":\"terminal\",\"pane_id\":\"$pane2\",\"surface\":{\"width\":64,\"height\":24}}" --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
-    $b wget -qO /tmp/hibr-pane-3.json --post-data="{\"command\":\"/blit-stage/hibr\",\"arguments\":[\"$BLIT_HIBR_PANE_WORKLOAD\",\"--session\",\"blit\",\"--join\",\"--name\",\"$pane3\"],\"surface_mode\":\"terminal\",\"pane_id\":\"$pane3\",\"surface\":{\"width\":64,\"height\":24}}" --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
-    $b wget -qO /tmp/hibr-pane-4.json --post-data="{\"command\":\"/blit-stage/hibr\",\"arguments\":[\"$BLIT_HIBR_PANE_WORKLOAD\",\"--session\",\"blit\",\"--join\",\"--name\",\"$pane4\"],\"surface_mode\":\"terminal\",\"pane_id\":\"$pane4\",\"surface\":{\"width\":64,\"height\":24}}" --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
+    $b wget -qO /tmp/hibr-pane-2.json --post-data="{\"command\":\"/blit-stage/hibr\",\"arguments\":[\"$BLIT_HIBR_PANE_WORKLOAD\",\"--session\",\"blit\",\"--join\",\"--name\",\"$pane2\"],\"environment\":{\"BLIT_HIBR_ADAPTER\":\"/blit-stage/mods/console-blit.so\",\"DT_LOG\":\"/tmp/hibr-pane-2.log\"},\"surface_mode\":\"terminal\",\"pane_id\":\"$pane2\",\"surface\":{\"width\":64,\"height\":24}}" --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
+    $b wget -qO /tmp/hibr-pane-3.json --post-data="{\"command\":\"/blit-stage/hibr\",\"arguments\":[\"$BLIT_HIBR_PANE_WORKLOAD\",\"--session\",\"blit\",\"--join\",\"--name\",\"$pane3\"],\"environment\":{\"BLIT_HIBR_ADAPTER\":\"/blit-stage/mods/console-blit.so\",\"DT_LOG\":\"/tmp/hibr-pane-3.log\"},\"surface_mode\":\"terminal\",\"pane_id\":\"$pane3\",\"surface\":{\"width\":64,\"height\":24}}" --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
+    $b wget -qO /tmp/hibr-pane-4.json --post-data="{\"command\":\"/blit-stage/hibr\",\"arguments\":[\"$BLIT_HIBR_PANE_WORKLOAD\",\"--session\",\"blit\",\"--join\",\"--name\",\"$pane4\"],\"environment\":{\"BLIT_HIBR_ADAPTER\":\"/blit-stage/mods/console-blit.so\",\"DT_LOG\":\"/tmp/hibr-pane-4.log\"},\"surface_mode\":\"terminal\",\"pane_id\":\"$pane4\",\"surface\":{\"width\":64,\"height\":24}}" --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
     $b sleep 10
     pane_matrix_pass=1
     echo HIBR_PANE_MATRIX_SESSIONS
@@ -449,16 +455,12 @@ if [ "${BLIT_HIBR_PANES_TEST:-0}" = 1 ]; then
         primary_detail=$($b wget -qO- "http://127.0.0.1:19191/v1/terminal-sessions/$primary_session_id" 2>/dev/null || true)
         primary_pid=$(echo "$primary_detail" |
             $b sed -n 's/.*"process_id"[ ]*:[ ]*\([0-9][0-9]*\).*/\1/p')
-        desktop_pid=
-        for proc in /proc/[0-9]*; do
-            [ -r "$proc/comm" ] || continue
-            comm=$( $b cat "$proc/comm" 2>/dev/null || true )
-            [ "$comm" = 'hibr [desktop]' ] || continue
-            candidate=${proc##*/}
-            [ "$candidate" != "$primary_pid" ] || continue
-            desktop_pid=$candidate
-            break
-        done
+        desktop_pid=$(echo "$primary_detail" |
+            $b sed -n 's/.*"owner_pid":\([0-9][0-9]*\).*/\1/p')
+        # The adapter's owner registration is the authoritative identity. A
+        # process name is not stable across Hibr builds and previously made
+        # this gate report a Blit failure before it ever tested restart.
+        [ "$desktop_pid" != "$primary_pid" ] || desktop_pid=
         restart_pass=1
         [ -n "$desktop_pid" ] || restart_pass=0
         if [ "$restart_pass" -eq 1 ]; then
@@ -492,7 +494,7 @@ if [ "${BLIT_HIBR_PANES_TEST:-0}" = 1 ]; then
         [ "$join_state" = failed ] || join_reconnect_pass=0
         [ "$primary_after_join" = running ] || join_reconnect_pass=0
         if [ "$join_reconnect_pass" -eq 1 ] && [ -n "$pane5" ]; then
-            $b wget -qO /tmp/hibr-pane-rejoin.json --post-data="{\"command\":\"/blit-stage/hibr\",\"arguments\":[\"$BLIT_HIBR_PANE_WORKLOAD\",\"--session\",\"blit\",\"--join\",\"--name\",\"$pane5\"],\"surface_mode\":\"terminal\",\"pane_id\":\"$pane5\",\"surface\":{\"width\":64,\"height\":24}}" --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
+            $b wget -qO /tmp/hibr-pane-rejoin.json --post-data="{\"command\":\"/blit-stage/hibr\",\"arguments\":[\"$BLIT_HIBR_PANE_WORKLOAD\",\"--session\",\"blit\",\"--join\",\"--name\",\"$pane5\"],\"environment\":{\"BLIT_HIBR_ADAPTER\":\"/blit-stage/mods/console-blit.so\",\"DT_LOG\":\"/tmp/hibr-pane-rejoin.log\"},\"surface_mode\":\"terminal\",\"pane_id\":\"$pane5\",\"surface\":{\"width\":64,\"height\":24}}" --header='Content-Type: application/json' http://127.0.0.1:19191/v1/terminal-sessions || true
             rejoin_id=$($b sed -n 's/.*"id":"\([0-9][0-9]*\)".*/\1/p' /tmp/hibr-pane-rejoin.json)
             $b sleep 8
             rejoin_state=$($b wget -qO- "http://127.0.0.1:19191/v1/terminal-sessions/$rejoin_id" |

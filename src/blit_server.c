@@ -6774,16 +6774,16 @@ static void refresh_session_state(BlitRuntime *runtime, BlitSession *session)
     if (result == session->process_id) {
         if (WIFEXITED(status)) {
             session->exit_code = WEXITSTATUS(status);
-            if (!session->hibr_process)
+            if (!session->hibr_process || session->hibr_desktop_join)
                 snprintf(session->state, sizeof(session->state),
                          session->exit_code == 0 ? "stopped" : "failed");
         } else if (WIFSIGNALED(status)) {
             session->exit_code = 128 + WTERMSIG(status);
-            if (!session->hibr_process)
+            if (!session->hibr_process || session->hibr_desktop_join)
                 snprintf(session->state, sizeof(session->state), "failed");
         } else {
             session->exit_code = -1;
-            if (!session->hibr_process)
+            if (!session->hibr_process || session->hibr_desktop_join)
                 snprintf(session->state, sizeof(session->state), "failed");
         }
         session->child_exited = 1;
@@ -6792,20 +6792,20 @@ static void refresh_session_state(BlitRuntime *runtime, BlitSession *session)
            protocol reply) immediately before exit.  Do not retire the
            surface here: service_session_output must drain those bytes before
            it observes EOF and closes the PTY. */
-        if (!session->hibr_process) {
+        if (!session->hibr_process || session->hibr_desktop_join) {
             disable_input_routes_for_target(runtime, target_id);
             remove_session_streams(runtime, target_id);
         }
     } else if (result < 0 && errno != EINTR) {
         session->exit_code = -1;
-        if (!session->hibr_process)
+        if (!session->hibr_process || session->hibr_desktop_join)
             snprintf(session->state, sizeof(session->state), "failed");
         session->child_exited = 1;
         if (session->pty_fd >= 0) {
             close(session->pty_fd);
             session->pty_fd = -1;
         }
-        if (!session->hibr_process) {
+        if (!session->hibr_process || session->hibr_desktop_join) {
             retire_session_surface(runtime, session);
             disable_input_routes_for_target(runtime, target_id);
             remove_session_streams(runtime, target_id);

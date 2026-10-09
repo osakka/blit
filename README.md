@@ -50,7 +50,7 @@ requests. Never put credentials in source, logs, screenshots, or commits.
 tools/build-tcc.sh build/blit/blit-server server
 ruby tools/tests/terminal_conformance.rb
 ruby tools/tests/hibr_singleton_gate.rb
-tools/tests/package_artifact_gate.sh blit_0.1.398-1_amd64.deb
+tools/tests/package_artifact_gate.sh blit_0.1.399-1_amd64.deb
 ```
 
 The exact test matrix and QEMU commands are in

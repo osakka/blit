@@ -64,6 +64,7 @@ must use a unique filename and number.
 - [0048 — One primary Hibr desktop owner](0048-one-hibr-desktop-owner.md)
 - [0048 — Temporal physical-experience capture is the troubleshooting boundary](0048-temporal-physical-experience-capture.md)
 - [0049 — Retire KMS work only after output submission](0049-kms-submission-retirement-boundary.md)
+- [0050 — Treat Hibr joins as failing attachments when their client exits](0050-hibr-join-attachment-lifecycle.md)
 
 ## Adding an ADR
 

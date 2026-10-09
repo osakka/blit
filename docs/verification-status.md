@@ -3,7 +3,7 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
-## Current 0.1.398 Hibr singleton-owner acceptance
+## Current 0.1.399 Hibr singleton-owner and lifecycle acceptance
 
 The TCC-built server now classifies the Hibr desktop entrypoints and enforces
 one primary owner per Hibr held-session name. The local API gate passed all
@@ -15,18 +15,22 @@ sessions remain unaffected. The request argument buffer is cleared for every
 request; this prevents a prior `--join` argument from leaking into a later
 shorter request. Hibr source was not modified.
 
-The exact 0.1.398 binary was also staged with the unchanged Hibr 0.99.100
+The exact 0.1.399 binary was also staged with the unchanged Hibr 0.99.100
 tree into the four-output VKMS fixture. It reached four displays, one primary
 Hibr desktop plus three `--join` clients, four running sessions and four
 surfaces, and emitted `KMS_FOUR_HIBR_PASS`. The QEMU fixture ran at its
 configured 240 Hz mode but reported TCG scheduling misses; this validates
 topology and ownership, not physical 240 Hz performance.
 
-The separate restart/rejoin stress variant currently emits
-`HIBR_PRIMARY_RESTART_FAIL` and `HIBR_JOIN_RECONNECT_FAIL`; its fixture exits
-with failure markers and is not counted as acceptance. This remains an open
-Hibr lifecycle test boundary. The successful four-output result above is the
-only current claim for primary-plus-join topology.
+The exact current TCC binary also passes the restart/rejoin variant in the
+two-output VKMS fixture: `LAYOUT_MATRIX_PASS`,
+`HIBR_PRIMARY_RESTART_PASS`, `HIBR_JOIN_RECONNECT_PASS`, and
+`HIBR_PANE_MATRIX_PASS`. The fixture uses the real staged stock Hibr desktop
+launcher, kills the registered primary owner, kills a joined attach client,
+and then creates a replacement join. The primary remains running while the
+dead join becomes `failed`, allowing the replacement join to be accepted.
+The fixture's `qemu_exit=0` is checked alongside all four markers; no Hibr
+source was modified.
 
 ## Current 0.1.396 live glyph geometry acceptance
 
