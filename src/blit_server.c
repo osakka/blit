@@ -7755,6 +7755,20 @@ static void destroy_session(BlitRuntime *runtime, BlitSession *session)
         close(session->pty_fd);
     disable_input_routes_for_target(runtime, target_id);
     remove_session_streams(runtime, target_id);
+    /* Image records are owned by the session, but SDL textures and the
+       composed scene cache are owned by each output.  Invalidate both before
+       releasing the records; otherwise a replacement session can present
+       pixels from the stopped session (notably a stale wallpaper or Kitty
+       image) until a later full redraw happens. */
+    for (i = 0; i < runtime->output_count; ++i) {
+        destroy_sdl_graphics_cache(&runtime->outputs[i]);
+        if (runtime->outputs[i].scene_texture != NULL)
+            SDL_DestroyTexture(runtime->outputs[i].scene_texture);
+        runtime->outputs[i].scene_texture = NULL;
+        runtime->outputs[i].initialized = 0;
+        runtime->outputs[i].last_graphics_signature = 0;
+        runtime->outputs[i].last_target_count = 0;
+    }
     if (surface != NULL) {
         terminal_scrollback_release(surface);
         memset(surface, 0, sizeof(*surface));
