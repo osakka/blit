@@ -18,6 +18,15 @@ glyph, pointer-atomicity, and wallpaper stress gates pass. The live visual
 acceptance gate is open until the 0.1.366 package is installed and its
 post-install screenshot confirms legible terminal glyphs.
 
+The package was subsequently accepted by the live supervised updater on
+`192.168.10.54` and `/v1/version` reported `0.1.366`. The live diagnostics
+reported `renderer=opengles2` and `glyph_path=immediate-texture`. The API
+pointer artifact capture found only cursor-sized pixel differences between
+positions, and the live synthetic motion/button verifier passed. These are
+not physical evdev or physical-display visual acceptance: the automated
+captures recorded zero physical evdev events, and the visual gate remains
+open pending an operator-visible confirmation of the real display.
+
 ## Current 0.1.363 diagnostic correctness
 
 The TCC build corrects the per-output presentation timing source in the API:

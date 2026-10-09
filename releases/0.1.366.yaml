@@ -11,7 +11,10 @@ local_tcc_build_acceptance: pass
 sdl_glyph_render_acceptance: pass
 pointer_damage_atomic_acceptance: pass
 pointer_wallpaper_stress_acceptance: pass
-live_package_acceptance: pending_update_token
+live_package_acceptance: pass
+live_version: 0.1.366
+live_glyph_path: immediate-texture
+live_api_pointer_acceptance: pass
 live_visual_acceptance: open
 live_physical_evdev_acceptance: open
 physical_multi_monitor_acceptance: open
