@@ -18,6 +18,12 @@ an input/session observation, not a renderer failure. An API-injected pointer
 control sample accepted and presented four motions, proving the API input and
 SDL composition path independently of physical-device access.
 
+The live 0.1.392 frame-rate gate then created a bounded temporary terminal
+session through the network API and measured 61.433 Hz on the 60 Hz output,
+with a 16.954 ms maximum render window and zero missed deadlines. The gate
+deleted its session successfully; the host returned to zero sessions and zero
+surfaces afterward.
+
 The exact direct-KMS VKMS fixture accepted all 120 and all 240 producer frames
 with zero protocol errors, but did not sustain visible page-flip cadence under
 the available two-output QEMU TCG environment. The 240 Hz synchronous run
