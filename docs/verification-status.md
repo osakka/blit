@@ -5,9 +5,8 @@ an evidence record, not a claim that the complete product is released.
 
 ## 0.1.401 current release evidence
 
-The current rebuilt package is `blit_0.1.401-1_amd64.deb`, with SHA-256
-`20b299017cb0d63ef6a896cc6b5fa97e596c9db7d4e0062c4810145cad7774d4`.
-The exact package/source relationship is recorded in
+The current rebuilt package is `blit_0.1.401-1_amd64.deb`. Its exact
+checksum/source relationship is recorded exclusively in
 [`releases/0.1.401.yaml`](../releases/0.1.401.yaml). The TCC server binary
 SHA-256 remains
 `633167c51397f0a7c129406a5ecb192e24f0fb16919e815d2ac0e991f75a500f`.
