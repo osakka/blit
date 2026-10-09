@@ -1,0 +1,17 @@
+release: 0.1.390
+package: blit_0.1.390-1_amd64.deb
+package_sha256: b59c720e99e9f54fdafcfd8bc5a1084a7fa6c737f5ba8574adf82dda25c6e5e3
+source_commit: dfad779
+server_binary_sha256: 6aed9f5032032aacf414f91a547aa69984526881523d5fa91bf211499300d5da
+hibr_adapter_sha256: 71b02a70629a5e9a49809f4e602bcf86dbb95bb809dde74f973672f1217cc02f
+hibr_root: /home/osakka/hibr
+hibr_version: 0.99.100
+tcc_build_acceptance: pass
+terminal_conformance: pending
+live_input_diagnostics_wheel_trace: pass
+qemu_four_output_hibr_acceptance: pass
+qemu_tall_hibr_boundary_diagnostic: open
+live_hibr_geometry_acceptance: pending
+physical_evdev_acceptance: open
+physical_multi_monitor_acceptance: open
+physical_high_refresh_acceptance: open
