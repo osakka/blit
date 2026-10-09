@@ -7924,6 +7924,17 @@ static int create_session(BlitRuntime *runtime, const char *json,
             setenv("HIBR_GFX", "kitty", 1) != 0 ||
             setenv("DT_LOG", hibr_log_path, 0) != 0)
                 _exit(126);
+        /* Authentication is checked before route dispatch, so a configured
+           token also protects the owner handshake and the stream upgrade
+           that the Hibr adapter needs. Supply the credential through the
+           environment Blit already owns rather than making a working
+           desktop depend on the operator configuring the same value twice.
+           ADR 0055 records the consequence: every launched child sees it.
+           The API's own environment entries are applied after this and
+           overwrite, so a client may set it empty to opt a child out. */
+        if (runtime->auth_token[0] != '\0' &&
+            setenv("BLIT_API_TOKEN", runtime->auth_token, 1) != 0)
+                _exit(126);
         if (pane_id[0] != '\0' && setenv("BLIT_PANE_ID", pane_id, 1) != 0)
             _exit(126);
         if (run_as_user) {

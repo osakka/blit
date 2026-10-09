@@ -49,7 +49,12 @@ typedef struct {
 	unsigned long long revision;
 	unsigned pen_fg, pen_bg, pen_attr;
 	char host[128], port[16], surface[128], session[64];
+	/* token is the Hibr owner handshake secret (ADR 0051) and travels in a
+	 * JSON body. api_token is the gateway bearer credential (ADR 0055) and
+	 * travels in an Authorization header. They answer different questions
+	 * and are deliberately not interchangeable. */
 	char token[128];
+	char api_token[256];
 	cb_cell *pending;
 	size_t pending_count, pending_capacity;
 	int ws_fd;
@@ -195,8 +200,13 @@ static int cb_http(const char *method, const char *path, const char *body,
 	}
 	length = snprintf(request, sizeof(request),
 		"%s %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n"
-		"Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%s",
-		method, path, cb.host, (unsigned long)strlen(body), body);
+		"Content-Type: application/json\r\n%s%s%s"
+		"Content-Length: %lu\r\n\r\n%s",
+		method, path, cb.host,
+		cb.api_token[0] ? "Authorization: Bearer " : "",
+		cb.api_token[0] ? cb.api_token : "",
+		cb.api_token[0] ? "\r\n" : "",
+		(unsigned long)strlen(body), body);
 	if (length < 0 || (size_t)length >= sizeof(request) ||
 	    !cb_write_all(fd, request, (size_t)length)) {
 		lg(HIBR_LERR, "console-blit: HTTP write failed for %s", path);
@@ -430,6 +440,11 @@ static int cb_open(sh *s)
 	v = getenv("BLIT_SESSION_TOKEN");
 	if (v && *v)
 		snprintf(cb.token, sizeof(cb.token), "%s", v);
+	/* Blit injects this when the gateway requires a bearer token. Absent or
+	 * empty means the server is unauthenticated and no header is sent. */
+	v = getenv("BLIT_API_TOKEN");
+	if (v && *v)
+		snprintf(cb.api_token, sizeof(cb.api_token), "%s", v);
 	if (!cb_register_owner())
 		return HIBR_FAIL;
 	snprintf(path, sizeof(path), "/v1/surfaces/%s/cells", cb.surface);
@@ -748,7 +763,10 @@ static int cb_ws_read(int fd, void *data, size_t length, int timeout_ms)
 
 static int cb_ws_open(void)
 {
-	char request[512], headers[2048];
+	/* Sized for the fixed headers plus a bearer credential; a token long
+	 * enough to overflow this is reported rather than silently truncated
+	 * into an upgrade the server would reject as malformed. */
+	char request[1024], headers[2048];
 	size_t used = 0;
 	int fd, n;
 	fd = hibr_dial(cb.host, cb.port, 0);
@@ -757,8 +775,17 @@ static int cb_ws_open(void)
 		"GET /v1/stream HTTP/1.1\r\nHost: %s\r\n"
 		"Upgrade: websocket\r\nConnection: Upgrade\r\n"
 		"Sec-WebSocket-Key: YmxpdC1jb25zb2xlLXN0cmVhbQ==\r\n"
-		"Sec-WebSocket-Version: 13\r\n\r\n", cb.host);
-	if (n < 0 || (size_t)n >= sizeof(request) || !cb_write_all(fd, request, (size_t)n))
+		"Sec-WebSocket-Version: 13\r\n%s%s%s\r\n", cb.host,
+		cb.api_token[0] ? "Authorization: Bearer " : "",
+		cb.api_token[0] ? cb.api_token : "",
+		cb.api_token[0] ? "\r\n" : "");
+	if (n < 0 || (size_t)n >= sizeof(request)) {
+		lg(HIBR_LERR, "console-blit: WebSocket upgrade does not fit in %lu bytes",
+			(unsigned long)sizeof(request));
+		close(fd);
+		return 0;
+	}
+	if (!cb_write_all(fd, request, (size_t)n))
 		{ CB_TRACE("console-blit: WebSocket handshake write failed"); close(fd); return 0; }
 	while (used + 1 < sizeof(headers)) {
 		ssize_t got = read(fd, headers + used, sizeof(headers) - used - 1);

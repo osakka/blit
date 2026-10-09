@@ -209,6 +209,25 @@ the stable binding coordinates for the ABI-level adapter; the adapter must
 use them to address the server-owned surface and must not discover or invent
 another surface identity.
 
+Two further variables are credentials and are not interchangeable:
+
+- `BLIT_SESSION_TOKEN` is the owner handshake secret from
+  [ADR 0051](adr/0051-fail-closed-hibr-owner-handshake.md). It travels in the
+  body of `POST /v1/terminal-sessions/{id}/hibr-owner` and answers which
+  process owns the session.
+- `BLIT_API_TOKEN` is the gateway bearer credential from
+  [ADR 0055](adr/0055-adapter-api-authentication.md). Blit sets it only when
+  `BLIT_AUTH_TOKEN` is configured, and the adapter sends it as
+  `Authorization: Bearer` on its HTTP requests and on the `/v1/stream`
+  upgrade. Authentication is checked before route dispatch, so without it the
+  owner handshake returns 401, the owner never registers, and the session is
+  retired as `hibr_attach_unresolved` — a failure that names Hibr rather than
+  authentication.
+
+An API `environment` entry overrides either value, because those entries are
+applied after Blit's own. Setting `BLIT_API_TOKEN` to an empty string opts a
+particular child out of receiving the credential.
+
 ## Primary/auxiliary probe
 
 The shared-session orchestration path has been exercised with two TCC-built
