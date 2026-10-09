@@ -25,6 +25,8 @@ qemu_four_output_hibr_acceptance: pass
 qemu_hibr_restart_rejoin_acceptance: pass
 live_deployment: pass
 live_terminal_input_route: pass_on_0.1.401
+live_refresh_rate_acceptance: pass_60.071_hz_zero_missed_deadlines
+live_physical_multi_display: unavailable_one_output
 live_physical_button_trace_contract: open
 live_hibr_geometry_acceptance: pending
 physical_evdev_acceptance: open
