@@ -3,7 +3,40 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
-## 0.1.400 deployed baseline and 0.1.401 contract correction
+## 0.1.401 current release evidence
+
+The current rebuilt package is `blit_0.1.401-1_amd64.deb`, with SHA-256
+`20b299017cb0d63ef6a896cc6b5fa97e596c9db7d4e0062c4810145cad7774d4`.
+The exact package/source relationship is recorded in
+[`releases/0.1.401.yaml`](../releases/0.1.401.yaml). The TCC server binary
+SHA-256 remains
+`633167c51397f0a7c129406a5ecb192e24f0fb16919e815d2ac0e991f75a500f`.
+
+The 0.1.401 source and artifact pass the OpenAPI structural gate (33 paths,
+including the versioned terminal-input subresource), full terminal
+conformance, Hibr singleton ownership, font/scale, resize, SDL glyph/pixel,
+frame-rate, binary pixel-frame, package, and 20-second four-session soak
+gates. The latest local soak recorded `2300` snapshots and `210` resizes with
+peak RSS `80636 KiB` under the `131072 KiB` limit. No Hibr source was changed.
+
+Fresh QEMU evidence also passes: the lifecycle/rejoin wrapper emitted all
+four required markers, and the four-output direct-KMS/Hibr fixture reached
+four independent 1024x768 outputs, four sessions, independent pixel checks,
+and `KMS_FOUR_OUTPUT_PASS`/`KMS_FOUR_HIBR_PASS`. These are virtual-display
+results; the fixture's TCG deadline misses are retained as VM timing evidence
+and are not described as physical 240 Hz scanout.
+
+The authorized live host reports 0.1.401, one SDL3/OpenGLES2 output at
+1920x2160 and 60 Hz, zero errors, and zero resources after cleanup. The
+network frame-rate gate measured `60.071 Hz` over a 516 ms window with
+`0` missed deadlines and a 16 ms target interval. This is valid live
+presentation evidence for that one output. The physical multi-display gate
+returned `PHYSICAL_MULTI_DISPLAY_UNAVAILABLE displays=1`; physical evdev
+button/motion tracing, physical multi-monitor Hibr geometry, and physical
+120/240 Hz scanout remain open and are not inferred from QEMU or synthetic
+API input.
+
+## 0.1.400 deployed baseline and 0.1.401 contract correction (historical)
 
 The deployed baseline TCC build embeds version `0.1.400` and has server SHA-256
 `73a07f5a0cce7148c77aa673f2b14cf1defab629d36e8011a8660673eef36cf4`.
