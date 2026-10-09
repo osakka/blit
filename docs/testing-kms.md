@@ -244,7 +244,7 @@ counters are printed because TCG/VKMS startup can miss virtual page flips
 before the producer starts. This is virtual high-refresh timing evidence, not
 a physical 240 Hz hardware claim.
 
-On the current 0.1.399 TCC build, the two-vCPU QEMU run accepted all 240
+On the current 0.1.400 TCC build, the two-vCPU QEMU run accepted all 240
 frames but increased missed deadlines from 20 to 40. An eight-vCPU,
 multithreaded-TCG comparison improved that to 3 and 16 respectively, still
 failing the visible-cadence predicate. `/dev/kvm` is absent on the test host;
