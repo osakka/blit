@@ -65,6 +65,14 @@ motions, 44 buttons, one ignored repeat, and two aggregate button-state
 coalesces. These are exact-current virtual input/render results; they do not
 close the source-qualified physical button trace on the supplied host.
 
+The exact-current two-output 240 Hz pixel-stream fixture accepted all 240
+complete frames with zero pixel-frame errors. Under this host's QEMU TCG
+execution it recorded 22 additional deadline misses and 78 page-flip presents,
+so `PIXEL_FRAME_RATE_240_FAIL` remains an honest
+`open_tcg_deadline_capacity` result. This is not evidence of transport loss or
+a physical renderer defect; KVM-backed or physical hardware evidence is still
+required before changing the production scheduler or closing the 240 Hz gate.
+
 ## 0.1.405 current candidate evidence
 
 The TCC-built 0.1.405 candidate adds bounded producer-side surface cadence

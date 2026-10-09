@@ -45,6 +45,11 @@ qemu_input_render_raw_motion_events: 547
 qemu_input_render_raw_button_events: 44
 qemu_input_render_ignored_button_repeats: 1
 qemu_input_render_button_state_coalesces: 2
+qemu_pixel_stream_current_frames: 240
+qemu_pixel_stream_current_pixel_errors: 0
+qemu_pixel_stream_current_missed_deadlines: 22
+qemu_pixel_stream_current_present_calls: 78
+qemu_pixel_stream_current_revalidation: open_tcg_deadline_capacity
 live_deployment: pass
 live_current_version: 0.1.409
 live_terminal_input_route: pass
