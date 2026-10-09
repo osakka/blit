@@ -39,6 +39,7 @@ Accepted decisions:
 29. [Aggregate button state across evdev mice](0041-aggregate-evdev-button-state.md).
 30. [Correlated live evidence bundles](0042-live-evidence-bundle.md).
 31. [Define multi-monitor frame atomicity at the scene boundary](0043-multi-monitor-frame-atomicity.md).
+32. [Free panes do not swallow display-attached input](0046-free-pane-does-not-swallow-display-input.md).
 
 Pending decisions:
 

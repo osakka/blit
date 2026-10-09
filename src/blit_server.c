@@ -12134,7 +12134,9 @@ static BlitSession *mouse_target(BlitRuntime *runtime, int output_index,
             if (runtime->sessions[j].used &&
                 strcmp(runtime->sessions[j].pane_id, pane->id) == 0)
                 return &runtime->sessions[j];
-        return NULL;
+        /* A pane can remain in the topology after its session is released.
+           It is free layout, not an input sink: continue to the display-level
+           session fallback below instead of swallowing clicks and motion. */
     }
     /* A display-attached session may intentionally have no Blit pane.  This
        is the API shape used by the primary Hibr desktop: it is rendered at

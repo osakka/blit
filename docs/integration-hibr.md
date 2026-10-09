@@ -30,12 +30,15 @@ direct DRM/KMS outputs (SDL3 is optional for effects)
 
 ## Compatibility probe
 
-The existing Hibr desktop runs inside Blit PTYs through the ordinary Hibr
-desktop command. Blit does not wrap or replace that command: it starts the
-standalone server, then receives the Hibr command through the terminal-session
-API. The complete Hibr desktop tree must remain installed in Hibr's own
-standard locations, including `desktop.hibr`, `wm/`, `widgets/`, themes,
-applications, and control-panel files.
+The packaged Blit integration runs the unchanged Hibr desktop through the
+package's Hibr entrypoint. That entrypoint loads Blit's `console-blit` display
+provider plus Hibr's existing `img`, `pty`, `term`, and `hold` modules in one
+Hibr process, then sources the stock `session.hibr`. This is required for
+wallpaper/canvas pixels to reach Blit's image scene and for the Hibr desktop
+to use the same display provider as its terminal cells. The complete Hibr
+desktop tree must remain installed in Hibr's own standard locations, including
+`desktop.hibr`, `wm/`, `widgets/`, themes, applications, and control-panel
+files.
 
 Start the direct server binary, with no Blit shell launcher involved:
 
@@ -54,24 +57,25 @@ schema directly with `execve(2)`. Hibr therefore remains the executable and
 the owner of desktop/session behavior; the repository's shell probes are
 limited to QEMU staging, build, and regression-test orchestration.
 
-Create it through the API by selecting the authoritative pane. Blit derives
-the complete PTY and surface geometry from that pane; do not guess a fixed
-`120x40` surface:
+Create the primary desktop through the API using the packaged entrypoint and
+authoritative display geometry:
 
 ```sh
 curl --fail --request POST \
   --header 'Content-Type: application/json' \
-  --data '{"command":"/usr/bin/desktop","arguments":["--session","blit","--name","display-1"],"pane_id":"pane-display-1-1"}' \
+  --data '{"command":"/usr/share/blit/hibr/blit-session.hibr","arguments":["--session","blit","--name","display-1"],"display_id":"display-1","surface_mode":"terminal"}' \
   http://127.0.0.1:8080/v1/terminal-sessions
 ```
 
-The held Hibr desktop uses the ordinary `console` path. Blit owns one
-PTY-backed terminal session per physical surface and parses each client's
-terminal stream locally. The primary and every `desktop --join` client use
-`"surface_mode":"terminal"`; Hibr's hold layer is the single source of truth
-and fans the desktop stream to each joined PTY. The held desktop must not
-load `console-blit`: that provider writes directly to one HTTP surface and
-cannot represent Hibr's joined-display coordinate space.
+Use `/usr/bin/desktop` only when deliberately testing Hibr's native display
+provider. It is not the Blit graphics integration path and does not prove
+wallpaper/canvas presentation through Blit.
+
+The packaged entrypoint uses the `console-blit` provider for the primary and
+every `desktop --join` client. Blit owns one PTY-backed terminal session per
+physical surface and keeps each surface authoritative; Hibr's hold layer
+remains the single source of truth for desktop/session state and fans the
+joined desktop to its clients.
 
 `console-blit` remains available for standalone, non-held Hibr programs that
 explicitly need the cell-level Blit provider. It is not part of the held
