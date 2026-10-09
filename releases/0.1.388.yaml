@@ -17,6 +17,8 @@ pointer_wallpaper_stress_acceptance: pass
 sdl_background_batch_acceptance: pass
 qemu_input_0_1_388_acceptance: pass
 qemu_four_output_hibr_0_1_388_acceptance: pass
+qemu_high_refresh_scheduler_0_1_388_acceptance: pass
+qemu_kms_capture_0_1_388_acceptance: pass
 qemu_high_refresh_acceptance: open
 qemu_pixel_stream_240_acceptance: open
 live_deployment_acceptance: pending
