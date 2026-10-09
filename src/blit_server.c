@@ -10440,13 +10440,11 @@ static void initialize_outputs(BlitRuntime *runtime)
         SDL_RenderPresent(renderer);
         runtime->outputs[runtime->output_count].window = window;
         runtime->outputs[runtime->output_count].renderer = renderer;
-        /* GLES2 geometry atlas sampling is isolated behind an explicit
-           switch because it corrupts glyphs on the live KMSDRM host. */
+        /* Geometry batching is the normal path for every SDL renderer. The
+           immediate path remains an explicit emergency workaround for a
+           backend-specific atlas regression and is selected with `off`. */
         runtime->outputs[runtime->output_count].glyph_geometry_enabled =
-            glyph_batch_mode != NULL && strcmp(glyph_batch_mode, "on") == 0;
-        if (glyph_batch_mode == NULL &&
-            strcmp(runtime->sdl_renderer_name, "opengles2") != 0)
-            runtime->outputs[runtime->output_count].glyph_geometry_enabled = 1;
+            glyph_batch_mode == NULL || strcmp(glyph_batch_mode, "on") == 0;
         if (glyph_batch_mode != NULL && strcmp(glyph_batch_mode, "off") != 0 &&
             strcmp(glyph_batch_mode, "on") != 0)
             fprintf(stderr,

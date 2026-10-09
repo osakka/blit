@@ -2,8 +2,7 @@
 
 ## Status
 
-Accepted for live diagnosis; the visual gate remains open until the real
-display is captured with the corrected path.
+Superseded by the 0.1.396 live geometry acceptance experiment.
 
 ## Context
 
@@ -21,23 +20,21 @@ frame.
 
 ## Decision
 
-Use immediate `SDL_RenderTexture` atlas draws by default for SDL's `opengles2`
-renderer. Keep the geometry path available with
-`BLIT_SDL_GLYPH_BATCH=on`; `BLIT_SDL_GLYPH_BATCH=off` forces the immediate path
-on every SDL renderer. The diagnostics API reports `render.glyph_path` as
-`immediate-texture`, `geometry-batch`, or `kms`.
+Use batched `SDL_RenderGeometry` atlas draws by default for every SDL
+renderer. Keep the immediate `SDL_RenderTexture` path available with
+`BLIT_SDL_GLYPH_BATCH=off` as a bounded rollback switch. The diagnostics API
+reports `render.glyph_path` as `immediate-texture`, `geometry-batch`, or `kms`.
 
-This is an isolation and correctness decision, not a claim that the geometry
-path is permanently rejected. It can be re-enabled only after a real GLES2
-pixel-oracle test proves equivalent glyph output.
+This is a reversible performance experiment. The live acceptance gate must
+prove equivalent glyph output before the default is retained.
 
 ## Verification
 
 - Local TCC build succeeds.
 - Existing SDL glyph, pointer atomicity, and wallpaper pointer-stress gates
   pass.
-- The live acceptance test is: install the package, verify
-  `/v1/version=0.1.366`, verify `render.glyph_path=immediate-texture`, capture
-  the display, and visually confirm the terminal glyphs are legible. If that
-  fails, retain the capture and revert the path experiment rather than
-  changing Hibr.
+- The live acceptance test is: install the candidate, verify
+  `render.glyph_path=geometry-batch`, capture the unchanged Hibr desktop, and
+  compare glyph legibility and frame timing with the immediate path. If the
+  live visual gate fails, set `BLIT_SDL_GLYPH_BATCH=off` and retain the
+  evidence; do not change Hibr.
