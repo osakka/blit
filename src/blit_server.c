@@ -534,6 +534,8 @@ typedef struct {
     uint64_t pixel_frames_last_accepted_us;
     unsigned long long diagnostic_loop_iterations;
     unsigned long long diagnostic_terminal_reads;
+    unsigned long long diagnostic_surface_commits;
+    unsigned long long diagnostic_frame_commits;
     unsigned long long diagnostic_present_calls;
     uint64_t diagnostic_last_loop_us;
     double diagnostic_last_loop_gap_ms;
@@ -1718,7 +1720,8 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"pixel_frames_pending\":%llu,"
         "\"frame_rate_frames\":%llu,\"frame_rate_window_ms\":%llu,"
         "\"frame_rate_age_ms\":%llu,\"loop_iterations\":%llu,"
-        "\"terminal_reads\":%llu,\"present_calls\":%llu,"
+        "\"terminal_reads\":%llu,\"surface_commits\":%llu,"
+        "\"frame_commits\":%llu,\"present_calls\":%llu,"
         "\"last_loop_gap_ms\":%.3f,\"max_loop_gap_ms\":%.3f,"
         "\"loop_gap_window_ms\":%llu,"
         "\"loop_gap_window_sequence\":%llu,"
@@ -1784,6 +1787,8 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         runtime->diagnostic_frame_rate_window_ms, frame_rate_age_ms,
         runtime->diagnostic_loop_iterations,
         runtime->diagnostic_terminal_reads,
+        runtime->diagnostic_surface_commits,
+        runtime->diagnostic_frame_commits,
         runtime->diagnostic_present_calls,
         runtime->diagnostic_last_loop_gap_ms,
         runtime->diagnostic_max_loop_gap_ms,
@@ -9024,8 +9029,10 @@ static void handle_request(int fd, BlitRuntime *runtime,
             /* Deferred cell chunks are transport detail.  Keep the bounded
                trace focused on actual presentation boundaries so a busy
                external terminal cannot evict input and render evidence. */
-            if (!presentation_deferred)
+            if (!presentation_deferred) {
+                ++runtime->diagnostic_surface_commits;
                 diagnostic_trace(runtime, "surface_update", detail);
+            }
         }
         if (!presentation_deferred)
             runtime->render_pending = 1;
@@ -9075,6 +9082,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
         }
         ++runtime->frame_revision;
         ++runtime->next_frame_id;
+        ++runtime->diagnostic_frame_commits;
         frame_receipt_json(runtime, body, sizeof(body));
         render_outputs(runtime, &plan, all_output_mask(runtime));
         send_http(fd, 202, "Accepted", "application/json", body);

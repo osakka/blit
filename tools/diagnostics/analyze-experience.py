@@ -55,6 +55,8 @@ def main():
     button_delta = delta(end, start, "evdev_mouse_button_events")
     wheel_delta = delta(end, start, "evdev_mouse_wheel_events")
     terminal_bytes_delta = delta(end, start, "terminal_bytes")
+    surface_commits_delta = delta(end, start, "surface_commits")
+    frame_commits_delta = delta(end, start, "frame_commits")
     graphics_upload_delta = delta(end, start, "graphics_texture_uploads")
 
     rate = (present_delta / elapsed_s) if elapsed_s else 0.0
@@ -104,6 +106,8 @@ def main():
             "evdev_mouse_button_events": button_delta,
             "evdev_mouse_wheel_events": wheel_delta,
             "terminal_bytes": terminal_bytes_delta,
+            "surface_commits": surface_commits_delta,
+            "frame_commits": frame_commits_delta,
             "graphics_texture_uploads": graphics_upload_delta,
         },
         "resources": resources(end),

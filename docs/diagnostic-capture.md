@@ -66,6 +66,13 @@ the terminal surface. Keep screenshots disabled for timing/input captures:
 the SDL screenshot readback is a heavyweight operation and can perturb the
 single-threaded render loop. It does not start or modify Hibr.
 
+The runtime performance object also reports `surface_commits` and
+`frame_commits`. These are the producer-side boundaries for a terminal
+capture: a low `present_calls` value with a similarly low commit value means
+the producer committed slowly; a high commit count with a low present count
+points at Blit scheduling or presentation. Terminal byte volume alone is not
+a frame-rate measurement.
+
 The pointer capture tolerates a host with no active Hibr session: the session
 JSON is recorded as `available:false` and the input/render capture continues.
 This is intentional, because a missing session must not hide a compositor or
