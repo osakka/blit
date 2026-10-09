@@ -3,7 +3,34 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
-## 0.1.402 current candidate evidence
+## 0.1.403 current candidate evidence
+
+The TCC-built 0.1.403 server makes the Hibr owner handshake fail closed for
+fresh primaries as well as joins and resumes. If the adapter never registers
+its token-scoped owner and bounded discovery finds no matching process, Blit
+marks the session failed, retires its surface, disables its routes, and emits
+`hibr_attach_unresolved`. A legitimate registered owner may restart and
+reconnect; the restart path is not mistaken for an ownerless launch. Hibr
+source was not modified.
+
+Exact build hashes: server
+`f4b8396118b55da28d82bbf0e8856ef23c5b19b3a7fa979960d05e40ff0efaac`, update
+helper
+`cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad`, and
+adapter
+`c1ac8a2cc2898b27411f79a665ce3c0c3156b227b9a2c4d77347c072b6a70db9`.
+The ownerless local probe passed; local singleton, restart, font/scale,
+pointer-composition, schema, and full terminal-conformance gates passed.
+The exact Hibr 0.99.100 QEMU two-output lifecycle passed layout, four-pane,
+primary-restart, join-reconnect, and final-topology markers. The exact
+four-output 240 Hz pixel/Hibr fixtures and input soak also passed.
+
+This candidate is not deployed to the physical host. The host remains on
+0.1.401; its current read-only evidence and the roughly 7 Hz Hibr producer
+cadence are recorded below. Physical evdev, multiple physical monitors,
+physical Hibr geometry, and physical high-refresh acceptance remain open.
+
+## 0.1.402 prior candidate evidence
 
 The TCC-built 0.1.402 server adds diagnostic classification to every
 non-deferred API cell commit: `transport=api-cells` and the owning

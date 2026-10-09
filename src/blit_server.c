@@ -7141,14 +7141,21 @@ static void service_attach_reasserts(BlitRuntime *runtime, uint64_t now)
                     session->id, strerror(errno));
 
         ++session->attach_reassert_attempts;
-        if (session->hibr_resume_requested &&
+        /* Every Hibr desktop client must complete the adapter ownership
+           handshake.  A fresh primary without it is just as misleading as a
+           stale --resume attachment: the PTY can continue producing cells
+           while the real desktop is owned by another console/provider.  The
+           bounded token-scoped discovery window remains the safety boundary;
+           valid primary and --join clients register before it expires. */
+        if (session->hibr_process &&
+            !session->hibr_owner_registered &&
             session->attach_reassert_attempts >=
                 session->attach_reassert_max_attempts &&
             session->attach_reassert_hibr_matches == 0 &&
             !session->hibr_attach_unresolved) {
             session->hibr_attach_unresolved = 1;
             diagnostic_log(runtime, "error", "hibr_attach_unresolved",
-                           "resume attachment found no owner process; refusing a misleading running session");
+                           "Hibr desktop adapter owner was not registered; refusing a misleading running session");
             terminate_session_process(session->process_id);
             session->exit_code = 78;
             session->child_exited = 1;

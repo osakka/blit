@@ -98,8 +98,9 @@ reinterpret them:
 - `--standby` waits for a later join request and is appropriate for a display
   that should remain available without joining immediately.
 
-Blit fails a resumed API attachment closedly if its bounded startup discovery
-finds no token-bearing Hibr owner. The session becomes `failed` with the
+Blit fails any API-launched Hibr attachment closedly if its bounded startup
+discovery finds no token-bearing Hibr owner. This applies to a fresh primary,
+`--join`, and `--resume`; the session becomes `failed` with the
 `hibr_attach_unresolved` diagnostic instead of remaining `running` with a
 partial surface. Inspect `hibr_attachment` in the session response and the
 diagnostic trace before retrying; do not start another primary against the
