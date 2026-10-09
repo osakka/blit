@@ -25,6 +25,12 @@ under-pointer scene across six samples with three pointer-cache hits. These
 results cover Blit's local composition path; they do not convert the live
 host's absent graphics objects or zero physical evdev events into a Hibr or
 hardware acceptance claim.
+The current PTY/API graphics gates also passed: Kitty texture-cache reuse
+reported five cache hits without an additional upload, and the fragmented
+RGBA pixel-frame gate accepted and drained all 30 frames (`26766 Hz` ingest
+rate, zero pending frames). These validate the controlled graphics transport;
+they do not imply that an external Hibr session actually emitted a Kitty or
+Sixel image.
 
 Fresh QEMU/VKMS images staged with the exact Hibr 0.99.100 checkout passed the
 four-output Hibr window-content gate on all four 1024x768@240 Hz outputs and
