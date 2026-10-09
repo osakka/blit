@@ -55,6 +55,16 @@ with an evdev source in the trace. Device counters prove that Blit read input;
 the source-qualified trace proves which device and target session received a
 specific event.
 
+Fresh QEMU input/render evidence was also rerun against the exact 0.1.409
+server and Hibr 0.99.100 fixture. With `blit.input_soak=1`, the guest passed
+`BLIT_INPUT_STREAM_PASS`, `BLIT_INPUT_GAMEPAD_PASS`,
+`BLIT_INPUT_RAW_EVDEV_PASS`, `BLIT_INPUT_MOUSE_REPEAT_PASS`,
+`BLIT_INPUT_MULTI_MOUSE_BUTTON_STATE_PASS`, and
+`BLIT_INPUT_RENDER_SOAK_PASS`. The raw fixture observed 926 events, 547
+motions, 44 buttons, one ignored repeat, and two aggregate button-state
+coalesces. These are exact-current virtual input/render results; they do not
+close the source-qualified physical button trace on the supplied host.
+
 ## 0.1.405 current candidate evidence
 
 The TCC-built 0.1.405 candidate adds bounded producer-side surface cadence
