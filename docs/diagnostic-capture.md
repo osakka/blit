@@ -232,6 +232,17 @@ missing:
 tools/diagnostics/verify-live-input.sh http://192.168.10.54:8080
 ```
 
+The deterministic pane-target regression is separate from physical acceptance:
+
+```sh
+ruby tools/tests/pointer_target_gate.rb
+```
+
+It proves that a pointer click selects the session under the pointer with
+`routing=pane-hit-test` when no fixed pointer route exists. A fixed
+`evdev-pointer` route intentionally overrides hit-testing and is reserved for
+dedicated input-probe workloads.
+
 For physical-device acceptance, run the screenshot-free gate while moving the
 real mouse. It rejects API-injected events, requires the pointer device to be
 present in the inventory, and fails distinctly when no physical motion was

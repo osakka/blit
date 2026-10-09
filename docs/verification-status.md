@@ -37,6 +37,11 @@ position and pane geometry, while keyboard focus remains an explicit route.
 A fixed pointer route remains available for dedicated input-probe workloads,
 but is not used for the Hibr desktop topology.
 
+The deterministic `tools/tests/pointer_target_gate.rb` now protects this
+invariant and passes alongside pointer-damage atomicity, external pointer
+composition, and wallpaper stress. Physical evdev input remains a separate
+hardware gate and is not inferred from these API-injected tests.
+
 ## Current 0.1.362 live Hibr evidence bundle
 
 The live host was started through Blit's API with the documented primary
