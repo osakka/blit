@@ -49,6 +49,15 @@ using the refreshed initroot: `PPM_DISPLAY_47_WIDE_KITTY_PASS`,
 because an empty temporary initroot produced a 4 KiB initramfs and a kernel
 panic before Blit started; it was not recorded as a Blit failure.
 
+The exact same 0.1.364 binary was then staged with the unchanged Hibr
+0.99.100 checkout into the four-output VKMS fixture. One primary Hibr desktop
+and three `desktop --join` clients reached four live sessions and four
+presented surfaces across four independent 240 Hz VKMS outputs. The run
+returned `KMS_FOUR_HIBR_PASS` and powered the guest down cleanly. This closes
+the current software orchestration/topology gate; it is not physical
+multi-monitor or sustained physical-240-Hz evidence, and the Hibr checkout
+was not modified.
+
 ## Current 0.1.362 live Hibr evidence bundle
 
 The live host was started through Blit's API with the documented primary
