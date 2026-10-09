@@ -259,9 +259,12 @@ does not change Hibr source or terminal protocol state.
 
 The surface cell snapshot is authoritative. Use `GET /v1/surfaces/{id}/summary`
 for cheap health checks and `GET /v1/surfaces/{id}/cells` for repair or full
-state. Send revisioned updates to the same cells route. The surface response
-contains the resulting revision and commit receipt; do not treat a partially
-received stream message or a screenshot as a committed frame.
+state. The summary distinguishes styled cells from cells containing actual
+codepoints and printable codepoints; this is useful when diagnosing a blank
+joined desktop whose surface exists but has not supplied glyphs. Send
+revisioned updates to the same cells route. The surface response contains the
+resulting revision and commit receipt; do not treat a partially received
+stream message or a screenshot as a committed frame.
 
 `/v1/frames` accepts an explicit coherent-frame request. The WebSocket stream
 can carry surface deltas, terminal output, frame events, diagnostics, and

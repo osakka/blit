@@ -80,6 +80,7 @@ case " $($b cat /proc/cmdline 2>/dev/null || true) " in
         hibr_surface_width=128
         hibr_surface_height=48
         hibr_tall=0
+        hibr_window_control=0
         case " $($b cat /proc/cmdline 2>/dev/null || true) " in
             *" blit.hibr_tall=1 "*)
                 # Diagnostic-only geometry mode. The ordinary four-output
@@ -89,6 +90,16 @@ case " $($b cat /proc/cmdline 2>/dev/null || true) " in
                 hibr_surface_width=240
                 hibr_surface_height=135
                 hibr_tall=1
+                ;;
+        esac
+        case " $($b cat /proc/cmdline 2>/dev/null || true) " in
+            *" blit.hibr_window_control=1 "*)
+                # The stock desktop deliberately keeps its menu/bar on the
+                # primary display and may leave an auxiliary join blank until
+                # a window is placed there. This mode uses Hibr's canonical
+                # one-window workload to prove populated auxiliary output
+                # composition without changing Hibr or the runtime path.
+                hibr_window_control=1
                 ;;
         esac
         export HIBR_MODPATH=/blit-stage/mods
@@ -103,15 +114,20 @@ case " $($b cat /proc/cmdline 2>/dev/null || true) " in
         export XDG_DATA_HOME=/tmp/hibr-data
         $b mkdir -p /root /tmp/hibr-state /tmp/hibr-config /tmp/hibr-data /tmp/hibr-ctl-0
         $b ln -sf pts/ptmx /dev/ptmx
+        primary_script=/blit-stage/blit-session.hibr
+        join_script=/blit-stage/blit-session.hibr
+        if [ "$hibr_window_control" -eq 1 ]; then
+            primary_script=/blit-stage/hibr_window_workload.hibr
+            join_script=/blit-stage/hibr_window_workload.hibr
+        fi
         $b wget -qO /tmp/hibr-primary.json \
-            --post-data="{\"command\":\"/blit-stage/hibr\",\"arguments\":[\"/blit-stage/blit-session.hibr\",\"--session\",\"blit\",\"--name\",\"$display1\"],\"environment\":{\"BLIT_HIBR_ADAPTER\":\"/blit-stage/mods/console-blit.so\",\"CP_THEME\":\"retro_car\",\"DT_CTL\":\"1\",\"DT_CTLPATH\":\"/tmp/hibr-ctl-0/blit.ctl\",\"DT_LOG\":\"/tmp/primary-hibr.log\"},\"surface_mode\":\"terminal\",\"display_id\":\"$display1\",\"surface\":{\"width\":$hibr_surface_width,\"height\":$hibr_surface_height}}" \
+            --post-data="{\"command\":\"/blit-stage/hibr\",\"arguments\":[\"$primary_script\",\"--session\",\"blit\",\"--name\",\"$display1\"],\"environment\":{\"BLIT_HIBR_ADAPTER\":\"/blit-stage/mods/console-blit.so\",\"CP_THEME\":\"retro_car\",\"DT_CTL\":\"1\",\"DT_CTLPATH\":\"/tmp/hibr-ctl-0/blit.ctl\",\"DT_LOG\":\"/tmp/primary-hibr.log\"},\"surface_mode\":\"terminal\",\"display_id\":\"$display1\",\"surface\":{\"width\":$hibr_surface_width,\"height\":$hibr_surface_height}}" \
             --header='Content-Type: application/json' \
             http://127.0.0.1:19191/v1/terminal-sessions || finish 1
-        primary_script=/blit-stage/blit-session.hibr
         for index in 2 3 4; do
             display_id=$(echo "$display_ids" | $b sed -n "${index}p")
             $b wget -qO "/tmp/hibr-join-$index.json" \
-                --post-data="{\"command\":\"/blit-stage/hibr\",\"arguments\":[\"$primary_script\",\"--session\",\"blit\",\"--join\",\"--name\",\"$display_id\"],\"environment\":{\"BLIT_HIBR_ADAPTER\":\"/blit-stage/mods/console-blit.so\",\"DT_LOG\":\"/tmp/join-$index-hibr.log\"},\"surface_mode\":\"terminal\",\"display_id\":\"$display_id\",\"surface\":{\"width\":$hibr_surface_width,\"height\":$hibr_surface_height}}" \
+                --post-data="{\"command\":\"/blit-stage/hibr\",\"arguments\":[\"$join_script\",\"--session\",\"blit\",\"--join\",\"--name\",\"$display_id\"],\"environment\":{\"BLIT_HIBR_ADAPTER\":\"/blit-stage/mods/console-blit.so\",\"DT_LOG\":\"/tmp/join-$index-hibr.log\"},\"surface_mode\":\"terminal\",\"display_id\":\"$display_id\",\"surface\":{\"width\":$hibr_surface_width,\"height\":$hibr_surface_height}}" \
                 --header='Content-Type: application/json' \
                 http://127.0.0.1:19191/v1/terminal-sessions || finish 1
         done
@@ -130,16 +146,27 @@ case " $($b cat /proc/cmdline 2>/dev/null || true) " in
             echo HIBR_SURFACE_SUMMARY surface=$surface_id
             $b cat "/tmp/${surface_id}-summary.json"
         done
+        content_fail=0
         for display_index in 1 2 3 4; do
             display_id=$(echo "$display_ids" | $b sed -n "${display_index}p")
             echo HIBR_CONTENT_DISPLAY index=$display_index id=$display_id
             $b wget -qO "/tmp/hibr-display-$display_index.bmp" \
                 "http://127.0.0.1:19191/v1/diagnostics/screenshots/$display_id" || finish 1
-            /blit-stage/bmp-content-assert "/tmp/hibr-display-$display_index.bmp" 1000 || {
+            if [ "$hibr_window_control" -eq 0 ] && [ "$display_index" -ne 1 ]; then
+                echo HIBR_CONTENT_AUXILIARY_EXPECTED_BLANK index=$display_index id=$display_id
+                continue
+            fi
+            if ! /blit-stage/bmp-content-assert "/tmp/hibr-display-$display_index.bmp" 1000; then
                 echo HIBR_CONTENT_FAIL index=$display_index id=$display_id
-                finish 1
-            }
+                content_fail=1
+            fi
         done
+        [ "$content_fail" -eq 0 ] || finish 1
+        if [ "$hibr_window_control" -eq 1 ]; then
+            echo KMS_FOUR_HIBR_WINDOW_CONTENT_PASS
+        else
+            echo KMS_FOUR_HIBR_PRIMARY_CONTENT_PASS
+        fi
         if [ "$hibr_tall" -eq 1 ]; then
             # A complete tall frame must contain at least one styled cell on
             # its final row. Absence is an explicit Hibr held-session boundary

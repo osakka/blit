@@ -54,6 +54,8 @@ int main(int argc, char **argv)
         }
     }
     fclose(file);
+    printf("BMP_CONTENT_RESULT visible_samples=%u minimum=%u\n",
+           visible, minimum);
     if (visible < minimum)
         return 1;
     printf("BMP_CONTENT_PASS visible_samples=%u minimum=%u\n",

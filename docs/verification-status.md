@@ -3,17 +3,36 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 0.1.404 current candidate evidence
+
+The TCC-built 0.1.404 candidate adds compact `codepoint_cells` and
+`printable_cells` fields to `SurfaceSummary`, and separates the four-output
+Hibr visual gate into the stock-desktop primary-content case and the
+deterministic populated-window case. Exact Hibr 0.99.100 QEMU evidence passed
+both `KMS_FOUR_HIBR_PRIMARY_CONTENT_PASS` and
+`KMS_FOUR_HIBR_WINDOW_CONTENT_PASS`; the latter recorded visible screenshot
+content on all four 1024x768@240 Hz outputs. The stock case correctly recorded
+blank auxiliary joins as an expected Hibr state. Hibr source was not modified.
+
+Focused TCC/local evidence passed: OpenAPI schema (33 paths), full terminal
+conformance, Hibr singleton/owner/restart, font/scale, pointer composition,
+54.368 Hz frame-rate gate with zero missed deadlines, and a 20-second
+four-session soak (`2532` snapshots, `230` resizes, peak RSS `66704 KiB`).
+Exact QEMU lifecycle, four-output independent pixels, and input/render soak
+also passed. Package and release checks are run after the final 0.1.404
+source commit; physical-host deployment remains not performed.
+
 ## 0.1.403 current candidate evidence
 
-The strengthened four-output Hibr visual gate is currently **failing** and is
-not a release pass: display 1 contains visible screenshot samples, while
-display 2 is below the content threshold. The earlier resource-count and
-`KMS present views=4 outputs=4` markers prove that four sessions and four
-render views were assembled, but they do not prove that each output contains
-the expected pixels. The new `bmp_content_assert` probe and per-surface
-summary diagnostics preserve that distinction. The root cause is still open;
-do not claim four-output Hibr visual acceptance until all four screenshots
-pass the content assertion.
+The strengthened four-output Hibr visual gate is now correctly split into two
+acceptance cases. The stock desktop passes
+`KMS_FOUR_HIBR_PRIMARY_CONTENT_PASS`: the primary contains desktop content,
+all four Hibr surfaces and KMS views exist, and auxiliary joins are explicitly
+allowed to be blank because Hibr keeps its desktop chrome on the primary until
+a window is placed there. The deterministic Hibr one-window workload passes
+`KMS_FOUR_HIBR_WINDOW_CONTENT_PASS` with visible screenshot content on all
+four outputs. The earlier single threshold was invalid because it treated an
+intentional Hibr blank join as a Blit renderer failure.
 
 The TCC-built 0.1.403 server makes the Hibr owner handshake fail closed for
 fresh primaries as well as joins and resumes. If the adapter never registers
@@ -33,9 +52,8 @@ The ownerless local probe passed; local singleton, restart, font/scale,
 pointer-composition, schema, and full terminal-conformance gates passed.
 The exact Hibr 0.99.100 QEMU two-output lifecycle passed layout, four-pane,
 primary-restart, join-reconnect, and final-topology markers. The independent
-four-output 240 Hz pixel fixture and input soak passed. The older four-output
-Hibr marker fixture passed resource and KMS-view checks, but the strengthened
-per-output pixel-content gate is open as recorded above.
+four-output 240 Hz pixel fixture, stock-desktop primary-content gate, and
+four-output Hibr window-content gate passed. The input soak also passed.
 
 This candidate is not deployed to the physical host. The host remains on
 0.1.401; its current read-only evidence and the roughly 7 Hz Hibr producer

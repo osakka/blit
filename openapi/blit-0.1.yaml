@@ -1766,7 +1766,8 @@ components:
       additionalProperties: false
     SurfaceSummary:
       type: object
-      required: [id, revision, width, height, non_empty_cells, cursor,
+      required: [id, revision, width, height, non_empty_cells, codepoint_cells,
+                 printable_cells, cursor,
                  graphics_images, damage]
       properties:
         id: {$ref: '#/components/schemas/ResourceId'}
@@ -1774,6 +1775,14 @@ components:
         width: {type: integer, minimum: 1}
         height: {type: integer, minimum: 1}
         non_empty_cells: {type: integer, minimum: 0}
+        codepoint_cells:
+          type: integer
+          minimum: 0
+          description: Cells containing a codepoint, including spaces.
+        printable_cells:
+          type: integer
+          minimum: 0
+          description: Cells containing a printable codepoint.
         cursor: {$ref: '#/components/schemas/Cursor'}
         graphics_images: {type: integer, minimum: 0}
         damage:

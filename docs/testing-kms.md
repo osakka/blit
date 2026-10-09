@@ -275,7 +275,16 @@ overlay target remain bound to the selected output rather than merely proving
 that four output objects exist.
 Adding `blit.hibr_four=1` to the same kernel command line replaces those probe
 sessions with one primary Hibr desktop and three `desktop --join` clients; the
-fixture then requires `KMS_FOUR_HIBR_PASS` with four Hibr-backed surfaces.
+fixture then requires `KMS_FOUR_HIBR_PRIMARY_CONTENT_PASS` with four
+Hibr-backed surfaces. Hibr deliberately keeps its bar and desktop chrome on
+the primary display; an auxiliary join can therefore be a valid blank screen
+until Hibr places a window there. The fixture records that as
+`HIBR_CONTENT_AUXILIARY_EXPECTED_BLANK`, not as a renderer failure.
+Adding `blit.hibr_window_control=1` selects the repository's deterministic
+Hibr one-window workload for the same primary and join arrangement and
+requires `KMS_FOUR_HIBR_WINDOW_CONTENT_PASS`, with visible pixels on all four
+outputs. This separates Hibr's intended blank auxiliary state from Blit's
+ability to compose populated joined output surfaces.
 For the tall-pane lifecycle boundary, add `blit.hibr_tall=1` as well. This is
 a diagnostic-only variant that creates four `240x135` Hibr surfaces and
 checks for styled cells on the final row. The current released Hibr session

@@ -3188,8 +3188,19 @@ static void surface_summary_json(const BlitSurface *surface,
     int x;
     int y;
     int non_empty = 0;
+    int codepoint_cells = 0;
+    int printable_cells = 0;
     int graphics = 0;
 
+    for (y = 0; y < surface->height; ++y)
+        for (x = 0; x < surface->width; ++x)
+            if (surface->codepoints[y][x] != 0)
+                ++codepoint_cells;
+    for (y = 0; y < surface->height; ++y)
+        for (x = 0; x < surface->width; ++x)
+            if (surface->codepoints[y][x] >= 0x20 &&
+                surface->codepoints[y][x] != 0x7f)
+                ++printable_cells;
     for (y = 0; y < surface->height; ++y)
         for (x = 0; x < surface->width; ++x)
             if (surface->codepoints[y][x] != 0 ||
@@ -3208,12 +3219,14 @@ static void surface_summary_json(const BlitSurface *surface,
     snprintf(body, capacity,
              "{\"id\":\"surface-%llu\",\"revision\":%llu,"
              "\"width\":%d,\"height\":%d,\"non_empty_cells\":%d,"
+             "\"codepoint_cells\":%d,\"printable_cells\":%d,"
              "\"cursor\":{\"x\":%d,\"y\":%d,\"visible\":%s,"
              "\"style\":%d},\"graphics_images\":%d,"
              "\"damage\":{\"valid\":%s,\"x\":%d,\"y\":%d,"
              "\"width\":%d,\"height\":%d}}",
              surface->id, surface->revision, surface->width, surface->height,
-             non_empty, surface->cursor_x, surface->cursor_y,
+             non_empty, codepoint_cells, printable_cells,
+             surface->cursor_x, surface->cursor_y,
              surface->cursor_visible ? "true" : "false", surface->cursor_style,
              graphics, surface->damage_valid ? "true" : "false",
              surface->damage_x, surface->damage_y, surface->damage_width,
