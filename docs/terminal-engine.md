@@ -131,9 +131,11 @@ attachment, focus, and input-route target.
 The application keypad state accepts both the DEC private mode (`CSI ? 66 h/l`)
 and the legacy VT selectors (`ESC =` / `ESC >`). DEC screen alignment (`ESC # 8`)
 is implemented as a full-grid `E` fill for diagnostics and terminal probes.
-Legacy X10 mouse mode (`CSI ? 9 h/l`) and DEC private mode reports for
-alternate-screen modes (`47`, `1047`, `1049`) and mouse mode `9` are retained
-consistently with Hibr's terminal model.
+   Legacy X10 mouse mode (`CSI ? 9 h/l`) and DEC private mode reports for
+   alternate-screen modes (`47`, `1047`, `1049`) and mouse mode `9` are retained
+   consistently with Hibr's terminal model.
+   Deferred-wrap erase and `CSI S/T` scroll-up/scroll-down behavior are covered
+   by the public conformance gate as well.
 
 Supported terminal status queries include device attributes (`CSI c`), device
 status (`CSI 5 n`), cursor position (`CSI 6 n`), and DEC mode reports

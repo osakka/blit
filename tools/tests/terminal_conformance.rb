@@ -644,6 +644,11 @@ snapshot = run_case(base, 'erase-line-to-cursor', "printf 'abc\\033[1D\\033[1K'"
 cells = cell_map(snapshot)
 raise 'erase line left cells' if cells.keys.any? { |x, y| y == 0 }
 
+snapshot = run_case(base, 'erase-pending-wrap',
+                    "printf '1234\\033[KZ'", width: 4, height: 2)
+assert_equal('123Z', row_text(snapshot),
+             'erase consumes deferred wrap before printing')
+
 snapshot = run_case(base, 'insert-character', "printf 'abcd\\033[2D\\033[2@X'")
 cells = cell_map(snapshot)
 assert_equal('a', cells.fetch([0, 0]).fetch('text'), 'insert prefix')
@@ -803,6 +808,15 @@ snapshot = run_case(base, 'scroll', "printf 'a\\nb\\nc'", height: 2)
 cells = cell_map(snapshot)
 assert_equal('b', cells.fetch([0, 0]).fetch('text'), 'scroll first row')
 assert_equal('c', cells.fetch([0, 1]).fetch('text'), 'scroll second row')
+
+snapshot = run_case(base, 'scroll-up-down',
+                    "printf '1\\r\\n2\\r\\n3\\r\\n4\\033[2S\\033[1T'",
+                    height: 6)
+cells = cell_map(snapshot)
+assert_equal('3', cells.fetch([0, 1]).fetch('text'),
+             'scroll-down restores scrolled row')
+assert_equal('4', cells.fetch([0, 2]).fetch('text'),
+             'scroll-down preserves row order')
 
 snapshot = run_case(base, 'alternate-screen', "printf 'main\\033[?1049h\\033[Halt\\033[?1049l'")
 cells = cell_map(snapshot)
