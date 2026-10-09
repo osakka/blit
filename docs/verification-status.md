@@ -3,6 +3,17 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## Current 0.1.396 live glyph geometry acceptance
+
+The live host accepted 0.1.396 and reported SDL3/OpenGL ES2 with
+`render.glyph_path=geometry-batch`. A fresh API-launched Hibr desktop produced
+a clean framebuffer with the wallpaper, menu, icons, and terminal status
+legible; no coloured-dot glyph corruption was observed. The 60 Hz output
+reported zero missed deadlines. During a five-second live sample the output
+recorded 232 presents (about 46 Hz) while the desktop workload was active.
+The Hibr sessions were deleted afterward and the live resource counts returned
+to zero. `BLIT_SDL_GLYPH_BATCH=off` remains the explicit rollback path.
+
 ## Current 0.1.394 font API and left-edge artifact evidence
 
 The TCC-built 0.1.394 server passes the font API gate: profile enumeration,

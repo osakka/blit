@@ -2,7 +2,7 @@
 
 ## Status
 
-Superseded by the 0.1.396 live geometry acceptance experiment.
+Accepted for 0.1.396 after the live geometry acceptance experiment.
 
 ## Context
 
@@ -25,16 +25,15 @@ renderer. Keep the immediate `SDL_RenderTexture` path available with
 `BLIT_SDL_GLYPH_BATCH=off` as a bounded rollback switch. The diagnostics API
 reports `render.glyph_path` as `immediate-texture`, `geometry-batch`, or `kms`.
 
-This is a reversible performance experiment. The live acceptance gate must
-prove equivalent glyph output before the default is retained.
+This is a reversible performance decision. The live acceptance gate proved
+equivalent glyph output before the default was retained.
 
 ## Verification
 
 - Local TCC build succeeds.
 - Existing SDL glyph, pointer atomicity, and wallpaper pointer-stress gates
   pass.
-- The live acceptance test is: install the candidate, verify
-  `render.glyph_path=geometry-batch`, capture the unchanged Hibr desktop, and
-  compare glyph legibility and frame timing with the immediate path. If the
-  live visual gate fails, set `BLIT_SDL_GLYPH_BATCH=off` and retain the
-  evidence; do not change Hibr.
+- The 0.1.396 live acceptance test verified `render.glyph_path=geometry-batch`
+  on OpenGL ES2, captured the unchanged Hibr desktop with legible glyphs, and
+  recorded zero missed deadlines. `BLIT_SDL_GLYPH_BATCH=off` remains the
+  bounded rollback switch; Hibr was not changed.
