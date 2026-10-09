@@ -1,9 +1,33 @@
-# blit roadmap
+# Blit roadmap
 
 The roadmap is ordered by dependency. A later milestone must not become a
 second, parallel implementation of an earlier one.
 
-## Current position
+## Current position — release 0.1.401
+
+The current release is a contract-correction and evidence release. The
+versioned terminal-input operation is now unambiguously published at
+`POST /v1/terminal-sessions/{session_id}/input`; the parent session resource
+contains lifecycle operations only. The OpenAPI schema gate, TCC build,
+terminal conformance suite, font/scale/glyph gates, resize and soak gates,
+package gate, QEMU input/four-output/Hibr lifecycle gates, and live API
+deployment verification pass for 0.1.401. The exact package and source hashes,
+commands, and limitations are recorded in
+[`releases/0.1.401.yaml`](../releases/0.1.401.yaml) and
+[`verification-status.md`](verification-status.md).
+
+This is not a physical-host completion claim. The authorized live host
+currently exposes one output. Physical multi-monitor geometry, physical evdev
+button tracing, physical 120/240 Hz scanout, and full live Hibr geometry are
+still open. QEMU/VKMS remains the repeatable multi-output acceptance oracle;
+the physical host remains the final host-specific evidence boundary.
+
+The next engineering priority is therefore not another launcher or parallel
+renderer. It is closing those named hardware evidence gaps while preserving
+the single canonical terminal state, atomic frame boundary, API diagnostics,
+and one-primary-Hibr-owner invariants below.
+
+## Historical platform position
 
 The platform capability gate is passing in the deterministic VKMS fixture:
 

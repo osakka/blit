@@ -96,7 +96,8 @@ requests. Never put credentials in source, logs, screenshots, or commits.
 tools/build-tcc.sh build/blit/blit-server server
 ruby tools/tests/terminal_conformance.rb
 ruby tools/tests/hibr_singleton_gate.rb
-tools/tests/package_artifact_gate.sh /tmp/blit-release-artifacts/blit_0.1.400-1_amd64.deb
+tools/tests/api_schema_gate.rb
+tools/tests/package_artifact_gate.sh /tmp/blit-release-artifacts/blit_0.1.401-1_amd64.deb
 ```
 
 The package is a derived release artifact. Build it only after the source,
@@ -109,6 +110,23 @@ The exact test matrix and QEMU commands are in
 The development workflow requires one source-of-truth change, a focused gate,
 an evidence update, `git diff --check`, and a deliberate commit/push for each
 cycle.
+
+## API contract at a glance
+
+The API is intentionally discoverable and revisioned. A client should treat
+the following sequence as a transaction boundary:
+
+```text
+version -> capabilities -> outputs/topology -> session -> surface/input
+        -> stream/diagnostics -> cleanup -> zero-resource verification
+```
+
+`openapi/blit-0.1.yaml` is the machine-readable contract; `docs/api.md` is
+the operator and client guide. The schema gate checks that the documented
+terminal-input route remains `POST /v1/terminal-sessions/{id}/input`, that
+the parent session route remains lifecycle-only, and that the public path
+count stays aligned with the release evidence. This prevents a client from
+silently depending on a route that the server does not implement.
 
 ## Documentation map
 

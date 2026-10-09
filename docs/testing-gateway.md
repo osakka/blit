@@ -307,7 +307,7 @@ tools/probes/stage_hibr_qemu.sh /tmp/hibr-initroot-current /path/to/hibr
 # `HIBR_PRIMARY_RESTART_PASS`, `HIBR_JOIN_RECONNECT_PASS`, and
 # `HIBR_PANE_MATRIX_PASS`. The repository-owned host wrapper asserts all
 # markers and rejects a clean QEMU poweroff when any marker is missing:
-tools/tests/qemu_hibr_lifecycle_gate.sh /tmp/blit-0.1.400-input.initramfs.gz
+tools/tests/qemu_hibr_lifecycle_gate.sh /tmp/blit-0.1.401-input.initramfs.gz
 # Add `blit.hibr_stock=1` to exercise that stock-session entrypoint rather
 # than the dedicated window-control workload.
 ```

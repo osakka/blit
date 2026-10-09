@@ -4,6 +4,22 @@ This is the human-facing guide to the API. The normative contract is always
 [`openapi/blit-0.1.yaml`](../openapi/blit-0.1.yaml); this guide explains the
 resource model and safe ordering of calls without duplicating every schema.
 
+## Contract-first client rule
+
+Treat `/v1/version` and the OpenAPI document as a compatibility handshake,
+not as optional metadata. Before issuing a mutation, a client should:
+
+1. verify the returned `api_version` is supported;
+2. discover the capability and revision of the target resource;
+3. send the schema-defined body with `If-Match` and an `Idempotency-Key` when
+   the operation is retryable; and
+4. resynchronize from the authoritative `GET` endpoint after a conflict,
+   stream gap, reconnect, or unknown resource event.
+
+The guide gives safe ordering and examples. It is deliberately not a second
+schema: field names, enums, status codes, limits, and binary message framing
+come only from the OpenAPI document.
+
 ## Endpoint and authentication
 
 The default development endpoint is `http://HOST:8080`. All public resources
@@ -84,6 +100,45 @@ For mutations, first fetch the resource revision, send the revision using the
 schema-defined precondition, and supply an `Idempotency-Key` for a retryable
 operation. A revision conflict means “resynchronize”: fetch authoritative
 state again, reconcile intent, and retry only if the operation is still valid.
+
+## Minimal session transaction
+
+The following is a complete text-session shape. The exact required and
+optional fields are defined by `CreateTerminalSession`; the example uses the
+server's ordinary shell policy and an explicit first display. Preserve every
+returned opaque ID rather than deriving one locally.
+
+```sh
+set -eu
+base=${BLIT_URL:-http://127.0.0.1:8080}
+key="blit-$(date +%s)-$$"
+
+session=$(curl --fail --silent --show-error \
+  --header 'Content-Type: application/json' \
+  --header "Idempotency-Key: $key" \
+  --data '{"command":"/bin/sh","display_id":"display-1"}' \
+  "$base/v1/terminal-sessions")
+printf '%s\n' "$session"
+session_id=$(printf '%s' "$session" | jq -r '.id')
+
+# Input is a subresource. The parent session route is not an input endpoint.
+curl --fail --silent --show-error \
+  --header 'Content-Type: application/json' \
+  --data '{"data":"printf '\''BLIT API OK\\n'\''\\n","mode":"raw"}' \
+  "$base/v1/terminal-sessions/$session_id/input"
+
+curl --fail --silent --show-error "$base/v1/diagnostics/runtime"
+curl --fail --silent --show-error -X DELETE \
+  "$base/v1/terminal-sessions/$session_id"
+curl --fail --silent --show-error "$base/v1/diagnostics"
+```
+
+In a production client, replace the shell parsing with a JSON library, use a
+stable idempotency key across retries, and verify that cleanup leaves no
+session, surface, route, or stream owned by the transaction. A `202` input
+receipt means the bounded PTY write path accepted bytes; it does not mean the
+terminal has already rendered them. Observe the surface revision or stream
+event and use runtime diagnostics to measure presentation.
 
 ## Core lifecycle
 
