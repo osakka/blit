@@ -1,0 +1,76 @@
+release: 0.1.411
+package: blit_0.1.411-1_amd64.deb
+package_sha256: 547e21d1290b82cc13263b1b4c84a95a46e91bd6d9fc8645ca0efcd140c7e10d
+source_commit: 2ee095336d360a21f259cb5ded0172d7b3d2960f
+package_documentation_commit: 2ee095336d360a21f259cb5ded0172d7b3d2960f
+server_binary_sha256: e65fc129232257d39a1fb5321ca3af1790ddbe8f14494cfb84e6ede780b9df85
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: 4ea24344606a3f1ef64ab7b07be73d52d28ee796e71347a91eb974eda5faf0e1
+hibr_root: /tmp/hibr-0.99.100
+hibr_version: 0.99.100
+tcc_build_acceptance: pass
+openapi_yaml: pass
+api_schema_gate: pass
+package_artifact_acceptance: pass
+network_auth_acceptance: pass_api_token_injected
+terminal_conformance: pass
+session_lifecycle_acceptance: pass
+session_write_resize_acceptance: pass
+stream_replay_acceptance: pass
+font_api_acceptance: pass
+hibr_font_manifest_acceptance: pass
+glyph_geometry_local_pixel_acceptance: pass
+sdl_glyph_filter_acceptance: pass
+external_pointer_composition: pass
+pointer_damage_atomic_acceptance: pass
+pointer_wallpaper_stress_acceptance: pass
+hidden_cursor_damage_acceptance: pass
+sdl_background_batch_acceptance: pass
+sdl_graphics_cache_acceptance: pass
+sdl_wallpaper_damage_acceptance: pass
+screenshot_overlay_acceptance: pass
+pixel_frame_acceptance: pass
+hibr_singleton_local_acceptance: pass
+hibr_resume_guard_acceptance: pass
+restart_gate: pass
+shutdown_gate: pass
+update_idle_timeout_acceptance: pass
+update_reset_acceptance: pass
+update_cancel_acceptance: pass
+frame_rate_settled_acceptance: pass
+terminal_soak_120s_acceptance: pass
+screenshot_nonblocking_live_acceptance: pass
+qemu_hibr_lifecycle_acceptance: not_rerun_candidate
+qemu_four_output_pixel_acceptance: not_rerun_candidate
+qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
+live_deployment: pass
+live_current_version: 0.1.411
+live_unauthenticated_hibr_desktop: pass_32400_cells
+live_authenticated_hibr_desktop: pending_operator_token
+live_physical_multi_display: unavailable_one_output
+live_physical_button_trace_contract: open
+physical_evdev_acceptance: open
+physical_multi_monitor_acceptance: open
+physical_high_refresh_acceptance: open
+notes: >-
+  Closes the ADR 0055 gap where a configured BLIT_AUTH_TOKEN made the Hibr
+  desktop unstartable. The local suite was run with tools/run-gates.sh,
+  introduced in 3504df0; its result for this build is pass=29 skip=3 with the
+  package gate deferred until this manifest and package existed. The
+  authenticated Hibr desktop is the gate that proves the fix and requires
+  Hibr. The package was deployed to 192.168.10.54, which reports 0.1.411, and
+  the unauthenticated Hibr path is unchanged by this release: a fresh
+  packaged launch registered its owner and reached 32,400 printable cells at
+  240x135 with the menu bar, wallpaper, icons and status line present.
+  Enabling BLIT_AUTH_TOKEN on that host is an operator action that this
+  session was not permitted to perform, so the authenticated case remains
+  pending and this release does not claim it.
+
+  Operational note recorded while deploying: a supervised restart leaves the
+  Hibr hold running, so the next packaged launch refuses with "blit is
+  already running -- add --resume to reattach". That message reaches only the
+  surface, never the API, so the session reports state=running with 127
+  printable cells. Reattaching with --resume produced a broken surface that
+  wrote "-1" on all 134 rows. Retiring the detached hold and launching fresh
+  recovered it. This is the restore step that issue #27 asks the deploy tool
+  to own.
