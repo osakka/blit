@@ -1085,6 +1085,31 @@ static void stop_server(int signal_number)
     blit_running = 0;
 }
 
+static int restart_server_process(const BlitRuntime *runtime)
+{
+    char port_text[16];
+    char executable[PATH_MAX];
+    ssize_t length;
+
+    if (runtime == NULL)
+        return -1;
+    snprintf(port_text, sizeof(port_text), "%d", runtime->listen_port);
+    /* The API restart contract applies equally to a package binary and to a
+       TCC-built fixture. Re-exec the exact running image first; otherwise a
+       development binary silently attempts to jump into a possibly absent
+       or unrelated installed release. */
+    length = readlink("/proc/self/exe", executable, sizeof(executable) - 1);
+    if (length > 0 && length < (ssize_t)sizeof(executable)) {
+        executable[length] = '\0';
+        execl(executable, "blit-server", port_text, (char *)NULL);
+    }
+    /* Package updates normally reach this path only if procfs is unavailable.
+       Keep the stable package location as the explicit deployment fallback. */
+    execl("/usr/lib/blit/bin/blit-server", "blit-server",
+          port_text, (char *)NULL);
+    return -1;
+}
+
 static int send_all(int fd, const void *data, size_t length)
 {
     const char *bytes = (const char *)data;
@@ -14587,10 +14612,7 @@ int main(int argc, char **argv)
     if (runtime.sdl_ready)
         SDL_Quit();
     if (blit_restart_requested) {
-        char port_text[16];
-        snprintf(port_text, sizeof(port_text), "%d", runtime.listen_port);
-        execl("/usr/lib/blit/bin/blit-server", "blit-server",
-              port_text, (char *)NULL);
+        restart_server_process(&runtime);
         fprintf(stderr, "blit: update restart failed: %s\n", strerror(errno));
         return 1;
     }

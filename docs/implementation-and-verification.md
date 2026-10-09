@@ -222,6 +222,8 @@ resource limits, diagnostics, and bounded recovery.
 Tests:
 
 - kill/restart primary and join processes;
+- restart the exact Blit executable through `/v1/control/restart` and verify
+  that the same binary returns on the same port;
 - terminate sessions during writes and resizes;
 - disconnect/reconnect stream clients;
 - force replay gaps and verify snapshot repair;

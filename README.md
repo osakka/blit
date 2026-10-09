@@ -96,6 +96,7 @@ requests. Never put credentials in source, logs, screenshots, or commits.
 tools/build-tcc.sh build/blit/blit-server server
 ruby tools/tests/hibr_singleton_gate.rb
 tools/tests/api_schema_gate.rb
+tools/tests/restart_gate.sh
 tools/tests/package_artifact_gate.sh /tmp/blit-release-artifacts/blit_0.1.401-1_amd64.deb
 ```
 

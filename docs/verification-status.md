@@ -17,6 +17,9 @@ conformance, Hibr singleton ownership, font/scale, resize, SDL glyph/pixel,
 frame-rate, binary pixel-frame, package, and 20-second four-session soak
 gates. The latest local soak recorded `2300` snapshots and `210` resizes with
 peak RSS `80636 KiB` under the `131072 KiB` limit. No Hibr source was changed.
+The restart gate also re-executes the exact TCC-built binary through
+`/v1/control/restart`, preserves its port, and returns a ready runtime; it no
+longer depends on the package installation path.
 
 Fresh QEMU evidence also passes: the lifecycle/rejoin wrapper emitted all
 four required markers, and the four-output direct-KMS/Hibr fixture reached

@@ -256,7 +256,9 @@ overlays are downstream of terminal state and cannot silently replace it.
 `POST /v1/control/shutdown` is an asynchronous clean stop. It terminates
 managed child process groups and releases outputs; it cannot restart itself.
 Use the host supervisor to start it again. `/v1/control/restart` requests an
-orderly in-process restart. Package installation uses the separate
+orderly restart of the exact executable currently serving the API, preserving
+the listen port; this also works for a TCC-built development fixture without
+silently switching to another installed binary. Package installation uses the separate
 `/v1/control/update` flow and must be verified through
 `/v1/control/update/status` and `/v1/version`.
 
