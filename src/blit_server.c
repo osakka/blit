@@ -660,6 +660,8 @@ static SDL_Texture *create_sdl_glyph_atlas(SDL_Renderer *renderer,
 static const char *pane_surface_id(const BlitRuntime *runtime,
                                    const BlitPane *pane);
 static void discover_panes(BlitRuntime *runtime);
+static BlitPane *find_pane_id(BlitRuntime *runtime, const char *pane_id);
+static int display_index_for_id(const BlitRuntime *runtime, const char *id);
 static void focus_session(BlitRuntime *runtime, BlitSession *target);
 static void disable_input_routes_for_target(BlitRuntime *runtime,
                                             const char *target_id);
@@ -687,6 +689,8 @@ static void pixel_frame_reset(BlitRuntime *runtime, BlitStream *stream,
                               int release_image);
 static void update_status_json(const BlitRuntime *runtime, char *body,
                                size_t capacity);
+static int resize_session_surface(BlitSession *session, BlitSurface *surface,
+                                  int width, int height);
 static int update_authorized(const BlitRuntime *runtime, const char *request);
 static void cancel_update_upload(BlitRuntime *runtime, int fd,
                                  const char *request);
@@ -1846,12 +1850,13 @@ static void server_json(const BlitRuntime *runtime, char *body, size_t capacity)
              "\"audio-inventory\",\"input-devices\",\"input-routes\","
              "\"network-terminal-input\",\"diagnostics\","
              "\"runtime-diagnostics\",\"lifecycle-control\","
-             "\"effects\",\"overlays\"],\"display_count\":%d,"
+             "\"effects\",\"overlays\",\"font-selection\"],\"display_count\":%d,"
              "\"display_backend\":{\"name\":\"%s\",\"ready\":%s,"
              "\"error\":\"%s\"},\"resources\":{"
              "\"graphics\":\"/v1/graphics\",\"displays\":\"/v1/displays\","
              "\"audio\":\"/v1/audio\",\"input_devices\":\"/v1/input/devices\","
              "\"input_routes\":\"/v1/input/routes\",\"topology\":\"/v1/topology\","
+             "\"fonts\":\"/v1/fonts\","
              "\"diagnostics\":\"/v1/diagnostics\","
              "\"runtime_diagnostics\":\"/v1/diagnostics/runtime\","
              "\"effects\":\"/v1/effects\","
@@ -7812,6 +7817,119 @@ static int resize_session_surface(BlitSession *session, BlitSurface *surface,
     return 1;
 }
 
+static void fonts_json(const BlitRuntime *runtime, char *body, size_t capacity)
+{
+    char escaped_path[512];
+    const char *active_id;
+    size_t used = 0;
+    int i;
+    int first = 1;
+
+    active_id = blit_font_profile_for_path(runtime->font.path);
+    json_escape(runtime->font.path, escaped_path, sizeof(escaped_path));
+    used += (size_t)snprintf(body + used, capacity - used,
+        "{\"revision\":1,\"active\":{\"id\":\"%s\",\"path\":\"%s\","
+        "\"scale\":%d,\"cell_pixels\":{\"width\":%d,\"height\":%d}},"
+        "\"profiles\":[",
+        active_id, escaped_path, runtime->font_scale,
+        blit_font_width(&runtime->font) * runtime->font_scale,
+        blit_font_height(&runtime->font) * runtime->font_scale);
+    for (i = 0; i < blit_font_profile_count() && used + 128 < capacity; ++i) {
+        const char *id = blit_font_profile_id(i);
+        const char *path = blit_font_profile_path(i);
+        used += (size_t)snprintf(body + used, capacity - used,
+            "%s{\"id\":\"%s\",\"path\":\"%s\",\"available\":%s}",
+            first ? "" : ",", id, path, access(path, R_OK) == 0 ? "true" : "false");
+        first = 0;
+    }
+    snprintf(body + used, capacity - used, "]}");
+}
+
+static int font_path_for_id(const char *id, char *path, size_t capacity)
+{
+    int i;
+
+    if (id == NULL || id[0] == '\0')
+        return 0;
+    for (i = 0; i < blit_font_profile_count(); ++i) {
+        if (strcmp(id, blit_font_profile_id(i)) == 0) {
+            snprintf(path, capacity, "%s", blit_font_profile_path(i));
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int apply_font_configuration(BlitRuntime *runtime, const char *path,
+                                    int scale)
+{
+    BlitFont candidate;
+    int i;
+
+    if (runtime == NULL || path == NULL || path[0] == '\0' ||
+        scale < 1 || scale > 3)
+        return 0;
+    memset(&candidate, 0, sizeof(candidate));
+    if (strcmp(path, runtime->font.path) != 0 &&
+        blit_font_load_path(&candidate, path) != 0) {
+        blit_font_free(&candidate);
+        return 0;
+    }
+    if (candidate.data != NULL) {
+        blit_font_free(&runtime->font);
+        runtime->font = candidate;
+    }
+    runtime->font_scale = scale;
+    if (!runtime->direct_kms) {
+        for (i = 0; i < runtime->output_count; ++i) {
+            BlitOutput *output = &runtime->outputs[i];
+            if (output->glyph_atlas != NULL)
+                SDL_DestroyTexture(output->glyph_atlas);
+            output->glyph_atlas = create_sdl_glyph_atlas(
+                output->renderer, &runtime->font,
+                &output->glyph_atlas_columns);
+            SDL_SetRenderScale(output->renderer, (float)scale, (float)scale);
+            output->initialized = 0;
+        }
+    }
+    discover_panes(runtime);
+    for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
+        BlitSession *session = &runtime->sessions[i];
+        BlitSurface *surface;
+        BlitPane *pane;
+        int width;
+        int height;
+        if (!session->used)
+            continue;
+        session->terminal_cell_width = runtime_terminal_cell_width(runtime);
+        session->terminal_cell_height = runtime_terminal_cell_height(runtime);
+        pane = find_pane_id(runtime, session->pane_id);
+        surface = find_surface_id(runtime, session->id);
+        if (pane != NULL) {
+            width = pane->width;
+            height = pane->height;
+        } else if (surface != NULL) {
+            width = surface->width;
+            height = surface->height;
+        } else {
+            continue;
+        }
+        if (surface == NULL || !resize_session_surface(session, surface,
+                                                        width, height))
+            return 0;
+        if (session->hibr_process) {
+            session->attach_reassert_pending = 1;
+            session->attach_reassert_due_us = monotonic_us();
+            session->attach_reassert_attempts = 0;
+            session->attach_reassert_max_attempts = 32;
+        }
+        ++session->revision;
+    }
+    ++runtime->topology_revision;
+    runtime->render_pending = 1;
+    return 1;
+}
+
 /* Stop a PTY process group without allowing a misbehaving child to wedge the
    gateway.  Hibr may keep descendants alive after SIGTERM, so a blocking
    waitpid here would make DELETE, SIGINT, and SIGTERM unable to return. */
@@ -8995,6 +9113,49 @@ static void handle_request(int fd, BlitRuntime *runtime,
         return;
     }
 
+    if (strcmp(path, "/v1/fonts") == 0 && strcmp(method, "PUT") == 0) {
+        char font_id[128];
+        char font_path[256];
+        int requested_scale;
+        int has_scale = strstr(payload, "\"scale\"") != NULL;
+        int has_font_id = json_string(payload, "font_id", font_id,
+                                      sizeof(font_id));
+        if (!has_scale && !has_font_id) {
+            send_problem(fd, 400, "Bad Request", "font_configuration_empty",
+                         "font_id or scale is required.");
+            return;
+        }
+        requested_scale = runtime->font_scale;
+        if (has_scale && (!json_int(payload, "scale", &requested_scale) ||
+                          requested_scale < 1 || requested_scale > 3)) {
+            send_problem(fd, 400, "Bad Request", "invalid_font_scale",
+                         "scale must be an integer from 1 through 3.");
+            return;
+        }
+        if (has_font_id) {
+            if (!font_path_for_id(font_id, font_path, sizeof(font_path))) {
+                send_problem(fd, 404, "Not Found", "invalid_font_profile",
+                             "font_id is not a known Blit font profile.");
+                return;
+            }
+            if (access(font_path, R_OK) != 0) {
+                send_problem(fd, 404, "Not Found", "font_not_found",
+                             "The selected font profile is not installed.");
+                return;
+            }
+        } else {
+            snprintf(font_path, sizeof(font_path), "%s", runtime->font.path);
+        }
+        if (!apply_font_configuration(runtime, font_path, requested_scale)) {
+            send_problem(fd, 422, "Unprocessable Entity", "font_apply_failed",
+                         "The font could not be loaded or applied to all sessions.");
+            return;
+        }
+        fonts_json(runtime, body, sizeof(body));
+        send_http(fd, 200, "OK", "application/json", body);
+        return;
+    }
+
     if (strncmp(path, "/v1/diagnostics/screenshots/",
                 strlen("/v1/diagnostics/screenshots/")) == 0 &&
         strcmp(method, "GET") == 0) {
@@ -9922,6 +10083,9 @@ static void handle_request(int fd, BlitRuntime *runtime,
         send_http(fd, 200, "OK", "application/json", body);
     } else if (strcmp(path, "/v1/version") == 0) {
         version_json(body, sizeof(body));
+        send_http(fd, 200, "OK", "application/json", body);
+    } else if (strcmp(path, "/v1/fonts") == 0) {
+        fonts_json(runtime, body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
     } else if (strcmp(path, "/v1/diagnostics") == 0) {
         diagnostics_json(runtime, body, sizeof(body));

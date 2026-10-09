@@ -21,10 +21,16 @@ typedef struct {
     size_t unicode_capacity;
     struct BlitFontGlyphMap *unicode_lookup;
     size_t unicode_lookup_capacity;
+    char path[256];
 } BlitFont;
 
 void blit_font_load(BlitFont *font);
+int blit_font_load_path(BlitFont *font, const char *path);
 void blit_font_free(BlitFont *font);
+int blit_font_profile_count(void);
+const char *blit_font_profile_id(int index);
+const char *blit_font_profile_path(int index);
+const char *blit_font_profile_for_path(const char *path);
 size_t blit_font_glyph_index(const BlitFont *font, uint32_t codepoint);
 uint32_t blit_font_glyph_row(const BlitFont *font, size_t glyph,
                              uint32_t codepoint, int row);

@@ -53,6 +53,42 @@ paths:
                 additionalProperties: false
         default:
           $ref: '#/components/responses/Problem'
+  /v1/fonts:
+    get:
+      tags: [terminals]
+      operationId: getFontProfiles
+      summary: List selectable fonts and the active logical cell size
+      responses:
+        '200':
+          description: Active font configuration and installed profiles
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FontProfiles'
+        default:
+          $ref: '#/components/responses/Problem'
+    put:
+      tags: [terminals]
+      operationId: replaceFontConfiguration
+      summary: Select a font profile and/or logical font scale
+      description: >-
+        Blit recomputes pane geometry and resizes attached PTYs. Hibr is not
+        modified. Scale is bounded to 1 through 3.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FontConfiguration'
+      responses:
+        '200':
+          description: Applied font configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FontProfiles'
+        default:
+          $ref: '#/components/responses/Problem'
   /v1/graphics:
     get:
       tags: [hardware]
@@ -951,6 +987,45 @@ components:
         width: {type: integer, minimum: 1}
         height: {type: integer, minimum: 1}
       additionalProperties: false
+    FontProfile:
+      type: object
+      required: [id, path, available]
+      properties:
+        id: {$ref: '#/components/schemas/ResourceId'}
+        path: {type: string}
+        available: {type: boolean}
+      additionalProperties: false
+    FontConfiguration:
+      type: object
+      minProperties: 1
+      properties:
+        font_id: {$ref: '#/components/schemas/ResourceId'}
+        scale: {type: integer, minimum: 1, maximum: 3}
+      additionalProperties: false
+    FontProfiles:
+      type: object
+      required: [revision, active, profiles]
+      properties:
+        revision: {$ref: '#/components/schemas/Revision'}
+        active:
+          type: object
+          required: [id, path, scale, cell_pixels]
+          properties:
+            id: {$ref: '#/components/schemas/ResourceId'}
+            path: {type: string}
+            scale: {type: integer, minimum: 1, maximum: 3}
+            cell_pixels:
+              type: object
+              required: [width, height]
+              properties:
+                width: {type: integer, minimum: 1}
+                height: {type: integer, minimum: 1}
+              additionalProperties: false
+          additionalProperties: false
+        profiles:
+          type: array
+          items: {$ref: '#/components/schemas/FontProfile'}
+      additionalProperties: false
     ServerDetails:
       type: object
       required: [id, name, api_version, revision, capabilities, display_count, display_backend, resources]
@@ -973,7 +1048,7 @@ components:
           additionalProperties: false
         resources:
           type: object
-          required: [graphics, displays, audio, input_devices, input_routes, topology, diagnostics, runtime_diagnostics]
+          required: [graphics, displays, audio, input_devices, input_routes, topology, fonts, diagnostics, runtime_diagnostics]
           properties:
             graphics: {type: string}
             displays: {type: string}
@@ -981,6 +1056,7 @@ components:
             input_devices: {type: string}
             input_routes: {type: string}
             topology: {type: string}
+            fonts: {type: string}
             diagnostics: {type: string}
             runtime_diagnostics: {type: string}
           additionalProperties: false

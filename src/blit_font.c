@@ -1,5 +1,6 @@
 #include "blit_font.h"
 
+#include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -232,28 +233,70 @@ static int font_load_file(BlitFont *font, const char *path)
     return 0;
 }
 
+typedef struct {
+    const char *id;
+    const char *path;
+} BlitFontProfile;
+
+static const BlitFontProfile blit_font_profiles[] = {
+    {"blit-hibr-terminus16", "/usr/lib/blit/fonts/Blit-Hibr-Terminus16.psf"},
+    {"uni2-terminus16", "/usr/lib/blit/fonts/Uni2-Terminus16.psf"},
+    {"lat15-terminus16", "/usr/lib/blit/fonts/Lat15-Terminus16.psf"},
+    {"uni2-console", "/usr/share/consolefonts/Uni2-Terminus16.psf"},
+    {"uni2-blit", "/usr/share/blit/Uni2-Terminus16.psf"},
+    {"uni2-fixed16", "/usr/share/consolefonts/Uni2-Fixed16.psf"},
+    {"lat15-console", "/usr/share/consolefonts/Lat15-Terminus16.psf"}
+};
+
+int blit_font_profile_count(void)
+{
+    return (int)(sizeof(blit_font_profiles) / sizeof(blit_font_profiles[0]));
+}
+
+const char *blit_font_profile_id(int index)
+{
+    if (index < 0 || index >= blit_font_profile_count()) return NULL;
+    return blit_font_profiles[index].id;
+}
+
+const char *blit_font_profile_path(int index)
+{
+    if (index < 0 || index >= blit_font_profile_count()) return NULL;
+    return blit_font_profiles[index].path;
+}
+
+const char *blit_font_profile_for_path(const char *path)
+{
+    int i;
+    if (path == NULL) return "custom";
+    for (i = 0; i < blit_font_profile_count(); ++i)
+        if (strcmp(path, blit_font_profiles[i].path) == 0)
+            return blit_font_profiles[i].id;
+    return "custom";
+}
+
+int blit_font_load_path(BlitFont *font, const char *path)
+{
+    if (font == NULL || path == NULL || path[0] == '\0') return -1;
+    blit_font_free(font);
+    if (font_load_file(font, path) != 0) return -1;
+    snprintf(font->path, sizeof(font->path), "%s", path);
+    fprintf(stderr, "blit: font=%s size=%dx%d glyphs=%lu mappings=%lu\n",
+            path, font->width, font->height,
+            (unsigned long)font->glyph_count,
+            (unsigned long)font->unicode_count);
+    return 0;
+}
+
 void blit_font_load(BlitFont *font)
 {
     const char *configured = getenv("BLIT_PSF_FONT");
-    const char *paths[8] = { configured,
-        "/usr/lib/blit/fonts/Blit-Hibr-Terminus16.psf",
-        "/usr/lib/blit/fonts/Uni2-Terminus16.psf",
-        "/usr/lib/blit/fonts/Lat15-Terminus16.psf",
-        "/usr/share/consolefonts/Uni2-Terminus16.psf",
-        "/usr/share/blit/Uni2-Terminus16.psf",
-        "/usr/share/consolefonts/Uni2-Fixed16.psf",
-        "/usr/share/consolefonts/Lat15-Terminus16.psf" };
     int i;
     if (font == NULL) return;
-    for (i = 0; i < 7; ++i) {
-        if (paths[i] != NULL && font_load_file(font, paths[i]) == 0) {
-            fprintf(stderr, "blit: font=%s size=%dx%d glyphs=%lu mappings=%lu\n",
-                    paths[i], font->width, font->height,
-                    (unsigned long)font->glyph_count,
-                    (unsigned long)font->unicode_count);
-            return;
-        }
-    }
+    if (configured != NULL && configured[0] != '\0' &&
+        blit_font_load_path(font, configured) == 0) return;
+    for (i = 0; i < blit_font_profile_count(); ++i)
+        if (blit_font_load_path(font, blit_font_profile_path(i)) == 0) return;
     fprintf(stderr, "blit: font unavailable; using built-in fallback\n");
 }
 
