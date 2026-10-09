@@ -18,6 +18,13 @@ at a 60 Hz SDL dummy target with zero missed deadlines. The API schema (33
 paths), full VT/UTF-8/Kitty/Sixel/Hibr terminal conformance, singleton,
 restart, and 20-second four-session soak gates passed; the soak remained below
 the 131072 KiB RSS ceiling.
+The focused current-source damage gates also passed:
+`SDL_WALLPAPER_DAMAGE_PASS` preserved the wallpaper pixel across an
+incremental cell commit, and `POINTER_WALLPAPER_STRESS_PASS` restored the
+under-pointer scene across six samples with three pointer-cache hits. These
+results cover Blit's local composition path; they do not convert the live
+host's absent graphics objects or zero physical evdev events into a Hibr or
+hardware acceptance claim.
 
 Fresh QEMU/VKMS images staged with the exact Hibr 0.99.100 checkout passed the
 four-output Hibr window-content gate on all four 1024x768@240 Hz outputs and
