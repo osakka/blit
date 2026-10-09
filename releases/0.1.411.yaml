@@ -46,7 +46,7 @@ qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
 live_deployment: pass
 live_current_version: 0.1.411
 live_unauthenticated_hibr_desktop: pass_32400_cells
-live_authenticated_hibr_desktop: pass_owner_registered
+live_authenticated_hibr_desktop: pass_production_service_32400_cells
 live_physical_multi_display: unavailable_one_output
 live_physical_button_trace_contract: open
 physical_evdev_acceptance: open
