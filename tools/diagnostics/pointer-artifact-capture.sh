@@ -5,6 +5,8 @@ base_url=${1:?usage: pointer-artifact-capture.sh http://host:8080 [output-dir] [
 output_dir=${2:-"diagnostics/pointer-$(date -u +%Y%m%dT%H%M%SZ)"}
 screenshots=${3:-no}
 mode=${4:-physical}
+session_id=${BLIT_SESSION_ID-}
+display_ids=${BLIT_DISPLAY_IDS-}
 
 case "$screenshots" in
     yes|no) ;;
@@ -44,10 +46,43 @@ get_optional_session() {
     esac
 }
 
+discover_session_id() {
+    [ -n "$session_id" ] && return 0
+    for candidate in $(seq 1 64); do
+        if curl --fail --silent --show-error --max-time 5 \
+            "$base_url/v1/terminal-sessions/$candidate" \
+            > "$output_dir/.session-probe.json"; then
+            session_id=$candidate
+            rm -f "$output_dir/.session-probe.json"
+            return 0
+        fi
+    done
+    rm -f "$output_dir/.session-probe.json"
+    echo "pointer capture: no live terminal session found; set BLIT_SESSION_ID" >&2
+    return 1
+}
+
+discover_display_ids() {
+    [ -n "$display_ids" ] && return 0
+    display_ids=$(python3 - "$output_dir/displays.json" <<'PY'
+import json
+import sys
+data = json.load(open(sys.argv[1]))
+ids = []
+for display in data.get("displays", data.get("outputs", [])):
+    value = display.get("id")
+    if value is not None:
+        value = str(value)
+        ids.append(value if value.startswith("display-") else "display-" + value)
+print(",".join(ids))
+PY
+)
+}
+
 capture() {
     local label=$1
     get "runtime-$label.json" /v1/diagnostics/runtime
-    get_optional_session "session-$label.json" /v1/terminal-sessions/1
+    get_optional_session "session-$label.json" "/v1/terminal-sessions/$session_id"
     get "trace-pointer-motion-$label.json" \
         '/v1/diagnostics/trace?kind=pointer_motion'
     get "trace-pointer-button-$label.json" \
@@ -57,20 +92,26 @@ capture() {
     get "trace-surface-update-$label.json" \
         '/v1/diagnostics/trace?kind=surface_update'
     if [ "$screenshots" = yes ]; then
-        curl --fail --silent --show-error --max-time 30 \
-            "$base_url/v1/diagnostics/screenshots/display-1" \
-            > "$output_dir/screenshots/$label.bmp"
-        sha256sum "$output_dir/screenshots/$label.bmp" \
-            >> "$output_dir/screenshot-sha256.txt"
+        IFS=',' read -r -a displays <<< "$display_ids"
+        for display_id in "${displays[@]}"; do
+            [ -n "$display_id" ] || continue
+            screenshot="$output_dir/screenshots/${label}-${display_id}.bmp"
+            curl --fail --silent --show-error --max-time 30 \
+                "$base_url/v1/diagnostics/screenshots/$display_id" \
+                > "$screenshot"
+            sha256sum "$screenshot" >> "$output_dir/screenshot-sha256.txt"
+        done
     fi
 }
 
 get version.json /v1/version
 get displays.json /v1/displays
+discover_display_ids
 get topology.json /v1/topology
 get input-devices.json /v1/input/devices
 get input-routes.json /v1/input/routes
-get_optional_session session.json /v1/terminal-sessions/1
+discover_session_id
+get_optional_session session.json "/v1/terminal-sessions/$session_id"
 capture before
 
 if [ "$mode" = api ]; then
