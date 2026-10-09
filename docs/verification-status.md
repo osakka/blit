@@ -3,6 +3,22 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## Current 0.1.394 font API and left-edge artifact evidence
+
+The TCC-built 0.1.394 server passes the font API gate: profile enumeration,
+runtime scale 2 (8x16 to 16x32 cells), pane/PTy reflow, profile selection, and
+restoration to scale 1. The packaged 0.1.394-1 artifact passes the package
+gate and was deployed to the live host.
+
+On the live Hibr session, the full authoritative surface snapshot contained
+the text `0` at cells `(0,20)` and `(0,21)`, and the surface cursor was at
+`(0,22)` with a visible block cursor. The cached framebuffer screenshot shows
+the same two glyphs followed by that cursor at the left edge. This establishes
+that the reported `0`/block is Hibr-owned terminal content and cursor state,
+not an uninitialized Blit framebuffer or an extra compositor overlay. The
+session was deleted after capture; the live resource counts returned to zero.
+No Blit change was made to conceal or rewrite those cells.
+
 ## Current 0.1.392 troubleshooting and refresh-boundary evidence
 
 ## Current 0.1.393 Hibr lifecycle and tall-surface evidence
