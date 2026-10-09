@@ -12,7 +12,7 @@ dependent on host hardware.
 
 ## Decision
 
-`POST /v1/terminal-sessions/{session_id}` accepts a bounded `TerminalInput`
+`POST /v1/terminal-sessions/{session_id}/input` accepts a bounded `TerminalInput`
 request. `mode: raw` writes the UTF-8/escape data unchanged. `mode: paste`
 adds DEC bracketed-paste delimiters only when the target session has enabled
 mode 2004; otherwise it writes the data unchanged and reports

@@ -792,7 +792,7 @@ Evdev Shift, Alt, and Ctrl state contributes the standard SGR/VT modifier bits
 to button, wheel, and drag reports.
 
 Network clients can drive a live PTY without synthetic hardware through
-`POST /v1/terminal-sessions/{session_id}` with `{ "data": "...", "mode":
+`POST /v1/terminal-sessions/{session_id}/input` with `{ "data": "...", "mode":
 "raw"|"paste" }`. Requests are limited to 768 bytes. `raw` writes unchanged
 data; `paste` adds DEC bracketed-paste delimiters only when the session enabled
 mode 2004, otherwise the receipt reports `paste-fallback`. The response

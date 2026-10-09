@@ -686,25 +686,6 @@ paths:
                 $ref: '#/components/schemas/TerminalSession'
         default:
           $ref: '#/components/responses/Problem'
-    post:
-      tags: [terminals]
-      operationId: sendTerminalInput
-      summary: Send bounded raw or bracketed-paste input to a terminal PTY
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/TerminalInput'
-      responses:
-        '202':
-          description: Input accepted by the PTY write path
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/TerminalInputReceipt'
-        default:
-          $ref: '#/components/responses/Problem'
     patch:
       tags: [terminals]
       operationId: updateTerminalSession
@@ -734,6 +715,28 @@ paths:
       responses:
         '204':
           description: Terminal session released
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/terminal-sessions/{session_id}/input:
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+    post:
+      tags: [terminals]
+      operationId: sendTerminalInput
+      summary: Send bounded raw or bracketed-paste input to a terminal PTY
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TerminalInput'
+      responses:
+        '202':
+          description: Input accepted by the PTY write path
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TerminalInputReceipt'
         default:
           $ref: '#/components/responses/Problem'
   /v1/terminal-sessions/{session_id}/hibr-owner:

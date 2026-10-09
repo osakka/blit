@@ -3,16 +3,16 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
-## 0.1.400 release candidate artifact
+## 0.1.400 deployed baseline and 0.1.401 contract correction
 
-The current TCC build embeds version `0.1.400` and has server SHA-256
+The deployed baseline TCC build embeds version `0.1.400` and has server SHA-256
 `73a07f5a0cce7148c77aa673f2b14cf1defab629d36e8011a8660673eef36cf4`.
 The Debian artifact
 `blit_0.1.400-1_amd64.deb` has SHA-256
 `3881dd591e41e87acd61a973ce47bd37e1636a23957b82ff667ed0572daf9a58` and
 passes the package allowlist, embedded-version, schema, binary, and packaged
-documentation checks. It has not been deployed to the live host, which still
-reports 0.1.398.
+documentation checks. It was deployed through the supervised update API and
+the live host now reports 0.1.400.
 
 The 0.1.400 binary passes the local font, resize, glyph, frame-rate,
 pixel-frame, Hibr singleton, full terminal-conformance, and 20-second
@@ -22,6 +22,17 @@ also passed the two-output lifecycle/rejoin wrapper, raw multi-device input
 `BLIT_INPUT_MULTI_MOUSE_BUTTON_STATE_PASS`), and four-output Hibr marker
 (`KMS_FOUR_HIBR_PASS`) runs. These remain virtual evidence; no physical
 multi-monitor or physical high-refresh claim is made.
+
+The deployment also closed the live terminal-input observation: the canonical
+`POST /v1/terminal-sessions/{session_id}/input` route accepted a 9-byte
+`LIVE400` request and the session was deleted cleanly. The earlier `405` came
+from probing the undocumented parent session path; the OpenAPI file and ADR
+0022 had incorrectly described that parent path. 0.1.401 corrects the schema,
+API guide, gateway guide, ADR wording, and adds `api_schema_gate.rb`, which
+rejects both the wrong parent POST and a missing `/input` route.
+
+The 0.1.401 contract-correction build is not yet deployed; its package and
+manifest will carry the exact corrected-schema hashes.
 
 ## 0.1.399 focused local acceptance after commit 6888dc5
 
@@ -66,13 +77,11 @@ input events (motion and button) were accepted and appeared in runtime input
 counters. Physical evdev counters remained zero, as expected for a synthetic
 probe.
 
-The same 0.1.398 host returned `405 method_not_allowed` for the documented
-`POST /v1/terminal-sessions/{id}` terminal-input route. The current 0.1.399
-TCC binary passes the terminal-conformance cases for that route; therefore
-this is recorded as a stale live-deployment/version discrepancy, not silently
-treated as a current-source failure. The temporary session was deleted and a
-follow-up runtime query reported zero sessions, surfaces, streams, and input
-routes. No Hibr process or Hibr source was touched.
+The 0.1.398 host initially returned `405 method_not_allowed` for the then-
+incorrectly documented parent session POST. After deployment of 0.1.400, the
+correct `/input` route accepted terminal data; the temporary session was
+deleted and a follow-up runtime query reported zero sessions, surfaces,
+streams, and input routes. No Hibr process or Hibr source was touched.
 
 ## Current 0.1.399 Hibr singleton-owner and lifecycle acceptance
 

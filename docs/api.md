@@ -47,7 +47,7 @@ status codes.
 | Identity | `GET /v1/version`, `GET /v1/server` | Compatibility and server capabilities |
 | Hardware | `GET /v1/graphics`, `/v1/displays`, `/v1/audio` | Discover renderers, outputs, modes, and sound devices |
 | Fonts/topology | `GET/PUT /v1/fonts`, `GET/PUT /v1/topology` | Select logical cell geometry and pane placement |
-| Terminals | `POST/GET /v1/terminal-sessions`, `GET/PATCH/DELETE /v1/terminal-sessions/{id}` | Create, place, inspect, and stop PTY sessions |
+| Terminals | `POST /v1/terminal-sessions`, `GET/PATCH/DELETE /v1/terminal-sessions/{id}`, `POST /v1/terminal-sessions/{id}/input` | Create, place, inspect, drive, and stop PTY sessions |
 | Hibr | `GET /v1/terminal-sessions/{id}/hibr-owner` | Inspect the primary/join ownership attachment |
 | Surfaces | `GET/PUT /v1/surfaces/{id}/cells`, `GET /v1/surfaces/{id}/summary`, `GET /v1/surfaces/{id}/scrollback` | Read and revision-update authoritative terminal state |
 | Input | `GET /v1/input/devices`, `GET/POST /v1/input/inject`, `GET/PUT /v1/input/routes` | Discover, diagnose, and route physical or synthetic input |
@@ -57,7 +57,7 @@ status codes.
 | Control | `POST /v1/control/shutdown`, `/restart` | Stop or restart the supervised server |
 | Updates | `POST /v1/control/update`, `GET /status`, `POST /cancel`, `/reset` | Upload and supervise a verified package update |
 
-The schema currently contains 32 path templates. Keep this table synchronized when a
+The schema currently contains 33 path templates. Keep this table synchronized when a
 path is added, removed, or renamed; the schema remains the authoritative count.
 
 ## Minimal client workflow
@@ -97,8 +97,8 @@ discover -> create session -> place surface -> route input
 Create a session with `POST /v1/terminal-sessions`. The response identifies
 the session, PTY process, surface, display/pane placement, and the
 `hibr_desktop` binding. Use `PATCH /v1/terminal-sessions/{id}` for placement
-and input policy, `POST` on the same resource for terminal input, and
-`DELETE` to stop the process group and release its surface.
+and input policy, `POST /v1/terminal-sessions/{id}/input` for terminal input,
+and `DELETE` to stop the process group and release its surface.
 
 All mutable resources expose revisions. Send `If-Match` when a client has a
 known revision; a stale mutation is a typed conflict, not an implicit merge.
