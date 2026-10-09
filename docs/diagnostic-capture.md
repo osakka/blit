@@ -204,6 +204,7 @@ it with surface updates. The harness therefore also requests filtered views:
 
 ```text
 /v1/diagnostics/trace?kind=pointer_button
+/v1/diagnostics/trace?kind=pointer_wheel
 /v1/diagnostics/trace?kind=pointer_motion
 /v1/diagnostics/trace?kind=keyboard_key
 /v1/diagnostics/trace?kind=surface_update

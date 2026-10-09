@@ -12515,6 +12515,13 @@ static void broadcast_evdev_pointer(BlitRuntime *runtime, const char *kind,
     if (routed != NULL)
         target = routed;
     if (strcmp(kind, "pointer_wheel") == 0) {
+        char detail[256];
+        snprintf(detail, sizeof(detail),
+                 "delta=%d x=%.1f y=%.1f target_session=%llu routing=%s",
+                 delta, runtime->pointer_x, runtime->pointer_y,
+                 target != NULL ? target->id : 0ULL,
+                 pointer_routing_name(target, routed));
+        diagnostic_trace(runtime, "pointer_wheel", detail);
         snprintf(input_event, sizeof(input_event),
                  "{\"type\":\"input\",\"session_id\":\"session-%llu\","
                  "\"device_id\":\"%s\",\"event\":{"

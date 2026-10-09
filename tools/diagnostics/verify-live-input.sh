@@ -22,6 +22,7 @@ get version-before.json /v1/version
 get runtime-before.json /v1/diagnostics/runtime
 get motion-before.json '/v1/diagnostics/trace?kind=pointer_motion'
 get button-before.json '/v1/diagnostics/trace?kind=pointer_button'
+get wheel-before.json '/v1/diagnostics/trace?kind=pointer_wheel'
 
 post motion-response.json '{"kind":"pointer_motion","x":1201,"y":901}'
 post button-press-response.json '{"kind":"pointer_button","button":0,"pressed":true}'
@@ -31,6 +32,7 @@ post wheel-response.json '{"kind":"pointer_wheel","delta":1}'
 get runtime-after.json /v1/diagnostics/runtime
 get motion-after.json '/v1/diagnostics/trace?kind=pointer_motion'
 get button-after.json '/v1/diagnostics/trace?kind=pointer_button'
+get wheel-after.json '/v1/diagnostics/trace?kind=pointer_wheel'
 get render-after.json '/v1/diagnostics/trace?kind=render_path'
 
 python3 - "$output_dir" <<'PY'
@@ -43,6 +45,7 @@ before = json.loads((root / "runtime-before.json").read_text())
 after = json.loads((root / "runtime-after.json").read_text())
 motion = json.loads((root / "motion-after.json").read_text())
 button = json.loads((root / "button-after.json").read_text())
+wheel = json.loads((root / "wheel-after.json").read_text())
 
 def value(doc, *keys):
     for key in keys:
@@ -55,11 +58,14 @@ motion_events = [e for e in motion.get("events", [])
                  if "device=api-pointer" in e.get("detail", "")]
 button_events = [e for e in button.get("events", [])
                  if "button=0" in e.get("detail", "")]
+wheel_events = [e for e in wheel.get("events", [])
+                if "delta=1" in e.get("detail", "")]
 pointer = value(after, "snapshot", "render", "pointer")
 
 checks = {
     "api_motion_trace": bool(motion_events),
     "api_button_trace": len(button_events) >= 2,
+    "api_wheel_trace": bool(wheel_events),
     "input_dispatch_count": after_events >= before_events + 4,
     "pointer_position": pointer.get("x") == 1201.0 and pointer.get("y") == 901.0,
     "render_path_trace": bool(json.loads((root / "render-after.json").read_text()).get("events")),
