@@ -81,9 +81,9 @@ def main():
     # re-presented, so present_calls is not a vblank/frame-rate counter. Only
     # classify a low present rate as suspicious while the capture observed
     # active terminal, graphics, or input work.
-    active_work = (terminal_bytes_delta > 0 or graphics_upload_delta > 0 or
-                   input_delta > 0 or evdev_delta > 0 or frame_delta > 0)
-    if (active_work and output_rates and
+    active_scene_work = terminal_bytes_delta > 0 or graphics_upload_delta > 0
+    input_activity = input_delta > 0 or evdev_delta > 0
+    if (active_scene_work and output_rates and
             rate < max(1.0, float(output_rates[0].get("refresh_hz") or 0) * 0.5)):
         warnings.append("active_present_rate_below_half_refresh")
     if evdev_delta == 0:
@@ -114,7 +114,8 @@ def main():
         },
         "warnings": warnings,
         "present_rate_semantics": "damage-driven-present-calls-not-vblank-rate",
-        "active_work_observed": active_work,
+        "active_work_observed": active_scene_work,
+        "input_activity_observed": input_activity,
         "result": "observation_complete",
     }
     (root / "analysis.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")

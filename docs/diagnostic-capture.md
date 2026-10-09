@@ -21,8 +21,9 @@ it does not use the server's cumulative maximum gap or rolling rate as a
 short-capture FPS measurement. `present_calls` is damage-driven: an unchanged
 scene is intentionally not re-presented. The analyzer therefore labels this
 as `damage-driven-present-calls-not-vblank-rate` and only warns about a low
-present rate when terminal, graphics, or input work was observed. Warnings are
-observations, not pass/fail claims.
+present rate when terminal or graphics scene work was observed. Input activity
+is reported independently because a short pointer burst is not a sustained
+frame-rate workload. Warnings are observations, not pass/fail claims.
 
 Interpret the first missing boundary in this order:
 
