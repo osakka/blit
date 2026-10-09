@@ -269,6 +269,11 @@ that four output objects exist.
 Adding `blit.hibr_four=1` to the same kernel command line replaces those probe
 sessions with one primary Hibr desktop and three `desktop --join` clients; the
 fixture then requires `KMS_FOUR_HIBR_PASS` with four Hibr-backed surfaces.
+The QEMU command must also include `vkms.create_default_dev=0`. Without that
+parameter VKMS creates its single-output default card before the configfs card;
+forcing Blit to `/dev/dri/card0` then tests the wrong card and reports one
+display. The fixture now emits this exact correction when that setup error is
+made.
 
 The fixture also accepts `blit.kitty_stack=1`. This sends two overlapping
 Kitty images with different z values and a two-pixel image positioned partly

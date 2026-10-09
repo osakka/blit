@@ -15,6 +15,8 @@ qemu_kernel: 6.19.14
 qemu_layout_matrix_acceptance: pass
 qemu_input_acceptance: pass
 qemu_hibr_pane_matrix_acceptance: pass
+qemu_four_output_hibr_acceptance: pass
+qemu_four_output_hibr_kernel_argument: vkms.create_default_dev=0
 live_package_acceptance: pass
 live_version: 0.1.366
 live_glyph_path: immediate-texture

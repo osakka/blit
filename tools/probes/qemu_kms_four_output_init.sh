@@ -60,8 +60,14 @@ $b wget -qO /tmp/displays.json http://127.0.0.1:19191/v1/displays
 $b wget -qO /tmp/diagnostics.json http://127.0.0.1:19191/v1/diagnostics
 $b cat /tmp/displays.json
 $b cat /tmp/diagnostics.json
-$b grep -q '"display_count":4' /tmp/server.json || finish 1
-$b grep -q '"displays":4' /tmp/diagnostics.json || finish 1
+if ! $b grep -q '"display_count":4' /tmp/server.json || ! $b grep -q '"displays":4' /tmp/diagnostics.json; then
+    $b echo 'FOUR_OUTPUT_FIXTURE_ERROR: expected four displays.' >&2
+    $b echo 'FOUR_OUTPUT_FIXTURE_ERROR: boot with vkms.create_default_dev=0 so Blit selects the configfs VKMS card.' >&2
+    $b cat /tmp/server.json >&2
+    $b cat /tmp/diagnostics.json >&2
+    $b cat /tmp/blit.log >&2
+    finish 1
+fi
 
 display_ids=$($b tr ',' '\n' < /tmp/displays.json |
     $b sed -n 's/.*"id":"\(display-[0-9][0-9]*\)".*/\1/p')
