@@ -1,4 +1,4 @@
-# blit documentation
+# Blit documentation
 
 blit is a schema-first, API-driven text display server with a native SDL3
 renderer and an integrated library of CRT/retro-terminal effects. It is
@@ -10,6 +10,21 @@ Canonical repository: `git.home.arpa/itdlabs/blit`
 
 This directory is the project contract. Implementation work should update the
 relevant documentation and schema in the same change.
+
+## Source-of-truth order
+
+When two documents appear to disagree, resolve the discrepancy in this order:
+
+1. `openapi/blit-0.1.yaml` for HTTP, WebSocket, schemas, status codes, and
+   public field names.
+2. The C implementation for behavior already inside the published contract.
+3. An accepted ADR for an architectural or semantic decision.
+4. The verification ledger for what has actually been built and observed.
+5. Guides and READMEs for explanation, examples, and operator workflow.
+
+Guides must not invent fields or promise capabilities absent from the schema.
+If a useful behavior is not yet in the schema, record it as roadmap work or an
+ADR proposal instead of documenting it as an API guarantee.
 
 The installed runtime boundary is the TCC-built `blit-server` binary. No
 shell launcher is shipped in the runtime package: Hibr remains an
@@ -31,7 +46,7 @@ panes, input routing, and diagnostics.
   initial non-goals.
 - [Architecture](architecture.md) — the proposed runtime model and the major
   boundaries between API, terminal state, effects, layout, and rendering.
-- [API guide](api.md) — endpoint purpose, safe call ordering, Hibr orchestration,
+- [API guide](api.md) — endpoint map, safe call ordering, Hibr orchestration,
   diagnostics, streaming, errors, and client rules.
 - [API principles](spec/api-principles.md) — schema-first rules for designing
   the public API.
@@ -64,6 +79,14 @@ remote troubleshooting surface. It combines the normal diagnostics snapshot
 with uptime, rendered-frame count, measured render duration, missed refresh
 deadlines, and a bounded in-memory event log. It is intentionally bounded so
 diagnostics cannot consume unbounded server memory.
+
+## Documentation maintenance
+
+Every public API change updates the OpenAPI file, this guide, the relevant ADR
+or roadmap entry, and at least one focused gate in the same cycle. Every
+release entry names the exact source commit, package checksum, toolchain, and
+limitations. Do not commit generated packages, screenshots, logs, QEMU images,
+or local host captures; link to the command and evidence location instead.
 
 ## Working status
 

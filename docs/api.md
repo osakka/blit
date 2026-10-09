@@ -36,6 +36,55 @@ Clients should discover before mutating:
 Do not infer capabilities from a screenshot or from a device filename. A
 resource is usable only when its API state and capability fields say it is.
 
+## Endpoint map
+
+This table is an orientation aid, not a second schema. The OpenAPI document is
+the authority for methods, parameters, required fields, response shapes, and
+status codes.
+
+| Area | Endpoints | Purpose |
+| --- | --- | --- |
+| Identity | `GET /v1/version`, `GET /v1/server` | Compatibility and server capabilities |
+| Hardware | `GET /v1/graphics`, `/v1/displays`, `/v1/audio` | Discover renderers, outputs, modes, and sound devices |
+| Fonts/topology | `GET/PUT /v1/fonts`, `GET/PUT /v1/topology` | Select logical cell geometry and pane placement |
+| Terminals | `POST/GET /v1/terminal-sessions`, `GET/PATCH/DELETE /v1/terminal-sessions/{id}` | Create, place, inspect, and stop PTY sessions |
+| Hibr | `GET /v1/terminal-sessions/{id}/hibr-owner` | Inspect the primary/join ownership attachment |
+| Surfaces | `GET/PUT /v1/surfaces/{id}/cells`, `GET /v1/surfaces/{id}/summary`, `GET /v1/surfaces/{id}/scrollback` | Read and revision-update authoritative terminal state |
+| Input | `GET /v1/input/devices`, `GET/POST /v1/input/inject`, `GET/PUT /v1/input/routes` | Discover, diagnose, and route physical or synthetic input |
+| Presentation | `POST /v1/frames`, `GET /v1/stream` | Commit coherent frames and consume event/pixel streams |
+| Graphics | `GET/PUT /v1/effects`, `POST/DELETE /v1/overlays/{id}` | Configure effects and bounded overlays |
+| Diagnostics | `GET /v1/diagnostics`, `/runtime`, `/trace`, `/screenshots/{display_id}` | Inspect state, timing, events, and evidence captures |
+| Control | `POST /v1/control/shutdown`, `/restart` | Stop or restart the supervised server |
+| Updates | `POST /v1/control/update`, `GET /status`, `POST /cancel`, `/reset` | Upload and supervise a verified package update |
+
+The schema currently contains 32 path templates. Keep this table synchronized when a
+path is added, removed, or renamed; the schema remains the authoritative count.
+
+## Minimal client workflow
+
+The following is a safe read-only probe. Real clients should use a JSON library
+and preserve returned IDs and revisions.
+
+```sh
+set -eu
+base=${BLIT_URL:-http://127.0.0.1:8080}
+auth=()
+if [ -n "${BLIT_AUTH_TOKEN:-}" ]; then
+  auth=(--header "Authorization: Bearer $BLIT_AUTH_TOKEN")
+fi
+
+curl --fail "${auth[@]}" "$base/v1/version"
+curl --fail "${auth[@]}" "$base/v1/server"
+curl --fail "${auth[@]}" "$base/v1/displays"
+curl --fail "${auth[@]}" "$base/v1/topology"
+curl --fail "${auth[@]}" "$base/v1/diagnostics/runtime"
+```
+
+For mutations, first fetch the resource revision, send the revision using the
+schema-defined precondition, and supply an `Idempotency-Key` for a retryable
+operation. A revision conflict means “resynchronize”: fetch authoritative
+state again, reconcile intent, and retry only if the operation is still valid.
+
 ## Core lifecycle
 
 The normal terminal lifecycle is:
@@ -102,6 +151,12 @@ bounded pixel frames. Pixel frames use `pixel_frame_begin` metadata followed by
 binary data and a final completion message. Back-pressure and dropped-event
 counters are visible in runtime diagnostics.
 
+The HTTP surface state and the stream are complementary. HTTP GETs are the
+repair path; the stream is the low-latency observation path. A client must
+resync after a sequence gap, unknown resource ID, reconnect, or rejected frame
+commit. Never reconstruct a complete surface solely from deltas received
+before a disconnect.
+
 ## Input
 
 Physical keyboards, pointers, and gamepads are discovered through
@@ -131,6 +186,12 @@ Use `?cached=1` to inspect the already-composed scene without forcing a fresh
 redraw. A screenshot is evidence of pixels only; pair it with runtime
 counters, surface snapshots, and trace events before diagnosing a boundary.
 
+For a performance report, capture `/v1/version`, `/v1/displays`, and
+`/v1/diagnostics/runtime` at the start and end of the same bounded workload.
+Compare `present_calls`, frame/render intervals, missed deadlines, queue
+pressure, and input dispatch counters. Do not report a frame rate from a
+screenshot timestamp or HTTP request latency.
+
 ## Effects, overlays, and control
 
 `GET/PUT /v1/effects` manages bounded named effects such as `scanlines`.
@@ -151,6 +212,13 @@ title, detail, and structured context where applicable. Clients must branch on
 the code, not parse human prose. Common codes include `route_not_found`,
 `invalid_request`, `stale_revision`, `unsupported_capability`,
 `hibr_desktop_exists`, and `hibr_desktop_owner_missing`.
+
+The problem response has `type`, `title`, `status`, and stable `code`; many
+failures also include machine-readable context. Log the code, status, request
+correlation data, and safe context. Do not log bearer tokens, update
+credentials, PTY contents, or complete binary payloads. A `404` for an unknown
+route is not evidence that the server is down; verify `/v1/version` and then
+check the requested path against the schema.
 
 Unknown response fields should be ignored. Resource IDs are opaque. Events and
 snapshots carry revisions/sequences so clients can detect gaps and resync from
