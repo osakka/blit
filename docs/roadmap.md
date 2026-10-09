@@ -23,9 +23,12 @@ oracle; the physical host remains the final host-specific evidence boundary.
 The next implementation boundary is measured cadence and physical experience:
 separate producer/update rate from presentation/scanout rate, instrument any
 slow Hibr producer path, and only then make a hardware claim. The current
-local dummy-backend frame gate measures about 54 Hz with zero missed deadlines
-under its 60 Hz workload; that is useful evidence, but it is not a 60 Hz
-physical scanout claim and is intentionally not hidden by changing the gate.
+0.1.405 settled local dummy-backend frame gate measures 59.996 Hz with zero
+missed deadlines under its 60 Hz workload; that is useful renderer evidence,
+but it is not a 60 Hz physical scanout claim and is intentionally not hidden
+by changing the gate. The supplied live host remains separately measured at
+60 Hz presentation with a slow/idle Hibr producer and no physical evdev
+events.
 
 The next engineering priority is therefore not another launcher or parallel
 renderer. It is closing those named hardware evidence gaps while preserving
