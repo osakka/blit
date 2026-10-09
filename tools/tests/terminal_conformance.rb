@@ -1054,10 +1054,20 @@ snapshot = run_case(base, 'c1-csi', "printf '\\2332;3HX'")
 cells = cell_map(snapshot)
 assert_equal('X', cells.fetch([2, 1]).fetch('text'), '8-bit CSI')
 
+snapshot = run_case(base, 'utf8-c1-csi', "printf '\\302\\2332;3HX'")
+cells = cell_map(snapshot)
+assert_equal('X', cells.fetch([2, 1]).fetch('text'), 'UTF-8 encoded C1 CSI')
+
 snapshot = run_case(base, 'c1-string-control',
                     "printf '\\2350;ignored title\\007X'")
 cells = cell_map(snapshot)
 assert_equal('X', cells.fetch([0, 0]).fetch('text'), '8-bit OSC isolation')
+
+snapshot = run_case(base, 'utf8-c1-string-control',
+                    "printf '\\302\\2350;utf8 title\\007X'")
+cells = cell_map(snapshot)
+assert_equal('X', cells.fetch([0, 0]).fetch('text'),
+             'UTF-8 encoded OSC isolation')
 
 snapshot = run_case(base, 'vt500-vertical-form-feed',
                     "printf 'A\\vB\\fC'", width: 8, height: 4)

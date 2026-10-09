@@ -14,7 +14,11 @@ It first records ten seconds of runtime counters, surface summaries, input
 inventory, and filtered traces with screenshots disabled. It then captures one
 current screenshot for every discovered display. This ordering is important:
 the screenshot transfer cannot be mistaken for a rendering stall. The output
-directory is the complete handoff artifact; preserve it unchanged.
+directory is the complete handoff artifact; preserve it unchanged. The command
+also writes `analysis.json` and `analysis.txt`. That report calculates present
+rate from the `present_calls` counter delta divided by the runtime-uptime delta;
+it does not use the server's cumulative maximum gap or rolling rate as a
+short-capture FPS measurement. Warnings are observations, not pass/fail claims.
 
 Interpret the first missing boundary in this order:
 
@@ -172,6 +176,15 @@ it with surface updates. The harness therefore also requests filtered views:
 
 Filtering changes only the diagnostic response; it does not alter input,
 routing, Hibr, or presentation.
+
+`analysis.json` is the canonical short-window comparison. Its `deltas` object
+contains the measured present cadence, missed-deadline delta, input deltas, and
+physical evdev deltas. `outputs` retains the display refresh target and present
+latencies, while `trace_end_sequences` shows whether each causal boundary
+advanced. A report with `no_physical_evdev_mouse_events` is not evidence that
+the pointer is broken; it means no physical movement occurred during that
+capture. Conversely, `present_rate_below_half_refresh` is a measured cadence
+warning even when the last individual present latency looks healthy.
 
 Trace responses are also bounded at the HTTP boundary: the default is the 32
 newest matching events, and callers may request `limit=1..128`. This prevents a

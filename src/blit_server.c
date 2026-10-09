@@ -6287,6 +6287,46 @@ static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
                 }
                 consumed = 1;
                 codepoint = '?';
+            } else if (codepoint == 0x009bU) {
+                /* UTF-8 encodes the C1 CSI control as C2 9B.  Hibr emits
+                   controls through the UTF-8 PTY contract, so recognize the
+                   decoded form before treating it as a printable cell. */
+                session->terminal_escape = 2;
+                session->terminal_csi_length = 0;
+                offset += consumed;
+                continue;
+            } else if (codepoint == 0x009dU || codepoint == 0x0090U ||
+                       codepoint == 0x0098U || codepoint == 0x009eU ||
+                       codepoint == 0x009fU) {
+                /* Likewise recognize UTF-8 encoded string-control introducers
+                   (OSC, DCS, SOS, PM, and APC) at the parser boundary. */
+                session->terminal_escape = 3;
+                session->terminal_string_type = codepoint == 0x009dU ? ']' :
+                    (unsigned char)codepoint;
+                session->terminal_string_length = 0;
+                offset += consumed;
+                continue;
+            } else if (codepoint == 0x0084U || codepoint == 0x0085U ||
+                       codepoint == 0x0088U || codepoint == 0x008dU) {
+                /* The non-string C1 motion controls have the same semantics
+                   whether received as a raw byte or UTF-8 encoded scalar. */
+                if (codepoint == 0x0084U)
+                    terminal_index(session, surface);
+                else if (codepoint == 0x0085U) {
+                    mark_cursor_damage(surface, surface->cursor_x,
+                                       surface->cursor_y);
+                    surface->cursor_x = 0;
+                    terminal_index(session, surface);
+                } else if (codepoint == 0x0088U) {
+                    if (surface->cursor_x >= 0 &&
+                        surface->cursor_x < surface->width)
+                        surface->tab_stops[surface->cursor_x] = 1;
+                } else {
+                    terminal_reverse_index(surface);
+                }
+                session->terminal_wrap_pending = 0;
+                offset += consumed;
+                continue;
             } else if (unicode_cell_width(codepoint) == 0) {
                 terminal_add_combining(session, surface, codepoint);
                 offset += consumed;

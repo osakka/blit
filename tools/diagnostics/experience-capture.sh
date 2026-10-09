@@ -39,3 +39,6 @@ PY
     sha256sum "$output_dir"/screenshots/*.bmp \
         > "$output_dir/screenshot-sha256.txt" 2>/dev/null || true
 fi
+
+python3 tools/diagnostics/analyze-experience.py "$output_dir" \
+    > "$output_dir/analysis.txt"
