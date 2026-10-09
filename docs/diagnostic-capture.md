@@ -360,4 +360,36 @@ handshake failures, image requests, pixel-frame transport failures, and
 successful frame submission. It does not modify Hibr. The authoritative result
 is still the Blit runtime: `pixel_frames_accepted` must increase and
 `pixel_frame_errors` must remain unchanged. Do not enable this continuously on
-a busy desktop; it is a probe aid, not a replacement for the runtime counters.
+ a busy desktop; it is a probe aid, not a replacement for the runtime counters.
+
+## Live experience capture contract
+
+`tools/diagnostics/experience-capture.sh` is the operator boundary for a real
+host. It records the deployed API version, display modes, topology, input
+devices and routes, terminal-session details, surface summaries, bounded
+runtime counters, traces, and post-capture framebuffer images. It discovers
+display IDs from `/v1/displays` and surface IDs from terminal-session details
+when topology is temporarily missing them, so it is safe for one or many
+outputs and for PTY sessions that are still attaching.
+
+Interpret the evidence in this order:
+
+1. `last_render_ms`, `max_render_ms`, `missed_deadlines`, and `loop_gap` decide
+   whether the renderer was late; `present_calls` is damage-driven and is not
+   itself a vblank rate.
+2. `terminal_bytes` and `terminal_reads` prove producer activity. `surface_commits`
+   and `frame_commits` apply only to their corresponding API producers.
+3. `graphics_texture_uploads`, `pixel_frames_accepted`, and
+   `pixel_frame_errors` distinguish a Hibr/image transport problem from an SDL
+   presentation problem.
+4. Aggregate evdev counters plus the per-device entries and input traces
+   distinguish no physical input from a wrong device, duplicate device, or
+   dispatch problem.
+5. Screenshots are visual evidence captured after the timing window; they must
+   not be used to infer a frame rate.
+
+An image-only Hibr probe is the control experiment. If it accepts a pixel frame
+and uploads a texture while the desktop capture reports zero image activity,
+the display server and adapter are working and the desktop is selecting its
+glyph fallback/configuration path. That conclusion is evidence-based and does
+not require changing Hibr.
