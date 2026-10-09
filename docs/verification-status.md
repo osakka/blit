@@ -2272,3 +2272,21 @@ stream reconnect/replay, input-device loss, output loss, and the two-hour PTY
 soak—have authoritative evidence above. Until the physical-monitor gate has
 authoritative evidence, the project must not be
 described as fully released or physically multi-monitor validated.
+# Current 0.1.367 diagnostics-instrumentation result
+
+The exact TCC-built 0.1.367 binary exposes producer-side
+`surface_commits` and `frame_commits` in `/v1/diagnostics/runtime`; both fields
+are required by `openapi/blit-0.1.yaml`. The local frame-rate workload passed at
+54.381 Hz with a 16 ms target and zero missed deadlines, and the deployed live
+workload passed at 63.000 Hz with zero missed deadlines.
+
+The exact 0.1.367 package was deployed to `192.168.10.54` and
+`/v1/version` reported 0.1.367. The four-output Hibr QEMU fixture passed
+`KMS_FOUR_HIBR_PASS` with the 6.19.14 VKMS kernel when booted with
+`vkms.create_default_dev=0`; omitting that argument selects VKMS's default
+single-output card and is now diagnosed explicitly by the fixture.
+
+The physical visual and physical evdev gates remain open. A live capture
+recorded a 60 Hz display, zero missed deadlines, and zero physical evdev mouse
+events; API-injected pointer motions were accepted and traced. Therefore this
+release does not claim physical mouse or visual acceptance.
