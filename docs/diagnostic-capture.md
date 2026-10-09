@@ -417,3 +417,39 @@ and uploads a texture while the desktop capture reports zero image activity,
 the display server and adapter are working and the desktop is selecting its
 glyph fallback/configuration path. That conclusion is evidence-based and does
 not require changing Hibr.
+
+# Live Hibr boundary capture
+
+For a real-host report, capture the three layers separately and keep the raw
+framebuffer beside the API snapshots:
+
+1. Query `/v1/version`, `/v1/topology`, and `/v1/diagnostics/runtime`.
+2. Capture `/v1/diagnostics/screenshots/display-1?cached=1` as BMP and convert
+   it to PNG without resizing.
+3. Start one ordinary shell surface through `/v1/terminal-sessions`, write a
+   known marker, and run `pointer-artifact-capture.sh ... api`.
+4. Start the unchanged Hibr `session.hibr` through the same API request and
+   capture it with the same pointer path.
+5. Run `stty size` in a separate ordinary shell surface using the exact Hibr
+   surface dimensions. The reported rows and columns must equal the API
+   surface dimensions before a geometry defect can be attributed to Blit.
+
+Interpretation is deliberately layered:
+
+- A clean shell marker plus coherent API pointer traces isolates Blit's
+  framebuffer and input composition path.
+- `refresh-aware`, the display mode refresh, present timing, and missed
+  deadlines are the performance evidence; a static damage-driven terminal is
+  not expected to present continuously at the refresh rate.
+- If `stty size` matches the surface but an unchanged Hibr desktop occupies
+  only part of the captured framebuffer, the defect is in Hibr's desktop
+  layout/session state or its content boundary. Do not “fix” that by changing
+  Blit's raster geometry or by modifying Hibr.
+
+The 0.1.389 live capture on the real host established this boundary: Blit
+reported 1920x2160 at 60 Hz, the control PTY reported 240x135, and the shell
+surface rendered cleanly. The unchanged Hibr capture presented coherently with
+no missed deadlines but occupied only the upper desktop region, leaving the
+lower framebuffer black. The captured artifacts are retained locally under
+`diagnostics/live-0.1.389-*` and are not treated as a passing full-desktop
+acceptance result.
