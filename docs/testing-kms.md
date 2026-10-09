@@ -276,6 +276,10 @@ reports `KMS_FOUR_HIBR_TALL_HIBR_BOUNDARY_OPEN`: all four Blit surfaces and
 KMS outputs are healthy, but Hibr's held desktop stream stops at its 24-row
 startup paint. It is intentionally not converted into a Blit pass or hidden
 by changing the compositor's geometry.
+Use `tools/probes/stage_four_output_qemu.sh INITROOT HIBR_ROOT` to construct the
+fixture initroot. It stages the current Blit binary, KMS pixel oracles, Hibr
+runtime, and the four-output init script as one atomic test boundary; do not
+combine the individual staging helpers manually.
 The QEMU command must also include `vkms.create_default_dev=0`. Without that
 parameter VKMS creates its single-output default card before the configfs card;
 forcing Blit to `/dev/dri/card0` then tests the wrong card and reports one
