@@ -5,6 +5,26 @@ an evidence record, not a claim that the complete product is released.
 
 ## Current 0.1.388 compositor and multi-output evidence
 
+## Current 0.1.389 KMS submission-boundary evidence
+
+The exact TCC-built 0.1.389 binary passes the complete terminal, renderer,
+pointer, pixel-frame, glyph, timing, and package gates. Direct KMS now returns
+submitted and deferred output masks: pending pixel-frame credits are consumed
+only after a page-flip or recovery modeset is submitted, and pointer damage is
+retained while an output remains deferred. This fixes a real state-retirement
+bug without treating a deferred page flip as a visible presentation.
+
+The exact 0.1.389 Hibr QEMU input fixture passes the layout, keypad, stream,
+gamepad, raw evdev, mouse-repeat, and multi-mouse button markers. The exact
+four-output Hibr fixture passes with four 240 Hz VKMS outputs, four Hibr-backed
+surfaces, and one primary plus three `desktop --join` clients. The 240 Hz
+scheduler still passes; the producer-driven pixel stream remains open because
+the no-KVM TCG/VKMS guest misses virtual page-flip deadlines.
+
+The physical host remains on 0.1.385. Physical deployment, real evdev input,
+physical multi-monitor behavior, and physical high-refresh behavior remain
+unverified. Hibr source was not modified.
+
 The exact TCC-built 0.1.388 binary passes terminal conformance, including
 malformed UTF-8 replacement as one U+FFFD cell per invalid leading byte. The
 SDL wallpaper-damage gate, external-pointer composition gate, pointer-damage
