@@ -349,6 +349,9 @@ static long cb_flush(void)
 			"],\"presentation\":\"%s\",\"cursor\":{\"x\":%d,\"y\":%d,\"visible\":%s}}",
 			i == (int)cb.pending_count ? "commit" : "defer",
 			cb.cursor_x, cb.cursor_y, cb.cursor_visible ? "true" : "false");
+		CB_TRACE("console-blit: cell request bytes=%lu cells=%d pending=%lu presentation=%s",
+			(unsigned long)used, i, (unsigned long)cb.pending_count,
+			i == (int)cb.pending_count ? "commit" : "defer");
 		if (!cb_http("PUT", path, body, response, sizeof(response))) {
 			if (strstr(response, "revision_conflict") &&
 			    cb_json_number(response, "revision", &cb.revision))
