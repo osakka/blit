@@ -35,6 +35,40 @@ terminal-session input subresource, display state goes through surfaces and
 frames, and lifecycle control goes through explicit control resources. This
 keeps input, presentation, and process ownership diagnosable.
 
+### Resource ownership at a glance
+
+Each resource has one canonical owner. Clients orchestrate resources through
+the API; they must not recreate an owner in a wrapper, shell script, or second
+desktop process.
+
+| Resource | Canonical owner | API responsibility |
+| --- | --- | --- |
+| API identity and capabilities | Blit server | Discover `/version`, `/server`, and hardware before mutation. |
+| Terminal bytes and emulation state | Blit terminal session | Write through the session input subresource; observe surface revisions. |
+| Desktop semantics and `desktop --join` | Hibr | Start one primary and attach joins; Blit observes ownership and placement. |
+| Cell surface and pane placement | Blit | Commit revisioned cells, map panes, resize PTYs, and route input. |
+| Physical scanout and refresh scheduling | Blit renderer/backend | Report output modes, cadence, missed deadlines, and failures. |
+| Client event/frame observation | Blit stream | Deliver ordered events and bounded pixel frames; clients resync over HTTP. |
+
+This is an ownership guide, not a second wire contract. The OpenAPI schema
+defines the exact fields and operations. Blit never patches Hibr or treats a
+successful Hibr command as proof that pixels are already visible.
+
+### HTTP and WebSocket are complementary
+
+HTTP is the authoritative control and repair plane. WebSocket is the ordered
+observation plane:
+
+```text
+HTTP GET state -> HTTP mutation -> response/revision -> WebSocket observation
+                                                \-> HTTP GET repair after gap
+```
+
+The stream is not a second database. After a missed sequence, unknown ID, or
+reconnect, fetch authoritative state and resume from its revision. Pixel-frame
+messages are bounded transport objects, not a replacement for terminal cell
+state.
+
 ### Required headers and response handling
 
 For JSON mutations send `Content-Type: application/json`. For retryable

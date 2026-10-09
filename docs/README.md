@@ -31,6 +31,19 @@ The shortest accurate project description is: **the OpenAPI schema defines the
 wire contract, the TCC-built C server implements it, ADRs record durable
 decisions, and the verification ledger limits what we are allowed to claim**.
 
+For a first integration, keep this transaction model in view:
+
+```text
+discover -> create one owned resource -> mutate with revision/idempotency
+         -> observe stream events -> repair from HTTP state when needed
+         -> delete -> verify zero owned resources
+```
+
+Blit is the API and presentation boundary; Hibr remains the desktop/session
+owner. One primary Hibr desktop may have joined clients, but a client must
+not start competing desktop owners to fill a pane or monitor. This distinction
+is the source of truth for the API guide and Hibr integration documentation.
+
 ## Source-of-truth order
 
 When two documents appear to disagree, resolve the discrepancy in this order:
