@@ -31,6 +31,13 @@ The fresh two-output input/render soak also passed against this exact binary:
 events, 44 button events, one ignored repeat, and two aggregate button-state
 coalesces. This is virtual input/render evidence, not physical evdev
 acceptance.
+Fresh four-output QEMU runs with the same binary and Hibr checkout also
+passed independent red/green/blue/yellow output pixels and the stock Hibr
+primary-content case. All four outputs reported 1024x768@240 Hz and
+`KMS_FOUR_OUTPUT_PASS`; the Hibr run reported one populated primary and three
+`HIBR_CONTENT_AUXILIARY_EXPECTED_BLANK` joins followed by
+`KMS_FOUR_HIBR_PRIMARY_CONTENT_PASS`. The blank auxiliary state is an
+intentional Hibr desktop-placement result, not a renderer pass-through.
 The exact server SHA-256 is
 `3b45d994ac80ae65588e4981546c31ebe6b42a8f664a42c3176a750677e14d46`.
 Physical deployment remains deliberately unperformed; the supplied host is
