@@ -5,15 +5,19 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=blit
-Group=blit
+User=root
+Group=root
 SupplementaryGroups=video render input
 EnvironmentFile=-/etc/blit/blit.env
 Environment=LD_LIBRARY_PATH=/usr/lib/blit/lib
 ExecStart=/usr/bin/blit 8080
 Restart=on-failure
 RestartSec=2s
-NoNewPrivileges=true
+# The gateway must be able to drop an API-created terminal child to its
+# requested desktop user. The child is permanently reduced before exec; the
+# gateway itself owns KMS/input and is protected by the API authentication and
+# command policy configured for the deployment.
+NoNewPrivileges=false
 PrivateTmp=true
 
 [Install]
