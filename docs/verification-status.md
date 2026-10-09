@@ -36,6 +36,15 @@ desktop startup, but no Blit adapter owner registered and the fail-closed
 back to zero sessions afterward. This is an open Hibr integration failure, not
 a renderer or frame-rate pass claim.
 
+The 0.1.409 candidate supersedes that failed live attempt. After explicitly
+retiring the stale detached Hibr hold left by the failed run, the ordinary
+packaged `blit-session.hibr` API launch stayed `running`, registered its owner,
+and reached 32,400 printable cells at 240x135. The captured 1920x2160
+framebuffer contained the Hibr menu bar, wallpaper, desktop icons, and status
+line. A versioned API input write was accepted while the owner remained
+registered. This is live one-output evidence; physical pointer events and
+additional physical outputs remain open.
+
 ## 0.1.405 current candidate evidence
 
 The TCC-built 0.1.405 candidate adds bounded producer-side surface cadence
