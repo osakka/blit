@@ -34,6 +34,15 @@ source was modified. The host-side
 `tools/tests/qemu_hibr_lifecycle_gate.sh` wrapper independently asserts the
 four markers, so a guest poweroff cannot mask a missing lifecycle result.
 
+The 0.1.399 direct-KMS 240 Hz pixel-stream run accepted all 240 frames with
+zero pixel-frame errors and selected a real KMS-reported 240 Hz mode, but the
+visible cadence gate correctly failed under QEMU TCG: the two-vCPU run grew
+missed deadlines from 20 to 40. A comparison with eight vCPUs and
+multithreaded TCG improved the run to 3 baseline and 16 post-stream misses,
+but still did not pass. `/dev/kvm` is absent on this test host. This is
+retained as VM-capability evidence; it is not converted into a physical
+240 Hz claim or “fixed” by enabling asynchronous tearing.
+
 ## Current 0.1.396 live glyph geometry acceptance
 
 The live host accepted 0.1.396 and reported SDL3/OpenGL ES2 with

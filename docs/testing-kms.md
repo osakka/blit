@@ -244,6 +244,13 @@ counters are printed because TCG/VKMS startup can miss virtual page flips
 before the producer starts. This is virtual high-refresh timing evidence, not
 a physical 240 Hz hardware claim.
 
+On the current 0.1.399 TCC build, the two-vCPU QEMU run accepted all 240
+frames but increased missed deadlines from 20 to 40. An eight-vCPU,
+multithreaded-TCG comparison improved that to 3 and 16 respectively, still
+failing the visible-cadence predicate. `/dev/kvm` is absent on the test host;
+repeat this gate with KVM or physical hardware before changing the production
+scheduler. Do not enable asynchronous page flips to turn this into a pass.
+
 For comparison only, `blit.kms_async=1` enables the existing asynchronous
 page-flip policy in the fixture and reports `drm-page-flip-async`; it may tear
 and does not relax the synchronized production gate.
