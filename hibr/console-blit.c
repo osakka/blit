@@ -28,6 +28,7 @@
 
 #define CB_MAX_PENDING 262144
 #define CB_HTTP_CAP 262144
+#define CB_FLUSH_BODY_LIMIT 6144
 #define CB_FLUSH_CELL_LIMIT 256
 #define CB_PIXEL_CHUNK 60000
 #define CB_GLYPH_CAP 16
@@ -317,8 +318,14 @@ static long cb_flush(void)
 		used = (size_t)snprintf(body, sizeof(body),
 			"{\"base_revision\":%llu,\"cells\":[",
 			cb.revision);
+		/* The server's complete HTTP request buffer is 8 KiB, including
+		 * headers. Keep the JSON body below that boundary; a fixed cell count
+		 * is unsafe because UTF-8 glyphs and styled cells have variable size.
+		 * Exceeding the boundary makes the server close the request, which
+		 * leaves Hibr retrying an ever-growing frame and presents as severe
+		 * blinking/latency. */
 		for (i = 0; i < (int)cb.pending_count && i < CB_FLUSH_CELL_LIMIT &&
-				used + 768 < sizeof(body) - 1; ++i) {
+				used + 768 < CB_FLUSH_BODY_LIMIT; ++i) {
 			char escaped[CB_GLYPH_CAP * 2];
 			char style[512];
 			const char *text = cb.pending[i].text;
