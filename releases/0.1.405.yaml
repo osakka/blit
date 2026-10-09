@@ -24,6 +24,9 @@ terminal_soak_20s_acceptance: pass
 frame_rate_settled_acceptance: pass
 surface_producer_cadence_acceptance: pass
 qemu_hibr_lifecycle_acceptance: pass
+qemu_refresh_scheduler_mixed_acceptance: pass
+qemu_refresh_scheduler_240_acceptance: pass
+qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
 qemu_input_render_soak_acceptance: inherited_0.1.404
 qemu_four_output_pixel_acceptance: inherited_0.1.404
 qemu_four_output_hibr_primary_content: inherited_0.1.404
