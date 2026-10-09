@@ -13,7 +13,7 @@ local_session_lifecycle_acceptance: pass
 local_update_cancel_acceptance: pass
 local_update_reset_acceptance: pass
 local_update_idle_timeout_acceptance: pass
-package_artifact_acceptance: pending_manifest_creation
+package_artifact_acceptance: pass
 qemu_kernel: 6.19.14
 qemu_input_acceptance: pass
 qemu_input_markers: BLIT_INPUT_MOUSE_REPEAT_PASS,BLIT_INPUT_MULTI_MOUSE_BUTTON_STATE_PASS
