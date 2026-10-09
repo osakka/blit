@@ -3,6 +3,34 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## Current 0.1.392 troubleshooting and refresh-boundary evidence
+
+The exact TCC-built 0.1.392 SDL renderer passes the focused pointer-plus-damage
+atomicity, wallpaper-pointer stress, wallpaper preservation, and batched
+full-screen background gates. These gates exercise the artifact shape reported
+on the physical host and preserve untouched scene pixels across pointer motion
+and incremental terminal updates.
+
+The authorized live host reports 0.1.392 with SDL3/OpenGL, one 60 Hz output,
+and approximately 16 ms SDL presents. A five-second canonical troubleshooting
+capture recorded no physical evdev events and no active Hibr session; that is
+an input/session observation, not a renderer failure. An API-injected pointer
+control sample accepted and presented four motions, proving the API input and
+SDL composition path independently of physical-device access.
+
+The exact direct-KMS VKMS fixture accepted all 120 and all 240 producer frames
+with zero protocol errors, but did not sustain visible page-flip cadence under
+the available two-output QEMU TCG environment. The 240 Hz synchronous run
+retired 81 presents in its capture window; the asynchronous comparison retired
+68 and had larger loop gaps. The 120 Hz run also failed the visible-presentation
+gate. No production scheduler change is justified by this evidence: the
+failure is at virtual VKMS/TCG page-flip delivery, and enabling asynchronous
+flips would trade correctness for possible tearing. Physical 120/240 Hz
+acceptance remains open and requires the real display hardware.
+
+The canonical capture protocol is documented in `docs/diagnostic-capture.md`.
+Hibr source was not modified.
+
 ## Current 0.1.388 compositor and multi-output evidence
 
 ## Current 0.1.389 KMS submission-boundary evidence
