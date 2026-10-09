@@ -33,6 +33,7 @@ update_idle_timeout_acceptance: pass
 update_reset_acceptance: pass
 qemu_input_0_1_389_acceptance: pass
 qemu_four_output_hibr_0_1_389_acceptance: pass
+qemu_tall_hibr_boundary_diagnostic: open
 qemu_high_refresh_scheduler_0_1_389_acceptance: pass
 qemu_kms_capture_0_1_389_acceptance: pass
 qemu_pixel_stream_240_acceptance: open
