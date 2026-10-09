@@ -1,6 +1,6 @@
 release: 0.1.363
 package: blit_0.1.363-1_amd64.deb
-package_sha256: 85e52673f10cdcd367e47b2bc9855c87fe56aac190e9d813619a04dfbfc1efa8
+package_sha256: 3afb01750e2bc774e8c332ad71d8b9dce912606f06b25d4756a664d6ed052b7a
 source_commit: dd973fe250f43a5832d3b2265965710187836215
 server_binary_sha256: 56a618d67da33f70da690e1e56dcb719eb324c2078cd30ad38be3e2d77f990a6
 hibr_adapter_sha256: d84e4637defaebccb08e43429b9be48286e024205d31af2009f90712c1713830
@@ -25,6 +25,7 @@ wallpaper_pointer_stress_acceptance: pass
 live_synthetic_input_acceptance: pass
 live_runtime_diagnostics_acceptance: pass
 live_hibr_resume_acceptance: pass
+live_hibr_input_route_acceptance: pass
 live_api_pointer_artifact_acceptance: pass
 live_experience_capture_acceptance: pass
 live_physical_evdev_acceptance: open

@@ -20,6 +20,13 @@ no physical evdev events because no pointer movement occurred during the
 window. Physical input and physical multi-monitor acceptance therefore remain
 open. This release does not claim those gates are closed.
 
+After deployment, the live Hibr session was restored with `--resume` and the
+explicit API routes `hibr-keyboard` and `hibr-pointer` were installed against
+`session-4`. Before that operation `/v1/input/routes` was empty; a discovered
+evdev device alone is not sufficient to deliver input to Hibr. The synthetic
+input verifier now passes through the configured route. Physical movement and
+clicks still require a real operator action during a capture and remain open.
+
 ## Current 0.1.362 live Hibr evidence bundle
 
 The live host was started through Blit's API with the documented primary
