@@ -35,6 +35,16 @@ mount `/dev/root` before `/init` ran. This was reproduced with and without
 and unchanged Hibr checkout therefore remain untested in that particular
 kernel fixture until a kernel with working external-initrd support is used.
 
+Using the workspace VKMS kernel `/tmp/linux-vkms-build/arch/x86/boot/bzImage`
+(`6.19.14`) instead, the current 0.1.366 binary reached the Hibr input
+fixture. It passed `LAYOUT_MATRIX_PASS` for 1x1, 2x1, 1x2, and 2x2 layouts,
+`BLIT_INPUT_KEYPAD_PASS`, `BLIT_INPUT_STREAM_PASS`,
+`BLIT_INPUT_RAW_EVDEV_PASS`, `BLIT_INPUT_MOUSE_REPEAT_PASS`,
+`BLIT_INPUT_MULTI_MOUSE_BUTTON_STATE_PASS`, and `BLIT_INPUT_GAMEPAD_PASS`.
+The fixture observed 656 raw evdev events, 392 motion events, 27 button
+events, 230 synchronization events, and one ignored button repeat. Hibr was
+staged from the unchanged `/home/osakka/hibr` checkout.
+
 ## Current 0.1.363 diagnostic correctness
 
 The TCC build corrects the per-output presentation timing source in the API:
