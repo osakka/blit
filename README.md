@@ -94,11 +94,30 @@ requests. Never put credentials in source, logs, screenshots, or commits.
 
 ```sh
 tools/build-tcc.sh build/blit/blit-server server
-ruby tools/tests/terminal_conformance.rb
 ruby tools/tests/hibr_singleton_gate.rb
 tools/tests/api_schema_gate.rb
 tools/tests/package_artifact_gate.sh /tmp/blit-release-artifacts/blit_0.1.401-1_amd64.deb
 ```
+
+The conformance runner deliberately targets a caller-owned server so the same
+test can validate a local dummy backend or a controlled remote fixture. Start
+the server in one terminal, then run the gate in another:
+
+```sh
+BLIT_PSF_FONT=build/blit-desktop-current/fonts/Lat15-Terminus16.psf \
+SDL_VIDEODRIVER=dummy LD_LIBRARY_PATH=build/sdl3-kms \
+  build/blit/blit-server 19195
+
+BLIT_TEST_SERVER=http://127.0.0.1:19195 \
+BLIT_EXPECTED_VERSION="$(sed -n '1p' packaging/VERSION)" \
+  ruby tools/tests/terminal_conformance.rb
+```
+
+The bounded soak uses the same ownership rule and additionally requires the
+server PID so it can enforce the RSS ceiling. See
+[`docs/implementation-and-verification.md`](docs/implementation-and-verification.md)
+for the exact two-process invocation and cleanup contract. Gates that own
+their dummy server, such as the frame-rate gate, state that explicitly.
 
 The package is a derived release artifact. Build it only after the source,
 schema, tests, documentation, and verification entry agree; the package gate
