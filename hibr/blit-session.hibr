@@ -49,6 +49,11 @@ mod load "$moddir/img.so" || exit 1
 mod load "$moddir/pty.so" || exit 1
 mod load "$moddir/term.so" || exit 1
 mod load "$moddir/hold.so" || exit 1
+# Open Blit's provider before the stock desktop enters its held-session
+# transition. The initial launcher remains the ownership-scoped Hibr client;
+# relying on the detached child's later `need display` can allow Hibr's native
+# console provider to win before the Blit adapter is opened.
+console open || exit 1
 # Hibr's stock desktop defaults DT_TERMMS to 70 ms, which is suitable for a
 # local terminal but caps program-driven redraws below a display refresh.
 # Blit's scheduler already applies the display's refresh interval, so remove

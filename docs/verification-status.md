@@ -3,7 +3,7 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
-## 0.1.407 current candidate evidence
+## 0.1.409 current candidate evidence
 
 The production Hibr launch path now installs and selects an explicit
 `blit-runtime-console.hibr` RC for API-launched Hibr children. The RC matches
@@ -13,6 +13,13 @@ This avoids duplicate native module loads while closing the systemd/deployment
 gap where QEMU supplied `HIBR_RC` but the live service did not. The package
 gate requires this RC and checks that it loads the configured Blit adapter.
 Hibr source remains unchanged.
+
+The current launcher also opens the Blit provider before the stock desktop
+enters its held-session transition. A focused live API experiment proved the
+distinction: the explicit pre-open path registered the owner and produced 229
+printable cells, while the previous implicit desktop path failed closed with
+`hibr_attach_unresolved` and an empty surface. The fix is Blit-owned and does
+not alter Hibr.
 
 The TCC-built 0.1.407 candidate passed the OpenAPI schema gate, full terminal
 conformance, Hibr singleton checks, and the exact Hibr 0.99.100 QEMU lifecycle
