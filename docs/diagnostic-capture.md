@@ -452,4 +452,7 @@ surface rendered cleanly. The unchanged Hibr capture presented coherently with
 no missed deadlines but occupied only the upper desktop region, leaving the
 lower framebuffer black. The captured artifacts are retained locally under
 `diagnostics/live-0.1.389-*` and are not treated as a passing full-desktop
-acceptance result.
+acceptance result. The Hibr-side lifecycle defect is tracked in
+[Hibr issue #145](https://git.home.arpa/itdlabs/hibr/issues/145); Blit remains
+responsible for preserving the evidence and must not paper over the missing
+Hibr rows by inventing terminal cells or changing the output geometry.
