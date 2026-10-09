@@ -3,6 +3,23 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 0.1.406 current candidate evidence
+
+The production Hibr launch path now installs and selects an explicit
+`blit-runtime-console.hibr` RC for API-launched Hibr children. This closes the
+systemd/deployment gap where the QEMU fixture supplied `HIBR_RC` but the live
+service did not, leaving a desktop process without Blit's display provider.
+The package gate requires this RC and checks that it loads the configured Blit
+adapter. Hibr source remains unchanged.
+
+The TCC-built 0.1.406 candidate passed the OpenAPI schema gate, full terminal
+conformance, Hibr singleton checks, and the exact Hibr 0.99.100 QEMU lifecycle
+matrix: `LAYOUT_MATRIX_PASS`, `HIBR_PRIMARY_RESTART_PASS`,
+`HIBR_JOIN_RECONNECT_PASS`, and `HIBR_PANE_MATRIX_PASS`. The live external
+image probe also registered its owner and completed a 512x512 graphics upload
+through the deployed adapter. Physical multi-monitor, physical button,
+physical high-refresh, and TCG 240 Hz deadline-capacity claims remain open.
+
 ## 0.1.405 current candidate evidence
 
 The TCC-built 0.1.405 candidate adds bounded producer-side surface cadence

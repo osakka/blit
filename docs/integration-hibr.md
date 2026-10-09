@@ -77,6 +77,13 @@ physical surface and keeps each surface authoritative; Hibr's hold layer
 remains the single source of truth for desktop/session state and fans the
 joined desktop to its clients.
 
+The package also installs `blit-runtime-console.hibr`, and the entrypoint sets
+`HIBR_RC` to it when the caller has not supplied an explicit fixture or
+operator RC. This is required for API-launched Hibr children under systemd:
+they do not inherit the QEMU fixture's environment. The RC loads the Blit
+adapter and Hibr's native `pty`, `term`, and `hold` modules only. An explicit
+`HIBR_RC` always wins, so controlled fixtures retain their own paths.
+
 `console-blit` remains available for standalone, non-held Hibr programs that
 explicitly need the cell-level Blit provider. It is not part of the held
 desktop integration path.

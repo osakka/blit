@@ -30,6 +30,14 @@ if [ ! -f "$desktop" ]; then
 	lg HIBR_LERR "blit-session: desktop session not found: $desktop"
 	exit 1
 fi
+# Hibr's held desktop creates interactive children that read HIBR_RC.  Supply
+# the installed Blit RC when the caller did not provide one; QEMU and other
+# controlled fixtures retain their explicit RC and therefore keep their own
+# staged module paths.
+runtime_rc=${BLIT_HIBR_RUNTIME_RC:-$d/blit-runtime-console.hibr}
+if [ -z "${HIBR_RC:-}" ] && [ -f "$runtime_rc" ]; then
+	export HIBR_RC=$runtime_rc
+fi
 # Run the real desktop file in this same Hibr process.  The launcher RC loads
 # the optional Blit provider before this entrypoint; exec-ing a second Hibr process here
 # would discard that provided display interface before desktop.hibr starts.

@@ -3,15 +3,19 @@
 The roadmap is ordered by dependency. A later milestone must not become a
 second, parallel implementation of an earlier one.
 
-## Current position — release 0.1.405
+## Current position — release 0.1.406
 
-The current candidate adds surface-content counters and separates the
+The current candidate closes the production Hibr launch contract by packaging
+an explicit `HIBR_RC` runtime file for API-launched Hibr children. This keeps
+the live systemd path aligned with the validated QEMU path without copying or
+modifying Hibr's desktop implementation. The previous candidate added
+surface-content counters and separates the
 four-output Hibr visual gate into two explicit cases: stock Hibr content on
 the primary with intentionally blank auxiliary joins, and a deterministic
 window workload that populates all four outputs. The exact TCC build, package,
 schema, terminal, input, lifecycle, four-output, Hibr, restart, producer
 cadence, and soak
-evidence is recorded in [`releases/0.1.405.yaml`](../releases/0.1.405.yaml)
+evidence is recorded in [`releases/0.1.406.yaml`](../releases/0.1.406.yaml)
 and [`verification-status.md`](verification-status.md).
 
 This is not a physical-host completion claim. The live host remains on 0.1.401
