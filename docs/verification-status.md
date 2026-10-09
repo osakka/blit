@@ -2322,3 +2322,11 @@ capture differed in only the cursor region (92 pixels) and had zero changed
 pixels outside the old/new cursor bounds. The render trace also recorded the
 `pointer-cache` path. This proves API pointer motion does not leave trails in
 the live SDL scene; it does not yet prove physical evdev motion on the host.
+
+# Current 0.1.383 live routing result
+
+The 0.1.383 deployment retained the graphics and input behavior while making
+routing diagnostics explicit. On the live host, the packaged Hibr entrypoint
+produced one complete 1920x2160 graphics image, and API motion plus both button
+edges reached session 1 with `routing=display-fallback`. This is the expected
+route for a primary display-attached session with no pane ID.
