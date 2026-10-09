@@ -64,6 +64,9 @@ server and Hibr 0.99.100 fixture. With `blit.input_soak=1`, the guest passed
 motions, 44 buttons, one ignored repeat, and two aggregate button-state
 coalesces. These are exact-current virtual input/render results; they do not
 close the source-qualified physical button trace on the supplied host.
+The same run now also passes `BLIT_INPUT_POINTER_BUTTON_TRACE_PASS`, proving
+that the critical trace retains an evdev source, button transition, and routed
+target session rather than merely incrementing aggregate counters.
 
 The exact-current two-output 240 Hz pixel-stream fixture accepted all 240
 complete frames with zero pixel-frame errors. Under this host's QEMU TCG

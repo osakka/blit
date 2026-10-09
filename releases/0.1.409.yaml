@@ -45,6 +45,7 @@ qemu_input_render_raw_motion_events: 547
 qemu_input_render_raw_button_events: 44
 qemu_input_render_ignored_button_repeats: 1
 qemu_input_render_button_state_coalesces: 2
+qemu_input_pointer_button_trace: pass
 qemu_pixel_stream_current_frames: 240
 qemu_pixel_stream_current_pixel_errors: 0
 qemu_pixel_stream_current_missed_deadlines: 22

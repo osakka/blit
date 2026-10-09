@@ -328,6 +328,19 @@ if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
     else
         echo BLIT_INPUT_RAW_EVDEV_FAIL
     fi
+    pointer_button_trace=$($b wget -qO- \
+        'http://127.0.0.1:19191/v1/diagnostics/trace?kind=pointer_button&limit=128' || true)
+    echo BLIT_INPUT_POINTER_BUTTON_TRACE
+    echo "$pointer_button_trace"
+    pointer_button_trace_pass=1
+    echo "$pointer_button_trace" | $b grep -q '"kind":"pointer_button"' || pointer_button_trace_pass=0
+    echo "$pointer_button_trace" | $b grep -q 'device=evdev-pointer' || pointer_button_trace_pass=0
+    echo "$pointer_button_trace" | $b grep -q "target_session=$input_pointer_id" || pointer_button_trace_pass=0
+    if [ "$pointer_button_trace_pass" -eq 1 ]; then
+        echo BLIT_INPUT_POINTER_BUTTON_TRACE_PASS
+    else
+        echo BLIT_INPUT_POINTER_BUTTON_TRACE_FAIL
+    fi
     if [ "${raw_mouse_repeats:-0}" -gt 0 ]; then
         echo BLIT_INPUT_MOUSE_REPEAT_PASS
     else
