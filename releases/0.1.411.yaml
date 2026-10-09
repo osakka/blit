@@ -46,7 +46,7 @@ qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
 live_deployment: pass
 live_current_version: 0.1.411
 live_unauthenticated_hibr_desktop: pass_32400_cells
-live_authenticated_hibr_desktop: pending_operator_token
+live_authenticated_hibr_desktop: pass_owner_registered
 live_physical_multi_display: unavailable_one_output
 live_physical_button_trace_contract: open
 physical_evdev_acceptance: open
@@ -62,9 +62,22 @@ notes: >-
   the unauthenticated Hibr path is unchanged by this release: a fresh
   packaged launch registered its owner and reached 32,400 printable cells at
   240x135 with the menu bar, wallpaper, icons and status line present.
-  Enabling BLIT_AUTH_TOKEN on that host is an operator action that this
-  session was not permitted to perform, so the authenticated case remains
-  pending and this release does not claim it.
+  The authenticated case is now proven on the same host without mutating
+  the production service: a second server was started on port 19600 with
+  BLIT_AUTH_TOKEN set and the dummy video backend, leaving blit.service and
+  its desktop untouched. Against that instance the packaged
+  blit-session.hibr entrypoint reached state=running with
+  owner_registered=true, owner_matches=1, unresolved=false and 6,144
+  printable cells at 128x48, and the captured framebuffer showed the menu
+  bar, wallpaper, desktop icons and status line. The runtime log recorded
+  hibr_resize_discovery matches=1 on the first attempt with no
+  hibr_attach_unresolved entry and no errors.
+
+  The same launch against 0.1.410 reported matches=0 for all 32 attempts and
+  then hibr_attach_unresolved with zero printable cells, so this is the
+  before/after pair for ADR 0055. The deployed blit.service still runs
+  unauthenticated; turning that on is an operator action and is not claimed
+  here.
 
   Operational note recorded while deploying: a supervised restart leaves the
   Hibr hold running, so the next packaged launch refuses with "blit is
