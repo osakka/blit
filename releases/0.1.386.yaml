@@ -21,7 +21,9 @@ screenshot_cache_acceptance: pending
 package_artifact_acceptance: pass
 qemu_input_acceptance: pass
 qemu_four_output_hibr_acceptance: pass
+qemu_high_refresh_scheduler_acceptance: pass
 qemu_high_refresh_acceptance: open
+qemu_pixel_stream_240_acceptance: open
 live_deployment_acceptance: pending
 live_hibr_geometry_acceptance: pending
 live_hibr_graphics_acceptance: pending
