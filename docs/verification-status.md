@@ -42,6 +42,13 @@ invariant and passes alongside pointer-damage atomicity, external pointer
 composition, and wallpaper stress. Physical evdev input remains a separate
 hardware gate and is not inferred from these API-injected tests.
 
+The exact 0.1.364 TCC binary was also rerun in the two-output VKMS fixture
+using the refreshed initroot: `PPM_DISPLAY_47_WIDE_KITTY_PASS`,
+`PPM_DISPLAY_48_PASS`, `KMS_API_SCREENSHOT_PASS size=3145782`, and
+`KMS_CAPTURE_PASS`. The first attempted rerun was rejected as invalid evidence
+because an empty temporary initroot produced a 4 KiB initramfs and a kernel
+panic before Blit started; it was not recorded as a Blit failure.
+
 ## Current 0.1.362 live Hibr evidence bundle
 
 The live host was started through Blit's API with the documented primary
