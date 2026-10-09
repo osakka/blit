@@ -25,7 +25,9 @@ remains on 0.1.385, so live deployment, physical input, and physical
 multi-monitor acceptance remain open. The live 0.1.385 screenshot evidence
 showed sparse scene corruption; commit `0053a34` restores under-text
 wallpaper during incremental damage and is included in 0.1.388. Hibr source
-was not modified.
+was not modified. A controlled QEMU comparison with 8 vCPUs and
+multithreaded TCG completed 240 frame uploads but only 83 visible presents,
+versus 81 with 2 vCPUs; no safe renderer change is justified by that result.
 
 ## Current 0.1.387 terminal-parity and high-refresh boundary
 
