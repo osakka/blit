@@ -21,6 +21,16 @@ sdl_glyph_render_acceptance: pass
 frame_rate_acceptance: pass
 pixel_frame_acceptance: pass
 kms_submission_retirement_boundary: pass
+shutdown_acceptance: pass
+session_lifecycle_acceptance: pass
+stream_replay_acceptance: pass
+screenshot_nonblocking_acceptance: pass
+network_auth_acceptance: pass
+http_fragmentation_acceptance: pass
+http_backpressure_acceptance: pass
+update_cancel_acceptance: pass
+update_idle_timeout_acceptance: pass
+update_reset_acceptance: pass
 qemu_input_0_1_389_acceptance: pass
 qemu_four_output_hibr_0_1_389_acceptance: pass
 qemu_high_refresh_scheduler_0_1_389_acceptance: pass
