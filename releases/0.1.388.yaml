@@ -15,6 +15,7 @@ external_pointer_composition_acceptance: pass
 pointer_damage_atomicity_acceptance: pass
 pointer_wallpaper_stress_acceptance: pass
 sdl_background_batch_acceptance: pass
+qemu_input_0_1_388_acceptance: pass
 qemu_high_refresh_acceptance: open
 qemu_pixel_stream_240_acceptance: open
 live_deployment_acceptance: pending
