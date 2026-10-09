@@ -654,6 +654,11 @@ static int cb_console(sh *s, int ac, char **av)
 {
 	const char *sub = ac > 1 ? av[1] : "";
 	int rows, cols, row, col, i;
+	/* Every console subcommand that reaches this provider, so "the command
+	 * never arrived" and "the handler did nothing" can be told apart.
+	 * `cell` dominates the log, so it is excluded to keep the rest legible. */
+	if (strcmp(sub, "cell") != 0)
+		CB_TRACE("console-blit: console %s (argc=%d)", sub[0] ? sub : "(none)", ac);
 	unsigned fg, bg, attr;
 	str result;
 	cb_pane *p;
