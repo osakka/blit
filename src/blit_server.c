@@ -721,6 +721,7 @@ static void update_pointer_position(BlitRuntime *runtime,
 static void broadcast_evdev_pointer(BlitRuntime *runtime, const char *kind,
                                     int button, int pressed, int delta,
                                     const char *device_id);
+static int session_surface_is_owner_authored(const BlitSession *session);
 static void dispatch_pointer_button(BlitRuntime *runtime, int button,
                                     int pressed, const char *device_id);
 
@@ -13237,6 +13238,12 @@ static void send_mouse_report(BlitRuntime *runtime, SDL_WindowID window_id,
     if (session == NULL || session->pty_fd < 0)
         return;
     if (session->terminal_mouse_mode == 0) {
+        /* ADR 0057: scrollback holds PTY history, which an owned surface's
+           content never passed through, so showing it replaces the owner's
+           screen with something that was never the desktop. The owner
+           receives pointer events over the input stream instead. */
+        if (session_surface_is_owner_authored(session))
+            return;
         if (!release && (button == 64 || button == 65))
             terminal_scrollback_wheel(runtime, session, button);
         else
@@ -13658,12 +13665,33 @@ static BlitSession *keyboard_target(BlitRuntime *runtime)
     return NULL;
 }
 
+/* ADR 0057: true when this session's surface is authored by a registered
+   owner over the API rather than by its PTY byte stream. Gated on the
+   desktop role, which is set at session create from the launch arguments,
+   not on hibr_owner_registered, which arrives asynchronously -- the
+   handshake window is exactly when a stray PTY write does the most damage
+   and is the state that produced a "running" session with a blank
+   surface. */
+static int session_surface_is_owner_authored(const BlitSession *session)
+{
+    return session != NULL &&
+        (session->hibr_desktop_primary || session->hibr_desktop_join);
+}
+
 static void send_evdev_key(BlitRuntime *runtime, unsigned short code)
 {
     BlitSession *session = keyboard_target(runtime);
     char sequence[32];
     int length = 0;
     if (session == NULL || session->pty_fd < 0) return;
+    /* ADR 0057: an owned surface is not an interactive terminal. The key
+       already reaches the owner over the input stream (ADR 0034); writing
+       it to the PTY as well gets it echoed back by the line discipline and
+       rendered into the surface the owner is drawing, and turns Page
+       Up/Down into scrollback navigation that replaces the owner's content
+       with terminal history. The caller broadcasts the stream event after
+       this returns, so the key is not lost. */
+    if (session_surface_is_owner_authored(session)) return;
     if (runtime->evdev_ctrl && code >= KEY_A && code <= KEY_Z) {
         sequence[0] = (char)(code - KEY_A + 1);
         length = 1;

@@ -1,0 +1,69 @@
+release: 0.1.417
+package: blit_0.1.417-1_amd64.deb
+package_sha256: ee40667b340a62dda3702493db274851df07d7fb4813b5711b5e5e92a8dbff0a
+source_commit: 49ae687bc096ff462f39abb72d2c15eb93e8c8dd
+package_documentation_commit: 49ae687bc096ff462f39abb72d2c15eb93e8c8dd
+server_binary_sha256: d612a0502bb62c5d21dcb1a0ea7d29b3412a2159835ac809cabef6dc967387af
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: fa7476569f5415908a0f2668c7a382039d11fc626b7a74b3bfbd41c729ec2c26
+hibr_root: /tmp/hibr-0.99.100
+hibr_version: 0.99.100
+tcc_build_acceptance: pass
+openapi_yaml: pass
+api_schema_gate: pass
+package_artifact_acceptance: pass
+network_auth_acceptance: pass_api_token_injected
+terminal_conformance: pass
+session_lifecycle_acceptance: pass
+session_write_resize_acceptance: pass
+stream_replay_acceptance: pass
+font_api_acceptance: pass
+hibr_font_manifest_acceptance: pass
+glyph_geometry_local_pixel_acceptance: pass
+sdl_glyph_filter_acceptance: pass
+external_pointer_composition: pass
+pointer_damage_atomic_acceptance: pass
+pointer_wallpaper_stress_acceptance: pass
+hidden_cursor_damage_acceptance: pass
+sdl_background_batch_acceptance: pass
+sdl_graphics_cache_acceptance: pass
+sdl_wallpaper_damage_acceptance: pass
+screenshot_overlay_acceptance: pass
+pixel_frame_acceptance: pass
+hibr_singleton_local_acceptance: pass
+hibr_resume_guard_acceptance: pass
+restart_gate: pass
+shutdown_gate: pass
+update_idle_timeout_acceptance: pass
+update_reset_acceptance: pass
+update_cancel_acceptance: pass
+frame_rate_settled_acceptance: pass
+terminal_soak_120s_acceptance: pass
+screenshot_nonblocking_live_acceptance: pass
+qemu_hibr_lifecycle_acceptance: not_rerun_candidate
+qemu_four_output_pixel_acceptance: not_rerun_candidate
+qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
+live_deployment: pending
+live_current_version: 0.1.412
+live_unauthenticated_hibr_desktop: pass_32400_cells
+live_authenticated_hibr_desktop: pass_production_service_32400_cells
+live_physical_multi_display: unavailable_one_output
+live_physical_button_trace_contract: open
+physical_evdev_acceptance: open
+physical_multi_monitor_acceptance: open
+physical_high_refresh_acceptance: open
+graphics_sixel_introducer_acceptance: pass
+graphics_kitty_png_acceptance: pass_pixel_identical_to_raw
+notes: >-
+  Accepts parameterised sixel introducers (DCS P1;P2;P3 q) and Kitty f=100
+  PNG transmissions. ADR 0056 records linking the system zlib for DEFLATE
+  rather than carrying an in-tree inflate, so Depends becomes
+  libc6, libdrm2, zlib1g.
+
+  The same 2x2 image transmitted as raw RGBA and as PNG produces a
+  byte-identical framebuffer (sha256 b01d4618dca32830), and an 8x8
+  four-quadrant image decodes to exactly the colours it was encoded with.
+  Four conformance vectors cover the introducer forms, DECRQSS not being
+  captured as sixel, the PNG transmission matching its raw equivalent, and
+  malformed or truncated containers creating no image.
+  tools/run-gates.sh all reports pass=29 skip=4 fail=0 for this source.
