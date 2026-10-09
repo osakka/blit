@@ -235,7 +235,9 @@ single-threaded response. For example:
 Use the smallest limit that answers the question. A missing or invalid limit
 uses the safe default; the oldest matching events are discarded first.
 
-`surface_update` records the `immediate` and `commit` boundaries, not every
+`surface_update` records the `api-cells` transport, the owning surface mode
+(`terminal`, `external`, or `mirror`), and the `immediate`/`commit` boundaries,
+not every
 deferred cell chunk. This keeps the bounded trace useful under high-volume
 terminal output while preserving the atomic-frame evidence.
 

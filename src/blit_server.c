@@ -9517,10 +9517,16 @@ static void handle_request(int fd, BlitRuntime *runtime,
             surface->frame_open = 0;
         {
             char detail[192];
+            BlitSession *surface_session = find_session_id(
+                runtime, surface->owner_session_id);
             snprintf(detail, sizeof(detail),
-                     "surface=surface-%llu revision=%llu presentation=%s frame_open=%d",
-                     surface->id, surface->revision, presentation,
-                     surface->frame_open);
+                     "surface=surface-%llu revision=%llu transport=api-cells "
+                     "surface_mode=%s presentation=%s frame_open=%d",
+                     surface->id, surface->revision,
+                     surface_session != NULL ?
+                         surface_mode_name(surface_session->surface_mode) :
+                         "unknown",
+                     presentation, surface->frame_open);
             /* Deferred cell chunks are transport detail.  Keep the bounded
                trace focused on actual presentation boundaries so a busy
                external terminal cannot evict input and render evidence. */

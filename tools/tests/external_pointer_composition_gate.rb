@@ -83,6 +83,8 @@ begin
   performance = runtime.fetch('performance')
   trace = request(base, :get, '/v1/diagnostics/trace?kind=render_path')
   details = trace.fetch('events').map { |event| event.fetch('detail') }
+  surface_trace = request(base, :get, '/v1/diagnostics/trace?kind=surface_update')
+  surface_details = surface_trace.fetch('events').map { |event| event.fetch('detail') }
   pointer_hits = performance.fetch('pointer_cache_hits')
   raise "external pointer cache was not used: #{performance.inspect}" unless
     pointer_hits >= 5
@@ -91,6 +93,10 @@ begin
       detail.include?('graphics_changed=0') }
   raise 'pointer-cache render path was not observed' unless
     details.any? { |detail| detail.include?('path=pointer-cache') }
+  raise 'surface transport/mode was not classified' unless
+    surface_details.any? { |detail| detail.include?('transport=api-cells') &&
+      detail.include?('surface_mode=external') &&
+      detail.include?('presentation=commit') }
   puts "EXTERNAL_POINTER_COMPOSITION_PASS pointer_cache_hits=#{pointer_hits} " \
        "pointer_cache_misses=#{performance.fetch('pointer_cache_misses')}"
 ensure

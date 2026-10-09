@@ -3,7 +3,33 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
-## 0.1.401 current release evidence
+## 0.1.402 current candidate evidence
+
+The TCC-built 0.1.402 server adds diagnostic classification to every
+non-deferred API cell commit: `transport=api-cells` and the owning
+`surface_mode` (`terminal`, `external`, or `mirror`). This distinguishes a
+producer-side API update from PTY terminal output in the bounded trace; it
+does not change rendering, Hibr behavior, or frame pacing. The optional Hibr
+adapter was rebuilt against the exact configured Hibr 0.99.100 ABI; the
+development checkout at `/home/osakka/hibr` is 0.99.120 and was not used or
+modified.
+
+The exact TCC server binary SHA-256 is
+`1a6cf13e4a26c6a68d2e729f9c34047209b09ecd8db5fedccdac4c8021a5793f`; the
+adapter SHA-256 remains
+`c1ac8a2cc2898b27411f79a665ce3c0c3156b227b9a2c4d77347c072b6a70db9`.
+The API schema gate passed with 33 paths, the full terminal conformance
+suite passed, and the new external-surface trace assertion passed. Restart
+of the exact serving binary passed, session write/resize passed, and the
+bounded frame-rate gate measured `54.370 Hz` over `514 ms` with zero missed
+deadlines. The 20-second four-session soak passed with `2372` snapshots,
+`216` resizes, and peak RSS `18540 KiB` under the `131072 KiB` limit.
+
+This candidate has not been deployed to the physical host yet; its live
+0.1.401 evidence remains below. QEMU and package acceptance are run against
+the final 0.1.402 artifact before release publication.
+
+## 0.1.401 prior release evidence
 
 The current rebuilt package is `blit_0.1.401-1_amd64.deb`. Its exact
 checksum/source relationship is recorded exclusively in
