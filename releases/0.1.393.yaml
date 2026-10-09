@@ -16,8 +16,8 @@ qemu_physical_button_trace_acceptance: pass
 qemu_four_output_pixel_acceptance: pass
 qemu_four_output_hibr_acceptance: pass
 qemu_tall_hibr_boundary_diagnostic: pass
-live_active_frame_rate_acceptance: pending
-live_input_diagnostics: pending
+live_active_frame_rate_acceptance: pass
+live_input_diagnostics: pass
 live_physical_button_trace_contract: open
 live_hibr_geometry_acceptance: pending
 physical_evdev_acceptance: open
