@@ -3,6 +3,26 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 0.1.400 release candidate artifact
+
+The current TCC build embeds version `0.1.400` and has server SHA-256
+`73a07f5a0cce7148c77aa673f2b14cf1defab629d36e8011a8660673eef36cf4`.
+The Debian artifact
+`blit_0.1.400-1_amd64.deb` has SHA-256
+`1d87cfcff236720f4fc8331a566cacb38913b3e98022ec5a846e4d72386fca2e` and
+passes the package allowlist, embedded-version, schema, binary, and packaged
+documentation checks. It has not been deployed to the live host, which still
+reports 0.1.398.
+
+The 0.1.400 binary passes the local font, resize, glyph, frame-rate,
+pixel-frame, Hibr singleton, full terminal-conformance, and 20-second
+four-session soak gates. Fresh QEMU images staged with the 0.1.400 binary
+also passed the two-output lifecycle/rejoin wrapper, raw multi-device input
+(`BLIT_INPUT_RAW_EVDEV_PASS`, `BLIT_INPUT_MOUSE_REPEAT_PASS`, and
+`BLIT_INPUT_MULTI_MOUSE_BUTTON_STATE_PASS`), and four-output Hibr marker
+(`KMS_FOUR_HIBR_PASS`) runs. These remain virtual evidence; no physical
+multi-monitor or physical high-refresh claim is made.
+
 ## 0.1.399 focused local acceptance after commit 6888dc5
 
 The canonical TCC rebuild produced the 0.1.399 server binary with SHA-256

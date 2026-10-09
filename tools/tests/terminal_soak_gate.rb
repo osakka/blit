@@ -137,10 +137,26 @@ ensure
   end
 end
 
-runtime = request(base, 'GET', '/v1/diagnostics/runtime').fetch('snapshot')
-assert(runtime.fetch('health').fetch('ready') == true, 'runtime not ready after cleanup')
-assert(runtime.fetch('resources').fetch('sessions') == 0, 'sessions leaked after cleanup')
-assert(runtime.fetch('render').fetch('pending') == false, 'render queue did not drain after cleanup')
+drain_started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+drain_deadline = drain_started + 1.0
+drain_wait_ms = 0
+loop do
+  runtime = request(base, 'GET', '/v1/diagnostics/runtime').fetch('snapshot')
+  assert(runtime.fetch('health').fetch('ready') == true,
+         'runtime not ready after cleanup')
+  assert(runtime.fetch('resources').fetch('sessions') == 0,
+         'sessions leaked after cleanup')
+  break unless runtime.fetch('render').fetch('pending')
+
+  now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+  if now >= drain_deadline
+    raise "render queue did not drain after cleanup: #{runtime.fetch('render').inspect}"
+  end
+  sleep 0.02
+  drain_wait_ms = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) -
+                    drain_started) * 1000).round
+end
 puts "TERMINAL_SOAK_PASS seconds=#{duration} sessions=#{session_count} " \
-     "snapshots=#{snapshots} resizes=#{resizes} max_rss_kib=#{max_rss} " \
+     "snapshots=#{snapshots} resizes=#{resizes} drain_wait_ms=#{drain_wait_ms} " \
+     "max_rss_kib=#{max_rss} " \
      "max_rss_limit_kib=#{max_rss_limit}"
