@@ -48,6 +48,13 @@ A failed cycle is also recorded: commit only a useful, coherent diagnostic or
 test improvement, explain the failure, and do not claim the feature passed.
 Never amend or rewrite pushed history to hide a failed experiment.
 
+The commit message should identify the boundary changed and the evidence
+updated, for example `document API lifecycle and release evidence`. Before
+push, inspect the staged file list and confirm that it contains no package,
+screenshot, log, QEMU image, token, or unrelated Hibr checkout. After push,
+record the commit ID in the release manifest or evidence ledger before making
+the next runtime claim.
+
 ## Required gates
 
 Use the narrowest gate that proves the change, then run the broader gate before

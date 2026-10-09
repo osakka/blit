@@ -20,6 +20,40 @@ The guide gives safe ordering and examples. It is deliberately not a second
 schema: field names, enums, status codes, limits, and binary message framing
 come only from the OpenAPI document.
 
+## API contract in one page
+
+Blit exposes three kinds of operations:
+
+| Kind | Examples | Client rule |
+| --- | --- | --- |
+| Discovery | `/version`, `/server`, `/displays`, `/topology` | Read before mutation; treat capabilities as runtime facts. |
+| Resource lifecycle | sessions, surfaces, routes, overlays, fonts, effects | Keep returned IDs/revisions; use preconditions and idempotency keys. |
+| Observation/control | stream, diagnostics, screenshots, shutdown/restart/update | Observe asynchronous work; use typed problem codes on failure. |
+
+The API is intentionally not a remote shell. Terminal bytes go through the
+terminal-session input subresource, display state goes through surfaces and
+frames, and lifecycle control goes through explicit control resources. This
+keeps input, presentation, and process ownership diagnosable.
+
+### Required headers and response handling
+
+For JSON mutations send `Content-Type: application/json`. For retryable
+mutations send a stable `Idempotency-Key`; for revisioned resources send the
+revision using the schema-defined `If-Match` precondition. If authentication
+is enabled, requests carry `Authorization: Bearer TOKEN`.
+
+| Outcome | Meaning | Correct action |
+| --- | --- | --- |
+| `2xx` | Accepted or completed according to that operation | Persist IDs/revisions; observe asynchronous work. |
+| `409` | Ownership, revision, or lifecycle conflict | Re-read authoritative state; do not blindly retry the same body. |
+| `404` | Unknown route or resource | Verify `/v1/version`, then check the schema and opaque ID. |
+| `429` | Bounded queue/back-pressure limit | Apply bounded backoff and inspect runtime counters. |
+| `4xx/5xx` problem | Typed failure | Branch on `code`, preserve safe context, and record correlation data. |
+
+Never infer presentation from request latency. A session input receipt means
+the PTY write was accepted; a frame is complete only when the surface/frame
+revision or stream event confirms it.
+
 ## Endpoint and authentication
 
 The default development endpoint is `http://HOST:8080`. All public resources
@@ -75,6 +109,35 @@ status codes.
 
 The schema currently contains 33 path templates. Keep this table synchronized when a
 path is added, removed, or renamed; the schema remains the authoritative count.
+
+### Method-level reference
+
+This is the stable mental model for the 33 paths; the OpenAPI file remains the
+exact method, parameter, and response reference:
+
+```text
+GET    /v1/version                         compatibility handshake
+GET    /v1/server                          capabilities and links
+GET    /v1/graphics /displays /audio       hardware inventory
+GET/PUT /v1/fonts /topology /effects       revisioned configuration
+POST   /v1/terminal-sessions               create a PTY-backed session
+GET/PATCH/DELETE /v1/terminal-sessions/{id} lifecycle and placement
+POST   /v1/terminal-sessions/{id}/input    terminal input bytes
+GET    /v1/terminal-sessions/{id}/hibr-owner Hibr ownership state
+GET/PUT /v1/surfaces/{id}/cells            authoritative cell snapshot/update
+GET    /v1/surfaces/{id}/summary/scrollback repair and inspection
+GET/POST /v1/input/*                       discover, route, or inject input
+POST   /v1/frames                          explicit coherent frame boundary
+GET    /v1/stream                          events and bounded pixel frames
+GET    /v1/diagnostics*                    state, timing, traces, screenshots
+POST   /v1/control/{shutdown,restart}      orderly service control
+POST/GET /v1/control/update*               verified package supervision
+POST/DELETE /v1/overlays[/{id}]            bounded graphic overlays
+```
+
+When this map and the schema disagree, the schema wins and the documentation
+must be corrected in the same change. A route addition is not complete until
+the schema gate, a focused request test, and the verification ledger agree.
 
 ## Minimal client workflow
 
@@ -246,6 +309,14 @@ For a performance report, capture `/v1/version`, `/v1/displays`, and
 Compare `present_calls`, frame/render intervals, missed deadlines, queue
 pressure, and input dispatch counters. Do not report a frame rate from a
 screenshot timestamp or HTTP request latency.
+
+For a reproducible performance report, include the exact `server_version`,
+display mode/refresh, workload duration, `present_calls`, measured frame or
+render interval, missed deadlines, input dispatch counters, terminal bytes,
+queue pressure, and the trace window used. “The screen looked slow” is a
+useful observation, but it is not enough to identify whether the producer,
+surface commit, scheduler, renderer, KMS submission, or physical scanout is
+the limiting boundary.
 
 ## Effects, overlays, and control
 

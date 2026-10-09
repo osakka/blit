@@ -11,6 +11,26 @@ Canonical repository: `git.home.arpa/itdlabs/blit`
 This directory is the project contract. Implementation work should update the
 relevant documentation and schema in the same change.
 
+## Start here
+
+Blit has three audiences, and they should not have to reverse-engineer one
+another's assumptions:
+
+1. **Operators and API clients**: read [the API guide](api.md), then use the
+   [OpenAPI contract](../openapi/blit-0.1.yaml) for exact fields and status
+   codes.
+2. **Hibr integrators**: read [Hibr integration](integration-hibr.md) and the
+   Hibr lifecycle ADRs. Blit owns placement, input routes, surfaces, and
+   diagnostics; Hibr owns desktop semantics and `--join` behavior.
+3. **Contributors and release operators**: read the
+   [engineering constitution](engineering-constitution.md),
+   [development workflow](development-workflow.md), and
+   [verification ledger](verification-status.md).
+
+The shortest accurate project description is: **the OpenAPI schema defines the
+wire contract, the TCC-built C server implements it, ADRs record durable
+decisions, and the verification ledger limits what we are allowed to claim**.
+
 ## Source-of-truth order
 
 When two documents appear to disagree, resolve the discrepancy in this order:
@@ -73,6 +93,21 @@ panes, input routing, and diagnostics.
 - [ADR index](adr/README.md) — decisions that constrain implementation.
 - [Verification status](verification-status.md) — the current evidence ledger,
   release gates, and explicitly unverified items.
+
+## How to read a result
+
+There are four different states and they must not be conflated:
+
+- **specified**: present in the OpenAPI contract or an accepted ADR;
+- **implemented**: present in the source and covered by a focused test;
+- **validated**: the matching binary/package passed the relevant end-to-end
+  gate;
+- **host accepted**: the exact deployed binary passed on the named physical
+  host, hardware, input devices, and display mode.
+
+The ledger records these separately. A passing dummy backend, QEMU output, or
+screenshot does not prove physical evdev, physical monitor count, Hibr
+geometry, or high-refresh behavior on another host.
 
 The authenticated `GET /v1/diagnostics/runtime` endpoint is the canonical
 remote troubleshooting surface. It combines the normal diagnostics snapshot

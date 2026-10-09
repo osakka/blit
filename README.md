@@ -1,5 +1,13 @@
 # Blit
 
+> API-driven, text-first display service for SDL3/KMS Linux hosts.
+
+Blit is the display and terminal boundary; Hibr remains the desktop/session
+owner. The normal integration is one Blit service, one primary Hibr desktop,
+and zero or more Hibr `desktop --join` attachments placed by Blit's logical
+topology API. Blit does not patch Hibr, launch competing desktop owners, or
+require an X11/Wayland compositor.
+
 Blit is an API-driven, text-first display server for Linux. It owns terminal
 surfaces, physical outputs, input routes, effects, diagnostics, and bounded
 graphic overlays behind one versioned OpenAPI contract. Its display path is
@@ -32,6 +40,36 @@ OpenAPI/HTTP + WebSocket
           |
           +---- SDL3/KMS presentation
 ```
+
+## Five-minute operator path
+
+The package installs a systemd service and the native `blit` executable. The
+API is plain HTTP over TCP; the default development port is 8080. Start with
+identity and readiness, then inspect hardware before creating a session:
+
+```sh
+curl --fail http://127.0.0.1:8080/v1/version
+curl --fail http://127.0.0.1:8080/v1/server
+curl --fail http://127.0.0.1:8080/v1/displays
+curl --fail http://127.0.0.1:8080/v1/diagnostics/runtime
+```
+
+For a real deployment, configure a bearer token and restrict the listener at
+the network boundary. An unauthenticated `0.0.0.0` listener is a test-LAN
+configuration only. The complete client transaction, Hibr ownership rules,
+stream protocol, error model, and shutdown/update behavior are in the
+[API guide](docs/api.md).
+
+The smallest useful acceptance loop is:
+
+```text
+version -> server -> displays/topology -> create one session
+        -> observe revisions/runtime -> delete session -> verify zero resources
+```
+
+A client must preserve opaque IDs and revisions returned by Blit; it must not
+derive resource IDs from display names or assume that an HTTP success means a
+frame has already been presented.
 
 The OpenAPI document defines wire behavior. The C implementation defines the
 runtime. ADRs explain durable decisions. Tests and the verification ledger are
