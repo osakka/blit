@@ -21,6 +21,13 @@ matrix: `LAYOUT_MATRIX_PASS`, `HIBR_PRIMARY_RESTART_PASS`,
 image probe also registered its owner and completed a 512x512 graphics upload
 through the deployed adapter. Physical multi-monitor, physical button,
 physical high-refresh, and TCG 240 Hz deadline-capacity claims remain open.
+The 0.1.407 package is deployed on the supplied host and `/v1/version` reports
+0.1.407. Its live SDL3 output reports 60 Hz and zero missed deadlines. A
+single-primary desktop launch was tested through the API; Hibr reported its
+desktop startup, but no Blit adapter owner registered and the fail-closed
+`hibr_attach_unresolved` path retired the empty surface. The host was cleaned
+back to zero sessions afterward. This is an open Hibr integration failure, not
+a renderer or frame-rate pass claim.
 
 ## 0.1.405 current candidate evidence
 
