@@ -12569,8 +12569,10 @@ static void dispatch_pointer_button(BlitRuntime *runtime, int button,
     if (button < 0 || button > 2)
         return;
     snprintf(detail, sizeof(detail),
-             "button=%d pressed=%d x=%.1f y=%.1f target_session=%llu routing=%s",
-             button, pressed, runtime->pointer_x, runtime->pointer_y,
+             "button=%d pressed=%d device=%s x=%.1f y=%.1f "
+             "target_session=%llu routing=%s",
+             button, pressed, device_id != NULL ? device_id : "unknown",
+             runtime->pointer_x, runtime->pointer_y,
              target != NULL ? target->id : 0ULL,
              pointer_routing_name(target, routed));
     diagnostic_trace(runtime, "pointer_button", detail);
