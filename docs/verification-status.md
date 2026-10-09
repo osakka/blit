@@ -45,6 +45,16 @@ still 0.1.401, one 60 Hz output, and its read-only evidence shows 60 Hz
 presentation with zero missed deadlines but roughly 7 Hz Hibr surface commits
 and zero physical evdev mouse events.
 
+The remaining 240 Hz pixel-stream claim was characterized again against the
+same 0.1.405 binary. QEMU accepted all 240 complete frames with zero pixel
+frame errors, but the two-output VKMS guest accumulated additional page-flip
+deadline misses in every TCG run: 11 with one vCPU, 12 with two, 18 with four,
+and 26 with eight vCPUs (the earlier two-vCPU run measured 12). This host has
+no `/dev/kvm`, so these are TCG capacity results, not evidence of physical
+240 Hz behavior or a proven renderer defect. The production scheduler remains
+unchanged; KVM-backed or physical hardware evidence is required before this
+acceptance can be closed.
+
 ## 0.1.404 current candidate evidence
 
 The TCC-built 0.1.404 candidate adds compact `codepoint_cells` and
