@@ -34,6 +34,15 @@ rejects both the wrong parent POST and a missing `/input` route.
 The 0.1.401 contract-correction build is not yet deployed; its package and
 manifest will carry the exact corrected-schema hashes.
 
+The 0.1.401 TCC binary has SHA-256
+`633167c51397f0a7c129406a5ecb192e24f0fb16919e815d2ac0e991f75a500f`.
+Its corrected-schema Debian artifact has SHA-256
+`5c7eb0af31e97eddde730f86ee931fd3c7c96cf15724271364fddecbcda11934`.
+The artifact passes the package gate, API schema gate, terminal conformance,
+font/resize/glyph/pixel/frame gates, singleton ownership, and the 20-second
+four-session soak. Fresh 0.1.401 QEMU images pass the lifecycle/rejoin
+wrapper, raw multi-device input markers, and four-output Hibr marker.
+
 ## 0.1.399 focused local acceptance after commit 6888dc5
 
 The canonical TCC rebuild produced the 0.1.399 server binary with SHA-256
