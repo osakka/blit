@@ -11,6 +11,8 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <netinet/in.h>
+#include <grp.h>
+#include <pwd.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdarg.h>
@@ -7370,6 +7372,11 @@ static int create_session(BlitRuntime *runtime, const char *json,
     int height = 0;
     int surface_present;
     char surface_mode[32];
+    char run_user[128];
+    struct passwd *run_pw = NULL;
+    int run_as_user = 0;
+    uid_t run_uid = (uid_t)-1;
+    gid_t run_gid = (gid_t)-1;
     int master_fd;
     pid_t process_id;
     unsigned long long session_id;
@@ -7393,6 +7400,17 @@ static int create_session(BlitRuntime *runtime, const char *json,
                                            environment_values, 32);
     if (environment_count < 0)
         return 0;
+    memset(run_user, 0, sizeof(run_user));
+    if (json_string(json, "user", run_user, sizeof(run_user))) {
+        if (geteuid() != 0 || run_user[0] == '\0')
+            return 0;
+        run_pw = getpwnam(run_user);
+        if (run_pw == NULL)
+            return 0;
+        run_uid = run_pw->pw_uid;
+        run_gid = run_pw->pw_gid;
+        run_as_user = 1;
+    }
     ++argument_count;
     arguments[argument_count] = NULL;
     memset(surface_mode, 0, sizeof(surface_mode));
@@ -7478,6 +7496,14 @@ static int create_session(BlitRuntime *runtime, const char *json,
                 _exit(126);
         if (pane_id[0] != '\0' && setenv("BLIT_PANE_ID", pane_id, 1) != 0)
             _exit(126);
+        if (run_as_user) {
+            if (initgroups(run_user, run_gid) != 0 ||
+                setgid(run_gid) != 0 || setuid(run_uid) != 0 ||
+                setenv("HOME", run_pw->pw_dir, 1) != 0 ||
+                setenv("USER", run_user, 1) != 0 ||
+                setenv("LOGNAME", run_user, 1) != 0)
+                _exit(126);
+        }
         for (environment_index = 0; environment_index < environment_count;
              ++environment_index)
             if (setenv(environment_keys[environment_index],

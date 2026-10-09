@@ -1371,6 +1371,14 @@ components:
       required: [command]
       properties:
         command: {type: string, minLength: 1}
+        user:
+          type: string
+          minLength: 1
+          description: >-
+            Optional local account identity for the child process. When Blit
+            runs as root, the child is initialized with that account's
+            supplementary groups, uid, gid, HOME, USER, and LOGNAME before
+            exec. Omitting this field preserves the service identity.
         arguments:
           type: array
           items: {type: string}
