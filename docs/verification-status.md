@@ -9,7 +9,7 @@ The current rebuilt package is `blit_0.1.401-1_amd64.deb`. Its exact
 checksum/source relationship is recorded exclusively in
 [`releases/0.1.401.yaml`](../releases/0.1.401.yaml). The TCC server binary
 SHA-256 remains
-`633167c51397f0a7c129406a5ecb192e24f0fb16919e815d2ac0e991f75a500f`.
+`8cade338f37f1374549af5d56a2803c083ebbda9ee5a82eedaf6bc5fe2f872a7`.
 
 The 0.1.401 source and artifact pass the OpenAPI structural gate (33 paths,
 including the versioned terminal-input subresource), full terminal
@@ -29,14 +29,30 @@ results; the fixture's TCG deadline misses are retained as VM timing evidence
 and are not described as physical 240 Hz scanout.
 
 The authorized live host reports 0.1.401, one SDL3/OpenGLES2 output at
-1920x2160 and 60 Hz, zero errors, and zero resources after cleanup. The
-network frame-rate gate measured `60.071 Hz` over a 516 ms window with
-`0` missed deadlines and a 16 ms target interval. This is valid live
-presentation evidence for that one output. The physical multi-display gate
-returned `PHYSICAL_MULTI_DISPLAY_UNAVAILABLE displays=1`; physical evdev
-button/motion tracing, physical multi-monitor Hibr geometry, and physical
-120/240 Hz scanout remain open and are not inferred from QEMU or synthetic
-API input.
+1920x2160 and 60 Hz, and zero renderer errors. The network frame-rate gate
+measured `60.071 Hz` over a 516 ms window with `0` missed deadlines and a
+16 ms target interval. This is valid live presentation evidence for that one
+output under an active bounded workload; it is not a claim that an unchanged
+terminal scene is continuously re-presented at vblank.
+
+A fresh live primary was then created through the documented API using the
+unchanged Hibr installation. The one primary reached `running`, its pointer
+and keyboard routes were installed for `session-4`, and the canonical
+10-second experience capture recorded `106` surface commits and `106`
+damage-driven presents in `14120 ms` (`7.507 Hz`), with zero missed
+deadlines. The runtime's selected target remained 60 Hz/16 ms. This lower
+number is producer/damage cadence, not scanout rate; it identifies the live
+Hibr scene-update path as the next performance/visual-fidelity boundary.
+The cached 1920x2160 framebuffer artifact is recorded outside the repository
+at `/tmp/blit-live-audit-primary-20261009T110254Z/screenshots/display-1.bmp`
+with SHA-256
+`14237d62536919fcda0cf642ff022ee2f8bc0d75354281db25c7e4e8feb57b46`.
+The capture observed no physical evdev mouse events, so physical button and
+motion acceptance remains open. The host exposes one physical output;
+physical multi-monitor Hibr geometry and physical 120/240 Hz scanout remain
+open and are not inferred from QEMU or synthetic API input. Visual Hibr
+geometry/fidelity remains an open acceptance boundary pending a deliberate
+comparison against the expected desktop image.
 
 ## 0.1.400 deployed baseline and 0.1.401 contract correction (historical)
 
