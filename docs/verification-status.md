@@ -58,6 +58,24 @@ the current software orchestration/topology gate; it is not physical
 multi-monitor or sustained physical-240-Hz evidence, and the Hibr checkout
 was not modified.
 
+## Current 0.1.365 live diagnostic result
+
+0.1.365 adds recognition of UTF-8-encoded C1 terminal controls at the PTY
+parser boundary. The TCC terminal conformance suite passes both UTF-8 C1 CSI
+and UTF-8 C1 OSC isolation cases, in addition to the existing raw-C1 cases.
+SDL glyph, graphics-cache, and wallpaper/pointer stress gates also pass.
+
+The exact 0.1.365 package was accepted and verified by the supervised update
+API on `192.168.10.54`. A post-deployment experience capture measured `212`
+presents over `8683 ms` (`24.416 Hz`) against the live `60 Hz` target, with
+zero missed deadlines and no physical evdev events during the window. The
+capture's surface snapshot contained no regex-detectable CSI/SGR fragments,
+but the visual screenshot still requires further renderer/lifecycle
+investigation; this release therefore does not claim the physical visual gate
+closed. The primary Hibr session was reattached to
+`pane-display-1-1` after restart. The unchanged Hibr checkout remains outside
+the Blit change set.
+
 ## Current 0.1.362 live Hibr evidence bundle
 
 The live host was started through Blit's API with the documented primary
