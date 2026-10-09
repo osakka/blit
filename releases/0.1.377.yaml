@@ -20,6 +20,7 @@ qemu_four_output_hibr_acceptance: pass
 qemu_four_output_hibr_marker: KMS_FOUR_HIBR_PASS
 qemu_four_output_hibr_kernel_argument: vkms.create_default_dev=0
 live_deployment: pass
+live_update_upload_connection_completion: open
 live_version_endpoint: pass
 live_hibr_session_acceptance: pass
 live_full_size_hibr_image_acceptance: pass
