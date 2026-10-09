@@ -76,6 +76,8 @@ panes, input routing, and diagnostics.
   non-negotiable development constraints.
 - [Development workflow](development-workflow.md) — ADR, testing, evidence,
   commit, and push cadence for each implementation cycle.
+- [Repository hygiene](repository-hygiene.md) — source-of-truth boundaries,
+  generated-artifact rules, claim vocabulary, and handoff discipline.
 - [Toolchain baseline](toolchain.md) — the compiler and dependency gates for
   this workspace.
 - [Roadmap](roadmap.md) — the ordered implementation milestones and exit
@@ -122,6 +124,8 @@ or roadmap entry, and at least one focused gate in the same cycle. Every
 release entry names the exact source commit, package checksum, toolchain, and
 limitations. Do not commit generated packages, screenshots, logs, QEMU images,
 or local host captures; link to the command and evidence location instead.
+The complete staging, review, commit, and push rules are in
+[repository hygiene](repository-hygiene.md).
 
 ## Working status
 

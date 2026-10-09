@@ -122,6 +122,24 @@ case " $($b cat /proc/cmdline 2>/dev/null || true) " in
         $b grep -q '"sessions":4' /tmp/hibr-four-final.json || finish 1
         $b grep -q '"surfaces":4' /tmp/hibr-four-final.json || finish 1
         $b grep -q 'KMS present views=4 outputs=4' /tmp/blit.log || finish 1
+        for session_file in /tmp/hibr-primary.json /tmp/hibr-join-2.json \
+            /tmp/hibr-join-3.json /tmp/hibr-join-4.json; do
+            surface_id=$($b sed -n 's/.*"surface_id":"\([^"]*\)".*/\1/p' "$session_file")
+            $b wget -qO "/tmp/${surface_id}-summary.json" \
+                "http://127.0.0.1:19191/v1/surfaces/$surface_id/summary" || finish 1
+            echo HIBR_SURFACE_SUMMARY surface=$surface_id
+            $b cat "/tmp/${surface_id}-summary.json"
+        done
+        for display_index in 1 2 3 4; do
+            display_id=$(echo "$display_ids" | $b sed -n "${display_index}p")
+            echo HIBR_CONTENT_DISPLAY index=$display_index id=$display_id
+            $b wget -qO "/tmp/hibr-display-$display_index.bmp" \
+                "http://127.0.0.1:19191/v1/diagnostics/screenshots/$display_id" || finish 1
+            /blit-stage/bmp-content-assert "/tmp/hibr-display-$display_index.bmp" 1000 || {
+                echo HIBR_CONTENT_FAIL index=$display_index id=$display_id
+                finish 1
+            }
+        done
         if [ "$hibr_tall" -eq 1 ]; then
             # A complete tall frame must contain at least one styled cell on
             # its final row. Absence is an explicit Hibr held-session boundary

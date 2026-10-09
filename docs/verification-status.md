@@ -5,6 +5,16 @@ an evidence record, not a claim that the complete product is released.
 
 ## 0.1.403 current candidate evidence
 
+The strengthened four-output Hibr visual gate is currently **failing** and is
+not a release pass: display 1 contains visible screenshot samples, while
+display 2 is below the content threshold. The earlier resource-count and
+`KMS present views=4 outputs=4` markers prove that four sessions and four
+render views were assembled, but they do not prove that each output contains
+the expected pixels. The new `bmp_content_assert` probe and per-surface
+summary diagnostics preserve that distinction. The root cause is still open;
+do not claim four-output Hibr visual acceptance until all four screenshots
+pass the content assertion.
+
 The TCC-built 0.1.403 server makes the Hibr owner handshake fail closed for
 fresh primaries as well as joins and resumes. If the adapter never registers
 its token-scoped owner and bounded discovery finds no matching process, Blit
@@ -22,8 +32,10 @@ adapter
 The ownerless local probe passed; local singleton, restart, font/scale,
 pointer-composition, schema, and full terminal-conformance gates passed.
 The exact Hibr 0.99.100 QEMU two-output lifecycle passed layout, four-pane,
-primary-restart, join-reconnect, and final-topology markers. The exact
-four-output 240 Hz pixel/Hibr fixtures and input soak also passed.
+primary-restart, join-reconnect, and final-topology markers. The independent
+four-output 240 Hz pixel fixture and input soak passed. The older four-output
+Hibr marker fixture passed resource and KMS-view checks, but the strengthened
+per-output pixel-content gate is open as recorded above.
 
 This candidate is not deployed to the physical host. The host remains on
 0.1.401; its current read-only evidence and the roughly 7 Hz Hibr producer

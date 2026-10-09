@@ -86,6 +86,8 @@ package is an alternate source of behavior.
   and [development workflow](docs/development-workflow.md) before editing.
 - **Release/operator:** read [gateway testing](docs/testing-gateway.md) and the
   [verification ledger](docs/verification-status.md) before deployment.
+- **Contributor/reviewer:** read the [repository hygiene standard](docs/repository-hygiene.md)
+  before staging or pushing a change.
 
 ## What exists today
 
@@ -195,6 +197,7 @@ silently depending on a route that the server does not implement.
 - [Terminal engine](docs/terminal-engine.md)
 - [Testing and evidence](docs/implementation-and-verification.md)
 - [Development workflow](docs/development-workflow.md)
+- [Repository hygiene and handoff standard](docs/repository-hygiene.md)
 - [Roadmap](docs/roadmap.md)
 - [ADR index](docs/adr/README.md)
 - [Verification status](docs/verification-status.md)
