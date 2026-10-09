@@ -45,6 +45,13 @@ The fixture observed 656 raw evdev events, 392 motion events, 27 button
 events, 230 synchronization events, and one ignored button repeat. Hibr was
 staged from the unchanged `/home/osakka/hibr` checkout.
 
+The same current binary then passed the full Hibr pane workload under the
+same VKMS kernel: `HIBR_PANE_MATRIX_TOPOLOGY` configured a 2x2 logical layout,
+four Hibr sessions reached `running` with four independent surfaces, and the
+guest emitted `HIBR_PANE_MATRIX_PASS`. This validates primary plus three-join
+orchestration on two VKMS outputs; it is not evidence for four physical
+monitors.
+
 ## Current 0.1.363 diagnostic correctness
 
 The TCC build corrects the per-output presentation timing source in the API:
