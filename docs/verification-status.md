@@ -29,16 +29,24 @@ This candidate has not been deployed to the physical host yet; its live
 0.1.401 evidence remains below. QEMU and package acceptance are run against
 the final 0.1.402 artifact before release publication.
 
-The 0.1.402 Debian artifact was rebuilt after the documentation commit and
-passes the package allowlist, embedded-version, binary, schema, and packaged
-documentation gate. Its SHA-256 and source commit are recorded in
-[`releases/0.1.402.yaml`](../releases/0.1.402.yaml). The exact Hibr 0.99.100
-QEMU lifecycle fixture boots two VKMS outputs, passes the layout matrix and
-four-pane session matrix, then times out after reaching the primary-restart
-target; it does not emit the restart/rejoin pass marker. This remains an open
-Hibr-fixture lifecycle boundary, not a Blit pass claim. Earlier QEMU evidence
-using a 0.99.120 development Hibr fixture is not interchangeable with this
-0.99.100 package-ABI result.
+The 0.1.402 Debian artifact passes the package allowlist, embedded-version,
+binary, schema, and packaged documentation gate. Its SHA-256 and source
+commit are recorded in [`releases/0.1.402.yaml`](../releases/0.1.402.yaml).
+The exact Hibr 0.99.100 QEMU lifecycle fixture boots two VKMS outputs, passes
+the 1x1/2x1/1x2/2x2 layout matrix and four-pane session matrix, then passes
+primary restart, joined-client reconnect, and final topology cleanup. The
+separate adapter probe also passes. Earlier QEMU evidence using a 0.99.120
+development Hibr fixture is not interchangeable with this 0.99.100
+package-ABI result.
+
+The exact 0.1.402 four-output VKMS fixture passes independent red/green/blue/
+yellow screenshot pixel assertions on four 1024x768@240 Hz outputs. Its
+four-output Hibr mode passes with one primary and three `desktop --join`
+clients and four live surfaces. The exact QEMU input-soak fixture passes
+stream input, gamepad discovery, raw evdev events, mouse-repeat filtering,
+multi-device button aggregation, and render soak. These are virtual-display
+and virtual-input results; physical monitor, evdev, and high-refresh
+acceptance remain host-specific and open.
 
 ## 0.1.401 prior release evidence
 
