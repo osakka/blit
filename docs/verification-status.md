@@ -43,6 +43,12 @@ above.
 The canonical capture protocol is documented in `docs/diagnostic-capture.md`.
 Hibr source was not modified.
 
+The TCC adapter build now rejects the development Hibr checkout at `0.99.116`
+when the package target is `0.99.100`, and accepts the exact unchanged
+`0.99.100` checkout. The resulting 0.1.392 package passes the artifact
+allowlist and checksum gate; its adapter and package provenance are recorded
+in `releases/0.1.392.yaml`.
+
 ## Current 0.1.388 compositor and multi-output evidence
 
 ## Current 0.1.389 KMS submission-boundary evidence
