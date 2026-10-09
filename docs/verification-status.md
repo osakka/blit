@@ -27,6 +27,16 @@ evdev device alone is not sufficient to deliver input to Hibr. The synthetic
 input verifier now passes through the configured route. Physical movement and
 clicks still require a real operator action during a capture and remain open.
 
+## Current 0.1.364 pointer target evidence
+
+The pointer trace now records the selected session and routing mode. On the
+live one-pane Hibr desktop, an injected click selected `session-1` with
+`routing=pane-hit-test` after the fixed `evdev-pointer` route was removed. This
+is the required multi-pane behavior: pointer targeting follows global pointer
+position and pane geometry, while keyboard focus remains an explicit route.
+A fixed pointer route remains available for dedicated input-probe workloads,
+but is not used for the Hibr desktop topology.
+
 ## Current 0.1.362 live Hibr evidence bundle
 
 The live host was started through Blit's API with the documented primary
