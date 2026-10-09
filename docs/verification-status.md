@@ -22,6 +22,15 @@ the 131072 KiB RSS ceiling.
 Fresh QEMU/VKMS images staged with the exact Hibr 0.99.100 checkout passed the
 four-output Hibr window-content gate on all four 1024x768@240 Hz outputs and
 the two-output layout/pane/primary-restart/join-reconnect lifecycle matrix.
+The fresh two-output input/render soak also passed against this exact binary:
+`LAYOUT_MATRIX_PASS`, `BLIT_INPUT_GAMEPAD_DISCOVERY_PASS`,
+`BLIT_INPUT_STREAM_PASS`, `BLIT_INPUT_GAMEPAD_PASS`,
+`BLIT_INPUT_RAW_EVDEV_PASS`, `BLIT_INPUT_MOUSE_REPEAT_PASS`,
+`BLIT_INPUT_MULTI_MOUSE_BUTTON_STATE_PASS`, and
+`BLIT_INPUT_RENDER_SOAK_PASS`. It observed 905 raw mouse events, 533 motion
+events, 44 button events, one ignored repeat, and two aggregate button-state
+coalesces. This is virtual input/render evidence, not physical evdev
+acceptance.
 The exact server SHA-256 is
 `3b45d994ac80ae65588e4981546c31ebe6b42a8f664a42c3176a750677e14d46`.
 Physical deployment remains deliberately unperformed; the supplied host is

@@ -1,6 +1,6 @@
 release: 0.1.405
 package: blit_0.1.405-1_amd64.deb
-package_sha256: 89e82e0d8c7b978d93febbc60cbdd0776c06fcfc792fcb7d0bb2954aef6d6d61
+package_sha256: 3ee19823d565641905459c9f8dfa50a1ed6ab6c4a159520130997ce6a0e94f5b
 source_commit: 4c0bf09
 server_binary_sha256: 3b45d994ac80ae65588e4981546c31ebe6b42a8f664a42c3176a750677e14d46
 update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
@@ -27,7 +27,7 @@ qemu_hibr_lifecycle_acceptance: pass
 qemu_refresh_scheduler_mixed_acceptance: pass
 qemu_refresh_scheduler_240_acceptance: pass
 qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
-qemu_input_render_soak_acceptance: inherited_0.1.404
+qemu_input_render_soak_acceptance: pass
 qemu_four_output_pixel_acceptance: inherited_0.1.404
 qemu_four_output_hibr_primary_content: inherited_0.1.404
 qemu_four_output_hibr_window_content: pass
