@@ -6,6 +6,7 @@ port=${BLIT_SCREENSHOT_OVERLAY_PORT:-19196}
 log=${TMPDIR:-/tmp}/blit-screenshot-overlay.$$.log
 before=${TMPDIR:-/tmp}/blit-screenshot-overlay.$$.before.bmp
 after=${TMPDIR:-/tmp}/blit-screenshot-overlay.$$.after.bmp
+cached=${TMPDIR:-/tmp}/blit-screenshot-overlay.$$.cached.bmp
 pid=
 
 cleanup()
@@ -14,7 +15,7 @@ cleanup()
         kill "${pid}" 2>/dev/null || true
         wait "${pid}" 2>/dev/null || true
     fi
-    rm -f "$log" "$before" "$after"
+    rm -f "$log" "$before" "$after" "$cached"
 }
 trap cleanup EXIT INT TERM
 
@@ -40,6 +41,9 @@ overlay_id=$(printf '%s' "$overlay" | ruby -rjson -e 'puts JSON.parse(STDIN.read
 sleep 1
 curl --connect-timeout 2 --max-time 3 --fail --silent \
     "http://127.0.0.1:$port/v1/diagnostics/screenshots/display-1" -o "$before"
+curl --connect-timeout 2 --max-time 3 --fail --silent \
+    "http://127.0.0.1:$port/v1/diagnostics/screenshots/display-1?cached=1" \
+    -o "$cached"
 
 curl --connect-timeout 2 --max-time 3 --fail --silent \
     --request DELETE "http://127.0.0.1:$port/v1/overlays/$overlay_id" >/dev/null
@@ -64,7 +68,9 @@ ruby -e '
   end
   before = top_left(ARGV.fetch(0))
   after = top_left(ARGV.fetch(1))
+  cached = top_left(ARGV.fetch(2))
   raise "overlay was not red: #{before.inspect}" unless before == [0, 0, 255]
+  raise "cached screenshot lost overlay: #{cached.inspect}" unless cached == [0, 0, 255]
   raise "red overlay survived deletion: #{after.inspect}" if after == [0, 0, 255]
   puts "SCREENSHOT_OVERLAY_GATE_PASS before_bgr=#{before.join(",")} after_bgr=#{after.join(",")}"
-' "$before" "$after"
+' "$before" "$after" "$cached"

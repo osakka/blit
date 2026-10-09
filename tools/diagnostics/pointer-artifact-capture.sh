@@ -97,7 +97,7 @@ capture() {
             [ -n "$display_id" ] || continue
             screenshot="$output_dir/screenshots/${label}-${display_id}.bmp"
             curl --fail --silent --show-error --max-time 30 \
-                "$base_url/v1/diagnostics/screenshots/$display_id" \
+                "$base_url/v1/diagnostics/screenshots/$display_id?cached=1" \
                 > "$screenshot"
             sha256sum "$screenshot" >> "$output_dir/screenshot-sha256.txt"
         done

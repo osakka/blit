@@ -33,7 +33,7 @@ PY
     while IFS= read -r display_id; do
         [ -n "$display_id" ] || continue
         curl --fail --silent --show-error --max-time 30 \
-            "$base_url/v1/diagnostics/screenshots/$display_id" \
+            "$base_url/v1/diagnostics/screenshots/$display_id?cached=1" \
             > "$output_dir/screenshots/$display_id.bmp"
     done < "$output_dir/display-ids.txt"
     sha256sum "$output_dir"/screenshots/*.bmp \

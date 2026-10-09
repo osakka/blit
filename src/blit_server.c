@@ -1253,6 +1253,11 @@ static int screenshot_output_index(const BlitRuntime *runtime,
     return -1;
 }
 
+static int screenshot_cached_request(const char *path)
+{
+    return path != NULL && strstr(path, "?cached=1") != NULL;
+}
+
 static void bmp_u16(unsigned char *p, uint16_t value)
 {
     p[0] = (unsigned char)(value & 0xffU);
@@ -8908,6 +8913,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
                 strlen("/v1/diagnostics/screenshots/")) == 0 &&
         strcmp(method, "GET") == 0) {
         int output_index = screenshot_output_index(runtime, path);
+        int cached = screenshot_cached_request(path);
         if (output_index < 0 ||
             (!runtime->direct_kms && runtime->outputs[output_index].renderer == NULL)) {
             send_problem(fd, 404, "Not Found", "display_not_found",
@@ -8916,8 +8922,14 @@ static void handle_request(int fd, BlitRuntime *runtime,
         }
         client->screenshot_output_index = output_index + 1;
         runtime->screenshot_requested_mask |= 1U << output_index;
-        runtime->outputs[output_index].initialized = 0;
-        runtime->render_next_us[output_index] = 0;
+        /* A cached capture observes the already-composed scene.  Fresh
+           captures retain the old repair behavior for callers that explicitly
+           need a complete rebuild, but diagnostics must not invalidate a live
+           Hibr scene merely to inspect it. */
+        if (!cached || !runtime->outputs[output_index].initialized) {
+            runtime->outputs[output_index].initialized = 0;
+            runtime->render_next_us[output_index] = 0;
+        }
         runtime->render_pending = 1;
         return;
     }
@@ -11681,8 +11693,19 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
            avoid SDL_RenderPresent, until damage or pointer state requires a
            new frame. */
         if (runtime->outputs[output_index].initialized &&
-            !runtime->pointer_dirty && !target_changed)
+            !runtime->pointer_dirty && !target_changed) {
+            if (runtime->screenshot_requested_mask & (1U << output_index)) {
+                /* Cached screenshot requests observe the scene texture and
+                   current software cursor without rebuilding terminal cells,
+                   graphics, or wallpaper. */
+                SDL_SetRenderTarget(renderer, NULL);
+                SDL_RenderTexture(renderer,
+                                  runtime->outputs[output_index].scene_texture,
+                                  NULL, NULL);
+                finish_sdl_output(runtime, output_index, 0);
+            }
             continue;
+        }
         if (!runtime->outputs[output_index].initialized) {
             SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
             SDL_RenderClear(renderer);
