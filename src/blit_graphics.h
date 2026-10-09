@@ -5,9 +5,13 @@
 #include <stdint.h>
 
 #define BLIT_GRAPHICS_MAX_IMAGES 8
-#define BLIT_GRAPHICS_MAX_WIDTH 512
-#define BLIT_GRAPHICS_MAX_HEIGHT 512
-#define BLIT_GRAPHICS_MAX_BYTES (4U * 1024U * 1024U)
+/* A physical 1920x2160 output needs a full-screen RGB image for Hibr
+   wallpaper (12,441,600 bytes). Keep the limit bounded while covering
+   4096-class displays and RGBA frames without silently forcing a glyph
+   fallback. */
+#define BLIT_GRAPHICS_MAX_WIDTH 4096
+#define BLIT_GRAPHICS_MAX_HEIGHT 4096
+#define BLIT_GRAPHICS_MAX_BYTES (64U * 1024U * 1024U)
 
 /* Renderer-neutral graphics record.  Kitty and sixel decoders both publish
    into this store; SDL3 and direct KMS receive read-only views of the same
