@@ -1,5 +1,25 @@
 # Live diagnostic capture
 
+## Physical symptom capture (canonical)
+
+For a report involving mouse movement, blinking, trails, missing clicks, or
+intermittent redraws, run this from a reachable Bash host:
+
+```sh
+tools/diagnostics/troubleshoot-experience.sh \
+  http://192.168.10.54:8080 15 \
+  diagnostics/troubleshoot-$(date -u +%Y%m%dT%H%M%SZ)
+```
+
+While it prints `recording`, reproduce the symptom with the real mouse and
+keyboard. The command writes `verdict.json`, `verdict.txt`, raw 250 ms runtime
+samples, filtered traces, and one cached screenshot per display. Its verdict is
+ordered at the first missing boundary: physical input, routing/render, surface
+production, presentation stall, or presentation cadence. Do not interpret a
+zero physical-input verdict as a renderer result; it means the reproduction
+did not cross evdev during that window. Do not use the screenshots to infer
+frame rate.
+
 ## One-command experience capture
 
 Use this as the canonical evidence transaction for a report from the real
