@@ -19,8 +19,11 @@ conformance, Hibr singleton/owner/restart, font/scale, pointer composition,
 54.368 Hz frame-rate gate with zero missed deadlines, and a 20-second
 four-session soak (`2532` snapshots, `230` resizes, peak RSS `66704 KiB`).
 Exact QEMU lifecycle, four-output independent pixels, and input/render soak
-also passed. Package and release checks are run after the final 0.1.404
-source commit; physical-host deployment remains not performed.
+also passed. The 0.1.404 Debian artifact passed the package gate; its exact
+checksum and source relationship are recorded in
+[`releases/0.1.404.yaml`](../releases/0.1.404.yaml). The TCC server SHA-256 is
+`7f44f7aa883fc99a2f987d92473105b0ae62db960b5ac67286aba043df291187`.
+Physical-host deployment remains not performed.
 
 ## 0.1.403 current candidate evidence
 
