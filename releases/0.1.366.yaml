@@ -21,6 +21,11 @@ live_package_acceptance: pass
 live_version: 0.1.366
 live_glyph_path: immediate-texture
 live_api_pointer_acceptance: pass
+live_experience_capture: observation
+live_experience_refresh_hz: 60
+live_experience_damage_present_hz: 22.835
+live_experience_missed_deadlines: 0
+live_experience_physical_evdev_events: 0
 live_visual_acceptance: open
 live_physical_evdev_acceptance: open
 physical_multi_monitor_acceptance: open
