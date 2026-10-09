@@ -30,6 +30,9 @@ Adapters, packages, screenshots, generated bindings, and staging trees are
 derived artifacts. They must not become a second implementation or an
 undocumented source of behavior. Hibr remains an external dependency: Blit
 tests its released executable and modules but does not modify the Hibr tree.
+The adapter build must name the exact Hibr checkout whose `HIBR_VER` matches
+`packaging/HIBR_VERSION`; a newer development checkout is a deliberate QEMU
+fixture input, not a valid package build target.
 
 ## Commit and push cadence
 

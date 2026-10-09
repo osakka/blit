@@ -38,6 +38,14 @@ case "$target" in
             echo "blit: Hibr headers/modules not found under $hibr_root" >&2
             exit 1
         fi
+        expected_hibr_version=$(sed -n '1p' "$ROOT/packaging/HIBR_VERSION")
+        actual_hibr_version=$(sed -n 's/^#define HIBR_VER "\(.*\)"/\1/p' \
+            "$hibr_root/include/hibr.h" | head -n 1)
+        if [ -z "$expected_hibr_version" ] ||
+           [ "$actual_hibr_version" != "$expected_hibr_version" ]; then
+            echo "blit: Hibr adapter target mismatch: expected $expected_hibr_version, found $actual_hibr_version under $hibr_root" >&2
+            exit 1
+        fi
         tcc -O2 -std=c99 -shared -fPIC \
             -I"$hibr_root/include" -I"$hibr_root/mods" \
             -o "$output" "$ROOT/hibr/console-blit.c"
