@@ -180,6 +180,13 @@ if command -v systemctl >/dev/null 2>&1; then
     # inside its own dpkg child.
     systemctl enable blit-update-helper.service || true
     systemctl enable blit.service || true
+    # A running service keeps its original uid and sandbox across an
+    # in-process binary exec. If this is an upgrade of an active deployment,
+    # restart the unit after the package has installed its new unit file so
+    # User=, groups, and other service-boundary changes take effect.
+    if systemctl is-active --quiet blit.service; then
+        systemctl restart blit.service || true
+    fi
 fi
 exit 0
 EOF

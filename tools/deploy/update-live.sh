@@ -67,12 +67,17 @@ http_code=$(curl_auth --request PUT \
     --data-binary "@$package" \
     -o "$tmpdir/response" -w '%{http_code}' \
     "$base_url/v1/control/update") || {
-    echo "update failed: network or transport error" >&2
-    exit 1
+    # The package postinst may deliberately restart the active unit after
+    # dpkg installs a changed service boundary. In that case the upload was
+    # accepted but the HTTP connection can close before a response is read;
+    # let the bounded verification poll decide whether installation succeeded.
+    echo "update connection closed during supervised restart; polling status" >&2
+    http_code=000
 }
 
 case "$http_code" in
     200|202) ;;
+    000) ;;
     401|403)
         echo "update refused: update credential rejected (HTTP $http_code); API auth and update auth are separate" >&2
         exit 1
