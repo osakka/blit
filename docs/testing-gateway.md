@@ -115,8 +115,10 @@ BLIT_UPDATE_TOKEN_FILE=/secure/path/live-update.token \
 `BLIT_UPDATE_TOKEN` may be used instead of the update-token file. `thisisatest`
 is not a built-in token; only the value configured on the running host in
 `BLIT_UPDATE_TOKEN` or `BLIT_UPDATE_TOKEN_FILE` is accepted. A `403` means the
-credential is wrong and the package was not installed. The helper also checks
-package metadata, SHA-256, update readiness, and the final running version.
+credential is wrong and the package was not installed. The helper also
+requires the package name and SHA-256 to match the checked-in
+`releases/<version>.yaml` manifest, then checks package metadata, update
+readiness, and the final running version.
 
 The idle-timeout gate holds a valid upload open without sending its body and
 verifies that the gateway transitions to `update upload idle timeout` instead

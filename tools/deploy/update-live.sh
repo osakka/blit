@@ -31,6 +31,23 @@ fi
 package_version=$(dpkg-deb -f "$package" Version)
 version=${package_version%-*}
 sha256=$(sha256sum "$package" | awk '{print $1}')
+repo_root=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
+manifest="$repo_root/releases/$version.yaml"
+test -f "$manifest" || {
+    echo "update refused: release manifest not found: $manifest" >&2
+    exit 2
+}
+manifest_package=$(sed -n 's/^package: //p' "$manifest")
+manifest_sha256=$(sed -n 's/^package_sha256: //p' "$manifest")
+package_name=$(basename "$package")
+[ "$manifest_package" = "$package_name" ] || {
+    echo "update refused: package name does not match release manifest" >&2
+    exit 2
+}
+[ "$manifest_sha256" = "$sha256" ] || {
+    echo "update refused: package checksum does not match release manifest" >&2
+    exit 2
+}
 base_url=${BLIT_BASE_URL:-http://$host:8080}
 api_token=${BLIT_AUTH_TOKEN:-}
 if [ "$api_token" = "" ] && [ "${BLIT_AUTH_TOKEN_FILE:-}" != "" ]; then
