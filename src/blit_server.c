@@ -11785,12 +11785,27 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             last_row = full_redraw ? surface->height : last_row;
             if (last_row > BLIT_MAX_CELL_ROWS)
                 last_row = BLIT_MAX_CELL_ROWS;
-            if (full_redraw) {
+            {
                 SDL_Rect graphics_clip;
                 graphics_clip.x = (int)surface_origin_x;
                 graphics_clip.y = surface_origin_y;
                 graphics_clip.w = surface->width * cell_width;
                 graphics_clip.h = surface->height * cell_height;
+                if (!full_redraw) {
+                    graphics_clip.x += plan->surfaces[plan_index].damage_x *
+                        cell_width;
+                    graphics_clip.y += plan->surfaces[plan_index].damage_y *
+                        cell_height;
+                    graphics_clip.w = plan->surfaces[plan_index].damage_width *
+                        cell_width;
+                    graphics_clip.h = plan->surfaces[plan_index].damage_height *
+                        cell_height;
+                }
+                /* Negative-z images are the scene's wallpaper layer.  An
+                   incremental terminal update clears its damage rectangle
+                   before repainting cells; restore that layer in the same
+                   clipped rectangle or the cached scene develops black
+                   holes whenever Hibr updates one cell over a wallpaper. */
                 SDL_SetRenderClipRect(renderer, &graphics_clip);
                 api_images_drawn += render_sdl_graphics(
                     &runtime->outputs[output_index], session->graphics,
