@@ -660,6 +660,14 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+        '409':
+          description: >-
+            The request would create a duplicate Hibr primary or an orphan
+            `--join` client.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         default:
           $ref: '#/components/responses/Problem'
   /v1/terminal-sessions/{session_id}:
@@ -1611,6 +1619,8 @@ components:
           $ref: '#/components/schemas/TerminalCapabilities'
         hibr_attachment:
           $ref: '#/components/schemas/HibrAttachmentDiagnostics'
+        hibr_desktop:
+          $ref: '#/components/schemas/HibrDesktopBinding'
         graphics:
           type: array
           description: >-
@@ -1631,6 +1641,21 @@ components:
         unresolved: {type: boolean}
         owner_registered: {type: boolean}
         owner_pid: {type: integer, minimum: 0}
+      additionalProperties: false
+    HibrDesktopBinding:
+      type: object
+      required: [role, session]
+      properties:
+        role:
+          type: string
+          enum: [none, primary, join]
+          description: >-
+            Blit's enforced Hibr ownership role. A primary owns the named
+            held desktop; join clients attach to that same Hibr session and
+            never create a second desktop state owner.
+        session:
+          type: string
+          description: Hibr held-session name, normally `blit`.
       additionalProperties: false
     HibrOwnerRegistration:
       type: object

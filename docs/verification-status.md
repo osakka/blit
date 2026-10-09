@@ -3,6 +3,18 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## Current 0.1.398 Hibr singleton-owner acceptance
+
+The TCC-built server now classifies the Hibr desktop entrypoints and enforces
+one primary owner per Hibr held-session name. The local API gate passed all
+four cases: an orphan `--join` returns `409 hibr_desktop_owner_missing`, one
+primary is accepted and reports `hibr_desktop.role=primary`, a duplicate
+primary returns `409 hibr_desktop_exists`, and a join against that primary is
+accepted and reports `hibr_desktop.role=join`. Ordinary non-Hibr shell
+sessions remain unaffected. The request argument buffer is cleared for every
+request; this prevents a prior `--join` argument from leaking into a later
+shorter request. Hibr source was not modified.
+
 ## Current 0.1.396 live glyph geometry acceptance
 
 The live host accepted 0.1.396 and reported SDL3/OpenGL ES2 with

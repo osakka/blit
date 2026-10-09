@@ -41,6 +41,7 @@ Accepted decisions:
 31. [Define multi-monitor frame atomicity at the scene boundary](0043-multi-monitor-frame-atomicity.md).
 32. [Free panes do not swallow display-attached input](0046-free-pane-does-not-swallow-display-input.md).
 33. [API-selectable fonts and logical scale](0047-api-selectable-fonts-and-logical-scale.md).
+34. [One primary Hibr desktop owner](0048-one-hibr-desktop-owner.md).
 
 Pending decisions:
 

@@ -355,6 +355,9 @@ typedef struct {
     int attach_reassert_max_attempts;
     int attach_reassert_hibr_matches;
     int hibr_process;
+    int hibr_desktop_primary;
+    int hibr_desktop_join;
+    char hibr_desktop_session[128];
     pid_t hibr_owner_pid;
     int hibr_owner_registered;
     int hibr_resume_requested;
@@ -7256,6 +7259,12 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
         (long)session->hibr_owner_pid);
     used += (size_t)snprintf(
         body + used, capacity - used,
+        ",\"hibr_desktop\":{\"role\":\"%s\",\"session\":\"%s\"}",
+        session->hibr_desktop_primary ? "primary" :
+            (session->hibr_desktop_join ? "join" : "none"),
+        session->hibr_desktop_session);
+    used += (size_t)snprintf(
+        body + used, capacity - used,
         ",\"terminal_capabilities\":{\"term\":\"%s\","
         "\"cell_pixels\":{\"width\":%d,\"height\":%d},"
         "\"graphics\":[\"kitty\",\"sixel\"]}",
@@ -7470,6 +7479,76 @@ static int if_match_revision(int fd, const char *request,
     return 1;
 }
 
+/* A Hibr desktop is one logical held session.  The primary and --join
+   clients are separate PTYs, but only the primary may own the named desktop.
+   Keep this policy in Blit so callers cannot accidentally create two primary
+   desktops by issuing two otherwise-valid generic session requests. */
+static int hibr_desktop_request(const char *command,
+                                char argument_storage[32][256],
+                                int argument_count,
+                                int *is_primary, int *is_join,
+                                char *session_name, size_t session_capacity)
+{
+    const char *command_name = strrchr(command, '/');
+    int desktop_invocation = 0;
+    int i;
+
+    command_name = command_name == NULL ? command : command_name + 1;
+    if (strcmp(command_name, "desktop") == 0) {
+        desktop_invocation = 1;
+    } else if (strcmp(command_name, "hibr") == 0) {
+        if (argument_count > 0 &&
+            (strcmp(argument_storage[0], "desktop") == 0 ||
+             strcmp(argument_storage[0], "desktop.hibr") == 0 ||
+             strstr(argument_storage[0], "/blit-session.hibr") != NULL ||
+             strstr(argument_storage[0], "/session.hibr") != NULL))
+            desktop_invocation = 1;
+    } else if (strcmp(command_name, "blit-session.hibr") == 0) {
+        desktop_invocation = 1;
+    }
+    if (!desktop_invocation)
+        return 0;
+
+    *is_primary = 1;
+    *is_join = 0;
+    snprintf(session_name, session_capacity, "%s", "blit");
+    for (i = 0; i < argument_count; ++i) {
+        const char *argument = argument_storage[i];
+        if (strcmp(argument, "--join") == 0 || strcmp(argument, "-j") == 0)
+            *is_join = 1;
+        else if (strcmp(argument, "--session") == 0 ||
+                 strcmp(argument, "-s") == 0) {
+            if (i + 1 >= argument_count || argument_storage[i + 1][0] == '\0')
+                return -1;
+            snprintf(session_name, session_capacity, "%s",
+                     argument_storage[++i]);
+        } else if (strncmp(argument, "--session=", 10) == 0) {
+            if (argument[10] == '\0') return -1;
+            snprintf(session_name, session_capacity, "%s", argument + 10);
+        }
+    }
+    *is_primary = *is_join ? 0 : 1;
+    return 1;
+}
+
+static BlitSession *hibr_desktop_owner(BlitRuntime *runtime,
+                                       const char *session_name)
+{
+    int i;
+
+    for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
+        BlitSession *session = &runtime->sessions[i];
+        if (!session->used || !session->hibr_desktop_primary ||
+            strcmp(session->hibr_desktop_session, session_name) != 0)
+            continue;
+        refresh_session_state(runtime, session);
+        if (strcmp(session->state, "running") == 0 ||
+            strcmp(session->state, "starting") == 0)
+            return session;
+    }
+    return NULL;
+}
+
 static int create_session(BlitRuntime *runtime, const char *json,
                            BlitSession **created)
 {
@@ -7499,9 +7578,14 @@ static int create_session(BlitRuntime *runtime, const char *json,
     char session_token[64];
     int hibr_resume_requested = 0;
     int hibr_process = 0;
+    int hibr_desktop_primary = 0;
+    int hibr_desktop_join = 0;
+    int hibr_desktop_result;
+    char hibr_desktop_session[128];
     const char *command_name;
     int i;
 
+    memset(argument_storage, 0, sizeof(argument_storage));
     if (!json_string(json, "command", command, sizeof(command)))
         return 0;
     surface_present = strstr(json, "\"surface\"") != NULL;
@@ -7535,9 +7619,22 @@ static int create_session(BlitRuntime *runtime, const char *json,
     command_name = strrchr(command, '/');
     command_name = command_name == NULL ? command : command_name + 1;
     if (strcmp(command_name, "hibr") == 0 ||
-        strcmp(command_name, "desktop") == 0) {
+        strcmp(command_name, "desktop") == 0 ||
+        strcmp(command_name, "blit-session.hibr") == 0) {
         hibr_process = 1;
     }
+    hibr_desktop_result = hibr_desktop_request(
+        command, argument_storage, argument_count, &hibr_desktop_primary,
+        &hibr_desktop_join, hibr_desktop_session,
+        sizeof(hibr_desktop_session));
+    if (hibr_desktop_result < 0)
+        return -1;
+    if (hibr_desktop_result > 0 && hibr_desktop_primary &&
+        hibr_desktop_owner(runtime, hibr_desktop_session) != NULL)
+        return -2;
+    if (hibr_desktop_result > 0 && hibr_desktop_join &&
+        hibr_desktop_owner(runtime, hibr_desktop_session) == NULL)
+        return -3;
     if (strcmp(command_name, "desktop") == 0)
         for (i = 0; i < argument_count - 1; ++i)
             if (strcmp(argument_storage[i], "--resume") == 0 ||
@@ -7660,6 +7757,12 @@ static int create_session(BlitRuntime *runtime, const char *json,
             session->exit_code = -1;
             session->hibr_resume_requested = hibr_resume_requested;
             session->hibr_process = hibr_process;
+            session->hibr_desktop_primary = hibr_desktop_primary;
+            session->hibr_desktop_join = hibr_desktop_join;
+            if (hibr_desktop_result > 0)
+                snprintf(session->hibr_desktop_session,
+                         sizeof(session->hibr_desktop_session), "%s",
+                         hibr_desktop_session);
             session->terminal_autowrap = 1;
             session->terminal_cell_width = runtime_terminal_cell_width(runtime);
             session->terminal_cell_height = runtime_terminal_cell_height(runtime);
@@ -9217,6 +9320,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
     if (strcmp(path, "/v1/terminal-sessions") == 0 &&
         strcmp(method, "POST") == 0) {
         BlitSession *session;
+        int create_result;
         char requested_command[256];
         char requested_display_id[128];
         char requested_pane_id[128];
@@ -9247,7 +9351,23 @@ static void handle_request(int fd, BlitRuntime *runtime,
                          "The requested Blit pane does not exist.");
             return;
         }
-        if (!create_session(runtime, payload, &session)) {
+        create_result = create_session(runtime, payload, &session);
+        if (create_result == -2) {
+            send_problem(fd, 409, "Conflict", "hibr_desktop_exists",
+                         "The named Hibr desktop already has a primary owner; use --resume or --join.");
+            return;
+        }
+        if (create_result == -3) {
+            send_problem(fd, 409, "Conflict", "hibr_desktop_owner_missing",
+                         "A Hibr --join client requires an active primary desktop owner.");
+            return;
+        }
+        if (create_result < 0) {
+            send_problem(fd, 400, "Bad Request", "invalid_hibr_desktop_arguments",
+                         "The Hibr desktop session name or argument list is invalid.");
+            return;
+        }
+        if (create_result == 0) {
             send_problem(fd, 400, "Bad Request", "session_create_failed",
                          "The command, surface dimensions, or PTY could not be created.");
             return;
