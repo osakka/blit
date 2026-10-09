@@ -27,6 +27,14 @@ not physical evdev or physical-display visual acceptance: the automated
 captures recorded zero physical evdev events, and the visual gate remains
 open pending an operator-visible confirmation of the real display.
 
+The attempted current QEMU input rerun is explicitly not recorded as a Blit
+result: the available `/home/osakka/new_project/build-inputs/bzImage` ignored
+both the newly staged and an older known initramfs, then panicked trying to
+mount `/dev/root` before `/init` ran. This was reproduced with and without
+`root=/dev/ram0`; the guest emitted no Blit marker. The staged 0.1.366 image
+and unchanged Hibr checkout therefore remain untested in that particular
+kernel fixture until a kernel with working external-initrd support is used.
+
 ## Current 0.1.363 diagnostic correctness
 
 The TCC build corrects the per-output presentation timing source in the API:
