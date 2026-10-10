@@ -99,16 +99,16 @@ skip_gate() {
 # the gates' own range between runs and give the kernel a moment. The pattern
 # deliberately excludes this script's own servers (19400+) and anything not
 # named blit-server, so a production `blit` on its own port is never matched.
-settle_gates() {
-    pkill -f 'blit-server 19[12][0-9][0-9]' 2>/dev/null || true
-    sleep 1
-}
+# Issue #28 removed the port-reaping that used to live here. Every gate that
+# spawns a server now has a port of its own and waits for it, reporting a
+# conflict as a conflict; a pkill between gates hid that behind a one-second
+# sleep and killed servers this script did not start. If a port conflict
+# reappears, the gate will say so by name.
 
 # Run one gate. The caller has already decided it is runnable here.
 run_gate() {
     name=$1
     shift
-    settle_gates
     out=$("$@" 2>&1) && rc=0 || rc=$?
     last=$(printf '%s' "$out" | tail -1 | cut -c1-72)
     if [ "$rc" -eq 0 ]; then

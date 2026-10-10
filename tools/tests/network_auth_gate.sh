@@ -1,9 +1,11 @@
 #!/bin/sh
 set -eu
+. "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/gate_port.sh"
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 BINARY=${BLIT_GATE_BINARY:-$ROOT/build/blit-desktop-current/bin/blit-server}
-PORT=${BLIT_GATE_PORT:-19202}
+PORT=${BLIT_GATE_PORT:-19205}
+PORT=$(gate_port "$PORT")
 TOKEN=${BLIT_GATE_TOKEN:-blit-network-gate}
 LOG=$(mktemp /tmp/blit-network-gate.XXXXXX)
 UNAUTH=$(mktemp /tmp/blit-network-unauth.XXXXXX)

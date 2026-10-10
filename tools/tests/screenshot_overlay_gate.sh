@@ -1,8 +1,10 @@
 #!/bin/sh
 set -eu
+. "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/gate_port.sh"
 
 binary=${BLIT_GATE_BINARY:-build/blit/blit-server}
 port=${BLIT_SCREENSHOT_OVERLAY_PORT:-19196}
+port=$(gate_port "$port")
 log=${TMPDIR:-/tmp}/blit-screenshot-overlay.$$.log
 before=${TMPDIR:-/tmp}/blit-screenshot-overlay.$$.before.bmp
 after=${TMPDIR:-/tmp}/blit-screenshot-overlay.$$.after.bmp

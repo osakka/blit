@@ -7,8 +7,9 @@
 require 'json'
 require 'net/http'
 require 'timeout'
+require_relative 'gate_port'
 
-port = Integer(ENV.fetch('BLIT_BACKGROUND_PORT', '19263'))
+port = gate_port(Integer(ENV.fetch('BLIT_BACKGROUND_PORT', '19263')))
 base = URI("http://127.0.0.1:#{port}")
 log = "/tmp/blit-background-batch-#{Process.pid}.log"
 env = {

@@ -8,8 +8,9 @@ require 'base64'
 require 'json'
 require 'net/http'
 require 'timeout'
+require_relative 'gate_port'
 
-port = Integer(ENV.fetch('BLIT_WALLPAPER_DAMAGE_PORT', '19254'))
+port = gate_port(Integer(ENV.fetch('BLIT_WALLPAPER_DAMAGE_PORT', '19212')))
 base = URI("http://127.0.0.1:#{port}")
 log = "/tmp/blit-wallpaper-damage-#{Process.pid}.log"
 env = {

@@ -1,8 +1,10 @@
 #!/bin/sh
 set -eu
+. "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/gate_port.sh"
 
 binary=${BLIT_GATE_BINARY:-build/blit/blit-server}
 port=${BLIT_SHUTDOWN_PORT:-19197}
+port=$(gate_port "$port")
 log=${TMPDIR:-/tmp}/blit-shutdown-gate.$$.log
 pid=
 

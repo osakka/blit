@@ -3,8 +3,9 @@
 
 require 'net/http'
 require 'socket'
+require_relative 'gate_port'
 
-port = Integer(ENV.fetch('BLIT_GATE_PORT', ARGV.fetch(0, '19202')))
+port = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', ARGV.fetch(0, '19204'))))
 slow = TCPSocket.new('127.0.0.1', port)
 slow.write("GET /v1/diagnostics HTTP/1.1\r\n")
 

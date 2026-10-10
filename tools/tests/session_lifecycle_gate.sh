@@ -1,8 +1,10 @@
 #!/bin/sh
 set -eu
+. "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/gate_port.sh"
 
 binary=${BLIT_GATE_BINARY:-build/blit/blit-server}
-port=${BLIT_LIFECYCLE_PORT:-19196}
+port=${BLIT_LIFECYCLE_PORT:-19200}
+port=$(gate_port "$port")
 log=${TMPDIR:-/tmp}/blit-lifecycle-gate.$$.log
 session=${TMPDIR:-/tmp}/blit-lifecycle-gate.$$.session
 delete_body=${TMPDIR:-/tmp}/blit-lifecycle-gate.$$.delete

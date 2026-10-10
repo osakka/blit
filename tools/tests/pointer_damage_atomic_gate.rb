@@ -10,8 +10,9 @@ require 'json'
 require 'net/http'
 require 'socket'
 require 'timeout'
+require_relative 'gate_port'
 
-port = Integer(ENV.fetch('BLIT_POINTER_DAMAGE_PORT', '19254'))
+port = gate_port(Integer(ENV.fetch('BLIT_POINTER_DAMAGE_PORT', '19211')))
 base = URI("http://127.0.0.1:#{port}")
 log = "/tmp/blit-pointer-damage-#{Process.pid}.log"
 pid = Process.spawn({'SDL_VIDEODRIVER' => 'dummy',

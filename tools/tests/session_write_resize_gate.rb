@@ -5,8 +5,9 @@ require 'json'
 require 'net/http'
 require 'tmpdir'
 require 'timeout'
+require_relative 'gate_port'
 
-port = Integer(ENV.fetch('BLIT_GATE_PORT', ARGV.fetch(0, '19246')))
+port = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', ARGV.fetch(0, '19207'))))
 base = URI("http://127.0.0.1:#{port}")
 log_path = File.join(Dir.tmpdir, "blit-session-write-resize-#{Process.pid}.log")
 env = {

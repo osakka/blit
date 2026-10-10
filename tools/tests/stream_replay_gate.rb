@@ -6,8 +6,9 @@ require 'net/http'
 require 'socket'
 require 'tmpdir'
 require 'timeout'
+require_relative 'gate_port'
 
-port = Integer(ENV.fetch('BLIT_GATE_PORT', ARGV.fetch(0, '19245')))
+port = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', ARGV.fetch(0, '19206'))))
 base = URI("http://127.0.0.1:#{port}")
 log_path = File.join(Dir.tmpdir, "blit-stream-replay-#{Process.pid}.log")
 env = {

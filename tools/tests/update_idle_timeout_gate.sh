@@ -1,8 +1,10 @@
 #!/bin/sh
 set -eu
+. "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/gate_port.sh"
 
 binary=${BLIT_GATE_BINARY:-build/blit/blit-server}
-port=${BLIT_UPDATE_IDLE_PORT:-19197}
+port=${BLIT_UPDATE_IDLE_PORT:-19201}
+port=$(gate_port "$port")
 log=${TMPDIR:-/tmp}/blit-update-idle.$$.log
 status=${TMPDIR:-/tmp}/blit-update-idle.$$.status
 token_file=${TMPDIR:-/tmp}/blit-update-idle.$$.token

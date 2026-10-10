@@ -1,8 +1,10 @@
 #!/bin/sh
 set -eu
+. "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/gate_port.sh"
 
 binary=${BLIT_GATE_BINARY:-build/blit/blit-server}
 port=${BLIT_UPDATE_CANCEL_PORT:-19195}
+port=$(gate_port "$port")
 log=${TMPDIR:-/tmp}/blit-update-cancel-gate.$$.log
 status=${TMPDIR:-/tmp}/blit-update-cancel-gate.$$.status
 token_file=${TMPDIR:-/tmp}/blit-update-cancel-gate.$$.token

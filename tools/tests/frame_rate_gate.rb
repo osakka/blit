@@ -5,13 +5,14 @@ require 'json'
 require 'net/http'
 require 'tmpdir'
 require 'timeout'
+require_relative 'gate_port'
 
 remote_server = ENV['BLIT_GATE_SERVER']
 if remote_server
   base = URI(remote_server)
   pid = nil
 else
-  port = Integer(ENV.fetch('BLIT_GATE_PORT', '19248'))
+  port = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', '19248')))
   base = URI("http://127.0.0.1:#{port}")
   log = File.join(Dir.tmpdir, "blit-frame-rate-#{Process.pid}.log")
   env = {

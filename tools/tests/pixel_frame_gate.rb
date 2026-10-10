@@ -13,9 +13,10 @@ require 'socket'
 require 'tmpdir'
 require 'timeout'
 require 'uri'
+require_relative 'gate_port'
 
 external_base = ENV['BLIT_TEST_SERVER']
-port = Integer(ENV.fetch('BLIT_GATE_PORT', '19249'))
+port = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', '19208')))
 base = external_base ? URI(external_base) : URI("http://127.0.0.1:#{port}")
 log = File.join(Dir.tmpdir, "blit-pixel-frame-#{Process.pid}.log")
 pid = nil

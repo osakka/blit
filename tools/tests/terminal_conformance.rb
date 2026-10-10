@@ -1621,6 +1621,38 @@ assert_equal([1, 2, 3], shown(delete_case(base, 'del-miss', 'a=d,d=p,x=30,y=9'))
                "d=#{target} is refused with a reason")
 end
 puts 'PASS kitty-placement-keys'
+# Issue #46. A conforming JSON encoder writes a control character as \uXXXX,
+# and the argument parser decoded only \n, \r and \t -- keeping the escape's
+# letter and dropping the backslash for everything else, so \u001b arrived as
+# the literal text `u001b` and a session argument could not carry an escape
+# sequence at all. Ruby's JSON.dump produces exactly that encoding for the ESC
+# below, so this vector fails on the wire format rather than on a contrivance.
+escaped_argument = request(base, 'POST', '/v1/terminal-sessions', {
+  'command' => '/bin/sh',
+  'arguments' => ['-c', "printf '%s' \"$1\"; sleep 0.3", 'sh',
+                  "\u001b[31mR\u001b[0m"],
+  'surface' => { 'width' => 20, 'height' => 4 }
+})
+escaped_state = Timeout.timeout(5) do
+  loop do
+    current = request(base, 'GET', "/v1/terminal-sessions/#{escaped_argument.fetch('id')}")
+    break current unless %w[starting running].include?(current.fetch('state'))
+
+    sleep 0.02
+  end
+end
+escaped_cells = request(base, 'GET',
+                        "/v1/surfaces/#{escaped_state.fetch('surface_id')}/cells")
+                .fetch('cells')
+first = escaped_cells.find { |c| c.fetch('x', 0) == 0 && c.fetch('y', 0) == 0 }
+assert_equal('R', first && first['text'],
+             'a \u001b in an argument reached the child as ESC, so the SGR was ' \
+             'parsed and the cell holds the letter rather than the escape as text')
+assert_equal('#cd0000', first && first.dig('style', 'foreground'),
+             'the SGR carried by that escape was applied')
+request(base, 'DELETE', "/v1/terminal-sessions/#{escaped_argument.fetch('id')}")
+puts 'PASS argument-carries-escaped-control-character'
+
 
 override_created = request(base, 'POST', '/v1/terminal-sessions', {
   'command' => '/bin/sh',

@@ -2,10 +2,12 @@
 # Issue #30. Build the Hibr display provider into a harness and assert that a
 # frame which changes nothing costs nothing. See adapter_coalesce_gate.c.
 set -eu
+. "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/gate_port.sh"
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 BINARY=${BLIT_GATE_BINARY:-$ROOT/build/blit/blit-server}
 PORT=${BLIT_GATE_PORT:-19246}
+PORT=$(gate_port "$PORT")
 FONT=${BLIT_GATE_FONT:-$ROOT/assets/fonts/Blit-Hibr-Terminus16.psf}
 PROBE=$ROOT/build/tests/adapter_coalesce_gate
 LOG=$(mktemp /tmp/blit-coalesce-gate.XXXXXX)

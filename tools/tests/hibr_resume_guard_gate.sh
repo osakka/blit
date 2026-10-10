@@ -1,8 +1,10 @@
 #!/bin/sh
 set -eu
+. "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/gate_port.sh"
 
 root=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
-port=${BLIT_RESUME_GUARD_PORT:-19261}
+port=${BLIT_RESUME_GUARD_PORT:-19214}
+port=$(gate_port "$port")
 log=$(mktemp "${TMPDIR:-/tmp}/blit-resume-guard.XXXXXX")
 server_pid=
 

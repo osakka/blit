@@ -16,9 +16,10 @@ require 'json'
 require 'net/http'
 require 'timeout'
 require 'uri'
+require_relative 'gate_port'
 
 ROOT = File.expand_path('../..', __dir__)
-PORT = Integer(ENV.fetch('BLIT_GATE_PORT', '19249'), 10)
+PORT = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', '19209'), 10))
 BINARY = ENV.fetch('BLIT_GATE_BINARY', File.join(ROOT, 'build/blit/blit-server'))
 FONT = ENV.fetch('BLIT_GATE_FONT',
                  File.join(ROOT, 'assets/fonts/Blit-Hibr-Terminus16.psf'))

@@ -2803,6 +2803,100 @@ static int json_append_codepoint(char *value, size_t capacity, size_t *out,
     return 1;
 }
 
+/* Decode one JSON string body into `value`, starting just after the opening
+   quote, and return the cursor just past the closing quote. NULL means the
+   string was not decodable: an unknown escape, a lone surrogate, an
+   unescaped control character, or more bytes than `capacity` holds.
+
+   One routine, because there were three. json_string decoded the whole escape
+   set; json_string_array and the value side of json_string_object decoded
+   \n, \r and \t and for anything else kept the escape's *letter* and dropped
+   the backslash -- so a conforming client's \u001b arrived as the literal
+   text `u001b`, and a session argument could not carry a control character
+   at all. Two parsers for one wire format is the defect, not the particular
+   escapes one of them was missing. */
+static const char *json_unescape(const char *cursor, char *value,
+                                 size_t capacity, size_t *length)
+{
+    size_t out = 0;
+
+    if (cursor == NULL || value == NULL || capacity == 0)
+        return NULL;
+    while (*cursor != '\0' && *cursor != '"') {
+        if (*cursor == '\\' && cursor[1] != '\0') {
+            unsigned int codepoint;
+            int high;
+            int low;
+            ++cursor;
+            if (*cursor == 'n') {
+                if (!json_append_codepoint(value, capacity, &out, '\n')) return NULL;
+                ++cursor;
+            } else if (*cursor == 'r') {
+                if (!json_append_codepoint(value, capacity, &out, '\r')) return NULL;
+                ++cursor;
+            } else if (*cursor == 't') {
+                if (!json_append_codepoint(value, capacity, &out, '\t')) return NULL;
+                ++cursor;
+            } else if (*cursor == 'b') {
+                if (!json_append_codepoint(value, capacity, &out, '\b')) return NULL;
+                ++cursor;
+            } else if (*cursor == 'f') {
+                if (!json_append_codepoint(value, capacity, &out, '\f')) return NULL;
+                ++cursor;
+            } else if (*cursor == '"' || *cursor == '\\' || *cursor == '/') {
+                if (!json_append_codepoint(value, capacity, &out,
+                                            (unsigned int)*cursor)) return NULL;
+                ++cursor;
+            } else if (*cursor == 'u') {
+                high = json_hex_digit(cursor[1]);
+                low = json_hex_digit(cursor[2]);
+                if (high < 0 || low < 0 ||
+                    json_hex_digit(cursor[3]) < 0 ||
+                    json_hex_digit(cursor[4]) < 0)
+                    return NULL;
+                codepoint = ((unsigned int)high << 12) |
+                    ((unsigned int)low << 8) |
+                    ((unsigned int)json_hex_digit(cursor[3]) << 4) |
+                    (unsigned int)json_hex_digit(cursor[4]);
+                cursor += 5;
+                if (codepoint >= 0xd800U && codepoint <= 0xdbffU) {
+                    unsigned int trail;
+                    if (cursor[0] != '\\' || cursor[1] != 'u') return NULL;
+                    high = json_hex_digit(cursor[2]);
+                    low = json_hex_digit(cursor[3]);
+                    if (high < 0 || low < 0 ||
+                        json_hex_digit(cursor[4]) < 0 ||
+                        json_hex_digit(cursor[5]) < 0)
+                        return NULL;
+                    trail = ((unsigned int)high << 12) |
+                        ((unsigned int)low << 8) |
+                        ((unsigned int)json_hex_digit(cursor[4]) << 4) |
+                        (unsigned int)json_hex_digit(cursor[5]);
+                    if (trail < 0xdc00U || trail > 0xdfffU) return NULL;
+                    codepoint = 0x10000U +
+                        ((codepoint - 0xd800U) << 10) + trail - 0xdc00U;
+                    cursor += 6;
+                } else if (codepoint >= 0xdc00U && codepoint <= 0xdfffU) {
+                    return NULL;
+                }
+                if (!json_append_codepoint(value, capacity, &out, codepoint)) return NULL;
+            } else {
+                return NULL;
+            }
+            continue;
+        }
+        if ((unsigned char)*cursor < 0x20U || out + 1 >= capacity)
+            return NULL;
+        value[out++] = *cursor++;
+    }
+    if (*cursor != '"')
+        return NULL;
+    value[out] = '\0';
+    if (length != NULL)
+        *length = out;
+    return cursor + 1;
+}
+
 static int json_string(const char *json, const char *key, char *value,
                        size_t capacity)
 {
@@ -2822,77 +2916,8 @@ static int json_string(const char *json, const char *key, char *value,
            *cursor == '\n') ++cursor;
     if (*cursor != '"')
         return 0;
-    ++cursor;
-    while (*cursor != '\0' && *cursor != '"') {
-        if (*cursor == '\\' && cursor[1] != '\0') {
-            unsigned int codepoint;
-            int high;
-            int low;
-            ++cursor;
-            if (*cursor == 'n') {
-                if (!json_append_codepoint(value, capacity, &out, '\n')) return 0;
-                ++cursor;
-            } else if (*cursor == 'r') {
-                if (!json_append_codepoint(value, capacity, &out, '\r')) return 0;
-                ++cursor;
-            } else if (*cursor == 't') {
-                if (!json_append_codepoint(value, capacity, &out, '\t')) return 0;
-                ++cursor;
-            } else if (*cursor == 'b') {
-                if (!json_append_codepoint(value, capacity, &out, '\b')) return 0;
-                ++cursor;
-            } else if (*cursor == 'f') {
-                if (!json_append_codepoint(value, capacity, &out, '\f')) return 0;
-                ++cursor;
-            } else if (*cursor == '"' || *cursor == '\\' || *cursor == '/') {
-                if (!json_append_codepoint(value, capacity, &out,
-                                            (unsigned int)*cursor)) return 0;
-                ++cursor;
-            } else if (*cursor == 'u') {
-                high = json_hex_digit(cursor[1]);
-                low = json_hex_digit(cursor[2]);
-                if (high < 0 || low < 0 ||
-                    json_hex_digit(cursor[3]) < 0 ||
-                    json_hex_digit(cursor[4]) < 0)
-                    return 0;
-                codepoint = ((unsigned int)high << 12) |
-                    ((unsigned int)low << 8) |
-                    ((unsigned int)json_hex_digit(cursor[3]) << 4) |
-                    (unsigned int)json_hex_digit(cursor[4]);
-                cursor += 5;
-                if (codepoint >= 0xd800U && codepoint <= 0xdbffU) {
-                    unsigned int trail;
-                    if (cursor[0] != '\\' || cursor[1] != 'u') return 0;
-                    high = json_hex_digit(cursor[2]);
-                    low = json_hex_digit(cursor[3]);
-                    if (high < 0 || low < 0 ||
-                        json_hex_digit(cursor[4]) < 0 ||
-                        json_hex_digit(cursor[5]) < 0)
-                        return 0;
-                    trail = ((unsigned int)high << 12) |
-                        ((unsigned int)low << 8) |
-                        ((unsigned int)json_hex_digit(cursor[4]) << 4) |
-                        (unsigned int)json_hex_digit(cursor[5]);
-                    if (trail < 0xdc00U || trail > 0xdfffU) return 0;
-                    codepoint = 0x10000U +
-                        ((codepoint - 0xd800U) << 10) + trail - 0xdc00U;
-                    cursor += 6;
-                } else if (codepoint >= 0xdc00U && codepoint <= 0xdfffU) {
-                    return 0;
-                }
-                if (!json_append_codepoint(value, capacity, &out, codepoint)) return 0;
-            } else {
-                return 0;
-            }
-            continue;
-        }
-        if ((unsigned char)*cursor < 0x20U || out + 1 >= capacity)
-            return 0;
-        value[out++] = *cursor++;
-    }
-    if (*cursor != '"')
+    if (json_unescape(cursor + 1, value, capacity, &out) == NULL)
         return 0;
-    value[out] = '\0';
     return out > 0;
 }
 
@@ -3019,23 +3044,9 @@ static int json_string_array(const char *json, const char *key,
             return count;
         if (*cursor++ != '"' || count >= limit)
             return -1;
-        while (*cursor != '\0' && *cursor != '"') {
-            if (out + 1 >= 256)
-                return -1;
-            if (*cursor == '\\' && cursor[1] != '\0') {
-                ++cursor;
-                if (*cursor == 'n') storage[count][out++] = '\n';
-                else if (*cursor == 'r') storage[count][out++] = '\r';
-                else if (*cursor == 't') storage[count][out++] = '\t';
-                else storage[count][out++] = *cursor;
-                ++cursor;
-            } else {
-                storage[count][out++] = *cursor++;
-            }
-        }
-        if (*cursor++ != '"')
+        cursor = json_unescape(cursor, storage[count], 256, &out);
+        if (cursor == NULL)
             return -1;
-        storage[count][out] = '\0';
         values[count] = storage[count];
         ++count;
         while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
@@ -3096,23 +3107,9 @@ static int json_string_object(const char *json, const char *key,
                *cursor == '\n') ++cursor;
         if (*cursor++ != '"')
             return -1;
-        while (*cursor != '\0' && *cursor != '"') {
-            if (value_len + 1 >= 256)
-                return -1;
-            if (*cursor == '\\' && cursor[1] != '\0') {
-                ++cursor;
-                if (*cursor == 'n') value_storage[count][value_len++] = '\n';
-                else if (*cursor == 'r') value_storage[count][value_len++] = '\r';
-                else if (*cursor == 't') value_storage[count][value_len++] = '\t';
-                else value_storage[count][value_len++] = *cursor;
-                ++cursor;
-            } else {
-                value_storage[count][value_len++] = *cursor++;
-            }
-        }
-        if (*cursor++ != '"')
+        cursor = json_unescape(cursor, value_storage[count], 256, &value_len);
+        if (cursor == NULL)
             return -1;
-        value_storage[count][value_len] = '\0';
         ++count;
         while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
                *cursor == '\n') ++cursor;

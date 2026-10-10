@@ -8,8 +8,9 @@
 require 'json'
 require 'net/http'
 require 'timeout'
+require_relative 'gate_port'
 
-port = Integer(ENV.fetch('BLIT_GLYPH_RENDER_PORT', '19264'))
+port = gate_port(Integer(ENV.fetch('BLIT_GLYPH_RENDER_PORT', '19264')))
 base = URI("http://127.0.0.1:#{port}")
 log = "/tmp/blit-glyph-render-#{Process.pid}.log"
 env = {
