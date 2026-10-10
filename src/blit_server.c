@@ -13047,6 +13047,49 @@ static int ensure_sdl_scene_texture(BlitOutput *output)
     return 1;
 }
 
+/* ADR 0061: a surface's pixel origin on an output, computed in one place.
+   A surface attached to a pane sits at its pane's cell position; a surface
+   with no pane is stacked below the other pane-less surfaces of the same
+   display, in surface-array order. Both are inset by BLIT_SURFACE_INSET_PX,
+   which is the part the hit test used to omit.
+
+   `cell_width`/`cell_height` are the caller's metrics, so a renderer working
+   in scaled device pixels and a hit test working in unscaled surface pixels
+   both get the same rule. They do not make the inset itself scale; a
+   font_scale other than 1 still insets by the same four device pixels on both
+   paths, which is tracked on the geometry issues rather than fixed here. */
+static void surface_origin_px(BlitRuntime *runtime, const BlitSurface *surface,
+                              const BlitSession *session, int output_index,
+                              int cell_width, int cell_height,
+                              int *origin_x, int *origin_y)
+{
+    const BlitPane *pane = session != NULL && session->pane_id[0] != '\0' ?
+        find_pane_id(runtime, session->pane_id) : NULL;
+    int index;
+
+    *origin_x = BLIT_SURFACE_INSET_PX;
+    *origin_y = BLIT_SURFACE_INSET_PX;
+    if (pane != NULL) {
+        *origin_x = pane->x * cell_width + BLIT_SURFACE_INSET_PX;
+        *origin_y = pane->y * cell_height + BLIT_SURFACE_INSET_PX;
+        return;
+    }
+    for (index = 0; index < BLIT_MAX_SESSIONS; ++index) {
+        BlitSurface *other = runtime->surfaces[index];
+        BlitSession *owner;
+        if (other == NULL || !other->used)
+            continue;
+        if (other == surface)
+            return;
+        owner = find_session_id(runtime, other->owner_session_id);
+        if (owner == NULL || owner->pane_id[0] != '\0')
+            continue;
+        if (!surface_targets_output(runtime, other, output_index))
+            continue;
+        *origin_y += other->height * cell_height + BLIT_SURFACE_INSET_PX;
+    }
+}
+
 static void finish_sdl_output(BlitRuntime *runtime, int output_index,
                               int scene_target)
 {
@@ -13167,12 +13210,19 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             views[view_count].surface_id = surface->id;
             views[view_count].surface_revision = surface->revision;
             views[view_count].display_id = runtime->outputs[output_index_for_surface].display_id;
-            views[view_count].origin_x = pane != NULL ?
-                pane->x * blit_kms_cell_width(runtime->kms) *
-                    runtime->font_scale + 4 : 4;
-            views[view_count].origin_y = pane != NULL ?
-                pane->y * blit_kms_cell_height(runtime->kms) *
-                    runtime->font_scale + 4 : 4;
+            {
+                int origin_x;
+                int origin_y;
+                surface_origin_px(runtime, surface, session,
+                                  output_index_for_surface,
+                                  blit_kms_cell_width(runtime->kms) *
+                                      runtime->font_scale,
+                                  blit_kms_cell_height(runtime->kms) *
+                                      runtime->font_scale,
+                                  &origin_x, &origin_y);
+                views[view_count].origin_x = origin_x;
+                views[view_count].origin_y = origin_y;
+            }
             views[view_count].cell_width =
                 blit_kms_cell_width(runtime->kms) * runtime->font_scale;
             views[view_count].cell_height =
@@ -13450,9 +13500,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             BlitSession *session;
             BlitPane *pane;
             char display_id[128];
-            float surface_origin_x = (float)BLIT_SURFACE_INSET_PX;
-            int surface_origin_y = BLIT_SURFACE_INSET_PX;
-            int prior_index;
+            float surface_origin_x;
+            int surface_origin_y;
             int first_row = 0;
             int last_row;
             int column;
@@ -13477,12 +13526,6 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             default_foreground = session_default_foreground(session);
             default_background = session_default_background(session);
             pane = find_pane_id(runtime, session->pane_id);
-            if (pane != NULL) {
-                surface_origin_x = (float)(pane->x * cell_width +
-                                           BLIT_SURFACE_INSET_PX);
-                surface_origin_y = pane->y * cell_height +
-                    BLIT_SURFACE_INSET_PX;
-            }
             if (session->display_id[0] == '\0') {
                 if (output_index != 0)
                     continue;
@@ -13492,15 +13535,14 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                 if (strcmp(session->display_id, display_id) != 0)
                     continue;
             }
-            if (pane == NULL) {
-                for (prior_index = 0; prior_index < plan_index; ++prior_index) {
-                    BlitSurface *prior = find_surface_id(
-                        runtime, plan->surfaces[prior_index].surface_id);
-                    if (prior != NULL && prior->used &&
-                        surface_targets_output(runtime, prior, output_index))
-                        surface_origin_y += prior->height * cell_height +
-                            BLIT_SURFACE_INSET_PX;
-                }
+            {
+                int origin_x;
+                int origin_y;
+                surface_origin_px(runtime, surface, session, output_index,
+                                  cell_width, cell_height, &origin_x,
+                                  &origin_y);
+                surface_origin_x = (float)origin_x;
+                surface_origin_y = origin_y;
             }
             if (!full_redraw) {
                 if (!plan->surfaces[plan_index].damage_valid)
@@ -13936,7 +13978,7 @@ static BlitSession *mouse_target(BlitRuntime *runtime, int output_index,
     char display_id[128];
     int cell_width;
     int cell_height;
-    int i;
+    int pass;
 
     if (output_index < 0 || output_index >= runtime->output_count)
         return NULL;
@@ -13955,45 +13997,34 @@ static BlitSession *mouse_target(BlitRuntime *runtime, int output_index,
         blit_font_height(&runtime->font);
     snprintf(display_id, sizeof(display_id), "display-%llu",
              runtime->outputs[output_index].display_id);
-    for (i = 0; i < runtime->pane_count; ++i) {
-        BlitPane *pane = &runtime->panes[i];
-        int pane_x;
-        int pane_y;
-        int j;
-        if (!pane->used || strcmp(pane->display_id, display_id) != 0)
-            continue;
-        pane_x = pane->x * cell_width;
-        pane_y = pane->y * cell_height;
-        if (pixel_x < pane_x || pixel_y < pane_y ||
-            pixel_x >= pane_x + pane->width * cell_width ||
-            pixel_y >= pane_y + pane->height * cell_height)
-            continue;
-        *column = (int)((pixel_x - pane_x) / (float)cell_width) + 1;
-        *row = (int)((pixel_y - pane_y) / (float)cell_height) + 1;
-        for (j = 0; j < BLIT_MAX_SESSIONS; ++j)
-            if (runtime->sessions[j].used &&
-                strcmp(runtime->sessions[j].pane_id, pane->id) == 0)
-                return &runtime->sessions[j];
-        /* A pane can remain in the topology after its session is released.
-           It is free layout, not an input sink: continue to the display-level
-           session fallback below instead of swallowing clicks and motion. */
-    }
-    /* A display-attached session may intentionally have no Blit pane.  This
-       is the API shape used by the primary Hibr desktop: it is rendered at
-       the first available stacked surface, but the old hit test only knew
-       about panes and silently discarded every button report. */
-    {
-        int stack_y = 0;
+    /* Surfaces in a pane are tested first.  A pane-less surface stacks from
+       the same corner as pane (0,0), so without this a desktop could shadow
+       a pane that is drawn on top of it. */
+    for (pass = 0; pass < 2; ++pass) {
         int session_index;
         for (session_index = 0; session_index < BLIT_MAX_SESSIONS;
              ++session_index) {
             BlitSession *session = &runtime->sessions[session_index];
             BlitSurface *surface;
-            int surface_x = 4;
-            int surface_y = stack_y + 4;
-            if (!session->used || session->pane_id[0] != '\0')
+            int paned;
+            int origin_x;
+            int origin_y;
+            int width;
+            int height;
+            if (!session->used)
                 continue;
-            if (session->display_id[0] == '\0') {
+            paned = session->pane_id[0] != '\0';
+            if (paned != (pass == 0))
+                continue;
+            if (paned) {
+                BlitPane *pane = find_pane_id(runtime, session->pane_id);
+                /* A pane can remain in the topology after its session is
+                   released; it is free layout, not an input sink. */
+                if (pane == NULL ||
+                    strcmp(pane->display_id, display_id) != 0)
+                    continue;
+            } else if (session->display_id[0] == '\0') {
+                /* A session with no display is rendered on the first one. */
                 if (output_index != 0)
                     continue;
             } else if (strcmp(session->display_id, display_id) != 0) {
@@ -14002,16 +14033,24 @@ static BlitSession *mouse_target(BlitRuntime *runtime, int output_index,
             surface = find_surface_id(runtime, session->id);
             if (surface == NULL || !surface->used)
                 continue;
-            if (pixel_x >= surface_x && pixel_y >= surface_y &&
-                pixel_x < surface_x + surface->width * cell_width &&
-                pixel_y < surface_y + surface->height * cell_height) {
-                *column = (int)((pixel_x - surface_x) /
-                                (float)cell_width) + 1;
-                *row = (int)((pixel_y - surface_y) /
-                             (float)cell_height) + 1;
-                return session;
-            }
-            stack_y += surface->height * cell_height + 4;
+            surface_origin_px(runtime, surface, session, output_index,
+                              cell_width, cell_height, &origin_x, &origin_y);
+            width = surface->width * cell_width;
+            height = surface->height * cell_height;
+            /* The inset belongs to the surface it surrounds: a click in it
+               reports the nearest edge cell rather than being discarded. */
+            if (pixel_x < origin_x - BLIT_SURFACE_INSET_PX ||
+                pixel_y < origin_y - BLIT_SURFACE_INSET_PX ||
+                pixel_x >= origin_x + width + BLIT_SURFACE_INSET_PX ||
+                pixel_y >= origin_y + height + BLIT_SURFACE_INSET_PX)
+                continue;
+            *column = (int)((pixel_x - origin_x) / (float)cell_width) + 1;
+            *row = (int)((pixel_y - origin_y) / (float)cell_height) + 1;
+            if (*column < 1) *column = 1;
+            if (*row < 1) *row = 1;
+            if (*column > surface->width) *column = surface->width;
+            if (*row > surface->height) *row = surface->height;
+            return session;
         }
     }
     return NULL;
