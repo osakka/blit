@@ -13577,25 +13577,85 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             flush_sdl_glyph_batch(&runtime->outputs[output_index]);
             if (surface->cursor_visible &&
                 surface->cursor_y >= first_row && surface->cursor_y < last_row) {
-                float cursor_x = surface_origin_x + surface->cursor_x * (float)cell_width;
+                int cursor_column = surface->cursor_x;
+                int cursor_cells = 1;
+                uint16_t cursor_attributes;
+                float cursor_x;
                 float cursor_y = (float)surface_origin_y + surface->cursor_y * (float)cell_height;
+                if (cursor_column < 0)
+                    cursor_column = 0;
+                if (cursor_column >= BLIT_MAX_CELL_COLS)
+                    cursor_column = BLIT_MAX_CELL_COLS - 1;
+                cursor_attributes =
+                    surface->attributes[surface->cursor_y][cursor_column];
+                /* A wide character owns both of its cells, so the cursor
+                   covers the pair rather than half a glyph. */
+                if ((cursor_attributes & BLIT_ATTR_CONTINUATION) &&
+                    cursor_column > 0) {
+                    --cursor_column;
+                    cursor_attributes =
+                        surface->attributes[surface->cursor_y][cursor_column];
+                }
+                if (cursor_attributes & BLIT_ATTR_WIDE)
+                    cursor_cells = 2;
+                cursor_x = surface_origin_x + cursor_column * (float)cell_width;
                 SDL_SetRenderDrawColor(renderer,
                     (unsigned char)(BLIT_DEFAULT_FOREGROUND >> 16),
                     (unsigned char)(BLIT_DEFAULT_FOREGROUND >> 8),
                     (unsigned char)BLIT_DEFAULT_FOREGROUND, 255);
                 if (surface->cursor_style == 3 || surface->cursor_style == 4)
                     SDL_RenderLine(renderer, cursor_x, cursor_y + cell_height - 1.0f,
-                                   cursor_x + cell_width - 1.0f, cursor_y + cell_height - 1.0f);
+                                   cursor_x + cursor_cells * cell_width - 1.0f,
+                                   cursor_y + cell_height - 1.0f);
                 else if (surface->cursor_style == 5 || surface->cursor_style == 6)
                     SDL_RenderLine(renderer, cursor_x, cursor_y,
                                    cursor_x, cursor_y + cell_height - 1.0f);
                 else {
+                    uint32_t cursor_codepoint =
+                        surface->codepoints[surface->cursor_y][cursor_column];
+                    uint32_t cell_foreground =
+                        surface->foreground[surface->cursor_y][cursor_column] ?
+                        surface->foreground[surface->cursor_y][cursor_column] - 1 :
+                        BLIT_DEFAULT_FOREGROUND;
+                    uint32_t cell_background =
+                        surface->background[surface->cursor_y][cursor_column] ?
+                        surface->background[surface->cursor_y][cursor_column] - 1 : 0;
                     SDL_FRect cursor_rect;
                     cursor_rect.x = cursor_x;
                     cursor_rect.y = cursor_y;
-                    cursor_rect.w = (float)cell_width;
+                    cursor_rect.w = (float)(cursor_cells * cell_width);
                     cursor_rect.h = (float)cell_height;
                     SDL_RenderFillRect(renderer, &cursor_rect);
+                    if (cursor_attributes & BLIT_ATTR_INVERSE) {
+                        uint32_t swapped = cell_foreground;
+                        cell_foreground = cell_background ? cell_background : 0;
+                        cell_background = swapped;
+                    }
+                    /* A block cursor is an inverse cell, not an eraser: the
+                       character under it is what the user is about to
+                       overwrite and has to stay readable. */
+                    if (cursor_codepoint != 0 && cursor_codepoint != ' ' &&
+                        !(cursor_attributes & BLIT_ATTR_CONCEAL)) {
+                        int combining_index;
+                        render_or_queue_sdl_glyph(
+                            &runtime->outputs[output_index], &runtime->font,
+                            cell_background, cursor_codepoint, cursor_x,
+                            cursor_y, (float)(cursor_cells * cell_width),
+                            (float)cell_height);
+                        for (combining_index = 0;
+                             combining_index <
+                                 surface->combining_count[surface->cursor_y][cursor_column] &&
+                             combining_index < BLIT_MAX_COMBINING;
+                             ++combining_index)
+                            render_or_queue_sdl_glyph(
+                                &runtime->outputs[output_index], &runtime->font,
+                                cell_background,
+                                surface->combining[surface->cursor_y][cursor_column][combining_index],
+                                cursor_x, cursor_y,
+                                (float)(cursor_cells * cell_width),
+                                (float)cell_height);
+                        flush_sdl_glyph_batch(&runtime->outputs[output_index]);
+                    }
                 }
             }
             {

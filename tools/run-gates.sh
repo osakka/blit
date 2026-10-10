@@ -212,6 +212,7 @@ suite_renderer() {
     run_gate sdl_graphics_cache_gate.rb ruby tools/tests/sdl_graphics_cache_gate.rb
     run_gate kitty_placement_gate.rb ruby tools/tests/kitty_placement_gate.rb
     run_gate sync_output_gate.rb ruby tools/tests/sync_output_gate.rb
+    run_gate cell_paint_gate.rb ruby tools/tests/cell_paint_gate.rb
     run_gate sdl_wallpaper_damage_gate.rb ruby tools/tests/sdl_wallpaper_damage_gate.rb
     run_gate screenshot_overlay_gate.sh "$ROOT"/tools/tests/screenshot_overlay_gate.sh
     run_gate render_state_agreement_gate.rb ruby tools/tests/render_state_agreement_gate.rb

@@ -26,6 +26,7 @@
 #define KMS_WHITE 0xbed2beU
 #define KMS_ATTR_WIDE 16
 #define KMS_ATTR_CONTINUATION 32
+#define KMS_ATTR_CONCEAL 64
 
 typedef struct {
     uint32_t fb;
@@ -688,15 +689,45 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
                          view->origin_y, view->columns * cw,
                          view->rows * ch);
     }
-    if (view->cursor_visible && view->cursor_x >= 0 && view->cursor_y >= 0) {
-        int cursor_x = view->origin_x + view->cursor_x * cw;
+    if (view->cursor_visible && view->cursor_x >= 0 && view->cursor_y >= 0 &&
+        view->cursor_y < view->rows) {
+        int cursor_column = view->cursor_x < view->columns ?
+            view->cursor_x : view->columns - 1;
+        int cursor_cells = 1;
+        int cursor_index;
+        uint16_t cursor_attr;
+        int cursor_x;
         int cursor_y = view->origin_y + view->cursor_y * ch;
+        if (cursor_column < 0) cursor_column = 0;
+        cursor_index = view->cursor_y * view->stride + cursor_column;
+        cursor_attr = view->attributes[cursor_index];
+        /* A wide character owns both of its cells, so the cursor covers the
+           pair rather than half a glyph. */
+        if ((cursor_attr & KMS_ATTR_CONTINUATION) && cursor_column > 0) {
+            --cursor_column;
+            cursor_index = view->cursor_y * view->stride + cursor_column;
+            cursor_attr = view->attributes[cursor_index];
+        }
+        if (cursor_attr & KMS_ATTR_WIDE) cursor_cells = 2;
+        cursor_x = view->origin_x + cursor_column * cw;
         if (view->cursor_style == 3 || view->cursor_style == 4)
-            fill_rect(output, cursor_x, cursor_y + ch - 1, cw, 1, KMS_WHITE);
+            fill_rect(output, cursor_x, cursor_y + ch - 1,
+                      cw * cursor_cells, 1, KMS_WHITE);
         else if (view->cursor_style == 5 || view->cursor_style == 6)
             fill_rect(output, cursor_x, cursor_y, 1, ch, KMS_WHITE);
-        else
-            fill_rect(output, cursor_x, cursor_y, cw, ch, KMS_WHITE);
+        else {
+            uint32_t cursor_cp = view->codepoints[cursor_index];
+            uint32_t cursor_bg = view_cell_background(view, cursor_index);
+            fill_rect(output, cursor_x, cursor_y, cw * cursor_cells, ch,
+                      KMS_WHITE);
+            /* A block cursor is an inverse cell, not an eraser: the
+               character under it is what the user is about to overwrite and
+               has to stay readable. */
+            if (cursor_cp != 0 && cursor_cp != ' ' &&
+                !(cursor_attr & KMS_ATTR_CONCEAL))
+                draw_glyph(output, font, cursor_cp, cursor_x, cursor_y,
+                           cw * cursor_cells, ch, cursor_bg);
+        }
     }
 }
 
