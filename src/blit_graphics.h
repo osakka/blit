@@ -24,6 +24,27 @@
 #define BLIT_SIXEL_MAX_DIMENSION 512
 #define BLIT_SIXEL_COLOR_REGISTERS 256
 
+/* A numbered Kitty placement (the p key) beyond the image's default one. */
+#define BLIT_GRAPHICS_MAX_PLACEMENTS 8
+#define BLIT_GRAPHICS_MAX_DRAWS \
+    (BLIT_GRAPHICS_MAX_IMAGES * (BLIT_GRAPHICS_MAX_PLACEMENTS + 1))
+
+/* Where one numbered placement puts an image, and which part of it. A zero
+   source width or height means "to the image's edge". ADR 0060. */
+typedef struct {
+    int used;
+    unsigned int id;
+    int x;
+    int y;
+    int width;
+    int height;
+    int z;
+    int src_x;
+    int src_y;
+    int src_w;
+    int src_h;
+} BlitGraphicsPlacement;
+
 /* Renderer-neutral graphics record.  Kitty and sixel decoders both publish
    into this store; SDL3 and direct KMS receive read-only views of the same
    pixels. */
@@ -45,6 +66,16 @@ typedef struct {
     int placement_width;
     int placement_height;
     int z;
+    /* Source rectangle of the default placement (Kitty x, y, w, h). Zero
+       width or height means to the edge of the image. ADR 0060. */
+    int src_x;
+    int src_y;
+    int src_w;
+    int src_h;
+    /* Placements addressed by a nonzero placement id. The fields above are
+       the default placement, the one with id 0, which is also the only one
+       sixel and API frames have. */
+    BlitGraphicsPlacement placements[BLIT_GRAPHICS_MAX_PLACEMENTS];
     unsigned long long revision;
     /* Unique identity for the pixel contents.  SDL output caches use this
        to discard a texture when a Kitty/Sixel image is replaced or updated. */
@@ -63,6 +94,106 @@ typedef struct {
        independent of `encoded`: o=z with f=100 is a deflated PNG, so the
        payload is inflated first and then decoded. ADR 0056. */
     int compressed;
+    /* Placement id plus one of a display (a=T) whose cursor movement is owed
+       when the last chunk arrives, because the placement's size in cells is
+       not known until then. Zero when nothing is owed. ADR 0060. */
+    int advance;
 } BlitGraphicsImage;
+
+/* One thing a renderer draws: a placement with its defaults resolved and its
+   source rectangle clamped to the image. Both renderers draw from a list of
+   these rather than walking images, so a placement means the same thing on
+   SDL and on KMS. */
+typedef struct {
+    const BlitGraphicsImage *image;
+    int x;
+    int y;
+    int width;
+    int height;
+    int z;
+    int src_x;
+    int src_y;
+    int src_w;
+    int src_h;
+} BlitGraphicsDraw;
+
+static inline int blit_graphics_draw_resolve(const BlitGraphicsImage *image,
+                                             int x, int y, int width,
+                                             int height, int z, int src_x,
+                                             int src_y, int src_w, int src_h,
+                                             BlitGraphicsDraw *out)
+{
+    if (src_x < 0) src_x = 0;
+    if (src_y < 0) src_y = 0;
+    if (src_x >= image->width || src_y >= image->height) return 0;
+    if (src_w <= 0 || src_w > image->width - src_x) src_w = image->width - src_x;
+    if (src_h <= 0 || src_h > image->height - src_y) src_h = image->height - src_y;
+    if (width <= 0) width = src_w;
+    if (height <= 0) height = src_h;
+    out->image = image;
+    out->x = x;
+    out->y = y;
+    out->width = width;
+    out->height = height;
+    out->z = z;
+    out->src_x = src_x;
+    out->src_y = src_y;
+    out->src_w = src_w;
+    out->src_h = src_h;
+    return 1;
+}
+
+/* Every visible placement of every drawable image, ordered by z and then by
+   image and placement order. Returns the number written. */
+static inline int blit_graphics_collect(const BlitGraphicsImage *images,
+                                        int count, BlitGraphicsDraw *out,
+                                        int capacity)
+{
+    int written = 0;
+    int image_index;
+    int i;
+    for (image_index = 0; image_index < count &&
+         image_index < BLIT_GRAPHICS_MAX_IMAGES; ++image_index) {
+        const BlitGraphicsImage *image = &images[image_index];
+        int slot;
+        if (!image->used || !image->complete || image->pixels == NULL ||
+            image->width < 1 || image->height < 1)
+            continue;
+        for (slot = -1; slot < BLIT_GRAPHICS_MAX_PLACEMENTS; ++slot) {
+            BlitGraphicsDraw draw;
+            int ok;
+            if (written >= capacity) return written;
+            if (slot < 0) {
+                if (!image->visible) continue;
+                ok = blit_graphics_draw_resolve(
+                    image, image->x, image->y, image->placement_width,
+                    image->placement_height, image->z, image->src_x,
+                    image->src_y, image->src_w, image->src_h, &draw);
+            } else {
+                const BlitGraphicsPlacement *p = &image->placements[slot];
+                if (!p->used) continue;
+                ok = blit_graphics_draw_resolve(
+                    image, p->x, p->y, p->width, p->height, p->z, p->src_x,
+                    p->src_y, p->src_w, p->src_h, &draw);
+            }
+            if (!ok) continue;
+            for (i = written; i > 0 && out[i - 1].z > draw.z; --i)
+                out[i] = out[i - 1];
+            out[i] = draw;
+            ++written;
+        }
+    }
+    return written;
+}
+
+/* Whether anything of this image is currently shown. */
+static inline int blit_graphics_shown(const BlitGraphicsImage *image)
+{
+    int slot;
+    if (image->visible) return 1;
+    for (slot = 0; slot < BLIT_GRAPHICS_MAX_PLACEMENTS; ++slot)
+        if (image->placements[slot].used) return 1;
+    return 0;
+}
 
 #endif

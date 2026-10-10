@@ -68,6 +68,10 @@ shell conformance path is stable.
    `DT_INK`/`DT_FACE` (or `BLIT_TERMINAL_FG`/`BLIT_TERMINAL_BG`) session
    environment values, preserving Hibr theme negotiation without a shell
    wrapper.
+   Kitty graphics placements (source rectangle, cell offset, numbered
+   placements, the `a i c p q x y z` delete targets) and the refusal of
+   unimplemented keys are specified in
+   [ADR 0060](adr/0060-kitty-placements-source-rectangles-and-delete-targets.md).
    The `CSI >` modifyOtherKeys family and the Kitty keyboard flag prefixes are
    parsed and consumed without leaking their control parameters into cell
    attributes.

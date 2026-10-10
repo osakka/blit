@@ -446,25 +446,25 @@ static void draw_glyph(KmsOutput *output, const BlitFont *font,
     }
 }
 
-static void draw_graphic(KmsOutput *output, const BlitGraphicsImage *image,
+static void draw_graphic(KmsOutput *output, const BlitGraphicsDraw *draw,
                          int origin_x, int origin_y, int clip_width,
                          int clip_height)
 {
-    int width = image->placement_width > 0 ? image->placement_width : image->width;
-    int height = image->placement_height > 0 ? image->placement_height : image->height;
+    const BlitGraphicsImage *image = draw->image;
+    int width = draw->width;
+    int height = draw->height;
     int bytes_per_pixel = image->format == 24 ? 3 : 4;
     int destination_y;
 
-    if (!image->used || !image->complete || !image->visible || image->pixels == NULL ||
-        image->width < 1 || image->height < 1 || width < 1 || height < 1)
+    if (width < 1 || height < 1 || draw->src_w < 1 || draw->src_h < 1)
         return;
     /* Emulator frames normally arrive at their presentation size.  Keep the
        native-size path free of the scaler's two integer divisions and
        per-pixel source-coordinate calculation.  Clipping is still applied so
        a canvas may safely extend beyond a pane or output. */
-    if (width == image->width && height == image->height) {
-        int destination_x = origin_x + image->x;
-        int destination_y = origin_y + image->y;
+    if (width == draw->src_w && height == draw->src_h) {
+        int destination_x = origin_x + draw->x;
+        int destination_y = origin_y + draw->y;
         int first_x = destination_x > origin_x ? destination_x : origin_x;
         int first_y = destination_y > origin_y ? destination_y : origin_y;
         int last_x = destination_x + width;
@@ -483,8 +483,8 @@ static void draw_graphic(KmsOutput *output, const BlitGraphicsImage *image,
             return;
         for (y = first_y; y < last_y; ++y) {
             int x;
-            int source_y = y - destination_y;
-            int source_x = first_x - destination_x;
+            int source_y = draw->src_y + (y - destination_y);
+            int source_x = draw->src_x + (first_x - destination_x);
             const unsigned char *source = image->pixels +
                 ((size_t)source_y * (size_t)image->width +
                  (size_t)source_x) * (size_t)bytes_per_pixel;
@@ -525,13 +525,13 @@ static void draw_graphic(KmsOutput *output, const BlitGraphicsImage *image,
         return;
     }
     for (destination_y = 0; destination_y < height; ++destination_y) {
-        int py = origin_y + image->y + destination_y;
-        int source_y = destination_y * image->height / height;
+        int py = origin_y + draw->y + destination_y;
+        int source_y = draw->src_y + destination_y * draw->src_h / height;
         int destination_x;
         if (py < 0 || py >= output->mode.vdisplay) continue;
         for (destination_x = 0; destination_x < width; ++destination_x) {
-            int px = origin_x + image->x + destination_x;
-            int source_x = destination_x * image->width / width;
+            int px = origin_x + draw->x + destination_x;
+            int source_x = draw->src_x + destination_x * draw->src_w / width;
             const unsigned char *source;
             uint32_t *destination;
             unsigned int alpha;
@@ -679,25 +679,14 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
         }
     }
     if (view->graphics != NULL) {
-        int drawn[KMS_MAX_VIEWS];
-        int pass;
-        memset(drawn, 0, sizeof(drawn));
-        for (pass = 0; pass < view->graphics_count && pass < KMS_MAX_VIEWS;
-             ++pass) {
-            int best = -1;
-            int index;
-            for (index = 0; index < view->graphics_count &&
-                 index < KMS_MAX_VIEWS; ++index)
-                if (!drawn[index] && view->graphics[index].used &&
-                    view->graphics[index].complete && view->graphics[index].visible &&
-                    (best < 0 || view->graphics[index].z < view->graphics[best].z))
-                    best = index;
-            if (best < 0) break;
-            drawn[best] = 1;
-            draw_graphic(output, &view->graphics[best], view->origin_x,
+        BlitGraphicsDraw draws[BLIT_GRAPHICS_MAX_DRAWS];
+        int count = blit_graphics_collect(view->graphics, view->graphics_count,
+                                          draws, BLIT_GRAPHICS_MAX_DRAWS);
+        int index;
+        for (index = 0; index < count; ++index)
+            draw_graphic(output, &draws[index], view->origin_x,
                          view->origin_y, view->columns * cw,
                          view->rows * ch);
-        }
     }
     if (view->cursor_visible && view->cursor_x >= 0 && view->cursor_y >= 0) {
         int cursor_x = view->origin_x + view->cursor_x * cw;

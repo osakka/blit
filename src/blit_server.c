@@ -3485,7 +3485,7 @@ static void surface_summary_json(const BlitSurface *surface,
     if (session != NULL)
         for (x = 0; x < BLIT_GRAPHICS_MAX_IMAGES; ++x)
             if (session->graphics[x].used && session->graphics[x].complete &&
-                session->graphics[x].visible)
+                blit_graphics_shown(&session->graphics[x]))
                 ++graphics;
     snprintf(body, capacity,
              "{\"id\":\"surface-%llu\",\"revision\":%llu,"
@@ -5138,6 +5138,246 @@ static int kitty_decode_chunk(BlitGraphicsImage *image, const char *payload)
     return 1;
 }
 
+/* Placement ids and the Kitty delete targets. ADR 0060. */
+typedef struct {
+    unsigned int id;
+    int x;
+    int y;
+    int width;
+    int height;
+    int z;
+    int src_x;
+    int src_y;
+    int src_w;
+    int src_h;
+} KittyPlacement;
+
+static int kitty_placement_get(const BlitGraphicsImage *image,
+                               unsigned int id, BlitGraphicsPlacement *out)
+{
+    int slot;
+    if (id == 0) {
+        if (!image->visible) return 0;
+        memset(out, 0, sizeof(*out));
+        out->used = 1;
+        out->x = image->x;
+        out->y = image->y;
+        out->width = image->placement_width;
+        out->height = image->placement_height;
+        out->z = image->z;
+        out->src_x = image->src_x;
+        out->src_y = image->src_y;
+        out->src_w = image->src_w;
+        out->src_h = image->src_h;
+        return 1;
+    }
+    for (slot = 0; slot < BLIT_GRAPHICS_MAX_PLACEMENTS; ++slot)
+        if (image->placements[slot].used && image->placements[slot].id == id) {
+            *out = image->placements[slot];
+            return 1;
+        }
+    return 0;
+}
+
+static void kitty_placement_remove(BlitGraphicsImage *image, unsigned int id)
+{
+    int slot;
+    if (id == 0) {
+        image->visible = 0;
+        return;
+    }
+    for (slot = 0; slot < BLIT_GRAPHICS_MAX_PLACEMENTS; ++slot)
+        if (image->placements[slot].used && image->placements[slot].id == id)
+            memset(&image->placements[slot], 0,
+                   sizeof(image->placements[slot]));
+}
+
+/* Displaying an (image, placement) pair again replaces it. Placement id 0
+   is the image's single default placement, which moves rather than
+   multiplying. Returns 0 when the image has no room for another numbered
+   placement. */
+static int kitty_place(BlitGraphicsImage *image, const KittyPlacement *request)
+{
+    int slot;
+    int free_slot = -1;
+    if (request->id == 0) {
+        image->visible = 1;
+        image->x = request->x;
+        image->y = request->y;
+        image->placement_width = request->width;
+        image->placement_height = request->height;
+        image->z = request->z;
+        image->src_x = request->src_x;
+        image->src_y = request->src_y;
+        image->src_w = request->src_w;
+        image->src_h = request->src_h;
+        ++image->revision;
+        return 1;
+    }
+    for (slot = 0; slot < BLIT_GRAPHICS_MAX_PLACEMENTS; ++slot) {
+        if (image->placements[slot].used &&
+            image->placements[slot].id == request->id) {
+            free_slot = slot;
+            break;
+        }
+        if (!image->placements[slot].used && free_slot < 0) free_slot = slot;
+    }
+    if (free_slot < 0) return 0;
+    image->placements[free_slot].used = 1;
+    image->placements[free_slot].id = request->id;
+    image->placements[free_slot].x = request->x;
+    image->placements[free_slot].y = request->y;
+    image->placements[free_slot].width = request->width;
+    image->placements[free_slot].height = request->height;
+    image->placements[free_slot].z = request->z;
+    image->placements[free_slot].src_x = request->src_x;
+    image->placements[free_slot].src_y = request->src_y;
+    image->placements[free_slot].src_w = request->src_w;
+    image->placements[free_slot].src_h = request->src_h;
+    ++image->revision;
+    return 1;
+}
+
+/* The source rectangle must start inside the image. Width and height are
+   clamped by the renderer, as the protocol allows. Returns 0 for a
+   placement that could never show a pixel. A PNG's size is unknown until it
+   is decoded, so an unknown size passes here and is checked again then. */
+static int kitty_placements_in_bounds(const BlitGraphicsImage *image)
+{
+    int slot;
+    if (image->width < 1 || image->height < 1) return 1;
+    if (image->visible && (image->src_x >= image->width ||
+                           image->src_y >= image->height))
+        return 0;
+    for (slot = 0; slot < BLIT_GRAPHICS_MAX_PLACEMENTS; ++slot)
+        if (image->placements[slot].used &&
+            (image->placements[slot].src_x >= image->width ||
+             image->placements[slot].src_y >= image->height))
+            return 0;
+    return 1;
+}
+
+static int kitty_floor_div(int value, int divisor)
+{
+    int quotient = value / divisor;
+    if (value % divisor != 0 && value < 0) --quotient;
+    return quotient;
+}
+
+/* The protocol moves the cursor right by the placement's columns and down by
+   its rows unless C=1 asked it not to. Past the screen the position is
+   undefined by the protocol; this clamps to the last cell instead of
+   scrolling, because an image does not scroll with the text. */
+static void kitty_advance_cursor(const BlitSession *session,
+                                 BlitSurface *surface,
+                                 const BlitGraphicsImage *image,
+                                 unsigned int placement_id)
+{
+    BlitGraphicsPlacement placed;
+    BlitGraphicsDraw draw;
+    int cw = session->terminal_cell_width > 0 ? session->terminal_cell_width : 8;
+    int ch = session->terminal_cell_height > 0 ? session->terminal_cell_height : 16;
+    int columns;
+    int rows;
+    if (!kitty_placement_get(image, placement_id, &placed) ||
+        !blit_graphics_draw_resolve(image, placed.x, placed.y, placed.width,
+                                    placed.height, placed.z, placed.src_x,
+                                    placed.src_y, placed.src_w, placed.src_h,
+                                    &draw))
+        return;
+    columns = (placed.x % cw + draw.width + cw - 1) / cw;
+    rows = (placed.y % ch + draw.height + ch - 1) / ch;
+    surface->cursor_x += columns;
+    if (surface->cursor_x > surface->width - 1)
+        surface->cursor_x = surface->width - 1;
+    surface->cursor_y += rows;
+    if (surface->cursor_y > surface->height - 1)
+        surface->cursor_y = surface->height - 1;
+}
+
+static int kitty_image_has_placement(const BlitGraphicsImage *image)
+{
+    int slot;
+    if (image->visible) return 1;
+    for (slot = 0; slot < BLIT_GRAPHICS_MAX_PLACEMENTS; ++slot)
+        if (image->placements[slot].used) return 1;
+    return 0;
+}
+
+/* a=d. Lowercase targets remove placements and keep the image's data;
+   uppercase also frees the data of any image left with no placement. Only
+   the all and by-id targets reach sixel and API images, as the old
+   delete-everything did; position targets are Kitty placements only. */
+static int kitty_delete(BlitSession *session, BlitSurface *surface,
+                        char target, unsigned int image_id,
+                        unsigned int placement_id, int x, int y, int z)
+{
+    int cw = session->terminal_cell_width > 0 ? session->terminal_cell_width : 8;
+    int ch = session->terminal_cell_height > 0 ? session->terminal_cell_height : 16;
+    int free_data = target >= 'A' && target <= 'Z';
+    char kind = (char)(free_data ? target - 'A' + 'a' : target);
+    int index;
+    int slot;
+    int by_position = kind == 'c' || kind == 'p' || kind == 'q' ||
+        kind == 'x' || kind == 'y';
+    if (!(kind == 'a' || kind == 'i' || kind == 'z' || by_position))
+        return 0;
+    for (index = 0; index < BLIT_GRAPHICS_MAX_IMAGES; ++index) {
+        BlitGraphicsImage *image = &session->graphics[index];
+        int removed = 0;
+        if (!image->used) continue;
+        if (by_position && strcmp(image->protocol, "kitty") != 0) continue;
+        if (kind == 'i' && image->id != image_id) continue;
+        for (slot = -1; slot < BLIT_GRAPHICS_MAX_PLACEMENTS; ++slot) {
+            unsigned int id = slot < 0 ? 0U : image->placements[slot].id;
+            BlitGraphicsPlacement placed;
+            BlitGraphicsDraw draw;
+            int match = 0;
+            if (slot >= 0 && !image->placements[slot].used) continue;
+            if (!kitty_placement_get(image, id, &placed)) continue;
+            switch (kind) {
+            case 'a':
+                match = 1;
+                break;
+            case 'i':
+                match = placement_id == 0 || id == placement_id;
+                break;
+            case 'z':
+                match = placed.z == z;
+                break;
+            default:
+                if (image->complete &&
+                    blit_graphics_draw_resolve(image, placed.x, placed.y,
+                        placed.width, placed.height, placed.z, placed.src_x,
+                        placed.src_y, placed.src_w, placed.src_h, &draw)) {
+                    int first_column = kitty_floor_div(draw.x, cw);
+                    int last_column = kitty_floor_div(draw.x + draw.width - 1, cw);
+                    int first_row = kitty_floor_div(draw.y, ch);
+                    int last_row = kitty_floor_div(draw.y + draw.height - 1, ch);
+                    int column = kind == 'c' ? surface->cursor_x : x - 1;
+                    int row = kind == 'c' ? surface->cursor_y : y - 1;
+                    int in_column = column >= first_column && column <= last_column;
+                    int in_row = row >= first_row && row <= last_row;
+                    if (kind == 'x') match = in_column;
+                    else if (kind == 'y') match = in_row;
+                    else match = in_column && in_row;
+                    if (kind == 'q' && placed.z != z) match = 0;
+                }
+                break;
+            }
+            if (match) {
+                kitty_placement_remove(image, id);
+                ++removed;
+            }
+        }
+        if (free_data && (removed > 0 || kind == 'a') &&
+            !kitty_image_has_placement(image))
+            graphics_image_release(image);
+    }
+    mark_surface_full_damage(surface);
+    return 1;
+}
+
 static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
 {
     char *payload = session->terminal_string;
@@ -5145,15 +5385,25 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
     char action[8];
     char compression[8];
     int compressed = 0;
+    int x;
+    int y;
     int image_id = 0;
     int format = 0;
     int width = 0;
     int height = 0;
     int more = 0;
-    int x = surface->cursor_x * (session->terminal_cell_width > 0 ?
-        session->terminal_cell_width : 8);
-    int y = surface->cursor_y * (session->terminal_cell_height > 0 ?
-        session->terminal_cell_height : 16);
+    int cell_width = session->terminal_cell_width > 0 ?
+        session->terminal_cell_width : 8;
+    int cell_height = session->terminal_cell_height > 0 ?
+        session->terminal_cell_height : 16;
+    int src_x = 0;
+    int src_y = 0;
+    int src_w = 0;
+    int src_h = 0;
+    int offset_x = 0;
+    int offset_y = 0;
+    int placement_id = 0;
+    int keep_cursor = 0;
     int placement_columns = 0;
     int placement_rows = 0;
     int placement_width = 0;
@@ -5162,6 +5412,8 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
     int quiet = 0;
     int display_on_complete = 0;
     int has_action;
+    char delete_target[8];
+    KittyPlacement placement;
     BlitGraphicsImage *image;
     int index;
 
@@ -5175,23 +5427,76 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
     *separator = '\0';
     has_action = kitty_parameter(payload, 'a', action, sizeof(action));
     if (!has_action) action[0] = '\0';
+    /* x and y are the source rectangle's origin (ADR 0060). They used to be
+       read as a destination pixel offset, which is not what the protocol
+       says; the destination is the cursor cell plus X and Y. */
     if (!kitty_parameter_int(payload, 'i', 0, &image_id) || image_id < 0 ||
         !kitty_parameter_int(payload, 'm', 0, &more) ||
-        !kitty_parameter_int(payload, 'x', x, &x) ||
-        !kitty_parameter_int(payload, 'y', y, &y) ||
+        !kitty_parameter_int(payload, 'x', 0, &src_x) ||
+        !kitty_parameter_int(payload, 'y', 0, &src_y) ||
+        !kitty_parameter_int(payload, 'w', 0, &src_w) ||
+        !kitty_parameter_int(payload, 'h', 0, &src_h) ||
+        !kitty_parameter_int(payload, 'X', 0, &offset_x) ||
+        !kitty_parameter_int(payload, 'Y', 0, &offset_y) ||
+        !kitty_parameter_int(payload, 'p', 0, &placement_id) ||
+        !kitty_parameter_int(payload, 'C', 0, &keep_cursor) ||
         !kitty_parameter_int(payload, 'c', 0, &placement_columns) ||
         !kitty_parameter_int(payload, 'r', 0, &placement_rows) ||
         !kitty_parameter_int(payload, 'z', 0, &z) ||
-        !kitty_parameter_int(payload, 'q', 0, &quiet) || quiet < 0 || quiet > 2) {
+        !kitty_parameter_int(payload, 'q', 0, &quiet) || quiet < 0 || quiet > 2 ||
+        placement_id < 0 || keep_cursor < 0 || keep_cursor > 1) {
         graphics_reject(session, "invalid-parameters");
         return;
     }
+    if (strcmp(action, "d") != 0 &&
+        (src_x < 0 || src_y < 0 || src_w < 0 || src_h < 0 ||
+         offset_x < 0 || offset_y < 0 ||
+         offset_x >= cell_width || offset_y >= cell_height)) {
+        graphics_reject(session, "placement-bounds");
+        kitty_reply(session, image_id, quiet, "EINVAL");
+        return;
+    }
+    /* Keys the protocol defines that this does not implement are refused,
+       not skipped: skipping one answers OK and draws the wrong pixels. */
+    {
+        char value[32];
+        static const char unsupported[] = "IPQHVSO";
+        const char *key;
+        int refused = 0;
+        for (key = unsupported; *key != '\0'; ++key)
+            if (kitty_parameter(payload, *key, value, sizeof(value)))
+                refused = 1;
+        if (kitty_parameter(payload, 't', value, sizeof(value)) &&
+            strcmp(value, "d") != 0)
+            refused = 1;
+        if (kitty_parameter(payload, 'U', value, sizeof(value)) &&
+            strcmp(value, "0") != 0)
+            refused = 1;
+        if (refused) {
+            graphics_reject(session, "unsupported-key");
+            kitty_reply(session, image_id, quiet, "EINVAL");
+            return;
+        }
+    }
+    x = surface->cursor_x * cell_width + offset_x;
+    y = surface->cursor_y * cell_height + offset_y;
     placement_width = kitty_cells_to_pixels(session, placement_columns, 0);
     placement_height = kitty_rows_to_pixels(session, placement_rows, 0);
     if (placement_width < 0 || placement_height < 0) {
         graphics_reject(session, "placement-bounds");
         return;
     }
+    memset(&placement, 0, sizeof(placement));
+    placement.id = (unsigned int)placement_id;
+    placement.x = x;
+    placement.y = y;
+    placement.width = placement_width;
+    placement.height = placement_height;
+    placement.z = z;
+    placement.src_x = src_x;
+    placement.src_y = src_y;
+    placement.src_w = src_w;
+    placement.src_h = src_h;
     /* o is the transmission's compression. The protocol defines exactly one
        value, so anything else is refused rather than quietly treated as raw
        bytes -- treating it as raw is what made an o=z transmission fail the
@@ -5212,14 +5517,22 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
         snprintf(action, sizeof(action), "t");
     }
     if (strcmp(action, "d") == 0) {
-        if (image_id == 0) {
-            for (index = 0; index < BLIT_GRAPHICS_MAX_IMAGES; ++index)
-                graphics_image_release(&session->graphics[index]);
-        } else {
-            image = graphics_image_find(session, (unsigned int)image_id);
-            if (image != NULL) graphics_image_release(image);
+        /* The target defaults to a, every visible placement. x and y here
+           are cell coordinates counted from 1, like cursor positions. */
+        char target = 'a';
+        if (kitty_parameter(payload, 'd', delete_target, sizeof(delete_target))) {
+            if (strlen(delete_target) != 1) {
+                graphics_reject(session, "unsupported-delete-target");
+                kitty_reply(session, image_id, quiet, "EINVAL");
+                return;
+            }
+            target = delete_target[0];
         }
-        mark_surface_full_damage(surface);
+        if (!kitty_delete(session, surface, target, (unsigned int)image_id,
+                          (unsigned int)placement_id, src_x, src_y, z)) {
+            graphics_reject(session, "unsupported-delete-target");
+            kitty_reply(session, image_id, quiet, "EINVAL");
+        }
         return;
     }
     if (strcmp(action, "q") == 0) {
@@ -5258,13 +5571,18 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
             graphics_reject(session, "placement-incomplete");
             return;
         }
-        image->visible = 1;
-        image->x = x;
-        image->y = y;
-        image->placement_width = placement_width > 0 ? placement_width : image->width;
-        image->placement_height = placement_height > 0 ? placement_height : image->height;
-        image->z = z;
-        ++image->revision;
+        if (src_x >= image->width || src_y >= image->height) {
+            graphics_reject(session, "placement-bounds");
+            kitty_reply(session, image_id, quiet, "EINVAL");
+            return;
+        }
+        if (!kitty_place(image, &placement)) {
+            graphics_reject(session, "placement-store-full");
+            kitty_reply(session, image_id, quiet, "ENOSPC");
+            return;
+        }
+        if (!keep_cursor)
+            kitty_advance_cursor(session, surface, image, placement.id);
         mark_surface_full_damage(surface);
         return;
     }
@@ -5331,6 +5649,20 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
                 }
         }
         if (image == NULL) {
+            /* d=a keeps the data of images it unplaced, as the protocol
+               says, so a full store may be full of images nothing shows. */
+            for (index = 0; index < BLIT_GRAPHICS_MAX_IMAGES; ++index)
+                if (session->graphics[index].used &&
+                    session->graphics[index].complete &&
+                    strcmp(session->graphics[index].protocol, "kitty") == 0 &&
+                    !kitty_image_has_placement(&session->graphics[index])) {
+                    graphics_image_release(&session->graphics[index]);
+                    ++session->graphics_evicted;
+                    image = &session->graphics[index];
+                    break;
+                }
+        }
+        if (image == NULL) {
             graphics_reject(session, "image-store-full");
             return;
         }
@@ -5370,12 +5702,20 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
         /* Preserve a=T's display intent while later q=2 chunks arrive.  The
            renderer still waits for complete, so this cannot expose partial
            image data. */
-        image->visible = 1;
-        image->x = x;
-        image->y = y;
-        image->placement_width = placement_width > 0 ? placement_width : image->width;
-        image->placement_height = placement_height > 0 ? placement_height : image->height;
-        image->z = z;
+        if (image->width > 0 && image->height > 0 &&
+            (src_x >= image->width || src_y >= image->height)) {
+            graphics_image_release(image);
+            graphics_reject(session, "placement-bounds");
+            kitty_reply(session, image_id, quiet, "EINVAL");
+            return;
+        }
+        if (!kitty_place(image, &placement)) {
+            graphics_image_release(image);
+            graphics_reject(session, "placement-store-full");
+            kitty_reply(session, image_id, quiet, "ENOSPC");
+            return;
+        }
+        image->advance = keep_cursor ? 0 : placement_id + 1;
     }
     if (image->width != width || image->height != height || image->format != format ||
         !kitty_decode_chunk(image, separator + 1)) {
@@ -5445,20 +5785,21 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
             image->bytes = image->capacity =
                 (size_t)decoded_width * (size_t)decoded_height * 4U;
             image->encoded = 0;
-            if (image->placement_width <= 0)
-                image->placement_width = decoded_width;
-            if (image->placement_height <= 0)
-                image->placement_height = decoded_height;
+        }
+        /* A PNG's size is only known now, so a source rectangle that starts
+           outside it could not be refused when the placement was made. */
+        if (!kitty_placements_in_bounds(image)) {
+            graphics_image_release(image);
+            graphics_reject(session, "placement-bounds");
+            kitty_reply(session, image_id, quiet, "EINVAL");
+            return;
         }
         image->complete = 1;
         image->generation = next_graphics_generation();
-        if (display_on_complete) {
-            image->visible = 1;
-            image->x = x;
-            image->y = y;
-            image->placement_width = placement_width > 0 ? placement_width : image->width;
-            image->placement_height = placement_height > 0 ? placement_height : image->height;
-            image->z = z;
+        if (image->advance > 0) {
+            kitty_advance_cursor(session, surface, image,
+                                 (unsigned int)(image->advance - 1));
+            image->advance = 0;
         }
         /* Image composition is part of the surface scene, not terminal cell
            state.  Invalidate the scene when the final Kitty chunk arrives so
@@ -8010,19 +8351,69 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
                 pixel_crc = (unsigned long)crc32(
                     crc32(0UL, NULL, 0), image->pixels,
                     (uInt)image->bytes);
+            int top_width = image->placement_width;
+            int top_height = image->placement_height;
+            {
+                BlitGraphicsDraw top;
+                if (image->complete && image->visible &&
+                    blit_graphics_draw_resolve(
+                        image, image->x, image->y, image->placement_width,
+                        image->placement_height, image->z, image->src_x,
+                        image->src_y, image->src_w, image->src_h, &top)) {
+                    top_width = top.width;
+                    top_height = top.height;
+                }
+            }
             used += (size_t)snprintf(body + used, capacity - used,
                 "%s{\"id\":%u,\"protocol\":\"%s\",\"complete\":%s,\"visible\":%s,"
                 "\"width\":%d,\"height\":%d,\"format\":%d,"
                 "\"bytes\":%lu,\"pixel_crc32\":%lu,\"x\":%d,\"y\":%d,"
                 "\"placement_width\":%d,\"placement_height\":%d,"
-                "\"z\":%d,\"revision\":%llu}",
+                "\"z\":%d,\"revision\":%llu",
                 first_graphics ? "" : ",", image->id, image->protocol,
                 image->complete ? "true" : "false",
                 image->visible ? "true" : "false", image->width,
                 image->height, image->format, (unsigned long)image->bytes,
                 pixel_crc,
-                image->x, image->y, image->placement_width,
-                image->placement_height, image->z, image->revision);
+                image->x, image->y, top_width, top_height, image->z,
+                image->revision);
+            /* The same record carries the placements: the default one as id
+               0, then each numbered one, with their source rectangles. A
+               placement whose rectangle starts outside the image is listed
+               with the stored values rather than resolved ones. */
+            used += (size_t)snprintf(body + used, capacity - used,
+                ",\"placements\":[");
+            {
+                int slot;
+                int first_placement = 1;
+                for (slot = -1; slot < BLIT_GRAPHICS_MAX_PLACEMENTS; ++slot) {
+                    BlitGraphicsPlacement placed;
+                    BlitGraphicsDraw draw;
+                    unsigned int placed_id = slot < 0 ? 0U :
+                        image->placements[slot].id;
+                    if (slot >= 0 && !image->placements[slot].used) continue;
+                    if (!kitty_placement_get(image, placed_id, &placed)) continue;
+                    if (image->complete && blit_graphics_draw_resolve(
+                            image, placed.x, placed.y, placed.width,
+                            placed.height, placed.z, placed.src_x,
+                            placed.src_y, placed.src_w, placed.src_h, &draw)) {
+                        placed.width = draw.width;
+                        placed.height = draw.height;
+                        placed.src_w = draw.src_w;
+                        placed.src_h = draw.src_h;
+                    }
+                    used += (size_t)snprintf(body + used, capacity - used,
+                        "%s{\"id\":%u,\"x\":%d,\"y\":%d,\"width\":%d,"
+                        "\"height\":%d,\"z\":%d,\"source\":{\"x\":%d,"
+                        "\"y\":%d,\"width\":%d,\"height\":%d}}",
+                        first_placement ? "" : ",", placed_id, placed.x,
+                        placed.y, placed.width, placed.height, placed.z,
+                        placed.src_x, placed.src_y, placed.src_w,
+                        placed.src_h);
+                    first_placement = 0;
+                }
+            }
+            used += (size_t)snprintf(body + used, capacity - used, "]}");
             first_graphics = 0;
         }
     }
@@ -11703,6 +12094,7 @@ static unsigned long long graphics_scene_signature(const BlitRuntime *runtime,
     unsigned long long signature = 1469598103934665603ULL;
     int session_index;
     int image_index;
+    int placement_index;
 
     if (runtime == NULL || output_index < 0 ||
         output_index >= runtime->output_count)
@@ -11748,6 +12140,41 @@ static unsigned long long graphics_scene_signature(const BlitRuntime *runtime,
             signature *= 1099511628211ULL;
             signature ^= (unsigned long long)(unsigned int)image->z;
             signature *= 1099511628211ULL;
+            signature ^= (unsigned long long)(unsigned int)image->src_x;
+            signature *= 1099511628211ULL;
+            signature ^= (unsigned long long)(unsigned int)image->src_y;
+            signature *= 1099511628211ULL;
+            signature ^= (unsigned long long)(unsigned int)image->src_w;
+            signature *= 1099511628211ULL;
+            signature ^= (unsigned long long)(unsigned int)image->src_h;
+            signature *= 1099511628211ULL;
+            for (placement_index = 0;
+                 placement_index < BLIT_GRAPHICS_MAX_PLACEMENTS;
+                 ++placement_index) {
+                const BlitGraphicsPlacement *placed =
+                    &image->placements[placement_index];
+                if (!placed->used) continue;
+                signature ^= placed->id;
+                signature *= 1099511628211ULL;
+                signature ^= (unsigned long long)(unsigned int)placed->x;
+                signature *= 1099511628211ULL;
+                signature ^= (unsigned long long)(unsigned int)placed->y;
+                signature *= 1099511628211ULL;
+                signature ^= (unsigned long long)(unsigned int)placed->width;
+                signature *= 1099511628211ULL;
+                signature ^= (unsigned long long)(unsigned int)placed->height;
+                signature *= 1099511628211ULL;
+                signature ^= (unsigned long long)(unsigned int)placed->z;
+                signature *= 1099511628211ULL;
+                signature ^= (unsigned long long)(unsigned int)placed->src_x;
+                signature *= 1099511628211ULL;
+                signature ^= (unsigned long long)(unsigned int)placed->src_y;
+                signature *= 1099511628211ULL;
+                signature ^= (unsigned long long)(unsigned int)placed->src_w;
+                signature *= 1099511628211ULL;
+                signature ^= (unsigned long long)(unsigned int)placed->src_h;
+                signature *= 1099511628211ULL;
+            }
         }
     }
     return signature;
@@ -12331,45 +12758,31 @@ static int render_sdl_graphics(BlitOutput *output,
                                int under_text)
 {
     SDL_Renderer *renderer = output != NULL ? output->renderer : NULL;
-    int drawn[BLIT_GRAPHICS_MAX_IMAGES];
+    BlitGraphicsDraw draws[BLIT_GRAPHICS_MAX_DRAWS];
     int api_images_drawn = 0;
-    int pass;
-    memset(drawn, 0, sizeof(drawn));
-    for (pass = 0; pass < image_count && pass < BLIT_GRAPHICS_MAX_IMAGES;
-         ++pass) {
-        int image_index;
-        int best = -1;
-        const BlitGraphicsImage *image;
-        int width;
-        int height;
+    int count = blit_graphics_collect(images, image_count, draws,
+                                      BLIT_GRAPHICS_MAX_DRAWS);
+    int index;
+    for (index = 0; index < count; ++index) {
+        const BlitGraphicsDraw *draw = &draws[index];
         SDL_Texture *texture;
+        SDL_FRect source;
         SDL_FRect destination;
 
-        for (image_index = 0; image_index < image_count &&
-             image_index < BLIT_GRAPHICS_MAX_IMAGES; ++image_index)
-            if (!drawn[image_index] && images[image_index].used &&
-                images[image_index].complete && images[image_index].visible &&
-                ((under_text && images[image_index].z < 0) ||
-                 (!under_text && images[image_index].z >= 0)) &&
-                (best < 0 || images[image_index].z < images[best].z))
-                best = image_index;
-        if (best < 0) break;
-        drawn[best] = 1;
-        image = &images[best];
-        if (!image->used || !image->complete || !image->visible ||
-            image->pixels == NULL || image->width < 1 || image->height < 1)
+        if ((under_text && draw->z >= 0) || (!under_text && draw->z < 0))
             continue;
-        width = image->placement_width > 0 ? image->placement_width : image->width;
-        height = image->placement_height > 0 ? image->placement_height : image->height;
-        if (width < 1 || height < 1) continue;
-        texture = sdl_graphics_texture(output, image);
+        texture = sdl_graphics_texture(output, draw->image);
         if (texture == NULL) continue;
-        destination.x = origin_x + image->x;
-        destination.y = origin_y + image->y;
-        destination.w = (float)width;
-        destination.h = (float)height;
-        SDL_RenderTexture(renderer, texture, NULL, &destination);
-        if (strcmp(image->protocol, "api") == 0)
+        source.x = (float)draw->src_x;
+        source.y = (float)draw->src_y;
+        source.w = (float)draw->src_w;
+        source.h = (float)draw->src_h;
+        destination.x = origin_x + draw->x;
+        destination.y = origin_y + draw->y;
+        destination.w = (float)draw->width;
+        destination.h = (float)draw->height;
+        SDL_RenderTexture(renderer, texture, &source, &destination);
+        if (strcmp(draw->image->protocol, "api") == 0)
             ++api_images_drawn;
     }
     return api_images_drawn;

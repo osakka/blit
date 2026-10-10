@@ -1,0 +1,84 @@
+release: 0.1.424
+package: blit_0.1.424-1_amd64.deb
+package_sha256: 45537f2da837b8a4344265339682e48973f342fb1ddab959a9cb5f91dc85332c
+source_commit: pending
+package_documentation_commit: pending
+server_binary_sha256: e672ac7381fac848be07dc3d8453610eff2c0733f7e59d8da54fec06e1036832
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: ed37dff18e0ba8ad638990b28287ab1aeb22ada5fe7345a3eb17a39733598d87
+hibr_root: /tmp/hibr-0.99.100
+hibr_version: 0.99.100
+tcc_build_acceptance: pass
+openapi_yaml: pass
+api_schema_gate: pass
+package_artifact_acceptance: pass
+network_auth_acceptance: pass_api_token_injected
+terminal_conformance: pass
+session_lifecycle_acceptance: pass
+session_write_resize_acceptance: pass
+stream_replay_acceptance: pass
+font_api_acceptance: pass
+hibr_font_manifest_acceptance: pass
+glyph_geometry_local_pixel_acceptance: pass
+sdl_glyph_filter_acceptance: pass
+external_pointer_composition: pass
+pointer_damage_atomic_acceptance: pass
+pointer_wallpaper_stress_acceptance: pass
+hidden_cursor_damage_acceptance: pass
+sdl_background_batch_acceptance: pass
+sdl_graphics_cache_acceptance: pass
+sdl_wallpaper_damage_acceptance: pass
+screenshot_overlay_acceptance: pass
+pixel_frame_acceptance: pass
+render_state_agreement_acceptance: pass
+adapter_coalesce_acceptance: pass_idle_frame_zero_requests
+kitty_placement_pixel_acceptance: pass_crop_offset_numbered_and_z_order_by_pixel
+kitty_placement_conformance_acceptance: pass_delete_targets_and_unsupported_key_refusals
+evdev_scan_open_count_acceptance: pass_32_opens_for_32_paths_was_96
+graphics_kitty_zlib_acceptance: pass_pixel_crc32_identical_to_raw
+graphics_xtsmgraphics_acceptance: pass_no_scroll_and_enforced_limits_reported
+terminal_kitty_keyboard_acceptance: pass_cursor_unmoved_query_reports_zero
+hibr_singleton_local_acceptance: pass
+hibr_resume_guard_acceptance: pass
+restart_gate: pass
+shutdown_gate: pass
+update_idle_timeout_acceptance: pass
+update_reset_acceptance: pass
+update_cancel_acceptance: pass
+frame_rate_settled_acceptance: pass
+terminal_soak_120s_acceptance: pass
+screenshot_nonblocking_live_acceptance: not_rerun_candidate
+qemu_hibr_lifecycle_acceptance: not_rerun_candidate
+qemu_four_output_pixel_acceptance: not_rerun_candidate
+qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
+live_deployment: pending
+live_current_version: 0.1.421
+live_physical_multi_display: unavailable_one_output
+live_physical_button_trace_contract: open
+physical_evdev_acceptance: open
+physical_multi_monitor_acceptance: open
+physical_high_refresh_acceptance: open
+notes: >-
+  Issue #15. Kitty graphics now implement the placement model and the delete
+  targets (ADR 0060). x/y/w/h select a source rectangle rather than offsetting
+  the destination, X/Y offset within the cell, p= numbers up to 8 placements
+  per image, and a=d supports targets a i c p q x y z in both cases, where
+  lowercase keeps image data and uppercase frees it. Keys not implemented
+  (I P Q H V S O, t other than d, U other than 0) and unknown delete targets
+  are refused with unsupported-key / unsupported-delete-target in
+  graphics_diagnostics.last_error instead of being silently ignored. SDL and
+  KMS draw from one z-sorted draw list.
+
+  tools/tests/kitty_placement_gate.rb asserts framebuffer pixels for a crop,
+  a cell offset, two numbered placements and z order; against the 0.1.421
+  server it fails the crop, offset and placement assertions. The conformance
+  vector kitty-placement-keys asserts state and refusals and fails on the
+  previous release because the placements array is absent.
+
+  Hibr's emitter sends only a=T (no x/y), d=I and d=A, so the changed meaning of
+  x/y does not reach it.
+
+  Not covered: t=f/t/s file and shared-memory transmission, unicode
+  placeholders, animation, relative placements. The KMS path is covered by the
+  shared draw list and local renderer tests; live-host screenshot evidence is
+  recorded at deployment.

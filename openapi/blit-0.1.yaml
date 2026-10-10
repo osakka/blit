@@ -1793,7 +1793,37 @@ components:
         placement_width: {type: integer, minimum: 0, maximum: 4096}
         placement_height: {type: integer, minimum: 0, maximum: 4096}
         z: {type: integer}
+        placements:
+          type: array
+          maxItems: 8
+          description: >-
+            Numbered placements of this image (Kitty `p=`), in addition to the
+            default placement described by the top-level fields. At most 8.
+          items: {$ref: '#/components/schemas/GraphicsPlacement'}
         revision: {$ref: '#/components/schemas/Revision'}
+      additionalProperties: false
+    GraphicsPlacement:
+      type: object
+      required: [id, x, y, width, height, z, source]
+      properties:
+        id: {type: integer, minimum: 1}
+        x: {type: integer, description: Destination pixel x on the surface.}
+        y: {type: integer, description: Destination pixel y on the surface.}
+        width: {type: integer, minimum: 0, maximum: 4096}
+        height: {type: integer, minimum: 0, maximum: 4096}
+        z: {type: integer}
+        source:
+          type: object
+          description: >-
+            The rectangle of the image that is drawn (Kitty `x y w h`).
+            Width and height are zero until resolved against the image size.
+          required: [x, y, width, height]
+          properties:
+            x: {type: integer, minimum: 0}
+            y: {type: integer, minimum: 0}
+            width: {type: integer, minimum: 0}
+            height: {type: integer, minimum: 0}
+          additionalProperties: false
       additionalProperties: false
     Cursor:
       type: object

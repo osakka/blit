@@ -14,6 +14,14 @@ so Hibr must perform right-to-left ordering, while Hibr's console still uses
 the Kitty graphics protocol. An API session may explicitly override either
 environment value when integrating a different terminal client.
 
+Blit implements the Kitty placement model: `x y w h` crop the image, `X Y`
+offset within the cell, `p` numbers up to 8 placements per image, and
+`a=d` supports the `a i c p q x y z` targets
+([ADR 0060](adr/0060-kitty-placements-source-rectangles-and-delete-targets.md)).
+Keys it does not implement are refused and reported in
+`graphics_diagnostics.last_error` rather than ignored. Hibr's emitter uses
+only whole-image display and the `I`/`A` deletes, which are unchanged.
+
 The SDL3 state engine must not be linked into hibr, and hibr must not become a
 second owner of display state. This preserves process isolation and lets other
 clients use blit without hibr.

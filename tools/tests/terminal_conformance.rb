@@ -8,6 +8,7 @@ require 'json'
 require 'base64'
 require 'zlib'
 require 'net/http'
+require 'tempfile'
 require 'timeout'
 require 'uri'
 
@@ -1486,6 +1487,140 @@ assert_equal(0, graphics_case(base, 'kitty-png-truncated',
   "\\033_Ga=T,f=100;#{Base64.strict_encode64(png_bytes[0, 20])}\\033\\\\").length,
              'a truncated PNG creates no image')
 puts 'PASS kitty-png-rejects-malformed'
+
+# Issue #15 / ADR 0060: placement ids, the source rectangle, and the delete
+# targets. The pixel behaviour is in kitty_placement_gate.rb; this is the
+# state and the refusals, which need no renderer.
+def graphics_state_case(base, _name, escape, width: 40, height: 10)
+  # Long argument strings are refused at session create, so the bytes go in a file.
+  file = Tempfile.new('kitty-escape')
+  file.write(escape)
+  file.flush
+  created = request(base, 'POST', '/v1/terminal-sessions', {
+    'command' => '/bin/sh',
+    'arguments' => ['-c', "printf '%b' \"$(cat #{file.path})\"; sleep 0.3"],
+    'surface' => { 'width' => width, 'height' => height }
+  })
+  id = created.fetch('id')
+  state = Timeout.timeout(5) do
+    loop do
+      current = request(base, 'GET', "/v1/terminal-sessions/#{id}")
+      break current unless %w[starting running].include?(current.fetch('state'))
+
+      sleep 0.02
+    end
+  end
+  request(base, 'DELETE', "/v1/terminal-sessions/#{id}")
+  state
+end
+
+gp = Base64.strict_encode64([1, 2, 3, 255].pack('C4') * 16)
+gk = "f=32,s=4,v=4,q=2"
+def gesc(keys, data = '') = "\\033_G#{keys};#{data}\\033\\\\"
+def gcup(row, col) = "\\033[#{row};#{col}H"
+
+# x and y are the source origin, not a destination offset.
+images = graphics_state_case(base, 'kitty-source-rect',
+  gcup(3, 4) + gesc("a=T,#{gk},i=1,x=1,y=2,w=2,h=1,C=1", gp)).fetch('graphics')
+placement = images.fetch(0).fetch('placements').fetch(0)
+assert_equal([24, 32], [placement.fetch('x'), placement.fetch('y')],
+             'destination is the cursor cell, not x and y')
+assert_equal({ 'x' => 1, 'y' => 2, 'width' => 2, 'height' => 1 },
+             placement.fetch('source'), 'source rectangle is recorded')
+assert_equal([2, 1], [placement.fetch('width'), placement.fetch('height')],
+             'an unscaled cropped placement is the size of its crop')
+
+# Width and height beyond the image clamp; an origin outside it is refused.
+images = graphics_state_case(base, 'kitty-source-clamp',
+  gesc("a=T,#{gk},i=1,x=3,y=3,w=9,h=9,C=1", gp)).fetch('graphics')
+assert_equal({ 'x' => 3, 'y' => 3, 'width' => 1, 'height' => 1 },
+             images.fetch(0).fetch('placements').fetch(0).fetch('source'),
+             'oversized w and h clamp to the image')
+state = graphics_state_case(base, 'kitty-source-outside',
+  gesc("a=T,#{gk},i=1,x=4,y=0,w=1,h=1,C=1", gp))
+assert_equal(0, state.fetch('graphics').length, 'a source origin outside the image shows nothing')
+assert_equal('placement-bounds', state.fetch('graphics_diagnostics').fetch('last_error'),
+             'a source origin outside the image is refused with a reason')
+state = graphics_state_case(base, 'kitty-offset-outside-cell',
+  gesc("a=T,#{gk},i=1,X=8,C=1", gp))
+assert_equal(0, state.fetch('graphics').length, 'X must be smaller than the cell')
+
+# Keys the protocol defines and this does not implement are refused.
+%w[t=f t=t t=s I=3 U=1 P=1 Q=1 H=1 V=1].each do |key|
+  state = graphics_state_case(base, "kitty-unsupported-#{key}",
+    gesc("a=T,#{gk},i=1,#{key},C=1", gp))
+  assert_equal(0, state.fetch('graphics').length, "unsupported key #{key} creates no image")
+  assert_equal('unsupported-key', state.fetch('graphics_diagnostics').fetch('last_error'),
+               "unsupported key #{key} is refused with a reason")
+end
+state = graphics_state_case(base, 'kitty-supported-t-d',
+  gesc("a=T,#{gk},i=1,t=d,U=0,C=1", gp))
+assert_equal(1, state.fetch('graphics').length, 't=d and U=0 are the supported defaults')
+
+# Numbered placements: the same (image, placement) pair replaces, a different
+# one adds, and an unnumbered display stays the single default placement.
+state = graphics_state_case(base, 'kitty-placement-ids',
+  gcup(1, 1) + gesc("a=T,#{gk},i=1,p=7,C=1", gp) +
+  gcup(2, 1) + gesc('a=p,i=1,p=9,C=1') +
+  gcup(3, 1) + gesc('a=p,i=1,p=7,C=1'))
+placements = state.fetch('graphics').fetch(0).fetch('placements')
+by_id = placements.to_h { |q| [q.fetch('id'), [q.fetch('x'), q.fetch('y')]] }
+assert_equal({ 7 => [0, 32], 9 => [0, 16] }, by_id,
+             'redisplaying p=7 moved it; p=9 is a separate placement')
+
+# Delete targets. Each case places three 4x4 images at cells (0,0), (5,2) and
+# (10,4) (z 0, 1, 2) and deletes by one target.
+def delete_case(base, name, delete_keys, clear: false)
+  escape = gcup(1, 1) + gesc("a=T,#{$gk},i=1,z=0,C=1", $gp) +
+           gcup(3, 6) + gesc("a=T,#{$gk},i=2,z=1,C=1", $gp) +
+           gcup(5, 11) + gesc("a=T,#{$gk},i=3,z=2,C=1", $gp) +
+           gcup(3, 6) + gesc(delete_keys)
+  graphics_state_case(base, name, escape).fetch('graphics')
+end
+$gk = gk
+$gp = gp
+def shown(images)
+  images.select { |g| g.fetch('placements').any? }.map { |g| g.fetch('id') }.sort
+end
+
+assert_equal([1, 3], shown(delete_case(base, 'del-p', 'a=d,d=p,x=6,y=3')),
+             'd=p removes the placements intersecting a 1-based cell')
+assert_equal([1, 3], shown(delete_case(base, 'del-c', 'a=d,d=c')),
+             'd=c removes the placements under the cursor')
+assert_equal([1, 2], shown(delete_case(base, 'del-q', 'a=d,d=q,x=11,y=5,z=2')),
+             'd=q matches the cell and the z-index together')
+assert_equal([1, 2, 3], shown(delete_case(base, 'del-q-z', 'a=d,d=q,x=6,y=3,z=2')),
+             'd=q does not remove a placement with another z-index')
+assert_equal([1, 3], shown(delete_case(base, 'del-x', 'a=d,d=x,x=6')),
+             'd=x removes the placements crossing a column')
+assert_equal([1, 2], shown(delete_case(base, 'del-y', 'a=d,d=y,y=5')),
+             'd=y removes the placements crossing a row')
+assert_equal([1, 3], shown(delete_case(base, 'del-z', 'a=d,d=z,z=1')),
+             'd=z removes the placements with that z-index')
+assert_equal([], shown(delete_case(base, 'del-default', 'a=d')),
+             'a=d with no target removes every visible placement')
+kept = delete_case(base, 'del-a-keeps-data', 'a=d,d=a')
+assert_equal([1, 2, 3], kept.map { |g| g.fetch('id') }.sort,
+             'lowercase d=a keeps the image data')
+assert_equal([], delete_case(base, 'del-A-frees-data', 'a=d,d=A'),
+             'uppercase d=A frees the image data')
+assert_equal([2, 3], delete_case(base, 'del-I-frees-one', 'a=d,d=I,i=1')
+                       .map { |g| g.fetch('id') }.sort,
+             'uppercase d=I frees one image')
+assert_equal([1, 2, 3], delete_case(base, 'del-i-keeps-one', 'a=d,d=i,i=1')
+                          .map { |g| g.fetch('id') }.sort,
+             'lowercase d=i keeps the image data')
+assert_equal([1, 2, 3], shown(delete_case(base, 'del-miss', 'a=d,d=p,x=30,y=9')),
+             'a delete that matches nothing removes nothing')
+%w[n N r R f F].each do |target|
+  state = graphics_state_case(base, "del-unsupported-#{target}",
+    gesc("a=T,#{gk},i=1,C=1", gp) + gesc("a=d,d=#{target}"))
+  assert_equal(1, state.fetch('graphics').length, "d=#{target} deletes nothing")
+  assert_equal('unsupported-delete-target',
+               state.fetch('graphics_diagnostics').fetch('last_error'),
+               "d=#{target} is refused with a reason")
+end
+puts 'PASS kitty-placement-keys'
 
 override_created = request(base, 'POST', '/v1/terminal-sessions', {
   'command' => '/bin/sh',
