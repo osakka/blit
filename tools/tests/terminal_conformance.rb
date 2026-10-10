@@ -1219,6 +1219,137 @@ assert_equal('1b50312b72343336463d3332333533361b5c' \
              '1b50312b723532343734323d333832463338324633381b5c',
              row_text(snapshot), 'XTGETTCAP answers every name in a request')
 
+# Issue #3: the VT400/VT500 left/right margin model. DECLRMM (CSI ?69h) did
+# nothing and the DECSLRM that follows it was swallowed by the SCOSC branch, so
+# margin-aware editors got full-width behaviour.
+#
+# Every vector here sets margins at columns 3..6 of a twelve-column surface, so
+# the two columns to the left and the six to the right are the evidence: an
+# operation that respects the margins leaves them alone, and one that does not
+# moves them.
+def margin_rows(snapshot)
+  grid = {}
+  snapshot.fetch('cells').each do |cell|
+    grid[[cell.fetch('x', 0), cell.fetch('y', 0)]] = cell['text'] || ' '
+  end
+  (0...snapshot.fetch('height')).map do |y|
+    (0...snapshot.fetch('width')).map { |x| grid[[x, y]] || ' ' }.join
+  end
+end
+
+FILL = "printf 'AAAA1\\r\\nBBBB2\\r\\nCCCC3\\r\\nDDDD4'"
+MARGINS = "printf '\\033[?69h\\033[3;6s'"
+
+snapshot = run_case(base, 'decslrm-insert-line',
+                    "#{FILL}; #{MARGINS}; printf '\\033[1;3H\\033[2L'",
+                    width: 12, height: 5)
+assert_equal(['AA          ', 'BB          ', 'CCAA1       ',
+              'DDBB2       ', '  CC3       '],
+             margin_rows(snapshot),
+             'IL shifts only the columns inside the horizontal margins')
+
+snapshot = run_case(base, 'decslrm-delete-line',
+                    "#{FILL}; #{MARGINS}; printf '\\033[1;3H\\033[1M'",
+                    width: 12, height: 5)
+assert_equal(['AABB2       ', 'BBCC3       ', 'CCDD4       ',
+              'DD          ', '            '],
+             margin_rows(snapshot),
+             'DL shifts only the columns inside the horizontal margins')
+
+snapshot = run_case(base, 'decslrm-insert-character',
+                    "#{FILL}; #{MARGINS}; printf '\\033[1;3H\\033[2@'",
+                    width: 12, height: 5)
+# AAAA1 occupies columns 1-5; the margins are 3-6. Inserting two at column 3
+# shifts columns 3-6 right by two, so the A's at 3 and 4 land on 5 and 6 and
+# the 1 at column 5 is pushed past the right margin and dropped -- which is
+# the behaviour that distinguishes a margin-respecting ICH from a full-width
+# one, where the 1 would have survived at column 7.
+assert_equal(['AA  AA      ', 'BBBB2       ', 'CCCC3       ',
+              'DDDD4       ', '            '],
+             margin_rows(snapshot),
+             'ICH shifts within the right margin and drops what passes it')
+
+snapshot = run_case(base, 'decslrm-delete-character',
+                    "#{FILL}; #{MARGINS}; printf '\\033[1;3H\\033[2P'",
+                    width: 12, height: 5)
+assert_equal(['AA1         ', 'BBBB2       ', 'CCCC3       ',
+              'DDDD4       ', '            '],
+             margin_rows(snapshot),
+             'DCH shifts within the right margin')
+
+snapshot = run_case(base, 'decslrm-scroll-up',
+                    "#{FILL}; #{MARGINS}; printf '\\033[1;3H\\033[1S'",
+                    width: 12, height: 5)
+assert_equal(['AABB2       ', 'BBCC3       ', 'CCDD4       ',
+              'DD          ', '            '],
+             margin_rows(snapshot),
+             'SU scrolls only the columns inside the horizontal margins')
+
+# A cursor outside the horizontal margins makes the operation a no-op, which
+# is the rule DEC states for the scroll margins. The ticket's own repro put the
+# cursor at column 1 and expected a confined shift; this is the behaviour
+# chosen instead, and it is the same rule ICH/DCH and the vertical margins
+# already follow.
+snapshot = run_case(base, 'decslrm-outside-margins-is-a-no-op',
+                    "#{FILL}; #{MARGINS}; printf '\\033[1;1H\\033[2L'",
+                    width: 12, height: 5)
+assert_equal(['AAAA1       ', 'BBBB2       ', 'CCCC3       ',
+              'DDDD4       ', '            '],
+             margin_rows(snapshot),
+             'IL with the cursor outside the margins changes nothing')
+
+# Autowrap at the right margin lands on the left one, not on column zero.
+snapshot = run_case(base, 'decslrm-autowrap',
+                    "#{MARGINS}; printf '\\033[1;3Hxyzw1234'",
+                    width: 12, height: 5)
+assert_equal(['  xyzw      ', '  1234      ', '            ',
+              '            ', '            '],
+             margin_rows(snapshot),
+             'autowrap at the right margin continues at the left margin')
+
+# CR inside the margins returns to the left margin.
+snapshot = run_case(base, 'decslrm-carriage-return',
+                    "#{MARGINS}; printf '\\033[1;3Habcd\\rZ'",
+                    width: 12, height: 5)
+assert_equal(['  Zbcd      ', '            ', '            ',
+              '            ', '            '],
+             margin_rows(snapshot),
+             'CR inside the margins returns to the left margin')
+
+# And the switch the ticket names: CSI s is DECSLRM while DECLRMM is set and
+# SCOSC while it is not. With DECLRMM reset, the same bytes save the cursor,
+# so CSI u restores it and the text lands back where it was saved.
+snapshot = run_case(base, 'scosc-without-declrmm',
+                    "printf '\\033[2;5HX\\033[s\\033[4;1HY\\033[uZ'",
+                    width: 12, height: 5)
+assert_equal(['            ', '    XZ      ', '            ',
+              'Y           ', '            '],
+             margin_rows(snapshot),
+             'CSI s is SCOSC while DECLRMM is reset')
+
+# With DECLRMM set, the same CSI s sets margins instead of saving, so CSI u
+# restores whatever SCOSC last saved -- the home position -- rather than the
+# position before the CSI s.
+snapshot = run_case(base, 'decslrm-not-scosc',
+                    "printf '\\033[?69h\\033[2;5HX\\033[3;6s\\033[4;1HY\\033[uZ'",
+                    width: 12, height: 5)
+rows = margin_rows(snapshot)
+assert_equal('    X       ', rows[1],
+             'the X landed before CSI s was interpreted as DECSLRM')
+assert_equal('Y           ', rows[3], 'the Y landed where it was placed')
+assert_equal('Z           ', rows[0],
+             'CSI s set margins rather than saving the cursor, so CSI u went home')
+
+# Turning DECLRMM off restores the full width rather than remembering the
+# columns, which is what makes CSI s unambiguous again.
+snapshot = run_case(base, 'declrmm-reset-restores-full-width',
+                    "#{FILL}; #{MARGINS}; printf '\\033[?69l\\033[1;1H\\033[2L'",
+                    width: 12, height: 5)
+assert_equal(['            ', '            ', 'AAAA1       ',
+              'BBBB2       ', 'CCCC3       '],
+             margin_rows(snapshot),
+             'with DECLRMM reset, IL is full width again')
+
 # bce is reported, so it has to be true: an erase applies the pen background.
 # Reading the code said so; this is the assertion that it does.
 snapshot = run_case(base, 'back-colour-erase',

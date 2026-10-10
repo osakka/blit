@@ -189,6 +189,15 @@ typedef struct {
     int cursor_style;
     int scroll_top;
     int scroll_bottom;
+    /* The VT400/VT500 left/right margin model (issue #3). DECLRMM (CSI ?69h)
+       enables it; DECSLRM (CSI Pl;Pr s) sets the columns. While it is off --
+       which is the state every existing client is in -- the accessors below
+       return 0 and width-1, so every horizontal operation behaves exactly as
+       it did. That identity is the regression oracle: the conformance suite
+       with margins at full width is the proof that nothing else moved. */
+    int lrmm_enabled;
+    int left_margin;
+    int right_margin;
     unsigned char tab_stops[BLIT_MAX_CELL_COLS];
     BlitScrollbackLine scrollback[BLIT_MAX_SCROLLBACK_LINES];
     int scrollback_count;
@@ -5890,6 +5899,31 @@ static void terminal_clear_line(BlitSurface *surface, int y, int start)
         terminal_clear_cell(surface, x, y);
 }
 
+/* The columns a horizontal operation may touch on this surface.
+ *
+ * Every operation that used to write 0 or surface->width - 1 asks here
+ * instead. That is the whole of the margin change: the operations did not
+ * learn about margins, they stopped assuming the line is the width. */
+static int surface_line_start(const BlitSurface *surface)
+{
+    return surface->lrmm_enabled ? surface->left_margin : 0;
+}
+
+static int surface_line_end(const BlitSurface *surface)
+{
+    return surface->lrmm_enabled ? surface->right_margin : surface->width - 1;
+}
+
+/* True when the cursor is inside the horizontal margins. Operations that move
+   to the left margin -- CR, line insertion, autowrap -- move to column zero
+   instead when the cursor is outside them, which is what a VT does. */
+static int surface_cursor_within_margins(const BlitSurface *surface)
+{
+    return !surface->lrmm_enabled ||
+        (surface->cursor_x >= surface->left_margin &&
+         surface->cursor_x <= surface->right_margin);
+}
+
 static void terminal_erase_cell(BlitSession *session, BlitSurface *surface,
                                 int x, int y)
 {
@@ -6090,6 +6124,54 @@ static void terminal_scroll_up(BlitSession *session, BlitSurface *surface)
     surface->damage_width = surface->width;
     surface->damage_height = bottom - top + 1;
     surface->cursor_y = bottom;
+}
+
+/* Copy one row's cells within a column range. A whole-row copy is this with
+   the range set to the full width, which is what every caller did before
+   left/right margins existed (issue #3). */
+static void terminal_copy_cells(BlitSurface *surface, int destination,
+                                int source, int from, int to)
+{
+    int x;
+
+    if (from < 0) from = 0;
+    if (to > surface->width - 1) to = surface->width - 1;
+    for (x = from; x <= to; ++x) {
+        surface->cells[destination][x] = surface->cells[source][x];
+        surface->codepoints[destination][x] = surface->codepoints[source][x];
+        memcpy(surface->combining[destination][x],
+               surface->combining[source][x],
+               sizeof(surface->combining[destination][x]));
+        surface->combining_count[destination][x] =
+            surface->combining_count[source][x];
+        surface->foreground[destination][x] = surface->foreground[source][x];
+        surface->background[destination][x] = surface->background[source][x];
+        surface->underline_color[destination][x] =
+            surface->underline_color[source][x];
+        surface->attributes[destination][x] = surface->attributes[source][x];
+        surface->links[destination][x] = surface->links[source][x];
+    }
+}
+
+static void terminal_blank_cells(BlitSurface *surface, int row, int from,
+                                 int to)
+{
+    int x;
+
+    if (from < 0) from = 0;
+    if (to > surface->width - 1) to = surface->width - 1;
+    for (x = from; x <= to; ++x) {
+        surface->cells[row][x] = 0;
+        surface->codepoints[row][x] = 0;
+        memset(surface->combining[row][x], 0,
+               sizeof(surface->combining[row][x]));
+        surface->combining_count[row][x] = 0;
+        surface->foreground[row][x] = 0;
+        surface->background[row][x] = 0;
+        surface->underline_color[row][x] = 0;
+        surface->attributes[row][x] = 0;
+        surface->links[row][x] = 0;
+    }
 }
 
 static void terminal_copy_row(BlitSurface *surface, int destination, int source)
@@ -8468,6 +8550,23 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         }
         if (terminal_csi_has_mode(sequence, 7))
             session->terminal_autowrap = enabled;
+        if (terminal_csi_has_mode(sequence, 69)) {
+            /* DECLRMM (issue #3). Turning it off restores the full width
+               rather than remembering the columns, which is what a VT does
+               and what makes CSI s unambiguous again. */
+            surface->lrmm_enabled = enabled;
+            if (!enabled) {
+                surface->left_margin = 0;
+                surface->right_margin = surface->width - 1;
+            } else if (surface->right_margin <= surface->left_margin ||
+                       surface->right_margin >= surface->width) {
+                /* Enabling the mode before DECSLRM has named any columns
+                   means the margins are the full width, not the zero-width
+                   pair a freshly zeroed surface would otherwise carry. */
+                surface->left_margin = 0;
+                surface->right_margin = surface->width - 1;
+            }
+        }
         return;
     }
     if (private_mode && command == 'p' && has_first &&
@@ -8553,6 +8652,9 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         surface->cursor_visible = 1;
         surface->scroll_top = 0;
         surface->scroll_bottom = surface->height - 1;
+        surface->lrmm_enabled = 0;
+        surface->left_margin = 0;
+        surface->right_margin = surface->width - 1;
         terminal_reset_tabs(surface);
         mark_surface_damage(surface, 0, 0);
     } else if (!private_mode && command == 'b') {
@@ -8589,7 +8691,23 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
                  surface->height, surface->width);
         terminal_write_reply(session, reply);
     } else if (!private_mode && command == 's') {
-        terminal_save_cursor(session, surface);
+        if (surface->lrmm_enabled) {
+            /* DECSLRM. Per DEC an out-of-order or out-of-range pair is
+               ignored rather than clamped, which is what DECSTBM above does
+               with Pt;Pb. */
+            int left = has_first && first > 0 ? first - 1 : 0;
+            int right = has_second && second > 0 ? second - 1 :
+                surface->width - 1;
+            if (left >= 0 && right < surface->width && left < right) {
+                surface->left_margin = left;
+                surface->right_margin = right;
+                surface->cursor_x = left;
+                surface->cursor_y = session->terminal_origin_mode ?
+                    surface->scroll_top : 0;
+            }
+        } else {
+            terminal_save_cursor(session, surface);
+        }
     } else if (!private_mode && command == 'u') {
         terminal_restore_cursor(session, surface);
     } else if (private_mode && (command == 'h' || command == 'l') &&
@@ -8676,15 +8794,25 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         if (session->terminal_origin_mode)
             surface->cursor_y += surface->scroll_top;
         surface->cursor_x = has_second && second > 0 ? second - 1 : 0;
+        /* Origin mode makes a position relative to the margins and clamps to
+           them, horizontally as well as vertically once DECLRMM is set
+           (issue #3). Without DECLRMM the left margin is zero and the right
+           is width-1, so this is the clamp that was already here. */
         if (session->terminal_origin_mode) {
+            surface->cursor_x += surface_line_start(surface);
             if (surface->cursor_y < surface->scroll_top)
                 surface->cursor_y = surface->scroll_top;
             if (surface->cursor_y > surface->scroll_bottom)
                 surface->cursor_y = surface->scroll_bottom;
+            if (surface->cursor_x < surface_line_start(surface))
+                surface->cursor_x = surface_line_start(surface);
+            if (surface->cursor_x > surface_line_end(surface))
+                surface->cursor_x = surface_line_end(surface);
         } else if (surface->cursor_y >= surface->height)
             surface->cursor_y = surface->height - 1;
         if (surface->cursor_x >= surface->width)
             surface->cursor_x = surface->width - 1;
+        session->terminal_wrap_pending = 0;
         mark_cursor_damage(surface, surface->cursor_x, surface->cursor_y);
     } else if (command == 'A' || command == 'B' ||
                command == 'C' || command == 'D') {
@@ -8726,10 +8854,20 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         mark_cursor_damage(surface, surface->cursor_x, surface->cursor_y);
     } else if (command == '@' || command == 'P') {
         int amount = has_first && first > 0 ? first : 1;
+        int left = surface_line_start(surface);
+        int right = surface_line_end(surface);
         int x;
-        if (amount > surface->width)
-            amount = surface->width;
-        if (command == '@') {
+        /* Insertion and deletion shift within the horizontal margins, so
+           cells beyond the right margin keep their content (issue #3).
+           Without DECLRMM, right is width-1 and this is the whole line. The
+           cursor outside the margins makes the operation a no-op, which is
+           what a VT does rather than silently using the full width. */
+        if (surface->cursor_x < left || surface->cursor_x > right) {
+            amount = 0;
+        } else if (amount > right - surface->cursor_x + 1) {
+            amount = right - surface->cursor_x + 1;
+        }
+        if (amount > 0 && command == '@') {
             if (amount == 1 &&
                 (surface->attributes[surface->cursor_y][surface->cursor_x] &
                  BLIT_ATTR_CONTINUATION)) {
@@ -8741,8 +8879,11 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
                 terminal_clear_cell(surface, surface->cursor_x,
                                     surface->cursor_y);
             } else {
-                for (x = surface->width - 1;
-                     x >= surface->cursor_x + amount; --x) {
+                /* A same-row shift, so it runs from the right margin
+                   inward or it would overwrite its own source. The range
+                   helper copies a column between two rows and cannot express
+                   this. */
+                for (x = right; x >= surface->cursor_x + amount; --x) {
                     int source = x - amount;
                     surface->cells[surface->cursor_y][x] =
                         surface->cells[surface->cursor_y][source];
@@ -8765,11 +8906,11 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
                         surface->links[surface->cursor_y][source];
                 }
                 for (x = surface->cursor_x;
-                     x < surface->cursor_x + amount && x < surface->width; ++x)
+                     x < surface->cursor_x + amount && x <= right; ++x)
                     terminal_clear_cell(surface, x, surface->cursor_y);
             }
-        } else {
-            for (x = surface->cursor_x; x < surface->width - amount; ++x) {
+        } else if (amount > 0) {
+            for (x = surface->cursor_x; x <= right - amount; ++x) {
                 int source = x + amount;
                 surface->cells[surface->cursor_y][x] =
                     surface->cells[surface->cursor_y][source];
@@ -8791,13 +8932,13 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
                 surface->links[surface->cursor_y][x] =
                     surface->links[surface->cursor_y][source];
             }
-            for (x = surface->width - amount; x < surface->width; ++x)
+            for (x = right - amount + 1; x <= right; ++x)
                 terminal_clear_cell(surface, x, surface->cursor_y);
         }
         terminal_normalize_wide_row(surface, surface->cursor_y);
-        mark_surface_damage(surface, 0, surface->cursor_y);
-        if (surface->damage_width < surface->width)
-            surface->damage_width = surface->width;
+        mark_surface_damage(surface, left, surface->cursor_y);
+        if (surface->damage_width < right - left + 1)
+            surface->damage_width = right - left + 1;
     } else if (command == 'Z') {
         int count = has_first && first > 0 ? first : 1;
         while (count-- > 0 && surface->cursor_x > 0)
@@ -8813,49 +8954,66 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         int count = has_first && first > 0 ? first : 1;
         int top = surface->cursor_y;
         int bottom = surface->scroll_bottom;
+        int left = surface_line_start(surface);
+        int right = surface_line_end(surface);
         int y;
-        if (count > bottom - top + 1)
+        /* With left/right margins set, insertion and deletion shift only the
+           columns inside them and leave the rest of each row alone. Outside
+           them -- which is every client that has not asked for DECLRMM --
+           left is 0 and right is width-1, so this is the whole row.
+         *
+         * A cursor outside the horizontal margins makes the operation a
+         * no-op, which is the rule DEC states for the scroll margins and the
+         * one ICH/DCH follow above; the vertical half of it is already here
+         * in the form of scroll_bottom. */
+        if (!surface_cursor_within_margins(surface))
+            count = 0;
+        else if (count > bottom - top + 1)
             count = bottom - top + 1;
         if (command == 'L') {
             for (y = bottom; y >= top + count; --y)
-                terminal_copy_row(surface, y, y - count);
+                terminal_copy_cells(surface, y, y - count, left, right);
             for (y = top; y < top + count; ++y)
-                terminal_blank_row(surface, y);
+                terminal_blank_cells(surface, y, left, right);
         } else {
             for (y = top; y <= bottom - count; ++y)
-                terminal_copy_row(surface, y, y + count);
+                terminal_copy_cells(surface, y, y + count, left, right);
             for (y = bottom - count + 1; y <= bottom; ++y)
-                terminal_blank_row(surface, y);
+                terminal_blank_cells(surface, y, left, right);
         }
-        /* VT line insertion/deletion leaves the cursor at column zero. */
-        surface->cursor_x = 0;
+        /* VT line insertion/deletion leaves the cursor at the left margin. */
+        surface->cursor_x = left;
         surface->damage_valid = 1;
-        surface->damage_x = 0;
+        surface->damage_x = left;
         surface->damage_y = top;
-        surface->damage_width = surface->width;
+        surface->damage_width = right - left + 1;
         surface->damage_height = bottom - top + 1;
     } else if (prefix == 0 && (command == 'S' || command == 'T')) {
         int count = has_first && first > 0 ? first : 1;
         int top = surface->scroll_top;
         int bottom = surface->scroll_bottom;
+        int left = surface_line_start(surface);
+        int right = surface_line_end(surface);
         int y;
+        /* Scrolling the region scrolls only the columns inside the
+           horizontal margins (issue #3). */
         if (count > bottom - top + 1)
             count = bottom - top + 1;
         if (command == 'S') {
             for (y = top; y <= bottom - count; ++y)
-                terminal_copy_row(surface, y, y + count);
+                terminal_copy_cells(surface, y, y + count, left, right);
             for (y = bottom - count + 1; y <= bottom; ++y)
-                terminal_blank_row(surface, y);
+                terminal_blank_cells(surface, y, left, right);
         } else {
             for (y = bottom; y >= top + count; --y)
-                terminal_copy_row(surface, y, y - count);
+                terminal_copy_cells(surface, y, y - count, left, right);
             for (y = top; y < top + count; ++y)
-                terminal_blank_row(surface, y);
+                terminal_blank_cells(surface, y, left, right);
         }
         surface->damage_valid = 1;
-        surface->damage_x = 0;
+        surface->damage_x = left;
         surface->damage_y = top;
-        surface->damage_width = surface->width;
+        surface->damage_width = right - left + 1;
         surface->damage_height = bottom - top + 1;
     } else if (command == 'E' || command == 'F') {
         int count = has_first && first > 0 ? first : 1;
@@ -8951,29 +9109,38 @@ static void terminal_put_codepoint(BlitSession *session, BlitSurface *surface,
     int glyph_x;
     int unchanged = 0;
 
+    /* Wrapping happens at the right margin and lands on the left one
+       (issue #3). Without DECLRMM those are width-1 and 0, which is what
+       every one of these comparisons used to say literally. */
+    int line_left = surface_line_start(surface);
+    int line_right = surface_line_end(surface);
+
     session->terminal_last_codepoint = codepoint;
     if (session->terminal_wrap_pending && session->terminal_autowrap) {
-        surface->cursor_x = 0;
+        surface->cursor_x = line_left;
         terminal_index(session, surface);
         session->terminal_wrap_pending = 0;
     }
-    if (cell_width == 2 && surface->cursor_x >= surface->width - 1) {
+    /* A two-cell glyph whose second half would fall outside the right margin
+       wraps before it is placed, rather than being split across the margin or
+       silently narrowed. */
+    if (cell_width == 2 && surface->cursor_x >= line_right) {
         if (session->terminal_autowrap) {
-            surface->cursor_x = 0;
+            surface->cursor_x = line_left;
             terminal_index(session, surface);
         } else {
             cell_width = 1;
         }
     }
-    if (surface->cursor_x >= surface->width) {
+    if (surface->cursor_x > line_right) {
         if (session->terminal_autowrap) {
-            surface->cursor_x = 0;
+            surface->cursor_x = line_left;
             if (surface->cursor_y < surface->scroll_bottom)
                 ++surface->cursor_y;
             else
                 terminal_scroll_up(session, surface);
         } else {
-            surface->cursor_x = surface->width - 1;
+            surface->cursor_x = line_right;
         }
     }
     session->terminal_last_width = cell_width;
@@ -9027,8 +9194,8 @@ static void terminal_put_codepoint(BlitSession *session, BlitSurface *surface,
     mark_surface_damage_width(surface, glyph_x, surface->cursor_y,
                               cell_width);
 advance_cursor:
-    if (surface->cursor_x + cell_width >= surface->width) {
-        surface->cursor_x = surface->width - 1;
+    if (surface->cursor_x + cell_width > line_right) {
+        surface->cursor_x = line_right;
         session->terminal_wrap_pending = session->terminal_autowrap;
     } else {
         surface->cursor_x += cell_width;
@@ -9119,6 +9286,9 @@ static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
                 surface->cursor_style = 1;
                 surface->scroll_top = 0;
                 surface->scroll_bottom = surface->height - 1;
+                surface->lrmm_enabled = 0;
+                surface->left_margin = 0;
+                surface->right_margin = surface->width - 1;
                 terminal_reset_tabs(surface);
                 session->terminal_charset_dec = 0;
                 session->terminal_charset_g1_dec = 0;
@@ -9283,25 +9453,37 @@ static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
             ++offset;
         } else if (byte == '\r') {
             mark_cursor_damage(surface, surface->cursor_x, surface->cursor_y);
-            surface->cursor_x = 0;
+            /* CR returns to the left margin when the cursor is inside the
+               margins, and to column zero when it is outside -- which is
+               what a VT does, and is column zero for every client that has
+               not asked for DECLRMM (issue #3). */
+            surface->cursor_x = surface_cursor_within_margins(surface) ?
+                surface_line_start(surface) : 0;
             session->terminal_wrap_pending = 0;
             ++offset;
         } else if (byte == '\n' || byte == '\v' || byte == '\f') {
             mark_cursor_damage(surface, surface->cursor_x, surface->cursor_y);
             if (session->terminal_newline_mode)
-                surface->cursor_x = 0;
+                surface->cursor_x = surface_cursor_within_margins(surface) ?
+                    surface_line_start(surface) : 0;
             terminal_index(session, surface);
             session->terminal_wrap_pending = 0;
             ++offset;
         } else if (byte == '\b') {
             if (session->terminal_wrap_pending)
                 session->terminal_wrap_pending = 0;
-            else if (surface->cursor_x > 0)
+            else if (surface->cursor_x > surface_line_start(surface))
+                --surface->cursor_x;
+            else if (!surface->lrmm_enabled && surface->cursor_x > 0)
                 --surface->cursor_x;
             mark_cursor_damage(surface, surface->cursor_x, surface->cursor_y);
             ++offset;
         } else if (byte == '\t') {
-            surface->cursor_x = terminal_next_tab(surface, surface->cursor_x);
+            int next = terminal_next_tab(surface, surface->cursor_x);
+            /* A tab stops at the right margin rather than stepping past it. */
+            if (next > surface_line_end(surface))
+                next = surface_line_end(surface);
+            surface->cursor_x = next;
             session->terminal_wrap_pending = 0;
             ++offset;
         } else if (byte == 0x0e) {
@@ -11088,6 +11270,9 @@ static int create_session(BlitRuntime *runtime, const char *json,
                 surface->cursor_style = 1;
                 surface->scroll_top = 0;
                 surface->scroll_bottom = height - 1;
+                surface->lrmm_enabled = 0;
+                surface->left_margin = 0;
+                surface->right_margin = width - 1;
                 terminal_reset_tabs(surface);
                 snprintf(surface->state, sizeof(surface->state), "available");
             }
@@ -11164,6 +11349,11 @@ static int resize_session_surface(BlitSession *session, BlitSurface *surface,
         surface->cursor_y = height - 1;
     surface->scroll_top = 0;
     surface->scroll_bottom = height - 1;
+    /* A resize resets the horizontal margins with the vertical ones: columns
+       chosen for one width mean nothing at another. */
+    surface->lrmm_enabled = 0;
+    surface->left_margin = 0;
+    surface->right_margin = width - 1;
     surface->scrollback_view = 0;
     terminal_reset_tabs(surface);
     session->terminal_wrap_pending = 0;

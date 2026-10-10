@@ -113,6 +113,16 @@ shell conformance path is stable.
    Device status replies include DA1/DA2, XTVERSION, CPR, window size,
    DECRQSS, and XTGETTCAP; erase operations preserve the active background
    colour according to BCE semantics.
+   Left/right margins are implemented (issue #3): DECLRMM (`CSI ?69h`) enables
+   the model, `CSI Pl;Pr s` is DECSLRM while it is on and SCOSC while it is
+   off, and insertion, deletion, scrolling, autowrap, CR, BS, HT and origin
+   mode all work within the margins. One pair of accessors answers "which
+   columns may this operation touch", and with DECLRMM off they return 0 and
+   width-1 -- so every client that has not asked for margins behaves exactly
+   as before, which is what the conformance suite at full width proves.
+   A cursor outside the horizontal margins makes an insert or delete a no-op,
+   the rule DEC states for the scroll margins; a two-cell glyph that would
+   straddle the right margin wraps before it is placed.
    XTGETTCAP answers with real values for the capabilities Blit owns -- `TN`,
    `Co`/`colors`, `RGB`, `cols`, `lines`, and the booleans `Tc` and `bce` --
    and refuses the rest, one DCS reply per requested name (issue #4). It used
