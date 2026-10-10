@@ -97,6 +97,33 @@ if [ "$unauth" != 401 ] || [ "$auth" != 200 ] ||
     exit 1
 fi
 ruby -rjson -e 'JSON.parse(File.read(ARGV.fetch(0)))' "$RUNTIME_DIAGNOSTICS"
+# The performance document and its schema must agree, in both directions.
+# They had drifted twice: input_keys_dropped and input_reports_dropped were
+# emitted and not described at all, and last_sdl_present_ms /
+# max_sdl_present_ms were described but left out of `required`. A counter the
+# schema does not mention is a counter a client cannot rely on, and this is
+# the only gate with both a running server and the schema to hand.
+ruby -ryaml -rjson -e '
+  emitted = JSON.parse(File.read(ARGV.fetch(0))).fetch("performance").keys.sort
+  schema = YAML.load_file(ARGV.fetch(1))
+      .dig("components", "schemas", "RuntimeDiagnostics",
+           "properties", "performance")
+  required = schema.fetch("required").sort
+  described = schema.fetch("properties").keys.sort
+  problems = []
+  problems << "emitted but not described: #{(emitted - described).inspect}" unless
+    (emitted - described).empty?
+  problems << "described but not emitted: #{(described - emitted).inspect}" unless
+    (described - emitted).empty?
+  problems << "emitted but not required: #{(emitted - required).inspect}" unless
+    (emitted - required).empty?
+  problems << "required but not emitted: #{(required - emitted).inspect}" unless
+    (required - emitted).empty?
+  unless problems.empty?
+    problems.each { |p| warn "network gate: performance schema: #{p}" }
+    exit 1
+  end
+' "$RUNTIME_DIAGNOSTICS" "$ROOT/openapi/blit-0.1.yaml"
 command_denied=$(curl -sS -o "$COMMAND_DENIED" -w '%{http_code}' \
     -H "Authorization: Bearer $TOKEN" \
     -H 'Content-Type: application/json' \
