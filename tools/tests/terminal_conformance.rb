@@ -1652,6 +1652,49 @@ assert_equal('#cd0000', first && first.dig('style', 'foreground'),
              'the SGR carried by that escape was applied')
 request(base, 'DELETE', "/v1/terminal-sessions/#{escaped_argument.fetch('id')}")
 puts 'PASS argument-carries-escaped-control-character'
+# Issue #48. A cell's colours belong under `style`, and the cell parser finds
+# keys by search, so a cell carrying them at the top level was accepted with
+# 200 and no style applied. The schema says additionalProperties is false for
+# a cell, so that spelling was never valid -- it was silently ignored, which
+# is how render_state_agreement_gate asserted blank cells were black on a
+# screen that was already black for its whole life.
+misplaced_session = request(base, 'POST', '/v1/terminal-sessions', {
+  'command' => '/bin/cat', 'surface' => { 'width' => 10, 'height' => 3 }
+})
+misplaced_surface = misplaced_session.fetch('surface_id')
+misplaced_revision = request(base, 'GET', "/v1/surfaces/#{misplaced_surface}/summary")
+                     .fetch('revision')
+misplaced_code, misplaced_body = request_with_status(
+  base, 'PUT', "/v1/surfaces/#{misplaced_surface}/cells", {
+    'base_revision' => misplaced_revision,
+    'cells' => [{ 'x' => 0, 'y' => 0, 'text' => 'M',
+                  'foreground' => '#ffffff', 'background' => '#0000ff' }]
+  })
+assert_equal(400, misplaced_code,
+             'a cell carrying style properties at its top level is refused')
+assert_equal('invalid_cell_property', misplaced_body && misplaced_body['code'],
+             'the refusal names the shape of the mistake')
+assert_equal(true,
+             (misplaced_body && misplaced_body['detail']).to_s.include?('foreground'),
+             'the refusal names the property it refused')
+# The documented spelling still applies, which is the other half: a refusal
+# that also broke the valid form would be worse than the silence.
+nested_code, = request_with_status(
+  base, 'PUT', "/v1/surfaces/#{misplaced_surface}/cells", {
+    'base_revision' => misplaced_revision,
+    'cells' => [{ 'x' => 0, 'y' => 0, 'text' => 'M',
+                  'style' => { 'foreground' => '#ffffff',
+                               'background' => '#0000ff' } }]
+  })
+assert_equal(true, [200, 204].include?(nested_code),
+             "the documented nested form is accepted: got #{nested_code}")
+nested_cell = request(base, 'GET', "/v1/surfaces/#{misplaced_surface}/cells")
+              .fetch('cells').find { |c| c.fetch('x', 0) == 0 && c.fetch('y', 0) == 0 }
+assert_equal('#0000ff', nested_cell && nested_cell.dig('style', 'background'),
+             'and it applies the background it carries')
+request(base, 'DELETE', "/v1/terminal-sessions/#{misplaced_session.fetch('id')}")
+puts 'PASS cell-style-must-be-nested'
+
 
 
 override_created = request(base, 'POST', '/v1/terminal-sessions', {

@@ -5,9 +5,11 @@ require 'json'
 require 'net/http'
 require 'socket'
 require 'timeout'
-require_relative 'gate_port'
 
-port = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', ARGV.fetch(0, '19202'))))
+# This gate is a client: network_auth_gate.sh starts the server and hands its
+# port over, so the port is expected to be serving. It deliberately does not
+# wait for the port to be free, which is what the shared helper does.
+port = Integer(ENV.fetch('BLIT_GATE_PORT', ARGV.fetch(0, '19202')))
 token = ENV.fetch('BLIT_GATE_TOKEN', 'blit-network-gate')
 base = URI("http://127.0.0.1:#{port}")
 

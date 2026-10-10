@@ -16,7 +16,10 @@ require 'uri'
 require_relative 'gate_port'
 
 external_base = ENV['BLIT_TEST_SERVER']
-port = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', '19208')))
+port = Integer(ENV.fetch('BLIT_GATE_PORT', '19208'))
+# Only this gate's own server binds the port; against an external server
+# the port is expected to be serving already.
+port = gate_port(port) unless external_base
 base = external_base ? URI(external_base) : URI("http://127.0.0.1:#{port}")
 log = File.join(Dir.tmpdir, "blit-pixel-frame-#{Process.pid}.log")
 pid = nil

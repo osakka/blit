@@ -3,9 +3,11 @@
 
 require 'net/http'
 require 'socket'
-require_relative 'gate_port'
 
-port = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', ARGV.fetch(0, '19204'))))
+# This gate is a client: network_auth_gate.sh starts the server and hands its
+# port over, so the port is expected to be serving. It deliberately does not
+# wait for the port to be free, which is what the shared helper does.
+port = Integer(ENV.fetch('BLIT_GATE_PORT', ARGV.fetch(0, '19204')))
 slow = TCPSocket.new('127.0.0.1', port)
 slow.write("GET /v1/diagnostics HTTP/1.1\r\n")
 

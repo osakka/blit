@@ -3814,12 +3814,39 @@ static void mark_graphics_damage(BlitSurface *surface, int x, int y,
                               cell_right - cell_x, cell_bottom - cell_y);
 }
 
-static int apply_cell_update(BlitSurface *surface, const char *json)
+/* Issue #48. A cell's colours and attributes belong under `style`, and this
+   parser finds keys by search, so a cell that carried them at the top level
+   was accepted with 200 and no style applied. The schema says
+   additionalProperties is false for a cell, so that spelling was never valid
+   -- it was silently ignored, which is how render_state_agreement_gate came
+   to assert that blank cells were black on a screen that was already black
+   for its whole life. Returns the offending key so the refusal can name it. */
+static const char *cell_misplaced_style_key(const char *cell_json)
+{
+    static const char *const style_keys[] = {
+        "foreground", "background", "underline_color", "bold", "dim",
+        "italic", "underline", "blink", "inverse", "strike", "concealed"
+    };
+    size_t i;
+
+    /* With a style object present the keys found by search are its own. */
+    if (json_key_cursor(cell_json, "style") != NULL)
+        return NULL;
+    for (i = 0; i < sizeof(style_keys) / sizeof(style_keys[0]); ++i)
+        if (json_key_cursor(cell_json, style_keys[i]) != NULL)
+            return style_keys[i];
+    return NULL;
+}
+
+static int apply_cell_update(BlitSurface *surface, const char *json,
+                             const char **rejected)
 {
     const char *cursor = strstr(json, "\"cells\"");
     const char *cursor_state = strstr(json, "\"cursor\"");
     int updated = 0;
 
+    if (rejected != NULL)
+        *rejected = NULL;
     if (cursor == NULL)
         return 0;
     cursor = json_key_cursor(cursor, "x");
@@ -3855,6 +3882,14 @@ static int apply_cell_update(BlitSurface *surface, const char *json)
             break;
         memcpy(cell_json, cursor, cell_length);
         cell_json[cell_length] = '\0';
+        {
+            const char *misplaced = cell_misplaced_style_key(cell_json);
+            if (misplaced != NULL) {
+                if (rejected != NULL)
+                    *rejected = misplaced;
+                return -1;
+            }
+        }
         style_cursor = json_key_cursor(cell_json, "style");
         style_seen = style_cursor != NULL;
         if (!json_int(cell_json, "x", &x) ||
@@ -8691,10 +8726,18 @@ static void send_problem(int fd, int status, const char *reason,
                          const char *code, const char *detail)
 {
     char body[1024];
+    char escaped_detail[768];
+
+    /* A detail is prose and may legitimately quote the thing it is refusing.
+       Interpolated raw, one quotation mark made the whole problem document
+       invalid JSON, so a client trying to read why its request failed got a
+       parse error instead of the reason. */
+    json_escape(detail != NULL ? detail : "", escaped_detail,
+                sizeof(escaped_detail));
     snprintf(body, sizeof(body),
              "{\"type\":\"about:blank\",\"title\":\"%s\","
              "\"status\":%d,\"code\":\"%s\",\"detail\":\"%s\"}",
-             reason, status, code, detail);
+             reason, status, code, escaped_detail);
     send_http(fd, status, reason, "application/problem+json", body);
 }
 
@@ -10887,10 +10930,24 @@ static void handle_request(int fd, BlitRuntime *runtime,
                                   surface->revision);
             return;
         }
-        if (apply_cell_update(surface, payload) <= 0) {
-            send_problem(fd, 400, "Bad Request", "invalid_cell_update",
-                         "The cells array contains no usable text updates.");
-            return;
+        {
+            const char *misplaced = NULL;
+            if (apply_cell_update(surface, payload, &misplaced) <= 0) {
+                if (misplaced != NULL) {
+                    char detail[256];
+                    snprintf(detail, sizeof(detail),
+                             "A cell carries \"%s\" at its top level. A cell's "
+                             "colours and attributes belong under \"style\"; "
+                             "accepted here they would be silently ignored.",
+                             misplaced);
+                    send_problem(fd, 400, "Bad Request",
+                                 "invalid_cell_property", detail);
+                    return;
+                }
+                send_problem(fd, 400, "Bad Request", "invalid_cell_update",
+                             "The cells array contains no usable text updates.");
+                return;
+            }
         }
         ++surface->revision;
         {
