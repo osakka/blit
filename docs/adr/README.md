@@ -6,7 +6,7 @@ and migration impact. The filename is the canonical link. A few historical
 records share a numeric heading because they were developed on parallel
 branches; they remain separate decisions and are all indexed below. They are
 not missing records and must not be silently merged. New ADRs must use a
-unique filename and number greater than 0057.
+unique filename and number greater than 0058.
 
 The index is a navigation aid, not a second decision source. The record itself
 is authoritative for its status and consequences. An implementation may cite
@@ -79,6 +79,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0055 — The Hibr adapter authenticates with an injected API token](0055-adapter-api-authentication.md)
 - [0056 — Decompress graphics payloads with zlib](0056-zlib-for-graphics-decompression.md)
 - [0057 — A surface with a registered owner is not an interactive terminal](0057-owned-surfaces-are-not-interactive-terminals.md)
+- [0058 — A surface revision counts accepted writes, not observed changes](0058-a-revision-counts-accepted-writes.md)
 
 ## Adding an ADR
 

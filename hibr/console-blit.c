@@ -57,6 +57,19 @@ typedef struct {
 	char api_token[256];
 	cb_cell *pending;
 	size_t pending_count, pending_capacity;
+	/* The last cell content Blit acknowledged, indexed y*cols + x, and a
+	 * scratch array holding the index of each cell's final write in the
+	 * frame being flushed.  Hibr redraws the whole screen every frame,
+	 * clear pass included, so without these a screen that did not change
+	 * still rewrote every cell and advanced the surface revision hundreds
+	 * of times a second (itdlabs/blit#30).  A shadow cell with empty text
+	 * has never been sent, which no pending cell can match because
+	 * cb_add_pending rejects empty text. */
+	cb_cell *shadow;
+	size_t shadow_count;
+	int *last_write;
+	int shadow_cursor_x, shadow_cursor_y, shadow_cursor_visible;
+	int shadow_cursor_known;
 	int ws_fd;
 	int ws_subscribed;
 	int mouse_mode;
@@ -281,6 +294,85 @@ static int cb_register_owner(void)
 	return 1;
 }
 
+static void cb_shadow_forget(void)
+{
+	if (cb.shadow != NULL)
+		memset(cb.shadow, 0, cb.shadow_count * sizeof(*cb.shadow));
+	cb.shadow_cursor_known = 0;
+}
+
+/* Size the shadow to the current surface and forget its contents.  Called
+ * when the geometry is first known and whenever it changes; a shadow that
+ * does not match the live geometry would alias one cell onto another. */
+static int cb_shadow_reset(void)
+{
+	size_t count = (size_t)cb.rows * (size_t)cb.cols;
+
+	if (cb.rows <= 0 || cb.cols <= 0) return 0;
+	if (count != cb.shadow_count) {
+		free(cb.shadow);
+		free(cb.last_write);
+		cb.shadow = (cb_cell *)calloc(count, sizeof(*cb.shadow));
+		cb.last_write = (int *)malloc(count * sizeof(*cb.last_write));
+		if (!cb.shadow || !cb.last_write) {
+			free(cb.shadow); free(cb.last_write);
+			cb.shadow = NULL; cb.last_write = NULL;
+			cb.shadow_count = 0;
+			return 0;
+		}
+		cb.shadow_count = count;
+	}
+	cb_shadow_forget();
+	return 1;
+}
+
+static int cb_cell_same(const cb_cell *a, const cb_cell *b)
+{
+	return a->fg == b->fg && a->bg == b->bg && a->attr == b->attr &&
+		!strcmp(a->text, b->text);
+}
+
+static int cb_cursor_changed(void)
+{
+	return !cb.shadow_cursor_known ||
+		cb.shadow_cursor_x != cb.cursor_x ||
+		cb.shadow_cursor_y != cb.cursor_y ||
+		cb.shadow_cursor_visible != cb.cursor_visible;
+}
+
+/* Reduce a frame to what actually changed, preserving write order.
+ *
+ * Hibr composes a frame by blanking the screen and then drawing over it, so
+ * the queue holds the whole surface and usually each cell twice.  Two kinds
+ * of write are dropped: one a later write in the same frame supersedes, and
+ * one whose result Blit already holds.  Order is preserved rather than
+ * rewritten row-major, because a double-width glyph's second half is
+ * written by Blit and must not be overtaken by a blank that was queued
+ * before it. */
+static void cb_coalesce_pending(void)
+{
+	size_t i, kept = 0;
+
+	if (cb.shadow == NULL || cb.last_write == NULL) return;
+	for (i = 0; i < cb.shadow_count; ++i) cb.last_write[i] = -1;
+	for (i = 0; i < cb.pending_count; ++i) {
+		size_t index = (size_t)cb.pending[i].y * (size_t)cb.cols +
+			(size_t)cb.pending[i].x;
+		if (index < cb.shadow_count) cb.last_write[index] = (int)i;
+	}
+	for (i = 0; i < cb.pending_count; ++i) {
+		size_t index = (size_t)cb.pending[i].y * (size_t)cb.cols +
+			(size_t)cb.pending[i].x;
+		if (index < cb.shadow_count &&
+		    (cb.last_write[index] != (int)i ||
+		     cb_cell_same(&cb.pending[i], &cb.shadow[index])))
+			continue;
+		if (kept != i) cb.pending[kept] = cb.pending[i];
+		++kept;
+	}
+	cb.pending_count = kept;
+}
+
 static int cb_add_pending(int x, int y, const char *text)
 {
 	cb_cell *cell;
@@ -294,12 +386,10 @@ static int cb_add_pending(int x, int y, const char *text)
 		 * next one.  Dropping later cells would make the bar/window layer
 		 * disappear after the wallpaper had filled the queue. */
 		if (next > CB_MAX_PENDING) next = CB_MAX_PENDING;
-            if (next <= cb.pending_capacity)
-                /* A flush is the application's frame boundary.  Never turn
-                 * queue pressure into an implicit commit: that exposes a
-                 * clear/redraw half-frame.  The raised bounded capacity is
-                 * sufficient for the largest supported logical surface. */
-                return HIBR_FAIL;
+		/* A flush is the application's frame boundary.  Never turn
+		 * queue pressure into an implicit commit: that exposes a
+		 * clear/redraw half-frame.  The bounded capacity is sufficient
+		 * for the largest supported logical surface. */
 		if (next <= cb.pending_capacity) return HIBR_FAIL;
 		cb.pending = realloc(cb.pending, next * sizeof(*cb.pending));
 		if (!cb.pending) { cb.pending_capacity = 0; cb.pending_count = 0; return HIBR_FAIL; }
@@ -343,11 +433,17 @@ static long cb_flush(void)
 {
 	char path[256], body[CB_HTTP_CAP], response[4096];
 	size_t used;
-	int i, sent_count;
+	const char *presentation;
+	int i, sent_count, sent_defer = 0;
 	if (!cb.opened) return -1;
 	response[0] = '\0';
 	if (!cb_surface_path(path, sizeof(path))) return -1;
-	while (cb.pending_count > 0) {
+	cb_coalesce_pending();
+	/* An idle screen reaches here with nothing to say.  Saying it anyway is
+	 * what issue #30 was about: silence is the correct frame. */
+	if (cb.pending_count == 0 && !cb_cursor_changed())
+		return 0;
+	do {
 		used = (size_t)snprintf(body, sizeof(body),
 			"{\"base_revision\":%llu,\"cells\":[",
 			cb.revision);
@@ -374,21 +470,44 @@ static long cb_flush(void)
 				i ? "," : "", cb.pending[i].x, cb.pending[i].y,
 				escaped, style);
 		}
-		if (i == 0) {
+		if (i == 0 && cb.pending_count > 0) {
 			lg(HIBR_LERR, "console-blit: cannot encode pending cells for %s", path);
 			return -1;
 		}
+		/* A frame that fits in one request is "immediate", never
+		 * "commit": Blit answers 409 frame_not_open to a commit with no
+		 * preceding defer, and once coalescing works most frames are a
+		 * single request.  "defer" is only for a frame the 8 KiB request
+		 * bound forces into pieces. */
+		if (i < (int)cb.pending_count)
+			presentation = "defer";
+		else
+			presentation = sent_defer ? "commit" : "immediate";
 		used += (size_t)snprintf(body + used, sizeof(body) - used,
 			"],\"presentation\":\"%s\",\"cursor\":{\"x\":%d,\"y\":%d,\"visible\":%s}}",
-			i == (int)cb.pending_count ? "commit" : "defer",
+			presentation,
 			cb.cursor_x, cb.cursor_y, cb.cursor_visible ? "true" : "false");
 		CB_TRACE("console-blit: cell request bytes=%lu cells=%d pending=%lu presentation=%s",
 			(unsigned long)used, i, (unsigned long)cb.pending_count,
-			i == (int)cb.pending_count ? "commit" : "defer");
+			presentation);
 		if (!cb_http("PUT", path, body, response, sizeof(response))) {
 			if (strstr(response, "revision_conflict") &&
-			    cb_json_number(response, "revision", &cb.revision))
+			    cb_json_number(response, "revision", &cb.revision)) {
+				/* Something other than this adapter wrote the
+				 * surface, so the shadow no longer describes
+				 * it.  Cells this frame already dropped as
+				 * unchanged are not recovered here; Hibr's next
+				 * redraw re-sends them against a forgotten
+				 * shadow, which costs one frame of staleness
+				 * and needs no second copy of the queue. */
+				cb_shadow_forget();
+				/* A cursor-only flush has nothing pending, so
+				 * this retry exits the loop and the cursor
+				 * update is lost.  Forgetting the shadow is
+				 * what repairs it: the next frame is a full
+				 * send and carries the cursor with it. */
 				continue;
+			}
 			lg(HIBR_LERR, "console-blit: flush failed surface=%s base_revision=%llu pending=%lu",
 				cb.surface, cb.revision, (unsigned long)cb.pending_count);
 			return -1;
@@ -400,11 +519,49 @@ static long cb_flush(void)
 		lg(HIBR_LDBG, "console-blit: flushed %d cells to %s revision=%llu",
 			i, cb.surface, cb.revision);
 		sent_count = i;
+		if (strcmp(presentation, "defer") == 0)
+			sent_defer = 1;
+		/* Blit holds these now, so they are what the next frame is
+		 * compared against.  Recorded per chunk rather than per frame so
+		 * a failure mid-frame leaves the shadow describing exactly what
+		 * was acknowledged. */
+		if (cb.shadow != NULL) {
+			int n;
+			for (n = 0; n < sent_count; ++n) {
+				size_t index = (size_t)cb.pending[n].y *
+					(size_t)cb.cols + (size_t)cb.pending[n].x;
+				int wide_risk;
+				if (index >= cb.shadow_count) continue;
+				/* Blit resolves glyph width, and a double-width
+				 * glyph owns the cell to its right: writing one
+				 * marks that cell a continuation and
+				 * overwriting one clears it.  The adapter does
+				 * not know widths, so treat any multi-byte text
+				 * on either side of the write as possibly wide
+				 * and forget the neighbour rather than claim to
+				 * know what Blit did with it.  Without this a
+				 * blank replacing a CJK glyph would leave the
+				 * cell to its right unrepainted, because the
+				 * frame that should have repainted it was
+				 * dropped as unchanged. */
+				wide_risk =
+					(unsigned char)cb.pending[n].text[0] >= 0x80 ||
+					(unsigned char)cb.shadow[index].text[0] >= 0x80;
+				cb.shadow[index] = cb.pending[n];
+				if (wide_risk && cb.pending[n].x + 1 < cb.cols)
+					memset(&cb.shadow[index + 1], 0,
+						sizeof(cb.shadow[index + 1]));
+			}
+		}
 		if (sent_count > 0 && (size_t)sent_count < cb.pending_count)
 			memmove(cb.pending, cb.pending + sent_count,
 				(cb.pending_count - (size_t)sent_count) * sizeof(*cb.pending));
 		cb.pending_count -= (size_t)sent_count;
-	}
+	} while (cb.pending_count > 0);
+	cb.shadow_cursor_x = cb.cursor_x;
+	cb.shadow_cursor_y = cb.cursor_y;
+	cb.shadow_cursor_visible = cb.cursor_visible;
+	cb.shadow_cursor_known = 1;
 	return 0;
 }
 
@@ -466,6 +623,13 @@ static int cb_open(sh *s)
 	 * `console cursor row col` request enables it; otherwise the desktop's
 	 * own drawing cursor appears as a moving block over wallpaper/savers. */
 	cb.cursor_visible = 0;
+	/* The shadow starts empty, so the first frame is a full send: the
+	 * surface's current content is not assumed. */
+	if (!cb_shadow_reset()) {
+		lg(HIBR_LERR, "console-blit: cannot size the cell shadow for %s",
+			cb.surface);
+		return HIBR_FAIL;
+	}
 	cb.opened = 1;
 	lg(HIBR_LDBG, "console-blit: opened surface=%s session=%s size=%dx%d revision=%llu",
 		cb.surface, cb.session[0] ? cb.session : "(none)",
@@ -478,6 +642,8 @@ static void cb_close(sh *s)
 	(void)s;
 	if (cb.ws_fd >= 0) close(cb.ws_fd);
 	free(cb.pending);
+	free(cb.shadow);
+	free(cb.last_write);
 	memset(&cb, 0, sizeof(cb));
 	cb.ws_fd = -1;
 }
@@ -501,6 +667,7 @@ static int cb_resized(void)
 	    !cb_json_int(response, "height", &rows)) return 0;
 	if (rows == cb.rows && cols == cb.cols) return 0;
 	cb.rows = rows; cb.cols = cols; cb.pending_count = 0;
+	cb_shadow_reset();
 	return 1;
 }
 

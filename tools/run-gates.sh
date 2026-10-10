@@ -40,6 +40,9 @@ Environment:
   BLIT_GATE_PACKAGE  .deb path; enables the packaging artifact gate
   BLIT_GATE_LIVE     live base URL; enables the live-host-only gates
   BLIT_SOAK_SECONDS  soak duration      (default 120, gate's own default)
+  BLIT_HIBR_ROOT     Hibr checkout providing the headers the adapter gate
+                     compiles against (default /tmp/hibr-<packaging/HIBR_VERSION>
+                     when present; without it that gate skips)
 
 Exit status is 0 only when every gate that ran reported success. A skipped
 gate is not a pass and is counted separately.
@@ -60,6 +63,19 @@ LIBS=${BLIT_GATE_LIBS:-$ROOT/build/sdl3-kms}
 PACKAGE=${BLIT_GATE_PACKAGE:-}
 LIVE=${BLIT_GATE_LIVE:-}
 PORT=${BLIT_GATE_BASE_PORT:-19400}
+# The adapter gate compiles hibr/console-blit.c, so it needs Hibr's headers.
+# Default to the pinned checkout rather than any newer development tree:
+# docs/development-workflow.md makes the version that matches
+# packaging/HIBR_VERSION the only valid adapter build target, and a gate that
+# proved the adapter against different headers than the package ships would
+# be proving the wrong artifact.
+if [ -z "${BLIT_HIBR_ROOT:-}" ]; then
+    pinned_hibr=/tmp/hibr-$(sed -n '1p' "$ROOT/packaging/HIBR_VERSION")
+    if [ -d "$pinned_hibr/include" ] && [ -d "$pinned_hibr/mods" ]; then
+        BLIT_HIBR_ROOT=$pinned_hibr
+        export BLIT_HIBR_ROOT
+    fi
+fi
 
 pass=0
 fail=0
@@ -200,6 +216,9 @@ suite_renderer() {
 
 suite_hibr() {
     run_gate hibr_singleton_gate.rb ruby tools/tests/hibr_singleton_gate.rb
+    # Needs only the Hibr headers, not a Hibr process: it compiles the shipped
+    # display provider into a harness. Skips (77) without BLIT_HIBR_ROOT.
+    run_gate adapter_coalesce_gate.sh "$ROOT"/tools/tests/adapter_coalesce_gate.sh
     run_gate hibr_resume_guard_gate.sh "$ROOT"/tools/tests/hibr_resume_guard_gate.sh
     # QEMU is the repeatable multi-display oracle and is never implied by a
     # local run; invoke tools/tests/qemu_hibr_lifecycle_gate.sh directly.

@@ -3490,13 +3490,19 @@ static void surface_summary_json(const BlitSurface *surface,
              "\"codepoint_cells\":%d,\"printable_cells\":%d,"
              "\"cursor\":{\"x\":%d,\"y\":%d,\"visible\":%s,"
              "\"style\":%d},\"graphics_images\":%d,"
+             "\"frame_open\":%s,"
              "\"damage\":{\"valid\":%s,\"x\":%d,\"y\":%d,"
              "\"width\":%d,\"height\":%d}}",
              surface->id, surface->revision, surface->width, surface->height,
              non_empty, codepoint_cells, printable_cells,
              surface->cursor_x, surface->cursor_y,
              surface->cursor_visible ? "true" : "false", surface->cursor_style,
-             graphics, surface->damage_valid ? "true" : "false",
+             graphics,
+             /* A client that coalesces frames needs to see that its last
+                request closed the frame; an open frame withholds the surface
+                from the renderer and is otherwise invisible. */
+             surface->frame_open ? "true" : "false",
+             surface->damage_valid ? "true" : "false",
              surface->damage_x, surface->damage_y, surface->damage_width,
              surface->damage_height);
 }
@@ -10097,9 +10103,15 @@ static void handle_request(int fd, BlitRuntime *runtime,
             return;
         }
         ++surface->revision;
+        /* An open frame withholds the surface from the renderer, so anything
+           that is not a deferred chunk has to close it.  "immediate" closing
+           it matters: once a client coalesces its frames (ADR 0058) most
+           frames fit in one request and are sent immediate, and a frame left
+           open by an earlier failure would otherwise never be closed and the
+           surface would stop presenting entirely. */
         if (presentation_deferred)
             surface->frame_open = 1;
-        else if (presentation_commit)
+        else
             surface->frame_open = 0;
         {
             char detail[192];

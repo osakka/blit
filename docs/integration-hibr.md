@@ -152,10 +152,20 @@ two-display run completed without that warning.
 The hibr module should be a transport adapter only:
 
 - `console put` becomes revisioned surface cell/style updates.
-- `console flush` becomes one atomic frame commit. The adapter sends bounded
-  cell requests with `presentation: defer` and marks only the final request
-  `presentation: commit`; Blit therefore never presents a partial Hibr
-  wallpaper/menu redraw between HTTP chunks.
+- `console flush` becomes one atomic frame commit, reduced to what the frame
+  actually changed. Hibr blanks the screen and redraws it every frame whether
+  or not anything moved, so the adapter keeps a shadow of the cells Blit has
+  acknowledged and sends only the delta: an idle screen sends nothing. This is
+  not an optimization but a contract obligation — a surface revision counts
+  accepted writes rather than observed changes
+  ([ADR 0058](adr/0058-a-revision-counts-accepted-writes.md)), so a client
+  that re-sends unchanged cells makes the revision useless to every other
+  client. A frame too large for the 8 KiB request bound is split into
+  `presentation: defer` requests with only the final one `presentation:
+  commit`, so Blit never presents a partial wallpaper/menu redraw between HTTP
+  chunks; a frame that fits in one request is `presentation: immediate`,
+  because Blit answers 409 `frame_not_open` to a commit with no preceding
+  defer.
 - `console key` waits on the WebSocket stream and returns decoded input.
 - `console watch` subscribes to terminal and surface events.
 - console mouse reports become blit input events.

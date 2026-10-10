@@ -791,6 +791,15 @@ paths:
       tags: [terminals]
       operationId: replaceSurfaceCells
       summary: Apply a revisioned text-cell update
+      description: >-
+        Applies cells and, if present, cursor state, then advances the
+        surface revision by one. The revision advances for every accepted
+        request, including a deferred chunk and a request whose cells are
+        identical to the cells they replace, so a client is responsible for
+        not sending writes that change nothing (ADR 0058). `cells` may be
+        empty when `cursor` is present: a cursor move with no cell change is
+        a legitimate update. A request whose `base_revision` does not match
+        the surface is a 409 with the current revision.
       parameters:
         - $ref: '#/components/parameters/IfMatch'
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -1002,6 +1011,13 @@ components:
       type: integer
       format: int64
       minimum: 0
+      description: >-
+        Monotonic counter identifying a resource's state. For a surface it
+        counts accepted writes, not observed changes: one accepted cell
+        request advances it by exactly one whatever `presentation` was and
+        whether or not the cells carried differ from the cells they replace.
+        A client that wants the revision to track visible change must not
+        send writes that change nothing. See ADR 0058.
     Bounds:
       type: object
       required: [x, y, width, height]
@@ -1808,7 +1824,7 @@ components:
       type: object
       required: [id, revision, width, height, non_empty_cells, codepoint_cells,
                  printable_cells, cursor,
-                 graphics_images, damage]
+                 graphics_images, frame_open, damage]
       properties:
         id: {$ref: '#/components/schemas/ResourceId'}
         revision: {$ref: '#/components/schemas/Revision'}
@@ -1825,6 +1841,12 @@ components:
           description: Cells containing a printable codepoint.
         cursor: {$ref: '#/components/schemas/Cursor'}
         graphics_images: {type: integer, minimum: 0}
+        frame_open:
+          type: boolean
+          description: >-
+            True while a multi-request frame is open, which withholds the
+            surface from the renderer until a `commit`. A `defer` opens it;
+            `commit` and `immediate` both close it.
         damage:
           type: object
           required: [valid, x, y, width, height]
@@ -1904,6 +1926,11 @@ components:
             and presents it normally. `defer` applies the revision but keeps
             it out of the renderer as part of a bounded multi-request frame.
             `commit` applies the final chunk and presents the complete frame.
+            A `commit` with no preceding `defer` is a 409 `frame_not_open`, so
+            a frame that fits in one request uses `immediate`. Deferred cells
+            are applied to the surface immediately; only their presentation
+            waits, so a deferred chunk advances the revision like any other
+            accepted write.
       additionalProperties: false
     FrameRequest:
       type: object
