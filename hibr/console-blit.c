@@ -536,17 +536,29 @@ static long cb_flush(void)
 				 * glyph owns the cell to its right: writing one
 				 * marks that cell a continuation and
 				 * overwriting one clears it.  The adapter does
-				 * not know widths, so treat any multi-byte text
-				 * on either side of the write as possibly wide
-				 * and forget the neighbour rather than claim to
-				 * know what Blit did with it.  Without this a
-				 * blank replacing a CJK glyph would leave the
-				 * cell to its right unrepainted, because the
-				 * frame that should have repainted it was
-				 * dropped as unchanged. */
+				 * not carry a width table, so it forgets the
+				 * neighbour of anything that could be wide
+				 * rather than claim to know what Blit did with
+				 * it.  Without this a blank replacing a CJK
+				 * glyph would leave the cell to its right
+				 * unrepainted, because the frame that should
+				 * have repainted it was dropped as unchanged.
+				 *
+				 * The test is the UTF-8 lead byte: 0xe0 means
+				 * three or more bytes, which means U+0800 or
+				 * above.  Blit's width table
+				 * (src/blit_unicode_width.h) has no
+				 * double-width range below U+1100, so this
+				 * covers every wide glyph and excludes the
+				 * two-byte ones.  That exclusion is not a
+				 * micro-optimisation: a Hibr wallpaper is
+				 * 32,104 cells of U+00B7, and treating those as
+				 * possibly wide left one invalidated cell per
+				 * frame and a request per second on a screen
+				 * where nothing changed at all. */
 				wide_risk =
-					(unsigned char)cb.pending[n].text[0] >= 0x80 ||
-					(unsigned char)cb.shadow[index].text[0] >= 0x80;
+					(unsigned char)cb.pending[n].text[0] >= 0xe0 ||
+					(unsigned char)cb.shadow[index].text[0] >= 0xe0;
 				cb.shadow[index] = cb.pending[n];
 				if (wide_risk && cb.pending[n].x + 1 < cb.cols)
 					memset(&cb.shadow[index + 1], 0,

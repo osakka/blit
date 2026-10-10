@@ -1,0 +1,111 @@
+release: 0.1.421
+package: blit_0.1.421-1_amd64.deb
+package_sha256: 1d02d514eda1fcf3ee02bd09c828f9ade01d7a3cc418119ca71dc96d2981a71b
+source_commit: ede228ee8fc5eee0e2e969843a3a0b9ac0f93ec4
+package_documentation_commit: ede228ee8fc5eee0e2e969843a3a0b9ac0f93ec4
+server_binary_sha256: 41691f2b51333dfd7ff4da5fc5b676b1fcbfb1c048f7ad1fcde8a0f927c0013f
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: ed37dff18e0ba8ad638990b28287ab1aeb22ada5fe7345a3eb17a39733598d87
+hibr_root: /tmp/hibr-0.99.100
+hibr_version: 0.99.100
+tcc_build_acceptance: pass
+openapi_yaml: pass
+api_schema_gate: pass
+package_artifact_acceptance: pass
+network_auth_acceptance: pass_api_token_injected
+terminal_conformance: pass
+session_lifecycle_acceptance: pass
+session_write_resize_acceptance: pass
+stream_replay_acceptance: pass
+font_api_acceptance: pass
+hibr_font_manifest_acceptance: pass
+glyph_geometry_local_pixel_acceptance: pass
+sdl_glyph_filter_acceptance: pass
+external_pointer_composition: pass
+pointer_damage_atomic_acceptance: pass
+pointer_wallpaper_stress_acceptance: pass
+hidden_cursor_damage_acceptance: pass
+sdl_background_batch_acceptance: pass
+sdl_graphics_cache_acceptance: pass
+sdl_wallpaper_damage_acceptance: pass
+screenshot_overlay_acceptance: pass
+pixel_frame_acceptance: pass
+render_state_agreement_acceptance: pass
+adapter_coalesce_acceptance: pass_idle_frame_zero_requests
+hibr_singleton_local_acceptance: pass
+hibr_resume_guard_acceptance: pass
+restart_gate: pass
+shutdown_gate: pass
+update_idle_timeout_acceptance: pass
+update_reset_acceptance: pass
+update_cancel_acceptance: pass
+frame_rate_settled_acceptance: pass
+terminal_soak_120s_acceptance: pass
+screenshot_nonblocking_live_acceptance: not_rerun_candidate
+qemu_hibr_lifecycle_acceptance: not_rerun_candidate
+qemu_four_output_pixel_acceptance: not_rerun_candidate
+qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
+live_deployment: pass
+live_current_version: 0.1.421
+live_idle_surface_revision_rate_before: 254_to_323_per_second
+live_idle_surface_revision_rate_after: zero_per_second_one_request_per_changed_cell
+live_hibr_desktop_startup_requests: 869_was_46474
+live_hibr_desktop_render_agreement: pass_32026_cell_centres
+live_physical_multi_display: unavailable_one_output
+live_physical_button_trace_contract: open
+physical_evdev_acceptance: open
+physical_multi_monitor_acceptance: open
+physical_high_refresh_acceptance: open
+notes: >-
+  ADR 0058. A surface revision counts accepted writes, not observed changes.
+  The server rule is unchanged and now written down in the schema; the Hibr
+  adapter is where it is honoured, by keeping a shadow of the acknowledged
+  cells and sending only each frame's delta. An idle desktop sends nothing.
+
+  Measured before this release on the live host at 0.1.419: an idle desktop
+  advanced surface-9 (240x135, 32,400 cells) by 1618, 1362 and 1274
+  revisions in consecutive five-second windows, i.e. 254 to 323 per second
+  with nothing visibly changing.
+
+  Two server changes fall out of coalescing. A coalesced frame usually fits
+  in one request, which must be presentation=immediate because Blit answers
+  409 frame_not_open to a commit with no preceding defer; and immediate now
+  closes an open frame, because otherwise one frame abandoned after its
+  first defer would withhold the surface from the renderer permanently.
+  frame_open is now reported by GET /v1/surfaces/{id}/summary so that state
+  is observable at all.
+
+  A third fix is adapter-side: Blit clears the cell to the right of a
+  double-width glyph when a narrow glyph replaces the leader, so the blank
+  that repaints that cell is exactly what coalescing drops. Multi-byte text
+  on either side of a write now invalidates the neighbour in the shadow.
+
+  tools/tests/adapter_coalesce_gate.sh compiles the shipped adapter into a
+  harness and drives it against a real server with no Hibr process. On
+  64x24: first frame 41 requests, identical frame 0, one changed cell 1,
+  cursor-only move 1, empty flush 0, twenty idle frames 0. Both assertions
+  that could have been vacuous were verified against deliberately broken
+  builds: the frame_open check exits 1 against the previous server rule, and
+  the wide-glyph check reports 1535 painted cells of 1536 without the
+  neighbour invalidation.
+
+  Deployed and measured. A fresh desktop draws its 32,400 cells in 869 cell
+  requests where 0.1.419 took 46,474. Idle read 0 revisions across three
+  consecutive fifteen-second windows; over a following seventy seconds the
+  revision advanced once and a cell-by-cell diff found exactly one changed
+  cell, (224,0) '3' to '4', the minute digit in the bar. Sampling the centre
+  of all 32,026 visible cells in a live screenshot finds the wallpaper and bar
+  backgrounds the state reports, so the screen is drawing rather than quiet.
+
+  The lead-byte test for a possibly-wide glyph is 0xe0 rather than 0x80
+  because a wallpaper is 32,104 cells of U+00B7: treating two-byte glyphs as
+  possibly wide left one invalidated cell per frame and measured one request
+  per second against a screen where no cell changed at all. Blit's width table
+  has no double-width range below U+1100, so 0xe0 covers every wide glyph.
+
+  Deploying also found blit#32: nothing on the host relaunches the Hibr
+  desktop after the supervised restart, and reattaching with --resume comes
+  back blank while reporting owner_registered and 32,400 cells. Ten accepted
+  requests cannot carry 32,400 cells, so that content arrived through the
+  session PTY rather than the adapter. Filed separately; a fresh --session
+  draws correctly.

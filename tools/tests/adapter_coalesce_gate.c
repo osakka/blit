@@ -338,6 +338,27 @@ int main(void)
 	frame("Z");
 	expect("and coalesces again after it", cb.revision - before, 0);
 
+	/* A two-byte glyph is never double width -- Blit's width table has no
+	   wide range below U+1100 -- so it must not invalidate its neighbour.
+	   A Hibr wallpaper is 32,104 cells of U+00B7, and treating those as
+	   possibly wide costs a request per second on a static screen. */
+	cb_pen(DP_RGB | 0x16324au, DP_RGB | 0x0d1b2au, 0);
+	cb_clear();
+	{
+		int x;
+		for (x = 0; x < 40; ++x) cb_put(3, x, "\xc2\xb7");  /* U+00B7 */
+	}
+	cb_flush();
+	before = cb.revision;
+	cb_pen(DP_RGB | 0x16324au, DP_RGB | 0x0d1b2au, 0);
+	cb_clear();
+	{
+		int x;
+		for (x = 0; x < 40; ++x) cb_put(3, x, "\xc2\xb7");
+	}
+	cb_flush();
+	expect("a narrow multi-byte glyph is free", cb.revision - before, 0);
+
 	expect_immediate_closes_an_open_frame();
 
 	/* A double-width glyph owns the cell to its right, and Blit clears that

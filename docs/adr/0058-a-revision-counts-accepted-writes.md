@@ -94,12 +94,19 @@ Three details are deliberate:
 - **The shadow forgets the cell to the right of any possibly-wide write.**
   Blit resolves glyph width, and a double-width glyph owns the cell to its
   right: writing one marks that cell a continuation, and overwriting one
-  clears it. The adapter does not know widths, so it treats any multi-byte
-  text on either side of a write as possibly wide and declines to claim
-  knowledge of the neighbour. Without this, a blank replacing a CJK glyph
-  leaves the cell to its right unpainted — Blit clears it as a side effect
-  and the frame that should have repainted it is dropped as unchanged. A full
-  re-send papered over this; coalescing cannot.
+  clears it. The adapter carries no width table, so it declines to claim
+  knowledge of the neighbour of anything that could be wide. Without this, a
+  blank replacing a CJK glyph leaves the cell to its right unpainted — Blit
+  clears it as a side effect and the frame that should have repainted it is
+  dropped as unchanged. A full re-send papered over this; coalescing cannot.
+
+  The test is the UTF-8 lead byte: `0xe0` or above means three or more bytes,
+  which means U+0800 or above. `src/blit_unicode_width.h` has no double-width
+  range below U+1100, so this covers every wide glyph while excluding the
+  two-byte ones. The exclusion matters more than it looks: a Hibr wallpaper is
+  32,104 cells of U+00B7, and treating those as possibly wide left one
+  invalidated cell at the end of every frame — measured on the live host as
+  one request a second against a screen where no cell changed at all.
 
 A frame that fits in one request is sent as `immediate`, never `commit`.
 Blit answers `409 frame_not_open` to a `commit` with no preceding `defer`,
@@ -192,6 +199,11 @@ cells to carry the pen background. Without the neighbour invalidation that
 reads 1,535 — one unpainted cell, beside the glyph, which is the defect
 exactly.
 
+Its converse is asserted too: a frame containing forty cells of U+00B7, sent
+twice, must cost nothing the second time. With the lead-byte test at `0x80`
+instead of `0xe0` that costs one request, which is how the live one-per-second
+residual was found.
+
 The `immediate`-closes-the-frame rule is asserted separately and the
 assertion is checked to have teeth. The gate opens a frame by hand with a
 `defer`, confirms `frame_open` is true, then sends a deliberately one-cell
@@ -206,6 +218,49 @@ The gate reports 77 (not applicable) without `BLIT_HIBR_ROOT`, which
 that proved the adapter against different headers than the package ships
 would be proving the wrong artifact. It runs in `tools/run-gates.sh hibr`.
 
-Live confirmation is the ticket's own method: revision delta per second and
-the adapter's `defer`/`commit` trace counts on an idle desktop, re-measured
-after deployment.
+## Live measurement
+
+On `192.168.10.54`, surface 240x135, 32,400 cells.
+
+| | 0.1.419 | 0.1.421 |
+| --- | --- | --- |
+| desktop startup, full screen drawn | 46,474 requests | **869** |
+| idle, nothing changing | 254-323 revisions/sec | **0** |
+| one clock digit changing | — | 1 request |
+
+The startup figure is the floor rather than an inefficiency: the shadow starts
+empty, so the first frame is the whole surface, and 32,400 cells at roughly 37
+per request is about 875. Everything above that was the re-sending.
+
+Idle measured as four consecutive fifteen-second windows at revision 872,
+872, 872, 873. The last window is the result, not a blemish: over a following
+seventy seconds the revision advanced exactly once, and a cell-by-cell diff of
+the two snapshots found exactly one cell changed — `(224,0)`, `'3'` to `'4'`,
+the minute digit in the bar. One cell changed, one request, one revision,
+which is what "proportionate to what changed" has to mean.
+
+The framebuffer agrees with that state. Sampling the centre of all 32,026
+visible cells, applying `surface_inset_px`, finds `#0d1b2a` wallpaper on
+31,745 of them and `#1b3a5c` on 231 against the 234 bar cells the state
+reports.
+
+An intermediate reading is worth recording because it is the shape of a
+correct result. Before the lead-byte test was tightened to `0xe0`, the idle
+rate was one revision a second with zero cells changed between samples — the
+re-send of the one neighbour each frame invalidated. One a second is a
+plausible-looking number for a desktop with a clock, and it would have been
+easy to accept. Diffing two snapshots and finding no changed cells is what
+showed it was not the clock. The measurement above is the same diff finding
+that it now is.
+
+A separate observation, not caused by this change: a desktop reattached with
+`--resume` comes back blank and stays blank. The surface held 32,400 cells of
+`" "` with no style at a revision of 10. Ten accepted requests cannot carry
+32,400 cells — the body bound is about 43 of them — so that content did not
+come from the adapter at all; it arrived through the session PTY and the
+terminal engine, which advances the revision once per read batch. A fresh
+`--session` on the same build draws correctly, in 887 requests, with styled
+wallpaper and bar. So this is the reattach path putting a terminal stream on
+an owned surface rather than the owner repainting it, which is the collision
+[ADR 0057](0057-owned-surfaces-are-not-interactive-terminals.md) describes
+from the other direction. It needs its own ticket and is not this one.
