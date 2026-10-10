@@ -1492,9 +1492,17 @@ components:
                 environment of sessions launched **after** the write. It
                 cannot reach a session that is already running, so a
                 controller that changes the default and wants it to apply
-                relaunches the session. Volume, mute and any other mixer
-                control are not here and are not implied: they need libasound,
-                which is a packaging decision of its own.
+                relaunches the session. A note on what the variables mean:
+                libasound reads `ALSA_CARD` as a card name or number and
+                `ALSA_PCM_CARD`/`ALSA_PCM_DEVICE` as the numbers that override
+                its `default` PCM, so an application honouring only
+                `ALSA_CARD` gets device 0 of the card -- which, for a chosen
+                HDMI output other than the first, is not the device that was
+                chosen. All three are exported; an application that ignores
+                two of them is beyond what Blit can enforce.
+                Volume, mute and any other mixer control are not here and are
+                not implied: they need libasound, which is a packaging
+                decision of its own.
           additionalProperties: false
         revision:
           $ref: '#/components/schemas/Revision'

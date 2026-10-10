@@ -120,9 +120,22 @@ run_gate() {
         skip=$((skip + 1))
         report "$name" SKIP "not applicable here (77): $last"
     else
+        # Keep the whole output of a failing gate, and name the file.  This
+        # reported only the last line, so a gate that failed once in a suite
+        # run and passed on its own left nothing to diagnose -- which is
+        # exactly what happened to pointer_damage_atomic_gate.rb (issue #61).
+        # An intermittent gate makes every later run ambiguous; losing its
+        # message makes it permanent.
         fail=$((fail + 1))
         failed_gates="$failed_gates $name"
-        report "$name" FAIL "rc=$rc $last"
+        failure_log="${BLIT_GATE_FAILURE_DIR:-/tmp}/blit-gate-$name.$$.out"
+        printf '%s\n' "$out" > "$failure_log" 2>/dev/null || failure_log=''
+        if [ -n "$failure_log" ]; then
+            report "$name" FAIL "rc=$rc $last"
+            printf '%s\n' "    output: $failure_log" >&2
+        else
+            report "$name" FAIL "rc=$rc $last"
+        fi
     fi
 }
 

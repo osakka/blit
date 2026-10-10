@@ -662,6 +662,8 @@ typedef struct {
     int evdev_ctrl;
     int evdev_alt;
     int evdev_watch_fd;
+    int snd_watch_fd;
+    int audio_rescan_requested;
     int evdev_rescan_requested;
     float evdev_mouse_x;
     float evdev_mouse_y;
@@ -919,6 +921,9 @@ static const char *json_rejected_property(const char *object,
                                           size_t writable_count);
 static void broadcast_input_device_changed(BlitRuntime *runtime,
                                            const BlitInputDevice *device,
+                                           const char *change);
+static void broadcast_audio_device_changed(BlitRuntime *runtime,
+                                           const BlitAudioDevice *audio,
                                            const char *change);
 static void update_pointer_position(BlitRuntime *runtime,
                                     const char *device_id);
@@ -2971,11 +2976,23 @@ static void scan_audio_devices(BlitRuntime *runtime, int announce)
             int discovered = 0;
             record_audio_device(runtime, card, card_id, device, 1,
                                 &discovered);
-            discovered_any |= discovered;
+            if (discovered) {
+                discovered_any = 1;
+                if (announce)
+                    broadcast_audio_device_changed(runtime,
+                        find_audio_device_pcm(runtime, card, device, 1),
+                        "discovered");
+            }
             discovered = 0;
             record_audio_device(runtime, card, card_id, device, 0,
                                 &discovered);
-            discovered_any |= discovered;
+            if (discovered) {
+                discovered_any = 1;
+                if (announce)
+                    broadcast_audio_device_changed(runtime,
+                        find_audio_device_pcm(runtime, card, device, 0),
+                        "discovered");
+            }
         }
     }
     for (index = 0; index < BLIT_MAX_AUDIO_DEVICES; ++index) {
@@ -2989,16 +3006,73 @@ static void scan_audio_devices(BlitRuntime *runtime, int announce)
         if (audio->present) {
             audio->present = 0;
             ++audio->revision;
+            ++runtime->audio_devices_revision;
+            if (announce)
+                broadcast_audio_device_changed(runtime, audio, "absent");
             discovered_any = 1;
         }
         if (audio->is_default)
             continue;
+        if (announce)
+            broadcast_audio_device_changed(runtime, audio, "removed");
         memset(audio, 0, sizeof(*audio));
         discovered_any = 1;
     }
     if (discovered_any)
         ++runtime->audio_devices_revision;
-    (void)announce;
+}
+
+/* An ALSA card can appear and disappear while Blit runs -- two of the live
+   host's six are USB. Without a watch the inventory would be whatever was
+   plugged in at boot, and a device unplugged would report present forever.
+   The watch is on the device-node root rather than procfs, because inotify
+   does not report changes under /proc. */
+static void open_snd_watch(BlitRuntime *runtime)
+{
+    int fd;
+
+    if (runtime->snd_watch_fd >= 0)
+        return;
+    fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+    if (fd < 0)
+        return;
+    if (inotify_add_watch(fd, snd_root(),
+                          IN_CREATE | IN_DELETE | IN_MOVED_TO |
+                          IN_MOVED_FROM | IN_ATTRIB) < 0) {
+        close(fd);
+        return;
+    }
+    runtime->snd_watch_fd = fd;
+}
+
+static void service_snd_watch(BlitRuntime *runtime)
+{
+    char buffer[4096];
+    ssize_t received;
+
+    if (runtime->snd_watch_fd < 0)
+        return;
+    for (;;) {
+        received = read(runtime->snd_watch_fd, buffer, sizeof(buffer));
+        if (received > 0) {
+            runtime->audio_rescan_requested = 1;
+            continue;
+        }
+        if (received < 0 && (errno == EINTR || errno == EAGAIN ||
+                             errno == EWOULDBLOCK))
+            return;
+        close(runtime->snd_watch_fd);
+        runtime->snd_watch_fd = -1;
+        return;
+    }
+}
+
+static void reconnect_audio_devices(BlitRuntime *runtime)
+{
+    if (!runtime->audio_rescan_requested)
+        return;
+    runtime->audio_rescan_requested = 0;
+    scan_audio_devices(runtime, 1);
 }
 
 static size_t audio_device_item_json(const BlitAudioDevice *audio, char *body,
@@ -11081,28 +11155,54 @@ static void broadcast_input_diagnostic(BlitRuntime *runtime,
    input_device_lost diagnostics say a device of some kind appeared or went
    away; this names the device and carries the collection revision the
    controller should now re-read. */
-static void broadcast_input_device_changed(BlitRuntime *runtime,
-                                           const BlitInputDevice *device,
-                                           const char *change)
+static void broadcast_device_changed(BlitRuntime *runtime,
+                                    const char *device_class,
+                                    const char *change, const char *id,
+                                    const char *name, const char *node,
+                                    unsigned long long revision,
+                                    unsigned long long collection_revision)
 {
     char escaped_name[512];
     char event[1024];
 
-    if (device == NULL)
-        return;
-    json_escape(device->name, escaped_name, sizeof(escaped_name));
+    json_escape(name != NULL ? name : "", escaped_name, sizeof(escaped_name));
     snprintf(event, sizeof(event),
-             "{\"type\":\"device_changed\",\"class\":\"input\","
+             "{\"type\":\"device_changed\",\"class\":\"%s\","
              "\"change\":\"%s\",\"id\":\"%s\",\"name\":\"%s\","
              "\"node\":\"%s\",\"revision\":%llu,"
              "\"collection_revision\":%llu}",
-             change, device->id, escaped_name, device->node, device->revision,
-             runtime->input_devices_revision);
-    /* Both masks: this is an input device today, and ADR 0064 stages 5 and 6
-       fire the same event for audio and display devices, which are not. A
-       controller subscribing to either sees it. */
+             device_class, change, id, escaped_name,
+             node != NULL ? node : "", revision, collection_revision);
+    /* Both masks: an input device is input, an audio or display device is
+       not, and a controller subscribing to either sees the event. */
     broadcast_stream(runtime, event,
                      BLIT_STREAM_INPUT | BLIT_STREAM_HARDWARE);
+}
+
+static void broadcast_audio_device_changed(BlitRuntime *runtime,
+                                           const BlitAudioDevice *audio,
+                                           const char *change)
+{
+    char node[256];
+
+    if (audio == NULL)
+        return;
+    snprintf(node, sizeof(node), "%s/pcmC%dD%d%c", snd_root(), audio->card,
+             audio->device, audio->playback ? 'p' : 'c');
+    broadcast_device_changed(runtime, "audio", change, audio->id, audio->name,
+                             node, audio->revision,
+                             runtime->audio_devices_revision);
+}
+
+static void broadcast_input_device_changed(BlitRuntime *runtime,
+                                           const BlitInputDevice *device,
+                                           const char *change)
+{
+    if (device == NULL)
+        return;
+    broadcast_device_changed(runtime, "input", change, device->id,
+                             device->name, device->node, device->revision,
+                             runtime->input_devices_revision);
 }
 
 static void replay_stream(BlitRuntime *runtime, int fd,
@@ -18191,6 +18291,7 @@ int main(int argc, char **argv)
         bind_address = "0.0.0.0";
     memset(&runtime, 0, sizeof(runtime));
     runtime.evdev_watch_fd = -1;
+    runtime.snd_watch_fd = -1;
     runtime.started_us = monotonic_us();
     diagnostic_log(&runtime, "info", "server_start", "Blit gateway starting");
     blit_font_load(&runtime.font);
@@ -18298,6 +18399,7 @@ int main(int argc, char **argv)
             evdev_register_path(&runtime, mouse_device, 0);
         scan_evdev_devices(&runtime, 0);
         scan_audio_devices(&runtime, 0);
+        open_snd_watch(&runtime);
         if (runtime.evdev_mouse_count > 0)
             for (input_index = 0; input_index < runtime.evdev_mouse_count;
                  ++input_index)
@@ -18422,6 +18524,7 @@ int main(int argc, char **argv)
         {
             uint64_t evdev_scan_started_us = monotonic_us();
             reconnect_evdev_devices(&runtime);
+            reconnect_audio_devices(&runtime);
             runtime.diagnostic_last_evdev_scan_ms =
                 (double)(monotonic_us() - evdev_scan_started_us) / 1000.0;
             if (runtime.diagnostic_last_evdev_scan_ms >
@@ -18489,6 +18592,11 @@ int main(int argc, char **argv)
             FD_SET(runtime.evdev_watch_fd, &readable);
             if (runtime.evdev_watch_fd > max_fd)
                 max_fd = runtime.evdev_watch_fd;
+        }
+        if (runtime.snd_watch_fd >= 0) {
+            FD_SET(runtime.snd_watch_fd, &readable);
+            if (runtime.snd_watch_fd > max_fd)
+                max_fd = runtime.snd_watch_fd;
         }
         for (i = 0; i < BLIT_MAX_STREAMS; ++i) {
             if (runtime.streams[i].used) {
@@ -18563,6 +18671,9 @@ int main(int argc, char **argv)
         if (runtime.evdev_watch_fd >= 0 && ready > 0 &&
             FD_ISSET(runtime.evdev_watch_fd, &readable))
             service_evdev_watch(&runtime);
+        if (runtime.snd_watch_fd >= 0 && ready > 0 &&
+            FD_ISSET(runtime.snd_watch_fd, &readable))
+            service_snd_watch(&runtime);
         if (ready > 0 && FD_ISSET(server_fd, &readable)) {
             client_fd = accept(server_fd, NULL, NULL);
             if (client_fd < 0) {
@@ -18678,6 +18789,8 @@ int main(int argc, char **argv)
     close(server_fd);
     if (runtime.evdev_watch_fd >= 0)
         close(runtime.evdev_watch_fd);
+    if (runtime.snd_watch_fd >= 0)
+        close(runtime.snd_watch_fd);
     stop_sessions(&runtime);
     {
         int input_index;

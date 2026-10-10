@@ -235,6 +235,19 @@ playback and capture independently — and is honoured by exporting
 `BLIT_AUDIO_PLAYBACK`/`BLIT_AUDIO_CAPTURE` into the environment of sessions
 launched **after** the write. `execve` means it cannot reach a session already
 running, so a controller that wants a change to apply relaunches the session.
+All three ALSA variables are exported, because libasound reads `ALSA_CARD` as
+a card and `ALSA_PCM_CARD`/`ALSA_PCM_DEVICE` as the override for its `default`
+PCM — an application that honours only `ALSA_CARD` lands on device 0 of the
+card, which for a chosen HDMI output other than the first is not the device
+that was chosen. That is a property of the applications, not of the choice,
+and the schema says it.
+
+The audio inventory watches its device-node root with inotify, the way the
+input scan does, so a card plugged in while Blit runs appears and one unplugged
+stops reporting itself present. The watch is on the device nodes rather than
+procfs because inotify does not report changes under `/proc`. A device chosen
+as a default keeps its entry while absent, for the same reason a configured
+input device does.
 Volume, mute and any other mixer control are **not** here and are not implied:
 they need libasound, which changes `tools/build-tcc.sh` and the
 `packaging/build-deb.sh` dependencies and is a toolchain decision with its own

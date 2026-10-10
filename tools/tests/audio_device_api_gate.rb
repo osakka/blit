@@ -24,6 +24,7 @@
 require 'fileutils'
 require 'json'
 require 'net/http'
+require 'socket'
 require 'timeout'
 require 'tmpdir'
 require 'uri'
@@ -80,6 +81,52 @@ def request(method, path, body: nil, headers: {})
     response.body
   end
   [response.code.to_i, parsed]
+end
+
+def read_exact(socket, length, timeout_seconds)
+  data = +''
+  deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout_seconds
+  while data.bytesize < length
+    remaining = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    raise Timeout::Error if remaining <= 0
+    raise Timeout::Error unless IO.select([socket], nil, nil, remaining)
+
+    data << socket.readpartial(length - data.bytesize)
+  end
+  data
+end
+
+def websocket_text(socket, timeout_seconds)
+  header = read_exact(socket, 2, timeout_seconds).bytes
+  length = header[1] & 0x7f
+  length = read_exact(socket, 2, timeout_seconds).unpack1('n') if length == 126
+  length = read_exact(socket, 8, timeout_seconds).unpack1('Q>') if length == 127
+  read_exact(socket, length, timeout_seconds).force_encoding(Encoding::UTF_8)
+end
+
+def open_hardware_stream(port)
+  socket = TCPSocket.new('127.0.0.1', port)
+  key = ['blit-audio-gate'].pack('m0')
+  socket.write("GET /v1/stream?events=hardware HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\n" \
+               "Connection: Upgrade\r\nUpgrade: websocket\r\n" \
+               "Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: #{key}\r\n\r\n")
+  response = +''
+  response << read_exact(socket, 1, 3) until response.include?("\r\n\r\n")
+  raise "stream handshake failed: #{response.lines.first}" unless
+    response.start_with?('HTTP/1.1 101')
+
+  socket
+end
+
+def await(timeout: 8)
+  deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
+  loop do
+    value = yield
+    return value if value
+    return nil if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+
+    sleep 0.15
+  end
 end
 
 def surface_text(surface_id)
@@ -225,6 +272,64 @@ Dir.mktmpdir('blit-audio') do |root|
     code, = request('GET', '/v1/audio/audio-does-not-exist')
     failures << "an unknown audio id -> #{code}, wanted 404" unless code == 404
 
+    # Hotplug. An ALSA card can appear and disappear while Blit runs -- two of
+    # the live host's six are USB -- so the inventory cannot be whatever was
+    # plugged in at boot. The watch is on the device-node root, because
+    # inotify does not report changes under /proc, so the trigger is the
+    # control node and not the procfs tree.
+    stream = open_hardware_stream(PORT)
+    revision_before_plug = nil
+    code, before_plug = request('GET', '/v1/audio')
+    revision_before_plug = before_plug.fetch('revision') if code == 200
+    FileUtils.mkdir_p(File.join(asound, 'card1', 'pcm0p'))
+    File.write(File.join(asound, 'card1', 'id'), "Webcam\n")
+    File.write(File.join(asound, 'card1', 'pcm0p', 'info'),
+               pcm_info(1, 0, 'PLAYBACK', 'USB Audio'))
+    File.write(File.join(snd, 'controlC1'), '')
+    plugged = await do
+      _, collection = request('GET', '/v1/audio')
+      collection.fetch('devices').any? { |d| d['id'] == 'audio-webcam-pcm0-p' } ?
+        collection : nil
+    end
+    if plugged.nil?
+      failures << 'a card created under the scan root was never discovered, ' \
+                  'so the audio inventory is whatever was plugged in at boot'
+    else
+      failures << 'the collection revision did not move on an audio hotplug' unless
+        plugged.fetch('revision') > revision_before_plug
+    end
+
+    # And it goes away again.
+    File.delete(File.join(snd, 'controlC1'))
+    FileUtils.rm_rf(File.join(asound, 'card1'))
+    gone = await do
+      _, collection = request('GET', '/v1/audio')
+      collection.fetch('devices').none? { |d| d['id'] == 'audio-webcam-pcm0-p' } ?
+        collection : nil
+    end
+    failures << 'an unplugged audio device was never retired' if gone.nil?
+
+    events = []
+    begin
+      loop { events << JSON.parse(websocket_text(stream, 0.3)) }
+    rescue StandardError
+      nil
+    end
+    stream.close
+    audio_events = events.select do |e|
+      e['type'] == 'device_changed' && e['class'] == 'audio'
+    end
+    if audio_events.empty?
+      failures << 'no audio device_changed event on /v1/stream?events=hardware; ' \
+                  "saw #{events.map { |e| [e['type'], e['class']] }.uniq.inspect}"
+    else
+      kinds = audio_events.map { |e| e['change'] }.uniq
+      %w[discovered removed].each do |wanted|
+        failures << "no audio device_changed with change=#{wanted}; saw " \
+                    "#{kinds.inspect}" unless kinds.include?(wanted)
+      end
+    end
+
     # The chosen default reaches a session launched after the choice, which is
     # the whole of what Blit can honour: it has no audio engine and cannot
     # route a stream, and execve means it never reaches a running session.
@@ -260,4 +365,5 @@ end
 puts 'AUDIO_DEVICE_API_PASS pcms=3 per_pcm_not_per_card=yes ' \
      'section_scoped_formats=yes rate_list=7 one_default_per_direction=yes ' \
      'unknown_property=400 stale_revision=409 unknown_id=404 ' \
-     'default_exported_to_new_session=yes'
+     'default_exported_to_new_session=yes hotplug=discovered_and_retired ' \
+     'stream=device_changed'
