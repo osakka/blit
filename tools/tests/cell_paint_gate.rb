@@ -6,6 +6,7 @@
 # place where the two renderers were each deciding for themselves.
 #
 #   #41 a block cursor is an inverse cell, not an eraser
+#   #42 italic is a slant, and is not bold
 #
 # Captures use ?cached=1 deliberately: a fresh capture invalidates the output
 # it inspects and can answer from a frame that was never presented (#45).
@@ -132,9 +133,31 @@ elsif inverted != glyph
               'inverted under the cursor'
 end
 
+# #42. Bold, italic and plain are three different things on screen. Italic
+# used to be drawn as a second strike one pixel over, which is what bold is,
+# so the two were pixel-identical.
+id = session("printf '\\033[1mX\\033[0m \\033[3mX\\033[0m X\\n'; sleep 60")
+sleep 2.0
+attributes = screenshot
+request('DELETE', "/v1/terminal-sessions/#{id}")
+shapes = { 'bold' => 0, 'italic' => 2, 'plain' => 4 }.transform_values do |column|
+  cell(attributes, inset, column, 0).select { |_, colour| colour != 0 }.keys.sort
+end
+shapes.each do |name, lit|
+  failures << "the #{name} cell has only #{lit.length} lit pixels" if lit.length < 10
+end
+[%w[bold italic], %w[bold plain], %w[italic plain]].each do |a, b|
+  next unless shapes[a] == shapes[b]
+
+  failures << "#{a} and #{b} render pixel-identically " \
+              "(#{shapes[a].length} lit pixels each)"
+end
+
 unless failures.empty?
   failures.each { |f| warn "cell-paint gate: #{f}" }
   exit 1
 end
 
-puts "CELL_PAINT_PASS block_cursor_keeps_glyph=#{glyph.length}px"
+puts "CELL_PAINT_PASS block_cursor_keeps_glyph=#{glyph.length}px " \
+     "bold=#{shapes['bold'].length}px italic=#{shapes['italic'].length}px " \
+     "plain=#{shapes['plain'].length}px"

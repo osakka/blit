@@ -75,6 +75,15 @@ shell conformance path is stable.
    The `CSI >` modifyOtherKeys family and the Kitty keyboard flag prefixes are
    parsed and consumed without leaking their control parameters into cell
    attributes.
+   SGR italic (`3`/`23`) is presented as a slant: the glyph's top edge moves
+   right and its bottom edge left, which is deliberately not bold's
+   double-strike, so the two attributes are distinguishable on screen.
+   SGR blink (`5`/`6`) is retained in the canonical style and **presented
+   steadily**, like the blinking cursor styles above. A blink phase would have
+   to mark the blinking cells damaged about twice a second for as long as they
+   exist, which contradicts the idle-frame contract that an otherwise quiet
+   surface schedules no frames (`tools/tests/adapter_coalesce_gate`). A client
+   that needs blink can read the attribute from the cell state.
    SGR italic (`3`/`23`), blink (`5`/`6`/`25`), and strike (`9`/`29`) are
    retained in the canonical style and exposed consistently through the API,
    SDL, and KMS paths.

@@ -12478,9 +12478,13 @@ static void flush_sdl_glyph_batch(BlitOutput *output)
     output->glyph_index_count = 0;
 }
 
+/* `lean` slants a glyph: the top edge moves right by this many pixels and the
+   bottom edge moves left by the same amount, so the glyph stays centred in its
+   cell and overhangs by at most `lean`. Zero draws upright. */
 static int queue_sdl_glyph(BlitOutput *output, const BlitFont *font,
                            uint32_t colour, uint32_t codepoint, float x,
-                           float y, float cell_width, float cell_height)
+                           float y, float cell_width, float cell_height,
+                           float lean)
 {
     SDL_Vertex *vertices;
     int *indices;
@@ -12520,13 +12524,13 @@ static int queue_sdl_glyph(BlitOutput *output, const BlitFont *font,
     blue = (float)(colour & 0xffU) / 255.0f;
     vertex = output->glyph_vertex_count;
     vertices = output->glyph_vertices + vertex;
-    vertices[0].position.x = x;
+    vertices[0].position.x = x + lean;
     vertices[0].position.y = y;
-    vertices[1].position.x = x + cell_width;
+    vertices[1].position.x = x + cell_width + lean;
     vertices[1].position.y = y;
-    vertices[2].position.x = x + cell_width;
+    vertices[2].position.x = x + cell_width - lean;
     vertices[2].position.y = y + cell_height;
-    vertices[3].position.x = x;
+    vertices[3].position.x = x - lean;
     vertices[3].position.y = y + cell_height;
     vertices[0].tex_coord.x = source_x;
     vertices[0].tex_coord.y = source_y;
@@ -12555,10 +12559,20 @@ static int queue_sdl_glyph(BlitOutput *output, const BlitFont *font,
     return 1;
 }
 
+/* The horizontal offset of one glyph row under a slant: `lean` at the top row,
+   -`lean` at the bottom. */
+static float glyph_row_lean(float lean, int row, int rows)
+{
+    if (lean == 0.0f || rows < 2)
+        return 0.0f;
+    return lean * (float)(rows - 1 - 2 * row) / (float)(rows - 1);
+}
+
 static void render_sdl_glyph(SDL_Renderer *renderer, const BlitFont *font,
                              SDL_Texture *glyph_atlas, int atlas_columns,
                              uint32_t colour, uint32_t codepoint, float x,
-                             float y, float cell_width, float cell_height)
+                             float y, float cell_width, float cell_height,
+                             float lean)
 {
     int source_width = font != NULL && font->data ? font->width : 5;
     int source_height = font != NULL && font->data ? font->height : 7;
@@ -12583,7 +12597,28 @@ static void render_sdl_glyph(SDL_Renderer *renderer, const BlitFont *font,
                                (unsigned char)(colour >> 16),
                                (unsigned char)(colour >> 8),
                                (unsigned char)colour);
-        SDL_RenderTexture(renderer, glyph_atlas, &source, &destination);
+        if (lean == 0.0f) {
+            SDL_RenderTexture(renderer, glyph_atlas, &source, &destination);
+            return;
+        }
+        /* A single textured quad cannot be slanted through this call, so a
+           slanted glyph is drawn one source row at a time. This is the
+           emergency immediate path (BLIT_SDL_GLYPH_BATCH=off); the geometry
+           path slants the quad itself. */
+        for (source_row = 0; source_row < font->height; ++source_row) {
+            SDL_FRect row_source = source;
+            SDL_FRect row_destination;
+            row_source.y = source.y + (float)source_row;
+            row_source.h = 1.0f;
+            row_destination.x = x + glyph_row_lean(lean, source_row,
+                                                   font->height);
+            row_destination.y = y + cell_height * (float)source_row /
+                (float)font->height;
+            row_destination.w = cell_width;
+            row_destination.h = cell_height / (float)font->height + 0.5f;
+            SDL_RenderTexture(renderer, glyph_atlas, &row_source,
+                              &row_destination);
+        }
         return;
     }
     for (source_row = 0; source_row < source_height; ++source_row) {
@@ -12603,7 +12638,8 @@ static void render_sdl_glyph(SDL_Renderer *renderer, const BlitFont *font,
             run_end = source_column;
             if (run_end > run_start) {
                 SDL_FRect pixel_run;
-                pixel_run.x = x + cell_width * run_start / source_width;
+                pixel_run.x = x + cell_width * run_start / source_width +
+                    glyph_row_lean(lean, source_row, source_height);
                 pixel_run.y = y + cell_height * source_row / source_height;
                 pixel_run.w = cell_width * (run_end - run_start) /
                     source_width;
@@ -12617,21 +12653,22 @@ static void render_sdl_glyph(SDL_Renderer *renderer, const BlitFont *font,
 static void render_or_queue_sdl_glyph(BlitOutput *output,
                                       const BlitFont *font, uint32_t colour,
                                       uint32_t codepoint, float x, float y,
-                                      float cell_width, float cell_height)
+                                      float cell_width, float cell_height,
+                                      float lean)
 {
     if (output != NULL && !output->glyph_geometry_enabled) {
         render_sdl_glyph(output->renderer, font, output->glyph_atlas,
                          output->glyph_atlas_columns, colour, codepoint, x, y,
-                         cell_width, cell_height);
+                         cell_width, cell_height, lean);
         return;
     }
     if (queue_sdl_glyph(output, font, colour, codepoint, x, y,
-                        cell_width, cell_height))
+                        cell_width, cell_height, lean))
         return;
     flush_sdl_glyph_batch(output);
     render_sdl_glyph(output->renderer, font, output->glyph_atlas,
                      output->glyph_atlas_columns, colour, codepoint, x, y,
-                     cell_width, cell_height);
+                     cell_width, cell_height, lean);
 }
 
 static void destroy_sdl_graphics_cache(BlitOutput *output)
@@ -12945,6 +12982,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
     int row;
     int cell_width = blit_font_width(&runtime->font);
     int cell_height = blit_font_height(&runtime->font);
+    float italic_lean = (float)((cell_height + 15) / 16);
     Uint64 render_started = 0;
     uint64_t diagnostic_render_started = monotonic_us();
 
@@ -13510,6 +13548,11 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                         (unsigned char)(foreground >> 8),
                         (unsigned char)foreground, 255);
                     if (!(attributes & BLIT_ATTR_CONCEAL)) {
+                        /* Italic is a slant.  Drawing it as a second strike
+                           one pixel over, which is what bold is, made the two
+                           attributes render identically. */
+                        float lean = (attributes & BLIT_ATTR_ITALIC) ?
+                            italic_lean : 0.0f;
                         if (!(attributes & BLIT_ATTR_CONTINUATION) &&
                             surface->codepoints[row][column] != 0 &&
                             surface->codepoints[row][column] != ' ')
@@ -13518,7 +13561,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                                 foreground, surface->codepoints[row][column],
                                 surface_origin_x + column * (float)cell_width,
                                 (float)surface_origin_y + row * (float)cell_height,
-                                (float)glyph_width, (float)cell_height);
+                                (float)glyph_width, (float)cell_height, lean);
                         if (surface->combining_count[row][column] > 0) {
                             int combining_index;
                             for (combining_index = 0;
@@ -13532,7 +13575,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                                     surface->combining[row][column][combining_index],
                                     surface_origin_x + column * (float)cell_width,
                                     (float)surface_origin_y + row * (float)cell_height,
-                                    (float)glyph_width, (float)cell_height);
+                                    (float)glyph_width, (float)cell_height, lean);
                             }
                         }
                         if (attributes & BLIT_ATTR_BOLD &&
@@ -13543,16 +13586,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                                 foreground, surface->codepoints[row][column],
                                 surface_origin_x + 1.0f + column * (float)cell_width,
                                 (float)surface_origin_y + row * (float)cell_height,
-                                (float)glyph_width, (float)cell_height);
-                        if (attributes & BLIT_ATTR_ITALIC &&
-                            surface->codepoints[row][column] != 0 &&
-                            surface->codepoints[row][column] != ' ')
-                            render_or_queue_sdl_glyph(
-                                &runtime->outputs[output_index], &runtime->font,
-                                foreground, surface->codepoints[row][column],
-                                surface_origin_x + 1.0f + column * (float)cell_width,
-                                (float)surface_origin_y + row * (float)cell_height,
-                                (float)glyph_width, (float)cell_height);
+                                (float)glyph_width, (float)cell_height, lean);
                         if (attributes & (BLIT_ATTR_UNDERLINE | BLIT_ATTR_STRIKE))
                             flush_sdl_glyph_batch(&runtime->outputs[output_index]);
                         if (attributes & BLIT_ATTR_UNDERLINE)
@@ -13641,7 +13675,9 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                             &runtime->outputs[output_index], &runtime->font,
                             cell_background, cursor_codepoint, cursor_x,
                             cursor_y, (float)(cursor_cells * cell_width),
-                            (float)cell_height);
+                            (float)cell_height,
+                            (cursor_attributes & BLIT_ATTR_ITALIC) ?
+                                italic_lean : 0.0f);
                         for (combining_index = 0;
                              combining_index <
                                  surface->combining_count[surface->cursor_y][cursor_column] &&
@@ -13653,7 +13689,9 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                                 surface->combining[surface->cursor_y][cursor_column][combining_index],
                                 cursor_x, cursor_y,
                                 (float)(cursor_cells * cell_width),
-                                (float)cell_height);
+                                (float)cell_height,
+                                (cursor_attributes & BLIT_ATTR_ITALIC) ?
+                                    italic_lean : 0.0f);
                         flush_sdl_glyph_batch(&runtime->outputs[output_index]);
                     }
                 }
