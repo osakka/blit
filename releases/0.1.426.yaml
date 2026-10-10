@@ -1,0 +1,134 @@
+release: 0.1.426
+package: blit_0.1.426-1_amd64.deb
+package_sha256: f116d8d6fbc01792e5997e49e4793af5a9603838bfcf3e95d7a900888da725ef
+source_commit: PENDING
+package_documentation_commit: PENDING
+server_binary_sha256: 9c107a5af2f7bf243cc47b46478e4b081fc3d4b0f4c0d1ee25c2c53885574122
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: ed37dff18e0ba8ad638990b28287ab1aeb22ada5fe7345a3eb17a39733598d87
+hibr_root: /tmp/hibr-0.99.100
+hibr_version: 0.99.100
+tcc_build_acceptance: pass
+openapi_yaml: pass
+api_schema_gate: pass
+package_artifact_acceptance: pass
+network_auth_acceptance: pass_api_token_injected
+terminal_conformance: pass
+session_lifecycle_acceptance: pass
+session_write_resize_acceptance: pass
+stream_replay_acceptance: pass
+font_api_acceptance: pass
+hibr_font_manifest_acceptance: pass
+glyph_geometry_local_pixel_acceptance: pass
+sdl_glyph_filter_acceptance: pass
+external_pointer_composition: pass
+pointer_damage_atomic_acceptance: pass
+pointer_wallpaper_stress_acceptance: pass
+hidden_cursor_damage_acceptance: pass
+sdl_background_batch_acceptance: pass
+sdl_graphics_cache_acceptance: pass
+sdl_wallpaper_damage_acceptance: pass
+screenshot_overlay_acceptance: pass
+pixel_frame_acceptance: pass
+render_state_agreement_acceptance: pass
+adapter_coalesce_acceptance: pass_idle_frame_zero_requests
+kitty_placement_pixel_acceptance: pass_crop_offset_numbered_and_z_order_by_pixel
+kitty_placement_conformance_acceptance: pass_delete_targets_and_unsupported_key_refusals
+sync_output_acceptance: pass_held_frame_and_hidden_writes_one_and_two_surfaces
+cell_paint_acceptance: pass_cursor_glyph_italic_distinct_session_defaults
+pointer_geometry_acceptance: pass_inset_honoured_and_pane_less_at_corner
+mouse_report_acceptance: pass_wheel_byte_96_hover_gated_per_cell_drops_counted
+key_encoding_acceptance: pass_25_encodings_capslock_numlock_held_modifiers
+frame_quiet_starvation_acceptance: pass_longest_stagnant_run_1_was_29
+capture_witness_acceptance: pass_one_source_presented_flag_presented_revision
+motion_trail_acceptance: pass_799_blank_cells_no_unaccounted_pixels
+render_state_agreement_acceptance: pass_30_blue_cells_was_vacuous
+evdev_scan_open_count_acceptance: pass_32_opens_for_32_paths_was_96
+graphics_kitty_zlib_acceptance: pass_pixel_crc32_identical_to_raw
+graphics_xtsmgraphics_acceptance: pass_no_scroll_and_enforced_limits_reported
+terminal_kitty_keyboard_acceptance: pass_cursor_unmoved_query_reports_zero
+hibr_singleton_local_acceptance: pass
+hibr_resume_guard_acceptance: pass
+restart_gate: pass
+shutdown_gate: pass
+update_idle_timeout_acceptance: pass
+update_reset_acceptance: pass
+update_cancel_acceptance: pass
+frame_rate_settled_acceptance: pass
+terminal_soak_120s_acceptance: pass
+screenshot_nonblocking_live_acceptance: not_rerun_candidate
+qemu_hibr_lifecycle_acceptance: not_rerun_candidate
+qemu_four_output_pixel_acceptance: not_rerun_candidate
+qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
+live_deployment: PENDING
+live_current_version: 0.1.425
+live_block_cursor_acceptance: PENDING
+live_italic_acceptance: PENDING
+live_session_default_acceptance: PENDING
+live_sync_output_acceptance: PENDING
+live_hibr_desktop_acceptance: PENDING
+live_idle_frame_acceptance: PENDING
+live_physical_multi_display: unavailable_one_output
+live_physical_button_trace_contract: open
+physical_evdev_acceptance: open
+physical_multi_monitor_acceptance: open
+physical_high_refresh_acceptance: open
+notes: >-
+  The capture witness, and the two gates that depend on it. Issues #29 and
+  #45 closed; #48 filed.
+
+  A diagnostic screenshot could answer with pixels that were never on a
+  screen, and every pixel gate in the tree rests on that witness. Inspecting
+  a display no longer changes it: the non-cached form cleared the output's
+  initialized flag, forcing a full redraw, so the capture showed a frame the
+  request itself had caused -- and on a surface holding a DEC 2026 batch it
+  showed the content the renderer was deliberately withholding, which is how
+  the first measurements for #33 came to contradict each other. Both forms now
+  answer from the next presented frame and ?cached=1 has no remaining effect.
+  The unreachable back-buffer readback fallback is removed.
+
+  The identity headers are recorded when the pixels are read rather than when
+  the response is written, since a slow client collects a capture several
+  frames later. X-Blit-Capture-Presented reports whether that frame's present
+  returned. X-Blit-Capture-Revisions now carries each surface's presented
+  revision rather than its current one: a surface whose frame is held is ahead
+  of what is on screen, so the old header named a state the pixels did not
+  show. docs/diagnostic-capture.md states the contract.
+
+  render_state_agreement_gate.rb had been passing without checking anything.
+  It wrote its fixture cells with foreground and background at the top level;
+  the API carries them under style, the spec says so and the parser requires
+  the key, so the colours were silently dropped and its "blank cells with a
+  non-default background" were ordinary unstyled cells. It then defaulted a
+  missing background to black and asserted those cells were black, on a screen
+  that was already black. It now checks thirty genuinely blue cells. The
+  silent drop is #48: a misplaced property should be a 400, and the schema
+  already says additionalProperties is false.
+
+  motion_trail_gate.rb answers the question behind #29 -- when content moves,
+  does the renderer leave pixels the state does not account for? The live
+  screensaver could not settle it, because a desktop advancing ~470 revisions
+  a second is never the same frame as a twelve-megabyte capture. So the motion
+  is reproduced and then stopped: with nothing writing, the pixels and the
+  state describe the same frame by construction, and the capture's headers are
+  checked to confirm that rather than assumed. 799 blank cells, none keeping a
+  pixel the state does not account for. The renderer does not leave trails.
+
+  That gate asserts an absence, so its teeth are load-bearing: a build that
+  under-paints the damage rectangle by one row leaves 242 trailing cells and
+  the gate reports them. An earlier fault injection -- removing the damage
+  clear entirely -- was not caught and should not have been, because the
+  background quads repaint those cells anyway.
+
+  A note on method, since it cost a suite run. terminal_soak_gate.rb is
+  sensitive to load on the build host: it failed inside a full run while gates
+  and builds were running alongside it, and passed 38/0 when the suite had the
+  machine to itself. Do not interpret a soak failure without knowing what else
+  was running.
+
+  Unchanged from 0.1.425: every pixel claim is measured on the SDL path.
+  src/blit_kms.c carries the synchronized-output, cursor-glyph, italic and
+  session-default changes and none of it has been seen on a screen -- the live
+  host presents through SDL3/opengles2, and reaching the direct KMS path needs
+  BLIT_DISPLAY_BACKEND=kms in the server's environment, which the API cannot
+  set.
