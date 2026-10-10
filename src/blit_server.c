@@ -56,6 +56,7 @@ extern char **environ;
 #define BLIT_MAX_CELL_ROWS 160
 #define BLIT_MAX_INPUT_DEVICES 32
 #define BLIT_MAX_AUDIO_DEVICES 64
+#define BLIT_MAX_SAMPLE_RATES 16
 #define BLIT_STREAM_DIAGNOSTICS 1
 #define BLIT_STREAM_SURFACES 2
 #define BLIT_STREAM_FRAMES 4
@@ -356,7 +357,9 @@ typedef struct {
     char subname[128];
     char format[32];
     int channels;
-    int sample_rate;
+    int sample_rates[BLIT_MAX_SAMPLE_RATES];
+    int sample_rate_count;
+    int sample_rates_continuous;
     int is_default;
     unsigned long long revision;
 } BlitAudioDevice;
@@ -2915,9 +2918,30 @@ static void record_audio_device(BlitRuntime *runtime, int card,
     if (read_section_value(path, playback ? "Playback" : "Capture",
                            "Channels", value, sizeof(value)))
         audio->channels = atoi(value);
+    /* ALSA publishes a comma-separated list: the live host's QuadCast reports
+       "8000, 11025, 16000, 22050, 32000, 44100, 48000". Taking atoi of the
+       line said the device supported 8 kHz and nothing else, which is a claim
+       about the hardware rather than a shortcut -- caught by reading the
+       deployed inventory, not by the gate, whose fixture had one rate. A
+       driver may also publish a range as "44100 - 48000"; the integers are
+       still reported, with a flag so a client is not told a range is a
+       list. */
     if (read_section_value(path, playback ? "Playback" : "Capture", "Rates",
-                           value, sizeof(value)))
-        audio->sample_rate = atoi(value);
+                           value, sizeof(value))) {
+        const char *cursor = value;
+        audio->sample_rate_count = 0;
+        audio->sample_rates_continuous = strchr(value, '-') != NULL;
+        while (*cursor != '\0' &&
+               audio->sample_rate_count < BLIT_MAX_SAMPLE_RATES) {
+            while (*cursor != '\0' && (*cursor < '0' || *cursor > '9'))
+                ++cursor;
+            if (*cursor == '\0')
+                break;
+            audio->sample_rates[audio->sample_rate_count++] = atoi(cursor);
+            while (*cursor >= '0' && *cursor <= '9')
+                ++cursor;
+        }
+    }
     audio->seen = 1;
     audio->present = 1;
 }
@@ -3005,9 +3029,19 @@ static size_t audio_device_item_json(const BlitAudioDevice *audio, char *body,
     if (audio->channels > 0)
         complete &= json_appendf(body, capacity, &used, ",\"channels\":%d",
                                  audio->channels);
-    if (audio->sample_rate > 0)
+    if (audio->sample_rate_count > 0) {
+        int rate_index;
+        complete &= json_appendf(body, capacity, &used, ",\"sample_rates\":[");
+        for (rate_index = 0; rate_index < audio->sample_rate_count;
+             ++rate_index)
+            complete &= json_appendf(body, capacity, &used, "%s%d",
+                                     rate_index == 0 ? "" : ",",
+                                     audio->sample_rates[rate_index]);
         complete &= json_appendf(body, capacity, &used,
-                                 ",\"sample_rates\":[%d]", audio->sample_rate);
+                                 "],\"sample_rates_continuous\":%s",
+                                 audio->sample_rates_continuous ? "true" :
+                                 "false");
+    }
     complete &= json_appendf(body, capacity, &used,
         ",\"identity\":{\"card\":%d,\"card_id\":\"%s\",\"device\":%d,"
         "\"subname\":\"%s\"},"

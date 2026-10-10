@@ -1445,7 +1445,17 @@ components:
         channels: {type: integer, minimum: 1}
         sample_rates:
           type: array
+          description: >-
+            Every rate the driver lists for this direction. ALSA publishes
+            them as a comma-separated line, so a single value here means the
+            device reported one rate and not that only the first was read.
           items: {type: integer, minimum: 1}
+        sample_rates_continuous:
+          type: boolean
+          description: >-
+            True when the driver published a range rather than a list, in
+            which case `sample_rates` holds the integers it named -- the
+            endpoints -- and not every usable rate between them.
         identity:
           type: object
           required: [card, card_id, device, subname]

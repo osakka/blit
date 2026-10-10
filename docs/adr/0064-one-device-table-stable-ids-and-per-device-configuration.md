@@ -220,7 +220,12 @@ from the card's stream description, read **per direction**: a USB card's
 `stream0` has separate `Playback:` and `Capture:` blocks whose formats differ,
 so taking the first match in the file reports the playback format for a
 capture device. A card that publishes no stream description reports none,
-rather than the `s16le` the old inventory asserted for everything.
+rather than the `s16le` the old inventory asserted for everything. Rates are a
+comma-separated line — the live host's QuadCast publishes seven, from 8 kHz to
+48 kHz — so every one of them is reported; reading the first integer said the
+device supported 8 kHz and nothing else, which is a claim about the hardware
+rather than a shortcut, and it was the deployed inventory that showed it
+rather than the gate, whose first fixture had a single rate.
 
 **Audio configuration is the choice of default, and nothing more.** Blit has
 no audio engine: it cannot route a stream, mix, or change a level.

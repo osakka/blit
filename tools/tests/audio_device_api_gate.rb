@@ -53,7 +53,7 @@ STREAM0 = <<~'TEXT'
       Altset 1
       Format: S24_3LE
       Channels: 1
-      Rates: 96000
+      Rates: 8000, 11025, 16000, 22050, 32000, 44100, 48000
 TEXT
 
 def pcm_info(card, device, stream, name)
@@ -167,8 +167,16 @@ Dir.mktmpdir('blit-audio') do |root|
         capture['formats'] == ['S24_3LE']
       failures << "the capture device reports #{capture['channels'].inspect} " \
                   'channels, wanted 1' unless capture['channels'] == 1
-      failures << "the capture device reports #{capture['sample_rates'].inspect}" unless
-        capture['sample_rates'] == [96000]
+      # ALSA publishes a comma-separated list, and the live QuadCast
+      # publishes seven rates. Taking the first integer said the device
+      # supported 8 kHz and nothing else -- a claim about the hardware, not a
+      # shortcut, and one the first version of this fixture could not catch
+      # because it had a single rate.
+      failures << "the capture device reports #{capture['sample_rates'].inspect}, " \
+                  'wanted every rate on the line' unless
+        capture['sample_rates'] == [8000, 11025, 16000, 22050, 32000, 44100, 48000]
+      failures << 'a comma-separated rate list was reported as continuous' if
+        capture['sample_rates_continuous'] == true
     end
     first_playback = devices.find { |d| d['id'] == 'audio-quadcast-pcm0-p' }
     if first_playback
@@ -250,6 +258,6 @@ unless failures.empty?
 end
 
 puts 'AUDIO_DEVICE_API_PASS pcms=3 per_pcm_not_per_card=yes ' \
-     'section_scoped_formats=yes one_default_per_direction=yes ' \
+     'section_scoped_formats=yes rate_list=7 one_default_per_direction=yes ' \
      'unknown_property=400 stale_revision=409 unknown_id=404 ' \
      'default_exported_to_new_session=yes'
