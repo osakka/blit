@@ -1091,6 +1091,99 @@ snapshot = run_case(base, 'decrqss-scroll-query',
                     "stty -icanon -echo min 0 time 5; printf '\\033P$qr\\033\\\\'; dd if=/dev/tty bs=1 count=11 2>/dev/null | od -An -tx1 | tr -d ' \\n'", width: 80)
 assert_equal('1b50312472313b34721b5c', row_text(snapshot), 'DECRQSS reply')
 
+# Issue #1: XTSMGRAPHICS is CSI ? Pi ; Pa ; Pv S. It used to fall through to
+# SU and scroll the screen, which means the first thing a sixel-capable
+# application did to Blit was destroy a line of output and then get no answer.
+# Echo is off in every case here: the reply Blit writes to the PTY would
+# otherwise come back through the line discipline and land on the grid, which
+# would make the no-scroll assertion test the wrong thing.
+xtsm_baseline = run_case(base, 'xtsmgraphics-baseline',
+                         "stty -echo; printf 'AAAA1\\nBBBB2\\nCCCC3\\nDDDD4'")
+assert_equal('AAAA1', row_text(xtsm_baseline), 'XTSMGRAPHICS fixture first row')
+%w[?1;1;0S ?2;1;0S ?3;1;0S ?1;4;0S ?2;2;0T].each do |sequence|
+  after = run_case(base, "xtsmgraphics-no-scroll-#{sequence.gsub(/[^a-zA-Z0-9]/, '')}",
+                   "stty -echo; printf 'AAAA1\\nBBBB2\\nCCCC3\\nDDDD4'; " \
+                   "printf '\\033[#{sequence}'")
+  assert_equal(screen_text(xtsm_baseline), screen_text(after),
+               "CSI #{sequence} leaves the grid alone")
+end
+puts 'PASS xtsmgraphics-does-not-scroll'
+
+# ...and SU/SD themselves must still scroll, which is what the prefix guard
+# could plausibly have broken.
+scrolled = run_case(base, 'xtsmgraphics-su-still-scrolls',
+                    "stty -echo; printf 'AAAA1\\nBBBB2\\nCCCC3\\nDDDD4'; printf '\\033[1S'")
+assert_equal('BBBB2', row_text(scrolled), 'CSI 1 S still scrolls up')
+
+# The reply reports the limits this build actually enforces: 256 colour
+# registers and 512x512 sixel geometry, both named in src/blit_graphics.h so
+# the answer cannot drift from the enforcement.
+snapshot = run_case(base, 'xtsmgraphics-colour-registers',
+                    "stty -icanon -echo min 0 time 5; printf '\\033[?1;1;0S'; " \
+                    'dd if=/dev/tty bs=1 count=11 2>/dev/null | od -An -tx1 | tr -d \' \\n\'',
+                    width: 80)
+assert_equal('1b5b3f313b303b32353653', row_text(snapshot),
+             'XTSMGRAPHICS colour-register reply')
+
+snapshot = run_case(base, 'xtsmgraphics-sixel-geometry',
+                    "stty -icanon -echo min 0 time 5; printf '\\033[?2;1;0S'; " \
+                    'dd if=/dev/tty bs=1 count=15 2>/dev/null | od -An -tx1 | tr -d \' \\n\'',
+                    width: 80)
+assert_equal('1b5b3f323b303b3531323b35313253', row_text(snapshot),
+             'XTSMGRAPHICS sixel-geometry reply')
+
+# An unrecognised item is Ps=1 (error) rather than silence; ReGIS is item 3
+# and this build has no ReGIS decoder.
+snapshot = run_case(base, 'xtsmgraphics-regis-unsupported',
+                    "stty -icanon -echo min 0 time 5; printf '\\033[?3;1;0S'; " \
+                    'dd if=/dev/tty bs=1 count=10 2>/dev/null | od -An -tx1 | tr -d \' \\n\'',
+                    width: 80)
+assert_equal('1b5b3f333b313b3053', row_text(snapshot),
+             'XTSMGRAPHICS reports ReGIS as an error rather than not answering')
+puts 'PASS xtsmgraphics-reply'
+
+# Issue #6 / ADR 0059: CSI > u, CSI < u, CSI = ... u and CSI ? u are the Kitty
+# keyboard protocol's flag sequences. They used to be cursor save/restore, so a
+# client performing the standard handshake had its cursor dragged back to
+# wherever it was when it enabled the protocol.
+snapshot = run_case(base, 'kitty-keyboard-push-pop-cursor',
+                    "stty -echo; printf '\\033[10;20H'; printf '\\033[>1u'; " \
+                    "printf '\\033[2;2H'; printf '\\033[<u'", width: 40, height: 12)
+assert_equal(1, snapshot.fetch('cursor').fetch('x'),
+             'a keyboard-flag pop does not move the cursor')
+assert_equal(1, snapshot.fetch('cursor').fetch('y'),
+             'a keyboard-flag pop does not move the cursor vertically')
+
+snapshot = run_case(base, 'kitty-keyboard-set-cursor',
+                    "stty -echo; printf '\\033[5;7H'; printf '\\033[=9;3u'; " \
+                    "printf '\\033[<3u'", width: 40, height: 12)
+assert_equal(6, snapshot.fetch('cursor').fetch('x'),
+             'a keyboard-flag set and a deep pop do not move the cursor')
+assert_equal(4, snapshot.fetch('cursor').fetch('y'),
+             'a keyboard-flag set and a deep pop do not move the cursor vertically')
+
+# ...and none of them print their parameters into the grid.
+assert_equal('', screen_text(snapshot).strip,
+             'keyboard-flag sequences leave no text behind')
+puts 'PASS kitty-keyboard-flags-do-not-move-the-cursor'
+
+# The query answers what is in effect, which is nothing -- before and after a
+# push. Reporting back a flag that is not honoured would be the invisible
+# failure ADR 0059 rejects.
+snapshot = run_case(base, 'kitty-keyboard-query',
+                    "stty -icanon -echo min 0 time 5; printf '\\033[?u'; " \
+                    'dd if=/dev/tty bs=1 count=5 2>/dev/null | od -An -tx1 | tr -d \' \\n\'',
+                    width: 80)
+assert_equal('1b5b3f3075', row_text(snapshot), 'CSI ? u reports no flags in effect')
+
+snapshot = run_case(base, 'kitty-keyboard-query-after-push',
+                    "stty -icanon -echo min 0 time 5; printf '\\033[>5u'; printf '\\033[?u'; " \
+                    'dd if=/dev/tty bs=1 count=5 2>/dev/null | od -An -tx1 | tr -d \' \\n\'',
+                    width: 80)
+assert_equal('1b5b3f3075', row_text(snapshot),
+             'CSI ? u reports what is honoured, not what was requested')
+puts 'PASS kitty-keyboard-query'
+
 snapshot = run_case(base, 'xtgettcap-query',
                     "stty -icanon -echo min 0 time 5; printf '\\033P+q544e\\033\\\\'; dd if=/dev/tty bs=1 count=11 2>/dev/null | od -An -tx1 | tr -d ' \\n'", width: 80)
 assert_equal('1b50302b72353434651b5c', row_text(snapshot), 'XTGETTCAP reply')
@@ -1195,12 +1288,37 @@ assert_equal(false, snapshot.fetch('cursor').fetch('visible'), 'cursor hidden')
 snapshot = run_case(base, 'cursor-style', "printf '\\033[2 qX\\033[4 q'")
 assert_equal(4, snapshot.fetch('cursor').fetch('style'), 'DECSCUSR steady underline')
 
-snapshot = run_case(base, 'kitty-cursor-restore',
-                    "printf '\\033[3;4H\\0337\\033[1;1HAB\\033[?uCD'",
+# ADR 0059 replaced CSI ? u as cursor-restore with the Kitty keyboard query,
+# so this vector now asserts the opposite of what it used to: the sequence
+# must NOT restore the DECSC slot, and printing continues where it was.
+snapshot = run_case(base, 'kitty-keyboard-query-does-not-restore',
+                    "stty -echo; printf '\\033[3;4H\\0337\\033[1;1HAB\\033[?uCD'",
                     width: 8, height: 4)
 cells = cell_map(snapshot)
-assert_equal('C', cells.fetch([3, 2]).fetch('text'), 'kitty restore prefix')
-assert_equal('D', cells.fetch([4, 2]).fetch('text'), 'kitty restore target')
+assert_equal('C', cells.fetch([2, 0]).fetch('text'),
+             'CSI ? u does not restore the saved cursor')
+assert_equal('D', cells.fetch([3, 0]).fetch('text'),
+             'printing continues from where the query found the cursor')
+# The snapshot is sparse, so an untouched cell is absent rather than a space.
+assert_equal(false, cells.key?([3, 2]),
+             'nothing is printed at the DECSC slot')
+# ...and DECRC itself still restores it, which is the sequence that should.
+snapshot = run_case(base, 'decsc-still-restores',
+                    "stty -echo; printf '\\033[3;4H\\0337\\033[1;1HAB\\0338CD'",
+                    width: 8, height: 4)
+cells = cell_map(snapshot)
+assert_equal('C', cells.fetch([3, 2]).fetch('text'), 'ESC 8 restores the cursor')
+puts 'PASS kitty-keyboard-query-is-not-cursor-restore'
+
+# The reply is CSI ? 0 u, which carries a parameter, while the query carries
+# none. With the tty echoing, a reply written to the PTY comes back as input,
+# so a terminal that answered the parameterised form would answer the echo of
+# its own answer without end. Echo is deliberately left ON here.
+snapshot = run_case(base, 'kitty-keyboard-query-echo-loop',
+                    "printf '\\033[?u'; sleep 0.3", width: 20, height: 4)
+assert_equal(true, screen_text(snapshot).strip.length < 40,
+             'an echoed keyboard-flag reply is not answered again')
+puts 'PASS kitty-keyboard-query-does-not-loop'
 
 kitty_data = Base64.strict_encode64("\xFF\x00\x00" * 4)
 run_session_field_case(base, 'normal-session-has-no-graphics',
@@ -1318,6 +1436,47 @@ assert_equal(raw_images.fetch(0).fetch('height'), png_images.fetch(0).fetch('hei
 assert_equal(32, png_images.fetch(0).fetch('format'), 'PNG decodes to RGBA')
 assert_equal(true, png_images.fetch(0).fetch('complete'), 'PNG transmission completes')
 puts 'PASS kitty-png-transmission'
+
+# Issue #13 / ADR 0056: o=z is the protocol's answer to a bounded transport,
+# which is what a PTY is. The same 2x2 image goes out three ways -- raw, zlib
+# of the raw samples, and zlib of the PNG container -- and all three must
+# produce the same picture. pixel_crc32 is what makes that assertable:
+# dimensions and byte counts agree for images that differ.
+zlib_images = graphics_case(base, 'kitty-zlib-rgba',
+  "\\033_Ga=T,f=32,s=2,v=2,o=z;" \
+  "#{Base64.strict_encode64(Zlib::Deflate.deflate(rgba_pixels))}\\033\\\\")
+assert_equal(1, zlib_images.length, 'o=z with f=32 produces one image')
+assert_equal(true, zlib_images.fetch(0).fetch('complete'), 'o=z completes')
+assert_equal(raw_images.fetch(0).fetch('pixel_crc32'),
+             zlib_images.fetch(0).fetch('pixel_crc32'),
+             'o=z inflates to the same pixels as the raw transmission')
+
+zlib_png_images = graphics_case(base, 'kitty-zlib-png',
+  "\\033_Ga=T,f=100,o=z;" \
+  "#{Base64.strict_encode64(Zlib::Deflate.deflate(png_bytes))}\\033\\\\")
+assert_equal(1, zlib_png_images.length, 'o=z with f=100 produces one image')
+assert_equal(raw_images.fetch(0).fetch('pixel_crc32'),
+             zlib_png_images.fetch(0).fetch('pixel_crc32'),
+             'a deflated PNG decodes to the same pixels')
+puts 'PASS kitty-zlib-transmission'
+
+# A stream that is not inflatable, and one that inflates to the wrong size for
+# the declared s and v, must both be refused rather than half-accepted. The
+# second is the one that matters: the size is an assertion, not a hint.
+assert_equal(0, graphics_case(base, 'kitty-zlib-garbage',
+  "\\033_Ga=T,f=32,s=2,v=2,o=z;#{Base64.strict_encode64('not a zlib stream')}" \
+  "\\033\\\\").length,
+             'an uninflatable o=z payload creates no image')
+assert_equal(0, graphics_case(base, 'kitty-zlib-wrong-size',
+  "\\033_Ga=T,f=32,s=4,v=4,o=z;" \
+  "#{Base64.strict_encode64(Zlib::Deflate.deflate(rgba_pixels))}\\033\\\\").length,
+             'an o=z payload inflating to the wrong size creates no image')
+# An unknown compression must say so rather than be treated as raw bytes,
+# which is the failure this issue was about.
+assert_equal(0, graphics_case(base, 'kitty-unknown-compression',
+  "\\033_Ga=T,f=32,s=2,v=2,o=q;#{Base64.strict_encode64(rgba_pixels)}\\033\\\\").length,
+             'an unknown o value creates no image')
+puts 'PASS kitty-zlib-rejects-malformed'
 
 # A container that is not a decodable PNG must be refused, not half-accepted.
 assert_equal(0, graphics_case(base, 'kitty-png-malformed',

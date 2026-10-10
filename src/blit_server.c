@@ -410,9 +410,6 @@ typedef struct {
     int terminal_alternate;
     int terminal_saved_x;
     int terminal_saved_y;
-    int terminal_cursor_saved;
-    int terminal_cursor_saved_x;
-    int terminal_cursor_saved_y;
     BlitSavedCursor terminal_saved_cursor[2];
     BlitSavedCursor terminal_alternate_saved_cursor;
     int terminal_dec_cursor_saved;
@@ -5140,6 +5137,8 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
     char *payload = session->terminal_string;
     char *separator;
     char action[8];
+    char compression[8];
+    int compressed = 0;
     int image_id = 0;
     int format = 0;
     int width = 0;
@@ -5186,6 +5185,18 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
     if (placement_width < 0 || placement_height < 0) {
         graphics_reject(session, "placement-bounds");
         return;
+    }
+    /* o is the transmission's compression. The protocol defines exactly one
+       value, so anything else is refused rather than quietly treated as raw
+       bytes -- treating it as raw is what made an o=z transmission fail the
+       pixel-size check instead of saying why. ADR 0056. */
+    if (kitty_parameter(payload, 'o', compression, sizeof(compression))) {
+        if (strcmp(compression, "z") != 0) {
+            graphics_reject(session, "unsupported-compression");
+            kitty_reply(session, image_id, quiet, "EINVAL");
+            return;
+        }
+        compressed = 1;
     }
     /* Hibr emits the protocol's canonical a=T form.  The following chunks
        deliberately omit a and carry only q=2, so an absent action means a
@@ -5276,6 +5287,9 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
         if (format == 0) format = image->format;
         if (width == 0) width = image->width;
         if (height == 0) height = image->height;
+        /* A continuation chunk carries only m and q, so the transmission's
+           compression is whatever the first chunk declared. */
+        if (action[0] == '\0') compressed = image->compressed;
     }
     /* f=100 is PNG. It is the protocol's only self-describing format, so
        s and v are optional and the real dimensions are not known until the
@@ -5325,7 +5339,12 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
            prove opacity incrementally before using the packed KMS path. */
         image->opaque = 0;
         image->encoded = format == 100;
-        image->capacity = image->encoded ?
+        image->compressed = compressed;
+        /* A staged payload -- a PNG container, a zlib stream, or a deflated
+           PNG which is both -- has no known length until it has been parsed,
+           so it accumulates against the staging bound instead of the pixel
+           size. */
+        image->capacity = (image->encoded || image->compressed) ?
             (size_t)BLIT_GRAPHICS_MAX_ENCODED_BYTES :
             (size_t)width * (size_t)height * (format == 24 ? 3U : 4U);
         if (image->capacity > BLIT_GRAPHICS_MAX_BYTES) {
@@ -5360,10 +5379,44 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
     }
     if (!more) {
         if (image->base64_tail_length != 0 ||
-            (!image->encoded && image->bytes != image->capacity)) {
+            (!image->encoded && !image->compressed &&
+             image->bytes != image->capacity)) {
             graphics_image_release(image);
             graphics_reject(session, "incomplete-data");
             return;
+        }
+        /* Inflate before anything reads the payload as content. For f=24/32
+           the inflated length is fixed by s and v, so it is both the bound
+           and an assertion: a stream that inflates to a different size is a
+           reject, not a resize. For f=100 the length is unknown until the
+           PNG is parsed, so the staging bound applies and png_decode checks
+           the result. ADR 0056. */
+        if (image->compressed) {
+            size_t expected = image->encoded ?
+                (size_t)BLIT_GRAPHICS_MAX_ENCODED_BYTES :
+                (size_t)image->width * (size_t)image->height *
+                    (image->format == 24 ? 3U : 4U);
+            unsigned char *inflated = (unsigned char *)malloc(
+                expected > 0 ? expected : 1U);
+            uLongf produced = (uLongf)expected;
+            if (inflated == NULL) {
+                graphics_image_release(image);
+                graphics_reject(session, "allocation-failed");
+                return;
+            }
+            if (uncompress(inflated, &produced, image->pixels,
+                           (uLong)image->bytes) != Z_OK ||
+                (!image->encoded && (size_t)produced != expected)) {
+                free(inflated);
+                graphics_image_release(image);
+                graphics_reject(session, "invalid-compressed-data");
+                return;
+            }
+            free(image->pixels);
+            image->pixels = inflated;
+            image->bytes = (size_t)produced;
+            image->capacity = expected;
+            image->compressed = 0;
         }
         if (image->encoded) {
             /* The container is complete; replace it with decoded samples.
@@ -5429,7 +5482,7 @@ static void terminal_apply_sixel(BlitSession *session, BlitSurface *surface,
                                  const char *body)
 {
     unsigned char *scratch;
-    uint32_t palette[256];
+    uint32_t palette[BLIT_SIXEL_COLOR_REGISTERS];
     const char *cursor = body;
     int current_color = 0;
     int x = 0;
@@ -5442,12 +5495,13 @@ static void terminal_apply_sixel(BlitSession *session, BlitSurface *surface,
     BlitGraphicsImage *image = NULL;
     int image_id = 1;
 
-    scratch = (unsigned char *)calloc(512U * 512U, 4U);
+    scratch = (unsigned char *)calloc((size_t)BLIT_SIXEL_MAX_DIMENSION *
+                                      (size_t)BLIT_SIXEL_MAX_DIMENSION, 4U);
     if (scratch == NULL) {
         graphics_reject(session, "sixel-allocation-failed");
         return;
     }
-    for (i = 0; i < 256; ++i)
+    for (i = 0; i < BLIT_SIXEL_COLOR_REGISTERS; ++i)
         palette[i] = 0xffffffU;
     palette[0] = 0x000000U;
     while (*cursor != '\0') {
@@ -5465,7 +5519,8 @@ static void terminal_apply_sixel(BlitSession *session, BlitSurface *surface,
             height = sixel_number(&cursor, 0);
             (void)aspect_y;
             (void)aspect_x;
-            if (width < 0 || height < 0 || width > 512 || height > 512) {
+            if (width < 0 || height < 0 || width > BLIT_SIXEL_MAX_DIMENSION ||
+                height > BLIT_SIXEL_MAX_DIMENSION) {
                 free(scratch);
                 graphics_reject(session, "sixel-bounds");
                 return;
@@ -5474,7 +5529,7 @@ static void terminal_apply_sixel(BlitSession *session, BlitSurface *surface,
             raster_height = height;
         } else if (command == '#') {
             int colour = sixel_number(&cursor, -1);
-            if (colour < 0 || colour > 255) {
+            if (colour < 0 || colour >= BLIT_SIXEL_COLOR_REGISTERS) {
                 free(scratch);
                 graphics_reject(session, "sixel-colour");
                 return;
@@ -5508,7 +5563,7 @@ static void terminal_apply_sixel(BlitSession *session, BlitSurface *surface,
             int repeat = sixel_number(&cursor, -1);
             unsigned char sixel;
             int bit;
-            if (repeat < 1 || repeat > 512 || *cursor < '?' || *cursor > '~') {
+            if (repeat < 1 || repeat > BLIT_SIXEL_MAX_DIMENSION || *cursor < '?' || *cursor > '~') {
                 free(scratch);
                 graphics_reject(session, "sixel-repeat");
                 return;
@@ -5517,13 +5572,15 @@ static void terminal_apply_sixel(BlitSession *session, BlitSurface *surface,
             for (i = 0; i < repeat; ++i) {
                 for (bit = 0; bit < 6; ++bit)
                     if (sixel & (1U << bit)) {
-                        if (x >= 512 || y + bit >= 512) {
+                        if (x >= BLIT_SIXEL_MAX_DIMENSION ||
+                            y + bit >= BLIT_SIXEL_MAX_DIMENSION) {
                             free(scratch);
                             graphics_reject(session, "sixel-bounds");
                             return;
                         }
                         {
-                            size_t pixel_offset = ((size_t)(y + bit) * 512U +
+                            size_t pixel_offset = ((size_t)(y + bit) *
+                                     (size_t)BLIT_SIXEL_MAX_DIMENSION +
                                 (size_t)x) * 4U;
                             uint32_t colour = palette[current_color];
                             scratch[pixel_offset] = (unsigned char)(colour >> 16);
@@ -5904,7 +5961,8 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
     /* Any cursor-addressing/control sequence consumes a deferred wrap. */
     session->terminal_wrap_pending = 0;
 
-    if (*cursor == '?' || *cursor == '>' || *cursor == '<') {
+    if (*cursor == '?' || *cursor == '>' || *cursor == '<' ||
+        *cursor == '=') {
         prefix = *cursor;
         private_mode = prefix == '?';
         ++cursor;
@@ -5922,18 +5980,15 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         ++cursor;
         has_second = terminal_number(&cursor, &second);
     }
-    if ((prefix == '>' || prefix == '<') && command == 'u') {
-        if (prefix == '>') {
-            session->terminal_cursor_saved = 1;
-            session->terminal_cursor_saved_x = surface->cursor_x;
-            session->terminal_cursor_saved_y = surface->cursor_y;
-        } else if (session->terminal_cursor_saved) {
-            surface->cursor_x = session->terminal_cursor_saved_x;
-            surface->cursor_y = session->terminal_cursor_saved_y;
-            mark_cursor_damage(surface, surface->cursor_x, surface->cursor_y);
-        }
+    /* ADR 0059: these are the Kitty keyboard protocol's flag sequences, not
+       cursor save/restore. Blit honours no keyboard enhancement flag, so a
+       push, a pop and a set are accepted and consumed without storing
+       anything -- a stack nothing can act on would report a flag back to the
+       client and then not honour it, which is a worse failure than the cursor
+       jump this replaces because it is invisible. Cursor save/restore keeps
+       SCOSC/SCORC and DECSC/DECRC. */
+    if ((prefix == '>' || prefix == '<' || prefix == '=') && command == 'u')
         return;
-    }
     if (prefix == '>' && command == 'c' && (!has_first || first == 0)) {
         terminal_write_reply(session, "\033[>1;10;0c");
         return;
@@ -5945,6 +6000,49 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
     /* CSI > ... m is the modifyOtherKeys family, not SGR.  It changes
        keyboard encoding and must never alter the cell attributes. */
     if (prefix == '>')
+        return;
+    /* XTSMGRAPHICS: CSI ? Pi ; Pa ; Pv S, answered CSI ? Pi ; Ps ; Pv S.
+       This is the query an application sends to decide whether to use sixel
+       at all, so it has to be answered before the final byte reaches the
+       scroll branch -- where it used to land, scrolling the screen by a line
+       and then not replying. Issue #1. */
+    if (private_mode && command == 'S') {
+        char reply[64];
+        int item = has_first ? first : 0;
+        int action = has_second ? second : 0;
+        if (item == 1) {
+            /* Colour registers. The count is fixed, so a read and a read of
+               the maximum are the same answer and a reset is already at its
+               only value; only an attempt to set it fails. */
+            if (action == 1 || action == 2 || action == 4)
+                snprintf(reply, sizeof(reply), "\033[?1;0;%dS",
+                         BLIT_SIXEL_COLOR_REGISTERS);
+            else if (action == 3)
+                snprintf(reply, sizeof(reply), "\033[?1;3;%dS",
+                         BLIT_SIXEL_COLOR_REGISTERS);
+            else
+                snprintf(reply, sizeof(reply), "\033[?1;2;0S");
+        } else if (item == 2) {
+            /* Sixel geometry, reported as width then height. */
+            if (action == 1 || action == 2 || action == 4)
+                snprintf(reply, sizeof(reply), "\033[?2;0;%d;%dS",
+                         BLIT_SIXEL_MAX_DIMENSION, BLIT_SIXEL_MAX_DIMENSION);
+            else if (action == 3)
+                snprintf(reply, sizeof(reply), "\033[?2;3;%d;%dS",
+                         BLIT_SIXEL_MAX_DIMENSION, BLIT_SIXEL_MAX_DIMENSION);
+            else
+                snprintf(reply, sizeof(reply), "\033[?2;2;0S");
+        } else {
+            /* Ps=1 is "error": an unrecognised item, which includes ReGIS
+               (Pi=3) because this build has no ReGIS decoder. */
+            snprintf(reply, sizeof(reply), "\033[?%d;1;0S", item);
+        }
+        terminal_write_reply(session, reply);
+        return;
+    }
+    /* CSI ? Ps ; Ps T is xterm's reset-title-modes, not scroll-down. It is
+       not implemented, but it must not scroll. */
+    if (private_mode && command == 'T')
         return;
     if (private_mode && (command == 'h' || command == 'l')) {
         int enabled = command == 'h';
@@ -6053,10 +6151,18 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         return;
     }
     if (private_mode && command == 'u') {
-        /* Kitty's cursor query/restore form.  Hibr treats the query as the
-           restore operation for the xterm-compatible terminal contract. */
-        if (terminal_saved_cursor(session)->valid)
-            terminal_restore_cursor(session, surface);
+        /* ADR 0059: the Kitty keyboard protocol's query. Report what is in
+           effect, which is nothing: answering zero is the protocol's feedback
+           loop working, and it lets a client fall back at once instead of
+           waiting for a reply that never came.
+
+           Only the parameterless form is the query. The reply is CSI ? 0 u,
+           which carries a parameter, and that distinction is load-bearing
+           rather than pedantic: with the tty echoing, a reply written to the
+           PTY comes straight back as input, so answering a parameterised
+           CSI ? Ps u would answer the echo of its own answer, forever. */
+        if (!has_first)
+            terminal_write_reply(session, "\033[?0u");
         return;
     }
     if (!private_mode && command == 'p' && has_first &&
@@ -6383,7 +6489,7 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         surface->damage_y = top;
         surface->damage_width = surface->width;
         surface->damage_height = bottom - top + 1;
-    } else if (command == 'S' || command == 'T') {
+    } else if (prefix == 0 && (command == 'S' || command == 'T')) {
         int count = has_first && first > 0 ? first : 1;
         int top = surface->scroll_top;
         int bottom = surface->scroll_bottom;
@@ -7885,16 +7991,30 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
              ++graphics_index) {
             BlitGraphicsImage *image = &session->graphics[graphics_index];
             if (!image->used) continue;
+            /* A checksum of the decoded samples, so a test can assert that
+               two transmissions of the same picture produced the same
+               picture.  Dimensions and byte counts agree for images that
+               differ, which is exactly the case a compression or placement
+               change has to be checked against.  zlib's crc32 is already
+               linked (ADR 0056) and the name says what it is: a checksum for
+               comparison, not a digest for trust.  Zero while a payload is
+               still a staged container rather than samples. */
+            unsigned long pixel_crc = 0;
+            if (image->complete && image->pixels != NULL && image->bytes > 0)
+                pixel_crc = (unsigned long)crc32(
+                    crc32(0UL, NULL, 0), image->pixels,
+                    (uInt)image->bytes);
             used += (size_t)snprintf(body + used, capacity - used,
                 "%s{\"id\":%u,\"protocol\":\"%s\",\"complete\":%s,\"visible\":%s,"
                 "\"width\":%d,\"height\":%d,\"format\":%d,"
-                "\"bytes\":%lu,\"x\":%d,\"y\":%d,"
+                "\"bytes\":%lu,\"pixel_crc32\":%lu,\"x\":%d,\"y\":%d,"
                 "\"placement_width\":%d,\"placement_height\":%d,"
                 "\"z\":%d,\"revision\":%llu}",
                 first_graphics ? "" : ",", image->id, image->protocol,
                 image->complete ? "true" : "false",
                 image->visible ? "true" : "false", image->width,
                 image->height, image->format, (unsigned long)image->bytes,
+                pixel_crc,
                 image->x, image->y, image->placement_width,
                 image->placement_height, image->z, image->revision);
             first_graphics = 0;

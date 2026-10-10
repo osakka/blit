@@ -17,6 +17,12 @@
    a 4096-class display compresses far below this; a payload that exceeds
    it is refused rather than allowed to grow the allocation. ADR 0056. */
 #define BLIT_GRAPHICS_MAX_ENCODED_BYTES (8U * 1024U * 1024U)
+/* The sixel decoder's bounds. They are named because XTSMGRAPHICS reports
+   them to the application: an advertised limit that disagrees with the
+   enforced one is worse than no answer, since a client sizes its image to
+   what it was told. */
+#define BLIT_SIXEL_MAX_DIMENSION 512
+#define BLIT_SIXEL_COLOR_REGISTERS 256
 
 /* Renderer-neutral graphics record.  Kitty and sixel decoders both publish
    into this store; SDL3 and direct KMS receive read-only views of the same
@@ -51,6 +57,12 @@ typedef struct {
        which point width/height/format come from the image itself and this
        clears. ADR 0056. */
     int encoded;
+    /* Set while `pixels` holds a zlib stream rather than the bytes it
+       inflates to (Kitty o=z). The compressed bytes accumulate here across
+       chunks and are inflated in place when the final chunk arrives. It is
+       independent of `encoded`: o=z with f=100 is a deflated PNG, so the
+       payload is inflated first and then decoded. ADR 0056. */
+    int compressed;
 } BlitGraphicsImage;
 
 #endif

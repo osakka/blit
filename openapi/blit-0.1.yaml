@@ -1755,7 +1755,8 @@ components:
       additionalProperties: false
     GraphicsImage:
       type: object
-      required: [id, protocol, complete, visible, width, height, format, bytes, x, y,
+      required: [id, protocol, complete, visible, width, height, format, bytes,
+                 pixel_crc32, x, y,
                  placement_width, placement_height, z, revision]
       properties:
         id: {type: integer, minimum: 1}
@@ -1766,6 +1767,17 @@ components:
         height: {type: integer, minimum: 1, maximum: 4096}
         format: {type: integer, enum: [24, 32]}
         bytes: {type: integer, minimum: 0, maximum: 67108864}
+        pixel_crc32:
+          type: integer
+          minimum: 0
+          maximum: 4294967295
+          description: >-
+            CRC-32 of the decoded samples, for asserting that two
+            transmissions of the same picture produced the same picture.
+            Dimensions and byte counts agree for images that differ, so they
+            cannot serve that purpose. It is a checksum for comparison, not a
+            digest for trust. Zero while the payload is still a staged
+            container rather than samples.
         x: {type: integer}
         y: {type: integer}
         placement_width: {type: integer, minimum: 0, maximum: 4096}

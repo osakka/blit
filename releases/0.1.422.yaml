@@ -1,0 +1,138 @@
+release: 0.1.422
+package: blit_0.1.422-1_amd64.deb
+package_sha256: 6bf060b8eaa746a9fd878fd33e58091dfd8d5f3692acf7f5ba4039da76b3f5cd
+source_commit: 11f49f59736ab6aa63dc189e6d7f6b14c17d7678
+package_documentation_commit: 11f49f59736ab6aa63dc189e6d7f6b14c17d7678
+server_binary_sha256: 81f014115593c133c9fb0e26c67db42d3895950c5334908aad71177850bb0b44
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: ed37dff18e0ba8ad638990b28287ab1aeb22ada5fe7345a3eb17a39733598d87
+hibr_root: /tmp/hibr-0.99.100
+hibr_version: 0.99.100
+tcc_build_acceptance: pass
+openapi_yaml: pass
+api_schema_gate: pass
+package_artifact_acceptance: pass
+network_auth_acceptance: pass_api_token_injected
+terminal_conformance: pass
+session_lifecycle_acceptance: pass
+session_write_resize_acceptance: pass
+stream_replay_acceptance: pass
+font_api_acceptance: pass
+hibr_font_manifest_acceptance: pass
+glyph_geometry_local_pixel_acceptance: pass
+sdl_glyph_filter_acceptance: pass
+external_pointer_composition: pass
+pointer_damage_atomic_acceptance: pass
+pointer_wallpaper_stress_acceptance: pass
+hidden_cursor_damage_acceptance: pass
+sdl_background_batch_acceptance: pass
+sdl_graphics_cache_acceptance: pass
+sdl_wallpaper_damage_acceptance: pass
+screenshot_overlay_acceptance: pass
+pixel_frame_acceptance: pass
+render_state_agreement_acceptance: pass
+adapter_coalesce_acceptance: pass_idle_frame_zero_requests
+graphics_kitty_zlib_acceptance: pass_pixel_crc32_identical_to_raw
+graphics_xtsmgraphics_acceptance: pass_no_scroll_and_enforced_limits_reported
+terminal_kitty_keyboard_acceptance: pass_cursor_unmoved_query_reports_zero
+hibr_singleton_local_acceptance: pass
+hibr_resume_guard_acceptance: pass
+restart_gate: pass
+shutdown_gate: pass
+update_idle_timeout_acceptance: pass
+update_reset_acceptance: pass
+update_cancel_acceptance: pass
+frame_rate_settled_acceptance: pass
+terminal_soak_120s_acceptance: pass
+screenshot_nonblocking_live_acceptance: not_rerun_candidate
+qemu_hibr_lifecycle_acceptance: not_rerun_candidate
+qemu_four_output_pixel_acceptance: not_rerun_candidate
+qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
+live_deployment: pending
+live_current_version: 0.1.421
+live_physical_multi_display: unavailable_one_output
+live_physical_button_trace_contract: open
+physical_evdev_acceptance: open
+physical_multi_monitor_acceptance: open
+physical_high_refresh_acceptance: open
+notes: >-
+  Issues #13 and #1, both gaps in how the terminal parser answers a graphics
+  client, both closed with conformance vectors checked against a build that
+  does not have the fix.
+
+  #13: Kitty o=z, the protocol's zlib compression, is implemented. The o key
+  was never parsed, so a compressed payload was interpreted as raw pixels,
+  failed the size check and was rejected. Measured against the previous
+  build: f=32,s=2,v=2,o=z gave images=0 with last_error invalid-data.
+
+  A compressed payload now stages the zlib stream against the same bound a
+  PNG container uses and is inflated when the final chunk arrives. For f=24
+  and f=32 the inflated length is fixed by s and v, so it is both the bound
+  and an assertion: a stream that inflates to a different size is a typed
+  reject rather than a resize. o=z composes with f=100, which is a deflated
+  PNG: inflate, then decode. An o value other than z is a typed
+  unsupported-compression reject rather than silent raw use.
+
+  GraphicsImage gains pixel_crc32, a CRC-32 of the decoded samples. Asserting
+  that two transmissions produced the same picture was not possible through
+  the API before: dimensions and byte counts agree for images that differ,
+  which is exactly the case a compression or placement change must be checked
+  against. zlib's crc32 is already linked under ADR 0056, and the field is
+  named for what it is -- a checksum for comparison, not a digest for trust.
+
+  #6 / ADR 0059: CSI > u, CSI < u, CSI = ... u and CSI ? u are the Kitty
+  keyboard protocol's flag sequences, and Blit implemented the first two as
+  cursor save/restore and the last as cursor restore. Under the advertised
+  TERM=xterm-kitty a client performing the standard handshake had its cursor
+  dragged back to wherever it was when it enabled the protocol, and CSI ? u
+  was never answered. Measured across both builds: push at row 10 col 20, move
+  to row 2 col 2, pop -- the previous build reports cursor (19,9), this one
+  reports (1,1).
+
+  The sequences now mean what the protocol says and move no cursor. No
+  keyboard enhancement flag is honoured, so CSI ? u answers CSI ? 0 u and no
+  flag stack is kept: a stack would report a flag back and then not honour it,
+  which is a worse failure than the cursor jump because it is invisible.
+  Answering zero is the protocol's feedback loop working -- the client falls
+  back at once rather than waiting for a reply that never came. ADR 0059
+  records why honouring flag 1 is deferred: the only key encoder is
+  send_evdev_key, reachable only from a physical evdev keyboard, and the build
+  machine has no /dev/uinput, so the change could be written but not gated.
+
+  Three session fields that existed only for the removed behaviour are
+  deleted, and docs/terminal-engine.md stops calling the old behaviour
+  Kitty-compatible in both places it said so.
+
+  #1: XTSMGRAPHICS (CSI ? Pi ; Pa ; Pv S) was dispatched without checking the
+  private-parameter prefix, so it fell through to SU and scrolled the screen
+  instead of replying. That made corrupting a line of output the first thing a
+  sixel-capable application did to Blit, followed by a timeout waiting for the
+  answer. CSI ? Ps ; Ps T had the mirror fault and scrolled down.
+
+  Both now answer. Item 1 reports 256 colour registers, item 2 reports 512x512
+  sixel geometry, an unknown item is Ps=1 and an unknown action is Ps=2. Those
+  limits are named in src/blit_graphics.h as BLIT_SIXEL_COLOR_REGISTERS and
+  BLIT_SIXEL_MAX_DIMENSION and the decoder enforces the same constants, so the
+  advertised limit cannot drift from the enforced one -- a client sizes its
+  image to what it was told.
+
+  Twenty-one conformance vectors. For #13: the same 2x2 image as raw, as zlib of
+  the raw samples, and as zlib of the PNG container, all three asserted equal
+  by pixel_crc32; an uninflatable stream, a stream inflating to the wrong size
+  for the declared s and v, and an unknown o value each creating no image. For
+  #1: five private-prefix forms leaving the grid byte-identical, CSI 1 S still
+  scrolling, and the three reply forms asserted as exact bytes read back off
+  /dev/tty. Against the pre-change build the first grid assertion fails with
+  expected "AAAA1BBBB2CCCC3DDDD4", got "BBBB2CCCC3DDDD4". For #6: a push/pop
+  pair and a set/deep-pop pair leaving the cursor where the motion put it,
+  leaving no text on the grid, and CSI ? u answering CSI ? 0 u both before and
+  after a push. Measured across both builds: push at row 10 col 20, move to row
+  2 col 2, pop -- the previous build reports cursor (19,9), this one (1,1).
+
+  One existing vector had to be inverted rather than kept: kitty-cursor-restore
+  asserted the behaviour ADR 0059 removes. The full suite catching that is how
+  a second defect was found. Answering the query writes CSI ? 0 u to the PTY,
+  and with the tty echoing that comes straight back as input, so answering the
+  parameterised CSI ? Ps u form would have answered the echo of its own answer
+  without end. Only the parameterless query is answered, and a vector asserts
+  that with echo deliberately left on.

@@ -52,9 +52,12 @@ shell conformance path is stable.
    styles retain their VT identity even when a backend presents them steadily.
    VT500 C0 vertical-tab/form-feed line feeds and the legacy ESC Z DECID query
    are handled by the same parser and covered by the conformance gate.
-   Kitty-compatible cursor restore (`CSI ? u`) and the ECMA-48 rule that C0
-   controls execute inside CSI are also covered, including CAN/SUB sequence
-   cancellation. SGR conceal (`8`/`28`) is retained in the canonical cell
+   The ECMA-48 rule that C0 controls execute inside CSI is also covered,
+   including CAN/SUB sequence cancellation. `CSI > u`, `CSI < u`,
+   `CSI = ... u` and `CSI ? u` are the Kitty keyboard protocol's flag
+   sequences, not cursor save/restore: they move no cursor, and `CSI ? u`
+   answers `CSI ? 0 u` because no keyboard enhancement flag is honoured
+   ([ADR 0059](adr/0059-kitty-keyboard-flags-own-their-sequences.md)). SGR conceal (`8`/`28`) is retained in the canonical cell
    style and suppressed by both renderers while preserving the cell background.
    Synchronized output (`CSI ? 2026 h/l`) gates presentation of that session's
    output until the application releases the update batch; unrelated displays
@@ -65,8 +68,9 @@ shell conformance path is stable.
    `DT_INK`/`DT_FACE` (or `BLIT_TERMINAL_FG`/`BLIT_TERMINAL_BG`) session
    environment values, preserving Hibr theme negotiation without a shell
    wrapper.
-   Hibr's modifyOtherKeys/cursor push-pop prefixes are parsed without leaking
-   their control parameters into cell attributes.
+   The `CSI >` modifyOtherKeys family and the Kitty keyboard flag prefixes are
+   parsed and consumed without leaking their control parameters into cell
+   attributes.
    SGR italic (`3`/`23`), blink (`5`/`6`/`25`), and strike (`9`/`29`) are
    retained in the canonical style and exposed consistently through the API,
    SDL, and KMS paths.
