@@ -8,6 +8,7 @@
 #       button, the wheel included
 #   #36 DEC 1002 reports motion only while a button is held, and both
 #       tracking modes report once per cell rather than once per sample
+#   #44 input the PTY would not take is counted, not lost in silence
 #
 # The session under test echoes its input with `cat -v`, so the bytes the
 # server wrote to the PTY come back as cells and can be read through the API
@@ -60,10 +61,14 @@ def echoed(surface_id)
       .map { |c| c.fetch('text', ' ') }.join
 end
 
-def reporting_session(modes)
+# `modes` arrives as a single-quoted Ruby literal so the backslash reaches the
+# shell's printf. It must not be a real ESC byte: a JSON-encoded control
+# character does not survive the server's argument parser (see the
+# json_string_array issue).
+def reporting_session(modes, prefix: '', tail: 'cat -v')
   json('POST', '/v1/terminal-sessions',
        'command' => '/bin/sh',
-       'arguments' => ['-c', "printf '#{modes}'; cat -v"],
+       'arguments' => ['-c', "#{prefix}printf '#{modes}'; #{tail}"],
        'display_id' => 'display-1',
        'surface' => { 'width' => 60, 'height' => 8 })
 end
@@ -72,6 +77,21 @@ def move_to(column, row, offset = 2)
   request('POST', '/v1/input/inject', 'kind' => 'pointer_motion',
           'x' => INSET + (column - 1) * CELL_W + offset,
           'y' => INSET + (row - 1) * CELL_H + 2)
+end
+
+# A DELETE returns before the session is gone, and a session that still
+# exists still wins the pointer hit test. Wait for it to actually go.
+def delete_session(id)
+  request('DELETE', "/v1/terminal-sessions/#{id}")
+  Timeout.timeout(5) do
+    loop do
+      break if request('GET', "/v1/terminal-sessions/#{id}").code == '404'
+
+      sleep 0.1
+    end
+  end
+rescue Timeout::Error
+  warn "mouse-report gate: session #{id} did not go away after DELETE"
 end
 
 def wait_for(surface_id, pattern, seconds = 5)
@@ -132,7 +152,7 @@ else
                 "#{button_byte.inspect}, expected 96 (`): #{text.inspect}"
   end
 end
-request('DELETE', "/v1/terminal-sessions/#{legacy.fetch('id')}")
+delete_session(legacy.fetch('id'))
 
 # #36. SGR reports are easier to count than to spell: code, column, row.
 # A code with the 32 bit set is a motion report.
@@ -172,7 +192,7 @@ if resampled.length > dragged.length
 end
 request('POST', '/v1/input/inject', 'kind' => 'pointer_button',
         'button' => 0, 'pressed' => false)
-request('DELETE', "/v1/terminal-sessions/#{tracking.fetch('id')}")
+delete_session(tracking.fetch('id'))
 
 # 1003 is any-event tracking: a bare hover is reported.
 any_event = reporting_session('\033[?1003h\033[?1006h')
@@ -183,7 +203,62 @@ if anywhere.length < 2
   failures << "DEC 1003 reported #{anywhere.length} motion events for a " \
               "hover across three cells, expected at least 2: #{anywhere.inspect}"
 end
-request('DELETE', "/v1/terminal-sessions/#{any_event.fetch('id')}")
+delete_session(any_event.fetch('id'))
+
+# #44. A terminal that has stopped reading fills its input queue, and the PTY
+# master is nonblocking, so the report write is refused. That has to be
+# counted rather than vanishing.
+def dropped_reports
+  json('GET', '/v1/diagnostics/runtime').fetch('performance')
+      .fetch('input_reports_dropped', nil)
+end
+
+deaf = reporting_session('\\033[?1000h\\033[?1006h',
+                         prefix: 'stty raw -echo 2>/dev/null; ',
+                         tail: 'sleep 60')
+sleep 2.0
+before = dropped_reports
+# Fill the input queue: the child puts its tty in raw mode so the queue
+# applies backpressure instead of discarding, and never reads stdin.
+filler = 'x' * 700
+fills = 0
+refused = nil
+40.times do
+  response = request('POST', "/v1/terminal-sessions/#{deaf.fetch('id')}/input",
+                     'data' => filler)
+  unless response.code.start_with?('2')
+    refused = response.code
+    break
+  end
+  fills += 1
+end
+# A refused 700-byte write only means there is no room for 700 bytes; a ten
+# byte report would still fit. Top the queue up one byte at a time until even
+# that is refused, so the report has nowhere to go.
+300.times do
+  response = request('POST', "/v1/terminal-sessions/#{deaf.fetch('id')}/input",
+                     'data' => 'x')
+  break unless response.code.start_with?('2')
+
+  fills += 1
+end
+move_to(3, 1)
+request('POST', '/v1/input/inject', 'kind' => 'pointer_button',
+        'button' => 0, 'pressed' => true)
+request('POST', '/v1/input/inject', 'kind' => 'pointer_button',
+        'button' => 0, 'pressed' => false)
+sleep 0.5
+after = dropped_reports
+if before.nil? || after.nil?
+  failures << 'the runtime diagnostics do not report ' \
+              'performance.input_reports_dropped at all, so a refused input ' \
+              'write is still invisible'
+elsif after <= before
+  failures << 'a mouse report written to a session whose input queue is ' \
+              "full was not counted as dropped (#{before} -> #{after}, " \
+              "#{fills} fills accepted, then #{refused.inspect})"
+end
+delete_session(deaf.fetch('id'))
 
 unless failures.empty?
   failures.each { |f| warn "mouse-report gate: #{f}" }
@@ -191,4 +266,4 @@ unless failures.empty?
 end
 
 puts "MOUSE_REPORT_PASS legacy_wheel_byte=96 hover_1002=0 drag_1002=#{dragged.length} " \
-     "hover_1003=#{anywhere.length}"
+     "hover_1003=#{anywhere.length} reports_dropped=#{before.inspect}->#{after.inspect}"

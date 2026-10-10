@@ -621,6 +621,11 @@ typedef struct {
     unsigned long long diagnostic_evdev_keyboard_key_presses;
     unsigned long long diagnostic_evdev_keyboard_keys_delivered;
     unsigned long long diagnostic_evdev_keyboard_keys_undelivered;
+    /* Physical input the PTY would not take. The master is nonblocking, so a
+       full input queue returns EAGAIN and the bytes are gone; these say so
+       instead of letting the loss be invisible. */
+    unsigned long long diagnostic_input_keys_dropped;
+    unsigned long long diagnostic_input_reports_dropped;
     uint64_t diagnostic_last_evdev_keyboard_event_us;
     char diagnostic_last_evdev_keyboard_path[128];
     unsigned long long diagnostic_sdl_mouse_events_discarded;
@@ -1903,6 +1908,8 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"evdev_keyboard_key_presses\":%llu,"
         "\"evdev_keyboard_keys_delivered\":%llu,"
         "\"evdev_keyboard_keys_undelivered\":%llu,"
+        "\"input_keys_dropped\":%llu,"
+        "\"input_reports_dropped\":%llu,"
         "\"last_evdev_keyboard_event_age_ms\":%llu,"
         "\"last_evdev_keyboard_path\":\"%s\","
         "\"evdev_keyboard_devices\":%s,"
@@ -1978,6 +1985,8 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         runtime->diagnostic_evdev_keyboard_key_presses,
         runtime->diagnostic_evdev_keyboard_keys_delivered,
         runtime->diagnostic_evdev_keyboard_keys_undelivered,
+        runtime->diagnostic_input_keys_dropped,
+        runtime->diagnostic_input_reports_dropped,
         runtime->diagnostic_last_evdev_keyboard_event_us > 0 &&
                 now >= runtime->diagnostic_last_evdev_keyboard_event_us ?
             (unsigned long long)((now -
@@ -14115,14 +14124,38 @@ static void terminal_scrollback_wheel(BlitRuntime *runtime,
     runtime->render_pending = 1;
 }
 
-static void send_focus_report(BlitSession *session, int focused)
+/* A session PTY master is nonblocking so the gateway loop cannot be held by a
+   terminal that has stopped reading. Every physical-input writer therefore has
+   to cope with the write being refused: a partial write is worse than none,
+   because half an escape sequence parses as something else, so a short write
+   counts as a drop rather than being resumed. The counter is the contract --
+   the bytes are not queued -- so a client can tell input was lost instead of
+   wondering why a keystroke did nothing. */
+static int write_input_bytes(BlitSession *session, const char *bytes,
+                             size_t length, unsigned long long *dropped)
+{
+    ssize_t written;
+
+    if (session == NULL || session->pty_fd < 0 || length == 0)
+        return 0;
+    written = write(session->pty_fd, bytes, length);
+    if (written == (ssize_t)length)
+        return 1;
+    if (dropped != NULL)
+        ++*dropped;
+    return 0;
+}
+
+static void send_focus_report(BlitRuntime *runtime, BlitSession *session,
+                              int focused)
 {
     const char *report;
     if (session == NULL || session->pty_fd < 0 ||
         !session->terminal_focus_reporting)
         return;
     report = focused ? "\033[I" : "\033[O";
-    write(session->pty_fd, report, strlen(report));
+    write_input_bytes(session, report, strlen(report),
+                      &runtime->diagnostic_input_reports_dropped);
 }
 
 static void focus_session(BlitRuntime *runtime, BlitSession *target)
@@ -14133,7 +14166,7 @@ static void focus_session(BlitRuntime *runtime, BlitSession *target)
         if (runtime->sessions[i].used &&
             runtime->sessions[i].focused !=
             (target != NULL && &runtime->sessions[i] == target))
-            send_focus_report(&runtime->sessions[i],
+            send_focus_report(runtime, &runtime->sessions[i],
                               target != NULL && &runtime->sessions[i] == target);
         if (runtime->sessions[i].used)
             runtime->sessions[i].focused =
@@ -14201,7 +14234,8 @@ static void send_mouse_report(BlitRuntime *runtime, SDL_WindowID window_id,
         snprintf(report, sizeof(report), "\033[M%c%c%c", code,
                  legacy_column + 32, legacy_row + 32);
     }
-    write(session->pty_fd, report, strlen(report));
+    write_input_bytes(session, report, strlen(report),
+                      &runtime->diagnostic_input_reports_dropped);
 }
 
 static void send_mouse_motion_report(BlitRuntime *runtime,
@@ -14253,7 +14287,8 @@ static void send_mouse_motion_report(BlitRuntime *runtime,
         snprintf(report, sizeof(report), "\033[M%c%c%c", button + 64,
                  (column > 223 ? 223 : column) + 32,
                  (row > 223 ? 223 : row) + 32);
-    write(session->pty_fd, report, strlen(report));
+    write_input_bytes(session, report, strlen(report),
+                      &runtime->diagnostic_input_reports_dropped);
 }
 
 static void update_pointer_position(BlitRuntime *runtime,
@@ -14757,7 +14792,9 @@ static int send_evdev_key(BlitRuntime *runtime, unsigned short code)
             ++length;
         }
         terminal_scrollback_show_live(find_surface_id(runtime, session->id));
-        write(session->pty_fd, sequence, (size_t)length);
+        if (!write_input_bytes(session, sequence, (size_t)length,
+                               &runtime->diagnostic_input_keys_dropped))
+            return 0;
     }
     return length > 0;
 }
