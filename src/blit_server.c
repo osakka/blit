@@ -71,6 +71,11 @@ extern char **environ;
    as many short writes.  Hold presentation briefly after the latest read so
    the renderer never exposes the clear/redraw interval between those writes. */
 #define BLIT_TERMINAL_FRAME_QUIET_US 8000ULL
+/* How long a Hibr desktop may hold a registered owner without painting
+   anything before that is reported as a fault (issue #32). Generous on
+   purpose: a fresh desktop paints within a second, and the cost of being
+   wrong here is a false alarm about a working screen. */
+#define BLIT_HIBR_UNPAINTED_US 10000000ULL
 #define BLIT_MAX_SCROLLBACK_LINES 1000
 #define BLIT_MAX_OVERLAYS 16
 #define BLIT_UPDATE_IDLE_TIMEOUT_US 30000000ULL
@@ -402,6 +407,13 @@ typedef struct {
     int hibr_owner_registered;
     int hibr_resume_requested;
     int hibr_attach_unresolved;
+    /* Cell requests the owner has had accepted for this session's surface,
+       and when it registered. A desktop whose owner registered and then never
+       painted is the blank-but-healthy state of issue #32, and these are what
+       make it visible instead of a guess. */
+    unsigned long long hibr_owner_writes;
+    uint64_t hibr_owner_registered_us;
+    int hibr_unpainted_reported;
     char hibr_session_token[64];
     int terminal_escape;
     /* Hibr emits a single SGR containing bold plus truecolor foreground and
@@ -2238,6 +2250,7 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
 static void diagnostics_json(const BlitRuntime *runtime, char *body,
                              size_t capacity)
 {
+    char errors[128];
     char escaped_error[256];
     char scheduler[4096];
     const char *backend = runtime->direct_kms ? "drm-kms" :
@@ -2268,6 +2281,22 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
         (runtime->output_count == 0 ||
          runtime->output_count != runtime->display_count ||
          runtime->sdl_vsync_failures > 0 ? "scheduler-only" : "sdl-vsync");
+    /* A desktop that registered an owner and never painted is a fault a
+       status check has to be able to see; "ready" describes the display
+       backend and stays separate (issue #32). */
+    {
+        int unpainted = 0;
+        int index;
+        for (index = 0; index < BLIT_MAX_SESSIONS; ++index)
+            if (runtime->sessions[index].used &&
+                runtime->sessions[index].hibr_unpainted_reported &&
+                runtime->sessions[index].hibr_owner_writes == 0)
+                unpainted = 1;
+        snprintf(errors, sizeof(errors), "[%s%s%s]",
+                 runtime->sdl_error[0] ? "\"backend_error\"" : "",
+                 runtime->sdl_error[0] && unpainted ? "," : "",
+                 unpainted ? "\"hibr_desktop_unpainted\"" : "");
+    }
     snprintf(body, capacity,
              "{\"revision\":1,\"health\":{\"ready\":%s,"
              "\"backend\":\"%s\",\"error\":\"%s\"},"
@@ -2310,7 +2339,7 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              runtime->previous_pointer_x, runtime->previous_pointer_y,
              runtime->previous_pointer_output,
              runtime->pointer_dirty ? "true" : "false",
-             runtime->sdl_error[0] ? "[\"backend_error\"]" : "[]",
+             errors,
              runtime_has_failed_display(runtime) ?
                  "[\"display_presentation_failed\"]" :
                  (runtime->evdev_keyboard_count == 0 ||
@@ -8364,6 +8393,32 @@ static void service_attach_reasserts(BlitRuntime *runtime, uint64_t now)
                 disable_input_routes_for_target(runtime, target_id);
             }
         }
+        /* Issue #32. An owner that registered and then never painted leaves
+           a desktop that every status check calls healthy and that shows
+           nothing. Deliberately not fatal, unlike an owner that never
+           registers at all: a slow desktop is still a desktop, and killing
+           one for being slow would be worse than the blankness. Reported
+           once, so a status check can see it and an operator knows to
+           relaunch rather than wonder. */
+        if (session->hibr_owner_registered &&
+            session->hibr_owner_writes == 0 &&
+            !session->hibr_unpainted_reported &&
+            session->hibr_owner_registered_us != 0 &&
+            now > session->hibr_owner_registered_us +
+                      BLIT_HIBR_UNPAINTED_US) {
+            char detail[256];
+            session->hibr_unpainted_reported = 1;
+            snprintf(detail, sizeof(detail),
+                     "session-%llu registered a Hibr owner %llu seconds ago "
+                     "and has had no cell request accepted%s; the surface is "
+                     "whatever it was, which on a reattachment is empty",
+                     session->id,
+                     (unsigned long long)(BLIT_HIBR_UNPAINTED_US / 1000000ULL),
+                     session->hibr_resume_requested ?
+                         " (--resume: the held session's own provider did not "
+                         "survive this server" : "");
+            diagnostic_log(runtime, "error", "hibr_desktop_unpainted", detail);
+        }
         /* Startup output can arrive before Hibr has installed its resize
            handling.  A single SIGWINCH is therefore not a reliable attach
            contract.  Retry for a bounded two-and-a-half second window; this
@@ -8474,13 +8529,16 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
         ",\"hibr_attachment\":{\"resume_requested\":%s,"
         "\"reassert_attempts\":%d,\"owner_matches\":%d,"
         "\"unresolved\":%s,\"owner_registered\":%s,"
-        "\"owner_pid\":%ld}",
+        "\"owner_pid\":%ld,\"owner_writes\":%llu,"
+        "\"owner_painted\":%s}",
         session->hibr_resume_requested ? "true" : "false",
         session->attach_reassert_attempts,
         session->attach_reassert_hibr_matches,
         session->hibr_attach_unresolved ? "true" : "false",
         session->hibr_owner_registered ? "true" : "false",
-        (long)session->hibr_owner_pid);
+        (long)session->hibr_owner_pid,
+        session->hibr_owner_writes,
+        session->hibr_owner_writes > 0 ? "true" : "false");
     used += (size_t)snprintf(
         body + used, capacity - used,
         ",\"hibr_desktop\":{\"role\":\"%s\",\"session\":\"%s\"}",
@@ -8933,8 +8991,11 @@ static int create_session(BlitRuntime *runtime, const char *json,
     if (hibr_desktop_result > 0 && hibr_desktop_join &&
         hibr_desktop_owner(runtime, hibr_desktop_session) == NULL)
         return -3;
-    if (strcmp(command_name, "desktop") == 0)
-        for (i = 0; i < argument_count - 1; ++i)
+    /* The deployed launcher is blit-session.hibr, not `desktop`, so looking
+       only at `desktop` meant a resumed desktop did not report itself as one
+       -- the one fact a blank reattachment most needed to state. */
+    if (hibr_desktop_result > 0 || strcmp(command_name, "desktop") == 0)
+        for (i = 0; i < argument_count; ++i)
             if (strcmp(argument_storage[i], "--resume") == 0 ||
                 strcmp(argument_storage[i], "-r") == 0) {
                 hibr_resume_requested = 1;
@@ -9846,8 +9907,18 @@ static void service_session_output(BlitRuntime *runtime, int fd)
                 runtime->sessions[i].attach_reassert_due_us =
                     monotonic_us() + 250000ULL;
             }
+            /* ADR 0063: an owned surface's cells come from its owner. A
+               desktop's PTY carries Hibr's own output -- and, after a
+               restart, `hold attach`'s replay of the held session's terminal
+               stream -- and rendering that into the surface is the same
+               two-writer collision ADR 0057 closed for physical input,
+               arriving from the output side. It is what filled a resumed
+               desktop with 32,400 blank cells and made it look healthy. The
+               bytes still reach the terminal_output stream below, so a client
+               that wants them can have them. */
             if (runtime->sessions[i].surface_mode != BLIT_SURFACE_EXTERNAL &&
                 surface != NULL &&
+                !session_surface_is_owner_authored(&runtime->sessions[i]) &&
                 terminal_consume_output(&runtime->sessions[i], surface, output,
                                         (size_t)received)) {
                 ++surface->revision;
@@ -10813,6 +10884,12 @@ static void handle_request(int fd, BlitRuntime *runtime,
             return;
         }
         ++surface->revision;
+        {
+            BlitSession *owner = find_session_id(runtime,
+                                                 surface->owner_session_id);
+            if (owner != NULL)
+                ++owner->hibr_owner_writes;
+        }
         /* An open frame withholds the surface from the renderer, so anything
            that is not a deferred chunk has to close it.  "immediate" closing
            it matters: once a client coalesces its frames (ADR 0058) most
@@ -10942,6 +11019,8 @@ static void handle_request(int fd, BlitRuntime *runtime,
         }
         session->hibr_owner_pid = (pid_t)owner_pid;
         session->hibr_owner_registered = 1;
+        if (session->hibr_owner_registered_us == 0)
+            session->hibr_owner_registered_us = monotonic_us();
         session->attach_reassert_pending = 1;
         session->attach_reassert_attempts = 0;
         session->attach_reassert_hibr_matches = 0;
