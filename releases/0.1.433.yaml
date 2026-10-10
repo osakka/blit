@@ -1,8 +1,8 @@
 release: 0.1.433
 package: blit_0.1.433-1_amd64.deb
 package_sha256: eb18a7ab96d158d8eb523b360a8018ae40e3a2d0ba371b621823560440909702
-source_commit: 05d8994f9770b6d6d115eae1a629faef5a94fb6e
-package_documentation_commit: 05d8994f9770b6d6d115eae1a629faef5a94fb6e
+source_commit: fea4242a276be5c91cc47db29b18e5e6441eced6
+package_documentation_commit: fea4242a276be5c91cc47db29b18e5e6441eced6
 server_binary_sha256: 8262024fd9de4da8263f0c09bd60558862ea92ef7dc9a62905555c5d692ca7a1
 update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
 hibr_adapter_sha256: ed37dff18e0ba8ad638990b28287ab1aeb22ada5fe7345a3eb17a39733598d87
@@ -50,7 +50,7 @@ desktop_repaint_acceptance: pass_pty_authored_0_cells_unpainted_reported_after_w
 gate_port_isolation_acceptance: carried_from_0_1_431
 input_identity_acceptance: pass_shared_phys_named_identical_fields_ordinal_max_73_bytes
 input_device_api_acceptance: carried_from_0_1_432
-live_input_device_table_acceptance: PENDING
+live_input_device_table_acceptance: pass_28_ids_identical_across_restart_zero_scan_opens_on_get
 json_escape_acceptance: carried_from_0_1_431
 live_cell_property_refusal_acceptance: carried_from_0_1_431
 live_unpainted_report_acceptance: carried_from_0_1_430
@@ -73,13 +73,13 @@ screenshot_nonblocking_live_acceptance: not_rerun_candidate
 qemu_hibr_lifecycle_acceptance: not_rerun_candidate
 qemu_four_output_pixel_acceptance: not_rerun_candidate
 qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
-live_deployment: PENDING
-live_current_version: PENDING
+live_deployment: pass_supervised_update_verified_0_1_433
+live_current_version: 0.1.433
 live_block_cursor_acceptance: carried_from_0_1_425
 live_italic_acceptance: carried_from_0_1_425
 live_session_default_acceptance: carried_from_0_1_425
 live_sync_output_acceptance: carried_from_0_1_425
-live_hibr_desktop_acceptance: PENDING
+live_hibr_desktop_acceptance: pass_32400_printable_revision_859
 live_idle_frame_acceptance: carried_from_0_1_425
 live_physical_multi_display: unavailable_one_output
 live_physical_button_trace_contract: open
@@ -128,3 +128,19 @@ notes: >-
   build/blit/blit-server, and both hashes now name what was actually released.
   The deployment itself was verified by the update helper against
   package_sha256, which was correct, so nothing shipped unverified.
+
+  Host-accepted on 192.168.10.54. 28 input devices, 28 distinct ids, nothing
+  dropped. The ids are identical -- same set and same order -- across a
+  POST /v1/control/restart, which is the stability claim measured rather than
+  argued. All seven polled devices carry a name- or position-derived id,
+  including 2.4G Dongle Keyboard, which under 0.1.432 was
+  ...-input2-2 and is now ...-input2-2.4g-dongle-keyboard. Two
+  collection GETs added no evdev_scan_opens there either: 32 before, 32 after.
+  The item route answers, and an unknown id is a 404. The desktop came back
+  with 32,400 printable cells at revision 859 and an empty errors array.
+
+  Still open: physical input remains untested. The per-device counters in each
+  item's state read zero on the host because nobody is at the keyboard, and
+  /v1/input/inject attributes to the aggregate route rather than to a physical
+  device, so it cannot exercise them. src/blit_kms.c carries its changes unseen
+  on a screen.
