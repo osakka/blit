@@ -3,7 +3,13 @@ set -eu
 . "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/gate_port.sh"
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-BINARY=${BLIT_GATE_BINARY:-$ROOT/build/blit-desktop-current/bin/blit-server}
+# The binary under review, which is the one packaging/build-deb.sh ships.
+# This used to default to build/blit-desktop-current/bin/blit-server, a
+# staging copy that build-deb.sh checks but never refreshes -- so the one gate
+# covering authentication, the command allowlist and BLIT_API_TOKEN injection
+# was passing against a binary that was eighteen hours old and not the one
+# being released (issue #59).
+BINARY=${BLIT_GATE_BINARY:-$ROOT/build/blit/blit-server}
 PORT=${BLIT_GATE_PORT:-19205}
 PORT=$(gate_port "$PORT")
 TOKEN=${BLIT_GATE_TOKEN:-blit-network-gate}

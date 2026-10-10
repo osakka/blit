@@ -181,11 +181,11 @@ suite_schema() {
     # network_auth_gate.sh invokes http_fragmentation_gate.rb and
     # http_backpressure_gate.rb itself, passing them its port. They are
     # sub-gates: running either standalone connects to nothing and raises.
-    if [ -x "$ROOT/build/blit-desktop-current/bin/blit-server" ]; then
-        run_gate network_auth_gate.sh "$ROOT"/tools/tests/network_auth_gate.sh
+    if [ -x "$BINARY" ]; then
+        run_gate network_auth_gate.sh env BLIT_GATE_BINARY="$BINARY" \
+            "$ROOT"/tools/tests/network_auth_gate.sh
     else
-        skip_gate network_auth_gate.sh \
-            "needs build/blit-desktop-current/bin/blit-server"
+        skip_gate network_auth_gate.sh "needs $BINARY"
     fi
 }
 

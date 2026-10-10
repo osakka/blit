@@ -35,6 +35,31 @@ def request(base, method, path, body = nil)
   end
 end
 
+# Wait for the renderer to have presented at least one frame since `since`.
+#
+# This replaced two unconditional 0.2s sleeps standing in for "a frame was
+# rendered". 200ms is not a bound on anything: under a full suite run several
+# other servers are competing, and this gate failed once in three suite runs
+# while passing every time on its own (issue #61). A wait on the frame counter
+# is the condition the sleeps were approximating.
+def frames(base)
+  request(base, Net::HTTP::Get, '/v1/diagnostics/runtime')
+      .fetch('performance').fetch('frames')
+end
+
+def await_frame(base, since, what)
+  deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 8.0
+  loop do
+    current = frames(base)
+    return current if current > since
+
+    if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+      raise "no frame was presented after #{what}: frames stayed at #{current}"
+    end
+    sleep 0.02
+  end
+end
+
 def screenshot(base)
   Net::HTTP.start(base.host, base.port, open_timeout: 2, read_timeout: 8) do |http|
     response = http.request(Net::HTTP::Get.new('/v1/diagnostics/screenshots/display-1'))
@@ -74,7 +99,7 @@ begin
 
   session = request(base, Net::HTTP::Post, '/v1/terminal-sessions',
                     'command' => '/bin/sh',
-                    'arguments' => ['-c', 'sleep 3'],
+                    'arguments' => ['-c', 'sleep 300'],
                     'surface_mode' => 'external',
                     'surface' => {'width' => 8, 'height' => 4})
   id = session.fetch('id')
@@ -85,6 +110,7 @@ begin
        'style' => {'foreground' => '#ffffff', 'background' => '#203040'}}
     end
   end
+  frames_before_scene = frames(base)
   request(base, Net::HTTP::Put, path,
           'base_revision' => 1, 'presentation' => 'defer', 'cells' => cells)
   request(base, Net::HTTP::Put, path,
@@ -92,7 +118,7 @@ begin
           'cells' => [{'x' => 0, 'y' => 0, 'text' => ' ',
                        'style' => {'foreground' => '#ffffff',
                                    'background' => '#203040'}}])
-  sleep 0.2
+  await_frame(base, frames_before_scene, 'the committed scene')
   # These requests deliberately remain adjacent. Depending on socket arrival
   # order, one attempt may be rendered in a separate loop turn; repeat the
   # same bounded experiment until the trace proves the intended overlap rather
@@ -145,7 +171,14 @@ begin
     end
     break if race
   end
-  sleep 0.2
+  # No wait here, and not a sleep either. The loop only exits with race set
+  # when the render trace already shows the incremental-damage path running
+  # with target_changed and pointer_dirty both set -- the frame under test has
+  # been presented, which is what makes the trace the synchronisation rather
+  # than an interval. The renderer is event-driven, so waiting for a *further*
+  # frame hangs: measured, the counter stays at 4 or 5 for the full timeout
+  # because there is nothing left to draw. The 0.2s sleep that used to be here
+  # was waiting for something that had already happened.
   bmp = screenshot(base)
   # The scene begins at (4,4), with 8x16 cells. Both samples are outside the
   # changed cell and must retain the committed background.

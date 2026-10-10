@@ -1470,9 +1470,22 @@ components:
           items: {type: string}
         state:
           type: object
-          required: [present]
+          required: [present, accessible]
           properties:
-            present: {type: boolean}
+            present:
+              type: boolean
+              description: >-
+                Whether the PCM's device node is there. The node is the
+                authority, not the `/proc/asound` entry, because the device
+                node directory is what the hotplug watch observes and nothing
+                under `/proc` reports changes to inotify.
+            accessible:
+              type: boolean
+              description: >-
+                Whether the server can open the node for reading and writing.
+                A present device it cannot open is still listed, with this
+                false, so a permission problem reads as a permission problem
+                rather than as a missing device.
           additionalProperties: false
         configuration:
           type: object

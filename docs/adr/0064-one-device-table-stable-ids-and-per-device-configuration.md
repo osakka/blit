@@ -245,7 +245,16 @@ and the schema says it.
 The audio inventory watches its device-node root with inotify, the way the
 input scan does, so a card plugged in while Blit runs appears and one unplugged
 stops reporting itself present. The watch is on the device nodes rather than
-procfs because inotify does not report changes under `/proc`. A device chosen
+procfs because inotify does not report changes under `/proc` — and for the
+same reason **a PCM's device node, not its procfs entry, is the authority on
+whether it exists**. Testing procfs made presence and the watch disagree: a
+rescan triggered by the node disappearing would still find the `/proc` tree
+and keep the device present, and no later event could correct it, because the
+only thing left to change was under `/proc`. The nodes under `/dev/snd` on the
+live host are exactly the twelve PCMs `/proc` describes, so nothing is lost by
+making the node authoritative. A node the server cannot open is still listed,
+with `state.accessible` false, so a permission problem reads as one rather
+than as a missing device. A device chosen
 as a default keeps its entry while absent, for the same reason a configured
 input device does.
 Volume, mute and any other mixer control are **not** here and are not implied:

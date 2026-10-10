@@ -22,6 +22,34 @@ cleanup() { rm -rf "$stage"; }
 trap cleanup EXIT HUP INT TERM
 dpkg-deb -x "$package" "$stage"
 
+# Every hash the manifest records must be the hash of what is inside this
+# package.  0.1.432's manifest named a server binary that was never released:
+# the value had been read from build/blit-desktop-current, a staging copy that
+# the builder checks and never refreshes (issue #59).  package_sha256 was
+# right, so the deployment itself was verified -- but a manifest that records
+# a different artifact than it shipped cannot be used to answer what ran.
+manifest_hash_matches() {
+    name=$1
+    file=$2
+    recorded=$(sed -n "s/^$name: //p" "$manifest")
+    if [ -z "$recorded" ]; then
+        echo "PACKAGE_ARTIFACT_FAIL manifest has no $name" >&2
+        exit 1
+    fi
+    actual=$(sha256sum "$file" | awk '{print $1}')
+    if [ "$recorded" != "$actual" ]; then
+        echo "PACKAGE_ARTIFACT_FAIL $name records $recorded but the package" \
+             "carries $actual" >&2
+        exit 1
+    fi
+}
+manifest_hash_matches server_binary_sha256 \
+    "$stage/usr/lib/blit/bin/blit-server"
+manifest_hash_matches update_helper_sha256 \
+    "$stage/usr/lib/blit/bin/blit-update-helper"
+manifest_hash_matches hibr_adapter_sha256 \
+    "$stage/usr/lib/blit/hibr/console-blit.so"
+
 test -x "$stage/usr/lib/blit/bin/blit-server"
 test -f "$stage/usr/lib/blit/hibr/console-blit.so"
 test -x "$stage/usr/share/blit/hibr/blit-session.hibr"
@@ -40,4 +68,34 @@ if dpkg-deb --contents "$package" | grep -Eq '(/|^)([^ ]*\.sh|start-blit|run-bli
     exit 1
 fi
 
-printf 'PACKAGE_ARTIFACT_PASS version=%s sha256=%s\n' "$version" "$actual_hash"
+# A release manifest records package_sha256 as evidence, which is only
+# evidence if the package can be rebuilt and checked.  It could not be until
+# packaging/build-deb.sh pinned SOURCE_DATE_EPOCH: dpkg-deb stamped the ar
+# container with the build time, so two builds of an identical tree differed.
+# The rebuild is off by default because it costs a full package build; the
+# release ritual runs it once.
+reproducible=skipped
+if [ "${BLIT_GATE_REBUILD:-0}" = 1 ]; then
+    rebuild=$(mktemp -d /tmp/blit-package-rebuild.XXXXXX)
+    if BLIT_HIBR_ROOT=${BLIT_HIBR_ROOT:-} "$root/packaging/build-deb.sh" \
+           "$rebuild" >/dev/null 2>&1 &&
+       [ -f "$rebuild/$(basename "$package")" ]; then
+        rebuilt_hash=$(sha256sum "$rebuild/$(basename "$package")" |
+                       awk '{print $1}')
+        if [ "$rebuilt_hash" != "$actual_hash" ]; then
+            echo "PACKAGE_ARTIFACT_FAIL a rebuild of the same tree produced" \
+                 "$rebuilt_hash, not $actual_hash" >&2
+            rm -rf "$rebuild"
+            exit 1
+        fi
+        reproducible=yes
+    else
+        echo "PACKAGE_ARTIFACT_FAIL the rebuild did not produce a package" >&2
+        rm -rf "$rebuild"
+        exit 1
+    fi
+    rm -rf "$rebuild"
+fi
+
+printf 'PACKAGE_ARTIFACT_PASS version=%s sha256=%s reproducible=%s\n' \
+    "$version" "$actual_hash" "$reproducible"

@@ -156,6 +156,9 @@ Dir.mktmpdir('blit-audio') do |root|
   File.write(File.join(asound, 'card0', 'pcm0c', 'info'),
              pcm_info(0, 0, 'CAPTURE', 'USB Mic'))
   File.write(File.join(snd, 'controlC0'), '')
+  # The PCM device nodes are what the server tests for existence, and what the
+  # hotplug watch observes; the procfs tree only supplies metadata.
+  %w[pcmC0D0p pcmC0D3p pcmC0D0c].each { |n| File.write(File.join(snd, n), '') }
 
   server = spawn({ 'SDL_VIDEODRIVER' => 'dummy', 'BLIT_PSF_FONT' => FONT,
                    'BLIT_ASOUND_ROOT' => asound, 'BLIT_SND_ROOT' => snd,
@@ -203,6 +206,10 @@ Dir.mktmpdir('blit-audio') do |root|
     devices.each do |device|
       missing = envelope.reject { |key| device.key?(key) }
       failures << "#{device['id']}: missing #{missing.inspect}" unless missing.empty?
+      failures << "#{device['id']}: state #{device['state'].inspect} is " \
+                  'missing present/accessible' unless
+        device.dig('state', 'present') == true &&
+        device['state'].key?('accessible')
     end
 
     # The capture device's format must come from the Capture section, not from
@@ -285,6 +292,9 @@ Dir.mktmpdir('blit-audio') do |root|
     File.write(File.join(asound, 'card1', 'id'), "Webcam\n")
     File.write(File.join(asound, 'card1', 'pcm0p', 'info'),
                pcm_info(1, 0, 'PLAYBACK', 'USB Audio'))
+    # The control node last: it is the event the watch acts on, so creating it
+    # after the metadata means the rescan it triggers sees a complete card.
+    File.write(File.join(snd, 'pcmC1D0p'), '')
     File.write(File.join(snd, 'controlC1'), '')
     plugged = await do
       _, collection = request('GET', '/v1/audio')
@@ -299,9 +309,19 @@ Dir.mktmpdir('blit-audio') do |root|
         plugged.fetch('revision') > revision_before_plug
     end
 
-    # And it goes away again.
+    # And it goes away again -- device nodes only, with the procfs tree left
+    # behind on purpose.
+    #
+    # That is the case that decides where presence is tested. The watch is on
+    # the device-node directory, because nothing under /proc fires inotify; so
+    # if presence were tested on the procfs entry, a rescan triggered by the
+    # node disappearing would still find the /proc tree and keep the device
+    # present -- and no later event would ever correct it, because the only
+    # thing that changed was under /proc. A real card's /proc entry does go
+    # away, but not necessarily before the rescan runs, so the two must not be
+    # allowed to disagree.
+    File.delete(File.join(snd, 'pcmC1D0p'))
     File.delete(File.join(snd, 'controlC1'))
-    FileUtils.rm_rf(File.join(asound, 'card1'))
     gone = await do
       _, collection = request('GET', '/v1/audio')
       collection.fetch('devices').none? { |d| d['id'] == 'audio-webcam-pcm0-p' } ?

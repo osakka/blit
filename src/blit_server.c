@@ -361,6 +361,7 @@ typedef struct {
     int sample_rate_count;
     int sample_rates_continuous;
     int is_default;
+    int accessible;
     unsigned long long revision;
 } BlitAudioDevice;
 
@@ -2876,15 +2877,28 @@ static void record_audio_device(BlitRuntime *runtime, int card,
 {
     char path[256];
     char info[256];
+    char node[256];
     char value[64];
     BlitAudioDevice *audio;
     char slug[BLIT_INPUT_SLUG_CAPACITY];
     int i;
 
+    /* The PCM device node is the authority on whether this device exists,
+       because the device node directory is what the hotplug watch observes.
+       Testing the procfs entry instead made presence and the watch disagree:
+       a card can lose its control node -- which fires the watch -- while its
+       /proc tree is still there for the moment the rescan runs, and nothing
+       under /proc fires inotify, so the stale entry would never be retired by
+       any later event. Measured on the live host, the nodes under /dev/snd
+       are exactly the twelve PCMs /proc describes, so this loses nothing.
+       F_OK rather than R_OK|W_OK: a device Blit cannot open is still a device
+       the controller should see, and state.accessible says which it is. */
+    snprintf(node, sizeof(node), "%s/pcmC%dD%d%c", snd_root(), card, device,
+             playback ? 'p' : 'c');
+    if (access(node, F_OK) != 0)
+        return;
     snprintf(info, sizeof(info), "%s/card%d/pcm%d%c/info", asound_root(),
              card, device, playback ? 'p' : 'c');
-    if (access(info, R_OK) != 0)
-        return;
     audio = find_audio_device_pcm(runtime, card, device, playback);
     if (audio == NULL) {
         for (i = 0; i < BLIT_MAX_AUDIO_DEVICES; ++i)
@@ -2947,6 +2961,7 @@ static void record_audio_device(BlitRuntime *runtime, int card,
                 ++cursor;
         }
     }
+    audio->accessible = access(node, R_OK | W_OK) == 0;
     audio->seen = 1;
     audio->present = 1;
 }
@@ -2968,7 +2983,10 @@ static void scan_audio_devices(BlitRuntime *runtime, int announce)
         snprintf(control, sizeof(control), "%s/controlC%d", snd_root(), card);
         snprintf(id_path, sizeof(id_path), "%s/card%d/id", asound_root(),
                  card);
-        if (access(control, R_OK) != 0 && access(id_path, R_OK) != 0)
+        /* A card with neither a control node nor a procfs entry has no PCM
+           nodes either, so skipping it only saves the 32 access() calls its
+           devices would cost. */
+        if (access(control, F_OK) != 0 && access(id_path, R_OK) != 0)
             continue;
         snprintf(card_id, sizeof(card_id), "card%d", card);
         read_text_file(id_path, card_id, sizeof(card_id));
@@ -3120,10 +3138,11 @@ static size_t audio_device_item_json(const BlitAudioDevice *audio, char *body,
         ",\"identity\":{\"card\":%d,\"card_id\":\"%s\",\"device\":%d,"
         "\"subname\":\"%s\"},"
         "\"capabilities\":[\"pcm\"],"
-        "\"state\":{\"present\":%s},"
+        "\"state\":{\"present\":%s,\"accessible\":%s},"
         "\"configuration\":{\"default\":%s},\"revision\":%llu}",
         audio->card, escaped_card, audio->device, escaped_subname,
         audio->present ? "true" : "false",
+        audio->accessible ? "true" : "false",
         audio->is_default ? "true" : "false", audio->revision);
     return complete ? used : capacity;
 }
@@ -18521,10 +18540,10 @@ int main(int argc, char **argv)
             runtime.diagnostic_loop_window_started_us = loop_started_us;
         }
 
+        reconnect_audio_devices(&runtime);
         {
             uint64_t evdev_scan_started_us = monotonic_us();
             reconnect_evdev_devices(&runtime);
-            reconnect_audio_devices(&runtime);
             runtime.diagnostic_last_evdev_scan_ms =
                 (double)(monotonic_us() - evdev_scan_started_us) / 1000.0;
             if (runtime.diagnostic_last_evdev_scan_ms >

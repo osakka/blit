@@ -23,6 +23,16 @@ if ! strings "$RUNTIME_BINARY" | grep -q '/v1/version'; then
 	echo "blit: canonical runtime lacks the version endpoint" >&2
 	exit 1
 fi
+# The staging copy beside the bundle's libraries is refreshed from the binary
+# this build actually ships.  It used to be checked for existence and never
+# updated, so it could be an arbitrarily old build -- and
+# tools/tests/network_auth_gate.sh defaulted to it, which meant the gate
+# covering authentication, the command allowlist and BLIT_API_TOKEN injection
+# was testing a binary nobody was releasing (issue #59).  The gate now takes
+# the canonical binary; this keeps the staging directory from being a second,
+# stale answer to "which server is this".
+cp -a "$RUNTIME_BINARY" "$BUNDLE/bin/blit-server"
+
 # The updater is a separate root-owned service.  Reject the historical failure
 # mode where the output-path argument caused the server to be copied twice.
 if cmp -s "$RUNTIME_BINARY" "$UPDATE_HELPER" ||
@@ -205,6 +215,18 @@ EOF
 
 mkdir -p "$OUT"
 output=$OUT/blit_${pkgver}_amd64.deb
+# Build the archive deterministically.  Without this, dpkg-deb stamps the ar
+# container with the build time and the tar entries with each staged file's
+# mtime, so two builds of an identical tree produce different bytes -- which
+# makes the package_sha256 a release manifest records unverifiable the moment
+# the artifact is gone.  The release ritual depends on being able to rebuild
+# and check, and a package's timestamps carry no information worth keeping:
+# SOURCE_DATE_EPOCH clamps every mtime to one value and fixes the container's.
+# It is overridable, but the default is a constant rather than anything
+# derived from git, because the release build happens before the commit that
+# records it and a commit-derived epoch would change under its own manifest.
+SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-1577836800}
+export SOURCE_DATE_EPOCH
 dpkg-deb --build --root-owner-group "$stage" "$output" >/dev/null
 # The runtime boundary is deliberately an allowlist.  Reject any shell
 # implementation or Hibr launcher if either ever reappears in the package.
