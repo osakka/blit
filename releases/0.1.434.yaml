@@ -1,0 +1,158 @@
+release: 0.1.434
+package: blit_0.1.434-1_amd64.deb
+package_sha256: e48499e10d489d37ad71121a7e3a9b15856d5ce51a0583391d913ee7aa66e223
+source_commit: 9ed3ac43a71cae14b203a29844c69943844ab9a3
+package_documentation_commit: 9ed3ac43a71cae14b203a29844c69943844ab9a3
+server_binary_sha256: 003c045c4cce8f99273afded221c989a35ae04d1e1e5e65ed970cff51c010dc3
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: ed37dff18e0ba8ad638990b28287ab1aeb22ada5fe7345a3eb17a39733598d87
+hibr_root: /tmp/hibr-0.99.100
+hibr_version: 0.99.100
+tcc_build_acceptance: pass
+openapi_yaml: pass
+api_schema_gate: pass
+package_artifact_acceptance: pass
+network_auth_acceptance: pass_api_token_injected
+terminal_conformance: pass
+session_lifecycle_acceptance: pass
+session_write_resize_acceptance: pass
+stream_replay_acceptance: pass
+font_api_acceptance: pass
+hibr_font_manifest_acceptance: pass
+glyph_geometry_local_pixel_acceptance: pass
+sdl_glyph_filter_acceptance: pass
+external_pointer_composition: pass
+pointer_damage_atomic_acceptance: pass
+pointer_wallpaper_stress_acceptance: pass
+hidden_cursor_damage_acceptance: pass
+sdl_background_batch_acceptance: pass
+sdl_graphics_cache_acceptance: pass
+sdl_wallpaper_damage_acceptance: pass
+screenshot_overlay_acceptance: pass
+pixel_frame_acceptance: pass
+render_state_agreement_acceptance: pass
+adapter_coalesce_acceptance: pass_idle_frame_zero_requests
+kitty_placement_pixel_acceptance: pass_crop_offset_numbered_and_z_order_by_pixel
+kitty_placement_conformance_acceptance: pass_delete_targets_and_unsupported_key_refusals
+sync_output_acceptance: pass_held_frame_and_hidden_writes_one_and_two_surfaces
+cell_paint_acceptance: pass_cursor_glyph_italic_distinct_session_defaults
+pointer_geometry_acceptance: pass_inset_honoured_and_pane_less_at_corner
+mouse_report_acceptance: pass_wheel_byte_96_hover_gated_per_cell_drops_counted
+key_encoding_acceptance: pass_25_encodings_capslock_numlock_held_modifiers
+frame_quiet_starvation_acceptance: pass_longest_stagnant_run_1_was_29
+capture_witness_acceptance: pass_one_source_presented_flag_presented_revision
+motion_trail_acceptance: pass_799_blank_cells_no_unaccounted_pixels
+render_state_agreement_acceptance: pass_30_blue_cells_was_vacuous
+bold_cell_containment_acceptance: pass_8px_drawn_0_spilled
+wide_glyph_acceptance: pass_4_samples_4_distinct_shapes_two_cells_each
+font_identity_acceptance: pass_929_1182_primary_and_49899_16x16_wide
+desktop_repaint_acceptance: pass_pty_authored_0_cells_unpainted_reported_after_window_retires
+gate_port_isolation_acceptance: carried_from_0_1_431
+input_identity_acceptance: carried_from_0_1_433
+input_device_api_acceptance: carried_from_0_1_432
+input_device_config_acceptance: pass_patch_409_409_400_422_bounded_object_hotplug_absence
+live_input_device_table_acceptance: carried_from_0_1_433
+live_input_device_config_acceptance: PENDING
+json_escape_acceptance: carried_from_0_1_431
+live_cell_property_refusal_acceptance: carried_from_0_1_431
+live_unpainted_report_acceptance: carried_from_0_1_430
+live_wide_glyph_acceptance: carried_from_0_1_428
+live_render_state_agreement_acceptance: carried_from_0_1_427
+evdev_scan_open_count_acceptance: pass_32_opens_for_32_paths_was_96
+graphics_kitty_zlib_acceptance: pass_pixel_crc32_identical_to_raw
+graphics_xtsmgraphics_acceptance: pass_no_scroll_and_enforced_limits_reported
+terminal_kitty_keyboard_acceptance: pass_cursor_unmoved_query_reports_zero
+hibr_singleton_local_acceptance: pass
+hibr_resume_guard_acceptance: pass
+restart_gate: pass
+shutdown_gate: pass
+update_idle_timeout_acceptance: pass
+update_reset_acceptance: pass
+update_cancel_acceptance: pass
+frame_rate_settled_acceptance: pass
+terminal_soak_120s_acceptance: pass
+screenshot_nonblocking_live_acceptance: not_rerun_candidate
+qemu_hibr_lifecycle_acceptance: not_rerun_candidate
+qemu_four_output_pixel_acceptance: not_rerun_candidate
+qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
+live_deployment: PENDING
+live_current_version: PENDING
+live_block_cursor_acceptance: carried_from_0_1_425
+live_italic_acceptance: carried_from_0_1_425
+live_session_default_acceptance: carried_from_0_1_425
+live_sync_output_acceptance: carried_from_0_1_425
+live_hibr_desktop_acceptance: PENDING
+live_idle_frame_acceptance: carried_from_0_1_425
+live_physical_multi_display: unavailable_one_output
+live_physical_button_trace_contract: open
+physical_evdev_acceptance: open
+physical_multi_monitor_acceptance: open
+physical_high_refresh_acceptance: open
+notes: >-
+  ADR 0064 stage 2, issue #52: per-device input configuration.
+
+  PATCH /v1/input/devices/{id} writes a device's `configuration` and nothing
+  else, with the concurrency rule the rest of Blit uses -- an optional
+  `revision` in the body, an If-Match header, or both, each answered 409 when
+  it does not identify the current revision. Writable: `enabled`, and for a
+  device read as a pointer `sensitivity_percent` (10 to 1000) and
+  `natural_scroll`.
+
+  Disabling a device releases every file descriptor the poll set holds for its
+  node and stops later scans re-claiming it, so the device is let go rather
+  than merely ignored; it stays in the inventory, keeps its configuration and
+  can be re-enabled. A property that is not writable is refused with 400 and
+  named in the detail; a pointer-only property on a device of another kind
+  with 422. Accepting either silently is how a controller comes to believe it
+  has set something it has not, which is exactly #48.
+
+  Three defects caught in review before they shipped, each one a thing the
+  design implies but the code did not do:
+
+  An absent device kept nothing. The retire sweep memset an unplugged device,
+  so unplug and replug would have returned it with defaults -- and a stable id
+  is worthless if what is attached to it evaporates while the device is out of
+  the machine, which is exactly when a control panel most wants to still show
+  it. A configured absent device now stays with state.present false; an
+  unconfigured one is still retired.
+
+  There were still two classifiers. record_input_device probed the device, and
+  then evdev_register_path asked evdev_has_rel_xy/has_keyboard/has_gamepad
+  again for the claim decision: the same predicates reached by two paths,
+  which is the drift the table was built to remove even while they agreed. The
+  claim now uses the table's kinds, and the predicates remain only as the
+  fallback for a full table.
+
+  `configuration` was read by forward search. The request parsers here find
+  keys by scanning ahead, so a search started inside a sub-object finds a key
+  that comes after it closes: {"configuration":{},"enabled":true} would have
+  re-enabled the device. json_object_slice copies the balanced object,
+  honouring strings so a brace inside one cannot end it early.
+
+  POST /v1/input/inject gained an optional device_id and a pointer_relative
+  kind, so an injected event travels the path a real event from that device
+  travels, including its configuration: a relative motion is scaled by its
+  sensitivity and a wheel event honours its scroll direction. Injecting
+  through a disabled device is 409. Without this there is no way to exercise
+  per-device configuration at all -- the gate environment has no /dev/input,
+  and a host with nobody at the keyboard has nothing to turn the knob on.
+
+  input_device_config_gate.rb drives hotplug by creating and deleting files
+  under BLIT_INPUT_ROOT, which gates the inotify rescan, the device_changed
+  stream event and the configuration-survives-absence rule in one fixture.
+  Teeth, each shown: retiring a configured absent device loses the
+  configuration and the replug comes back enabled; reading configuration by
+  forward search lets an `enabled` outside the object re-enable the device;
+  accepting an unknown property answers 200. Suite: 44 pass, 5 skip, 0 fail.
+
+  Not in: per-device routing. `configuration.route` threads a device through
+  keyboard_target and the seven input_route_target call sites, and the
+  aggregate evdev-keyboard/evdev-pointer/evdev-gamepad strings are also a
+  stream contract -- larger than the rest of the configuration put together,
+  so it is its own stage. The keyboard layout stays #35.
+
+  Stated rather than left implicit: configuration is held in memory, so a Blit
+  restart resets it and a controller re-applies what it wants, with the
+  collection revision dropping back toward 1 as the signal. Persisting it is a
+  separate decision, worth weighing against #55 -- a restart already loses the
+  desktop.
