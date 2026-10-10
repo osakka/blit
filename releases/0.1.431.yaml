@@ -1,0 +1,138 @@
+release: 0.1.431
+package: blit_0.1.431-1_amd64.deb
+package_sha256: c65e6623a660802b242a043f763eb22991b8a75ee8480f4ccc6dec09b5cf611f
+source_commit: PENDING
+package_documentation_commit: PENDING
+server_binary_sha256: b157dcdc6488d6127823d3daa8a1e8e708bf14ac2c870010c6b81c18610b92b4
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: ed37dff18e0ba8ad638990b28287ab1aeb22ada5fe7345a3eb17a39733598d87
+hibr_root: /tmp/hibr-0.99.100
+hibr_version: 0.99.100
+tcc_build_acceptance: pass
+openapi_yaml: pass
+api_schema_gate: pass
+package_artifact_acceptance: pass
+network_auth_acceptance: pass_api_token_injected
+terminal_conformance: pass
+session_lifecycle_acceptance: pass
+session_write_resize_acceptance: pass
+stream_replay_acceptance: pass
+font_api_acceptance: pass
+hibr_font_manifest_acceptance: pass
+glyph_geometry_local_pixel_acceptance: pass
+sdl_glyph_filter_acceptance: pass
+external_pointer_composition: pass
+pointer_damage_atomic_acceptance: pass
+pointer_wallpaper_stress_acceptance: pass
+hidden_cursor_damage_acceptance: pass
+sdl_background_batch_acceptance: pass
+sdl_graphics_cache_acceptance: pass
+sdl_wallpaper_damage_acceptance: pass
+screenshot_overlay_acceptance: pass
+pixel_frame_acceptance: pass
+render_state_agreement_acceptance: pass
+adapter_coalesce_acceptance: pass_idle_frame_zero_requests
+kitty_placement_pixel_acceptance: pass_crop_offset_numbered_and_z_order_by_pixel
+kitty_placement_conformance_acceptance: pass_delete_targets_and_unsupported_key_refusals
+sync_output_acceptance: pass_held_frame_and_hidden_writes_one_and_two_surfaces
+cell_paint_acceptance: pass_cursor_glyph_italic_distinct_session_defaults
+pointer_geometry_acceptance: pass_inset_honoured_and_pane_less_at_corner
+mouse_report_acceptance: pass_wheel_byte_96_hover_gated_per_cell_drops_counted
+key_encoding_acceptance: pass_25_encodings_capslock_numlock_held_modifiers
+frame_quiet_starvation_acceptance: pass_longest_stagnant_run_1_was_29
+capture_witness_acceptance: pass_one_source_presented_flag_presented_revision
+motion_trail_acceptance: pass_799_blank_cells_no_unaccounted_pixels
+render_state_agreement_acceptance: pass_30_blue_cells_was_vacuous
+bold_cell_containment_acceptance: pass_8px_drawn_0_spilled
+wide_glyph_acceptance: pass_4_samples_4_distinct_shapes_two_cells_each
+font_identity_acceptance: pass_929_1182_primary_and_49899_16x16_wide
+desktop_repaint_acceptance: pass_pty_authored_0_cells_unpainted_reported_after_window_retires
+gate_port_isolation_acceptance: pass_41_41_back_to_back_without_settle_gates
+json_escape_acceptance: pass_argument_carries_escaped_esc_and_cell_style_scope
+live_unpainted_report_acceptance: PENDING
+live_wide_glyph_acceptance: carried_from_0_1_428
+live_render_state_agreement_acceptance: PENDING
+evdev_scan_open_count_acceptance: pass_32_opens_for_32_paths_was_96
+graphics_kitty_zlib_acceptance: pass_pixel_crc32_identical_to_raw
+graphics_xtsmgraphics_acceptance: pass_no_scroll_and_enforced_limits_reported
+terminal_kitty_keyboard_acceptance: pass_cursor_unmoved_query_reports_zero
+hibr_singleton_local_acceptance: pass
+hibr_resume_guard_acceptance: pass
+restart_gate: pass
+shutdown_gate: pass
+update_idle_timeout_acceptance: pass
+update_reset_acceptance: pass
+update_cancel_acceptance: pass
+frame_rate_settled_acceptance: pass
+terminal_soak_120s_acceptance: pass
+screenshot_nonblocking_live_acceptance: not_rerun_candidate
+qemu_hibr_lifecycle_acceptance: not_rerun_candidate
+qemu_four_output_pixel_acceptance: not_rerun_candidate
+qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
+live_deployment: PENDING
+live_current_version: 0.1.430
+live_block_cursor_acceptance: carried_from_0_1_425
+live_italic_acceptance: carried_from_0_1_425
+live_session_default_acceptance: carried_from_0_1_425
+live_sync_output_acceptance: carried_from_0_1_425
+live_hibr_desktop_acceptance: PENDING
+live_idle_frame_acceptance: carried_from_0_1_425
+live_physical_multi_display: unavailable_one_output
+live_physical_button_trace_contract: open
+physical_evdev_acceptance: open
+physical_multi_monitor_acceptance: open
+physical_high_refresh_acceptance: open
+notes: >-
+  Three defects that each cost a wrong diagnosis, and one found while fixing
+  them. Issues #28, #46 and #48.
+
+  #28. Gates bound hard-coded ports and ten ports were shared between gates,
+  so running two back to back could have one reach listen() while the previous
+  server still held the socket -- a sequencing failure reported as a failure
+  of whatever the second gate asserts, and one that disappears when the gate
+  is re-run alone. Every gate that spawns a server now takes a unique default
+  and waits for it through a shared helper that names the port and its holder
+  and says that a conflict is a conflict. Fourteen colliding defaults moved
+  into 19200-19214; run-gates keeps its own 19400 base.
+
+  run-gates.sh loses settle_gates, a pkill over the gates' port range plus a
+  one second sleep, which hid conflicts behind the sleep and killed servers
+  the script had not started. Its removal is the issue's own done-when, so the
+  acceptance is two full suite runs back to back: 41 pass, 0 fail, twice.
+
+  The helper's first act was to break two working gates, correctly:
+  network_auth_gate.sh starts a server and hands its port to the two HTTP
+  gates as clients, which need that port to be serving rather than free. They
+  no longer go through the helper, and pixel_frame_gate waits only when it is
+  binding its own server rather than using BLIT_TEST_SERVER.
+
+  #46. Three parsers decoded one wire format. json_string handled the whole
+  escape set; json_string_array and the value side of json_string_object
+  handled only three simple escapes and for anything else kept the escape's
+  letter and dropped the backslash, so a conforming encoder's escaped ESC
+  arrived as the literal text u001b and a session argument could not carry a
+  control character at all. They now share json_unescape, which decodes the
+  full set including surrogate pairs and refuses what it cannot decode rather
+  than mangling it.
+
+  #48. A cell's colours belong under style, and the cell parser finds keys by
+  search, so a cell carrying them at the top level was accepted with 200 and
+  no style applied -- the schema calls that spelling invalid and the server
+  took it anyway. The same request, before and after:
+
+    old   200 {"revision":2,"accepted":true}   cell style=null
+    new   400 invalid_cell_property            names the property it refused
+
+  That silence is how render_state_agreement_gate came to assert that blank
+  cells were black on a screen that was already black, for its whole life.
+  Checked against the deployed adapter before making it an error:
+  console-blit.c writes exactly x, y, text and style.
+
+  Found while fixing #48: send_problem interpolated its detail raw, so a
+  detail that quoted the thing it was refusing made the entire problem
+  document invalid JSON, and a client reading why its request failed got a
+  parse error instead of the reason. It escapes the detail now. The new
+  conformance vector found it by failing to parse its own refusal.
+
+  Unchanged: every pixel claim is measured on the SDL path, and
+  src/blit_kms.c carries its changes unseen on a screen.
