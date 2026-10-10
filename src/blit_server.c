@@ -489,6 +489,10 @@ typedef struct {
     int evdev_mouse_count;
     int evdev_mouse_reported[BLIT_MAX_INPUT_DEVICES];
     unsigned int evdev_mouse_buttons[BLIT_MAX_INPUT_DEVICES];
+    /* open() calls the device scan has made, lifetime. The scan used to open
+       every path once per kind, so this is how the reduction to one probe per
+       path is measured rather than asserted. */
+    unsigned long long diagnostic_evdev_scan_opens;
     unsigned long long diagnostic_evdev_mouse_device_events[BLIT_MAX_INPUT_DEVICES];
     unsigned long long diagnostic_evdev_mouse_device_syncs[BLIT_MAX_INPUT_DEVICES];
     unsigned long long diagnostic_evdev_mouse_device_motion[BLIT_MAX_INPUT_DEVICES];
@@ -1930,7 +1934,8 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"last_sdl_present_ms\":%.3f,\"max_sdl_present_ms\":%.3f,"
         "\"last_select_ms\":%.3f,\"max_select_ms\":%.3f,"
         "\"last_sdl_events_ms\":%.3f,\"max_sdl_events_ms\":%.3f,"
-        "\"last_evdev_scan_ms\":%.3f,\"max_evdev_scan_ms\":%.3f},"
+        "\"last_evdev_scan_ms\":%.3f,\"max_evdev_scan_ms\":%.3f,"
+        "\"evdev_scan_opens\":%llu},"
         "\"logs\":[",
         snapshot,
         runtime->started_us > 0 && now >= runtime->started_us ?
@@ -2021,7 +2026,8 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         runtime->diagnostic_last_sdl_events_ms,
         runtime->diagnostic_max_sdl_events_ms,
         runtime->diagnostic_last_evdev_scan_ms,
-        runtime->diagnostic_max_evdev_scan_ms);
+        runtime->diagnostic_max_evdev_scan_ms,
+        runtime->diagnostic_evdev_scan_opens);
     count = runtime->diagnostic_log_count;
     first = 1;
     index = (runtime->diagnostic_log_next - count + BLIT_MAX_RUNTIME_LOGS) %
@@ -11477,75 +11483,6 @@ static int input_path_seen(char paths[][128], int count, const char *path)
     return 0;
 }
 
-static int open_evdev_mice(const char *configured, int *fds,
-                           char paths[][128], int *count)
-{
-    int index;
-    *count = 0;
-    if (configured != NULL && configured[0] != '\0') {
-        int fd = open(configured, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
-        if (fd >= 0 && evdev_has_rel_xy(fd)) {
-            fds[(*count)] = fd;
-            snprintf(paths[(*count)++], 128, "%s", configured);
-        } else if (fd >= 0) {
-            fprintf(stderr, "blit: configured mouse %s has no REL_X/REL_Y; scanning all input devices\n", configured);
-            close(fd);
-        } else {
-            fprintf(stderr, "blit: cannot open configured mouse %s: %s\n",
-                    configured, strerror(errno));
-        }
-    }
-    for (index = 0; index < 32 && *count < BLIT_MAX_INPUT_DEVICES; ++index) {
-        char path[64];
-        int fd;
-        snprintf(path, sizeof(path), "/dev/input/event%d", index);
-        if (input_path_seen(paths, *count, path)) continue;
-        fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
-        if (fd < 0) continue;
-        if (evdev_has_rel_xy(fd)) {
-            fds[*count] = fd;
-            snprintf(paths[(*count)++], 128, "%s", path);
-        } else close(fd);
-    }
-    return *count;
-}
-
-static int open_evdev_keyboards(int *fds, char paths[][128], int *count)
-{
-    int index;
-    *count = 0;
-    for (index = 0; index < 32 && *count < BLIT_MAX_INPUT_DEVICES; ++index) {
-        char path[64];
-        int fd;
-        snprintf(path, sizeof(path), "/dev/input/event%d", index);
-        fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
-        if (fd < 0) continue;
-        if (evdev_has_keyboard(fd)) {
-            fds[*count] = fd;
-            snprintf(paths[(*count)++], 128, "%s", path);
-        } else close(fd);
-    }
-    return *count;
-}
-
-static int open_evdev_gamepads(int *fds, char paths[][128], int *count)
-{
-    int index;
-    *count = 0;
-    for (index = 0; index < 32 && *count < BLIT_MAX_INPUT_DEVICES; ++index) {
-        char path[64];
-        int fd;
-        snprintf(path, sizeof(path), "/dev/input/event%d", index);
-        fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
-        if (fd < 0) continue;
-        if (evdev_has_gamepad(fd)) {
-            fds[*count] = fd;
-            snprintf(paths[(*count)++], 128, "%s", path);
-        } else close(fd);
-    }
-    return *count;
-}
-
 static int evdev_path_open(const int *fds, char paths[][128], int count,
                            const char *path)
 {
@@ -11555,6 +11492,122 @@ static int evdev_path_open(const int *fds, char paths[][128], int count,
             return 1;
     return 0;
 }
+
+/* Open one evdev path and register it for every kind it turns out to be.
+ *
+ * This replaced three separate per-kind scans, each of which opened all 32
+ * paths. A device therefore got three open() calls and three EVIOCGBIT
+ * probes, and 32 paths cost 96 of each whether or not anything was there.
+ * The live host recorded a single scan taking 3.456 seconds with the whole
+ * event loop stalled behind it (issue #16), and nothing in the scan needs to
+ * touch a device more than once to find out what it is.
+ *
+ * The probe fd becomes the fd of the first kind that matches, so an ordinary
+ * mouse or keyboard costs exactly one open. A device that is two kinds at
+ * once -- a keyboard with a built-in trackpad -- gets a second open rather
+ * than a dup, deliberately: each kind drains its own fd to exhaustion, and a
+ * shared open file description would let whichever kind read first consume
+ * the other's events.
+ */
+static void evdev_register_path(BlitRuntime *runtime, const char *path,
+                                int announce)
+{
+    int probe;
+    int claimed = 0;
+    int mouse_wanted;
+    int keyboard_wanted;
+    int gamepad_wanted;
+
+    mouse_wanted = runtime->evdev_mouse_count < BLIT_MAX_INPUT_DEVICES &&
+        !evdev_path_open(runtime->evdev_mouse_fds, runtime->evdev_mouse_paths,
+                         runtime->evdev_mouse_count, path);
+    keyboard_wanted = runtime->evdev_keyboard_count < BLIT_MAX_INPUT_DEVICES &&
+        !evdev_path_open(runtime->evdev_keyboard_fds,
+                         runtime->evdev_keyboard_paths,
+                         runtime->evdev_keyboard_count, path);
+    gamepad_wanted = runtime->evdev_gamepad_count < BLIT_MAX_INPUT_DEVICES &&
+        !evdev_path_open(runtime->evdev_gamepad_fds,
+                         runtime->evdev_gamepad_paths,
+                         runtime->evdev_gamepad_count, path);
+    if (!mouse_wanted && !keyboard_wanted && !gamepad_wanted)
+        return;
+
+    ++runtime->diagnostic_evdev_scan_opens;
+    probe = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+    if (probe < 0)
+        return;
+
+    if (mouse_wanted && evdev_has_rel_xy(probe)) {
+        int slot = runtime->evdev_mouse_count++;
+        runtime->evdev_mouse_fds[slot] = probe;
+        snprintf(runtime->evdev_mouse_paths[slot], 128, "%s", path);
+        runtime->evdev_mouse_reported[slot] = 0;
+        runtime->evdev_mouse_buttons[slot] = 0;
+        runtime->diagnostic_evdev_mouse_device_events[slot] = 0;
+        runtime->diagnostic_evdev_mouse_device_syncs[slot] = 0;
+        runtime->diagnostic_evdev_mouse_device_motion[slot] = 0;
+        runtime->diagnostic_evdev_mouse_device_wheel[slot] = 0;
+        runtime->diagnostic_evdev_mouse_device_buttons[slot] = 0;
+        claimed = 1;
+        if (announce) {
+            fprintf(stderr, "blit: evdev mouse reconnected: %s fd=%d\n",
+                    path, probe);
+            broadcast_input_diagnostic(runtime, "info",
+                                       "input_device_reconnected",
+                                       "evdev-pointer", path,
+                                       runtime->evdev_mouse_count);
+        }
+    }
+    if (keyboard_wanted && evdev_has_keyboard(probe)) {
+        int fd = probe;
+        if (claimed) {
+            ++runtime->diagnostic_evdev_scan_opens;
+            fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+        }
+        if (fd >= 0) {
+            int slot = runtime->evdev_keyboard_count++;
+            runtime->evdev_keyboard_fds[slot] = fd;
+            snprintf(runtime->evdev_keyboard_paths[slot], 128, "%s", path);
+            runtime->evdev_keyboard_reported[slot] = 0;
+            runtime->diagnostic_evdev_keyboard_device_events[slot] = 0;
+            runtime->diagnostic_evdev_keyboard_device_keys[slot] = 0;
+            claimed = 1;
+            if (announce) {
+                fprintf(stderr, "blit: evdev keyboard reconnected: %s fd=%d\n",
+                        path, fd);
+                broadcast_input_diagnostic(runtime, "info",
+                                           "input_device_reconnected",
+                                           "evdev-keyboard", path,
+                                           runtime->evdev_keyboard_count);
+            }
+        }
+    }
+    if (gamepad_wanted && evdev_has_gamepad(probe)) {
+        int fd = probe;
+        if (claimed) {
+            ++runtime->diagnostic_evdev_scan_opens;
+            fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+        }
+        if (fd >= 0) {
+            int slot = runtime->evdev_gamepad_count++;
+            runtime->evdev_gamepad_fds[slot] = fd;
+            snprintf(runtime->evdev_gamepad_paths[slot], 128, "%s", path);
+            runtime->evdev_gamepad_reported[slot] = 0;
+            claimed = 1;
+            if (announce) {
+                fprintf(stderr, "blit: evdev gamepad reconnected: %s fd=%d\n",
+                        path, fd);
+                broadcast_input_diagnostic(runtime, "info",
+                                           "input_device_reconnected",
+                                           "evdev-gamepad", path,
+                                           runtime->evdev_gamepad_count);
+            }
+        }
+    }
+    if (!claimed)
+        close(probe);
+}
+
 
 static void broadcast_input_diagnostic(BlitRuntime *runtime,
                                        const char *severity,
@@ -11603,84 +11656,25 @@ static void service_evdev_watch(BlitRuntime *runtime)
     }
 }
 
-static void reconnect_evdev_devices(BlitRuntime *runtime)
+/* Walk every evdev path once.  `announce` reports a discovery as a reconnect,
+   which is right for a hotplug and noise at boot. */
+static void scan_evdev_devices(BlitRuntime *runtime, int announce)
 {
     int index;
 
+    for (index = 0; index < 32; ++index) {
+        char path[64];
+        snprintf(path, sizeof(path), "/dev/input/event%d", index);
+        evdev_register_path(runtime, path, announce);
+    }
+}
+
+static void reconnect_evdev_devices(BlitRuntime *runtime)
+{
     if (!runtime->evdev_rescan_requested)
         return;
     runtime->evdev_rescan_requested = 0;
-    for (index = 0; index < 32; ++index) {
-        char path[64];
-        int fd;
-        snprintf(path, sizeof(path), "/dev/input/event%d", index);
-        if (runtime->evdev_mouse_count < BLIT_MAX_INPUT_DEVICES &&
-            !evdev_path_open(runtime->evdev_mouse_fds,
-                             runtime->evdev_mouse_paths,
-                             runtime->evdev_mouse_count, path)) {
-            fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
-            if (fd >= 0 && evdev_has_rel_xy(fd)) {
-                int slot = runtime->evdev_mouse_count++;
-                runtime->evdev_mouse_fds[slot] = fd;
-                snprintf(runtime->evdev_mouse_paths[slot], 128, "%s", path);
-                runtime->evdev_mouse_reported[slot] = 0;
-                runtime->evdev_mouse_buttons[slot] = 0;
-                runtime->diagnostic_evdev_mouse_device_events[slot] = 0;
-                runtime->diagnostic_evdev_mouse_device_syncs[slot] = 0;
-                runtime->diagnostic_evdev_mouse_device_motion[slot] = 0;
-                runtime->diagnostic_evdev_mouse_device_wheel[slot] = 0;
-                runtime->diagnostic_evdev_mouse_device_buttons[slot] = 0;
-                fprintf(stderr, "blit: evdev mouse reconnected: %s fd=%d\n",
-                        path, fd);
-                broadcast_input_diagnostic(runtime, "info",
-                                            "input_device_reconnected",
-                                            "evdev-pointer", path,
-                                            runtime->evdev_mouse_count);
-                fd = -1;
-            }
-            if (fd >= 0) close(fd);
-        }
-        if (runtime->evdev_keyboard_count < BLIT_MAX_INPUT_DEVICES &&
-            !evdev_path_open(runtime->evdev_keyboard_fds,
-                             runtime->evdev_keyboard_paths,
-                             runtime->evdev_keyboard_count, path)) {
-            fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
-            if (fd >= 0 && evdev_has_keyboard(fd)) {
-                int slot = runtime->evdev_keyboard_count++;
-                runtime->evdev_keyboard_fds[slot] = fd;
-                snprintf(runtime->evdev_keyboard_paths[slot], 128, "%s", path);
-                runtime->evdev_keyboard_reported[slot] = 0;
-                fprintf(stderr, "blit: evdev keyboard reconnected: %s fd=%d\n",
-                        path, fd);
-                broadcast_input_diagnostic(runtime, "info",
-                                            "input_device_reconnected",
-                                            "evdev-keyboard", path,
-                                            runtime->evdev_keyboard_count);
-                fd = -1;
-            }
-            if (fd >= 0) close(fd);
-        }
-        if (runtime->evdev_gamepad_count < BLIT_MAX_INPUT_DEVICES &&
-            !evdev_path_open(runtime->evdev_gamepad_fds,
-                             runtime->evdev_gamepad_paths,
-                             runtime->evdev_gamepad_count, path)) {
-            fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
-            if (fd >= 0 && evdev_has_gamepad(fd)) {
-                int slot = runtime->evdev_gamepad_count++;
-                runtime->evdev_gamepad_fds[slot] = fd;
-                snprintf(runtime->evdev_gamepad_paths[slot], 128, "%s", path);
-                runtime->evdev_gamepad_reported[slot] = 0;
-                fprintf(stderr, "blit: evdev gamepad reconnected: %s fd=%d\n",
-                        path, fd);
-                broadcast_input_diagnostic(runtime, "info",
-                                            "input_device_reconnected",
-                                            "evdev-gamepad", path,
-                                            runtime->evdev_gamepad_count);
-                fd = -1;
-            }
-            if (fd >= 0) close(fd);
-        }
-    }
+    scan_evdev_devices(runtime, 1);
 }
 
 static int surface_targets_output(BlitRuntime *runtime,
@@ -14970,47 +14964,40 @@ int main(int argc, char **argv)
         initialize_outputs(&runtime);
     discover_panes(&runtime);
     {
+        /* One scan for all three kinds, the same one a hotplug runs.  Boot
+           used to call three separate per-kind scans, each opening all 32
+           paths; issue #16 is that cost landing on the event loop. */
         const char *mouse_device = getenv("BLIT_EVDEV_MOUSE");
-        runtime.evdev_mouse_count = open_evdev_mice(
-            mouse_device, runtime.evdev_mouse_fds, runtime.evdev_mouse_paths,
-            &runtime.evdev_mouse_count);
-        if (runtime.evdev_mouse_count > 0) {
-            int input_index;
+        int input_index;
+        if (mouse_device != NULL && mouse_device[0] != '\0')
+            evdev_register_path(&runtime, mouse_device, 0);
+        scan_evdev_devices(&runtime, 0);
+        if (runtime.evdev_mouse_count > 0)
             for (input_index = 0; input_index < runtime.evdev_mouse_count;
                  ++input_index)
                 fprintf(stderr, "blit: evdev mouse[%d]=%s fd=%d\n",
                         input_index, runtime.evdev_mouse_paths[input_index],
                         runtime.evdev_mouse_fds[input_index]);
-        } else
+        else
             fprintf(stderr, "blit: no usable evdev mouse found\n");
-    }
-    {
-        runtime.evdev_keyboard_count = open_evdev_keyboards(
-            runtime.evdev_keyboard_fds, runtime.evdev_keyboard_paths,
-            &runtime.evdev_keyboard_count);
-        if (runtime.evdev_keyboard_count > 0) {
-            int input_index;
+        if (runtime.evdev_keyboard_count > 0)
             for (input_index = 0; input_index < runtime.evdev_keyboard_count;
                  ++input_index)
                 fprintf(stderr, "blit: evdev keyboard[%d]=%s fd=%d\n",
                         input_index, runtime.evdev_keyboard_paths[input_index],
                         runtime.evdev_keyboard_fds[input_index]);
-        } else
+        else
             fprintf(stderr, "blit: no usable evdev keyboard found\n");
-    }
-    {
-        runtime.evdev_gamepad_count = open_evdev_gamepads(
-            runtime.evdev_gamepad_fds, runtime.evdev_gamepad_paths,
-            &runtime.evdev_gamepad_count);
-        if (runtime.evdev_gamepad_count > 0) {
-            int input_index;
+        if (runtime.evdev_gamepad_count > 0)
             for (input_index = 0; input_index < runtime.evdev_gamepad_count;
                  ++input_index)
                 fprintf(stderr, "blit: evdev gamepad[%d]=%s fd=%d\n",
                         input_index, runtime.evdev_gamepad_paths[input_index],
                         runtime.evdev_gamepad_fds[input_index]);
-        } else
+        else
             fprintf(stderr, "blit: no usable evdev gamepad found\n");
+        fprintf(stderr, "blit: evdev scan opened %llu paths\n",
+                runtime.diagnostic_evdev_scan_opens);
     }
     open_evdev_watch(&runtime);
     runtime.evdev_rescan_requested = 0;

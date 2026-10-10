@@ -1,0 +1,98 @@
+release: 0.1.423
+package: blit_0.1.423-1_amd64.deb
+package_sha256: f1889e6600d6f6ab3c0c31443dd8af1379dde2a2fed2439b9ad20125c023c00d
+source_commit: 4c1968add2126ee2f7df13d0ad77b620452701eb
+package_documentation_commit: 4c1968add2126ee2f7df13d0ad77b620452701eb
+server_binary_sha256: 1d1e1538f01015fd0187087a8d795742bd99f4970e7710272a543a00a9559144
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: ed37dff18e0ba8ad638990b28287ab1aeb22ada5fe7345a3eb17a39733598d87
+hibr_root: /tmp/hibr-0.99.100
+hibr_version: 0.99.100
+tcc_build_acceptance: pass
+openapi_yaml: pass
+api_schema_gate: pass
+package_artifact_acceptance: pass
+network_auth_acceptance: pass_api_token_injected
+terminal_conformance: pass
+session_lifecycle_acceptance: pass
+session_write_resize_acceptance: pass
+stream_replay_acceptance: pass
+font_api_acceptance: pass
+hibr_font_manifest_acceptance: pass
+glyph_geometry_local_pixel_acceptance: pass
+sdl_glyph_filter_acceptance: pass
+external_pointer_composition: pass
+pointer_damage_atomic_acceptance: pass
+pointer_wallpaper_stress_acceptance: pass
+hidden_cursor_damage_acceptance: pass
+sdl_background_batch_acceptance: pass
+sdl_graphics_cache_acceptance: pass
+sdl_wallpaper_damage_acceptance: pass
+screenshot_overlay_acceptance: pass
+pixel_frame_acceptance: pass
+render_state_agreement_acceptance: pass
+adapter_coalesce_acceptance: pass_idle_frame_zero_requests
+evdev_scan_open_count_acceptance: pass_32_opens_for_32_paths_was_96
+graphics_kitty_zlib_acceptance: pass_pixel_crc32_identical_to_raw
+graphics_xtsmgraphics_acceptance: pass_no_scroll_and_enforced_limits_reported
+terminal_kitty_keyboard_acceptance: pass_cursor_unmoved_query_reports_zero
+hibr_singleton_local_acceptance: pass
+hibr_resume_guard_acceptance: pass
+restart_gate: pass
+shutdown_gate: pass
+update_idle_timeout_acceptance: pass
+update_reset_acceptance: pass
+update_cancel_acceptance: pass
+frame_rate_settled_acceptance: pass
+terminal_soak_120s_acceptance: pass
+screenshot_nonblocking_live_acceptance: not_rerun_candidate
+qemu_hibr_lifecycle_acceptance: not_rerun_candidate
+qemu_four_output_pixel_acceptance: not_rerun_candidate
+qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
+live_deployment: pending
+live_current_version: 0.1.421
+live_physical_multi_display: unavailable_one_output
+live_physical_button_trace_contract: open
+physical_evdev_acceptance: open
+physical_multi_monitor_acceptance: open
+physical_high_refresh_acceptance: open
+notes: >-
+  Issue #16, partly. The input-device scan walked 32 paths and opened each one
+  once per device kind -- three open() calls and three EVIOCGBIT probes per
+  path, 96 of each for 32 paths, whether or not anything was there -- and it
+  runs inline on the event loop between select() and rendering. The live host
+  recorded a single scan taking 3.456 seconds with max_loop_gap_ms 3460.284
+  behind it: for that time nothing was presented, no input dispatched and no
+  client serviced.
+
+  Boot had the same shape through three separate per-kind functions. Both are
+  now one scan that opens a path once to find out what it is. The probe fd
+  becomes the fd of the first kind that matches, so an ordinary mouse or
+  keyboard costs exactly one open and an absent path costs one failed open.
+
+  A device that is two kinds at once -- a keyboard with a built-in trackpad --
+  gets a second open rather than a dup, deliberately: each kind drains its own
+  fd to exhaustion, and a shared open file description would let whichever read
+  first consume the other's events.
+
+  Measured at the syscall level with strace on an input-device-free host:
+
+    pre-change   96 openat on /dev/input/event*
+    this build   32 openat on /dev/input/event*
+
+  /v1/diagnostics/runtime gains evdev_scan_opens, a lifetime count of the
+  scan's open() calls, so the reduction is measured rather than asserted.
+  tools/tests/evdev_scan_gate.rb asserts it stays at one probe per path plus at
+  most one extra per registered kind, and that max_evdev_scan_ms fits the 16ms
+  frame budget. Its teeth were checked against a build deliberately reopening
+  each path: 64 opens for 32 paths, gate exits 1.
+
+  What this release does NOT fix, stated plainly because the issue's first
+  done-when asks for it: a single wedged open can still stall the loop for as
+  long as the kernel takes. There is no asynchronous open() for a character
+  device, so bounding that needs the open off the loop thread -- a worker
+  process passing the fd back over SCM_RIGHTS, or a thread in a server that has
+  none. A SIGALRM-interrupted open was considered and rejected: it would put
+  signal-interrupted I/O into the event loop to fix a condition that cannot be
+  reproduced or gated on any machine available here. Issue #16 stays open for
+  that, with the three-times reduction and the counter landed.
