@@ -60,7 +60,7 @@ live_input_device_config_acceptance: pass_one_rule_for_where_a_property_applies
 live_main_block_key_acceptance: carried_from_0_1_435
 live_per_device_keymap_acceptance: carried_from_0_1_441
 live_device_kinds_acceptance: carried_from_0_1_442
-live_listener_posture_acceptance: PENDING
+live_listener_posture_acceptance: pass_bind_0_0_0_0_authentication_required_401_unauthenticated
 live_device_routing_acceptance: carried_from_0_1_436
 live_audio_device_acceptance: pass_12_pcms_unchanged_by_node_authority_all_accessible
 json_escape_acceptance: carried_from_0_1_431
@@ -85,13 +85,13 @@ screenshot_nonblocking_live_acceptance: not_rerun_candidate
 qemu_hibr_lifecycle_acceptance: not_rerun_candidate
 qemu_four_output_pixel_acceptance: not_rerun_candidate
 qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
-live_deployment: PENDING
-live_current_version: PENDING
+live_deployment: pass_supervised_update_verified_0_1_443
+live_current_version: 0.1.443
 live_block_cursor_acceptance: carried_from_0_1_425
 live_italic_acceptance: carried_from_0_1_425
 live_session_default_acceptance: carried_from_0_1_425
 live_sync_output_acceptance: carried_from_0_1_425
-live_hibr_desktop_acceptance: PENDING
+live_hibr_desktop_acceptance: pass_32400_printable_revision_859
 live_idle_frame_acceptance: carried_from_0_1_425
 live_physical_multi_display: unavailable_one_output
 live_physical_button_trace_contract: open
@@ -179,3 +179,24 @@ notes: >-
   host's token is persisted in its unit environment rather than set
   transiently. A fail-safe build therefore cannot strand it. 401 alone would
   not have proved that.
+
+  Host-accepted on 192.168.10.54:
+
+    /v1/server listener  {"bind":"0.0.0.0","port":8080,
+                          "authentication":"required",
+                          "command_allowlist":false}
+    unauthenticated GET /v1/server -> 401
+    errors [] warnings []
+
+  The fail-safe logic did not strand the host, which was the risk worth
+  checking: it has a token, so its explicit network bind was honoured. The
+  device-kinds and audio probes still pass, and the desktop came back with
+  32,400 printable cells at revision 859.
+
+  Left as it is, and visible now in a way it was not: command_allowlist is
+  false on this host, so an authenticated caller can run any command as root.
+  That is what the API is for and the token is a root credential; narrowing it
+  with BLIT_COMMAND_ALLOWLIST is awkward for a Hibr deployment, which spawns
+  more than one program, so it is a deployment decision rather than a default.
+  The point of reporting it is that a control panel can now show which posture
+  a host is in instead of nobody knowing.
