@@ -6,7 +6,7 @@ and migration impact. The filename is the canonical link. A few historical
 records share a numeric heading because they were developed on parallel
 branches; they remain separate decisions and are all indexed below. They are
 not missing records and must not be silently merged. New ADRs must use a
-unique filename and number greater than 0061.
+unique filename and number greater than 0062.
 
 The index is a navigation aid, not a second decision source. The record itself
 is authoritative for its status and consequences. An implementation may cite
@@ -83,6 +83,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0059 — `CSI > u`, `CSI < u` and `CSI ? u` belong to the Kitty keyboard protocol](0059-kitty-keyboard-flags-own-their-sequences.md)
 - [0060 — Kitty placements, source rectangles and delete targets](0060-kitty-placements-source-rectangles-and-delete-targets.md)
 - [0061 — A surface's origin on an output is computed in one place](0061-one-rule-for-a-surface-origin.md)
+- [0062 — A wide cell is drawn from a second, 16×16 font](0062-a-second-font-for-wide-cells.md)
 
 ## Adding an ADR
 

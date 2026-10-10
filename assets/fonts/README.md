@@ -26,3 +26,36 @@ Unicode or CJK shaping in an 8×16 cell. The build uses ordered fallback fonts
 and fails if a required scalar resolves to a fallback `.notdef` bitmap. Required box-drawing characters are
 generated as dedicated deterministic terminal geometry, rather than inherited
 from potentially aliased fallback-font bitmaps.
+
+## The wide font
+
+`Blit-Hibr-Unifont16.psf` is the **16×16** font used for cells a wide
+character occupies. It is a second artifact rather than an extension of the
+8×16 font because PSF2 carries one cell size per file, and a wide character
+needs a bitmap twice as wide — a two-cell character drawn from an 8×16 bitmap
+is a stretched narrow glyph, which is what the primary font can offer and why
+CJK, Kana and Hangul previously rendered as `?`
+([ADR 0062](../../docs/adr/0062-a-second-font-for-wide-cells.md)).
+
+49,899 glyphs, covering every wide block of the BMP completely: CJK Unified
+(20,992), CJK Extension A, CJK Compatibility, Hangul Syllables (11,172),
+Hangul Jamo, Hiragana, Katakana, CJK Symbols and Fullwidth forms.
+
+Source: **GNU Unifont 15.1.05**, the only freely licensed bitmap font with
+complete coverage at this cell size. Unifont is dual licensed under the SIL
+Open Font License 1.1 and GPLv2+ with the GNU Font Embedding Exception; this
+artifact is redistributed under the **OFL 1.1**. Copyright © 1998–2024 Roman
+Czyborra, Paul Hardy, Qianqian Fang, Andrew Miller, Johnnie Weaver, David
+Corbett, Nils Moskopp, Rebecca Bettencourt, Ho-Seok Ee et al.
+
+Regenerate it with:
+
+```sh
+tools/fonts/make-wide-psf.py /usr/share/unifont/unifont.bdf \
+  assets/fonts/Blit-Hibr-Unifont16.psf
+```
+
+Only glyphs the BDF marks `DWIDTH 16` are taken; a narrow glyph belongs in the
+primary font. Codepoints outside the BMP are **not** covered, because
+`unifont.bdf` is a BMP font — emoji live in plane 1 and need Unifont's
+`unifont_upper`, which is a separate decision recorded in ADR 0062.
