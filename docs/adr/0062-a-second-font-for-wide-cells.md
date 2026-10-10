@@ -84,6 +84,19 @@ CJK, Kana, Hangul, Fullwidth forms and CJK symbols render as themselves on
 both renderers. The package grows by 1.71 MiB, which is the cost of carrying
 the coverage rather than depending on the host's fonts.
 
+Measured runtime cost of loading it, against the same build with the wide font
+absent:
+
+| | without | with |
+| --- | --- | --- |
+| startup to first served request | 77 ms | 307 ms |
+| resident set | 12.4 MiB | 20.4 MiB |
+
+The 8 MiB is the file, the row cache the loader builds for every glyph
+(49,899 × 16 rows × 4 bytes), and the codepoint hash. The SDL wide atlas is
+**not** in that figure: it is 16 MiB of texture, created on the first wide
+glyph, so a session that shows none never allocates it.
+
 **Not covered: anything outside the BMP**, which means emoji. `unifont.bdf` is
 a BMP font; plane 1 lives in Unifont's `unifont_upper`, a third artifact and
 another 1–2 MiB. Emoji in a terminal also want colour, which a PSF2 bitmap

@@ -192,6 +192,7 @@ suite_terminal() {
 suite_font() {
     run_gate font_api_gate.rb ruby tools/tests/font_api_gate.rb
     run_gate font_identity_gate.rb ruby tools/tests/font_identity_gate.rb
+    run_gate wide_glyph_gate.rb ruby tools/tests/wide_glyph_gate.rb
     run_gate sdl_glyph_render_gate.rb ruby tools/tests/sdl_glyph_render_gate.rb
     run_gate hibr_font_manifest_gate.py python3 tools/tests/hibr_font_manifest_gate.py
     if [ -d "$ROOT/vendor/SDL3/include" ]; then

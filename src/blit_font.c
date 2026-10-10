@@ -248,6 +248,34 @@ static const BlitFontProfile blit_font_profiles[] = {
     {"lat15-console", "/usr/share/consolefonts/Lat15-Terminus16.psf"}
 };
 
+/* The 16x16 font for wide cells (ADR 0062). It is a separate artifact because
+   PSF2 carries one cell size per file, so this is not a profile of the
+   primary font and must not appear in the profile list a client can select. */
+static const char *blit_font_wide_paths[] = {
+    "/usr/lib/blit/fonts/Blit-Hibr-Unifont16.psf",
+    "/usr/share/blit/fonts/Blit-Hibr-Unifont16.psf",
+    "assets/fonts/Blit-Hibr-Unifont16.psf"
+};
+
+int blit_font_load_wide(BlitFont *font)
+{
+    const char *configured = getenv("BLIT_PSF_WIDE_FONT");
+    size_t i;
+
+    if (font == NULL) return -1;
+    if (configured != NULL && configured[0] != '\0')
+        return blit_font_load_path(font, configured);
+    for (i = 0; i < sizeof(blit_font_wide_paths) /
+                    sizeof(blit_font_wide_paths[0]); ++i)
+        if (blit_font_load_path(font, blit_font_wide_paths[i]) == 0)
+            return 0;
+    /* Not fatal: a wide cell falls back to the primary font's substitute,
+       which is what every release before ADR 0062 did. */
+    fprintf(stderr, "blit: wide font unavailable; wide cells fall back to the "
+                    "primary font\n");
+    return -1;
+}
+
 int blit_font_profile_count(void)
 {
     return (int)(sizeof(blit_font_profiles) / sizeof(blit_font_profiles[0]));
@@ -298,6 +326,38 @@ void blit_font_load(BlitFont *font)
     for (i = 0; i < blit_font_profile_count(); ++i)
         if (blit_font_load_path(font, blit_font_profile_path(i)) == 0) return;
     fprintf(stderr, "blit: font unavailable; using built-in fallback\n");
+}
+
+/* Whether this font maps this codepoint to a glyph of its own.
+   blit_font_glyph_index cannot answer that: it returns the '?' substitute, or
+   glyph zero for a font that has no '?', so "it returned something" says
+   nothing. Choosing between the primary and the wide font needs the real
+   answer (ADR 0062). */
+int blit_font_has_glyph(const BlitFont *font, uint32_t codepoint)
+{
+    BlitFontGlyphMap *map;
+    size_t i;
+
+    if (font == NULL || font->glyph_count == 0) return 0;
+    if (codepoint < 256)
+        return font->ascii_glyph[codepoint] >= 0;
+    map = (BlitFontGlyphMap *)font->unicode_lookup;
+    if (map != NULL) {
+        size_t slot = glyph_hash(codepoint) &
+            (font->unicode_lookup_capacity - 1);
+        while (map[slot].codepoint != 0xffffffffU) {
+            if (map[slot].codepoint == codepoint) return 1;
+            slot = (slot + 1) & (font->unicode_lookup_capacity - 1);
+        }
+        return 0;
+    }
+    map = (BlitFontGlyphMap *)font->unicode_map;
+    for (i = 0; i < font->unicode_count; ++i)
+        if (map[i].codepoint == codepoint) return 1;
+    if (font->codepoints != NULL)
+        for (i = 0; i < font->glyph_count; ++i)
+            if (font->codepoints[i] == codepoint) return 1;
+    return 0;
 }
 
 size_t blit_font_glyph_index(const BlitFont *font, uint32_t codepoint)

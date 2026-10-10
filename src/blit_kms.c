@@ -76,6 +76,8 @@ struct BlitKms {
     int output_count;
     KmsOutput outputs[KMS_MAX_OUTPUTS];
     BlitFont *font;
+    /* ADR 0062: the 16x16 font for wide cells. */
+    BlitFont *wide_font;
     int cell_width_override;
     char screenshot_dir[256];
     unsigned long screenshot_frame;
@@ -586,6 +588,7 @@ static void draw_graphic(KmsOutput *output, const BlitGraphicsDraw *draw,
 }
 
 static void draw_view(KmsOutput *output, const BlitFont *font,
+                      const BlitFont *wide_font,
                       const BlitKmsSurfaceView *view)
 {
     int row;
@@ -680,9 +683,15 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
                 (view->combining_count == NULL ||
                  view->combining_count[index] == 0))
                 continue;
+            /* ADR 0062: a wide character's glyph is 16 pixels wide and lives
+               in the wide font; a codepoint that font does not map stays on
+               the primary one, whose substitute is the visible marker. */
+            const BlitFont *glyph_font =
+                (attr & KMS_ATTR_WIDE) && wide_font != NULL &&
+                blit_font_has_glyph(wide_font, cp) ? wide_font : font;
             if (!(attr & KMS_ATTR_CONTINUATION)) {
-                draw_glyph(output, font, cp, x, y, glyph_width, ch, fg, lean,
-                           0);
+                draw_glyph(output, glyph_font, cp, x, y, glyph_width, ch, fg,
+                           lean, 0);
             }
             if (!(attr & KMS_ATTR_CONTINUATION) && (attr & 4))
                 fill_rect(output, x, y + ch - 1, glyph_width, 1, underline);
@@ -691,8 +700,8 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
             if (!(attr & KMS_ATTR_CONTINUATION) && (attr & 1))
                 /* Shifted a pixel right, so it gives up its last column
                    rather than writing into the next cell. */
-                draw_glyph(output, font, cp, x + 1, y, glyph_width, ch, fg,
-                           lean, 1);
+                draw_glyph(output, glyph_font, cp, x + 1, y, glyph_width, ch,
+                           fg, lean, 1);
             if (!(attr & KMS_ATTR_CONTINUATION) && view->combining != NULL &&
                 view->combining_count != NULL) {
                 int combining_index;
@@ -745,6 +754,9 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
         else {
             uint32_t cursor_cp = view->codepoints[cursor_index];
             uint32_t cursor_bg = view_cell_background(view, cursor_index);
+            const BlitFont *cursor_font =
+                (cursor_attr & KMS_ATTR_WIDE) && wide_font != NULL &&
+                blit_font_has_glyph(wide_font, cursor_cp) ? wide_font : font;
             fill_rect(output, cursor_x, cursor_y, cw * cursor_cells, ch,
                       KMS_WHITE);
             /* A block cursor is an inverse cell, not an eraser: the
@@ -752,7 +764,7 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
                has to stay readable. */
             if (cursor_cp != 0 && cursor_cp != ' ' &&
                 !(cursor_attr & KMS_ATTR_CONCEAL))
-                draw_glyph(output, font, cursor_cp, cursor_x, cursor_y,
+                draw_glyph(output, cursor_font, cursor_cp, cursor_x, cursor_y,
                            cw * cursor_cells, ch, cursor_bg,
                            (cursor_attr & KMS_ATTR_ITALIC) ? italic_lean : 0,
                            0);
@@ -1049,10 +1061,11 @@ static int all_outputs_have_content(const BlitKms *kms,
     return 1;
 }
 
-BlitKms *blit_kms_new(BlitFont *font)
+BlitKms *blit_kms_new(BlitFont *font, BlitFont *wide_font)
 {
     BlitKms *kms = (BlitKms *)calloc(1, sizeof(BlitKms));
-    if (kms != NULL) { kms->fd = -1; kms->font = font; }
+    if (kms != NULL) { kms->fd = -1; kms->font = font;
+    kms->wide_font = wide_font; }
     return kms;
 }
 
@@ -1479,7 +1492,7 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                 if (full_redraw)
                     draw.damage_valid = 0;
                 draw_view(output, kms != NULL ? kms->font : NULL,
-                          &draw);
+                          kms != NULL ? kms->wide_font : NULL, &draw);
             }
         draw_kms_effects(output, effect_enabled, effect_intensity);
         draw_kms_overlays(output, overlays, overlay_count);

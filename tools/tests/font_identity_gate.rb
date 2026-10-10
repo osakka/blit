@@ -21,6 +21,7 @@ ROOT = File.expand_path('../..', __dir__)
 PORT = Integer(ENV.fetch('BLIT_GATE_PORT', '19261'), 10)
 BINARY = ENV.fetch('BLIT_GATE_BINARY', File.join(ROOT, 'build/blit/blit-server'))
 ASSET = File.join(ROOT, 'assets/fonts/Blit-Hibr-Terminus16.psf')
+WIDE_ASSET = File.join(ROOT, 'assets/fonts/Blit-Hibr-Unifont16.psf')
 FONT = ENV.fetch('BLIT_GATE_FONT', ASSET)
 BASE = URI("http://127.0.0.1:#{PORT}")
 CELL_W = 8
@@ -193,6 +194,31 @@ GUARANTEED.keys.each_with_index do |codepoint, index|
   end
 end
 
+# 4. The wide font (ADR 0062) is a second artifact with its own identity. A
+# stale or absent one returns wide cells to the '?' substitute, which is the
+# condition #23 was about, so it is asserted here rather than left to the
+# wide-glyph gate alone.
+if File.file?(WIDE_ASSET)
+  wide = psf2_identity(WIDE_ASSET)
+  if wide[:width] != 16 || wide[:height] != 16
+    failures << "the wide font is #{wide[:width]}x#{wide[:height]}; a wide " \
+                'cell is two 8px columns and needs 16x16'
+  end
+  { 0x4E2D => 'CJK ideograph', 0x3042 => 'HIRAGANA A',
+    0xD55C => 'HANGUL SYLLABLE HAN', 0xFF21 => 'FULLWIDTH A' }.each do |cp, name|
+    next if wide[:mapped].key?(cp)
+
+    failures << ('the wide font does not map U+%04X (%s)' % [cp, name])
+  end
+  if wide[:glyphs] < 40_000
+    failures << "the wide font has only #{wide[:glyphs]} glyphs; the wide BMP " \
+                'blocks need about fifty thousand'
+  end
+else
+  failures << "#{WIDE_ASSET.sub("#{ROOT}/", '')} is missing, so wide cells " \
+              'fall back to the primary font and render as "?"'
+end
+
 unless failures.empty?
   failures.each { |f| warn "font-identity gate: #{f}" }
   exit 1
@@ -200,4 +226,5 @@ end
 
 puts "FONT_IDENTITY_PASS glyphs=#{active['glyphs']} " \
      "mappings=#{active['mappings']} cell=#{expected[:width]}x#{expected[:height]} " \
-     "guaranteed_codepoints=#{GUARANTEED.length}"
+     "guaranteed_codepoints=#{GUARANTEED.length} " \
+     "wide=#{File.file?(WIDE_ASSET) ? psf2_identity(WIDE_ASSET)[:glyphs] : 0}_glyphs_16x16"

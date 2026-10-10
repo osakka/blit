@@ -267,6 +267,23 @@ typedef struct {
     SDL_Renderer *renderer;
     SDL_Texture *scene_texture;
     SDL_Texture *glyph_atlas;
+    /* ADR 0062: wide glyphs come from a 16x16 font with fifty thousand
+       bitmaps, which will not fit an atlas built up front. This one is a
+       fixed size and is filled a glyph at a time on first use, with a
+       codepoint-indexed slot table so the lookup costs nothing per frame.
+       Wide glyphs also batch separately, because a batch submits with one
+       texture. */
+    SDL_Texture *wide_atlas;
+    int wide_atlas_columns;
+    int wide_atlas_slots;
+    int wide_atlas_next;
+    int32_t *wide_atlas_slot_of;
+    SDL_Vertex *wide_vertices;
+    int *wide_indices;
+    int wide_capacity;
+    int wide_vertex_count;
+    int wide_index_count;
+    unsigned long long wide_glyph_uploads;
     SDL_Texture *graphics_textures[BLIT_SDL_GRAPHICS_CACHE];
     const BlitGraphicsImage *graphics_sources[BLIT_SDL_GRAPHICS_CACHE];
     unsigned long long graphics_generations[BLIT_SDL_GRAPHICS_CACHE];
@@ -559,6 +576,10 @@ typedef struct {
     char sdl_renderer_name[64];
     BlitKms *kms;
     BlitFont font;
+    /* ADR 0062: the 16x16 font for cells a wide character occupies. Its
+       glyph_count is zero when it could not be loaded, which is the test for
+       whether a wide cell can be drawn from it. */
+    BlitFont wide_font;
     char sdl_screenshot_dir[256];
     unsigned long sdl_screenshot_after;
     unsigned long sdl_frame;
@@ -3080,6 +3101,19 @@ static int parse_color(const char *text, uint32_t *color)
         return 0;
     *color = (uint32_t)value;
     return 1;
+}
+
+/* ADR 0062: a wide character's glyph needs a 16x16 bitmap, which lives in the
+   wide font. Anything else -- including a wide codepoint the wide font does
+   not map -- is drawn from the primary font, whose substitute remains the
+   visible marker for genuinely uncovered codepoints. */
+static const BlitFont *cell_font(const BlitRuntime *runtime,
+                                 uint16_t attributes, uint32_t codepoint)
+{
+    if ((attributes & BLIT_ATTR_WIDE) &&
+        blit_font_has_glyph(&runtime->wide_font, codepoint))
+        return &runtime->wide_font;
+    return &runtime->font;
 }
 
 /* A session's default colours come from DT_INK/DT_FACE (or
@@ -11600,7 +11634,7 @@ static void discover_displays(BlitRuntime *runtime)
         char error[256];
         error[0] = '\0';
         runtime->direct_kms = 1;
-        runtime->kms = blit_kms_new(&runtime->font);
+        runtime->kms = blit_kms_new(&runtime->font, &runtime->wide_font);
         if (runtime->kms == NULL || blit_kms_open(runtime->kms, error,
                                                    sizeof(error)) < 0) {
             snprintf(runtime->sdl_error, sizeof(runtime->sdl_error),
@@ -11923,6 +11957,15 @@ static void destroy_outputs(BlitRuntime *runtime)
         runtime->outputs[i].scene_texture = NULL;
         if (runtime->outputs[i].glyph_atlas != NULL)
             SDL_DestroyTexture(runtime->outputs[i].glyph_atlas);
+        if (runtime->outputs[i].wide_atlas != NULL)
+            SDL_DestroyTexture(runtime->outputs[i].wide_atlas);
+        free(runtime->outputs[i].wide_atlas_slot_of);
+        free(runtime->outputs[i].wide_vertices);
+        free(runtime->outputs[i].wide_indices);
+        runtime->outputs[i].wide_atlas = NULL;
+        runtime->outputs[i].wide_atlas_slot_of = NULL;
+        runtime->outputs[i].wide_vertices = NULL;
+        runtime->outputs[i].wide_indices = NULL;
         runtime->outputs[i].glyph_atlas = NULL;
         runtime->outputs[i].glyph_atlas_columns = 0;
         free(runtime->outputs[i].glyph_vertices);
@@ -11954,7 +11997,7 @@ static int activate_direct_kms_fallback(BlitRuntime *runtime)
         return 0;
     destroy_outputs(runtime);
     error[0] = '\0';
-    runtime->kms = blit_kms_new(&runtime->font);
+    runtime->kms = blit_kms_new(&runtime->font, &runtime->wide_font);
     if (runtime->kms == NULL || blit_kms_open(runtime->kms, error,
                                                sizeof(error)) < 0) {
         if (runtime->kms != NULL) {
@@ -12751,6 +12794,214 @@ static float glyph_row_lean(float lean, int row, int rows)
     if (lean == 0.0f || rows < 2)
         return 0.0f;
     return lean * (float)(rows - 1 - 2 * row) / (float)(rows - 1);
+}
+
+#define BLIT_WIDE_ATLAS_PIXELS 2048
+#define BLIT_WIDE_ATLAS_CODEPOINTS 0x10000
+
+/* The wide atlas and its slot table, created on first wide glyph so a session
+   that never shows one pays nothing. */
+static int ensure_sdl_wide_atlas(BlitOutput *output, const BlitFont *font)
+{
+    int tile;
+    int index;
+
+    if (output == NULL || output->renderer == NULL || font == NULL ||
+        font->data == NULL || font->width < 1 || font->height < 1)
+        return 0;
+    if (output->wide_atlas != NULL)
+        return 1;
+    tile = font->width > font->height ? font->width : font->height;
+    tile += 2;
+    output->wide_atlas = SDL_CreateTexture(output->renderer,
+                                           SDL_PIXELFORMAT_RGBA32,
+                                           SDL_TEXTUREACCESS_STATIC,
+                                           BLIT_WIDE_ATLAS_PIXELS,
+                                           BLIT_WIDE_ATLAS_PIXELS);
+    if (output->wide_atlas == NULL)
+        return 0;
+    SDL_SetTextureBlendMode(output->wide_atlas, SDL_BLENDMODE_BLEND);
+    if (!SDL_SetTextureScaleMode(output->wide_atlas, SDL_SCALEMODE_NEAREST)) {
+        SDL_DestroyTexture(output->wide_atlas);
+        output->wide_atlas = NULL;
+        return 0;
+    }
+    output->wide_atlas_columns = BLIT_WIDE_ATLAS_PIXELS / tile;
+    output->wide_atlas_slots = output->wide_atlas_columns *
+        (BLIT_WIDE_ATLAS_PIXELS / tile);
+    output->wide_atlas_slot_of = (int32_t *)malloc(
+        (size_t)BLIT_WIDE_ATLAS_CODEPOINTS * sizeof(*output->wide_atlas_slot_of));
+    if (output->wide_atlas_slot_of == NULL) {
+        SDL_DestroyTexture(output->wide_atlas);
+        output->wide_atlas = NULL;
+        return 0;
+    }
+    for (index = 0; index < BLIT_WIDE_ATLAS_CODEPOINTS; ++index)
+        output->wide_atlas_slot_of[index] = -1;
+    output->wide_atlas_next = 0;
+    return 1;
+}
+
+/* The slot holding this codepoint's bitmap, uploading it on first use.
+   Returns -1 when the atlas is full, which the caller treats as "not
+   available" rather than evicting something that is on screen. */
+static int sdl_wide_atlas_slot(BlitOutput *output, const BlitFont *font,
+                               uint32_t codepoint)
+{
+    unsigned char *pixels;
+    size_t glyph;
+    int tile = font->width > font->height ? font->width : font->height;
+    int slot;
+    int row;
+    int column;
+    SDL_Rect rect;
+
+    if (codepoint >= BLIT_WIDE_ATLAS_CODEPOINTS)
+        return -1;
+    if (!ensure_sdl_wide_atlas(output, font))
+        return -1;
+    if (output->wide_atlas_slot_of[codepoint] >= 0)
+        return output->wide_atlas_slot_of[codepoint];
+    if (output->wide_atlas_next >= output->wide_atlas_slots)
+        return -1;
+    tile += 2;
+    glyph = blit_font_glyph_index(font, codepoint);
+    pixels = (unsigned char *)calloc(1, (size_t)tile * (size_t)tile * 4U);
+    if (pixels == NULL)
+        return -1;
+    for (row = 0; row < font->height; ++row) {
+        uint32_t bits = blit_font_glyph_row(font, glyph, codepoint, row);
+        for (column = 0; column < font->width; ++column) {
+            size_t offset;
+            if (!(bits & (1U << (font->width - column - 1))))
+                continue;
+            offset = ((size_t)(row + 1) * (size_t)tile +
+                      (size_t)(column + 1)) * 4U;
+            pixels[offset] = 255;
+            pixels[offset + 1] = 255;
+            pixels[offset + 2] = 255;
+            pixels[offset + 3] = 255;
+        }
+    }
+    slot = output->wide_atlas_next++;
+    rect.x = (slot % output->wide_atlas_columns) * tile;
+    rect.y = (slot / output->wide_atlas_columns) * tile;
+    rect.w = tile;
+    rect.h = tile;
+    if (!SDL_UpdateTexture(output->wide_atlas, &rect, pixels, tile * 4)) {
+        free(pixels);
+        --output->wide_atlas_next;
+        return -1;
+    }
+    free(pixels);
+    output->wide_atlas_slot_of[codepoint] = slot;
+    ++output->wide_glyph_uploads;
+    return slot;
+}
+
+static void flush_sdl_wide_batch(BlitOutput *output)
+{
+    if (output == NULL || output->renderer == NULL ||
+        output->wide_atlas == NULL || output->wide_vertex_count == 0)
+        return;
+    SDL_RenderGeometry(output->renderer, output->wide_atlas,
+                       output->wide_vertices, output->wide_vertex_count,
+                       output->wide_indices, output->wide_index_count);
+    output->wide_vertex_count = 0;
+    output->wide_index_count = 0;
+}
+
+static int queue_sdl_wide_glyph(BlitOutput *output, const BlitFont *font,
+                                uint32_t colour, uint32_t codepoint, float x,
+                                float y, float cell_width, float cell_height,
+                                float lean)
+{
+    SDL_Vertex *vertices;
+    int *indices;
+    int slot;
+    int tile;
+    float source_x;
+    float source_y;
+    float source_w;
+    float source_h;
+    float red;
+    float green;
+    float blue;
+    int vertex;
+    int index;
+    int required;
+
+    slot = sdl_wide_atlas_slot(output, font, codepoint);
+    if (slot < 0)
+        return 0;
+    tile = (font->width > font->height ? font->width : font->height) + 2;
+    required = output->wide_vertex_count + 4;
+    if (required > output->wide_capacity) {
+        int capacity = output->wide_capacity > 0 ? output->wide_capacity : 256;
+        SDL_Vertex *grown;
+        int *grown_indices;
+        while (capacity < required) {
+            if (capacity > 1000000)
+                return 0;
+            capacity *= 2;
+        }
+        grown = (SDL_Vertex *)realloc(output->wide_vertices,
+                                      (size_t)capacity * sizeof(*grown));
+        if (grown == NULL)
+            return 0;
+        output->wide_vertices = grown;
+        grown_indices = (int *)realloc(output->wide_indices,
+                                       (size_t)(capacity / 4) * 6U *
+                                       sizeof(*grown_indices));
+        if (grown_indices == NULL)
+            return 0;
+        output->wide_indices = grown_indices;
+        output->wide_capacity = capacity;
+    }
+    source_x = (float)((slot % output->wide_atlas_columns) * tile + 1) /
+        (float)BLIT_WIDE_ATLAS_PIXELS;
+    source_y = (float)((slot / output->wide_atlas_columns) * tile + 1) /
+        (float)BLIT_WIDE_ATLAS_PIXELS;
+    source_w = (float)font->width / (float)BLIT_WIDE_ATLAS_PIXELS;
+    source_h = (float)font->height / (float)BLIT_WIDE_ATLAS_PIXELS;
+    red = (float)((colour >> 16) & 0xffU) / 255.0f;
+    green = (float)((colour >> 8) & 0xffU) / 255.0f;
+    blue = (float)(colour & 0xffU) / 255.0f;
+    vertex = output->wide_vertex_count;
+    vertices = output->wide_vertices + vertex;
+    vertices[0].position.x = x + lean;
+    vertices[0].position.y = y;
+    vertices[1].position.x = x + cell_width + lean;
+    vertices[1].position.y = y;
+    vertices[2].position.x = x + cell_width - lean;
+    vertices[2].position.y = y + cell_height;
+    vertices[3].position.x = x - lean;
+    vertices[3].position.y = y + cell_height;
+    vertices[0].tex_coord.x = source_x;
+    vertices[0].tex_coord.y = source_y;
+    vertices[1].tex_coord.x = source_x + source_w;
+    vertices[1].tex_coord.y = source_y;
+    vertices[2].tex_coord.x = source_x + source_w;
+    vertices[2].tex_coord.y = source_y + source_h;
+    vertices[3].tex_coord.x = source_x;
+    vertices[3].tex_coord.y = source_y + source_h;
+    for (index = 0; index < 4; ++index) {
+        vertices[index].color.r = red;
+        vertices[index].color.g = green;
+        vertices[index].color.b = blue;
+        vertices[index].color.a = 1.0f;
+    }
+    index = output->wide_index_count;
+    indices = output->wide_indices + index;
+    indices[0] = vertex;
+    indices[1] = vertex + 1;
+    indices[2] = vertex + 2;
+    indices[3] = vertex;
+    indices[4] = vertex + 2;
+    indices[5] = vertex + 3;
+    output->wide_vertex_count += 4;
+    output->wide_index_count += 6;
+    return 1;
 }
 
 static void render_sdl_glyph(SDL_Renderer *renderer, const BlitFont *font,
@@ -13814,9 +14065,22 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                            attributes render identically. */
                         float lean = (attributes & BLIT_ATTR_ITALIC) ?
                             italic_lean : 0.0f;
+                        /* ADR 0062: a wide character's glyph is 16 pixels
+                           wide and comes from the wide font and its own
+                           batch, because a batch submits with one texture. */
+                        const BlitFont *glyph_font = cell_font(
+                            runtime, attributes,
+                            surface->codepoints[row][column]);
                         if (!(attributes & BLIT_ATTR_CONTINUATION) &&
                             surface->codepoints[row][column] != 0 &&
-                            surface->codepoints[row][column] != ' ')
+                            surface->codepoints[row][column] != ' ' &&
+                            (glyph_font == &runtime->font ||
+                             !queue_sdl_wide_glyph(
+                                 &runtime->outputs[output_index], glyph_font,
+                                 foreground, surface->codepoints[row][column],
+                                 surface_origin_x + column * (float)cell_width,
+                                 (float)surface_origin_y + row * (float)cell_height,
+                                 (float)glyph_width, (float)cell_height, lean)))
                             render_or_queue_sdl_glyph(
                                 &runtime->outputs[output_index], &runtime->font,
                                 foreground, surface->codepoints[row][column],
@@ -13843,7 +14107,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                         }
                         if (attributes & BLIT_ATTR_BOLD &&
                             surface->codepoints[row][column] != 0 &&
-                            surface->codepoints[row][column] != ' ')
+                            surface->codepoints[row][column] != ' ' &&
+                            glyph_font == &runtime->font)
                             render_or_queue_sdl_glyph(
                                 &runtime->outputs[output_index], &runtime->font,
                                 foreground, surface->codepoints[row][column],
@@ -13856,6 +14121,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                                 1.0f);
                         if (attributes & (BLIT_ATTR_UNDERLINE | BLIT_ATTR_STRIKE))
                             flush_sdl_glyph_batch(&runtime->outputs[output_index]);
+                            flush_sdl_wide_batch(&runtime->outputs[output_index]);
                         if (attributes & BLIT_ATTR_UNDERLINE)
                             SDL_SetRenderDrawColor(renderer,
                                 (unsigned char)(underline_color >> 16),
@@ -13876,6 +14142,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                 }
             }
             flush_sdl_glyph_batch(&runtime->outputs[output_index]);
+            flush_sdl_wide_batch(&runtime->outputs[output_index]);
             if (surface->cursor_visible &&
                 surface->cursor_y >= first_row && surface->cursor_y < last_row) {
                 int cursor_column = surface->cursor_x;
@@ -13939,6 +14206,16 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                     if (cursor_codepoint != 0 && cursor_codepoint != ' ' &&
                         !(cursor_attributes & BLIT_ATTR_CONCEAL)) {
                         int combining_index;
+                        const BlitFont *cursor_font = cell_font(
+                            runtime, cursor_attributes, cursor_codepoint);
+                        if (cursor_font == &runtime->font ||
+                            !queue_sdl_wide_glyph(
+                                &runtime->outputs[output_index], cursor_font,
+                                cell_background, cursor_codepoint, cursor_x,
+                                cursor_y, (float)(cursor_cells * cell_width),
+                                (float)cell_height,
+                                (cursor_attributes & BLIT_ATTR_ITALIC) ?
+                                    italic_lean : 0.0f))
                         render_or_queue_sdl_glyph(
                             &runtime->outputs[output_index], &runtime->font,
                             cell_background, cursor_codepoint, cursor_x,
@@ -13961,6 +14238,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                                 (cursor_attributes & BLIT_ATTR_ITALIC) ?
                                     italic_lean : 0.0f, 0.0f);
                         flush_sdl_glyph_batch(&runtime->outputs[output_index]);
+                        flush_sdl_wide_batch(&runtime->outputs[output_index]);
                     }
                 }
             }
@@ -15938,6 +16216,7 @@ int main(int argc, char **argv)
     runtime.started_us = monotonic_us();
     diagnostic_log(&runtime, "info", "server_start", "Blit gateway starting");
     blit_font_load(&runtime.font);
+    blit_font_load_wide(&runtime.wide_font);
     runtime.font_scale = 1;
     /* With no keyboard to ask, assume the keypad types digits, which is what
        it did before NumLock was honoured at all. EVIOCGLED corrects this from

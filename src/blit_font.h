@@ -25,12 +25,16 @@ typedef struct {
 } BlitFont;
 
 void blit_font_load(BlitFont *font);
+/* Load the 16x16 font used for wide cells (ADR 0062). Returns 0 on success;
+   a failure is not fatal and leaves wide cells on the primary font. */
+int blit_font_load_wide(BlitFont *font);
 int blit_font_load_path(BlitFont *font, const char *path);
 void blit_font_free(BlitFont *font);
 int blit_font_profile_count(void);
 const char *blit_font_profile_id(int index);
 const char *blit_font_profile_path(int index);
 const char *blit_font_profile_for_path(const char *path);
+int blit_font_has_glyph(const BlitFont *font, uint32_t codepoint);
 size_t blit_font_glyph_index(const BlitFont *font, uint32_t codepoint);
 uint32_t blit_font_glyph_row(const BlitFont *font, size_t glyph,
                              uint32_t codepoint, int row);

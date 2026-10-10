@@ -92,7 +92,7 @@ typedef struct {
 #define BLIT_KMS_PRESENTATION_FAILED 3
 #define BLIT_KMS_PRESENTATION_RECOVERING 4
 
-BlitKms *blit_kms_new(BlitFont *font);
+BlitKms *blit_kms_new(BlitFont *font, BlitFont *wide_font);
 int blit_kms_open(BlitKms *kms, char *error, size_t error_capacity);
 int blit_kms_display_count(const BlitKms *kms);
 int blit_kms_display_info(const BlitKms *kms, int index,
