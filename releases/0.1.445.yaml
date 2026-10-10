@@ -1,0 +1,155 @@
+release: 0.1.445
+package: blit_0.1.445-1_amd64.deb
+package_sha256: 7e1bad333e32748acabea0c94752772679fc842da36b87b7e5f69d76aa1805c2
+source_commit: 60ed438383a7f160b0def779e888901f09eccf41
+package_documentation_commit: 60ed438383a7f160b0def779e888901f09eccf41
+server_binary_sha256: e615f91021ead73d315a2fb8d370ec4d42e3b73dcddfb09a318c568283a5dd58
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: ed37dff18e0ba8ad638990b28287ab1aeb22ada5fe7345a3eb17a39733598d87
+hibr_root: /tmp/hibr-0.99.100
+hibr_version: 0.99.100
+tcc_build_acceptance: pass
+openapi_yaml: pass
+api_schema_gate: pass_36_paths
+package_artifact_acceptance: pass_manifest_hashes_match_package_and_reproducible
+network_auth_acceptance: pass_four_listener_postures_loopback_default_refusal_and_override_warning
+terminal_conformance: pass
+session_lifecycle_acceptance: pass
+session_write_resize_acceptance: pass
+stream_replay_acceptance: pass
+font_api_acceptance: pass
+hibr_font_manifest_acceptance: pass
+glyph_geometry_local_pixel_acceptance: pass
+sdl_glyph_filter_acceptance: pass
+external_pointer_composition: pass
+pointer_damage_atomic_acceptance: pass_three_consecutive_runs_frame_counter_wait
+pointer_wallpaper_stress_acceptance: pass
+hidden_cursor_damage_acceptance: pass
+sdl_background_batch_acceptance: pass
+sdl_graphics_cache_acceptance: pass
+sdl_wallpaper_damage_acceptance: pass
+screenshot_overlay_acceptance: pass
+pixel_frame_acceptance: pass
+render_state_agreement_acceptance: pass
+adapter_coalesce_acceptance: pass_idle_frame_zero_requests
+kitty_placement_pixel_acceptance: pass_crop_offset_numbered_and_z_order_by_pixel
+kitty_placement_conformance_acceptance: pass_delete_targets_and_unsupported_key_refusals
+sync_output_acceptance: pass_held_frame_and_hidden_writes_one_and_two_surfaces
+cell_paint_acceptance: pass_cursor_glyph_italic_distinct_session_defaults
+pointer_geometry_acceptance: pass_inset_honoured_and_pane_less_at_corner
+mouse_report_acceptance: pass_wheel_byte_96_hover_gated_per_cell_drops_counted
+key_encoding_acceptance: pass_119_encodings_plus_per_device_keymap_and_modifiers
+frame_quiet_starvation_acceptance: pass_longest_stagnant_run_1_was_29
+capture_witness_acceptance: pass_one_source_presented_flag_presented_revision
+motion_trail_acceptance: pass_799_blank_cells_no_unaccounted_pixels
+render_state_agreement_acceptance: pass_30_blue_cells_was_vacuous
+bold_cell_containment_acceptance: pass_8px_drawn_0_spilled
+wide_glyph_acceptance: pass_4_samples_4_distinct_shapes_two_cells_each
+font_identity_acceptance: pass_929_1182_primary_and_49899_16x16_wide
+desktop_repaint_acceptance: pass_pty_authored_0_cells_unpainted_reported_after_window_retires
+gate_port_isolation_acceptance: carried_from_0_1_431
+input_identity_acceptance: carried_from_0_1_433
+input_device_api_acceptance: carried_from_0_1_432
+input_device_config_acceptance: pass_one_rule_for_where_a_property_applies
+input_device_route_acceptance: carried_from_0_1_436
+audio_device_api_acceptance: pass_node_is_the_authority_hotplug_retires_three_runs
+display_device_api_acceptance: pass_envelope_item_matches_collection_no_writable_property
+main_block_key_table_acceptance: carried_from_0_1_435
+live_input_device_table_acceptance: carried_from_0_1_433
+live_input_device_config_acceptance: pass_one_rule_for_where_a_property_applies
+live_main_block_key_acceptance: carried_from_0_1_435
+live_per_device_keymap_acceptance: carried_from_0_1_441
+live_device_kinds_acceptance: carried_from_0_1_442
+live_listener_posture_acceptance: carried_from_0_1_443
+live_evdev_opener_acceptance: carried_from_0_1_444
+live_output_occupancy_acceptance: PENDING
+live_device_routing_acceptance: carried_from_0_1_436
+live_audio_device_acceptance: pass_12_pcms_unchanged_by_node_authority_all_accessible
+json_escape_acceptance: carried_from_0_1_431
+live_cell_property_refusal_acceptance: carried_from_0_1_431
+live_unpainted_report_acceptance: carried_from_0_1_430
+live_wide_glyph_acceptance: carried_from_0_1_428
+live_render_state_agreement_acceptance: carried_from_0_1_427
+evdev_scan_open_count_acceptance: carried_from_0_1_431
+evdev_open_latency_acceptance: carried_from_0_1_444
+output_occupancy_acceptance: pass_warning_always_error_only_when_declared
+performance_schema_agreement_acceptance: pass_89_required_89_described_both_directions
+graphics_kitty_zlib_acceptance: pass_pixel_crc32_identical_to_raw
+graphics_xtsmgraphics_acceptance: pass_no_scroll_and_enforced_limits_reported
+terminal_kitty_keyboard_acceptance: pass_cursor_unmoved_query_reports_zero
+hibr_singleton_local_acceptance: pass
+hibr_resume_guard_acceptance: pass
+restart_gate: pass
+shutdown_gate: pass
+update_idle_timeout_acceptance: pass
+update_reset_acceptance: pass
+update_cancel_acceptance: pass
+frame_rate_settled_acceptance: pass
+terminal_soak_120s_acceptance: pass
+screenshot_nonblocking_live_acceptance: not_rerun_candidate
+qemu_hibr_lifecycle_acceptance: not_rerun_candidate
+qemu_four_output_pixel_acceptance: not_rerun_candidate
+qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
+live_deployment: PENDING
+live_current_version: PENDING
+live_block_cursor_acceptance: carried_from_0_1_425
+live_italic_acceptance: carried_from_0_1_425
+live_session_default_acceptance: carried_from_0_1_425
+live_sync_output_acceptance: carried_from_0_1_425
+live_hibr_desktop_acceptance: PENDING
+live_idle_frame_acceptance: carried_from_0_1_425
+live_physical_multi_display: unavailable_one_output
+live_physical_button_trace_contract: open
+physical_evdev_acceptance: open
+physical_multi_monitor_acceptance: open
+physical_high_refresh_acceptance: open
+notes: >-
+  Issue #55: an output with nothing on it says so.
+
+  A Blit restart left the host with no desktop -- the session was gone,
+  nothing relaunched it, and health was green throughout: ready true, backend
+  sdl3, errors []. The screen was blank and nothing in the API said so. That
+  is an unattended outage that no monitor could have caught.
+
+  Of the ticket's two options, relaunching the desktop Blit was presenting
+  needs memory across a restart of what it launched, and cannot be done with
+  --resume anyway (#32). Reporting it can be done now, correctly, and is what
+  makes the outage detectable.
+
+  Two tiers, because Blit cannot know on its own whether a given output is
+  supposed to be showing something -- an idle development server is not
+  broken, and every gate in this repository runs one:
+
+    warning, always: output_without_session whenever an output has nothing on
+      it. A display server presenting nothing is worth saying out loud.
+
+    error, only when the deployment set BLIT_EXPECT_DESKTOP=1, and only after
+      30 seconds -- long enough for a desktop to start, which on the live host
+      takes about twelve seconds from POST to the first painted cell.
+
+  The idle clock lives in the event loop rather than in the diagnostics
+  builder. A document is read on request and this is a clock: building it on
+  demand would have measured the time since the last reader rather than the
+  time since the output emptied, so a monitor that polled often would never
+  have seen the fault.
+
+  The packaged deployment sets BLIT_EXPECT_DESKTOP=1 -- in blit.env on a fresh
+  install and appended on upgrade, the same way the auth token is -- because
+  that package exists to present a desktop. A host that deliberately runs Blit
+  with no session removes the line.
+
+  Also: errors and warnings are enumerated in the schema now. Both were bare
+  arrays of string, so a client had no way to know what either could contain.
+
+  Gate: output_occupancy_gate.rb asserts the distinction in both directions,
+  which is the part that could rot silently into "always an error" -- breaking
+  every other gate's fixture -- or "never an error", which is the original
+  defect. Teeth: with the two reports removed, the warning is absent and the
+  declared deployment still reports nothing after 30 s.
+
+  Suite: 49 pass, 5 skip, 0 fail.
+
+  Not done, and still #55's other half if anyone wants it: Blit does not
+  relaunch the desktop. It reports that it has an output with nothing on it,
+  which is the part Blit can be right about; what to launch, and whether to,
+  belongs to whatever owns the deployment.
