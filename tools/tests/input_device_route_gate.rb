@@ -91,18 +91,16 @@ def create_session(name)
 end
 
 def inject_letter(device_id, letter)
-  code = { 'a' => 30, 'b' => 48 }.fetch(letter)
-  %w[press release].each_with_index do |_, index|
-    status, = request('POST', '/v1/input/inject',
-                      body: { 'kind' => 'key', 'code' => code,
-                              'value' => 1 - index, 'device_id' => device_id })
-    raise "inject #{letter} -> #{status}" unless status == 202
-  end
-  # The newline the echo loop reads a line on.
-  %w[press release].each_with_index do |_, index|
-    request('POST', '/v1/input/inject',
-            body: { 'kind' => 'key', 'code' => 28, 'value' => 1 - index,
-                    'device_id' => device_id })
+  code = { 'a' => 30, 'b' => 48, 'c' => 46 }.fetch(letter)
+  [code, 28].each do |key|
+    [1, 0].each do |value|
+      event = { 'kind' => 'key', 'code' => key, 'value' => value }
+      # device_id is optional: without it the event is attributed to the
+      # aggregate route, which is what this endpoint did before ADR 0064.
+      event['device_id'] = device_id if device_id
+      status, = request('POST', '/v1/input/inject', body: event)
+      raise "inject #{letter} -> #{status}" unless status == 202
+    end
   end
 end
 
@@ -201,6 +199,31 @@ Dir.mktmpdir('blit-route') do |root|
                   "route is not per device: #{second_text.inspect}"
     end
 
+    # The routing decision is carried by a runtime field that is set at the
+    # top of a drain or an injection and cleared at the bottom. If it ever
+    # survived a request boundary, an injection with no device_id -- which has
+    # no device and must fall back to focus -- would land wherever the last
+    # routed device pointed. This is the assertion that catches that.
+    # The test uses the *second* device deliberately: with no device_id the
+    # fallback is the focused session, which is the first one, so routing
+    # through the first device could not tell a leak from the fallback
+    # working.
+    before_leak = surface_text(second.fetch('surface_id'))
+    inject_letter(device_b, 'b')
+    sleep 0.5
+    inject_letter(nil, 'c')
+    sleep 1
+    after_leak = surface_text(second.fetch('surface_id'))
+    if after_leak.include?('GOT[c]')
+      failures << 'an injection with no device_id landed in the session the ' \
+                  'previous routed device pointed at, so the routing source ' \
+                  "outlived its request: #{after_leak.inspect}"
+    end
+    unless after_leak.scan('GOT[b]').length > before_leak.scan('GOT[b]').length
+      failures << 'the routed device stopped delivering after an unrouted ' \
+                  'injection'
+    end
+
     # A device route that exists but is disabled falls through to the rule
     # that applied before it, rather than blocking the device's input.
     _, item = request('GET', "/v1/input/devices/#{device_b}")
@@ -226,6 +249,25 @@ Dir.mktmpdir('blit-route') do |root|
     if after_fallthrough.scan('GOT[b]').length > before_fallthrough.scan('GOT[b]').length
       failures << 'a disabled device route still delivered to its target'
     end
+
+    # A route can be removed, not merely disabled, or a controller cannot put
+    # a device back the way it found it.
+    _, item = request('GET', "/v1/input/devices/#{device_b}")
+    code, cleared = request('PATCH', "/v1/input/devices/#{device_b}",
+                            body: { 'configuration' => {
+                              'route' => { 'enabled' => false } } },
+                            headers: { 'If-Match' => item.fetch('revision').to_s })
+    if code != 200
+      failures << "removing a route -> #{code} #{cleared.inspect}"
+    elsif !cleared.dig('configuration', 'route').nil?
+      failures << 'a removed route is still reported: ' \
+                  "#{cleared.dig('configuration', 'route').inspect}"
+    end
+    code, = request('PATCH', "/v1/input/devices/#{device_b}",
+                    body: { 'configuration' => {
+                      'route' => { 'enabled' => true } } })
+    failures << "an enabled route with no target -> #{code}, wanted 400" unless
+      code == 400
 
     # A device that is routed is a configured device, so unplugging it must
     # not retire it and lose the route.
@@ -254,4 +296,5 @@ end
 
 puts 'INPUT_DEVICE_ROUTE_PASS devices=2 sessions=2 keys_landed_per_device=yes ' \
      'unknown_target=400 unknown_route_property=400 disabled_route=falls_through ' \
-     'routed_device_survives_unplug=yes'
+     'no_device_id_does_not_inherit=yes route_removable=yes ' \
+     'enabled_without_target=400 routed_device_survives_unplug=yes'

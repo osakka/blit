@@ -89,16 +89,18 @@ begin
   failures << "session 2 received keyboard A's key: #{second.inspect}" if
     second.include?('GOT[a]')
 ensure
-  # Clear the routes and remove the sessions, so the host is as it was.
+  # Remove the routes -- not merely disable them, or the devices stay
+  # "configured" and the host is not as it was found -- and remove the
+  # sessions.
   [a, b].each do |device|
     _, item = call('GET', "/v1/input/devices/#{device.fetch('id')}")
     next unless item.is_a?(Hash) && item.dig('configuration', 'route')
 
-    call('PATCH', "/v1/input/devices/#{device.fetch('id')}",
-         { 'configuration' => {
-           'route' => { 'target_session_id' => item.dig('configuration', 'route', 'target_session_id'),
-                        'enabled' => false } } },
-         { 'If-Match' => item.fetch('revision').to_s })
+    code, = call('PATCH', "/v1/input/devices/#{device.fetch('id')}",
+                 { 'configuration' => { 'route' => { 'enabled' => false } } },
+                 { 'If-Match' => item.fetch('revision').to_s })
+    warn "live device routing: could not remove #{device['id']}'s route (#{code})" unless
+      code == 200
   end
   sessions.each { |s| call('DELETE', "/v1/terminal-sessions/#{s.fetch('id')}") }
 end

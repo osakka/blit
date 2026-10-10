@@ -168,6 +168,9 @@ that exists but is disabled **falls through** rather than blocking, so
 disabling it restores the behaviour that applied before it instead of dropping
 the device's input. A route whose target session ends is disabled and keeps its
 target, so a controller can still see what it pointed at.
+A route object carrying `enabled: false` and no `target_session_id` removes
+the route, which is how a controller puts a device back the way it found it;
+without that a device could be routed and un-enabled but never un-routed.
 `configuration.enabled: false` releases the device's file descriptors
 entirely.
 
@@ -188,7 +191,12 @@ would otherwise assume otherwise:
 - **The cursor is global.** Routing a pointer sends that device's buttons and
   reports to its target regardless of where the cursor is, and two routed
   pointers still move one cursor. That is what the aggregate routes already
-  do; a cursor per device is a different feature.
+  do; a cursor per device is a different feature. The cell coordinates in a
+  routed report are therefore those of the surface *under the cursor*, clamped
+  to the first cell when the cursor is over no surface — so a routed pointer
+  reports its target's buttons with the geometry of wherever the cursor
+  happens to be. Also pre-existing, also stated rather than changed: changing
+  it would change the aggregate routes' meaning too.
 - **Modifier state is global across keyboards.** Shift held on a keyboard
   routed to session 1 modifies another keyboard's keys on their way to
   session 2. This predates routing — `evdev_shift` and `evdev_key_held` are

@@ -596,7 +596,10 @@ paths:
                     natural_scroll: {type: boolean}
                     route:
                       type: object
-                      required: [target_session_id, enabled]
+                      description: >-
+                        Omit target_session_id, with enabled false, to remove
+                        the route.
+                      required: [enabled]
                       properties:
                         target_session_id:
                           $ref: '#/components/schemas/ResourceId'
@@ -1692,12 +1695,20 @@ components:
                 blocking, so disabling it restores the previous behaviour
                 instead of dropping the device's input. A route whose target
                 session ends is disabled and keeps its target, so a controller
-                can still see what it pointed at.
+                can still see what it pointed at. Sending a route object with
+                `enabled: false` and no `target_session_id` removes the route
+                entirely, which is how a device is put back the way it was
+                found.
                 Routing a pointer sends that device's buttons and reports to
                 the target regardless of where the cursor is; the cursor
                 itself is global and shared by every pointer, as it is for the
-                aggregate routes.
-              required: [target_session_id, enabled]
+                aggregate routes. The cell coordinates in a routed report are
+                those of the surface under the cursor, clamped to the first
+                cell when the cursor is over no surface -- so a routed pointer
+                reports its target's buttons with the geometry of wherever the
+                cursor happens to be. That is what the aggregate routes have
+                always done.
+              required: [enabled]
               properties:
                 target_session_id:
                   $ref: '#/components/schemas/ResourceId'
@@ -1708,8 +1719,11 @@ components:
           allOf:
             - $ref: '#/components/schemas/Revision'
           description: >-
-            Counts changes to this device's own description and configuration.
-            It is what a configuring PATCH carries in If-Match.
+            Counts changes to this device: its reported kinds and
+            capabilities, its `state.present`, and its configuration. It is
+            what a configuring PATCH carries in If-Match, so a PATCH written
+            against a device that has since been unplugged conflicts rather
+            than being applied to a device that is no longer there.
       additionalProperties: false
     InjectedPointerEvent:
       type: object

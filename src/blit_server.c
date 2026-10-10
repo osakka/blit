@@ -12466,6 +12466,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
         route_cursor = json_key_cursor(configuration, "route");
         if (route_cursor != NULL) {
             const char *route_rejected;
+            int target_present;
             if (!json_object_slice(route_cursor, route, sizeof(route))) {
                 send_problem(fd, 400, "Bad Request", "invalid_device_route",
                              "route must be a JSON object with target_session_id and enabled.");
@@ -12482,31 +12483,47 @@ static void handle_request(int fd, BlitRuntime *runtime,
                              detail);
                 return;
             }
-            if (!json_string(route, "target_session_id", route_target,
-                             sizeof(route_target)) ||
-                !json_bool(route, "enabled", &route_enabled) ||
-                strncmp(route_target, "session-", 8) != 0) {
+            target_present = json_key_cursor(route,
+                                             "target_session_id") != NULL;
+            route_target[0] = '\0';
+            if (!json_bool(route, "enabled", &route_enabled) ||
+                (target_present &&
+                 (!json_string(route, "target_session_id", route_target,
+                               sizeof(route_target)) ||
+                  strncmp(route_target, "session-", 8) != 0))) {
                 send_problem(fd, 400, "Bad Request", "invalid_device_route",
-                             "A device route requires a session-N target_session_id and an enabled boolean.");
+                             "A device route requires an enabled boolean and, to set a route, a session-N target_session_id. Omit the target to remove the route.");
                 return;
             }
-            route_session = find_session_id(runtime,
-                strtoull(route_target + 8, NULL, 10));
-            if (route_session == NULL) {
-                send_problem(fd, 400, "Bad Request", "invalid_device_route",
-                             "A device route target session does not exist.");
-                return;
-            }
-            /* The same rule PUT /v1/input/routes/{id} applies: an enabled
-               route needs a live target, or it is a route to nowhere that
-               silently swallows the device's input. */
-            refresh_session_state(runtime, route_session);
-            if (route_enabled &&
-                strcmp(route_session->state, "running") != 0 &&
-                strcmp(route_session->state, "starting") != 0) {
-                send_problem(fd, 409, "Conflict", "input_route_target_stopped",
-                             "An enabled device route requires a live target session.");
-                return;
+            /* A route with no target is removed. Without this a device can be
+               routed and un-enabled but never un-routed, so a controller
+               could not put a device back the way it found it. */
+            if (!target_present) {
+                if (route_enabled) {
+                    send_problem(fd, 400, "Bad Request", "invalid_device_route",
+                                 "A route with no target_session_id cannot be enabled.");
+                    return;
+                }
+            } else {
+                route_session = find_session_id(runtime,
+                    strtoull(route_target + 8, NULL, 10));
+                if (route_session == NULL) {
+                    send_problem(fd, 400, "Bad Request", "invalid_device_route",
+                                 "A device route target session does not exist.");
+                    return;
+                }
+                /* The same rule PUT /v1/input/routes/{id} applies: an enabled
+                   route needs a live target, or it is a route to nowhere that
+                   silently swallows the device's input. */
+                refresh_session_state(runtime, route_session);
+                if (route_enabled &&
+                    strcmp(route_session->state, "running") != 0 &&
+                    strcmp(route_session->state, "starting") != 0) {
+                    send_problem(fd, 409, "Conflict",
+                                 "input_route_target_stopped",
+                                 "An enabled device route requires a live target session.");
+                    return;
+                }
             }
             route_requested = 1;
         }
