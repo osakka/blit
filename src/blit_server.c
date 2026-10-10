@@ -13138,11 +13138,15 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             if (surface_targets_output(runtime, surface, output_index)) {
                 BlitSession *session = find_session_id(
                     runtime, surface->owner_session_id);
+                /* A synchronized surface is still a target.  Dropping it
+                   from the count moves last_target_count, which forces a
+                   full redraw, which clears the very pixels the mode
+                   exists to hold. */
+                ++target_count;
                 if (session != NULL && session->terminal_synchronized) {
                     ++synchronized_count;
                     continue;
                 }
-                ++target_count;
                 if (surface->damage_valid) {
                     target_changed = 1;
                     if (session != NULL &&
@@ -13212,11 +13216,15 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                      graphics_scene_signature(runtime, output_index));
             diagnostic_trace(runtime, "render_path", detail);
         }
-        if (target_count == 0 && overlay_count == 0 &&
-            synchronized_count > 0) {
+        if (target_count == synchronized_count && overlay_count == 0 &&
+            synchronized_count > 0 &&
+            !(runtime->screenshot_requested_mask & (1U << output_index))) {
             /* Leave the synchronized output untouched until its owner sends
                the matching CSI ?2026 l.  In particular, do not clear it
-               merely because another output caused a render pass. */
+               merely because another output caused a render pass.  A pending
+               screenshot falls through instead of being skipped, so that
+               inspecting a synchronized output returns the frame it is
+               holding rather than whatever was captured last. */
             continue;
         }
         scene_target = ensure_sdl_scene_texture(
@@ -13318,7 +13326,12 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             session = find_session_id(runtime, surface->owner_session_id);
             if (session == NULL)
                 continue;
-            if (session->terminal_synchronized)
+            /* Hold the last presented pixels: they are already in the
+               cached scene texture and the incremental path does not touch
+               this surface's rectangle.  A genuine full redraw has cleared
+               the scene, so there is nothing left to hold -- draw the
+               current cells and tear once rather than leave a hole. */
+            if (session->terminal_synchronized && !full_redraw)
                 continue;
             pane = find_pane_id(runtime, session->pane_id);
             if (pane != NULL) {
