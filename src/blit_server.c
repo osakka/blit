@@ -14180,15 +14180,21 @@ static void send_mouse_report(BlitRuntime *runtime, SDL_WindowID window_id,
         snprintf(report, sizeof(report), "\033[<%d;%d;%d%c", code, column,
                  row, release ? 'm' : 'M');
     } else {
-        /* Legacy X10/VT reports encode release as button 3, followed by
-           the mandatory 32 offset.  Wheel codes already include their
-           64 offset and must not be offset a second time. */
+        /* xterm ctlseqs: the button byte is 32 + Cb for *every* button,
+           including the wheel, whose Cb values 64..67 therefore go on the
+           wire as 96..99.  Skipping the offset for the wheel sent 64 and 65,
+           which a reader decodes as button 0 with no flags -- a left click or
+           nothing at all.  Release is Cb 3.
+           The coordinate bytes are 32 + position, so this encoding cannot
+           address past 223; clamp rather than wrap a far-right column into
+           the control range. */
+        int legacy_column = column > 223 ? 223 : column;
+        int legacy_row = row > 223 ? 223 : row;
         if (release && button < 64)
             code = 3 + mouse_modifier_bits(runtime);
-        if (code < 64)
-            code += 32;
+        code += 32;
         snprintf(report, sizeof(report), "\033[M%c%c%c", code,
-                 column + 32, row + 32);
+                 legacy_column + 32, legacy_row + 32);
     }
     write(session->pty_fd, report, strlen(report));
 }
@@ -14221,8 +14227,11 @@ static void send_mouse_motion_report(BlitRuntime *runtime,
         snprintf(report, sizeof(report), "\033[<%d;%d;%dM", button + 32,
                  column, row);
     else
+        /* 32 for motion plus the encoding's own 32 offset, and the same
+           223-column ceiling as a button report. */
         snprintf(report, sizeof(report), "\033[M%c%c%c", button + 64,
-                 column + 32, row + 32);
+                 (column > 223 ? 223 : column) + 32,
+                 (row > 223 ? 223 : row) + 32);
     write(session->pty_fd, report, strlen(report));
 }
 
