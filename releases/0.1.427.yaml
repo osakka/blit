@@ -44,6 +44,7 @@ capture_witness_acceptance: pass_one_source_presented_flag_presented_revision
 motion_trail_acceptance: pass_799_blank_cells_no_unaccounted_pixels
 render_state_agreement_acceptance: pass_30_blue_cells_was_vacuous
 bold_cell_containment_acceptance: pass_8px_drawn_0_spilled
+live_render_state_agreement_acceptance: pass_197_blank_cells_0_unaccounted_coherent_sample
 evdev_scan_open_count_acceptance: pass_32_opens_for_32_paths_was_96
 graphics_kitty_zlib_acceptance: pass_pixel_crc32_identical_to_raw
 graphics_xtsmgraphics_acceptance: pass_no_scroll_and_enforced_limits_reported
@@ -61,14 +62,14 @@ screenshot_nonblocking_live_acceptance: not_rerun_candidate
 qemu_hibr_lifecycle_acceptance: not_rerun_candidate
 qemu_four_output_pixel_acceptance: not_rerun_candidate
 qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
-live_deployment: PENDING
-live_current_version: 0.1.426
-live_block_cursor_acceptance: PENDING
-live_italic_acceptance: PENDING
-live_session_default_acceptance: PENDING
-live_sync_output_acceptance: PENDING
-live_hibr_desktop_acceptance: PENDING
-live_idle_frame_acceptance: PENDING
+live_deployment: pass_supervised_update_verified_0_1_427
+live_current_version: 0.1.427
+live_block_cursor_acceptance: carried_from_0_1_425
+live_italic_acceptance: carried_from_0_1_425
+live_session_default_acceptance: carried_from_0_1_425
+live_sync_output_acceptance: carried_from_0_1_425
+live_hibr_desktop_acceptance: pass_32400_printable_rev_868_stable
+live_idle_frame_acceptance: carried_from_0_1_425
 live_physical_multi_display: unavailable_one_output
 live_physical_button_trace_contract: open
 physical_evdev_acceptance: open
@@ -115,6 +116,14 @@ notes: >-
   cell_paint_gate.rb writes a bold box-drawing glyph beside a blank cell and
   asserts the blank cell is entirely its background; the pre-change binary
   puts one white pixel there.
+
+  Host-accepted. The same comparison was re-run against the Hibr desktop on
+  0.1.427 and now passes: 197 blank cells, zero pixels the state does not
+  account for, on a coherent sample (presented=true, capture revision 868,
+  state revision 868, zero discarded). That makes it the first
+  renderer-versus-state result on real desktop content this project can
+  stand behind, and it is reproducible --
+  tools/probes/host_render_agreement.rb, operator tooling, not packaged.
 
   Unchanged: every pixel claim is measured on the SDL path, and
   src/blit_kms.c carries the same change unseen on a screen.
