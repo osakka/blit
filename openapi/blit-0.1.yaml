@@ -1639,10 +1639,33 @@ components:
           additionalProperties: false
         errors:
           type: array
-          items: {type: string}
+          description: >-
+            Faults a status check should act on. `backend_error` when the
+            display backend failed; `hibr_desktop_unpainted` when a desktop
+            registered an owner and never painted (issue #32);
+            `output_without_session` when an output has had nothing on it for
+            longer than a desktop takes to start **and** the deployment set
+            `BLIT_EXPECT_DESKTOP=1` (issue #55). `health.ready` is about the
+            display backend and stays separate from all of these.
+          items:
+            type: string
+            enum: [backend_error, hibr_desktop_unpainted,
+                   output_without_session]
         warnings:
           type: array
-          items: {type: string}
+          description: >-
+            Conditions worth reporting that may be intentional.
+            `display_presentation_failed`; `input_device_missing`;
+            `unauthenticated_network_listener` while
+            `BLIT_ALLOW_UNAUTHENTICATED_NETWORK=1` is in force (ADR 0065); and
+            `output_without_session` whenever an output has nothing on it,
+            declared or not -- a display server presenting nothing is worth
+            saying out loud, and Blit cannot know on its own whether a given
+            output is supposed to be showing something.
+          items:
+            type: string
+            enum: [display_presentation_failed, input_device_missing,
+                   unauthenticated_network_listener, output_without_session]
       additionalProperties: false
     RuntimeDiagnostics:
       type: object

@@ -82,6 +82,11 @@ extern char **environ;
    purpose: a fresh desktop paints within a second, and the cost of being
    wrong here is a false alarm about a working screen. */
 #define BLIT_HIBR_UNPAINTED_US 10000000ULL
+/* Issue #55: how long an output may present nothing before that is a fault
+   rather than a server that has not been asked to show anything yet. It has
+   to outlast a desktop launch, which on the live host takes about twelve
+   seconds from POST to the first painted cell. */
+#define BLIT_OUTPUT_IDLE_US 30000000ULL
 #define BLIT_MAX_SCROLLBACK_LINES 1000
 #define BLIT_MAX_OVERLAYS 16
 #define BLIT_UPDATE_IDLE_TIMEOUT_US 30000000ULL
@@ -729,6 +734,11 @@ typedef struct {
     int opener_pending_count;
     int scan_sweep_pending;
     int scan_sweep_announce;
+    /* Issue #55: when every output last had a session on it, and whether this
+       deployment expects one. A restart leaves the host with no desktop, and
+       the health document said nothing. */
+    int expect_desktop;
+    uint64_t outputs_idle_since_us;
     int opener_notify[2];
     unsigned long long diagnostic_open_requests;
     unsigned long long diagnostic_open_requests_dropped;
@@ -2425,7 +2435,8 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
 static void diagnostics_json(const BlitRuntime *runtime, char *body,
                              size_t capacity)
 {
-    char errors[128];
+    uint64_t now = monotonic_us();
+    char errors[192];
     char escaped_error[256];
     char scheduler[4096];
     const char *backend = runtime->direct_kms ? "drm-kms" :
@@ -2435,7 +2446,8 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
     int routes = 0;
     int input_devices = 0;
     int surfaces = 0;
-    char warnings[160];
+    int idle_outputs = 0;
+    char warnings[224];
     const char *presentation_sync;
     char escaped_renderer[128];
     int i;
@@ -2460,6 +2472,41 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
         (runtime->output_count == 0 ||
          runtime->output_count != runtime->display_count ||
          runtime->sdl_vsync_failures > 0 ? "scheduler-only" : "sdl-vsync");
+    /* An output with nothing on it (issue #55).
+ *
+ * A Blit restart leaves the host with no desktop: the session is gone and
+ * nothing relaunches it, while health stayed green and said nothing. Blit
+ * cannot know on its own whether a given output is *supposed* to be showing
+ * something -- an idle development server is not broken -- so the count is
+ * always reported as a warning, and becomes an error only for a deployment
+ * that has said it expects a desktop. Monitoring a display server that
+ * presents nothing is the whole point of the field. */
+    {
+        int output_index;
+        for (output_index = 0; output_index < runtime->output_count;
+             ++output_index) {
+            int occupied = 0;
+            int session_index;
+            char display_id[128];
+            snprintf(display_id, sizeof(display_id), "display-%llu",
+                     runtime->outputs[output_index].display_id);
+            for (session_index = 0; session_index < BLIT_MAX_SESSIONS;
+                 ++session_index) {
+                const BlitSession *session = &runtime->sessions[session_index];
+                if (!session->used)
+                    continue;
+                if (session->display_id[0] == '\0' ?
+                        output_index == 0 :
+                        strcmp(session->display_id, display_id) == 0) {
+                    occupied = 1;
+                    break;
+                }
+            }
+            if (!occupied)
+                ++idle_outputs;
+        }
+    }
+
     /* A desktop that registered an owner and never painted is a fault a
        status check has to be able to see; "ready" describes the display
        backend and stays separate (issue #32). */
@@ -2486,10 +2533,16 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
             first_warning = 0;
         }
         if (runtime->evdev_keyboard_count == 0 ||
-            runtime->evdev_mouse_count == 0)
+            runtime->evdev_mouse_count == 0) {
             warning_used += (size_t)snprintf(warnings + warning_used,
                 sizeof(warnings) - warning_used,
                 "%s\"input_device_missing\"", first_warning ? "" : ",");
+            first_warning = 0;
+        }
+        if (idle_outputs > 0)
+            warning_used += (size_t)snprintf(warnings + warning_used,
+                sizeof(warnings) - warning_used,
+                "%s\"output_without_session\"", first_warning ? "" : ",");
         snprintf(warnings + warning_used, sizeof(warnings) - warning_used, "]");
     }
     {
@@ -2500,10 +2553,32 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
                 runtime->sessions[index].hibr_unpainted_reported &&
                 runtime->sessions[index].hibr_owner_writes == 0)
                 unpainted = 1;
-        snprintf(errors, sizeof(errors), "[%s%s%s]",
-                 runtime->sdl_error[0] ? "\"backend_error\"" : "",
-                 runtime->sdl_error[0] && unpainted ? "," : "",
-                 unpainted ? "\"hibr_desktop_unpainted\"" : "");
+        /* An idle output is an error only when the deployment said it
+           expects a desktop, and only after it has had time to start one. */
+        int idle_fault = idle_outputs > 0 && runtime->expect_desktop &&
+            runtime->outputs_idle_since_us != 0 &&
+            now >= runtime->outputs_idle_since_us + BLIT_OUTPUT_IDLE_US;
+        int first_error = 1;
+        size_t error_used = 0;
+        errors[0] = '\0';
+        error_used += (size_t)snprintf(errors + error_used,
+                                       sizeof(errors) - error_used, "[");
+        if (runtime->sdl_error[0]) {
+            error_used += (size_t)snprintf(errors + error_used,
+                sizeof(errors) - error_used, "\"backend_error\"");
+            first_error = 0;
+        }
+        if (unpainted) {
+            error_used += (size_t)snprintf(errors + error_used,
+                sizeof(errors) - error_used, "%s\"hibr_desktop_unpainted\"",
+                first_error ? "" : ",");
+            first_error = 0;
+        }
+        if (idle_fault)
+            error_used += (size_t)snprintf(errors + error_used,
+                sizeof(errors) - error_used, "%s\"output_without_session\"",
+                first_error ? "" : ",");
+        snprintf(errors + error_used, sizeof(errors) - error_used, "]");
     }
     snprintf(body, capacity,
              "{\"revision\":1,\"health\":{\"ready\":%s,"
@@ -19205,6 +19280,14 @@ int main(int argc, char **argv)
             return 3;
         }
     }
+    {
+        /* A deployment that exists to show a desktop says so, and then an
+           output with nothing on it is an error a monitor can act on rather
+           than a warning it has to interpret. Off by default: an idle server
+           is not a broken one, and every gate in this repository runs one. */
+        const char *expect = getenv("BLIT_EXPECT_DESKTOP");
+        runtime.expect_desktop = expect != NULL && expect[0] == '1';
+    }
     snprintf(runtime.listener_bind, sizeof(runtime.listener_bind), "%s",
              bind_address);
     runtime.listener_port = port;
@@ -19473,6 +19556,40 @@ int main(int argc, char **argv)
         now = monotonic_us();
         service_attach_reasserts(&runtime, now);
         service_unpainted_desktops(&runtime, now);
+        /* When an output stopped having a session on it, so the health
+           document can distinguish "nothing yet" from "nothing for a while".
+           Counted here rather than in the diagnostics builder, because a
+           document is read on request and this is a clock. */
+        {
+            int output_index;
+            int idle = 0;
+            for (output_index = 0; output_index < runtime.output_count;
+                 ++output_index) {
+                int occupied = 0;
+                int session_index;
+                char display_id[128];
+                snprintf(display_id, sizeof(display_id), "display-%llu",
+                         runtime.outputs[output_index].display_id);
+                for (session_index = 0; session_index < BLIT_MAX_SESSIONS;
+                     ++session_index) {
+                    BlitSession *session = &runtime.sessions[session_index];
+                    if (!session->used)
+                        continue;
+                    if (session->display_id[0] == '\0' ?
+                            output_index == 0 :
+                            strcmp(session->display_id, display_id) == 0) {
+                        occupied = 1;
+                        break;
+                    }
+                }
+                if (!occupied)
+                    idle = 1;
+            }
+            if (!idle)
+                runtime.outputs_idle_since_us = 0;
+            else if (runtime.outputs_idle_since_us == 0)
+                runtime.outputs_idle_since_us = now;
+        }
         wait_ms = render_wait_ms(&runtime, now);
         for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
             BlitSession *session = &runtime.sessions[i];

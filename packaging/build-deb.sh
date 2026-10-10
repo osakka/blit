@@ -173,6 +173,12 @@ if [ ! -f /etc/blit/blit.env ]; then
     cat > /etc/blit/blit.env <<'CONFIG'
 BLIT_BIND_ADDRESS=0.0.0.0
 BLIT_UPDATE_TOKEN_FILE=/etc/blit/update.token
+# Issue #55. This package exists to present a desktop, so an output with
+# nothing on it is a fault a monitor should see rather than a warning it has
+# to interpret. Blit reports the warning either way; this turns it into an
+# error after a grace window long enough for a desktop to start. Remove the
+# line on a host that deliberately runs Blit with no session.
+BLIT_EXPECT_DESKTOP=1
 LANG=C.UTF-8
 LC_ALL=C.UTF-8
 CONFIG
@@ -196,6 +202,9 @@ if ! grep -q '^BLIT_AUTH_TOKEN=' /etc/blit/blit.env; then
         >> /etc/blit/blit.env
     chown root:blit /etc/blit/blit.env
     chmod 0640 /etc/blit/blit.env
+fi
+if ! grep -q '^BLIT_EXPECT_DESKTOP=' /etc/blit/blit.env; then
+    printf '%s\n' 'BLIT_EXPECT_DESKTOP=1' >> /etc/blit/blit.env
 fi
 if ! grep -q '^LANG=' /etc/blit/blit.env; then
     printf '%s\n' 'LANG=C.UTF-8' >> /etc/blit/blit.env

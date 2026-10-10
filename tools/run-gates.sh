@@ -250,6 +250,7 @@ suite_hibr() {
     # display provider into a harness. Skips (77) without BLIT_HIBR_ROOT.
     run_gate adapter_coalesce_gate.sh "$ROOT"/tools/tests/adapter_coalesce_gate.sh
     run_gate desktop_repaint_gate.rb ruby tools/tests/desktop_repaint_gate.rb
+    run_gate output_occupancy_gate.rb ruby tools/tests/output_occupancy_gate.rb
     run_gate hibr_resume_guard_gate.sh "$ROOT"/tools/tests/hibr_resume_guard_gate.sh
     # QEMU is the repeatable multi-display oracle and is never implied by a
     # local run; invoke tools/tests/qemu_hibr_lifecycle_gate.sh directly.
