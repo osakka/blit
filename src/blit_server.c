@@ -7874,6 +7874,161 @@ static void terminal_apply_sixel(BlitSession *session, BlitSurface *surface,
     mark_surface_full_damage(surface);
 }
 
+/* XTGETTCAP: DCS + q <hex-name> [; <hex-name>...] ST (issue #4).
+ *
+ * Every request used to be answered with the failure status and the names
+ * echoed back, so TN, colors, RGB and everything else reported *unsupported*
+ * where Blit plainly supports the capability. Blit advertises
+ * TERM=xterm-kitty, and a client that trusts that string then asks here to
+ * confirm truecolor before enabling it -- a blanket failure pushes a
+ * well-behaved client onto its most conservative path, which is a silent
+ * downgrade of exactly the fidelity the string promised.
+ *
+ * Answered are the capabilities whose value Blit genuinely owns and which do
+ * not depend on a mode that can change between the question and the answer.
+ * The arrow keys are deliberately not here: kcuu1 is ESC O A in application
+ * cursor mode and ESC [ A outside it, so any single value would be wrong half
+ * the time, and a wrong answer is worse than the honest refusal.
+ *
+ * One DCS per requested name, which is what xterm and kitty both do, so a
+ * mixed request is answered rather than failing whole. A boolean capability
+ * that holds answers with its name and no value. */
+static int terminal_hex_value(char digit)
+{
+    if (digit >= '0' && digit <= '9') return digit - '0';
+    if (digit >= 'a' && digit <= 'f') return digit - 'a' + 10;
+    if (digit >= 'A' && digit <= 'F') return digit - 'A' + 10;
+    return -1;
+}
+
+static int terminal_hex_decode(const char *hex, size_t length, char *out,
+                               size_t capacity)
+{
+    size_t index;
+    size_t used = 0;
+
+    if ((length % 2) != 0)
+        return 0;
+    for (index = 0; index + 1 < length + 1 && index < length; index += 2) {
+        int high = terminal_hex_value(hex[index]);
+        int low = terminal_hex_value(hex[index + 1]);
+        if (high < 0 || low < 0 || used + 1 >= capacity)
+            return 0;
+        out[used++] = (char)((high << 4) | low);
+    }
+    out[used] = '\0';
+    return 1;
+}
+
+static void terminal_hex_encode(const char *text, char *out, size_t capacity)
+{
+    static const char digits[] = "0123456789ABCDEF";
+    size_t used = 0;
+    size_t index;
+
+    for (index = 0; text[index] != '\0' && used + 2 < capacity; ++index) {
+        out[used++] = digits[(unsigned char)text[index] >> 4];
+        out[used++] = digits[(unsigned char)text[index] & 0xf];
+    }
+    out[used] = '\0';
+}
+
+/* The value of one capability, or NULL when Blit does not own it. `boolean`
+   is set for a capability that is reported by its presence alone. */
+static const char *terminal_termcap_value(const BlitSession *session,
+                                          const BlitSurface *surface,
+                                          const char *name, char *storage,
+                                          size_t capacity, int *boolean)
+{
+    *boolean = 0;
+    if (strcmp(name, "TN") == 0 || strcmp(name, "name") == 0)
+        return "xterm-kitty";
+    if (strcmp(name, "Co") == 0 || strcmp(name, "colors") == 0) {
+        /* The terminfo entry for the TERM Blit advertises says 256. Truecolor
+           is signalled by RGB and Tc, which is how a client is supposed to
+           learn it; claiming 16777216 here would disagree with the entry the
+           client already loaded. */
+        snprintf(storage, capacity, "256");
+        return storage;
+    }
+    if (strcmp(name, "RGB") == 0) {
+        snprintf(storage, capacity, "8/8/8");
+        return storage;
+    }
+    if (strcmp(name, "cols") == 0) {
+        snprintf(storage, capacity, "%d", surface->width);
+        return storage;
+    }
+    if (strcmp(name, "lines") == 0) {
+        snprintf(storage, capacity, "%d", surface->height);
+        return storage;
+    }
+    if (strcmp(name, "Tc") == 0) {
+        /* Truecolor. Blit stores a 24-bit value per cell and the SGR parser
+           takes 38;2 and 48;2, so this is the capability as tmux defines it. */
+        *boolean = 1;
+        return storage;
+    }
+    if (strcmp(name, "bce") == 0) {
+        /* Back-colour erase: terminal_erase_cell applies the pen background
+           to the cell it clears. Reported because the code does it, and
+           asserted by a conformance vector rather than taken on trust. */
+        *boolean = 1;
+        return storage;
+    }
+    (void)session;
+    return NULL;
+}
+
+static void terminal_report_termcap(BlitSession *session,
+                                    const BlitSurface *surface,
+                                    const char *request)
+{
+    const char *cursor = request;
+
+    while (*cursor != '\0') {
+        const char *separator = strchr(cursor, ';');
+        size_t length = separator != NULL ? (size_t)(separator - cursor) :
+            strlen(cursor);
+        char name[64];
+        char value[64];
+        char encoded_name[160];
+        char encoded_value[160];
+        char reply[512];
+        const char *resolved;
+        int boolean = 0;
+
+        if (length == 0 || !terminal_hex_decode(cursor, length, name,
+                                                sizeof(name))) {
+            /* A name that is not hex cannot be echoed back as one, so the
+               refusal carries what was asked verbatim. */
+            snprintf(reply, sizeof(reply), "\033P0+r%.*s\033\\", (int)length,
+                     cursor);
+            terminal_write_reply(session, reply);
+        } else {
+            resolved = terminal_termcap_value(session, surface, name, value,
+                                              sizeof(value), &boolean);
+            terminal_hex_encode(name, encoded_name, sizeof(encoded_name));
+            if (resolved == NULL) {
+                snprintf(reply, sizeof(reply), "\033P0+r%s\033\\",
+                         encoded_name);
+            } else if (boolean) {
+                snprintf(reply, sizeof(reply), "\033P1+r%s\033\\",
+                         encoded_name);
+            } else {
+                terminal_hex_encode(resolved, encoded_value,
+                                    sizeof(encoded_value));
+                snprintf(reply, sizeof(reply), "\033P1+r%s=%s\033\\",
+                         encoded_name, encoded_value);
+            }
+            terminal_write_reply(session, reply);
+        }
+        if (separator == NULL)
+            break;
+        cursor = separator + 1;
+    }
+}
+
 static void terminal_apply_string(BlitSession *session, BlitSurface *surface)
 {
     const char *payload = session->terminal_string;
@@ -7945,8 +8100,7 @@ static void terminal_apply_string(BlitSession *session, BlitSurface *surface)
             terminal_write_reply(session, "\033P0$r\033\\");
         }
     } else if (strncmp(payload, "+q", 2) == 0) {
-        snprintf(reply, sizeof(reply), "\033P0+r%s\033\\", payload + 2);
-        terminal_write_reply(session, reply);
+        terminal_report_termcap(session, surface, payload + 2);
     }
 }
 

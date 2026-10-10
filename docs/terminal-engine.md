@@ -112,7 +112,15 @@ shell conformance path is stable.
    SDL, and KMS paths.
    Device status replies include DA1/DA2, XTVERSION, CPR, window size,
    DECRQSS, and XTGETTCAP; erase operations preserve the active background
-   colour according to BCE semantics. `CSI 3 J` also releases retained
+   colour according to BCE semantics.
+   XTGETTCAP answers with real values for the capabilities Blit owns -- `TN`,
+   `Co`/`colors`, `RGB`, `cols`, `lines`, and the booleans `Tc` and `bce` --
+   and refuses the rest, one DCS reply per requested name (issue #4). It used
+   to refuse everything, which pushed a client that trusted
+   `TERM=xterm-kitty` onto its most conservative path. The arrow keys are
+   deliberately refused rather than answered: `kcuu1` is `ESC O A` in
+   application cursor mode and `ESC [ A` outside it, so any single value would
+   be wrong half the time. `CSI 3 J` also releases retained
    main-screen scrollback instead of merely clearing visible cells.
 
 The direct KMS test remains the hardware oracle; the terminal engine must not

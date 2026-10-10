@@ -1185,9 +1185,47 @@ assert_equal('1b5b3f3075', row_text(snapshot),
              'CSI ? u reports what is honoured, not what was requested')
 puts 'PASS kitty-keyboard-query'
 
-snapshot = run_case(base, 'xtgettcap-query',
-                    "stty -icanon -echo min 0 time 5; printf '\\033P+q544e\\033\\\\'; dd if=/dev/tty bs=1 count=11 2>/dev/null | od -An -tx1 | tr -d ' \\n'", width: 80)
-assert_equal('1b50302b72353434651b5c', row_text(snapshot), 'XTGETTCAP reply')
+# Issue #4. XTGETTCAP used to answer the failure status with the names echoed
+# back, for every request -- so TN, colors and RGB all reported *unsupported*
+# on a server that advertises TERM=xterm-kitty and supports all three. A
+# client that trusts the TERM string and then asks here was pushed onto its
+# most conservative path.
+snapshot = run_case(base, 'xtgettcap-terminal-name',
+                    "stty -icanon -echo min 0 time 5; printf '\\033P+q544e\\033\\\\'; dd if=/dev/tty bs=1 count=34 2>/dev/null | od -An -tx1 | tr -d ' \\n'", width: 110)
+# ESC P 1 + r 544E = 787465726D2D6B69747479 ESC \   ->  TN=xterm-kitty
+assert_equal('1b50312b72353434453d373837343635373236443244364236393734373437391b5c',
+             row_text(snapshot), 'XTGETTCAP TN answers the terminal name')
+
+snapshot = run_case(base, 'xtgettcap-unknown-name',
+                    "stty -icanon -echo min 0 time 5; printf '\\033P+q7a7a7a\\033\\\\'; dd if=/dev/tty bs=1 count=13 2>/dev/null | od -An -tx1 | tr -d ' \\n'", width: 110)
+# ESC P 0 + r 7A7A7A ESC \  -- a name Blit does not own still fails, which is
+# what makes the success above mean something.
+assert_equal('1b50302b723741374137411b5c', row_text(snapshot),
+             'XTGETTCAP refuses a capability it does not own')
+
+snapshot = run_case(base, 'xtgettcap-boolean',
+                    "stty -icanon -echo min 0 time 5; printf '\\033P+q5463\\033\\\\'; dd if=/dev/tty bs=1 count=11 2>/dev/null | od -An -tx1 | tr -d ' \\n'", width: 110)
+# ESC P 1 + r 5463 ESC \ -- a boolean capability is reported by its presence,
+# with no value, which is how xterm answers one.
+assert_equal('1b50312b72353436331b5c', row_text(snapshot),
+             'XTGETTCAP reports a boolean capability by presence')
+
+snapshot = run_case(base, 'xtgettcap-multiple-names',
+                    "stty -icanon -echo min 0 time 5; printf '\\033P+q436f;524742\\033\\\\'; dd if=/dev/tty bs=1 count=42 2>/dev/null | od -An -tx1 | tr -d ' \\n'", width: 110)
+# Two DCS replies, one per name: Co=256 then RGB=8/8/8. One reply per name is
+# what xterm and kitty both do, so a mixed request is answered rather than
+# failing whole.
+assert_equal('1b50312b72343336463d3332333533361b5c' \
+             '1b50312b723532343734323d333832463338324633381b5c',
+             row_text(snapshot), 'XTGETTCAP answers every name in a request')
+
+# bce is reported, so it has to be true: an erase applies the pen background.
+# Reading the code said so; this is the assertion that it does.
+snapshot = run_case(base, 'back-colour-erase',
+                    "printf '\\033[48;5;4m\\033[2J'", width: 20, height: 4)
+erased = cell_map(snapshot)
+assert_equal('#0000ee', erased.fetch([3, 1]).fetch('style').fetch('background'),
+             'an erase applies the pen background, which is what bce reports')
 
 snapshot = run_case(base, 'modify-other-keys-prefix',
                     "printf 'a\\033[>4;2mb\\033[>4mc'")
