@@ -475,6 +475,11 @@ typedef struct {
     unsigned long long frame_revision;
     unsigned long long next_event_sequence;
     unsigned int mouse_buttons;
+    /* The cell the last motion report named, so the next sample inside the
+       same cell is not reported again. */
+    unsigned long long motion_report_session;
+    int motion_report_column;
+    int motion_report_row;
     int font_scale;
     int pointer_valid;
     int pointer_output;
@@ -14222,6 +14227,22 @@ static void send_mouse_motion_report(BlitRuntime *runtime,
     if (session->terminal_mouse_mode != 1002 &&
         session->terminal_mouse_mode != 1003)
         return;
+    /* DEC 1002 is button-event tracking: motion is reported only while a
+       button is down.  Reporting it unconditionally turned every hover into a
+       drag for an application that asked for drags. DEC 1003 is any-event
+       tracking and does report a bare hover. */
+    if (session->terminal_mouse_mode == 1002 && runtime->mouse_buttons == 0)
+        return;
+    /* A terminal reports motion when the *cell* changes.  The pointer is
+       sampled per evdev SYN_REPORT, so a mouse crossing one eight-pixel cell
+       otherwise emits a dozen identical reports. */
+    if (runtime->motion_report_session == session->id &&
+        runtime->motion_report_column == column &&
+        runtime->motion_report_row == row)
+        return;
+    runtime->motion_report_session = session->id;
+    runtime->motion_report_column = column;
+    runtime->motion_report_row = row;
     button += mouse_modifier_bits(runtime);
     if (session->terminal_mouse_sgr)
         snprintf(report, sizeof(report), "\033[<%d;%d;%dM", button + 32,

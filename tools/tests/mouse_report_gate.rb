@@ -6,6 +6,8 @@
 #
 #   #37 the legacy (non-SGR) encoding's button byte is 32 + Cb for every
 #       button, the wheel included
+#   #36 DEC 1002 reports motion only while a button is held, and both
+#       tracking modes report once per cell rather than once per sample
 #
 # The session under test echoes its input with `cat -v`, so the bytes the
 # server wrote to the PTY come back as cells and can be read through the API
@@ -66,9 +68,9 @@ def reporting_session(modes)
        'surface' => { 'width' => 60, 'height' => 8 })
 end
 
-def move_to(column, row)
+def move_to(column, row, offset = 2)
   request('POST', '/v1/input/inject', 'kind' => 'pointer_motion',
-          'x' => INSET + (column - 1) * CELL_W + 2,
+          'x' => INSET + (column - 1) * CELL_W + offset,
           'y' => INSET + (row - 1) * CELL_H + 2)
 end
 
@@ -132,9 +134,61 @@ else
 end
 request('DELETE', "/v1/terminal-sessions/#{legacy.fetch('id')}")
 
+# #36. SGR reports are easier to count than to spell: code, column, row.
+# A code with the 32 bit set is a motion report.
+def motions(surface_id)
+  echoed(surface_id).scan(/\^\[\[<(\d+);(\d+);(\d+)([Mm])/)
+                    .map { |code, column, row, _| [code.to_i, column.to_i, row.to_i] }
+                    .select { |code, _, _| code >= 32 }
+end
+
+# 1002 is button-event tracking: a hover is not a drag.
+tracking = reporting_session('\033[?1002h\033[?1006h')
+sleep 2.0
+[1, 5, 9].each { |column| move_to(column, 1); sleep 0.3 }
+hovered = motions(tracking.fetch('surface_id'))
+unless hovered.empty?
+  failures << "DEC 1002 reported #{hovered.length} motion events with no " \
+              "button held: #{hovered.inspect}"
+end
+
+# With a button down, one report per cell entered and no more.
+request('POST', '/v1/input/inject', 'kind' => 'pointer_button',
+        'button' => 0, 'pressed' => true)
+sleep 0.4
+[13, 17].each { |column| move_to(column, 1); sleep 0.4 }
+dragged = motions(tracking.fetch('surface_id'))
+if dragged.length < 2
+  failures << "DEC 1002 reported #{dragged.length} motion events while " \
+              "dragging across two cells, expected 2: #{dragged.inspect}"
+end
+# Three more samples at different pixels inside the cell it is already in
+# must add nothing: the pointer moved, the cell did not.
+[3, 5, 7].each { |offset| move_to(17, 1, offset); sleep 0.2 }
+resampled = motions(tracking.fetch('surface_id'))
+if resampled.length > dragged.length
+  failures << "#{resampled.length - dragged.length} extra motion events were " \
+              'reported for samples inside a cell the pointer was already in'
+end
+request('POST', '/v1/input/inject', 'kind' => 'pointer_button',
+        'button' => 0, 'pressed' => false)
+request('DELETE', "/v1/terminal-sessions/#{tracking.fetch('id')}")
+
+# 1003 is any-event tracking: a bare hover is reported.
+any_event = reporting_session('\033[?1003h\033[?1006h')
+sleep 2.0
+[1, 5, 9].each { |column| move_to(column, 2); sleep 0.3 }
+anywhere = motions(any_event.fetch('surface_id'))
+if anywhere.length < 2
+  failures << "DEC 1003 reported #{anywhere.length} motion events for a " \
+              "hover across three cells, expected at least 2: #{anywhere.inspect}"
+end
+request('DELETE', "/v1/terminal-sessions/#{any_event.fetch('id')}")
+
 unless failures.empty?
   failures.each { |f| warn "mouse-report gate: #{f}" }
   exit 1
 end
 
-puts 'MOUSE_REPORT_PASS legacy_wheel_byte=96'
+puts "MOUSE_REPORT_PASS legacy_wheel_byte=96 hover_1002=0 drag_1002=#{dragged.length} " \
+     "hover_1003=#{anywhere.length}"
