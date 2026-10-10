@@ -59,7 +59,7 @@ live_input_device_table_acceptance: carried_from_0_1_433
 live_input_device_config_acceptance: carried_from_0_1_434
 live_main_block_key_acceptance: carried_from_0_1_435
 live_device_routing_acceptance: carried_from_0_1_436
-live_audio_device_acceptance: PENDING
+live_audio_device_acceptance: pass_12_pcms_unchanged_by_node_authority_all_accessible
 json_escape_acceptance: carried_from_0_1_431
 live_cell_property_refusal_acceptance: carried_from_0_1_431
 live_unpainted_report_acceptance: carried_from_0_1_430
@@ -82,13 +82,13 @@ screenshot_nonblocking_live_acceptance: not_rerun_candidate
 qemu_hibr_lifecycle_acceptance: not_rerun_candidate
 qemu_four_output_pixel_acceptance: not_rerun_candidate
 qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
-live_deployment: PENDING
-live_current_version: PENDING
+live_deployment: pass_supervised_update_verified_0_1_440
+live_current_version: 0.1.440
 live_block_cursor_acceptance: carried_from_0_1_425
 live_italic_acceptance: carried_from_0_1_425
 live_session_default_acceptance: carried_from_0_1_425
 live_sync_output_acceptance: carried_from_0_1_425
-live_hibr_desktop_acceptance: PENDING
+live_hibr_desktop_acceptance: pass_32400_printable_revision_859
 live_idle_frame_acceptance: carried_from_0_1_425
 live_physical_multi_display: unavailable_one_output
 live_physical_button_trace_contract: open
@@ -163,3 +163,10 @@ notes: >-
   Separately: the audio rescan was being measured inside
   diagnostic_last_evdev_scan_ms, which the evdev scan gate bounds at one
   frame. Suite: 47 pass, 5 skip, 0 fail.
+
+  Host-accepted on 192.168.10.54. Still twelve PCMs after presence moved from
+  procfs to the device node, all of them accessible -- which is the check that
+  the change lost nothing, since a mistake there would have shown up as
+  devices disappearing from the inventory. max_evdev_scan_ms 0.032 with the
+  audio rescan no longer counted inside it. The desktop came back with 32,400
+  printable cells at revision 859 and an empty errors array.
