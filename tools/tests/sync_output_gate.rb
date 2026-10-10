@@ -14,6 +14,13 @@
 # Both are asserted here, in both directions, because only the pair
 # distinguishes a held frame from either failure.
 #
+# Issue #45 rides along here, because a held frame is the one case where a
+# capture's own honesty is checkable: the pixels correspond to the state
+# before the batch, so the identity the capture reports must name that older
+# revision and not the live one. Both request forms are exercised, because
+# the non-cached form used to force a rebuild of the output it was inspecting
+# and so showed the batch the renderer was withholding.
+#
 # docs/terminal-engine.md states the contract this gate measures.
 
 require 'json'
@@ -49,11 +56,24 @@ def request(method, path, body = nil)
   Net::HTTP.start(uri.hostname, uri.port, read_timeout: 30) { |h| h.request(req) }
 end
 
-def screenshot
-  response = request('GET', '/v1/diagnostics/screenshots/display-1?cached=1')
+def capture(form = :cached)
+  path = '/v1/diagnostics/screenshots/display-1'
+  path += '?cached=1' if form == :cached
+  response = request('GET', path)
   raise "screenshot failed: #{response.code}" unless response.code == '200'
 
-  response.body
+  revisions = {}
+  (response['X-Blit-Capture-Revisions'] || '').split(',').each do |pair|
+    id, revision = pair.split('=')
+    revisions[id] = Integer(revision, 10) if id && revision
+  end
+  { body: response.body, revisions: revisions,
+    presented: response['X-Blit-Capture-Presented'],
+    frame: response['X-Blit-Capture-Frame'] }
+end
+
+def screenshot(form = :cached)
+  capture(form).fetch(:body)
 end
 
 # 24-bit BMP, bottom-up, rows padded to four bytes.
@@ -125,15 +145,36 @@ failures = []
 
 # A surface with no pane is drawn at the inset, and each further pane-less
 # surface on the output is stacked below the previous one.
-def run_case(name, driver_script, origin_y, failures, inset)
+def run_case(name, driver_script, origin_y, failures, inset, form = :cached)
   driver = driver_script ? session(driver_script) : nil
   batch = session(BATCH)
+  surface = nil
   sleep 1.5
-  before = row_signature(screenshot, inset, origin_y)
+  before = row_signature(screenshot(form), inset, origin_y)
   sleep 3.0
-  during = row_signature(screenshot, inset, origin_y)
+  held = capture(form)
+  during = row_signature(held.fetch(:body), inset, origin_y)
+  # #45. The capture must say it reached a screen, and must name the state its
+  # pixels actually show -- which, mid-batch, is behind the live revision.
+  if held.fetch(:presented) != 'true'
+    failures << "#{name}/#{form}: the capture does not report being presented " \
+                "(#{held.fetch(:presented).inspect})"
+  end
+  surface = JSON.parse(request('GET', "/v1/terminal-sessions/#{batch}").body)
+                .fetch('surface_id')
+  live = JSON.parse(request('GET', "/v1/surfaces/#{surface}/summary").body)
+             .fetch('revision')
+  reported = held.fetch(:revisions)[surface]
+  if reported.nil?
+    failures << "#{name}/#{form}: the capture reported no revision for #{surface}"
+  elsif reported >= live
+    failures << "#{name}/#{form}: the capture reports revision #{reported} " \
+                "for #{surface}, which is not behind the live revision " \
+                "#{live} even though that surface's frame is being held -- " \
+                'so the identity names a state these pixels do not show'
+  end
   sleep 3.5
-  after = row_signature(screenshot, inset, origin_y)
+  after = row_signature(screenshot(form), inset, origin_y)
   request('DELETE', "/v1/terminal-sessions/#{batch}")
   request('DELETE', "/v1/terminal-sessions/#{driver}") if driver
 
@@ -163,12 +204,15 @@ end
 # the other surface is synchronized. This is the case the renderer gets
 # wrong, because the target count moves.
 run_case('two-surfaces', DRIVER, inset + ROWS * CELL_H + inset, failures, inset)
-# One surface on the output, which must keep behaving as it already did.
-run_case('one-surface', nil, inset, failures, inset)
+# One surface on the output, which must keep behaving as it already did, and
+# must behave the same whichever capture form is used to look at it (#45).
+run_case('one-surface', nil, inset, failures, inset, :cached)
+run_case('one-surface', nil, inset, failures, inset, :fresh)
 
 unless failures.empty?
   failures.each { |f| warn "sync-output gate: #{f}" }
   exit 1
 end
 
-puts 'SYNC_OUTPUT_PASS held_last_frame=2_cases batch_writes_hidden=yes'
+puts 'SYNC_OUTPUT_PASS held_last_frame=3_cases batch_writes_hidden=yes ' \
+     'capture_presented=true capture_identity=behind_live_revision'

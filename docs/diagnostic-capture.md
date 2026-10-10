@@ -468,3 +468,38 @@ shell control returned `stty size` `135 240` and the Hibr capture was saved at
 `diagnostics/live-hibr-screenshot-20261009T084834Z/`. The screenshot is the
 authoritative visual artifact for this run: it shows the Hibr scene above the
 black lower region while the API reports a healthy 1920x2160, 60 Hz SDL output.
+
+## What a capture is, and what its headers mean
+
+`GET /v1/diagnostics/screenshots/{display}` answers from **one** source: the
+pixels read during a present, immediately before `SDL_RenderPresent`. There is
+no second path. Two older behaviours are gone, because each of them could
+answer with something that was never on a screen:
+
+- the request no longer invalidates the output it inspects. The non-cached
+  form used to clear `initialized`, forcing a full redraw, so the capture
+  showed a frame the request itself caused — and on a surface holding a
+  DEC 2026 batch it showed the very content the renderer was withholding.
+  `?cached=1` is still accepted and now has no remaining effect;
+- the fallback that read the renderer's current back buffer when no capture
+  was pending is removed. A request with no presented frame yet waits for one,
+  and fails with `screenshot_failed` rather than returning unpresented pixels.
+
+Three headers make a capture checkable rather than merely plausible, and all
+three are recorded **when the pixels are read**, not when the response is
+written — a slow client can collect a capture several frames later:
+
+| header | meaning |
+| --- | --- |
+| `X-Blit-Capture-Frame` | the render pass these pixels came from |
+| `X-Blit-Capture-Presented` | `true` once that frame's present returned |
+| `X-Blit-Capture-Revisions` | per surface, the revision **last drawn into a presented frame** |
+
+The revision is deliberately not each surface's current revision. A surface
+whose frame is being held has a current revision ahead of what is on screen,
+and reporting that would name a state the pixels do not show. A comparison
+between pixels and cell state is therefore only valid when the reported
+revision equals the state's revision; `tools/tests/render_state_agreement_gate.rb`
+discards a sample where they differ, and `tools/tests/sync_output_gate.rb`
+asserts the reported revision is *behind* the live one while a DEC 2026 batch
+is open.

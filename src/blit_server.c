@@ -189,6 +189,11 @@ typedef struct {
        chunks. Keep those chunks out of the renderer until the commit chunk
        arrives, otherwise Hibr's wallpaper/menu redraw is visibly torn. */
     int frame_open;
+    /* The revision whose cells were last drawn into a presented frame. It
+       lags `revision` whenever the renderer is holding a frame back -- a DEC
+       2026 batch -- which is what makes a capture's identity checkable
+       instead of merely plausible. */
+    unsigned long long presented_revision;
 } BlitSurface;
 
 typedef struct {
@@ -292,6 +297,12 @@ typedef struct {
     unsigned long long background_batch_submissions;
     unsigned long long background_quads;
     SDL_Surface *screenshot_surface;
+    /* The identity of the frame those pixels came from, recorded when they
+       were read rather than when they are sent: a slow client can collect a
+       capture several frames later, and headers computed at send time name a
+       state the pixels never had. */
+    char screenshot_identity[1024];
+    int screenshot_presented;
     unsigned long long display_id;
     int initialized;
     int vsync_enabled;
@@ -1308,9 +1319,12 @@ static void capture_identity_headers(const BlitRuntime *runtime,
     for (i = 0; i < BLIT_MAX_SESSIONS && used + 64 < capacity; ++i) {
         const BlitSurface *surface = runtime->surfaces[i];
         if (surface == NULL || !surface->used) continue;
+        /* The presented revision, not the current one: for a surface whose
+           frame is being held these differ, and reporting the current
+           revision would name a state these pixels do not show. */
         used += (size_t)snprintf(out + used, capacity - used,
                                  "%ssurface-%llu=%llu", first ? "" : ",",
-                                 surface->id, surface->revision);
+                                 surface->id, surface->presented_revision);
         first = 0;
     }
     snprintf(out + used, capacity - used, "\r\n");
@@ -1482,18 +1496,22 @@ static int send_sdl_screenshot(BlitHttpClient *client, BlitRuntime *runtime,
         return -1;
     }
     output = &runtime->outputs[output_index];
+    /* Only a frame that was captured during a present is served. Reading the
+       renderer's current back buffer here used to be the fallback, which could
+       answer with pixels that were never presented; the caller waits for a
+       capture instead. */
     pixels = output->screenshot_surface;
-    if (pixels != NULL)
-        output->screenshot_surface = NULL;
-    else
-        pixels = SDL_RenderReadPixels(output->renderer, NULL);
-    capture_identity_headers(runtime, capture_headers,
-                             sizeof(capture_headers));
     if (pixels == NULL) {
         send_problem(client->fd, 503, "Service Unavailable", "screenshot_failed",
-                     "The SDL renderer could not read the current framebuffer.");
+                     "No presented frame has been captured for this display.");
         return -1;
     }
+    output->screenshot_surface = NULL;
+    snprintf(capture_headers, sizeof(capture_headers), "%s%s",
+             output->screenshot_identity,
+             output->screenshot_presented ?
+                 "X-Blit-Capture-Presented: true\r\n" :
+                 "X-Blit-Capture-Presented: false\r\n");
     if (!encode_bmp_surface(pixels, &bytes, &length)) {
         SDL_DestroySurface(pixels);
         send_problem(client->fd, 503, "Service Unavailable", "screenshot_failed",
@@ -10540,14 +10558,14 @@ static void handle_request(int fd, BlitRuntime *runtime,
         }
         client->screenshot_output_index = output_index + 1;
         runtime->screenshot_requested_mask |= 1U << output_index;
-        /* A cached capture observes the already-composed scene.  Fresh
-           captures retain the old repair behavior for callers that explicitly
-           need a complete rebuild, but diagnostics must not invalidate a live
-           Hibr scene merely to inspect it. */
-        if (!cached || !runtime->outputs[output_index].initialized) {
-            runtime->outputs[output_index].initialized = 0;
-            runtime->render_next_us[output_index] = 0;
-        }
+        /* Inspecting a display must not change it. Forcing a rebuild for the
+           non-cached form made the capture show a frame the request itself
+           caused -- and, worse, showed a surface holding a DEC 2026 batch the
+           contents it was deliberately withholding. Both forms now answer
+           from the next presented frame; `cached=1` is accepted and has no
+           remaining effect. */
+        (void)cached;
+        runtime->render_next_us[output_index] = 0;
         runtime->render_pending = 1;
         return;
     }
@@ -13076,6 +13094,13 @@ static void capture_requested_screenshot(BlitRuntime *runtime,
         return;
     }
     runtime->outputs[output_index].screenshot_surface = pixels;
+    capture_identity_headers(runtime,
+                             runtime->outputs[output_index].screenshot_identity,
+                             sizeof(runtime->outputs[output_index].screenshot_identity));
+    /* These pixels are the ones about to be presented.  The flag becomes true
+       once that present returns, so a client can tell a capture that reached
+       the screen from one that did not. */
+    runtime->outputs[output_index].screenshot_presented = 0;
 }
 
 static int ensure_sdl_scene_texture(BlitOutput *output)
@@ -13151,6 +13176,7 @@ static void finish_sdl_output(BlitRuntime *runtime, int output_index,
     SDL_Renderer *renderer = runtime->outputs[output_index].renderer;
     uint64_t present_started_us;
     double present_ms;
+    int captured;
 
     if (scene_target) {
         SDL_SetRenderTarget(renderer, NULL);
@@ -13160,8 +13186,11 @@ static void finish_sdl_output(BlitRuntime *runtime, int output_index,
     render_pointer(runtime, output_index);
     capture_sdl_frame(runtime, output_index, renderer);
     capture_requested_screenshot(runtime, output_index, renderer);
+    captured = runtime->outputs[output_index].screenshot_surface != NULL;
     present_started_us = monotonic_us();
     SDL_RenderPresent(renderer);
+    if (captured)
+        runtime->outputs[output_index].screenshot_presented = 1;
     present_ms = (double)(monotonic_us() - present_started_us) / 1000.0;
     runtime->diagnostic_last_sdl_present_ms = present_ms;
     if (present_ms > runtime->diagnostic_max_sdl_present_ms)
@@ -13338,8 +13367,11 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             if (damage_consumed[surface_index]) {
                 BlitSurface *surface = find_surface_id(
                     runtime, views[surface_index].surface_id);
-                if (surface != NULL)
+                if (surface != NULL && !views[surface_index].synchronized) {
                     surface->damage_valid = 0;
+                    surface->presented_revision =
+                        views[surface_index].surface_revision;
+                }
             }
         for (surface_index = 0; surface_index < runtime->output_count;
              ++surface_index)
@@ -13960,8 +13992,11 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                     break;
                 }
         }
-        if (rendered)
+        if (rendered) {
             surface->damage_valid = 0;
+            surface->presented_revision =
+                plan->surfaces[plan_index].surface_revision;
+        }
         if (rendered && session != NULL)
             session->terminal_frame_batch = 0;
     }
