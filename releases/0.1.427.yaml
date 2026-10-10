@@ -1,0 +1,120 @@
+release: 0.1.427
+package: blit_0.1.427-1_amd64.deb
+package_sha256: ed8ad9ce11ab5457cd8fe48f38ca09b09b68f7d54457c05cbef24872e0663152
+source_commit: PENDING
+package_documentation_commit: PENDING
+server_binary_sha256: ae4b0320f34f5dd99ea83d483e6ce11ad4de8c8bb012b9a3d0ef073510550832
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: ed37dff18e0ba8ad638990b28287ab1aeb22ada5fe7345a3eb17a39733598d87
+hibr_root: /tmp/hibr-0.99.100
+hibr_version: 0.99.100
+tcc_build_acceptance: pass
+openapi_yaml: pass
+api_schema_gate: pass
+package_artifact_acceptance: pass
+network_auth_acceptance: pass_api_token_injected
+terminal_conformance: pass
+session_lifecycle_acceptance: pass
+session_write_resize_acceptance: pass
+stream_replay_acceptance: pass
+font_api_acceptance: pass
+hibr_font_manifest_acceptance: pass
+glyph_geometry_local_pixel_acceptance: pass
+sdl_glyph_filter_acceptance: pass
+external_pointer_composition: pass
+pointer_damage_atomic_acceptance: pass
+pointer_wallpaper_stress_acceptance: pass
+hidden_cursor_damage_acceptance: pass
+sdl_background_batch_acceptance: pass
+sdl_graphics_cache_acceptance: pass
+sdl_wallpaper_damage_acceptance: pass
+screenshot_overlay_acceptance: pass
+pixel_frame_acceptance: pass
+render_state_agreement_acceptance: pass
+adapter_coalesce_acceptance: pass_idle_frame_zero_requests
+kitty_placement_pixel_acceptance: pass_crop_offset_numbered_and_z_order_by_pixel
+kitty_placement_conformance_acceptance: pass_delete_targets_and_unsupported_key_refusals
+sync_output_acceptance: pass_held_frame_and_hidden_writes_one_and_two_surfaces
+cell_paint_acceptance: pass_cursor_glyph_italic_distinct_session_defaults
+pointer_geometry_acceptance: pass_inset_honoured_and_pane_less_at_corner
+mouse_report_acceptance: pass_wheel_byte_96_hover_gated_per_cell_drops_counted
+key_encoding_acceptance: pass_25_encodings_capslock_numlock_held_modifiers
+frame_quiet_starvation_acceptance: pass_longest_stagnant_run_1_was_29
+capture_witness_acceptance: pass_one_source_presented_flag_presented_revision
+motion_trail_acceptance: pass_799_blank_cells_no_unaccounted_pixels
+render_state_agreement_acceptance: pass_30_blue_cells_was_vacuous
+bold_cell_containment_acceptance: pass_8px_drawn_0_spilled
+evdev_scan_open_count_acceptance: pass_32_opens_for_32_paths_was_96
+graphics_kitty_zlib_acceptance: pass_pixel_crc32_identical_to_raw
+graphics_xtsmgraphics_acceptance: pass_no_scroll_and_enforced_limits_reported
+terminal_kitty_keyboard_acceptance: pass_cursor_unmoved_query_reports_zero
+hibr_singleton_local_acceptance: pass
+hibr_resume_guard_acceptance: pass
+restart_gate: pass
+shutdown_gate: pass
+update_idle_timeout_acceptance: pass
+update_reset_acceptance: pass
+update_cancel_acceptance: pass
+frame_rate_settled_acceptance: pass
+terminal_soak_120s_acceptance: pass
+screenshot_nonblocking_live_acceptance: not_rerun_candidate
+qemu_hibr_lifecycle_acceptance: not_rerun_candidate
+qemu_four_output_pixel_acceptance: not_rerun_candidate
+qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
+live_deployment: PENDING
+live_current_version: 0.1.426
+live_block_cursor_acceptance: PENDING
+live_italic_acceptance: PENDING
+live_session_default_acceptance: PENDING
+live_sync_output_acceptance: PENDING
+live_hibr_desktop_acceptance: PENDING
+live_idle_frame_acceptance: PENDING
+live_physical_multi_display: unavailable_one_output
+live_physical_button_trace_contract: open
+physical_evdev_acceptance: open
+physical_multi_monitor_acceptance: open
+physical_high_refresh_acceptance: open
+notes: >-
+  One defect, found by the capture witness from 0.1.426 doing its job on the
+  live host. Issue #49.
+
+  Bold overstrikes a glyph one pixel to the right at the full cell width, so a
+  glyph reaching its own right edge wrote a pixel into the cell beside it. A
+  blank neighbour showed a sliver of it; because that sliver survives until
+  the neighbour is repainted and returns when the bold cell is redrawn, it is
+  indistinguishable from a rendering trail -- and is a candidate explanation
+  for the "screensaver leaves part of the shape drawn" report that #29 was
+  filed to make testable.
+
+  The overstrike now gives up its rightmost column: the same fraction is
+  dropped from the source and the destination, so the glyph keeps its scale
+  and simply is not doubled in its last column, which at an eight-pixel cell
+  is not visible. Both renderers.
+
+  How it was found, because the method is the point. With the capture fixed in
+  0.1.426, a renderer-versus-state comparison was run against the real Hibr
+  desktop on 192.168.10.54 -- the first one the project could trust rather
+  than dismiss as skew. The sample was coherent (presented=true, capture
+  revision 869, state revision 869, zero discarded) and of 197 blank cells
+  with a background of their own, exactly one disagreed:
+
+    cell(2,0) text="✎" bold=true   cell(3,0) blank, 4 pixels not its background
+    row  8   left .#######          here #.......
+    row  9   left ..######          here #.......
+    row 10   left ...#####          here #.......
+    row 12   left ......##          here #.......
+
+  The pencil glyph reaches its own rightmost column on those rows and the
+  overstrike shifted a copy one pixel right. Three earlier attempts at this
+  comparison on this host produced three findings that were all skew; this one
+  named a cause and the cause was real.
+
+  It is not the italic slant from 0.1.425: those cells report italic=false, so
+  no shear was applied.
+
+  cell_paint_gate.rb writes a bold box-drawing glyph beside a blank cell and
+  asserts the blank cell is entirely its background; the pre-change binary
+  puts one white pixel there.
+
+  Unchanged: every pixel claim is measured on the SDL path, and
+  src/blit_kms.c carries the same change unseen on a screen.
