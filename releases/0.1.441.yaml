@@ -1,0 +1,166 @@
+release: 0.1.441
+package: blit_0.1.441-1_amd64.deb
+package_sha256: ab5b62153327aa77a4d7608dd5764f32a033ed1135756661ff4020fa49d7e251
+source_commit: c04ae8ef3abcb4c99d42583dfd0f4c1dbf6f6732
+package_documentation_commit: c04ae8ef3abcb4c99d42583dfd0f4c1dbf6f6732
+server_binary_sha256: 8acb6e6d6253d672b6cac1cf26921baf56327598d92aa9f008074fa38958c69e
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: ed37dff18e0ba8ad638990b28287ab1aeb22ada5fe7345a3eb17a39733598d87
+hibr_root: /tmp/hibr-0.99.100
+hibr_version: 0.99.100
+tcc_build_acceptance: pass
+openapi_yaml: pass
+api_schema_gate: pass_36_paths
+package_artifact_acceptance: pass_manifest_hashes_match_package_and_reproducible
+network_auth_acceptance: pass_api_token_injected_against_the_canonical_binary
+terminal_conformance: pass
+session_lifecycle_acceptance: pass
+session_write_resize_acceptance: pass
+stream_replay_acceptance: pass
+font_api_acceptance: pass
+hibr_font_manifest_acceptance: pass
+glyph_geometry_local_pixel_acceptance: pass
+sdl_glyph_filter_acceptance: pass
+external_pointer_composition: pass
+pointer_damage_atomic_acceptance: pass_three_consecutive_runs_frame_counter_wait
+pointer_wallpaper_stress_acceptance: pass
+hidden_cursor_damage_acceptance: pass
+sdl_background_batch_acceptance: pass
+sdl_graphics_cache_acceptance: pass
+sdl_wallpaper_damage_acceptance: pass
+screenshot_overlay_acceptance: pass
+pixel_frame_acceptance: pass
+render_state_agreement_acceptance: pass
+adapter_coalesce_acceptance: pass_idle_frame_zero_requests
+kitty_placement_pixel_acceptance: pass_crop_offset_numbered_and_z_order_by_pixel
+kitty_placement_conformance_acceptance: pass_delete_targets_and_unsupported_key_refusals
+sync_output_acceptance: pass_held_frame_and_hidden_writes_one_and_two_surfaces
+cell_paint_acceptance: pass_cursor_glyph_italic_distinct_session_defaults
+pointer_geometry_acceptance: pass_inset_honoured_and_pane_less_at_corner
+mouse_report_acceptance: pass_wheel_byte_96_hover_gated_per_cell_drops_counted
+key_encoding_acceptance: pass_119_encodings_plus_per_device_keymap_and_modifiers
+frame_quiet_starvation_acceptance: pass_longest_stagnant_run_1_was_29
+capture_witness_acceptance: pass_one_source_presented_flag_presented_revision
+motion_trail_acceptance: pass_799_blank_cells_no_unaccounted_pixels
+render_state_agreement_acceptance: pass_30_blue_cells_was_vacuous
+bold_cell_containment_acceptance: pass_8px_drawn_0_spilled
+wide_glyph_acceptance: pass_4_samples_4_distinct_shapes_two_cells_each
+font_identity_acceptance: pass_929_1182_primary_and_49899_16x16_wide
+desktop_repaint_acceptance: pass_pty_authored_0_cells_unpainted_reported_after_window_retires
+gate_port_isolation_acceptance: carried_from_0_1_431
+input_identity_acceptance: carried_from_0_1_433
+input_device_api_acceptance: carried_from_0_1_432
+input_device_config_acceptance: carried_from_0_1_434
+input_device_route_acceptance: carried_from_0_1_436
+audio_device_api_acceptance: pass_node_is_the_authority_hotplug_retires_three_runs
+display_device_api_acceptance: pass_envelope_item_matches_collection_no_writable_property
+main_block_key_table_acceptance: carried_from_0_1_435
+live_input_device_table_acceptance: carried_from_0_1_433
+live_input_device_config_acceptance: carried_from_0_1_434
+live_main_block_key_acceptance: PENDING
+live_per_device_keymap_acceptance: PENDING
+live_device_routing_acceptance: carried_from_0_1_436
+live_audio_device_acceptance: pass_12_pcms_unchanged_by_node_authority_all_accessible
+json_escape_acceptance: carried_from_0_1_431
+live_cell_property_refusal_acceptance: carried_from_0_1_431
+live_unpainted_report_acceptance: carried_from_0_1_430
+live_wide_glyph_acceptance: carried_from_0_1_428
+live_render_state_agreement_acceptance: carried_from_0_1_427
+evdev_scan_open_count_acceptance: pass_32_opens_for_32_paths_was_96
+graphics_kitty_zlib_acceptance: pass_pixel_crc32_identical_to_raw
+graphics_xtsmgraphics_acceptance: pass_no_scroll_and_enforced_limits_reported
+terminal_kitty_keyboard_acceptance: pass_cursor_unmoved_query_reports_zero
+hibr_singleton_local_acceptance: pass
+hibr_resume_guard_acceptance: pass
+restart_gate: pass
+shutdown_gate: pass
+update_idle_timeout_acceptance: pass
+update_reset_acceptance: pass
+update_cancel_acceptance: pass
+frame_rate_settled_acceptance: pass
+terminal_soak_120s_acceptance: pass
+screenshot_nonblocking_live_acceptance: not_rerun_candidate
+qemu_hibr_lifecycle_acceptance: not_rerun_candidate
+qemu_four_output_pixel_acceptance: not_rerun_candidate
+qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
+live_deployment: PENDING
+live_current_version: PENDING
+live_block_cursor_acceptance: carried_from_0_1_425
+live_italic_acceptance: carried_from_0_1_425
+live_session_default_acceptance: carried_from_0_1_425
+live_sync_output_acceptance: carried_from_0_1_425
+live_hibr_desktop_acceptance: PENDING
+live_idle_frame_acceptance: carried_from_0_1_425
+live_physical_multi_display: unavailable_one_output
+live_physical_button_trace_contract: open
+physical_evdev_acceptance: open
+physical_multi_monitor_acceptance: open
+physical_high_refresh_acceptance: open
+notes: >-
+  ADR 0064 stage 4, issue #35. The last input stage, and the last of the
+  global-state defects the per-device work kept uncovering.
+
+  A keyboard's layout and its modifier state were one global set each. The
+  layout being global made every keyboard US, which is what #35 asked about.
+  The modifier state being global meant Shift held on a keyboard routed to one
+  session modified another keyboard's keys on their way to a different
+  session -- a defect that predated routing, since there was one evdev_shift
+  and one evdev_key_held for every keyboard, and that routing only made
+  reachable.
+
+  configuration.keymap is a sparse override on the built-in table, by evdev
+  code, with four levels: plain, shift, altgr, shift+altgr. Sparse because a
+  request is bounded at BLIT_REQUEST_SIZE and a complete table does not fit --
+  and a parser that accepted the prefix of one that did not would hand a
+  controller a keyboard it believed it had configured. A layout difference is
+  a few dozen keys; the cap is 128 codes and more is a 400, so a client cannot
+  fill the bound and have a prefix accepted.
+
+  An empty level means "not defined here", so AltGr on a key with no third
+  level falls back to the unmodified one. That is what AltGr does on a US
+  keyboard, where it selects nothing, and what the built-in table does because
+  it has no third level at all -- one rule rather than one per table. The
+  override is also the only way to reach the third level, which is what
+  finally makes evdev_altgr mean something: it has been tracked, and done
+  nothing, since AltGr stopped being treated as Alt.
+
+  The modifier flags, the held set and both locks moved into BlitInputDevice,
+  resolved through runtime->input_source. One exception, stated rather than
+  discovered later: the modifiers a mouse report carries are OR'd across every
+  present keyboard. Per-device state is right for a key, because a key belongs
+  to the keyboard that produced it, and wrong for a click, because there is one
+  cursor -- so a shift-click still means "shift held anywhere".
+
+  Two things deliberately not built, named so neither looks like an oversight.
+  There is no named-keymap resource: a keymaps collection is a second resource
+  with its own identity, lifecycle and persistence question, and the per-device
+  object already fits the bound, so holding a layout is the control panel's
+  job. And reading the kernel console keymap through KDGKBENT on /dev/tty0 --
+  which would give every layout loadkeys has configured, with no new
+  dependency -- is deferred because there is no tty where the gates run, so it
+  could only be exercised on the host. A host-only path is exactly what let a
+  gate spend seven releases testing a stale binary (#59). Dead keys and
+  compose sequences are out of scope: a table of characters cannot express
+  them.
+
+  The key-encoding gate gains two fabricated keyboards, which is what makes
+  any of this testable. A QWERTZ override on one types its layout -- Z and Y
+  exchanged, ß where the hyphen is, @ and Ω on AltGr and shift+AltGr over Q --
+  while the same codes on the other keyboard type US. That second half is the
+  assertion that a layout belongs to a device and not to the server. Plus the
+  AltGr fallback, Shift held on one keyboard not modifying the other's key,
+  and CapsLock likewise.
+
+  Teeth, and the two halves are caught separately: with the translator reading
+  one global state the layout assertions fail and AltGr types the plain
+  character; with the held set pooled across devices but the layout still per
+  device, exactly the cross-keyboard Shift and CapsLock assertions fail and
+  nothing else does.
+
+  Suite: 47 pass, 5 skip, 0 fail.
+
+  One thing shipped untested, recorded rather than implied: audio
+  state.accessible is always true on this host and in the fixture, because
+  Blit runs as root and the fixture's nodes are ordinary files. The field
+  exists so that a device Blit cannot open reads as a permission problem
+  rather than as a missing device; the false case has never been exercised.
