@@ -67,7 +67,11 @@ shell conformance path is stable.
    OSC 10/11 background and foreground queries answer from validated
    `DT_INK`/`DT_FACE` (or `BLIT_TERMINAL_FG`/`BLIT_TERMINAL_BG`) session
    environment values, preserving Hibr theme negotiation without a shell
-   wrapper.
+   wrapper. That pair is also what both renderers paint an **unstyled** cell
+   with, and what the cell snapshot reports for it, so the colour an
+   application is told is the colour it is shown. OSC 10/11 are accepted as
+   sets as well as queries, in either the `rgb:RRRR/GGGG/BBBB` or `#rrggbb`
+   spelling, and a set repaints the whole surface.
    Kitty graphics placements (source rectangle, cell offset, numbered
    placements, the `a i c p q x y z` delete targets) and the refusal of
    unimplemented keys are specified in

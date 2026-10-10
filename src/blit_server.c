@@ -3038,6 +3038,30 @@ static int parse_color(const char *text, uint32_t *color)
     return 1;
 }
 
+/* A session's default colours come from DT_INK/DT_FACE (or
+   BLIT_TERMINAL_FG/BG) and apply to every cell the application left
+   unstyled. They were previously only used to answer OSC 10/11, so a client
+   was told one colour and shown another. */
+static uint32_t session_default_foreground(const BlitSession *session)
+{
+    uint32_t colour;
+
+    if (session != NULL &&
+        parse_color(session->terminal_default_foreground, &colour))
+        return colour;
+    return BLIT_DEFAULT_FOREGROUND;
+}
+
+static uint32_t session_default_background(const BlitSession *session)
+{
+    uint32_t colour;
+
+    if (session != NULL &&
+        parse_color(session->terminal_default_background, &colour))
+        return colour;
+    return 0;
+}
+
 static int utf8_decode(const unsigned char *text, size_t length,
                        size_t *consumed, uint32_t *codepoint)
 {
@@ -3413,9 +3437,11 @@ static int surface_snapshot_json(const BlitSurface *surface,
             first = 0;
             if (styled) {
                 uint32_t foreground = surface->foreground[y][x] ?
-                    surface->foreground[y][x] - 1 : BLIT_DEFAULT_FOREGROUND;
+                    surface->foreground[y][x] - 1 :
+                    session_default_foreground(session);
                 uint32_t background = surface->background[y][x] ?
-                    surface->background[y][x] - 1 : 0;
+                    surface->background[y][x] - 1 :
+                    session_default_background(session);
                 if (!json_appendf(body, capacity, &used,
                     ",\"style\":{\"foreground\":\"#%06x\","
                     "\"background\":\"#%06x\",\"bold\":%s,"
@@ -4705,7 +4731,63 @@ static int terminal_colour_reply(const char *value, char *reply,
     return 1;
 }
 
-static void terminal_apply_osc(BlitSession *session)
+static int terminal_hex_digit(char digit)
+{
+    return (digit >= '0' && digit <= '9') ||
+        (digit >= 'a' && digit <= 'f') || (digit >= 'A' && digit <= 'F');
+}
+
+/* OSC 10/11 carry either an X colour name of the form rgb:RRRR/GGGG/BBBB (the
+   spelling xterm answers with, and the one a client that read our own reply
+   will echo back) or a #rrggbb literal. Both normalize to #rrggbb, which is
+   what the session stores and parse_color reads. */
+static int terminal_colour_value(const char *value, char *out, size_t capacity)
+{
+    unsigned int component[3];
+    int index;
+
+    if (value == NULL || capacity < 8)
+        return 0;
+    if (value[0] == '#') {
+        uint32_t parsed;
+        if (!parse_color(value, &parsed))
+            return 0;
+        snprintf(out, capacity, "#%06x", (unsigned int)parsed);
+        return 1;
+    }
+    if (strncmp(value, "rgb:", 4) != 0)
+        return 0;
+    value += 4;
+    for (index = 0; index < 3; ++index) {
+        char digits[5];
+        int length = 0;
+        while (length < 4 && terminal_hex_digit(value[length])) {
+            digits[length] = value[length];
+            ++length;
+        }
+        if (length == 0)
+            return 0;
+        digits[length] = '\0';
+        /* A component may be 1 to 4 hex digits wide; scale it to 8 bits. */
+        component[index] = (unsigned int)strtoul(digits, NULL, 16);
+        if (length == 1) component[index] *= 0x11U;
+        else if (length == 3) component[index] >>= 4;
+        else if (length == 4) component[index] >>= 8;
+        value += length;
+        if (index < 2) {
+            if (*value != '/')
+                return 0;
+            ++value;
+        }
+    }
+    if (*value != '\0')
+        return 0;
+    snprintf(out, capacity, "#%02x%02x%02x", component[0] & 0xffU,
+             component[1] & 0xffU, component[2] & 0xffU);
+    return 1;
+}
+
+static void terminal_apply_osc(BlitSession *session, BlitSurface *surface)
 {
     char *separator;
     const char *payload;
@@ -4733,6 +4815,21 @@ static void terminal_apply_osc(BlitSession *session)
             snprintf(reply, sizeof(reply), "\033]%d;%s\033\\",
                      command, colour);
             terminal_write_reply(session, reply);
+        }
+    } else if (command == 10 || command == 11) {
+        /* A set changes what every unstyled cell is painted with, so the
+           whole surface has to be repainted, not just the cursor cell. */
+        char normalized[8];
+        if (terminal_colour_value(payload, normalized, sizeof(normalized))) {
+            char *target = command == 10 ?
+                session->terminal_default_foreground :
+                session->terminal_default_background;
+            size_t capacity = command == 10 ?
+                sizeof(session->terminal_default_foreground) :
+                sizeof(session->terminal_default_background);
+            snprintf(target, capacity, "%s", normalized);
+            if (surface != NULL)
+                mark_surface_full_damage(surface);
         }
     } else if (command == 52) {
         /* Keep OSC 52 in Hibr's canonical selection;base64 form.  A query
@@ -7161,12 +7258,12 @@ static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
         if (session->terminal_escape == 3) {
             if (byte == 0x9c) {
                 if (session->terminal_string_type == ']')
-                    terminal_apply_osc(session);
+                    terminal_apply_osc(session, surface);
                 else
                     terminal_apply_string(session, surface);
                 session->terminal_escape = 0;
             } else if (byte == '\a' && session->terminal_string_type == ']') {
-                terminal_apply_osc(session);
+                terminal_apply_osc(session, surface);
                 session->terminal_escape = 0;
             } else if (byte == 0x1b)
                 session->terminal_escape = 4;
@@ -7180,7 +7277,7 @@ static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
         if (session->terminal_escape == 4) {
             if (byte == '\\') {
                 if (session->terminal_string_type == ']')
-                    terminal_apply_osc(session);
+                    terminal_apply_osc(session, surface);
                 else
                     terminal_apply_string(session, surface);
                 session->terminal_escape = 0;
@@ -13107,6 +13204,10 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                count change is a full redraw, which clears the frame being
                held -- and blit_kms_present leaves its pixels alone. */
             views[view_count].synchronized = session->terminal_synchronized;
+            views[view_count].default_foreground =
+                session_default_foreground(session);
+            views[view_count].default_background =
+                session_default_background(session);
             views[view_count].graphics = session->graphics;
             views[view_count].graphics_count = BLIT_GRAPHICS_MAX_IMAGES;
             ++view_count;
@@ -13355,6 +13456,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             int first_row = 0;
             int last_row;
             int column;
+            uint32_t default_foreground;
+            uint32_t default_background;
 
             if (surface == NULL || !surface->used ||
                 surface->revision != plan->surfaces[plan_index].surface_revision)
@@ -13371,6 +13474,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                current cells and tear once rather than leave a hole. */
             if (session->terminal_synchronized && !full_redraw)
                 continue;
+            default_foreground = session_default_foreground(session);
+            default_background = session_default_background(session);
             pane = find_pane_id(runtime, session->pane_id);
             if (pane != NULL) {
                 surface_origin_x = (float)(pane->x * cell_width +
@@ -13459,9 +13564,10 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                        column < BLIT_MAX_CELL_COLS) {
                     uint32_t foreground = surface->foreground[row][column] ?
                         surface->foreground[row][column] - 1 :
-                        BLIT_DEFAULT_FOREGROUND;
+                        default_foreground;
                     uint32_t background = surface->background[row][column] ?
-                        surface->background[row][column] - 1 : 0;
+                        surface->background[row][column] - 1 :
+                        default_background;
                     uint16_t attributes = surface->attributes[row][column];
                     int run_start;
                     int run_end;
@@ -13481,10 +13587,11 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                         uint32_t next_foreground =
                             surface->foreground[row][run_end] ?
                             surface->foreground[row][run_end] - 1 :
-                            BLIT_DEFAULT_FOREGROUND;
+                            default_foreground;
                         uint32_t next_background =
                             surface->background[row][run_end] ?
-                            surface->background[row][run_end] - 1 : 0;
+                            surface->background[row][run_end] - 1 :
+                            default_background;
                         uint16_t next_attributes =
                             surface->attributes[row][run_end];
                         if (next_attributes & BLIT_ATTR_INVERSE) {
@@ -13524,9 +13631,10 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                      column < BLIT_MAX_CELL_COLS; ++column) {
                     uint32_t foreground = surface->foreground[row][column] ?
                         surface->foreground[row][column] - 1 :
-                        BLIT_DEFAULT_FOREGROUND;
+                        default_foreground;
                     uint32_t background = surface->background[row][column] ?
-                        surface->background[row][column] - 1 : 0;
+                        surface->background[row][column] - 1 :
+                        default_background;
                     uint16_t attributes = surface->attributes[row][column];
 
                     if (attributes & BLIT_ATTR_INVERSE) {
@@ -13650,10 +13758,11 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                     uint32_t cell_foreground =
                         surface->foreground[surface->cursor_y][cursor_column] ?
                         surface->foreground[surface->cursor_y][cursor_column] - 1 :
-                        BLIT_DEFAULT_FOREGROUND;
+                        default_foreground;
                     uint32_t cell_background =
                         surface->background[surface->cursor_y][cursor_column] ?
-                        surface->background[surface->cursor_y][cursor_column] - 1 : 0;
+                        surface->background[surface->cursor_y][cursor_column] - 1 :
+                        default_background;
                     SDL_FRect cursor_rect;
                     cursor_rect.x = cursor_x;
                     cursor_rect.y = cursor_y;

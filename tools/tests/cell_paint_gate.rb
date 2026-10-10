@@ -7,6 +7,7 @@
 #
 #   #41 a block cursor is an inverse cell, not an eraser
 #   #42 italic is a slant, and is not bold
+#   #40 an unstyled cell uses the session's DT_INK/DT_FACE pair
 #
 # Captures use ?cached=1 deliberately: a fresh capture invalidates the output
 # it inspects and can answer from a frame that was never presented (#45).
@@ -153,6 +154,35 @@ end
               "(#{shapes[a].length} lit pixels each)"
 end
 
+# #40. The session's default pair is what an unstyled cell is painted with.
+# It used to reach only the OSC 10/11 answer, so an application was told one
+# colour and shown another.
+id = session("printf 'X'; sleep 60", 'DT_INK' => '#ff0000')
+sleep 2.0
+ink = cell(screenshot, inset, 0, 0).values.tally
+request('DELETE', "/v1/terminal-sessions/#{id}")
+unless ink.fetch(0xff0000, 0) >= 10
+  failures << "DT_INK=#ff0000 painted no red glyph pixels: #{ink.inspect}"
+end
+
+id = session('sleep 60', 'DT_FACE' => '#0000ff')
+sleep 2.0
+face = cell(screenshot, inset, 5, 5).values.tally
+request('DELETE', "/v1/terminal-sessions/#{id}")
+unless face.fetch(0x0000ff, 0) == CELL_W * CELL_H
+  failures << "DT_FACE=#0000ff did not paint a blank cell blue: #{face.inspect}"
+end
+
+# OSC 10 is also a set, not only a query: a client that changes the default
+# repaints every unstyled cell.
+id = session("printf '\\033]10;rgb:0000/ff00/0000\\033\\\\X'; sleep 60")
+sleep 2.0
+osc = cell(screenshot, inset, 0, 0).values.tally
+request('DELETE', "/v1/terminal-sessions/#{id}")
+unless osc.fetch(0x00ff00, 0) >= 10
+  failures << "OSC 10 set to green painted no green glyph pixels: #{osc.inspect}"
+end
+
 unless failures.empty?
   failures.each { |f| warn "cell-paint gate: #{f}" }
   exit 1
@@ -160,4 +190,4 @@ end
 
 puts "CELL_PAINT_PASS block_cursor_keeps_glyph=#{glyph.length}px " \
      "bold=#{shapes['bold'].length}px italic=#{shapes['italic'].length}px " \
-     "plain=#{shapes['plain'].length}px"
+     "plain=#{shapes['plain'].length}px session_defaults=ink,face,osc10"

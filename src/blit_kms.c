@@ -388,9 +388,9 @@ static uint32_t view_cell_background(const BlitKmsSurfaceView *view,
                                      int index)
 {
     uint32_t fg = view->foreground[index] ?
-        view->foreground[index] - 1 : KMS_WHITE;
+        view->foreground[index] - 1 : view->default_foreground;
     uint32_t bg = view->background[index] ?
-        view->background[index] - 1 : 0;
+        view->background[index] - 1 : view->default_background;
     if (view->attributes[index] & 8) {
         uint32_t temporary = fg;
         fg = bg;
@@ -654,9 +654,9 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
         for (column = first_column; column < last_column; ++column) {
             int index = row * view->stride + column;
             uint32_t fg = view->foreground[index] ?
-                view->foreground[index] - 1 : KMS_WHITE;
+                view->foreground[index] - 1 : view->default_foreground;
             uint32_t bg = view->background[index] ?
-                view->background[index] - 1 : 0;
+                view->background[index] - 1 : view->default_background;
             uint32_t underline = view->underline_color != NULL &&
                 view->underline_color[index] ?
                 view->underline_color[index] - 1 : fg;

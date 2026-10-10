@@ -37,6 +37,10 @@ typedef struct {
     const uint32_t *background;
     const uint32_t *underline_color;
     const uint16_t *attributes;
+    /* The colours an unstyled cell is painted with, from the session's
+       DT_INK/DT_FACE pair. */
+    uint32_t default_foreground;
+    uint32_t default_background;
     int stride;
     int cursor_x;
     int cursor_y;
