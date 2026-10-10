@@ -57,8 +57,14 @@ screenshot_nonblocking_live_acceptance: not_rerun_candidate
 qemu_hibr_lifecycle_acceptance: not_rerun_candidate
 qemu_four_output_pixel_acceptance: not_rerun_candidate
 qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
-live_deployment: PENDING
-live_current_version: 0.1.421
+live_deployment: pass_supervised_update_verified_0_1_425
+live_current_version: 0.1.425
+live_block_cursor_acceptance: pass_108px_block_with_20px_glyph_inverted
+live_italic_acceptance: pass_bold_38px_italic_20px_plain_20px_three_shapes
+live_session_default_acceptance: pass_dt_ink_glyph_is_ff0000
+live_sync_output_acceptance: pass_held_116px_during_batch_80px_after_release
+live_hibr_desktop_acceptance: pass_32400_printable_owner_registered_rev_stable
+live_idle_frame_acceptance: pass_1_frame_in_20s_0_missed_deadlines
 live_physical_multi_display: unavailable_one_output
 live_physical_button_trace_contract: open
 physical_evdev_acceptance: open
@@ -117,6 +123,18 @@ notes: >-
   The soak gate trips at 50, so the shipped server was within a factor of two
   while idle. The deferral predates 0.1.424 (e4b442d), so it is not a
   regression from this work; this work shifted the timing enough to expose it.
+
+  Host-accepted on 192.168.10.54 at 1920x2160 through SDL3/opengles2 -- real
+  GPU rendering, not the dummy driver the gates use. The block cursor's cell
+  reads 108 pixels of cursor colour with the glyph's own 20 pixels inverted
+  inside it; bold, italic and plain occupy 38, 20 and 20 pixels in three
+  different shapes; a DT_INK session's glyph is ff0000; and a surface holding
+  a DEC 2026 batch keeps its 116 lit pixels through the batch and shows the
+  new 80 only after release. The Hibr desktop was relaunched afterwards and
+  reached 32,400 printable cells with its owner registered and its revision
+  stable; 20 seconds idle with it up produced one frame (a screenshot
+  request) and no missed deadlines, so bounding the coalescing window did not
+  cost the idle-frame contract.
 
   What this release does NOT establish. Every pixel claim is measured on the
   SDL path. src/blit_kms.c carries the same changes for synchronized output,
