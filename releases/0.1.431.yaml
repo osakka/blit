@@ -49,9 +49,10 @@ font_identity_acceptance: pass_929_1182_primary_and_49899_16x16_wide
 desktop_repaint_acceptance: pass_pty_authored_0_cells_unpainted_reported_after_window_retires
 gate_port_isolation_acceptance: pass_41_41_back_to_back_without_settle_gates
 json_escape_acceptance: pass_argument_carries_escaped_esc_and_cell_style_scope
-live_unpainted_report_acceptance: PENDING
+live_cell_property_refusal_acceptance: pass_400_invalid_cell_property_valid_json_detail
+live_unpainted_report_acceptance: carried_from_0_1_430
 live_wide_glyph_acceptance: carried_from_0_1_428
-live_render_state_agreement_acceptance: PENDING
+live_render_state_agreement_acceptance: carried_from_0_1_427
 evdev_scan_open_count_acceptance: pass_32_opens_for_32_paths_was_96
 graphics_kitty_zlib_acceptance: pass_pixel_crc32_identical_to_raw
 graphics_xtsmgraphics_acceptance: pass_no_scroll_and_enforced_limits_reported
@@ -69,13 +70,13 @@ screenshot_nonblocking_live_acceptance: not_rerun_candidate
 qemu_hibr_lifecycle_acceptance: not_rerun_candidate
 qemu_four_output_pixel_acceptance: not_rerun_candidate
 qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
-live_deployment: PENDING
-live_current_version: 0.1.430
+live_deployment: pass_supervised_update_verified_0_1_431
+live_current_version: 0.1.431
 live_block_cursor_acceptance: carried_from_0_1_425
 live_italic_acceptance: carried_from_0_1_425
 live_session_default_acceptance: carried_from_0_1_425
 live_sync_output_acceptance: carried_from_0_1_425
-live_hibr_desktop_acceptance: PENDING
+live_hibr_desktop_acceptance: pass_32400_printable_858_owner_writes
 live_idle_frame_acceptance: carried_from_0_1_425
 live_physical_multi_display: unavailable_one_output
 live_physical_button_trace_contract: open
@@ -133,6 +134,16 @@ notes: >-
   document invalid JSON, and a client reading why its request failed got a
   parse error instead of the reason. It escapes the detail now. The new
   conformance vector found it by failing to parse its own refusal.
+
+  Host-accepted. The desktop came up on 192.168.10.54 with 32,400 printable
+  cells and 858 accepted owner writes, an empty errors array, and the cell
+  refusal answers there as it does locally:
+
+    400 invalid_cell_property
+    "A cell carries \"foreground\" at its top level..."
+
+  which is also the check that the escaped detail is valid JSON on the wire
+  rather than only in a local test.
 
   Unchanged: every pixel claim is measured on the SDL path, and
   src/blit_kms.c carries its changes unseen on a screen.
