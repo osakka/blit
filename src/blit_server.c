@@ -679,6 +679,9 @@ typedef struct {
     char evdev_gamepad_paths[BLIT_MAX_INPUT_DEVICES][128];
     int evdev_gamepad_count;
     int evdev_gamepad_reported[BLIT_MAX_INPUT_DEVICES];
+    char listener_bind[64];
+    int listener_port;
+    int unauthenticated_network;
     int evdev_watch_fd;
     int snd_watch_fd;
     int audio_rescan_requested;
@@ -2288,12 +2291,21 @@ static void server_json(const BlitRuntime *runtime, char *body, size_t capacity)
              "\"diagnostics\":\"/v1/diagnostics\","
              "\"runtime_diagnostics\":\"/v1/diagnostics/runtime\","
              "\"effects\":\"/v1/effects\","
-             "\"overlays\":\"/v1/overlays\"}}",
+             "\"overlays\":\"/v1/overlays\"},"
+             /* ADR 0065: the posture the server actually came up with, so an
+                operator and a control panel can read it rather than infer it
+                from a startup line nobody sees. */
+             "\"listener\":{\"bind\":\"%s\",\"port\":%d,"
+             "\"authentication\":\"%s\","
+             "\"command_allowlist\":%s}}",
              blit_version, runtime->display_count, backend,
              (runtime->direct_kms ? runtime->display_count > 0 :
               runtime->sdl_ready && runtime->output_count > 0 &&
               runtime->output_count == runtime->display_count) ?
-                 "true" : "false", escaped_error);
+                 "true" : "false", escaped_error,
+             runtime->listener_bind, runtime->listener_port,
+             runtime->auth_token[0] != '\0' ? "required" : "none",
+             runtime->command_allowlist[0] != '\0' ? "true" : "false");
 }
 
 static void version_json(char *body, size_t capacity)
@@ -2404,6 +2416,7 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
     int routes = 0;
     int input_devices = 0;
     int surfaces = 0;
+    char warnings[160];
     const char *presentation_sync;
     char escaped_renderer[128];
     int i;
@@ -2431,6 +2444,35 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
     /* A desktop that registered an owner and never painted is a fault a
        status check has to be able to see; "ready" describes the display
        backend and stays separate (issue #32). */
+    /* The warning list, built rather than chosen, because more than one of
+       these can hold at once -- and an unauthenticated network listener is
+       exactly the kind of thing that must not be hidden by a display fault
+       happening to be reported first. */
+    {
+        int first_warning = 1;
+        size_t warning_used = 0;
+        warnings[0] = '\0';
+        warning_used += (size_t)snprintf(warnings + warning_used,
+                                         sizeof(warnings) - warning_used, "[");
+        if (runtime->unauthenticated_network) {
+            warning_used += (size_t)snprintf(warnings + warning_used,
+                sizeof(warnings) - warning_used,
+                "\"unauthenticated_network_listener\"");
+            first_warning = 0;
+        }
+        if (runtime_has_failed_display(runtime)) {
+            warning_used += (size_t)snprintf(warnings + warning_used,
+                sizeof(warnings) - warning_used,
+                "%s\"display_presentation_failed\"", first_warning ? "" : ",");
+            first_warning = 0;
+        }
+        if (runtime->evdev_keyboard_count == 0 ||
+            runtime->evdev_mouse_count == 0)
+            warning_used += (size_t)snprintf(warnings + warning_used,
+                sizeof(warnings) - warning_used,
+                "%s\"input_device_missing\"", first_warning ? "" : ",");
+        snprintf(warnings + warning_used, sizeof(warnings) - warning_used, "]");
+    }
     {
         int unpainted = 0;
         int index;
@@ -2488,11 +2530,7 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              runtime->previous_pointer_output,
              runtime->pointer_dirty ? "true" : "false",
              errors,
-             runtime_has_failed_display(runtime) ?
-                 "[\"display_presentation_failed\"]" :
-                 (runtime->evdev_keyboard_count == 0 ||
-                  runtime->evdev_mouse_count == 0 ?
-                  "[\"input_device_missing\"]" : "[]"));
+             warnings);
 }
 
 static int display_index_by_id(const BlitRuntime *runtime, const char *id)
@@ -18655,6 +18693,7 @@ int main(int argc, char **argv)
     int port = 8080;
     int server_fd;
     const char *bind_address = getenv("BLIT_BIND_ADDRESS");
+    int bind_requested;
     struct sockaddr_in address;
     static BlitRuntime runtime;
 
@@ -18664,7 +18703,13 @@ int main(int argc, char **argv)
         fprintf(stderr, "usage: %s [port]\n", argv[0]);
         return 2;
     }
-    if (bind_address == NULL || bind_address[0] == '\0')
+    /* Was a bind address asked for, or is this the default? The distinction
+       decides what happens when there is no token: an operator who said
+       nothing gets a safe listener, and one who explicitly asked for a
+       network listener with no authentication is stopped rather than
+       silently obeyed. */
+    bind_requested = bind_address != NULL && bind_address[0] != '\0';
+    if (!bind_requested)
         bind_address = "0.0.0.0";
     memset(&runtime, 0, sizeof(runtime));
     runtime.evdev_watch_fd = -1;
@@ -18744,11 +18789,46 @@ int main(int argc, char **argv)
     snprintf(runtime.update_detail, sizeof(runtime.update_detail),
              runtime.update_token[0] != '\0' ?
              "update API enabled" : "BLIT_UPDATE_TOKEN is not configured");
+    /* ADR 0065. POST /v1/terminal-sessions execve's a client-supplied command
+       by design, and the service may run privileged, so an unauthenticated
+       network listener is remote code execution as whomever Blit runs as.
+       This used to warn and carry on.
+     *
+     * Now: no token and no requested address means loopback, which is safe by
+     * default and still a working server for development. No token and an
+       explicitly requested network address is refused, because that
+       combination cannot be an accident worth obeying -- with an escape hatch
+       for a fixture that genuinely has no network, which has to be asked for
+       by name. */
     if (strcmp(bind_address, "127.0.0.1") != 0 &&
-        strcmp(bind_address, "::1") != 0 && runtime.auth_token[0] == '\0')
-        fprintf(stderr,
-                "blit: warning: network listener has no BLIT_AUTH_TOKEN; "
-                "the API is unauthenticated\n");
+        strcmp(bind_address, "::1") != 0 && runtime.auth_token[0] == '\0') {
+        const char *allow = getenv("BLIT_ALLOW_UNAUTHENTICATED_NETWORK");
+        if (!bind_requested) {
+            bind_address = "127.0.0.1";
+            fprintf(stderr,
+                    "blit: no BLIT_AUTH_TOKEN; binding 127.0.0.1 instead of "
+                    "0.0.0.0. Set a token to listen on the network.\n");
+        } else if (allow != NULL && allow[0] == '1') {
+            runtime.unauthenticated_network = 1;
+            fprintf(stderr,
+                    "blit: warning: BLIT_ALLOW_UNAUTHENTICATED_NETWORK=1 and "
+                    "no BLIT_AUTH_TOKEN; %s:%d accepts unauthenticated "
+                    "requests, and the session API runs commands\n",
+                    bind_address, port);
+        } else {
+            fprintf(stderr,
+                    "blit: refusing to listen on %s with no BLIT_AUTH_TOKEN. "
+                    "The session API executes client-supplied commands, so an "
+                    "unauthenticated network listener is remote code "
+                    "execution. Set BLIT_AUTH_TOKEN, or bind 127.0.0.1, or "
+                    "set BLIT_ALLOW_UNAUTHENTICATED_NETWORK=1 to override.\n",
+                    bind_address);
+            return 3;
+        }
+    }
+    snprintf(runtime.listener_bind, sizeof(runtime.listener_bind), "%s",
+             bind_address);
+    runtime.listener_port = port;
     {
         const char *command_allowlist = getenv("BLIT_COMMAND_ALLOWLIST");
         if (command_allowlist != NULL)

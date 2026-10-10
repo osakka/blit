@@ -195,4 +195,109 @@ if grep -qF "$TOKEN" "$TOKEN_SURFACE"; then
     exit 1
 fi
 
-echo "NETWORK_AUTH_PASS unauth=$unauth auth=$auth diagnostics=$diagnostics runtime_diagnostics=$runtime_diagnostics graphics=$graphics audio=$audio displays=$displays command_denied=$command_denied command_allowed=$command_allowed api_token_injected=$injected"
+# ADR 0065. POST /v1/terminal-sessions execve's a client-supplied command by
+# design, and the deployed service may run privileged, so an unauthenticated
+# network listener is remote code execution as whomever Blit runs as. It used
+# to warn on stderr and carry on, which is how the project's own host spent
+# time network-reachable with authentication off (issue #25).
+#
+# Three postures, three servers. The first two need no token, so they cannot
+# reuse the one above.
+POSTURE_PORT=$((PORT + 2))
+POSTURE_LOG=$(mktemp /tmp/blit-network-posture.XXXXXX)
+POSTURE_BODY=$(mktemp /tmp/blit-network-posture-body.XXXXXX)
+posture_pid=
+posture_cleanup() {
+    if [ -n "$posture_pid" ]; then kill "$posture_pid" 2>/dev/null || true; fi
+    rm -f "$POSTURE_LOG" "$POSTURE_BODY"
+    token_cleanup
+}
+trap posture_cleanup EXIT HUP INT TERM
+
+# 1. No token and no requested address: safe by default, and still a working
+#    server for development.
+SDL_VIDEODRIVER=dummy LD_LIBRARY_PATH="$ROOT/build/sdl3-kms" \
+    "$BINARY" "$POSTURE_PORT" >"$POSTURE_LOG" 2>&1 &
+posture_pid=$!
+ready=0
+for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    if curl -fsS -o "$POSTURE_BODY" \
+       "http://127.0.0.1:$POSTURE_PORT/v1/server" 2>/dev/null; then
+        ready=1
+        break
+    fi
+    sleep 1
+done
+if [ "$ready" -ne 1 ]; then
+    echo "network gate: the default-posture server did not become ready" >&2
+    cat "$POSTURE_LOG" >&2
+    exit 1
+fi
+default_bind=$(ruby -rjson -e '
+  puts JSON.parse(File.read(ARGV.fetch(0))).fetch("listener").fetch("bind")
+' "$POSTURE_BODY")
+default_auth=$(ruby -rjson -e '
+  puts JSON.parse(File.read(ARGV.fetch(0))).fetch("listener").fetch("authentication")
+' "$POSTURE_BODY")
+if [ "$default_bind" != 127.0.0.1 ] || [ "$default_auth" != none ]; then
+    echo "network gate: with no token the listener must be loopback, got" \
+         "bind=$default_bind authentication=$default_auth" >&2
+    exit 1
+fi
+kill "$posture_pid" 2>/dev/null || true
+wait "$posture_pid" 2>/dev/null || true
+posture_pid=
+
+# 2. No token and an explicitly requested network address: refused. An
+#    operator who asked for that cannot have meant it, and the server says
+#    which of the three ways out to take.
+# `set -e` would abort on the refusal itself, which is the result under test.
+if SDL_VIDEODRIVER=dummy LD_LIBRARY_PATH="$ROOT/build/sdl3-kms" \
+       BLIT_BIND_ADDRESS=0.0.0.0 \
+       "$BINARY" $((POSTURE_PORT + 1)) >"$POSTURE_LOG" 2>&1; then
+    echo "network gate: a network bind with no token must be refused" >&2
+    cat "$POSTURE_LOG" >&2
+    exit 1
+fi
+if ! grep -q 'refusing to listen' "$POSTURE_LOG"; then
+    echo "network gate: the refusal does not say why" >&2
+    cat "$POSTURE_LOG" >&2
+    exit 1
+fi
+
+# 3. The override exists for a fixture with no network, has to be asked for by
+#    name, and is reported where health is read rather than only on stderr.
+SDL_VIDEODRIVER=dummy LD_LIBRARY_PATH="$ROOT/build/sdl3-kms" \
+    BLIT_BIND_ADDRESS=0.0.0.0 BLIT_ALLOW_UNAUTHENTICATED_NETWORK=1 \
+    "$BINARY" $((POSTURE_PORT + 2)) >"$POSTURE_LOG" 2>&1 &
+posture_pid=$!
+ready=0
+for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    if curl -fsS -o "$POSTURE_BODY" \
+       "http://127.0.0.1:$((POSTURE_PORT + 2))/v1/diagnostics" 2>/dev/null; then
+        ready=1
+        break
+    fi
+    sleep 1
+done
+if [ "$ready" -ne 1 ]; then
+    echo "network gate: the override-posture server did not become ready" >&2
+    cat "$POSTURE_LOG" >&2
+    exit 1
+fi
+if ! ruby -rjson -e '
+  exit JSON.parse(File.read(ARGV.fetch(0))).fetch("warnings")
+           .include?("unauthenticated_network_listener") ? 0 : 1
+' "$POSTURE_BODY"; then
+    echo "network gate: an unauthenticated network listener is not reported" \
+         "in the health warnings" >&2
+    exit 1
+fi
+kill "$posture_pid" 2>/dev/null || true
+wait "$posture_pid" 2>/dev/null || true
+posture_pid=
+
+# The authenticated server started at the top of this gate is the fourth
+# posture: a token, an explicit network bind, and 401 for an unauthenticated
+# request -- asserted above.
+echo "NETWORK_AUTH_PASS unauth=$unauth auth=$auth diagnostics=$diagnostics runtime_diagnostics=$runtime_diagnostics graphics=$graphics audio=$audio displays=$displays command_denied=$command_denied command_allowed=$command_allowed api_token_injected=$injected default_bind=$default_bind network_without_token=refused override_warned=yes"

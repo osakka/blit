@@ -6,7 +6,7 @@ and migration impact. The filename is the canonical link. A few historical
 records share a numeric heading because they were developed on parallel
 branches; they remain separate decisions and are all indexed below. They are
 not missing records and must not be silently merged. New ADRs must use a
-unique filename and number greater than 0064.
+unique filename and number greater than 0065.
 
 The index is a navigation aid, not a second decision source. The record itself
 is authoritative for its status and consequences. An implementation may cite
@@ -86,6 +86,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0062 — A wide cell is drawn from a second, 16×16 font](0062-a-second-font-for-wide-cells.md)
 - [0063 — A desktop's cells come from its owner, and a desktop that never paints says so](0063-a-desktop-cells-come-from-its-owner.md)
 - [0064 — One device table, stable ids, and per-device configuration](0064-one-device-table-stable-ids-and-per-device-configuration.md)
+- [0065 — The privilege and authentication model](0065-the-privilege-and-authentication-model.md)
 
 ## Adding an ADR
 

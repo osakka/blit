@@ -1297,7 +1297,7 @@ components:
       additionalProperties: false
     ServerDetails:
       type: object
-      required: [id, name, api_version, revision, capabilities, display_count, display_backend, resources]
+      required: [id, name, api_version, revision, capabilities, display_count, display_backend, resources, listener]
       properties:
         id: {$ref: '#/components/schemas/ResourceId'}
         name: {type: string}
@@ -1328,6 +1328,33 @@ components:
             fonts: {type: string}
             diagnostics: {type: string}
             runtime_diagnostics: {type: string}
+          additionalProperties: false
+        listener:
+          type: object
+          description: >-
+            The posture this server actually came up with (ADR 0065), reported
+            rather than only logged so an operator and a control panel can read
+            it. The session API executes a client-supplied command, and the
+            service may run privileged, so an unauthenticated network listener
+            is remote code execution as whomever Blit runs as. With no token
+            and no requested bind address the server binds loopback; with no
+            token and an explicitly requested network address it refuses to
+            start, unless `BLIT_ALLOW_UNAUTHENTICATED_NETWORK=1` is set -- in
+            which case `/v1/diagnostics` also reports
+            `unauthenticated_network_listener` among its warnings.
+          required: [bind, port, authentication, command_allowlist]
+          properties:
+            bind: {type: string}
+            port: {type: integer, minimum: 1, maximum: 65535}
+            authentication:
+              type: string
+              enum: [required, none]
+            command_allowlist:
+              type: boolean
+              description: >-
+                Whether BLIT_COMMAND_ALLOWLIST restricts what a session may
+                execute. Note that an allowlist containing a shell -- which a
+                desktop deployment wants -- is not a boundary.
           additionalProperties: false
       additionalProperties: false
     GraphicsCard:

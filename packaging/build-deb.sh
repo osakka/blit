@@ -112,6 +112,14 @@ chmod 0755 "$stage/usr/lib/blit/bin/blit-update-helper"
 cp -a "$ROOT/packaging/blit-update-helper.service" \
     "$stage/lib/systemd/system/"
 cp -a "$ROOT/packaging/blit.service" "$stage/lib/systemd/system/"
+# ADR 0065: the unprivileged profile, shipped as a drop-in an operator
+# installs rather than as the default. It is not enabled here because whether
+# the blit user can reach this host's DRM device cannot be known from inside
+# the package, and a gateway that comes up unable to present has no way back
+# in on an API-only deployment.
+install -d -m 0755 "$stage/usr/share/doc/blit/examples"
+cp -a "$ROOT/packaging/blit-unprivileged.conf" \
+    "$stage/usr/share/doc/blit/examples/"
 cp -a "$BUNDLE/lib/libSDL3.so.0.4.16" "$stage/usr/lib/blit/lib/"
 ln -s libSDL3.so.0.4.16 "$stage/usr/lib/blit/lib/libSDL3.so.0"
 cp -a "$BUNDLE/fonts/." "$stage/usr/lib/blit/fonts/"
@@ -168,6 +176,24 @@ BLIT_UPDATE_TOKEN_FILE=/etc/blit/update.token
 LANG=C.UTF-8
 LC_ALL=C.UTF-8
 CONFIG
+    chown root:blit /etc/blit/blit.env
+    chmod 0640 /etc/blit/blit.env
+fi
+# ADR 0065. The session API execve's a client-supplied command, so a network
+# listener without authentication is remote code execution. This file asks for
+# 0.0.0.0, so the install has to supply a token with it: a generated one, the
+# same way the update token is generated, rather than a default value or an
+# unauthenticated deployment.
+#
+# On an upgrade of a deployment that has none, the token is appended rather
+# than left absent -- the server refuses a network bind without one, and a
+# host that will not start is worse than a client that has to be told the new
+# token. It is in /etc/blit/blit.env, readable by root and the blit group.
+if ! grep -q '^BLIT_AUTH_TOKEN=' /etc/blit/blit.env; then
+    umask 077
+    printf 'BLIT_AUTH_TOKEN=%s\n' \
+        "$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')" \
+        >> /etc/blit/blit.env
     chown root:blit /etc/blit/blit.env
     chmod 0640 /etc/blit/blit.env
 fi
