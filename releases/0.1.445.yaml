@@ -62,7 +62,7 @@ live_per_device_keymap_acceptance: carried_from_0_1_441
 live_device_kinds_acceptance: carried_from_0_1_442
 live_listener_posture_acceptance: carried_from_0_1_443
 live_evdev_opener_acceptance: carried_from_0_1_444
-live_output_occupancy_acceptance: PENDING
+live_output_occupancy_acceptance: pass_warning_then_error_after_the_window_cleared_by_the_desktop
 live_device_routing_acceptance: carried_from_0_1_436
 live_audio_device_acceptance: pass_12_pcms_unchanged_by_node_authority_all_accessible
 json_escape_acceptance: carried_from_0_1_431
@@ -90,13 +90,13 @@ screenshot_nonblocking_live_acceptance: not_rerun_candidate
 qemu_hibr_lifecycle_acceptance: not_rerun_candidate
 qemu_four_output_pixel_acceptance: not_rerun_candidate
 qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
-live_deployment: PENDING
-live_current_version: PENDING
+live_deployment: pass_supervised_update_verified_0_1_445
+live_current_version: 0.1.445
 live_block_cursor_acceptance: carried_from_0_1_425
 live_italic_acceptance: carried_from_0_1_425
 live_session_default_acceptance: carried_from_0_1_425
 live_sync_output_acceptance: carried_from_0_1_425
-live_hibr_desktop_acceptance: PENDING
+live_hibr_desktop_acceptance: pass_32400_printable_revision_859
 live_idle_frame_acceptance: carried_from_0_1_425
 live_physical_multi_display: unavailable_one_output
 live_physical_button_trace_contract: open
@@ -153,3 +153,17 @@ notes: >-
   relaunch the desktop. It reports that it has an output with nothing on it,
   which is the part Blit can be right about; what to launch, and whether to,
   belongs to whatever owns the deployment.
+
+  Host-accepted on 192.168.10.54, which is where the outage was observed. The
+  sequence is the whole of what #55 asked for:
+
+    just after the restart, no desktop   warnings [output_without_session]
+                                         errors   []
+    after 40 s with nothing on screen    errors   [output_without_session]
+    desktop relaunched                   errors   []  warnings []
+
+  BLIT_EXPECT_DESKTOP=1 reached the running service through the postinst's
+  upgrade append -- confirmed by a session echoing that one variable, which is
+  how it was checked without reading the file the auth token lives in.
+
+  Before this release that middle line read `errors []` with a blank screen.
