@@ -59,7 +59,7 @@ live_input_device_table_acceptance: carried_from_0_1_433
 live_input_device_config_acceptance: carried_from_0_1_434
 live_main_block_key_acceptance: carried_from_0_1_435
 live_device_routing_acceptance: carried_from_0_1_436
-live_audio_device_acceptance: PENDING
+live_audio_device_acceptance: pass_12_pcms_four_hdmi_outputs_seven_rates_default_exported
 json_escape_acceptance: carried_from_0_1_431
 live_cell_property_refusal_acceptance: carried_from_0_1_431
 live_unpainted_report_acceptance: carried_from_0_1_430
@@ -82,13 +82,13 @@ screenshot_nonblocking_live_acceptance: not_rerun_candidate
 qemu_hibr_lifecycle_acceptance: not_rerun_candidate
 qemu_four_output_pixel_acceptance: not_rerun_candidate
 qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
-live_deployment: PENDING
-live_current_version: PENDING
+live_deployment: pass_supervised_update_verified_0_1_439
+live_current_version: 0.1.439
 live_block_cursor_acceptance: carried_from_0_1_425
 live_italic_acceptance: carried_from_0_1_425
 live_session_default_acceptance: carried_from_0_1_425
 live_sync_output_acceptance: carried_from_0_1_425
-live_hibr_desktop_acceptance: PENDING
+live_hibr_desktop_acceptance: pass_32400_printable_revision_859
 live_idle_frame_acceptance: carried_from_0_1_425
 live_physical_multi_display: unavailable_one_output
 live_physical_button_trace_contract: open
@@ -135,3 +135,14 @@ notes: >-
   message makes that permanent.
 
   Suite: 47 pass, 5 skip, 0 fail.
+
+  Host-accepted on 192.168.10.54. Both live oracles re-run against 0.1.439:
+  12 PCMs with the QuadCast's seven rates and the chosen default reaching a
+  session launched afterwards, and two real keyboards routed to two sessions
+  with each key landing in its own. 28 input devices, errors empty, the
+  desktop back with 32,400 printable cells at revision 859.
+
+  Not measured on the host: audio hotplug itself. Plugging a card in or out of
+  192.168.10.54 needs someone at the machine, so what is host-accepted is that
+  the watch does not disturb the inventory it had -- the hotplug behaviour is
+  gated locally, with teeth, against a fabricated scan root.
