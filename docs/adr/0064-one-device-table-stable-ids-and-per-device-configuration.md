@@ -101,9 +101,22 @@ physical path is the disambiguator that matters in practice: the live host's
 remote exposes three event nodes that share one `input_id` and differ only by
 their `phys` interface suffix. When the identity block is all zeros and both
 strings are empty — a virtual device — the id falls back to the node basename.
-If two devices still derive the same id, a `-<n>` ordinal is appended in scan
-order. `node` ("/dev/input/event4") is reported as a separate, explicitly
-unstable field.
+`node` ("/dev/input/event4") is reported as a separate, explicitly unstable
+field.
+
+**On a collision the device's own name is the discriminator, and a scan-order
+ordinal only the last resort.** This was corrected against live data rather
+than designed: deployed with a bare ordinal, 192.168.10.54 reported 28 input
+nodes and only 14 distinct `(identity, phys)` pairs, because one HID interface
+commonly presents several event nodes — a keyboard, a consumer-control and a
+system-control collection — that report the same bus id and the same `phys` and
+differ only in their name. Fourteen of the 28 ids were therefore pure scan
+order, and one of them, `2.4G Dongle Keyboard`, is a device the server
+actually reads. With the name as the first discriminator, 27 of the 28 are
+stable. The last pair reports an identical bus id, an identical `phys` and an
+identical name; nothing in evdev distinguishes them, so they take the ordinal
+and the contract says so. The composed id is bounded at 112 bytes, inside
+`ResourceId`'s 128.
 
 This is as stable as udev's own `by-id` naming and no more: moving a device to
 a different USB port changes its `phys` and therefore its id, unless the device
@@ -198,9 +211,12 @@ specified for the SDL path and left unimplemented for KMS.
 
 - `tools/tests/input_identity_gate.c` / `.sh` — derivation as a pure function:
   three nodes sharing one `input_id` get three ids, a serial wins over a
-  physical path, an empty identity block falls back to the node, and a
-  collision takes an ordinal. Teeth: built against the derivation with the
-  `phys` disambiguator removed, the three-node case collapses to one id.
+  physical path, an empty identity block falls back to the node, five nodes
+  sharing one `phys` are separated by name, and two nodes identical in every
+  reported field take an ordinal. Every fixture is a device the live host
+  actually presents. Teeth: with the `phys` disambiguator removed the
+  three-node case collapses to one id; with the name discriminator removed the
+  shared-`phys` case collapses and the ordinal becomes the first resort.
 - `tools/tests/input_device_api_gate.rb` — the envelope, the item endpoint,
   the real collection revision, the serialised count against
   `/v1/diagnostics/runtime`, and that a `GET /v1/input/devices` adds no

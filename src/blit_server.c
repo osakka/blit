@@ -2745,22 +2745,25 @@ static BlitInputDevice *find_input_device_id(BlitRuntime *runtime,
     return NULL;
 }
 
-/* Assign the device its id, taking the next free ordinal when an identical
-   device is already in the table. The ordinal is a function of scan order, so
-   two devices that report nothing distinguishing still get stable ids for as
-   long as both stay present. */
+/* Assign the device its id, raising the discriminator until the id is free.
+   The device's own name is the first discriminator and a scan-order ordinal
+   the last, because on real hardware one HID interface commonly presents
+   several event nodes that report the same bus id and the same phys and
+   differ only in their name. */
 static void assign_input_device_id(BlitRuntime *runtime,
                                    BlitInputDevice *device)
 {
-    int ordinal;
+    int discriminator;
 
-    for (ordinal = 0; ordinal < BLIT_MAX_INPUT_DEVICES; ++ordinal) {
+    for (discriminator = 0; discriminator <= BLIT_MAX_INPUT_DEVICES;
+         ++discriminator) {
         char candidate[BLIT_INPUT_ID_CAPACITY];
         BlitInputDevice *existing;
 
         blit_input_device_id(device->bustype, device->vendor, device->product,
-                             device->uniq, device->phys, device->node, ordinal,
-                             candidate, sizeof(candidate));
+                             device->uniq, device->phys, device->name,
+                             device->node, discriminator, candidate,
+                             sizeof(candidate));
         existing = find_input_device_id(runtime, candidate);
         if (existing == NULL || existing == device) {
             snprintf(device->id, sizeof(device->id), "%s", candidate);

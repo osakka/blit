@@ -36,6 +36,7 @@
 
 #define BLIT_INPUT_ID_CAPACITY 128
 #define BLIT_INPUT_SLUG_CAPACITY 48
+#define BLIT_INPUT_NAME_CAPACITY 40
 
 /* Reduce a device-reported string to the ResourceId alphabet.
  *
@@ -97,22 +98,41 @@ static size_t blit_input_node_slug(const char *node, char *out, size_t capacity)
                            capacity);
 }
 
-/* Derive the id. `bustype`, `vendor` and `product` come from EVIOCGID;
-   `uniq` and `phys` may be NULL or empty. `ordinal` is zero for the first
-   device deriving a given id and counts up for each later collision, so two
-   devices that are genuinely indistinguishable still get distinct ids in scan
-   order.
+/* Derive the id.
  *
- * EVIOCGID's `version` is deliberately *not* part of the id: a firmware
- * update changes it, and a saved configuration should survive one. It is
- * reported in the item's `identity` block instead. */
+ * `bustype`, `vendor` and `product` come from EVIOCGID; `uniq`, `phys` and
+ * `name` may be NULL or empty. EVIOCGID's `version` is deliberately not part
+ * of the id -- a firmware update changes it, and a saved configuration should
+ * survive one. It is reported in the item's `identity` block instead.
+ *
+ * `discriminator` is 0 for the first device deriving a given id and is raised
+ * by the caller for each later collision:
+ *
+ *   0  the bare identity
+ *   1  plus a slug of the device's own name
+ *   n  plus that slug and a scan-order ordinal
+ *
+ * The name is the discriminator rather than a bare number because on real
+ * hardware the identity block and the physical path are routinely *not*
+ * unique. The live host has 28 input nodes and only 14 distinct
+ * (identity, phys) pairs: one HID interface commonly presents several event
+ * nodes -- a keyboard, a consumer-control and a system-control collection --
+ * which report the same bus id and the same phys and differ only in their
+ * name. A numeric ordinal over those is scan order, so unplugging one node
+ * renumbers the rest, which is exactly the instability this id exists to
+ * avoid. With the name, 27 of the host's 28 devices are stable; the last pair
+ * reports an identical bus id, phys and name, and nothing in evdev
+ * distinguishes them, so they fall back to the ordinal and the contract says
+ * so. */
 static void blit_input_device_id(unsigned bustype, unsigned vendor,
                                  unsigned product, const char *uniq,
-                                 const char *phys, const char *node,
-                                 int ordinal, char *out, size_t capacity)
+                                 const char *phys, const char *name,
+                                 const char *node, int discriminator,
+                                 char *out, size_t capacity)
 {
     char slug[BLIT_INPUT_SLUG_CAPACITY];
-    char ordinal_suffix[16];
+    char name_slug[BLIT_INPUT_NAME_CAPACITY];
+    char suffix[BLIT_INPUT_NAME_CAPACITY + 16];
     size_t slug_length;
 
     if (capacity == 0)
@@ -120,9 +140,18 @@ static void blit_input_device_id(unsigned bustype, unsigned vendor,
     slug_length = blit_input_slug(uniq, slug, sizeof(slug));
     if (slug_length == 0)
         slug_length = blit_input_slug(phys, slug, sizeof(slug));
-    ordinal_suffix[0] = '\0';
-    if (ordinal > 0)
-        snprintf(ordinal_suffix, sizeof(ordinal_suffix), "-%d", ordinal);
+    suffix[0] = '\0';
+    if (discriminator > 0) {
+        size_t name_length = blit_input_slug(name, name_slug,
+                                             sizeof(name_slug));
+        if (name_length > 0 && discriminator == 1)
+            snprintf(suffix, sizeof(suffix), "-%s", name_slug);
+        else if (name_length > 0)
+            snprintf(suffix, sizeof(suffix), "-%s-%d", name_slug,
+                     discriminator - 1);
+        else
+            snprintf(suffix, sizeof(suffix), "-%d", discriminator);
+    }
     if (bustype == 0 && vendor == 0 && product == 0 && slug_length == 0) {
         /* A device with no identity at all -- a virtual or kernel-synthesised
            device. The node is all there is, and it is not stable; saying so
@@ -130,15 +159,15 @@ static void blit_input_device_id(unsigned bustype, unsigned vendor,
         char node_slug[BLIT_INPUT_SLUG_CAPACITY];
         if (blit_input_node_slug(node, node_slug, sizeof(node_slug)) == 0)
             snprintf(node_slug, sizeof(node_slug), "unknown");
-        snprintf(out, capacity, "input-node-%s%s", node_slug, ordinal_suffix);
+        snprintf(out, capacity, "input-node-%s%s", node_slug, suffix);
         return;
     }
     if (slug_length > 0)
         snprintf(out, capacity, "input-%04x-%04x-%04x-%s%s", bustype & 0xffffu,
-                 vendor & 0xffffu, product & 0xffffu, slug, ordinal_suffix);
+                 vendor & 0xffffu, product & 0xffffu, slug, suffix);
     else
         snprintf(out, capacity, "input-%04x-%04x-%04x%s", bustype & 0xffffu,
-                 vendor & 0xffffu, product & 0xffffu, ordinal_suffix);
+                 vendor & 0xffffu, product & 0xffffu, suffix);
 }
 
 #endif /* BLIT_INPUT_IDENTITY_H */
