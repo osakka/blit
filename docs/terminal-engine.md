@@ -81,7 +81,16 @@ shell conformance path is stable.
    literal character, but not to a control sequence, which carries Alt in its
    parameter instead. A key may be injected by evdev code through
    `POST /v1/input/inject`, which runs the same encoder as a physical device.
-   Keyboard layout beyond US, CapsLock and NumLock are not implemented.
+   Modifier state is what is physically held across every keyboard, so
+   releasing one of two held Shift keys keeps Shift down and a device that
+   disappears mid-hold does not leave one stuck; the kernel's own key and LED
+   state is adopted when a keyboard is opened. CapsLock inverts Shift for
+   letters only. NumLock selects between the keypad's digits and its cursor
+   and editing block, and defaults to digits when no device LED says
+   otherwise. The right Alt key is AltGr and does not prefix ESC the way the
+   left one does -- but with only a US table there is no third level for it to
+   select, so **keyboard layout is still US-only**: that, and a keymap source
+   to replace the built-in table, are what remains of the keyboard work.
    Kitty graphics placements (source rectangle, cell offset, numbered
    placements, the `a i c p q x y z` delete targets) and the refusal of
    unimplemented keys are specified in

@@ -475,6 +475,14 @@ typedef struct {
     unsigned long long frame_revision;
     unsigned long long next_event_sequence;
     unsigned int mouse_buttons;
+    /* Which keys are physically down, across every keyboard. The three
+       modifier flags are derived from this: holding both Shift keys and
+       releasing one left a single boolean saying Shift was up, and a device
+       that disappeared mid-hold left it stuck down forever. */
+    unsigned char evdev_key_held[(KEY_MAX + 8) / 8];
+    int evdev_altgr;
+    int evdev_caps_lock;
+    int evdev_num_lock;
     /* The cell the last motion report named, so the next sample inside the
        same cell is not reported again. */
     unsigned long long motion_report_session;
@@ -756,6 +764,7 @@ static void broadcast_evdev_pointer(BlitRuntime *runtime, const char *kind,
                                     const char *device_id);
 static int session_surface_is_owner_authored(const BlitSession *session);
 static int send_evdev_key(BlitRuntime *runtime, unsigned short code);
+static void evdev_sync_modifiers(BlitRuntime *runtime);
 static void dispatch_evdev_key_event(BlitRuntime *runtime,
                                      const struct input_event *event,
                                      const char *device_id);
@@ -12094,6 +12103,7 @@ static void evdev_register_path(BlitRuntime *runtime, const char *path,
             runtime->diagnostic_evdev_keyboard_device_events[slot] = 0;
             runtime->diagnostic_evdev_keyboard_device_keys[slot] = 0;
             claimed = 1;
+            evdev_sync_modifiers(runtime);
             if (announce) {
                 fprintf(stderr, "blit: evdev keyboard reconnected: %s fd=%d\n",
                         path, fd);
@@ -14684,6 +14694,67 @@ static int session_surface_is_owner_authored(const BlitSession *session)
         (session->hibr_desktop_primary || session->hibr_desktop_join);
 }
 
+static int evdev_key_is_held(const BlitRuntime *runtime, unsigned short code)
+{
+    if (code > KEY_MAX)
+        return 0;
+    return (runtime->evdev_key_held[code / 8] & (1U << (code % 8))) != 0;
+}
+
+static void evdev_key_set_held(BlitRuntime *runtime, unsigned short code,
+                               int held)
+{
+    if (code > KEY_MAX)
+        return;
+    if (held)
+        runtime->evdev_key_held[code / 8] |= (unsigned char)(1U << (code % 8));
+    else
+        runtime->evdev_key_held[code / 8] &=
+            (unsigned char)~(1U << (code % 8));
+}
+
+/* Derive the modifier flags from what is actually held. AltGr is deliberately
+   not Alt: treating the right Alt key as Alt made it prefix ESC instead of
+   selecting a third level, so an AltGr character could not be typed at all. */
+static void evdev_refresh_modifiers(BlitRuntime *runtime)
+{
+    runtime->evdev_shift = evdev_key_is_held(runtime, KEY_LEFTSHIFT) ||
+        evdev_key_is_held(runtime, KEY_RIGHTSHIFT);
+    runtime->evdev_ctrl = evdev_key_is_held(runtime, KEY_LEFTCTRL) ||
+        evdev_key_is_held(runtime, KEY_RIGHTCTRL);
+    runtime->evdev_alt = evdev_key_is_held(runtime, KEY_LEFTALT);
+    runtime->evdev_altgr = evdev_key_is_held(runtime, KEY_RIGHTALT);
+}
+
+/* Adopt the kernel's idea of what is held and which locks are lit. A keyboard
+   opened while Shift is down, or after a device vanished mid-hold, otherwise
+   carries a modifier state that is wrong until that key is pressed again. */
+static void evdev_sync_modifiers(BlitRuntime *runtime)
+{
+    int index;
+
+    memset(runtime->evdev_key_held, 0, sizeof(runtime->evdev_key_held));
+    for (index = 0; index < runtime->evdev_keyboard_count; ++index) {
+        unsigned char keys[(KEY_MAX + 8) / 8];
+        unsigned long leds[2];
+        int byte;
+        if (runtime->evdev_keyboard_fds[index] < 0)
+            continue;
+        memset(keys, 0, sizeof(keys));
+        if (ioctl(runtime->evdev_keyboard_fds[index], EVIOCGKEY(sizeof(keys)),
+                  keys) >= 0)
+            for (byte = 0; byte < (int)sizeof(keys); ++byte)
+                runtime->evdev_key_held[byte] |= keys[byte];
+        memset(leds, 0, sizeof(leds));
+        if (ioctl(runtime->evdev_keyboard_fds[index], EVIOCGLED(sizeof(leds)),
+                  leds) >= 0) {
+            runtime->evdev_caps_lock = input_bit(leds, LED_CAPSL) ? 1 : 0;
+            runtime->evdev_num_lock = input_bit(leds, LED_NUML) ? 1 : 0;
+        }
+    }
+    evdev_refresh_modifiers(runtime);
+}
+
 /* xterm's modifier parameter: 1 plus a bit per held modifier.  1 means no
    modifier, in which case the unparameterised form of a sequence is sent. */
 static int evdev_modifier_parameter(const BlitRuntime *runtime)
@@ -14746,8 +14817,9 @@ static int send_evdev_key(BlitRuntime *runtime, unsigned short code)
         sequence[0] = (char)(code - KEY_A + 1);
         length = 1;
     } else if (code >= KEY_A && code <= KEY_Z) {
-        sequence[0] = (char)(runtime->evdev_shift ? 'A' : 'a' + code - KEY_A);
-        if (runtime->evdev_shift) sequence[0] = (char)('A' + code - KEY_A);
+        /* CapsLock inverts Shift for letters, and only for letters. */
+        int upper = runtime->evdev_shift != runtime->evdev_caps_lock;
+        sequence[0] = (char)((upper ? 'A' : 'a') + code - KEY_A);
         length = 1;
     } else if (code >= KEY_1 && code <= KEY_9) {
         static const char normal[] = "123456789";
@@ -14776,6 +14848,26 @@ static int send_evdev_key(BlitRuntime *runtime, unsigned short code)
             code == KEY_COMMA ? 8 : code == KEY_DOT ? 9 : 10;
         sequence[0] = (runtime->evdev_shift ? shifted : normal)[punctuation];
         length = 1;
+    } else if ((code == KEY_KP0 || code == KEY_KP1 || code == KEY_KP2 ||
+                code == KEY_KP3 || code == KEY_KP4 || code == KEY_KP5 ||
+                code == KEY_KP6 || code == KEY_KP7 || code == KEY_KP8 ||
+                code == KEY_KP9 || code == KEY_KPDOT) &&
+               !runtime->evdev_num_lock) {
+        /* With NumLock off the keypad is a cursor and editing block, which is
+           what the keycaps say and what it did on a VT. */
+        switch (code) {
+        case KEY_KP8: final = 'A'; ss3 = session->terminal_application_cursor; break;
+        case KEY_KP2: final = 'B'; ss3 = session->terminal_application_cursor; break;
+        case KEY_KP6: final = 'C'; ss3 = session->terminal_application_cursor; break;
+        case KEY_KP4: final = 'D'; ss3 = session->terminal_application_cursor; break;
+        case KEY_KP7: final = 'H'; ss3 = session->terminal_application_cursor; break;
+        case KEY_KP1: final = 'F'; ss3 = session->terminal_application_cursor; break;
+        case KEY_KP5: number = 0; final = 'E'; break;   /* Begin */
+        case KEY_KP9: number = 5; final = '~'; break;   /* Page Up */
+        case KEY_KP3: number = 6; final = '~'; break;   /* Page Down */
+        case KEY_KP0: number = 2; final = '~'; break;   /* Insert */
+        default: number = 3; final = '~'; break;        /* KPDOT: Delete */
+        }
     } else if (code == KEY_KP0 || code == KEY_KP1 || code == KEY_KP2 ||
                code == KEY_KP3 || code == KEY_KP4 || code == KEY_KP5 ||
                code == KEY_KP6 || code == KEY_KP7 || code == KEY_KP8 ||
@@ -14830,10 +14922,31 @@ static int send_evdev_key(BlitRuntime *runtime, unsigned short code)
         number = code == KEY_INSERT ? 2 : code == KEY_DELETE ? 3 :
             code == KEY_PAGEUP ? 5 : 6;
         final = '~';
-    } else if (code >= KEY_F1 && code <= KEY_F12) {
-        static const int function_numbers[] = {
-            0, 0, 0, 0, 15, 17, 18, 19, 20, 21, 23, 24
+    } else if (code == KEY_102ND) {
+        /* The extra key next to left Shift on an ISO board. A US map has no
+           third level for it, so it carries the backslash pair. */
+        sequence[0] = runtime->evdev_shift ? '|' : '\\';
+        length = 1;
+    } else if (code == KEY_KPCOMMA || code == KEY_KPEQUAL ||
+               code == KEY_KPLEFTPAREN || code == KEY_KPRIGHTPAREN) {
+        sequence[0] = code == KEY_KPCOMMA ? ',' :
+            code == KEY_KPEQUAL ? '=' :
+            code == KEY_KPLEFTPAREN ? '(' : ')';
+        length = 1;
+    } else if (code == KEY_MENU || code == KEY_COMPOSE) {
+        number = 29;
+        final = '~';
+    } else if (code >= KEY_F13 && code <= KEY_F20) {
+        static const int high_function_numbers[] = {
+            25, 26, 28, 29, 31, 32, 33, 34
         };
+        number = high_function_numbers[code - KEY_F13];
+        final = '~';
+    } else if (code >= KEY_F1 && code <= KEY_F10) {
+        /* F1-F10 are contiguous evdev codes; F11 and F12 are not, and are
+           nineteen codes further along with the keypad and the lock keys in
+           between. Treating KEY_F1..KEY_F12 as one range indexed a
+           twelve-entry table with up to 29, which read past it. */
         if (code <= KEY_F4) {
             /* F1-F4 are SS3 P..S unmodified and CSI 1;M P..S with a
                modifier, which is why they need the descriptor rather than a
@@ -14841,9 +14954,13 @@ static int send_evdev_key(BlitRuntime *runtime, unsigned short code)
             final = (char)('P' + (code - KEY_F1));
             ss3 = 1;
         } else {
-            number = function_numbers[code - KEY_F1];
+            static const int function_numbers[] = { 15, 17, 18, 19, 20, 21 };
+            number = function_numbers[code - KEY_F5];
             final = '~';
         }
+    } else if (code == KEY_F11 || code == KEY_F12) {
+        number = code == KEY_F11 ? 23 : 24;
+        final = '~';
     } else if (code == KEY_UP || code == KEY_DOWN || code == KEY_LEFT ||
                code == KEY_RIGHT) {
         final = code == KEY_UP ? 'A' : code == KEY_DOWN ? 'B' :
@@ -14898,15 +15015,30 @@ static void dispatch_evdev_key_event(BlitRuntime *runtime,
 
     if (event->type != EV_KEY)
         return;
-    if (event->code == KEY_LEFTSHIFT || event->code == KEY_RIGHTSHIFT) {
-        runtime->evdev_shift = event->value != 0;
+    /* Autorepeat does not change what is held. */
+    if (event->value != 2)
+        evdev_key_set_held(runtime, event->code, event->value != 0);
+    switch (event->code) {
+    case KEY_LEFTSHIFT: case KEY_RIGHTSHIFT:
+    case KEY_LEFTCTRL: case KEY_RIGHTCTRL:
+    case KEY_LEFTALT: case KEY_RIGHTALT:
+    case KEY_LEFTMETA: case KEY_RIGHTMETA:
+        evdev_refresh_modifiers(runtime);
         modifier_only = 1;
-    } else if (event->code == KEY_LEFTCTRL || event->code == KEY_RIGHTCTRL) {
-        runtime->evdev_ctrl = event->value != 0;
+        break;
+    case KEY_CAPSLOCK:
+        /* A lock toggles on press and is not a held modifier. */
+        if (event->value == 1)
+            runtime->evdev_caps_lock = !runtime->evdev_caps_lock;
         modifier_only = 1;
-    } else if (event->code == KEY_LEFTALT || event->code == KEY_RIGHTALT) {
-        runtime->evdev_alt = event->value != 0;
+        break;
+    case KEY_NUMLOCK:
+        if (event->value == 1)
+            runtime->evdev_num_lock = !runtime->evdev_num_lock;
         modifier_only = 1;
+        break;
+    default:
+        break;
     }
     if (event->value != 0) {
         char detail[160];
@@ -14999,6 +15131,9 @@ static void service_evdev_keyboard(BlitRuntime *runtime)
                                         runtime->evdev_keyboard_count - 1);
             remove_evdev_keyboard(runtime, device_index);
             --device_index;
+            /* A device that vanished while a modifier was held would leave it
+               stuck down for every other keyboard. */
+            evdev_sync_modifiers(runtime);
         }
     }
 }
@@ -15728,6 +15863,10 @@ int main(int argc, char **argv)
     diagnostic_log(&runtime, "info", "server_start", "Blit gateway starting");
     blit_font_load(&runtime.font);
     runtime.font_scale = 1;
+    /* With no keyboard to ask, assume the keypad types digits, which is what
+       it did before NumLock was honoured at all. EVIOCGLED corrects this from
+       the device's own LED as soon as one is opened. */
+    runtime.evdev_num_lock = 1;
     runtime.render_interval_ms = 16;
     {
         const char *font_scale = getenv("BLIT_FONT_SCALE");

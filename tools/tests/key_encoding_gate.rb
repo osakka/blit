@@ -1,7 +1,8 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# Issue #34. What a physical key press puts on a session's PTY.
+# Issues #34 and, in part, #35. What a physical key press puts on a session's
+# PTY, and the modifier state machine behind it.
 #
 # Keys arrive through POST /v1/input/inject with an evdev code and value, which
 # runs the same dispatch a real device does -- modifier state machine,
@@ -37,7 +38,10 @@ KEY = {
   'slash' => 53, 'space' => 57, 'tab' => 15, 'enter' => 28,
   'f1' => 59, 'f5' => 63, 'home' => 102, 'pageup' => 104, 'delete' => 111,
   'up' => 103, 'left' => 105, 'right' => 106, 'down' => 108,
-  'leftshift' => 42, 'leftctrl' => 29, 'leftalt' => 56
+  'leftshift' => 42, 'leftctrl' => 29, 'leftalt' => 56,
+  'rightshift' => 54, 'rightalt' => 100, 'capslock' => 58, 'numlock' => 69,
+  'f11' => 87, 'f12' => 88, 'f13' => 183, 'kp8' => 72, 'kp9' => 73,
+  'kpdot' => 83, 'key102nd' => 86
 }.freeze
 
 abort("key-encoding gate: missing #{BINARY}") unless File.executable?(BINARY)
@@ -144,7 +148,16 @@ cases = [
   [KEY['backslash'], %w[leftctrl], '^\\', 'ctrl+backslash is 0x1c'],
   [KEY['minus'], %w[leftctrl], '^_', 'ctrl+minus is 0x1f'],
   [KEY['slash'], %w[leftctrl], '^_', 'ctrl+slash is 0x1f'],
-  [KEY['space'], %w[leftctrl], '^@', 'ctrl+space is NUL']
+  [KEY['space'], %w[leftctrl], '^@', 'ctrl+space is NUL'],
+  # #35: keys that previously produced nothing, and one that read past the
+  # end of a table because KEY_F11 is not KEY_F1 + 10.
+  [KEY['f11'], [], '^[[23~', 'F11'],
+  [KEY['f12'], [], '^[[24~', 'F12'],
+  [KEY['f13'], [], '^[[25~', 'F13'],
+  [KEY['key102nd'], [], '\\', 'the ISO key beside left shift'],
+  # AltGr is not Alt: it must not prefix ESC the way the left Alt does.
+  [KEY['a'], %w[rightalt], 'a', 'altgr with a letter does not send ESC'],
+  [KEY['a'], %w[leftalt], '^[a', 'alt with a letter sends ESC']
 ]
 
 cases.each do |code, modifiers, expected, description|
@@ -154,6 +167,48 @@ cases.each do |code, modifiers, expected, description|
 
   failures << "#{description}: expected #{expected.inspect}, got #{got.inspect}"
 end
+
+# #35. Modifier state is what is actually held, not the last event seen.
+# Holding both shift keys and releasing one used to leave shift off.
+key(KEY['leftshift'], 1)
+key(KEY['rightshift'], 1)
+key(KEY['leftshift'], 0)
+both_shifts = press(surface, KEY['a'])
+key(KEY['rightshift'], 0)
+unless both_shifts == 'A'
+  failures << 'with two shift keys held and one released, shift was treated ' \
+              "as up: expected \"A\", got #{both_shifts.inspect}"
+end
+
+# CapsLock is a lock, not a held modifier, and it inverts shift for letters.
+key(KEY['capslock'], 1)
+key(KEY['capslock'], 0)
+locked = press(surface, KEY['a'])
+shifted_while_locked = press(surface, KEY['a'], %w[leftshift])
+key(KEY['capslock'], 1)
+key(KEY['capslock'], 0)
+unlocked = press(surface, KEY['a'])
+failures << "capslock did not upper-case a letter: #{locked.inspect}" unless
+  locked == 'A'
+failures << 'shift with capslock did not lower-case a letter: ' \
+            "#{shifted_while_locked.inspect}" unless shifted_while_locked == 'a'
+failures << "capslock did not toggle off: #{unlocked.inspect}" unless
+  unlocked == 'a'
+
+# NumLock selects between the keypad's digits and its cursor block.
+numeric = press(surface, KEY['kp8'])
+key(KEY['numlock'], 1)
+key(KEY['numlock'], 0)
+cursor = press(surface, KEY['kp8'])
+delete = press(surface, KEY['kpdot'])
+key(KEY['numlock'], 1)
+key(KEY['numlock'], 0)
+failures << "keypad 8 with numlock on was not a digit: #{numeric.inspect}" unless
+  numeric == '8'
+failures << "keypad 8 with numlock off was not Up: #{cursor.inspect}" unless
+  cursor == '^[[A'
+failures << "keypad . with numlock off was not Delete: #{delete.inspect}" unless
+  delete == '^[[3~'
 
 # A modifier press on its own produces no bytes, so it is not a key for the
 # delivered/undelivered counters ADR 0057 relies on.
@@ -182,4 +237,5 @@ unless failures.empty?
   exit 1
 end
 
-puts "KEY_ENCODING_PASS cases=#{cases.length} modifier_only_uncounted=yes"
+puts "KEY_ENCODING_PASS cases=#{cases.length} both_shifts=held_set " \
+     'capslock=toggles numlock=selects_keypad modifier_only_uncounted=yes'
