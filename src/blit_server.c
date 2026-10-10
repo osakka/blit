@@ -8292,6 +8292,44 @@ static int force_hibr_session_resize(BlitSession *session,
     return 1;
 }
 
+/* Issue #32. An owner that registered and then never painted leaves a desktop
+   that every status check calls healthy and that shows nothing.
+   Deliberately its own pass rather than part of the reassert loop: that loop
+   stops re-arming after its bounded window -- about eight seconds on a host
+   where the owner group is found immediately -- so a check inside it never
+   runs long enough to see this. That is exactly how an earlier version of
+   this passed its gate and reported nothing on the live host.
+   Not fatal, unlike an owner that never registers at all: a slow desktop is
+   still a desktop, and killing one for being slow would be worse than the
+   blankness it prevents. */
+static void service_unpainted_desktops(BlitRuntime *runtime, uint64_t now)
+{
+    int i;
+
+    for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
+        BlitSession *session = &runtime->sessions[i];
+        char detail[256];
+
+        if (!session->used || session->hibr_unpainted_reported ||
+            !session->hibr_owner_registered ||
+            session->hibr_owner_writes != 0 ||
+            session->hibr_owner_registered_us == 0 ||
+            now <= session->hibr_owner_registered_us + BLIT_HIBR_UNPAINTED_US)
+            continue;
+        session->hibr_unpainted_reported = 1;
+        snprintf(detail, sizeof(detail),
+                 "session-%llu registered a Hibr owner %llu seconds ago and "
+                 "has had no cell request accepted%s; the surface holds "
+                 "whatever it did, which on a reattachment is nothing",
+                 session->id,
+                 (unsigned long long)(BLIT_HIBR_UNPAINTED_US / 1000000ULL),
+                 session->hibr_resume_requested ?
+                     " (--resume: the held session's own provider did not "
+                     "survive this server)" : "");
+        diagnostic_log(runtime, "error", "hibr_desktop_unpainted", detail);
+    }
+}
+
 static void service_attach_reasserts(BlitRuntime *runtime, uint64_t now)
 {
     int i;
@@ -8392,32 +8430,6 @@ static void service_attach_reasserts(BlitRuntime *runtime, uint64_t now)
                          session->id);
                 disable_input_routes_for_target(runtime, target_id);
             }
-        }
-        /* Issue #32. An owner that registered and then never painted leaves
-           a desktop that every status check calls healthy and that shows
-           nothing. Deliberately not fatal, unlike an owner that never
-           registers at all: a slow desktop is still a desktop, and killing
-           one for being slow would be worse than the blankness. Reported
-           once, so a status check can see it and an operator knows to
-           relaunch rather than wonder. */
-        if (session->hibr_owner_registered &&
-            session->hibr_owner_writes == 0 &&
-            !session->hibr_unpainted_reported &&
-            session->hibr_owner_registered_us != 0 &&
-            now > session->hibr_owner_registered_us +
-                      BLIT_HIBR_UNPAINTED_US) {
-            char detail[256];
-            session->hibr_unpainted_reported = 1;
-            snprintf(detail, sizeof(detail),
-                     "session-%llu registered a Hibr owner %llu seconds ago "
-                     "and has had no cell request accepted%s; the surface is "
-                     "whatever it was, which on a reattachment is empty",
-                     session->id,
-                     (unsigned long long)(BLIT_HIBR_UNPAINTED_US / 1000000ULL),
-                     session->hibr_resume_requested ?
-                         " (--resume: the held session's own provider did not "
-                         "survive this server" : "");
-            diagnostic_log(runtime, "error", "hibr_desktop_unpainted", detail);
         }
         /* Startup output can arrive before Hibr has installed its resize
            handling.  A single SIGWINCH is therefore not a reliable attach
@@ -16616,6 +16628,7 @@ int main(int argc, char **argv)
         }
         now = monotonic_us();
         service_attach_reasserts(&runtime, now);
+        service_unpainted_desktops(&runtime, now);
         wait_ms = render_wait_ms(&runtime, now);
         for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
             BlitSession *session = &runtime.sessions[i];

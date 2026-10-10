@@ -75,7 +75,13 @@ File.write(launcher, <<~'SCRIPT')
   printf '\033[2J\033[H'
   i=0
   while [ $i -lt 40 ]; do printf 'STREAM REPLAY LINE %s\r\n' "$i"; i=$((i + 1)); done
-  sleep 120
+  # exec without the session token, so Blit's owner rediscovery stops finding
+  # a match. It then retries on its short interval and retires its bounded
+  # window in about eight seconds -- before the unpainted threshold. That is
+  # the live host's timing. A fixture that keeps matching holds the window
+  # open for a minute instead, which is how a check coupled to that window
+  # passed this gate and reported nothing on the host.
+  exec env -u BLIT_SESSION_TOKEN sleep 120
 SCRIPT
 FileUtils.chmod(0o755, launcher)
 
@@ -186,6 +192,14 @@ end
 logged = (json('GET', '/v1/diagnostics/runtime')['logs'] || [])
          .any? { |l| l['code'] == 'hibr_desktop_unpainted' }
 failures << 'the unpainted desktop was not written to the runtime log' unless logged
+# The report has to survive the owner-rediscovery window closing, which is
+# the thing that silently broke this on the live host.
+retired = attachment(created.fetch('id'))
+if retired['reassert_attempts'].to_i < 32
+  warn "desktop-repaint gate: note: the reassert window was still open " \
+       "(#{retired['reassert_attempts']} attempts) when the report arrived, " \
+       'so this run did not exercise the retired-window case'
+end
 
 # And an owner that does paint is counted, so the signal is not just "always on".
 revision = json('GET', "/v1/surfaces/#{surface}/summary").fetch('revision')
