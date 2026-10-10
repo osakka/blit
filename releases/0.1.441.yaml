@@ -57,8 +57,8 @@ display_device_api_acceptance: pass_envelope_item_matches_collection_no_writable
 main_block_key_table_acceptance: carried_from_0_1_435
 live_input_device_table_acceptance: carried_from_0_1_433
 live_input_device_config_acceptance: carried_from_0_1_434
-live_main_block_key_acceptance: PENDING
-live_per_device_keymap_acceptance: PENDING
+live_main_block_key_acceptance: carried_from_0_1_435
+live_per_device_keymap_acceptance: pass_qwertz_altgr_levels_and_cross_keyboard_shift_with_the_desktop_up
 live_device_routing_acceptance: carried_from_0_1_436
 live_audio_device_acceptance: pass_12_pcms_unchanged_by_node_authority_all_accessible
 json_escape_acceptance: carried_from_0_1_431
@@ -83,13 +83,13 @@ screenshot_nonblocking_live_acceptance: not_rerun_candidate
 qemu_hibr_lifecycle_acceptance: not_rerun_candidate
 qemu_four_output_pixel_acceptance: not_rerun_candidate
 qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
-live_deployment: PENDING
-live_current_version: PENDING
+live_deployment: pass_supervised_update_verified_0_1_441
+live_current_version: 0.1.441
 live_block_cursor_acceptance: carried_from_0_1_425
 live_italic_acceptance: carried_from_0_1_425
 live_session_default_acceptance: carried_from_0_1_425
 live_sync_output_acceptance: carried_from_0_1_425
-live_hibr_desktop_acceptance: PENDING
+live_hibr_desktop_acceptance: pass_32400_printable_revision_866
 live_idle_frame_acceptance: carried_from_0_1_425
 live_physical_multi_display: unavailable_one_output
 live_physical_button_trace_contract: open
@@ -164,3 +164,38 @@ notes: >-
   Blit runs as root and the fixture's nodes are ordinary files. The field
   exists so that a device Blit cannot open reads as a permission problem
   rather than as a missing device; the false case has never been exercised.
+
+  Host-accepted on 192.168.10.54, tools/probes/host_keyboard_layout.rb against
+  two of its real keyboards:
+
+    A code 21        -> "z"      the Y key, under a QWERTZ override
+    A code 44        -> "y"
+    A code 12        -> "ß"      where US has the hyphen
+    A code 16+altgr  -> "@"      the third level
+    A code 16+altgr+shift -> "Ω" the fourth, and two bytes of UTF-8
+    B code 21        -> "y"      the other keyboard is still US
+    B code 44        -> "z"
+    B code 12        -> "-"
+    shift on A, "a" on B -> "a"  the modifier did not cross
+
+  The probe restores both keyboards; the host carries no configuration
+  afterwards. The desktop came back with 32,400 printable cells at revision
+  866 and an empty errors array.
+
+  Two notes from running it, both measured rather than assumed:
+
+  The probe routes both keyboards to its own session, and it has to. Without
+  that it only works when no desktop is running: a Hibr desktop owns the
+  focused surface and ADR 0057 refuses PTY writes to an owner-authored
+  surface, so every key types nothing. Measured that way once -- 112 presses,
+  18 delivered, 94 undelivered -- which is
+  evdev_keyboard_keys_undelivered doing exactly the job it exists for rather
+  than a key being lost. Per-device routing is what lets a live input probe be
+  independent of what is on screen.
+
+  One HTTP request to /v1/input/inject timed out at 25 s on the first live
+  run and did not reproduce in three later runs. Not filed as a stall, because
+  the server's own measurement rules it out: max_loop_gap_ms stayed at 23.4 ms
+  and max_evdev_scan_ms at 0.042, so the event loop never blocked for
+  anything like that long. Recorded because an unexplained pause on the input
+  path is worth writing down even when the metric says it was not the server.
