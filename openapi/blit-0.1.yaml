@@ -505,6 +505,15 @@ paths:
       tags: [hardware]
       operationId: listInputDevices
       summary: List keyboard, pointer, and other input devices
+      description: >-
+        Served from the runtime's device table (ADR 0064). The response is a
+        view of what the server has discovered and polls; the request performs
+        no device enumeration, so it is safe to poll. `revision` counts
+        discoveries, losses and accepted configuration writes, and a change is
+        also announced on the event stream as `device_changed`. `count` is the
+        number of serialised devices and `dropped` the number that did not fit
+        the response; a client that sees a non-zero `dropped` is seeing an
+        incomplete inventory and is told so rather than silently shortchanged.
       responses:
         '200':
           description: Input inventory
@@ -520,6 +529,29 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/InputDevice'
+                  count: {type: integer, minimum: 0}
+                  dropped: {type: integer, minimum: 0}
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/input/devices/{device_id}:
+    parameters:
+      - name: device_id
+        in: path
+        required: true
+        schema: {$ref: '#/components/schemas/ResourceId'}
+    get:
+      tags: [hardware]
+      operationId: getInputDevice
+      summary: Read one input device
+      responses:
+        '200':
+          description: The input device
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InputDevice'
+        '404':
+          $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
   /v1/input/inject:
@@ -1449,27 +1481,120 @@ components:
       additionalProperties: false
     InputDevice:
       type: object
-      required: [id, name, kinds, route_ids, capabilities]
+      required: [id, class, name, node, kinds, route_ids, capabilities,
+                 identity, state, configuration, revision]
       properties:
-        id: {$ref: '#/components/schemas/ResourceId'}
+        id:
+          allOf:
+            - $ref: '#/components/schemas/ResourceId'
+          description: >-
+            Derived from what the device reports about itself, not from its
+            node number (ADR 0064):
+            `input-<bustype>-<vendor>-<product>[-<slug>][-<ordinal>]`, with the
+            slug taken from the device's serial when it has one and from its
+            physical bus position otherwise. It is as stable as udev's own
+            by-id naming and no more: a device with no serial that is moved to
+            a different port reports a different physical position and
+            therefore gets a different id. A device that reports no identity
+            at all -- a virtual or kernel-synthesised device -- is named
+            `input-node-<basename>`, which says in the id itself that it is
+            not stable. Configuration should be saved against this, never
+            against `node`.
+        class:
+          type: string
+          enum: [input]
         name: {type: string}
+        node:
+          type: string
+          description: >-
+            The device node, for example `/dev/input/event4`. Reported for
+            diagnosis only. Node numbers are assigned in discovery order and
+            change on replug and on reboot, so this is explicitly not a stable
+            identifier.
         kinds:
           type: array
+          description: >-
+            How the server reads this device. These are exactly the predicates
+            the poll loop uses, so a device listed as a keyboard is a device
+            read as a keyboard. `other` means the server probed the device and
+            reads it under no kind -- it is listed because a controller showing
+            a device the server ignores is more useful than one that omits it.
           items:
             type: string
             enum: [keyboard, pointer, touch, gamepad, other]
         route_ids:
           type: array
           description: >-
-            Canonical input-route identities accepted by UpdateInputRoute for
-            this physical source. All discovered sources of a kind feed the
-            corresponding aggregate route; no discovered source is ignored.
+            Aggregate input-route identities accepted by UpdateInputRoute for
+            this physical source. Every discovered source of a kind feeds the
+            corresponding aggregate route. A device of kind `other` feeds none
+            and reports an empty list.
           items:
             type: string
             enum: [evdev-keyboard, evdev-pointer, evdev-gamepad]
         capabilities:
           type: array
           items: {type: string}
+        identity:
+          type: object
+          description: What the device reports about itself, as read by evdev.
+          required: [bustype, vendor, product, version, uniq, phys]
+          properties:
+            bustype: {type: integer, minimum: 0}
+            vendor: {type: integer, minimum: 0}
+            product: {type: integer, minimum: 0}
+            version: {type: integer, minimum: 0}
+            uniq:
+              type: string
+              description: The device's own serial, empty when it reports none.
+            phys:
+              type: string
+              description: The device's position on its bus, empty when unknown.
+          additionalProperties: false
+        state:
+          type: object
+          description: >-
+            Live, read-only truth about the device, including its own event
+            counters. The counters are per device; before ADR 0064 they
+            existed only as lifetime cross-device totals and a diagnostics
+            array keyed by a path the inventory did not publish.
+          required: [present, open, polled_kinds, last_seen_ms, uptime_ms]
+          properties:
+            present: {type: boolean}
+            open:
+              type: boolean
+              description: Whether the server currently holds this device open.
+            polled_kinds:
+              type: integer
+              description: >-
+                Bit set of the kinds currently open: 1 keyboard, 2 pointer,
+                4 gamepad.
+            last_seen_ms: {type: integer, minimum: 0}
+            uptime_ms: {type: integer, minimum: 0}
+            events: {type: integer, minimum: 0}
+            keys: {type: integer, minimum: 0}
+            pointer_events: {type: integer, minimum: 0}
+            pointer_syncs: {type: integer, minimum: 0}
+            pointer_motion: {type: integer, minimum: 0}
+            pointer_wheel: {type: integer, minimum: 0}
+            pointer_buttons: {type: integer, minimum: 0}
+          additionalProperties: false
+        configuration:
+          type: object
+          description: >-
+            The writable part of the device, and the only writable part. ADR
+            0064 stage 2 adds a PATCH for it; today it reports the one
+            property the server honours.
+          required: [enabled]
+          properties:
+            enabled: {type: boolean}
+          additionalProperties: false
+        revision:
+          allOf:
+            - $ref: '#/components/schemas/Revision'
+          description: >-
+            Counts changes to this device's own description and configuration.
+            It is what a configuring PATCH carries in If-Match.
       additionalProperties: false
     InjectedPointerEvent:
       type: object

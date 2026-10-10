@@ -5,6 +5,7 @@
 #include "blit_font.h"
 #include "blit_graphics.h"
 #include "blit_unicode_width.h"
+#include "blit_input_identity.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -266,6 +267,53 @@ typedef struct {
     char target_session_id[128];
     int enabled;
 } BlitInputRoute;
+
+/* ADR 0064: the runtime owns one input device table and the API is a view of
+ * it.
+ *
+ * Before this table there were two device models. /v1/input/devices opened
+ * all 32 /dev/input/event* nodes on every GET and classified them with its
+ * own heuristics (KEY_A || KEY_ENTER for a keyboard); evdev_register_path
+ * held the fds the runtime actually polls, keyed by path, using stricter
+ * predicates (KEY_A && KEY_ENTER). So the inventory listed devices the
+ * runtime never read -- on the live host, the consumer-control node of the
+ * remote -- and could not say whether anything in it was live. The GET also
+ * ran the scan that issue #16 measured at 3.46 seconds with the event loop
+ * stalled behind it.
+ *
+ * The table is populated by the scan that already runs and is serialised from
+ * memory. The per-kind fd arrays remain the poll set; a device's open state
+ * and its counters are found by looking its node up in them, so there is one
+ * source of truth for each fact rather than a copy that can drift. */
+#define BLIT_INPUT_KIND_KEYBOARD 1
+#define BLIT_INPUT_KIND_POINTER 2
+#define BLIT_INPUT_KIND_GAMEPAD 4
+
+#define BLIT_INPUT_CAP_REL_X 1
+#define BLIT_INPUT_CAP_REL_Y 2
+#define BLIT_INPUT_CAP_BUTTONS 4
+#define BLIT_INPUT_CAP_KEYS 8
+#define BLIT_INPUT_CAP_AXES 16
+#define BLIT_INPUT_CAP_GAMEPAD_BUTTONS 32
+
+typedef struct {
+    int used;
+    int seen;
+    char id[BLIT_INPUT_ID_CAPACITY];
+    char node[128];
+    char name[256];
+    unsigned bustype;
+    unsigned vendor;
+    unsigned product;
+    unsigned version;
+    char uniq[64];
+    char phys[128];
+    unsigned kinds;
+    unsigned capabilities;
+    unsigned long long first_seen_us;
+    unsigned long long last_seen_us;
+    unsigned long long revision;
+} BlitInputDevice;
 
 typedef struct {
     SDL_Window *window;
@@ -572,6 +620,8 @@ typedef struct {
     BlitHttpClient http_clients[BLIT_MAX_HTTP_CLIENTS];
     BlitInputRoute input_routes[16];
     unsigned long long input_routes_revision;
+    BlitInputDevice input_devices[BLIT_MAX_INPUT_DEVICES];
+    unsigned long long input_devices_revision;
     BlitOutput outputs[BLIT_MAX_DISPLAYS];
     BlitIdempotency idempotency[BLIT_MAX_IDEMPOTENCY];
     BlitEventRecord event_history[BLIT_MAX_EVENT_HISTORY];
@@ -2258,6 +2308,7 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
     int sessions = 0;
     int streams = 0;
     int routes = 0;
+    int input_devices = 0;
     int surfaces = 0;
     const char *presentation_sync;
     char escaped_renderer[128];
@@ -2271,6 +2322,8 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
         if (runtime->streams[i].used) ++streams;
     for (i = 0; i < 16; ++i)
         if (runtime->input_routes[i].used) ++routes;
+    for (i = 0; i < BLIT_MAX_INPUT_DEVICES; ++i)
+        if (runtime->input_devices[i].used) ++input_devices;
     render_scheduler_json(runtime, scheduler, sizeof(scheduler));
     json_escape(runtime->sdl_error, escaped_error, sizeof(escaped_error));
     json_escape(runtime->sdl_renderer_name, escaped_renderer,
@@ -2303,7 +2356,7 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              "\"resources\":{\"displays\":%d,\"outputs\":%d,"
              "\"sessions\":%d,\"surfaces\":%d,\"streams\":%d,"
              "\"input_routes\":%d,\"keyboards\":%d,\"pointers\":%d,"
-             "\"gamepads\":%d},"
+             "\"gamepads\":%d,\"input_devices\":%d},"
              "\"render\":{\"pending\":%s,\"interval_ms\":%d,"
              "\"effective_interval_ms\":%d,\"mode\":\"refresh-aware\","
              "\"outputs\":%s,"
@@ -2323,6 +2376,7 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              runtime->display_count, runtime->output_count, sessions, surfaces,
              streams, routes, runtime->evdev_keyboard_count,
              runtime->evdev_mouse_count, runtime->evdev_gamepad_count,
+             input_devices,
              runtime->render_pending ? "true" : "false",
              runtime->render_interval_ms, runtime->render_effective_interval_ms,
              scheduler,
@@ -2600,100 +2654,373 @@ static void audio_json(char *body, size_t capacity)
     snprintf(body + used, capacity - used, "]}");
 }
 
-static void input_json(char *body, size_t capacity)
+/* Probe one open evdev fd for the kinds and capabilities it reports.
+ *
+ * This is the single classifier (ADR 0064). The kinds are exactly the
+ * predicates the poll loop uses to decide whether to read a device, so a
+ * device the inventory calls a keyboard is a device the runtime reads as a
+ * keyboard -- which was not true of the two classifiers this replaced. */
+static void probe_input_device(int fd, unsigned *kinds,
+                               unsigned *capabilities)
+{
+    unsigned long key_bits[32];
+    unsigned long rel_bits[4];
+    unsigned long abs_bits[4];
+    int keyboard;
+    int pointer;
+    int gamepad;
+    int has_axis;
+
+    *kinds = 0;
+    *capabilities = 0;
+    memset(key_bits, 0, sizeof(key_bits));
+    memset(rel_bits, 0, sizeof(rel_bits));
+    memset(abs_bits, 0, sizeof(abs_bits));
+    ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(key_bits)), key_bits);
+    ioctl(fd, EVIOCGBIT(EV_REL, sizeof(rel_bits)), rel_bits);
+    ioctl(fd, EVIOCGBIT(EV_ABS, sizeof(abs_bits)), abs_bits);
+    keyboard = input_bit(key_bits, KEY_A) && input_bit(key_bits, KEY_ENTER);
+    pointer = input_bit(rel_bits, REL_X) && input_bit(rel_bits, REL_Y);
+    has_axis = input_bit(abs_bits, ABS_X) || input_bit(abs_bits, ABS_Y) ||
+        input_bit(abs_bits, ABS_RX) || input_bit(abs_bits, ABS_RY);
+    gamepad = has_axis &&
+        (input_bit(key_bits, BTN_GAMEPAD) || input_bit(key_bits, BTN_SOUTH) ||
+         input_bit(key_bits, BTN_EAST) || input_bit(key_bits, BTN_NORTH) ||
+         input_bit(key_bits, BTN_WEST));
+    if (keyboard) *kinds |= BLIT_INPUT_KIND_KEYBOARD;
+    if (pointer) *kinds |= BLIT_INPUT_KIND_POINTER;
+    if (gamepad) *kinds |= BLIT_INPUT_KIND_GAMEPAD;
+    if (input_bit(rel_bits, REL_X)) *capabilities |= BLIT_INPUT_CAP_REL_X;
+    if (input_bit(rel_bits, REL_Y)) *capabilities |= BLIT_INPUT_CAP_REL_Y;
+    if (input_bit(key_bits, BTN_LEFT)) *capabilities |= BLIT_INPUT_CAP_BUTTONS;
+    if (keyboard) *capabilities |= BLIT_INPUT_CAP_KEYS;
+    if (has_axis) *capabilities |= BLIT_INPUT_CAP_AXES;
+    if (gamepad) *capabilities |= BLIT_INPUT_CAP_GAMEPAD_BUTTONS;
+}
+
+static void read_input_device_strings(int fd, BlitInputDevice *device)
+{
+    struct input_id identity;
+    char text[256];
+
+    memset(&identity, 0, sizeof(identity));
+    if (ioctl(fd, EVIOCGID, &identity) == 0) {
+        device->bustype = identity.bustype;
+        device->vendor = identity.vendor;
+        device->product = identity.product;
+        device->version = identity.version;
+    }
+    memset(text, 0, sizeof(text));
+    if (ioctl(fd, EVIOCGNAME(sizeof(text) - 1), text) >= 0 && text[0] != '\0')
+        snprintf(device->name, sizeof(device->name), "%s", text);
+    memset(text, 0, sizeof(text));
+    if (ioctl(fd, EVIOCGUNIQ(sizeof(text) - 1), text) >= 0)
+        snprintf(device->uniq, sizeof(device->uniq), "%s", text);
+    memset(text, 0, sizeof(text));
+    if (ioctl(fd, EVIOCGPHYS(sizeof(text) - 1), text) >= 0)
+        snprintf(device->phys, sizeof(device->phys), "%s", text);
+}
+
+static BlitInputDevice *find_input_device_node(BlitRuntime *runtime,
+                                               const char *node)
+{
+    int i;
+
+    for (i = 0; i < BLIT_MAX_INPUT_DEVICES; ++i)
+        if (runtime->input_devices[i].used &&
+            strcmp(runtime->input_devices[i].node, node) == 0)
+            return &runtime->input_devices[i];
+    return NULL;
+}
+
+static BlitInputDevice *find_input_device_id(BlitRuntime *runtime,
+                                             const char *id)
+{
+    int i;
+
+    for (i = 0; i < BLIT_MAX_INPUT_DEVICES; ++i)
+        if (runtime->input_devices[i].used &&
+            strcmp(runtime->input_devices[i].id, id) == 0)
+            return &runtime->input_devices[i];
+    return NULL;
+}
+
+/* Assign the device its id, taking the next free ordinal when an identical
+   device is already in the table. The ordinal is a function of scan order, so
+   two devices that report nothing distinguishing still get stable ids for as
+   long as both stay present. */
+static void assign_input_device_id(BlitRuntime *runtime,
+                                   BlitInputDevice *device)
+{
+    int ordinal;
+
+    for (ordinal = 0; ordinal < BLIT_MAX_INPUT_DEVICES; ++ordinal) {
+        char candidate[BLIT_INPUT_ID_CAPACITY];
+        BlitInputDevice *existing;
+
+        blit_input_device_id(device->bustype, device->vendor, device->product,
+                             device->uniq, device->phys, device->node, ordinal,
+                             candidate, sizeof(candidate));
+        existing = find_input_device_id(runtime, candidate);
+        if (existing == NULL || existing == device) {
+            snprintf(device->id, sizeof(device->id), "%s", candidate);
+            return;
+        }
+    }
+    snprintf(device->id, sizeof(device->id), "input-node-%s",
+             strrchr(device->node, '/') != NULL ?
+                 strrchr(device->node, '/') + 1 : device->node);
+}
+
+/* Record what a probe of `node` found. Returns the table entry, or NULL when
+   the table is full. A device already in the table keeps its id: the id is
+   what a controller saves configuration against, and re-deriving it on every
+   scan would let an ordinal move under a client. */
+static BlitInputDevice *record_input_device(BlitRuntime *runtime,
+                                            const char *node, int fd,
+                                            int *discovered)
+{
+    BlitInputDevice *device = find_input_device_node(runtime, node);
+    unsigned kinds = 0;
+    unsigned capabilities = 0;
+    int i;
+
+    if (discovered != NULL)
+        *discovered = 0;
+    if (device == NULL) {
+        for (i = 0; i < BLIT_MAX_INPUT_DEVICES; ++i)
+            if (!runtime->input_devices[i].used) {
+                device = &runtime->input_devices[i];
+                break;
+            }
+        if (device == NULL)
+            return NULL;
+        memset(device, 0, sizeof(*device));
+        device->used = 1;
+        snprintf(device->node, sizeof(device->node), "%s", node);
+        snprintf(device->name, sizeof(device->name), "%s", node);
+        read_input_device_strings(fd, device);
+        assign_input_device_id(runtime, device);
+        device->first_seen_us = monotonic_us();
+        /* A device starts at revision 1, not 0: the revision is what a
+           configuring PATCH will carry in If-Match, and a resource that
+           exists at revision 0 has no first value to match against. */
+        device->revision = 1;
+        if (discovered != NULL)
+            *discovered = 1;
+    }
+    probe_input_device(fd, &kinds, &capabilities);
+    if (device->kinds != kinds || device->capabilities != capabilities)
+        ++device->revision;
+    device->kinds = kinds;
+    device->capabilities = capabilities;
+    device->seen = 1;
+    device->last_seen_us = monotonic_us();
+    return device;
+}
+
+/* How many of a device's kinds the poll loop currently holds open. The fd
+   arrays are keyed by path and compacted on removal, so this is a lookup
+   rather than a stored index: a stored index would be a second source of
+   truth that goes stale on the next hotplug. */
+static int input_device_open_kinds(const BlitRuntime *runtime,
+                                   const BlitInputDevice *device)
+{
+    int open_kinds = 0;
+    int i;
+
+    for (i = 0; i < runtime->evdev_keyboard_count; ++i)
+        if (runtime->evdev_keyboard_fds[i] >= 0 &&
+            strcmp(runtime->evdev_keyboard_paths[i], device->node) == 0)
+            open_kinds |= BLIT_INPUT_KIND_KEYBOARD;
+    for (i = 0; i < runtime->evdev_mouse_count; ++i)
+        if (runtime->evdev_mouse_fds[i] >= 0 &&
+            strcmp(runtime->evdev_mouse_paths[i], device->node) == 0)
+            open_kinds |= BLIT_INPUT_KIND_POINTER;
+    for (i = 0; i < runtime->evdev_gamepad_count; ++i)
+        if (runtime->evdev_gamepad_fds[i] >= 0 &&
+            strcmp(runtime->evdev_gamepad_paths[i], device->node) == 0)
+            open_kinds |= BLIT_INPUT_KIND_GAMEPAD;
+    return open_kinds;
+}
+
+static int input_device_slot(const char (*paths)[128], int count,
+                             const char *node)
+{
+    int i;
+
+    for (i = 0; i < count; ++i)
+        if (strcmp(paths[i], node) == 0)
+            return i;
+    return -1;
+}
+
+static size_t input_device_item_json(const BlitRuntime *runtime,
+                                     const BlitInputDevice *device,
+                                     char *body, size_t capacity)
+{
+    char escaped_name[512];
+    char escaped_phys[256];
+    char escaped_uniq[128];
+    int open_kinds = input_device_open_kinds(runtime, device);
+    int keyboard_slot = input_device_slot(runtime->evdev_keyboard_paths,
+                                          runtime->evdev_keyboard_count,
+                                          device->node);
+    int mouse_slot = input_device_slot(runtime->evdev_mouse_paths,
+                                       runtime->evdev_mouse_count,
+                                       device->node);
+    uint64_t now = monotonic_us();
+    size_t used = 0;
+    int complete = 1;
+    int first = 1;
+
+    json_escape(device->name, escaped_name, sizeof(escaped_name));
+    json_escape(device->phys, escaped_phys, sizeof(escaped_phys));
+    json_escape(device->uniq, escaped_uniq, sizeof(escaped_uniq));
+    complete &= json_appendf(body, capacity, &used,
+        "{\"id\":\"%s\",\"class\":\"input\",\"name\":\"%s\","
+        "\"node\":\"%s\",\"kinds\":[", device->id, escaped_name,
+        device->node);
+    if (device->kinds & BLIT_INPUT_KIND_KEYBOARD) {
+        complete &= json_appendf(body, capacity, &used, "\"keyboard\"");
+        first = 0;
+    }
+    if (device->kinds & BLIT_INPUT_KIND_POINTER) {
+        complete &= json_appendf(body, capacity, &used, "%s\"pointer\"",
+                            first ? "" : ",");
+        first = 0;
+    }
+    if (device->kinds & BLIT_INPUT_KIND_GAMEPAD) {
+        complete &= json_appendf(body, capacity, &used, "%s\"gamepad\"",
+                            first ? "" : ",");
+        first = 0;
+    }
+    /* A node Blit probed but reads under no kind. It is listed because a
+       control panel showing a device Blit ignores is more useful than a
+       device that is simply absent -- the live host's remote presents a
+       consumer-control node that the old inventory called a keyboard and the
+       poll loop never read. */
+    if (first)
+        complete &= json_appendf(body, capacity, &used, "\"other\"");
+    complete &= json_appendf(body, capacity, &used, "],\"route_ids\":[");
+    first = 1;
+    if (device->kinds & BLIT_INPUT_KIND_KEYBOARD) {
+        complete &= json_appendf(body, capacity, &used, "\"evdev-keyboard\"");
+        first = 0;
+    }
+    if (device->kinds & BLIT_INPUT_KIND_POINTER) {
+        complete &= json_appendf(body, capacity, &used, "%s\"evdev-pointer\"",
+                            first ? "" : ",");
+        first = 0;
+    }
+    if (device->kinds & BLIT_INPUT_KIND_GAMEPAD)
+        complete &= json_appendf(body, capacity, &used, "%s\"evdev-gamepad\"",
+                            first ? "" : ",");
+    complete &= json_appendf(body, capacity, &used, "],\"capabilities\":[");
+    first = 1;
+    if (device->capabilities & BLIT_INPUT_CAP_REL_X) {
+        complete &= json_appendf(body, capacity, &used, "\"rel-x\"");
+        first = 0;
+    }
+    if (device->capabilities & BLIT_INPUT_CAP_REL_Y) {
+        complete &= json_appendf(body, capacity, &used, "%s\"rel-y\"",
+                            first ? "" : ",");
+        first = 0;
+    }
+    if (device->capabilities & BLIT_INPUT_CAP_BUTTONS) {
+        complete &= json_appendf(body, capacity, &used, "%s\"buttons\"",
+                            first ? "" : ",");
+        first = 0;
+    }
+    if (device->capabilities & BLIT_INPUT_CAP_KEYS) {
+        complete &= json_appendf(body, capacity, &used, "%s\"keys\"",
+                            first ? "" : ",");
+        first = 0;
+    }
+    if (device->capabilities & BLIT_INPUT_CAP_AXES) {
+        complete &= json_appendf(body, capacity, &used, "%s\"axes\"",
+                            first ? "" : ",");
+        first = 0;
+    }
+    if (device->capabilities & BLIT_INPUT_CAP_GAMEPAD_BUTTONS)
+        complete &= json_appendf(body, capacity, &used, "%s\"gamepad-buttons\"",
+                            first ? "" : ",");
+    complete &= json_appendf(body, capacity, &used,
+        "],\"identity\":{\"bustype\":%u,\"vendor\":%u,\"product\":%u,"
+        "\"version\":%u,\"uniq\":\"%s\",\"phys\":\"%s\"},"
+        "\"state\":{\"present\":%s,\"open\":%s,\"polled_kinds\":%d,"
+        "\"last_seen_ms\":%llu,\"uptime_ms\":%llu",
+        device->bustype, device->vendor, device->product, device->version,
+        escaped_uniq, escaped_phys,
+        device->seen ? "true" : "false",
+        open_kinds != 0 ? "true" : "false", open_kinds,
+        (unsigned long long)((now - device->last_seen_us) / 1000ULL),
+        (unsigned long long)((now - device->first_seen_us) / 1000ULL));
+    /* Per-device counters (#17). They lived in a diagnostics array keyed by
+       path, which a client had to join against an inventory that did not
+       publish the path. */
+    if (keyboard_slot >= 0)
+        complete &= json_appendf(body, capacity, &used,
+            ",\"events\":%llu,\"keys\":%llu",
+            runtime->diagnostic_evdev_keyboard_device_events[keyboard_slot],
+            runtime->diagnostic_evdev_keyboard_device_keys[keyboard_slot]);
+    if (mouse_slot >= 0)
+        complete &= json_appendf(body, capacity, &used,
+            ",\"pointer_events\":%llu,\"pointer_syncs\":%llu,"
+            "\"pointer_motion\":%llu,\"pointer_wheel\":%llu,"
+            "\"pointer_buttons\":%llu",
+            runtime->diagnostic_evdev_mouse_device_events[mouse_slot],
+            runtime->diagnostic_evdev_mouse_device_syncs[mouse_slot],
+            runtime->diagnostic_evdev_mouse_device_motion[mouse_slot],
+            runtime->diagnostic_evdev_mouse_device_wheel[mouse_slot],
+            runtime->diagnostic_evdev_mouse_device_buttons[mouse_slot]);
+    complete &= json_appendf(body, capacity, &used,
+        "},\"configuration\":{\"enabled\":true},\"revision\":%llu}",
+        device->revision);
+    /* One test, at the end: json_appendf leaves `used` alone when a field
+       does not fit, so a truncated item is a complete prefix rather than a
+       buffer overrun -- but it is still not an item, and the collection
+       serialiser must be able to tell. `capacity` is the sentinel. */
+    return complete ? used : capacity;
+}
+
+/* Serialise the table. A device is dropped only when it does not fit, and
+   dropping one is reported rather than silently truncating: every other
+   *_json helper in this server breaks out of its loop on overflow and emits a
+   truncated-but-closed object, which is indistinguishable from a host that
+   has fewer devices. */
+static void input_devices_json(const BlitRuntime *runtime, char *body,
+                               size_t capacity)
 {
     size_t used = 0;
-    int index;
-    int device_count = 0;
+    int count = 0;
+    int dropped = 0;
+    int i;
+
     used += (size_t)snprintf(body + used, capacity - used,
-                             "{\"revision\":1,\"devices\":[");
-    for (index = 0; index < 32 && used < capacity; ++index) {
-        char path[64];
-        char name[256];
-        unsigned long event_bits[4];
-        unsigned long key_bits[32];
-        unsigned long rel_bits[4];
-        unsigned long abs_bits[4];
-        int fd;
-        int pointer;
-        int keyboard;
-        int gamepad;
-        int first_kind = 1;
-        int first_route = 1;
-        int first_capability = 1;
-        snprintf(path, sizeof(path), "/dev/input/event%d", index);
-        fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
-        if (fd < 0) continue;
-        memset(name, 0, sizeof(name));
-        memset(event_bits, 0, sizeof(event_bits));
-        memset(key_bits, 0, sizeof(key_bits));
-        memset(rel_bits, 0, sizeof(rel_bits));
-        memset(abs_bits, 0, sizeof(abs_bits));
-        ioctl(fd, EVIOCGNAME(sizeof(name)), name);
-        ioctl(fd, EVIOCGBIT(0, sizeof(event_bits)), event_bits);
-        ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(key_bits)), key_bits);
-        ioctl(fd, EVIOCGBIT(EV_REL, sizeof(rel_bits)), rel_bits);
-        ioctl(fd, EVIOCGBIT(EV_ABS, sizeof(abs_bits)), abs_bits);
-        pointer = input_bit(key_bits, BTN_LEFT) || input_bit(key_bits, BTN_RIGHT) ||
-            input_bit(rel_bits, REL_X) || input_bit(rel_bits, REL_Y);
-        keyboard = input_bit(key_bits, KEY_A) || input_bit(key_bits, KEY_ENTER);
-        gamepad = (input_bit(abs_bits, ABS_X) || input_bit(abs_bits, ABS_Y) ||
-                   input_bit(abs_bits, ABS_RX) || input_bit(abs_bits, ABS_RY)) &&
-            (input_bit(key_bits, BTN_GAMEPAD) ||
-             input_bit(key_bits, BTN_SOUTH) || input_bit(key_bits, BTN_EAST));
-        if (!pointer && !keyboard && !gamepad) { close(fd); continue; }
-        used += (size_t)snprintf(body + used, capacity - used,
-                                 "%s{\"id\":\"event-%d\",\"name\":\"",
-                                 device_count++ > 0 ? "," : "", index);
-        {
-            char escaped[512];
-            json_escape(name[0] ? name : path, escaped, sizeof(escaped));
-            used += (size_t)snprintf(body + used, capacity - used, "%s\",\"kinds\":[", escaped);
+                             "{\"revision\":%llu,\"devices\":[",
+                             runtime->input_devices_revision);
+    for (i = 0; i < BLIT_MAX_INPUT_DEVICES; ++i) {
+        const BlitInputDevice *device = &runtime->input_devices[i];
+        char item[4096];
+        size_t length;
+
+        if (!device->used)
+            continue;
+        length = input_device_item_json(runtime, device, item, sizeof(item));
+        if (length >= sizeof(item) ||
+            used + length + (size_t)(count > 0 ? 1 : 0) + 40 >= capacity) {
+            ++dropped;
+            continue;
         }
-        if (keyboard) {
-            used += (size_t)snprintf(body + used, capacity - used, "\"keyboard\"");
-            first_kind = 0;
-        }
-        if (pointer) {
-            used += (size_t)snprintf(body + used, capacity - used, "%s\"pointer\"", first_kind ? "" : ",");
-            first_kind = 0;
-        }
-        if (gamepad) {
-            used += (size_t)snprintf(body + used, capacity - used, "%s\"gamepad\"", first_kind ? "" : ",");
-            first_kind = 0;
-        }
-        used += (size_t)snprintf(body + used, capacity - used, "],\"route_ids\":[");
-        if (keyboard) {
-            used += (size_t)snprintf(body + used, capacity - used,
-                                     "\"evdev-keyboard\"");
-            first_route = 0;
-        }
-        if (pointer) {
-            used += (size_t)snprintf(body + used, capacity - used,
-                                     "%s\"evdev-pointer\"",
-                                     first_route ? "" : ",");
-            first_route = 0;
-        }
-        if (gamepad) {
-            used += (size_t)snprintf(body + used, capacity - used,
-                                     "%s\"evdev-gamepad\"",
-                                     first_route ? "" : ",");
-        }
-        used += (size_t)snprintf(body + used, capacity - used, "],\"capabilities\":[");
-        if (input_bit(rel_bits, REL_X)) { used += (size_t)snprintf(body + used, capacity - used, "\"rel-x\""); first_capability = 0; }
-        if (input_bit(rel_bits, REL_Y)) { used += (size_t)snprintf(body + used, capacity - used, "%s\"rel-y\"", first_capability ? "" : ","); first_capability = 0; }
-        if (input_bit(key_bits, BTN_LEFT)) { used += (size_t)snprintf(body + used, capacity - used, "%s\"buttons\"", first_capability ? "" : ","); first_capability = 0; }
-        if (keyboard) { used += (size_t)snprintf(body + used, capacity - used, "%s\"keys\"", first_capability ? "" : ","); }
-        if (input_bit(abs_bits, ABS_X) || input_bit(abs_bits, ABS_Y) ||
-            input_bit(abs_bits, ABS_RX) || input_bit(abs_bits, ABS_RY)) {
-            used += (size_t)snprintf(body + used, capacity - used, "%s\"axes\"", first_capability ? "" : ",");
-            first_capability = 0;
-        }
-        if (gamepad) { used += (size_t)snprintf(body + used, capacity - used, "%s\"gamepad-buttons\"", first_capability ? "" : ","); }
-        used += (size_t)snprintf(body + used, capacity - used, "]}");
-        close(fd);
+        if (count > 0)
+            body[used++] = ',';
+        memcpy(body + used, item, length);
+        used += length;
+        ++count;
     }
-    snprintf(body + used, capacity - used, "]}");
+    snprintf(body + used, capacity - used, "],\"count\":%d,\"dropped\":%d}",
+             count, dropped);
 }
 
 static const char *request_body(const char *request)
@@ -9863,6 +10190,31 @@ static void broadcast_input_diagnostic(BlitRuntime *runtime,
     broadcast_stream(runtime, event, BLIT_STREAM_DIAGNOSTICS);
 }
 
+/* ADR 0064: a controller needs to know that the device collection changed
+   without polling it. The existing input_device_reconnected /
+   input_device_lost diagnostics say a device of some kind appeared or went
+   away; this names the device and carries the collection revision the
+   controller should now re-read. */
+static void broadcast_input_device_changed(BlitRuntime *runtime,
+                                           const BlitInputDevice *device,
+                                           const char *change)
+{
+    char escaped_name[512];
+    char event[1024];
+
+    if (device == NULL)
+        return;
+    json_escape(device->name, escaped_name, sizeof(escaped_name));
+    snprintf(event, sizeof(event),
+             "{\"type\":\"device_changed\",\"class\":\"input\","
+             "\"change\":\"%s\",\"id\":\"%s\",\"name\":\"%s\","
+             "\"node\":\"%s\",\"revision\":%llu,"
+             "\"collection_revision\":%llu}",
+             change, device->id, escaped_name, device->node, device->revision,
+             runtime->input_devices_revision);
+    broadcast_stream(runtime, event, BLIT_STREAM_INPUT);
+}
+
 static void replay_stream(BlitRuntime *runtime, int fd,
                           unsigned long long since)
 {
@@ -11758,7 +12110,29 @@ static void handle_request(int fd, BlitRuntime *runtime,
         audio_json(body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
     } else if (strcmp(path, "/v1/input/devices") == 0) {
-        input_json(body, sizeof(body));
+        /* Served from the runtime's table (ADR 0064). This route used to run
+           the evdev scan -- 32 synchronous open() calls on the event-loop
+           thread, measured at 3.46 seconds on the live host in issue #16 --
+           so a controller that polled the inventory periodically froze the
+           server it was controlling. */
+        input_devices_json(runtime, body, sizeof(body));
+        send_http(fd, 200, "OK", "application/json", body);
+    } else if (strncmp(path, "/v1/input/devices/",
+                       strlen("/v1/input/devices/")) == 0) {
+        const char *device_id = path + strlen("/v1/input/devices/");
+        BlitInputDevice *device = find_input_device_id(runtime, device_id);
+        if (*device_id == '\0' || device == NULL) {
+            send_problem(fd, 404, "Not Found", "input_device_not_found",
+                         "The requested input device does not exist.");
+            return;
+        }
+        if (input_device_item_json(runtime, device, body, sizeof(body)) >=
+            sizeof(body)) {
+            send_problem(fd, 500, "Internal Server Error",
+                         "input_device_unserialisable",
+                         "The input device item did not fit its response buffer.");
+            return;
+        }
         send_http(fd, 200, "OK", "application/json", body);
     } else {
         send_http(fd, 404, "Not Found", "application/problem+json",
@@ -12273,6 +12647,11 @@ static void evdev_register_path(BlitRuntime *runtime, const char *path,
     int keyboard_wanted;
     int gamepad_wanted;
 
+    /* The poll set stores a node path in 128 bytes and matches devices by it,
+       so a path that would be truncated is refused rather than registered
+       under a name that collides with another device's. */
+    if (strlen(path) >= 128)
+        return;
     mouse_wanted = runtime->evdev_mouse_count < BLIT_MAX_INPUT_DEVICES &&
         !evdev_path_open(runtime->evdev_mouse_fds, runtime->evdev_mouse_paths,
                          runtime->evdev_mouse_count, path);
@@ -12291,6 +12670,22 @@ static void evdev_register_path(BlitRuntime *runtime, const char *path,
     probe = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
     if (probe < 0)
         return;
+
+    /* ADR 0064: record what this probe found before deciding what to claim.
+       The table is what /v1/input/devices serves, so it has to include a node
+       that matches no kind -- the live host's remote presents a
+       consumer-control node that the old inventory called a keyboard and the
+       poll loop never read. */
+    {
+        int discovered = 0;
+        BlitInputDevice *device = record_input_device(runtime, path, probe,
+                                                     &discovered);
+        if (discovered && device != NULL) {
+            ++runtime->input_devices_revision;
+            if (announce)
+                broadcast_input_device_changed(runtime, device, "discovered");
+        }
+    }
 
     if (mouse_wanted && evdev_has_rel_xy(probe)) {
         int slot = runtime->evdev_mouse_count++;
@@ -12372,6 +12767,18 @@ static void broadcast_input_diagnostic(BlitRuntime *runtime,
                                        const char *path,
                                        int active_devices);
 
+/* Where the evdev nodes live. It is /dev/input everywhere this ships; the
+   override exists because the gate environment has no /dev/input at all, and
+   because a container may have the nodes bind-mounted elsewhere. The inotify
+   watch uses the same root, so a hotplug under an overridden root is still
+   noticed. */
+static const char *evdev_root(void)
+{
+    const char *root = getenv("BLIT_INPUT_ROOT");
+
+    return (root != NULL && root[0] != '\0') ? root : "/dev/input";
+}
+
 static void open_evdev_watch(BlitRuntime *runtime)
 {
     int fd;
@@ -12381,7 +12788,7 @@ static void open_evdev_watch(BlitRuntime *runtime)
     fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
     if (fd < 0)
         return;
-    if (inotify_add_watch(fd, "/dev/input",
+    if (inotify_add_watch(fd, evdev_root(),
                           IN_CREATE | IN_DELETE | IN_MOVED_TO |
                           IN_MOVED_FROM | IN_ATTRIB) < 0) {
         close(fd);
@@ -12418,10 +12825,28 @@ static void scan_evdev_devices(BlitRuntime *runtime, int announce)
 {
     int index;
 
+    /* A device is present if this scan found it, or if the poll loop still
+       holds one of its fds -- a fully claimed device is not re-probed, so the
+       scan alone would mark it absent. */
+    for (index = 0; index < BLIT_MAX_INPUT_DEVICES; ++index)
+        runtime->input_devices[index].seen = 0;
     for (index = 0; index < 32; ++index) {
-        char path[64];
-        snprintf(path, sizeof(path), "/dev/input/event%d", index);
+        char path[192];
+        snprintf(path, sizeof(path), "%s/event%d", evdev_root(), index);
         evdev_register_path(runtime, path, announce);
+    }
+    for (index = 0; index < BLIT_MAX_INPUT_DEVICES; ++index) {
+        BlitInputDevice *device = &runtime->input_devices[index];
+        if (!device->used)
+            continue;
+        if (input_device_open_kinds(runtime, device) != 0)
+            device->seen = 1;
+        if (device->seen)
+            continue;
+        if (announce)
+            broadcast_input_device_changed(runtime, device, "removed");
+        memset(device, 0, sizeof(*device));
+        ++runtime->input_devices_revision;
     }
 }
 
@@ -16402,6 +16827,7 @@ int main(int argc, char **argv)
     runtime.next_event_sequence = 1;
     runtime.topology_revision = 1;
     runtime.input_routes_revision = 1;
+    runtime.input_devices_revision = 1;
     runtime.next_overlay_id = 1;
     runtime.effect.revision = 1;
     snprintf(runtime.effect.preset, sizeof(runtime.effect.preset), "none");
