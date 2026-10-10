@@ -147,10 +147,17 @@ Run `tools/tests/terminal_conformance.rb` against a TCC-built server with the
 dummy video backend and the bundled production font. Start the server with:
 
 ```sh
-BLIT_PSF_FONT=build/blit-desktop-current/fonts/Lat15-Terminus16.psf \
+BLIT_PSF_FONT=assets/fonts/Blit-Hibr-Terminus16.psf \
 SDL_VIDEODRIVER=dummy LD_LIBRARY_PATH=build/sdl3-kms \
   build/blit/blit-server 19195
 ```
+
+`assets/fonts` is the authoritative font location: it is what the Debian
+package installs, and `packaging/build-deb.sh` copies it *over* any font a
+vendored bundle supplies. A font loaded from `build/` may be a different
+artifact under the same name -- `tools/tests/font_identity_gate.rb` fails if
+one is, and reports the loaded font's glyph and mapping counts, which
+`GET /v1/fonts` also exposes as `active.glyphs` and `active.mappings`.
 
 The runner currently asserts printable output, cursor
 addressing, styles, erase, scrolling, scroll regions, alternate-screen

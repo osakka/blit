@@ -9207,11 +9207,18 @@ static void fonts_json(const BlitRuntime *runtime, char *body, size_t capacity)
     json_escape(runtime->font.path, escaped_path, sizeof(escaped_path));
     used += (size_t)snprintf(body + used, capacity - used,
         "{\"revision\":1,\"active\":{\"id\":\"%s\",\"path\":\"%s\","
-        "\"scale\":%d,\"cell_pixels\":{\"width\":%d,\"height\":%d}},"
+        "\"scale\":%d,\"cell_pixels\":{\"width\":%d,\"height\":%d},"
+        /* The loaded font's own identity.  Without it nothing can tell that a
+           run picked up a different artifact under the same name, which is
+           exactly how a stale 540-glyph copy in the build tree rendered
+           characters as '?' while the released package drew them. */
+        "\"glyphs\":%lu,\"mappings\":%lu},"
         "\"profiles\":[",
         active_id, escaped_path, runtime->font_scale,
         blit_font_width(&runtime->font) * runtime->font_scale,
-        blit_font_height(&runtime->font) * runtime->font_scale);
+        blit_font_height(&runtime->font) * runtime->font_scale,
+        (unsigned long)runtime->font.glyph_count,
+        (unsigned long)runtime->font.unicode_count);
     for (i = 0; i < blit_font_profile_count() && used + 128 < capacity; ++i) {
         const char *id = blit_font_profile_id(i);
         const char *path = blit_font_profile_path(i);

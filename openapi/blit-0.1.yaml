@@ -1051,7 +1051,7 @@ components:
         revision: {$ref: '#/components/schemas/Revision'}
         active:
           type: object
-          required: [id, path, scale, cell_pixels]
+          required: [id, path, scale, cell_pixels, glyphs, mappings]
           properties:
             id: {$ref: '#/components/schemas/ResourceId'}
             path: {type: string}
@@ -1063,6 +1063,18 @@ components:
                 width: {type: integer, minimum: 1}
                 height: {type: integer, minimum: 1}
               additionalProperties: false
+            glyphs:
+              type: integer
+              minimum: 1
+              description: >-
+                Bitmaps in the loaded font. With `mappings`, this is the
+                font's identity: two artifacts can share a filename and a
+                cell size while covering different codepoints, and without
+                these a run cannot tell which one it loaded.
+            mappings:
+              type: integer
+              minimum: 1
+              description: Unicode codepoints the loaded font maps to a glyph.
           additionalProperties: false
         profiles:
           type: array
