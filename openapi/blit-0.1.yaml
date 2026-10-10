@@ -526,12 +526,14 @@ paths:
     post:
       tags: [hardware]
       operationId: injectPointerInput
-      summary: Inject a deterministic pointer event through the normal input path
+      summary: Inject a deterministic input event through the normal input path
       description: >-
-        Test and API clients may inject pointer motion, button, or wheel events.
-        The event is routed and rendered by the same canonical path as evdev;
-        this endpoint is explicitly synthetic and does not emulate a physical
-        device descriptor.
+        Test and API clients may inject pointer motion, button, or wheel
+        events, or a key press or release by evdev code. The event is routed
+        and rendered by the same canonical path as a physical device -- a key
+        goes through the same modifier state machine, encoder, PTY write and
+        counters -- so what is exercised is the real path and not a synthetic
+        shortcut. This endpoint does not emulate a physical device descriptor.
       requestBody:
         required: true
         content:
@@ -1463,12 +1465,28 @@ components:
       properties:
         kind:
           type: string
-          enum: [pointer_motion, pointer_button, pointer_wheel]
+          enum: [pointer_motion, pointer_button, pointer_wheel, key]
         x: {type: integer, description: Absolute virtual-desktop X coordinate.}
         y: {type: integer, description: Absolute virtual-desktop Y coordinate.}
         button: {type: integer, minimum: 0, maximum: 2}
         pressed: {type: boolean}
         delta: {type: integer, description: Wheel direction and magnitude.}
+        code:
+          type: integer
+          minimum: 1
+          maximum: 767
+          description: >-
+            Key kind only. The Linux evdev key code, as a physical device
+            reports it. Modifier codes update the server's modifier state, so a
+            modified key is injected as press-modifier, press-key,
+            release-key, release-modifier, exactly as a device would send it.
+        value:
+          type: integer
+          minimum: 0
+          maximum: 2
+          description: >-
+            Key kind only. 0 release, 1 press, 2 autorepeat, matching
+            input_event.value.
       additionalProperties: false
     UpdateInputRoute:
       type: object

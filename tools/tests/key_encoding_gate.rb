@@ -1,0 +1,185 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Issue #34. What a physical key press puts on a session's PTY.
+#
+# Keys arrive through POST /v1/input/inject with an evdev code and value, which
+# runs the same dispatch a real device does -- modifier state machine,
+# counters, PTY write and stream broadcast -- so what this measures is the
+# encoder and not a test-only shortcut. There is no /dev/uinput in the build
+# container, which is the other reason this path exists.
+#
+# The session echoes its input with `cat -v`, so the bytes written to the PTY
+# come back as cells: ESC reads as ^[ and a C0 control as ^ plus a letter. Its
+# tty has signal characters disabled, because this is about byte delivery and
+# one of the sequences under test is ^\, which would otherwise raise SIGQUIT
+# and kill the thing doing the echoing.
+#
+# Keys whose bytes are invisible once echoed -- a literal tab or carriage
+# return move the cursor and leave no cell -- are not listed; 'a' covers the
+# unmodified-literal path.
+
+require 'json'
+require 'net/http'
+require 'timeout'
+require 'uri'
+
+ROOT = File.expand_path('../..', __dir__)
+PORT = Integer(ENV.fetch('BLIT_GATE_PORT', '19254'), 10)
+BINARY = ENV.fetch('BLIT_GATE_BINARY', File.join(ROOT, 'build/blit/blit-server'))
+FONT = ENV.fetch('BLIT_GATE_FONT',
+                 File.join(ROOT, 'assets/fonts/Blit-Hibr-Terminus16.psf'))
+BASE = URI("http://127.0.0.1:#{PORT}")
+
+# linux/input-event-codes.h
+KEY = {
+  'a' => 30, '1' => 2, 'minus' => 12, 'leftbrace' => 26, 'backslash' => 43,
+  'slash' => 53, 'space' => 57, 'tab' => 15, 'enter' => 28,
+  'f1' => 59, 'f5' => 63, 'home' => 102, 'pageup' => 104, 'delete' => 111,
+  'up' => 103, 'left' => 105, 'right' => 106, 'down' => 108,
+  'leftshift' => 42, 'leftctrl' => 29, 'leftalt' => 56
+}.freeze
+
+abort("key-encoding gate: missing #{BINARY}") unless File.executable?(BINARY)
+
+def request(method, path, body = nil)
+  uri = BASE + path
+  klass = { 'GET' => Net::HTTP::Get, 'POST' => Net::HTTP::Post,
+            'DELETE' => Net::HTTP::Delete }.fetch(method)
+  req = klass.new(uri)
+  if body
+    req['Content-Type'] = 'application/json'
+    req.body = JSON.dump(body)
+  end
+  req['Idempotency-Key'] = "key-#{rand(1 << 30)}" if method == 'POST'
+  Net::HTTP.start(uri.hostname, uri.port, read_timeout: 30) { |h| h.request(req) }
+end
+
+def json(method, path, body = nil)
+  response = request(method, path, body)
+  unless response.code.start_with?('2')
+    abort("key-encoding gate: #{method} #{path} -> #{response.code} #{response.body}")
+  end
+  JSON.parse(response.body)
+end
+
+def key(code, value)
+  response = request('POST', '/v1/input/inject',
+                     'kind' => 'key', 'code' => code, 'value' => value)
+  abort("key-encoding gate: key inject refused: #{response.body}") unless
+    response.code.start_with?('2')
+end
+
+# Press `code` with the named modifiers held, and return what the session saw.
+def press(surface_id, code, modifiers = [])
+  before = echoed(surface_id)
+  modifiers.each { |name| key(KEY.fetch(name), 1) }
+  key(code, 1)
+  key(code, 0)
+  modifiers.reverse_each { |name| key(KEY.fetch(name), 0) }
+  Timeout.timeout(5) do
+    loop do
+      text = echoed(surface_id)
+      break text[before.length..] if text.length > before.length
+
+      sleep 0.1
+    end
+  end
+rescue Timeout::Error
+  ''
+end
+
+def echoed(surface_id)
+  json('GET', "/v1/surfaces/#{surface_id}/cells").fetch('cells')
+      .sort_by { |c| [c.fetch('y', 0), c.fetch('x', 0)] }
+      .map { |c| c.fetch('text', ' ') }.join.rstrip
+end
+
+server = spawn({ 'SDL_VIDEODRIVER' => 'dummy', 'BLIT_PSF_FONT' => FONT,
+                 'LD_LIBRARY_PATH' => File.join(ROOT, 'build/sdl3-kms') },
+               BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')
+at_exit do
+  Process.kill('TERM', server) rescue nil
+  Process.wait(server) rescue nil
+end
+
+Timeout.timeout(15) do
+  loop do
+    begin
+      break if request('GET', '/v1/version').code == '200'
+    rescue StandardError
+      nil
+    end
+    sleep 0.2
+  end
+end
+
+session = json('POST', '/v1/terminal-sessions',
+               'command' => '/bin/sh',
+               'arguments' => ['-c', 'stty -isig 2>/dev/null; cat -v'],
+               'display_id' => 'display-1',
+               'surface' => { 'width' => 120, 'height' => 20 })
+surface = session.fetch('surface_id')
+sleep 2.0
+
+failures = []
+
+# code, modifiers, what the application must receive, as `cat -v` spells it.
+cases = [
+  [KEY['a'], [], 'a', 'an unmodified letter'],
+  [KEY['a'], %w[leftshift], 'A', 'shift with a letter'],
+  [KEY['a'], %w[leftctrl], '^A', 'ctrl with a letter'],
+  [KEY['tab'], %w[leftshift], '^[[Z', 'shift+tab is a back-tab'],
+  [KEY['left'], [], '^[[D', 'an unmodified arrow'],
+  [KEY['right'], %w[leftctrl], '^[[1;5C', 'ctrl with an arrow'],
+  [KEY['up'], %w[leftshift], '^[[1;2A', 'shift with an arrow'],
+  [KEY['left'], %w[leftalt], '^[[1;3D', 'alt with an arrow'],
+  [KEY['home'], %w[leftctrl], '^[[1;5H', 'ctrl with home'],
+  [KEY['f5'], %w[leftshift], '^[[15;2~', 'shift with a function key'],
+  [KEY['f1'], [], '^[OP', 'an unmodified F1'],
+  [KEY['f1'], %w[leftshift], '^[[1;2P', 'shift with F1'],
+  [KEY['delete'], %w[leftctrl], '^[[3;5~', 'ctrl with delete'],
+  [KEY['pageup'], %w[leftctrl], '^[[5;5~', 'ctrl with page up'],
+  [KEY['leftbrace'], %w[leftctrl], '^[', 'ctrl+[ is ESC'],
+  [KEY['backslash'], %w[leftctrl], '^\\', 'ctrl+backslash is 0x1c'],
+  [KEY['minus'], %w[leftctrl], '^_', 'ctrl+minus is 0x1f'],
+  [KEY['slash'], %w[leftctrl], '^_', 'ctrl+slash is 0x1f'],
+  [KEY['space'], %w[leftctrl], '^@', 'ctrl+space is NUL']
+]
+
+cases.each do |code, modifiers, expected, description|
+  got = press(surface, code, modifiers)
+  warn "  #{description}: #{got.inspect}" if ENV['BLIT_GATE_DEBUG']
+  next if got == expected
+
+  failures << "#{description}: expected #{expected.inspect}, got #{got.inspect}"
+end
+
+# A modifier press on its own produces no bytes, so it is not a key for the
+# delivered/undelivered counters ADR 0057 relies on.
+def key_counters
+  performance = json('GET', '/v1/diagnostics/runtime').fetch('performance')
+  %w[evdev_keyboard_key_presses evdev_keyboard_keys_delivered
+     evdev_keyboard_keys_undelivered].map { |k| performance.fetch(k) }
+end
+
+before = key_counters
+2.times do
+  key(KEY['leftshift'], 1)
+  key(KEY['leftshift'], 0)
+end
+sleep 0.3
+after = key_counters
+unless before == after
+  failures << 'pressing a modifier on its own moved the key counters ' \
+              "#{before.inspect} -> #{after.inspect}"
+end
+
+request('DELETE', "/v1/terminal-sessions/#{session.fetch('id')}")
+
+unless failures.empty?
+  failures.each { |f| warn "key-encoding gate: #{f}" }
+  exit 1
+end
+
+puts "KEY_ENCODING_PASS cases=#{cases.length} modifier_only_uncounted=yes"

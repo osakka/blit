@@ -756,6 +756,9 @@ static void broadcast_evdev_pointer(BlitRuntime *runtime, const char *kind,
                                     const char *device_id);
 static int session_surface_is_owner_authored(const BlitSession *session);
 static int send_evdev_key(BlitRuntime *runtime, unsigned short code);
+static void dispatch_evdev_key_event(BlitRuntime *runtime,
+                                     const struct input_event *event,
+                                     const char *device_id);
 static void dispatch_pointer_button(BlitRuntime *runtime, int button,
                                     int pressed, const char *device_id);
 
@@ -11216,9 +11219,26 @@ static void handle_request(int fd, BlitRuntime *runtime,
                                      "api-pointer");
             send_mouse_report(runtime, 0, runtime->pointer_x,
                               runtime->pointer_y, delta > 0 ? 64 : 65, 0);
+        } else if (strcmp(kind, "key") == 0) {
+            int key_code;
+            int key_value;
+            struct input_event injected;
+            if (!json_int(payload, "code", &key_code) ||
+                !json_int(payload, "value", &key_value) ||
+                key_code <= 0 || key_code > KEY_MAX ||
+                key_value < 0 || key_value > 2) {
+                send_problem(fd, 400, "Bad Request", "invalid_input_event",
+                             "A key event requires an evdev code of 1..KEY_MAX and a value of 0 (release), 1 (press) or 2 (repeat).");
+                return;
+            }
+            memset(&injected, 0, sizeof(injected));
+            injected.type = EV_KEY;
+            injected.code = (unsigned short)key_code;
+            injected.value = key_value;
+            dispatch_evdev_key_event(runtime, &injected, "api-keyboard");
         } else {
             send_problem(fd, 422, "Unprocessable Entity", "unsupported_input_event",
-                         "Only pointer_motion, pointer_button, and pointer_wheel are supported.");
+                         "Only pointer_motion, pointer_button, pointer_wheel, and key are supported.");
             return;
         }
         record_input_dispatch(runtime, input_started_us);
@@ -14664,6 +14684,37 @@ static int session_surface_is_owner_authored(const BlitSession *session)
         (session->hibr_desktop_primary || session->hibr_desktop_join);
 }
 
+/* xterm's modifier parameter: 1 plus a bit per held modifier.  1 means no
+   modifier, in which case the unparameterised form of a sequence is sent. */
+static int evdev_modifier_parameter(const BlitRuntime *runtime)
+{
+    int parameter = 1;
+
+    if (runtime->evdev_shift) parameter += 1;
+    if (runtime->evdev_alt) parameter += 2;
+    if (runtime->evdev_ctrl) parameter += 4;
+    return parameter;
+}
+
+/* Ctrl with a letter is the letter's position in the alphabet; Ctrl with
+   these keys is a C0 control instead of the printable character, which is how
+   a program receives Ctrl-[ as ESC or Ctrl-/ as 0x1f. */
+static int evdev_control_byte(unsigned short code, int *byte)
+{
+    switch (code) {
+    case KEY_SPACE: *byte = 0x00; return 1;     /* Ctrl-Space, Ctrl-@ */
+    case KEY_2: *byte = 0x00; return 1;
+    case KEY_LEFTBRACE: *byte = 0x1b; return 1; /* Ctrl-[ */
+    case KEY_BACKSLASH: *byte = 0x1c; return 1;
+    case KEY_RIGHTBRACE: *byte = 0x1d; return 1;
+    case KEY_6: *byte = 0x1e; return 1;         /* Ctrl-^ */
+    case KEY_MINUS: *byte = 0x1f; return 1;     /* Ctrl-_ */
+    case KEY_SLASH: *byte = 0x1f; return 1;
+    case KEY_8: *byte = 0x7f; return 1;         /* Ctrl-? */
+    default: return 0;
+    }
+}
+
 /* Returns 1 when the key was written to a session PTY and 0 when it was
    not, so the caller can count delivered against undelivered presses. */
 static int send_evdev_key(BlitRuntime *runtime, unsigned short code)
@@ -14671,6 +14722,14 @@ static int send_evdev_key(BlitRuntime *runtime, unsigned short code)
     BlitSession *session = keyboard_target(runtime);
     char sequence[32];
     int length = 0;
+    int modifier = evdev_modifier_parameter(runtime);
+    int control_byte = 0;
+    /* A key xterm spells as a control sequence: `final` is its last
+       character, `number` the parameter of the CSI n ~ forms, and `ss3` marks
+       the ones that use SS3 rather than CSI when unmodified. */
+    char final = '\0';
+    int number = 0;
+    int ss3 = 0;
     if (session == NULL || session->pty_fd < 0) return 0;
     /* ADR 0057: an owned surface is not an interactive terminal. The key
        already reaches the owner over the input stream (ADR 0034); writing
@@ -14680,7 +14739,10 @@ static int send_evdev_key(BlitRuntime *runtime, unsigned short code)
        with terminal history. The caller broadcasts the stream event after
        this returns, so the key is not lost. */
     if (session_surface_is_owner_authored(session)) return 0;
-    if (runtime->evdev_ctrl && code >= KEY_A && code <= KEY_Z) {
+    if (runtime->evdev_ctrl && evdev_control_byte(code, &control_byte)) {
+        sequence[0] = (char)control_byte;
+        length = 1;
+    } else if (runtime->evdev_ctrl && code >= KEY_A && code <= KEY_Z) {
         sequence[0] = (char)(code - KEY_A + 1);
         length = 1;
     } else if (code >= KEY_A && code <= KEY_Z) {
@@ -14750,43 +14812,68 @@ static int send_evdev_key(BlitRuntime *runtime, unsigned short code)
     } else if (code == KEY_BACKSPACE) {
         sequence[0] = 0x7f; length = 1;
     } else if (code == KEY_TAB) {
-        sequence[0] = '\t'; length = 1;
+        /* Shift+Tab is a back-tab, which has its own sequence rather than
+           being a tab with a modifier parameter. */
+        if (runtime->evdev_shift)
+            final = 'Z';
+        else {
+            sequence[0] = '\t';
+            length = 1;
+        }
     } else if (code == KEY_ESC) {
         sequence[0] = 0x1b; length = 1;
     } else if (code == KEY_HOME || code == KEY_END) {
-        sequence[0] = 0x1b;
-        sequence[1] = session->terminal_application_cursor ? 'O' : '[';
-        if (session->terminal_application_cursor) {
-            sequence[2] = code == KEY_HOME ? 'H' : 'F';
-            length = 3;
-        } else {
-            sequence[2] = code == KEY_HOME ? 'H' : 'F';
-            length = 3;
-        }
+        final = code == KEY_HOME ? 'H' : 'F';
+        ss3 = session->terminal_application_cursor;
     } else if (code == KEY_INSERT || code == KEY_DELETE ||
                code == KEY_PAGEUP || code == KEY_PAGEDOWN) {
-        int number = code == KEY_INSERT ? 2 : code == KEY_DELETE ? 3 :
+        number = code == KEY_INSERT ? 2 : code == KEY_DELETE ? 3 :
             code == KEY_PAGEUP ? 5 : 6;
-        length = (int)snprintf(sequence, sizeof(sequence), "\033[%d~", number);
+        final = '~';
     } else if (code >= KEY_F1 && code <= KEY_F12) {
-        static const char *function_keys[] = {
-            "\033OP", "\033OQ", "\033OR", "\033OS", "\033[15~",
-            "\033[17~", "\033[18~", "\033[19~", "\033[20~",
-            "\033[21~", "\033[23~", "\033[24~"
+        static const int function_numbers[] = {
+            0, 0, 0, 0, 15, 17, 18, 19, 20, 21, 23, 24
         };
-        const char *function_key = function_keys[code - KEY_F1];
-        length = (int)strlen(function_key);
-        memcpy(sequence, function_key, (size_t)length);
-    } else if (code == KEY_UP || code == KEY_DOWN || code == KEY_LEFT || code == KEY_RIGHT) {
-        sequence[0] = 0x1b;
-        sequence[1] = session->terminal_application_cursor ? 'O' : '[';
-        sequence[2] = code == KEY_UP ? 'A' : code == KEY_DOWN ? 'B' :
+        if (code <= KEY_F4) {
+            /* F1-F4 are SS3 P..S unmodified and CSI 1;M P..S with a
+               modifier, which is why they need the descriptor rather than a
+               literal table. */
+            final = (char)('P' + (code - KEY_F1));
+            ss3 = 1;
+        } else {
+            number = function_numbers[code - KEY_F1];
+            final = '~';
+        }
+    } else if (code == KEY_UP || code == KEY_DOWN || code == KEY_LEFT ||
+               code == KEY_RIGHT) {
+        final = code == KEY_UP ? 'A' : code == KEY_DOWN ? 'B' :
             code == KEY_RIGHT ? 'C' : 'D';
-        length = 3;
+        ss3 = session->terminal_application_cursor;
+    }
+    /* Build the control sequence, carrying the modifier parameter.  Without
+       this every modified cursor key, function key and editing key reached the
+       application as its unmodified self: Ctrl+Right was Right. */
+    if (final == 'Z') {
+        length = (int)snprintf(sequence, sizeof(sequence), "\033[Z");
+    } else if (final == '~') {
+        length = modifier > 1 ?
+            (int)snprintf(sequence, sizeof(sequence), "\033[%d;%d~", number,
+                          modifier) :
+            (int)snprintf(sequence, sizeof(sequence), "\033[%d~", number);
+    } else if (final != '\0') {
+        length = modifier > 1 ?
+            (int)snprintf(sequence, sizeof(sequence), "\033[1;%d%c", modifier,
+                          final) :
+            (int)snprintf(sequence, sizeof(sequence), "\033%c%c",
+                          ss3 ? 'O' : '[', final);
     }
     if (length > 0) {
-        if (runtime->evdev_alt && sequence[0] != 0x1b && length <
-            (int)sizeof(sequence) - 1) {
+        /* Meta-sends-escape applies to a literal character.  A control
+           sequence already carries Alt in its modifier parameter, and
+           prefixing it as well produced an ESC followed by an unmodified
+           key -- which is how Alt+Left arrived as a bare Left. */
+        if (runtime->evdev_alt && final == '\0' && sequence[0] != 0x1b &&
+            length < (int)sizeof(sequence) - 1) {
             memmove(sequence + 1, sequence, (size_t)length);
             sequence[0] = 0x1b;
             ++length;
@@ -14797,6 +14884,75 @@ static int send_evdev_key(BlitRuntime *runtime, unsigned short code)
             return 0;
     }
     return length > 0;
+}
+
+/* One physical key event: the modifier state, the counters, the PTY write and
+   the stream broadcast. A real device and POST /v1/input/inject share this, so
+   an injected key cannot take a different path from a real one -- which is the
+   only thing that makes injection worth having. */
+static void dispatch_evdev_key_event(BlitRuntime *runtime,
+                                     const struct input_event *event,
+                                     const char *device_id)
+{
+    int modifier_only = 0;
+
+    if (event->type != EV_KEY)
+        return;
+    if (event->code == KEY_LEFTSHIFT || event->code == KEY_RIGHTSHIFT) {
+        runtime->evdev_shift = event->value != 0;
+        modifier_only = 1;
+    } else if (event->code == KEY_LEFTCTRL || event->code == KEY_RIGHTCTRL) {
+        runtime->evdev_ctrl = event->value != 0;
+        modifier_only = 1;
+    } else if (event->code == KEY_LEFTALT || event->code == KEY_RIGHTALT) {
+        runtime->evdev_alt = event->value != 0;
+        modifier_only = 1;
+    }
+    if (event->value != 0) {
+        char detail[160];
+        snprintf(detail, sizeof(detail),
+                 "code=%u value=%d shift=%d ctrl=%d alt=%d device=%s",
+                 (unsigned int)event->code, event->value,
+                 runtime->evdev_shift, runtime->evdev_ctrl,
+                 runtime->evdev_alt,
+                 device_id != NULL ? device_id : "evdev-keyboard");
+        diagnostic_trace(runtime, "keyboard_key", detail);
+        if (getenv("BLIT_TRACE_KEYS") != NULL)
+            fprintf(stderr, "blit: key %s\n", detail);
+        /* A modifier press is not a key for counting purposes: it produces no
+           bytes, so calling it undelivered made the counter that distinguishes
+           a dead input path from an owned surface (ADR 0057) tick on every
+           Shift press of an ordinary terminal. */
+        if (!modifier_only) {
+            ++runtime->diagnostic_evdev_keyboard_key_presses;
+            /* Delivered means the key was written to a session PTY.  An owned
+               surface takes its input from the stream instead (ADR 0057), so
+               undelivered is the expected state for a desktop and a fault for
+               an ordinary terminal. */
+            if (send_evdev_key(runtime, event->code))
+                ++runtime->diagnostic_evdev_keyboard_keys_delivered;
+            else
+                ++runtime->diagnostic_evdev_keyboard_keys_undelivered;
+        }
+    }
+    {
+        char input_event[256];
+        BlitSession *target = keyboard_target(runtime);
+        snprintf(input_event, sizeof(input_event),
+                 "{\"type\":\"input\",\"session_id\":\"session-%llu\","
+                 "\"device_id\":\"%s\",\"event\":{"
+                 "\"kind\":\"key\",\"time_us\":%llu,\"code\":%u,\"pressed\":%s,"
+                 "\"repeat\":%s,\"shift\":%s,\"ctrl\":%s,\"alt\":%s}}",
+                 target != NULL ? target->id : 0ULL,
+                 device_id != NULL ? device_id : "evdev-keyboard",
+                 (unsigned long long)monotonic_us(),
+                 (unsigned int)event->code, event->value != 0 ? "true" : "false",
+                 event->value == 2 ? "true" : "false",
+                 runtime->evdev_shift ? "true" : "false",
+                 runtime->evdev_ctrl ? "true" : "false",
+                 runtime->evdev_alt ? "true" : "false");
+        broadcast_stream(runtime, input_event, BLIT_STREAM_INPUT);
+    }
 }
 
 static void service_evdev_keyboard(BlitRuntime *runtime)
@@ -14819,60 +14975,15 @@ static void service_evdev_keyboard(BlitRuntime *runtime)
                      sizeof(runtime->diagnostic_last_evdev_keyboard_path), "%s",
                      runtime->evdev_keyboard_paths[device_index]);
             if (event.type != EV_KEY) continue;
-            if (event.code == KEY_LEFTSHIFT || event.code == KEY_RIGHTSHIFT)
-                runtime->evdev_shift = event.value != 0;
-            else if (event.code == KEY_LEFTCTRL || event.code == KEY_RIGHTCTRL)
-                runtime->evdev_ctrl = event.value != 0;
-            else if (event.code == KEY_LEFTALT || event.code == KEY_RIGHTALT)
-                runtime->evdev_alt = event.value != 0;
             if (event.value != 0) {
-                {
-                    char detail[160];
-                    snprintf(detail, sizeof(detail),
-                             "code=%u value=%d shift=%d ctrl=%d alt=%d",
-                             (unsigned int)event.code, event.value,
-                             runtime->evdev_shift, runtime->evdev_ctrl,
-                             runtime->evdev_alt);
-                    diagnostic_trace(runtime, "keyboard_key", detail);
-                }
-                if (getenv("BLIT_TRACE_KEYS") != NULL)
-                    fprintf(stderr, "blit: key code=%u value=%d shift=%d ctrl=%d alt=%d\n",
-                            (unsigned int)event.code, event.value,
-                            runtime->evdev_shift, runtime->evdev_ctrl,
-                            runtime->evdev_alt);
                 if (!runtime->evdev_keyboard_reported[device_index]) {
                     fprintf(stderr, "blit: evdev keyboard events received from %s\n",
                             runtime->evdev_keyboard_paths[device_index]);
                     runtime->evdev_keyboard_reported[device_index] = 1;
                 }
-                ++runtime->diagnostic_evdev_keyboard_key_presses;
                 ++runtime->diagnostic_evdev_keyboard_device_keys[device_index];
-                /* Delivered means the key was written to a session PTY.
-                   An owned surface takes its input from the stream instead
-                   (ADR 0057), so undelivered is the expected state for a
-                   desktop and a fault for an ordinary terminal. */
-                if (send_evdev_key(runtime, event.code))
-                    ++runtime->diagnostic_evdev_keyboard_keys_delivered;
-                else
-                    ++runtime->diagnostic_evdev_keyboard_keys_undelivered;
             }
-            {
-                char input_event[256];
-                BlitSession *target = keyboard_target(runtime);
-                snprintf(input_event, sizeof(input_event),
-                         "{\"type\":\"input\",\"session_id\":\"session-%llu\","
-                         "\"device_id\":\"evdev-keyboard\",\"event\":{"
-                         "\"kind\":\"key\",\"time_us\":%llu,\"code\":%u,\"pressed\":%s,"
-                         "\"repeat\":%s,\"shift\":%s,\"ctrl\":%s,\"alt\":%s}}",
-                         target != NULL ? target->id : 0ULL,
-                         (unsigned long long)monotonic_us(),
-                         (unsigned int)event.code, event.value != 0 ? "true" : "false",
-                         event.value == 2 ? "true" : "false",
-                         runtime->evdev_shift ? "true" : "false",
-                         runtime->evdev_ctrl ? "true" : "false",
-                         runtime->evdev_alt ? "true" : "false");
-                broadcast_stream(runtime, input_event, BLIT_STREAM_INPUT);
-            }
+            dispatch_evdev_key_event(runtime, &event, "evdev-keyboard");
             record_input_dispatch(runtime, input_started_us);
         }
         if (received == 0 ||

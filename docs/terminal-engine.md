@@ -72,6 +72,16 @@ shell conformance path is stable.
    application is told is the colour it is shown. OSC 10/11 are accepted as
    sets as well as queries, in either the `rgb:RRRR/GGGG/BBBB` or `#rrggbb`
    spelling, and a set repaints the whole surface.
+   Physical keys carry xterm's modifier parameter: a held Shift, Alt or Ctrl
+   turns an arrow, `Home`/`End` or `F1`-`F4` into `CSI 1;M <final>` and an
+   editing or `F5`-`F12` key into `CSI n;M ~`, where M is 1 plus 1 for Shift,
+   2 for Alt and 4 for Ctrl. Shift+Tab is `CSI Z`. Ctrl with `[ \ ] ^ _ ?`,
+   space or the digits that spell them produces the corresponding C0 control
+   rather than the printable character. Meta-sends-escape still applies to a
+   literal character, but not to a control sequence, which carries Alt in its
+   parameter instead. A key may be injected by evdev code through
+   `POST /v1/input/inject`, which runs the same encoder as a physical device.
+   Keyboard layout beyond US, CapsLock and NumLock are not implemented.
    Kitty graphics placements (source rectangle, cell offset, numbered
    placements, the `a i c p q x y z` delete targets) and the refusal of
    unimplemented keys are specified in
