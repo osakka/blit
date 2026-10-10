@@ -57,6 +57,7 @@ extern char **environ;
 #define BLIT_MAX_INPUT_DEVICES 32
 #define BLIT_MAX_AUDIO_DEVICES 64
 #define BLIT_MAX_SAMPLE_RATES 16
+#define BLIT_MAX_KEYMAP_OVERRIDES 128
 #define BLIT_STREAM_DIAGNOSTICS 1
 #define BLIT_STREAM_SURFACES 2
 #define BLIT_STREAM_FRAMES 4
@@ -321,6 +322,29 @@ typedef struct {
     int natural_scroll;
     char route_target[128];
     int route_enabled;
+    /* ADR 0064 stage 4: a keyboard's own layout and its own modifier state.
+     *
+     * Both were one global set. The layout being global made every keyboard
+     * US; the modifier state being global meant Shift held on a keyboard
+     * routed to one session modified another keyboard's keys on their way to
+     * a different session -- invisible until per-device routing made two
+     * keyboards able to feed two places.
+     *
+     * The keymap is a sparse override on the built-in table, by evdev code,
+     * with four levels: plain, shift, altgr, shift+altgr. Sparse because the
+     * whole of a layout difference is a few dozen keys, and because a request
+     * is bounded at BLIT_REQUEST_SIZE -- a full table would not fit and a
+     * parser that accepted a prefix of one would be worse than refusing it. */
+    int keymap_count;
+    unsigned short keymap_codes[BLIT_MAX_KEYMAP_OVERRIDES];
+    char keymap_levels[BLIT_MAX_KEYMAP_OVERRIDES][4][8];
+    unsigned char key_held[(KEY_MAX + 8) / 8];
+    int shift;
+    int ctrl;
+    int alt;
+    int altgr;
+    int caps_lock;
+    int num_lock;
     int present;
     unsigned long long first_seen_us;
     unsigned long long last_seen_us;
@@ -617,10 +641,6 @@ typedef struct {
        modifier flags are derived from this: holding both Shift keys and
        releasing one left a single boolean saying Shift was up, and a device
        that disappeared mid-hold left it stuck down forever. */
-    unsigned char evdev_key_held[(KEY_MAX + 8) / 8];
-    int evdev_altgr;
-    int evdev_caps_lock;
-    int evdev_num_lock;
     /* The cell the last motion report named, so the next sample inside the
        same cell is not reported again. */
     unsigned long long motion_report_session;
@@ -659,9 +679,6 @@ typedef struct {
     char evdev_gamepad_paths[BLIT_MAX_INPUT_DEVICES][128];
     int evdev_gamepad_count;
     int evdev_gamepad_reported[BLIT_MAX_INPUT_DEVICES];
-    int evdev_shift;
-    int evdev_ctrl;
-    int evdev_alt;
     int evdev_watch_fd;
     int snd_watch_fd;
     int audio_rescan_requested;
@@ -3365,6 +3382,9 @@ static BlitInputDevice *record_input_device(BlitRuntime *runtime,
         device->used = 1;
         device->enabled = 1;
         device->sensitivity_percent = BLIT_INPUT_SENSITIVITY_DEFAULT;
+        /* Until EVIOCGLED reports this keyboard's own LED, assume its keypad
+           types digits -- what it did before NumLock was honoured at all. */
+        device->num_lock = 1;
         snprintf(device->node, sizeof(device->node), "%s", node);
         snprintf(device->name, sizeof(device->name), "%s", node);
         read_input_device_strings(fd, device);
@@ -3395,6 +3415,19 @@ static BlitInputDevice *record_input_device(BlitRuntime *runtime,
     return device;
 }
 
+/* The modifier and layout state used when a key arrives from a keyboard with
+   no table entry -- which happens only when the table is full, since every
+   drain and every keyed injection sets the source. It is a real device
+   structure rather than a special case in the translator, so there is one
+   code path and not two. */
+static BlitInputDevice default_keyboard_state;
+
+static BlitInputDevice *keyboard_state(BlitRuntime *runtime)
+{
+    return runtime->input_source != NULL ? runtime->input_source :
+        &default_keyboard_state;
+}
+
 /* True when a controller has changed something about this device. An absent
    device that carries configuration is kept in the table rather than
    retired: a stable id is worthless if what is attached to it evaporates
@@ -3417,7 +3450,8 @@ static int input_device_configured(const BlitInputDevice *device)
 {
     return !device->enabled ||
         device->sensitivity_percent != BLIT_INPUT_SENSITIVITY_DEFAULT ||
-        device->natural_scroll || device->route_target[0] != '\0';
+        device->natural_scroll || device->route_target[0] != '\0' ||
+        device->keymap_count > 0;
 }
 
 /* How many of a device's kinds the poll loop currently holds open. The fd
@@ -3591,6 +3625,22 @@ static size_t input_device_item_json(const BlitRuntime *runtime,
         complete &= json_appendf(body, capacity, &used,
             ",\"route\":{\"target_session_id\":\"%s\",\"enabled\":%s}",
             device->route_target, device->route_enabled ? "true" : "false");
+    /* The keymap reports its base and which codes it overrides, not the
+       levels. A full table would dominate the item and the controller already
+       holds the layout it sent; what it needs back is confirmation of which
+       codes took effect. */
+    if (device->keymap_count > 0) {
+        int keymap_index;
+        complete &= json_appendf(body, capacity, &used,
+            ",\"keymap\":{\"base\":\"us\",\"override_count\":%d,"
+            "\"codes\":[", device->keymap_count);
+        for (keymap_index = 0; keymap_index < device->keymap_count;
+             ++keymap_index)
+            complete &= json_appendf(body, capacity, &used, "%s%u",
+                                     keymap_index == 0 ? "" : ",",
+                                     (unsigned)device->keymap_codes[keymap_index]);
+        complete &= json_appendf(body, capacity, &used, "]}");
+    }
     complete &= json_appendf(body, capacity, &used,
         "},\"revision\":%llu}", device->revision);
     /* One test, at the end: json_appendf leaves `used` alone when a field
@@ -5031,6 +5081,148 @@ static const char *json_rejected_property(const char *object,
     return NULL;
 }
 
+static const char *input_keymap_rejected_property(const char *keymap)
+{
+    static const char *const writable[] = { "base", "keys" };
+
+    return json_rejected_property(keymap, writable,
+                                  sizeof(writable) / sizeof(writable[0]));
+}
+
+/* Parse a keymap object into the override table a device carries.
+ *
+ * The shape is {"base":"us","keys":{"<code>":[plain,shift,altgr,
+ * shift+altgr]}}: a sparse override by evdev code with four levels, each a
+ * UTF-8 string of at most four bytes, or "" for a level this key does not
+ * define. "base" names the built-in table the overrides sit on and is "us"
+ * because that is the only one; naming it now means a second base does not
+ * change the shape later.
+ *
+ * Sparse rather than complete because a request is bounded at
+ * BLIT_REQUEST_SIZE and a complete table does not fit -- and a parser that
+ * silently accepted the prefix of one that did not fit would hand a
+ * controller a keyboard it believed it had configured. Anything malformed is
+ * refused with the reason, never partially applied: the caller only installs
+ * what this returns whole. */
+static int parse_input_keymap(const char *keymap, BlitInputDevice *parsed,
+                              const char **reason)
+{
+    char base[32];
+    const char *keys;
+    const char *cursor;
+    int count = 0;
+
+    *reason = NULL;
+    parsed->keymap_count = 0;
+    if (json_key_cursor(keymap, "base") != NULL) {
+        if (!json_string(keymap, "base", base, sizeof(base)) ||
+            strcmp(base, "us") != 0) {
+            *reason = "base names the built-in table the overrides sit on, and"
+                " the only one is \"us\".";
+            return 0;
+        }
+    }
+    keys = json_key_cursor(keymap, "keys");
+    if (keys == NULL)
+        return 1;
+    cursor = strchr(keys, '{');
+    if (cursor == NULL) {
+        *reason = "keys is an object of evdev code to a four-level array.";
+        return 0;
+    }
+    ++cursor;
+    for (;;) {
+        char code_text[16];
+        size_t code_length = 0;
+        long code;
+        char *end;
+        int level;
+
+        while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
+               *cursor == '\n' || *cursor == ',')
+            ++cursor;
+        if (*cursor == '}' || *cursor == '\0')
+            break;
+        if (*cursor != '"') {
+            *reason = "each key in keys is an evdev code as a quoted number.";
+            return 0;
+        }
+        ++cursor;
+        while (*cursor != '\0' && *cursor != '"' &&
+               code_length + 1 < sizeof(code_text))
+            code_text[code_length++] = *cursor++;
+        code_text[code_length] = '\0';
+        if (*cursor != '"') {
+            *reason = "each key in keys is an evdev code as a quoted number.";
+            return 0;
+        }
+        ++cursor;
+        code = strtol(code_text, &end, 10);
+        if (end == code_text || *end != '\0' || code < 1 || code > KEY_MAX) {
+            *reason = "an evdev code must be a number from 1 through KEY_MAX.";
+            return 0;
+        }
+        while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
+               *cursor == '\n')
+            ++cursor;
+        if (*cursor != ':') {
+            *reason = "each code in keys is followed by its four levels.";
+            return 0;
+        }
+        ++cursor;
+        while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
+               *cursor == '\n')
+            ++cursor;
+        if (*cursor != '[') {
+            *reason = "each code maps to an array of exactly four levels:"
+                " plain, shift, altgr, shift+altgr.";
+            return 0;
+        }
+        ++cursor;
+        if (count >= BLIT_MAX_KEYMAP_OVERRIDES) {
+            *reason = "a keymap carries at most 128 overridden codes.";
+            return 0;
+        }
+        parsed->keymap_codes[count] = (unsigned short)code;
+        for (level = 0; level < 4; ++level) {
+            char value[32];
+            size_t length = 0;
+            while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
+                   *cursor == '\n' || *cursor == ',')
+                ++cursor;
+            if (*cursor != '"') {
+                *reason = "each level is a string, empty when the key does not"
+                    " define it.";
+                return 0;
+            }
+            cursor = json_unescape(cursor + 1, value, sizeof(value), &length);
+            if (cursor == NULL) {
+                *reason = "a level string could not be decoded.";
+                return 0;
+            }
+            if (length >= sizeof(parsed->keymap_levels[0][0])) {
+                *reason = "a level is one character: at most seven bytes of"
+                    " UTF-8.";
+                return 0;
+            }
+            memcpy(parsed->keymap_levels[count][level], value, length);
+            parsed->keymap_levels[count][level][length] = '\0';
+        }
+        while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
+               *cursor == '\n')
+            ++cursor;
+        if (*cursor != ']') {
+            *reason = "each code maps to an array of exactly four levels:"
+                " plain, shift, altgr, shift+altgr.";
+            return 0;
+        }
+        ++cursor;
+        ++count;
+    }
+    parsed->keymap_count = count;
+    return 1;
+}
+
 static const char *input_route_rejected_property(const char *route)
 {
     static const char *const writable[] = { "target_session_id", "enabled" };
@@ -5042,7 +5234,7 @@ static const char *input_route_rejected_property(const char *route)
 static const char *input_device_rejected_property(const char *configuration)
 {
     static const char *const writable[] = {
-        "enabled", "sensitivity_percent", "natural_scroll", "route"
+        "enabled", "sensitivity_percent", "natural_scroll", "route", "keymap"
     };
 
     return json_rejected_property(configuration, writable,
@@ -13018,6 +13210,10 @@ static void handle_request(int fd, BlitRuntime *runtime,
         int route_requested = 0;
         int route_enabled = 0;
         BlitSession *route_session = NULL;
+        char keymap[4096];
+        const char *keymap_cursor;
+        static BlitInputDevice parsed_keymap;
+        int keymap_requested = 0;
         int changed = 0;
 
         if (*device_id == '\0' || device == NULL) {
@@ -13158,6 +13354,42 @@ static void handle_request(int fd, BlitRuntime *runtime,
             }
             route_requested = 1;
         }
+        keymap_cursor = json_key_cursor(configuration, "keymap");
+        if (keymap_cursor != NULL) {
+            const char *keymap_rejected;
+            const char *reason = NULL;
+            /* Not gated on the keyboard kind, unlike the pointer
+               properties. A keymap translates key events, and
+               POST /v1/input/inject delivers a key through any device id, so
+               there is no device for which one provably cannot apply. A
+               device that never delivers a key simply never uses it. The
+               pointer properties are different: they scale pointer motion,
+               which is reported only for a pointer, so a controller is never
+               offered them where they would do nothing. */
+            if (!json_object_slice(keymap_cursor, keymap, sizeof(keymap))) {
+                send_problem(fd, 400, "Bad Request", "invalid_device_keymap",
+                             "keymap must be a JSON object with base and keys.");
+                return;
+            }
+            keymap_rejected = input_keymap_rejected_property(keymap);
+            if (keymap_rejected != NULL) {
+                char detail[256];
+                snprintf(detail, sizeof(detail),
+                         "A keymap carries \"%s\", which is not a writable "
+                         "property. Writable: base and keys.", keymap_rejected);
+                send_problem(fd, 400, "Bad Request", "invalid_device_property",
+                             detail);
+                return;
+            }
+            memset(&parsed_keymap, 0, sizeof(parsed_keymap));
+            if (!parse_input_keymap(keymap, &parsed_keymap, &reason)) {
+                send_problem(fd, 400, "Bad Request", "invalid_device_keymap",
+                             reason != NULL ? reason :
+                             "keymap could not be parsed.");
+                return;
+            }
+            keymap_requested = 1;
+        }
         if (sensitivity_requested &&
             (sensitivity < BLIT_INPUT_SENSITIVITY_MIN ||
              sensitivity > BLIT_INPUT_SENSITIVITY_MAX)) {
@@ -13185,6 +13417,19 @@ static void handle_request(int fd, BlitRuntime *runtime,
         if (natural_scroll_requested &&
             natural_scroll != device->natural_scroll) {
             device->natural_scroll = natural_scroll;
+            changed = 1;
+        }
+        if (keymap_requested &&
+            (parsed_keymap.keymap_count != device->keymap_count ||
+             memcmp(parsed_keymap.keymap_codes, device->keymap_codes,
+                    sizeof(device->keymap_codes)) != 0 ||
+             memcmp(parsed_keymap.keymap_levels, device->keymap_levels,
+                    sizeof(device->keymap_levels)) != 0)) {
+            device->keymap_count = parsed_keymap.keymap_count;
+            memcpy(device->keymap_codes, parsed_keymap.keymap_codes,
+                   sizeof(device->keymap_codes));
+            memcpy(device->keymap_levels, parsed_keymap.keymap_levels,
+                   sizeof(device->keymap_levels));
             changed = 1;
         }
         if (route_requested &&
@@ -16501,12 +16746,31 @@ static int active_mouse_button(const BlitRuntime *runtime)
     return 3;
 }
 
+/* The modifiers a mouse report carries, OR'd across every present keyboard.
+ *
+ * Per-device state is right for a key, because a key belongs to the keyboard
+ * that produced it. It is wrong for a click: there is one cursor
+ * (ADR 0064 stage 3), so a shift-click means "shift held anywhere", the same
+ * way it meant that when the state was global. */
 static int mouse_modifier_bits(const BlitRuntime *runtime)
 {
     int modifiers = 0;
-    if (runtime->evdev_shift) modifiers |= 4;
-    if (runtime->evdev_alt) modifiers |= 8;
-    if (runtime->evdev_ctrl) modifiers |= 16;
+    int shift = 0;
+    int alt = 0;
+    int ctrl = 0;
+    int i;
+
+    for (i = 0; i < BLIT_MAX_INPUT_DEVICES; ++i) {
+        const BlitInputDevice *device = &runtime->input_devices[i];
+        if (!device->used || !device->present)
+            continue;
+        shift |= device->shift;
+        alt |= device->alt;
+        ctrl |= device->ctrl;
+    }
+    if (shift) modifiers |= 4;
+    if (alt) modifiers |= 8;
+    if (ctrl) modifiers |= 16;
     return modifiers;
 }
 
@@ -17095,76 +17359,85 @@ static int session_surface_is_owner_authored(const BlitSession *session)
         (session->hibr_desktop_primary || session->hibr_desktop_join);
 }
 
-static int evdev_key_is_held(const BlitRuntime *runtime, unsigned short code)
+static int evdev_key_is_held(const BlitInputDevice *device,
+                             unsigned short code)
 {
     if (code > KEY_MAX)
         return 0;
-    return (runtime->evdev_key_held[code / 8] & (1U << (code % 8))) != 0;
+    return (device->key_held[code / 8] & (1U << (code % 8))) != 0;
 }
 
-static void evdev_key_set_held(BlitRuntime *runtime, unsigned short code,
+static void evdev_key_set_held(BlitInputDevice *device, unsigned short code,
                                int held)
 {
     if (code > KEY_MAX)
         return;
     if (held)
-        runtime->evdev_key_held[code / 8] |= (unsigned char)(1U << (code % 8));
+        device->key_held[code / 8] |= (unsigned char)(1U << (code % 8));
     else
-        runtime->evdev_key_held[code / 8] &=
-            (unsigned char)~(1U << (code % 8));
+        device->key_held[code / 8] &= (unsigned char)~(1U << (code % 8));
 }
 
-/* Derive the modifier flags from what is actually held. AltGr is deliberately
-   not Alt: treating the right Alt key as Alt made it prefix ESC instead of
-   selecting a third level, so an AltGr character could not be typed at all. */
-static void evdev_refresh_modifiers(BlitRuntime *runtime)
+/* Derive one keyboard's modifier flags from what that keyboard is holding.
+   AltGr is deliberately not Alt: treating the right Alt key as Alt made it
+   prefix ESC instead of selecting a third level, so an AltGr character could
+   not be typed at all. */
+static void evdev_refresh_modifiers(BlitInputDevice *device)
 {
-    runtime->evdev_shift = evdev_key_is_held(runtime, KEY_LEFTSHIFT) ||
-        evdev_key_is_held(runtime, KEY_RIGHTSHIFT);
-    runtime->evdev_ctrl = evdev_key_is_held(runtime, KEY_LEFTCTRL) ||
-        evdev_key_is_held(runtime, KEY_RIGHTCTRL);
-    runtime->evdev_alt = evdev_key_is_held(runtime, KEY_LEFTALT);
-    runtime->evdev_altgr = evdev_key_is_held(runtime, KEY_RIGHTALT);
+    device->shift = evdev_key_is_held(device, KEY_LEFTSHIFT) ||
+        evdev_key_is_held(device, KEY_RIGHTSHIFT);
+    device->ctrl = evdev_key_is_held(device, KEY_LEFTCTRL) ||
+        evdev_key_is_held(device, KEY_RIGHTCTRL);
+    device->alt = evdev_key_is_held(device, KEY_LEFTALT);
+    device->altgr = evdev_key_is_held(device, KEY_RIGHTALT);
 }
 
-/* Adopt the kernel's idea of what is held and which locks are lit. A keyboard
-   opened while Shift is down, or after a device vanished mid-hold, otherwise
-   carries a modifier state that is wrong until that key is pressed again. */
+/* Adopt the kernel's idea of what each keyboard is holding and which of its
+   locks are lit. A keyboard opened while Shift is down, or after a device
+   vanished mid-hold, otherwise carries a modifier state that is wrong until
+   that key is pressed again.
+ *
+ * Per device, not pooled: pooling meant a key released on one keyboard could
+ * not be distinguished from the same key still held on another, and a lock
+ * lit on one keyboard applied to all of them. */
 static void evdev_sync_modifiers(BlitRuntime *runtime)
 {
     int index;
 
-    memset(runtime->evdev_key_held, 0, sizeof(runtime->evdev_key_held));
     for (index = 0; index < runtime->evdev_keyboard_count; ++index) {
         unsigned char keys[(KEY_MAX + 8) / 8];
         unsigned long leds[2];
-        int byte;
+        BlitInputDevice *device;
         if (runtime->evdev_keyboard_fds[index] < 0)
             continue;
+        device = find_input_device_node(runtime,
+                                        runtime->evdev_keyboard_paths[index]);
+        if (device == NULL)
+            continue;
         memset(keys, 0, sizeof(keys));
+        memset(device->key_held, 0, sizeof(device->key_held));
         if (ioctl(runtime->evdev_keyboard_fds[index], EVIOCGKEY(sizeof(keys)),
                   keys) >= 0)
-            for (byte = 0; byte < (int)sizeof(keys); ++byte)
-                runtime->evdev_key_held[byte] |= keys[byte];
+            memcpy(device->key_held, keys, sizeof(device->key_held));
         memset(leds, 0, sizeof(leds));
         if (ioctl(runtime->evdev_keyboard_fds[index], EVIOCGLED(sizeof(leds)),
                   leds) >= 0) {
-            runtime->evdev_caps_lock = input_bit(leds, LED_CAPSL) ? 1 : 0;
-            runtime->evdev_num_lock = input_bit(leds, LED_NUML) ? 1 : 0;
+            device->caps_lock = input_bit(leds, LED_CAPSL) ? 1 : 0;
+            device->num_lock = input_bit(leds, LED_NUML) ? 1 : 0;
         }
+        evdev_refresh_modifiers(device);
     }
-    evdev_refresh_modifiers(runtime);
 }
 
 /* xterm's modifier parameter: 1 plus a bit per held modifier.  1 means no
    modifier, in which case the unparameterised form of a sequence is sent. */
-static int evdev_modifier_parameter(const BlitRuntime *runtime)
+static int evdev_modifier_parameter(const BlitInputDevice *device)
 {
     int parameter = 1;
 
-    if (runtime->evdev_shift) parameter += 1;
-    if (runtime->evdev_alt) parameter += 2;
-    if (runtime->evdev_ctrl) parameter += 4;
+    if (device->shift) parameter += 1;
+    if (device->alt) parameter += 2;
+    if (device->ctrl) parameter += 4;
     return parameter;
 }
 
@@ -17234,28 +17507,72 @@ static const char evdev_us_shifted[BLIT_KEY_TABLE_LAST -
     'Z', 'X', 'C', 'V', 'B', 'N', 'M', '<', '>', '?'
 };
 
-/* The character this key types, or 0 when it is not a character key.
-   CapsLock inverts Shift for letters, and only for letters. */
-static char evdev_key_character(const BlitRuntime *runtime,
-                                unsigned short code)
+/* What this key types on this keyboard, written into `out` as UTF-8 and
+   returned as a length, or 0 when the key types nothing.
+ *
+ * The device's keymap is consulted first: a sparse override by evdev code
+ * with four levels -- plain, shift, altgr, shift+altgr. It is the only way to
+ * reach the third level, because the built-in table is ASCII and has none, so
+ * AltGr on an un-overridden key still types nothing rather than guessing a
+ * character for it. CapsLock inverts Shift, and only when the plain level is
+ * a single lower-case letter: inverting it for a digit or a punctuation key
+ * would be wrong on every layout. */
+static int evdev_key_character(const BlitInputDevice *device,
+                               unsigned short code, char *out, size_t capacity)
 {
-    char plain;
-    char shifted;
+    const char *levels[4];
+    char plain_byte;
+    char shifted_byte;
+    int level;
+    int index;
     int letter;
 
-    if (code == KEY_SPACE)
-        return ' ';
+    if (capacity == 0)
+        return 0;
+    out[0] = '\0';
+    for (index = 0; index < device->keymap_count; ++index) {
+        if (device->keymap_codes[index] != code)
+            continue;
+        levels[0] = device->keymap_levels[index][0];
+        levels[1] = device->keymap_levels[index][1];
+        levels[2] = device->keymap_levels[index][2];
+        levels[3] = device->keymap_levels[index][3];
+        letter = levels[0][0] != '\0' && levels[0][1] == '\0' &&
+            levels[0][0] >= 'a' && levels[0][0] <= 'z';
+        /* An empty level is "not defined here", not "types nothing": AltGr on
+           a key with no third level falls back to the unmodified one, which
+           is what AltGr does on a US keyboard, where it is a modifier that
+           selects nothing. The built-in table has no third level at all and
+           behaves the same way, so there is one rule rather than one per
+           table. */
+        if (device->altgr && levels[device->shift ? 3 : 2][0] != '\0')
+            level = device->shift ? 3 : 2;
+        else if (letter)
+            level = (device->shift != device->caps_lock) ? 1 : 0;
+        else
+            level = device->shift ? 1 : 0;
+        if (levels[level][0] == '\0')
+            return 0;
+        snprintf(out, capacity, "%s", levels[level]);
+        return (int)strlen(out);
+    }
+    if (code == KEY_SPACE) {
+        out[0] = ' ';
+        out[1] = '\0';
+        return 1;
+    }
     if (code < BLIT_KEY_TABLE_FIRST || code > BLIT_KEY_TABLE_LAST)
-        return '\0';
-    plain = evdev_us_unshifted[code - BLIT_KEY_TABLE_FIRST];
-    shifted = evdev_us_shifted[code - BLIT_KEY_TABLE_FIRST];
-    if (plain == '\0')
-        return '\0';
-    letter = plain >= 'a' && plain <= 'z';
-    if (letter)
-        return (runtime->evdev_shift != runtime->evdev_caps_lock) ? shifted :
-            plain;
-    return runtime->evdev_shift ? shifted : plain;
+        return 0;
+    plain_byte = evdev_us_unshifted[code - BLIT_KEY_TABLE_FIRST];
+    shifted_byte = evdev_us_shifted[code - BLIT_KEY_TABLE_FIRST];
+    if (plain_byte == '\0')
+        return 0;
+    letter = plain_byte >= 'a' && plain_byte <= 'z';
+    out[0] = letter ? ((device->shift != device->caps_lock) ? shifted_byte :
+                       plain_byte) :
+        (device->shift ? shifted_byte : plain_byte);
+    out[1] = '\0';
+    return 1;
 }
 
 /* Returns 1 when the key was written to a session PTY and 0 when it was
@@ -17263,15 +17580,17 @@ static char evdev_key_character(const BlitRuntime *runtime,
 static int send_evdev_key(BlitRuntime *runtime, unsigned short code)
 {
     BlitSession *session = keyboard_target(runtime);
+    BlitInputDevice *keyboard = keyboard_state(runtime);
     char sequence[32];
     int length = 0;
-    int modifier = evdev_modifier_parameter(runtime);
+    int modifier = evdev_modifier_parameter(keyboard);
     int control_byte = 0;
     /* A key xterm spells as a control sequence: `final` is its last
        character, `number` the parameter of the CSI n ~ forms, and `ss3` marks
        the ones that use SS3 rather than CSI when unmodified. */
     char final = '\0';
-    char character;
+    char character[8];
+    int character_length;
     int number = 0;
     int ss3 = 0;
     if (session == NULL || session->pty_fd < 0) return 0;
@@ -17283,24 +17602,28 @@ static int send_evdev_key(BlitRuntime *runtime, unsigned short code)
        with terminal history. The caller broadcasts the stream event after
        this returns, so the key is not lost. */
     if (session_surface_is_owner_authored(session)) return 0;
-    if (runtime->evdev_ctrl && evdev_control_byte(code, &control_byte)) {
+    character_length = evdev_key_character(keyboard, code, character,
+                                           sizeof(character));
+    if (keyboard->ctrl && evdev_control_byte(code, &control_byte)) {
         sequence[0] = (char)control_byte;
         length = 1;
-    } else if (runtime->evdev_ctrl &&
-               (character = evdev_key_character(runtime, code)) != '\0' &&
-               ((character | 0x20) >= 'a' && (character | 0x20) <= 'z')) {
+    } else if (keyboard->ctrl && character_length == 1 &&
+               ((character[0] | 0x20) >= 'a' &&
+                (character[0] | 0x20) <= 'z')) {
         /* Control plus a letter is that letter's control byte, taken from the
-           character the key actually types rather than from its code. */
-        sequence[0] = (char)((character | 0x20) - 'a' + 1);
+           character the key actually types rather than from its code -- so it
+           follows the keyboard's own layout. */
+        sequence[0] = (char)((character[0] | 0x20) - 'a' + 1);
         length = 1;
-    } else if ((character = evdev_key_character(runtime, code)) != '\0') {
-        sequence[0] = character;
-        length = 1;
+    } else if (character_length > 0) {
+        /* A keymap level is UTF-8 and may be more than one byte. */
+        memcpy(sequence, character, (size_t)character_length);
+        length = character_length;
     } else if ((code == KEY_KP0 || code == KEY_KP1 || code == KEY_KP2 ||
                 code == KEY_KP3 || code == KEY_KP4 || code == KEY_KP5 ||
                 code == KEY_KP6 || code == KEY_KP7 || code == KEY_KP8 ||
                 code == KEY_KP9 || code == KEY_KPDOT) &&
-               !runtime->evdev_num_lock) {
+               !keyboard->num_lock) {
         /* With NumLock off the keypad is a cursor and editing block, which is
            what the keycaps say and what it did on a VT. */
         switch (code) {
@@ -17354,7 +17677,7 @@ static int send_evdev_key(BlitRuntime *runtime, unsigned short code)
     } else if (code == KEY_TAB) {
         /* Shift+Tab is a back-tab, which has its own sequence rather than
            being a tab with a modifier parameter. */
-        if (runtime->evdev_shift)
+        if (keyboard->shift)
             final = 'Z';
         else {
             sequence[0] = '\t';
@@ -17373,7 +17696,7 @@ static int send_evdev_key(BlitRuntime *runtime, unsigned short code)
     } else if (code == KEY_102ND) {
         /* The extra key next to left Shift on an ISO board. A US map has no
            third level for it, so it carries the backslash pair. */
-        sequence[0] = runtime->evdev_shift ? '|' : '\\';
+        sequence[0] = keyboard->shift ? '|' : '\\';
         length = 1;
     } else if (code == KEY_KPCOMMA || code == KEY_KPEQUAL ||
                code == KEY_KPLEFTPAREN || code == KEY_KPRIGHTPAREN) {
@@ -17437,7 +17760,7 @@ static int send_evdev_key(BlitRuntime *runtime, unsigned short code)
            sequence already carries Alt in its modifier parameter, and
            prefixing it as well produced an ESC followed by an unmodified
            key -- which is how Alt+Left arrived as a bare Left. */
-        if (runtime->evdev_alt && final == '\0' && sequence[0] != 0x1b &&
+        if (keyboard->alt && final == '\0' && sequence[0] != 0x1b &&
             length < (int)sizeof(sequence) - 1) {
             memmove(sequence + 1, sequence, (size_t)length);
             sequence[0] = 0x1b;
@@ -17460,29 +17783,35 @@ static void dispatch_evdev_key_event(BlitRuntime *runtime,
                                      const char *device_id)
 {
     int modifier_only = 0;
+    /* The keyboard this event came from: its held set, its locks and its
+       layout. The source is set for every keyboard drain and every keyed
+       injection, so the fallback is reached only when the device table is
+       full. */
+    BlitInputDevice *keyboard = keyboard_state(runtime);
 
     if (event->type != EV_KEY)
         return;
     /* Autorepeat does not change what is held. */
     if (event->value != 2)
-        evdev_key_set_held(runtime, event->code, event->value != 0);
+        evdev_key_set_held(keyboard, event->code, event->value != 0);
     switch (event->code) {
     case KEY_LEFTSHIFT: case KEY_RIGHTSHIFT:
     case KEY_LEFTCTRL: case KEY_RIGHTCTRL:
     case KEY_LEFTALT: case KEY_RIGHTALT:
     case KEY_LEFTMETA: case KEY_RIGHTMETA:
-        evdev_refresh_modifiers(runtime);
+        evdev_refresh_modifiers(keyboard);
         modifier_only = 1;
         break;
     case KEY_CAPSLOCK:
-        /* A lock toggles on press and is not a held modifier. */
+        /* A lock toggles on press and is not a held modifier. It is this
+           keyboard's lock: the LED is on this keyboard. */
         if (event->value == 1)
-            runtime->evdev_caps_lock = !runtime->evdev_caps_lock;
+            keyboard->caps_lock = !keyboard->caps_lock;
         modifier_only = 1;
         break;
     case KEY_NUMLOCK:
         if (event->value == 1)
-            runtime->evdev_num_lock = !runtime->evdev_num_lock;
+            keyboard->num_lock = !keyboard->num_lock;
         modifier_only = 1;
         break;
     default:
@@ -17493,8 +17822,7 @@ static void dispatch_evdev_key_event(BlitRuntime *runtime,
         snprintf(detail, sizeof(detail),
                  "code=%u value=%d shift=%d ctrl=%d alt=%d device=%s",
                  (unsigned int)event->code, event->value,
-                 runtime->evdev_shift, runtime->evdev_ctrl,
-                 runtime->evdev_alt,
+                 keyboard->shift, keyboard->ctrl, keyboard->alt,
                  device_id != NULL ? device_id : "evdev-keyboard");
         diagnostic_trace(runtime, "keyboard_key", detail);
         if (getenv("BLIT_TRACE_KEYS") != NULL)
@@ -17528,9 +17856,9 @@ static void dispatch_evdev_key_event(BlitRuntime *runtime,
                  (unsigned long long)monotonic_us(),
                  (unsigned int)event->code, event->value != 0 ? "true" : "false",
                  event->value == 2 ? "true" : "false",
-                 runtime->evdev_shift ? "true" : "false",
-                 runtime->evdev_ctrl ? "true" : "false",
-                 runtime->evdev_alt ? "true" : "false");
+                 keyboard->shift ? "true" : "false",
+                 keyboard->ctrl ? "true" : "false",
+                 keyboard->alt ? "true" : "false");
         broadcast_stream(runtime, input_event, BLIT_STREAM_INPUT);
     }
 }
@@ -18316,10 +18644,13 @@ int main(int argc, char **argv)
     blit_font_load(&runtime.font);
     blit_font_load_wide(&runtime.wide_font);
     runtime.font_scale = 1;
-    /* With no keyboard to ask, assume the keypad types digits, which is what
-       it did before NumLock was honoured at all. EVIOCGLED corrects this from
-       the device's own LED as soon as one is opened. */
-    runtime.evdev_num_lock = 1;
+    /* With no keyboard to ask, assume every keypad types digits, which is
+       what it did before NumLock was honoured at all. EVIOCGLED corrects a
+       real keyboard from its own LED as soon as one is opened, and a device
+       discovered later inherits this default until it does. */
+    default_keyboard_state.used = 1;
+    default_keyboard_state.enabled = 1;
+    default_keyboard_state.num_lock = 1;
     runtime.render_interval_ms = 16;
     {
         const char *font_scale = getenv("BLIT_FONT_SCALE");

@@ -695,6 +695,18 @@ paths:
                       minimum: 10
                       maximum: 1000
                     natural_scroll: {type: boolean}
+                    keymap:
+                      type: object
+                      properties:
+                        base: {type: string, enum: [us]}
+                        keys:
+                          type: object
+                          additionalProperties:
+                            type: array
+                            minItems: 4
+                            maxItems: 4
+                            items: {type: string, maxLength: 4}
+                      additionalProperties: false
                     route:
                       type: object
                       description: >-
@@ -1930,6 +1942,60 @@ components:
               description: >-
                 Pointer devices only. Inverts the wheel direction this device
                 reports.
+            keymap:
+              type: object
+              description: >-
+                How this keyboard's keys translate to characters: a **sparse
+                override** on a built-in table, by evdev code, with four
+                levels. It is per device, so two keyboards on one server can
+                carry different layouts.
+                Sparse rather than complete because a request is bounded and a
+                complete table does not fit -- and a parser that accepted the
+                prefix of one that did not fit would hand a controller a
+                keyboard it believed it had configured. The whole of a layout
+                difference is a few dozen keys.
+                An item reports the base and which codes are overridden, not
+                the levels: a full table would dominate the item, and the
+                controller already holds the layout it sent.
+                Not gated on the keyboard kind, unlike the pointer properties:
+                a keymap translates key events, and `POST /v1/input/inject`
+                delivers a key through any device id, so there is no device for
+                which one provably cannot apply. A device that never delivers a
+                key simply never uses it.
+                Dead keys and compose sequences are **not** expressible: those
+                need a stateful translator, which is a different feature.
+              properties:
+                base:
+                  type: string
+                  enum: [us]
+                  description: >-
+                    The built-in table the overrides sit on. There is one; it
+                    is named so that adding a second does not change the shape.
+                keys:
+                  type: object
+                  description: >-
+                    Evdev code, as a decimal string, to the four levels:
+                    plain, shift, altgr, shift+altgr. Each level is a UTF-8
+                    string of at most one character, or `""` for a level this
+                    key does not define -- in which case AltGr falls back to
+                    the unmodified level, which is what AltGr does on a US
+                    keyboard where it selects nothing. CapsLock inverts Shift
+                    when the plain level is a single lower-case letter, and
+                    only then. At most 128 codes; more is a 400.
+                  additionalProperties:
+                    type: array
+                    minItems: 4
+                    maxItems: 4
+                    items: {type: string, maxLength: 4}
+                override_count:
+                  type: integer
+                  minimum: 0
+                  description: Read-only. How many codes this keymap overrides.
+                codes:
+                  type: array
+                  description: Read-only. The codes this keymap overrides.
+                  items: {type: integer, minimum: 1}
+              additionalProperties: false
             route:
               type: object
               description: >-

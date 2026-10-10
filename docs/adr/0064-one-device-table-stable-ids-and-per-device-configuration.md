@@ -185,6 +185,50 @@ resolution may run while the field holds a device from a previous drain, which
 is why it is also set and cleared around the `POST /v1/input/inject` body,
 including on every refusal path inside it.
 
+**A keyboard's layout and its modifier state are its own.** Both were one
+global set. The layout being global made every keyboard US, which is issue
+#35; the modifier state being global meant Shift held on a keyboard routed to
+one session modified another keyboard's keys on their way to a different
+session — a defect that existed before routing and that routing made
+reachable.
+
+`configuration.keymap` is a **sparse override** on a built-in table, by evdev
+code, with four levels: plain, shift, altgr, shift+altgr. Sparse because a
+request is bounded at `BLIT_REQUEST_SIZE` and a complete table does not fit —
+and a parser that accepted the prefix of one that did not fit would hand a
+controller a keyboard it believed it had configured; the whole of a layout
+difference is a few dozen keys. An empty level means "not defined here", so
+AltGr on a key with no third level falls back to the unmodified one, which is
+what AltGr does on a US keyboard where it selects nothing; the built-in table
+has no third level at all and behaves the same way, so there is one rule
+rather than one per table. The override is the only way to reach the third
+level, which is what makes `evdev_altgr` — tracked since 0.1.42x and doing
+nothing — finally mean something.
+
+There is deliberately **no named-keymap resource**. A `PUT /v1/input/keymaps/
+{name}` collection would be a second resource with its own identity,
+lifecycle and persistence question, and the per-device object already fits the
+request bound. Configuration is controller-persisted (above), so holding the
+layout is the control panel's job; two keyboards wanting one layout is two
+PATCHes.
+
+Not decided here, and named so it is not mistaken for an oversight: reading
+the **kernel console keymap** through `KDGKBENT` on `/dev/tty0` would give
+every layout the operator has configured with `loadkeys`, with no new
+dependency, at the cost of decoding the `K_*` types. It is deferred because
+there is no tty in the environment the gates run in, so it could only be
+exercised on the live host — and a host-only path is exactly what let a gate
+spend seven releases testing a stale binary (#59). **Dead keys and compose
+sequences are out of scope**: a table of characters cannot express them, and a
+stateful translator is a different feature.
+
+Modifier state moved into the device with the layout, except for one thing:
+the modifiers a **mouse report** carries are OR'd across every present
+keyboard. Per-device state is right for a key, because a key belongs to the
+keyboard that produced it; it is wrong for a click, because there is one
+cursor, so a shift-click means "shift held anywhere" — which is what it meant
+when the state was global.
+
 Two things routing does **not** change, stated because a control-panel author
 would otherwise assume otherwise:
 
@@ -197,11 +241,11 @@ would otherwise assume otherwise:
   reports its target's buttons with the geometry of wherever the cursor
   happens to be. Also pre-existing, also stated rather than changed: changing
   it would change the aggregate routes' meaning too.
-- **Modifier state is global across keyboards.** Shift held on a keyboard
-  routed to session 1 modifies another keyboard's keys on their way to
-  session 2. This predates routing — `evdev_shift` and `evdev_key_held` are
-  one set for all keyboards — and routing only makes it observable. Fixing it
-  belongs with the keymap work (#35), not here.
+- **Modifier state was global across keyboards.** Shift held on a keyboard
+  routed to session 1 modified another keyboard's keys on their way to
+  session 2. It predated routing — `evdev_shift` and `evdev_key_held` were one
+  set for all keyboards — and routing only made it observable. Fixed in stage
+  4, above.
 
 **Collection revisions become real.** `input_devices_revision` increments on
 every discovery, loss and accepted PATCH, and the change is announced on
@@ -307,7 +351,8 @@ reasons, either sufficient.
 2. **Input configuration.** `PATCH /v1/input/devices/{id}`: `enabled`,
    pointer `sensitivity_percent` and `natural_scroll`. *Done, 0.1.434.*
 3. **Per-device routing.** `configuration.route`. *Done, 0.1.435.*
-4. **Keyboard layout** (#35). A keymap that is not hard-coded US.
+4. **Keyboard layout and per-keyboard modifier state** (#35).
+   *Done, 0.1.441.*
 5. **Audio.** Real per-PCM capabilities, device items, default selection.
    *Done, 0.1.437.*
 6. **Displays.** Item endpoint and the envelope; no writable property.
@@ -373,6 +418,19 @@ reasons, either sufficient.
   agreeing with the collection, that `configuration` is empty and a PATCH is
   refused rather than quietly accepted, and that the reported bounds are the
   bounds. Teeth: the pre-change item shape fails the envelope.
+
+- `tools/tests/key_encoding_gate.rb` — stage 4, on top of its 119 encoding
+  cases. Two fabricated keyboards: a QWERTZ override on one (Z and Y
+  exchanged, ß where the hyphen is, AltGr and shift+AltGr on Q) types its
+  layout, while the same codes on the other keyboard type US — which is the
+  assertion that a layout belongs to a device and not to the server. AltGr on
+  a key with no third level falls back to the unmodified one. Shift held on
+  one keyboard does not modify the other's key, and does modify its own;
+  CapsLock likewise. Teeth: with the translator reading one global state, the
+  layout assertions fail and AltGr types the plain character; with the held
+  set pooled across devices but the layout per device, the cross-keyboard
+  Shift and CapsLock assertions fail and nothing else does — the two halves of
+  the stage are caught separately.
 
   **Not gated locally, and not claimed to be:** that disabling a device stops
   it being polled, and that `sensitivity_percent` scales motion. Both need a

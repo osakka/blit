@@ -20,8 +20,10 @@
 # return move the cursor and leave no cell -- are not listed; 'a' covers the
 # unmodified-literal path.
 
+require 'fileutils'
 require 'json'
 require 'net/http'
+require 'tmpdir'
 require 'timeout'
 require 'uri'
 require_relative 'gate_port'
@@ -50,6 +52,7 @@ abort("key-encoding gate: missing #{BINARY}") unless File.executable?(BINARY)
 def request(method, path, body = nil)
   uri = BASE + path
   klass = { 'GET' => Net::HTTP::Get, 'POST' => Net::HTTP::Post,
+            'PATCH' => Net::HTTP::Patch,
             'DELETE' => Net::HTTP::Delete }.fetch(method)
   req = klass.new(uri)
   if body
@@ -68,20 +71,26 @@ def json(method, path, body = nil)
   JSON.parse(response.body)
 end
 
-def key(code, value)
-  response = request('POST', '/v1/input/inject',
-                     'kind' => 'key', 'code' => code, 'value' => value)
+def key(code, value, device = nil)
+  event = { 'kind' => 'key', 'code' => code, 'value' => value }
+  event['device_id'] = device if device
+  response = request('POST', '/v1/input/inject', event)
   abort("key-encoding gate: key inject refused: #{response.body}") unless
     response.code.start_with?('2')
 end
 
 # Press `code` with the named modifiers held, and return what the session saw.
-def press(surface_id, code, modifiers = [])
+# `device` attributes every event to one keyboard; `modifier_device` lets the
+# modifiers come from a *different* keyboard, which is how per-device modifier
+# state is tested.
+def press(surface_id, code, modifiers = [], device: nil,
+          modifier_device: nil)
   before = echoed(surface_id)
-  modifiers.each { |name| key(KEY.fetch(name), 1) }
-  key(code, 1)
-  key(code, 0)
-  modifiers.reverse_each { |name| key(KEY.fetch(name), 0) }
+  modifier_device ||= device
+  modifiers.each { |name| key(KEY.fetch(name), 1, modifier_device) }
+  key(code, 1, device)
+  key(code, 0, device)
+  modifiers.reverse_each { |name| key(KEY.fetch(name), 0, modifier_device) }
   Timeout.timeout(5) do
     loop do
       text = echoed(surface_id)
@@ -100,7 +109,17 @@ def echoed(surface_id)
       .map { |c| c.fetch('text', ' ') }.join.rstrip
 end
 
+# Two fabricated input devices, so an injected key can be attributed to one
+# keyboard or the other. ADR 0064 stage 4 made the layout and the modifier
+# state per keyboard; without two devices to address, neither can be tested.
+INPUT_ROOT = Dir.mktmpdir('blit-keys')
+%w[event0 event1].each { |node| File.write(File.join(INPUT_ROOT, node), '') }
+DEVICE_A = 'input-node-event0'
+DEVICE_B = 'input-node-event1'
+at_exit { FileUtils.remove_entry(INPUT_ROOT) rescue nil }
+
 server = spawn({ 'SDL_VIDEODRIVER' => 'dummy', 'BLIT_PSF_FONT' => FONT,
+                 'BLIT_INPUT_ROOT' => INPUT_ROOT,
                  'LD_LIBRARY_PATH' => File.join(ROOT, 'build/sdl3-kms') },
                BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')
 at_exit do
@@ -247,6 +266,93 @@ failures << "keypad 8 with numlock off was not Up: #{cursor.inspect}" unless
 failures << "keypad . with numlock off was not Delete: #{delete.inspect}" unless
   delete == '^[[3~'
 
+# ADR 0064 stage 4. A keyboard's layout is its own.
+#
+# The fixture is the QWERTZ swap plus the key that carries a third level,
+# because those are the two things a US-only translator cannot express: Z and
+# Y exchanged, ß where the hyphen is, and AltGr on Q.
+QWERTZ = {
+  'base' => 'us',
+  'keys' => {
+    '21' => %w[z Z] + ['', ''],     # the Y key types z
+    '44' => %w[y Y] + ['', ''],     # the Z key types y
+    '12' => ['ß', '?', '\\', ''],   # where US has the hyphen
+    '16' => ['q', 'Q', '@', 'Ω']    # AltGr and shift+AltGr levels
+  }
+}.freeze
+
+def patch_device(device, configuration)
+  response = request('PATCH', "/v1/input/devices/#{device}",
+                     'configuration' => configuration)
+  abort("key-encoding gate: PATCH #{device} -> #{response.code} " \
+        "#{response.body}") unless response.code == '200'
+  JSON.parse(response.body)
+end
+
+patched = patch_device(DEVICE_A, 'keymap' => QWERTZ)
+failures << "the keymap was not recorded: #{patched['configuration'].inspect}" unless
+  patched.dig('configuration', 'keymap', 'override_count') == 4
+
+# Through the keyboard that carries the layout.
+[[KEY_Y_POSITION = 21, [], 'z'],
+ [21, %w[leftshift], 'Z'],
+ [44, [], 'y'],
+ [12, [], 'ß'],
+ [12, %w[leftshift], '?'],
+ [16, [], 'q'],
+ [16, %w[rightalt], '@'],
+ [16, %w[rightalt leftshift], 'Ω']].each do |code, modifiers, expected|
+  got = press(surface, code, modifiers, device: DEVICE_A)
+  next if got == expected
+
+  failures << "code #{code}#{modifiers.empty? ? '' : '+' + modifiers.join('+')} " \
+              "on the keyboard with the layout: expected #{expected.inspect}, " \
+              "got #{got.inspect}"
+end
+
+# The other keyboard has no layout, so the same codes are US. This is the
+# assertion that the layout belongs to a device and not to the server.
+[[21, 'y'], [44, 'z'], [12, '-']].each do |code, expected|
+  got = press(surface, code, [], device: DEVICE_B)
+  next if got == expected
+
+  failures << "code #{code} on the keyboard without the layout: expected " \
+              "#{expected.inspect}, got #{got.inspect} -- a keymap set on one " \
+              'device reached another'
+end
+
+# AltGr on a key with no third level falls back to the unmodified one, which
+# is what AltGr does on a US keyboard where it selects nothing.
+altgr_without_level = press(surface, 44, %w[rightalt], device: DEVICE_A)
+failures << 'altgr on a key with no third level did not fall back to the ' \
+            "unmodified one: #{altgr_without_level.inspect}" unless
+  altgr_without_level == 'y'
+
+# ADR 0064 stage 4. Modifier state is a keyboard's own.
+#
+# Shift held on one keyboard must not modify another keyboard's keys. This was
+# one global set, so it did -- invisible until per-device routing made two
+# keyboards able to feed two different sessions.
+cross = press(surface, KEY['a'], %w[leftshift], device: DEVICE_B,
+              modifier_device: DEVICE_A)
+failures << 'shift held on one keyboard modified another keyboard\'s key: ' \
+            "expected \"a\", got #{cross.inspect}" unless cross == 'a'
+same = press(surface, KEY['a'], %w[leftshift], device: DEVICE_B)
+failures << 'shift on the same keyboard did not modify its own key: ' \
+            "#{same.inspect}" unless same == 'A'
+
+# A lock is a keyboard's own too: the LED is on that keyboard.
+key(KEY['capslock'], 1, DEVICE_A)
+key(KEY['capslock'], 0, DEVICE_A)
+locked_a = press(surface, KEY['a'], [], device: DEVICE_A)
+unlocked_b = press(surface, KEY['a'], [], device: DEVICE_B)
+key(KEY['capslock'], 1, DEVICE_A)
+key(KEY['capslock'], 0, DEVICE_A)
+failures << "capslock on one keyboard did not upper-case its own letter: " \
+            "#{locked_a.inspect}" unless locked_a == 'A'
+failures << 'capslock on one keyboard upper-cased another keyboard\'s ' \
+            "letter: #{unlocked_b.inspect}" unless unlocked_b == 'a'
+
 # A modifier press on its own produces no bytes, so it is not a key for the
 # delivered/undelivered counters ADR 0057 relies on.
 def key_counters
@@ -274,5 +380,5 @@ unless failures.empty?
   exit 1
 end
 
-puts "KEY_ENCODING_PASS cases=#{cases.length} both_shifts=held_set " \
+puts "KEY_ENCODING_PASS cases=#{cases.length} keymap=per_device modifiers=per_device both_shifts=held_set " \
      'capslock=toggles numlock=selects_keypad modifier_only_uncounted=yes'
