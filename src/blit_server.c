@@ -3428,6 +3428,22 @@ static BlitInputDevice *keyboard_state(BlitRuntime *runtime)
         &default_keyboard_state;
 }
 
+/* Whether a property or an event of `kind` applies to this device.
+ *
+ * One rule for both the PATCH and the injection, because they reached
+ * different answers: `keymap` was accepted on any device on the grounds that
+ * POST /v1/input/inject delivers a key through any device id, while
+ * sensitivity_percent was refused on a non-pointer -- and a pointer_relative
+ * injection through a keyboard then used a sensitivity the API would not let
+ * anyone set. So: a device of no known kind accepts anything, because Blit
+ * has made no claim about what it is; a device of a known kind refuses what
+ * contradicts its kinds. A controller can set exactly what it can see, and
+ * an injection can deliver exactly what the device could have delivered. */
+static int input_device_supports(const BlitInputDevice *device, unsigned kind)
+{
+    return device->kinds == 0 || (device->kinds & kind) != 0;
+}
+
 /* True when a controller has changed something about this device. An absent
    device that carries configuration is kept in the table rather than
    retired: a stable id is worthless if what is attached to it evaporates
@@ -3612,11 +3628,11 @@ static size_t input_device_item_json(const BlitRuntime *runtime,
     complete &= json_appendf(body, capacity, &used,
         "},\"configuration\":{\"enabled\":%s",
         device->enabled ? "true" : "false");
-    /* Pointer settings are reported only for a device read as a pointer, and
-       refused on anything else. A control panel that offers a scroll-
-       direction toggle for a keyboard is offering a setting that cannot do
-       anything. */
-    if (device->kinds & BLIT_INPUT_KIND_POINTER)
+    /* Reported wherever they can be set, which is the same rule
+       input_device_supports applies to the PATCH: a control panel sees
+       exactly the properties it may write. A keyboard does not get a
+       scroll-direction toggle it cannot use. */
+    if (input_device_supports(device, BLIT_INPUT_KIND_POINTER))
         complete &= json_appendf(body, capacity, &used,
             ",\"sensitivity_percent\":%d,\"natural_scroll\":%s",
             device->sensitivity_percent,
@@ -12997,6 +13013,22 @@ static void handle_request(int fd, BlitRuntime *runtime,
                device that is not the one delivering this event. */
             runtime->input_source = inject_device;
         }
+        /* An injection may deliver only what the named device could have
+           delivered, by the same rule the PATCH applies. Without this a
+           pointer_relative through a keyboard was scaled by a sensitivity no
+           one could set, and a key through a mouse was translated by a keymap
+           no one could set either. */
+        if (inject_device != NULL) {
+            unsigned wanted = strcmp(kind, "key") == 0 ?
+                BLIT_INPUT_KIND_KEYBOARD : BLIT_INPUT_KIND_POINTER;
+            if (!input_device_supports(inject_device, wanted)) {
+                send_problem(fd, 422, "Unprocessable Entity",
+                             "device_kind_mismatch",
+                             "The named device is not read as a source of this kind of event.");
+                runtime->input_source = NULL;
+                return;
+            }
+        }
         if (strcmp(kind, "pointer_motion") == 0) {
             if (!json_int(payload, "x", &x) || !json_int(payload, "y", &y)) {
                 send_problem(fd, 400, "Bad Request", "invalid_input_event",
@@ -13284,10 +13316,10 @@ static void handle_request(int fd, BlitRuntime *runtime,
             return;
         }
         if ((sensitivity_requested || natural_scroll_requested) &&
-            (device->kinds & BLIT_INPUT_KIND_POINTER) == 0) {
+            !input_device_supports(device, BLIT_INPUT_KIND_POINTER)) {
             send_problem(fd, 422, "Unprocessable Entity",
                          "device_property_not_applicable",
-                         "sensitivity_percent and natural_scroll apply to a device read as a pointer.");
+                         "sensitivity_percent and natural_scroll apply to a device Blit reads as a pointer, or to one of no known kind.");
             return;
         }
         route_cursor = json_key_cursor(configuration, "route");
@@ -13358,14 +13390,12 @@ static void handle_request(int fd, BlitRuntime *runtime,
         if (keymap_cursor != NULL) {
             const char *keymap_rejected;
             const char *reason = NULL;
-            /* Not gated on the keyboard kind, unlike the pointer
-               properties. A keymap translates key events, and
-               POST /v1/input/inject delivers a key through any device id, so
-               there is no device for which one provably cannot apply. A
-               device that never delivers a key simply never uses it. The
-               pointer properties are different: they scale pointer motion,
-               which is reported only for a pointer, so a controller is never
-               offered them where they would do nothing. */
+            if (!input_device_supports(device, BLIT_INPUT_KIND_KEYBOARD)) {
+                send_problem(fd, 422, "Unprocessable Entity",
+                             "device_property_not_applicable",
+                             "keymap applies to a device Blit reads as a keyboard, or to one of no known kind.");
+                return;
+            }
             if (!json_object_slice(keymap_cursor, keymap, sizeof(keymap))) {
                 send_problem(fd, 400, "Bad Request", "invalid_device_keymap",
                              "keymap must be a JSON object with base and keys.");

@@ -174,6 +174,16 @@ without that a device could be routed and un-enabled but never un-routed.
 `configuration.enabled: false` releases the device's file descriptors
 entirely.
 
+**One rule decides where a property applies.** A device of no known kind — one
+Blit probed and reads under no kind at all — accepts any property and any
+injected event, because Blit has made no claim about what it is. A device of a
+known kind refuses what contradicts its kinds, with a 422. The same rule
+governs `POST /v1/input/inject`, so an injection can deliver only what that
+device could have delivered. Before this there were two rules: `keymap` was
+accepted anywhere while `sensitivity_percent` was refused on a non-pointer —
+and a `pointer_relative` injection through a keyboard was then scaled by a
+sensitivity no one could set. A controller can set exactly what it can see.
+
 The decision is carried by `runtime->input_source`, a field set at the top of
 each `service_evdev_*` drain and cleared at the bottom, rather than by
 threading a device through `keyboard_target` and the seven
@@ -431,6 +441,14 @@ reasons, either sufficient.
   set pooled across devices but the layout per device, the cross-keyboard
   Shift and CapsLock assertions fail and nothing else does — the two halves of
   the stage are caught separately.
+
+- **Unexercised, and recorded rather than implied:** the full-table fallback,
+  `default_keyboard_state`, which a key uses when its device has no table
+  entry. Reaching it needs 33 devices under `BLIT_INPUT_ROOT` and nothing
+  does. Audio's `state.accessible` is likewise always true, here and on the
+  host, because Blit runs as root and the fixture's nodes are ordinary files;
+  the field exists so a device Blit cannot open reads as a permission problem
+  rather than as a missing device, and that case has never been produced.
 
   **Not gated locally, and not claimed to be:** that disabling a device stops
   it being polled, and that `sensitivity_percent` scales motion. Both need a

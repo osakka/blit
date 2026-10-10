@@ -324,9 +324,15 @@ end
 # AltGr on a key with no third level falls back to the unmodified one, which
 # is what AltGr does on a US keyboard where it selects nothing.
 altgr_without_level = press(surface, 44, %w[rightalt], device: DEVICE_A)
-failures << 'altgr on a key with no third level did not fall back to the ' \
-            "unmodified one: #{altgr_without_level.inspect}" unless
-  altgr_without_level == 'y'
+# The choice this pins: AltGr on a key with no third level types the
+# unmodified character, which is US-keyboard behaviour where AltGr selects
+# nothing -- not X11's, where it types nothing at all. Both are defensible;
+# this is the one Blit made, and the built-in table behaves the same way
+# because it has no third level either, so there is one rule.
+failures << 'altgr on a key with no third level must fall back to the ' \
+            'unmodified character (US behaviour, where AltGr selects ' \
+            "nothing; not X11's, where it types nothing): " \
+            "#{altgr_without_level.inspect}" unless altgr_without_level == 'y'
 
 # ADR 0064 stage 4. Modifier state is a keyboard's own.
 #

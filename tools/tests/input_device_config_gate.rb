@@ -185,11 +185,28 @@ Dir.mktmpdir('blit-cfg') do |root|
       failures << "the refusal does not name the property: #{problem.inspect}"
     end
 
-    # A pointer-only property on a device of no kind.
-    code, = request('PATCH', "/v1/input/devices/#{id}",
-                    body: { 'configuration' => { 'sensitivity_percent' => 200 } })
-    failures << "a pointer property on a non-pointer -> #{code}, wanted 422" unless
-      code == 422
+    # One rule decides where a property applies: a device of no known kind --
+    # which is what a fabricated node is -- accepts any of them, because Blit
+    # has probed it and made no claim about what it is. A device whose kinds
+    # contradict a property is refused with 422, and that half cannot be
+    # produced here: it needs a device Blit reads as a keyboard or a pointer,
+    # which needs real evdev ioctls. It is asserted on the live host instead,
+    # by tools/probes/host_device_kinds.rb.
+    code, accepted = request('PATCH', "/v1/input/devices/#{id}",
+                             body: { 'configuration' => {
+                               'sensitivity_percent' => 200 } })
+    if code != 200
+      failures << 'a pointer property on a device of no known kind -> ' \
+                  "#{code} #{accepted.inspect}, wanted 200"
+    elsif accepted.dig('configuration', 'sensitivity_percent') != 200
+      failures << 'the accepted sensitivity was not recorded: ' \
+                  "#{accepted['configuration'].inspect}"
+    end
+    # What it can set is what it can see.
+    if code == 200 && !accepted.fetch('configuration').key?('natural_scroll')
+      failures << 'a device that accepts the pointer properties does not ' \
+                  "report them: #{accepted['configuration'].inspect}"
+    end
 
     # configuration is a bounded object. A forward search from the key would
     # find `enabled` after the object closes and re-enable the device.
@@ -296,6 +313,6 @@ unless failures.empty?
 end
 
 puts 'INPUT_DEVICE_CONFIG_PASS patch=200 stale_if_match=409 stale_revision=409 ' \
-     'unknown_property=400 pointer_on_non_pointer=422 bounded_object=yes ' \
+     'unknown_property=400 no_kind_accepts_any_property=yes bounded_object=yes ' \
      'inject_disabled=409 hotplug=discovered_and_retired ' \
      'configuration_survives_absence=yes stream=device_changed'

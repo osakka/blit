@@ -1931,11 +1931,17 @@ components:
               maximum: 1000
               default: 100
               description: >-
-                Pointer devices only; reported only when kinds includes
-                pointer and refused with 422 on anything else. Scales relative
-                motion from this device. It applies to the evdev path and to
-                pointer_relative injection; SDL's own mouse events do not pass
-                through it.
+                Scales relative motion from this device. Applies to the evdev
+                path and to `pointer_relative` injection; SDL's own mouse
+                events do not pass through it.
+                Reported, and writable, for a device Blit reads as a pointer
+                and for one of no known kind -- a device it probed and reads
+                under no kind at all, about which it has made no claim.
+                Refused with 422 on a device whose kinds contradict it, by the
+                same rule that governs `keymap` and that `POST
+                /v1/input/inject` applies to a `device_id`: a controller can
+                set exactly what it can see, and an injection can deliver
+                exactly what the device could have delivered.
             natural_scroll:
               type: boolean
               default: false
@@ -1957,11 +1963,9 @@ components:
                 An item reports the base and which codes are overridden, not
                 the levels: a full table would dominate the item, and the
                 controller already holds the layout it sent.
-                Not gated on the keyboard kind, unlike the pointer properties:
-                a keymap translates key events, and `POST /v1/input/inject`
-                delivers a key through any device id, so there is no device for
-                which one provably cannot apply. A device that never delivers a
-                key simply never uses it.
+                Writable for a device Blit reads as a keyboard and for one of
+                no known kind; refused with 422 where the kinds contradict it,
+                by the same rule as the pointer properties.
                 Dead keys and compose sequences are **not** expressible: those
                 need a stateful translator, which is a different feature.
               properties:
