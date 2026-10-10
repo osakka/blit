@@ -1,0 +1,137 @@
+release: 0.1.439
+package: blit_0.1.439-1_amd64.deb
+package_sha256: 62be3ac68591a557225bcc7b2d463b1b081a3956b379a6383b2ec6fbe2e9934f
+source_commit: c57c3cd7a37ae17b90a1190ade8e2cb912908138
+package_documentation_commit: c57c3cd7a37ae17b90a1190ade8e2cb912908138
+server_binary_sha256: 8553694158742ebdb120f4a22fdc8a68d5685ce1e769bcdf6c77a54924b2b0dc
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: ed37dff18e0ba8ad638990b28287ab1aeb22ada5fe7345a3eb17a39733598d87
+hibr_root: /tmp/hibr-0.99.100
+hibr_version: 0.99.100
+tcc_build_acceptance: pass
+openapi_yaml: pass
+api_schema_gate: pass_36_paths
+package_artifact_acceptance: pass
+network_auth_acceptance: pass_api_token_injected
+terminal_conformance: pass
+session_lifecycle_acceptance: pass
+session_write_resize_acceptance: pass
+stream_replay_acceptance: pass
+font_api_acceptance: pass
+hibr_font_manifest_acceptance: pass
+glyph_geometry_local_pixel_acceptance: pass
+sdl_glyph_filter_acceptance: pass
+external_pointer_composition: pass
+pointer_damage_atomic_acceptance: pass
+pointer_wallpaper_stress_acceptance: pass
+hidden_cursor_damage_acceptance: pass
+sdl_background_batch_acceptance: pass
+sdl_graphics_cache_acceptance: pass
+sdl_wallpaper_damage_acceptance: pass
+screenshot_overlay_acceptance: pass
+pixel_frame_acceptance: pass
+render_state_agreement_acceptance: pass
+adapter_coalesce_acceptance: pass_idle_frame_zero_requests
+kitty_placement_pixel_acceptance: pass_crop_offset_numbered_and_z_order_by_pixel
+kitty_placement_conformance_acceptance: pass_delete_targets_and_unsupported_key_refusals
+sync_output_acceptance: pass_held_frame_and_hidden_writes_one_and_two_surfaces
+cell_paint_acceptance: pass_cursor_glyph_italic_distinct_session_defaults
+pointer_geometry_acceptance: pass_inset_honoured_and_pane_less_at_corner
+mouse_report_acceptance: pass_wheel_byte_96_hover_gated_per_cell_drops_counted
+key_encoding_acceptance: carried_from_0_1_435
+frame_quiet_starvation_acceptance: pass_longest_stagnant_run_1_was_29
+capture_witness_acceptance: pass_one_source_presented_flag_presented_revision
+motion_trail_acceptance: pass_799_blank_cells_no_unaccounted_pixels
+render_state_agreement_acceptance: pass_30_blue_cells_was_vacuous
+bold_cell_containment_acceptance: pass_8px_drawn_0_spilled
+wide_glyph_acceptance: pass_4_samples_4_distinct_shapes_two_cells_each
+font_identity_acceptance: pass_929_1182_primary_and_49899_16x16_wide
+desktop_repaint_acceptance: pass_pty_authored_0_cells_unpainted_reported_after_window_retires
+gate_port_isolation_acceptance: carried_from_0_1_431
+input_identity_acceptance: carried_from_0_1_433
+input_device_api_acceptance: carried_from_0_1_432
+input_device_config_acceptance: carried_from_0_1_434
+input_device_route_acceptance: carried_from_0_1_436
+audio_device_api_acceptance: pass_three_pcms_formats_rate_list_default_export_hotplug_and_stream
+display_device_api_acceptance: pass_envelope_item_matches_collection_no_writable_property
+main_block_key_table_acceptance: carried_from_0_1_435
+live_input_device_table_acceptance: carried_from_0_1_433
+live_input_device_config_acceptance: carried_from_0_1_434
+live_main_block_key_acceptance: carried_from_0_1_435
+live_device_routing_acceptance: carried_from_0_1_436
+live_audio_device_acceptance: PENDING
+json_escape_acceptance: carried_from_0_1_431
+live_cell_property_refusal_acceptance: carried_from_0_1_431
+live_unpainted_report_acceptance: carried_from_0_1_430
+live_wide_glyph_acceptance: carried_from_0_1_428
+live_render_state_agreement_acceptance: carried_from_0_1_427
+evdev_scan_open_count_acceptance: pass_32_opens_for_32_paths_was_96
+graphics_kitty_zlib_acceptance: pass_pixel_crc32_identical_to_raw
+graphics_xtsmgraphics_acceptance: pass_no_scroll_and_enforced_limits_reported
+terminal_kitty_keyboard_acceptance: pass_cursor_unmoved_query_reports_zero
+hibr_singleton_local_acceptance: pass
+hibr_resume_guard_acceptance: pass
+restart_gate: pass
+shutdown_gate: pass
+update_idle_timeout_acceptance: pass
+update_reset_acceptance: pass
+update_cancel_acceptance: pass
+frame_rate_settled_acceptance: pass
+terminal_soak_120s_acceptance: pass
+screenshot_nonblocking_live_acceptance: not_rerun_candidate
+qemu_hibr_lifecycle_acceptance: not_rerun_candidate
+qemu_four_output_pixel_acceptance: not_rerun_candidate
+qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
+live_deployment: PENDING
+live_current_version: PENDING
+live_block_cursor_acceptance: carried_from_0_1_425
+live_italic_acceptance: carried_from_0_1_425
+live_session_default_acceptance: carried_from_0_1_425
+live_sync_output_acceptance: carried_from_0_1_425
+live_hibr_desktop_acceptance: PENDING
+live_idle_frame_acceptance: carried_from_0_1_425
+live_physical_multi_display: unavailable_one_output
+live_physical_button_trace_contract: open
+physical_evdev_acceptance: open
+physical_multi_monitor_acceptance: open
+physical_high_refresh_acceptance: open
+notes: >-
+  Three gaps in 0.1.437's audio stage, each one the contract claiming
+  something the code did not do.
+
+  scan_audio_devices ran once, at boot. There was no inotify watch and no
+  rescan, so a USB card plugged in after Blit started never appeared and one
+  unplugged reported present forever -- and two of the live host's six cards
+  are USB. The audio inventory now watches its device-node root exactly as the
+  evdev scan watches /dev/input, with its own rescan flag serviced from the
+  same place in the loop. The watch is on the device nodes rather than procfs
+  because inotify does not report changes under /proc, so the trigger is
+  controlC<N> and not the cardN tree.
+
+  Nothing broadcast device_changed for an audio device. BLIT_STREAM_HARDWARE
+  was OR'd into the input broadcast in 0.1.435 for exactly this reason and
+  then nothing used it, so the schema's statement that device_changed reaches
+  events=hardware subscribers was false for the whole audio class.
+  broadcast_device_changed is now generic over the class, and audio announces
+  discovery, absence and retirement.
+
+  The export note. libasound reads ALSA_CARD as a card name or number and
+  ALSA_PCM_CARD/ALSA_PCM_DEVICE as the numbers that override its default PCM,
+  so an application honouring only ALSA_CARD lands on device 0 of the card --
+  which, for a chosen HDMI output other than the first, is not the device that
+  was chosen. All three are exported, and the schema now says what an
+  application that ignores two of them gets rather than implying the choice is
+  enforced.
+
+  The audio gate gains the hotplug case: a card appearing under the scan roots
+  is discovered, the collection revision moves, the card going away retires
+  it, and both are announced on events=hardware. Teeth: without the watch the
+  card is never discovered and the stream carries no audio event at all.
+
+  Also #61's harness half. run_gate() reported only a failing gate's last
+  line, which is how this session's one intermittent failure left nothing to
+  diagnose. It writes the whole output to a named file now and prints the
+  path. An intermittent gate makes every later suite run ambiguous; losing its
+  message makes that permanent.
+
+  Suite: 47 pass, 5 skip, 0 fail.
