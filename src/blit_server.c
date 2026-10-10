@@ -9796,9 +9796,20 @@ static void service_session_output(BlitRuntime *runtime, int fd)
                                    sizeof(surface_event));
                 broadcast_stream(runtime, surface_event, BLIT_STREAM_SURFACES);
                 runtime->render_pending = 1;
-                if (runtime->sessions[i].terminal_frame_batch)
-                    runtime->terminal_frame_quiet_until_us = monotonic_us() +
-                        BLIT_TERMINAL_FRAME_QUIET_US;
+                if (runtime->sessions[i].terminal_frame_batch) {
+                    uint64_t now_us = monotonic_us();
+                    /* Open the coalescing window once; never extend it. The
+                       deadline used to be pushed to now+8ms on every batched
+                       chunk, and the flag that causes the push is cleared only
+                       by a frame -- so a few sessions clearing their screens
+                       faster than the window is wide pushed it forward
+                       forever and nothing was ever presented. Bounding it
+                       keeps the clear and its redraw in one frame while
+                       guaranteeing that frame happens. */
+                    if (runtime->terminal_frame_quiet_until_us <= now_us)
+                        runtime->terminal_frame_quiet_until_us = now_us +
+                            BLIT_TERMINAL_FRAME_QUIET_US;
+                }
             }
             runtime->diagnostic_terminal_bytes += (unsigned long long)received;
             runtime->diagnostic_last_terminal_ms =

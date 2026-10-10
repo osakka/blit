@@ -118,7 +118,17 @@ begin
     else
       stagnant_frame_checks += 1
     end
-    assert(stagnant_frame_checks < 50, 'render frame counter stopped')
+    # A stalled frame counter has two very different causes -- nothing to
+    # draw, or something to draw that is never drawn -- and the failure is
+    # unreadable without knowing which. Name the renderer's own state.
+    assert(stagnant_frame_checks < 50,
+           'render frame counter stopped: ' \
+           "frames=#{frames} pending=#{render.fetch('pending', 'n/a')} " \
+           "interval_ms=#{render.fetch('interval_ms', 'n/a')} " \
+           "mode=#{render.fetch('mode', 'n/a').inspect} " \
+           "last_render_ms=#{runtime_response.fetch('performance').fetch('last_render_ms', 'n/a')} " \
+           "max_render_ms=#{runtime_response.fetch('performance').fetch('max_render_ms', 'n/a')} " \
+           "missed_deadlines=#{runtime_response.fetch('performance').fetch('missed_deadlines', 'n/a')}")
     last_frames = frames
     current_rss = rss_kib(soak_pid)
     assert(!current_rss.nil?, 'server RSS became unavailable')
