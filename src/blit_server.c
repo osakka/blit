@@ -13016,11 +13016,6 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             if (surface == NULL || !surface->used) continue;
             session = find_session_id(runtime, surface->owner_session_id);
             if (session == NULL) continue;
-            /* Synchronized output retains its last complete frame.  Do not
-               submit its partial damage, but continue presenting unrelated
-               outputs in the same server. */
-            if (session->terminal_synchronized)
-                continue;
             pane = find_pane_id(runtime, session->pane_id);
             if (session->display_id[0] != '\0') {
                 for (output_index_for_surface = 0;
@@ -13069,6 +13064,11 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             views[view_count].damage_height = surface->damage_height;
             views[view_count].damage_consumed =
                 &damage_consumed[view_count];
+            /* Synchronized output retains its last presented frame.  The view
+               is submitted so the output's view count does not move -- a
+               count change is a full redraw, which clears the frame being
+               held -- and blit_kms_present leaves its pixels alone. */
+            views[view_count].synchronized = session->terminal_synchronized;
             views[view_count].graphics = session->graphics;
             views[view_count].graphics_count = BLIT_GRAPHICS_MAX_IMAGES;
             ++view_count;

@@ -784,8 +784,19 @@ static void remember_output_views(KmsOutput *output,
                                   const BlitKmsSurfaceView *views,
                                   int view_count, int output_view_count)
 {
+    unsigned long long previous_ids[KMS_MAX_VIEWS];
+    unsigned long long previous_revisions[KMS_MAX_VIEWS];
+    int previous_count = output->last_view_count < KMS_MAX_VIEWS ?
+        output->last_view_count : KMS_MAX_VIEWS;
     int view_index;
     int stored = 0;
+    int i;
+
+    if (previous_count < 0) previous_count = 0;
+    for (i = 0; i < previous_count; ++i) {
+        previous_ids[i] = output->last_surface_ids[i];
+        previous_revisions[i] = output->last_surface_revisions[i];
+    }
     output->last_view_count = output_view_count;
     for (view_index = 0; view_index < view_count &&
          stored < KMS_MAX_VIEWS; ++view_index) {
@@ -794,6 +805,15 @@ static void remember_output_views(KmsOutput *output,
         output->last_surface_ids[stored] = views[view_index].surface_id;
         output->last_surface_revisions[stored] =
             views[view_index].surface_revision;
+        /* A synchronized view was not drawn.  Remembering the revision it
+           carries mid-batch would make the release frame look like one that
+           had already been presented, and it would never be drawn.  Keep the
+           revision this output last actually put on screen. */
+        if (views[view_index].synchronized)
+            for (i = 0; i < previous_count; ++i)
+                if (previous_ids[i] == views[view_index].surface_id)
+                    output->last_surface_revisions[stored] =
+                        previous_revisions[i];
         ++stored;
     }
 }
@@ -1258,6 +1278,8 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
             for (view_index = 0; view_index < view_count; ++view_index) {
                 if (views[view_index].display_id != output->info.id)
                     continue;
+                if (views[view_index].synchronized)
+                    continue;
                 if (!output_view_unchanged(output, &views[view_index])) {
                     output_changed = 1;
                     break;
@@ -1326,6 +1348,14 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
             if (views[view_index].display_id == output->info.id) {
                 BlitKmsSurfaceView draw = views[view_index];
                 int pointer_damage = 0;
+                /* Hold the last presented pixels.  They are already in this
+                   buffer: a non-full frame is rebuilt from the front buffer
+                   above, so leaving the view undrawn preserves it.  A genuine
+                   full redraw started from a cleared buffer and has nothing
+                   left to hold, so the current cells are drawn -- one tear
+                   rather than a hole. */
+                if (views[view_index].synchronized && !full_redraw)
+                    continue;
                 if (pointer_changed) {
                     include_pointer_damage(output, &views[view_index],
                                            kms->previous_pointer_x,

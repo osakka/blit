@@ -48,6 +48,9 @@ typedef struct {
     int damage_width;
     int damage_height;
     int *damage_consumed;
+    /* The surface is holding a DEC 2026 batch: it is passed through so the
+       output's view count stays stable, and is not drawn. */
+    int synchronized;
     const BlitGraphicsImage *graphics;
     int graphics_count;
 } BlitKmsSurfaceView;
