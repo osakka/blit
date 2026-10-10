@@ -1,0 +1,138 @@
+release: 0.1.425
+package: blit_0.1.425-1_amd64.deb
+package_sha256: d0d174f4cd3cf2a783540a42422b26d578b5978285769c3eae2b52aafefa84a9
+source_commit: PENDING
+package_documentation_commit: PENDING
+server_binary_sha256: 5cc9feb673c0950c760d3847b65b837ff9e91e674cb32380f86f1e91615db7c7
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: ed37dff18e0ba8ad638990b28287ab1aeb22ada5fe7345a3eb17a39733598d87
+hibr_root: /tmp/hibr-0.99.100
+hibr_version: 0.99.100
+tcc_build_acceptance: pass
+openapi_yaml: pass
+api_schema_gate: pass
+package_artifact_acceptance: pass
+network_auth_acceptance: pass_api_token_injected
+terminal_conformance: pass
+session_lifecycle_acceptance: pass
+session_write_resize_acceptance: pass
+stream_replay_acceptance: pass
+font_api_acceptance: pass
+hibr_font_manifest_acceptance: pass
+glyph_geometry_local_pixel_acceptance: pass
+sdl_glyph_filter_acceptance: pass
+external_pointer_composition: pass
+pointer_damage_atomic_acceptance: pass
+pointer_wallpaper_stress_acceptance: pass
+hidden_cursor_damage_acceptance: pass
+sdl_background_batch_acceptance: pass
+sdl_graphics_cache_acceptance: pass
+sdl_wallpaper_damage_acceptance: pass
+screenshot_overlay_acceptance: pass
+pixel_frame_acceptance: pass
+render_state_agreement_acceptance: pass
+adapter_coalesce_acceptance: pass_idle_frame_zero_requests
+kitty_placement_pixel_acceptance: pass_crop_offset_numbered_and_z_order_by_pixel
+kitty_placement_conformance_acceptance: pass_delete_targets_and_unsupported_key_refusals
+sync_output_acceptance: pass_held_frame_and_hidden_writes_one_and_two_surfaces
+cell_paint_acceptance: pass_cursor_glyph_italic_distinct_session_defaults
+pointer_geometry_acceptance: pass_inset_honoured_and_pane_less_at_corner
+mouse_report_acceptance: pass_wheel_byte_96_hover_gated_per_cell_drops_counted
+key_encoding_acceptance: pass_25_encodings_capslock_numlock_held_modifiers
+frame_quiet_starvation_acceptance: pass_longest_stagnant_run_1_was_29
+evdev_scan_open_count_acceptance: pass_32_opens_for_32_paths_was_96
+graphics_kitty_zlib_acceptance: pass_pixel_crc32_identical_to_raw
+graphics_xtsmgraphics_acceptance: pass_no_scroll_and_enforced_limits_reported
+terminal_kitty_keyboard_acceptance: pass_cursor_unmoved_query_reports_zero
+hibr_singleton_local_acceptance: pass
+hibr_resume_guard_acceptance: pass
+restart_gate: pass
+shutdown_gate: pass
+update_idle_timeout_acceptance: pass
+update_reset_acceptance: pass
+update_cancel_acceptance: pass
+frame_rate_settled_acceptance: pass
+terminal_soak_120s_acceptance: pass
+screenshot_nonblocking_live_acceptance: not_rerun_candidate
+qemu_hibr_lifecycle_acceptance: not_rerun_candidate
+qemu_four_output_pixel_acceptance: not_rerun_candidate
+qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
+live_deployment: PENDING
+live_current_version: 0.1.421
+live_physical_multi_display: unavailable_one_output
+live_physical_button_trace_contract: open
+physical_evdev_acceptance: open
+physical_multi_monitor_acceptance: open
+physical_high_refresh_acceptance: open
+notes: >-
+  Rendering and input correctness, from a whole-server review: issues #33,
+  #34, #36, #37, #38, #39, #40, #41, #42 and #44 closed, #35 half done, and
+  #45, #46 and #47 filed from what the work turned up. ADR 0061 records the
+  one surface-origin rule.
+
+  Presentation. A surface holding a DEC 2026 batch was dropped from the
+  renderer's target/view count, which moves the count, which forces a full
+  redraw, which clears the scene -- so the frame the mode exists to hold was
+  the one thing guaranteed to be erased. Both paths now keep it counted and
+  simply do not draw it. The block cursor was a solid rectangle drawn after
+  the glyph layer, erasing the character the user was about to overwrite; it
+  is now an inverse cell. Italic was a second bold strike one pixel over and
+  so pixel-identical to bold; it is now a slant, and text blink is documented
+  as presented steadily rather than silently dropped. A session's DT_INK and
+  DT_FACE reached only the OSC 10/11 answer, so an application was told one
+  colour and shown another; both renderers now paint unstyled cells with the
+  session pair, and OSC 10/11 are accepted as sets.
+
+  Geometry. Three pieces of code computed a surface's origin and disagreed.
+  The hit test omitted the four-pixel inset both renderers draw with, so every
+  click inside a pane was computed from half a cell left and a quarter of a
+  row up. A pane-less surface was placed three ways; with one pane session
+  present the SDL path drew it at y=776 on a 768-pixel display, off the
+  screen, while the hit test still believed it was at the corner.
+
+  Input. Modifiers reached the application only for letters and punctuation:
+  Ctrl+Right was Right, Shift+Tab was a tab, Shift+F1 was F1, and Alt+Left
+  lost the Alt entirely. Modifier state was the last event seen rather than
+  what is held, so releasing one of two Shift keys said Shift was up. CapsLock
+  and NumLock were untracked, AltGr aliased Alt, and F11/F12 indexed a
+  twelve-entry table with 28 and 29 -- past its end. DEC 1002 reported hover
+  motion with no button held, both tracking modes reported per pointer sample
+  rather than per cell, and the legacy wheel byte was 64 where xterm defines
+  96. Input the PTY refused was lost in silence and is now counted.
+
+  POST /v1/input/inject gains a key kind, and the key path a physical device
+  takes is factored so an injected key cannot diverge from a real one. That is
+  what makes the encoder testable in a container with no /dev/uinput.
+
+  Rendering starvation, found by the soak gate failing only inside a full
+  suite run. The window that coalesces a clear and its redraw was pushed to
+  now+8ms on every batched chunk, and the flag causing the push is cleared
+  only by a frame being presented, so sessions clearing faster than the window
+  is wide pushed the deadline forever and nothing was presented. Four sessions
+  clearing every 10ms over 20 seconds on an idle host:
+
+    0.1.424          frames=302   longest stagnant run=29  missed=1088
+    this build       frames=1251  longest stagnant run=1   missed=138
+
+  The soak gate trips at 50, so the shipped server was within a factor of two
+  while idle. The deferral predates 0.1.424 (e4b442d), so it is not a
+  regression from this work; this work shifted the timing enough to expose it.
+
+  What this release does NOT establish. Every pixel claim is measured on the
+  SDL path. src/blit_kms.c carries the same changes for synchronized output,
+  the cursor glyph, italic and the session default pair, and none of it has
+  been seen on a screen: there is no DRM device in the build container, the
+  live host presents through SDL3/opengles2 rather than the direct KMS path,
+  and reaching that path needs BLIT_DISPLAY_BACKEND=kms in the server's
+  environment, which the API cannot set. The QEMU oracle needs an initroot
+  that no longer exists. Physical keyboard and pointer hardware is likewise
+  unexercised: the encoders are gated through the injection endpoint, which
+  shares their code path but not their devices.
+
+  Also open: #45, the screenshot diagnostic answers from three different
+  sources and a fresh request invalidates the output it inspects, which is why
+  the first #33 measurements contradicted each other -- every pixel gate in
+  the tree rests on that witness. #46, json_string_array decodes only \n, \r
+  and \t, so a conforming client's \u001b arrives as the literal text u001b
+  and a session argument cannot carry a control character. #35, keyboard
+  layout is still US-only and wants a keymap source and an ADR.
