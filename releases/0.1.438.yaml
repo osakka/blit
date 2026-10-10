@@ -1,0 +1,124 @@
+release: 0.1.438
+package: blit_0.1.438-1_amd64.deb
+package_sha256: 1ebaba8ef3e926946af2a48438c2522813e9f0b4830734606c69add99c3fba32
+source_commit: d201a9fadd180e3cfa5cce6fd3f805f39b42e36a
+package_documentation_commit: d201a9fadd180e3cfa5cce6fd3f805f39b42e36a
+server_binary_sha256: 0a4ca1eb404d7072c2bb4d87937d08e232270ef2858b871e62d9886208d6eb9b
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: ed37dff18e0ba8ad638990b28287ab1aeb22ada5fe7345a3eb17a39733598d87
+hibr_root: /tmp/hibr-0.99.100
+hibr_version: 0.99.100
+tcc_build_acceptance: pass
+openapi_yaml: pass
+api_schema_gate: pass_36_paths
+package_artifact_acceptance: pass
+network_auth_acceptance: pass_api_token_injected
+terminal_conformance: pass
+session_lifecycle_acceptance: pass
+session_write_resize_acceptance: pass
+stream_replay_acceptance: pass
+font_api_acceptance: pass
+hibr_font_manifest_acceptance: pass
+glyph_geometry_local_pixel_acceptance: pass
+sdl_glyph_filter_acceptance: pass
+external_pointer_composition: pass
+pointer_damage_atomic_acceptance: pass
+pointer_wallpaper_stress_acceptance: pass
+hidden_cursor_damage_acceptance: pass
+sdl_background_batch_acceptance: pass
+sdl_graphics_cache_acceptance: pass
+sdl_wallpaper_damage_acceptance: pass
+screenshot_overlay_acceptance: pass
+pixel_frame_acceptance: pass
+render_state_agreement_acceptance: pass
+adapter_coalesce_acceptance: pass_idle_frame_zero_requests
+kitty_placement_pixel_acceptance: pass_crop_offset_numbered_and_z_order_by_pixel
+kitty_placement_conformance_acceptance: pass_delete_targets_and_unsupported_key_refusals
+sync_output_acceptance: pass_held_frame_and_hidden_writes_one_and_two_surfaces
+cell_paint_acceptance: pass_cursor_glyph_italic_distinct_session_defaults
+pointer_geometry_acceptance: pass_inset_honoured_and_pane_less_at_corner
+mouse_report_acceptance: pass_wheel_byte_96_hover_gated_per_cell_drops_counted
+key_encoding_acceptance: carried_from_0_1_435
+frame_quiet_starvation_acceptance: pass_longest_stagnant_run_1_was_29
+capture_witness_acceptance: pass_one_source_presented_flag_presented_revision
+motion_trail_acceptance: pass_799_blank_cells_no_unaccounted_pixels
+render_state_agreement_acceptance: pass_30_blue_cells_was_vacuous
+bold_cell_containment_acceptance: pass_8px_drawn_0_spilled
+wide_glyph_acceptance: pass_4_samples_4_distinct_shapes_two_cells_each
+font_identity_acceptance: pass_929_1182_primary_and_49899_16x16_wide
+desktop_repaint_acceptance: pass_pty_authored_0_cells_unpainted_reported_after_window_retires
+gate_port_isolation_acceptance: carried_from_0_1_431
+input_identity_acceptance: carried_from_0_1_433
+input_device_api_acceptance: carried_from_0_1_432
+input_device_config_acceptance: carried_from_0_1_434
+input_device_route_acceptance: carried_from_0_1_436
+audio_device_api_acceptance: pass_three_pcms_per_direction_formats_seven_rate_list_one_default_env_export
+display_device_api_acceptance: pass_envelope_item_matches_collection_no_writable_property
+main_block_key_table_acceptance: carried_from_0_1_435
+live_input_device_table_acceptance: carried_from_0_1_433
+live_input_device_config_acceptance: carried_from_0_1_434
+live_main_block_key_acceptance: carried_from_0_1_435
+live_device_routing_acceptance: carried_from_0_1_436
+live_audio_device_acceptance: PENDING
+json_escape_acceptance: carried_from_0_1_431
+live_cell_property_refusal_acceptance: carried_from_0_1_431
+live_unpainted_report_acceptance: carried_from_0_1_430
+live_wide_glyph_acceptance: carried_from_0_1_428
+live_render_state_agreement_acceptance: carried_from_0_1_427
+evdev_scan_open_count_acceptance: pass_32_opens_for_32_paths_was_96
+graphics_kitty_zlib_acceptance: pass_pixel_crc32_identical_to_raw
+graphics_xtsmgraphics_acceptance: pass_no_scroll_and_enforced_limits_reported
+terminal_kitty_keyboard_acceptance: pass_cursor_unmoved_query_reports_zero
+hibr_singleton_local_acceptance: pass
+hibr_resume_guard_acceptance: pass
+restart_gate: pass
+shutdown_gate: pass
+update_idle_timeout_acceptance: pass
+update_reset_acceptance: pass
+update_cancel_acceptance: pass
+frame_rate_settled_acceptance: pass
+terminal_soak_120s_acceptance: pass
+screenshot_nonblocking_live_acceptance: not_rerun_candidate
+qemu_hibr_lifecycle_acceptance: not_rerun_candidate
+qemu_four_output_pixel_acceptance: not_rerun_candidate
+qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
+live_deployment: PENDING_0_1_438
+live_current_version: PENDING
+live_block_cursor_acceptance: carried_from_0_1_425
+live_italic_acceptance: carried_from_0_1_425
+live_session_default_acceptance: carried_from_0_1_425
+live_sync_output_acceptance: carried_from_0_1_425
+live_hibr_desktop_acceptance: PENDING
+live_idle_frame_acceptance: carried_from_0_1_425
+live_physical_multi_display: unavailable_one_output
+live_physical_button_trace_contract: open
+physical_evdev_acceptance: open
+physical_multi_monitor_acceptance: open
+physical_high_refresh_acceptance: open
+notes: >-
+  One defect, found by reading 0.1.437's own deployed inventory rather than by
+  a gate.
+
+  The live host's HyperX QuadCast publishes
+
+    Rates: 8000, 11025, 16000, 22050, 32000, 44100, 48000
+
+  and atoi of that line reported sample_rates: [8000] -- a claim that the
+  device supports 8 kHz and nothing else. Every integer on the line is now
+  reported, bounded at sixteen.
+
+  The gate could not have caught it: its fixture had a single rate, which is
+  the one shape where taking the first integer is correct. That is the same
+  shape of gap as #58, where key_encoding_gate tested exactly the one letter
+  the broken arithmetic got right. Two fixtures in this session have now
+  sampled precisely the case that works, which is worth saying out loud: a
+  fixture with one of something does not test a list.
+
+  A driver may also publish a range -- "44100 - 48000" -- and
+  sample_rates_continuous now says so, rather than letting a client read two
+  endpoints as a two-element list. No card on this host uses that form; the
+  flag exists because the format allows it and misreporting it silently would
+  look identical to the bug above.
+
+  The gate's fixture now carries the QuadCast's seven rates. Teeth: taking
+  atoi of the line reports [8000]. Suite: 47 pass, 5 skip, 0 fail.
