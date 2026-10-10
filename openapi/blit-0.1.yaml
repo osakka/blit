@@ -131,6 +131,32 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/Display'
+                  count: {type: integer, minimum: 0}
+                  dropped: {type: integer, minimum: 0}
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/displays/{display_id}:
+    parameters:
+      - name: display_id
+        in: path
+        required: true
+        schema: {$ref: '#/components/schemas/ResourceId'}
+    get:
+      tags: [hardware]
+      operationId: getDisplay
+      summary: Read one display
+      description: >-
+        There is no PATCH here. A display has no writable property: see the
+        `configuration` description on the Display schema.
+      responses:
+        '200':
+          description: The display
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Display'
+        '404':
+          $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
   /v1/audio:
@@ -138,6 +164,12 @@ paths:
       tags: [hardware]
       operationId: listAudioDevices
       summary: List audio devices and capabilities
+      description: >-
+        One item per ALSA PCM per direction, served from the runtime's table
+        (ADR 0064). The request performs no enumeration, so it is safe to
+        poll; the inventory this replaced made 32 x 32 x 2 `access()` calls on
+        the event-loop thread per request. `revision` counts discoveries,
+        losses and accepted configuration writes.
       responses:
         '200':
           description: Audio inventory
@@ -153,6 +185,75 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/AudioDevice'
+                  count: {type: integer, minimum: 0}
+                  dropped: {type: integer, minimum: 0}
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/audio/{device_id}:
+    parameters:
+      - name: device_id
+        in: path
+        required: true
+        schema: {$ref: '#/components/schemas/ResourceId'}
+    get:
+      tags: [hardware]
+      operationId: getAudioDevice
+      summary: Read one audio device
+      responses:
+        '200':
+          description: The audio device
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AudioDevice'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    patch:
+      tags: [hardware]
+      operationId: updateAudioDevice
+      summary: Configure one audio device
+      description: >-
+        Writes a device's `configuration` and nothing else, with the same
+        concurrency rule as the other device classes: an optional `revision`
+        in the body, an `If-Match` header, or both, each answered 409 when it
+        does not identify the current revision. A property that is not
+        writable is refused with 400 and named.
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [configuration]
+              properties:
+                revision:
+                  $ref: '#/components/schemas/Revision'
+                configuration:
+                  type: object
+                  properties:
+                    default: {type: boolean}
+                  additionalProperties: false
+              additionalProperties: false
+      responses:
+        '200':
+          description: The updated audio device
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AudioDevice'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
   /v1/diagnostics:
@@ -1244,36 +1345,151 @@ components:
       additionalProperties: false
     Display:
       type: object
-      required: [id, name, bounds, modes, presentation_state]
+      required: [id, class, name, bounds, modes, active_mode,
+                 presentation_state, capabilities, state, configuration,
+                 revision]
       properties:
         id: {$ref: '#/components/schemas/ResourceId'}
+        class:
+          type: string
+          enum: [display]
         name: {type: string}
-        bounds: {$ref: '#/components/schemas/Bounds'}
+        bounds:
+          type: object
+          required: [x, y, width, height]
+          properties:
+            x: {type: integer}
+            y: {type: integer}
+            width: {type: integer, minimum: 1}
+            height: {type: integer, minimum: 1}
+          additionalProperties: false
         modes:
           type: array
           items: {$ref: '#/components/schemas/DisplayMode'}
-        active_mode: {$ref: '#/components/schemas/DisplayMode'}
-        presentation_state:
-          type: string
-          enum: [available, unavailable, presenting, recovering, failed]
+        active_mode:
+          oneOf:
+            - $ref: '#/components/schemas/DisplayMode'
+            - type: 'null'
+        presentation_state: {type: string}
+        capabilities:
+          type: array
+          items: {type: string}
+        state:
+          type: object
+          required: [present, presentation_state]
+          properties:
+            present: {type: boolean}
+            presentation_state: {type: string}
+          additionalProperties: false
+        configuration:
+          type: object
+          description: >-
+            Empty, and that is the decision rather than an omission. Selecting
+            a mode changes the render output size and therefore every surface
+            on the display, and a Hibr desktop's cells come from its owner
+            (ADR 0063), so Blit cannot repaint one at a new size by itself: it
+            needs a resize protocol with the owner. The modes are reported so
+            a controller can show them; the write that applies one does not
+            exist yet, and saying so beats a property that accepts a value and
+            does nothing. There is no PATCH on this path.
+          additionalProperties: false
+        revision:
+          $ref: '#/components/schemas/Revision'
       additionalProperties: false
+
     AudioDevice:
       type: object
-      required: [id, name, direction, formats]
+      description: >-
+        One ALSA PCM in one direction, not one card (ADR 0064). A card with
+        four HDMI outputs is four playback devices, because choosing between
+        them is the whole of choosing an output. Served from the runtime's
+        table and never enumerated on request.
+      required: [id, class, name, node, direction, kinds, formats, identity,
+                 capabilities, state, configuration, revision]
       properties:
-        id: {$ref: '#/components/schemas/ResourceId'}
+        id:
+          allOf:
+            - $ref: '#/components/schemas/ResourceId'
+          description: >-
+            `audio-<card-id>-pcm<device>-<p|c>`, with the card component taken
+            from `/proc/asound/card<N>/id`, which ALSA keeps stable across
+            reboots -- unlike the card *number*, which is assignment order and
+            moves when a USB card is plugged in earlier.
+        class:
+          type: string
+          enum: [audio]
         name: {type: string}
+        node:
+          type: string
+          description: >-
+            The PCM device node. Reported for diagnosis; it carries the card
+            number and so is not a stable identifier.
         direction:
           type: string
-          enum: [playback, capture, duplex]
+          enum: [playback, capture]
+        kinds:
+          type: array
+          items:
+            type: string
+            enum: [playback, capture]
         formats:
           type: array
+          description: >-
+            As the driver reports them for this direction, read from the
+            card's stream description. Empty for a card that publishes no
+            stream description -- an HDA card describes itself through
+            `codec#N` instead -- rather than asserting a format it has not
+            reported. The inventory this replaced hardcoded `s16le` for every
+            device.
           items: {type: string}
         channels: {type: integer, minimum: 1}
         sample_rates:
           type: array
           items: {type: integer, minimum: 1}
+        identity:
+          type: object
+          required: [card, card_id, device, subname]
+          properties:
+            card: {type: integer, minimum: 0}
+            card_id: {type: string}
+            device: {type: integer, minimum: 0}
+            subname: {type: string}
+          additionalProperties: false
+        capabilities:
+          type: array
+          items: {type: string}
+        state:
+          type: object
+          required: [present]
+          properties:
+            present: {type: boolean}
+          additionalProperties: false
+        configuration:
+          type: object
+          description: >-
+            Written with PATCH /v1/audio/{device_id}.
+          required: [default]
+          properties:
+            default:
+              type: boolean
+              description: >-
+                Marks this PCM as the default for its direction, clearing the
+                flag on the other devices of that direction; playback and
+                capture are chosen independently. Blit has no audio engine and
+                cannot route a stream, so the choice is honoured by exporting
+                `ALSA_CARD`, `ALSA_PCM_CARD`, `ALSA_PCM_DEVICE` and
+                `BLIT_AUDIO_PLAYBACK`/`BLIT_AUDIO_CAPTURE` into the
+                environment of sessions launched **after** the write. It
+                cannot reach a session that is already running, so a
+                controller that changes the default and wants it to apply
+                relaunches the session. Volume, mute and any other mixer
+                control are not here and are not implied: they need libasound,
+                which is a packaging decision of its own.
+          additionalProperties: false
+        revision:
+          $ref: '#/components/schemas/Revision'
       additionalProperties: false
+
     Diagnostics:
       type: object
       required: [revision, health, resources, render, errors, warnings]

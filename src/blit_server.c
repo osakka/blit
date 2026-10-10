@@ -55,6 +55,7 @@ extern char **environ;
 #define BLIT_MAX_CELL_COLS 512
 #define BLIT_MAX_CELL_ROWS 160
 #define BLIT_MAX_INPUT_DEVICES 32
+#define BLIT_MAX_AUDIO_DEVICES 64
 #define BLIT_STREAM_DIAGNOSTICS 1
 #define BLIT_STREAM_SURFACES 2
 #define BLIT_STREAM_FRAMES 4
@@ -328,6 +329,37 @@ typedef struct {
 #define BLIT_INPUT_SENSITIVITY_DEFAULT 100
 #define BLIT_INPUT_SENSITIVITY_MIN 10
 #define BLIT_INPUT_SENSITIVITY_MAX 1000
+
+/* ADR 0064 stage 5: an audio device is one ALSA PCM in one direction, not one
+ * card.
+ *
+ * The inventory this replaced listed a card, with a direction of "duplex"
+ * when the card had both. The live host has six cards and nine PCMs, four of
+ * them HDMI outputs on one card -- which a control panel has to be able to
+ * tell apart, because choosing between "HDMI 0" and "HDMI 3" is the whole
+ * point of choosing an output. It also hardcoded formats as s16le and never
+ * reported channels or rates, which the schema already allowed.
+ *
+ * Like the input table this is built by a scan and served from memory: the
+ * previous /v1/audio made 32 x 32 x 2 access() calls per request, which is
+ * the same stall shape as issue #16. */
+typedef struct {
+    int used;
+    int seen;
+    int present;
+    char id[128];
+    char card_id[64];
+    int card;
+    int device;
+    int playback;
+    char name[128];
+    char subname[128];
+    char format[32];
+    int channels;
+    int sample_rate;
+    int is_default;
+    unsigned long long revision;
+} BlitAudioDevice;
 
 typedef struct {
     SDL_Window *window;
@@ -636,6 +668,9 @@ typedef struct {
     unsigned long long input_routes_revision;
     BlitInputDevice input_devices[BLIT_MAX_INPUT_DEVICES];
     unsigned long long input_devices_revision;
+    BlitAudioDevice audio_devices[BLIT_MAX_AUDIO_DEVICES];
+    unsigned long long audio_devices_revision;
+    unsigned long long displays_revision;
     /* The physical device whose events are being dispatched right now, or
        NULL. ADR 0064 stage 3 routes per device, and the alternative was
        threading a device through keyboard_target and seven
@@ -876,6 +911,9 @@ static void send_mouse_report(BlitRuntime *runtime, SDL_WindowID window_id,
                               float pixel_x, float pixel_y, int button,
                               int release);
 static void update_evdev_pointer(BlitRuntime *runtime);
+static const char *json_rejected_property(const char *object,
+                                          const char *const *writable,
+                                          size_t writable_count);
 static void broadcast_input_device_changed(BlitRuntime *runtime,
                                            const BlitInputDevice *device,
                                            const char *change);
@@ -2209,7 +2247,8 @@ static void server_json(const BlitRuntime *runtime, char *body, size_t capacity)
              "\"capabilities\":[\"http-control\",\"websocket-stream\","
              "\"terminal-sessions\",\"topology\","
              "\"native-presentation\",\"graphics-inventory\","
-             "\"audio-inventory\",\"input-devices\","
+             "\"audio-inventory\",\"audio-device-configuration\","
+             "\"display-devices\",\"input-devices\","
              "\"input-device-configuration\",\"input-routes\","
              "\"network-terminal-input\",\"diagnostics\","
              "\"runtime-diagnostics\",\"lifecycle-control\","
@@ -2430,55 +2469,103 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
                   "[\"input_device_missing\"]" : "[]"));
 }
 
-static void displays_json(const BlitRuntime *runtime, char *body, size_t capacity)
+static int display_index_by_id(const BlitRuntime *runtime, const char *id)
+{
+    int i;
+
+    for (i = 0; i < runtime->display_count; ++i) {
+        char candidate[128];
+        snprintf(candidate, sizeof(candidate), "display-%llu",
+                 runtime->displays[i].id);
+        if (strcmp(candidate, id) == 0)
+            return i;
+    }
+    return -1;
+}
+
+/* One display in the ADR 0064 envelope.
+ *
+ * `configuration` is empty, and that is the decision rather than an
+ * omission: selecting a mode changes the render output size and therefore
+ * every surface on the display, and a Hibr desktop's cells come from its
+ * owner (ADR 0063), so Blit cannot repaint one at a new size by itself. Mode
+ * selection needs a resize protocol with the owner, which is its own ticket.
+ * The modes are reported so a controller can show them; the write that
+ * applies one does not exist yet, and saying so beats a property that
+ * accepts a value and does nothing. */
+static size_t display_item_json(const BlitRuntime *runtime, int index,
+                                char *body, size_t capacity)
+{
+    const BlitDisplay *display = &runtime->displays[index];
+    char escaped_name[256];
+    size_t used = 0;
+    int complete = 1;
+    int active_mode = display->active_mode;
+    int mode_index;
+
+    json_escape(display->name, escaped_name, sizeof(escaped_name));
+    if (active_mode < 0 || active_mode >= display->mode_count)
+        active_mode = 0;
+    complete &= json_appendf(body, capacity, &used,
+        "{\"id\":\"display-%llu\",\"class\":\"display\",\"name\":\"%s\","
+        "\"bounds\":{\"x\":%d,\"y\":%d,\"width\":%d,\"height\":%d},"
+        "\"modes\":[", display->id, escaped_name, display->bounds.x,
+        display->bounds.y, display->bounds.w, display->bounds.h);
+    for (mode_index = 0; mode_index < display->mode_count; ++mode_index) {
+        const BlitKmsMode *mode = &display->modes[mode_index];
+        complete &= json_appendf(body, capacity, &used,
+            "%s{\"width\":%d,\"height\":%d,\"refresh_hz\":%.3f}",
+            mode_index == 0 ? "" : ",", mode->width, mode->height,
+            mode->refresh_hz);
+    }
+    complete &= json_appendf(body, capacity, &used, "],\"active_mode\":");
+    if (display->mode_count > 0) {
+        const BlitKmsMode *mode = &display->modes[active_mode];
+        complete &= json_appendf(body, capacity, &used,
+            "{\"width\":%d,\"height\":%d,\"refresh_hz\":%.3f}", mode->width,
+            mode->height, mode->refresh_hz);
+    } else {
+        complete &= json_appendf(body, capacity, &used, "null");
+    }
+    complete &= json_appendf(body, capacity, &used,
+        ",\"presentation_state\":\"%s\","
+        "\"capabilities\":[\"mode-report\"],"
+        "\"state\":{\"present\":true,\"presentation_state\":\"%s\"},"
+        "\"configuration\":{},\"revision\":%llu}",
+        display_presentation_state(runtime, index),
+        display_presentation_state(runtime, index),
+        runtime->displays_revision);
+    return complete ? used : capacity;
+}
+
+static void displays_json(const BlitRuntime *runtime, char *body,
+                          size_t capacity)
 {
     size_t used = 0;
+    int count = 0;
+    int dropped = 0;
     int i;
 
     used += (size_t)snprintf(body + used, capacity - used,
-                             "{\"revision\":1,\"displays\":[");
-    for (i = 0; i < runtime->display_count && used < capacity; ++i) {
-        char escaped_name[256];
-        int mode_index;
-        int active_mode = runtime->displays[i].active_mode;
-        json_escape(runtime->displays[i].name, escaped_name,
-                    sizeof(escaped_name));
-        used += (size_t)snprintf(
-            body + used, capacity - used,
-            "%s{\"id\":\"display-%llu\",\"name\":\"%s\","
-            "\"bounds\":{\"x\":%d,\"y\":%d,\"width\":%d,"
-            "\"height\":%d},\"modes\":[",
-            i == 0 ? "" : ",", runtime->displays[i].id, escaped_name,
-            runtime->displays[i].bounds.x, runtime->displays[i].bounds.y,
-            runtime->displays[i].bounds.w, runtime->displays[i].bounds.h,
-            runtime->displays[i].bounds.h);
-        for (mode_index = 0; mode_index < runtime->displays[i].mode_count &&
-             used < capacity; ++mode_index) {
-            BlitKmsMode *mode = &runtime->displays[i].modes[mode_index];
-            used += (size_t)snprintf(
-                body + used, capacity - used,
-                "%s{\"width\":%d,\"height\":%d,\"refresh_hz\":%.3f}",
-                mode_index == 0 ? "" : ",", mode->width, mode->height,
-                mode->refresh_hz);
+                             "{\"revision\":%llu,\"displays\":[",
+                             runtime->displays_revision);
+    for (i = 0; i < runtime->display_count; ++i) {
+        char item[8192];
+        size_t length = display_item_json(runtime, i, item, sizeof(item));
+
+        if (length >= sizeof(item) ||
+            used + length + (size_t)(count > 0 ? 1 : 0) + 40 >= capacity) {
+            ++dropped;
+            continue;
         }
-        if (active_mode < 0 || active_mode >= runtime->displays[i].mode_count)
-            active_mode = 0;
-        if (runtime->displays[i].mode_count > 0) {
-            BlitKmsMode *mode = &runtime->displays[i].modes[active_mode];
-            used += (size_t)snprintf(
-                body + used, capacity - used,
-                "],\"active_mode\":{\"width\":%d,\"height\":%d,"
-                "\"refresh_hz\":%.3f},\"presentation_state\":\"%s\"}",
-                mode->width, mode->height, mode->refresh_hz,
-                display_presentation_state(runtime, i));
-        } else {
-            used += (size_t)snprintf(
-                body + used, capacity - used,
-                "],\"active_mode\":null,\"presentation_state\":\"%s\"}",
-                display_presentation_state(runtime, i));
-        }
+        if (count > 0)
+            body[used++] = ',';
+        memcpy(body + used, item, length);
+        used += length;
+        ++count;
     }
-    snprintf(body + used, capacity - used, "]}");
+    snprintf(body + used, capacity - used, "],\"count\":%d,\"dropped\":%d}",
+             count, dropped);
 }
 
 static void topology_json(const BlitRuntime *runtime, char *body, size_t capacity)
@@ -2636,51 +2723,359 @@ static void graphics_json(char *body, size_t capacity)
     snprintf(body + used, capacity - used, "]}");
 }
 
-static void audio_json(char *body, size_t capacity)
+/* Where ALSA's procfs and device nodes live. Overridable for the same reason
+   as BLIT_INPUT_ROOT: this build container has neither, so without an
+   override the audio inventory cannot be gated at all. */
+static const char *asound_root(void)
 {
-    size_t used = 0;
-    int card;
+    const char *root = getenv("BLIT_ASOUND_ROOT");
+
+    return (root != NULL && root[0] != '\0') ? root : "/proc/asound";
+}
+
+static const char *snd_root(void)
+{
+    const char *root = getenv("BLIT_SND_ROOT");
+
+    return (root != NULL && root[0] != '\0') ? root : "/dev/snd";
+}
+
+/* Read the value of a `key: value` line from a procfs file. read_text_file
+   reads only the first line, and every file here is a block of such lines. */
+static int read_keyed_value(const char *path, const char *key, char *value,
+                            size_t capacity)
+{
+    FILE *file;
+    char line[256];
+    size_t key_length = strlen(key);
     int found = 0;
 
-    used += (size_t)snprintf(body + used, capacity - used,
-                             "{\"revision\":1,\"devices\":[");
-    for (card = 0; card < 32 && used < capacity; ++card) {
-        char control[64];
-        char pcm[64];
-        char name_path[96];
-        char name[128] = "ALSA card";
-        char escaped_name[256];
-        int playback = 0;
-        int capture = 0;
-        int device;
-        int length;
-
-        snprintf(control, sizeof(control), "/dev/snd/controlC%d", card);
-        for (device = 0; device < 32; ++device) {
-            snprintf(pcm, sizeof(pcm), "/dev/snd/pcmC%dD%dp", card, device);
-            if (access(pcm, R_OK | W_OK) == 0) playback = 1;
-            snprintf(pcm, sizeof(pcm), "/dev/snd/pcmC%dD%dc", card, device);
-            if (access(pcm, R_OK | W_OK) == 0) capture = 1;
-        }
-        if (access(control, R_OK | W_OK) != 0 || (!playback && !capture))
+    if (capacity == 0)
+        return 0;
+    value[0] = '\0';
+    file = fopen(path, "r");
+    if (file == NULL)
+        return 0;
+    while (fgets(line, (int)sizeof(line), file) != NULL) {
+        char *cursor;
+        size_t length;
+        if (strncmp(line, key, key_length) != 0 || line[key_length] != ':')
             continue;
-        snprintf(name_path, sizeof(name_path), "/proc/asound/card%d/id", card);
-        read_text_file(name_path, name, sizeof(name));
-        json_escape(name, escaped_name, sizeof(escaped_name));
-        length = snprintf(body + used, capacity - used,
-                          "%s{\"id\":\"alsa-card-%d\","
-                          "\"name\":\"%s\",\"direction\":\"%s\","
-                          "\"formats\":[%s]}", found ? "," : "", card,
-                          escaped_name,
-                          playback && capture ? "duplex" :
-                          (playback ? "playback" : "capture"),
-                          playback || capture ? "\"s16le\"" : "");
-        if (length < 0 || (size_t)length >= capacity - used)
-            break;
-        used += (size_t)length;
-        found = 1;
+        cursor = line + key_length + 1;
+        while (*cursor == ' ' || *cursor == '\t')
+            ++cursor;
+        length = strlen(cursor);
+        while (length > 0 && (cursor[length - 1] == '\n' ||
+                              cursor[length - 1] == '\r' ||
+                              cursor[length - 1] == ' '))
+            cursor[--length] = '\0';
+        snprintf(value, capacity, "%s", cursor);
+        found = value[0] != '\0';
+        break;
     }
-    snprintf(body + used, capacity - used, "]}");
+    fclose(file);
+    return found;
+}
+
+/* Read a `key: value` line from inside a named section of a procfs file.
+ *
+ * cardN/stream0 describes a USB card as a sequence of "Playback:" and
+ * "Capture:" blocks, each with its own Format, Channels and Rates. Taking the
+ * first match in the file would report the playback format for a capture
+ * device. A section ends at the next line that starts in column zero and ends
+ * in a colon. */
+static int read_section_value(const char *path, const char *section,
+                              const char *key, char *value, size_t capacity)
+{
+    FILE *file;
+    char line[256];
+    size_t key_length = strlen(key);
+    int inside = 0;
+    int found = 0;
+
+    if (capacity == 0)
+        return 0;
+    value[0] = '\0';
+    file = fopen(path, "r");
+    if (file == NULL)
+        return 0;
+    while (fgets(line, (int)sizeof(line), file) != NULL) {
+        char *cursor = line;
+        size_t indent = 0;
+        while (*cursor == ' ' || *cursor == '\t') {
+            ++cursor;
+            ++indent;
+        }
+        if (indent == 0) {
+            inside = strncmp(line, section, strlen(section)) == 0;
+            continue;
+        }
+        if (!inside)
+            continue;
+        if (strncmp(cursor, key, key_length) != 0 || cursor[key_length] != ':')
+            continue;
+        cursor += key_length + 1;
+        while (*cursor == ' ' || *cursor == '\t')
+            ++cursor;
+        {
+            size_t length = strlen(cursor);
+            while (length > 0 && (cursor[length - 1] == '\n' ||
+                                  cursor[length - 1] == '\r' ||
+                                  cursor[length - 1] == ' '))
+                cursor[--length] = '\0';
+            snprintf(value, capacity, "%s", cursor);
+            found = value[0] != '\0';
+        }
+        break;
+    }
+    fclose(file);
+    return found;
+}
+
+static BlitAudioDevice *find_audio_device_id(BlitRuntime *runtime,
+                                             const char *id)
+{
+    int i;
+
+    for (i = 0; i < BLIT_MAX_AUDIO_DEVICES; ++i)
+        if (runtime->audio_devices[i].used &&
+            strcmp(runtime->audio_devices[i].id, id) == 0)
+            return &runtime->audio_devices[i];
+    return NULL;
+}
+
+static BlitAudioDevice *find_audio_device_pcm(BlitRuntime *runtime, int card,
+                                              int device, int playback)
+{
+    int i;
+
+    for (i = 0; i < BLIT_MAX_AUDIO_DEVICES; ++i) {
+        BlitAudioDevice *audio = &runtime->audio_devices[i];
+        if (audio->used && audio->card == card && audio->device == device &&
+            audio->playback == playback)
+            return audio;
+    }
+    return NULL;
+}
+
+/* Record one PCM in one direction. The id is built from the card's own id
+   string -- /proc/asound/cardN/id, which ALSA keeps stable across reboots --
+   rather than from the card number, which is assignment order and moves when
+   a USB card is plugged in earlier. */
+static void record_audio_device(BlitRuntime *runtime, int card,
+                                const char *card_id, int device, int playback,
+                                int *discovered)
+{
+    char path[256];
+    char info[256];
+    char value[64];
+    BlitAudioDevice *audio;
+    char slug[BLIT_INPUT_SLUG_CAPACITY];
+    int i;
+
+    snprintf(info, sizeof(info), "%s/card%d/pcm%d%c/info", asound_root(),
+             card, device, playback ? 'p' : 'c');
+    if (access(info, R_OK) != 0)
+        return;
+    audio = find_audio_device_pcm(runtime, card, device, playback);
+    if (audio == NULL) {
+        for (i = 0; i < BLIT_MAX_AUDIO_DEVICES; ++i)
+            if (!runtime->audio_devices[i].used) {
+                audio = &runtime->audio_devices[i];
+                break;
+            }
+        if (audio == NULL)
+            return;
+        memset(audio, 0, sizeof(*audio));
+        audio->used = 1;
+        audio->card = card;
+        audio->device = device;
+        audio->playback = playback;
+        audio->revision = 1;
+        snprintf(audio->card_id, sizeof(audio->card_id), "%s", card_id);
+        if (blit_input_slug(card_id, slug, sizeof(slug)) == 0)
+            snprintf(slug, sizeof(slug), "card%d", card);
+        snprintf(audio->id, sizeof(audio->id), "audio-%s-pcm%d-%c", slug,
+                 device, playback ? 'p' : 'c');
+        if (discovered != NULL)
+            *discovered = 1;
+    }
+    if (read_keyed_value(info, "name", value, sizeof(value)))
+        snprintf(audio->name, sizeof(audio->name), "%s", value);
+    if (read_keyed_value(info, "subname", value, sizeof(value)))
+        snprintf(audio->subname, sizeof(audio->subname), "%s", value);
+    /* Formats, channels and rates come from the card's stream description.
+       HDA cards do not publish one -- they describe themselves through
+       codec#N instead -- so these stay empty there rather than being
+       asserted. The old inventory hardcoded s16le for everything. */
+    snprintf(path, sizeof(path), "%s/card%d/stream0", asound_root(), card);
+    if (read_section_value(path, playback ? "Playback" : "Capture", "Format",
+                           value, sizeof(value)))
+        snprintf(audio->format, sizeof(audio->format), "%s", value);
+    if (read_section_value(path, playback ? "Playback" : "Capture",
+                           "Channels", value, sizeof(value)))
+        audio->channels = atoi(value);
+    if (read_section_value(path, playback ? "Playback" : "Capture", "Rates",
+                           value, sizeof(value)))
+        audio->sample_rate = atoi(value);
+    audio->seen = 1;
+    audio->present = 1;
+}
+
+static void scan_audio_devices(BlitRuntime *runtime, int announce)
+{
+    int card;
+    int index;
+    int discovered_any = 0;
+
+    for (index = 0; index < BLIT_MAX_AUDIO_DEVICES; ++index)
+        runtime->audio_devices[index].seen = 0;
+    for (card = 0; card < 32; ++card) {
+        char control[256];
+        char id_path[256];
+        char card_id[64];
+        int device;
+
+        snprintf(control, sizeof(control), "%s/controlC%d", snd_root(), card);
+        snprintf(id_path, sizeof(id_path), "%s/card%d/id", asound_root(),
+                 card);
+        if (access(control, R_OK) != 0 && access(id_path, R_OK) != 0)
+            continue;
+        snprintf(card_id, sizeof(card_id), "card%d", card);
+        read_text_file(id_path, card_id, sizeof(card_id));
+        for (device = 0; device < 16; ++device) {
+            int discovered = 0;
+            record_audio_device(runtime, card, card_id, device, 1,
+                                &discovered);
+            discovered_any |= discovered;
+            discovered = 0;
+            record_audio_device(runtime, card, card_id, device, 0,
+                                &discovered);
+            discovered_any |= discovered;
+        }
+    }
+    for (index = 0; index < BLIT_MAX_AUDIO_DEVICES; ++index) {
+        BlitAudioDevice *audio = &runtime->audio_devices[index];
+        if (!audio->used || audio->seen)
+            continue;
+        /* A device chosen as the default keeps its entry while it is absent,
+           for the same reason a configured input device does: the choice is
+           saved against the id and should still be there when the card comes
+           back. */
+        if (audio->present) {
+            audio->present = 0;
+            ++audio->revision;
+            discovered_any = 1;
+        }
+        if (audio->is_default)
+            continue;
+        memset(audio, 0, sizeof(*audio));
+        discovered_any = 1;
+    }
+    if (discovered_any)
+        ++runtime->audio_devices_revision;
+    (void)announce;
+}
+
+static size_t audio_device_item_json(const BlitAudioDevice *audio, char *body,
+                                     size_t capacity)
+{
+    char escaped_name[256];
+    char escaped_subname[256];
+    char escaped_card[128];
+    size_t used = 0;
+    int complete = 1;
+
+    json_escape(audio->name[0] != '\0' ? audio->name : "ALSA PCM",
+                escaped_name, sizeof(escaped_name));
+    json_escape(audio->subname, escaped_subname, sizeof(escaped_subname));
+    json_escape(audio->card_id, escaped_card, sizeof(escaped_card));
+    complete &= json_appendf(body, capacity, &used,
+        "{\"id\":\"%s\",\"class\":\"audio\",\"name\":\"%s\","
+        "\"node\":\"%s/pcmC%dD%d%c\",\"direction\":\"%s\","
+        "\"kinds\":[\"%s\"],\"formats\":[",
+        audio->id, escaped_name, snd_root(), audio->card, audio->device,
+        audio->playback ? 'p' : 'c',
+        audio->playback ? "playback" : "capture",
+        audio->playback ? "playback" : "capture");
+    if (audio->format[0] != '\0')
+        complete &= json_appendf(body, capacity, &used, "\"%s\"",
+                                 audio->format);
+    complete &= json_appendf(body, capacity, &used, "]");
+    if (audio->channels > 0)
+        complete &= json_appendf(body, capacity, &used, ",\"channels\":%d",
+                                 audio->channels);
+    if (audio->sample_rate > 0)
+        complete &= json_appendf(body, capacity, &used,
+                                 ",\"sample_rates\":[%d]", audio->sample_rate);
+    complete &= json_appendf(body, capacity, &used,
+        ",\"identity\":{\"card\":%d,\"card_id\":\"%s\",\"device\":%d,"
+        "\"subname\":\"%s\"},"
+        "\"capabilities\":[\"pcm\"],"
+        "\"state\":{\"present\":%s},"
+        "\"configuration\":{\"default\":%s},\"revision\":%llu}",
+        audio->card, escaped_card, audio->device, escaped_subname,
+        audio->present ? "true" : "false",
+        audio->is_default ? "true" : "false", audio->revision);
+    return complete ? used : capacity;
+}
+
+static void audio_devices_json(const BlitRuntime *runtime, char *body,
+                               size_t capacity)
+{
+    size_t used = 0;
+    int count = 0;
+    int dropped = 0;
+    int i;
+
+    used += (size_t)snprintf(body + used, capacity - used,
+                             "{\"revision\":%llu,\"devices\":[",
+                             runtime->audio_devices_revision);
+    for (i = 0; i < BLIT_MAX_AUDIO_DEVICES; ++i) {
+        const BlitAudioDevice *audio = &runtime->audio_devices[i];
+        char item[2048];
+        size_t length;
+
+        if (!audio->used)
+            continue;
+        length = audio_device_item_json(audio, item, sizeof(item));
+        if (length >= sizeof(item) ||
+            used + length + (size_t)(count > 0 ? 1 : 0) + 40 >= capacity) {
+            ++dropped;
+            continue;
+        }
+        if (count > 0)
+            body[used++] = ',';
+        memcpy(body + used, item, length);
+        used += length;
+        ++count;
+    }
+    snprintf(body + used, capacity - used, "],\"count\":%d,\"dropped\":%d}",
+             count, dropped);
+}
+
+static const char *audio_device_rejected_property(const char *configuration)
+{
+    static const char *const writable[] = { "default" };
+
+    return json_rejected_property(configuration, writable,
+                                  sizeof(writable) / sizeof(writable[0]));
+}
+
+/* The PCM a newly launched session should use, as ALSA's own environment
+   variables spell it. It reaches a child through execve and therefore only a
+   child launched after the choice was made; it cannot reach a running one. */
+static const BlitAudioDevice *default_audio_device(const BlitRuntime *runtime,
+                                                   int playback)
+{
+    int i;
+
+    for (i = 0; i < BLIT_MAX_AUDIO_DEVICES; ++i) {
+        const BlitAudioDevice *audio = &runtime->audio_devices[i];
+        if (audio->used && audio->is_default && audio->playback == playback)
+            return audio;
+    }
+    return NULL;
 }
 
 /* Probe one open evdev fd for the kinds and capabilities it reports.
@@ -4437,14 +4832,25 @@ static int json_object_scalars(const char *object, char *out, size_t capacity)
     return 1;
 }
 
-/* The property names a device's route may carry. Checked separately from the
-   configuration's own, because a nested object's keys are at a different
-   depth and the configuration scan deliberately only looks at depth one. */
-static const char *input_route_rejected_property(const char *route)
+/* The name of the first property in `object` that is not in `writable`, or
+   NULL when every one of them is.
+ *
+ * Accepting an unknown property silently is how a controller comes to believe
+ * it has set something it has not -- the same failure as issue #48, where a
+ * cell carrying its colours at the top level was answered with 200 and no
+ * style applied. Every writable object in the device API is checked through
+ * here, so a refusal always names the property.
+ *
+ * Only the object's own keys are considered: a quoted token is a property
+ * name when a colon follows it and it sits at depth one, which is what keeps
+ * a nested object's keys from being judged against the outer object's
+ * writable set. */
+static const char *json_rejected_property(const char *object,
+                                          const char *const *writable,
+                                          size_t writable_count)
 {
-    static const char *const writable[] = { "target_session_id", "enabled" };
     static char rejected[96];
-    const char *cursor = route;
+    const char *cursor = object;
     int depth = 0;
 
     while (*cursor != '\0' && *cursor != '{')
@@ -4473,7 +4879,7 @@ static const char *input_route_rejected_property(const char *route)
                 ++after;
             if (*after != ':' || depth != 1)
                 continue;
-            for (i = 0; i < sizeof(writable) / sizeof(writable[0]); ++i)
+            for (i = 0; i < writable_count; ++i)
                 if (strlen(writable[i]) == length &&
                     strncmp(name, writable[i], length) == 0) {
                     known = 1;
@@ -4498,69 +4904,22 @@ static const char *input_route_rejected_property(const char *route)
     return NULL;
 }
 
-/* The property names a device configuration may carry. Anything else is
-   refused and named, rather than accepted and ignored -- which is how a
-   controller comes to believe it has set something it has not (issue #48). */
+static const char *input_route_rejected_property(const char *route)
+{
+    static const char *const writable[] = { "target_session_id", "enabled" };
+
+    return json_rejected_property(route, writable,
+                                  sizeof(writable) / sizeof(writable[0]));
+}
+
 static const char *input_device_rejected_property(const char *configuration)
 {
     static const char *const writable[] = {
         "enabled", "sensitivity_percent", "natural_scroll", "route"
     };
-    static char rejected[96];
-    const char *cursor = configuration;
-    int depth = 0;
 
-    while (*cursor != '\0' && *cursor != '{')
-        ++cursor;
-    if (*cursor != '{')
-        return NULL;
-    for (; *cursor != '\0'; ++cursor) {
-        if (*cursor == '"') {
-            const char *name = cursor + 1;
-            size_t length = 0;
-            const char *after;
-            size_t i;
-            int known = 0;
-
-            while (name[length] != '\0' && name[length] != '"') {
-                if (name[length] == '\\' && name[length + 1] != '\0')
-                    ++length;
-                ++length;
-            }
-            if (name[length] != '"')
-                return NULL;
-            after = name + length + 1;
-            cursor = after - 1;
-            while (*after == ' ' || *after == '\t' || *after == '\r' ||
-                   *after == '\n')
-                ++after;
-            /* A quoted token followed by a colon is a property name; one
-               followed by anything else is a value. */
-            if (*after != ':' || depth != 1)
-                continue;
-            for (i = 0; i < sizeof(writable) / sizeof(writable[0]); ++i)
-                if (strlen(writable[i]) == length &&
-                    strncmp(name, writable[i], length) == 0) {
-                    known = 1;
-                    break;
-                }
-            if (!known) {
-                size_t copy = length < sizeof(rejected) - 1 ?
-                    length : sizeof(rejected) - 1;
-                memcpy(rejected, name, copy);
-                rejected[copy] = '\0';
-                return rejected;
-            }
-            continue;
-        }
-        if (*cursor == '{' || *cursor == '[')
-            ++depth;
-        else if (*cursor == '}' || *cursor == ']') {
-            if (--depth == 0)
-                break;
-        }
-    }
-    return NULL;
+    return json_rejected_property(configuration, writable,
+                                  sizeof(writable) / sizeof(writable[0]));
 }
 
 static int apply_cell_update(BlitSurface *surface, const char *json,
@@ -9944,6 +10303,29 @@ static int create_session(BlitRuntime *runtime, const char *json,
                 _exit(126);
         if (pane_id[0] != '\0' && setenv("BLIT_PANE_ID", pane_id, 1) != 0)
             _exit(126);
+        /* ADR 0064 stage 5. A chosen default PCM reaches a child as ALSA's
+           own environment variables, which is the whole of what Blit can
+           honour: it has no audio engine, so it cannot route a stream, and
+           execve means the choice reaches only children launched after it was
+           made -- never a session already running. */
+        {
+            const BlitAudioDevice *playback = default_audio_device(runtime, 1);
+            const BlitAudioDevice *capture = default_audio_device(runtime, 0);
+            char number[16];
+            if (playback != NULL) {
+                snprintf(number, sizeof(number), "%d", playback->card);
+                if (setenv("ALSA_CARD", playback->card_id, 1) != 0 ||
+                    setenv("ALSA_PCM_CARD", number, 1) != 0)
+                    _exit(126);
+                snprintf(number, sizeof(number), "%d", playback->device);
+                if (setenv("ALSA_PCM_DEVICE", number, 1) != 0 ||
+                    setenv("BLIT_AUDIO_PLAYBACK", playback->id, 1) != 0)
+                    _exit(126);
+            }
+            if (capture != NULL &&
+                setenv("BLIT_AUDIO_CAPTURE", capture->id, 1) != 0)
+                _exit(126);
+        }
         if (run_as_user) {
             if (initgroups(run_user, run_gid) != 0 ||
                 setgid(run_gid) != 0 || setuid(run_uid) != 0 ||
@@ -12357,6 +12739,102 @@ static void handle_request(int fd, BlitRuntime *runtime,
         send_http(fd, 202, "Accepted", "application/json", body);
         return;
     }
+    if (strncmp(path, "/v1/audio/", strlen("/v1/audio/")) == 0 &&
+        strcmp(method, "PATCH") == 0) {
+        const char *audio_id = path + strlen("/v1/audio/");
+        BlitAudioDevice *audio = find_audio_device_id(runtime, audio_id);
+        char configuration[512];
+        char scalars[512];
+        const char *configuration_cursor = json_key_cursor(payload,
+                                                           "configuration");
+        const char *rejected;
+        int requested_revision = 0;
+        int has_requested_revision = json_key_cursor(payload,
+                                                     "revision") != NULL;
+        int make_default = 0;
+        int default_requested;
+        int changed = 0;
+        int i;
+
+        if (*audio_id == '\0' || audio == NULL) {
+            send_problem(fd, 404, "Not Found", "audio_device_not_found",
+                         "The requested audio device does not exist.");
+            return;
+        }
+        if (idempotency_replay(runtime, fd, request, method, path, payload))
+            return;
+        if (has_requested_revision &&
+            (!json_int(payload, "revision", &requested_revision) ||
+             requested_revision < 0)) {
+            send_problem(fd, 400, "Bad Request", "invalid_device_revision",
+                         "revision must be a non-negative integer.");
+            return;
+        }
+        if (has_requested_revision &&
+            (unsigned long long)requested_revision != audio->revision) {
+            send_revision_problem(fd, "revision_conflict",
+                                  "The audio device revision is no longer current.",
+                                  audio->revision);
+            return;
+        }
+        if (!if_match_revision(fd, request, audio->revision))
+            return;
+        if (configuration_cursor == NULL ||
+            !json_object_slice(configuration_cursor, configuration,
+                               sizeof(configuration)) ||
+            !json_object_scalars(configuration, scalars, sizeof(scalars))) {
+            send_problem(fd, 400, "Bad Request", "invalid_device_configuration",
+                         "A device update carries its writable properties under configuration, as a JSON object.");
+            return;
+        }
+        rejected = audio_device_rejected_property(configuration);
+        if (rejected != NULL) {
+            char detail[256];
+            snprintf(detail, sizeof(detail),
+                     "An audio device configuration carries \"%s\", which is "
+                     "not a writable property. Writable: default.", rejected);
+            send_problem(fd, 400, "Bad Request", "invalid_device_property",
+                         detail);
+            return;
+        }
+        default_requested = json_bool(scalars, "default", &make_default);
+        if (json_key_cursor(scalars, "default") != NULL && !default_requested) {
+            send_problem(fd, 400, "Bad Request", "invalid_device_configuration",
+                         "default must be a JSON boolean.");
+            return;
+        }
+        if (default_requested && make_default != audio->is_default) {
+            if (make_default) {
+                /* One default per direction: choosing an output is choosing
+                   between outputs, so the others give it up. */
+                for (i = 0; i < BLIT_MAX_AUDIO_DEVICES; ++i) {
+                    BlitAudioDevice *other = &runtime->audio_devices[i];
+                    if (other->used && other != audio && other->is_default &&
+                        other->playback == audio->playback) {
+                        other->is_default = 0;
+                        ++other->revision;
+                    }
+                }
+            }
+            audio->is_default = make_default;
+            changed = 1;
+        }
+        if (changed) {
+            ++audio->revision;
+            ++runtime->audio_devices_revision;
+        }
+        if (audio_device_item_json(audio, body, sizeof(body)) >=
+            sizeof(body)) {
+            send_problem(fd, 500, "Internal Server Error",
+                         "audio_device_unserialisable",
+                         "The audio device item did not fit its response buffer.");
+            return;
+        }
+        idempotency_store(runtime, request, method, path, payload, 200, "OK",
+                          "application/json", body);
+        send_http(fd, 200, "OK", "application/json", body);
+        return;
+    }
     if (strncmp(path, "/v1/input/devices/",
                 strlen("/v1/input/devices/")) == 0 &&
         strcmp(method, "PATCH") == 0) {
@@ -12865,7 +13343,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
         graphics_json(body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
     } else if (strcmp(path, "/v1/audio") == 0) {
-        audio_json(body, sizeof(body));
+        audio_devices_json(runtime, body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
     } else if (strcmp(path, "/v1/input/devices") == 0) {
         /* Served from the runtime's table (ADR 0064). This route used to run
@@ -12874,6 +13352,38 @@ static void handle_request(int fd, BlitRuntime *runtime,
            so a controller that polled the inventory periodically froze the
            server it was controlling. */
         input_devices_json(runtime, body, sizeof(body));
+        send_http(fd, 200, "OK", "application/json", body);
+    } else if (strncmp(path, "/v1/audio/", strlen("/v1/audio/")) == 0) {
+        const char *audio_id = path + strlen("/v1/audio/");
+        BlitAudioDevice *audio = find_audio_device_id(runtime, audio_id);
+        if (*audio_id == '\0' || audio == NULL) {
+            send_problem(fd, 404, "Not Found", "audio_device_not_found",
+                         "The requested audio device does not exist.");
+            return;
+        }
+        if (audio_device_item_json(audio, body, sizeof(body)) >=
+            sizeof(body)) {
+            send_problem(fd, 500, "Internal Server Error",
+                         "audio_device_unserialisable",
+                         "The audio device item did not fit its response buffer.");
+            return;
+        }
+        send_http(fd, 200, "OK", "application/json", body);
+    } else if (strncmp(path, "/v1/displays/", strlen("/v1/displays/")) == 0) {
+        const char *display_id = path + strlen("/v1/displays/");
+        int index = display_index_by_id(runtime, display_id);
+        if (*display_id == '\0' || index < 0) {
+            send_problem(fd, 404, "Not Found", "display_not_found",
+                         "The requested display does not exist.");
+            return;
+        }
+        if (display_item_json(runtime, index, body, sizeof(body)) >=
+            sizeof(body)) {
+            send_problem(fd, 500, "Internal Server Error",
+                         "display_unserialisable",
+                         "The display item did not fit its response buffer.");
+            return;
+        }
         send_http(fd, 200, "OK", "application/json", body);
     } else if (strncmp(path, "/v1/input/devices/",
                        strlen("/v1/input/devices/")) == 0) {
@@ -17692,6 +18202,8 @@ int main(int argc, char **argv)
     runtime.topology_revision = 1;
     runtime.input_routes_revision = 1;
     runtime.input_devices_revision = 1;
+    runtime.audio_devices_revision = 1;
+    runtime.displays_revision = 1;
     runtime.next_overlay_id = 1;
     runtime.effect.revision = 1;
     snprintf(runtime.effect.preset, sizeof(runtime.effect.preset), "none");
@@ -17751,6 +18263,7 @@ int main(int argc, char **argv)
         if (mouse_device != NULL && mouse_device[0] != '\0')
             evdev_register_path(&runtime, mouse_device, 0);
         scan_evdev_devices(&runtime, 0);
+        scan_audio_devices(&runtime, 0);
         if (runtime.evdev_mouse_count > 0)
             for (input_index = 0; input_index < runtime.evdev_mouse_count;
                  ++input_index)

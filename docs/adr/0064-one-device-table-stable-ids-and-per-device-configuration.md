@@ -208,18 +208,44 @@ every discovery, loss and accepted PATCH, and the change is announced on
 `/v1/stream` as a `device_changed` event alongside the existing
 `input_device_reconnected` / `input_device_lost` diagnostics.
 
-**Audio and display configuration are staged, and the ADR does not promise
-what Blit cannot do.** Blit has no audio engine; it advertises
-`audio-inventory` and enumerates ALSA cards by `access()` on
-`/dev/snd/*`, hardcoding `s16le`. Real mixer control means linking libasound,
-which is a packaging and toolchain decision (`tools/build-tcc.sh` must link
-it, `packaging/build-deb.sh` must depend on it) and is deliberately **not**
-decided here. Stage 3 delivers honest capabilities read from
-`/proc/asound/cardN` and a Blit-level default-sink selection exported to
-launched sessions; a mixer requires its own ADR. Display mode-setting is
-reachable only through SDL (`SDL_SetWindowFullscreenMode`); the KMS backend in
-`src/blit_kms.c` is exercised by nothing today, so stage 4 configuration is
-specified for the SDL path and left unimplemented for KMS.
+**An audio device is one PCM in one direction, not one card.** The inventory
+this replaced listed a card with a direction of `duplex` when it had both. The
+live host has six cards and nine PCMs, four of them HDMI outputs on one card —
+and choosing between "HDMI 0" and "HDMI 3" is the whole of choosing an output,
+so per-card granularity cannot express the thing a control panel exists to do.
+The id is `audio-<card-id>-pcm<device>-<p|c>`, with the card component from
+`/proc/asound/card<N>/id`, which ALSA keeps stable across reboots — unlike the
+card *number*, which is assignment order. Formats, channels and rates come
+from the card's stream description, read **per direction**: a USB card's
+`stream0` has separate `Playback:` and `Capture:` blocks whose formats differ,
+so taking the first match in the file reports the playback format for a
+capture device. A card that publishes no stream description reports none,
+rather than the `s16le` the old inventory asserted for everything.
+
+**Audio configuration is the choice of default, and nothing more.** Blit has
+no audio engine: it cannot route a stream, mix, or change a level.
+`configuration.default` marks a PCM as the default for its direction —
+playback and capture independently — and is honoured by exporting
+`ALSA_CARD`, `ALSA_PCM_CARD`, `ALSA_PCM_DEVICE` and
+`BLIT_AUDIO_PLAYBACK`/`BLIT_AUDIO_CAPTURE` into the environment of sessions
+launched **after** the write. `execve` means it cannot reach a session already
+running, so a controller that wants a change to apply relaunches the session.
+Volume, mute and any other mixer control are **not** here and are not implied:
+they need libasound, which changes `tools/build-tcc.sh` and the
+`packaging/build-deb.sh` dependencies and is a toolchain decision with its own
+ADR.
+
+**A display has no writable property, and that is the decision.** Selecting a
+mode changes the render output size and therefore every surface on the
+display, and a Hibr desktop's cells come from its owner
+([ADR 0063](0063-a-desktop-cells-come-from-its-owner.md)), so Blit cannot
+repaint one at a new size by itself — it needs a resize protocol with the
+owner, which does not exist. The modes are reported so a controller can show
+them; the write that applies one is its own ticket. A `mode` property that
+accepted a value and did nothing would be worse than its absence. The KMS
+backend cannot be validated at all, and a mode change on an unattended screen
+that fails to come back is unrecoverable over the API — two independent
+reasons, either sufficient.
 
 ## Consequences
 
@@ -255,8 +281,11 @@ specified for the SDL path and left unimplemented for KMS.
    pointer `sensitivity_percent` and `natural_scroll`. *Done, 0.1.434.*
 3. **Per-device routing.** `configuration.route`. *Done, 0.1.435.*
 4. **Keyboard layout** (#35). A keymap that is not hard-coded US.
-5. **Audio.** Real capabilities, device items, default-sink selection.
-6. **Displays.** Item endpoints and SDL mode-set configuration.
+5. **Audio.** Real per-PCM capabilities, device items, default selection.
+   *Done, 0.1.437.*
+6. **Displays.** Item endpoint and the envelope; no writable property.
+   *Done, 0.1.437.* Mode selection is its own ticket, because it needs a
+   resize protocol with the surface owner.
 
 ## Evidence
 
@@ -299,6 +328,24 @@ specified for the SDL path and left unimplemented for KMS.
   disabled route falls through without delivering, and that a routed device
   survives being unplugged. Teeth: with the per-device resolution removed from
   `input_route_target`, both letters land in the same session.
+
+- `tools/tests/audio_device_api_gate.rb` — three PCMs on one card, two of them
+  playback, which is the case per-card granularity could not express; the
+  envelope; the item endpoint; per-direction formats, where the fixture's
+  `stream0` gives Playback and Capture different ones so a parser that takes
+  the first match in the file is caught; one default per direction, chosen
+  independently; the 400 naming an unknown property; the 409 on a stale
+  revision; and that the chosen default reaches a session launched after the
+  write, read out of that session's own surface. Its devices are fabricated
+  under `BLIT_ASOUND_ROOT`/`BLIT_SND_ROOT`, because this environment has
+  neither `/proc/asound` nor `/dev/snd`. Teeth: reading the format from the
+  Playback section regardless of direction gives the capture device the
+  playback format; a single default across both directions makes choosing a
+  microphone clear the chosen output.
+- `tools/tests/display_device_api_gate.rb` — the envelope, the item endpoint
+  agreeing with the collection, that `configuration` is empty and a PATCH is
+  refused rather than quietly accepted, and that the reported bounds are the
+  bounds. Teeth: the pre-change item shape fails the envelope.
 
   **Not gated locally, and not claimed to be:** that disabling a device stops
   it being polled, and that `sensitivity_percent` scales motion. Both need a

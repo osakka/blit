@@ -211,6 +211,8 @@ suite_renderer() {
     run_gate input_device_api_gate.rb ruby tools/tests/input_device_api_gate.rb
     run_gate input_device_config_gate.rb ruby tools/tests/input_device_config_gate.rb
     run_gate input_device_route_gate.rb ruby tools/tests/input_device_route_gate.rb
+    run_gate audio_device_api_gate.rb ruby tools/tests/audio_device_api_gate.rb
+    run_gate display_device_api_gate.rb ruby tools/tests/display_device_api_gate.rb
     run_gate pointer_target_gate.rb ruby tools/tests/pointer_target_gate.rb
     run_gate pointer_wallpaper_stress_gate.rb ruby tools/tests/pointer_wallpaper_stress_gate.rb
     run_gate external_pointer_composition_gate.rb ruby tools/tests/external_pointer_composition_gate.rb
