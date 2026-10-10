@@ -55,7 +55,8 @@ input_device_route_acceptance: pass_two_devices_two_sessions_keys_landed_per_dev
 main_block_key_table_acceptance: pass_31_of_31_was_1_of_30
 live_input_device_table_acceptance: carried_from_0_1_433
 live_input_device_config_acceptance: carried_from_0_1_434
-live_main_block_key_acceptance: PENDING
+live_main_block_key_acceptance: pass_94_of_94_unshifted_and_shifted
+live_device_routing_acceptance: pass_two_real_keyboards_two_sessions
 json_escape_acceptance: carried_from_0_1_431
 live_cell_property_refusal_acceptance: carried_from_0_1_431
 live_unpainted_report_acceptance: carried_from_0_1_430
@@ -78,13 +79,13 @@ screenshot_nonblocking_live_acceptance: not_rerun_candidate
 qemu_hibr_lifecycle_acceptance: not_rerun_candidate
 qemu_four_output_pixel_acceptance: not_rerun_candidate
 qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
-live_deployment: PENDING
-live_current_version: PENDING
+live_deployment: pass_supervised_update_verified_0_1_435
+live_current_version: 0.1.435
 live_block_cursor_acceptance: carried_from_0_1_425
 live_italic_acceptance: carried_from_0_1_425
 live_session_default_acceptance: carried_from_0_1_425
 live_sync_output_acceptance: carried_from_0_1_425
-live_hibr_desktop_acceptance: PENDING
+live_hibr_desktop_acceptance: pass_32400_printable_revision_859
 live_idle_frame_acceptance: carried_from_0_1_425
 live_physical_multi_display: unavailable_one_output
 live_physical_button_trace_contract: open
@@ -171,3 +172,30 @@ notes: >-
   keys on their way to a different session. It predates routing -- one
   evdev_shift and one evdev_key_held for every keyboard -- and routing only
   made it observable. It belongs with #35.
+
+  Host-accepted on 192.168.10.54, both halves measured there and not only
+  locally.
+
+  The key table, through a cat session on the host: 94 of 94 main-block cases
+  correct, unshifted and shifted. Before this release the same host would have
+  typed one of them right.
+
+  Per-device routing, through tools/probes/host_device_routing.rb against two
+  of the host's real keyboards:
+
+    keyboard A  input-0003-25a7-0124-usb-0000-e6-00.4-1.1.4-input2
+                ZYSD.Ltd HCY MIC RC          -> session 1
+    keyboard B  input-0003-062a-4101-usb-0000-e6-00.4-1.1.3.1-input0
+                MOSART Semi. 2.4G Keyboard Mouse -> session 2
+
+    session 1   "GOT[a]"
+    session 2   "GOT[b]"
+
+  Each keyboard's key landed in its own session and in neither of the other's.
+  The probe clears the routes and removes its sessions, so the host is left as
+  it was found. The desktop came back with 32,400 printable cells at revision
+  859 and an empty errors array.
+
+  Unchanged: the per-device counters still read zero on the host, because
+  nobody is at the keyboard and an injection is attributed to the aggregate
+  route. src/blit_kms.c carries its changes unseen on a screen.
