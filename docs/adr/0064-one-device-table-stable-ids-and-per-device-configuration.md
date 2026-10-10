@@ -161,11 +161,39 @@ refusal already do. `GET /v1/<class>/{id}` returns one item.
 
 **Per-device routing supersedes the aggregate routes without removing them.**
 A device's `configuration.route` names a `target_session_id` and an `enabled`
-flag. `input_route_target()` resolves the device's own route first and falls
-back to the aggregate `evdev-keyboard` / `evdev-pointer` / `evdev-gamepad`
-route, so existing clients keep working and a control panel can override one
-device at a time. `configuration.enabled: false` removes the device from the
-poll set entirely.
+flag. Resolution order is the device's own route, then the aggregate
+`evdev-keyboard` / `evdev-pointer` / `evdev-gamepad` route, then the caller's
+own fallback — the focused session, or the surface under the pointer. A route
+that exists but is disabled **falls through** rather than blocking, so
+disabling it restores the behaviour that applied before it instead of dropping
+the device's input. A route whose target session ends is disabled and keeps its
+target, so a controller can still see what it pointed at.
+`configuration.enabled: false` releases the device's file descriptors
+entirely.
+
+The decision is carried by `runtime->input_source`, a field set at the top of
+each `service_evdev_*` drain and cleared at the bottom, rather than by
+threading a device through `keyboard_target` and the seven
+`input_route_target` call sites — functions SDL also calls, which would all
+pass nothing. A field is honest here because the input path is single-threaded
+and synchronous: a device's events are fully dispatched before the next
+device's drain begins. The discipline that makes it safe is that no route
+resolution may run while the field holds a device from a previous drain, which
+is why it is also set and cleared around the `POST /v1/input/inject` body,
+including on every refusal path inside it.
+
+Two things routing does **not** change, stated because a control-panel author
+would otherwise assume otherwise:
+
+- **The cursor is global.** Routing a pointer sends that device's buttons and
+  reports to its target regardless of where the cursor is, and two routed
+  pointers still move one cursor. That is what the aggregate routes already
+  do; a cursor per device is a different feature.
+- **Modifier state is global across keyboards.** Shift held on a keyboard
+  routed to session 1 modifies another keyboard's keys on their way to
+  session 2. This predates routing — `evdev_shift` and `evdev_key_held` are
+  one set for all keyboards — and routing only makes it observable. Fixing it
+  belongs with the keymap work (#35), not here.
 
 **Collection revisions become real.** `input_devices_revision` increments on
 every discovery, loss and accepted PATCH, and the change is announced on
@@ -217,11 +245,7 @@ specified for the SDL path and left unimplemented for KMS.
    real `input_devices_revision`. *Done, 0.1.432/0.1.433.*
 2. **Input configuration.** `PATCH /v1/input/devices/{id}`: `enabled`,
    pointer `sensitivity_percent` and `natural_scroll`. *Done, 0.1.434.*
-3. **Per-device routing.** `configuration.route`, which threads the device
-   through `keyboard_target` and the seven `input_route_target` call sites.
-   Deferred from stage 2 deliberately: the aggregate `evdev-keyboard` /
-   `evdev-pointer` / `evdev-gamepad` strings are also a stream contract, so
-   the change is larger than the rest of the configuration put together.
+3. **Per-device routing.** `configuration.route`. *Done, 0.1.435.*
 4. **Keyboard layout** (#35). A keymap that is not hard-coded US.
 5. **Audio.** Real capabilities, device items, default-sink selection.
 6. **Displays.** Item endpoints and SDL mode-set configuration.
@@ -258,6 +282,15 @@ specified for the SDL path and left unimplemented for KMS.
   the configuration and the replug comes back enabled; reading
   `configuration` by forward search lets `enabled` outside the object
   re-enable the device; and accepting an unknown property answers 200.
+
+- `tools/tests/input_device_route_gate.rb` — stage 3, and the first input
+  test that runs without hardware at all: two shells, two devices, each routed
+  to one shell, a letter injected through each with its `device_id` and read
+  back from that shell's own surface. Also the 400 for a route to a session
+  that does not exist, the 400 naming an unknown route property, that a
+  disabled route falls through without delivering, and that a routed device
+  survives being unplugged. Teeth: with the per-device resolution removed from
+  `input_route_target`, both letters land in the same session.
 
   **Not gated locally, and not claimed to be:** that disabling a device stops
   it being polled, and that `sensitivity_percent` scales motion. Both need a

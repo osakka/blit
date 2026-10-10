@@ -161,6 +161,42 @@ cases = [
   [KEY['a'], %w[leftalt], '^[a', 'alt with a letter sends ESC']
 ]
 
+
+# The whole main block, unshifted and shifted.
+#
+# This exists because the gate used to test exactly one letter, 'a', and 'a'
+# was the one letter the encoder got right. evdev numbers keys by physical
+# position, not alphabetically -- KEY_A is 30, KEY_S is 31, KEY_D is 32 -- and
+# the encoder computed a letter as `'a' + code - KEY_A`. So the S key typed
+# 'b', the D key typed 'c', the semicolon key typed 'j', the backslash key
+# typed 'n', and Q through P and X through M, which lie outside 30..44, typed
+# nothing at all. Of thirty main-block keys exactly one produced the right
+# character, and the gate's single case was that one.
+#
+# The row order below is the keyboard's, which is also evdev's code order, so
+# a misplaced entry is visible as a key out of place rather than as an index.
+MAIN_BLOCK = [
+  # code, unshifted, shifted
+  [2, '1', '!'], [3, '2', '@'], [4, '3', '#'], [5, '4', '$'], [6, '5', '%'],
+  [7, '6', '^'], [8, '7', '&'], [9, '8', '*'], [10, '9', '('], [11, '0', ')'],
+  [12, '-', '_'], [13, '=', '+'],
+  [16, 'q', 'Q'], [17, 'w', 'W'], [18, 'e', 'E'], [19, 'r', 'R'],
+  [20, 't', 'T'], [21, 'y', 'Y'], [22, 'u', 'U'], [23, 'i', 'I'],
+  [24, 'o', 'O'], [25, 'p', 'P'], [26, '[', '{'], [27, ']', '}'],
+  [30, 'a', 'A'], [31, 's', 'S'], [32, 'd', 'D'], [33, 'f', 'F'],
+  [34, 'g', 'G'], [35, 'h', 'H'], [36, 'j', 'J'], [37, 'k', 'K'],
+  [38, 'l', 'L'], [39, ';', ':'], [40, "'", '"'], [41, '`', '~'],
+  [43, '\\', '|'],
+  [44, 'z', 'Z'], [45, 'x', 'X'], [46, 'c', 'C'], [47, 'v', 'V'],
+  [48, 'b', 'B'], [49, 'n', 'N'], [50, 'm', 'M'], [51, ',', '<'],
+  [52, '.', '>'], [53, '/', '?']
+].freeze
+
+MAIN_BLOCK.each do |code, plain, shifted|
+  cases << [code, [], plain, "the #{plain.inspect} key"]
+  cases << [code, %w[leftshift], shifted, "shift with the #{plain.inspect} key"]
+end
+
 cases.each do |code, modifiers, expected, description|
   got = press(surface, code, modifiers)
   warn "  #{description}: #{got.inspect}" if ENV['BLIT_GATE_DEBUG']

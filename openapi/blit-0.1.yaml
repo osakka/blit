@@ -510,7 +510,8 @@ paths:
         view of what the server has discovered and polls; the request performs
         no device enumeration, so it is safe to poll. `revision` counts
         discoveries, losses and accepted configuration writes, and a change is
-        also announced on the event stream as `device_changed`. `count` is the
+        also announced on the event stream as `device_changed`, delivered to
+        `events=input` and `events=hardware` subscribers. `count` is the
         number of serialised devices and `dropped` the number that did not fit
         the response; a client that sees a non-zero `dropped` is seeing an
         incomplete inventory and is told so rather than silently shortchanged.
@@ -567,7 +568,8 @@ paths:
         accepted and ignored; a pointer-only property on a device that is not
         read as a pointer is refused with 422. An accepted write bumps the
         device's revision and the collection's, and is announced on the event
-        stream as `device_changed` with `change: "configured"`.
+        stream as `device_changed` with `change: "configured"`, delivered to
+        `events=input` and `events=hardware` subscribers.
       parameters:
         - name: If-Match
           in: header
@@ -592,6 +594,14 @@ paths:
                       minimum: 10
                       maximum: 1000
                     natural_scroll: {type: boolean}
+                    route:
+                      type: object
+                      required: [target_session_id, enabled]
+                      properties:
+                        target_session_id:
+                          $ref: '#/components/schemas/ResourceId'
+                        enabled: {type: boolean}
+                      additionalProperties: false
                   additionalProperties: false
               additionalProperties: false
       responses:
@@ -1670,6 +1680,29 @@ components:
               description: >-
                 Pointer devices only. Inverts the wheel direction this device
                 reports.
+            route:
+              type: object
+              description: >-
+                Where this device's input goes, overriding the aggregate route
+                for its kind. Resolution order is: this route when it is
+                enabled, then the aggregate evdev-keyboard/evdev-pointer/
+                evdev-gamepad route, then the caller's own fallback (the
+                focused session, or the surface under the pointer). A route
+                that exists but is disabled falls through rather than
+                blocking, so disabling it restores the previous behaviour
+                instead of dropping the device's input. A route whose target
+                session ends is disabled and keeps its target, so a controller
+                can still see what it pointed at.
+                Routing a pointer sends that device's buttons and reports to
+                the target regardless of where the cursor is; the cursor
+                itself is global and shared by every pointer, as it is for the
+                aggregate routes.
+              required: [target_session_id, enabled]
+              properties:
+                target_session_id:
+                  $ref: '#/components/schemas/ResourceId'
+                enabled: {type: boolean}
+              additionalProperties: false
           additionalProperties: false
         revision:
           allOf:
@@ -1735,6 +1768,11 @@ components:
         device_id:
           type: string
           enum: [evdev-keyboard, evdev-pointer, evdev-gamepad]
+          description: >-
+            An aggregate pseudo-device: every discovered source of that kind
+            feeds it. Since ADR 0064 a single device can carry its own route
+            under its `configuration`, which wins over this one; these remain
+            as the fallback and as the identity the event stream publishes.
         target_session_id: {$ref: '#/components/schemas/ResourceId'}
         enabled: {type: boolean}
       additionalProperties: false

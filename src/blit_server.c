@@ -317,6 +317,8 @@ typedef struct {
     int enabled;
     int sensitivity_percent;
     int natural_scroll;
+    char route_target[128];
+    int route_enabled;
     int present;
     unsigned long long first_seen_us;
     unsigned long long last_seen_us;
@@ -634,6 +636,16 @@ typedef struct {
     unsigned long long input_routes_revision;
     BlitInputDevice input_devices[BLIT_MAX_INPUT_DEVICES];
     unsigned long long input_devices_revision;
+    /* The physical device whose events are being dispatched right now, or
+       NULL. ADR 0064 stage 3 routes per device, and the alternative was
+       threading a device through keyboard_target and seven
+       input_route_target call sites -- functions SDL also calls, which would
+       all pass NULL. A field is honest here because the input path is
+       single-threaded and synchronous: a device's events are fully dispatched
+       before the next device's drain begins. The discipline that makes it
+       safe is that it is set at the top of a drain and cleared at the bottom,
+       so no resolution can ever see a device from a previous drain. */
+    BlitInputDevice *input_source;
     BlitOutput outputs[BLIT_MAX_DISPLAYS];
     BlitIdempotency idempotency[BLIT_MAX_IDEMPOTENCY];
     BlitEventRecord event_history[BLIT_MAX_EVENT_HISTORY];
@@ -864,6 +876,9 @@ static void send_mouse_report(BlitRuntime *runtime, SDL_WindowID window_id,
                               float pixel_x, float pixel_y, int button,
                               int release);
 static void update_evdev_pointer(BlitRuntime *runtime);
+static void broadcast_input_device_changed(BlitRuntime *runtime,
+                                           const BlitInputDevice *device,
+                                           const char *change);
 static void update_pointer_position(BlitRuntime *runtime,
                                     const char *device_id);
 static void broadcast_evdev_pointer(BlitRuntime *runtime, const char *kind,
@@ -2194,7 +2209,8 @@ static void server_json(const BlitRuntime *runtime, char *body, size_t capacity)
              "\"capabilities\":[\"http-control\",\"websocket-stream\","
              "\"terminal-sessions\",\"topology\","
              "\"native-presentation\",\"graphics-inventory\","
-             "\"audio-inventory\",\"input-devices\",\"input-routes\","
+             "\"audio-inventory\",\"input-devices\","
+             "\"input-device-configuration\",\"input-routes\","
              "\"network-terminal-input\",\"diagnostics\","
              "\"runtime-diagnostics\",\"lifecycle-control\","
              "\"effects\",\"overlays\",\"font-selection\"],\"display_count\":%d,"
@@ -2758,6 +2774,18 @@ static BlitInputDevice *find_input_device_id(BlitRuntime *runtime,
     return NULL;
 }
 
+/* The configuration of the device behind a poll slot, by node path. Resolved
+   once per drain rather than per event: the table's slots do not move while a
+   drain is in flight -- the scan and its sweep run on the same thread,
+   between drains -- and a per-event lookup would put a linear search in the
+   motion path. */
+static BlitInputDevice *input_device_for_slot(BlitRuntime *runtime,
+                                              const char (*paths)[128],
+                                              int slot)
+{
+    return find_input_device_node(runtime, paths[slot]);
+}
+
 /* Assign the device its id, raising the discriminator until the id is free.
    The device's own name is the first discriminator and a scan-order ordinal
    the last, because on real hardware one HID interface commonly presents
@@ -2867,7 +2895,7 @@ static int input_device_configured(const BlitInputDevice *device)
 {
     return !device->enabled ||
         device->sensitivity_percent != BLIT_INPUT_SENSITIVITY_DEFAULT ||
-        device->natural_scroll;
+        device->natural_scroll || device->route_target[0] != '\0';
 }
 
 /* How many of a device's kinds the poll loop currently holds open. The fd
@@ -3037,6 +3065,10 @@ static size_t input_device_item_json(const BlitRuntime *runtime,
             ",\"sensitivity_percent\":%d,\"natural_scroll\":%s",
             device->sensitivity_percent,
             device->natural_scroll ? "true" : "false");
+    if (device->route_target[0] != '\0')
+        complete &= json_appendf(body, capacity, &used,
+            ",\"route\":{\"target_session_id\":\"%s\",\"enabled\":%s}",
+            device->route_target, device->route_enabled ? "true" : "false");
     complete &= json_appendf(body, capacity, &used,
         "},\"revision\":%llu}", device->revision);
     /* One test, at the end: json_appendf leaves `used` alone when a field
@@ -4280,13 +4312,199 @@ static int json_object_slice(const char *cursor, char *out, size_t capacity)
     return 0;
 }
 
+/* Copy only an object's own scalar members, dropping every nested object and
+   array.
+ *
+ * json_bool and json_int find a key by searching forward at any depth, so
+ * reading "enabled" from {"route":{"target_session_id":"s","enabled":false}}
+ * finds the *route's* enabled and disables the device. Bounding the outer
+ * object was not enough: the boundary has to be the object's own level. The
+ * route gate caught exactly this, by injecting through a device that a
+ * route-only PATCH had silently disabled. */
+static int json_object_scalars(const char *object, char *out, size_t capacity)
+{
+    const char *cursor = object;
+    size_t used = 0;
+    int first = 1;
+
+    if (capacity < 3)
+        return 0;
+    while (*cursor != '\0' && *cursor != '{')
+        ++cursor;
+    if (*cursor != '{')
+        return 0;
+    ++cursor;
+    out[used++] = '{';
+    while (*cursor != '\0' && *cursor != '}') {
+        const char *name;
+        size_t name_length = 0;
+        const char *value;
+        size_t value_length = 0;
+        int nested = 0;
+
+        while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
+               *cursor == '\n' || *cursor == ',')
+            ++cursor;
+        if (*cursor != '"')
+            break;
+        name = ++cursor;
+        while (*cursor != '\0' && *cursor != '"') {
+            if (*cursor == '\\' && cursor[1] != '\0') {
+                ++cursor;
+                ++name_length;
+            }
+            ++cursor;
+            ++name_length;
+        }
+        if (*cursor != '"')
+            return 0;
+        ++cursor;
+        while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
+               *cursor == '\n')
+            ++cursor;
+        if (*cursor != ':')
+            return 0;
+        ++cursor;
+        while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
+               *cursor == '\n')
+            ++cursor;
+        value = cursor;
+        if (*cursor == '{' || *cursor == '[') {
+            int depth = 0;
+            nested = 1;
+            for (; *cursor != '\0'; ++cursor) {
+                if (*cursor == '"') {
+                    ++cursor;
+                    while (*cursor != '\0' && *cursor != '"') {
+                        if (*cursor == '\\' && cursor[1] != '\0')
+                            ++cursor;
+                        ++cursor;
+                    }
+                    if (*cursor != '"')
+                        return 0;
+                    continue;
+                }
+                if (*cursor == '{' || *cursor == '[')
+                    ++depth;
+                else if (*cursor == '}' || *cursor == ']') {
+                    if (--depth == 0) {
+                        ++cursor;
+                        break;
+                    }
+                }
+            }
+        } else if (*cursor == '"') {
+            ++cursor;
+            while (*cursor != '\0' && *cursor != '"') {
+                if (*cursor == '\\' && cursor[1] != '\0')
+                    ++cursor;
+                ++cursor;
+            }
+            if (*cursor != '"')
+                return 0;
+            ++cursor;
+            value_length = (size_t)(cursor - value);
+        } else {
+            while (*cursor != '\0' && *cursor != ',' && *cursor != '}')
+                ++cursor;
+            value_length = (size_t)(cursor - value);
+            while (value_length > 0 &&
+                   (value[value_length - 1] == ' ' ||
+                    value[value_length - 1] == '\t' ||
+                    value[value_length - 1] == '\r' ||
+                    value[value_length - 1] == '\n'))
+                --value_length;
+        }
+        if (nested)
+            continue;
+        if (used + name_length + value_length + 6 >= capacity)
+            return 0;
+        if (!first)
+            out[used++] = ',';
+        first = 0;
+        out[used++] = '"';
+        memcpy(out + used, name, name_length);
+        used += name_length;
+        out[used++] = '"';
+        out[used++] = ':';
+        memcpy(out + used, value, value_length);
+        used += value_length;
+    }
+    if (used + 2 > capacity)
+        return 0;
+    out[used++] = '}';
+    out[used] = '\0';
+    return 1;
+}
+
+/* The property names a device's route may carry. Checked separately from the
+   configuration's own, because a nested object's keys are at a different
+   depth and the configuration scan deliberately only looks at depth one. */
+static const char *input_route_rejected_property(const char *route)
+{
+    static const char *const writable[] = { "target_session_id", "enabled" };
+    static char rejected[96];
+    const char *cursor = route;
+    int depth = 0;
+
+    while (*cursor != '\0' && *cursor != '{')
+        ++cursor;
+    if (*cursor != '{')
+        return NULL;
+    for (; *cursor != '\0'; ++cursor) {
+        if (*cursor == '"') {
+            const char *name = cursor + 1;
+            size_t length = 0;
+            const char *after;
+            size_t i;
+            int known = 0;
+
+            while (name[length] != '\0' && name[length] != '"') {
+                if (name[length] == '\\' && name[length + 1] != '\0')
+                    ++length;
+                ++length;
+            }
+            if (name[length] != '"')
+                return NULL;
+            after = name + length + 1;
+            cursor = after - 1;
+            while (*after == ' ' || *after == '\t' || *after == '\r' ||
+                   *after == '\n')
+                ++after;
+            if (*after != ':' || depth != 1)
+                continue;
+            for (i = 0; i < sizeof(writable) / sizeof(writable[0]); ++i)
+                if (strlen(writable[i]) == length &&
+                    strncmp(name, writable[i], length) == 0) {
+                    known = 1;
+                    break;
+                }
+            if (!known) {
+                size_t copy = length < sizeof(rejected) - 1 ?
+                    length : sizeof(rejected) - 1;
+                memcpy(rejected, name, copy);
+                rejected[copy] = '\0';
+                return rejected;
+            }
+            continue;
+        }
+        if (*cursor == '{' || *cursor == '[')
+            ++depth;
+        else if (*cursor == '}' || *cursor == ']') {
+            if (--depth == 0)
+                break;
+        }
+    }
+    return NULL;
+}
+
 /* The property names a device configuration may carry. Anything else is
    refused and named, rather than accepted and ignored -- which is how a
    controller comes to believe it has set something it has not (issue #48). */
 static const char *input_device_rejected_property(const char *configuration)
 {
     static const char *const writable[] = {
-        "enabled", "sensitivity_percent", "natural_scroll"
+        "enabled", "sensitivity_percent", "natural_scroll", "route"
     };
     static char rejected[96];
     const char *cursor = configuration;
@@ -8217,11 +8435,31 @@ static BlitInputRoute *find_input_route(BlitRuntime *runtime,
     return NULL;
 }
 
+/* Resolve where this input goes.
+ *
+ * The order is: the physical device's own route, then the aggregate route for
+ * its kind, then the caller's own fallback (focus, or the surface under the
+ * pointer). A device route that exists but is disabled falls through rather
+ * than blocking, so disabling a route restores the previous behaviour instead
+ * of dropping the device's input.
+ *
+ * `device_id` remains the aggregate identity -- "evdev-keyboard",
+ * "evdev-pointer", "evdev-gamepad" -- because that string is also what the
+ * event stream publishes. The per-device decision comes from
+ * runtime->input_source, not from this argument. */
 static BlitSession *input_route_target(BlitRuntime *runtime,
                                        const char *device_id)
 {
     int i;
 
+    if (runtime->input_source != NULL &&
+        runtime->input_source->route_enabled &&
+        strncmp(runtime->input_source->route_target, "session-", 8) == 0) {
+        BlitSession *session = find_session_id(runtime,
+            strtoull(runtime->input_source->route_target + 8, NULL, 10));
+        if (session != NULL && session->pty_fd >= 0)
+            return session;
+    }
     for (i = 0; i < 16; ++i) {
         BlitInputRoute *route = &runtime->input_routes[i];
         BlitSession *session;
@@ -8281,6 +8519,20 @@ static void disable_input_routes_for_target(BlitRuntime *runtime,
     }
     if (changed)
         ++runtime->input_routes_revision;
+    /* A per-device route to a session that is gone has to be disabled by the
+       same rule, and the controller told -- otherwise a device is routed at a
+       dead session and its input silently goes nowhere. The target is kept so
+       a panel can still show what it was pointed at. */
+    for (i = 0; i < BLIT_MAX_INPUT_DEVICES; ++i) {
+        BlitInputDevice *device = &runtime->input_devices[i];
+        if (!device->used || !device->route_enabled ||
+            strcmp(device->route_target, target_id) != 0)
+            continue;
+        device->route_enabled = 0;
+        ++device->revision;
+        ++runtime->input_devices_revision;
+        broadcast_input_device_changed(runtime, device, "configured");
+    }
 }
 
 static unsigned int evdev_mouse_button_aggregate(const BlitRuntime *runtime)
@@ -10430,7 +10682,11 @@ static void broadcast_input_device_changed(BlitRuntime *runtime,
              "\"collection_revision\":%llu}",
              change, device->id, escaped_name, device->node, device->revision,
              runtime->input_devices_revision);
-    broadcast_stream(runtime, event, BLIT_STREAM_INPUT);
+    /* Both masks: this is an input device today, and ADR 0064 stages 5 and 6
+       fire the same event for audio and display devices, which are not. A
+       controller subscribing to either sees it. */
+    broadcast_stream(runtime, event,
+                     BLIT_STREAM_INPUT | BLIT_STREAM_HARDWARE);
 }
 
 static void replay_stream(BlitRuntime *runtime, int fd,
@@ -12009,11 +12265,16 @@ static void handle_request(int fd, BlitRuntime *runtime,
                              "The named input device is disabled, so it delivers no input.");
                 return;
             }
+            /* Same discipline as a drain: the source is set for exactly the
+               dispatch and cleared after it, so nothing downstream can see a
+               device that is not the one delivering this event. */
+            runtime->input_source = inject_device;
         }
         if (strcmp(kind, "pointer_motion") == 0) {
             if (!json_int(payload, "x", &x) || !json_int(payload, "y", &y)) {
                 send_problem(fd, 400, "Bad Request", "invalid_input_event",
                              "Pointer motion requires integer x and y coordinates.");
+                runtime->input_source = NULL;
                 return;
             }
             runtime->evdev_mouse_x = (float)x;
@@ -12025,6 +12286,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
                 button < 0 || button > 2) {
                 send_problem(fd, 400, "Bad Request", "invalid_input_event",
                              "Pointer buttons require button 0..2 and pressed boolean.");
+                runtime->input_source = NULL;
                 return;
             }
             dispatch_pointer_button(runtime, button, pressed, "api-pointer");
@@ -12041,6 +12303,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
                 (dx == 0 && dy == 0)) {
                 send_problem(fd, 400, "Bad Request", "invalid_input_event",
                              "Relative pointer motion requires a non-zero integer dx or dy.");
+                runtime->input_source = NULL;
                 return;
             }
             /* The same accumulation a REL_X/REL_Y pair takes, scaled by the
@@ -12053,6 +12316,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
             if (!json_int(payload, "delta", &delta) || delta == 0) {
                 send_problem(fd, 400, "Bad Request", "invalid_input_event",
                              "Pointer wheel requires a non-zero integer delta.");
+                runtime->input_source = NULL;
                 return;
             }
             direction = (inject_device != NULL &&
@@ -12072,6 +12336,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
                 key_value < 0 || key_value > 2) {
                 send_problem(fd, 400, "Bad Request", "invalid_input_event",
                              "A key event requires an evdev code of 1..KEY_MAX and a value of 0 (release), 1 (press) or 2 (repeat).");
+                runtime->input_source = NULL;
                 return;
             }
             memset(&injected, 0, sizeof(injected));
@@ -12082,9 +12347,11 @@ static void handle_request(int fd, BlitRuntime *runtime,
         } else {
             send_problem(fd, 422, "Unprocessable Entity", "unsupported_input_event",
                          "Only pointer_motion, pointer_relative, pointer_button, pointer_wheel, and key are supported.");
+            runtime->input_source = NULL;
             return;
         }
         record_input_dispatch(runtime, input_started_us);
+        runtime->input_source = NULL;
         snprintf(body, sizeof(body),
                  "{\"accepted\":true,\"kind\":\"%s\"}", kind);
         send_http(fd, 202, "Accepted", "application/json", body);
@@ -12101,6 +12368,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
         const char *device_id = path + strlen("/v1/input/devices/");
         BlitInputDevice *device = find_input_device_id(runtime, device_id);
         char configuration[1024];
+        char scalars[1024];
         const char *configuration_cursor = json_key_cursor(payload,
                                                            "configuration");
         const char *rejected = NULL;
@@ -12113,6 +12381,12 @@ static void handle_request(int fd, BlitRuntime *runtime,
         int sensitivity_requested;
         int natural_scroll = 0;
         int natural_scroll_requested;
+        char route[512];
+        char route_target[128];
+        const char *route_cursor;
+        int route_requested = 0;
+        int route_enabled = 0;
+        BlitSession *route_session = NULL;
         int changed = 0;
 
         if (*device_id == '\0' || device == NULL) {
@@ -12160,18 +12434,23 @@ static void handle_request(int fd, BlitRuntime *runtime,
                          detail);
             return;
         }
-        enabled_requested = json_bool(configuration, "enabled", &enabled);
-        sensitivity_requested = json_int(configuration, "sensitivity_percent",
+        if (!json_object_scalars(configuration, scalars, sizeof(scalars))) {
+            send_problem(fd, 400, "Bad Request", "invalid_device_configuration",
+                         "A device configuration must be a JSON object of properties.");
+            return;
+        }
+        enabled_requested = json_bool(scalars, "enabled", &enabled);
+        sensitivity_requested = json_int(scalars, "sensitivity_percent",
                                          &sensitivity);
-        natural_scroll_requested = json_bool(configuration, "natural_scroll",
+        natural_scroll_requested = json_bool(scalars, "natural_scroll",
                                              &natural_scroll);
-        if (json_key_cursor(configuration, "enabled") != NULL &&
+        if (json_key_cursor(scalars, "enabled") != NULL &&
             !enabled_requested) {
             send_problem(fd, 400, "Bad Request", "invalid_device_configuration",
                          "enabled must be a JSON boolean.");
             return;
         }
-        if (json_key_cursor(configuration, "natural_scroll") != NULL &&
+        if (json_key_cursor(scalars, "natural_scroll") != NULL &&
             !natural_scroll_requested) {
             send_problem(fd, 400, "Bad Request", "invalid_device_configuration",
                          "natural_scroll must be a JSON boolean.");
@@ -12183,6 +12462,53 @@ static void handle_request(int fd, BlitRuntime *runtime,
                          "device_property_not_applicable",
                          "sensitivity_percent and natural_scroll apply to a device read as a pointer.");
             return;
+        }
+        route_cursor = json_key_cursor(configuration, "route");
+        if (route_cursor != NULL) {
+            const char *route_rejected;
+            if (!json_object_slice(route_cursor, route, sizeof(route))) {
+                send_problem(fd, 400, "Bad Request", "invalid_device_route",
+                             "route must be a JSON object with target_session_id and enabled.");
+                return;
+            }
+            route_rejected = input_route_rejected_property(route);
+            if (route_rejected != NULL) {
+                char detail[256];
+                snprintf(detail, sizeof(detail),
+                         "A device route carries \"%s\", which is not a "
+                         "writable property. Writable: target_session_id and "
+                         "enabled.", route_rejected);
+                send_problem(fd, 400, "Bad Request", "invalid_device_property",
+                             detail);
+                return;
+            }
+            if (!json_string(route, "target_session_id", route_target,
+                             sizeof(route_target)) ||
+                !json_bool(route, "enabled", &route_enabled) ||
+                strncmp(route_target, "session-", 8) != 0) {
+                send_problem(fd, 400, "Bad Request", "invalid_device_route",
+                             "A device route requires a session-N target_session_id and an enabled boolean.");
+                return;
+            }
+            route_session = find_session_id(runtime,
+                strtoull(route_target + 8, NULL, 10));
+            if (route_session == NULL) {
+                send_problem(fd, 400, "Bad Request", "invalid_device_route",
+                             "A device route target session does not exist.");
+                return;
+            }
+            /* The same rule PUT /v1/input/routes/{id} applies: an enabled
+               route needs a live target, or it is a route to nowhere that
+               silently swallows the device's input. */
+            refresh_session_state(runtime, route_session);
+            if (route_enabled &&
+                strcmp(route_session->state, "running") != 0 &&
+                strcmp(route_session->state, "starting") != 0) {
+                send_problem(fd, 409, "Conflict", "input_route_target_stopped",
+                             "An enabled device route requires a live target session.");
+                return;
+            }
+            route_requested = 1;
         }
         if (sensitivity_requested &&
             (sensitivity < BLIT_INPUT_SENSITIVITY_MIN ||
@@ -12211,6 +12537,14 @@ static void handle_request(int fd, BlitRuntime *runtime,
         if (natural_scroll_requested &&
             natural_scroll != device->natural_scroll) {
             device->natural_scroll = natural_scroll;
+            changed = 1;
+        }
+        if (route_requested &&
+            (strcmp(device->route_target, route_target) != 0 ||
+             route_enabled != device->route_enabled)) {
+            snprintf(device->route_target, sizeof(device->route_target), "%s",
+                     route_target);
+            device->route_enabled = route_enabled;
             changed = 1;
         }
         if (changed) {
@@ -15895,6 +16229,8 @@ static void service_evdev_gamepad(BlitRuntime *runtime)
          ++device_index) {
         int device_lost = 0;
         if (runtime->evdev_gamepad_fds[device_index] < 0) continue;
+        runtime->input_source = input_device_for_slot(runtime,
+            runtime->evdev_gamepad_paths, device_index);
         while ((received = read(runtime->evdev_gamepad_fds[device_index],
                                 &event, sizeof(event))) ==
                (ssize_t)sizeof(event)) {
@@ -15923,19 +16259,8 @@ static void service_evdev_gamepad(BlitRuntime *runtime)
             remove_evdev_gamepad(runtime, device_index);
             --device_index;
         }
+        runtime->input_source = NULL;
     }
-}
-
-/* The configuration of the device behind a poll slot, by node path. Resolved
-   once per drain rather than per event: the table's slots do not move while a
-   drain is in flight -- the scan and its sweep run on the same thread,
-   between drains -- and a per-event lookup would put a linear search in the
-   motion path. */
-static BlitInputDevice *input_device_for_slot(BlitRuntime *runtime,
-                                              const char (*paths)[128],
-                                              int slot)
-{
-    return find_input_device_node(runtime, paths[slot]);
 }
 
 static void service_evdev_mouse(BlitRuntime *runtime)
@@ -15959,6 +16284,7 @@ static void service_evdev_mouse(BlitRuntime *runtime)
             BLIT_INPUT_SENSITIVITY_DEFAULT;
         natural_scroll = configuration != NULL ?
             configuration->natural_scroll : 0;
+        runtime->input_source = configuration;
         while ((received = read(runtime->evdev_mouse_fds[device_index],
                                 &event, sizeof(event))) ==
                (ssize_t)sizeof(event)) {
@@ -16050,6 +16376,7 @@ static void service_evdev_mouse(BlitRuntime *runtime)
             remove_evdev_mouse(runtime, device_index);
             --device_index;
         }
+        runtime->input_source = NULL;
     }
 }
 
@@ -16180,6 +16507,77 @@ static int evdev_control_byte(unsigned short code, int *byte)
     }
 }
 
+/* The character a main-block key types on a US layout, by evdev code.
+ *
+ * This table replaced range arithmetic that assumed the letter codes are
+ * alphabetical. They are not: evdev numbers keys by physical position, so
+ * KEY_A is 30, KEY_S is 31, KEY_D is 32, and `'a' + code - KEY_A` makes the S
+ * key type 'b', the D key type 'c', the semicolon key type 'j', and the
+ * backslash key type 'n' -- while Q through P and X through M, which lie
+ * outside 30..44, typed nothing at all. Measured on a session before the fix:
+ * of thirty main-block keys exactly one, A, produced the right character.
+ *
+ * Codes run from KEY_1 (2) to KEY_SLASH (53); '\0' marks a code in that span
+ * that is not a character key and is handled elsewhere -- Backspace, Tab,
+ * Enter, Left Control and Left Shift. KEY_SPACE (57) is outside the span and
+ * is handled on its own.
+ *
+ * This is still one hard-coded layout, which is issue #35's remaining scope.
+ * A hard-coded layout that is wrong about its own layout is a different
+ * thing, and this is the fix for that. */
+#define BLIT_KEY_TABLE_FIRST KEY_1
+#define BLIT_KEY_TABLE_LAST KEY_SLASH
+
+static const char evdev_us_unshifted[BLIT_KEY_TABLE_LAST -
+                                     BLIT_KEY_TABLE_FIRST + 1] = {
+    '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=',
+    '\0',                                   /* KEY_BACKSPACE */
+    '\0',                                   /* KEY_TAB */
+    'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '[', ']',
+    '\0',                                   /* KEY_ENTER */
+    '\0',                                   /* KEY_LEFTCTRL */
+    'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';', '\'', '`',
+    '\0',                                   /* KEY_LEFTSHIFT */
+    '\\',
+    'z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/'
+};
+
+static const char evdev_us_shifted[BLIT_KEY_TABLE_LAST -
+                                   BLIT_KEY_TABLE_FIRST + 1] = {
+    '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '_', '+',
+    '\0', '\0',
+    'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', '{', '}',
+    '\0', '\0',
+    'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ':', '"', '~',
+    '\0',
+    '|',
+    'Z', 'X', 'C', 'V', 'B', 'N', 'M', '<', '>', '?'
+};
+
+/* The character this key types, or 0 when it is not a character key.
+   CapsLock inverts Shift for letters, and only for letters. */
+static char evdev_key_character(const BlitRuntime *runtime,
+                                unsigned short code)
+{
+    char plain;
+    char shifted;
+    int letter;
+
+    if (code == KEY_SPACE)
+        return ' ';
+    if (code < BLIT_KEY_TABLE_FIRST || code > BLIT_KEY_TABLE_LAST)
+        return '\0';
+    plain = evdev_us_unshifted[code - BLIT_KEY_TABLE_FIRST];
+    shifted = evdev_us_shifted[code - BLIT_KEY_TABLE_FIRST];
+    if (plain == '\0')
+        return '\0';
+    letter = plain >= 'a' && plain <= 'z';
+    if (letter)
+        return (runtime->evdev_shift != runtime->evdev_caps_lock) ? shifted :
+            plain;
+    return runtime->evdev_shift ? shifted : plain;
+}
+
 /* Returns 1 when the key was written to a session PTY and 0 when it was
    not, so the caller can count delivered against undelivered presses. */
 static int send_evdev_key(BlitRuntime *runtime, unsigned short code)
@@ -16193,6 +16591,7 @@ static int send_evdev_key(BlitRuntime *runtime, unsigned short code)
        character, `number` the parameter of the CSI n ~ forms, and `ss3` marks
        the ones that use SS3 rather than CSI when unmodified. */
     char final = '\0';
+    char character;
     int number = 0;
     int ss3 = 0;
     if (session == NULL || session->pty_fd < 0) return 0;
@@ -16207,40 +16606,15 @@ static int send_evdev_key(BlitRuntime *runtime, unsigned short code)
     if (runtime->evdev_ctrl && evdev_control_byte(code, &control_byte)) {
         sequence[0] = (char)control_byte;
         length = 1;
-    } else if (runtime->evdev_ctrl && code >= KEY_A && code <= KEY_Z) {
-        sequence[0] = (char)(code - KEY_A + 1);
+    } else if (runtime->evdev_ctrl &&
+               (character = evdev_key_character(runtime, code)) != '\0' &&
+               ((character | 0x20) >= 'a' && (character | 0x20) <= 'z')) {
+        /* Control plus a letter is that letter's control byte, taken from the
+           character the key actually types rather than from its code. */
+        sequence[0] = (char)((character | 0x20) - 'a' + 1);
         length = 1;
-    } else if (code >= KEY_A && code <= KEY_Z) {
-        /* CapsLock inverts Shift for letters, and only for letters. */
-        int upper = runtime->evdev_shift != runtime->evdev_caps_lock;
-        sequence[0] = (char)((upper ? 'A' : 'a') + code - KEY_A);
-        length = 1;
-    } else if (code >= KEY_1 && code <= KEY_9) {
-        static const char normal[] = "123456789";
-        static const char shifted[] = "!@#$%^&*(";
-        sequence[0] = (runtime->evdev_shift ? shifted : normal)[code - KEY_1];
-        length = 1;
-    } else if (code == KEY_0) {
-        sequence[0] = runtime->evdev_shift ? ')' : '0'; length = 1;
-    } else if (code == KEY_SPACE) {
-        sequence[0] = ' '; length = 1;
-    } else if (code == KEY_MINUS || code == KEY_EQUAL ||
-               code == KEY_LEFTBRACE || code == KEY_RIGHTBRACE ||
-               code == KEY_BACKSLASH || code == KEY_SEMICOLON ||
-               code == KEY_APOSTROPHE || code == KEY_GRAVE ||
-               code == KEY_COMMA || code == KEY_DOT || code == KEY_SLASH) {
-        static const char normal[] = {
-            '-', '=', '[', ']', '\\', ';', '\'', '`', ',', '.', '/'
-        };
-        static const char shifted[] = {
-            '_', '+', '{', '}', '|', ':', '"', '~', '<', '>', '?'
-        };
-        int punctuation = code == KEY_MINUS ? 0 : code == KEY_EQUAL ? 1 :
-            code == KEY_LEFTBRACE ? 2 : code == KEY_RIGHTBRACE ? 3 :
-            code == KEY_BACKSLASH ? 4 : code == KEY_SEMICOLON ? 5 :
-            code == KEY_APOSTROPHE ? 6 : code == KEY_GRAVE ? 7 :
-            code == KEY_COMMA ? 8 : code == KEY_DOT ? 9 : 10;
-        sequence[0] = (runtime->evdev_shift ? shifted : normal)[punctuation];
+    } else if ((character = evdev_key_character(runtime, code)) != '\0') {
+        sequence[0] = character;
         length = 1;
     } else if ((code == KEY_KP0 || code == KEY_KP1 || code == KEY_KP2 ||
                 code == KEY_KP3 || code == KEY_KP4 || code == KEY_KP5 ||
@@ -16490,6 +16864,8 @@ static void service_evdev_keyboard(BlitRuntime *runtime)
          ++device_index) {
         int device_lost = 0;
         if (runtime->evdev_keyboard_fds[device_index] < 0) continue;
+        runtime->input_source = input_device_for_slot(runtime,
+            runtime->evdev_keyboard_paths, device_index);
         while ((received = read(runtime->evdev_keyboard_fds[device_index],
                                 &event, sizeof(event))) ==
                (ssize_t)sizeof(event)) {
@@ -16529,6 +16905,7 @@ static void service_evdev_keyboard(BlitRuntime *runtime)
                stuck down for every other keyboard. */
             evdev_sync_modifiers(runtime);
         }
+        runtime->input_source = NULL;
     }
 }
 
