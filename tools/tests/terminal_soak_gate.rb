@@ -107,6 +107,17 @@ begin
     end
 
     runtime_response = request(base, 'GET', '/v1/diagnostics/runtime')
+    # A 2xx whose body is not the document this gate expects is worth naming:
+    # chasing it from a bare KeyError and a line number tells you nothing
+    # about whether the server answered oddly or the response was cut short.
+    if !runtime_response.is_a?(Hash) || !runtime_response.key?('snapshot')
+      raw = request(base, 'GET', '/v1/diagnostics/runtime')
+      assert(false,
+             'runtime diagnostics did not return a snapshot: ' \
+             "#{runtime_response.class} keys=" \
+             "#{runtime_response.is_a?(Hash) ? runtime_response.keys.inspect : 'n/a'} " \
+             "retry=#{raw.is_a?(Hash) ? raw.keys.inspect : raw.inspect}")
+    end
     diagnostics = runtime_response.fetch('snapshot')
     health = diagnostics.fetch('health')
     assert(health.fetch('ready') == true, 'runtime stopped being ready')

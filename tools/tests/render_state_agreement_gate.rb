@@ -110,8 +110,12 @@ cells = []
 (0...6).each do |row|
   (0...10).each do |column|
     text = row.even? ? 'X' : ' '
+    # Colours belong under `style`; the server ignores a cell that carries
+    # them at the top level, which left this gate asserting that blank cells
+    # are black on a screen that was already black.
     cells << { 'x' => column, 'y' => row, 'text' => text,
-               'foreground' => '#ffffff', 'background' => '#0000ff' }
+               'style' => { 'foreground' => '#ffffff',
+                            'background' => '#0000ff' } }
   end
 end
 snapshot = JSON.parse(request('GET', "/v1/surfaces/#{surface}/summary").body)
@@ -154,7 +158,13 @@ while attempts < 5 && result.nil?
       next unless (cell['text'] || ' ') == ' '
 
       style = cell['style'] || {}
-      hex = (style['background'] || '#000000').delete('#')
+      if style['background'].nil?
+        # A blank cell with no background of its own proves nothing here, and
+        # silently defaulting it to black is how this gate came to pass
+        # vacuously.
+        next
+      end
+      hex = style['background'].delete('#')
       want = [hex[0, 2].to_i(16), hex[2, 2].to_i(16), hex[4, 2].to_i(16)]
       checked += 1
       bad = 0
