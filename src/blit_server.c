@@ -30,6 +30,7 @@
 #include <sys/un.h>
 #include <time.h>
 #include <unistd.h>
+#include <pthread.h>
 #include <pty.h>
 /* ADR 0056: DEFLATE for PNG (f=100) and Kitty o=z payloads. */
 #include <zlib.h>
@@ -58,6 +59,7 @@ extern char **environ;
 #define BLIT_MAX_AUDIO_DEVICES 64
 #define BLIT_MAX_SAMPLE_RATES 16
 #define BLIT_MAX_KEYMAP_OVERRIDES 128
+#define BLIT_MAX_OPEN_QUEUE 64
 #define BLIT_STREAM_DIAGNOSTICS 1
 #define BLIT_STREAM_SURFACES 2
 #define BLIT_STREAM_FRAMES 4
@@ -338,6 +340,16 @@ typedef struct {
     int keymap_count;
     unsigned short keymap_codes[BLIT_MAX_KEYMAP_OVERRIDES];
     char keymap_levels[BLIT_MAX_KEYMAP_OVERRIDES][4][8];
+    /* ADR 0064 / issue #57: a device's own counters. They were slot-indexed
+       arrays on the runtime, copied along by hand every time the poll set
+       compacted, and reported by /v1/diagnostics/runtime keyed by a node path
+       the inventory did not publish. */
+    unsigned long long events;
+    unsigned long long keys;
+    unsigned long long pointer_syncs;
+    unsigned long long pointer_motion;
+    unsigned long long pointer_wheel;
+    unsigned long long pointer_buttons;
     unsigned char key_held[(KEY_MAX + 8) / 8];
     int shift;
     int ctrl;
@@ -368,6 +380,37 @@ typedef struct {
  * Like the input table this is built by a scan and served from memory: the
  * previous /v1/audio made 32 x 32 x 2 access() calls per request, which is
  * the same stall shape as issue #16. */
+/* Issue #16: opening an evdev node is the one blocking call on the event-loop
+ * thread, and the live host recorded a single one taking 3.456 seconds with
+ * max_loop_gap_ms 3460.284 behind it. For those 3.46 s nothing was presented,
+ * no input was dispatched and no client was serviced.
+ *
+ * There is no asynchronous open() for a character device, so the open moves to
+ * a thread. The thread does all of the device I/O -- open, the classifier's
+ * EVIOCGBIT probes, and the identity ioctls -- and hands back a record plus
+ * the file descriptors, which are valid in the main thread because a thread
+ * shares the descriptor table. Nothing in the record points at runtime state,
+ * and the thread touches nothing but its two queues, so the boundary is the
+ * queue and not a lock discipline spread through the server.
+ *
+ * The failure mode is the point: if a device wedges the opener, requests queue
+ * behind it and hotplug stops working, while the loop keeps presenting and
+ * serving. That is strictly better than the loop wedging with it. */
+typedef struct {
+    char path[128];
+    int opened;                 /* the open() succeeded, whatever it found */
+    int fd[3];                  /* one per kind: keyboard, pointer, gamepad */
+    unsigned kinds;
+    unsigned capabilities;
+    unsigned bustype;
+    unsigned vendor;
+    unsigned product;
+    unsigned version;
+    char name[256];
+    char uniq[64];
+    char phys[128];
+} BlitOpenedDevice;
+
 typedef struct {
     int used;
     int seen;
@@ -664,13 +707,6 @@ typedef struct {
        every path once per kind, so this is how the reduction to one probe per
        path is measured rather than asserted. */
     unsigned long long diagnostic_evdev_scan_opens;
-    unsigned long long diagnostic_evdev_mouse_device_events[BLIT_MAX_INPUT_DEVICES];
-    unsigned long long diagnostic_evdev_mouse_device_syncs[BLIT_MAX_INPUT_DEVICES];
-    unsigned long long diagnostic_evdev_mouse_device_motion[BLIT_MAX_INPUT_DEVICES];
-    unsigned long long diagnostic_evdev_mouse_device_wheel[BLIT_MAX_INPUT_DEVICES];
-    unsigned long long diagnostic_evdev_mouse_device_buttons[BLIT_MAX_INPUT_DEVICES];
-    unsigned long long diagnostic_evdev_keyboard_device_events[BLIT_MAX_INPUT_DEVICES];
-    unsigned long long diagnostic_evdev_keyboard_device_keys[BLIT_MAX_INPUT_DEVICES];
     int evdev_keyboard_fds[BLIT_MAX_INPUT_DEVICES];
     char evdev_keyboard_paths[BLIT_MAX_INPUT_DEVICES][128];
     int evdev_keyboard_count;
@@ -679,6 +715,24 @@ typedef struct {
     char evdev_gamepad_paths[BLIT_MAX_INPUT_DEVICES][128];
     int evdev_gamepad_count;
     int evdev_gamepad_reported[BLIT_MAX_INPUT_DEVICES];
+    /* The opener thread's two queues, its wake pipe and the paths it has been
+       asked about but has not answered for yet. */
+    pthread_t opener_thread;
+    int opener_running;
+    pthread_mutex_t opener_lock;
+    pthread_cond_t opener_wake;
+    char opener_requests[BLIT_MAX_OPEN_QUEUE][128];
+    int opener_request_count;
+    BlitOpenedDevice opener_results[BLIT_MAX_OPEN_QUEUE];
+    int opener_result_count;
+    char opener_pending[BLIT_MAX_OPEN_QUEUE][128];
+    int opener_pending_count;
+    int scan_sweep_pending;
+    int scan_sweep_announce;
+    int opener_notify[2];
+    unsigned long long diagnostic_open_requests;
+    unsigned long long diagnostic_open_requests_dropped;
+    double diagnostic_max_open_ms;
     char listener_bind[64];
     int listener_port;
     int unauthenticated_network;
@@ -943,6 +997,7 @@ static const char *json_rejected_property(const char *object,
 static void broadcast_input_device_changed(BlitRuntime *runtime,
                                            const BlitInputDevice *device,
                                            const char *change);
+static void retire_absent_input_devices(BlitRuntime *runtime, int announce);
 static void broadcast_audio_device_changed(BlitRuntime *runtime,
                                            const BlitAudioDevice *audio,
                                            const char *change);
@@ -2028,10 +2083,6 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
     int count;
     int first;
     int index;
-    char mouse_devices[4096];
-    size_t mouse_used = 0;
-    char keyboard_devices[4096];
-    size_t keyboard_used = 0;
     uint64_t now = monotonic_us();
     double frame_rate_hz = runtime->diagnostic_frame_rate_hz;
     double surface_commit_hz = runtime->diagnostic_surface_commit_hz;
@@ -2052,42 +2103,6 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
     if (runtime->diagnostic_last_surface_commit_us == 0 ||
         surface_commit_age_ms > 2000ULL)
         surface_commit_hz = 0.0;
-
-    mouse_used += (size_t)snprintf(mouse_devices + mouse_used,
-                                   sizeof(mouse_devices) - mouse_used, "[");
-    for (index = 0; index < runtime->evdev_mouse_count; ++index) {
-        mouse_used += (size_t)snprintf(
-            mouse_devices + mouse_used, sizeof(mouse_devices) - mouse_used,
-            "%s{\"path\":\"%s\",\"fd\":%d,\"events\":%llu,"
-            "\"syncs\":%llu,\"motion\":%llu,\"wheel\":%llu,"
-            "\"buttons\":%llu}", index > 0 ? "," : "",
-            runtime->evdev_mouse_paths[index],
-            runtime->evdev_mouse_fds[index],
-            runtime->diagnostic_evdev_mouse_device_events[index],
-            runtime->diagnostic_evdev_mouse_device_syncs[index],
-            runtime->diagnostic_evdev_mouse_device_motion[index],
-            runtime->diagnostic_evdev_mouse_device_wheel[index],
-            runtime->diagnostic_evdev_mouse_device_buttons[index]);
-    }
-    snprintf(mouse_devices + mouse_used, sizeof(mouse_devices) - mouse_used,
-             "]");
-
-    keyboard_used += (size_t)snprintf(keyboard_devices + keyboard_used,
-                                      sizeof(keyboard_devices) - keyboard_used,
-                                      "[");
-    for (index = 0; index < runtime->evdev_keyboard_count; ++index) {
-        keyboard_used += (size_t)snprintf(
-            keyboard_devices + keyboard_used,
-            sizeof(keyboard_devices) - keyboard_used,
-            "%s{\"path\":\"%s\",\"fd\":%d,\"events\":%llu,\"keys\":%llu}",
-            index > 0 ? "," : "",
-            runtime->evdev_keyboard_paths[index],
-            runtime->evdev_keyboard_fds[index],
-            runtime->diagnostic_evdev_keyboard_device_events[index],
-            runtime->diagnostic_evdev_keyboard_device_keys[index]);
-    }
-    snprintf(keyboard_devices + keyboard_used,
-             sizeof(keyboard_devices) - keyboard_used, "]");
 
     diagnostics_json(runtime, snapshot, sizeof(snapshot));
     used = (size_t)snprintf(body, capacity,
@@ -2120,8 +2135,6 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"input_reports_dropped\":%llu,"
         "\"last_evdev_keyboard_event_age_ms\":%llu,"
         "\"last_evdev_keyboard_path\":\"%s\","
-        "\"evdev_keyboard_devices\":%s,"
-        "\"evdev_mouse_devices\":%s,"
         "\"sdl_mouse_events_discarded\":%llu,"
         "\"sdl_mouse_events_processed\":%llu,"
         "\"sdl_mouse_motion_events\":%llu,"
@@ -2155,6 +2168,10 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"last_select_ms\":%.3f,\"max_select_ms\":%.3f,"
         "\"last_sdl_events_ms\":%.3f,\"max_sdl_events_ms\":%.3f,"
         "\"last_evdev_scan_ms\":%.3f,\"max_evdev_scan_ms\":%.3f,"
+        "\"evdev_open_requests\":%llu,"
+        "\"evdev_open_requests_dropped\":%llu,"
+        "\"evdev_open_queue_depth\":%d,"
+        "\"evdev_opener_thread\":%s,"
         "\"evdev_scan_opens\":%llu},"
         "\"logs\":[",
         snapshot,
@@ -2200,8 +2217,6 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
             (unsigned long long)((now -
                 runtime->diagnostic_last_evdev_keyboard_event_us) / 1000ULL) : 0ULL,
         runtime->diagnostic_last_evdev_keyboard_path,
-        keyboard_devices,
-        mouse_devices,
         runtime->diagnostic_sdl_mouse_events_discarded,
         runtime->diagnostic_sdl_mouse_events_processed,
         runtime->diagnostic_sdl_mouse_motion_events,
@@ -2249,6 +2264,10 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         runtime->diagnostic_max_sdl_events_ms,
         runtime->diagnostic_last_evdev_scan_ms,
         runtime->diagnostic_max_evdev_scan_ms,
+        runtime->diagnostic_open_requests,
+        runtime->diagnostic_open_requests_dropped,
+        runtime->opener_pending_count,
+        runtime->opener_running ? "true" : "false",
         runtime->diagnostic_evdev_scan_opens);
     count = runtime->diagnostic_log_count;
     first = 1;
@@ -3304,6 +3323,31 @@ static void probe_input_device(int fd, unsigned *kinds,
     if (gamepad) *capabilities |= BLIT_INPUT_CAP_GAMEPAD_BUTTONS;
 }
 
+/* The identity ioctls, into the record the opener thread hands back. It does
+   not touch runtime state, which is what lets it run off the loop thread. */
+static void read_opened_device_identity(int fd, BlitOpenedDevice *opened)
+{
+    struct input_id identity;
+    char text[256];
+
+    memset(&identity, 0, sizeof(identity));
+    if (ioctl(fd, EVIOCGID, &identity) == 0) {
+        opened->bustype = identity.bustype;
+        opened->vendor = identity.vendor;
+        opened->product = identity.product;
+        opened->version = identity.version;
+    }
+    memset(text, 0, sizeof(text));
+    if (ioctl(fd, EVIOCGNAME(sizeof(text) - 1), text) >= 0 && text[0] != '\0')
+        snprintf(opened->name, sizeof(opened->name), "%s", text);
+    memset(text, 0, sizeof(text));
+    if (ioctl(fd, EVIOCGUNIQ(sizeof(text) - 1), text) >= 0)
+        snprintf(opened->uniq, sizeof(opened->uniq), "%s", text);
+    memset(text, 0, sizeof(text));
+    if (ioctl(fd, EVIOCGPHYS(sizeof(text) - 1), text) >= 0)
+        snprintf(opened->phys, sizeof(opened->phys), "%s", text);
+}
+
 static void read_input_device_strings(int fd, BlitInputDevice *device)
 {
     struct input_id identity;
@@ -3508,6 +3552,61 @@ static int input_device_configured(const BlitInputDevice *device)
         device->keymap_count > 0;
 }
 
+/* Record what the opener thread found. The same bookkeeping as
+   record_input_device, from a record rather than from a live fd, because the
+   ioctls happened on the other thread. */
+static BlitInputDevice *record_opened_device(BlitRuntime *runtime,
+                                             const BlitOpenedDevice *opened,
+                                             int *discovered)
+{
+    BlitInputDevice *device = find_input_device_node(runtime, opened->path);
+    int i;
+
+    if (discovered != NULL)
+        *discovered = 0;
+    if (device == NULL) {
+        for (i = 0; i < BLIT_MAX_INPUT_DEVICES; ++i)
+            if (!runtime->input_devices[i].used) {
+                device = &runtime->input_devices[i];
+                break;
+            }
+        if (device == NULL)
+            return NULL;
+        memset(device, 0, sizeof(*device));
+        device->used = 1;
+        device->enabled = 1;
+        device->sensitivity_percent = BLIT_INPUT_SENSITIVITY_DEFAULT;
+        device->num_lock = 1;
+        snprintf(device->node, sizeof(device->node), "%s", opened->path);
+        snprintf(device->name, sizeof(device->name), "%s",
+                 opened->name[0] != '\0' ? opened->name : opened->path);
+        device->bustype = opened->bustype;
+        device->vendor = opened->vendor;
+        device->product = opened->product;
+        device->version = opened->version;
+        snprintf(device->uniq, sizeof(device->uniq), "%s", opened->uniq);
+        snprintf(device->phys, sizeof(device->phys), "%s", opened->phys);
+        assign_input_device_id(runtime, device);
+        device->first_seen_us = monotonic_us();
+        device->revision = 1;
+        if (discovered != NULL)
+            *discovered = 1;
+    }
+    if (device->kinds != opened->kinds ||
+        device->capabilities != opened->capabilities)
+        ++device->revision;
+    device->kinds = opened->kinds;
+    device->capabilities = opened->capabilities;
+    device->seen = 1;
+    device->last_seen_us = monotonic_us();
+    if (!device->present) {
+        device->present = 1;
+        if (discovered != NULL && !*discovered)
+            *discovered = -1;
+    }
+    return device;
+}
+
 /* How many of a device's kinds the poll loop currently holds open. The fd
    arrays are keyed by path and compacted on removal, so this is a lookup
    rather than a stored index: a stored index would be a second source of
@@ -3533,17 +3632,6 @@ static int input_device_open_kinds(const BlitRuntime *runtime,
     return open_kinds;
 }
 
-static int input_device_slot(const char (*paths)[128], int count,
-                             const char *node)
-{
-    int i;
-
-    for (i = 0; i < count; ++i)
-        if (strcmp(paths[i], node) == 0)
-            return i;
-    return -1;
-}
-
 static size_t input_device_item_json(const BlitRuntime *runtime,
                                      const BlitInputDevice *device,
                                      char *body, size_t capacity)
@@ -3552,12 +3640,6 @@ static size_t input_device_item_json(const BlitRuntime *runtime,
     char escaped_phys[256];
     char escaped_uniq[128];
     int open_kinds = input_device_open_kinds(runtime, device);
-    int keyboard_slot = input_device_slot(runtime->evdev_keyboard_paths,
-                                          runtime->evdev_keyboard_count,
-                                          device->node);
-    int mouse_slot = input_device_slot(runtime->evdev_mouse_paths,
-                                       runtime->evdev_mouse_count,
-                                       device->node);
     uint64_t now = monotonic_us();
     size_t used = 0;
     int complete = 1;
@@ -3645,24 +3727,18 @@ static size_t input_device_item_json(const BlitRuntime *runtime,
         open_kinds != 0 ? "true" : "false", open_kinds,
         (unsigned long long)((now - device->last_seen_us) / 1000ULL),
         (unsigned long long)((now - device->first_seen_us) / 1000ULL));
-    /* Per-device counters (#17). They lived in a diagnostics array keyed by
-       path, which a client had to join against an inventory that did not
-       publish the path. */
-    if (keyboard_slot >= 0)
+    /* Per-device counters (#17, #57). On the device itself now, so there is
+       no slot to look up and nothing to copy when the poll set compacts. */
+    if (device->kinds & BLIT_INPUT_KIND_KEYBOARD)
         complete &= json_appendf(body, capacity, &used,
-            ",\"events\":%llu,\"keys\":%llu",
-            runtime->diagnostic_evdev_keyboard_device_events[keyboard_slot],
-            runtime->diagnostic_evdev_keyboard_device_keys[keyboard_slot]);
-    if (mouse_slot >= 0)
+            ",\"events\":%llu,\"keys\":%llu", device->events, device->keys);
+    if (device->kinds & BLIT_INPUT_KIND_POINTER)
         complete &= json_appendf(body, capacity, &used,
             ",\"pointer_events\":%llu,\"pointer_syncs\":%llu,"
             "\"pointer_motion\":%llu,\"pointer_wheel\":%llu,"
             "\"pointer_buttons\":%llu",
-            runtime->diagnostic_evdev_mouse_device_events[mouse_slot],
-            runtime->diagnostic_evdev_mouse_device_syncs[mouse_slot],
-            runtime->diagnostic_evdev_mouse_device_motion[mouse_slot],
-            runtime->diagnostic_evdev_mouse_device_wheel[mouse_slot],
-            runtime->diagnostic_evdev_mouse_device_buttons[mouse_slot]);
+            device->events, device->pointer_syncs, device->pointer_motion,
+            device->pointer_wheel, device->pointer_buttons);
     complete &= json_appendf(body, capacity, &used,
         "},\"configuration\":{\"enabled\":%s",
         device->enabled ? "true" : "false");
@@ -9329,27 +9405,12 @@ static void remove_evdev_mouse(BlitRuntime *runtime, int index)
                  runtime->evdev_mouse_paths[i + 1]);
         runtime->evdev_mouse_reported[i] = runtime->evdev_mouse_reported[i + 1];
         runtime->evdev_mouse_buttons[i] = runtime->evdev_mouse_buttons[i + 1];
-        runtime->diagnostic_evdev_mouse_device_events[i] =
-            runtime->diagnostic_evdev_mouse_device_events[i + 1];
-        runtime->diagnostic_evdev_mouse_device_syncs[i] =
-            runtime->diagnostic_evdev_mouse_device_syncs[i + 1];
-        runtime->diagnostic_evdev_mouse_device_motion[i] =
-            runtime->diagnostic_evdev_mouse_device_motion[i + 1];
-        runtime->diagnostic_evdev_mouse_device_wheel[i] =
-            runtime->diagnostic_evdev_mouse_device_wheel[i + 1];
-        runtime->diagnostic_evdev_mouse_device_buttons[i] =
-            runtime->diagnostic_evdev_mouse_device_buttons[i + 1];
     }
     --runtime->evdev_mouse_count;
     runtime->evdev_mouse_fds[runtime->evdev_mouse_count] = -1;
     runtime->evdev_mouse_paths[runtime->evdev_mouse_count][0] = '\0';
     runtime->evdev_mouse_reported[runtime->evdev_mouse_count] = 0;
     runtime->evdev_mouse_buttons[runtime->evdev_mouse_count] = 0;
-    runtime->diagnostic_evdev_mouse_device_events[runtime->evdev_mouse_count] = 0;
-    runtime->diagnostic_evdev_mouse_device_syncs[runtime->evdev_mouse_count] = 0;
-    runtime->diagnostic_evdev_mouse_device_motion[runtime->evdev_mouse_count] = 0;
-    runtime->diagnostic_evdev_mouse_device_wheel[runtime->evdev_mouse_count] = 0;
-    runtime->diagnostic_evdev_mouse_device_buttons[runtime->evdev_mouse_count] = 0;
     /* Keep the configured route across hotplug.  Device availability is
        reported independently; a reconnect should resume the same route
        without requiring a controller to recreate it. */
@@ -9377,19 +9438,11 @@ static void remove_evdev_keyboard(BlitRuntime *runtime, int index)
         /* The per-device counters are indexed by slot, so they must follow
            the device when the array is compacted or a hotplug would
            attribute one keyboard's events to another. */
-        runtime->diagnostic_evdev_keyboard_device_events[i] =
-            runtime->diagnostic_evdev_keyboard_device_events[i + 1];
-        runtime->diagnostic_evdev_keyboard_device_keys[i] =
-            runtime->diagnostic_evdev_keyboard_device_keys[i + 1];
     }
     --runtime->evdev_keyboard_count;
     runtime->evdev_keyboard_fds[runtime->evdev_keyboard_count] = -1;
     runtime->evdev_keyboard_paths[runtime->evdev_keyboard_count][0] = '\0';
     runtime->evdev_keyboard_reported[runtime->evdev_keyboard_count] = 0;
-    runtime->diagnostic_evdev_keyboard_device_events[
-        runtime->evdev_keyboard_count] = 0;
-    runtime->diagnostic_evdev_keyboard_device_keys[
-        runtime->evdev_keyboard_count] = 0;
     /* Keep the configured route across hotplug; it becomes effective again
        when a keyboard is discovered. */
     runtime->evdev_rescan_requested = 1;
@@ -14356,6 +14409,181 @@ static int evdev_path_open(const int *fds, char paths[][128], int count,
     return 0;
 }
 
+/* Open one device node. The single place that does, so that the fixture hook
+ * below applies wherever the open happens -- on the opener thread or, when
+ * there is no thread, on the loop.
+ *
+ * `BLIT_INPUT_OPEN_DELAY_US` makes an open take a known amount of time. It
+ * exists because the property under test -- that a slow open does not stall
+ * the loop -- cannot otherwise be produced: O_NONBLOCK makes a FIFO open
+ * return immediately, and creating a character device whose driver blocks in
+ * open needs root. A fixture hook in shipped code is the price of the
+ * assertion being measurable rather than argued, and a hook that only the
+ * fixed path honoured would have made the gate pass against the defect. */
+static int evdev_open_node(const char *path)
+{
+    const char *delay_text = getenv("BLIT_INPUT_OPEN_DELAY_US");
+    unsigned long delay_us = delay_text != NULL ?
+        strtoul(delay_text, NULL, 10) : 0UL;
+
+    if (delay_us > 0)
+        usleep((useconds_t)delay_us);
+    return open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+}
+
+/* The opener thread. It does the device I/O and nothing else. */
+static void *evdev_opener(void *argument)
+{
+    BlitRuntime *runtime = argument;
+
+    for (;;) {
+        char path[128];
+        BlitOpenedDevice opened;
+        int probe;
+        int kind;
+
+        pthread_mutex_lock(&runtime->opener_lock);
+        while (runtime->opener_running && runtime->opener_request_count == 0)
+            pthread_cond_wait(&runtime->opener_wake, &runtime->opener_lock);
+        if (!runtime->opener_running) {
+            pthread_mutex_unlock(&runtime->opener_lock);
+            return NULL;
+        }
+        snprintf(path, sizeof(path), "%s", runtime->opener_requests[0]);
+        --runtime->opener_request_count;
+        memmove(runtime->opener_requests, runtime->opener_requests + 1,
+                (size_t)runtime->opener_request_count *
+                sizeof(runtime->opener_requests[0]));
+        pthread_mutex_unlock(&runtime->opener_lock);
+
+        memset(&opened, 0, sizeof(opened));
+        snprintf(opened.path, sizeof(opened.path), "%s", path);
+        opened.fd[0] = opened.fd[1] = opened.fd[2] = -1;
+        probe = evdev_open_node(path);
+        if (probe >= 0) {
+            int claimed = 0;
+            opened.opened = 1;
+            probe_input_device(probe, &opened.kinds, &opened.capabilities);
+            read_opened_device_identity(probe, &opened);
+            /* One fd per kind: each kind drains its own fd to exhaustion, and
+               a shared open file description would let whichever read first
+               consume the other's events. */
+            for (kind = 0; kind < 3; ++kind) {
+                unsigned mask = kind == 0 ? BLIT_INPUT_KIND_KEYBOARD :
+                    (kind == 1 ? BLIT_INPUT_KIND_POINTER :
+                     BLIT_INPUT_KIND_GAMEPAD);
+                if ((opened.kinds & mask) == 0)
+                    continue;
+                if (!claimed) {
+                    opened.fd[kind] = probe;
+                    claimed = 1;
+                } else {
+                    opened.fd[kind] = evdev_open_node(path);
+                }
+            }
+            if (!claimed)
+                close(probe);
+        }
+
+        pthread_mutex_lock(&runtime->opener_lock);
+        if (runtime->opener_result_count < BLIT_MAX_OPEN_QUEUE)
+            runtime->opener_results[runtime->opener_result_count++] = opened;
+        else
+            for (kind = 0; kind < 3; ++kind)
+                if (opened.fd[kind] >= 0)
+                    close(opened.fd[kind]);
+        pthread_mutex_unlock(&runtime->opener_lock);
+        /* Wake select(). A full pipe means a wake is already pending, which
+           is all this byte means. */
+        {
+            char wake = 1;
+            ssize_t written = write(runtime->opener_notify[1], &wake, 1);
+            (void)written;
+        }
+    }
+}
+
+static void start_evdev_opener(BlitRuntime *runtime)
+{
+    if (runtime->opener_running)
+        return;
+    if (pipe(runtime->opener_notify) != 0)
+        return;
+    fcntl(runtime->opener_notify[0], F_SETFL, O_NONBLOCK);
+    fcntl(runtime->opener_notify[0], F_SETFD, FD_CLOEXEC);
+    fcntl(runtime->opener_notify[1], F_SETFL, O_NONBLOCK);
+    fcntl(runtime->opener_notify[1], F_SETFD, FD_CLOEXEC);
+    pthread_mutex_init(&runtime->opener_lock, NULL);
+    pthread_cond_init(&runtime->opener_wake, NULL);
+    runtime->opener_running = 1;
+    if (pthread_create(&runtime->opener_thread, NULL, evdev_opener,
+                       runtime) != 0) {
+        /* No thread means the scan opens inline, as it did before: slower in
+           the worst case, never wrong. */
+        runtime->opener_running = 0;
+        close(runtime->opener_notify[0]);
+        close(runtime->opener_notify[1]);
+        runtime->opener_notify[0] = -1;
+        runtime->opener_notify[1] = -1;
+        fprintf(stderr, "blit: evdev opener thread unavailable; device opens "
+                        "run on the event loop\n");
+    }
+}
+
+static int opener_path_pending(const BlitRuntime *runtime, const char *path)
+{
+    int i;
+
+    for (i = 0; i < runtime->opener_pending_count; ++i)
+        if (strcmp(runtime->opener_pending[i], path) == 0)
+            return 1;
+    return 0;
+}
+
+static void opener_forget_pending(BlitRuntime *runtime, const char *path)
+{
+    int i;
+
+    for (i = 0; i < runtime->opener_pending_count; ++i)
+        if (strcmp(runtime->opener_pending[i], path) == 0) {
+            --runtime->opener_pending_count;
+            memmove(runtime->opener_pending + i, runtime->opener_pending + i + 1,
+                    (size_t)(runtime->opener_pending_count - i) *
+                    sizeof(runtime->opener_pending[0]));
+            return;
+        }
+}
+
+/* Ask the opener for a path. Returns 1 when the request was queued, so the
+   caller knows not to open it itself. */
+static int request_evdev_open(BlitRuntime *runtime, const char *path)
+{
+    int queued = 0;
+
+    if (!runtime->opener_running)
+        return 0;
+    if (opener_path_pending(runtime, path))
+        return 1;
+    pthread_mutex_lock(&runtime->opener_lock);
+    if (runtime->opener_request_count < BLIT_MAX_OPEN_QUEUE) {
+        snprintf(runtime->opener_requests[runtime->opener_request_count],
+                 sizeof(runtime->opener_requests[0]), "%s", path);
+        ++runtime->opener_request_count;
+        queued = 1;
+    }
+    pthread_cond_signal(&runtime->opener_wake);
+    pthread_mutex_unlock(&runtime->opener_lock);
+    if (!queued) {
+        ++runtime->diagnostic_open_requests_dropped;
+        return 0;
+    }
+    ++runtime->diagnostic_open_requests;
+    if (runtime->opener_pending_count < BLIT_MAX_OPEN_QUEUE)
+        snprintf(runtime->opener_pending[runtime->opener_pending_count++],
+                 sizeof(runtime->opener_pending[0]), "%s", path);
+    return 1;
+}
+
 /* Open one evdev path and register it for every kind it turns out to be.
  *
  * This replaced three separate per-kind scans, each of which opened all 32
@@ -14405,8 +14633,14 @@ static void evdev_register_path(BlitRuntime *runtime, const char *path,
     if (!mouse_wanted && !keyboard_wanted && !gamepad_wanted)
         return;
 
+    /* Issue #16: hand the open to the opener thread and come back when it
+       answers. The loop never calls open() on a device node, so a device that
+       takes seconds to open costs this iteration nothing. With no thread --
+       pthread_create failed -- the open happens here, as it always did. */
     ++runtime->diagnostic_evdev_scan_opens;
-    probe = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+    if (request_evdev_open(runtime, path))
+        return;
+    probe = evdev_open_node(path);
     if (probe < 0)
         return;
 
@@ -14451,11 +14685,6 @@ static void evdev_register_path(BlitRuntime *runtime, const char *path,
         snprintf(runtime->evdev_mouse_paths[slot], 128, "%s", path);
         runtime->evdev_mouse_reported[slot] = 0;
         runtime->evdev_mouse_buttons[slot] = 0;
-        runtime->diagnostic_evdev_mouse_device_events[slot] = 0;
-        runtime->diagnostic_evdev_mouse_device_syncs[slot] = 0;
-        runtime->diagnostic_evdev_mouse_device_motion[slot] = 0;
-        runtime->diagnostic_evdev_mouse_device_wheel[slot] = 0;
-        runtime->diagnostic_evdev_mouse_device_buttons[slot] = 0;
         claimed = 1;
         if (announce) {
             fprintf(stderr, "blit: evdev mouse reconnected: %s fd=%d\n",
@@ -14470,15 +14699,13 @@ static void evdev_register_path(BlitRuntime *runtime, const char *path,
         int fd = probe;
         if (claimed) {
             ++runtime->diagnostic_evdev_scan_opens;
-            fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+            fd = evdev_open_node(path);
         }
         if (fd >= 0) {
             int slot = runtime->evdev_keyboard_count++;
             runtime->evdev_keyboard_fds[slot] = fd;
             snprintf(runtime->evdev_keyboard_paths[slot], 128, "%s", path);
             runtime->evdev_keyboard_reported[slot] = 0;
-            runtime->diagnostic_evdev_keyboard_device_events[slot] = 0;
-            runtime->diagnostic_evdev_keyboard_device_keys[slot] = 0;
             claimed = 1;
             evdev_sync_modifiers(runtime);
             if (announce) {
@@ -14495,7 +14722,7 @@ static void evdev_register_path(BlitRuntime *runtime, const char *path,
         int fd = probe;
         if (claimed) {
             ++runtime->diagnostic_evdev_scan_opens;
-            fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+            fd = evdev_open_node(path);
         }
         if (fd >= 0) {
             int slot = runtime->evdev_gamepad_count++;
@@ -14517,6 +14744,135 @@ static void evdev_register_path(BlitRuntime *runtime, const char *path,
         close(probe);
 }
 
+
+/* Take one answer from the opener and register it. The ioctls are already
+   done; this is bookkeeping and the poll set, which is the half that belongs
+   on the loop thread. */
+static void adopt_opened_device(BlitRuntime *runtime,
+                                const BlitOpenedDevice *opened, int announce)
+{
+    BlitInputDevice *device;
+    int discovered = 0;
+    int kind;
+
+    opener_forget_pending(runtime, opened->path);
+    /* An open that failed says nothing about a device; there may not be one.
+       An open that succeeded is a device, even when it is of no kind the poll
+       loop reads -- the inventory lists such a device rather than omitting
+       it, which is how the old inventory came to disagree with the poll
+       set. */
+    if (!opened->opened)
+        return;
+    device = record_opened_device(runtime, opened, &discovered);
+    if (discovered != 0 && device != NULL) {
+        ++runtime->input_devices_revision;
+        if (announce)
+            broadcast_input_device_changed(runtime, device,
+                discovered > 0 ? "discovered" : "reconnected");
+    }
+    if (device != NULL && !device->enabled) {
+        for (kind = 0; kind < 3; ++kind)
+            if (opened->fd[kind] >= 0)
+                close(opened->fd[kind]);
+        return;
+    }
+    if (opened->fd[0] >= 0) {
+        if (runtime->evdev_keyboard_count < BLIT_MAX_INPUT_DEVICES &&
+            !evdev_path_open(runtime->evdev_keyboard_fds,
+                             runtime->evdev_keyboard_paths,
+                             runtime->evdev_keyboard_count, opened->path)) {
+            int slot = runtime->evdev_keyboard_count++;
+            runtime->evdev_keyboard_fds[slot] = opened->fd[0];
+            snprintf(runtime->evdev_keyboard_paths[slot], 128, "%s",
+                     opened->path);
+            runtime->evdev_keyboard_reported[slot] = 0;
+            evdev_sync_modifiers(runtime);
+            if (announce) {
+                fprintf(stderr, "blit: evdev keyboard reconnected: %s fd=%d\n",
+                        opened->path, opened->fd[0]);
+                broadcast_input_diagnostic(runtime, "info",
+                                           "input_device_reconnected",
+                                           "evdev-keyboard", opened->path,
+                                           runtime->evdev_keyboard_count);
+            }
+        } else {
+            close(opened->fd[0]);
+        }
+    }
+    if (opened->fd[1] >= 0) {
+        if (runtime->evdev_mouse_count < BLIT_MAX_INPUT_DEVICES &&
+            !evdev_path_open(runtime->evdev_mouse_fds,
+                             runtime->evdev_mouse_paths,
+                             runtime->evdev_mouse_count, opened->path)) {
+            int slot = runtime->evdev_mouse_count++;
+            runtime->evdev_mouse_fds[slot] = opened->fd[1];
+            snprintf(runtime->evdev_mouse_paths[slot], 128, "%s",
+                     opened->path);
+            runtime->evdev_mouse_reported[slot] = 0;
+            runtime->evdev_mouse_buttons[slot] = 0;
+            if (announce) {
+                fprintf(stderr, "blit: evdev mouse reconnected: %s fd=%d\n",
+                        opened->path, opened->fd[1]);
+                broadcast_input_diagnostic(runtime, "info",
+                                           "input_device_reconnected",
+                                           "evdev-pointer", opened->path,
+                                           runtime->evdev_mouse_count);
+            }
+        } else {
+            close(opened->fd[1]);
+        }
+    }
+    if (opened->fd[2] >= 0) {
+        if (runtime->evdev_gamepad_count < BLIT_MAX_INPUT_DEVICES &&
+            !evdev_path_open(runtime->evdev_gamepad_fds,
+                             runtime->evdev_gamepad_paths,
+                             runtime->evdev_gamepad_count, opened->path)) {
+            int slot = runtime->evdev_gamepad_count++;
+            runtime->evdev_gamepad_fds[slot] = opened->fd[2];
+            snprintf(runtime->evdev_gamepad_paths[slot], 128, "%s",
+                     opened->path);
+            runtime->evdev_gamepad_reported[slot] = 0;
+            if (announce) {
+                fprintf(stderr, "blit: evdev gamepad reconnected: %s fd=%d\n",
+                        opened->path, opened->fd[2]);
+                broadcast_input_diagnostic(runtime, "info",
+                                           "input_device_reconnected",
+                                           "evdev-gamepad", opened->path,
+                                           runtime->evdev_gamepad_count);
+            }
+        } else {
+            close(opened->fd[2]);
+        }
+    }
+}
+
+static void service_evdev_opener(BlitRuntime *runtime, int announce)
+{
+    BlitOpenedDevice batch[BLIT_MAX_OPEN_QUEUE];
+    int count = 0;
+    int i;
+    char drain[64];
+
+    if (!runtime->opener_running)
+        return;
+    while (runtime->opener_notify[0] >= 0 &&
+           read(runtime->opener_notify[0], drain, sizeof(drain)) > 0)
+        ;
+    pthread_mutex_lock(&runtime->opener_lock);
+    count = runtime->opener_result_count;
+    for (i = 0; i < count; ++i)
+        batch[i] = runtime->opener_results[i];
+    runtime->opener_result_count = 0;
+    pthread_mutex_unlock(&runtime->opener_lock);
+    for (i = 0; i < count; ++i)
+        adopt_opened_device(runtime, &batch[i], announce);
+    /* The scan's own second half, run once every path it asked about has been
+       answered for. */
+    if (runtime->scan_sweep_pending && runtime->opener_pending_count == 0) {
+        runtime->scan_sweep_pending = 0;
+        retire_absent_input_devices(runtime, runtime->scan_sweep_announce);
+    }
+}
 
 static void broadcast_input_diagnostic(BlitRuntime *runtime,
                                        const char *severity,
@@ -14579,24 +14935,24 @@ static void service_evdev_watch(BlitRuntime *runtime)
 
 /* Walk every evdev path once.  `announce` reports a discovery as a reconnect,
    which is right for a hotplug and noise at boot. */
-static void scan_evdev_devices(BlitRuntime *runtime, int announce)
+/* Retire whatever the last scan did not account for.
+ *
+ * Separate from the scan, and deferred until the opener has answered for
+ * everything it was asked about, because since issue #16 the scan does not
+ * open anything itself: it posts requests. "Did this scan see the device?"
+ * cannot be answered at the end of a scan that has not happened yet, and
+ * answering it there marked every device present forever -- which is what two
+ * gates caught the moment the opener landed. */
+static void retire_absent_input_devices(BlitRuntime *runtime, int announce)
 {
     int index;
 
-    /* A device is present if this scan found it, or if the poll loop still
-       holds one of its fds -- a fully claimed device is not re-probed, so the
-       scan alone would mark it absent. */
-    for (index = 0; index < BLIT_MAX_INPUT_DEVICES; ++index)
-        runtime->input_devices[index].seen = 0;
-    for (index = 0; index < 32; ++index) {
-        char path[192];
-        snprintf(path, sizeof(path), "%s/event%d", evdev_root(), index);
-        evdev_register_path(runtime, path, announce);
-    }
     for (index = 0; index < BLIT_MAX_INPUT_DEVICES; ++index) {
         BlitInputDevice *device = &runtime->input_devices[index];
         if (!device->used)
             continue;
+        /* A device the poll loop still holds open is present whatever the
+           scan saw: a fully claimed device is not re-probed. */
         if (input_device_open_kinds(runtime, device) != 0)
             device->seen = 1;
         if (device->seen)
@@ -14618,6 +14974,27 @@ static void scan_evdev_devices(BlitRuntime *runtime, int announce)
         memset(device, 0, sizeof(*device));
         ++runtime->input_devices_revision;
     }
+}
+
+static void scan_evdev_devices(BlitRuntime *runtime, int announce)
+{
+    int index;
+
+    for (index = 0; index < BLIT_MAX_INPUT_DEVICES; ++index)
+        runtime->input_devices[index].seen = 0;
+    for (index = 0; index < 32; ++index) {
+        char path[192];
+        snprintf(path, sizeof(path), "%s/event%d", evdev_root(), index);
+        evdev_register_path(runtime, path, announce);
+    }
+    if (runtime->opener_running && runtime->opener_pending_count > 0) {
+        /* The answers are still coming. service_evdev_opener runs the sweep
+           when the last one lands. */
+        runtime->scan_sweep_pending = 1;
+        runtime->scan_sweep_announce = announce;
+        return;
+    }
+    retire_absent_input_devices(runtime, announce);
 }
 
 static void reconnect_evdev_devices(BlitRuntime *runtime)
@@ -17302,7 +17679,7 @@ static void service_evdev_mouse(BlitRuntime *runtime)
                (ssize_t)sizeof(event)) {
             uint64_t input_started_us = monotonic_us();
             ++runtime->diagnostic_evdev_mouse_events;
-            ++runtime->diagnostic_evdev_mouse_device_events[device_index];
+            if (configuration != NULL) ++configuration->events;
             runtime->diagnostic_last_evdev_mouse_event_us = input_started_us;
             snprintf(runtime->diagnostic_last_evdev_mouse_path,
                      sizeof(runtime->diagnostic_last_evdev_mouse_path), "%s",
@@ -17316,7 +17693,7 @@ static void service_evdev_mouse(BlitRuntime *runtime)
                 if (event.code == REL_WHEEL || event.code == REL_HWHEEL) {
                     int button;
                     ++runtime->diagnostic_evdev_mouse_wheel_events;
-                    ++runtime->diagnostic_evdev_mouse_device_wheel[device_index];
+                    if (configuration != NULL) ++configuration->pointer_wheel;
                     int direction = natural_scroll ? -event.value :
                         event.value;
                     if (event.code == REL_HWHEEL)
@@ -17333,18 +17710,18 @@ static void service_evdev_mouse(BlitRuntime *runtime)
                 }
                 if (event.code == REL_X) {
                     ++runtime->diagnostic_evdev_mouse_motion_events;
-                    ++runtime->diagnostic_evdev_mouse_device_motion[device_index];
+                    if (configuration != NULL) ++configuration->pointer_motion;
                     runtime->evdev_mouse_x +=
                         scale_pointer_delta(event.value, sensitivity);
                 } else if (event.code == REL_Y) {
                     ++runtime->diagnostic_evdev_mouse_motion_events;
-                    ++runtime->diagnostic_evdev_mouse_device_motion[device_index];
+                    if (configuration != NULL) ++configuration->pointer_motion;
                     runtime->evdev_mouse_y +=
                         scale_pointer_delta(event.value, sensitivity);
                 }
             } else if (event.type == EV_SYN && event.code == SYN_REPORT) {
                 ++runtime->diagnostic_evdev_mouse_syncs;
-                ++runtime->diagnostic_evdev_mouse_device_syncs[device_index];
+                if (configuration != NULL) ++configuration->pointer_syncs;
                 update_evdev_pointer(runtime);
                 record_input_dispatch(runtime, input_started_us);
             } else if (event.type == EV_KEY &&
@@ -17367,7 +17744,7 @@ static void service_evdev_mouse(BlitRuntime *runtime)
                 else
                     button = 2;
                 ++runtime->diagnostic_evdev_mouse_button_events;
-                ++runtime->diagnostic_evdev_mouse_device_buttons[device_index];
+                if (configuration != NULL) ++configuration->pointer_buttons;
                 int release = event.value == 0;
                 dispatch_evdev_mouse_button(runtime, device_index, button,
                                             !release);
@@ -17947,7 +18324,8 @@ static void service_evdev_keyboard(BlitRuntime *runtime)
                (ssize_t)sizeof(event)) {
             uint64_t input_started_us = monotonic_us();
             ++runtime->diagnostic_evdev_keyboard_events;
-            ++runtime->diagnostic_evdev_keyboard_device_events[device_index];
+            if (runtime->input_source != NULL)
+                ++runtime->input_source->events;
             runtime->diagnostic_last_evdev_keyboard_event_us = input_started_us;
             snprintf(runtime->diagnostic_last_evdev_keyboard_path,
                      sizeof(runtime->diagnostic_last_evdev_keyboard_path), "%s",
@@ -17959,7 +18337,8 @@ static void service_evdev_keyboard(BlitRuntime *runtime)
                             runtime->evdev_keyboard_paths[device_index]);
                     runtime->evdev_keyboard_reported[device_index] = 1;
                 }
-                ++runtime->diagnostic_evdev_keyboard_device_keys[device_index];
+                if (runtime->input_source != NULL)
+                    ++runtime->input_source->keys;
             }
             dispatch_evdev_key_event(runtime, &event, "evdev-keyboard");
             record_input_dispatch(runtime, input_started_us);
@@ -18857,6 +19236,7 @@ int main(int argc, char **argv)
         int input_index;
         if (mouse_device != NULL && mouse_device[0] != '\0')
             evdev_register_path(&runtime, mouse_device, 0);
+        start_evdev_opener(&runtime);
         scan_evdev_devices(&runtime, 0);
         scan_audio_devices(&runtime, 0);
         open_snd_watch(&runtime);
@@ -19058,6 +19438,11 @@ int main(int argc, char **argv)
             if (runtime.snd_watch_fd > max_fd)
                 max_fd = runtime.snd_watch_fd;
         }
+        if (runtime.opener_running && runtime.opener_notify[0] >= 0) {
+            FD_SET(runtime.opener_notify[0], &readable);
+            if (runtime.opener_notify[0] > max_fd)
+                max_fd = runtime.opener_notify[0];
+        }
         for (i = 0; i < BLIT_MAX_STREAMS; ++i) {
             if (runtime.streams[i].used) {
                 FD_SET(runtime.streams[i].fd, &readable);
@@ -19134,6 +19519,10 @@ int main(int argc, char **argv)
         if (runtime.snd_watch_fd >= 0 && ready > 0 &&
             FD_ISSET(runtime.snd_watch_fd, &readable))
             service_snd_watch(&runtime);
+        /* Unconditional, not gated on the pipe being readable: a result can
+           land between the drain and the select, and the queue is cheap to
+           check. The pipe is what stops select() sleeping through one. */
+        service_evdev_opener(&runtime, 1);
         if (ready > 0 && FD_ISSET(server_fd, &readable)) {
             client_fd = accept(server_fd, NULL, NULL);
             if (client_fd < 0) {
@@ -19251,6 +19640,15 @@ int main(int argc, char **argv)
         close(runtime.evdev_watch_fd);
     if (runtime.snd_watch_fd >= 0)
         close(runtime.snd_watch_fd);
+    if (runtime.opener_running) {
+        pthread_mutex_lock(&runtime.opener_lock);
+        runtime.opener_running = 0;
+        pthread_cond_signal(&runtime.opener_wake);
+        pthread_mutex_unlock(&runtime.opener_lock);
+        pthread_join(runtime.opener_thread, NULL);
+        close(runtime.opener_notify[0]);
+        close(runtime.opener_notify[1]);
+    }
     stop_sessions(&runtime);
     {
         int input_index;

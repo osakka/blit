@@ -220,6 +220,7 @@ suite_renderer() {
     run_gate hidden_cursor_damage_gate.rb ruby tools/tests/hidden_cursor_damage_gate.rb
     run_gate pointer_damage_atomic_gate.rb ruby tools/tests/pointer_damage_atomic_gate.rb
     run_gate evdev_scan_gate.rb ruby tools/tests/evdev_scan_gate.rb
+    run_gate evdev_open_latency_gate.rb ruby tools/tests/evdev_open_latency_gate.rb
     run_gate input_identity_gate.sh "$ROOT"/tools/tests/input_identity_gate.sh
     run_gate input_device_api_gate.rb ruby tools/tests/input_device_api_gate.rb
     run_gate input_device_config_gate.rb ruby tools/tests/input_device_config_gate.rb
