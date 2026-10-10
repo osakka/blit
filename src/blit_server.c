@@ -35,6 +35,16 @@
 
 extern char **environ;
 
+/* Every surface is drawn inset from its pane origin by this many pixels on
+   both axes. It is a presentation margin, not part of the cell geometry, so
+   a cell at (column,row) occupies
+   (inset + column*cell_width, inset + row*cell_height) on the framebuffer
+   rather than (column*cell_width, row*cell_height). Anything comparing
+   pixels against cell state has to apply it; a pixel check that does not
+   will attribute the offset to the renderer, which is how issue #31 was
+   first misread. It is reported by /v1/diagnostics as surface_inset_px. */
+#define BLIT_SURFACE_INSET_PX 4
+
 #define BLIT_MAX_DISPLAYS 16
 #define BLIT_MAX_PANES 64
 #define BLIT_MAX_SESSIONS 16
@@ -2200,7 +2210,8 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              "\"render\":{\"pending\":%s,\"interval_ms\":%d,"
              "\"effective_interval_ms\":%d,\"mode\":\"refresh-aware\","
              "\"outputs\":%s,"
-             "\"font_scale\":%d,\"direct_kms\":%s,"
+             "\"font_scale\":%d,\"surface_inset_px\":%d,"
+             "\"direct_kms\":%s,"
              "\"renderer\":\"%s\","
              "\"glyph_path\":\"%s\","
              "\"presentation_sync\":\"%s\","
@@ -2219,6 +2230,7 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              runtime->render_interval_ms, runtime->render_effective_interval_ms,
              scheduler,
              runtime->font_scale,
+             BLIT_SURFACE_INSET_PX,
              runtime->direct_kms ? "true" : "false", escaped_renderer,
              runtime->direct_kms ? "kms" :
                  (runtime->output_count > 0 &&
@@ -12752,8 +12764,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             BlitSession *session;
             BlitPane *pane;
             char display_id[128];
-            float surface_origin_x = 4.0f;
-            int surface_origin_y = 4;
+            float surface_origin_x = (float)BLIT_SURFACE_INSET_PX;
+            int surface_origin_y = BLIT_SURFACE_INSET_PX;
             int prior_index;
             int first_row = 0;
             int last_row;
@@ -12771,8 +12783,10 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                 continue;
             pane = find_pane_id(runtime, session->pane_id);
             if (pane != NULL) {
-                surface_origin_x = (float)(pane->x * cell_width + 4);
-                surface_origin_y = pane->y * cell_height + 4;
+                surface_origin_x = (float)(pane->x * cell_width +
+                                           BLIT_SURFACE_INSET_PX);
+                surface_origin_y = pane->y * cell_height +
+                    BLIT_SURFACE_INSET_PX;
             }
             if (session->display_id[0] == '\0') {
                 if (output_index != 0)
@@ -12789,7 +12803,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                         runtime, plan->surfaces[prior_index].surface_id);
                     if (prior != NULL && prior->used &&
                         surface_targets_output(runtime, prior, output_index))
-                        surface_origin_y += prior->height * cell_height + 4;
+                        surface_origin_y += prior->height * cell_height +
+                            BLIT_SURFACE_INSET_PX;
                 }
             }
             if (!full_redraw) {

@@ -20,6 +20,11 @@
 # surface after the pattern is drawn, so a discard means something
 # unexpected is mutating it and the gate says so rather than passing
 # quietly.
+#
+# The cell-to-pixel mapping must apply the surface inset, which this reads
+# from diagnostics rather than assuming. Assuming zero made the text cursor
+# look like it was rendering four pixels outside its cell, which was filed
+# as a defect and was not one.
 
 require 'json'
 require 'net/http'
@@ -132,6 +137,12 @@ while attempts < 5 && result.nil?
 
   width = Integer(ENV.fetch('BLIT_GATE_FB_WIDTH', '1024'), 10)
   height = Integer(ENV.fetch('BLIT_GATE_FB_HEIGHT', '768'), 10)
+  # A surface is drawn inset from its pane origin, so a cell's pixels are
+  # NOT at (x*cell_width, y*cell_height). Read the inset rather than
+  # assuming zero: assuming zero is what made the renderer look wrong when
+  # this gate was first written.
+  inset = JSON.parse(request('GET', '/v1/diagnostics').body)
+              .fetch('render').fetch('surface_inset_px')
   grid = {}
   state.fetch('cells').each { |c| grid[[c.fetch('x', 0), c.fetch('y', 0)]] = c }
   mismatched = []
@@ -147,8 +158,8 @@ while attempts < 5 && result.nil?
       want = [hex[0, 2].to_i(16), hex[2, 2].to_i(16), hex[4, 2].to_i(16)]
       checked += 1
       bad = 0
-      (y * CELL_H...((y + 1) * CELL_H)).each do |py|
-        (x * CELL_W...((x + 1) * CELL_W)).each do |px|
+      ((inset + y * CELL_H)...(inset + (y + 1) * CELL_H)).each do |py|
+        ((inset + x * CELL_W)...(inset + (x + 1) * CELL_W)).each do |px|
           next if py >= height || px >= width
 
           bad += 1 if bmp_pixel(bmp, width, height, px, py) != want
