@@ -248,7 +248,20 @@ paths:
         '200':
           description: >-
             Current SDL3 or direct-KMS framebuffer encoded as a BMP image.
-            Direct-KMS captures are 32-bit bottom-up BMP images.
+            Direct-KMS captures are 32-bit bottom-up BMP images. The response
+            carries the state identity the pixels correspond to, sampled at
+            the moment the framebuffer is read, so a client can tell a
+            rendering fault from a capture whose surface moved underneath it.
+          headers:
+            X-Blit-Capture-Frame:
+              description: Frame counter at the moment the framebuffer was read.
+              schema: {type: integer, minimum: 0}
+            X-Blit-Capture-Revisions:
+              description: >-
+                Comma-separated surface-id=revision pairs for every live
+                surface, sampled with the pixels. A comparison against a
+                surface snapshot is only meaningful while these still match.
+              schema: {type: string}
           content:
             image/bmp:
               schema:

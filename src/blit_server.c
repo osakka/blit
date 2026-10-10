@@ -1213,9 +1213,11 @@ static void send_http(int fd, int status, const char *reason,
     }
 }
 
-static int queue_http_bytes(BlitHttpClient *client, int status,
-                            const char *reason, const char *content_type,
-                            unsigned char *body, size_t length)
+static int queue_http_bytes_extra(BlitHttpClient *client, int status,
+                                  const char *reason,
+                                  const char *content_type,
+                                  const char *extra_headers,
+                                  unsigned char *body, size_t length)
 {
     int header_length;
 
@@ -1228,10 +1230,12 @@ static int queue_http_bytes(BlitHttpClient *client, int status,
         "HTTP/1.1 %d %s\r\n"
         "Content-Type: %s\r\n"
         "X-Blit-Version: %s\r\n"
+        "%s"
         "Content-Length: %lu\r\n"
         "Connection: close\r\n"
         "Cache-Control: no-store\r\n\r\n",
-        status, reason, content_type, blit_version, (unsigned long)length);
+        status, reason, content_type, blit_version,
+        extra_headers != NULL ? extra_headers : "", (unsigned long)length);
     if (header_length <= 0 ||
         (size_t)header_length >= sizeof(client->response_header))
         return 0;
@@ -1241,6 +1245,42 @@ static int queue_http_bytes(BlitHttpClient *client, int status,
     client->response_body_length = length;
     client->response_body_offset = 0;
     return 1;
+}
+
+static int queue_http_bytes(BlitHttpClient *client, int status,
+                            const char *reason, const char *content_type,
+                            unsigned char *body, size_t length)
+{
+    return queue_http_bytes_extra(client, status, reason, content_type, "",
+                                  body, length);
+}
+
+/* ADR-pending (#29): a framebuffer capture is only evidence about the
+   renderer if the state it corresponds to can be named. Sample every live
+   surface's revision at the instant the pixels are read, so a client can
+   discard a comparison whose state moved underneath it instead of
+   reporting the skew as a rendering defect. */
+static void capture_identity_headers(const BlitRuntime *runtime,
+                                     char *out, size_t capacity)
+{
+    size_t used = 0;
+    int i;
+    int first = 1;
+    if (out == NULL || capacity == 0) return;
+    out[0] = '\0';
+    used += (size_t)snprintf(out + used, capacity - used,
+                             "X-Blit-Capture-Frame: %llu\r\n"
+                             "X-Blit-Capture-Revisions: ",
+                             runtime->diagnostic_frames);
+    for (i = 0; i < BLIT_MAX_SESSIONS && used + 64 < capacity; ++i) {
+        const BlitSurface *surface = runtime->surfaces[i];
+        if (surface == NULL || !surface->used) continue;
+        used += (size_t)snprintf(out + used, capacity - used,
+                                 "%ssurface-%llu=%llu", first ? "" : ",",
+                                 surface->id, surface->revision);
+        first = 0;
+    }
+    snprintf(out + used, capacity - used, "\r\n");
 }
 
 static void remove_http_client(BlitRuntime *runtime, int index);
@@ -1395,6 +1435,7 @@ static int send_sdl_screenshot(BlitHttpClient *client, BlitRuntime *runtime,
     int output_index;
     BlitOutput *output;
     size_t length = 0;
+    char capture_headers[1024];
 
     if (runtime->direct_kms || !runtime->sdl_ready) {
         send_problem(client->fd, 501, "Not Implemented", "screenshot_backend",
@@ -1413,6 +1454,8 @@ static int send_sdl_screenshot(BlitHttpClient *client, BlitRuntime *runtime,
         output->screenshot_surface = NULL;
     else
         pixels = SDL_RenderReadPixels(output->renderer, NULL);
+    capture_identity_headers(runtime, capture_headers,
+                             sizeof(capture_headers));
     if (pixels == NULL) {
         send_problem(client->fd, 503, "Service Unavailable", "screenshot_failed",
                      "The SDL renderer could not read the current framebuffer.");
@@ -1425,7 +1468,8 @@ static int send_sdl_screenshot(BlitHttpClient *client, BlitRuntime *runtime,
         return -1;
     }
     SDL_DestroySurface(pixels);
-    if (!queue_http_bytes(client, 200, "OK", "image/bmp", bytes, length)) {
+    if (!queue_http_bytes_extra(client, 200, "OK", "image/bmp",
+                                capture_headers, bytes, length)) {
         free(bytes);
         send_problem(client->fd, 503, "Service Unavailable", "screenshot_failed",
                      "The framebuffer response could not be queued.");
@@ -1439,15 +1483,19 @@ static int send_kms_screenshot(BlitHttpClient *client, BlitRuntime *runtime,
 {
     unsigned char *bytes = NULL;
     size_t length = 0;
+    char capture_headers[1024];
     int result = blit_kms_screenshot(runtime->kms, output_index,
                                      &bytes, &length);
+    capture_identity_headers(runtime, capture_headers,
+                             sizeof(capture_headers));
     if (result == 0) return 0;
     if (result < 0) {
         send_problem(client->fd, 503, "Service Unavailable", "screenshot_failed",
                      "The KMS framebuffer could not be encoded.");
         return -1;
     }
-    if (!queue_http_bytes(client, 200, "OK", "image/bmp", bytes, length)) {
+    if (!queue_http_bytes_extra(client, 200, "OK", "image/bmp",
+                                capture_headers, bytes, length)) {
         free(bytes);
         send_problem(client->fd, 503, "Service Unavailable", "screenshot_failed",
                      "The framebuffer response could not be queued.");
