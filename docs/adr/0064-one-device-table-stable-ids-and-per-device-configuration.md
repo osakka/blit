@@ -135,6 +135,19 @@ about the hardware. `state` is read-only live truth — whether the device is
 open, when it was last seen, and its own event counters. `configuration` is the
 writable part and nothing else is writable.
 
+**An absent device keeps its configuration.** A device that is unplugged stays
+in the table with `state.present: false` for as long as it carries
+configuration; only an unconfigured absent device is retired. A stable id is
+worthless if what is attached to it evaporates while the device is out of the
+machine, which is exactly when a control panel most wants to still show it.
+
+**Configuration is held in memory.** A Blit restart resets every device to the
+defaults and a controller re-applies what it wants; the collection revision
+dropping back toward 1 is the signal that it has to. Persisting configuration
+across a restart is a separate decision, not taken here — and worth weighing
+against issue #55, which records that a restart is a real operational event
+that already loses the desktop.
+
 **Configuration is written per device, by PATCH, with the concurrency rule the
 rest of Blit already uses:**
 
@@ -201,11 +214,17 @@ specified for the SDL path and left unimplemented for KMS.
 
 1. **Identity and the table.** `BlitInputDevice`, derivation, serve the
    inventory from memory, per-device `state`, `GET /v1/input/devices/{id}`,
-   real `input_devices_revision`.
-2. **Input configuration.** PATCH: `enabled`, `route`, pointer sensitivity,
-   keyboard layout (#35).
-3. **Audio.** Real capabilities, device items, default-sink selection.
-4. **Displays.** Item endpoints and SDL mode-set configuration.
+   real `input_devices_revision`. *Done, 0.1.432/0.1.433.*
+2. **Input configuration.** `PATCH /v1/input/devices/{id}`: `enabled`,
+   pointer `sensitivity_percent` and `natural_scroll`. *Done, 0.1.434.*
+3. **Per-device routing.** `configuration.route`, which threads the device
+   through `keyboard_target` and the seven `input_route_target` call sites.
+   Deferred from stage 2 deliberately: the aggregate `evdev-keyboard` /
+   `evdev-pointer` / `evdev-gamepad` strings are also a stream contract, so
+   the change is larger than the rest of the configuration put together.
+4. **Keyboard layout** (#35). A keymap that is not hard-coded US.
+5. **Audio.** Real capabilities, device items, default-sink selection.
+6. **Displays.** Item endpoints and SDL mode-set configuration.
 
 ## Evidence
 
@@ -226,7 +245,26 @@ specified for the SDL path and left unimplemented for KMS.
   rescans before serving the collection fails the open-count assertion with
   32 opens; (b) a build that emits the pre-change item shape fails the
   envelope, the id and the hardcoded-revision assertions.
-  Stage 2's `400` on an unknown configuration property and `409` on a stale
-  revision belong to stage 2 and are gated there.
+- `tools/tests/input_device_config_gate.rb` — stage 2. The PATCH write and
+  both revision bumps; `409` on a stale `If-Match` and on a stale body
+  `revision`; `400` naming an unknown property; `422` for a pointer-only
+  property on a device that is not read as a pointer; that `configuration` is
+  a bounded object and a property outside it does not leak in through a
+  forward search; `409` for an injection through a disabled device; hotplug
+  through inotify under `BLIT_INPUT_ROOT`, including that a configured device
+  survives being unplugged as `present: false` and comes back still
+  configured while an unconfigured one is retired; and the `device_changed`
+  stream event. Teeth, each shown: retiring a configured absent device loses
+  the configuration and the replug comes back enabled; reading
+  `configuration` by forward search lets `enabled` outside the object
+  re-enable the device; and accepting an unknown property answers 200.
+
+  **Not gated locally, and not claimed to be:** that disabling a device stops
+  it being polled, and that `sensitivity_percent` scales motion. Both need a
+  device the server classifies as a pointer, which needs real evdev ioctls;
+  the gate environment has no `/dev/input` and no `/dev/uinput`, so its
+  fabricated nodes are devices of no kind. Both are measured on
+  192.168.10.54, which has three real pointers, through
+  `POST /v1/input/inject` with a `device_id`.
 - Live: ids recorded from 192.168.10.54 before and after a server restart,
   reported in the stage-1 ticket.

@@ -310,10 +310,22 @@ typedef struct {
     char phys[128];
     unsigned kinds;
     unsigned capabilities;
+    /* Configuration (ADR 0064 stage 2). It is held in memory, so a Blit
+       restart resets it to these defaults and a controller re-applies what it
+       wants; the collection revision dropping back toward 1 is the signal
+       that it has to. Persisting it is a separate decision. */
+    int enabled;
+    int sensitivity_percent;
+    int natural_scroll;
+    int present;
     unsigned long long first_seen_us;
     unsigned long long last_seen_us;
     unsigned long long revision;
 } BlitInputDevice;
+
+#define BLIT_INPUT_SENSITIVITY_DEFAULT 100
+#define BLIT_INPUT_SENSITIVITY_MIN 10
+#define BLIT_INPUT_SENSITIVITY_MAX 1000
 
 typedef struct {
     SDL_Window *window;
@@ -851,6 +863,7 @@ static void remove_session_streams(BlitRuntime *runtime,
 static void send_mouse_report(BlitRuntime *runtime, SDL_WindowID window_id,
                               float pixel_x, float pixel_y, int button,
                               int release);
+static void update_evdev_pointer(BlitRuntime *runtime);
 static void update_pointer_position(BlitRuntime *runtime,
                                     const char *device_id);
 static void broadcast_evdev_pointer(BlitRuntime *runtime, const char *kind,
@@ -2800,6 +2813,8 @@ static BlitInputDevice *record_input_device(BlitRuntime *runtime,
             return NULL;
         memset(device, 0, sizeof(*device));
         device->used = 1;
+        device->enabled = 1;
+        device->sensitivity_percent = BLIT_INPUT_SENSITIVITY_DEFAULT;
         snprintf(device->node, sizeof(device->node), "%s", node);
         snprintf(device->name, sizeof(device->name), "%s", node);
         read_input_device_strings(fd, device);
@@ -2819,7 +2834,40 @@ static BlitInputDevice *record_input_device(BlitRuntime *runtime,
     device->capabilities = capabilities;
     device->seen = 1;
     device->last_seen_us = monotonic_us();
+    /* A device that was absent and is back. Configuration survives the gap,
+       which is the point of deriving the id from the device rather than from
+       its node number. */
+    if (!device->present) {
+        device->present = 1;
+        if (discovered != NULL && !*discovered)
+            *discovered = -1;
+    }
     return device;
+}
+
+/* True when a controller has changed something about this device. An absent
+   device that carries configuration is kept in the table rather than
+   retired: a stable id is worthless if what is attached to it evaporates
+   while the device is unplugged. */
+/* Scale a relative pointer delta by a device's sensitivity.
+ *
+ * The pointer position is a float, so the scale does not have to round per
+ * event and a 50% setting does not throw away every second count of a
+ * one-count movement. The percentage is an integer because the request
+ * parser here has json_int and no float reader, and a percentage is the
+ * resolution a control panel offers anyway. */
+static float scale_pointer_delta(int value, int sensitivity_percent)
+{
+    if (sensitivity_percent == BLIT_INPUT_SENSITIVITY_DEFAULT)
+        return (float)value;
+    return (float)value * (float)sensitivity_percent / 100.0f;
+}
+
+static int input_device_configured(const BlitInputDevice *device)
+{
+    return !device->enabled ||
+        device->sensitivity_percent != BLIT_INPUT_SENSITIVITY_DEFAULT ||
+        device->natural_scroll;
 }
 
 /* How many of a device's kinds the poll loop currently holds open. The fd
@@ -2955,7 +3003,7 @@ static size_t input_device_item_json(const BlitRuntime *runtime,
         "\"last_seen_ms\":%llu,\"uptime_ms\":%llu",
         device->bustype, device->vendor, device->product, device->version,
         escaped_uniq, escaped_phys,
-        device->seen ? "true" : "false",
+        device->present ? "true" : "false",
         open_kinds != 0 ? "true" : "false", open_kinds,
         (unsigned long long)((now - device->last_seen_us) / 1000ULL),
         (unsigned long long)((now - device->first_seen_us) / 1000ULL));
@@ -2978,8 +3026,19 @@ static size_t input_device_item_json(const BlitRuntime *runtime,
             runtime->diagnostic_evdev_mouse_device_wheel[mouse_slot],
             runtime->diagnostic_evdev_mouse_device_buttons[mouse_slot]);
     complete &= json_appendf(body, capacity, &used,
-        "},\"configuration\":{\"enabled\":true},\"revision\":%llu}",
-        device->revision);
+        "},\"configuration\":{\"enabled\":%s",
+        device->enabled ? "true" : "false");
+    /* Pointer settings are reported only for a device read as a pointer, and
+       refused on anything else. A control panel that offers a scroll-
+       direction toggle for a keyboard is offering a setting that cannot do
+       anything. */
+    if (device->kinds & BLIT_INPUT_KIND_POINTER)
+        complete &= json_appendf(body, capacity, &used,
+            ",\"sensitivity_percent\":%d,\"natural_scroll\":%s",
+            device->sensitivity_percent,
+            device->natural_scroll ? "true" : "false");
+    complete &= json_appendf(body, capacity, &used,
+        "},\"revision\":%llu}", device->revision);
     /* One test, at the end: json_appendf leaves `used` alone when a field
        does not fit, so a truncated item is a complete prefix rather than a
        buffer overrun -- but it is still not an item, and the collection
@@ -4165,6 +4224,124 @@ static const char *cell_misplaced_style_key(const char *cell_json)
     for (i = 0; i < sizeof(style_keys) / sizeof(style_keys[0]); ++i)
         if (json_key_cursor(cell_json, style_keys[i]) != NULL)
             return style_keys[i];
+    return NULL;
+}
+
+/* Copy the balanced JSON object that starts at or after `cursor` into `out`.
+ *
+ * The request parsers in this file find keys by searching forward, which is
+ * fine for a flat object and wrong for a nested one: a search started inside
+ * a sub-object happily finds a key that comes after the sub-object closes, so
+ * {"configuration":{},"enabled":true} would read as an enabled device. A
+ * configuration object is written, not just read, so its boundary has to be
+ * real. Returns 0 when there is no balanced object or it does not fit. */
+static int json_object_slice(const char *cursor, char *out, size_t capacity)
+{
+    size_t used = 0;
+    int depth = 0;
+
+    if (cursor == NULL || capacity == 0)
+        return 0;
+    out[0] = '\0';
+    while (*cursor != '\0' && *cursor != '{')
+        ++cursor;
+    if (*cursor != '{')
+        return 0;
+    for (; *cursor != '\0'; ++cursor) {
+        if (used + 1 >= capacity)
+            return 0;
+        out[used++] = *cursor;
+        if (*cursor == '"') {
+            /* Copy the whole string, so a brace inside it cannot change the
+               depth and end the object early. */
+            ++cursor;
+            while (*cursor != '\0' && *cursor != '"') {
+                if (used + 2 >= capacity)
+                    return 0;
+                out[used++] = *cursor;
+                if (*cursor == '\\' && cursor[1] != '\0')
+                    out[used++] = *++cursor;
+                ++cursor;
+            }
+            if (*cursor != '"')
+                return 0;
+            out[used++] = '"';
+            continue;
+        }
+        if (*cursor == '{' || *cursor == '[')
+            ++depth;
+        else if (*cursor == '}' || *cursor == ']') {
+            if (--depth == 0) {
+                out[used] = '\0';
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+/* The property names a device configuration may carry. Anything else is
+   refused and named, rather than accepted and ignored -- which is how a
+   controller comes to believe it has set something it has not (issue #48). */
+static const char *input_device_rejected_property(const char *configuration)
+{
+    static const char *const writable[] = {
+        "enabled", "sensitivity_percent", "natural_scroll"
+    };
+    static char rejected[96];
+    const char *cursor = configuration;
+    int depth = 0;
+
+    while (*cursor != '\0' && *cursor != '{')
+        ++cursor;
+    if (*cursor != '{')
+        return NULL;
+    for (; *cursor != '\0'; ++cursor) {
+        if (*cursor == '"') {
+            const char *name = cursor + 1;
+            size_t length = 0;
+            const char *after;
+            size_t i;
+            int known = 0;
+
+            while (name[length] != '\0' && name[length] != '"') {
+                if (name[length] == '\\' && name[length + 1] != '\0')
+                    ++length;
+                ++length;
+            }
+            if (name[length] != '"')
+                return NULL;
+            after = name + length + 1;
+            cursor = after - 1;
+            while (*after == ' ' || *after == '\t' || *after == '\r' ||
+                   *after == '\n')
+                ++after;
+            /* A quoted token followed by a colon is a property name; one
+               followed by anything else is a value. */
+            if (*after != ':' || depth != 1)
+                continue;
+            for (i = 0; i < sizeof(writable) / sizeof(writable[0]); ++i)
+                if (strlen(writable[i]) == length &&
+                    strncmp(name, writable[i], length) == 0) {
+                    known = 1;
+                    break;
+                }
+            if (!known) {
+                size_t copy = length < sizeof(rejected) - 1 ?
+                    length : sizeof(rejected) - 1;
+                memcpy(rejected, name, copy);
+                rejected[copy] = '\0';
+                return rejected;
+            }
+            continue;
+        }
+        if (*cursor == '{' || *cursor == '[')
+            ++depth;
+        else if (*cursor == '}' || *cursor == ']') {
+            if (--depth == 0)
+                break;
+        }
+    }
     return NULL;
 }
 
@@ -8258,6 +8435,44 @@ static void remove_evdev_gamepad(BlitRuntime *runtime, int index)
     runtime->evdev_rescan_requested = 1;
 }
 
+/* Release every fd the poll set holds for one node.
+ *
+ * Disabling a device has to actually let go of it, not merely stop reading:
+ * an fd Blit keeps open is a device the rest of the system still sees as
+ * taken. The removals request a rescan, and evdev_register_path refuses to
+ * re-claim a device whose configuration says disabled, so the next scan
+ * leaves it alone. */
+static int release_input_device_fds(BlitRuntime *runtime, const char *node)
+{
+    int released = 0;
+    int i;
+    int keyboard_released = 0;
+
+    for (i = runtime->evdev_mouse_count - 1; i >= 0; --i)
+        if (strcmp(runtime->evdev_mouse_paths[i], node) == 0) {
+            remove_evdev_mouse(runtime, i);
+            ++released;
+        }
+    for (i = runtime->evdev_keyboard_count - 1; i >= 0; --i)
+        if (strcmp(runtime->evdev_keyboard_paths[i], node) == 0) {
+            remove_evdev_keyboard(runtime, i);
+            keyboard_released = 1;
+            ++released;
+        }
+    for (i = runtime->evdev_gamepad_count - 1; i >= 0; --i)
+        if (strcmp(runtime->evdev_gamepad_paths[i], node) == 0) {
+            remove_evdev_gamepad(runtime, i);
+            ++released;
+        }
+    /* A keyboard that went away while a modifier was held would leave it
+       stuck down for every other keyboard. The device-lost path does this at
+       its call site rather than inside remove_evdev_keyboard, so this does
+       too. */
+    if (keyboard_released)
+        evdev_sync_modifiers(runtime);
+    return released;
+}
+
 static int display_id_is_known(const BlitRuntime *runtime, const char *display_id)
 {
     char expected[128];
@@ -11758,6 +11973,8 @@ static void handle_request(int fd, BlitRuntime *runtime,
         strcmp(method, "POST") == 0) {
         uint64_t input_started_us = monotonic_us();
         char kind[64];
+        char inject_device_id[BLIT_INPUT_ID_CAPACITY];
+        BlitInputDevice *inject_device = NULL;
         int x;
         int y;
         int button;
@@ -11768,6 +11985,30 @@ static void handle_request(int fd, BlitRuntime *runtime,
             send_problem(fd, 400, "Bad Request", "invalid_input_event",
                          "An input event kind is required.");
             return;
+        }
+        /* An optional device_id makes the injected event travel the path a
+           real event from that device travels, including its configuration.
+           Without it there is no way to exercise per-device configuration at
+           all: a host with no physical input has nothing to turn the knob
+           on, and the gate environment has no /dev/input. */
+        if (json_key_cursor(payload, "device_id") != NULL) {
+            if (!json_string(payload, "device_id", inject_device_id,
+                             sizeof(inject_device_id))) {
+                send_problem(fd, 400, "Bad Request", "invalid_input_event",
+                             "device_id must be a string naming an input device.");
+                return;
+            }
+            inject_device = find_input_device_id(runtime, inject_device_id);
+            if (inject_device == NULL) {
+                send_problem(fd, 404, "Not Found", "input_device_not_found",
+                             "The named input device does not exist.");
+                return;
+            }
+            if (!inject_device->enabled) {
+                send_problem(fd, 409, "Conflict", "input_device_disabled",
+                             "The named input device is disabled, so it delivers no input.");
+                return;
+            }
         }
         if (strcmp(kind, "pointer_motion") == 0) {
             if (!json_int(payload, "x", &x) || !json_int(payload, "y", &y)) {
@@ -11787,17 +12028,40 @@ static void handle_request(int fd, BlitRuntime *runtime,
                 return;
             }
             dispatch_pointer_button(runtime, button, pressed, "api-pointer");
+        } else if (strcmp(kind, "pointer_relative") == 0) {
+            int dx = 0;
+            int dy = 0;
+            int sensitivity = inject_device != NULL ?
+                inject_device->sensitivity_percent :
+                BLIT_INPUT_SENSITIVITY_DEFAULT;
+            if ((json_key_cursor(payload, "dx") != NULL &&
+                 !json_int(payload, "dx", &dx)) ||
+                (json_key_cursor(payload, "dy") != NULL &&
+                 !json_int(payload, "dy", &dy)) ||
+                (dx == 0 && dy == 0)) {
+                send_problem(fd, 400, "Bad Request", "invalid_input_event",
+                             "Relative pointer motion requires a non-zero integer dx or dy.");
+                return;
+            }
+            /* The same accumulation a REL_X/REL_Y pair takes, scaled by the
+               same per-device sensitivity. */
+            runtime->evdev_mouse_x += scale_pointer_delta(dx, sensitivity);
+            runtime->evdev_mouse_y += scale_pointer_delta(dy, sensitivity);
+            update_evdev_pointer(runtime);
         } else if (strcmp(kind, "pointer_wheel") == 0) {
+            int direction;
             if (!json_int(payload, "delta", &delta) || delta == 0) {
                 send_problem(fd, 400, "Bad Request", "invalid_input_event",
                              "Pointer wheel requires a non-zero integer delta.");
                 return;
             }
+            direction = (inject_device != NULL &&
+                         inject_device->natural_scroll) ? -delta : delta;
             broadcast_evdev_pointer(runtime, "pointer_wheel",
-                                     delta > 0 ? 64 : 65, 1, delta,
+                                     direction > 0 ? 64 : 65, 1, delta,
                                      "api-pointer");
             send_mouse_report(runtime, 0, runtime->pointer_x,
-                              runtime->pointer_y, delta > 0 ? 64 : 65, 0);
+                              runtime->pointer_y, direction > 0 ? 64 : 65, 0);
         } else if (strcmp(kind, "key") == 0) {
             int key_code;
             int key_value;
@@ -11817,13 +12081,153 @@ static void handle_request(int fd, BlitRuntime *runtime,
             dispatch_evdev_key_event(runtime, &injected, "api-keyboard");
         } else {
             send_problem(fd, 422, "Unprocessable Entity", "unsupported_input_event",
-                         "Only pointer_motion, pointer_button, pointer_wheel, and key are supported.");
+                         "Only pointer_motion, pointer_relative, pointer_button, pointer_wheel, and key are supported.");
             return;
         }
         record_input_dispatch(runtime, input_started_us);
         snprintf(body, sizeof(body),
                  "{\"accepted\":true,\"kind\":\"%s\"}", kind);
         send_http(fd, 202, "Accepted", "application/json", body);
+        return;
+    }
+    if (strncmp(path, "/v1/input/devices/",
+                strlen("/v1/input/devices/")) == 0 &&
+        strcmp(method, "PATCH") == 0) {
+        /* ADR 0064 stage 2: configuration is written per device, and
+           `configuration` is the only writable part of an item. The
+           concurrency rule is the one the rest of Blit already uses -- an
+           optional `revision` in the body plus If-Match -- so a controller
+           needs one idiom, not two. */
+        const char *device_id = path + strlen("/v1/input/devices/");
+        BlitInputDevice *device = find_input_device_id(runtime, device_id);
+        char configuration[1024];
+        const char *configuration_cursor = json_key_cursor(payload,
+                                                           "configuration");
+        const char *rejected = NULL;
+        int requested_revision = 0;
+        int has_requested_revision = json_key_cursor(payload,
+                                                     "revision") != NULL;
+        int enabled = 0;
+        int enabled_requested;
+        int sensitivity = 0;
+        int sensitivity_requested;
+        int natural_scroll = 0;
+        int natural_scroll_requested;
+        int changed = 0;
+
+        if (*device_id == '\0' || device == NULL) {
+            send_problem(fd, 404, "Not Found", "input_device_not_found",
+                         "The requested input device does not exist.");
+            return;
+        }
+        if (idempotency_replay(runtime, fd, request, method, path, payload))
+            return;
+        if (has_requested_revision &&
+            (!json_int(payload, "revision", &requested_revision) ||
+             requested_revision < 0)) {
+            send_problem(fd, 400, "Bad Request", "invalid_device_revision",
+                         "revision must be a non-negative integer.");
+            return;
+        }
+        if (has_requested_revision &&
+            (unsigned long long)requested_revision != device->revision) {
+            send_revision_problem(fd, "revision_conflict",
+                                  "The input device revision is no longer current.",
+                                  device->revision);
+            return;
+        }
+        if (!if_match_revision(fd, request, device->revision))
+            return;
+        if (configuration_cursor == NULL ||
+            !json_object_slice(configuration_cursor, configuration,
+                               sizeof(configuration))) {
+            send_problem(fd, 400, "Bad Request", "invalid_device_configuration",
+                         "A device update carries its writable properties under configuration, as a JSON object.");
+            return;
+        }
+        /* An unknown property is refused and named. Accepting it silently is
+           how a controller comes to believe it has set something it has not
+           -- the same failure as issue #48, where a cell carrying its colours
+           at the top level was answered with 200 and no style applied. */
+        rejected = input_device_rejected_property(configuration);
+        if (rejected != NULL) {
+            char detail[256];
+            snprintf(detail, sizeof(detail),
+                     "A device configuration carries \"%s\", which is not a "
+                     "writable property. Writable: enabled, and for a pointer "
+                     "sensitivity_percent and natural_scroll.", rejected);
+            send_problem(fd, 400, "Bad Request", "invalid_device_property",
+                         detail);
+            return;
+        }
+        enabled_requested = json_bool(configuration, "enabled", &enabled);
+        sensitivity_requested = json_int(configuration, "sensitivity_percent",
+                                         &sensitivity);
+        natural_scroll_requested = json_bool(configuration, "natural_scroll",
+                                             &natural_scroll);
+        if (json_key_cursor(configuration, "enabled") != NULL &&
+            !enabled_requested) {
+            send_problem(fd, 400, "Bad Request", "invalid_device_configuration",
+                         "enabled must be a JSON boolean.");
+            return;
+        }
+        if (json_key_cursor(configuration, "natural_scroll") != NULL &&
+            !natural_scroll_requested) {
+            send_problem(fd, 400, "Bad Request", "invalid_device_configuration",
+                         "natural_scroll must be a JSON boolean.");
+            return;
+        }
+        if ((sensitivity_requested || natural_scroll_requested) &&
+            (device->kinds & BLIT_INPUT_KIND_POINTER) == 0) {
+            send_problem(fd, 422, "Unprocessable Entity",
+                         "device_property_not_applicable",
+                         "sensitivity_percent and natural_scroll apply to a device read as a pointer.");
+            return;
+        }
+        if (sensitivity_requested &&
+            (sensitivity < BLIT_INPUT_SENSITIVITY_MIN ||
+             sensitivity > BLIT_INPUT_SENSITIVITY_MAX)) {
+            char detail[192];
+            snprintf(detail, sizeof(detail),
+                     "sensitivity_percent must be an integer from %d through %d.",
+                     BLIT_INPUT_SENSITIVITY_MIN, BLIT_INPUT_SENSITIVITY_MAX);
+            send_problem(fd, 400, "Bad Request", "invalid_device_configuration",
+                         detail);
+            return;
+        }
+        if (enabled_requested && enabled != device->enabled) {
+            device->enabled = enabled;
+            changed = 1;
+            if (!enabled)
+                release_input_device_fds(runtime, device->node);
+            else
+                runtime->evdev_rescan_requested = 1;
+        }
+        if (sensitivity_requested &&
+            sensitivity != device->sensitivity_percent) {
+            device->sensitivity_percent = sensitivity;
+            changed = 1;
+        }
+        if (natural_scroll_requested &&
+            natural_scroll != device->natural_scroll) {
+            device->natural_scroll = natural_scroll;
+            changed = 1;
+        }
+        if (changed) {
+            ++device->revision;
+            ++runtime->input_devices_revision;
+            broadcast_input_device_changed(runtime, device, "configured");
+        }
+        if (input_device_item_json(runtime, device, body, sizeof(body)) >=
+            sizeof(body)) {
+            send_problem(fd, 500, "Internal Server Error",
+                         "input_device_unserialisable",
+                         "The input device item did not fit its response buffer.");
+            return;
+        }
+        idempotency_store(runtime, request, method, path, payload, 200, "OK",
+                          "application/json", body);
+        send_http(fd, 200, "OK", "application/json", body);
         return;
     }
     if (strcmp(path, "/v1/input/routes") == 0 &&
@@ -12649,6 +13053,11 @@ static void evdev_register_path(BlitRuntime *runtime, const char *path,
     int mouse_wanted;
     int keyboard_wanted;
     int gamepad_wanted;
+    int is_mouse;
+    int is_keyboard;
+    int is_gamepad;
+    int discovered;
+    BlitInputDevice *device;
 
     /* The poll set stores a node path in 128 bytes and matches devices by it,
        so a path that would be truncated is refused rather than registered
@@ -12679,18 +13088,37 @@ static void evdev_register_path(BlitRuntime *runtime, const char *path,
        that matches no kind -- the live host's remote presents a
        consumer-control node that the old inventory called a keyboard and the
        poll loop never read. */
-    {
-        int discovered = 0;
-        BlitInputDevice *device = record_input_device(runtime, path, probe,
-                                                     &discovered);
-        if (discovered && device != NULL) {
-            ++runtime->input_devices_revision;
-            if (announce)
-                broadcast_input_device_changed(runtime, device, "discovered");
-        }
+    discovered = 0;
+    device = record_input_device(runtime, path, probe, &discovered);
+    if (discovered != 0 && device != NULL) {
+        ++runtime->input_devices_revision;
+        if (announce)
+            broadcast_input_device_changed(runtime, device,
+                discovered > 0 ? "discovered" : "reconnected");
     }
+    if (device != NULL && !device->enabled) {
+        /* A device a controller disabled is still probed -- so it stays in
+           the inventory, keeps its configuration, and can be re-enabled --
+           but it is never claimed and so never read. */
+        close(probe);
+        return;
+    }
+    /* The table's kinds are the claim decision. They come from
+       probe_input_device, which is the one classifier (ADR 0064). Asking
+       evdev_has_rel_xy/has_keyboard/has_gamepad again here would be a second
+       one, and two classifiers disagreeing is the defect the table exists to
+       remove. The predicates remain the fallback for the one case with no
+       table entry: a table that is full. */
+    is_mouse = device != NULL ? (device->kinds & BLIT_INPUT_KIND_POINTER) != 0
+                              : evdev_has_rel_xy(probe);
+    is_keyboard = device != NULL ?
+        (device->kinds & BLIT_INPUT_KIND_KEYBOARD) != 0 :
+        evdev_has_keyboard(probe);
+    is_gamepad = device != NULL ?
+        (device->kinds & BLIT_INPUT_KIND_GAMEPAD) != 0 :
+        evdev_has_gamepad(probe);
 
-    if (mouse_wanted && evdev_has_rel_xy(probe)) {
+    if (mouse_wanted && is_mouse) {
         int slot = runtime->evdev_mouse_count++;
         runtime->evdev_mouse_fds[slot] = probe;
         snprintf(runtime->evdev_mouse_paths[slot], 128, "%s", path);
@@ -12711,7 +13139,7 @@ static void evdev_register_path(BlitRuntime *runtime, const char *path,
                                        runtime->evdev_mouse_count);
         }
     }
-    if (keyboard_wanted && evdev_has_keyboard(probe)) {
+    if (keyboard_wanted && is_keyboard) {
         int fd = probe;
         if (claimed) {
             ++runtime->diagnostic_evdev_scan_opens;
@@ -12736,7 +13164,7 @@ static void evdev_register_path(BlitRuntime *runtime, const char *path,
             }
         }
     }
-    if (gamepad_wanted && evdev_has_gamepad(probe)) {
+    if (gamepad_wanted && is_gamepad) {
         int fd = probe;
         if (claimed) {
             ++runtime->diagnostic_evdev_scan_opens;
@@ -12845,6 +13273,18 @@ static void scan_evdev_devices(BlitRuntime *runtime, int announce)
         if (input_device_open_kinds(runtime, device) != 0)
             device->seen = 1;
         if (device->seen)
+            continue;
+        if (device->present) {
+            device->present = 0;
+            ++device->revision;
+            ++runtime->input_devices_revision;
+            if (announce)
+                broadcast_input_device_changed(runtime, device, "absent");
+        }
+        /* A configured device stays in the table while it is unplugged, so
+           its configuration is still there when it comes back. An
+           unconfigured one has nothing worth remembering. */
+        if (input_device_configured(device))
             continue;
         if (announce)
             broadcast_input_device_changed(runtime, device, "removed");
@@ -15486,6 +15926,18 @@ static void service_evdev_gamepad(BlitRuntime *runtime)
     }
 }
 
+/* The configuration of the device behind a poll slot, by node path. Resolved
+   once per drain rather than per event: the table's slots do not move while a
+   drain is in flight -- the scan and its sweep run on the same thread,
+   between drains -- and a per-event lookup would put a linear search in the
+   motion path. */
+static BlitInputDevice *input_device_for_slot(BlitRuntime *runtime,
+                                              const char (*paths)[128],
+                                              int slot)
+{
+    return find_input_device_node(runtime, paths[slot]);
+}
+
 static void service_evdev_mouse(BlitRuntime *runtime)
 {
     struct input_event event;
@@ -15495,7 +15947,18 @@ static void service_evdev_mouse(BlitRuntime *runtime)
     for (device_index = 0; device_index < runtime->evdev_mouse_count;
          ++device_index) {
         int device_lost = 0;
+        BlitInputDevice *configuration;
+        int sensitivity;
+        int natural_scroll;
         if (runtime->evdev_mouse_fds[device_index] < 0) continue;
+        configuration = input_device_for_slot(runtime,
+                                              runtime->evdev_mouse_paths,
+                                              device_index);
+        sensitivity = configuration != NULL ?
+            configuration->sensitivity_percent :
+            BLIT_INPUT_SENSITIVITY_DEFAULT;
+        natural_scroll = configuration != NULL ?
+            configuration->natural_scroll : 0;
         while ((received = read(runtime->evdev_mouse_fds[device_index],
                                 &event, sizeof(event))) ==
                (ssize_t)sizeof(event)) {
@@ -15516,10 +15979,12 @@ static void service_evdev_mouse(BlitRuntime *runtime)
                     int button;
                     ++runtime->diagnostic_evdev_mouse_wheel_events;
                     ++runtime->diagnostic_evdev_mouse_device_wheel[device_index];
+                    int direction = natural_scroll ? -event.value :
+                        event.value;
                     if (event.code == REL_HWHEEL)
-                        button = event.value > 0 ? 66 : 67;
+                        button = direction > 0 ? 66 : 67;
                     else
-                        button = event.value > 0 ? 64 : 65;
+                        button = direction > 0 ? 64 : 65;
                     broadcast_evdev_pointer(runtime, "pointer_wheel", button,
                                              1, event.value,
                                              "evdev-pointer");
@@ -15531,11 +15996,13 @@ static void service_evdev_mouse(BlitRuntime *runtime)
                 if (event.code == REL_X) {
                     ++runtime->diagnostic_evdev_mouse_motion_events;
                     ++runtime->diagnostic_evdev_mouse_device_motion[device_index];
-                    runtime->evdev_mouse_x += event.value;
+                    runtime->evdev_mouse_x +=
+                        scale_pointer_delta(event.value, sensitivity);
                 } else if (event.code == REL_Y) {
                     ++runtime->diagnostic_evdev_mouse_motion_events;
                     ++runtime->diagnostic_evdev_mouse_device_motion[device_index];
-                    runtime->evdev_mouse_y += event.value;
+                    runtime->evdev_mouse_y +=
+                        scale_pointer_delta(event.value, sensitivity);
                 }
             } else if (event.type == EV_SYN && event.code == SYN_REPORT) {
                 ++runtime->diagnostic_evdev_mouse_syncs;

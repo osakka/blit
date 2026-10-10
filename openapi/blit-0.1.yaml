@@ -554,6 +554,63 @@ paths:
           $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
+    patch:
+      tags: [hardware]
+      operationId: updateInputDevice
+      summary: Configure one input device
+      description: >-
+        Writes a device's `configuration` and nothing else. The concurrency
+        rule is the one the rest of Blit uses: an optional `revision` in the
+        body, an `If-Match` header, or both, each answered with 409 when it
+        does not identify the device's current revision. A property that is
+        not writable is refused with 400 and named in the detail rather than
+        accepted and ignored; a pointer-only property on a device that is not
+        read as a pointer is refused with 422. An accepted write bumps the
+        device's revision and the collection's, and is announced on the event
+        stream as `device_changed` with `change: "configured"`.
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [configuration]
+              properties:
+                revision:
+                  $ref: '#/components/schemas/Revision'
+                configuration:
+                  type: object
+                  properties:
+                    enabled: {type: boolean}
+                    sensitivity_percent:
+                      type: integer
+                      minimum: 10
+                      maximum: 1000
+                    natural_scroll: {type: boolean}
+                  additionalProperties: false
+              additionalProperties: false
+      responses:
+        '200':
+          description: The updated input device
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InputDevice'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /v1/input/inject:
     post:
       tags: [hardware]
@@ -1582,12 +1639,37 @@ components:
         configuration:
           type: object
           description: >-
-            The writable part of the device, and the only writable part. ADR
-            0064 stage 2 adds a PATCH for it; today it reports the one
-            property the server honours.
+            The writable part of the device, and the only writable part.
+            Written with PATCH /v1/input/devices/{device_id}. It is held in
+            memory: a Blit restart resets it to the defaults and a controller
+            re-applies what it wants, with the collection revision dropping
+            back toward 1 as the signal that it has to.
           required: [enabled]
           properties:
-            enabled: {type: boolean}
+            enabled:
+              type: boolean
+              description: >-
+                false releases every file descriptor the server holds for this
+                device and stops it being claimed by later scans, so the
+                device is left alone rather than merely ignored. It stays in
+                the inventory and can be re-enabled.
+            sensitivity_percent:
+              type: integer
+              minimum: 10
+              maximum: 1000
+              default: 100
+              description: >-
+                Pointer devices only; reported only when kinds includes
+                pointer and refused with 422 on anything else. Scales relative
+                motion from this device. It applies to the evdev path and to
+                pointer_relative injection; SDL's own mouse events do not pass
+                through it.
+            natural_scroll:
+              type: boolean
+              default: false
+              description: >-
+                Pointer devices only. Inverts the wheel direction this device
+                reports.
           additionalProperties: false
         revision:
           allOf:
@@ -1602,9 +1684,30 @@ components:
       properties:
         kind:
           type: string
-          enum: [pointer_motion, pointer_button, pointer_wheel, key]
+          enum: [pointer_motion, pointer_relative, pointer_button,
+                 pointer_wheel, key]
+        device_id:
+          allOf:
+            - $ref: '#/components/schemas/ResourceId'
+          description: >-
+            Optional. Names an input device from /v1/input/devices, so the
+            injected event travels the path a real event from that device
+            travels, including that device's configuration: a relative motion
+            is scaled by its sensitivity_percent and a wheel event honours its
+            natural_scroll. Injecting through a disabled device is a 409 and
+            delivers nothing. Without it the event is injected with the
+            defaults and attributed to the aggregate route, which is what this
+            endpoint did before ADR 0064.
         x: {type: integer, description: Absolute virtual-desktop X coordinate.}
         y: {type: integer, description: Absolute virtual-desktop Y coordinate.}
+        dx:
+          type: integer
+          description: >-
+            pointer_relative only. A relative X delta, as REL_X carries it.
+        dy:
+          type: integer
+          description: >-
+            pointer_relative only. A relative Y delta, as REL_Y carries it.
         button: {type: integer, minimum: 0, maximum: 2}
         pressed: {type: boolean}
         delta: {type: integer, description: Wheel direction and magnitude.}
