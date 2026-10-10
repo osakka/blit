@@ -1,0 +1,148 @@
+release: 0.1.432
+package: blit_0.1.432-1_amd64.deb
+package_sha256: 1578568a0d7462428243ec288976137f1e3d0c0e1a066df04b5e0dafc04e30e3
+source_commit: 05d8994f9770b6d6d115eae1a629faef5a94fb6e
+package_documentation_commit: 05d8994f9770b6d6d115eae1a629faef5a94fb6e
+server_binary_sha256: 4ce7ecc7069932e0dc929c236433b8363f435fa709d4e4956f559fc6d36164f8
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e1f0fdb001ff28fc9a035d34ec3711212b721db9cbf86fdd966dd43887552cb0
+hibr_root: /tmp/hibr-0.99.100
+hibr_version: 0.99.100
+tcc_build_acceptance: pass
+openapi_yaml: pass
+api_schema_gate: pass
+package_artifact_acceptance: pass
+network_auth_acceptance: pass_api_token_injected
+terminal_conformance: pass
+session_lifecycle_acceptance: pass
+session_write_resize_acceptance: pass
+stream_replay_acceptance: pass
+font_api_acceptance: pass
+hibr_font_manifest_acceptance: pass
+glyph_geometry_local_pixel_acceptance: pass
+sdl_glyph_filter_acceptance: pass
+external_pointer_composition: pass
+pointer_damage_atomic_acceptance: pass
+pointer_wallpaper_stress_acceptance: pass
+hidden_cursor_damage_acceptance: pass
+sdl_background_batch_acceptance: pass
+sdl_graphics_cache_acceptance: pass
+sdl_wallpaper_damage_acceptance: pass
+screenshot_overlay_acceptance: pass
+pixel_frame_acceptance: pass
+render_state_agreement_acceptance: pass
+adapter_coalesce_acceptance: pass_idle_frame_zero_requests
+kitty_placement_pixel_acceptance: pass_crop_offset_numbered_and_z_order_by_pixel
+kitty_placement_conformance_acceptance: pass_delete_targets_and_unsupported_key_refusals
+sync_output_acceptance: pass_held_frame_and_hidden_writes_one_and_two_surfaces
+cell_paint_acceptance: pass_cursor_glyph_italic_distinct_session_defaults
+pointer_geometry_acceptance: pass_inset_honoured_and_pane_less_at_corner
+mouse_report_acceptance: pass_wheel_byte_96_hover_gated_per_cell_drops_counted
+key_encoding_acceptance: pass_25_encodings_capslock_numlock_held_modifiers
+frame_quiet_starvation_acceptance: pass_longest_stagnant_run_1_was_29
+capture_witness_acceptance: pass_one_source_presented_flag_presented_revision
+motion_trail_acceptance: pass_799_blank_cells_no_unaccounted_pixels
+render_state_agreement_acceptance: pass_30_blue_cells_was_vacuous
+bold_cell_containment_acceptance: pass_8px_drawn_0_spilled
+wide_glyph_acceptance: pass_4_samples_4_distinct_shapes_two_cells_each
+font_identity_acceptance: pass_929_1182_primary_and_49899_16x16_wide
+desktop_repaint_acceptance: pass_pty_authored_0_cells_unpainted_reported_after_window_retires
+gate_port_isolation_acceptance: carried_from_0_1_431
+input_identity_acceptance: pass_3_nodes_one_input_id_3_distinct_ids
+input_device_api_acceptance: pass_11_field_envelope_item_route_zero_scan_opens_on_get
+json_escape_acceptance: carried_from_0_1_431
+live_cell_property_refusal_acceptance: carried_from_0_1_431
+live_unpainted_report_acceptance: carried_from_0_1_430
+live_wide_glyph_acceptance: carried_from_0_1_428
+live_render_state_agreement_acceptance: carried_from_0_1_427
+evdev_scan_open_count_acceptance: pass_32_opens_for_32_paths_was_96
+graphics_kitty_zlib_acceptance: pass_pixel_crc32_identical_to_raw
+graphics_xtsmgraphics_acceptance: pass_no_scroll_and_enforced_limits_reported
+terminal_kitty_keyboard_acceptance: pass_cursor_unmoved_query_reports_zero
+hibr_singleton_local_acceptance: pass
+hibr_resume_guard_acceptance: pass
+restart_gate: pass
+shutdown_gate: pass
+update_idle_timeout_acceptance: pass
+update_reset_acceptance: pass
+update_cancel_acceptance: pass
+frame_rate_settled_acceptance: pass
+terminal_soak_120s_acceptance: pass
+screenshot_nonblocking_live_acceptance: not_rerun_candidate
+qemu_hibr_lifecycle_acceptance: not_rerun_candidate
+qemu_four_output_pixel_acceptance: not_rerun_candidate
+qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
+live_deployment: PENDING
+live_current_version: PENDING
+live_block_cursor_acceptance: carried_from_0_1_425
+live_italic_acceptance: carried_from_0_1_425
+live_session_default_acceptance: carried_from_0_1_425
+live_sync_output_acceptance: carried_from_0_1_425
+live_hibr_desktop_acceptance: PENDING
+live_idle_frame_acceptance: carried_from_0_1_425
+live_physical_multi_display: unavailable_one_output
+live_physical_button_trace_contract: open
+physical_evdev_acceptance: open
+physical_multi_monitor_acceptance: open
+physical_high_refresh_acceptance: open
+notes: >-
+  ADR 0064 stage 1, issue #51: one input device table, derived identities, and
+  an inventory that is a view rather than a scan. Closes #17.
+
+  The device surface had two models. GET /v1/input/devices opened all 32
+  /dev/input/event* nodes on every request and classified them with its own
+  heuristics (KEY_A || KEY_ENTER for a keyboard); evdev_register_path held the
+  fds the poll loop actually reads, keyed by path, using stricter predicates
+  (KEY_A && KEY_ENTER). So the inventory listed devices the server never read
+  -- on 192.168.10.54, event-6, the consumer-control node of the remote -- and
+  could not say whether anything in it was live. The GET also ran the scan
+  issue #16 measured at 3.46 s with the event loop stalled behind it, so a
+  control panel that polled the inventory periodically froze the server it was
+  controlling.
+
+  The runtime now owns one table, populated by the scan that already runs, and
+  the route serialises it. One classifier, and it is the poll loop's: a device
+  listed as a keyboard is a device read as a keyboard. A node the server
+  probes but reads under no kind is listed as "other" with an empty route
+  list, rather than described as input that never arrives.
+
+  An id is derived from what the device reports about itself, not from its node
+  number -- which is assigned in discovery order and renumbers on replug, so
+  configuration a controller saved against event-5 could land on a different
+  device after a restart. It is
+  input-<bustype>-<vendor>-<product>[-<slug>][-<ordinal>], slug from the
+  device serial when there is one and from the bus position otherwise. The bus
+  position is the part that matters in practice: the live host's remote
+  presents three event nodes that share one input_id and differ only in the
+  interface suffix of their phys string. Built without it, the identity gate's
+  three-node case collapses to one id -- which is the teeth for that
+  assertion.
+
+  Per-device counters move from a diagnostics array keyed by a path the
+  inventory did not publish into the device's own state (#17). The collection
+  revision counts discoveries and losses instead of being a hardcoded 1, and a
+  change is announced on the stream as device_changed. New: GET
+  /v1/input/devices/{id}, resources.input_devices, and BLIT_INPUT_ROOT, which
+  the gate needs because this environment has no /dev/input at all.
+
+  Two new gates, each with its teeth shown: input_identity_gate.c for the
+  derivation as a pure function, and input_device_api_gate.rb for the
+  envelope, the item route, the real revision, the count agreeing with the
+  runtime's own, and zero evdev_scan_opens across a collection GET. A build
+  that rescans before serving fails that last one with 32 opens; a build that
+  emits the old item shape fails the envelope, the id and the revision.
+
+  Also in: the device serialiser drops a device only when it does not fit and
+  reports the count it dropped. Every other *_json helper in the server breaks
+  out of its loop on overflow and emits a truncated-but-closed object, which a
+  client cannot distinguish from a host with fewer devices.
+
+  Not in: any configuration write. configuration reports {enabled:true} and
+  nothing accepts a PATCH yet -- that is stage 2 (#52), with per-device
+  routing and the keyboard layout (#35). Stage 3 is audio (#53), stage 4
+  displays (#54). Moving the scan off the event-loop thread remains #16; this
+  removes the stall from the request path, not from the scan.
+
+  Unchanged: physical input devices are still untested -- the encoders are
+  gated through /v1/input/inject, which shares their code path but not their
+  hardware -- and src/blit_kms.c carries its changes unseen on a screen.
