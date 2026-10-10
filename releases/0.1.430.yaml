@@ -1,0 +1,126 @@
+release: 0.1.430
+package: blit_0.1.430-1_amd64.deb
+package_sha256: feb6faddbe61e54b8568f4eb55cba205993c5325c70206268158612ee1e7da30
+source_commit: PENDING
+package_documentation_commit: PENDING
+server_binary_sha256: 4f4e24ed0de6a34eafff87d54af2d1f1ea3f5024760441dd937944cbf9dcc758
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: ed37dff18e0ba8ad638990b28287ab1aeb22ada5fe7345a3eb17a39733598d87
+hibr_root: /tmp/hibr-0.99.100
+hibr_version: 0.99.100
+tcc_build_acceptance: pass
+openapi_yaml: pass
+api_schema_gate: pass
+package_artifact_acceptance: pass
+network_auth_acceptance: pass_api_token_injected
+terminal_conformance: pass
+session_lifecycle_acceptance: pass
+session_write_resize_acceptance: pass
+stream_replay_acceptance: pass
+font_api_acceptance: pass
+hibr_font_manifest_acceptance: pass
+glyph_geometry_local_pixel_acceptance: pass
+sdl_glyph_filter_acceptance: pass
+external_pointer_composition: pass
+pointer_damage_atomic_acceptance: pass
+pointer_wallpaper_stress_acceptance: pass
+hidden_cursor_damage_acceptance: pass
+sdl_background_batch_acceptance: pass
+sdl_graphics_cache_acceptance: pass
+sdl_wallpaper_damage_acceptance: pass
+screenshot_overlay_acceptance: pass
+pixel_frame_acceptance: pass
+render_state_agreement_acceptance: pass
+adapter_coalesce_acceptance: pass_idle_frame_zero_requests
+kitty_placement_pixel_acceptance: pass_crop_offset_numbered_and_z_order_by_pixel
+kitty_placement_conformance_acceptance: pass_delete_targets_and_unsupported_key_refusals
+sync_output_acceptance: pass_held_frame_and_hidden_writes_one_and_two_surfaces
+cell_paint_acceptance: pass_cursor_glyph_italic_distinct_session_defaults
+pointer_geometry_acceptance: pass_inset_honoured_and_pane_less_at_corner
+mouse_report_acceptance: pass_wheel_byte_96_hover_gated_per_cell_drops_counted
+key_encoding_acceptance: pass_25_encodings_capslock_numlock_held_modifiers
+frame_quiet_starvation_acceptance: pass_longest_stagnant_run_1_was_29
+capture_witness_acceptance: pass_one_source_presented_flag_presented_revision
+motion_trail_acceptance: pass_799_blank_cells_no_unaccounted_pixels
+render_state_agreement_acceptance: pass_30_blue_cells_was_vacuous
+bold_cell_containment_acceptance: pass_8px_drawn_0_spilled
+wide_glyph_acceptance: pass_4_samples_4_distinct_shapes_two_cells_each
+font_identity_acceptance: pass_929_1182_primary_and_49899_16x16_wide
+desktop_repaint_acceptance: pass_pty_authored_0_cells_unpainted_reported_after_window_retires
+live_wide_glyph_acceptance: PENDING
+live_render_state_agreement_acceptance: PENDING
+evdev_scan_open_count_acceptance: pass_32_opens_for_32_paths_was_96
+graphics_kitty_zlib_acceptance: pass_pixel_crc32_identical_to_raw
+graphics_xtsmgraphics_acceptance: pass_no_scroll_and_enforced_limits_reported
+terminal_kitty_keyboard_acceptance: pass_cursor_unmoved_query_reports_zero
+hibr_singleton_local_acceptance: pass
+hibr_resume_guard_acceptance: pass
+restart_gate: pass
+shutdown_gate: pass
+update_idle_timeout_acceptance: pass
+update_reset_acceptance: pass
+update_cancel_acceptance: pass
+frame_rate_settled_acceptance: pass
+terminal_soak_120s_acceptance: pass
+screenshot_nonblocking_live_acceptance: not_rerun_candidate
+qemu_hibr_lifecycle_acceptance: not_rerun_candidate
+qemu_four_output_pixel_acceptance: not_rerun_candidate
+qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
+live_deployment: PENDING
+live_current_version: 0.1.429
+live_block_cursor_acceptance: carried_from_0_1_425
+live_italic_acceptance: carried_from_0_1_425
+live_session_default_acceptance: carried_from_0_1_425
+live_sync_output_acceptance: carried_from_0_1_425
+live_hibr_desktop_acceptance: PENDING
+live_idle_frame_acceptance: carried_from_0_1_425
+live_physical_multi_display: unavailable_one_output
+live_physical_button_trace_contract: open
+physical_evdev_acceptance: open
+physical_multi_monitor_acceptance: open
+physical_high_refresh_acceptance: open
+notes: >-
+  A correction to 0.1.429, found on the live host within minutes of
+  deploying it.
+
+  0.1.429's unpainted-desktop report never fired there. The check sat inside
+  service_attach_reasserts, whose body only runs while the owner-rediscovery
+  window is re-armed, and that window retires after 32 attempts. On a host
+  where the owner group is found immediately the retry interval is 250ms, so
+  the window closes in about eight seconds -- before the ten second threshold
+  -- and the check was dead by the time it would have fired. The host showed
+  the state the report exists for (owner_writes 0, owner_painted false, zero
+  printable cells, black screen) with an empty errors array.
+
+  It had passed its gate on timing luck. The gate's fixture kept carrying
+  BLIT_SESSION_TOKEN in the environment of its surviving process, so owner
+  rediscovery kept matching, the retry interval stayed at two seconds, and
+  the window was still open at ten. A gate whose fixture differs from the
+  deployment in a timing-relevant way can assert a behaviour the deployment
+  does not have, which is the part worth remembering.
+
+  The check is now its own pass over the session table, independent of the
+  reassert machinery. The gate's fixture execs without the session token so
+  rediscovery stops matching and the window retires early, which reproduces
+  the host; it also says when a run did not exercise that case rather than
+  passing quietly. Against a build with the check coupled to the window again
+  the gate reports that the unpainted desktop was never reported, in
+  diagnostics or in the runtime log.
+
+  Everything else in 0.1.429 stands: a desktop's PTY no longer authors its
+  surface, owner_writes and owner_painted are reported, and --resume is
+  recorded for the deployed launcher.
+
+  Also measured on the host while verifying this, and worth recording because
+  it is not what #32 described: a --resume reattachment to a held session can
+  work. The first attempt drew the desktop through the attaching client's
+  provider -- 858 accepted owner writes, 32,400 printable cells -- while a
+  second attempt to the same held session after the first was deleted drew
+  nothing. So the blank reattachment is real and reproducible, but it is a
+  state the held session can be in rather than something --resume always
+  does, and the surface is now honestly empty instead of being filled with
+  32,400 blank cells by the replayed stream. The repaint half remains
+  itdlabs/hibr#176.
+
+  Unchanged: every pixel claim is measured on the SDL path, and
+  src/blit_kms.c carries its changes unseen on a screen.
