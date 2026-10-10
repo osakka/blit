@@ -408,9 +408,12 @@ static int glyph_row_lean(int lean, int row, int rows)
     return lean * (rows - 1 - 2 * row) / (rows - 1);
 }
 
+/* `trim` drops that many destination pixels from the right edge, and the
+   matching source columns with them, so bold's overstrike gives up its last
+   column instead of writing into the next cell. */
 static void draw_glyph(KmsOutput *output, const BlitFont *font,
                        uint32_t codepoint, int x, int y, int cw, int ch,
-                       uint32_t color, int lean)
+                       uint32_t color, int lean, int trim)
 {
     int glyph_row;
     int glyph_column;
@@ -418,9 +421,14 @@ static void draw_glyph(KmsOutput *output, const BlitFont *font,
     int font_width = font != NULL && font->data ? font->width : 5;
     int font_height = font != NULL && font->data ? font->height : 7;
     glyph = blit_font_glyph_index(font, codepoint);
+    if (trim > 0) {
+        if (trim >= cw) return;
+        cw -= trim;
+    }
     /* The unscaled fast path writes without a per-pixel bounds test, which a
        slant's overhang would break; a slanted glyph takes the general path. */
-    if (lean == 0 && font != NULL && font->data != NULL && cw == font_width &&
+    if (lean == 0 && trim == 0 && font != NULL && font->data != NULL &&
+        cw == font_width &&
         ch == font_height && x >= 0 && y >= 0 &&
         x + cw <= output->mode.hdisplay && y + ch <= output->mode.vdisplay) {
         /* The bundled PSF is used at native size in the normal KMS path.
@@ -673,15 +681,18 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
                  view->combining_count[index] == 0))
                 continue;
             if (!(attr & KMS_ATTR_CONTINUATION)) {
-                draw_glyph(output, font, cp, x, y, glyph_width, ch, fg, lean);
+                draw_glyph(output, font, cp, x, y, glyph_width, ch, fg, lean,
+                           0);
             }
             if (!(attr & KMS_ATTR_CONTINUATION) && (attr & 4))
                 fill_rect(output, x, y + ch - 1, glyph_width, 1, underline);
             if (!(attr & KMS_ATTR_CONTINUATION) && (attr & 512))
                 fill_rect(output, x, y + ch / 2, glyph_width, 1, fg);
             if (!(attr & KMS_ATTR_CONTINUATION) && (attr & 1))
+                /* Shifted a pixel right, so it gives up its last column
+                   rather than writing into the next cell. */
                 draw_glyph(output, font, cp, x + 1, y, glyph_width, ch, fg,
-                           lean);
+                           lean, 1);
             if (!(attr & KMS_ATTR_CONTINUATION) && view->combining != NULL &&
                 view->combining_count != NULL) {
                 int combining_index;
@@ -690,7 +701,7 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
                      combining_index < 4; ++combining_index) {
                     uint32_t mark = view->combining[index * 4 + combining_index];
                     draw_glyph(output, font, mark, x, y, glyph_width, ch, fg,
-                               lean);
+                               lean, 0);
                 }
             }
         }
@@ -743,7 +754,8 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
                 !(cursor_attr & KMS_ATTR_CONCEAL))
                 draw_glyph(output, font, cursor_cp, cursor_x, cursor_y,
                            cw * cursor_cells, ch, cursor_bg,
-                           (cursor_attr & KMS_ATTR_ITALIC) ? italic_lean : 0);
+                           (cursor_attr & KMS_ATTR_ITALIC) ? italic_lean : 0,
+                           0);
         }
     }
 }

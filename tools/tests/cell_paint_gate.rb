@@ -8,6 +8,7 @@
 #   #41 a block cursor is an inverse cell, not an eraser
 #   #42 italic is a slant, and is not bold
 #   #40 an unstyled cell uses the session's DT_INK/DT_FACE pair
+#   #49 a bold glyph stays inside its own cell
 #
 # Captures use ?cached=1 deliberately: a fresh capture invalidates the output
 # it inspects and can answer from a frame that was never presented (#45).
@@ -34,13 +35,14 @@ abort("cell-paint gate: missing #{BINARY}") unless File.executable?(BINARY)
 def request(method, path, body = nil)
   uri = BASE + path
   klass = { 'GET' => Net::HTTP::Get, 'POST' => Net::HTTP::Post,
+            'PUT' => Net::HTTP::Put,
             'DELETE' => Net::HTTP::Delete }.fetch(method)
   req = klass.new(uri)
   if body
     req['Content-Type'] = 'application/json'
     req.body = JSON.dump(body)
   end
-  req['Idempotency-Key'] = "paint-#{rand(1 << 30)}" if method == 'POST'
+  req['Idempotency-Key'] = "paint-#{rand(1 << 30)}" if %w[POST PUT].include?(method)
   Net::HTTP.start(uri.hostname, uri.port, read_timeout: 30) { |h| h.request(req) }
 end
 
@@ -68,6 +70,14 @@ def cell(bmp, inset, column, row)
     end
   end
   map
+end
+
+def json(method, path, body = nil)
+  response = request(method, path, body)
+  unless response.code.start_with?('2')
+    abort("cell-paint gate: #{method} #{path} -> #{response.code} #{response.body}")
+  end
+  JSON.parse(response.body)
 end
 
 def session(script, environment = {})
@@ -183,6 +193,40 @@ unless osc.fetch(0x00ff00, 0) >= 10
   failures << "OSC 10 set to green painted no green glyph pixels: #{osc.inspect}"
 end
 
+# #49. Bold is an overstrike one pixel to the right, so a glyph that reaches
+# its own right edge used to put a pixel in the next cell. A box-drawing
+# glyph spans the full cell width, which is what makes this visible at all.
+holder = json('POST', '/v1/terminal-sessions',
+              'command' => '/bin/cat', 'display_id' => 'display-1',
+              'surface' => { 'width' => 20, 'height' => 4 })
+bold_surface = holder.fetch('surface_id')
+revision = json('GET', "/v1/surfaces/#{bold_surface}/summary").fetch('revision')
+written = request('PUT', "/v1/surfaces/#{bold_surface}/cells",
+                  'base_revision' => revision,
+                  'cells' => [
+                    { 'x' => 0, 'y' => 2, 'text' => "\u2500",
+                      'style' => { 'foreground' => '#ffffff',
+                                   'background' => '#204060', 'bold' => true } },
+                    { 'x' => 1, 'y' => 2, 'text' => ' ',
+                      'style' => { 'foreground' => '#ffffff',
+                                   'background' => '#204060' } }
+                  ])
+unless %w[200 204].include?(written.code)
+  abort("cell-paint gate: bold fixture write #{written.code} #{written.body}")
+end
+sleep 2.0
+bold_shot = screenshot
+drawn = cell(bold_shot, inset, 0, 2).values.count { |c| c != 0x204060 }
+spill = cell(bold_shot, inset, 1, 2).values.tally.reject { |c, _| c == 0x204060 }
+request('DELETE', "/v1/terminal-sessions/#{holder.fetch('id')}")
+if drawn < 4
+  failures << "the bold fixture drew only #{drawn} glyph pixels; the font has " \
+              'no full-width glyph at U+2500 and this case proves nothing'
+elsif !spill.empty?
+  failures << "a bold glyph put #{spill.values.sum} pixels into the blank " \
+              "cell beside it: #{spill.inspect}"
+end
+
 unless failures.empty?
   failures.each { |f| warn "cell-paint gate: #{f}" }
   exit 1
@@ -190,4 +234,5 @@ end
 
 puts "CELL_PAINT_PASS block_cursor_keeps_glyph=#{glyph.length}px " \
      "bold=#{shapes['bold'].length}px italic=#{shapes['italic'].length}px " \
-     "plain=#{shapes['plain'].length}px session_defaults=ink,face,osc10"
+     "plain=#{shapes['plain'].length}px session_defaults=ink,face,osc10 " \
+     "bold_stays_in_cell=#{drawn}px_drawn_0_spilled"
