@@ -228,7 +228,11 @@ if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
     $b cat /tmp/input-key-route.json; $b cat /tmp/input-pointer-route.json
     $b cat /tmp/input-gamepad-route.json
     input_wait=30
-    [ "${BLIT_INPUT_SOAK_TEST:-0}" = 1 ] && input_wait=12
+    # The synthetic producer waits eight seconds before its bounded workload.
+    # Start the observable probe early instead of adding another fixed guest
+    # sleep: the twenty-second probe window below covers the complete producer
+    # workload and remains usable on slow TCG hosts.
+    [ "${BLIT_INPUT_SOAK_TEST:-0}" = 1 ] && input_wait=1
     input_wait_arg=$($b cat /proc/cmdline 2>/dev/null | $b sed -n 's/.*blit.input_wait=\([0-9][0-9]*\).*/\1/p')
     [ -n "$input_wait_arg" ] && input_wait=$input_wait_arg
     $b sleep "$input_wait"
