@@ -37,8 +37,8 @@ BINARY = ENV.fetch('BLIT_GATE_BINARY', File.join(ROOT, 'build/blit/blit-server')
 FONT = ENV.fetch('BLIT_GATE_FONT',
                  File.join(ROOT, 'assets/fonts/Blit-Hibr-Terminus16.psf'))
 BASE = URI("http://127.0.0.1:#{PORT}")
-STABLE = 'input-0003-046d-c52b-usb-0000'
-SECOND = 'input-0003-05ac-0256-usb-0000'
+STABLE = 'input-0003-046d-c52b-usb-0000-00-14.0-3-input0'
+SECOND = 'input-0003-05ac-0256-usb-0000-00-14.0-4-input0'
 UNSTABLE = 'input-node-event1'
 
 abort("settings gate: missing #{BINARY}") unless File.executable?(BINARY)
@@ -122,11 +122,19 @@ Dir.mktmpdir('blit-settings') do |root|
   input = File.join(root, 'input')
   Dir.mkdir(input)
   File.write(File.join(input, 'event0'), '')
-  # bustype:vendor:product:version:uniq:phys:name -- a device that reports
-  # who it is, so ADR 0064 gives it an id derived from that and not from its
-  # node number.
-  File.write(File.join(input, 'event0.identity'),
-             "3:046d:c52b:0111::usb-0000:00:14.0-3/input0:Fabricated Pointer\n")
+  # A device that reports who it is, so ADR 0064 gives it an id derived from
+  # that and not from its node number. The sidecar is key=value lines because
+  # every USB phys contains colons.
+  File.write(File.join(input, 'event0.identity'), <<~SIDECAR)
+    bustype=3
+    vendor=046d
+    product=c52b
+    version=0111
+    phys=usb-0000:00:14.0-3/input0
+    name=Fabricated Pointer
+    kinds=pointer
+    capabilities=rel-x,rel-y,buttons
+  SIDECAR
   File.write(File.join(input, 'event1'), '')
   # A second device with an identity of its own, so that the dormant-entry
   # scenario can hold a refused entry and an accepted one at the same time.
@@ -134,8 +142,17 @@ Dir.mktmpdir('blit-settings') do |root|
   # server that applies nothing at all, and the scenario would pass against
   # the very build it is meant to catch.
   File.write(File.join(input, 'event2'), '')
-  File.write(File.join(input, 'event2.identity'),
-             "3:05ac:0256:0100::usb-0000:00:14.0-4/input0:Fabricated Keyboard\n")
+  File.write(File.join(input, 'event2.identity'), <<~SIDECAR)
+    bustype=3
+    vendor=05ac
+    product=0256
+    version=0100
+    phys=usb-0000:00:14.0-4/input0
+    name=Fabricated Keyboard
+    kinds=keyboard
+    capabilities=keys,repeat
+    repeat=250,33
+  SIDECAR
   document = File.join(root, 'settings.json')
   env = { 'BLIT_INPUT_ROOT' => input, 'BLIT_SETTINGS_PATH' => document }
 
@@ -162,10 +179,11 @@ Dir.mktmpdir('blit-settings') do |root|
 
   verdict('a-write-is-stored-against-the-stable-id-only') do
     [STABLE, UNSTABLE].each do |id|
+      revision = devices.fetch(id).fetch('revision')
       code, = request('PATCH', "/v1/input/devices/#{id}",
                       { 'configuration' => { 'sensitivity_percent' => 250,
                                              'natural_scroll' => true } },
-                      { 'If-Match' => '1' })
+                      { 'If-Match' => revision.to_s })
       check(code == 200, "PATCH #{id} -> #{code}")
     end
     begin
@@ -321,27 +339,53 @@ Dir.mktmpdir('blit-settings') do |root|
 
   verdict('a-stored-property-the-device-contradicts-stays-dormant') do
     stop
-    # A fabricated node reports no kinds, and ADR 0064's rule is that a
-    # kind-less device accepts any property -- so the contradiction is built
-    # with a value the validator refuses instead. The second entry is valid,
-    # which is what makes this scenario say something: a server that applies
-    # nothing would fail it rather than pass it by accident.
+    # The contradiction ADR 0067 names: a pointer property stored for a device
+    # the kernel reports as a keyboard. It is refused by the same 422 a PATCH
+    # would return, because the loader goes through the same validator.
+    #
+    # The other entry is valid and must be applied, which is what makes this
+    # scenario say something -- with only the refusal, "the refused value was
+    # not applied" would also be true of a server that applies nothing at all,
+    # and the scenario would pass against the very build it exists to catch.
     File.write(document, JSON.dump(
       'version' => 1,
-      'input_devices' => { STABLE => { 'sensitivity_percent' => 9999 },
-                           SECOND => { 'sensitivity_percent' => 140 } },
+      'input_devices' => { SECOND => { 'sensitivity_percent' => 140 },
+                           STABLE => { 'natural_scroll' => true } },
       'audio_devices' => {}))
     start(env)
-    check(sensitivity(STABLE) == 100,
-          "a stored value the validator refuses is not applied, got " \
-          "#{sensitivity(STABLE).inspect}")
-    check(sensitivity(SECOND) == 140,
-          "and one refusal does not stop the rest of the document, got " \
-          "#{sensitivity(SECOND).inspect}")
-    check(File.exist?(document) &&
-          JSON.parse(File.read(document)).fetch('input_devices').key?(STABLE),
-          'and is kept rather than deleted, because a refusal is far likelier ' \
-          'to be a re-probe than a controller mistake')
+    check(devices[SECOND].to_h.dig('configuration', 'sensitivity_percent').nil?,
+          'a keyboard does not report a pointer property at all, got ' \
+          "#{devices[SECOND].to_h['configuration'].inspect}")
+    check(devices[STABLE].to_h.dig('configuration', 'natural_scroll') == true,
+          "one refusal does not stop the rest of the document, got " \
+          "#{devices[STABLE].to_h['configuration'].inspect}")
+    stored = File.exist?(document) ? JSON.parse(File.read(document)) : {}
+    check(stored.dig('input_devices', SECOND) ==
+          { 'sensitivity_percent' => 140 },
+          'and the refused entry is kept rather than deleted, because a ' \
+          'refusal is far likelier to be a kernel re-probe than a ' \
+          "controller's mistake -- got #{stored.dig('input_devices', SECOND).inspect}")
+    # "Dormant until something else is written" is not dormant. A later write
+    # regenerates the document from the live devices, and the refused property
+    # is not in any of them -- so without a merge it would disappear here.
+    revision = devices.fetch(STABLE).fetch('revision')
+    code, = request('PATCH', "/v1/input/devices/#{STABLE}",
+                    { 'configuration' => { 'sensitivity_percent' => 160 } },
+                    { 'If-Match' => revision.to_s })
+    check(code == 200, "PATCH -> #{code}")
+    Timeout.timeout(10) do
+      sleep 0.1 until JSON.parse(File.read(document))
+                        .dig('input_devices', STABLE, 'sensitivity_percent') == 160
+    end
+    stored = JSON.parse(File.read(document))
+    check(stored.dig('input_devices', SECOND) ==
+          { 'sensitivity_percent' => 140 },
+          'and survives a later write to another device, got ' \
+          "#{stored.dig('input_devices', SECOND).inspect}")
+    check(stored.dig('input_devices', STABLE) ==
+          { 'sensitivity_percent' => 160, 'natural_scroll' => true },
+          'while the live device carries both of its own properties, got ' \
+          "#{stored.dig('input_devices', STABLE).inspect}")
   end
 end
 

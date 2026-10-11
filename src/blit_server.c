@@ -325,6 +325,11 @@ typedef struct {
 #define BLIT_INPUT_CAP_KEYS 8
 #define BLIT_INPUT_CAP_AXES 16
 #define BLIT_INPUT_CAP_GAMEPAD_BUTTONS 32
+/* EV_REP: the kernel autorepeats for this device, so its rate and delay are
+   per-device kernel settings Blit can own (issue #66). Reported so a control
+   panel can hide a control the hardware does not have rather than offer one
+   that will be refused. */
+#define BLIT_INPUT_CAP_REPEAT 64
 
 typedef struct {
     int used;
@@ -3526,6 +3531,13 @@ static void probe_input_device(int fd, unsigned *kinds,
     if (keyboard) *capabilities |= BLIT_INPUT_CAP_KEYS;
     if (has_axis) *capabilities |= BLIT_INPUT_CAP_AXES;
     if (gamepad) *capabilities |= BLIT_INPUT_CAP_GAMEPAD_BUTTONS;
+    {
+        unsigned long event_bits[2];
+        memset(event_bits, 0, sizeof(event_bits));
+        ioctl(fd, EVIOCGBIT(0, sizeof(event_bits)), event_bits);
+        if (input_bit(event_bits, EV_REP))
+            *capabilities |= BLIT_INPUT_CAP_REPEAT;
+    }
 }
 
 /* The identity ioctls, into the record the opener thread hands back. It does
@@ -3553,53 +3565,115 @@ static void read_opened_device_identity(int fd, BlitOpenedDevice *opened)
         snprintf(opened->phys, sizeof(opened->phys), "%s", text);
 }
 
-/* A fabricated node is a regular file, so every identity ioctl fails and the
-   device reports nothing at all -- which is precisely the case ADR 0064 gives
-   an `input-node-<basename>` id and ADR 0067 refuses to persist. A gate
-   therefore could not fabricate a device with a *stable* id, and so could not
-   test the distinction that matters.
+/* A fabricated node is a regular file, so every ioctl against it fails and
+   the device reports nothing at all -- no identity, no kinds, no
+   capabilities. That is precisely the case ADR 0064 gives an
+   `input-node-<basename>` id and ADR 0067 refuses to persist, so a gate could
+   not fabricate a device with a *stable* id, nor one Blit reads as a
+   keyboard, and so could not test either distinction.
 
-   So a sidecar beside the node supplies what the ioctls would have:
+   A sidecar beside the node supplies what the ioctls would have, as
+   `key=value` lines:
 
-       <node>.identity:  bustype:vendor:product:version:uniq:phys:name
+       <node>.identity:
+           bustype=3
+           vendor=046d
+           product=c52b
+           version=0111
+           uniq=
+           phys=usb-0000:00:14.0-3/input0
+           name=Fabricated Pointer
+           kinds=pointer
+           capabilities=rel-x,rel-y,buttons
+           repeat=250,33
+
+   Every field is optional. `kinds` and `capabilities` override what the probe
+   found, and are re-read on every scan because the probe runs on every scan;
+   the rest is identity and is read once, when the device enters the table.
+
+   One line per field rather than a `:`-separated record, which was the first
+   shape and was wrong: every USB `phys` contains colons, so the field split
+   cut `usb-0000:00:14.0-3/input0` after `usb-0000` and swallowed the name.
 
    Read only when BLIT_INPUT_ROOT is set, so it cannot exist in a deployment:
-   a real /dev/input has no such files and the seam is not even looked for.
-   Both paths that create a device entry call it -- the direct probe and the
-   opener thread's adoption -- because a seam that works down one of two paths
-   is worse than none. */
-static void read_input_identity_sidecar(BlitInputDevice *device)
+   a real /dev/input has no such files and the seam is not looked for. */
+static unsigned input_sidecar_kinds(const char *text)
 {
-    char sidecar[320];
-    char line[512];
-    char *field[7];
-    char *cursor;
-    int count = 0;
+    unsigned kinds = 0;
+
+    if (strstr(text, "keyboard") != NULL) kinds |= BLIT_INPUT_KIND_KEYBOARD;
+    if (strstr(text, "pointer") != NULL) kinds |= BLIT_INPUT_KIND_POINTER;
+    if (strstr(text, "gamepad") != NULL) kinds |= BLIT_INPUT_KIND_GAMEPAD;
+    return kinds;
+}
+
+static unsigned input_sidecar_capabilities(const char *text)
+{
+    unsigned capabilities = 0;
+
+    if (strstr(text, "rel-x") != NULL) capabilities |= BLIT_INPUT_CAP_REL_X;
+    if (strstr(text, "rel-y") != NULL) capabilities |= BLIT_INPUT_CAP_REL_Y;
+    if (strstr(text, "buttons") != NULL) capabilities |= BLIT_INPUT_CAP_BUTTONS;
+    if (strstr(text, "keys") != NULL) capabilities |= BLIT_INPUT_CAP_KEYS;
+    if (strstr(text, "axes") != NULL) capabilities |= BLIT_INPUT_CAP_AXES;
+    if (strstr(text, "repeat") != NULL) capabilities |= BLIT_INPUT_CAP_REPEAT;
+    return capabilities;
+}
+
+/* `identity` fills the device's identity fields; `kinds` and `capabilities`,
+   when given, are overridden by the sidecar if it names them. Returns whether
+   a sidecar was found at all. */
+static int read_input_sidecar(BlitInputDevice *device, int identity,
+                              unsigned *kinds, unsigned *capabilities,
+                              unsigned *repeat_delay, unsigned *repeat_period)
+{
+    char path[320];
+    char line[640];
+    FILE *file;
 
     if (getenv("BLIT_INPUT_ROOT") == NULL)
-        return;
-    snprintf(sidecar, sizeof(sidecar), "%s.identity", device->node);
-    line[0] = '\0';
-    if (!read_text_file(sidecar, line, sizeof(line)) || line[0] == '\0')
-        return;
-    cursor = line;
-    while (count < 7) {
-        field[count++] = cursor;
-        cursor = strchr(cursor, ':');
-        if (cursor == NULL)
-            break;
-        *cursor++ = '\0';
+        return 0;
+    snprintf(path, sizeof(path), "%s.identity", device->node);
+    file = fopen(path, "r");
+    if (file == NULL)
+        return 0;
+    while (fgets(line, (int)sizeof(line), file) != NULL) {
+        char *value = strchr(line, '=');
+        size_t length;
+        if (value == NULL)
+            continue;
+        *value++ = '\0';
+        length = strlen(value);
+        while (length > 0 && (value[length - 1] == '\n' ||
+                              value[length - 1] == '\r'))
+            value[--length] = '\0';
+        if (identity && strcmp(line, "bustype") == 0)
+            device->bustype = (unsigned)strtoul(value, NULL, 16);
+        else if (identity && strcmp(line, "vendor") == 0)
+            device->vendor = (unsigned)strtoul(value, NULL, 16);
+        else if (identity && strcmp(line, "product") == 0)
+            device->product = (unsigned)strtoul(value, NULL, 16);
+        else if (identity && strcmp(line, "version") == 0)
+            device->version = (unsigned)strtoul(value, NULL, 16);
+        else if (identity && strcmp(line, "uniq") == 0)
+            snprintf(device->uniq, sizeof(device->uniq), "%s", value);
+        else if (identity && strcmp(line, "phys") == 0)
+            snprintf(device->phys, sizeof(device->phys), "%s", value);
+        else if (identity && strcmp(line, "name") == 0 && value[0] != '\0')
+            snprintf(device->name, sizeof(device->name), "%s", value);
+        else if (kinds != NULL && strcmp(line, "kinds") == 0)
+            *kinds = input_sidecar_kinds(value);
+        else if (capabilities != NULL && strcmp(line, "capabilities") == 0)
+            *capabilities = input_sidecar_capabilities(value);
+        else if (repeat_delay != NULL && strcmp(line, "repeat") == 0) {
+            char *comma = strchr(value, ',');
+            *repeat_delay = (unsigned)strtoul(value, NULL, 10);
+            if (comma != NULL && repeat_period != NULL)
+                *repeat_period = (unsigned)strtoul(comma + 1, NULL, 10);
+        }
     }
-    while (count < 7)
-        field[count++] = (char *)"";
-    device->bustype = (unsigned short)strtoul(field[0], NULL, 16);
-    device->vendor = (unsigned short)strtoul(field[1], NULL, 16);
-    device->product = (unsigned short)strtoul(field[2], NULL, 16);
-    device->version = (unsigned short)strtoul(field[3], NULL, 16);
-    snprintf(device->uniq, sizeof(device->uniq), "%s", field[4]);
-    snprintf(device->phys, sizeof(device->phys), "%s", field[5]);
-    if (field[6][0] != '\0')
-        snprintf(device->name, sizeof(device->name), "%s", field[6]);
+    fclose(file);
+    return 1;
 }
 
 static void read_input_device_strings(int fd, BlitInputDevice *device)
@@ -3724,7 +3798,7 @@ static BlitInputDevice *record_input_device(BlitRuntime *runtime,
         snprintf(device->node, sizeof(device->node), "%s", node);
         snprintf(device->name, sizeof(device->name), "%s", node);
         read_input_device_strings(fd, device);
-        read_input_identity_sidecar(device);
+        read_input_sidecar(device, 1, NULL, NULL, NULL, NULL);
         assign_input_device_id(runtime, device);
         device->first_seen_us = monotonic_us();
         /* A device starts at revision 1, not 0: the revision is what a
@@ -3740,6 +3814,7 @@ static BlitInputDevice *record_input_device(BlitRuntime *runtime,
         settings_apply_input_device(runtime, device);
     }
     probe_input_device(fd, &kinds, &capabilities);
+    read_input_sidecar(device, 0, &kinds, &capabilities, NULL, NULL);
     if (device->kinds != kinds || device->capabilities != capabilities)
         ++device->revision;
     device->kinds = kinds;
@@ -3846,7 +3921,7 @@ static BlitInputDevice *record_opened_device(BlitRuntime *runtime,
         device->version = opened->version;
         snprintf(device->uniq, sizeof(device->uniq), "%s", opened->uniq);
         snprintf(device->phys, sizeof(device->phys), "%s", opened->phys);
-        read_input_identity_sidecar(device);
+        read_input_sidecar(device, 1, NULL, NULL, NULL, NULL);
         assign_input_device_id(runtime, device);
         device->first_seen_us = monotonic_us();
         device->revision = 1;
@@ -3858,11 +3933,15 @@ static BlitInputDevice *record_opened_device(BlitRuntime *runtime,
            one opened directly came up configured (ADR 0067). */
         settings_apply_input_device(runtime, device);
     }
-    if (device->kinds != opened->kinds ||
-        device->capabilities != opened->capabilities)
-        ++device->revision;
-    device->kinds = opened->kinds;
-    device->capabilities = opened->capabilities;
+    {
+        unsigned kinds = opened->kinds;
+        unsigned capabilities = opened->capabilities;
+        read_input_sidecar(device, 0, &kinds, &capabilities, NULL, NULL);
+        if (device->kinds != kinds || device->capabilities != capabilities)
+            ++device->revision;
+        device->kinds = kinds;
+        device->capabilities = capabilities;
+    }
     device->seen = 1;
     device->last_seen_us = monotonic_us();
     if (!device->present) {
@@ -3966,6 +4045,11 @@ static size_t input_device_item_json(const BlitRuntime *runtime,
     }
     if (device->capabilities & BLIT_INPUT_CAP_BUTTONS) {
         complete &= json_appendf(body, capacity, &used, "%s\"buttons\"",
+                            first ? "" : ",");
+        first = 0;
+    }
+    if (device->capabilities & BLIT_INPUT_CAP_REPEAT) {
+        complete &= json_appendf(body, capacity, &used, "%s\"repeat\"",
                             first ? "" : ",");
         first = 0;
     }
@@ -14218,6 +14302,66 @@ static size_t settings_audio_configuration(const BlitAudioDevice *audio,
     return used;
 }
 
+/* The members of `fresh`, then any member of `stored` that `fresh` does not
+   name. Two things need this, and they are the same thing seen twice.
+
+   A stored property that was refused -- a pointer property on a device the
+   kernel now reports as a keyboard -- is not in the live configuration, so
+   regenerating the document from the live state alone would delete it on the
+   next save. ADR 0067 says it lies dormant and applies again when the device
+   reads the way it did, and "dormant until something else is written" is not
+   that.
+
+   The same merge is what keeps a newer release's property alive when an older
+   one writes the document: it does not recognise the key, so it would drop
+   it, and a downgrade would quietly eat settings. */
+static size_t settings_merge_object(const char *fresh, const char *stored,
+                                    char *out, size_t capacity)
+{
+    size_t used = 0;
+    char key[64];
+    static char value[8192];
+    const char *cursor;
+    int first = 1;
+
+    out[0] = '\0';
+    json_appendf(out, capacity, &used, "{");
+    cursor = fresh != NULL ? fresh : "{}";
+    while (*cursor != '\0' && *cursor != '{')
+        ++cursor;
+    if (*cursor == '{') {
+        ++cursor;
+        while ((cursor = json_next_member(cursor, key, sizeof(key), value,
+                                          sizeof(value))) != NULL) {
+            json_appendf(out, capacity, &used, "%s\"%s\":%s",
+                         first ? "" : ",", key, value);
+            first = 0;
+        }
+    }
+    if (stored == NULL || stored[0] == '\0') {
+        json_appendf(out, capacity, &used, "}");
+        return first ? 0 : used;
+    }
+    cursor = stored;
+    while (*cursor != '\0' && *cursor != '{')
+        ++cursor;
+    if (*cursor == '{') {
+        char probe[72];
+        ++cursor;
+        while ((cursor = json_next_member(cursor, key, sizeof(key), value,
+                                          sizeof(value))) != NULL) {
+            snprintf(probe, sizeof(probe), "\"%s\"", key);
+            if (fresh != NULL && strstr(fresh, probe) != NULL)
+                continue;
+            json_appendf(out, capacity, &used, "%s\"%s\":%s",
+                         first ? "" : ",", key, value);
+            first = 0;
+        }
+    }
+    json_appendf(out, capacity, &used, "}");
+    return first ? 0 : used;
+}
+
 /* Everything the document holds for a class that is not a device Blit can see
    right now, copied across from the document being replaced. An unplugged
    device keeps its settings, which is the whole point of an id derived from
@@ -14273,7 +14417,9 @@ static size_t settings_build(BlitRuntime *runtime, char *out, size_t capacity,
     first = 1;
     for (i = 0; i < BLIT_MAX_INPUT_DEVICES; ++i) {
         BlitInputDevice *device = &runtime->input_devices[i];
-        char configuration[8192];
+        char live[8192];
+        static char stored[8192];
+        static char configuration[8192];
         if (!device->used)
             continue;
         /* An `input-node-<basename>` id says in itself that it is not stable
@@ -14284,8 +14430,13 @@ static size_t settings_build(BlitRuntime *runtime, char *out, size_t capacity,
            rather than leaving a controller to discover it. */
         if (strncmp(device->id, "input-node-", 11) == 0)
             continue;
-        if (settings_input_configuration(device, configuration,
-                                         sizeof(configuration)) == 0)
+        settings_input_configuration(device, live, sizeof(live));
+        if (!settings_member(runtime->settings_document, "input_devices",
+                             device->id, stored, sizeof(stored)))
+            stored[0] = '\0';
+        if (settings_merge_object(live[0] != '\0' ? live : NULL, stored,
+                                  configuration,
+                                  sizeof(configuration)) == 0)
             continue;
         json_appendf(out, capacity, &used, "%s\"%s\":%s",
                      first ? "" : ",", device->id, configuration);
