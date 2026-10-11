@@ -1,0 +1,216 @@
+release: 0.1.455
+package: blit_0.1.455-1_amd64.deb
+package_sha256: d5595cc272b3ad6a3288795a58aee69664b24f38fe07f6531f5afb556e4779c5
+source_commit: 5561e84f3f5c0d9ba49326842d65b2f0b30f52ac
+package_documentation_commit: 5561e84f3f5c0d9ba49326842d65b2f0b30f52ac
+server_binary_sha256: f2287793344ef665a9694fddb89ba69ed00032289f57aea8f3f18e2cbab145a4
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: ed37dff18e0ba8ad638990b28287ab1aeb22ada5fe7345a3eb17a39733598d87
+hibr_root: /tmp/hibr-0.99.100
+hibr_version: 0.99.100
+tcc_build_acceptance: pass
+openapi_yaml: pass
+api_schema_gate: pass_39_paths
+package_artifact_acceptance: pass_manifest_hashes_match_package_and_reproducible
+network_auth_acceptance: pass_four_listener_postures_loopback_default_refusal_and_override_warning
+terminal_conformance: carried_from_0_1_450
+live_terminal_feature_acceptance: carried_from_0_1_447
+live_sixel_acceptance: carried_from_0_1_448
+session_lifecycle_acceptance: pass
+session_write_resize_acceptance: pass
+stream_replay_acceptance: pass
+font_api_acceptance: pass
+hibr_font_manifest_acceptance: pass
+glyph_geometry_local_pixel_acceptance: pass
+sdl_glyph_filter_acceptance: pass
+external_pointer_composition: pass
+pointer_damage_atomic_acceptance: pass_three_consecutive_runs_frame_counter_wait
+pointer_wallpaper_stress_acceptance: pass
+hidden_cursor_damage_acceptance: pass
+sdl_background_batch_acceptance: pass
+sdl_graphics_cache_acceptance: pass
+sdl_wallpaper_damage_acceptance: pass
+screenshot_overlay_acceptance: pass
+pixel_frame_acceptance: pass
+render_state_agreement_acceptance: pass
+adapter_coalesce_acceptance: pass_idle_frame_zero_requests
+kitty_placement_pixel_acceptance: pass_crop_offset_numbered_and_z_order_by_pixel
+kitty_placement_conformance_acceptance: pass_delete_targets_and_unsupported_key_refusals
+sixel_decoder_pixel_acceptance: carried_from_0_1_448
+sixel_decoder_teeth: carried_from_0_1_448
+graphics_bound_publication_acceptance: carried_from_0_1_448
+graphics_payload_trace_acceptance: carried_from_0_1_449
+graphics_payload_trace_teeth: carried_from_0_1_449
+live_graphics_boundary: carried_from_0_1_449
+sync_output_acceptance: pass_held_frame_and_hidden_writes_one_and_two_surfaces
+cell_paint_acceptance: pass_cursor_glyph_italic_distinct_session_defaults
+pointer_geometry_acceptance: pass_inset_honoured_and_pane_less_at_corner
+mouse_report_acceptance: pass_wheel_byte_96_hover_gated_per_cell_drops_counted
+key_encoding_acceptance: pass_119_encodings_plus_per_device_keymap_and_modifiers
+frame_quiet_starvation_acceptance: pass_longest_stagnant_run_1_was_29
+capture_witness_acceptance: pass_one_source_presented_flag_presented_revision
+motion_trail_acceptance: pass_799_blank_cells_no_unaccounted_pixels
+render_state_agreement_acceptance: pass_30_blue_cells_was_vacuous
+bold_cell_containment_acceptance: pass_8px_drawn_0_spilled
+wide_glyph_acceptance: pass_4_samples_4_distinct_shapes_two_cells_each
+font_identity_acceptance: pass_929_1182_primary_and_49899_16x16_wide
+desktop_repaint_acceptance: pass_pty_authored_0_cells_unpainted_reported_after_window_retires
+gate_port_isolation_acceptance: carried_from_0_1_431
+input_identity_acceptance: carried_from_0_1_433
+input_device_api_acceptance: carried_from_0_1_432
+input_device_config_acceptance: pass_one_rule_for_where_a_property_applies
+settings_persistence_acceptance: pass_nine_scenarios_plus_dormant_entry_survives_a_later_write
+settings_persistence_teeth: pass_eight_of_eight_fail_pre_change_28_checks
+keyboard_settings_acceptance: carried_from_0_1_453
+keyboard_settings_teeth: carried_from_0_1_453
+input_fabrication_sidecar_acceptance: pass_key_value_kinds_and_capabilities_make_the_422_rule_locally_testable
+pointer_settings_acceptance: carried_from_0_1_454
+pointer_settings_teeth: carried_from_0_1_454
+pointer_curve_acceptance: carried_from_0_1_454
+pointer_curve_teeth: carried_from_0_1_454
+settings_flush_deadline_acceptance: pass_a_quiet_server_still_writes
+live_pointer_settings: carried_from_0_1_454
+audio_card_acceptance: pass_eight_scenarios_card_owned_mixer_resolution_rule_and_read_back
+audio_card_teeth: pass_seven_of_eight_fail_pre_change_35_checks
+audio_control_arithmetic_acceptance: pass_settles_on_six_ranges_and_the_rule_in_five_shapes
+audio_control_arithmetic_teeth: pass_123_assertions_fail_with_truncation
+audio_group_in_unit: pass_both_profiles_grant_audio
+live_audio_controls: pending
+live_keyboard_settings: carried_from_0_1_453
+live_settings_persistence: carried_from_0_1_452
+input_device_route_acceptance: carried_from_0_1_436
+audio_device_api_acceptance: carried_from_0_1_447
+display_device_api_acceptance: pass_envelope_item_matches_collection_no_writable_property
+main_block_key_table_acceptance: carried_from_0_1_435
+live_input_device_table_acceptance: carried_from_0_1_433
+live_input_device_config_acceptance: pass_one_rule_for_where_a_property_applies
+live_main_block_key_acceptance: carried_from_0_1_435
+live_per_device_keymap_acceptance: carried_from_0_1_441
+live_device_kinds_acceptance: carried_from_0_1_442
+live_listener_posture_acceptance: carried_from_0_1_443
+live_evdev_opener_acceptance: carried_from_0_1_444
+live_output_occupancy_acceptance: carried_from_0_1_445
+live_device_routing_acceptance: carried_from_0_1_436
+live_audio_device_acceptance: pass_12_pcms_unchanged_by_node_authority_all_accessible
+json_escape_acceptance: carried_from_0_1_431
+live_cell_property_refusal_acceptance: carried_from_0_1_431
+live_unpainted_report_acceptance: carried_from_0_1_430
+live_wide_glyph_acceptance: carried_from_0_1_428
+live_render_state_agreement_acceptance: carried_from_0_1_427
+evdev_scan_open_count_acceptance: carried_from_0_1_431
+evdev_open_latency_acceptance: carried_from_0_1_444
+output_occupancy_acceptance: pass_warning_always_error_only_when_declared
+performance_schema_agreement_acceptance: pass_93_required_93_described_both_directions
+graphics_kitty_zlib_acceptance: pass_pixel_crc32_identical_to_raw
+graphics_xtsmgraphics_acceptance: pass_no_scroll_and_4096_square_reported
+terminal_kitty_keyboard_acceptance: pass_cursor_unmoved_query_reports_zero
+hibr_singleton_local_acceptance: pass
+hibr_resume_guard_acceptance: pass
+restart_gate: pass
+shutdown_gate: pass
+update_idle_timeout_acceptance: pass
+update_reset_acceptance: pass
+update_restart_intent_acceptance: carried_from_0_1_450
+update_restart_intent_teeth: carried_from_0_1_450
+kitty_transmission_medium_acceptance: carried_from_0_1_450
+live_kitty_transmission_medium_acceptance: carried_from_0_1_450
+live_update_restart_race: carried_from_0_1_450
+update_cancel_acceptance: pass
+frame_rate_settled_acceptance: pass
+terminal_soak_120s_acceptance: pass
+screenshot_nonblocking_live_acceptance: not_rerun_candidate
+qemu_hibr_lifecycle_acceptance: not_rerun_candidate
+qemu_four_output_pixel_acceptance: not_rerun_candidate
+qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
+live_deployment: pending
+live_current_version: pending
+live_block_cursor_acceptance: carried_from_0_1_425
+live_italic_acceptance: carried_from_0_1_425
+live_session_default_acceptance: carried_from_0_1_425
+live_sync_output_acceptance: carried_from_0_1_425
+live_hibr_desktop_acceptance: pending
+live_idle_frame_acceptance: carried_from_0_1_425
+live_physical_multi_display: unavailable_one_output
+live_physical_button_trace_contract: open
+physical_evdev_acceptance: open
+physical_multi_monitor_acceptance: open
+physical_high_refresh_acceptance: open
+notes: >-
+  Epic #64 stage 4 (#68): a card's mixer belongs to the API.
+  `configuration.default` was the entire writable surface of an audio device,
+  so a control panel could not set a volume -- and the reason it could not is
+  that Blit had never opened an ALSA *control* device, only the PCM nodes'
+  presence.
+
+  The mixer belongs to the **card**. ADR 0064's audio id is per PCM because
+  that is what an application opens, and this host has four HDMI outputs on
+  one card -- so a mixer held per PCM would be four copies of one thing and a
+  write through one would leave three stale. It is its own resource, every PCM
+  carries `card_controls`, and every card carries `shares_controls_with`,
+  because a controller showing four outputs with four sliders would otherwise
+  be surprised when they moved together.
+
+  Raw SNDRV_CTL_IOCTL_* on /dev/snd/controlC<N> through <sound/asound.h> -- a
+  kernel UAPI header, so no libasound and no new dependency, the same way this
+  codebase already speaks to evdev and DRM.
+
+  The listing was proved against all six of the host's cards with a read-only
+  probe *before* the model was built around it, and that is why the resolution
+  rule is shaped the way it is rather than guessed. The six cards between them
+  report:
+
+    controlC0   6 elements   PCM Playback Volume 0..255, the only one
+    controlC1  28 elements   IEC958 Playback Switch x4, no volume at all
+    controlC2  13 elements   Master Playback Volume 0..87 and a PCM one
+    controlC3   3 elements   capture only
+    controlC4   8 elements   Mic and Speaker Playback Volume, no Master
+    controlC5   2 elements   capture only, range 0..9216
+
+  So: Master if there is one; else the only "* Playback Volume" if there is
+  exactly one; else nothing. Every branch exists on this hardware, including
+  the ambiguous one, where the properties are *absent* and a write is refused
+  with audio_control_ambiguous rather than guessing which of two elements the
+  operator meant.
+
+  mute is the inverse of the playback switch, because an ALSA switch is on
+  when audible.
+
+  The percentage property took three attempts to state correctly and the
+  comment in blit_audio_control.h records all three. `percent -> raw ->
+  percent` exact needs a span of at least 100; `raw -> percent -> raw` exact
+  needs at most 100; they are complementary and neither holds everywhere,
+  because 88 values cannot distinguish 101 percentages. What rounding both
+  ways buys, on every range, is that the cycle *settles after one
+  application*: read, show, write back, and you land where you started. A
+  slider may snap once; it never drifts. Truncating breaks that, and that is
+  the teeth -- 123 assertions fail with it.
+
+  Not persisted, deliberately: control values are the card's own state and the
+  card keeps them, so storing and re-applying would make Blit fight alsactl
+  for ownership of something that already survives a reboot. A pointer's
+  sensitivity exists only in Blit; a mixer level does not. The `default` flag
+  on a PCM is Blit's own and stays persisted.
+
+  The group, said exactly rather than ticked: /dev/snd/controlC* is root:audio
+  and the unit granted video, render and input -- so this would have worked in
+  the root profile and silently not in the unprivileged one, a difference that
+  only appears after switching. `audio` is in both unit files now. What is
+  **not** claimed is that the unprivileged profile can open the control
+  device: the gate runs as the developer against fabricated files and the host
+  runs root, so that measurement belongs to an operator who switches profiles
+  (ADR 0065). state.control_accessible is reported separately from a PCM's
+  accessible so the difference is visible either way.
+
+  Out of scope and said so in docs/api.md: format and sample-rate selection.
+  It is a PCM hw_params question rather than a mixer one and would mean Blit
+  opening a PCM, which it does not do.
+
+  Gates: audio_control_gate.c pins the arithmetic on six real ranges including
+  a two-value one and a negative floor, plus the resolution rule in all five
+  shapes the host has. audio_card_gate.rb, eight scenarios against three
+  fabricated cards -- one with Master and two PCMs, one with four PCMs and no
+  unambiguous volume, one whose control device cannot be read at all. Teeth:
+  7 of 8 fail with 35 failures; the eighth asserts the If-Match and
+  unknown-property discipline, a baseline the teeth build shares.
+
+  Suite: 58 pass, 5 skip, 0 fail.
