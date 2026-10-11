@@ -95,7 +95,7 @@ update_restart_intent_acceptance: pass_install_exits_nonzero_api_restart_execs_s
 update_restart_intent_teeth: pass_pre_change_keeps_serving_after_install
 kitty_transmission_medium_acceptance: pass_t_f_t_t_t_s_refused_with_a_readable_path_and_einval
 live_kitty_transmission_medium_acceptance: pass_three_media_unsupported_key_on_0_1_449
-live_update_restart_race: pending
+live_update_restart_race: pass_91s_sigkill_before_under_1s_clean_after
 update_cancel_acceptance: pass
 frame_rate_settled_acceptance: pass
 terminal_soak_120s_acceptance: pass
@@ -103,13 +103,13 @@ screenshot_nonblocking_live_acceptance: not_rerun_candidate
 qemu_hibr_lifecycle_acceptance: not_rerun_candidate
 qemu_four_output_pixel_acceptance: not_rerun_candidate
 qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
-live_deployment: pending
-live_current_version: pending
+live_deployment: pass_supervised_update_verified_0_1_450_twice
+live_current_version: 0.1.450
 live_block_cursor_acceptance: carried_from_0_1_425
 live_italic_acceptance: carried_from_0_1_425
 live_session_default_acceptance: carried_from_0_1_425
 live_sync_output_acceptance: carried_from_0_1_425
-live_hibr_desktop_acceptance: pending
+live_hibr_desktop_acceptance: pass_32400_printable_revision_859_survived_30_samples
 live_idle_frame_acceptance: carried_from_0_1_425
 live_physical_multi_display: unavailable_one_output
 live_physical_button_trace_contract: open
@@ -198,3 +198,52 @@ notes: >-
   shape #14 named.
 
   Suite: 52 pass, 5 skip, 0 fail.
+
+  Host-accepted on 192.168.10.54, and #63 measured on both sides of its own
+  fix. The 0.1.450 package was deployed twice: the first deployment is
+  performed by the running 0.1.449, which still carries the race, and the
+  second by the fixed 0.1.450.
+
+  Before, 04:55:17 to 04:56:48 -- 91 seconds:
+
+    04:55:17 Stopping blit.service ...
+    04:55:17 blit[14469]: blit gateway listening ...   <- same pid, re-exec'd
+    04:56:48 (the 90s TimeoutStopSec expires; SIGKILL; unit restarted)
+
+  After, 04:57:30 to 04:57:30 -- under one second:
+
+    04:57:30 Stopping blit.service ...
+    04:57:30 blit[14788]: blit: package installed; exiting for the unit restart
+    04:57:30 blit.service: Main process exited, code=exited, status=1/FAILURE
+    04:57:30 blit.service: Stopped blit.service
+    04:57:30 blit.service: Started blit.service
+    04:57:30 blit[15012]: blit gateway listening ...
+
+  No stop-sigterm timeout, no SIGKILL, no child killed, and one `listening`
+  line from one pid instead of two.
+
+  The non-zero exit was the deliberate choice and the cost of it was measured
+  rather than assumed, because the ticket itself complained about a noisy unit
+  result. It is not sticky: after the restart the host reports
+
+    systemctl is-active blit   -> active
+    systemctl is-failed blit   -> active
+    Result=success  NRestarts=0  ActiveState=active  SubState=running
+
+  So the whole trace is one journal line, immediately preceded by Blit's own
+  `package installed; exiting for the unit restart`, which makes it
+  self-explanatory. The old behaviour left `Failed with result 'timeout'` and
+  killed the desktop.
+
+  The desktop launched right after the clean deployment: 32,400 printable
+  cells at revision 859, and 30 samples over five minutes with zero uptime
+  resets, one session throughout, errors and warnings empty every time. Under
+  the old behaviour a desktop launched in that window was SIGKILLed.
+
+  Separately, a 20-minute watch of the pre-fix clean process -- 118 readable
+  samples, zero uptime resets -- is what established that the kill was the
+  race and not a crash, and so what to fix.
+
+  #14's media were measured on 0.1.449 before the bump and carried: t=f, t=t
+  and t=s with a readable path all answer images=0 last_error=unsupported-key,
+  each with a graphics_payload trace entry naming the reason.

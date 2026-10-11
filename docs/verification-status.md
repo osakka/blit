@@ -3035,3 +3035,67 @@ receive one. Blit's graphics decoders are not implicated, and the sixel and
 Kitty gaps fixed in 0.1.446 through 0.1.448 were real but are not the cause of
 this symptom.
 
+## 0.1.450: the update restart race, measured on both sides of its own fix
+
+Issue #63. Two mechanisms restarted the service after a package install and
+neither knew about the other, so systemd's one `SIGTERM` was consumed by a
+process that then re-exec'd. The unit waited out `TimeoutStopSec` and
+`SIGKILL`ed its whole cgroup, taking an attached Hibr desktop with it 90
+seconds after the deployment reported success.
+
+The 0.1.450 package was deployed to 192.168.10.54 twice. The first deployment
+is performed by the running 0.1.449, which still carries the race; the second
+by the fixed 0.1.450.
+
+Before -- 04:55:17 to 04:56:48, 91 seconds:
+
+```
+04:55:17 systemd[1]: Stopping blit.service ...
+04:55:17 blit[14469]: blit gateway listening ...        <- the same pid, re-exec'd
+04:56:48 (TimeoutStopSec expires, SIGKILL, unit restarted)
+```
+
+After -- 04:57:30 to 04:57:30, under one second:
+
+```
+04:57:30 systemd[1]: Stopping blit.service ...
+04:57:30 blit[14788]: blit: package installed; exiting for the unit restart
+04:57:30 systemd[1]: blit.service: Main process exited, code=exited, status=1/FAILURE
+04:57:30 systemd[1]: blit.service: Stopped blit.service ...
+04:57:30 systemd[1]: blit.service: Started blit.service ...
+04:57:30 blit[15012]: blit gateway listening ...
+```
+
+No `stop-sigterm` timeout, no `SIGKILL`, no child killed, and one `listening`
+line from one pid instead of two. Two `listening` lines from one pid is the
+signature of the old behaviour.
+
+The non-zero exit is deliberate -- `Restart=on-failure` must remain a safety
+net if the helper dies before it reaches `systemctl`, because the package must
+never be installed with the service down -- and its cost was measured rather
+than assumed, since the ticket itself objected to a permanently noisy unit
+result. It is not sticky:
+
+```
+systemctl is-active blit   -> active
+systemctl is-failed blit   -> active
+Result=success  NRestarts=0  ActiveState=active  SubState=running
+```
+
+The whole trace is one journal line, immediately preceded by Blit's own
+`package installed; exiting for the unit restart`.
+
+A desktop launched right after the clean deployment reached 32,400 printable
+cells at revision 859 and was sampled 30 times over five minutes: zero uptime
+resets, one session throughout, `errors` and `warnings` empty every time.
+
+How this was found is part of the evidence. The host has no SSH, so the
+journal came back through the API: a terminal session running `journalctl`
+with a 200x60 surface, read off `GET /v1/surfaces/{id}/cells`. Blit's own
+in-process log ring cannot answer a question about why the previous process
+ended, because it died with it -- all it could say was that uptime was 5.7
+minutes and there were no sessions. A 20-minute watch of the clean process
+(118 readable samples, zero uptime resets, one session throughout) is what
+established that the kill was a deployment race and not a crash, and so what
+to fix.
+
