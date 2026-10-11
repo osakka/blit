@@ -1562,7 +1562,7 @@ components:
 
     Diagnostics:
       type: object
-      required: [revision, health, resources, render, errors, warnings]
+      required: [revision, health, resources, render, graphics, errors, warnings]
       properties:
         revision: {$ref: '#/components/schemas/Revision'}
         health:
@@ -1636,6 +1636,27 @@ components:
                 previous_output: {type: integer}
                 dirty: {type: boolean}
               additionalProperties: false
+          additionalProperties: false
+        graphics:
+          type: object
+          description: >-
+            The enforced graphics bounds. A client has to size an image
+            before it sends one, and the only other way to learn the limit is
+            to have an image refused; these are the same numbers XTSMGRAPHICS
+            answers with. The sixel bound is not a limit of its own -- a
+            decoded sixel image is an ordinary graphics image -- so a
+            full-size sixel canvas is exactly `max_bytes` (issue #8).
+          required: [max_images, max_width, max_height, max_bytes,
+                     sixel_max_width, sixel_max_height,
+                     sixel_color_registers]
+          properties:
+            max_images: {type: integer, minimum: 1}
+            max_width: {type: integer, minimum: 1}
+            max_height: {type: integer, minimum: 1}
+            max_bytes: {type: integer, minimum: 1}
+            sixel_max_width: {type: integer, minimum: 1}
+            sixel_max_height: {type: integer, minimum: 1}
+            sixel_color_registers: {type: integer, minimum: 1}
           additionalProperties: false
         errors:
           type: array

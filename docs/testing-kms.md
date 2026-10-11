@@ -325,7 +325,11 @@ direct-color sixel columns with six-row raster data and requires
 `PPM_DISPLAY_47_SIXEL_PASS`; the equivalent SDL3 capture passes
 `SDL_SIXEL_PASS`. This validates the shared RGBA graphics object and both
 renderers for the bounded sixel capability advertised in the session contract.
-Unsupported sixel extensions remain rejected diagnostically.
+A payload that cannot be parsed at all is still rejected diagnostically, but
+geometry past the bound is clipped rather than discarded and neither colour
+space nor an undefined colour register costs an image -- see the Sixel section
+of `docs/terminal-engine.md`, which `tools/tests/sixel_decoder_gate.rb`
+asserts against the framebuffer.
 
 ## Pointer stress gate
 

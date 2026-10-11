@@ -1065,6 +1065,28 @@ snapshot = run_case(base, 'decrqm-x10-mouse-mode',
 assert_equal('1b5b3f393b312479', row_text(snapshot),
              'DECRQM X10 mouse mode')
 
+# Issue #11: DECSDM is mode 80 and its polarity is load-bearing. DEC and
+# current xterm agree that *set* is display mode and that the power-up
+# default is reset -- sixel scrolling -- but xterm carried the inverse for
+# years, so a client has to be able to ask. The default answer is 2.
+snapshot = run_case(base, 'decrqm-sixel-display-mode-default',
+                    "stty -icanon -echo min 0 time 5; printf '\\033[?80$p'; dd if=/dev/tty bs=1 count=9 2>/dev/null | od -An -tx1 | tr -d ' \\n'",
+                    width: 40)
+assert_equal('1b5b3f38303b322479', row_text(snapshot),
+             'DECRQM reports sixel scrolling, not display mode, by default')
+
+snapshot = run_case(base, 'decrqm-sixel-display-mode-set',
+                    "stty -icanon -echo min 0 time 5; printf '\\033[?80h\\033[?80$p'; dd if=/dev/tty bs=1 count=9 2>/dev/null | od -An -tx1 | tr -d ' \\n'",
+                    width: 40)
+assert_equal('1b5b3f38303b312479', row_text(snapshot),
+             'DECRQM reports DECSDM once it is set')
+
+snapshot = run_case(base, 'decrqm-sixel-cursor-right',
+                    "stty -icanon -echo min 0 time 5; printf '\\033[?8452h\\033[?8452$p'; dd if=/dev/tty bs=1 count=11 2>/dev/null | od -An -tx1 | tr -d ' \\n'",
+                    width: 40)
+assert_equal('1b5b3f383435323b312479', row_text(snapshot),
+             'DECRQM reports 8452')
+
 snapshot = run_case(base, 'background-color-erase',
                     "printf '\\033[44m\\033[2J\\033[0mx'")
 cells = cell_map(snapshot)
@@ -1117,8 +1139,10 @@ scrolled = run_case(base, 'xtsmgraphics-su-still-scrolls',
 assert_equal('BBBB2', row_text(scrolled), 'CSI 1 S still scrolls up')
 
 # The reply reports the limits this build actually enforces: 256 colour
-# registers and 512x512 sixel geometry, both named in src/blit_graphics.h so
-# the answer cannot drift from the enforcement.
+# registers and 4096x4096 sixel geometry, both named in src/blit_graphics.h so
+# the answer cannot drift from the enforcement. The geometry was 512x512 until
+# issue #8; a client that sizes its image to what it was told would have been
+# held to a tenth of one output's width.
 snapshot = run_case(base, 'xtsmgraphics-colour-registers',
                     "stty -icanon -echo min 0 time 5; printf '\\033[?1;1;0S'; " \
                     'dd if=/dev/tty bs=1 count=11 2>/dev/null | od -An -tx1 | tr -d \' \\n\'',
@@ -1128,9 +1152,9 @@ assert_equal('1b5b3f313b303b32353653', row_text(snapshot),
 
 snapshot = run_case(base, 'xtsmgraphics-sixel-geometry',
                     "stty -icanon -echo min 0 time 5; printf '\\033[?2;1;0S'; " \
-                    'dd if=/dev/tty bs=1 count=15 2>/dev/null | od -An -tx1 | tr -d \' \\n\'',
+                    'dd if=/dev/tty bs=1 count=17 2>/dev/null | od -An -tx1 | tr -d \' \\n\'',
                     width: 80)
-assert_equal('1b5b3f323b303b3531323b35313253', row_text(snapshot),
+assert_equal('1b5b3f323b303b343039363b3430393653', row_text(snapshot),
              'XTSMGRAPHICS sixel-geometry reply')
 
 # An unrecognised item is Ps=1 (error) rather than silence; ReGIS is item 3

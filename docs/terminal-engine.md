@@ -155,6 +155,60 @@ shell conformance path is stable.
    be wrong half the time. `CSI 3 J` also releases retained
    main-screen scrollback instead of merely clearing visible cells.
 
+## Sixel
+
+A decoded sixel image is an ordinary graphics image, so the decoder's bound is
+the graphics image bound: 4096 by 4096 pixels, which at four bytes a pixel is
+exactly the 64 MiB graphics byte budget. The same numbers are what
+XTSMGRAPHICS answers for item 2 and what `GET /v1/diagnostics` publishes under
+`graphics`, because a client sizes its image to what it was told and an
+advertised limit that disagrees with the enforced one is worse than no answer.
+The canvas is allocated band by band as the stream reaches them, so an 80x40
+picture does not pay for a full-size buffer.
+
+Pixels outside the bound are clipped and only a payload that cannot be parsed
+at all is rejected (issue #8). The bound was a literal 512 until then, which
+is below any realistic picture -- a terminal-width image on a 1920-pixel
+output was refused outright, and `!1920~`, the most natural thing an encoder
+emits for a flat region, was refused twice over.
+
+The colour registers belong to the session, not to one DCS string: a stream
+may define its palette once and send several images (issue #10). The first
+sixteen default to the VT340's documented colours and the rest to the same
+256-colour palette the text path uses, so a register nobody defined reads as
+the colour that index means everywhere else in this terminal; they used to all
+be white, which made a partly-defaulted image render partly correct and partly
+as white blocks. RIS and DECSTR drop the palette.
+
+Both colour spaces are decoded. `Pu=1` is DEC's HLS, whose hue origin is blue
+at zero degrees, so 120 is red and 240 is green; `Pu=2` is RGB in percent.
+A component out of range clamps and a colour space Blit does not model leaves
+the register as it was, because the picture staying visible beats every
+alternative (issue #9).
+
+The introducer's positional parameters are read. `P1` (pixel aspect) and `P3`
+(horizontal grid size) are drawn at 1:1 and ignored; `P2` is the background
+select, where 1 leaves an unset pixel transparent and 0 and 2 paint it with
+the current background colour. A bare `DCS q` means `P2=0`, so the common
+introducer asks for an opaque image -- which the always-transparent scratch
+buffer could never produce (issue #11).
+
+Placement follows the mode pair. Mode 80 is DECSDM: **set** is display mode,
+which homes the image and leaves the cursor alone; **reset**, the power-up
+default, is sixel scrolling, which places the image at the cursor, scrolls the
+screen by the rows the image needs, and leaves the cursor at the start of the
+line below it. Mode 8452 leaves the cursor to the right of the graphic on its
+own last row instead. Both answer DECRQM. The polarity of mode 80 is worth
+reading twice: it is DEC's and current xterm's, but xterm carried the inverse
+for years, so a client written against old xterm asks for the opposite of what
+it wants -- which is exactly why DECRQM has to answer. Blit also differs from
+DEC on one point and says so here: in display mode DEC clips the image to the
+graphics region, and Blit clips it to the screen.
+
+Images are placed at absolute pixel offsets and do not move when the text
+scrolls afterwards. The scrolling a sixel image causes is accounted for in
+that image's own origin; a previously placed image stays where it was put.
+
 The direct KMS test remains the hardware oracle; the terminal engine must not
 introduce a second display or terminal implementation.
 

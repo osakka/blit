@@ -233,6 +233,7 @@ suite_renderer() {
     run_gate sdl_background_batch_gate.rb ruby tools/tests/sdl_background_batch_gate.rb
     run_gate sdl_graphics_cache_gate.rb ruby tools/tests/sdl_graphics_cache_gate.rb
     run_gate kitty_placement_gate.rb ruby tools/tests/kitty_placement_gate.rb
+    run_gate sixel_decoder_gate.rb ruby tools/tests/sixel_decoder_gate.rb
     run_gate sync_output_gate.rb ruby tools/tests/sync_output_gate.rb
     run_gate cell_paint_gate.rb ruby tools/tests/cell_paint_gate.rb
     run_gate motion_trail_gate.rb ruby tools/tests/motion_trail_gate.rb

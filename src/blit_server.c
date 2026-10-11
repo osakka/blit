@@ -628,6 +628,19 @@ typedef struct {
     int terminal_last_width;
     uint32_t terminal_foreground;
     uint32_t terminal_background;
+    /* The sixel colour registers, which belong to the session rather than to
+       one DCS string: a stream may define its palette once and then send
+       several images (issue #10). Built on first use so a session that never
+       draws pays nothing, and dropped by RIS and DECSTR. */
+    uint32_t terminal_sixel_palette[BLIT_SIXEL_COLOR_REGISTERS];
+    int terminal_sixel_palette_ready;
+    /* DECSDM (mode 80) and xterm's 8452. DECSDM *set* is display mode, which
+       homes the image and leaves the cursor alone; reset -- the power-up
+       default -- is sixel scrolling. That polarity is DEC's and current
+       xterm's; xterm had it inverted for years, so the name of the mode is
+       worth reading twice (issue #11). */
+    int terminal_sixel_display_mode;
+    int terminal_sixel_cursor_right;
     uint16_t terminal_attributes;
     int terminal_foreground_set;
     int terminal_background_set;
@@ -2615,6 +2628,16 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              "\"pointer\":{\"valid\":%s,\"x\":%.1f,\"y\":%.1f,"
              "\"output\":%d,\"previous_x\":%.1f,\"previous_y\":%.1f,"
              "\"previous_output\":%d,\"dirty\":%s}},"
+             /* The enforced graphics bounds, published because a client
+                has to size an image before it sends one and the only other
+                way to learn the limit is to have an image refused. These are
+                the same numbers XTSMGRAPHICS answers with; an advertised
+                limit that disagrees with the enforced one is worse than no
+                answer (issue #8). */
+             "\"graphics\":{\"max_images\":%d,\"max_width\":%d,"
+             "\"max_height\":%d,\"max_bytes\":%lu,"
+             "\"sixel_max_width\":%d,\"sixel_max_height\":%d,"
+             "\"sixel_color_registers\":%d},"
              "\"errors\":%s,\"warnings\":%s}",
              (runtime->direct_kms ? runtime->display_count > 0 :
               runtime->sdl_ready && runtime->output_count > 0 &&
@@ -2640,6 +2663,11 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              runtime->previous_pointer_x, runtime->previous_pointer_y,
              runtime->previous_pointer_output,
              runtime->pointer_dirty ? "true" : "false",
+             BLIT_GRAPHICS_MAX_IMAGES, BLIT_GRAPHICS_MAX_WIDTH,
+             BLIT_GRAPHICS_MAX_HEIGHT,
+             (unsigned long)BLIT_GRAPHICS_MAX_BYTES,
+             BLIT_SIXEL_MAX_WIDTH, BLIT_SIXEL_MAX_HEIGHT,
+             BLIT_SIXEL_COLOR_REGISTERS,
              errors,
              warnings);
 }
@@ -6454,6 +6482,126 @@ static uint32_t terminal_ansi_palette(int index)
     return colors[index];
 }
 
+/* The colour of a 256-palette index: the sixteen ANSI colours, the 6x6x6
+   cube, then the grey ramp. Extracted so the sixel colour registers can
+   default to the same palette the text path uses rather than inventing a
+   second rule (issue #10). */
+static int terminal_indexed_colour(int index, uint32_t *colour)
+{
+    if (index < 0 || index > 255)
+        return 0;
+    if (index < 16) {
+        uint32_t base = terminal_ansi_palette(index % 8);
+        *colour = index >= 8 ? ((base & 0x7f7f7fU) | 0x303030U) : base;
+        return 1;
+    }
+    if (index < 232) {
+        int cube = index - 16;
+        int r = cube / 36;
+        int g = (cube / 6) % 6;
+        int b = cube % 6;
+        *colour = (uint32_t)((r ? 55 + r * 40 : 0) << 16) |
+            (uint32_t)((g ? 55 + g * 40 : 0) << 8) |
+            (uint32_t)(b ? 55 + b * 40 : 0);
+        return 1;
+    }
+    {
+        int shade = 8 + (index - 232) * 10;
+        *colour = (uint32_t)(shade << 16) | (uint32_t)(shade << 8) |
+            (uint32_t)shade;
+    }
+    return 1;
+}
+
+/* The VT340's sixteen default colour registers, as the percentages the
+   hardware documents. A sixel stream may select a register it never defined
+   and is entitled to the terminal's default; every one of these used to be
+   white, so an image that defined some colours and relied on defaults for
+   the rest rendered partly correct and partly as white blocks -- harder to
+   diagnose than an outright failure, because the image did appear
+   (issue #10). */
+static uint32_t terminal_sixel_default_colour(int index)
+{
+    static const unsigned char percent[16][3] = {
+        {  0,  0,  0 }, { 20, 20, 80 }, { 80, 13, 13 }, { 20, 80, 20 },
+        { 80, 20, 80 }, { 20, 80, 80 }, { 80, 80, 20 }, { 53, 53, 53 },
+        { 26, 26, 26 }, { 33, 33, 60 }, { 60, 26, 26 }, { 33, 60, 33 },
+        { 60, 33, 60 }, { 33, 60, 60 }, { 60, 60, 33 }, { 80, 80, 80 }
+    };
+    uint32_t colour = 0;
+
+    if (index >= 0 && index < 16)
+        return ((uint32_t)(percent[index][0] * 255 / 100) << 16) |
+            ((uint32_t)(percent[index][1] * 255 / 100) << 8) |
+            (uint32_t)(percent[index][2] * 255 / 100);
+    /* Beyond the sixteen the VT340 defines, the documented rule is the same
+       256-colour palette the text path uses: a register nobody defined reads
+       as the colour that index means everywhere else in this terminal. */
+    if (terminal_indexed_colour(index, &colour))
+        return colour;
+    return 0;
+}
+
+/* DEC's HLS, which is the VT340's own colour model: Ph is a hue angle in
+   degrees where 0 is blue, Pl is lightness and Ps saturation, both
+   percentages. Rejecting the image for using it was the worst available
+   outcome -- an approximate conversion is visibly fine (issue #9). */
+static uint32_t terminal_sixel_hls_to_rgb(int hue, int lightness,
+                                          int saturation)
+{
+    double h;
+    double l;
+    double sat;
+    double chroma;
+    double secondary;
+    double match;
+    double red = 0.0;
+    double green = 0.0;
+    double blue = 0.0;
+    int sector;
+
+    if (hue < 0) hue = 0;
+    if (hue > 360) hue = hue % 360;
+    if (lightness < 0) lightness = 0;
+    if (lightness > 100) lightness = 100;
+    if (saturation < 0) saturation = 0;
+    if (saturation > 100) saturation = 100;
+    /* DEC puts blue at 0 degrees where the conventional model puts red, so
+       the angle is rotated before the usual conversion. */
+    h = (double)((hue + 240) % 360);
+    l = (double)lightness / 100.0;
+    sat = (double)saturation / 100.0;
+    chroma = (1.0 - (l * 2.0 - 1.0 < 0 ? -(l * 2.0 - 1.0) : l * 2.0 - 1.0)) *
+        sat;
+    sector = (int)(h / 60.0);
+    secondary = chroma * (1.0 - ((h / 60.0 - (double)(sector / 2 * 2) - 1.0) <
+                                 0 ? -(h / 60.0 - (double)(sector / 2 * 2) -
+                                       1.0) : (h / 60.0 -
+                                               (double)(sector / 2 * 2) -
+                                               1.0)));
+    match = l - chroma / 2.0;
+    switch (sector) {
+    case 0: red = chroma; green = secondary; break;
+    case 1: red = secondary; green = chroma; break;
+    case 2: green = chroma; blue = secondary; break;
+    case 3: green = secondary; blue = chroma; break;
+    case 4: red = secondary; blue = chroma; break;
+    default: red = chroma; blue = secondary; break;
+    }
+    red += match;
+    green += match;
+    blue += match;
+    if (red < 0.0) red = 0.0;
+    if (green < 0.0) green = 0.0;
+    if (blue < 0.0) blue = 0.0;
+    if (red > 1.0) red = 1.0;
+    if (green > 1.0) green = 1.0;
+    if (blue > 1.0) blue = 1.0;
+    return ((uint32_t)(red * 255.0 + 0.5) << 16) |
+        ((uint32_t)(green * 255.0 + 0.5) << 8) |
+        (uint32_t)(blue * 255.0 + 0.5);
+}
+
 static uint32_t terminal_dec_special(uint32_t codepoint)
 {
     switch (codepoint) {
@@ -7771,173 +7919,295 @@ static int sixel_number(const char **cursor, int fallback)
     return (int)value;
 }
 
-/* `body` points at the first sixel data byte, after the introducer's
-   optional P1;P2;P3 parameters and its final 'q'. The caller owns that
-   parsing because the parameters belong to the DCS introducer rather than
-   to the sixel data stream. */
-static void terminal_apply_sixel(BlitSession *session, BlitSurface *surface,
-                                 const char *body)
+/* The decoder's canvas. One write site for a pixel, because the previous
+   decoder inlined the same store twice -- once for a bare sixel byte and
+   once for a `!` run -- and the off-by-one band check (`y + 5 >= 512`, which
+   refused a band whose first bit alone was set) existed in only one of the
+   two copies (issue #8).
+
+   Rows are allocated as the stream reaches them. A full-height canvas is
+   64 MiB, which is the graphics byte budget; an 80x40 picture touches 48
+   rows of it. The stride is the full bound so that growing the canvas never
+   has to re-lay-out what is already drawn. */
+typedef struct {
+    unsigned char *pixels;
+    int rows;
+    int maximum_x;
+    int maximum_y;
+    int exhausted;
+} BlitSixelCanvas;
+
+#define BLIT_SIXEL_STRIDE ((size_t)BLIT_SIXEL_MAX_WIDTH * 4U)
+
+static int sixel_canvas_reserve(BlitSixelCanvas *canvas, int rows)
 {
-    unsigned char *scratch;
-    uint32_t palette[BLIT_SIXEL_COLOR_REGISTERS];
+    unsigned char *grown;
+    int target = canvas->rows > 0 ? canvas->rows : 6;
+
+    if (canvas->exhausted)
+        return 0;
+    if (rows <= canvas->rows)
+        return 1;
+    if (rows > BLIT_SIXEL_MAX_HEIGHT)
+        return 0;
+    while (target < rows)
+        target *= 2;
+    if (target > BLIT_SIXEL_MAX_HEIGHT)
+        target = BLIT_SIXEL_MAX_HEIGHT;
+    grown = (unsigned char *)realloc(canvas->pixels,
+                                     (size_t)target * BLIT_SIXEL_STRIDE);
+    if (grown == NULL) {
+        canvas->exhausted = 1;
+        return 0;
+    }
+    memset(grown + (size_t)canvas->rows * BLIT_SIXEL_STRIDE, 0,
+           (size_t)(target - canvas->rows) * BLIT_SIXEL_STRIDE);
+    canvas->pixels = grown;
+    canvas->rows = target;
+    return 1;
+}
+
+/* Clips. Sixel has no reliable end-of-image size declaration -- the `"`
+   raster attributes are optional -- so a decoder that aborts on the first
+   out-of-range pixel discards images it could have drawn. */
+static void sixel_canvas_plot(BlitSixelCanvas *canvas, int x, int y,
+                              uint32_t colour)
+{
+    size_t offset;
+
+    if (x < 0 || y < 0 || x >= BLIT_SIXEL_MAX_WIDTH ||
+        y >= BLIT_SIXEL_MAX_HEIGHT)
+        return;
+    if (!sixel_canvas_reserve(canvas, y + 1))
+        return;
+    offset = (size_t)y * BLIT_SIXEL_STRIDE + (size_t)x * 4U;
+    canvas->pixels[offset] = (unsigned char)(colour >> 16);
+    canvas->pixels[offset + 1U] = (unsigned char)(colour >> 8);
+    canvas->pixels[offset + 2U] = (unsigned char)colour;
+    canvas->pixels[offset + 3U] = 255;
+    if (x + 1 > canvas->maximum_x) canvas->maximum_x = x + 1;
+    if (y + 1 > canvas->maximum_y) canvas->maximum_y = y + 1;
+}
+
+static void terminal_sixel_reset_palette(BlitSession *session)
+{
+    session->terminal_sixel_palette_ready = 0;
+}
+
+static void terminal_sixel_prepare_palette(BlitSession *session)
+{
+    int i;
+
+    if (session->terminal_sixel_palette_ready)
+        return;
+    for (i = 0; i < BLIT_SIXEL_COLOR_REGISTERS; ++i)
+        session->terminal_sixel_palette[i] = terminal_sixel_default_colour(i);
+    session->terminal_sixel_palette_ready = 1;
+}
+
+/* `body` points at the first sixel data byte, after the introducer's
+   P1;P2;P3 parameters and its final 'q'. The caller owns that parsing
+   because the parameters belong to the DCS introducer rather than to the
+   sixel data stream; `background_select` is that introducer's P2. */
+static void terminal_apply_sixel(BlitSession *session, BlitSurface *surface,
+                                 const char *body, int background_select)
+{
+    BlitSixelCanvas canvas;
+    uint32_t *palette;
     const char *cursor = body;
     int current_color = 0;
     int x = 0;
     int y = 0;
-    int maximum_x = 0;
-    int maximum_y = 0;
     int raster_width = 0;
     int raster_height = 0;
+    int cell_width = session->terminal_cell_width > 0 ?
+        session->terminal_cell_width : 8;
+    int cell_height = session->terminal_cell_height > 0 ?
+        session->terminal_cell_height : 16;
+    int width;
+    int height;
+    int start_x = surface->cursor_x;
+    int start_y = surface->cursor_y;
+    int origin_column;
+    int origin_row;
+    int scrolled = 0;
+    int source_x = 0;
+    int source_y = 0;
     int i;
     BlitGraphicsImage *image = NULL;
     int image_id = 1;
 
-    scratch = (unsigned char *)calloc((size_t)BLIT_SIXEL_MAX_DIMENSION *
-                                      (size_t)BLIT_SIXEL_MAX_DIMENSION, 4U);
-    if (scratch == NULL) {
+    memset(&canvas, 0, sizeof(canvas));
+    if (!sixel_canvas_reserve(&canvas, 6)) {
         graphics_reject(session, "sixel-allocation-failed");
         return;
     }
-    for (i = 0; i < BLIT_SIXEL_COLOR_REGISTERS; ++i)
-        palette[i] = 0xffffffU;
-    palette[0] = 0x000000U;
+    terminal_sixel_prepare_palette(session);
+    palette = session->terminal_sixel_palette;
     while (*cursor != '\0') {
         unsigned char command = (unsigned char)*cursor++;
         if (command == '"') {
             int aspect_y = sixel_number(&cursor, 1);
             int aspect_x;
-            int width;
-            int height;
+            int declared_width;
+            int declared_height;
             if (*cursor == ';') ++cursor;
             aspect_x = sixel_number(&cursor, 1);
             if (*cursor == ';') ++cursor;
-            width = sixel_number(&cursor, 0);
+            declared_width = sixel_number(&cursor, 0);
             if (*cursor == ';') ++cursor;
-            height = sixel_number(&cursor, 0);
+            declared_height = sixel_number(&cursor, 0);
             (void)aspect_y;
             (void)aspect_x;
-            if (width < 0 || height < 0 || width > BLIT_SIXEL_MAX_DIMENSION ||
-                height > BLIT_SIXEL_MAX_DIMENSION) {
-                free(scratch);
-                graphics_reject(session, "sixel-bounds");
-                return;
-            }
-            raster_width = width;
-            raster_height = height;
+            /* Clamped, not rejected: a declaration larger than the bound
+               describes an image Blit will draw the visible part of. */
+            if (declared_width < 0) declared_width = 0;
+            if (declared_height < 0) declared_height = 0;
+            if (declared_width > BLIT_SIXEL_MAX_WIDTH)
+                declared_width = BLIT_SIXEL_MAX_WIDTH;
+            if (declared_height > BLIT_SIXEL_MAX_HEIGHT)
+                declared_height = BLIT_SIXEL_MAX_HEIGHT;
+            raster_width = declared_width;
+            raster_height = declared_height;
         } else if (command == '#') {
             int colour = sixel_number(&cursor, -1);
             if (colour < 0 || colour >= BLIT_SIXEL_COLOR_REGISTERS) {
-                free(scratch);
+                free(canvas.pixels);
                 graphics_reject(session, "sixel-colour");
                 return;
             }
             current_color = colour;
             if (*cursor == ';') {
                 int mode;
-                int red;
-                int green;
-                int blue;
+                int first;
+                int second;
+                int third;
                 ++cursor;
                 mode = sixel_number(&cursor, -1);
                 if (*cursor == ';') ++cursor;
-                red = sixel_number(&cursor, -1);
+                first = sixel_number(&cursor, -1);
                 if (*cursor == ';') ++cursor;
-                green = sixel_number(&cursor, -1);
+                second = sixel_number(&cursor, -1);
                 if (*cursor == ';') ++cursor;
-                blue = sixel_number(&cursor, -1);
-                if (mode != 2 || red < 0 || red > 100 || green < 0 ||
-                    green > 100 || blue < 0 || blue > 100) {
-                    free(scratch);
+                third = sixel_number(&cursor, -1);
+                if (mode < 0 || first < 0 || second < 0 || third < 0) {
+                    free(canvas.pixels);
                     graphics_reject(session, "sixel-colour");
                     return;
                 }
-                palette[current_color] =
-                    ((uint32_t)(red * 255 / 100) << 16) |
-                    ((uint32_t)(green * 255 / 100) << 8) |
-                    (uint32_t)(blue * 255 / 100);
+                /* Components clamp rather than discarding the image, and an
+                   introducer naming a colour space Blit does not model
+                   leaves the register as it was: the picture stays visible,
+                   which beats every alternative (issue #9). */
+                if (mode == 1) {
+                    palette[current_color] =
+                        terminal_sixel_hls_to_rgb(first, second, third);
+                } else if (mode == 2) {
+                    if (first > 100) first = 100;
+                    if (second > 100) second = 100;
+                    if (third > 100) third = 100;
+                    palette[current_color] =
+                        ((uint32_t)(first * 255 / 100) << 16) |
+                        ((uint32_t)(second * 255 / 100) << 8) |
+                        (uint32_t)(third * 255 / 100);
+                }
             }
         } else if (command == '!') {
             int repeat = sixel_number(&cursor, -1);
             unsigned char sixel;
             int bit;
-            if (repeat < 1 || repeat > BLIT_SIXEL_MAX_DIMENSION || *cursor < '?' || *cursor > '~') {
-                free(scratch);
+            /* Only an unparseable run is refused: no digits, or a byte that
+               is not sixel data. `!0~` repeats nothing and is legal. */
+            if (repeat < 0 || *cursor < '?' || *cursor > '~') {
+                free(canvas.pixels);
                 graphics_reject(session, "sixel-repeat");
                 return;
             }
             sixel = (unsigned char)*cursor++ - 63U;
+            /* A run wider than the bound is saturated rather than refused.
+               `!1920~` is the most natural thing an encoder emits for a flat
+               region, and every write past the bound clips anyway, so
+               saturating x is behaviourally identical and finite. */
+            if (repeat > BLIT_SIXEL_MAX_WIDTH)
+                repeat = BLIT_SIXEL_MAX_WIDTH;
             for (i = 0; i < repeat; ++i) {
                 for (bit = 0; bit < 6; ++bit)
-                    if (sixel & (1U << bit)) {
-                        if (x >= BLIT_SIXEL_MAX_DIMENSION ||
-                            y + bit >= BLIT_SIXEL_MAX_DIMENSION) {
-                            free(scratch);
-                            graphics_reject(session, "sixel-bounds");
-                            return;
-                        }
-                        {
-                            size_t pixel_offset = ((size_t)(y + bit) *
-                                     (size_t)BLIT_SIXEL_MAX_DIMENSION +
-                                (size_t)x) * 4U;
-                            uint32_t colour = palette[current_color];
-                            scratch[pixel_offset] = (unsigned char)(colour >> 16);
-                            scratch[pixel_offset + 1U] = (unsigned char)(colour >> 8);
-                            scratch[pixel_offset + 2U] = (unsigned char)colour;
-                            scratch[pixel_offset + 3U] = 255;
-                        }
-                        if (x + 1 > maximum_x) maximum_x = x + 1;
-                        if (y + bit + 1 > maximum_y) maximum_y = y + bit + 1;
-                    }
+                    if (sixel & (1U << bit))
+                        sixel_canvas_plot(&canvas, x, y + bit,
+                                          palette[current_color]);
                 ++x;
+                if (x > BLIT_SIXEL_MAX_WIDTH)
+                    x = BLIT_SIXEL_MAX_WIDTH;
             }
         } else if (command == '$') {
             x = 0;
         } else if (command == '-') {
             x = 0;
-            y += 6;
+            if (y < BLIT_SIXEL_MAX_HEIGHT)
+                y += 6;
         } else if (command >= '?' && command <= '~') {
             unsigned char sixel = command - 63U;
             int bit;
-            if (x >= 512 || y >= 512 || y + 5 >= 512) {
-                free(scratch);
-                graphics_reject(session, "sixel-bounds");
-                return;
-            }
             for (bit = 0; bit < 6; ++bit)
-                if (sixel & (1U << bit)) {
-                    {
-                        size_t pixel_offset = ((size_t)(y + bit) * 512U +
-                            (size_t)x) * 4U;
-                        uint32_t colour = palette[current_color];
-                        scratch[pixel_offset] = (unsigned char)(colour >> 16);
-                        scratch[pixel_offset + 1U] = (unsigned char)(colour >> 8);
-                        scratch[pixel_offset + 2U] = (unsigned char)colour;
-                        scratch[pixel_offset + 3U] = 255;
-                    }
-                    if (x + 1 > maximum_x) maximum_x = x + 1;
-                    if (y + bit + 1 > maximum_y) maximum_y = y + bit + 1;
-                }
+                if (sixel & (1U << bit))
+                    sixel_canvas_plot(&canvas, x, y + bit,
+                                      palette[current_color]);
             ++x;
+            if (x > BLIT_SIXEL_MAX_WIDTH)
+                x = BLIT_SIXEL_MAX_WIDTH;
         }
     }
-    if (raster_width > 0 && maximum_x > raster_width)
-        maximum_x = raster_width;
-    if (raster_height > 0 && maximum_y > raster_height)
-        maximum_y = raster_height;
-    if (maximum_x < 1 || maximum_y < 1) {
-        free(scratch);
-        graphics_reject(session, "sixel-empty");
+    width = canvas.maximum_x;
+    height = canvas.maximum_y;
+    if (raster_width > 0 && width > raster_width)
+        width = raster_width;
+    if (raster_height > 0 && height > raster_height)
+        height = raster_height;
+    if (width < 1 || height < 1) {
+        free(canvas.pixels);
+        graphics_reject(session, canvas.exhausted ?
+                        "sixel-allocation-failed" : "sixel-empty");
         return;
     }
-    if (raster_width > maximum_x) maximum_x = raster_width;
-    if (raster_height > maximum_y) maximum_y = raster_height;
+    if (raster_width > width) width = raster_width;
+    if (raster_height > height) height = raster_height;
+    if (!sixel_canvas_reserve(&canvas, height)) {
+        free(canvas.pixels);
+        graphics_reject(session, "sixel-allocation-failed");
+        return;
+    }
+    /* P2 background select. 1 leaves an unset pixel transparent; 0 and 2
+       both paint it with the current background colour, and 0 is what a
+       bare `DCS q` means -- so the common introducer asks for an opaque
+       image, which the always-transparent calloc could never produce
+       (issue #11). */
+    if (background_select != 1) {
+        uint32_t background = session->terminal_background_set ?
+            session->terminal_background : session_default_background(session);
+        int row;
+        for (row = 0; row < height; ++row) {
+            unsigned char *line = canvas.pixels + (size_t)row *
+                BLIT_SIXEL_STRIDE;
+            int column;
+            for (column = 0; column < width; ++column)
+                if (line[(size_t)column * 4U + 3U] == 0) {
+                    line[(size_t)column * 4U] =
+                        (unsigned char)(background >> 16);
+                    line[(size_t)column * 4U + 1U] =
+                        (unsigned char)(background >> 8);
+                    line[(size_t)column * 4U + 2U] =
+                        (unsigned char)background;
+                    line[(size_t)column * 4U + 3U] = 255;
+                }
+        }
+    }
     for (i = 0; i < BLIT_GRAPHICS_MAX_IMAGES; ++i)
         if (!session->graphics[i].used) {
             image = &session->graphics[i];
             break;
         }
     if (image == NULL) {
-        free(scratch);
+        free(canvas.pixels);
         graphics_reject(session, "image-store-full");
         return;
     }
@@ -7945,38 +8215,96 @@ static void terminal_apply_sixel(BlitSession *session, BlitSurface *surface,
         ++image_id;
         if (image_id <= 0) image_id = 1;
     }
-    memset(image, 0, sizeof(*image));
-    image->pixels = (unsigned char *)malloc((size_t)maximum_x *
-                                             (size_t)maximum_y * 4U);
-    if (image->pixels == NULL) {
-        free(scratch);
-        graphics_reject(session, "sixel-allocation-failed");
-        return;
+    /* Placement and the cursor contract. Before issue #11 the decoder put
+       the image at the cursor's pixel offset and returned without touching
+       the cursor, so text printed afterwards was written over the image and
+       a script emitting several images stacked them all at one origin. */
+    if (session->terminal_sixel_display_mode) {
+        /* DECSDM set: the image is homed and the cursor is left alone. */
+        origin_column = 0;
+        origin_row = 0;
+    } else {
+        int rows = (height + cell_height - 1) / cell_height;
+        int advances = session->terminal_sixel_cursor_right ? rows - 1 : rows;
+        origin_column = start_x;
+        for (i = 0; i < advances; ++i) {
+            int before = surface->cursor_y;
+            terminal_index(session, surface);
+            if (surface->cursor_y == before)
+                ++scrolled;
+        }
+        if (session->terminal_sixel_cursor_right) {
+            surface->cursor_x = start_x + (width + cell_width - 1) /
+                cell_width;
+            if (surface->cursor_x > surface->width - 1)
+                surface->cursor_x = surface->width - 1;
+        } else {
+            surface->cursor_x = surface->lrmm_enabled ?
+                surface->left_margin : 0;
+        }
+        session->terminal_wrap_pending = 0;
+        origin_row = start_y - scrolled;
     }
-    image->used = 1;
-    image->complete = 1;
-    image->id = (unsigned int)image_id;
-    snprintf(image->protocol, sizeof(image->protocol), "sixel");
-    image->width = maximum_x;
-    image->height = maximum_y;
-    image->format = 32;
-    image->opaque = 0;
-    image->bytes = image->capacity = (size_t)maximum_x *
-        (size_t)maximum_y * 4U;
-    for (y = 0; y < maximum_y; ++y)
-        memcpy(image->pixels + (size_t)y * (size_t)maximum_x * 4U,
-               scratch + (size_t)y * 512U * 4U,
-               (size_t)maximum_x * 4U);
-    image->visible = 1;
-    image->x = surface->cursor_x * (session->terminal_cell_width > 0 ?
-        session->terminal_cell_width : 8);
-    image->y = surface->cursor_y * (session->terminal_cell_height > 0 ?
-        session->terminal_cell_height : 16);
-    image->placement_width = maximum_x;
-    image->placement_height = maximum_y;
-    image->revision = 1;
-    image->generation = next_graphics_generation();
-    free(scratch);
+    /* What is left after the screen's edges have taken their share. The
+       source rectangle carries the crop so the visible part is drawn at its
+       true size rather than squeezed into the remaining space. */
+    if (origin_row < 0) {
+        source_y = -origin_row * cell_height;
+        if (source_y >= height) source_y = height - 1;
+        origin_row = 0;
+    }
+    if (origin_column < 0) {
+        source_x = -origin_column * cell_width;
+        if (source_x >= width) source_x = width - 1;
+        origin_column = 0;
+    }
+    {
+        int pixel_x = origin_column * cell_width;
+        int pixel_y = origin_row * cell_height;
+        int visible_width = width - source_x;
+        int visible_height = height - source_y;
+        int screen_width = surface->width * cell_width;
+        int screen_height = surface->height * cell_height;
+        if (pixel_x + visible_width > screen_width)
+            visible_width = screen_width - pixel_x;
+        if (pixel_y + visible_height > screen_height)
+            visible_height = screen_height - pixel_y;
+        if (visible_width < 1) visible_width = 1;
+        if (visible_height < 1) visible_height = 1;
+        memset(image, 0, sizeof(*image));
+        image->pixels = (unsigned char *)malloc((size_t)width *
+                                                (size_t)height * 4U);
+        if (image->pixels == NULL) {
+            free(canvas.pixels);
+            graphics_reject(session, "sixel-allocation-failed");
+            return;
+        }
+        image->used = 1;
+        image->complete = 1;
+        image->id = (unsigned int)image_id;
+        snprintf(image->protocol, sizeof(image->protocol), "sixel");
+        image->width = width;
+        image->height = height;
+        image->format = 32;
+        image->opaque = background_select != 1;
+        image->bytes = image->capacity = (size_t)width * (size_t)height * 4U;
+        for (i = 0; i < height; ++i)
+            memcpy(image->pixels + (size_t)i * (size_t)width * 4U,
+                   canvas.pixels + (size_t)i * BLIT_SIXEL_STRIDE,
+                   (size_t)width * 4U);
+        image->visible = 1;
+        image->x = pixel_x;
+        image->y = pixel_y;
+        image->src_x = source_x;
+        image->src_y = source_y;
+        image->src_w = visible_width;
+        image->src_h = visible_height;
+        image->placement_width = visible_width;
+        image->placement_height = visible_height;
+        image->revision = 1;
+        image->generation = next_graphics_generation();
+    }
+    free(canvas.pixels);
     mark_surface_full_damage(surface);
 }
 
@@ -8162,11 +8490,32 @@ static void terminal_apply_string(BlitSession *session, BlitSurface *surface)
        as malformed sixel would diagnose the wrong thing. */
     {
         const char *introducer = payload;
+        int positional[3];
+        int index = 0;
+        positional[0] = positional[1] = positional[2] = 0;
         while ((*introducer >= '0' && *introducer <= '9') ||
-               *introducer == ';')
-            ++introducer;
+               *introducer == ';') {
+            if (*introducer == ';') {
+                ++introducer;
+                if (index < 2) ++index;
+                continue;
+            }
+            /* An omitted parameter keeps its default of zero, which for P2
+               is "fill with the background" -- the same as a bare DCS q. */
+            positional[index] = 0;
+            while (*introducer >= '0' && *introducer <= '9') {
+                if (positional[index] < 1000000)
+                    positional[index] = positional[index] * 10 +
+                        (*introducer - '0');
+                ++introducer;
+            }
+        }
         if (*introducer == 'q') {
-            terminal_apply_sixel(session, surface, introducer + 1);
+            /* P1 is the pixel aspect ratio and P3 the horizontal grid size,
+               both of which Blit draws at 1:1 and so ignores; P2 is the
+               background select the decoder needs (issue #11). */
+            terminal_apply_sixel(session, surface, introducer + 1,
+                                 positional[1]);
             return;
         }
     }
@@ -8367,27 +8716,7 @@ static void terminal_apply_sgr(BlitSession *session, const char *sequence)
             int valid = 0;
             if (mode == 5 && i + 1 < count) {
                 int index = params[++i];
-                if (index < 16) {
-                    int base = index % 8;
-                    color = terminal_ansi_palette(base);
-                    if (index >= 8)
-                        color = (color & 0x7f7f7fU) | 0x303030U;
-                    valid = 1;
-                } else if (index < 232) {
-                    int cube = index - 16;
-                    int r = cube / 36;
-                    int g = (cube / 6) % 6;
-                    int b = cube % 6;
-                    color = (uint32_t)((r ? 55 + r * 40 : 0) << 16) |
-                        (uint32_t)((g ? 55 + g * 40 : 0) << 8) |
-                        (uint32_t)(b ? 55 + b * 40 : 0);
-                    valid = 1;
-                } else if (index < 256) {
-                    int shade = 8 + (index - 232) * 10;
-                    color = (uint32_t)(shade << 16) |
-                        (uint32_t)(shade << 8) | (uint32_t)shade;
-                    valid = 1;
-                }
+                valid = terminal_indexed_colour(index, &color);
             } else if (mode == 2 && i + 3 < count) {
                 int r = params[++i];
                 int g = params[++i];
@@ -8848,10 +9177,10 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
             /* Sixel geometry, reported as width then height. */
             if (action == 1 || action == 2 || action == 4)
                 snprintf(reply, sizeof(reply), "\033[?2;0;%d;%dS",
-                         BLIT_SIXEL_MAX_DIMENSION, BLIT_SIXEL_MAX_DIMENSION);
+                         BLIT_SIXEL_MAX_WIDTH, BLIT_SIXEL_MAX_HEIGHT);
             else if (action == 3)
                 snprintf(reply, sizeof(reply), "\033[?2;3;%d;%dS",
-                         BLIT_SIXEL_MAX_DIMENSION, BLIT_SIXEL_MAX_DIMENSION);
+                         BLIT_SIXEL_MAX_WIDTH, BLIT_SIXEL_MAX_HEIGHT);
             else
                 snprintf(reply, sizeof(reply), "\033[?2;2;0S");
         } else {
@@ -8945,6 +9274,18 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         }
         if (terminal_csi_has_mode(sequence, 7))
             session->terminal_autowrap = enabled;
+        if (terminal_csi_has_mode(sequence, 80)) {
+            /* DECSDM. Set is *display* mode -- the image is homed and the
+               cursor does not move; reset, the power-up default, is sixel
+               scrolling. xterm carried the inverse polarity for years, so a
+               client written against old xterm and one written against the
+               VT330/VT340 manual ask for opposite things with the same
+               sequence; DEC's reading is the one current xterm documents and
+               the one Blit follows (issue #11). */
+            session->terminal_sixel_display_mode = enabled;
+        }
+        if (terminal_csi_has_mode(sequence, 8452))
+            session->terminal_sixel_cursor_right = enabled;
         if (terminal_csi_has_mode(sequence, 69)) {
             /* DECLRMM (issue #3). Turning it off restores the full width
                rather than remembering the columns, which is what a VT does
@@ -8979,6 +9320,9 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
             state = session->terminal_mouse_mode == first ? 1 : 2; break;
         case 1004: state = session->terminal_focus_reporting ? 1 : 2; break;
         case 1006: state = session->terminal_mouse_sgr ? 1 : 2; break;
+        case 80: state = session->terminal_sixel_display_mode ? 1 : 2; break;
+        case 8452:
+            state = session->terminal_sixel_cursor_right ? 1 : 2; break;
         case 2004: state = session->terminal_bracketed_paste ? 1 : 2; break;
         default: state = 0; break;
         }
@@ -9043,6 +9387,9 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         session->terminal_mouse_mode = 0;
         session->terminal_mouse_sgr = 0;
         session->terminal_synchronized = 0;
+        terminal_sixel_reset_palette(session);
+        session->terminal_sixel_display_mode = 0;
+        session->terminal_sixel_cursor_right = 0;
         surface->cursor_style = 1;
         surface->cursor_visible = 1;
         surface->scroll_top = 0;
@@ -9729,6 +10076,9 @@ static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
                 surface->left_margin = 0;
                 surface->right_margin = surface->width - 1;
                 terminal_reset_tabs(surface);
+                terminal_sixel_reset_palette(session);
+                session->terminal_sixel_display_mode = 0;
+                session->terminal_sixel_cursor_right = 0;
                 session->terminal_charset_dec = 0;
                 session->terminal_charset_g1_dec = 0;
                 session->terminal_charset_shift = 0;

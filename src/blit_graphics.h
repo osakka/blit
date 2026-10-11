@@ -20,8 +20,16 @@
 /* The sixel decoder's bounds. They are named because XTSMGRAPHICS reports
    them to the application: an advertised limit that disagrees with the
    enforced one is worse than no answer, since a client sizes its image to
-   what it was told. */
-#define BLIT_SIXEL_MAX_DIMENSION 512
+   what it was told.
+
+   Not a limit of the decoder's own: a decoded sixel image is an ordinary
+   graphics image, so its bound is the graphics image bound above, and a
+   full-size scratch buffer is exactly BLIT_GRAPHICS_MAX_BYTES. Until issue
+   #8 this was a literal 512, which is below any realistic picture -- a
+   terminal-width image on a 1920-pixel output was refused outright, and the
+   whole image was discarded rather than clipped. */
+#define BLIT_SIXEL_MAX_WIDTH BLIT_GRAPHICS_MAX_WIDTH
+#define BLIT_SIXEL_MAX_HEIGHT BLIT_GRAPHICS_MAX_HEIGHT
 #define BLIT_SIXEL_COLOR_REGISTERS 256
 
 /* A numbered Kitty placement (the p key) beyond the image's default one. */
