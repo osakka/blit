@@ -3099,3 +3099,52 @@ minutes and there were no sessions. A 20-minute watch of the clean process
 established that the kill was a deployment race and not a crash, and so what
 to fix.
 
+## 0.1.451 and 0.1.452: a device setting survives a release
+
+Epic #64 stage 1 (#65), ADR 0067. Until these releases a device's
+configuration lived only in memory, so every supervised update returned every
+pointer speed, keyboard layout and default audio device to its default. This
+is the first measurement on this host of one surviving.
+
+Measured on 192.168.10.54:
+
+```
+PATCH /v1/input/devices/input-0003-25a7-0124-...-input3
+  -> sensitivity_percent 215, natural_scroll true
+PATCH /v1/audio/audio-device-pcm0-p
+  -> default true
+
+/var/lib/blit/settings.json   -rw-r----- 1 root root 191
+{"version":1,"input_devices":{"input-0003-25a7-0124-usb-0000-e6-00.4-1.1.4-input3":
+ {"sensitivity_percent":215,"natural_scroll":true}},
+ "audio_devices":{"audio-device-pcm0-p":{"default":true}}}
+
+supervised update to 0.1.452  -> both still applied
+POST /v1/control/restart      -> both still applied, settings revision 1
+```
+
+Only what differs from a default is written, and only against ids derived from
+what a device reports about itself. The document's own revision is stored with
+it, which 0.1.452 added after reading the live host and finding the revision
+back at 0 in the fresh process: it is the `If-Match` a controller writes the
+whole document against, and a counter that restarts at zero would let a stale
+write match by accident. Measured both ways afterwards -- a document written
+by 0.1.451 carries no revision and loads as 0, which is the right answer for
+an older document, and a write then records 1 that the restart reads back.
+
+The deployments themselves were clean, which is issue #63 holding across three
+releases now: stop, exit and start inside one second, one `listening` line per
+process, no `stop-sigterm` timeout and no `SIGKILL` of the unit's children.
+
+**An honest gap in the same window.** The first desktop launch after the
+0.1.452 deployment did not take. Blit created session 1, logged
+`hibr_resize_discovery session=1 attempt=1 matches=1` and then `matches=0` for
+attempts 2 through 4, and retired the surface -- while Hibr's own
+`[attached: blit-0-1-452]` and `[hold: blit-0-1-452]` processes stayed alive as
+orphans, which were killed by hand afterwards. A second launch under a
+different session name reached 32,400 printable cells at revision 860 in about
+ten seconds and stayed healthy with `errors` and `warnings` both empty. That is
+the fail-closed `hibr_attach_unresolved` shape; it is recorded on issue #32
+rather than explained here, because neither release touched the attach path and
+one occurrence is not a diagnosis.
+
