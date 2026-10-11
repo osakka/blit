@@ -131,13 +131,13 @@ screenshot_nonblocking_live_acceptance: not_rerun_candidate
 qemu_hibr_lifecycle_acceptance: not_rerun_candidate
 qemu_four_output_pixel_acceptance: not_rerun_candidate
 qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
-live_deployment: pending
-live_current_version: pending
+live_deployment: pass_supervised_update_verified_0_1_460
+live_current_version: 0.1.460
 live_block_cursor_acceptance: carried_from_0_1_425
 live_italic_acceptance: carried_from_0_1_425
 live_session_default_acceptance: carried_from_0_1_425
 live_sync_output_acceptance: carried_from_0_1_425
-live_hibr_desktop_acceptance: pending
+live_hibr_desktop_acceptance: pass_desktop_relaunched_errors_and_warnings_empty
 live_idle_frame_acceptance: carried_from_0_1_425
 live_physical_multi_display: unavailable_one_output
 live_physical_button_trace_contract: open
@@ -211,3 +211,6 @@ notes: >-
   repaint it.
 
   Suite: 62 pass, 5 skip, 0 fail.
+live_hotplug_recovery: pass_hub_returned_28_devices_4_keyboards_3_pointers_all_open
+live_input_device_missing_warning: pass_fires_at_3_of_peak_4_and_clears_at_4_of_4
+live_probe_settings_cleanup: pass_document_replaced_with_the_audio_default_alone

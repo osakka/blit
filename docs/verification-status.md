@@ -3609,3 +3609,65 @@ Claiming the suite covers this would be worse than the gap.
 writes immediate and its erase-plus-draw fits one chunk. Issue #72's done-when
 asked for it to be fixed so it would have caught this; that is recorded as not
 achievable here rather than quietly dropped.
+
+## 0.1.460: input robustness across hotplug
+
+Issue #74, and the last of #72. Asked for directly after the feature work was
+not making the server usable.
+
+### Two defects, found by asking about the fiftieth cycle rather than the first
+
+**Retiring an absent device only ever happened on a filesystem event.** A
+rescan is the only caller of `retire_absent_input_devices`, and inotify is the
+only thing that arms a rescan. The flag coalesces, so a hub dropping thirteen
+nodes at once produces one scan; if it runs mid-burst it marks the nodes that
+still exist as seen, and nothing arms another. Measured: a deleted node's
+device stayed `present: true` for 56 seconds and counting. A watch event now
+sets a one-second resettle deadline as well, and the select wait is clamped to
+it — a hotplug is exactly when the loop has no other reason to wake, which is
+ADR 0067's settings-flush shape.
+
+**A probe that learned nothing erased what the device was.** Opening a node
+being torn down succeeds while every `EVIOC*` ioctl fails, so `kinds` came back
+zero and that zero was written over a known device. Measured: a pointer
+demoted to `other` with empty capabilities. A keyboard in that state is never
+claimed by the poll loop again even once the hardware returns.
+
+**`input_device_missing` fired only at zero.** On the live host a microphone's
+remote-control interface counted as both a keyboard and a pointer, so while a
+USB hub had taken the real ones away `/v1/diagnostics` reported `warnings: []`
+and the operator had no usable input. It now fires below the peak this process
+has seen.
+
+### The first teethed gate of this stretch
+
+`tools/tests/input_hotplug_cycle_gate.rb`, thirty cycles of two fabricated
+devices:
+
+```
+fixed    3 runs, 3 passes
+pre-fix  3 runs, 3 failures, at cycles 15, 0 and 4
+```
+
+always as `unplugging left keyboard=false pointer_present=true`.
+
+It does not cover the poll set: a fabricated node is a regular file and is
+never opened as a keyboard, so `state.open` stays false. The host was measured
+directly instead — 19 descriptors, 2 on event nodes, zero deleted.
+
+### Host-accepted
+
+The hub returned during this release. Blit picked up the full set
+unaided — `input_devices: 28`, `keyboards: 4`, `pointers: 3`, every one
+`open: true`, which is the pre-incident state.
+
+The new warning, end to end on real hardware:
+
+```
+one keyboard disabled   keyboards 3 of peak 4   warnings ['input_device_missing']
+re-enabled              keyboards 4 of peak 4   warnings []
+```
+
+The two stale probe settings left on the microphone's HID interfaces by
+earlier `host_*` probes were cleared with `PUT /v1/settings`, leaving the
+document carrying the audio default alone.
