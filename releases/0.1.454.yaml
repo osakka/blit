@@ -1,0 +1,207 @@
+release: 0.1.454
+package: blit_0.1.454-1_amd64.deb
+package_sha256: 7d21407cf01738c3240aa7813ea6ad2e15702937d5eed78e912a968bde160335
+source_commit: 257cb58e85516cf8f9e068a0ca375483e9d331ba
+package_documentation_commit: 257cb58e85516cf8f9e068a0ca375483e9d331ba
+server_binary_sha256: cab2e2afdcf5d474c1e3915eaf5bd84848f5f7d12271f502801287701ae8be5c
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: ed37dff18e0ba8ad638990b28287ab1aeb22ada5fe7345a3eb17a39733598d87
+hibr_root: /tmp/hibr-0.99.100
+hibr_version: 0.99.100
+tcc_build_acceptance: pass
+openapi_yaml: pass
+api_schema_gate: pass_37_paths
+package_artifact_acceptance: pass_manifest_hashes_match_package_and_reproducible
+network_auth_acceptance: pass_four_listener_postures_loopback_default_refusal_and_override_warning
+terminal_conformance: carried_from_0_1_450
+live_terminal_feature_acceptance: carried_from_0_1_447
+live_sixel_acceptance: carried_from_0_1_448
+session_lifecycle_acceptance: pass
+session_write_resize_acceptance: pass
+stream_replay_acceptance: pass
+font_api_acceptance: pass
+hibr_font_manifest_acceptance: pass
+glyph_geometry_local_pixel_acceptance: pass
+sdl_glyph_filter_acceptance: pass
+external_pointer_composition: pass
+pointer_damage_atomic_acceptance: pass_three_consecutive_runs_frame_counter_wait
+pointer_wallpaper_stress_acceptance: pass
+hidden_cursor_damage_acceptance: pass
+sdl_background_batch_acceptance: pass
+sdl_graphics_cache_acceptance: pass
+sdl_wallpaper_damage_acceptance: pass
+screenshot_overlay_acceptance: pass
+pixel_frame_acceptance: pass
+render_state_agreement_acceptance: pass
+adapter_coalesce_acceptance: pass_idle_frame_zero_requests
+kitty_placement_pixel_acceptance: pass_crop_offset_numbered_and_z_order_by_pixel
+kitty_placement_conformance_acceptance: pass_delete_targets_and_unsupported_key_refusals
+sixel_decoder_pixel_acceptance: carried_from_0_1_448
+sixel_decoder_teeth: carried_from_0_1_448
+graphics_bound_publication_acceptance: carried_from_0_1_448
+graphics_payload_trace_acceptance: carried_from_0_1_449
+graphics_payload_trace_teeth: carried_from_0_1_449
+live_graphics_boundary: carried_from_0_1_449
+sync_output_acceptance: pass_held_frame_and_hidden_writes_one_and_two_surfaces
+cell_paint_acceptance: pass_cursor_glyph_italic_distinct_session_defaults
+pointer_geometry_acceptance: pass_inset_honoured_and_pane_less_at_corner
+mouse_report_acceptance: pass_wheel_byte_96_hover_gated_per_cell_drops_counted
+key_encoding_acceptance: pass_119_encodings_plus_per_device_keymap_and_modifiers
+frame_quiet_starvation_acceptance: pass_longest_stagnant_run_1_was_29
+capture_witness_acceptance: pass_one_source_presented_flag_presented_revision
+motion_trail_acceptance: pass_799_blank_cells_no_unaccounted_pixels
+render_state_agreement_acceptance: pass_30_blue_cells_was_vacuous
+bold_cell_containment_acceptance: pass_8px_drawn_0_spilled
+wide_glyph_acceptance: pass_4_samples_4_distinct_shapes_two_cells_each
+font_identity_acceptance: pass_929_1182_primary_and_49899_16x16_wide
+desktop_repaint_acceptance: pass_pty_authored_0_cells_unpainted_reported_after_window_retires
+gate_port_isolation_acceptance: carried_from_0_1_431
+input_identity_acceptance: carried_from_0_1_433
+input_device_api_acceptance: carried_from_0_1_432
+input_device_config_acceptance: pass_one_rule_for_where_a_property_applies
+settings_persistence_acceptance: pass_nine_scenarios_plus_dormant_entry_survives_a_later_write
+settings_persistence_teeth: pass_eight_of_eight_fail_pre_change_28_checks
+keyboard_settings_acceptance: carried_from_0_1_453
+keyboard_settings_teeth: carried_from_0_1_453
+input_fabrication_sidecar_acceptance: pass_key_value_kinds_and_capabilities_make_the_422_rule_locally_testable
+pointer_settings_acceptance: pass_nine_scenarios_buttons_at_dispatch_step_on_trace_alias_refused
+pointer_settings_teeth: pass_eight_of_nine_fail_pre_change_35_checks
+pointer_curve_acceptance: pass_boundaries_sign_monotonic_never_slower_than_flat
+pointer_curve_teeth: pass_five_assertions_fail_with_adaptive_flattened
+settings_flush_deadline_acceptance: pass_a_quiet_server_still_writes
+live_pointer_settings: pending
+live_keyboard_settings: carried_from_0_1_453
+live_settings_persistence: carried_from_0_1_452
+input_device_route_acceptance: carried_from_0_1_436
+audio_device_api_acceptance: pass_node_is_the_authority_hotplug_retires_three_runs
+display_device_api_acceptance: pass_envelope_item_matches_collection_no_writable_property
+main_block_key_table_acceptance: carried_from_0_1_435
+live_input_device_table_acceptance: carried_from_0_1_433
+live_input_device_config_acceptance: pass_one_rule_for_where_a_property_applies
+live_main_block_key_acceptance: carried_from_0_1_435
+live_per_device_keymap_acceptance: carried_from_0_1_441
+live_device_kinds_acceptance: carried_from_0_1_442
+live_listener_posture_acceptance: carried_from_0_1_443
+live_evdev_opener_acceptance: carried_from_0_1_444
+live_output_occupancy_acceptance: carried_from_0_1_445
+live_device_routing_acceptance: carried_from_0_1_436
+live_audio_device_acceptance: pass_12_pcms_unchanged_by_node_authority_all_accessible
+json_escape_acceptance: carried_from_0_1_431
+live_cell_property_refusal_acceptance: carried_from_0_1_431
+live_unpainted_report_acceptance: carried_from_0_1_430
+live_wide_glyph_acceptance: carried_from_0_1_428
+live_render_state_agreement_acceptance: carried_from_0_1_427
+evdev_scan_open_count_acceptance: carried_from_0_1_431
+evdev_open_latency_acceptance: carried_from_0_1_444
+output_occupancy_acceptance: pass_warning_always_error_only_when_declared
+performance_schema_agreement_acceptance: pass_93_required_93_described_both_directions
+graphics_kitty_zlib_acceptance: pass_pixel_crc32_identical_to_raw
+graphics_xtsmgraphics_acceptance: pass_no_scroll_and_4096_square_reported
+terminal_kitty_keyboard_acceptance: pass_cursor_unmoved_query_reports_zero
+hibr_singleton_local_acceptance: pass
+hibr_resume_guard_acceptance: pass
+restart_gate: pass
+shutdown_gate: pass
+update_idle_timeout_acceptance: pass
+update_reset_acceptance: pass
+update_restart_intent_acceptance: carried_from_0_1_450
+update_restart_intent_teeth: carried_from_0_1_450
+kitty_transmission_medium_acceptance: carried_from_0_1_450
+live_kitty_transmission_medium_acceptance: carried_from_0_1_450
+live_update_restart_race: carried_from_0_1_450
+update_cancel_acceptance: pass
+frame_rate_settled_acceptance: pass
+terminal_soak_120s_acceptance: pass
+screenshot_nonblocking_live_acceptance: not_rerun_candidate
+qemu_hibr_lifecycle_acceptance: not_rerun_candidate
+qemu_four_output_pixel_acceptance: not_rerun_candidate
+qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
+live_deployment: pending
+live_current_version: pending
+live_block_cursor_acceptance: carried_from_0_1_425
+live_italic_acceptance: carried_from_0_1_425
+live_session_default_acceptance: carried_from_0_1_425
+live_sync_output_acceptance: carried_from_0_1_425
+live_hibr_desktop_acceptance: pending
+live_idle_frame_acceptance: carried_from_0_1_425
+live_physical_multi_display: unavailable_one_output
+live_physical_button_trace_contract: open
+physical_evdev_acceptance: open
+physical_multi_monitor_acceptance: open
+physical_high_refresh_acceptance: open
+notes: >-
+  Epic #64 stage 3 (#67): a pointer's buttons, scroll step and acceleration
+  curve. `sensitivity_percent` and `natural_scroll` were the whole of a
+  pointer's configuration, and `sensitivity_percent` is linear -- so there was
+  exactly one acceleration curve and it was the identity.
+
+  The interesting part of `buttons` is what it refuses. The terminal mouse
+  report holds one state per button, so two codes aliased onto one of them
+  means pressing both and releasing one reports released while the other is
+  still down -- the same defect #66's modifier remap avoids by keying its held
+  set on the physical code, except here the state belongs to the protocol and
+  cannot be re-derived. So an aliasing map is refused, and the check is on the
+  *effective* map with the defaults included: mapping 272 to right and leaving
+  273 alone is refused, because 273 still produces right. The 400 names both
+  codes and says what to do instead.
+
+  A code that is neither a default nor mapped is not a button. The event
+  filter deliberately does not widen to all of EV_KEY, or a pointer that also
+  reports keyboard keys would dispatch letters as clicks.
+
+  `flat` is the default and is exactly what this did before, because changing
+  what an existing property means is not an upgrade. `adaptive` multiplies it
+  again by a factor rising with the delta's magnitude -- untouched at or below
+  2 counts, tripled at or above 20, linear between -- and that choice of input
+  is a deliberate trade stated in docs/api.md: it makes the curve exact and
+  therefore testable, at the cost of depending on the device's report rate, so
+  adaptive feels different on a 1000 Hz mouse than on a 125 Hz one.
+
+  The curve lives in src/blit_input_pointer.h as a pure function, like
+  blit_input_identity.h, because it cannot be measured through the API in a
+  gate environment at all: a fabricated node is a regular file, nothing opens
+  it as a pointer, and update_evdev_pointer deliberately publishes nothing
+  when no pointer is open. Issue #52's gate records the same limitation about
+  sensitivity_percent.
+
+  POST /v1/input/inject also took a logical button 0..2, which bypasses the
+  map -- so the map could have been set and never exercised. It now takes an
+  evdev `code` too, which goes through the device's map exactly as a real
+  press does; the `key` injection already had that shape, and ADR 0064's rule
+  is that an injection delivers what the device could have delivered.
+
+  Gamepads get `deadzone_percent`, as a percentage of the axis's own reported
+  range so one setting means the same thing on a 0..255 stick and a
+  -32768..32767 one, and `invert_axes`. Applied to a copy of the event before
+  the broadcast and to EV_ABS only: a button is not an axis, and a deadzone on
+  one would silently swallow presses.
+
+  Middle-button emulation is #71 rather than this release. It needs a deferred
+  press and so a time-driven obligation in a loop that is otherwise entirely
+  event-driven; the design is written down in the ticket. It is absent rather
+  than present-and-off, which is the shape ADR 0064 chose for an unimplemented
+  display property.
+
+  A real bug found while gating this, and fixed: a settings write that was
+  still coalescing could sit in memory indefinitely on a quiet server, because
+  the loop is event-driven and nothing woke it. Found by a gate that configured
+  a device, stopped talking to the server and waited for the document. The
+  select wait is clamped to the remaining flush window now -- a deadline, the
+  same shape the attach reassert already used -- and a write that cannot reach
+  the disk says so once instead of failing in silence.
+
+  The pointer gate asserts through GET /v1/settings rather than the document's
+  path. ADR 0067 makes it a resource precisely so that where it is kept is an
+  implementation detail, and the restart is what proves the bytes reached the
+  disk.
+
+  Gates: pointer_curve_gate.c pins the curve at its boundaries, its sign, its
+  monotonicity, that it never brakes, and that flat is byte-for-byte what
+  sensitivity_percent always did -- teeth, 5 assertions fail with adaptive
+  flattened. pointer_settings_gate.rb, nine scenarios, every one measured by
+  effect: the swap read off the pointer_button trace, the step counted on the
+  pointer_wheel trace, a disabled button dispatching nothing -- teeth, 8 of 9
+  fail with 35 individual failures, the ninth asserting the default state that
+  the teeth build shares by construction.
+
+  Suite: 56 pass, 5 skip, 0 fail.
