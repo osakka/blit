@@ -14254,15 +14254,22 @@ static void settings_copy_unseen(BlitRuntime *runtime, const char *section,
 }
 
 /* The document as it should be on disk right now. */
-static size_t settings_build(BlitRuntime *runtime, char *out, size_t capacity)
+static size_t settings_build(BlitRuntime *runtime, char *out, size_t capacity,
+                             unsigned long long revision)
 {
     size_t used = 0;
     int first;
     int i;
 
     out[0] = '\0';
+    /* The revision is in the document, not only in memory. Every other
+       revision in Blit is per-process and ADR 0064 made a restart observable
+       through them deliberately -- but this one is the If-Match a controller
+       writes the whole document against, and a counter that restarted at zero
+       would make a stale write from before the restart match by accident. */
     json_appendf(out, capacity, &used,
-                 "{\"version\":1,\"input_devices\":{");
+                 "{\"version\":1,\"revision\":%llu,\"input_devices\":{",
+                 revision);
     first = 1;
     for (i = 0; i < BLIT_MAX_INPUT_DEVICES; ++i) {
         BlitInputDevice *device = &runtime->input_devices[i];
@@ -14356,7 +14363,8 @@ static void settings_flush(BlitRuntime *runtime, int force)
         monotonic_us() - runtime->settings_dirty_us <
             (uint64_t)BLIT_SETTINGS_FLUSH_US)
         return;
-    length = settings_build(runtime, document, sizeof(document));
+    length = settings_build(runtime, document, sizeof(document),
+                            runtime->settings_revision + 1);
     if (length == 0 || length + 1 >= sizeof(document)) {
         runtime->settings_dirty = 0;
         return;
@@ -14394,6 +14402,13 @@ static void settings_load(BlitRuntime *runtime)
     runtime->settings_document[received] = '\0';
     if (received == 0)
         return;
+    {
+        int stored_revision = 0;
+        if (json_int(runtime->settings_document, "revision",
+                     &stored_revision) && stored_revision > 0)
+            runtime->settings_revision =
+                (unsigned long long)stored_revision;
+    }
     if (json_key_cursor(runtime->settings_document, "version") == NULL ||
         json_key_cursor(runtime->settings_document, "input_devices") == NULL) {
         snprintf(broken, sizeof(broken), "%s.broken", runtime->settings_path);
@@ -14461,7 +14476,8 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
     static char document[BLIT_SETTINGS_CAPACITY];
     size_t used = 0;
 
-    settings_build(runtime, document, sizeof(document));
+    settings_build(runtime, document, sizeof(document),
+                   runtime->settings_revision);
     json_appendf(body, capacity, &used,
                  "{\"revision\":%llu,\"path\":\"%s\",\"persisted\":%s,"
                  "\"document\":%s}",

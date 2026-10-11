@@ -197,6 +197,15 @@ Dir.mktmpdir('blit-settings') do |root|
     check(sensitivity(UNSTABLE) == 100,
           'the unstable id came back at the default, which is the honest ' \
           "answer rather than a wrong device configured, got #{sensitivity(UNSTABLE).inspect}")
+    # The revision is in the document, not only in memory. Every other
+    # revision in Blit is per-process, but this one is the If-Match a
+    # controller writes the whole document against -- a counter that restarted
+    # at zero would let a stale write from before the restart match by
+    # accident.
+    _, settings = request('GET', '/v1/settings')
+    check(settings.is_a?(Hash) && settings['revision'].to_i.positive?,
+          "the document revision survives the restart, got " \
+          "#{settings.is_a?(Hash) ? settings['revision'].inspect : settings.inspect}")
   end
 
   # A write accepted inside the coalescing window has to reach the disk, and a

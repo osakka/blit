@@ -1700,6 +1700,16 @@ components:
             eat a newer one's settings.
           properties:
             version: {type: integer, minimum: 1}
+            revision:
+              type: integer
+              minimum: 0
+              description: >-
+                The document's own revision, stored with it. Every other
+                revision in Blit is per-process and ADR 0064 made a restart
+                observable through them deliberately -- but this one is the
+                `If-Match` a controller writes the whole document against, and
+                a counter that restarted at zero would let a stale write from
+                before the restart match by accident.
             input_devices:
               type: object
               additionalProperties:
