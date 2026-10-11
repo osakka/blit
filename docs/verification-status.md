@@ -3205,3 +3205,55 @@ release, and the desktop came back with 32,400 printable cells at revision 859
 with `errors` and `warnings` both empty -- on the first launch, unlike the
 0.1.452 window recorded above.
 
+## 0.1.454: the acceleration curve, on real hardware
+
+Epic #64 stage 3 (#67). Pointer travel is the one measurement a gate
+environment cannot make: a fabricated evdev node is a regular file, nothing
+opens it as a pointer, and `update_evdev_pointer` deliberately publishes
+nothing when no pointer is open. Issue #52's gate records the same limitation
+about `sensitivity_percent` and sends that measurement here.
+
+Measured on 192.168.10.54, injecting through a real pointer's own
+configuration:
+
+```
+pointers: 3 of 28 devices
+subject:  input-0003-25a7-0124-usb-0000-e6-00.4-1.1.4-input3
+
+flat      delta 20 travels 20.0 at 100%, 40.0 at 200%
+adaptive  delta  2 travels  2.0
+          delta 11 travels 22.0
+          delta 20 travels 60.0
+
+buttons        272 -> button=2, 273 -> button=0 at the dispatch
+aliasing map   400 invalid_device_buttons
+scroll_step    1 -> 1 report, 3 -> 3 reports
+```
+
+The flat numbers are #52's measurement unchanged, re-run under an explicit
+`flat` profile: `sensitivity_percent` means exactly what it meant before an
+acceleration profile existed, which is what #67 promised about the property it
+did not change. The adaptive numbers are the documented curve exactly --
+untouched at the floor of 2, doubled at the midpoint of 11, tripled at the
+ceiling of 20.
+
+`tools/tests/pointer_curve_gate.c` pins the same curve at its boundaries
+without a server, including its sign, its monotonicity, and that it is never
+slower than flat.
+
+**A recorded gap.** This host has no gamepad: its one device reporting an
+`axes` capability reads as `other`. So `deadzone_percent` and `invert_axes`
+are measured only against a fabricated gamepad, and there is no gamepad
+injection kind, so even that is an API contract rather than an effect. Their
+behaviour on real hardware is untested and is not claimed.
+
+**Middle-button emulation is absent by decision**, recorded as issue #71 with
+its design: it needs a deferred press, and so a time-driven obligation in an
+event loop that is otherwise entirely event-driven.
+
+One real bug was found while gating this release and fixed in it: a settings
+write that was still coalescing could sit in memory indefinitely on a quiet
+server, because nothing woke the loop. The `select` wait is now clamped to the
+remaining flush window, the same shape the attach reassert already used, and a
+write that cannot reach the disk says so once rather than failing in silence.
+
