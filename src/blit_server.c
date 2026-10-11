@@ -21076,6 +21076,17 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
     int cell_width = blit_font_width(&runtime->font);
     int cell_height = blit_font_height(&runtime->font);
     float italic_lean = (float)((cell_height + 15) / 16);
+    /* Issue #72. Damage is cleared only for a surface this pass actually
+       painted. It used to be cleared for every surface that *targets* an
+       output in the mask, which is a different question: the per-output loop
+       has several paths that skip drawing -- a held synchronized frame, an
+       output with nothing on it, a session whose display_id does not match,
+       a display powered down -- and every one of them discarded damage that
+       had never reached a pixel. Whatever the damage rectangle then went on
+       to be, those cells were never repainted again. */
+    int surface_painted[BLIT_MAX_FRAME_SURFACES];
+
+    memset(surface_painted, 0, sizeof(surface_painted));
     Uint64 render_started = 0;
     uint64_t diagnostic_render_started = monotonic_us();
 
@@ -21868,6 +21879,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                     (float)surface_origin_y, 0);
                 SDL_SetRenderClipRect(renderer, NULL);
             }
+            if (plan_index < BLIT_MAX_FRAME_SURFACES)
+                surface_painted[plan_index] = 1;
         }
         render_sdl_effects(runtime, renderer,
                            runtime->displays[display_index_for_output(
@@ -21901,18 +21914,10 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             runtime, plan->surfaces[plan_index].surface_id);
         BlitSession *session = surface != NULL ? find_session_id(
             runtime, surface->owner_session_id) : NULL;
-        int rendered = 0;
-        int output_index;
-        if (surface != NULL &&
-            (session == NULL || !session->terminal_synchronized)) {
-            for (output_index = 0; output_index < runtime->output_count;
-                 ++output_index)
-                if ((output_mask & (1U << output_index)) &&
-                    surface_targets_output(runtime, surface, output_index)) {
-                    rendered = 1;
-                    break;
-                }
-        }
+        int rendered = surface != NULL &&
+            (session == NULL || !session->terminal_synchronized) &&
+            plan_index < BLIT_MAX_FRAME_SURFACES &&
+            surface_painted[plan_index];
         if (rendered) {
             surface->damage_valid = 0;
             surface->presented_revision =
