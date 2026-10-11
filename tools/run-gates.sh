@@ -264,6 +264,7 @@ suite_lifecycle() {
     run_gate shutdown_gate.sh "$ROOT"/tools/tests/shutdown_gate.sh
     run_gate update_idle_timeout_gate.sh "$ROOT"/tools/tests/update_idle_timeout_gate.sh
     run_gate update_reset_gate.sh "$ROOT"/tools/tests/update_reset_gate.sh
+    run_gate update_restart_gate.sh "$ROOT"/tools/tests/update_restart_gate.sh
     run_gate update_cancel_gate.sh "$ROOT"/tools/tests/update_cancel_gate.sh
 }
 

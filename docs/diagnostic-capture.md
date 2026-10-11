@@ -274,6 +274,49 @@ of "nothing arrived".
 An unfiltered trace request still returns the surface ring, as it always has,
 so `graphics_payload` has to be named to be read.
 
+## Restart intents
+
+Two things restart Blit, and which one applies is part of the contract rather
+than an implementation detail.
+
+`POST /v1/control/restart` **re-execs the running image** in place. The pid
+survives, the port keeps answering, and `tools/tests/restart_gate.sh` asserts
+`same_binary=1`. Nothing else is going to restart the process, so it restarts
+itself.
+
+A **package install exits** -- non-zero -- and does not exec. The privileged
+helper has already run `systemctl daemon-reload` and `systemctl restart
+--no-block blit.service`, and that is the only path that can pick up a changed
+unit file: credentials, supplementary groups and sandboxing come from the unit,
+and an in-process exec cannot change them. The non-zero exit keeps
+`Restart=on-failure` as a safety net for the case where the helper dies before
+it reaches `systemctl`, because the package must never be installed with the
+service down.
+
+Doing both raced, and the race was expensive (issue #63). systemd sends its one
+`SIGTERM` to the main pid; a process that execs instead of exiting consumes
+that signal and keeps running, so the unit waits out `TimeoutStopSec` -- 90
+seconds by default -- and is then `SIGKILL`ed along with **every process in its
+cgroup**, including an attached Hibr desktop. The journal signature is:
+
+```
+Stopping blit.service ...
+blit[<pid>]: blit gateway listening ...          <- the same pid, re-exec'd
+blit.service: State 'stop-sigterm' timed out. Killing.
+blit.service: Killing process <pid> (blit-server) with signal SIGKILL
+blit.service: Killing process <pid> (hibr [attached:) with signal SIGKILL
+blit.service: Main process exited, code=killed, status=9/KILL
+blit.service: Failed with result 'timeout'
+```
+
+Two `listening` lines from one pid is the tell. `tools/tests/update_restart_gate.sh`
+asserts the two intents stay distinguishable.
+
+On a host with no SSH, the journal is still reachable: create a terminal
+session running `journalctl` with a wide surface and read the cells back off
+`GET /v1/surfaces/{id}/cells`. The in-process log ring cannot answer a question
+about why the previous process ended, because it died with it.
+
 ## Real-host troubleshooting protocol
 
 Use one capture as the evidence packet for each visible failure. Do not infer

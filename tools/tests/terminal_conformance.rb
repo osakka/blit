@@ -2047,6 +2047,39 @@ state = graphics_state_case(base, 'kitty-supported-t-d',
   gesc("a=T,#{gk},i=1,t=d,U=0,C=1", gp))
 assert_equal(1, state.fetch('graphics').length, 't=d and U=0 are the supported defaults')
 
+# ADR 0066 / issue #14. The vectors above refuse t=f with a payload that is
+# not a path. This one hands it a real, readable path -- the regression guard
+# for the only failure mode that matters, which is a future implementation
+# that helpfully opens what it was handed. A terminal escape sequence is not
+# an authenticated request: anything that can write to a PTY can emit one, so
+# a path that arrives this way must never be opened whatever it names.
+real_path = Base64.strict_encode64('/etc/hostname')
+state = graphics_state_case(base, 'kitty-t-f-real-path',
+  gesc("a=T,#{gk},i=1,t=f,C=1", real_path))
+assert_equal(0, state.fetch('graphics').length,
+             't=f naming a readable file creates no image')
+assert_equal('unsupported-key', state.fetch('graphics_diagnostics').fetch('last_error'),
+             't=f naming a readable file is refused with a reason')
+%w[t=t t=s].each do |medium|
+  state = graphics_state_case(base, "kitty-#{medium}-real-path",
+    gesc("a=T,#{gk},i=1,#{medium},C=1", real_path))
+  assert_equal(0, state.fetch('graphics').length,
+               "#{medium} naming a readable file creates no image")
+  assert_equal('unsupported-key',
+               state.fetch('graphics_diagnostics').fetch('last_error'),
+               "#{medium} naming a readable file is refused with a reason")
+end
+
+# The client-facing half: a refusal is answered rather than silent, so a
+# client falls back at once instead of waiting for a reply that never came.
+snapshot = run_case(base, 'kitty-t-f-reply',
+                    "stty -icanon -echo min 0 time 5; " \
+                    "printf '\\033_Ga=T,f=32,s=4,v=4,i=5,t=f;#{real_path}\\033\\\\'; " \
+                    'dd if=/dev/tty bs=1 count=15 2>/dev/null | od -An -tx1 | tr -d \' \\n\'',
+                    width: 60)
+assert_equal('1b5f47693d353b45494e56414c1b5c', row_text(snapshot).strip,
+             't=f is answered with EINVAL rather than dropped')
+
 # Numbered placements: the same (image, placement) pair replaces, a different
 # one adds, and an unnumbered display stays the single default placement.
 state = graphics_state_case(base, 'kitty-placement-ids',

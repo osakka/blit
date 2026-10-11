@@ -87,6 +87,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0063 — A desktop's cells come from its owner, and a desktop that never paints says so](0063-a-desktop-cells-come-from-its-owner.md)
 - [0064 — One device table, stable ids, and per-device configuration](0064-one-device-table-stable-ids-and-per-device-configuration.md)
 - [0065 — The privilege and authentication model](0065-the-privilege-and-authentication-model.md)
+- [0066 — The terminal names no file Blit opens](0066-the-terminal-names-no-file-blit-opens.md)
 
 ## Adding an ADR
 

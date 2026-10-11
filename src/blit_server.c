@@ -993,6 +993,13 @@ static int output_index_for_display_index(const BlitRuntime *runtime,
 
 static volatile sig_atomic_t blit_running = 1;
 static volatile sig_atomic_t blit_restart_requested = 0;
+/* An update install is restarted by the privileged helper's `systemctl
+   restart`, not by this process. Re-exec'ing here raced that restart: systemd
+   sends its one SIGTERM to the main pid, the process execs instead of
+   exiting, and the unit waits out TimeoutStopSec and then SIGKILLs the whole
+   cgroup -- taking an attached Hibr desktop with it, 90 seconds after the
+   deployment reported success (issue #63). */
+static volatile sig_atomic_t blit_update_exit_requested = 0;
 #ifndef BLIT_BUILD_VERSION
 #define BLIT_BUILD_VERSION "development"
 #endif
@@ -20094,8 +20101,11 @@ static int run_update_helper(const char *path, const char *sha256,
     if (fd < 0) return 0;
     memset(&address, 0, sizeof(address));
     address.sun_family = AF_UNIX;
-    snprintf(address.sun_path, sizeof(address.sun_path),
-             "/run/blit/update.sock");
+    /* The helper's socket. Overridable only so a gate can stand a stub
+       helper in front of it; the deployed path is the packaged one. */
+    snprintf(address.sun_path, sizeof(address.sun_path), "%s",
+             getenv("BLIT_UPDATE_SOCKET") != NULL ?
+                 getenv("BLIT_UPDATE_SOCKET") : "/run/blit/update.sock");
     if (connect(fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
         close(fd);
         snprintf(output, capacity, "root update helper is unavailable");
@@ -20232,7 +20242,13 @@ static void finish_update_upload(BlitRuntime *runtime, BlitHttpClient *client)
              "package installed; restarting Blit");
     send_http(client->fd, 202, "Accepted", "application/json",
               "{\"state\":\"restarting\",\"detail\":\"package installed; restarting Blit\"}");
-    blit_restart_requested = 1;
+    /* Exit; do not exec. The helper has already asked systemd to restart the
+       unit, which is the only path that can pick up a changed unit file --
+       its own comment says so. Doing both raced, and the race cost the whole
+       cgroup (issue #63). The exit is non-zero so Restart=on-failure remains
+       a safety net if the helper dies before it reaches systemctl: the
+       package must never be installed with the service down. */
+    blit_update_exit_requested = 1;
     blit_running = 0;
 }
 
@@ -21039,7 +21055,12 @@ int main(int argc, char **argv)
         SDL_Quit();
     if (blit_restart_requested) {
         restart_server_process(&runtime);
-        fprintf(stderr, "blit: update restart failed: %s\n", strerror(errno));
+        fprintf(stderr, "blit: restart failed: %s\n", strerror(errno));
+        return 1;
+    }
+    if (blit_update_exit_requested) {
+        fprintf(stderr, "blit: package installed; exiting for the unit "
+                        "restart\n");
         return 1;
     }
     return 0;
