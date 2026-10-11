@@ -799,6 +799,19 @@ paths:
                             maxItems: 4
                             items: {type: string, maxLength: 4}
                       additionalProperties: false
+                    repeat_delay_ms: {type: integer, minimum: 10, maximum: 10000}
+                    repeat_rate_hz: {type: integer, minimum: 1, maximum: 255}
+                    caps_lock_boot: {type: boolean}
+                    num_lock_boot: {type: boolean}
+                    modifiers:
+                      type: object
+                      description: >-
+                        Evdev code to role (issue #66). Replaces the whole
+                        map; an empty object clears it.
+                      additionalProperties:
+                        type: string
+                        enum: [none, shift, control, alt, altgr, meta,
+                               caps_lock, num_lock]
                     route:
                       type: object
                       description: >-
@@ -2129,7 +2142,16 @@ components:
             enum: [evdev-keyboard, evdev-pointer, evdev-gamepad]
         capabilities:
           type: array
-          items: {type: string}
+          description: >-
+            What evdev reports this device can do. `repeat` is EV_REP: the
+            kernel autorepeats for the device, so its delay and rate are
+            per-device kernel settings Blit owns through `EVIOCGREP` and
+            `EVIOCSREP`. A control panel should hide a repeat control for a
+            device without it rather than offer one that will be refused
+            (issue #66).
+          items:
+            type: string
+            enum: [rel-x, rel-y, buttons, keys, axes, gamepad-buttons, repeat]
         identity:
           type: object
           description: What the device reports about itself, as read by evdev.
@@ -2214,6 +2236,66 @@ components:
               description: >-
                 Pointer devices only. Inverts the wheel direction this device
                 reports.
+            repeat_delay_ms:
+              type: integer
+              minimum: 10
+              maximum: 10000
+              description: >-
+                How long a key must be held before it starts repeating.
+                Reported only for a device whose capabilities include
+                `repeat`, and the value reported is what the last read from
+                the kernel found -- not what Blit last asked for.
+            repeat_rate_hz:
+              type: integer
+              minimum: 1
+              maximum: 255
+              description: >-
+                How many repeats a second. The kernel holds a period in whole
+                milliseconds, so the rate is quantised on the way in and a
+                read-back can differ from the request: 30 Hz is a 33 ms
+                period, which reads back as 30 Hz, while 7 Hz is 142 ms. That
+                is why the read-back is what gets reported, and why
+                `repeat_period_ms` is reported beside it.
+            repeat_period_ms:
+              type: integer
+              minimum: 1
+              description: >-
+                Read-only. The period the kernel actually holds, from which
+                `repeat_rate_hz` is derived.
+            caps_lock_boot:
+              type: boolean
+              description: >-
+                The Caps Lock state to apply when this keyboard is opened,
+                including after a hotplug. Absent means unset, which leaves
+                the kernel's own LED state as the authority -- the behaviour
+                before this property existed. Blit writes the LED so the lamp
+                and the behaviour agree.
+            num_lock_boot:
+              type: boolean
+              description: >-
+                The same for Num Lock, which decides whether the keypad types
+                digits or selects navigation.
+            modifiers:
+              type: object
+              additionalProperties:
+                type: string
+                enum: [none, shift, control, alt, altgr, meta, caps_lock,
+                       num_lock]
+              description: >-
+                A sparse map from evdev code to the role that code plays, per
+                device. This is how Caps-Lock-as-Control is expressed, and it
+                is not expressible as a keymap: a keymap maps a code to the
+                *characters* it types, and a modifier is not a character.
+
+                The two compose in one order -- the remap decides what a code
+                *is*, the keymap decides what it *types* -- and a code with a
+                role never reaches the keymap. `none` swallows the key, which
+                is how "disable this key" is said.
+
+                A remapped code does not become the code it was mapped to:
+                the held set stays keyed by the physical code, so holding a
+                real Control and releasing a remapped Caps Lock leaves
+                Control held.
             keymap:
               type: object
               description: >-

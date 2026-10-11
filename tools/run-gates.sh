@@ -242,6 +242,7 @@ suite_renderer() {
     run_gate pointer_geometry_gate.rb ruby tools/tests/pointer_geometry_gate.rb
     run_gate mouse_report_gate.rb ruby tools/tests/mouse_report_gate.rb
     run_gate key_encoding_gate.rb ruby tools/tests/key_encoding_gate.rb
+    run_gate keyboard_settings_gate.rb ruby tools/tests/keyboard_settings_gate.rb
     run_gate sdl_wallpaper_damage_gate.rb ruby tools/tests/sdl_wallpaper_damage_gate.rb
     run_gate screenshot_overlay_gate.sh "$ROOT"/tools/tests/screenshot_overlay_gate.sh
     run_gate render_state_agreement_gate.rb ruby tools/tests/render_state_agreement_gate.rb

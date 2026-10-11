@@ -331,6 +331,37 @@ typedef struct {
    that will be refused. */
 #define BLIT_INPUT_CAP_REPEAT 64
 
+/* Issue #66. The kernel autorepeats for a device that reports EV_REP, and the
+   delay and period are per-device kernel settings reached with EVIOCGREP and
+   EVIOCSREP on a descriptor Blit already holds. Measured on 192.168.10.54:
+   both work on the O_RDONLY descriptor the opener uses, so owning the repeat
+   rate needs no change to how a device is opened.
+
+   The rate is exposed in hertz because that is what a person adjusts, and
+   converted to the kernel's whole-millisecond period -- so a read-back can
+   differ from the request, and the read-back is what is reported. */
+#define BLIT_INPUT_REPEAT_DELAY_MIN 10
+#define BLIT_INPUT_REPEAT_DELAY_MAX 10000
+#define BLIT_INPUT_REPEAT_RATE_MIN 1
+#define BLIT_INPUT_REPEAT_RATE_MAX 255
+
+/* A remapped key's role. The remap decides what a code *is*; #58's keymap
+   decides what it *types*. They compose in that order, and a code with a role
+   never reaches the keymap -- which is what makes CapsLock-as-Control work at
+   all, since a modifier is not a character and no keymap entry could express
+   it. BLIT_MODIFIER_NONE swallows the key, which is how "disable this key" is
+   said. */
+#define BLIT_MODIFIER_UNMAPPED (-1)
+#define BLIT_MODIFIER_NONE 0
+#define BLIT_MODIFIER_SHIFT 1
+#define BLIT_MODIFIER_CTRL 2
+#define BLIT_MODIFIER_ALT 3
+#define BLIT_MODIFIER_ALTGR 4
+#define BLIT_MODIFIER_META 5
+#define BLIT_MODIFIER_CAPS_LOCK 6
+#define BLIT_MODIFIER_NUM_LOCK 7
+#define BLIT_MAX_MODIFIER_OVERRIDES 32
+
 typedef struct {
     int used;
     int seen;
@@ -370,6 +401,29 @@ typedef struct {
     int keymap_count;
     unsigned short keymap_codes[BLIT_MAX_KEYMAP_OVERRIDES];
     char keymap_levels[BLIT_MAX_KEYMAP_OVERRIDES][4][8];
+    /* Issue #66. What a key *is*, as against what it types. Sparse, by evdev
+       code, per device for the same reason the keymap is. */
+    int modifier_count;
+    unsigned short modifier_codes[BLIT_MAX_MODIFIER_OVERRIDES];
+    unsigned char modifier_roles[BLIT_MAX_MODIFIER_OVERRIDES];
+    /* The repeat the kernel has for this device, read back after every set and
+       at every modifier sync, so a controller sees what the hardware is doing
+       rather than what Blit last asked for. `repeat_configured` is what makes
+       a stored entry distinguishable from a machine's own defaults, which are
+       not the same on every host. */
+    int repeat_configured;
+    int repeat_delay_ms;
+    int repeat_period_ms;
+    /* Where a fabricated node stands in for the kernel: a regular file fails
+       every ioctl, so a gate could otherwise not reach this path at all. Only
+       ever touched when BLIT_INPUT_ROOT is set. */
+    int simulated_repeat_delay_ms;
+    int simulated_repeat_period_ms;
+    /* The lock states to apply when this keyboard is opened. -1 is unset,
+       which leaves the kernel's own LED state as the authority -- the
+       behaviour before this existed. */
+    int caps_lock_boot;
+    int num_lock_boot;
     /* ADR 0064 / issue #57: a device's own counters. They were slot-indexed
        arrays on the runtime, copied along by hand every time the poll set
        compacted, and reported by /v1/diagnostics/runtime keyed by a node path
@@ -1007,6 +1061,10 @@ static int runtime_terminal_cell_height(const BlitRuntime *runtime)
     if (value < 1) value = 16;
     return value * (runtime->font_scale > 0 ? runtime->font_scale : 1);
 }
+
+static void input_device_apply_repeat(BlitRuntime *runtime,
+                                      BlitInputDevice *device);
+static void evdev_refresh_modifiers(BlitInputDevice *device);
 
 /* ADR 0067. Declared here because a device acquires its stored settings in
    the scan that discovers it, which is well above the settings module. */
@@ -3625,7 +3683,7 @@ static unsigned input_sidecar_capabilities(const char *text)
    a sidecar was found at all. */
 static int read_input_sidecar(BlitInputDevice *device, int identity,
                               unsigned *kinds, unsigned *capabilities,
-                              unsigned *repeat_delay, unsigned *repeat_period)
+                              int *repeat_delay, int *repeat_period)
 {
     char path[320];
     char line[640];
@@ -3667,9 +3725,9 @@ static int read_input_sidecar(BlitInputDevice *device, int identity,
             *capabilities = input_sidecar_capabilities(value);
         else if (repeat_delay != NULL && strcmp(line, "repeat") == 0) {
             char *comma = strchr(value, ',');
-            *repeat_delay = (unsigned)strtoul(value, NULL, 10);
+            *repeat_delay = (int)strtol(value, NULL, 10);
             if (comma != NULL && repeat_period != NULL)
-                *repeat_period = (unsigned)strtoul(comma + 1, NULL, 10);
+                *repeat_period = (int)strtol(comma + 1, NULL, 10);
         }
     }
     fclose(file);
@@ -3776,6 +3834,7 @@ static BlitInputDevice *record_input_device(BlitRuntime *runtime,
     BlitInputDevice *device = find_input_device_node(runtime, node);
     unsigned kinds = 0;
     unsigned capabilities = 0;
+    int created = 0;
     int i;
 
     if (discovered != NULL)
@@ -3795,10 +3854,14 @@ static BlitInputDevice *record_input_device(BlitRuntime *runtime,
         /* Until EVIOCGLED reports this keyboard's own LED, assume its keypad
            types digits -- what it did before NumLock was honoured at all. */
         device->num_lock = 1;
+        device->caps_lock_boot = -1;
+        device->num_lock_boot = -1;
         snprintf(device->node, sizeof(device->node), "%s", node);
         snprintf(device->name, sizeof(device->name), "%s", node);
         read_input_device_strings(fd, device);
-        read_input_sidecar(device, 1, NULL, NULL, NULL, NULL);
+        read_input_sidecar(device, 1, NULL, NULL,
+                           &device->simulated_repeat_delay_ms,
+                           &device->simulated_repeat_period_ms);
         assign_input_device_id(runtime, device);
         device->first_seen_us = monotonic_us();
         /* A device starts at revision 1, not 0: the revision is what a
@@ -3807,11 +3870,7 @@ static BlitInputDevice *record_input_device(BlitRuntime *runtime,
         device->revision = 1;
         if (discovered != NULL)
             *discovered = 1;
-        /* ADR 0067. This is the only place a device acquires its id, so it is
-           the only place stored settings have to be applied: the boot scan and
-           a hotplug an hour later come through here alike, with no second code
-           path to keep in step. */
-        settings_apply_input_device(runtime, device);
+        created = 1;
     }
     probe_input_device(fd, &kinds, &capabilities);
     read_input_sidecar(device, 0, &kinds, &capabilities, NULL, NULL);
@@ -3819,6 +3878,20 @@ static BlitInputDevice *record_input_device(BlitRuntime *runtime,
         ++device->revision;
     device->kinds = kinds;
     device->capabilities = capabilities;
+    /* ADR 0067, and *after* the kinds and capabilities are known. Applying
+       stored settings at the moment the entry is allocated looked like the
+       natural place and was wrong: the device's kinds were still zero, so a
+       keyboard property gated on EV_REP was refused by the same 422 that
+       protects a live PATCH. This is still the only place a device acquires
+       its id, so the boot scan and a hotplug an hour later come through here
+       alike, with no second code path to keep in step. */
+    if (created) {
+        settings_apply_input_device(runtime, device);
+        /* Read back whatever is now in force: for a device with no descriptor
+           yet that is the simulated pair, and for a real one the modifier
+           sync replaces it as soon as the descriptor registers. */
+        input_device_apply_repeat(runtime, device);
+    }
     device->seen = 1;
     device->last_seen_us = monotonic_us();
     /* A device that was absent and is back. Configuration survives the gap,
@@ -3895,6 +3968,7 @@ static BlitInputDevice *record_opened_device(BlitRuntime *runtime,
                                              int *discovered)
 {
     BlitInputDevice *device = find_input_device_node(runtime, opened->path);
+    int created = 0;
     int i;
 
     if (discovered != NULL)
@@ -3912,6 +3986,8 @@ static BlitInputDevice *record_opened_device(BlitRuntime *runtime,
         device->enabled = 1;
         device->sensitivity_percent = BLIT_INPUT_SENSITIVITY_DEFAULT;
         device->num_lock = 1;
+        device->caps_lock_boot = -1;
+        device->num_lock_boot = -1;
         snprintf(device->node, sizeof(device->node), "%s", opened->path);
         snprintf(device->name, sizeof(device->name), "%s",
                  opened->name[0] != '\0' ? opened->name : opened->path);
@@ -3921,17 +3997,15 @@ static BlitInputDevice *record_opened_device(BlitRuntime *runtime,
         device->version = opened->version;
         snprintf(device->uniq, sizeof(device->uniq), "%s", opened->uniq);
         snprintf(device->phys, sizeof(device->phys), "%s", opened->phys);
-        read_input_sidecar(device, 1, NULL, NULL, NULL, NULL);
+        read_input_sidecar(device, 1, NULL, NULL,
+                           &device->simulated_repeat_delay_ms,
+                           &device->simulated_repeat_period_ms);
         assign_input_device_id(runtime, device);
         device->first_seen_us = monotonic_us();
         device->revision = 1;
         if (discovered != NULL)
             *discovered = 1;
-        /* The opener thread's path to a new entry, and the second of the two
-           places a device acquires its id. Both apply stored settings, or a
-           device opened off the thread would come up at the defaults while
-           one opened directly came up configured (ADR 0067). */
-        settings_apply_input_device(runtime, device);
+        created = 1;
     }
     {
         unsigned kinds = opened->kinds;
@@ -3941,6 +4015,14 @@ static BlitInputDevice *record_opened_device(BlitRuntime *runtime,
             ++device->revision;
         device->kinds = kinds;
         device->capabilities = capabilities;
+    }
+    /* The opener thread's path to a new entry, and the second of the two
+       places a device acquires its id. Both apply stored settings, or a
+       device opened off the thread would come up at the defaults while one
+       opened directly came up configured (ADR 0067). */
+    if (created) {
+        settings_apply_input_device(runtime, device);
+        input_device_apply_repeat(runtime, device);
     }
     device->seen = 1;
     device->last_seen_us = monotonic_us();
@@ -3975,6 +4057,178 @@ static int input_device_open_kinds(const BlitRuntime *runtime,
             strcmp(runtime->evdev_gamepad_paths[i], device->node) == 0)
             open_kinds |= BLIT_INPUT_KIND_GAMEPAD;
     return open_kinds;
+}
+
+/* The descriptor Blit holds for this device as a keyboard, or -1. The repeat
+   ioctls go through the descriptor the poll set already owns rather than
+   opening the node again: it is the one Blit knows it can read from, and
+   EVIOCSREP needs no more than that. */
+static const char *input_modifier_role_name(int role)
+{
+    switch (role) {
+    case BLIT_MODIFIER_NONE: return "none";
+    case BLIT_MODIFIER_SHIFT: return "shift";
+    case BLIT_MODIFIER_CTRL: return "control";
+    case BLIT_MODIFIER_ALT: return "alt";
+    case BLIT_MODIFIER_ALTGR: return "altgr";
+    case BLIT_MODIFIER_META: return "meta";
+    case BLIT_MODIFIER_CAPS_LOCK: return "caps_lock";
+    case BLIT_MODIFIER_NUM_LOCK: return "num_lock";
+    default: return "";
+    }
+}
+
+static int input_modifier_role_from_name(const char *name)
+{
+    int role;
+
+    for (role = BLIT_MODIFIER_NONE; role <= BLIT_MODIFIER_NUM_LOCK; ++role)
+        if (strcmp(input_modifier_role_name(role), name) == 0)
+            return role;
+    return BLIT_MODIFIER_UNMAPPED;
+}
+
+static int input_device_keyboard_fd(const BlitRuntime *runtime,
+                                    const BlitInputDevice *device)
+{
+    int i;
+
+    for (i = 0; i < runtime->evdev_keyboard_count; ++i)
+        if (runtime->evdev_keyboard_fds[i] >= 0 &&
+            strcmp(runtime->evdev_keyboard_paths[i], device->node) == 0)
+            return runtime->evdev_keyboard_fds[i];
+    return -1;
+}
+
+/* What the kernel has. A fabricated node fails the ioctl, and under
+   BLIT_INPUT_ROOT the device's own simulated pair stands in for the kernel --
+   which is faithful rather than merely convenient: a real kernel also keeps
+   its value across a Blit restart, and so does this. */
+static int input_device_repeat_get(const BlitRuntime *runtime,
+                                   const BlitInputDevice *device,
+                                   int *delay_ms, int *period_ms)
+{
+    unsigned int values[2];
+    int fd = input_device_keyboard_fd(runtime, device);
+
+    if (fd >= 0 && ioctl(fd, EVIOCGREP, values) == 0) {
+        *delay_ms = (int)values[0];
+        *period_ms = (int)values[1];
+        return 1;
+    }
+    if (getenv("BLIT_INPUT_ROOT") != NULL &&
+        device->simulated_repeat_delay_ms > 0) {
+        *delay_ms = device->simulated_repeat_delay_ms;
+        *period_ms = device->simulated_repeat_period_ms;
+        return 1;
+    }
+    return 0;
+}
+
+static int input_device_repeat_set(const BlitRuntime *runtime,
+                                   BlitInputDevice *device, int delay_ms,
+                                   int period_ms)
+{
+    unsigned int values[2];
+    int fd = input_device_keyboard_fd(runtime, device);
+
+    values[0] = (unsigned int)delay_ms;
+    values[1] = (unsigned int)period_ms;
+    if (fd >= 0 && ioctl(fd, EVIOCSREP, values) == 0)
+        return 1;
+    if (getenv("BLIT_INPUT_ROOT") != NULL) {
+        device->simulated_repeat_delay_ms = delay_ms;
+        device->simulated_repeat_period_ms = period_ms;
+        return 1;
+    }
+    return 0;
+}
+
+/* A rate in hertz is what a person adjusts; the kernel takes a period in
+   whole milliseconds. The conversion is lossy in both directions, which is
+   exactly why what gets reported is the read-back and not the request. */
+static int input_repeat_period_for_rate(int rate_hz)
+{
+    int period = rate_hz > 0 ? 1000 / rate_hz : 0;
+
+    return period < 1 ? 1 : period;
+}
+
+static int input_repeat_rate_for_period(int period_ms)
+{
+    int rate = period_ms > 0 ? 1000 / period_ms : 0;
+
+    return rate < 1 ? 1 : rate;
+}
+
+/* Put the device's configured repeat into the kernel and read back what the
+   kernel made of it. Called wherever a keyboard descriptor is registered, so
+   a hotplug re-applies it with no extra state to carry. */
+static void input_device_apply_repeat(BlitRuntime *runtime,
+                                      BlitInputDevice *device)
+{
+    int delay = 0;
+    int period = 0;
+
+    if (device->repeat_configured && device->repeat_delay_ms > 0 &&
+        device->repeat_period_ms > 0)
+        input_device_repeat_set(runtime, device, device->repeat_delay_ms,
+                                device->repeat_period_ms);
+    if (input_device_repeat_get(runtime, device, &delay, &period)) {
+        device->repeat_delay_ms = delay;
+        device->repeat_period_ms = period;
+    }
+}
+
+/* A lock state the operator chose, applied over the kernel's LED. This runs
+   after evdev_sync_modifiers has adopted the LED, because the sync is the
+   authority when nothing has been configured and would otherwise undo this.
+   The LED is written so the light and the behaviour agree -- a Num Lock lamp
+   that disagrees with what the keypad types is worse than no lamp. */
+static void input_device_apply_locks(BlitRuntime *runtime,
+                                     BlitInputDevice *device)
+{
+    int fd;
+
+    if (device->caps_lock_boot < 0 && device->num_lock_boot < 0)
+        return;
+    if (device->caps_lock_boot >= 0)
+        device->caps_lock = device->caps_lock_boot;
+    if (device->num_lock_boot >= 0)
+        device->num_lock = device->num_lock_boot;
+    /* The LED needs a writable descriptor, which the poll set's read-only one
+       is not. A momentary open is bounded and fails cleanly where the node is
+       not writable; it is skipped for a fabricated node, which is a regular
+       file that would simply accumulate event structs. */
+    if (getenv("BLIT_INPUT_ROOT") != NULL)
+        return;
+    fd = open(device->node, O_WRONLY | O_CLOEXEC);
+    if (fd < 0)
+        return;
+    {
+        struct input_event events[2];
+        int count = 0;
+        memset(events, 0, sizeof(events));
+        if (device->caps_lock_boot >= 0) {
+            events[count].type = EV_LED;
+            events[count].code = LED_CAPSL;
+            events[count].value = device->caps_lock_boot;
+            ++count;
+        }
+        if (device->num_lock_boot >= 0) {
+            events[count].type = EV_LED;
+            events[count].code = LED_NUML;
+            events[count].value = device->num_lock_boot;
+            ++count;
+        }
+        if (count > 0 &&
+            write(fd, events, sizeof(events[0]) * (size_t)count) < 0)
+            /* A device that will not take an LED write is not an error worth
+               reporting on every hotplug; the state above is what decides
+               behaviour. */
+            (void)0;
+    }
+    close(fd);
 }
 
 static size_t input_device_item_json(const BlitRuntime *runtime,
@@ -4101,6 +4355,41 @@ static size_t input_device_item_json(const BlitRuntime *runtime,
             ",\"sensitivity_percent\":%d,\"natural_scroll\":%s",
             device->sensitivity_percent,
             device->natural_scroll ? "true" : "false");
+    /* The keyboard properties, by the same rule. repeat is reported only
+       where the kernel autorepeats -- a device without EV_REP has no rate to
+       show and none to set (issue #66) -- and the values are what the last
+       read from the kernel found, not what Blit last asked for: the rate is
+       quantised to a whole-millisecond period on the way in. */
+    if (input_device_supports(device, BLIT_INPUT_KIND_KEYBOARD)) {
+        if ((device->capabilities & BLIT_INPUT_CAP_REPEAT) &&
+            device->repeat_period_ms > 0)
+            complete &= json_appendf(body, capacity, &used,
+                ",\"repeat_delay_ms\":%d,\"repeat_rate_hz\":%d,"
+                "\"repeat_period_ms\":%d",
+                device->repeat_delay_ms,
+                input_repeat_rate_for_period(device->repeat_period_ms),
+                device->repeat_period_ms);
+        if (device->caps_lock_boot >= 0)
+            complete &= json_appendf(body, capacity, &used,
+                ",\"caps_lock_boot\":%s",
+                device->caps_lock_boot ? "true" : "false");
+        if (device->num_lock_boot >= 0)
+            complete &= json_appendf(body, capacity, &used,
+                ",\"num_lock_boot\":%s",
+                device->num_lock_boot ? "true" : "false");
+        if (device->modifier_count > 0) {
+            int modifier_index;
+            complete &= json_appendf(body, capacity, &used, ",\"modifiers\":{");
+            for (modifier_index = 0; modifier_index < device->modifier_count;
+                 ++modifier_index)
+                complete &= json_appendf(body, capacity, &used,
+                    "%s\"%u\":\"%s\"", modifier_index == 0 ? "" : ",",
+                    (unsigned)device->modifier_codes[modifier_index],
+                    input_modifier_role_name(
+                        (int)device->modifier_roles[modifier_index]));
+            complete &= json_appendf(body, capacity, &used, "}");
+        }
+    }
     if (device->route_target[0] != '\0')
         complete &= json_appendf(body, capacity, &used,
             ",\"route\":{\"target_session_id\":\"%s\",\"enabled\":%s}",
@@ -5319,6 +5608,90 @@ static const char *cell_misplaced_style_key(const char *cell_json)
  * {"configuration":{},"enabled":true} would read as an enabled device. A
  * configuration object is written, not just read, so its boundary has to be
  * real. Returns 0 when there is no balanced object or it does not fit. */
+/* One member of a JSON object: its key and the text of its value. Returns the
+   cursor to continue from, or NULL at the end of the object. The repo has no
+   JSON parser and does not need one; the document's shape is Blit's own and
+   one level of nesting per class is all of it. */
+static const char *json_next_member(const char *cursor, char *key,
+                                    size_t key_capacity, char *value,
+                                    size_t value_capacity)
+{
+    size_t used = 0;
+    int depth = 0;
+
+    if (cursor == NULL || key_capacity == 0 || value_capacity == 0)
+        return NULL;
+    key[0] = '\0';
+    value[0] = '\0';
+    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\n' ||
+           *cursor == '\r' || *cursor == ',' || *cursor == '{')
+        ++cursor;
+    if (*cursor != '"')
+        return NULL;
+    ++cursor;
+    while (*cursor != '\0' && *cursor != '"') {
+        if (used + 1 >= key_capacity)
+            return NULL;
+        key[used++] = *cursor++;
+    }
+    if (*cursor != '"')
+        return NULL;
+    key[used] = '\0';
+    ++cursor;
+    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\n' ||
+           *cursor == '\r')
+        ++cursor;
+    if (*cursor != ':')
+        return NULL;
+    ++cursor;
+    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\n' ||
+           *cursor == '\r')
+        ++cursor;
+    used = 0;
+    for (; *cursor != '\0'; ++cursor) {
+        if (used + 2 >= value_capacity)
+            return NULL;
+        if (*cursor == '"') {
+            value[used++] = *cursor++;
+            while (*cursor != '\0' && *cursor != '"') {
+                if (used + 3 >= value_capacity)
+                    return NULL;
+                value[used++] = *cursor;
+                if (*cursor == '\\' && cursor[1] != '\0')
+                    value[used++] = *++cursor;
+                ++cursor;
+            }
+            if (*cursor != '"')
+                return NULL;
+            value[used++] = '"';
+            if (depth == 0) {
+                value[used] = '\0';
+                return cursor + 1;
+            }
+            continue;
+        }
+        if (*cursor == '{' || *cursor == '[')
+            ++depth;
+        else if (*cursor == '}' || *cursor == ']') {
+            if (depth == 0) {
+                /* The end of the enclosing object with no value read. */
+                value[used] = '\0';
+                return used > 0 ? cursor : NULL;
+            }
+            if (--depth == 0) {
+                value[used++] = *cursor;
+                value[used] = '\0';
+                return cursor + 1;
+            }
+        } else if (depth == 0 && (*cursor == ',' || *cursor == '}')) {
+            value[used] = '\0';
+            return cursor;
+        }
+        value[used++] = *cursor;
+    }
+    return NULL;
+}
+
 static int json_object_slice(const char *cursor, char *out, size_t capacity)
 {
     size_t used = 0;
@@ -5714,11 +6087,79 @@ static const char *input_route_rejected_property(const char *route)
 static const char *input_device_rejected_property(const char *configuration)
 {
     static const char *const writable[] = {
-        "enabled", "sensitivity_percent", "natural_scroll", "route", "keymap"
+        "enabled", "sensitivity_percent", "natural_scroll", "route", "keymap",
+        "repeat_delay_ms", "repeat_rate_hz", "caps_lock_boot",
+        "num_lock_boot", "modifiers"
     };
 
     return json_rejected_property(configuration, writable,
                                   sizeof(writable) / sizeof(writable[0]));
+}
+
+/* Issue #66. The modifier remap, parsed into a scratch device the way the
+   keymap is: nothing is applied until the whole map has been accepted, so a
+   refusal in the middle leaves the device as it was. */
+static const char *input_modifiers_rejected_property(const char *modifiers)
+{
+    return NULL;
+}
+
+static int parse_input_modifiers(const char *modifiers,
+                                 BlitInputDevice *parsed,
+                                 const char **reason)
+{
+    const char *cursor = modifiers;
+    char key[32];
+    char value[64];
+
+    parsed->modifier_count = 0;
+    while (*cursor != '\0' && *cursor != '{')
+        ++cursor;
+    if (*cursor != '{') {
+        *reason = "modifiers must be a JSON object of evdev code to role.";
+        return 0;
+    }
+    ++cursor;
+    while ((cursor = json_next_member(cursor, key, sizeof(key), value,
+                                      sizeof(value))) != NULL) {
+        char *end = NULL;
+        long code = strtol(key, &end, 10);
+        int role;
+        char name[32];
+        size_t length;
+        if (end == key || (end != NULL && *end != '\0') || code < 1 ||
+            code > KEY_MAX) {
+            *reason = "every key of modifiers must be an evdev code from 1 "
+                      "through KEY_MAX.";
+            return 0;
+        }
+        if (value[0] != '"') {
+            *reason = "every value of modifiers must be a role name.";
+            return 0;
+        }
+        length = strlen(value);
+        if (length < 2 || value[length - 1] != '"' || length - 2 >= sizeof(name)) {
+            *reason = "every value of modifiers must be a role name.";
+            return 0;
+        }
+        memcpy(name, value + 1, length - 2);
+        name[length - 2] = '\0';
+        role = input_modifier_role_from_name(name);
+        if (role == BLIT_MODIFIER_UNMAPPED) {
+            *reason = "a modifier role must be one of none, shift, control, "
+                      "alt, altgr, meta, caps_lock, num_lock.";
+            return 0;
+        }
+        if (parsed->modifier_count >= BLIT_MAX_MODIFIER_OVERRIDES) {
+            *reason = "too many modifier overrides for one device.";
+            return 0;
+        }
+        parsed->modifier_codes[parsed->modifier_count] =
+            (unsigned short)code;
+        parsed->modifier_roles[parsed->modifier_count] = (unsigned char)role;
+        ++parsed->modifier_count;
+    }
+    return 1;
 }
 
 static int apply_cell_update(BlitSurface *surface, const char *json,
@@ -13842,6 +14283,18 @@ static int apply_input_device_configuration(BlitRuntime *runtime,
     const char *keymap_cursor;
     static BlitInputDevice parsed_keymap;
     int keymap_requested = 0;
+    int repeat_delay = 0;
+    int repeat_delay_requested;
+    int repeat_rate = 0;
+    int repeat_rate_requested;
+    int caps_boot = 0;
+    int caps_boot_requested;
+    int num_boot = 0;
+    int num_boot_requested;
+    char modifiers[2048];
+    const char *modifiers_cursor;
+    static BlitInputDevice parsed_modifiers;
+    int modifiers_requested = 0;
     int changed = 0;
 
     /* An unknown property is refused and named. Accepting it silently is
@@ -13883,6 +14336,99 @@ static int apply_input_device_configuration(BlitRuntime *runtime,
                                 "invalid_device_configuration",
                                 "natural_scroll must be a JSON boolean.");
         return 0;
+    }
+    repeat_delay_requested = json_int(scalars, "repeat_delay_ms",
+                                      &repeat_delay);
+    repeat_rate_requested = json_int(scalars, "repeat_rate_hz", &repeat_rate);
+    caps_boot_requested = json_bool(scalars, "caps_lock_boot", &caps_boot);
+    num_boot_requested = json_bool(scalars, "num_lock_boot", &num_boot);
+    if ((json_key_cursor(scalars, "repeat_delay_ms") != NULL &&
+         !repeat_delay_requested) ||
+        (json_key_cursor(scalars, "repeat_rate_hz") != NULL &&
+         !repeat_rate_requested)) {
+        config_problem(problem, 400, "Bad Request",
+                       "invalid_device_configuration",
+                       "repeat_delay_ms and repeat_rate_hz must be integers.");
+        return 0;
+    }
+    if ((json_key_cursor(scalars, "caps_lock_boot") != NULL &&
+         !caps_boot_requested) ||
+        (json_key_cursor(scalars, "num_lock_boot") != NULL &&
+         !num_boot_requested)) {
+        config_problem(problem, 400, "Bad Request",
+                       "invalid_device_configuration",
+                       "caps_lock_boot and num_lock_boot must be JSON "
+                       "booleans.");
+        return 0;
+    }
+    /* The keyboard properties follow the same rule as the pointer ones: a
+       device of no known kind accepts anything, a known kind refuses what
+       contradicts it. */
+    if ((caps_boot_requested || num_boot_requested) &&
+        !input_device_supports(device, BLIT_INPUT_KIND_KEYBOARD)) {
+        config_problem(problem, 422, "Unprocessable Entity",
+                       "device_property_not_applicable",
+                       "caps_lock_boot and num_lock_boot apply to a device Blit reads as a keyboard, or to one of no known kind.");
+        return 0;
+    }
+    /* Repeat needs more than a keyboard: it needs EV_REP, because the rate is
+       the kernel's and a device the kernel does not autorepeat for has none
+       to set. Refusing says so, where accepting would store a number that
+       changes nothing. */
+    if ((repeat_delay_requested || repeat_rate_requested) &&
+        !(device->capabilities & BLIT_INPUT_CAP_REPEAT)) {
+        config_problem(problem, 422, "Unprocessable Entity",
+                       "device_property_not_applicable",
+                       "repeat_delay_ms and repeat_rate_hz apply to a device that reports EV_REP, which this one does not; its capabilities would include \"repeat\".");
+        return 0;
+    }
+    if (repeat_delay_requested &&
+        (repeat_delay < BLIT_INPUT_REPEAT_DELAY_MIN ||
+         repeat_delay > BLIT_INPUT_REPEAT_DELAY_MAX)) {
+        char detail[192];
+        snprintf(detail, sizeof(detail),
+                 "repeat_delay_ms must be an integer from %d through %d.",
+                 BLIT_INPUT_REPEAT_DELAY_MIN, BLIT_INPUT_REPEAT_DELAY_MAX);
+        config_problem(problem, 400, "Bad Request",
+                       "invalid_device_configuration", detail);
+        return 0;
+    }
+    if (repeat_rate_requested &&
+        (repeat_rate < BLIT_INPUT_REPEAT_RATE_MIN ||
+         repeat_rate > BLIT_INPUT_REPEAT_RATE_MAX)) {
+        char detail[192];
+        snprintf(detail, sizeof(detail),
+                 "repeat_rate_hz must be an integer from %d through %d.",
+                 BLIT_INPUT_REPEAT_RATE_MIN, BLIT_INPUT_REPEAT_RATE_MAX);
+        config_problem(problem, 400, "Bad Request",
+                       "invalid_device_configuration", detail);
+        return 0;
+    }
+    modifiers_cursor = json_key_cursor(configuration, "modifiers");
+    if (modifiers_cursor != NULL) {
+        const char *reason = NULL;
+        if (!input_device_supports(device, BLIT_INPUT_KIND_KEYBOARD)) {
+            config_problem(problem, 422, "Unprocessable Entity",
+                           "device_property_not_applicable",
+                           "modifiers applies to a device Blit reads as a keyboard, or to one of no known kind.");
+            return 0;
+        }
+        if (!json_object_slice(modifiers_cursor, modifiers,
+                               sizeof(modifiers))) {
+            config_problem(problem, 400, "Bad Request",
+                           "invalid_device_modifiers",
+                           "modifiers must be a JSON object of evdev code to role.");
+            return 0;
+        }
+        memset(&parsed_modifiers, 0, sizeof(parsed_modifiers));
+        if (!parse_input_modifiers(modifiers, &parsed_modifiers, &reason)) {
+            config_problem(problem, 400, "Bad Request",
+                           "invalid_device_modifiers",
+                           reason != NULL ? reason :
+                           "modifiers could not be parsed.");
+            return 0;
+        }
+        modifiers_requested = 1;
     }
     if ((sensitivity_requested || natural_scroll_requested) &&
         !input_device_supports(device, BLIT_INPUT_KIND_POINTER)) {
@@ -14021,6 +14567,42 @@ static int apply_input_device_configuration(BlitRuntime *runtime,
         device->natural_scroll = natural_scroll;
         changed = 1;
     }
+    if (repeat_delay_requested || repeat_rate_requested) {
+        int delay = repeat_delay_requested ? repeat_delay :
+            (device->repeat_delay_ms > 0 ? device->repeat_delay_ms : 250);
+        int period = repeat_rate_requested ?
+            input_repeat_period_for_rate(repeat_rate) :
+            (device->repeat_period_ms > 0 ? device->repeat_period_ms : 33);
+        device->repeat_configured = 1;
+        device->repeat_delay_ms = delay;
+        device->repeat_period_ms = period;
+        input_device_apply_repeat(runtime, device);
+        changed = 1;
+    }
+    if (caps_boot_requested && device->caps_lock_boot != caps_boot) {
+        device->caps_lock_boot = caps_boot;
+        changed = 1;
+    }
+    if (num_boot_requested && device->num_lock_boot != num_boot) {
+        device->num_lock_boot = num_boot;
+        changed = 1;
+    }
+    if (caps_boot_requested || num_boot_requested)
+        input_device_apply_locks(runtime, device);
+    if (modifiers_requested &&
+        (parsed_modifiers.modifier_count != device->modifier_count ||
+         memcmp(parsed_modifiers.modifier_codes, device->modifier_codes,
+                sizeof(device->modifier_codes)) != 0 ||
+         memcmp(parsed_modifiers.modifier_roles, device->modifier_roles,
+                sizeof(device->modifier_roles)) != 0)) {
+        device->modifier_count = parsed_modifiers.modifier_count;
+        memcpy(device->modifier_codes, parsed_modifiers.modifier_codes,
+               sizeof(device->modifier_codes));
+        memcpy(device->modifier_roles, parsed_modifiers.modifier_roles,
+               sizeof(device->modifier_roles));
+        evdev_refresh_modifiers(device);
+        changed = 1;
+    }
     if (keymap_requested &&
         (parsed_keymap.keymap_count != device->keymap_count ||
          memcmp(parsed_keymap.keymap_codes, device->keymap_codes,
@@ -14128,90 +14710,6 @@ static int apply_audio_device_configuration(BlitRuntime *runtime,
  * so a restored setting cannot be validated differently from a live one.
  */
 
-/* One member of a JSON object: its key and the text of its value. Returns the
-   cursor to continue from, or NULL at the end of the object. The repo has no
-   JSON parser and does not need one; the document's shape is Blit's own and
-   one level of nesting per class is all of it. */
-static const char *json_next_member(const char *cursor, char *key,
-                                    size_t key_capacity, char *value,
-                                    size_t value_capacity)
-{
-    size_t used = 0;
-    int depth = 0;
-
-    if (cursor == NULL || key_capacity == 0 || value_capacity == 0)
-        return NULL;
-    key[0] = '\0';
-    value[0] = '\0';
-    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\n' ||
-           *cursor == '\r' || *cursor == ',' || *cursor == '{')
-        ++cursor;
-    if (*cursor != '"')
-        return NULL;
-    ++cursor;
-    while (*cursor != '\0' && *cursor != '"') {
-        if (used + 1 >= key_capacity)
-            return NULL;
-        key[used++] = *cursor++;
-    }
-    if (*cursor != '"')
-        return NULL;
-    key[used] = '\0';
-    ++cursor;
-    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\n' ||
-           *cursor == '\r')
-        ++cursor;
-    if (*cursor != ':')
-        return NULL;
-    ++cursor;
-    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\n' ||
-           *cursor == '\r')
-        ++cursor;
-    used = 0;
-    for (; *cursor != '\0'; ++cursor) {
-        if (used + 2 >= value_capacity)
-            return NULL;
-        if (*cursor == '"') {
-            value[used++] = *cursor++;
-            while (*cursor != '\0' && *cursor != '"') {
-                if (used + 3 >= value_capacity)
-                    return NULL;
-                value[used++] = *cursor;
-                if (*cursor == '\\' && cursor[1] != '\0')
-                    value[used++] = *++cursor;
-                ++cursor;
-            }
-            if (*cursor != '"')
-                return NULL;
-            value[used++] = '"';
-            if (depth == 0) {
-                value[used] = '\0';
-                return cursor + 1;
-            }
-            continue;
-        }
-        if (*cursor == '{' || *cursor == '[')
-            ++depth;
-        else if (*cursor == '}' || *cursor == ']') {
-            if (depth == 0) {
-                /* The end of the enclosing object with no value read. */
-                value[used] = '\0';
-                return used > 0 ? cursor : NULL;
-            }
-            if (--depth == 0) {
-                value[used++] = *cursor;
-                value[used] = '\0';
-                return cursor + 1;
-            }
-        } else if (depth == 0 && (*cursor == ',' || *cursor == '}')) {
-            value[used] = '\0';
-            return cursor;
-        }
-        value[used++] = *cursor;
-    }
-    return NULL;
-}
-
 /* The slice of `document` stored for `id` under `section`, or NULL. */
 static int settings_member(const char *document, const char *section,
                            const char *id, char *out, size_t capacity)
@@ -14264,6 +14762,38 @@ static size_t settings_input_configuration(const BlitInputDevice *device,
         json_appendf(out, capacity, &used, "%s\"natural_scroll\":true",
                      first ? "" : ",");
         first = 0;
+    }
+    if (device->repeat_configured) {
+        json_appendf(out, capacity, &used,
+                     "%s\"repeat_delay_ms\":%d,\"repeat_rate_hz\":%d",
+                     first ? "" : ",", device->repeat_delay_ms,
+                     input_repeat_rate_for_period(device->repeat_period_ms));
+        first = 0;
+    }
+    if (device->caps_lock_boot >= 0) {
+        json_appendf(out, capacity, &used, "%s\"caps_lock_boot\":%s",
+                     first ? "" : ",",
+                     device->caps_lock_boot ? "true" : "false");
+        first = 0;
+    }
+    if (device->num_lock_boot >= 0) {
+        json_appendf(out, capacity, &used, "%s\"num_lock_boot\":%s",
+                     first ? "" : ",",
+                     device->num_lock_boot ? "true" : "false");
+        first = 0;
+    }
+    if (device->modifier_count > 0) {
+        int i;
+        json_appendf(out, capacity, &used, "%s\"modifiers\":{",
+                     first ? "" : ",");
+        first = 0;
+        for (i = 0; i < device->modifier_count; ++i)
+            json_appendf(out, capacity, &used, "%s\"%u\":\"%s\"",
+                         i == 0 ? "" : ",",
+                         (unsigned)device->modifier_codes[i],
+                         input_modifier_role_name(
+                             (int)device->modifier_roles[i]));
+        json_appendf(out, capacity, &used, "}");
     }
     if (device->keymap_count > 0) {
         int i;
@@ -14658,6 +15188,12 @@ static void settings_reset(BlitRuntime *runtime)
         }
         device->sensitivity_percent = BLIT_INPUT_SENSITIVITY_DEFAULT;
         device->natural_scroll = 0;
+        device->repeat_configured = 0;
+        device->caps_lock_boot = -1;
+        device->num_lock_boot = -1;
+        device->modifier_count = 0;
+        memset(device->modifier_codes, 0, sizeof(device->modifier_codes));
+        memset(device->modifier_roles, 0, sizeof(device->modifier_roles));
         device->keymap_count = 0;
         memset(device->keymap_codes, 0, sizeof(device->keymap_codes));
         memset(device->keymap_levels, 0, sizeof(device->keymap_levels));
@@ -20117,14 +20653,48 @@ static void evdev_key_set_held(BlitInputDevice *device, unsigned short code,
    AltGr is deliberately not Alt: treating the right Alt key as Alt made it
    prefix ESC instead of selecting a third level, so an AltGr character could
    not be typed at all. */
+/* The role a device gives this code, or BLIT_MODIFIER_UNMAPPED. */
+static int input_device_modifier_role(const BlitInputDevice *device,
+                                      unsigned short code)
+{
+    int i;
+
+    for (i = 0; i < device->modifier_count; ++i)
+        if (device->modifier_codes[i] == code)
+            return (int)device->modifier_roles[i];
+    return BLIT_MODIFIER_UNMAPPED;
+}
+
+/* Whether any code this device has remapped to `role` is currently held.
+ *
+ * The remap does not rewrite the code, which was the first and wrong design:
+ * rewriting CapsLock to KEY_LEFTCTRL would have made a real Ctrl and a
+ * remapped CapsLock share one held bit, so releasing either would have
+ * reported Ctrl released while the other was still physically down. The held
+ * set stays keyed by the physical code and the roles are resolved here. */
+static int evdev_role_is_held(const BlitInputDevice *device, int role)
+{
+    int i;
+
+    for (i = 0; i < device->modifier_count; ++i)
+        if ((int)device->modifier_roles[i] == role &&
+            evdev_key_is_held(device, device->modifier_codes[i]))
+            return 1;
+    return 0;
+}
+
 static void evdev_refresh_modifiers(BlitInputDevice *device)
 {
     device->shift = evdev_key_is_held(device, KEY_LEFTSHIFT) ||
-        evdev_key_is_held(device, KEY_RIGHTSHIFT);
+        evdev_key_is_held(device, KEY_RIGHTSHIFT) ||
+        evdev_role_is_held(device, BLIT_MODIFIER_SHIFT);
     device->ctrl = evdev_key_is_held(device, KEY_LEFTCTRL) ||
-        evdev_key_is_held(device, KEY_RIGHTCTRL);
-    device->alt = evdev_key_is_held(device, KEY_LEFTALT);
-    device->altgr = evdev_key_is_held(device, KEY_RIGHTALT);
+        evdev_key_is_held(device, KEY_RIGHTCTRL) ||
+        evdev_role_is_held(device, BLIT_MODIFIER_CTRL);
+    device->alt = evdev_key_is_held(device, KEY_LEFTALT) ||
+        evdev_role_is_held(device, BLIT_MODIFIER_ALT);
+    device->altgr = evdev_key_is_held(device, KEY_RIGHTALT) ||
+        evdev_role_is_held(device, BLIT_MODIFIER_ALTGR);
 }
 
 /* Adopt the kernel's idea of what each keyboard is holding and which of its
@@ -20161,6 +20731,11 @@ static void evdev_sync_modifiers(BlitRuntime *runtime)
             device->num_lock = input_bit(leds, LED_NUML) ? 1 : 0;
         }
         evdev_refresh_modifiers(device);
+        /* The repeat the kernel has, adopted here for the same reason the
+           held keys and the LEDs are: this is the one pass that asks a live
+           descriptor what it is actually doing (issue #66). */
+        input_device_apply_repeat(runtime, device);
+        input_device_apply_locks(runtime, device);
     }
 }
 
@@ -20524,12 +21099,37 @@ static void dispatch_evdev_key_event(BlitRuntime *runtime,
        full. */
     BlitInputDevice *keyboard = keyboard_state(runtime);
 
+    int role;
+
     if (event->type != EV_KEY)
         return;
     /* Autorepeat does not change what is held. */
     if (event->value != 2)
         evdev_key_set_held(keyboard, event->code, event->value != 0);
-    switch (event->code) {
+    /* Issue #66. The remap decides what this code *is*, and takes precedence
+       over what the code would otherwise mean: a CapsLock remapped to Control
+       must not also toggle CapsLock. A code with a role never reaches the
+       keymap, because a modifier is not a character and no keymap entry could
+       have expressed one. */
+    role = input_device_modifier_role(keyboard, event->code);
+    if (role != BLIT_MODIFIER_UNMAPPED) {
+        switch (role) {
+        case BLIT_MODIFIER_CAPS_LOCK:
+            if (event->value == 1)
+                keyboard->caps_lock = !keyboard->caps_lock;
+            break;
+        case BLIT_MODIFIER_NUM_LOCK:
+            if (event->value == 1)
+                keyboard->num_lock = !keyboard->num_lock;
+            break;
+        default:
+            /* Including BLIT_MODIFIER_NONE, which holds nothing and types
+               nothing -- the way "disable this key" is said. */
+            evdev_refresh_modifiers(keyboard);
+            break;
+        }
+        modifier_only = 1;
+    } else switch (event->code) {
     case KEY_LEFTSHIFT: case KEY_RIGHTSHIFT:
     case KEY_LEFTCTRL: case KEY_RIGHTCTRL:
     case KEY_LEFTALT: case KEY_RIGHTALT:

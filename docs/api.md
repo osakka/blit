@@ -472,6 +472,58 @@ only a trace entry identifying an evdev source proves physical-device
 delivery. There must be one deliberate pointer owner for a
 display-attached session; competing routes are a configuration error.
 
+### Keyboard settings
+
+A keyboard's writable properties, all under `configuration` and all written
+with `PATCH /v1/input/devices/{device_id}` (ADR 0067 stores them, so they
+survive a release):
+
+| property | what it is |
+|---|---|
+| `repeat_delay_ms` | how long a key is held before it repeats |
+| `repeat_rate_hz` | how many repeats a second |
+| `repeat_period_ms` | read-only; the period the kernel actually holds |
+| `caps_lock_boot`, `num_lock_boot` | the lock states to apply when the device opens |
+| `modifiers` | a sparse map from evdev code to the role that code plays |
+| `keymap` | a sparse map from evdev code to the characters it types |
+
+**Repeat is the kernel's.** Blit sets it with `EVIOCSREP` on the descriptor it
+already holds and reads it back with `EVIOCGREP`, so what is reported is what
+the hardware is doing and not what Blit last asked for. That distinction is
+observable, because the kernel holds a period in whole milliseconds while a
+person adjusts a rate in hertz: 30 Hz is a 33 ms period and reads back as 30,
+but 7 Hz is 142.857 ms, which the kernel keeps as 142. Read the values back
+rather than assuming the request took.
+
+Repeat applies only where the device's `capabilities` include `repeat`, which
+is EV_REP. A device the kernel does not autorepeat for has no rate to set, so
+asking is a `422` rather than a stored number that changes nothing — hide the
+control for such a device rather than offering it.
+
+**`modifiers` is not `keymap`, and they compose in one order.** The remap
+decides what a code *is*; the keymap decides what it *types*. A code with a
+role never reaches the keymap, which is why Caps-Lock-as-Control is a remap
+and could not have been a keymap entry — a modifier is not a character. The
+roles are `none`, `shift`, `control`, `alt`, `altgr`, `meta`, `caps_lock` and
+`num_lock`; `none` swallows the key, which is how "disable this key" is said.
+
+A remapped code does not *become* the code it was mapped to. The held set
+stays keyed by the physical code, so holding a real Control and releasing a
+remapped Caps Lock leaves Control held — which it would not if the remap
+rewrote the code, since the two would then share one held bit.
+
+```text
+PATCH /v1/input/devices/{device_id}
+  { "configuration": { "repeat_delay_ms": 250, "repeat_rate_hz": 30,
+                       "num_lock_boot": true,
+                       "modifiers": { "58": "control", "125": "none" } } }
+  -> read repeat_period_ms and repeat_rate_hz back from the response
+```
+
+An empty `modifiers` object clears the map. Every property is per device: two
+keyboards on one server can carry different layouts, different repeat rates
+and different remaps, which is what makes per-device routing usable.
+
 ## Diagnostics and screenshots
 
 Use `GET /v1/diagnostics` for current health/resource state and
