@@ -13598,6 +13598,271 @@ static void service_stream(BlitRuntime *runtime, int fd)
     }
 }
 
+/* ADR 0067. The validate-and-apply half of a device configuration write,
+   separated from the request that carries it so that a configuration
+   *restored at boot* is validated by exactly the same code as one arriving by
+   PATCH. A parallel loader that knew the properties for itself would drift
+   from this one, and the first symptom would be a stored setting that the API
+   refuses and the loader accepts.
+
+   It also gives ADR 0067's "a stored configuration that contradicts the
+   device's present kinds lies dormant" rule for free: that contradiction is
+   the same 422 the PATCH returns, so a stored pointer property on a device
+   the kernel now calls a keyboard is refused here and left in the document
+   rather than applied or deleted.
+
+   Nothing is mutated until everything has been validated, which is the
+   property that makes a refusal leave the device as it was. */
+typedef struct {
+    int status;
+    const char *title;
+    char code[64];
+    char detail[320];
+} BlitConfigProblem;
+
+static void config_problem(BlitConfigProblem *problem, int status,
+                           const char *title, const char *code,
+                           const char *detail)
+{
+    if (problem == NULL)
+        return;
+    problem->status = status;
+    problem->title = title;
+    snprintf(problem->code, sizeof(problem->code), "%s", code);
+    snprintf(problem->detail, sizeof(problem->detail), "%s", detail);
+}
+
+static int apply_input_device_configuration(BlitRuntime *runtime,
+                                            BlitInputDevice *device,
+                                            const char *configuration,
+                                            BlitConfigProblem *problem)
+{
+    char scalars[1024];
+    const char *rejected = NULL;
+    int enabled = 0;
+    int enabled_requested;
+    int sensitivity = 0;
+    int sensitivity_requested;
+    int natural_scroll = 0;
+    int natural_scroll_requested;
+    char route[512];
+    char route_target[128];
+    const char *route_cursor;
+    int route_requested = 0;
+    int route_enabled = 0;
+    BlitSession *route_session = NULL;
+    char keymap[4096];
+    const char *keymap_cursor;
+    static BlitInputDevice parsed_keymap;
+    int keymap_requested = 0;
+    int changed = 0;
+
+    /* An unknown property is refused and named. Accepting it silently is
+       how a controller comes to believe it has set something it has not
+       -- the same failure as issue #48, where a cell carrying its colours
+       at the top level was answered with 200 and no style applied. */
+    rejected = input_device_rejected_property(configuration);
+    if (rejected != NULL) {
+        char detail[256];
+        snprintf(detail, sizeof(detail),
+                 "A device configuration carries \"%s\", which is not a "
+                 "writable property. Writable: enabled, and for a pointer "
+                 "sensitivity_percent and natural_scroll.", rejected);
+        config_problem(problem, 400, "Bad Request", "invalid_device_property",
+                                detail);
+        return 0;
+    }
+    if (!json_object_scalars(configuration, scalars, sizeof(scalars))) {
+        config_problem(problem, 400, "Bad Request",
+                                "invalid_device_configuration",
+                                "A device configuration must be a JSON object of properties.");
+        return 0;
+    }
+    enabled_requested = json_bool(scalars, "enabled", &enabled);
+    sensitivity_requested = json_int(scalars, "sensitivity_percent",
+                                     &sensitivity);
+    natural_scroll_requested = json_bool(scalars, "natural_scroll",
+                                         &natural_scroll);
+    if (json_key_cursor(scalars, "enabled") != NULL &&
+        !enabled_requested) {
+        config_problem(problem, 400, "Bad Request",
+                                "invalid_device_configuration",
+                                "enabled must be a JSON boolean.");
+        return 0;
+    }
+    if (json_key_cursor(scalars, "natural_scroll") != NULL &&
+        !natural_scroll_requested) {
+        config_problem(problem, 400, "Bad Request",
+                                "invalid_device_configuration",
+                                "natural_scroll must be a JSON boolean.");
+        return 0;
+    }
+    if ((sensitivity_requested || natural_scroll_requested) &&
+        !input_device_supports(device, BLIT_INPUT_KIND_POINTER)) {
+        config_problem(problem, 422, "Unprocessable Entity",
+                                "device_property_not_applicable",
+                                "sensitivity_percent and natural_scroll apply to a device Blit reads as a pointer, or to one of no known kind.");
+        return 0;
+    }
+    route_cursor = json_key_cursor(configuration, "route");
+    if (route_cursor != NULL) {
+        const char *route_rejected;
+        int target_present;
+        if (!json_object_slice(route_cursor, route, sizeof(route))) {
+            config_problem(problem, 400, "Bad Request", "invalid_device_route",
+                                    "route must be a JSON object with target_session_id and enabled.");
+            return 0;
+        }
+        route_rejected = input_route_rejected_property(route);
+        if (route_rejected != NULL) {
+            char detail[256];
+            snprintf(detail, sizeof(detail),
+                     "A device route carries \"%s\", which is not a "
+                     "writable property. Writable: target_session_id and "
+                     "enabled.", route_rejected);
+            config_problem(problem, 400, "Bad Request",
+                                    "invalid_device_property", detail);
+            return 0;
+        }
+        target_present = json_key_cursor(route,
+                                         "target_session_id") != NULL;
+        route_target[0] = '\0';
+        if (!json_bool(route, "enabled", &route_enabled) ||
+            (target_present &&
+             (!json_string(route, "target_session_id", route_target,
+                           sizeof(route_target)) ||
+              strncmp(route_target, "session-", 8) != 0))) {
+            config_problem(problem, 400, "Bad Request", "invalid_device_route",
+                                    "A device route requires an enabled boolean and, to set a route, a session-N target_session_id. Omit the target to remove the route.");
+            return 0;
+        }
+        /* A route with no target is removed. Without this a device can be
+           routed and un-enabled but never un-routed, so a controller
+           could not put a device back the way it found it. */
+        if (!target_present) {
+            if (route_enabled) {
+                config_problem(problem, 400, "Bad Request",
+                                        "invalid_device_route",
+                                        "A route with no target_session_id cannot be enabled.");
+                return 0;
+            }
+        } else {
+            route_session = find_session_id(runtime,
+                strtoull(route_target + 8, NULL, 10));
+            if (route_session == NULL) {
+                config_problem(problem, 400, "Bad Request",
+                                        "invalid_device_route",
+                                        "A device route target session does not exist.");
+                return 0;
+            }
+            /* The same rule PUT /v1/input/routes/{id} applies: an enabled
+               route needs a live target, or it is a route to nowhere that
+               silently swallows the device's input. */
+            refresh_session_state(runtime, route_session);
+            if (route_enabled &&
+                strcmp(route_session->state, "running") != 0 &&
+                strcmp(route_session->state, "starting") != 0) {
+                config_problem(problem, 409, "Conflict",
+                                        "input_route_target_stopped",
+                                        "An enabled device route requires a live target session.");
+                return 0;
+            }
+        }
+        route_requested = 1;
+    }
+    keymap_cursor = json_key_cursor(configuration, "keymap");
+    if (keymap_cursor != NULL) {
+        const char *keymap_rejected;
+        const char *reason = NULL;
+        if (!input_device_supports(device, BLIT_INPUT_KIND_KEYBOARD)) {
+            config_problem(problem, 422, "Unprocessable Entity",
+                                    "device_property_not_applicable",
+                                    "keymap applies to a device Blit reads as a keyboard, or to one of no known kind.");
+            return 0;
+        }
+        if (!json_object_slice(keymap_cursor, keymap, sizeof(keymap))) {
+            config_problem(problem, 400, "Bad Request",
+                                    "invalid_device_keymap",
+                                    "keymap must be a JSON object with base and keys.");
+            return 0;
+        }
+        keymap_rejected = input_keymap_rejected_property(keymap);
+        if (keymap_rejected != NULL) {
+            char detail[256];
+            snprintf(detail, sizeof(detail),
+                     "A keymap carries \"%s\", which is not a writable "
+                     "property. Writable: base and keys.", keymap_rejected);
+            config_problem(problem, 400, "Bad Request",
+                                    "invalid_device_property", detail);
+            return 0;
+        }
+        memset(&parsed_keymap, 0, sizeof(parsed_keymap));
+        if (!parse_input_keymap(keymap, &parsed_keymap, &reason)) {
+            config_problem(problem, 400, "Bad Request",
+                                    "invalid_device_keymap",
+                                    reason != NULL ? reason : "keymap could not be parsed.");
+            return 0;
+        }
+        keymap_requested = 1;
+    }
+    if (sensitivity_requested &&
+        (sensitivity < BLIT_INPUT_SENSITIVITY_MIN ||
+         sensitivity > BLIT_INPUT_SENSITIVITY_MAX)) {
+        char detail[192];
+        snprintf(detail, sizeof(detail),
+                 "sensitivity_percent must be an integer from %d through %d.",
+                 BLIT_INPUT_SENSITIVITY_MIN, BLIT_INPUT_SENSITIVITY_MAX);
+        config_problem(problem, 400, "Bad Request",
+                                "invalid_device_configuration", detail);
+        return 0;
+    }
+    if (enabled_requested && enabled != device->enabled) {
+        device->enabled = enabled;
+        changed = 1;
+        if (!enabled)
+            release_input_device_fds(runtime, device->node);
+        else
+            runtime->evdev_rescan_requested = 1;
+    }
+    if (sensitivity_requested &&
+        sensitivity != device->sensitivity_percent) {
+        device->sensitivity_percent = sensitivity;
+        changed = 1;
+    }
+    if (natural_scroll_requested &&
+        natural_scroll != device->natural_scroll) {
+        device->natural_scroll = natural_scroll;
+        changed = 1;
+    }
+    if (keymap_requested &&
+        (parsed_keymap.keymap_count != device->keymap_count ||
+         memcmp(parsed_keymap.keymap_codes, device->keymap_codes,
+                sizeof(device->keymap_codes)) != 0 ||
+         memcmp(parsed_keymap.keymap_levels, device->keymap_levels,
+                sizeof(device->keymap_levels)) != 0)) {
+        device->keymap_count = parsed_keymap.keymap_count;
+        memcpy(device->keymap_codes, parsed_keymap.keymap_codes,
+               sizeof(device->keymap_codes));
+        memcpy(device->keymap_levels, parsed_keymap.keymap_levels,
+               sizeof(device->keymap_levels));
+        changed = 1;
+    }
+    if (route_requested &&
+        (strcmp(device->route_target, route_target) != 0 ||
+         route_enabled != device->route_enabled)) {
+        snprintf(device->route_target, sizeof(device->route_target), "%s",
+                 route_target);
+        device->route_enabled = route_enabled;
+        changed = 1;
+    }
+    if (changed) {
+        ++device->revision;
+        ++runtime->input_devices_revision;
+        broadcast_input_device_changed(runtime, device, "configured");
+    }
+    return 1;
+}
+
 static void handle_request(int fd, BlitRuntime *runtime,
                            BlitHttpClient *client, const char *request)
 {
@@ -14647,30 +14912,12 @@ static void handle_request(int fd, BlitRuntime *runtime,
         const char *device_id = path + strlen("/v1/input/devices/");
         BlitInputDevice *device = find_input_device_id(runtime, device_id);
         char configuration[1024];
-        char scalars[1024];
         const char *configuration_cursor = json_key_cursor(payload,
                                                            "configuration");
-        const char *rejected = NULL;
+        BlitConfigProblem problem;
         int requested_revision = 0;
         int has_requested_revision = json_key_cursor(payload,
                                                      "revision") != NULL;
-        int enabled = 0;
-        int enabled_requested;
-        int sensitivity = 0;
-        int sensitivity_requested;
-        int natural_scroll = 0;
-        int natural_scroll_requested;
-        char route[512];
-        char route_target[128];
-        const char *route_cursor;
-        int route_requested = 0;
-        int route_enabled = 0;
-        BlitSession *route_session = NULL;
-        char keymap[4096];
-        const char *keymap_cursor;
-        static BlitInputDevice parsed_keymap;
-        int keymap_requested = 0;
-        int changed = 0;
 
         if (*device_id == '\0' || device == NULL) {
             send_problem(fd, 404, "Not Found", "input_device_not_found",
@@ -14702,202 +14949,11 @@ static void handle_request(int fd, BlitRuntime *runtime,
                          "A device update carries its writable properties under configuration, as a JSON object.");
             return;
         }
-        /* An unknown property is refused and named. Accepting it silently is
-           how a controller comes to believe it has set something it has not
-           -- the same failure as issue #48, where a cell carrying its colours
-           at the top level was answered with 200 and no style applied. */
-        rejected = input_device_rejected_property(configuration);
-        if (rejected != NULL) {
-            char detail[256];
-            snprintf(detail, sizeof(detail),
-                     "A device configuration carries \"%s\", which is not a "
-                     "writable property. Writable: enabled, and for a pointer "
-                     "sensitivity_percent and natural_scroll.", rejected);
-            send_problem(fd, 400, "Bad Request", "invalid_device_property",
-                         detail);
+        if (!apply_input_device_configuration(runtime, device, configuration,
+                                              &problem)) {
+            send_problem(fd, problem.status, problem.title, problem.code,
+                         problem.detail);
             return;
-        }
-        if (!json_object_scalars(configuration, scalars, sizeof(scalars))) {
-            send_problem(fd, 400, "Bad Request", "invalid_device_configuration",
-                         "A device configuration must be a JSON object of properties.");
-            return;
-        }
-        enabled_requested = json_bool(scalars, "enabled", &enabled);
-        sensitivity_requested = json_int(scalars, "sensitivity_percent",
-                                         &sensitivity);
-        natural_scroll_requested = json_bool(scalars, "natural_scroll",
-                                             &natural_scroll);
-        if (json_key_cursor(scalars, "enabled") != NULL &&
-            !enabled_requested) {
-            send_problem(fd, 400, "Bad Request", "invalid_device_configuration",
-                         "enabled must be a JSON boolean.");
-            return;
-        }
-        if (json_key_cursor(scalars, "natural_scroll") != NULL &&
-            !natural_scroll_requested) {
-            send_problem(fd, 400, "Bad Request", "invalid_device_configuration",
-                         "natural_scroll must be a JSON boolean.");
-            return;
-        }
-        if ((sensitivity_requested || natural_scroll_requested) &&
-            !input_device_supports(device, BLIT_INPUT_KIND_POINTER)) {
-            send_problem(fd, 422, "Unprocessable Entity",
-                         "device_property_not_applicable",
-                         "sensitivity_percent and natural_scroll apply to a device Blit reads as a pointer, or to one of no known kind.");
-            return;
-        }
-        route_cursor = json_key_cursor(configuration, "route");
-        if (route_cursor != NULL) {
-            const char *route_rejected;
-            int target_present;
-            if (!json_object_slice(route_cursor, route, sizeof(route))) {
-                send_problem(fd, 400, "Bad Request", "invalid_device_route",
-                             "route must be a JSON object with target_session_id and enabled.");
-                return;
-            }
-            route_rejected = input_route_rejected_property(route);
-            if (route_rejected != NULL) {
-                char detail[256];
-                snprintf(detail, sizeof(detail),
-                         "A device route carries \"%s\", which is not a "
-                         "writable property. Writable: target_session_id and "
-                         "enabled.", route_rejected);
-                send_problem(fd, 400, "Bad Request", "invalid_device_property",
-                             detail);
-                return;
-            }
-            target_present = json_key_cursor(route,
-                                             "target_session_id") != NULL;
-            route_target[0] = '\0';
-            if (!json_bool(route, "enabled", &route_enabled) ||
-                (target_present &&
-                 (!json_string(route, "target_session_id", route_target,
-                               sizeof(route_target)) ||
-                  strncmp(route_target, "session-", 8) != 0))) {
-                send_problem(fd, 400, "Bad Request", "invalid_device_route",
-                             "A device route requires an enabled boolean and, to set a route, a session-N target_session_id. Omit the target to remove the route.");
-                return;
-            }
-            /* A route with no target is removed. Without this a device can be
-               routed and un-enabled but never un-routed, so a controller
-               could not put a device back the way it found it. */
-            if (!target_present) {
-                if (route_enabled) {
-                    send_problem(fd, 400, "Bad Request", "invalid_device_route",
-                                 "A route with no target_session_id cannot be enabled.");
-                    return;
-                }
-            } else {
-                route_session = find_session_id(runtime,
-                    strtoull(route_target + 8, NULL, 10));
-                if (route_session == NULL) {
-                    send_problem(fd, 400, "Bad Request", "invalid_device_route",
-                                 "A device route target session does not exist.");
-                    return;
-                }
-                /* The same rule PUT /v1/input/routes/{id} applies: an enabled
-                   route needs a live target, or it is a route to nowhere that
-                   silently swallows the device's input. */
-                refresh_session_state(runtime, route_session);
-                if (route_enabled &&
-                    strcmp(route_session->state, "running") != 0 &&
-                    strcmp(route_session->state, "starting") != 0) {
-                    send_problem(fd, 409, "Conflict",
-                                 "input_route_target_stopped",
-                                 "An enabled device route requires a live target session.");
-                    return;
-                }
-            }
-            route_requested = 1;
-        }
-        keymap_cursor = json_key_cursor(configuration, "keymap");
-        if (keymap_cursor != NULL) {
-            const char *keymap_rejected;
-            const char *reason = NULL;
-            if (!input_device_supports(device, BLIT_INPUT_KIND_KEYBOARD)) {
-                send_problem(fd, 422, "Unprocessable Entity",
-                             "device_property_not_applicable",
-                             "keymap applies to a device Blit reads as a keyboard, or to one of no known kind.");
-                return;
-            }
-            if (!json_object_slice(keymap_cursor, keymap, sizeof(keymap))) {
-                send_problem(fd, 400, "Bad Request", "invalid_device_keymap",
-                             "keymap must be a JSON object with base and keys.");
-                return;
-            }
-            keymap_rejected = input_keymap_rejected_property(keymap);
-            if (keymap_rejected != NULL) {
-                char detail[256];
-                snprintf(detail, sizeof(detail),
-                         "A keymap carries \"%s\", which is not a writable "
-                         "property. Writable: base and keys.", keymap_rejected);
-                send_problem(fd, 400, "Bad Request", "invalid_device_property",
-                             detail);
-                return;
-            }
-            memset(&parsed_keymap, 0, sizeof(parsed_keymap));
-            if (!parse_input_keymap(keymap, &parsed_keymap, &reason)) {
-                send_problem(fd, 400, "Bad Request", "invalid_device_keymap",
-                             reason != NULL ? reason :
-                             "keymap could not be parsed.");
-                return;
-            }
-            keymap_requested = 1;
-        }
-        if (sensitivity_requested &&
-            (sensitivity < BLIT_INPUT_SENSITIVITY_MIN ||
-             sensitivity > BLIT_INPUT_SENSITIVITY_MAX)) {
-            char detail[192];
-            snprintf(detail, sizeof(detail),
-                     "sensitivity_percent must be an integer from %d through %d.",
-                     BLIT_INPUT_SENSITIVITY_MIN, BLIT_INPUT_SENSITIVITY_MAX);
-            send_problem(fd, 400, "Bad Request", "invalid_device_configuration",
-                         detail);
-            return;
-        }
-        if (enabled_requested && enabled != device->enabled) {
-            device->enabled = enabled;
-            changed = 1;
-            if (!enabled)
-                release_input_device_fds(runtime, device->node);
-            else
-                runtime->evdev_rescan_requested = 1;
-        }
-        if (sensitivity_requested &&
-            sensitivity != device->sensitivity_percent) {
-            device->sensitivity_percent = sensitivity;
-            changed = 1;
-        }
-        if (natural_scroll_requested &&
-            natural_scroll != device->natural_scroll) {
-            device->natural_scroll = natural_scroll;
-            changed = 1;
-        }
-        if (keymap_requested &&
-            (parsed_keymap.keymap_count != device->keymap_count ||
-             memcmp(parsed_keymap.keymap_codes, device->keymap_codes,
-                    sizeof(device->keymap_codes)) != 0 ||
-             memcmp(parsed_keymap.keymap_levels, device->keymap_levels,
-                    sizeof(device->keymap_levels)) != 0)) {
-            device->keymap_count = parsed_keymap.keymap_count;
-            memcpy(device->keymap_codes, parsed_keymap.keymap_codes,
-                   sizeof(device->keymap_codes));
-            memcpy(device->keymap_levels, parsed_keymap.keymap_levels,
-                   sizeof(device->keymap_levels));
-            changed = 1;
-        }
-        if (route_requested &&
-            (strcmp(device->route_target, route_target) != 0 ||
-             route_enabled != device->route_enabled)) {
-            snprintf(device->route_target, sizeof(device->route_target), "%s",
-                     route_target);
-            device->route_enabled = route_enabled;
-            changed = 1;
-        }
-        if (changed) {
-            ++device->revision;
-            ++runtime->input_devices_revision;
-            broadcast_input_device_changed(runtime, device, "configured");
         }
         if (input_device_item_json(runtime, device, body, sizeof(body)) >=
             sizeof(body)) {
