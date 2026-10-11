@@ -17428,12 +17428,16 @@ static void handle_request(int fd, BlitRuntime *runtime,
                 runtime, surface->owner_session_id);
             snprintf(detail, sizeof(detail),
                      "surface=surface-%llu revision=%llu transport=api-cells "
-                     "surface_mode=%s presentation=%s frame_open=%d",
+                     "surface_mode=%s presentation=%s frame_open=%d "
+                     "damage=%d,%d,%dx%d valid=%d",
                      surface->id, surface->revision,
                      surface_session != NULL ?
                          surface_mode_name(surface_session->surface_mode) :
                          "unknown",
-                     presentation, surface->frame_open);
+                     presentation, surface->frame_open,
+                     surface->damage_x, surface->damage_y,
+                     surface->damage_width, surface->damage_height,
+                     surface->damage_valid);
             /* Deferred cell chunks are transport detail.  Keep the bounded
                trace focused on actual presentation boundaries so a busy
                external terminal cannot evict input and render evidence. */
@@ -21356,7 +21360,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
         {
             char detail[256];
             snprintf(detail, sizeof(detail),
-                     "output=%d path=%s target_count=%d active_surfaces=%d target_changed=%d external_changed=%d pointer_dirty=%d initialized=%d graphics_changed=%d graphics_images=%d last_graphics_signature=%llu graphics_signature=%llu",
+                     "output=%d path=%s target_count=%d active_surfaces=%d target_changed=%d external_changed=%d pointer_dirty=%d initialized=%d graphics_changed=%d graphics_images=%d damage=%d,%d,%dx%d last_graphics_signature=%llu graphics_signature=%llu",
                      output_index, full_redraw ? "full-redraw" :
                          "incremental-damage",
                      target_count, active_output_surface_count(runtime, output_index),
@@ -21365,6 +21369,14 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                      runtime->outputs[output_index].initialized,
                      graphics_changed,
                      graphics_scene_count(runtime, output_index),
+                     plan->surface_count > 0 ?
+                         plan->surfaces[0].damage_x : -1,
+                     plan->surface_count > 0 ?
+                         plan->surfaces[0].damage_y : -1,
+                     plan->surface_count > 0 ?
+                         plan->surfaces[0].damage_width : -1,
+                     plan->surface_count > 0 ?
+                         plan->surfaces[0].damage_height : -1,
                      runtime->outputs[output_index].last_graphics_signature,
                      graphics_scene_signature(runtime, output_index));
             diagnostic_trace(runtime, "render_path", detail);
