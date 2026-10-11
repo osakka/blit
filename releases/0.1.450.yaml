@@ -1,0 +1,200 @@
+release: 0.1.450
+package: blit_0.1.450-1_amd64.deb
+package_sha256: b211e0b5a53d8f649235cb11d68e8aad0c6822ceb5191fe2006d6b5462297cbb
+source_commit: 72cec19128c7b816f96bd9634fc00160aa9ff871
+package_documentation_commit: 72cec19128c7b816f96bd9634fc00160aa9ff871
+server_binary_sha256: 59f9cd4dbf8d47b63b9e46240e524cfc399601f290afd245deacaed37fe9712d
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: ed37dff18e0ba8ad638990b28287ab1aeb22ada5fe7345a3eb17a39733598d87
+hibr_root: /tmp/hibr-0.99.100
+hibr_version: 0.99.100
+tcc_build_acceptance: pass
+openapi_yaml: pass
+api_schema_gate: pass_36_paths
+package_artifact_acceptance: pass_manifest_hashes_match_package_and_reproducible
+network_auth_acceptance: pass_four_listener_postures_loopback_default_refusal_and_override_warning
+terminal_conformance: pass_with_kitty_transmission_medium_refusal_vectors
+live_terminal_feature_acceptance: carried_from_0_1_447
+live_sixel_acceptance: carried_from_0_1_448
+session_lifecycle_acceptance: pass
+session_write_resize_acceptance: pass
+stream_replay_acceptance: pass
+font_api_acceptance: pass
+hibr_font_manifest_acceptance: pass
+glyph_geometry_local_pixel_acceptance: pass
+sdl_glyph_filter_acceptance: pass
+external_pointer_composition: pass
+pointer_damage_atomic_acceptance: pass_three_consecutive_runs_frame_counter_wait
+pointer_wallpaper_stress_acceptance: pass
+hidden_cursor_damage_acceptance: pass
+sdl_background_batch_acceptance: pass
+sdl_graphics_cache_acceptance: pass
+sdl_wallpaper_damage_acceptance: pass
+screenshot_overlay_acceptance: pass
+pixel_frame_acceptance: pass
+render_state_agreement_acceptance: pass
+adapter_coalesce_acceptance: pass_idle_frame_zero_requests
+kitty_placement_pixel_acceptance: pass_crop_offset_numbered_and_z_order_by_pixel
+kitty_placement_conformance_acceptance: pass_delete_targets_and_unsupported_key_refusals
+sixel_decoder_pixel_acceptance: carried_from_0_1_448
+sixel_decoder_teeth: carried_from_0_1_448
+graphics_bound_publication_acceptance: carried_from_0_1_448
+graphics_payload_trace_acceptance: carried_from_0_1_449
+graphics_payload_trace_teeth: carried_from_0_1_449
+live_graphics_boundary: carried_from_0_1_449
+sync_output_acceptance: pass_held_frame_and_hidden_writes_one_and_two_surfaces
+cell_paint_acceptance: pass_cursor_glyph_italic_distinct_session_defaults
+pointer_geometry_acceptance: pass_inset_honoured_and_pane_less_at_corner
+mouse_report_acceptance: pass_wheel_byte_96_hover_gated_per_cell_drops_counted
+key_encoding_acceptance: pass_119_encodings_plus_per_device_keymap_and_modifiers
+frame_quiet_starvation_acceptance: pass_longest_stagnant_run_1_was_29
+capture_witness_acceptance: pass_one_source_presented_flag_presented_revision
+motion_trail_acceptance: pass_799_blank_cells_no_unaccounted_pixels
+render_state_agreement_acceptance: pass_30_blue_cells_was_vacuous
+bold_cell_containment_acceptance: pass_8px_drawn_0_spilled
+wide_glyph_acceptance: pass_4_samples_4_distinct_shapes_two_cells_each
+font_identity_acceptance: pass_929_1182_primary_and_49899_16x16_wide
+desktop_repaint_acceptance: pass_pty_authored_0_cells_unpainted_reported_after_window_retires
+gate_port_isolation_acceptance: carried_from_0_1_431
+input_identity_acceptance: carried_from_0_1_433
+input_device_api_acceptance: carried_from_0_1_432
+input_device_config_acceptance: pass_one_rule_for_where_a_property_applies
+input_device_route_acceptance: carried_from_0_1_436
+audio_device_api_acceptance: pass_node_is_the_authority_hotplug_retires_three_runs
+display_device_api_acceptance: pass_envelope_item_matches_collection_no_writable_property
+main_block_key_table_acceptance: carried_from_0_1_435
+live_input_device_table_acceptance: carried_from_0_1_433
+live_input_device_config_acceptance: pass_one_rule_for_where_a_property_applies
+live_main_block_key_acceptance: carried_from_0_1_435
+live_per_device_keymap_acceptance: carried_from_0_1_441
+live_device_kinds_acceptance: carried_from_0_1_442
+live_listener_posture_acceptance: carried_from_0_1_443
+live_evdev_opener_acceptance: carried_from_0_1_444
+live_output_occupancy_acceptance: carried_from_0_1_445
+live_device_routing_acceptance: carried_from_0_1_436
+live_audio_device_acceptance: pass_12_pcms_unchanged_by_node_authority_all_accessible
+json_escape_acceptance: carried_from_0_1_431
+live_cell_property_refusal_acceptance: carried_from_0_1_431
+live_unpainted_report_acceptance: carried_from_0_1_430
+live_wide_glyph_acceptance: carried_from_0_1_428
+live_render_state_agreement_acceptance: carried_from_0_1_427
+evdev_scan_open_count_acceptance: carried_from_0_1_431
+evdev_open_latency_acceptance: carried_from_0_1_444
+output_occupancy_acceptance: pass_warning_always_error_only_when_declared
+performance_schema_agreement_acceptance: pass_93_required_93_described_both_directions
+graphics_kitty_zlib_acceptance: pass_pixel_crc32_identical_to_raw
+graphics_xtsmgraphics_acceptance: pass_no_scroll_and_4096_square_reported
+terminal_kitty_keyboard_acceptance: pass_cursor_unmoved_query_reports_zero
+hibr_singleton_local_acceptance: pass
+hibr_resume_guard_acceptance: pass
+restart_gate: pass
+shutdown_gate: pass
+update_idle_timeout_acceptance: pass
+update_reset_acceptance: pass
+update_restart_intent_acceptance: pass_install_exits_nonzero_api_restart_execs_same_pid
+update_restart_intent_teeth: pass_pre_change_keeps_serving_after_install
+kitty_transmission_medium_acceptance: pass_t_f_t_t_t_s_refused_with_a_readable_path_and_einval
+live_kitty_transmission_medium_acceptance: pass_three_media_unsupported_key_on_0_1_449
+live_update_restart_race: pending
+update_cancel_acceptance: pass
+frame_rate_settled_acceptance: pass
+terminal_soak_120s_acceptance: pass
+screenshot_nonblocking_live_acceptance: not_rerun_candidate
+qemu_hibr_lifecycle_acceptance: not_rerun_candidate
+qemu_four_output_pixel_acceptance: not_rerun_candidate
+qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
+live_deployment: pending
+live_current_version: pending
+live_block_cursor_acceptance: carried_from_0_1_425
+live_italic_acceptance: carried_from_0_1_425
+live_session_default_acceptance: carried_from_0_1_425
+live_sync_output_acceptance: carried_from_0_1_425
+live_hibr_desktop_acceptance: pending
+live_idle_frame_acceptance: carried_from_0_1_425
+live_physical_multi_display: unavailable_one_output
+live_physical_button_trace_contract: open
+physical_evdev_acceptance: open
+physical_multi_monitor_acceptance: open
+physical_high_refresh_acceptance: open
+notes: >-
+  Two pieces of the same deployment-and-trust boundary, plus the ADR #14 asked
+  for.
+
+  #63, found while host-accepting 0.1.449 and the reason that acceptance had
+  to be redone. Two mechanisms restarted the service after a package install
+  and neither knew about the other: the privileged helper runs `systemctl
+  daemon-reload` and `systemctl restart --no-block blit.service` -- correct,
+  and its own comment says why, since the package may have changed the unit
+  and credentials come from the unit -- while `finish_update_upload` also set
+  `blit_restart_requested` and `main` re-exec'd.
+
+  systemd sends its one SIGTERM to the main pid. A process that execs instead
+  of exiting consumes that signal and keeps running, so the unit waits out
+  TimeoutStopSec -- 90 seconds -- and is then SIGKILLed along with every
+  process in its cgroup. From the host journal:
+
+    04:24:42 Stopping blit.service ...
+    04:24:43 blit[14145]: blit gateway listening ...   <- same pid, re-exec'd
+    04:26:12 State 'stop-sigterm' timed out. Killing.
+    04:26:12 Killing process 14446 (hibr [attached:) with signal SIGKILL
+    04:26:12 Killing process 14449 (desktop [blit-0) with signal SIGKILL
+    04:26:13 Main process exited, code=killed, status=9/KILL
+    04:26:13 Failed with result 'timeout'
+
+  Two `listening` lines from one pid is the tell. Every supervised update left
+  a 90-second window where the service answered normally and was already
+  doomed; update-live.sh reported success against that process, and anything
+  started in the window died with it. The helper's restart counter was at 25,
+  so this had been happening for a long time with nothing able to report it:
+  the in-process log ring dies with the process.
+
+  How it was found is worth keeping. The host has no SSH, so the journal came
+  back through the API -- a terminal session running journalctl with a 200x60
+  surface, read off GET /v1/surfaces/{id}/cells. Before that, all Blit could
+  say was that uptime was 5.7 minutes and there were no sessions.
+
+  The install path now exits, non-zero, and does not exec. Non-zero so that
+  Restart=on-failure stays a safety net if the helper dies before reaching
+  systemctl -- the package must never be installed with the service down.
+  POST /v1/control/restart keeps its re-exec, because nothing else is going to
+  restart it, and restart_gate.sh still reports same_binary=1.
+
+  A 20-minute watch of the clean process before the fix was written: 118
+  readable samples, zero uptime resets, one session throughout. So the kill
+  was the race and not a crash, which is the distinction that decided what to
+  fix.
+
+  tools/tests/update_restart_gate.sh asserts the two intents stay
+  distinguishable, which nothing did before. It drives the real install path
+  with a stub helper, which needed the helper socket to become overridable --
+  the same testing-hook shape as BLIT_INPUT_ROOT and BLIT_ASOUND_ROOT. Teeth:
+  the pre-change binary keeps serving after the install and prints the same
+  double-listening signature as the host journal.
+
+  #14 and ADR 0066. The ticket's premise -- `t` never parsed -- had already
+  been fixed by ADR 0060's work: anything but t=d is refused with a typed
+  unsupported-key and an EINVAL reply. What was missing is the decision, which
+  #14 asked for explicitly. ADR 0066 records it as a property of the channel
+  rather than of the key: no path or shared-memory object name arriving over a
+  terminal channel is opened, read, created, deleted or unlinked.
+
+  A terminal escape sequence is not an authenticated request -- anything that
+  can write to a PTY can emit an APC sequence, and under ADR 0065 this process
+  may be root. t=f would turn "whatever can print here" into "whatever can
+  make a root process read an arbitrary path", and t=t and t=s add a delete.
+  The real motivation, large payloads without pushing megabytes through a PTY,
+  is already served by /v1/graphics over authenticated HTTP.
+
+  The vector: t=f, t=t and t=s carrying the base64 of a real readable path are
+  refused and create no image, with the EINVAL reply read back off the
+  session's own tty. Measured on the host under 0.1.449:
+
+    t=f with a readable path  images=0 last_error="unsupported-key"
+    t=t with a readable path  images=0 last_error="unsupported-key"
+    t=s with a readable path  images=0 last_error="unsupported-key"
+
+  Teeth: with the `t` check removed the diagnosis becomes incomplete-data --
+  Blit reporting the wrong thing about a path it was handed, which is the
+  shape #14 named.
+
+  Suite: 52 pass, 5 skip, 0 fail.
