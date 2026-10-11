@@ -175,13 +175,15 @@ path is added, removed, or renamed; the schema remains the authoritative count.
 
 ### Method-level reference
 
-This is the stable mental model for the 33 paths; the OpenAPI file remains the
+This is the stable mental model for the 39 paths; the OpenAPI file remains the
 exact method, parameter, and response reference:
 
 ```text
 GET    /v1/version                         compatibility handshake
 GET    /v1/server                          capabilities and links
 GET    /v1/graphics /displays /audio       hardware inventory
+GET/PATCH /v1/displays/{id}                rotation and brightness
+GET/PATCH /v1/audio/cards[/{id}]           a card's mixer
 GET/PUT /v1/fonts /topology /effects       revisioned configuration
 POST   /v1/terminal-sessions               create a PTY-backed session
 GET/PATCH/DELETE /v1/terminal-sessions/{id} lifecycle and placement
@@ -408,6 +410,107 @@ reports physical outputs; `/v1/topology` reports logical placement.
 bounds, and presentation state. `PUT /v1/topology` changes the logical
 placement using the schema's revision and idempotency controls. Pane splits are
 logical Blit layout resources; they do not create extra physical monitors.
+
+### Display settings: rotation, brightness, and what power costs
+
+A display's `configuration` used to be `{}`, and that was a decision rather
+than an omission (ADR 0064): selecting a mode changes the render output size
+and therefore every surface on the display, and a Hibr desktop's cells come
+from its owner (ADR 0063), so applying one needs a resize protocol with that
+owner. Issue #60 is that protocol. `mode` is still refused, with
+`invalid_display_property`.
+
+What is left is the settings that resize nothing, and `capabilities` says
+which of them this backend and this hardware can actually perform. It is
+derived, not declared: `configuration` offers exactly what `capabilities`
+claims, and a PATCH accepts exactly that. A property that takes a value and
+does nothing is worse than its absence, which is the reasoning the empty
+object used.
+
+```text
+mode-report   always
+rotation      the SDL path. Blit's own render transform.
+brightness    only where a backlight is attributed to the display.
+```
+
+**`rotation`** is `0`, `90`, `180` or `270`: the angle, clockwise, by which
+Blit rotates the rendered image before presenting it. At 90, what Blit drew at
+the top-left of the logical rectangle appears at the **top-right of the
+panel**. The contract is stated as a corner on purpose, because every enum
+that could stand in for it means something different -- DRM's `ROTATE_90` is
+anticlockwise and RandR calls the same transform "right".
+
+Rotation moves the display's rectangle, not its mode:
+
+```text
+bounds            the logical rectangle: 1920x2160 becomes 2160x1920 at 90
+modes             physical, unchanged
+active_mode       physical, unchanged
+state.physical    the mode the connector drives
+```
+
+`bounds` is the logical one because that is what a rotated monitor occupies on
+a desk, and because the cell grid, the pointer hit test and the topology
+placements then all work in one coordinate space. `xrandr` reports the same
+split. `GET /v1/topology` carries the same rectangle and the same rotation.
+
+A rotation is refused with **409 `display_rotation_in_use`** while a surface is
+present on the display. Exchanging width and height exchanges the cell grid,
+and a surface's owner is the one that decides its size -- so this is issue
+#60's problem again, and the refusal is a conflict rather than a prohibition:
+remove the sessions and the same request succeeds. A rotation is persisted
+(ADR 0067) against the display's **name**, which on the SDL KMSDRM backend is
+its connector (`DP-1`); setting it back to `0` removes the stored entry rather
+than leaving a zero behind.
+
+**`brightness_percent`** reads `actual_brightness` -- what the panel is doing
+-- and writes `brightness` -- what was requested. A driver that ramps will
+report the old value until it arrives, which is why the two are not conflated.
+It is not persisted: `systemd-backlight` already restores it across a boot, and
+two things restoring one setting is how they end up fighting. A backlight is
+attributed to a display only when the host has **exactly one backlight and
+exactly one display**: sysfs does not say which panel a backlight drives, and a
+control that dims the wrong screen is worse than one that is absent. Where none
+is attributed, the write is refused with 422
+`display_brightness_unsupported`.
+
+**Power is reported and not settable.** `state.power` carries the connector's
+DPMS state where a DRM connector was matched to the display, so an operator can
+see that a panel is asleep -- but `power` is deliberately not in
+`capabilities`, because nothing can set it yet. Two measurements on the live
+host say why:
+
+```text
+/sys/class/drm/card0-DP-1/dpms   mode 444; a root write returns EACCES
+/dev/dri/card0                   one open fd, held by blit through SDL
+```
+
+So sysfs is not an avenue on any backend -- that is the kernel, not SDL -- and
+setting the property needs DRM master, which belongs to SDL's KMSDRM backend.
+SDL publishes that master fd per window, which is the route the rest of #69
+takes. `/sys/class/graphics/fb0/blank` is not an alternative: fbdev emulation
+is one device for the whole card, so it could not express "turn off this one
+display" even if it worked behind a master.
+
+On this host there is **no backlight at all** (`/sys/class/backlight` exists and
+is empty), so `brightness` is absent there and that is the answer rather than a
+gap. The code path is real and gated locally against a fabricated backlight
+under `BLIT_BACKLIGHT_ROOT`.
+
+Two limits are worth knowing rather than discovering:
+
+- Whether the **unprivileged profile** (ADR 0065) can write
+  `/sys/class/backlight/*/brightness` is not measured. The attribute is
+  typically `root:video` with a udev rule granting the seat's user, the gate
+  runs against fabricated files, and the live host runs as root with no
+  backlight. It is the same unmeasured-group caveat as the ALSA control device
+  in #68, and it belongs to an operator who switches profiles on hardware that
+  has a panel.
+- On a **multi-display** host, rotating one display changes its width, so a
+  topology placement computed against the old width may no longer tile. Blit
+  does not recompute the placement for you: re-`PUT /v1/topology` after a
+  rotation. Both machines this was measured on have a single output, so that
+  is a stated consequence rather than a tested one.
 
 `GET /v1/fonts` lists profiles and the active cell size. `PUT /v1/fonts` can
 select `font_id`, `scale` from 1 through 3, or both. Blit recalculates pane

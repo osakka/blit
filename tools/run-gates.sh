@@ -224,6 +224,7 @@ suite_renderer() {
     run_gate input_identity_gate.sh "$ROOT"/tools/tests/input_identity_gate.sh
     run_gate pointer_curve_gate.sh "$ROOT"/tools/tests/pointer_curve_gate.sh
     run_gate audio_control_gate.sh "$ROOT"/tools/tests/audio_control_gate.sh
+    run_gate display_geometry_gate.sh "$ROOT"/tools/tests/display_geometry_gate.sh
     run_gate input_device_api_gate.rb ruby tools/tests/input_device_api_gate.rb
     run_gate input_device_config_gate.rb ruby tools/tests/input_device_config_gate.rb
     run_gate settings_persistence_gate.rb ruby tools/tests/settings_persistence_gate.rb
@@ -247,6 +248,7 @@ suite_renderer() {
     run_gate key_encoding_gate.rb ruby tools/tests/key_encoding_gate.rb
     run_gate keyboard_settings_gate.rb ruby tools/tests/keyboard_settings_gate.rb
     run_gate pointer_settings_gate.rb ruby tools/tests/pointer_settings_gate.rb
+    run_gate display_settings_gate.rb ruby tools/tests/display_settings_gate.rb
     run_gate sdl_wallpaper_damage_gate.rb ruby tools/tests/sdl_wallpaper_damage_gate.rb
     run_gate screenshot_overlay_gate.sh "$ROOT"/tools/tests/screenshot_overlay_gate.sh
     run_gate render_state_agreement_gate.rb ruby tools/tests/render_state_agreement_gate.rb

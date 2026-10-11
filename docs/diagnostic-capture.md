@@ -309,6 +309,28 @@ device's `route` names a `session-N` target, which does not survive a restart
 either. Both are reported in the device item and both are honest gaps rather
 than oversights.
 
+The document has three sections: `input_devices`, `audio_devices` and
+`displays`. A display is keyed by its **name**, not by `display-<n>`, for the
+same stability reason — the name is the connector (`DP-1` on the live host)
+while `display-<n>` is enumeration order. The `displays` section is also the
+one whose subjects do not exist yet when the document loads, so it is applied
+after the outputs are initialised and before the first frame.
+
+What is in each section is the setting Blit owns and nothing else:
+
+```text
+displays   rotation only. Power is not persisted -- SDL's initialising
+           modeset turns the panel on anyway, so a stored `off` would be a
+           dark boot whose only remedy is an API nobody can see. Brightness
+           is not persisted either: systemd-backlight already restores it.
+audio      the per-PCM `default` flag, not mixer values. A card keeps its own
+           volume, and storing it would make Blit fight alsactl for a setting
+           that already survives a reboot.
+```
+
+A setting returned to its default **removes** its entry rather than writing
+the default out, so the document stays a record of what somebody chose.
+
 ### When settings are the problem
 
 A document that cannot be read never stops a boot. It is renamed to

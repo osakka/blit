@@ -368,6 +368,13 @@ reasons, either sufficient.
 6. **Displays.** Item endpoint and the envelope; no writable property.
    *Done, 0.1.437.* Mode selection is its own ticket, because it needs a
    resize protocol with the surface owner.
+7. **Display settings that resize nothing** (#69, ADR 0067). The empty
+   `configuration` object this record chose was right about mode selection and
+   too broad about everything else: rotation is Blit's own render transform and
+   resizes nothing a mode change would. `capabilities` is now derived from the
+   backend and the hardware, and `configuration` offers exactly what it claims
+   — which is this record's own reasoning applied per property rather than per
+   resource. `mode` is still refused and still issue #60's. *Done, 0.1.456.*
 
 ## Evidence
 

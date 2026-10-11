@@ -222,6 +222,22 @@ the live host:
   and that is recorded as a dependency rather than promised. Mode selection
   remains issue #60 and is not re-decided here.
 
+  *Measured since, in #69 (0.1.456), and it resolves this dependency in both
+  directions.* Rotation turned out not to need DRM master at all: it is a
+  render transform over a scene Blit already composes into a texture, so it is
+  implemented on the SDL path and persisted here. Power is the other way round.
+  `/sys/class/drm/card0-DP-1/dpms` is mode 444 and a root write returns
+  `EACCES` on kernel 6.12, so sysfs is not an avenue on any backend — that is
+  the kernel, not SDL — and `/sys/class/graphics/fb0/blank` is one device for
+  the whole card and could not express a single display. What does exist is the
+  cooperation branch this paragraph named: SDL's KMSDRM backend publishes its
+  own master fd per window as `SDL_PROP_WINDOW_KMSDRM_DRM_FD_NUMBER`. 0.1.456
+  reads the connector's DPMS state through it and reports it; setting it is the
+  remainder of #69, and it carries a hazard worth writing down here, because
+  it is the reason the read shipped first: SDL waits for its own pageflip
+  events on that fd with `poll(..., -1)`, so a display turned off while a flip
+  is outstanding is a hang of the only thread that serves the API.
+
 Key repeat becomes a kernel setting Blit owns per device, via `EVIOCGREP` and
 `EVIOCSREP` on the device's own descriptor. This is a real change in posture:
 until now Blit has only ever *read* from an evdev descriptor. It is bounded —

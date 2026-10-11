@@ -105,9 +105,27 @@ displays.each do |display|
                 'modes are not square, which is what a duplicated argument ' \
                 'would look like'
   end
-  failures << "#{display['id']}: configuration #{display['configuration'].inspect} " \
-              'must be empty until mode selection has a resize protocol' unless
-    display['configuration'] == {}
+  # Issue #69 replaced the empty object, but not the reasoning behind it: a
+  # display's `configuration` carries exactly the properties this backend and
+  # this hardware can actually perform, and each one has to be claimed in
+  # `capabilities` first. A property offered without the capability, or a
+  # capability with nothing to set, is the lie the empty object avoided.
+  settable = display.fetch('configuration', {}).keys
+  claimed = display.fetch('capabilities', [])
+  failures << "#{display['id']}: capabilities #{claimed.inspect} must include " \
+              'mode-report' unless claimed.include?('mode-report')
+  unexpected = settable - %w[rotation brightness_percent]
+  failures << "#{display['id']}: configuration offers #{unexpected.inspect}; " \
+              "mode selection still needs issue #60's resize protocol" unless
+    unexpected.empty?
+  failures << "#{display['id']}: rotation is settable without the capability" if
+    settable.include?('rotation') && !claimed.include?('rotation')
+  failures << "#{display['id']}: rotation is a capability but not settable" if
+    claimed.include?('rotation') && !settable.include?('rotation')
+  if settable.include?('brightness_percent') && !claimed.include?('brightness')
+    failures << "#{display['id']}: brightness_percent is settable without " \
+                'the capability'
+  end
   failures << "#{display['id']}: state #{display['state'].inspect}" unless
     display.dig('state', 'present') == true
   failures << "#{display['id']}: revision #{display['revision'].inspect}" unless
@@ -122,14 +140,18 @@ if first
     failures << 'the item endpoint disagrees with the collection: ' \
                 "#{item.inspect} vs #{first.inspect}"
   end
-  # No writable property means no PATCH route, not a PATCH that silently
-  # accepts a mode.
-  code, = request('PATCH', "/v1/displays/#{first.fetch('id')}",
-                  body: { 'configuration' => { 'mode' => { 'width' => 640,
-                                                           'height' => 480 } } })
-  failures << "PATCH a display -> #{code}; a display has no writable " \
-              'property yet, so this must be refused and not quietly ' \
-              'accepted' unless [404, 405].include?(code)
+  # A mode is the one that resizes every surface on the display, and it is
+  # still issue #60's. The PATCH route exists now, so the refusal has to come
+  # from the property check rather than from the route's absence -- a weaker
+  # guarantee than it was, which is why the problem detail is read too.
+  code, problem = request('PATCH', "/v1/displays/#{first.fetch('id')}",
+                          body: { 'configuration' => {
+                            'mode' => { 'width' => 640, 'height' => 480 } } })
+  failures << "PATCH a mode -> #{code}; selecting a mode resizes every " \
+              'surface and must still be refused' unless code == 400
+  unless problem.is_a?(Hash) && problem['code'] == 'invalid_display_property'
+    failures << "a refused mode should name the property: #{problem.inspect}"
+  end
 end
 
 code, = request('GET', '/v1/displays/display-does-not-exist')
@@ -141,4 +163,4 @@ unless failures.empty?
 end
 
 puts "DISPLAY_DEVICE_API_PASS displays=#{displays.length} envelope=11 " \
-     'item_matches_collection=yes no_writable_property=refused unknown_id=404'
+     'item_matches_collection=yes capabilities=derived mode=refused unknown_id=404'

@@ -145,9 +145,6 @@ paths:
       tags: [hardware]
       operationId: getDisplay
       summary: Read one display
-      description: >-
-        There is no PATCH here. A display has no writable property: see the
-        `configuration` description on the Display schema.
       responses:
         '200':
           description: The display
@@ -156,6 +153,56 @@ paths:
               schema:
                 $ref: '#/components/schemas/Display'
         '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    patch:
+      tags: [hardware]
+      operationId: updateDisplay
+      summary: Set a display's rotation or brightness
+      description: >-
+        Only the properties this display lists in `capabilities` are accepted,
+        and anything else is refused with `invalid_display_property` rather
+        than ignored. Selecting a mode is deliberately not here: it resizes
+        every surface on the display and needs issue #60's resize protocol.
+
+        `rotation` is refused with 409 `display_rotation_in_use` while a
+        surface is present on the display, because rotating exchanges the cell
+        grid's width and height and a surface's owner is the one that decides
+        its size (ADR 0063). `brightness_percent` is refused with 422
+        `display_brightness_unsupported` where no backlight is attributed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [configuration]
+              properties:
+                configuration:
+                  type: object
+                  properties:
+                    rotation: {type: integer, enum: [0, 90, 180, 270]}
+                    brightness_percent:
+                      type: integer
+                      minimum: 0
+                      maximum: 100
+                  additionalProperties: false
+              additionalProperties: false
+      responses:
+        '200':
+          description: The updated display
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Display'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '422':
           $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
@@ -1621,6 +1668,15 @@ components:
         name: {type: string}
         bounds:
           type: object
+          description: >-
+            The display's rectangle in the desktop's coordinate space, which
+            is the *logical* one: at a rotation of 90 or 270 its width and
+            height are the active mode's exchanged, because a rotated monitor
+            occupies a rotated rectangle. `modes` and `active_mode` stay
+            physical, and `state.physical` carries the mode's own size beside
+            them. That is the same split `xrandr` reports, and it is what lets
+            the cell grid, the pointer hit test and the topology placements all
+            work in one space.
           required: [x, y, width, height]
           properties:
             x: {type: integer}
@@ -1638,25 +1694,86 @@ components:
         presentation_state: {type: string}
         capabilities:
           type: array
-          items: {type: string}
+          description: >-
+            What this backend and this hardware can actually perform, derived
+            rather than declared: `configuration` offers exactly these and a
+            PATCH accepts exactly these. `mode-report` is always present.
+            `rotation` is present on the SDL path, which composes a scene that
+            can be drawn rotated; the direct-KMS path composes straight into
+            the connector's framebuffer and omits it. `brightness` is present
+            only where a backlight is attributed to the display.
+          items:
+            type: string
+            enum: [mode-report, rotation, brightness]
         state:
           type: object
-          required: [present, presentation_state]
+          required: [present, presentation_state, physical]
           properties:
             present: {type: boolean}
             presentation_state: {type: string}
+            physical:
+              type: object
+              description: >-
+                The mode the connector is driving. It never rotates, so it is
+                what `bounds` is derived from rather than the other way round.
+              required: [width, height]
+              properties:
+                width: {type: integer, minimum: 0}
+                height: {type: integer, minimum: 0}
+              additionalProperties: false
+            power:
+              type: string
+              enum: [on, standby, suspend, off]
+              description: >-
+                The connector's DPMS state as the kernel reports it, present
+                only where a DRM connector was matched to this display. It is
+                reported and not settable, which is why `power` is not a
+                capability: on the live host `/sys/class/drm/*/dpms` is mode
+                444 and a root write returns EACCES, and the one open fd on
+                the card belongs to SDL. Setting it is the rest of issue #69.
+            connector:
+              type: string
+              description: >-
+                The DRM connector this display was matched to, by name, e.g.
+                `DP-1`. Matching is by name and not by index because SDL
+                enumerates only the connectors it drives while the kernel
+                enumerates all of them.
+            backlight:
+              type: string
+              description: >-
+                The backlight device under /sys/class/backlight attributed to
+                this display. A backlight is attributed only when the host has
+                exactly one backlight and exactly one display: sysfs does not
+                say which panel a backlight drives, and dimming the wrong
+                screen is worse than offering nothing.
           additionalProperties: false
         configuration:
           type: object
           description: >-
-            Empty, and that is the decision rather than an omission. Selecting
-            a mode changes the render output size and therefore every surface
-            on the display, and a Hibr desktop's cells come from its owner
-            (ADR 0063), so Blit cannot repaint one at a new size by itself: it
-            needs a resize protocol with the owner. The modes are reported so
-            a controller can show them; the write that applies one does not
-            exist yet, and saying so beats a property that accepts a value and
-            does nothing. There is no PATCH on this path.
+            The properties this display can actually perform, and only those
+            (issue #69). It replaced an empty object, but not the reasoning
+            behind it: selecting a mode changes the render output size and
+            therefore every surface on the display, and a Hibr desktop's cells
+            come from its owner (ADR 0063), so it needs a resize protocol with
+            that owner. The modes are reported so a controller can show them;
+            `mode` is still refused.
+
+            `rotation` is the angle, clockwise, by which Blit rotates the
+            rendered image before presenting it: at 90 what was drawn at the
+            top-left of the logical rectangle appears at the top-right of the
+            panel. It is stated as a corner rather than as an enum because
+            DRM's ROTATE_90 is anticlockwise and RandR calls the same transform
+            "right". It is Blit's own render transform, needs no DRM master,
+            and is persisted (ADR 0067).
+
+            `brightness_percent` is the backlight's level. It is read from
+            `actual_brightness`, which is what the panel is doing, and written
+            to `brightness`, which is what was requested -- so a driver that
+            ramps reports the old value until it arrives. It is not persisted:
+            systemd-backlight already restores it across a boot.
+          properties:
+            rotation: {type: integer, enum: [0, 90, 180, 270]}
+            brightness_percent: {type: integer, minimum: 0, maximum: 100}
           additionalProperties: false
         revision:
           $ref: '#/components/schemas/Revision'

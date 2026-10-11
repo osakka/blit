@@ -8,6 +8,7 @@
 #include "blit_unicode_width.h"
 #include "blit_input_identity.h"
 #include "blit_audio_control.h"
+#include "blit_display_geometry.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -40,6 +41,7 @@
 #include <pthread.h>
 #include <pty.h>
 /* ADR 0056: DEFLATE for PNG (f=100) and Kitty o=z payloads. */
+#include <xf86drmMode.h>
 #include <zlib.h>
 
 extern char **environ;
@@ -70,6 +72,9 @@ extern char **environ;
    levels is a few kilobytes per keyboard. */
 #define BLIT_SETTINGS_CAPACITY 65536
 #define BLIT_SETTINGS_FLUSH_US 500000
+#define BLIT_SETTINGS_AUDIO 0
+#define BLIT_SETTINGS_INPUT 1
+#define BLIT_SETTINGS_DISPLAY 2
 #define BLIT_MAX_SAMPLE_RATES 16
 #define BLIT_MAX_KEYMAP_OVERRIDES 128
 #define BLIT_MAX_OPEN_QUEUE 64
@@ -127,11 +132,31 @@ extern char **environ;
 typedef struct {
     unsigned long long id;
     char name[128];
+    /* Issue #69. `bounds` is the *logical* rectangle -- the physical mode with
+       its axes exchanged at 90 and 270 -- because that is the space the cell
+       grid, the hit test and the topology placements already work in. The
+       mode the connector drives is kept beside it, because three things need
+       it and cannot derive it once bounds has rotated: the one draw that
+       presents the scene, the software pointer, and matching this display to
+       its DRM connector. */
     SDL_Rect bounds;
+    int physical_width;
+    int physical_height;
+    int rotation;
     double refresh_hz;
     int mode_count;
     int active_mode;
     BlitKmsMode modes[BLIT_KMS_MAX_MODES];
+    /* The connector's DPMS state as the kernel reports it, and the connector
+       it was read from. Read-only in 0.1.456: `capabilities` does not claim
+       `power` until something can set it. -1 is "not read". */
+    int power_state;
+    char connector[64];
+    /* The backlight this display owns, under BLIT_BACKLIGHT_ROOT or
+       /sys/class/backlight. Empty when the host has none, which is the answer
+       on both machines #69 can reach. */
+    char backlight[64];
+    int backlight_max;
 } BlitDisplay;
 
 typedef struct {
@@ -951,6 +976,9 @@ typedef struct {
     int output_count;
     int sdl_ready;
     int direct_kms;
+    /* Issue #69. A DRM connector's power state is read at most once a second:
+       it is three ioctls per connector and nothing changes it but Blit. */
+    uint64_t display_power_checked_us;
     int sdl_vsync_failures;
     char sdl_renderer_name[64];
     BlitKms *kms;
@@ -1310,15 +1338,52 @@ static void render_pointer(BlitRuntime *runtime, int output_index)
         runtime->font_scale;
     /* KMSDRM does not reliably provide a hardware cursor.  Draw a small
        high-contrast software cursor so pointer visibility is independent of
-       the compositor, desktop shell, or terminal mouse-reporting mode. */
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-    SDL_RenderLine(renderer, x, y, x, y + 15.0f);
-    SDL_RenderLine(renderer, x, y, x + 11.0f, y + 11.0f);
-    SDL_RenderLine(renderer, x + 4.0f, y + 10.0f, x + 7.0f, y + 17.0f);
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-    SDL_RenderLine(renderer, x + 1.0f, y + 1.0f, x + 1.0f, y + 12.0f);
-    SDL_RenderLine(renderer, x + 1.0f, y + 1.0f, x + 9.0f, y + 9.0f);
-    SDL_RenderLine(renderer, x + 4.0f, y + 10.0f, x + 6.0f, y + 15.0f);
+       the compositor, desktop shell, or terminal mouse-reporting mode.
+
+       Issue #69. The cursor is drawn *after* the scene has been presented, so
+       it is in panel coordinates while the pointer's position -- and the cell
+       grid it is hit-testing against -- is logical. Both the hotspot and the
+       arrow's own shape go through the transform: rotating the hotspot alone
+       would leave an arrow pointing the wrong way on a rotated panel, and the
+       shape is where that shows. The sizes are font-scaled units, so the
+       panel's size is divided the same way x and y were. */
+    {
+        static const float arrow[6][4] = {
+            { 0.0f, 0.0f, 0.0f, 15.0f },
+            { 0.0f, 0.0f, 11.0f, 11.0f },
+            { 4.0f, 10.0f, 7.0f, 17.0f },
+            { 1.0f, 1.0f, 1.0f, 12.0f },
+            { 1.0f, 1.0f, 9.0f, 9.0f },
+            { 4.0f, 10.0f, 6.0f, 15.0f }
+        };
+        int rotation = runtime->displays[display_index].rotation;
+        float scale = (float)(runtime->font_scale > 0 ?
+                              runtime->font_scale : 1);
+        float panel_width = (float)runtime->displays[display_index]
+            .physical_width / scale;
+        float panel_height = (float)runtime->displays[display_index]
+            .physical_height / scale;
+        int line;
+
+        for (line = 0; line < 6; ++line) {
+            float from_x;
+            float from_y;
+            float to_x;
+            float to_y;
+
+            if (line == 0)
+                SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+            else if (line == 3)
+                SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+            blit_rotate_point(rotation, (int)panel_width, (int)panel_height,
+                              x + arrow[line][0], y + arrow[line][1],
+                              &from_x, &from_y);
+            blit_rotate_point(rotation, (int)panel_width, (int)panel_height,
+                              x + arrow[line][2], y + arrow[line][3], &to_x,
+                              &to_y);
+            SDL_RenderLine(renderer, from_x, from_y, to_x, to_y);
+        }
+    }
 }
 
 static int refresh_period_ms(double refresh_hz)
@@ -1334,6 +1399,28 @@ static int refresh_period_ms(double refresh_hz)
     if (period < 1)
         period = 1;
     return period;
+}
+
+/* Issue #69. The one place a display's rectangle is written. The mode the
+   connector drives goes in physical_*, and `bounds` is that mode under the
+   display's rotation. Every caller that learns a size from a backend goes
+   through here, so a rotation cannot end up half applied -- which is the
+   failure that would leave the cell grid and the scene texture disagreeing
+   about how big the display is. */
+static void set_display_geometry(BlitDisplay *display, int x, int y,
+                                 int width, int height)
+{
+    int logical_width;
+    int logical_height;
+
+    display->physical_width = width;
+    display->physical_height = height;
+    blit_rotate_size(display->rotation, width, height, &logical_width,
+                     &logical_height);
+    display->bounds.x = x;
+    display->bounds.y = y;
+    display->bounds.w = logical_width;
+    display->bounds.h = logical_height;
 }
 
 static int display_index_for_output(const BlitRuntime *runtime,
@@ -2917,6 +3004,270 @@ static int display_index_by_id(const BlitRuntime *runtime, const char *id)
  * The modes are reported so a controller can show them; the write that
  * applies one does not exist yet, and saying so beats a property that
  * accepts a value and does nothing. */
+/* ---- issue #69: what this backend and this hardware actually permit ----
+ *
+ * ADR 0064 left a display's `configuration` empty on purpose, and the empty
+ * object was honest: a mode change resizes every surface, and a Hibr desktop's
+ * cells come from its owner, so it needs issue #60's resize protocol first.
+ * What is left over is the settings that resize nothing, and they divide by
+ * who is allowed to perform them:
+ *
+ *   rotation    Blit's own render transform. No DRM master needed, so it is
+ *               available wherever the scene is composed into a texture that
+ *               can be drawn rotated -- which is the SDL path.
+ *   power       the connector's DPMS, which needs DRM master. Measured on the
+ *               live host: /sys/class/drm/card0-DP-1/dpms is mode 444 and a
+ *               root write returns EACCES, so sysfs is not an avenue on any
+ *               backend; and one fd holds /dev/dri/card0, which is Blit's own
+ *               through SDL. SDL publishes that master fd per window
+ *               (SDL_PROP_WINDOW_KMSDRM_DRM_FD_NUMBER), which is the
+ *               "cooperation with SDL" branch ADR 0067 recorded as a
+ *               dependency. 0.1.456 reads it; `capabilities` does not claim
+ *               `power` until something can set it.
+ *   brightness  a backlight, which this host does not have:
+ *               /sys/class/backlight exists and is empty. The capability is
+ *               therefore absent here, and that is the answer rather than a
+ *               gap -- but the code path is real, and BLIT_BACKLIGHT_ROOT
+ *               lets a gate fabricate one.
+ */
+
+#define BLIT_BACKLIGHT_ROOT_DEFAULT "/sys/class/backlight"
+
+static const char *backlight_root(void)
+{
+    const char *root = getenv("BLIT_BACKLIGHT_ROOT");
+    return root != NULL && root[0] != '\0' ? root : BLIT_BACKLIGHT_ROOT_DEFAULT;
+}
+
+static int read_sysfs_long(const char *path, long *value)
+{
+    char text[64];
+    ssize_t got;
+    int fd = open(path, O_RDONLY);
+
+    if (fd < 0)
+        return -1;
+    got = read(fd, text, sizeof(text) - 1);
+    close(fd);
+    if (got <= 0)
+        return -1;
+    text[got] = '\0';
+    *value = strtol(text, NULL, 10);
+    return 0;
+}
+
+/* The attribution rule, and the whole of it: a backlight belongs to a display
+   only when the host has exactly one of each.
+ 
+   There is no link from a backlight device to a connector in sysfs, and under
+   SDL there is no connector to link it to. Guessing -- "the first backlight
+   goes to the first display" -- would put a laptop panel's brightness on an
+   external monitor, and a brightness control that dims the wrong screen is
+   worse than one that is absent. So the ambiguous case reports nothing, and
+   `docs/api.md` says which case the host is in. */
+static void discover_backlights(BlitRuntime *runtime)
+{
+    const char *root = backlight_root();
+    DIR *directory;
+    struct dirent *entry;
+    char found[64];
+    int count = 0;
+    int i;
+
+    for (i = 0; i < runtime->display_count; ++i) {
+        runtime->displays[i].backlight[0] = '\0';
+        runtime->displays[i].backlight_max = 0;
+    }
+    found[0] = '\0';
+    directory = opendir(root);
+    if (directory == NULL)
+        return;
+    while ((entry = readdir(directory)) != NULL) {
+        if (entry->d_name[0] == '.')
+            continue;
+        ++count;
+        if (count == 1)
+            snprintf(found, sizeof(found), "%s", entry->d_name);
+    }
+    closedir(directory);
+    if (count != 1 || runtime->display_count != 1)
+        return;
+    {
+        char path[512];
+        long maximum = 0;
+        snprintf(path, sizeof(path), "%s/%s/max_brightness", root, found);
+        if (read_sysfs_long(path, &maximum) < 0 || maximum <= 0)
+            return;
+        snprintf(runtime->displays[0].backlight,
+                 sizeof(runtime->displays[0].backlight), "%s", found);
+        runtime->displays[0].backlight_max = (int)maximum;
+    }
+}
+
+/* `actual_brightness` is what the panel is doing, `brightness` is what was
+   last requested; a driver that ramps reports them differently, so a read
+   prefers the first and a write goes to the second. The percentage conversion
+   is blit_audio_control.h's, deliberately: it is one rounding rule that stage
+   4's gate already pins in both directions, and restating it here would be a
+   fourth chance to get it wrong. */
+static int display_brightness_percent(const BlitDisplay *display)
+{
+    char path[512];
+    long raw = 0;
+
+    if (display->backlight[0] == '\0' || display->backlight_max <= 0)
+        return -1;
+    snprintf(path, sizeof(path), "%s/%s/actual_brightness", backlight_root(),
+             display->backlight);
+    if (read_sysfs_long(path, &raw) < 0) {
+        snprintf(path, sizeof(path), "%s/%s/brightness", backlight_root(),
+                 display->backlight);
+        if (read_sysfs_long(path, &raw) < 0)
+            return -1;
+    }
+    return blit_audio_percent_for_raw((int)raw, 0, display->backlight_max);
+}
+
+static int display_write_brightness(const BlitDisplay *display, int percent)
+{
+    char path[512];
+    char text[32];
+    int raw;
+    int length;
+    ssize_t written;
+    int fd;
+
+    if (display->backlight[0] == '\0' || display->backlight_max <= 0)
+        return -1;
+    raw = blit_audio_raw_for_percent(percent, 0, display->backlight_max);
+    snprintf(path, sizeof(path), "%s/%s/brightness", backlight_root(),
+             display->backlight);
+    fd = open(path, O_WRONLY);
+    if (fd < 0)
+        return -1;
+    length = snprintf(text, sizeof(text), "%d\n", raw);
+    written = write(fd, text, (size_t)length);
+    close(fd);
+    return written == (ssize_t)length ? 0 : -1;
+}
+
+/* The DRM fd, from whichever backend holds it. On the direct-KMS path Blit
+   opened it; under SDL it belongs to SDL's KMSDRM backend, which publishes it
+   per window. Nothing here ever reads from the fd -- SDL waits for its own
+   pageflip events on it with no timeout, so consuming one behind its back
+   would hang the render thread for good. */
+static int display_drm_fd(BlitRuntime *runtime)
+{
+    int output_index;
+
+    if (runtime->direct_kms)
+        return runtime->kms != NULL ? blit_kms_fd(runtime->kms) : -1;
+    for (output_index = 0; output_index < runtime->output_count;
+         ++output_index) {
+        SDL_Window *window = runtime->outputs[output_index].window;
+        int fd;
+
+        if (window == NULL)
+            continue;
+        fd = (int)SDL_GetNumberProperty(SDL_GetWindowProperties(window),
+                                        SDL_PROP_WINDOW_KMSDRM_DRM_FD_NUMBER,
+                                        -1);
+        if (fd >= 0)
+            return fd;
+    }
+    return -1;
+}
+
+static int connector_dpms_value(int fd, const drmModeConnector *connector)
+{
+    int index;
+
+    for (index = 0; index < connector->count_props; ++index) {
+        drmModePropertyRes *property = drmModeGetProperty(fd,
+            connector->props[index]);
+        int value = -1;
+
+        if (property == NULL)
+            continue;
+        if (strcmp(property->name, "DPMS") == 0)
+            value = (int)connector->prop_values[index];
+        drmModeFreeProperty(property);
+        if (value >= 0)
+            return value;
+    }
+    return -1;
+}
+
+/* Match each display to its connector, and read that connector's power state.
+ 
+   The match is by name, not by index, because index order is the bug: SDL
+   enumerates only the connectors it is driving, the kernel enumerates all of
+   them, and this host has eight with one connected -- so display 0 is
+   connector 0 only by luck. SDL names a KMSDRM display "<type>-<type_id>"
+   from libdrm's own connector type name, so the display Blit already reports
+   as `DP-1` is the connector that formats to `DP-1`. On the direct-KMS path
+   Blit names a display after the connector id instead, so that path matches
+   on the id it already holds. */
+static void refresh_display_power(BlitRuntime *runtime)
+{
+    int fd;
+    drmModeRes *resources;
+    int i;
+
+    if (runtime->display_power_checked_us != 0 &&
+        monotonic_us() - runtime->display_power_checked_us < 1000000)
+        return;
+    runtime->display_power_checked_us = monotonic_us();
+    for (i = 0; i < runtime->display_count; ++i)
+        runtime->displays[i].power_state = -1;
+    fd = display_drm_fd(runtime);
+    if (fd < 0)
+        return;
+    resources = drmModeGetResources(fd);
+    if (resources == NULL)
+        return;
+    for (i = 0; i < resources->count_connectors; ++i) {
+        drmModeConnector *connector = drmModeGetConnector(fd,
+            resources->connectors[i]);
+        const char *type;
+        char name[64];
+        int display_index;
+
+        if (connector == NULL)
+            continue;
+        type = drmModeGetConnectorTypeName(connector->connector_type);
+        snprintf(name, sizeof(name), "%s-%u", type != NULL ? type : "Unknown",
+                 connector->connector_type_id);
+        for (display_index = 0; display_index < runtime->display_count;
+             ++display_index) {
+            BlitDisplay *display = &runtime->displays[display_index];
+            int matched = runtime->direct_kms ?
+                display->id == (unsigned long long)connector->connector_id :
+                strcmp(display->name, name) == 0;
+
+            if (!matched)
+                continue;
+            snprintf(display->connector, sizeof(display->connector), "%s",
+                     name);
+            display->power_state = connector_dpms_value(fd, connector);
+            break;
+        }
+        drmModeFreeConnector(connector);
+    }
+    drmModeFreeResources(resources);
+}
+
+static const char *display_power_name(int state)
+{
+    switch (state) {
+    case DRM_MODE_DPMS_ON: return "on";
+    case DRM_MODE_DPMS_STANDBY: return "standby";
+    case DRM_MODE_DPMS_SUSPEND: return "suspend";
+    case DRM_MODE_DPMS_OFF: return "off";
+    default: return NULL;
+    }
+}
+
 static size_t display_item_json(const BlitRuntime *runtime, int index,
                                 char *body, size_t capacity)
 {
@@ -2951,14 +3302,62 @@ static size_t display_item_json(const BlitRuntime *runtime, int index,
     } else {
         complete &= json_appendf(body, capacity, &used, "null");
     }
+    /* Issue #69. `capabilities` is derived from the backend and the hardware,
+       never a literal: a `configuration` property that accepts a value and
+       does nothing is worse than its absence, which is the reasoning ADR 0064
+       used for the empty object this replaces.
+
+       `rotation` is Blit's own render transform and needs no DRM master, but
+       it needs a composed scene texture to draw rotated, which is the SDL
+       path; the direct-KMS compositor has no transform and says so by
+       omission. `brightness` is present only where a backlight was
+       attributed. `power` is readable here but is not a capability: nothing
+       can set it yet (#69 continues). */
     complete &= json_appendf(body, capacity, &used,
-        ",\"presentation_state\":\"%s\","
-        "\"capabilities\":[\"mode-report\"],"
-        "\"state\":{\"present\":true,\"presentation_state\":\"%s\"},"
-        "\"configuration\":{},\"revision\":%llu}",
-        display_presentation_state(runtime, index),
-        display_presentation_state(runtime, index),
-        runtime->displays_revision);
+        ",\"presentation_state\":\"%s\",\"capabilities\":[\"mode-report\"",
+        display_presentation_state(runtime, index));
+    if (!runtime->direct_kms)
+        complete &= json_appendf(body, capacity, &used, ",\"rotation\"");
+    if (display->backlight[0] != '\0')
+        complete &= json_appendf(body, capacity, &used, ",\"brightness\"");
+    complete &= json_appendf(body, capacity, &used,
+        "],\"state\":{\"present\":true,\"presentation_state\":\"%s\","
+        "\"physical\":{\"width\":%d,\"height\":%d}",
+        display_presentation_state(runtime, index), display->physical_width,
+        display->physical_height);
+    if (display_power_name(display->power_state) != NULL)
+        complete &= json_appendf(body, capacity, &used, ",\"power\":\"%s\"",
+                                 display_power_name(display->power_state));
+    if (display->connector[0] != '\0') {
+        char escaped_connector[128];
+        json_escape(display->connector, escaped_connector,
+                    sizeof(escaped_connector));
+        complete &= json_appendf(body, capacity, &used,
+                                 ",\"connector\":\"%s\"",
+                                 escaped_connector);
+    }
+    if (display->backlight[0] != '\0') {
+        char escaped_backlight[128];
+        json_escape(display->backlight, escaped_backlight,
+                    sizeof(escaped_backlight));
+        complete &= json_appendf(body, capacity, &used,
+                                 ",\"backlight\":\"%s\"",
+                                 escaped_backlight);
+    }
+    complete &= json_appendf(body, capacity, &used, "},\"configuration\":{");
+    if (!runtime->direct_kms)
+        complete &= json_appendf(body, capacity, &used, "\"rotation\":%d",
+                                 display->rotation);
+    if (display->backlight[0] != '\0') {
+        int percent = display_brightness_percent(display);
+        if (percent >= 0)
+            complete &= json_appendf(body, capacity, &used,
+                                     "%s\"brightness_percent\":%d",
+                                     runtime->direct_kms ? "" : ",", percent);
+    }
+    complete &= json_appendf(body, capacity, &used,
+                             "},\"revision\":%llu}",
+                             runtime->displays_revision);
     return complete ? used : capacity;
 }
 
@@ -3012,10 +3411,11 @@ static void topology_json(const BlitRuntime *runtime, char *body, size_t capacit
             body + used, capacity - used,
             "%s{\"display_id\":\"display-%llu\",\"bounds\":{"
             "\"x\":%d,\"y\":%d,\"width\":%d,\"height\":%d},"
-            "\"rotation\":0,\"scale\":1}",
+            "\"rotation\":%d,\"scale\":1}",
             i == 0 ? "" : ",", runtime->displays[i].id,
             runtime->displays[i].bounds.x, runtime->displays[i].bounds.y,
-            runtime->displays[i].bounds.w, runtime->displays[i].bounds.h);
+            runtime->displays[i].bounds.w, runtime->displays[i].bounds.h,
+            runtime->displays[i].rotation);
     }
     used += (size_t)snprintf(body + used, capacity - used, "],\"panes\":[");
     for (i = 0; i < runtime->pane_count && used < capacity; ++i) {
@@ -15585,6 +15985,171 @@ static void audio_cards_json(BlitRuntime *runtime, char *body, size_t capacity)
     json_appendf(body, capacity, &used, "]}");
 }
 
+/* ---- issue #69: applying a display setting ----------------------------- */
+
+static const char *display_rejected_property(const char *configuration)
+{
+    static const char *const writable[] = {
+        "rotation", "brightness_percent"
+    };
+
+    return json_rejected_property(configuration, writable,
+                                  sizeof(writable) / sizeof(writable[0]));
+}
+
+/* Rotation changes the effective cell grid, and a Hibr desktop's cells come
+   from its owner (ADR 0063), so rotating under a live surface would hand its
+   owner a grid it never agreed to -- the same resize problem as issue #60.
+   Every surface has an owning session (there is no route that creates one
+   without), so "an owned surface is present" is simply "a surface targets
+   this display", and that is what the refusal says. */
+static int display_carries_surface(BlitRuntime *runtime, int display_index)
+{
+    int output_index = output_index_for_display_index(runtime, display_index);
+    int index;
+
+    if (output_index < 0)
+        return 0;
+    for (index = 0; index < BLIT_MAX_SESSIONS; ++index) {
+        BlitSurface *surface = runtime->surfaces[index];
+
+        if (surface == NULL || !surface->used)
+            continue;
+        if (surface_targets_output(runtime, surface, output_index))
+            return 1;
+    }
+    return 0;
+}
+
+static int apply_display_rotation(BlitRuntime *runtime, int display_index,
+                                  int rotation, BlitConfigProblem *problem)
+{
+    BlitDisplay *display = &runtime->displays[display_index];
+    int output_index;
+
+    if (!blit_rotation_valid(rotation)) {
+        config_problem(problem, 400, "Bad Request", "invalid_display_rotation",
+                       "rotation must be 0, 90, 180, or 270. It is the "
+                       "clockwise angle Blit rotates the image by, so at 90 "
+                       "what was drawn at the top-left appears at the "
+                       "top-right of the panel.");
+        return 0;
+    }
+    if (runtime->direct_kms) {
+        config_problem(problem, 422, "Unprocessable Entity",
+                       "display_rotation_unsupported",
+                       "The direct-KMS path composes straight into the "
+                       "connector's framebuffer and has no rotation "
+                       "transform, so this display does not list `rotation` "
+                       "among its capabilities.");
+        return 0;
+    }
+    if (display->rotation == rotation)
+        return 1;
+    if (display_carries_surface(runtime, display_index)) {
+        config_problem(problem, 409, "Conflict", "display_rotation_in_use",
+                       "Rotating exchanges the display's width and height and "
+                       "therefore its cell grid, and a surface's owner is the "
+                       "one that decides its size (ADR 0063). Remove the "
+                       "sessions on this display first. Resizing a live "
+                       "surface is issue #60.");
+        return 0;
+    }
+    output_index = output_index_for_display_index(runtime, display_index);
+    /* The scene is composed at the logical size and drawn rotated, so the
+       cached texture is the wrong shape the moment rotation changes. Drop it
+       and ask for a full frame; a renderer that kept it would present a
+       correctly rotated copy of a stale picture. */
+    if (output_index >= 0) {
+        if (runtime->outputs[output_index].scene_texture != NULL) {
+            SDL_DestroyTexture(runtime->outputs[output_index].scene_texture);
+            runtime->outputs[output_index].scene_texture = NULL;
+        }
+        runtime->outputs[output_index].initialized = 0;
+    }
+    display->rotation = rotation;
+    set_display_geometry(display, display->bounds.x, display->bounds.y,
+                         display->physical_width, display->physical_height);
+    ++runtime->displays_revision;
+    ++runtime->topology_revision;
+    return 1;
+}
+
+static int apply_display_configuration(BlitRuntime *runtime,
+                                       int display_index,
+                                       const char *configuration,
+                                       BlitConfigProblem *problem)
+{
+    BlitDisplay *display = &runtime->displays[display_index];
+    char scalars[512];
+    const char *rejected;
+    int rotation = 0;
+    int rotation_requested;
+    int brightness = 0;
+    int brightness_requested;
+
+    if (!json_object_scalars(configuration, scalars, sizeof(scalars))) {
+        config_problem(problem, 400, "Bad Request",
+                       "invalid_display_configuration",
+                       "A display configuration must be a JSON object of "
+                       "properties.");
+        return 0;
+    }
+    rejected = display_rejected_property(configuration);
+    if (rejected != NULL) {
+        char detail[320];
+        snprintf(detail, sizeof(detail),
+                 "A display configuration carries \"%s\", which is not a "
+                 "writable property. Writable: rotation, and "
+                 "brightness_percent where a backlight exists. A mode change "
+                 "resizes every surface and needs issue #60.", rejected);
+        config_problem(problem, 400, "Bad Request", "invalid_display_property",
+                       detail);
+        return 0;
+    }
+    rotation_requested = json_int(scalars, "rotation", &rotation);
+    brightness_requested = json_int(scalars, "brightness_percent",
+                                    &brightness);
+    if ((json_key_cursor(scalars, "rotation") != NULL &&
+         !rotation_requested) ||
+        (json_key_cursor(scalars, "brightness_percent") != NULL &&
+         !brightness_requested)) {
+        config_problem(problem, 400, "Bad Request",
+                       "invalid_display_configuration",
+                       "rotation and brightness_percent must be integers.");
+        return 0;
+    }
+    if (brightness_requested && (brightness < 0 || brightness > 100)) {
+        config_problem(problem, 400, "Bad Request",
+                       "invalid_display_configuration",
+                       "brightness_percent must be an integer from 0 "
+                       "through 100.");
+        return 0;
+    }
+    if (brightness_requested && display->backlight[0] == '\0') {
+        config_problem(problem, 422, "Unprocessable Entity",
+                       "display_brightness_unsupported",
+                       "No backlight is attributed to this display, so it "
+                       "does not list `brightness` among its capabilities. A "
+                       "backlight is attributed only when the host has "
+                       "exactly one backlight and one display, because sysfs "
+                       "does not say which panel a backlight drives.");
+        return 0;
+    }
+    if (rotation_requested &&
+        !apply_display_rotation(runtime, display_index, rotation, problem))
+        return 0;
+    if (brightness_requested &&
+        display_write_brightness(display, brightness) < 0) {
+        config_problem(problem, 500, "Internal Server Error",
+                       "display_brightness_write_failed",
+                       "The backlight's brightness attribute could not be "
+                       "written.");
+        return 0;
+    }
+    return 1;
+}
+
 static const char *audio_card_rejected_property(const char *configuration)
 {
     static const char *const writable[] = {
@@ -16076,8 +16641,47 @@ static size_t settings_merge_object(const char *fresh, const char *stored,
    attached at all since boot has to keep them too, or the first save after a
    restart would quietly delete every entry for hardware that happens to be
    unplugged today. */
+/* Issue #69. A display's stored key is its name, which on every backend Blit
+   ships is the hardware's own: SDL's KMSDRM backend names a display after the
+   connector it drives, so the live host's display is `DP-1`, and the
+   direct-KMS path names it after the connector id. ADR 0064's stability test
+   is what is being applied here -- stage 1 refused to persist against
+   `input-node-<n>` because the kernel reassigns node numbers, and
+   `display-<n>` is enumeration order in exactly the same way, while a
+   connector name is the physical port. The dummy backend the gates run
+   against names its single display `1`. */
+static int find_display_name(const BlitRuntime *runtime, const char *name)
+{
+    int i;
+
+    for (i = 0; i < runtime->display_count; ++i)
+        if (strcmp(runtime->displays[i].name, name) == 0)
+            return i;
+    return -1;
+}
+
+/* Rotation, and only rotation.
+ 
+   Power is deliberately not persisted: SDL's initialisation performs a
+   modeset that turns the panel on anyway, so a stored `off` would be a dark
+   boot whose only remedy is the API the operator cannot see. Brightness is
+   not persisted either, for the reason stage 4 gave about mixer values --
+   systemd-backlight already restores it across a boot, and two things
+   restoring one setting is how they end up fighting. */
+static size_t settings_display_configuration(const BlitDisplay *display,
+                                             char *out, size_t capacity)
+{
+    size_t used = 0;
+
+    out[0] = '\0';
+    if (display->rotation == 0)
+        return 0;
+    json_appendf(out, capacity, &used, "{\"rotation\":%d}", display->rotation);
+    return used;
+}
+
 static void settings_copy_unseen(BlitRuntime *runtime, const char *section,
-                                 int input, char *out, size_t capacity,
+                                 int kind, char *out, size_t capacity,
                                  size_t *used, int *first)
 {
     const char *cursor = json_key_cursor(runtime->settings_document, section);
@@ -16095,8 +16699,15 @@ static void settings_copy_unseen(BlitRuntime *runtime, const char *section,
                                       sizeof(value))) != NULL) {
         if (value[0] != '{')
             continue;
-        if (input ? find_input_device_id(runtime, key) != NULL
-                  : find_audio_device_id(runtime, key) != NULL)
+        /* A stored entry whose subject is live has already been written from
+           that subject, including the case where it is live and now carries
+           nothing -- a display returned to rotation 0 loses its entry, which
+           is how a setting gets cleared rather than accumulating. */
+        if (kind == BLIT_SETTINGS_INPUT ?
+                find_input_device_id(runtime, key) != NULL :
+            kind == BLIT_SETTINGS_AUDIO ?
+                find_audio_device_id(runtime, key) != NULL :
+                find_display_name(runtime, key) >= 0)
             continue;
         json_appendf(out, capacity, used, "%s\"%s\":%s",
                      *first ? "" : ",", key, value);
@@ -16149,8 +16760,8 @@ static size_t settings_build(BlitRuntime *runtime, char *out, size_t capacity,
                      first ? "" : ",", device->id, configuration);
         first = 0;
     }
-    settings_copy_unseen(runtime, "input_devices", 1, out, capacity, &used,
-                         &first);
+    settings_copy_unseen(runtime, "input_devices", BLIT_SETTINGS_INPUT, out,
+                         capacity, &used, &first);
     json_appendf(out, capacity, &used, "},\"audio_devices\":{");
     first = 1;
     for (i = 0; i < BLIT_MAX_AUDIO_DEVICES; ++i) {
@@ -16165,8 +16776,23 @@ static size_t settings_build(BlitRuntime *runtime, char *out, size_t capacity,
                      first ? "" : ",", audio->id, configuration);
         first = 0;
     }
-    settings_copy_unseen(runtime, "audio_devices", 0, out, capacity, &used,
-                         &first);
+    settings_copy_unseen(runtime, "audio_devices", BLIT_SETTINGS_AUDIO, out,
+                         capacity, &used, &first);
+    json_appendf(out, capacity, &used, "},\"displays\":{");
+    first = 1;
+    for (i = 0; i < runtime->display_count; ++i) {
+        char configuration[128];
+        if (settings_display_configuration(&runtime->displays[i],
+                                           configuration,
+                                           sizeof(configuration)) == 0)
+            continue;
+        json_appendf(out, capacity, &used, "%s\"%s\":%s",
+                     first ? "" : ",", runtime->displays[i].name,
+                     configuration);
+        first = 0;
+    }
+    settings_copy_unseen(runtime, "displays", BLIT_SETTINGS_DISPLAY, out,
+                         capacity, &used, &first);
     json_appendf(out, capacity, &used, "}}");
     return used;
 }
@@ -16335,6 +16961,34 @@ static void settings_apply_audio_device(BlitRuntime *runtime,
                                           &problem))
         fprintf(stderr, "blit: stored configuration for %s not applied: %s\n",
                 audio->id, problem.detail);
+}
+
+/* Issue #69. Applied after the displays are enumerated, because the physical
+   size has to exist before a rotation can exchange its axes, and before the
+   first frame, because the scene texture is sized from the result. That
+   ordering is stage 1's bug restated: a stored input setting used to be
+   applied where the device entry was allocated, which was before the kernel
+   had been asked what the device could do. */
+static void settings_apply_displays(BlitRuntime *runtime)
+{
+    int i;
+
+    if (!runtime->settings_enabled || runtime->settings_document[0] == '\0')
+        return;
+    for (i = 0; i < runtime->display_count; ++i) {
+        char configuration[128];
+        BlitConfigProblem problem;
+
+        if (!settings_member(runtime->settings_document, "displays",
+                             runtime->displays[i].name, configuration,
+                             sizeof(configuration)))
+            continue;
+        memset(&problem, 0, sizeof(problem));
+        if (!apply_display_configuration(runtime, i, configuration, &problem))
+            fprintf(stderr,
+                    "blit: stored configuration for display %s not applied: "
+                    "%s\n", runtime->displays[i].name, problem.detail);
+    }
 }
 
 static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
@@ -17514,6 +18168,52 @@ static void handle_request(int fd, BlitRuntime *runtime,
         send_http(fd, 202, "Accepted", "application/json", body);
         return;
     }
+    if (strncmp(path, "/v1/displays/", strlen("/v1/displays/")) == 0 &&
+        strcmp(method, "PATCH") == 0) {
+        const char *display_id = path + strlen("/v1/displays/");
+        int display_index = display_index_by_id(runtime, display_id);
+        char display_configuration[512];
+        const char *display_cursor = json_key_cursor(payload, "configuration");
+        BlitConfigProblem display_problem;
+
+        if (*display_id == '\0' || display_index < 0) {
+            send_problem(fd, 404, "Not Found", "display_not_found",
+                         "The requested display does not exist.");
+            return;
+        }
+        if (idempotency_replay(runtime, fd, request, method, path, payload))
+            return;
+        if (!if_match_revision(fd, request, runtime->displays_revision))
+            return;
+        if (display_cursor == NULL ||
+            !json_object_slice(display_cursor, display_configuration,
+                               sizeof(display_configuration))) {
+            send_problem(fd, 400, "Bad Request",
+                         "invalid_display_configuration",
+                         "A display update carries its writable properties under configuration, as a JSON object.");
+            return;
+        }
+        if (!apply_display_configuration(runtime, display_index,
+                                         display_configuration,
+                                         &display_problem)) {
+            send_problem(fd, display_problem.status, display_problem.title,
+                         display_problem.code, display_problem.detail);
+            return;
+        }
+        settings_mark_dirty(runtime);
+        refresh_display_power(runtime);
+        if (display_item_json(runtime, display_index, body, sizeof(body)) >=
+            sizeof(body)) {
+            send_problem(fd, 500, "Internal Server Error",
+                         "display_unserialisable",
+                         "The display item did not fit its response buffer.");
+            return;
+        }
+        idempotency_store(runtime, request, method, path, payload, 200, "OK",
+                          "application/json", body);
+        send_http(fd, 200, "OK", "application/json", body);
+        return;
+    }
     if (strncmp(path, "/v1/audio/cards/", strlen("/v1/audio/cards/")) == 0 &&
         strcmp(method, "PATCH") == 0) {
         const char *card_id = path + strlen("/v1/audio/cards/");
@@ -17956,6 +18656,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
                               trace_limit);
         send_http(fd, 200, "OK", "application/json", body);
     } else if (strcmp(path, "/v1/displays") == 0) {
+        refresh_display_power(runtime);
         displays_json(runtime, body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
     } else if (strcmp(path, "/v1/topology") == 0) {
@@ -18013,6 +18714,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
                          "The requested display does not exist.");
             return;
         }
+        refresh_display_power(runtime);
         if (display_item_json(runtime, index, body, sizeof(body)) >=
             sizeof(body)) {
             send_problem(fd, 500, "Internal Server Error",
@@ -18075,10 +18777,8 @@ static void discover_displays(BlitRuntime *runtime)
             runtime->displays[i].id = info.id;
             snprintf(runtime->displays[i].name,
                      sizeof(runtime->displays[i].name), "%s", info.name);
-            runtime->displays[i].bounds.x = info.x;
-            runtime->displays[i].bounds.y = info.y;
-            runtime->displays[i].bounds.w = info.width;
-            runtime->displays[i].bounds.h = info.height;
+            set_display_geometry(&runtime->displays[i], info.x, info.y,
+                                 info.width, info.height);
             runtime->displays[i].refresh_hz = info.refresh_hz;
             runtime->displays[i].mode_count = info.mode_count;
             runtime->displays[i].active_mode = info.active_mode;
@@ -18116,11 +18816,16 @@ static void discover_displays(BlitRuntime *runtime)
         runtime->displays[i].id = (unsigned long long)ids[i];
         snprintf(runtime->displays[i].name, sizeof(runtime->displays[i].name),
                  "%s", name ? name : "unknown");
-        if (!SDL_GetDisplayBounds(ids[i], &runtime->displays[i].bounds)) {
-            runtime->displays[i].bounds.x = 0;
-            runtime->displays[i].bounds.y = 0;
-            runtime->displays[i].bounds.w = 0;
-            runtime->displays[i].bounds.h = 0;
+        {
+            SDL_Rect reported;
+            if (!SDL_GetDisplayBounds(ids[i], &reported)) {
+                reported.x = 0;
+                reported.y = 0;
+                reported.w = 0;
+                reported.h = 0;
+            }
+            set_display_geometry(&runtime->displays[i], reported.x, reported.y,
+                                 reported.w, reported.h);
         }
         mode = SDL_GetCurrentDisplayMode(ids[i]);
         if (mode == NULL)
@@ -18445,10 +19150,8 @@ static int activate_direct_kms_fallback(BlitRuntime *runtime)
         runtime->displays[i].id = info.id;
         snprintf(runtime->displays[i].name,
                  sizeof(runtime->displays[i].name), "%s", info.name);
-        runtime->displays[i].bounds.x = info.x;
-        runtime->displays[i].bounds.y = info.y;
-        runtime->displays[i].bounds.w = info.width;
-        runtime->displays[i].bounds.h = info.height;
+        set_display_geometry(&runtime->displays[i], info.x, info.y,
+                             info.width, info.height);
         runtime->displays[i].refresh_hz = info.refresh_hz;
         runtime->displays[i].mode_count = info.mode_count;
         runtime->displays[i].active_mode = info.active_mode;
@@ -20212,17 +20915,36 @@ static void capture_requested_screenshot(BlitRuntime *runtime,
     runtime->outputs[output_index].screenshot_presented = 0;
 }
 
-static int ensure_sdl_scene_texture(BlitOutput *output)
+/* Issue #69. The cached scene is the size Blit *composes* into, which is the
+   display's logical rectangle -- the connector's mode with its axes exchanged
+   at 90 and 270. It used to be the renderer's output size, which is the same
+   thing only while nothing is rotated. */
+static int ensure_sdl_scene_texture(BlitOutput *output, int logical_width,
+                                    int logical_height)
 {
-    int width;
-    int height;
+    int width = logical_width;
+    int height = logical_height;
 
     if (output == NULL || output->renderer == NULL)
         return 0;
-    if (output->scene_texture != NULL)
-        return 1;
-    if (!SDL_GetRenderOutputSize(output->renderer, &width, &height) ||
-        width < 1 || height < 1)
+    if (output->scene_texture != NULL) {
+        float existing_width = 0.0f;
+        float existing_height = 0.0f;
+
+        if (width > 0 && height > 0 &&
+            SDL_GetTextureSize(output->scene_texture, &existing_width,
+                               &existing_height) &&
+            ((int)existing_width != width || (int)existing_height != height)) {
+            SDL_DestroyTexture(output->scene_texture);
+            output->scene_texture = NULL;
+            output->initialized = 0;
+        } else {
+            return 1;
+        }
+    }
+    if ((width < 1 || height < 1) &&
+        (!SDL_GetRenderOutputSize(output->renderer, &width, &height) ||
+         width < 1 || height < 1))
         return 0;
     output->scene_texture = SDL_CreateTexture(
         output->renderer, SDL_PIXELFORMAT_RGBA8888,
@@ -20279,6 +21001,47 @@ static void surface_origin_px(BlitRuntime *runtime, const BlitSurface *surface,
     }
 }
 
+/* Issue #69. The one draw that puts a composed scene on a panel.
+ 
+   All three paths that present a cached scene go through it, because rotation
+   has to apply to every one of them: the pointer-cache fast path presents the
+   scene without rebuilding it, so a rotation applied only in the full-redraw
+   path would un-rotate itself the moment the pointer moved.
+
+   The destination is the scene's *own* rectangle, centred on the panel, and
+   the rotation is about that rectangle's centre. Passing the panel's
+   rectangle instead is the mistake that looks correct at 0 and 180 and crops
+   at 90; `display_geometry_gate.c` asserts the footprint for that reason. The
+   render scale is set to 1 for the draw because the scene texture is in
+   device pixels while the renderer is in font-scaled units. */
+static void present_sdl_scene(BlitRuntime *runtime, int output_index)
+{
+    SDL_Renderer *renderer = runtime->outputs[output_index].renderer;
+    SDL_Texture *scene = runtime->outputs[output_index].scene_texture;
+    int display_index = display_index_for_output(runtime, output_index);
+    int rotation = display_index >= 0 ?
+        runtime->displays[display_index].rotation : 0;
+    float scale = (float)(runtime->font_scale > 0 ? runtime->font_scale : 1);
+    SDL_FRect destination;
+
+    SDL_SetRenderTarget(renderer, NULL);
+    if (scene == NULL)
+        return;
+    if (rotation == 0) {
+        SDL_RenderTexture(renderer, scene, NULL, NULL);
+        return;
+    }
+    blit_rotation_present_rect(rotation,
+        runtime->displays[display_index].physical_width,
+        runtime->displays[display_index].physical_height,
+        &destination.x, &destination.y, &destination.w, &destination.h);
+    SDL_SetRenderScale(renderer, 1.0f, 1.0f);
+    SDL_RenderTextureRotated(renderer, scene, NULL, &destination,
+                             blit_rotation_angle(rotation), NULL,
+                             SDL_FLIP_NONE);
+    SDL_SetRenderScale(renderer, scale, scale);
+}
+
 static void finish_sdl_output(BlitRuntime *runtime, int output_index,
                               int scene_target)
 {
@@ -20287,11 +21050,8 @@ static void finish_sdl_output(BlitRuntime *runtime, int output_index,
     double present_ms;
     int captured;
 
-    if (scene_target) {
-        SDL_SetRenderTarget(renderer, NULL);
-        SDL_RenderTexture(renderer, runtime->outputs[output_index].scene_texture,
-                          NULL, NULL);
-    }
+    if (scene_target)
+        present_sdl_scene(runtime, output_index);
     render_pointer(runtime, output_index);
     capture_sdl_frame(runtime, output_index, renderer);
     capture_requested_screenshot(runtime, output_index, renderer);
@@ -20567,10 +21327,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                          output_index, target_changed);
                 diagnostic_trace(runtime, "render_path", detail);
             }
-            SDL_SetRenderTarget(renderer, NULL);
-            SDL_RenderTexture(renderer,
-                              runtime->outputs[output_index].scene_texture,
-                              NULL, NULL);
+            present_sdl_scene(runtime, output_index);
             finish_sdl_output(runtime, output_index, 0);
             continue;
         }
@@ -20612,8 +21369,16 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                holding rather than whatever was captured last. */
             continue;
         }
-        scene_target = ensure_sdl_scene_texture(
-            &runtime->outputs[output_index]);
+        {
+            int scene_display = display_index_for_output(runtime,
+                                                         output_index);
+            scene_target = ensure_sdl_scene_texture(
+                &runtime->outputs[output_index],
+                scene_display >= 0 ?
+                    runtime->displays[scene_display].bounds.w : 0,
+                scene_display >= 0 ?
+                    runtime->displays[scene_display].bounds.h : 0);
+        }
         if (scene_target)
             SDL_SetRenderTarget(renderer,
                                 runtime->outputs[output_index].scene_texture);
@@ -20670,10 +21435,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                 /* Cached screenshot requests observe the scene texture and
                    current software cursor without rebuilding terminal cells,
                    graphics, or wallpaper. */
-                SDL_SetRenderTarget(renderer, NULL);
-                SDL_RenderTexture(renderer,
-                                  runtime->outputs[output_index].scene_texture,
-                                  NULL, NULL);
+                present_sdl_scene(runtime, output_index);
                 finish_sdl_output(runtime, output_index, 0);
             }
             continue;
@@ -23486,6 +24248,10 @@ int main(int argc, char **argv)
     signal(SIGPIPE, SIG_IGN);
     discover_displays(&runtime);
     apply_test_refresh_override(&runtime);
+    /* Issue #69. After enumeration, because the attribution rule counts
+       displays, and before the stored document is applied, because a stored
+       brightness is refused on a display that has no backlight. */
+    discover_backlights(&runtime);
     if (runtime.direct_kms && runtime.display_count == 0) {
         fprintf(stderr, "blit: direct KMS backend did not find a usable display\n");
         if (runtime.kms != NULL) blit_kms_close(runtime.kms);
@@ -23493,6 +24259,14 @@ int main(int argc, char **argv)
     }
     if (runtime.sdl_ready || runtime.direct_kms)
         initialize_outputs(&runtime);
+    /* Issue #69. After the outputs exist, because a rotation drops the
+       output's cached scene texture, and before the first frame, because that
+       texture is sized from the display's logical rectangle. The document was
+       read earlier -- it has to be, since a stored input setting is applied as
+       a device enters the table and the boot scan is below -- so displays are
+       the one stored section whose subjects do not exist yet when it loads.
+       Stage 1 made this same mistake in the other direction. */
+    settings_apply_displays(&runtime);
     discover_panes(&runtime);
     {
         /* One scan for all three kinds, the same one a hotplug runs.  Boot
