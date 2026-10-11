@@ -64,7 +64,7 @@ settings_persistence_teeth: pass_eight_of_eight_fail_pre_change_28_checks
 keyboard_settings_acceptance: pass_seven_scenarios_repeat_capability_quantisation_remap_no_aliasing_boot_locks
 keyboard_settings_teeth: pass_seven_of_seven_fail_pre_change_33_checks
 input_fabrication_sidecar_acceptance: pass_key_value_kinds_and_capabilities_make_the_422_rule_locally_testable
-live_keyboard_settings: pending
+live_keyboard_settings: pass_four_keyboards_real_ioctl_quantisation_422_and_restored
 live_settings_persistence: carried_from_0_1_452
 input_device_route_acceptance: carried_from_0_1_436
 audio_device_api_acceptance: pass_node_is_the_authority_hotplug_retires_three_runs
@@ -110,13 +110,13 @@ screenshot_nonblocking_live_acceptance: not_rerun_candidate
 qemu_hibr_lifecycle_acceptance: not_rerun_candidate
 qemu_four_output_pixel_acceptance: not_rerun_candidate
 qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
-live_deployment: pending
-live_current_version: pending
+live_deployment: pass_supervised_update_verified_0_1_453
+live_current_version: 0.1.453
 live_block_cursor_acceptance: carried_from_0_1_425
 live_italic_acceptance: carried_from_0_1_425
 live_session_default_acceptance: carried_from_0_1_425
 live_sync_output_acceptance: carried_from_0_1_425
-live_hibr_desktop_acceptance: pending
+live_hibr_desktop_acceptance: pass_32400_printable_revision_859
 live_idle_frame_acceptance: carried_from_0_1_425
 live_physical_multi_display: unavailable_one_output
 live_physical_button_trace_contract: open
@@ -210,3 +210,41 @@ notes: >-
   and the gate tests that stand-in; the real round-trip is the host probe's.
 
   Suite: 54 pass, 5 skip, 0 fail.
+
+  Host-accepted on 192.168.10.54. The real kernel round-trip, which is the
+  half no local gate can do, on four real keyboards:
+
+    keyboards reporting EV_REP: 4 of 28 devices
+      input-0003-25a7-0124-...-input2     delay=250 period=33 rate=30
+      input-0003-062a-4101-...-input0     delay=250 period=33 rate=30
+      input-0003-0c45-fefe-...-input0     delay=250 period=33 rate=30
+      input-0003-0c45-fefe-...-2.4g-dongle-keyboard  delay=250 period=33 rate=30
+
+    set delay=400 rate=20  ->  kernel delay=400 period= 50 rate=20
+    set delay=250 rate= 7  ->  kernel delay=250 period=142 rate= 7
+    set delay=180 rate=30  ->  kernel delay=180 period= 33 rate=30
+
+    a device without EV_REP            422 device_property_not_applicable
+    lock states                        caps_lock_boot false, num_lock_boot true
+    stored                             {"repeat_delay_ms":180,
+                                        "repeat_rate_hz":30,
+                                        "caps_lock_boot":false,
+                                        "num_lock_boot":true}
+    restored                           delay=250 rate=30
+
+  The quantisation is measured rather than argued: 7 Hz is 142.857 ms and the
+  kernel keeps 142, which reads back as 7 Hz. 20 Hz is 50 ms exactly. That is
+  why the read-back is what gets reported.
+
+  The probe restores every keyboard it touched, because a test box whose keys
+  repeat at 3 Hz afterwards is a test box somebody has to fix by hand.
+
+  The deployment was clean -- #63 holding in a fourth release:
+
+    11:59:36 Stopping blit.service ...
+    11:59:37 blit: package installed; exiting for the unit restart
+    11:59:37 Started blit.service ...
+
+  No stop-sigterm timeout, no SIGKILL, one `listening` line. The desktop came
+  back with 32,400 printable cells at revision 859, errors and warnings both
+  empty, on the first launch this time.

@@ -3148,3 +3148,60 @@ the fail-closed `hibr_attach_unresolved` shape; it is recorded on issue #32
 rather than explained here, because neither release touched the attach path and
 one occurrence is not a diagnosis.
 
+## 0.1.453: a keyboard's repeat is the kernel's, and Blit owns it
+
+Epic #64 stage 2 (#66). Two facts were measured on 192.168.10.54 before any of
+the implementation was written, because they decided its shape.
+
+`EVIOCGREP` and `EVIOCSREP` both work on the `O_RDONLY` descriptor the opener
+thread already holds:
+
+```
+/dev/input/event4 O_RDONLY GET=(250, 33) SET=ok
+/dev/input/event8 O_RDONLY GET=(250, 33) SET=ok
+```
+
+So owning the repeat rate needed no change to how an input device is opened.
+The LED is the other half and does need a writable descriptor, so that was
+measured too, with the lamp restored:
+
+```
+/dev/input/event4 numlock before=0 set->1 (write ok) now=1 restored=write ok now=0
+```
+
+The repeat round-trip on four real keyboards, with the quantisation measured
+rather than asserted:
+
+```
+keyboards reporting EV_REP: 4 of 28 devices
+
+set delay=400 rate=20  ->  kernel delay=400 period= 50 rate=20
+set delay=250 rate= 7  ->  kernel delay=250 period=142 rate= 7
+set delay=180 rate=30  ->  kernel delay=180 period= 33 rate=30
+
+a device without EV_REP   ->  422 device_property_not_applicable
+stored                    ->  {"repeat_delay_ms":180,"repeat_rate_hz":30,
+                               "caps_lock_boot":false,"num_lock_boot":true}
+restored                  ->  delay=250 rate=30
+```
+
+7 Hz is 142.857 ms and the kernel keeps 142, which reads back as 7 Hz; 20 Hz
+is 50 ms exactly. This is why what Blit reports is the read-back and not the
+request, and why `repeat_period_ms` is reported beside the rate.
+
+`tools/probes/host_keyboard_settings.rb` restores every keyboard it touched.
+
+**What the local gate proves and what it cannot.** A fabricated node is a
+regular file and fails every ioctl, so `tools/tests/keyboard_settings_gate.rb`
+tests a stand-in for the kernel -- the sidecar's `repeat=` line -- and says so
+in its header. What it does prove, and the host probe does not, is the
+*effect* of the remap and the boot lock states: keys are injected through the
+same dispatch a real device uses and the session echoes what reached its PTY,
+so a setting that is stored but changes no byte fails. The LED is skipped for
+a fabricated node and is only ever measured on the host.
+
+The deployment itself was clean, which is issue #63 holding across a fourth
+release, and the desktop came back with 32,400 printable cells at revision 859
+with `errors` and `warnings` both empty -- on the first launch, unlike the
+0.1.452 window recorded above.
+
