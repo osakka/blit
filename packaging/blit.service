@@ -7,7 +7,11 @@ Wants=network-online.target
 Type=simple
 User=root
 Group=root
-SupplementaryGroups=video render input
+# audio is for /dev/snd/controlC*, which is root:audio: issue #68 gives the
+# API a card's mixer, and the root profile would work without this while the
+# unprivileged one (ADR 0065) silently could not -- a difference that would
+# only show up after switching profiles.
+SupplementaryGroups=video render input audio
 EnvironmentFile=-/etc/blit/blit.env
 # ADR 0067. /var/lib/blit holds the settings document the API writes, so the
 # directory has to belong to whoever the unit runs as. StateDirectory= is the

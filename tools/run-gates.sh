@@ -223,11 +223,13 @@ suite_renderer() {
     run_gate evdev_open_latency_gate.rb ruby tools/tests/evdev_open_latency_gate.rb
     run_gate input_identity_gate.sh "$ROOT"/tools/tests/input_identity_gate.sh
     run_gate pointer_curve_gate.sh "$ROOT"/tools/tests/pointer_curve_gate.sh
+    run_gate audio_control_gate.sh "$ROOT"/tools/tests/audio_control_gate.sh
     run_gate input_device_api_gate.rb ruby tools/tests/input_device_api_gate.rb
     run_gate input_device_config_gate.rb ruby tools/tests/input_device_config_gate.rb
     run_gate settings_persistence_gate.rb ruby tools/tests/settings_persistence_gate.rb
     run_gate input_device_route_gate.rb ruby tools/tests/input_device_route_gate.rb
     run_gate audio_device_api_gate.rb ruby tools/tests/audio_device_api_gate.rb
+    run_gate audio_card_gate.rb ruby tools/tests/audio_card_gate.rb
     run_gate display_device_api_gate.rb ruby tools/tests/display_device_api_gate.rb
     run_gate pointer_target_gate.rb ruby tools/tests/pointer_target_gate.rb
     run_gate pointer_wallpaper_stress_gate.rb ruby tools/tests/pointer_wallpaper_stress_gate.rb

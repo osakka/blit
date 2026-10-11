@@ -256,6 +256,105 @@ paths:
           $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
+  /v1/audio/cards:
+    get:
+      tags: [audio]
+      operationId: listAudioCards
+      summary: List the audio cards and their mixers
+      description: >-
+        A mixer belongs to a **card**, not to a PCM. ADR 0064's audio id is
+        per PCM because that is what an application opens, and a card with
+        four HDMI outputs has one mixer between them -- so a mixer reported
+        per PCM would be four copies of one thing and a write through one
+        would leave three stale. Every PCM points here with `card_controls`
+        and this says which PCMs share it (issue #68).
+      responses:
+        '200':
+          description: The cards and their control elements
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [revision, cards]
+                properties:
+                  revision: {$ref: '#/components/schemas/Revision'}
+                  cards:
+                    type: array
+                    items: {$ref: '#/components/schemas/AudioCard'}
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/audio/cards/{card_id}:
+    parameters:
+      - in: path
+        name: card_id
+        required: true
+        description: >-
+          The card's ALSA id, from `/proc/asound/card<N>/id`, which ALSA keeps
+          stable across reboots -- unlike the card *number*.
+        schema: {type: string}
+    get:
+      tags: [audio]
+      operationId: getAudioCard
+      summary: Get one card's mixer
+      responses:
+        '200':
+          description: The card
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AudioCard'}
+        default:
+          $ref: '#/components/responses/Problem'
+    patch:
+      tags: [audio]
+      operationId: configureAudioCard
+      summary: Set a volume, a mute, or a named control
+      description: >-
+        `volume_percent` and `mute` act on the element the resolution rule
+        names, and are refused with `audio_control_ambiguous` where it names
+        none -- a card with two playback volumes and no Master is genuinely
+        ambiguous, and guessing would adjust the wrong hardware. `controls`
+        writes a named element by its own raw value.
+
+        What comes back is what the card holds after the write, not what was
+        asked for: an ALSA range is whatever the hardware says, so a
+        percentage is converted against the element's own range and the result
+        read back. 50% of a 0..87 Master is 44, which reads back as 51%.
+      parameters:
+        - in: header
+          name: If-Match
+          required: false
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [configuration]
+              properties:
+                configuration:
+                  type: object
+                  additionalProperties: false
+                  properties:
+                    volume_percent: {type: integer, minimum: 0, maximum: 100}
+                    mute: {type: boolean}
+                    controls:
+                      type: object
+                      description: >-
+                        Element name to its own raw integer value, not a
+                        percentage: an enumerated element has values rather
+                        than a magnitude, and each element's range is in the
+                        card's `controls` list.
+                      additionalProperties: {type: integer}
+              additionalProperties: false
+      responses:
+        '200':
+          description: The card after the write
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AudioCard'}
+        default:
+          $ref: '#/components/responses/Problem'
   /v1/settings:
     get:
       tags: [settings]
@@ -1442,7 +1541,7 @@ components:
           additionalProperties: false
         resources:
           type: object
-          required: [graphics, displays, audio, input_devices, input_routes, topology, fonts, settings, diagnostics, runtime_diagnostics]
+          required: [graphics, displays, audio, audio_cards, input_devices, input_routes, topology, fonts, settings, diagnostics, runtime_diagnostics]
           properties:
             graphics: {type: string}
             displays: {type: string}
@@ -1451,6 +1550,7 @@ components:
             input_routes: {type: string}
             topology: {type: string}
             fonts: {type: string}
+            audio_cards: {type: string}
             settings: {type: string}
             diagnostics: {type: string}
             runtime_diagnostics: {type: string}
@@ -1633,6 +1733,14 @@ components:
         capabilities:
           type: array
           items: {type: string}
+        card_controls:
+          type: string
+          description: >-
+            The path to this PCM's card mixer. The mixer is the card's, not
+            this device's: ADR 0064's id is per PCM because that is what an
+            application opens, and a card with four HDMI outputs has one mixer
+            between them. The card's `shares_controls_with` says which other
+            PCMs it belongs to as well (issue #68).
         state:
           type: object
           required: [present, accessible]
@@ -1651,6 +1759,13 @@ components:
                 A present device it cannot open is still listed, with this
                 false, so a permission problem reads as a permission problem
                 rather than as a missing device.
+            control_accessible:
+              type: boolean
+              description: >-
+                Whether the card's control device could be read, which is a
+                separate fact: `/dev/snd/controlC*` is `root:audio` and the
+                PCM nodes are not, so a server without the `audio` group sees
+                PCMs and no mixers.
           additionalProperties: false
         configuration:
           type: object
@@ -1686,6 +1801,118 @@ components:
           $ref: '#/components/schemas/Revision'
       additionalProperties: false
 
+    AudioCard:
+      type: object
+      required: [id, class, card, state, control_count, controls_truncated,
+                 shares_controls_with, controls, configuration, revision]
+      properties:
+        id:
+          type: string
+          description: The card's ALSA id, stable across reboots.
+        class: {type: string, enum: [audio-card]}
+        card:
+          type: integer
+          minimum: 0
+          description: >-
+            The card number, which is assignment order and moves when a USB
+            card is plugged in earlier. Reported for correlation with
+            `/dev/snd`, never for identity.
+        state:
+          type: object
+          required: [present, control_accessible]
+          properties:
+            present: {type: boolean}
+            control_accessible:
+              type: boolean
+              description: >-
+                Whether `/dev/snd/controlC<N>` could be read. Separate from a
+                PCM's `accessible` because a deployment can have one and not
+                the other: the control device is `root:audio` and the PCM
+                nodes are not, so a server without the `audio` group sees
+                PCMs and no mixers.
+          additionalProperties: false
+        control_count:
+          type: integer
+          minimum: 0
+          description: How many elements the card reports, in total.
+        controls_truncated:
+          type: boolean
+          description: >-
+            True when the card has more elements than the bounded list holds.
+            An HDA codec routinely reports over a hundred; a controller is
+            told rather than handed a silently shortened list.
+        shares_controls_with:
+          type: array
+          items: {type: string}
+          description: >-
+            The audio device ids whose PCMs share this mixer. Reported rather
+            than implied: without it a controller showing four HDMI outputs
+            would present four volume sliders and be surprised when they moved
+            together.
+        controls:
+          type: array
+          items:
+            type: object
+            required: [name, index, type, channels, writable, minimum,
+                       maximum, step, values]
+            properties:
+              name: {type: string}
+              index: {type: integer, minimum: 0}
+              type:
+                type: string
+                enum: [boolean, integer, enumerated, bytes, iec958,
+                       integer64, unknown]
+              channels: {type: integer, minimum: 0}
+              writable:
+                type: boolean
+                description: >-
+                  The card's own answer. Writing a read-only element is
+                  refused rather than silently ignored.
+              minimum: {type: integer}
+              maximum: {type: integer}
+              step: {type: integer}
+              values:
+                type: array
+                items: {type: integer}
+              percent:
+                type: integer
+                minimum: 0
+                maximum: 100
+                description: >-
+                  The first channel's value as a percentage of this element's
+                  own range. Present only for boolean and integer elements: an
+                  enumerated or bytes element has values, not a magnitude.
+            additionalProperties: false
+        configuration:
+          type: object
+          additionalProperties: false
+          description: >-
+            The writable part. `volume_percent` and `mute` are present only
+            where the resolution rule names an element -- `Master Playback
+            Volume` if there is one, else the only `* Playback Volume` if
+            there is exactly one, else nothing. Two candidates and no Master
+            is ambiguous, and their absence is the answer rather than a guess.
+
+            Control values are **not** persisted in the settings document:
+            they are the card's own state and the card keeps them, so storing
+            and re-applying them would make Blit fight `alsactl` for ownership
+            of something that already survives a reboot (ADR 0067).
+          properties:
+            volume_percent: {type: integer, minimum: 0, maximum: 100}
+            volume_control:
+              type: string
+              description: Which element `volume_percent` resolved to.
+            mute:
+              type: boolean
+              description: >-
+                The inverse of the playback switch, because an ALSA switch is
+                on when audible.
+            mute_control: {type: string}
+            controls:
+              type: object
+              additionalProperties: {type: integer}
+        revision: {$ref: '#/components/schemas/Revision'}
+      additionalProperties: false
     Settings:
       type: object
       required: [revision, path, persisted, document]

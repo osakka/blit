@@ -7,6 +7,7 @@
 #include "blit_input_pointer.h"
 #include "blit_unicode_width.h"
 #include "blit_input_identity.h"
+#include "blit_audio_control.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -22,6 +23,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+/* After sys/ioctl.h, which defines the _IOWR the ALSA control ioctls are
+   built from. A kernel UAPI header, not libasound: issue #68 speaks to the
+   control device the same way this codebase already speaks to evdev and DRM,
+   with no new dependency. */
+#include <sound/asound.h>
 #include <sys/inotify.h>
 #include <sys/select.h>
 #include <sys/socket.h>
@@ -542,6 +548,45 @@ typedef struct {
     unsigned long long revision;
 } BlitAudioDevice;
 
+/* Issue #68. A card's mixer: one ALSA control element as the API reports it.
+   `writable` is the card's own answer -- some elements are read-only and
+   offering a control for one would be a lie. */
+#define BLIT_MAX_AUDIO_CARDS 32
+#define BLIT_MAX_AUDIO_CONTROLS 64
+#define BLIT_MAX_AUDIO_CHANNELS 8
+
+typedef struct {
+    char name[BLIT_AUDIO_CONTROL_NAME_CAPACITY];
+    unsigned numid;
+    int index;
+    int type;
+    int channels;
+    int minimum;
+    int maximum;
+    int step;
+    int values[BLIT_MAX_AUDIO_CHANNELS];
+    int value_count;
+    int writable;
+} BlitAudioControl;
+
+/* The mixer belongs to the card, not to the PCM. ADR 0064's audio id is per
+   PCM because that is what an application opens, and the live host has four
+   HDMI outputs on one card -- so a mixer held per PCM would be four copies of
+   one thing, and a write through one would leave the other three stale. */
+typedef struct {
+    int used;
+    int seen;
+    int present;
+    int card;
+    char card_id[64];
+    int control_accessible;
+    int control_count;
+    int controls_truncated;
+    int listed;
+    BlitAudioControl controls[BLIT_MAX_AUDIO_CONTROLS];
+    unsigned long long revision;
+} BlitAudioCard;
+
 typedef struct {
     SDL_Window *window;
     SDL_Renderer *renderer;
@@ -880,6 +925,8 @@ typedef struct {
     BlitInputDevice input_devices[BLIT_MAX_INPUT_DEVICES];
     unsigned long long input_devices_revision;
     BlitAudioDevice audio_devices[BLIT_MAX_AUDIO_DEVICES];
+    BlitAudioCard audio_cards[BLIT_MAX_AUDIO_CARDS];
+    unsigned long long audio_cards_revision;
     unsigned long long audio_devices_revision;
     unsigned long long displays_revision;
     /* The physical device whose events are being dispatched right now, or
@@ -2494,6 +2541,7 @@ static void server_json(const BlitRuntime *runtime, char *body, size_t capacity)
              "\"terminal-sessions\",\"topology\","
              "\"native-presentation\",\"graphics-inventory\","
              "\"audio-inventory\",\"audio-device-configuration\","
+             "\"audio-card-mixers\","
              "\"display-devices\",\"input-devices\","
              "\"input-device-configuration\",\"input-routes\","
              "\"settings-persistence\","
@@ -2503,7 +2551,9 @@ static void server_json(const BlitRuntime *runtime, char *body, size_t capacity)
              "\"display_backend\":{\"name\":\"%s\",\"ready\":%s,"
              "\"error\":\"%s\"},\"resources\":{"
              "\"graphics\":\"/v1/graphics\",\"displays\":\"/v1/displays\","
-             "\"audio\":\"/v1/audio\",\"input_devices\":\"/v1/input/devices\","
+             "\"audio\":\"/v1/audio\","
+             "\"audio_cards\":\"/v1/audio/cards\","
+             "\"input_devices\":\"/v1/input/devices\","
              "\"input_routes\":\"/v1/input/routes\",\"topology\":\"/v1/topology\","
              "\"fonts\":\"/v1/fonts\","
              "\"settings\":\"/v1/settings\","
@@ -3114,6 +3164,327 @@ static const char *snd_root(void)
     return (root != NULL && root[0] != '\0') ? root : "/dev/snd";
 }
 
+/* ADR 0067 stage 4 / issue #68. A card's mixer.
+ *
+ * `configuration.default` was the entire writable surface of an audio device,
+ * so a control panel could not set a volume -- the first thing anyone reaches
+ * for. The reason it could not is that Blit had never opened an ALSA *control*
+ * device, only the PCM nodes' presence.
+ *
+ * The mixer belongs to the **card**, and ADR 0064's audio id is per PCM
+ * because that is what an application opens. The live host has twelve PCMs on
+ * six cards, four of them HDMI outputs on one card -- so a mixer held on the
+ * PCM would be four copies of one thing, a write through one would leave the
+ * other three stale, and every item would carry the whole element list. It is
+ * its own resource instead, and the PCM item points at it and says which
+ * other PCMs share it.
+ *
+ * Spoken with raw SNDRV_CTL_IOCTL_* on /dev/snd/controlC<N>, the same way
+ * this codebase already speaks to evdev and DRM. Blit does not link libasound
+ * and does not play audio; owning the mixer is still its job, because it is
+ * the privileged process on an API-only machine and Hibr cannot reach
+ * /dev/snd/controlC* without it.
+ */
+
+static int audio_control_open(int card, int writable)
+{
+    char path[256];
+
+    snprintf(path, sizeof(path), "%s/controlC%d", snd_root(), card);
+    return open(path, (writable ? O_RDWR : O_RDONLY) | O_CLOEXEC);
+}
+
+static const char *audio_control_type_name(int type)
+{
+    switch (type) {
+    case SNDRV_CTL_ELEM_TYPE_BOOLEAN: return "boolean";
+    case SNDRV_CTL_ELEM_TYPE_INTEGER: return "integer";
+    case SNDRV_CTL_ELEM_TYPE_ENUMERATED: return "enumerated";
+    case SNDRV_CTL_ELEM_TYPE_BYTES: return "bytes";
+    case SNDRV_CTL_ELEM_TYPE_IEC958: return "iec958";
+    case SNDRV_CTL_ELEM_TYPE_INTEGER64: return "integer64";
+    default: return "unknown";
+    }
+}
+
+/* A fabricated control node is a regular file and serves no ioctl, so a gate
+   could not reach any of this. The sidecar stands in for the card, in the
+   same shape and for the same reason as an input device's `.identity`:
+
+       <node>.elements:
+           [Master Playback Volume]
+           type=integer
+           channels=2
+           min=0
+           max=87
+           value=64,64
+
+   Read only when BLIT_SND_ROOT is set, so it cannot exist in a deployment. */
+static int audio_card_read_sidecar(BlitAudioCard *card)
+{
+    char path[256];
+    char line[320];
+    FILE *file;
+    BlitAudioControl *element = NULL;
+
+    if (getenv("BLIT_SND_ROOT") == NULL)
+        return 0;
+    snprintf(path, sizeof(path), "%s/controlC%d.elements", snd_root(),
+             card->card);
+    file = fopen(path, "r");
+    if (file == NULL)
+        return 0;
+    card->listed = 0;
+    card->control_count = 0;
+    while (fgets(line, (int)sizeof(line), file) != NULL) {
+        size_t length = strlen(line);
+        char *value;
+        while (length > 0 && (line[length - 1] == '\n' ||
+                              line[length - 1] == '\r'))
+            line[--length] = '\0';
+        if (line[0] == '[') {
+            char *close = strchr(line, ']');
+            if (close == NULL || card->listed >= BLIT_MAX_AUDIO_CONTROLS)
+                continue;
+            *close = '\0';
+            element = &card->controls[card->listed++];
+            memset(element, 0, sizeof(*element));
+            snprintf(element->name, sizeof(element->name), "%s", line + 1);
+            element->numid = (unsigned)card->listed;
+            element->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
+            element->channels = 1;
+            element->writable = 1;
+            ++card->control_count;
+            continue;
+        }
+        value = strchr(line, '=');
+        if (value == NULL || element == NULL)
+            continue;
+        *value++ = '\0';
+        if (strcmp(line, "type") == 0)
+            element->type = strcmp(value, "boolean") == 0 ?
+                SNDRV_CTL_ELEM_TYPE_BOOLEAN :
+                strcmp(value, "enumerated") == 0 ?
+                SNDRV_CTL_ELEM_TYPE_ENUMERATED :
+                SNDRV_CTL_ELEM_TYPE_INTEGER;
+        else if (strcmp(line, "channels") == 0)
+            element->channels = atoi(value);
+        else if (strcmp(line, "min") == 0)
+            element->minimum = atoi(value);
+        else if (strcmp(line, "max") == 0)
+            element->maximum = atoi(value);
+        else if (strcmp(line, "step") == 0)
+            element->step = atoi(value);
+        else if (strcmp(line, "writable") == 0)
+            element->writable = atoi(value) != 0;
+        else if (strcmp(line, "value") == 0) {
+            char *cursor = value;
+            element->value_count = 0;
+            while (*cursor != '\0' &&
+                   element->value_count < BLIT_MAX_AUDIO_CHANNELS) {
+                element->values[element->value_count++] =
+                    (int)strtol(cursor, &cursor, 10);
+                if (*cursor == ',') ++cursor;
+                else break;
+            }
+        }
+    }
+    fclose(file);
+    if (element != NULL && element->type == SNDRV_CTL_ELEM_TYPE_BOOLEAN)
+        element->maximum = element->maximum > 0 ? element->maximum : 1;
+    return 1;
+}
+
+/* What the card has, read fresh. The element list is bounded: an HDA codec
+   routinely reports a hundred elements, and a controller is told how many
+   there are and whether it got them all rather than being handed a silently
+   truncated list. */
+static void audio_card_refresh(BlitAudioCard *card)
+{
+    static struct snd_ctl_elem_id identifiers[BLIT_MAX_AUDIO_CONTROLS];
+    static struct snd_ctl_elem_info element_info;
+    static struct snd_ctl_elem_value element_value;
+    struct snd_ctl_elem_list list;
+    int fd;
+    unsigned int i;
+
+    card->control_accessible = 0;
+    if (audio_card_read_sidecar(card)) {
+        card->control_accessible = 1;
+        return;
+    }
+    card->listed = 0;
+    card->control_count = 0;
+    card->controls_truncated = 0;
+    fd = audio_control_open(card->card, 0);
+    if (fd < 0)
+        return;
+    memset(&list, 0, sizeof(list));
+    memset(identifiers, 0, sizeof(identifiers));
+    list.space = BLIT_MAX_AUDIO_CONTROLS;
+    list.pids = identifiers;
+    if (ioctl(fd, SNDRV_CTL_IOCTL_ELEM_LIST, &list) < 0) {
+        close(fd);
+        return;
+    }
+    card->control_accessible = 1;
+    card->control_count = (int)list.count;
+    card->controls_truncated = list.count > list.used;
+    for (i = 0; i < list.used && card->listed < BLIT_MAX_AUDIO_CONTROLS; ++i) {
+        BlitAudioControl *element = &card->controls[card->listed];
+        int channel;
+        memset(element, 0, sizeof(*element));
+        memset(&element_info, 0, sizeof(element_info));
+        element_info.id = identifiers[i];
+        if (ioctl(fd, SNDRV_CTL_IOCTL_ELEM_INFO, &element_info) < 0)
+            continue;
+        snprintf(element->name, sizeof(element->name), "%s",
+                 (const char *)identifiers[i].name);
+        element->numid = identifiers[i].numid;
+        element->index = (int)identifiers[i].index;
+        element->type = (int)element_info.type;
+        element->channels = (int)element_info.count;
+        element->writable =
+            (element_info.access & SNDRV_CTL_ELEM_ACCESS_WRITE) != 0;
+        if (element->type == SNDRV_CTL_ELEM_TYPE_BOOLEAN) {
+            element->minimum = 0;
+            element->maximum = 1;
+        } else {
+            element->minimum = (int)element_info.value.integer.min;
+            element->maximum = (int)element_info.value.integer.max;
+            element->step = (int)element_info.value.integer.step;
+        }
+        memset(&element_value, 0, sizeof(element_value));
+        element_value.id = identifiers[i];
+        if (ioctl(fd, SNDRV_CTL_IOCTL_ELEM_READ, &element_value) == 0) {
+            int count = element->channels;
+            if (count > BLIT_MAX_AUDIO_CHANNELS)
+                count = BLIT_MAX_AUDIO_CHANNELS;
+            for (channel = 0; channel < count; ++channel)
+                element->values[channel] =
+                    (int)element_value.value.integer.value[channel];
+            element->value_count = count;
+        }
+        ++card->listed;
+    }
+    close(fd);
+}
+
+/* Write one element's every channel to the same value, then read back what
+   the card made of it -- the same discipline as a keyboard's repeat rate
+   (issue #66), and for the same reason: an ALSA range is whatever the
+   hardware says and the value that took is not always the value asked for. */
+static int audio_card_write_control(BlitAudioCard *card,
+                                    BlitAudioControl *element, int raw)
+{
+    static struct snd_ctl_elem_value element_value;
+    int fd;
+    int channel;
+    int count = element->channels > 0 ? element->channels : 1;
+
+    if (count > BLIT_MAX_AUDIO_CHANNELS)
+        count = BLIT_MAX_AUDIO_CHANNELS;
+    if (getenv("BLIT_SND_ROOT") != NULL) {
+        for (channel = 0; channel < count; ++channel)
+            element->values[channel] = raw;
+        element->value_count = count;
+        return 1;
+    }
+    fd = audio_control_open(card->card, 1);
+    if (fd < 0)
+        return 0;
+    memset(&element_value, 0, sizeof(element_value));
+    element_value.id.numid = element->numid;
+    for (channel = 0; channel < count; ++channel)
+        element_value.value.integer.value[channel] = raw;
+    if (ioctl(fd, SNDRV_CTL_IOCTL_ELEM_WRITE, &element_value) < 0) {
+        close(fd);
+        return 0;
+    }
+    memset(&element_value, 0, sizeof(element_value));
+    element_value.id.numid = element->numid;
+    if (ioctl(fd, SNDRV_CTL_IOCTL_ELEM_READ, &element_value) == 0) {
+        for (channel = 0; channel < count; ++channel)
+            element->values[channel] =
+                (int)element_value.value.integer.value[channel];
+        element->value_count = count;
+    }
+    close(fd);
+    return 1;
+}
+
+static BlitAudioCard *find_audio_card(BlitRuntime *runtime, int number)
+{
+    int i;
+
+    for (i = 0; i < BLIT_MAX_AUDIO_CARDS; ++i)
+        if (runtime->audio_cards[i].used &&
+            runtime->audio_cards[i].card == number)
+            return &runtime->audio_cards[i];
+    return NULL;
+}
+
+static BlitAudioCard *find_audio_card_id(BlitRuntime *runtime,
+                                         const char *card_id)
+{
+    int i;
+
+    for (i = 0; i < BLIT_MAX_AUDIO_CARDS; ++i)
+        if (runtime->audio_cards[i].used &&
+            strcmp(runtime->audio_cards[i].card_id, card_id) == 0)
+            return &runtime->audio_cards[i];
+    return NULL;
+}
+
+static BlitAudioCard *record_audio_card(BlitRuntime *runtime, int number,
+                                        const char *card_id)
+{
+    BlitAudioCard *card = find_audio_card(runtime, number);
+    int i;
+
+    if (card == NULL) {
+        for (i = 0; i < BLIT_MAX_AUDIO_CARDS; ++i)
+            if (!runtime->audio_cards[i].used) {
+                card = &runtime->audio_cards[i];
+                break;
+            }
+        if (card == NULL)
+            return NULL;
+        memset(card, 0, sizeof(*card));
+        card->used = 1;
+        card->card = number;
+        card->revision = 1;
+    }
+    snprintf(card->card_id, sizeof(card->card_id), "%s", card_id);
+    card->seen = 1;
+    card->present = 1;
+    audio_card_refresh(card);
+    return card;
+}
+
+/* The index of the element a plain `volume` or `mute` means on this card, or
+   -1. The rule is in blit_audio_control.h and asserted there. */
+static int audio_card_resolve(const BlitAudioCard *card, const char *kind)
+{
+    const char *names[BLIT_MAX_AUDIO_CONTROLS];
+    int i;
+
+    for (i = 0; i < card->listed; ++i)
+        names[i] = card->controls[i].name;
+    return blit_audio_resolve_playback(names, card->listed, kind);
+}
+
+static BlitAudioControl *audio_card_find_control(BlitAudioCard *card,
+                                                 const char *name)
+{
+    int i;
+
+    for (i = 0; i < card->listed; ++i)
+        if (strcmp(card->controls[i].name, name) == 0)
+            return &card->controls[i];
+    return NULL;
+}
+
 /* Read the value of a `key: value` line from a procfs file. read_text_file
    reads only the first line, and every file here is a block of such lines. */
 static int read_keyed_value(const char *path, const char *key, char *value,
@@ -3339,6 +3710,8 @@ static void scan_audio_devices(BlitRuntime *runtime, int announce)
 
     for (index = 0; index < BLIT_MAX_AUDIO_DEVICES; ++index)
         runtime->audio_devices[index].seen = 0;
+    for (index = 0; index < BLIT_MAX_AUDIO_CARDS; ++index)
+        runtime->audio_cards[index].seen = 0;
     for (card = 0; card < 32; ++card) {
         char control[256];
         char id_path[256];
@@ -3355,6 +3728,8 @@ static void scan_audio_devices(BlitRuntime *runtime, int announce)
             continue;
         snprintf(card_id, sizeof(card_id), "card%d", card);
         read_text_file(id_path, card_id, sizeof(card_id));
+        /* The card's own mixer, refreshed with its PCMs (issue #68). */
+        record_audio_card(runtime, card, card_id);
         for (device = 0; device < 16; ++device) {
             int discovered = 0;
             record_audio_device(runtime, card, card_id, device, 1,
@@ -3404,6 +3779,19 @@ static void scan_audio_devices(BlitRuntime *runtime, int announce)
             broadcast_audio_device_changed(runtime, audio, "removed");
         memset(audio, 0, sizeof(*audio));
         discovered_any = 1;
+    }
+    for (index = 0; index < BLIT_MAX_AUDIO_CARDS; ++index) {
+        BlitAudioCard *card = &runtime->audio_cards[index];
+        if (!card->used || card->seen)
+            continue;
+        /* A card that has gone keeps its entry while anything is configured
+           on it, for the same reason a configured input device does. */
+        if (card->present) {
+            card->present = 0;
+            card->control_accessible = 0;
+            ++card->revision;
+            ++runtime->audio_cards_revision;
+        }
     }
     if (discovered_any)
         ++runtime->audio_devices_revision;
@@ -3462,9 +3850,11 @@ static void reconnect_audio_devices(BlitRuntime *runtime)
     scan_audio_devices(runtime, 1);
 }
 
-static size_t audio_device_item_json(const BlitAudioDevice *audio, char *body,
+static size_t audio_device_item_json(BlitRuntime *runtime,
+                                     const BlitAudioDevice *audio, char *body,
                                      size_t capacity)
 {
+    int control_accessible = 0;
     char escaped_name[256];
     char escaped_subname[256];
     char escaped_card[128];
@@ -3503,20 +3893,40 @@ static size_t audio_device_item_json(const BlitAudioDevice *audio, char *body,
                                  audio->sample_rates_continuous ? "true" :
                                  "false");
     }
+    {
+        const BlitAudioCard *card = find_audio_card(runtime, audio->card);
+        control_accessible = card != NULL && card->control_accessible;
+    }
+    {
+        const BlitAudioCard *card = find_audio_card(runtime, audio->card);
+        control_accessible = card != NULL && card->control_accessible;
+    }
     complete &= json_appendf(body, capacity, &used,
         ",\"identity\":{\"card\":%d,\"card_id\":\"%s\",\"device\":%d,"
         "\"subname\":\"%s\"},"
         "\"capabilities\":[\"pcm\"],"
-        "\"state\":{\"present\":%s,\"accessible\":%s},"
+        /* The mixer is the card's, not this PCM's, and the pointer says so
+           rather than leaving a controller to infer it from card_id. ADR
+           0064's id is per PCM because that is what an application opens, and
+           four HDMI outputs on one card share one mixer (issue #68). */
+        "\"card_controls\":\"/v1/audio/cards/%s\","
+        /* Two separate facts: a deployment can have a readable PCM node and
+           an unreadable control device -- /dev/snd/controlC* is root:audio
+           and the PCM nodes are not -- so one boolean could not have carried
+           both. */
+        "\"state\":{\"present\":%s,\"accessible\":%s,"
+        "\"control_accessible\":%s},"
         "\"configuration\":{\"default\":%s},\"revision\":%llu}",
         audio->card, escaped_card, audio->device, escaped_subname,
+        escaped_card,
         audio->present ? "true" : "false",
         audio->accessible ? "true" : "false",
+        control_accessible ? "true" : "false",
         audio->is_default ? "true" : "false", audio->revision);
     return complete ? used : capacity;
 }
 
-static void audio_devices_json(const BlitRuntime *runtime, char *body,
+static void audio_devices_json(BlitRuntime *runtime, char *body,
                                size_t capacity)
 {
     size_t used = 0;
@@ -3529,12 +3939,13 @@ static void audio_devices_json(const BlitRuntime *runtime, char *body,
                              runtime->audio_devices_revision);
     for (i = 0; i < BLIT_MAX_AUDIO_DEVICES; ++i) {
         const BlitAudioDevice *audio = &runtime->audio_devices[i];
-        char item[2048];
+        char item[2560];
         size_t length;
 
         if (!audio->used)
             continue;
-        length = audio_device_item_json(audio, item, sizeof(item));
+        length = audio_device_item_json(runtime, audio, item,
+                                        sizeof(item));
         if (length >= sizeof(item) ||
             used + length + (size_t)(count > 0 ? 1 : 0) + 40 >= capacity) {
             ++dropped;
@@ -15046,6 +15457,319 @@ static int apply_input_device_configuration(BlitRuntime *runtime,
     return 1;
 }
 
+/* Which PCMs of this card share its mixer. The sharing is the whole reason
+   the mixer is its own resource, so it is reported rather than implied:
+   without it a controller showing four HDMI outputs would present four volume
+   sliders and be surprised when they moved together (issue #68). */
+static size_t audio_card_sharers_json(const BlitRuntime *runtime,
+                                      const BlitAudioCard *card, char *out,
+                                      size_t capacity, size_t *used)
+{
+    int first = 1;
+    int i;
+
+    json_appendf(out, capacity, used, "[");
+    for (i = 0; i < BLIT_MAX_AUDIO_DEVICES; ++i) {
+        const BlitAudioDevice *audio = &runtime->audio_devices[i];
+        if (!audio->used || audio->card != card->card)
+            continue;
+        json_appendf(out, capacity, used, "%s\"%s\"", first ? "" : ",",
+                     audio->id);
+        first = 0;
+    }
+    json_appendf(out, capacity, used, "]");
+    return *used;
+}
+
+static size_t audio_card_item_json(const BlitRuntime *runtime,
+                                   const BlitAudioCard *card, char *body,
+                                   size_t capacity)
+{
+    size_t used = 0;
+    int volume_index = audio_card_resolve(card, "Volume");
+    int mute_index = audio_card_resolve(card, "Switch");
+    int i;
+
+    body[0] = '\0';
+    json_appendf(body, capacity, &used,
+                 "{\"id\":\"%s\",\"class\":\"audio-card\",\"card\":%d,"
+                 "\"state\":{\"present\":%s,\"control_accessible\":%s},"
+                 "\"control_count\":%d,\"controls_truncated\":%s,"
+                 "\"shares_controls_with\":",
+                 card->card_id, card->card,
+                 card->present ? "true" : "false",
+                 card->control_accessible ? "true" : "false",
+                 card->control_count,
+                 card->controls_truncated ? "true" : "false");
+    audio_card_sharers_json(runtime, card, body, capacity, &used);
+    json_appendf(body, capacity, &used, ",\"controls\":[");
+    for (i = 0; i < card->listed; ++i) {
+        const BlitAudioControl *element = &card->controls[i];
+        int channel;
+        char escaped[128];
+        json_escape(element->name, escaped, sizeof(escaped));
+        json_appendf(body, capacity, &used,
+                     "%s{\"name\":\"%s\",\"index\":%d,\"type\":\"%s\","
+                     "\"channels\":%d,\"writable\":%s,\"minimum\":%d,"
+                     "\"maximum\":%d,\"step\":%d,\"values\":[",
+                     i == 0 ? "" : ",", escaped, element->index,
+                     audio_control_type_name(element->type),
+                     element->channels,
+                     element->writable ? "true" : "false",
+                     element->minimum, element->maximum, element->step);
+        for (channel = 0; channel < element->value_count; ++channel)
+            json_appendf(body, capacity, &used, "%s%d",
+                         channel == 0 ? "" : ",", element->values[channel]);
+        json_appendf(body, capacity, &used, "]");
+        /* A percentage only where one means something. An enumerated or bytes
+           element has values, not a magnitude. */
+        if ((element->type == SNDRV_CTL_ELEM_TYPE_INTEGER ||
+             element->type == SNDRV_CTL_ELEM_TYPE_BOOLEAN) &&
+            element->value_count > 0)
+            json_appendf(body, capacity, &used, ",\"percent\":%d",
+                         blit_audio_percent_for_raw(element->values[0],
+                                                     element->minimum,
+                                                     element->maximum));
+        json_appendf(body, capacity, &used, "}");
+    }
+    json_appendf(body, capacity, &used, "],\"configuration\":{");
+    /* volume and mute are present only where the rule resolves them. A card
+       with both "Mic Playback Volume" and "Speaker Playback Volume" and no
+       Master is genuinely ambiguous, and guessing would adjust the wrong one
+       -- so they are absent and the controller names the element itself. */
+    if (volume_index >= 0) {
+        const BlitAudioControl *element = &card->controls[volume_index];
+        json_appendf(body, capacity, &used,
+                     "\"volume_percent\":%d,\"volume_control\":\"%s\"",
+                     element->value_count > 0 ?
+                         blit_audio_percent_for_raw(element->values[0],
+                                                     element->minimum,
+                                                     element->maximum) : 0,
+                     element->name);
+    }
+    if (mute_index >= 0) {
+        const BlitAudioControl *element = &card->controls[mute_index];
+        /* An ALSA playback switch is on when audible, so mute is its
+           inverse. Reporting the switch as "mute" without inverting it is a
+           bug a control panel cannot see. */
+        json_appendf(body, capacity, &used,
+                     "%s\"mute\":%s,\"mute_control\":\"%s\"",
+                     volume_index >= 0 ? "," : "",
+                     element->value_count > 0 && element->values[0] == 0 ?
+                         "true" : "false",
+                     element->name);
+    }
+    json_appendf(body, capacity, &used, "},\"revision\":%llu}",
+                 card->revision);
+    return used;
+}
+
+static void audio_cards_json(BlitRuntime *runtime, char *body, size_t capacity)
+{
+    size_t used = 0;
+    int first = 1;
+    int i;
+
+    json_appendf(body, capacity, &used,
+                 "{\"revision\":%llu,\"cards\":[",
+                 runtime->audio_cards_revision);
+    for (i = 0; i < BLIT_MAX_AUDIO_CARDS; ++i) {
+        static char item[8192];
+        if (!runtime->audio_cards[i].used)
+            continue;
+        audio_card_item_json(runtime, &runtime->audio_cards[i], item,
+                             sizeof(item));
+        json_appendf(body, capacity, &used, "%s%s", first ? "" : ",", item);
+        first = 0;
+    }
+    json_appendf(body, capacity, &used, "]}");
+}
+
+static const char *audio_card_rejected_property(const char *configuration)
+{
+    static const char *const writable[] = {
+        "volume_percent", "mute", "controls"
+    };
+
+    return json_rejected_property(configuration, writable,
+                                  sizeof(writable) / sizeof(writable[0]));
+}
+
+static int apply_audio_card_configuration(BlitRuntime *runtime,
+                                          BlitAudioCard *card,
+                                          const char *configuration,
+                                          BlitConfigProblem *problem)
+{
+    char scalars[512];
+    const char *rejected;
+    char controls[1024];
+    const char *controls_cursor;
+    int volume = 0;
+    int volume_requested;
+    int mute = 0;
+    int mute_requested;
+    int changed = 0;
+
+    (void)runtime;
+    if (!json_object_scalars(configuration, scalars, sizeof(scalars))) {
+        config_problem(problem, 400, "Bad Request",
+                       "invalid_device_configuration",
+                       "A card configuration must be a JSON object of "
+                       "properties.");
+        return 0;
+    }
+    rejected = audio_card_rejected_property(configuration);
+    if (rejected != NULL) {
+        char detail[256];
+        snprintf(detail, sizeof(detail),
+                 "A card configuration carries \"%s\", which is not a "
+                 "writable property. Writable: volume_percent, mute, and "
+                 "controls.", rejected);
+        config_problem(problem, 400, "Bad Request", "invalid_device_property",
+                       detail);
+        return 0;
+    }
+    if (!card->control_accessible) {
+        config_problem(problem, 409, "Conflict", "audio_control_unavailable",
+                       "This card's control device cannot be read, so it has no mixer to write. state.control_accessible says so.");
+        return 0;
+    }
+    volume_requested = json_int(scalars, "volume_percent", &volume);
+    mute_requested = json_bool(scalars, "mute", &mute);
+    if ((json_key_cursor(scalars, "volume_percent") != NULL &&
+         !volume_requested) ||
+        (json_key_cursor(scalars, "mute") != NULL && !mute_requested)) {
+        config_problem(problem, 400, "Bad Request",
+                       "invalid_device_configuration",
+                       "volume_percent must be an integer and mute a JSON "
+                       "boolean.");
+        return 0;
+    }
+    if (volume_requested && (volume < 0 || volume > 100)) {
+        config_problem(problem, 400, "Bad Request",
+                       "invalid_device_configuration",
+                       "volume_percent must be an integer from 0 through 100.");
+        return 0;
+    }
+    if (volume_requested) {
+        int index = audio_card_resolve(card, "Volume");
+        if (index < 0) {
+            config_problem(problem, 422, "Unprocessable Entity",
+                           "audio_control_ambiguous",
+                           "This card has no single playback volume to mean: name the element under controls instead. volume_control is absent for exactly this reason.");
+            return 0;
+        }
+        if (!card->controls[index].writable) {
+            config_problem(problem, 422, "Unprocessable Entity",
+                           "audio_control_read_only",
+                           "The card reports its playback volume as read-only.");
+            return 0;
+        }
+        if (!audio_card_write_control(card, &card->controls[index],
+                blit_audio_raw_for_percent(volume,
+                    card->controls[index].minimum,
+                    card->controls[index].maximum))) {
+            config_problem(problem, 500, "Internal Server Error",
+                           "audio_control_write_failed",
+                           "The card refused the write.");
+            return 0;
+        }
+        changed = 1;
+    }
+    if (mute_requested) {
+        int index = audio_card_resolve(card, "Switch");
+        if (index < 0) {
+            config_problem(problem, 422, "Unprocessable Entity",
+                           "audio_control_ambiguous",
+                           "This card has no single playback switch to mean: name the element under controls instead.");
+            return 0;
+        }
+        if (!card->controls[index].writable) {
+            config_problem(problem, 422, "Unprocessable Entity",
+                           "audio_control_read_only",
+                           "The card reports its playback switch as read-only.");
+            return 0;
+        }
+        /* The switch is on when audible, so mute is its inverse. */
+        if (!audio_card_write_control(card, &card->controls[index],
+                                      mute ? 0 : 1)) {
+            config_problem(problem, 500, "Internal Server Error",
+                           "audio_control_write_failed",
+                           "The card refused the write.");
+            return 0;
+        }
+        changed = 1;
+    }
+    controls_cursor = json_key_cursor(configuration, "controls");
+    if (controls_cursor != NULL) {
+        char key[BLIT_AUDIO_CONTROL_NAME_CAPACITY];
+        char value[64];
+        const char *cursor;
+        if (!json_object_slice(controls_cursor, controls, sizeof(controls))) {
+            config_problem(problem, 400, "Bad Request",
+                           "invalid_audio_controls",
+                           "controls must be a JSON object of element name to value.");
+            return 0;
+        }
+        cursor = controls;
+        while (*cursor != '\0' && *cursor != '{')
+            ++cursor;
+        if (*cursor == '{')
+            ++cursor;
+        while ((cursor = json_next_member(cursor, key, sizeof(key), value,
+                                          sizeof(value))) != NULL) {
+            BlitAudioControl *element = audio_card_find_control(card, key);
+            char *end = NULL;
+            long raw;
+            if (element == NULL) {
+                char detail[256];
+                snprintf(detail, sizeof(detail),
+                         "This card has no control named \"%s\". The names it "
+                         "does have are in its controls list.", key);
+                config_problem(problem, 404, "Not Found",
+                               "audio_control_not_found", detail);
+                return 0;
+            }
+            if (!element->writable) {
+                char detail[256];
+                snprintf(detail, sizeof(detail),
+                         "The card reports \"%s\" as read-only.", key);
+                config_problem(problem, 422, "Unprocessable Entity",
+                               "audio_control_read_only", detail);
+                return 0;
+            }
+            raw = strtol(value, &end, 10);
+            if (end == value || (end != NULL && *end != '\0')) {
+                config_problem(problem, 400, "Bad Request",
+                               "invalid_audio_controls",
+                               "a control value is the element's own raw integer, not a percentage: its range is in the controls list.");
+                return 0;
+            }
+            if (raw < element->minimum || raw > element->maximum) {
+                char detail[256];
+                snprintf(detail, sizeof(detail),
+                         "\"%s\" takes a value from %d through %d.", key,
+                         element->minimum, element->maximum);
+                config_problem(problem, 400, "Bad Request",
+                               "invalid_audio_controls", detail);
+                return 0;
+            }
+            if (!audio_card_write_control(card, element, (int)raw)) {
+                config_problem(problem, 500, "Internal Server Error",
+                               "audio_control_write_failed",
+                               "The card refused the write.");
+                return 0;
+            }
+            changed = 1;
+        }
+    }
+    if (changed) {
+        ++card->revision;
+        ++runtime->audio_cards_revision;
+    }
+    return 1;
+}
+
 /* The audio counterpart, separated for the same reason (ADR 0067): a stored
    default must be validated by the code a PATCH goes through, not by a second
    reader of the same property. */
@@ -16790,6 +17514,42 @@ static void handle_request(int fd, BlitRuntime *runtime,
         send_http(fd, 202, "Accepted", "application/json", body);
         return;
     }
+    if (strncmp(path, "/v1/audio/cards/", strlen("/v1/audio/cards/")) == 0 &&
+        strcmp(method, "PATCH") == 0) {
+        const char *card_id = path + strlen("/v1/audio/cards/");
+        BlitAudioCard *card = find_audio_card_id(runtime, card_id);
+        char card_configuration[1024];
+        const char *card_cursor = json_key_cursor(payload, "configuration");
+        BlitConfigProblem card_problem;
+
+        if (*card_id == '\0' || card == NULL) {
+            send_problem(fd, 404, "Not Found", "audio_card_not_found",
+                         "The requested audio card does not exist.");
+            return;
+        }
+        if (idempotency_replay(runtime, fd, request, method, path, payload))
+            return;
+        if (!if_match_revision(fd, request, card->revision))
+            return;
+        if (card_cursor == NULL ||
+            !json_object_slice(card_cursor, card_configuration,
+                               sizeof(card_configuration))) {
+            send_problem(fd, 400, "Bad Request", "invalid_device_configuration",
+                         "A card update carries its writable properties under configuration, as a JSON object.");
+            return;
+        }
+        if (!apply_audio_card_configuration(runtime, card, card_configuration,
+                                            &card_problem)) {
+            send_problem(fd, card_problem.status, card_problem.title,
+                         card_problem.code, card_problem.detail);
+            return;
+        }
+        audio_card_item_json(runtime, card, body, sizeof(body));
+        idempotency_store(runtime, request, method, path, payload, 200, "OK",
+                          "application/json", body);
+        send_http(fd, 200, "OK", "application/json", body);
+        return;
+    }
     if (strncmp(path, "/v1/audio/", strlen("/v1/audio/")) == 0 &&
         strcmp(method, "PATCH") == 0) {
         const char *audio_id = path + strlen("/v1/audio/");
@@ -16839,7 +17599,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
             return;
         }
         settings_mark_dirty(runtime);
-        if (audio_device_item_json(audio, body, sizeof(body)) >=
+        if (audio_device_item_json(runtime, audio, body, sizeof(body)) >=
             sizeof(body)) {
             send_problem(fd, 500, "Internal Server Error",
                          "audio_device_unserialisable",
@@ -17215,6 +17975,20 @@ static void handle_request(int fd, BlitRuntime *runtime,
            server it was controlling. */
         input_devices_json(runtime, body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
+    } else if (strcmp(path, "/v1/audio/cards") == 0) {
+        audio_cards_json(runtime, body, sizeof(body));
+        send_http(fd, 200, "OK", "application/json", body);
+    } else if (strncmp(path, "/v1/audio/cards/",
+                       strlen("/v1/audio/cards/")) == 0) {
+        const char *card_id = path + strlen("/v1/audio/cards/");
+        BlitAudioCard *card = find_audio_card_id(runtime, card_id);
+        if (*card_id == '\0' || card == NULL) {
+            send_problem(fd, 404, "Not Found", "audio_card_not_found",
+                         "The requested audio card does not exist.");
+            return;
+        }
+        audio_card_item_json(runtime, card, body, sizeof(body));
+        send_http(fd, 200, "OK", "application/json", body);
     } else if (strncmp(path, "/v1/audio/", strlen("/v1/audio/")) == 0) {
         const char *audio_id = path + strlen("/v1/audio/");
         BlitAudioDevice *audio = find_audio_device_id(runtime, audio_id);
@@ -17223,7 +17997,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
                          "The requested audio device does not exist.");
             return;
         }
-        if (audio_device_item_json(audio, body, sizeof(body)) >=
+        if (audio_device_item_json(runtime, audio, body, sizeof(body)) >=
             sizeof(body)) {
             send_problem(fd, 500, "Internal Server Error",
                          "audio_device_unserialisable",

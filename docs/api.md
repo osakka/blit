@@ -472,6 +472,74 @@ only a trace entry identifying an evdev source proves physical-device
 delivery. There must be one deliberate pointer owner for a
 display-attached session; competing routes are a configuration error.
 
+### Audio: a card's mixer
+
+A mixer belongs to the **card**, not to a PCM, and the API says so rather
+than leaving it to be discovered. ADR 0064's audio id is per PCM because that
+is what an application opens, and the live host has four HDMI outputs on one
+card — so a mixer reported per PCM would be four copies of one thing, and a
+write through one would leave the other three stale.
+
+```text
+GET  /v1/audio/cards                -> every card and its control elements
+GET  /v1/audio/cards/{card_id}      -> one card
+PATCH /v1/audio/cards/{card_id}     -> volume_percent, mute, or controls
+GET  /v1/audio/{device_id}          -> card_controls points at the card
+```
+
+Every PCM carries `card_controls`, and every card carries
+`shares_controls_with`: the ids of the devices whose PCMs share that mixer.
+Show four HDMI outputs with four independent volume sliders and they will
+appear to move together, because they are one slider.
+
+**`volume_percent` and `mute` resolve by a rule, and are absent when it names
+nothing.** The rule is: the element named exactly `Master Playback Volume` if
+there is one; else the only `* Playback Volume` if there is exactly one; else
+nothing. The live host's six cards exercise every branch — one has `Master`,
+one has only `PCM Playback Volume`, one has both `Mic Playback Volume` and
+`Speaker Playback Volume` and no `Master`, and three have no playback volume
+at all. For the ambiguous one, `volume_percent` is **absent** and a write is
+refused with `audio_control_ambiguous`: guessing would adjust the wrong
+hardware. Name the element under `controls` instead.
+
+`mute` is the inverse of the playback switch, because an ALSA switch is on
+when audible.
+
+**A percentage is converted against the element's own range, and what comes
+back is the read-back.** ALSA ranges are whatever the hardware says: the
+host's cards report `0..255`, `0..87`, `0..63`, `0..36`, `0..32` and `0..9216`
+for various elements. So:
+
+```text
+PATCH /v1/audio/cards/PCH { "configuration": { "volume_percent": 50 } }
+  -> Master Playback Volume values [44, 44], volume_percent 51
+```
+
+50% of `0..87` is 44, and 44 of `0..87` is 51%. That is arithmetic, not a bug:
+88 values cannot distinguish 101 percentages. Read the response rather than
+assuming the request took. What the rounding does guarantee is that the cycle
+*settles*: read a value, show a percentage, write it back, and you land where
+you started — so a slider may snap once and never drifts after.
+
+**Named writes take the element's own raw value**, not a percentage, because
+an enumerated element has values rather than a magnitude. Each element reports
+its `minimum`, `maximum`, `step`, `channels` and `writable`; a read-only
+element is refused rather than silently ignored.
+
+**Control values are not persisted.** They are the card's own state and the
+card keeps them, so storing and re-applying them would make Blit fight
+`alsactl` for ownership of something that already survives a reboot. The
+`default` flag on a PCM *is* Blit's own and *is* persisted (ADR 0067).
+
+`state.control_accessible` is a separate fact from a PCM's `accessible`:
+`/dev/snd/controlC*` is `root:audio` while the PCM nodes are not, so a server
+without the `audio` group sees PCMs and no mixers. The packaged unit grants
+it; the unprivileged profile (ADR 0065) grants it too.
+
+Format and sample-rate *selection* is deliberately not here: it is a PCM
+`hw_params` question rather than a mixer one, and it would mean Blit opening a
+PCM, which it does not do.
+
 ### Pointer and gamepad settings
 
 | property | what it is |
