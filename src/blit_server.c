@@ -72,6 +72,8 @@ extern char **environ;
    levels is a few kilobytes per keyboard. */
 #define BLIT_SETTINGS_CAPACITY 65536
 #define BLIT_SETTINGS_FLUSH_US 500000
+/* How long after a device-node change to look once more (issue #72 follow-on). */
+#define BLIT_EVDEV_RESETTLE_US 1000000
 #define BLIT_SETTINGS_AUDIO 0
 #define BLIT_SETTINGS_INPUT 1
 #define BLIT_SETTINGS_DISPLAY 2
@@ -907,6 +909,20 @@ typedef struct {
     char evdev_keyboard_paths[BLIT_MAX_INPUT_DEVICES][128];
     int evdev_keyboard_count;
     int evdev_keyboard_reported[BLIT_MAX_INPUT_DEVICES];
+    /* The most of each kind this process has ever had open. `input_device_missing`
+       used to fire only when a count reached zero, which sounds like the right
+       threshold until a machine has one stray HID interface left: on
+       2026-10-11 a USB hub took the live host's keyboard and mouse away and
+       the warning stayed silent, because a microphone's remote-control
+       interface still counted as a keyboard and a pointer. Diagnostics said
+       `warnings: []` while the operator had no input at all.
+
+       A peak is per-process on purpose: it is the difference between what this
+       machine had and what it has, and a restart is the deliberate way to say
+       "this is the new normal". */
+    int evdev_keyboard_peak;
+    int evdev_mouse_peak;
+    int evdev_gamepad_peak;
     int evdev_gamepad_fds[BLIT_MAX_INPUT_DEVICES];
     char evdev_gamepad_paths[BLIT_MAX_INPUT_DEVICES][128];
     int evdev_gamepad_count;
@@ -941,6 +957,18 @@ typedef struct {
     int snd_watch_fd;
     int audio_rescan_requested;
     int evdev_rescan_requested;
+    /* A rescan is the only thing that retires an absent device, and it is
+       armed by inotify. A burst of removals -- a USB hub dropping thirteen
+       nodes at once, which the live host did on 2026-10-11 -- coalesces into
+       one flag, so the single scan can run while some of those nodes still
+       exist and mark them seen. Nothing then arms another scan, and a device
+       that is gone stays `present` for the life of the process: measured
+       here at 56 seconds and counting, with kinds wiped to `other`.
+
+       So a watch event also sets a resettle deadline, and the loop rescans
+       once more after the burst has finished arriving. Idle cost is nothing;
+       it only ever fires after a real change. */
+    uint64_t evdev_resettle_us;
     float evdev_mouse_x;
     float evdev_mouse_y;
     BlitStream streams[BLIT_MAX_STREAMS];
@@ -2859,7 +2887,16 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
                 "%s\"display_presentation_failed\"", first_warning ? "" : ",");
             first_warning = 0;
         }
-        if (runtime->evdev_keyboard_count == 0 ||
+        /* Below what this machine has had, not merely at zero. The zero test
+           is what let the live host report `warnings: []` on 2026-10-11 while
+           a USB hub had taken the keyboard and the mouse: a microphone's
+           remote-control interface was still open and still counted as one of
+           each. `state.input_devices` carries the numbers so the warning can
+           be acted on rather than just noticed. */
+        if (runtime->evdev_keyboard_count < runtime->evdev_keyboard_peak ||
+            runtime->evdev_mouse_count < runtime->evdev_mouse_peak ||
+            runtime->evdev_gamepad_count < runtime->evdev_gamepad_peak ||
+            runtime->evdev_keyboard_count == 0 ||
             runtime->evdev_mouse_count == 0) {
             warning_used += (size_t)snprintf(warnings + warning_used,
                 sizeof(warnings) - warning_used,
@@ -2923,8 +2960,10 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              "\"backend\":\"%s\",\"error\":\"%s\"},"
              "\"resources\":{\"displays\":%d,\"outputs\":%d,"
              "\"sessions\":%d,\"surfaces\":%d,\"streams\":%d,"
-             "\"input_routes\":%d,\"keyboards\":%d,\"pointers\":%d,"
-             "\"gamepads\":%d,\"input_devices\":%d},"
+             "\"input_routes\":%d,\"keyboards\":%d,\"keyboards_peak\":%d,"
+             "\"pointers\":%d,\"pointers_peak\":%d,"
+             "\"gamepads\":%d,\"gamepads_peak\":%d,"
+             "\"input_devices\":%d},"
              "\"render\":{\"pending\":%s,\"interval_ms\":%d,"
              "\"effective_interval_ms\":%d,\"mode\":\"refresh-aware\","
              "\"outputs\":%s,"
@@ -2953,7 +2992,9 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
                  "true" : "false", backend, escaped_error,
              runtime->display_count, runtime->output_count, sessions, surfaces,
              streams, routes, runtime->evdev_keyboard_count,
-             runtime->evdev_mouse_count, runtime->evdev_gamepad_count,
+             runtime->evdev_keyboard_peak,
+             runtime->evdev_mouse_count, runtime->evdev_mouse_peak,
+             runtime->evdev_gamepad_count, runtime->evdev_gamepad_peak,
              input_devices,
              runtime->render_pending ? "true" : "false",
              runtime->render_interval_ms, runtime->render_effective_interval_ms,
@@ -4713,10 +4754,23 @@ static BlitInputDevice *record_input_device(BlitRuntime *runtime,
     }
     probe_input_device(fd, &kinds, &capabilities);
     read_input_sidecar(device, 0, &kinds, &capabilities, NULL, NULL);
-    if (device->kinds != kinds || device->capabilities != capabilities)
-        ++device->revision;
-    device->kinds = kinds;
-    device->capabilities = capabilities;
+    /* A probe that learned nothing is not the same as a device that is
+       nothing. Opening a node that is being torn down succeeds while every
+       EVIOC* ioctl on it fails, so `kinds` comes back zero -- and writing that
+       zero over a known device permanently demotes a keyboard to `other`,
+       after which the poll loop will never claim it again even once the
+       hardware is back. Measured on a node removed mid-scan: kinds went from
+       `pointer` to `other` and stayed there.
+
+       An existing device keeps what it was until a probe actually contradicts
+       it. A newly created one has nothing to keep, so zero is its honest
+       answer and `other` is what the inventory should say. */
+    if (kinds != 0 || capabilities != 0 || created) {
+        if (device->kinds != kinds || device->capabilities != capabilities)
+            ++device->revision;
+        device->kinds = kinds;
+        device->capabilities = capabilities;
+    }
     /* ADR 0067, and *after* the kinds and capabilities are known. Applying
        stored settings at the moment the entry is allocated looked like the
        natural place and was wrong: the device's kinds were still zero, so a
@@ -7633,11 +7687,21 @@ static void terminal_clear_wide_overlap(BlitSurface *surface, int x, int y)
         x >= surface->width || y >= surface->height)
         return;
     attributes = surface->attributes[y][x];
-    if ((attributes & BLIT_ATTR_CONTINUATION) && x > 0)
+    /* Issue #72. Clearing the *other* half of a wide glyph changes a cell
+       the caller is not writing and therefore is not marking damaged -- it
+       marks only its own target. A cell emptied with no damage is never
+       repainted, so its pixels stay for as long as the surface lives. Mark it
+       here, where the clearing happens, rather than asking every caller to
+       remember a neighbour it did not know it touched. */
+    if ((attributes & BLIT_ATTR_CONTINUATION) && x > 0) {
         terminal_clear_cell(surface, x - 1, y);
+        mark_surface_damage(surface, x - 1, y);
+    }
     if ((attributes & BLIT_ATTR_WIDE) && x + 1 < surface->width &&
-        (surface->attributes[y][x + 1] & BLIT_ATTR_CONTINUATION))
+        (surface->attributes[y][x + 1] & BLIT_ATTR_CONTINUATION)) {
         terminal_clear_cell(surface, x + 1, y);
+        mark_surface_damage(surface, x + 1, y);
+    }
 }
 
 static void terminal_normalize_wide_row(BlitSurface *surface, int y)
@@ -19505,6 +19569,8 @@ static void evdev_register_path(BlitRuntime *runtime, const char *path,
 
     if (mouse_wanted && is_mouse) {
         int slot = runtime->evdev_mouse_count++;
+            if (runtime->evdev_mouse_count > runtime->evdev_mouse_peak)
+                runtime->evdev_mouse_peak = runtime->evdev_mouse_count;
         runtime->evdev_mouse_fds[slot] = probe;
         snprintf(runtime->evdev_mouse_paths[slot], 128, "%s", path);
         runtime->evdev_mouse_reported[slot] = 0;
@@ -19527,6 +19593,8 @@ static void evdev_register_path(BlitRuntime *runtime, const char *path,
         }
         if (fd >= 0) {
             int slot = runtime->evdev_keyboard_count++;
+            if (runtime->evdev_keyboard_count > runtime->evdev_keyboard_peak)
+                runtime->evdev_keyboard_peak = runtime->evdev_keyboard_count;
             runtime->evdev_keyboard_fds[slot] = fd;
             snprintf(runtime->evdev_keyboard_paths[slot], 128, "%s", path);
             runtime->evdev_keyboard_reported[slot] = 0;
@@ -19550,6 +19618,8 @@ static void evdev_register_path(BlitRuntime *runtime, const char *path,
         }
         if (fd >= 0) {
             int slot = runtime->evdev_gamepad_count++;
+            if (runtime->evdev_gamepad_count > runtime->evdev_gamepad_peak)
+                runtime->evdev_gamepad_peak = runtime->evdev_gamepad_count;
             runtime->evdev_gamepad_fds[slot] = fd;
             snprintf(runtime->evdev_gamepad_paths[slot], 128, "%s", path);
             runtime->evdev_gamepad_reported[slot] = 0;
@@ -19606,6 +19676,8 @@ static void adopt_opened_device(BlitRuntime *runtime,
                              runtime->evdev_keyboard_paths,
                              runtime->evdev_keyboard_count, opened->path)) {
             int slot = runtime->evdev_keyboard_count++;
+            if (runtime->evdev_keyboard_count > runtime->evdev_keyboard_peak)
+                runtime->evdev_keyboard_peak = runtime->evdev_keyboard_count;
             runtime->evdev_keyboard_fds[slot] = opened->fd[0];
             snprintf(runtime->evdev_keyboard_paths[slot], 128, "%s",
                      opened->path);
@@ -19629,6 +19701,8 @@ static void adopt_opened_device(BlitRuntime *runtime,
                              runtime->evdev_mouse_paths,
                              runtime->evdev_mouse_count, opened->path)) {
             int slot = runtime->evdev_mouse_count++;
+            if (runtime->evdev_mouse_count > runtime->evdev_mouse_peak)
+                runtime->evdev_mouse_peak = runtime->evdev_mouse_count;
             runtime->evdev_mouse_fds[slot] = opened->fd[1];
             snprintf(runtime->evdev_mouse_paths[slot], 128, "%s",
                      opened->path);
@@ -19652,6 +19726,8 @@ static void adopt_opened_device(BlitRuntime *runtime,
                              runtime->evdev_gamepad_paths,
                              runtime->evdev_gamepad_count, opened->path)) {
             int slot = runtime->evdev_gamepad_count++;
+            if (runtime->evdev_gamepad_count > runtime->evdev_gamepad_peak)
+                runtime->evdev_gamepad_peak = runtime->evdev_gamepad_count;
             runtime->evdev_gamepad_fds[slot] = opened->fd[2];
             snprintf(runtime->evdev_gamepad_paths[slot], 128, "%s",
                      opened->path);
@@ -19746,6 +19822,8 @@ static void service_evdev_watch(BlitRuntime *runtime)
         received = read(runtime->evdev_watch_fd, buffer, sizeof(buffer));
         if (received > 0) {
             runtime->evdev_rescan_requested = 1;
+            runtime->evdev_resettle_us = monotonic_us() +
+                BLIT_EVDEV_RESETTLE_US;
             continue;
         }
         if (received < 0 && (errno == EINTR || errno == EAGAIN ||
@@ -19823,6 +19901,14 @@ static void scan_evdev_devices(BlitRuntime *runtime, int announce)
 
 static void reconnect_evdev_devices(BlitRuntime *runtime)
 {
+    /* The second look after a burst. Whatever the first scan caught
+       mid-removal is caught here, and this is the only path that retires a
+       device nothing else will ever ask about again. */
+    if (runtime->evdev_resettle_us != 0 &&
+        monotonic_us() >= runtime->evdev_resettle_us) {
+        runtime->evdev_resettle_us = 0;
+        runtime->evdev_rescan_requested = 1;
+    }
     if (!runtime->evdev_rescan_requested)
         return;
     runtime->evdev_rescan_requested = 0;
@@ -24606,6 +24692,18 @@ int main(int argc, char **argv)
                           1000ULL);
             if (flush_wait_ms < wait_ms)
                 wait_ms = flush_wait_ms;
+        }
+        /* The resettle look after a device-node burst is a deadline of the
+           same shape, and needs the same clamp for the same reason: the one
+           thing that must still happen after the last inotify event is the
+           scan that retires whatever the burst's own scan caught half-removed
+           (issue #72 follow-on). A hotplug is exactly when the loop has no
+           other reason to wake. */
+        if (runtime.evdev_resettle_us != 0) {
+            int resettle_wait_ms = now >= runtime.evdev_resettle_us ? 0 :
+                (int)((runtime.evdev_resettle_us - now + 999ULL) / 1000ULL);
+            if (resettle_wait_ms < wait_ms)
+                wait_ms = resettle_wait_ms;
         }
         /* A bounded stream service turn may leave complete WebSocket
            messages in Blit's user-space receive buffer after the kernel socket

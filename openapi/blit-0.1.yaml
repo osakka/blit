@@ -2120,8 +2120,22 @@ components:
             streams: {type: integer, minimum: 0}
             input_routes: {type: integer, minimum: 0}
             keyboards: {type: integer, minimum: 0}
+            keyboards_peak:
+              type: integer
+              minimum: 0
+              description: >-
+                The most keyboards this process has had open at once. A count
+                below its peak is what `input_device_missing` reports, because
+                the zero test it used to make is defeated by one stray HID
+                interface: on the live host a USB hub took the keyboard and
+                the mouse away while a microphone's remote-control interface
+                kept both counts at one, and `warnings` stayed empty. The peak
+                is per-process, so a restart is the deliberate way to say that
+                the smaller number is the new normal.
             pointers: {type: integer, minimum: 0}
+            pointers_peak: {type: integer, minimum: 0}
             gamepads: {type: integer, minimum: 0}
+            gamepads_peak: {type: integer, minimum: 0}
           additionalProperties: false
         render:
           type: object

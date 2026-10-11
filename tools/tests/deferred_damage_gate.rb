@@ -13,15 +13,26 @@
 # again, and on the live host that is a screensaver leaving a solid trail of
 # itself: 8407 cells painted that the cell snapshot said were blank.
 #
-# The shape here is the host's, reduced: one surface writing a full-screen
-# frame in deferred chunks, and a second session producing output throughout so
-# that frames keep being scheduled while the batch is open. The assertion is the
-# one that matters and the one the API can answer -- what the cells say and what
-# the panel shows have to agree.
+# The assertion is the one that matters and the one the API can answer: what
+# the cells say and what the panel shows have to agree.
 #
-# `motion_trail_gate.rb` cannot catch this: it writes immediate, and its
-# erase-plus-draw fits in a single chunk, so it never has an open frame for a
-# frame to interrupt.
+# **This gate has no teeth, and that is worth knowing before trusting it.** It
+# passes against the pre-fix binary too. Four reproductions were built for #72
+# -- this one, a 12x8 host probe, one at the screensaver's exact 240x135 with a
+# 24x14 sprite, and one writing a cell per request as the live trace showed the
+# owner actually does -- and not one of them failed before the fix and passed
+# after. The development container has no GPU, so every local run uses SDL's
+# software renderer, and the failure has only ever been observed on the host's
+# opengles2 path. What carries the fix is the live measurement: 8407 stale
+# cells growing at 96 a second before, a flat 5-9 after, where those few are
+# the race between reading the cells and reading the screenshot.
+#
+# So this guards the invariant from here on rather than proving it, and a
+# regression test with teeth needs a gate host with a GPU. That is recorded on
+# the issue rather than left as a gap in the suite's reputation.
+#
+# `motion_trail_gate.rb` asserts the same property and also passes either way:
+# it writes immediate, and its erase-plus-draw fits in a single chunk.
 
 require 'json'
 require 'net/http'

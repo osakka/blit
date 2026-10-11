@@ -331,6 +331,37 @@ audio      the per-PCM `default` flag, not mixer values. A card keeps its own
 A setting returned to its default **removes** its entry rather than writing
 the default out, so the document stays a record of what somebody chose.
 
+### When input disappears
+
+`input_device_missing` fires when a count of open keyboards, pointers or
+gamepads is **below the most this process has had** — not only when it reaches
+zero. The zero test is what the warning used to do, and on 2026-10-11 it
+stayed silent while a USB hub took the live host's keyboard and mouse away:
+a microphone's remote-control interface was still open and still counted as
+one of each, so `warnings` was empty while the operator had no usable input at
+all. `resources` carries `keyboards_peak`, `pointers_peak` and `gamepads_peak`
+so the warning can be acted on rather than merely noticed.
+
+The peak is per-process on purpose. Unplugging a keyboard you no longer want
+leaves the warning on until a restart, and a restart is the deliberate way to
+say that the smaller number is the new normal.
+
+Two things a hotplug burst used to break, both fixed in 0.1.460 and both
+gated by `tools/tests/input_hotplug_cycle_gate.rb`:
+
+- A rescan is the only thing that retires an absent device, and inotify arms
+  it. A hub dropping thirteen nodes at once coalesces into one flag, so the
+  single scan could run while some of those nodes still existed and mark them
+  seen — after which nothing armed another scan and the device stayed
+  `present` for the life of the process. A watch event now also sets a
+  one-second resettle deadline, and the loop looks once more after the burst
+  has finished arriving.
+- Opening a node that is being torn down succeeds while every `EVIOC*` ioctl
+  on it fails, so the probe returned no kinds — and that zero was written over
+  the device, permanently demoting a keyboard to `other`. The poll loop then
+  never claimed it again, even once the hardware came back. A probe that
+  learned nothing now leaves an existing device as it was.
+
 ### When settings are the problem
 
 A document that cannot be read never stops a boot. It is renamed to

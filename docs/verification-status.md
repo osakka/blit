@@ -3513,3 +3513,99 @@ this host, through the fd above, so it is worth implementing rather than
 recording as a gap — which is the opposite of what the ticket expected and
 better than it. The write, the presentation suspension it needs, and the
 quiescence protocol for testing it safely are the remainder of the stage.
+
+## 0.1.457 through 0.1.460: the screensaver's trail, and what found it
+
+Issue #72, reported from the screen rather than by a gate: the Hibr desktop's
+screensaver was leaving a solid trail of itself across the panel.
+
+### The measurement that framed it
+
+The authoritative cell snapshot and the pixels disagreed, which is the whole
+finding — the owner was authoring correctly (ADR 0063) and the renderer was
+keeping old pixels:
+
+```
+GET /v1/surfaces/surface-2/cells   336 cells carry ink, box x 89..112 y 41..54
+the panel                          8706 cells painted, box x 0..239 y 0..133
+painted but blank in the data      8407
+```
+
+A no-op `PUT /v1/topology` forces a full redraw; it dropped the count from 8706
+to 333, matching the data, and the trail then rebuilt at about 96 cells a
+second. So the full-redraw path was correct and the incremental one was not.
+
+### Three defects
+
+**The incremental path cleared a rectangle and repainted rows** (0.1.457). The
+repaint walks `column = 0` to `surface->width` for every damaged row; the clear
+covered only the damage rectangle's columns. A blank cell with the default
+background draws nothing — `if (background == 0) { ++column; continue; }` — so
+any column repainted outside the cleared rectangle kept its old pixels. A
+sprite moving diagonally is exactly that case: consecutive positions overlap in
+rows, not in columns. Host effect: 8407 stale cells to 2832.
+
+**Damage was cleared for surfaces that were never drawn** (0.1.458). The tail
+cleared `damage_valid` for every surface that *targets* an output, which is a
+different question from whether it was painted. Four paths in the per-output
+loop skip drawing, and each discarded damage that had never reached a pixel.
+The renderer now records what it painted and the tail consults that record, so
+every skip path is covered by construction.
+
+**Clearing a wide glyph's partner cell marked no damage** (0.1.460).
+`terminal_clear_wide_overlap` blanks a neighbouring cell; only the caller's own
+target was marked. Marked at the point of clearing rather than asking every
+caller to remember a neighbour it did not know it touched.
+
+### What actually found it
+
+Not reading the code. Three theories came from reading it and all three were
+wrong. What settled it was shipping the damage rectangle into both traces
+(0.1.459) and reading them off the live host:
+
+```
+surface_update  damage=93,97,1x1 valid=1  presentation=immediate
+render_path     damage=93,97,1x1  path=incremental-damage
+```
+
+The owner writes **one cell per request**, immediate, so every write is its own
+frame with a 1×1 damage rectangle. Every reproduction built before that wrote
+in batches, which is why none of them reproduced anything.
+
+### Host-accepted
+
+Twelve samples over three minutes with the screensaver running, spanning two
+full clear-and-redraw cycles:
+
+```
+   drawn   painted  stale  missing
+ 1  2906     2913      7      0
+ 3    52       58      6      0     <- screensaver cleared the screen
+ 7  1059     1068      9      0
+10  1813     1819      6      0
+11   103      109      6      0     <- and again
+12   363      369      6      0
+```
+
+The residual 5–9 is the race between reading `/cells` and reading the
+screenshot; `missing=0` throughout says nothing is under-painted. The number
+does not grow, which is the question.
+
+### The gate gap, stated rather than papered over
+
+Four reproductions were built: `deferred_damage_gate.rb`, a 12×8 host probe,
+one at the screensaver's exact 240×135 with deferred-commit batches, and one
+writing a cell per request as the trace showed. **None failed before the fix
+and passed after.** The development container is an unprivileged LXC with no
+GPU, so every local run uses SDL's software renderer, and this failure has only
+been observed on the host's `opengles2` path.
+
+`deferred_damage_gate.rb` is in the suite and guards the invariant going
+forward, and its header says in as many words that it has no teeth and why. A
+regression test with teeth needs a gate host with a GPU — #20/#21's territory.
+Claiming the suite covers this would be worse than the gap.
+
+`motion_trail_gate.rb` asserts the same property and passes either way: it
+writes immediate and its erase-plus-draw fits one chunk. Issue #72's done-when
+asked for it to be fixed so it would have caught this; that is recorded as not
+achievable here rather than quietly dropped.

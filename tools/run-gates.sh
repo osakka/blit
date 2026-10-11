@@ -228,6 +228,7 @@ suite_renderer() {
     run_gate input_device_api_gate.rb ruby tools/tests/input_device_api_gate.rb
     run_gate input_device_config_gate.rb ruby tools/tests/input_device_config_gate.rb
     run_gate settings_persistence_gate.rb ruby tools/tests/settings_persistence_gate.rb
+    run_gate input_hotplug_cycle_gate.rb ruby tools/tests/input_hotplug_cycle_gate.rb
     run_gate input_device_route_gate.rb ruby tools/tests/input_device_route_gate.rb
     run_gate audio_device_api_gate.rb ruby tools/tests/audio_device_api_gate.rb
     run_gate audio_card_gate.rb ruby tools/tests/audio_card_gate.rb
