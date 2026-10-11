@@ -113,6 +113,22 @@ shell conformance path is stable.
    Device status replies include DA1/DA2, XTVERSION, CPR, window size,
    DECRQSS, and XTGETTCAP; erase operations preserve the active background
    colour according to BCE semantics.
+   The VT500 rectangular area operations are implemented (issue #2): DECFRA
+   `$x`, DECERA `$z`, DECSERA `${`, DECCRA `$v`, DECCARA `$r`, DECRARA `$t`
+   and DECSACE `*x`, with DECSCA `"q` providing the character protection
+   DECSERA needs. The CSI parser records the intermediate byte and dispatches
+   on the pair: before that the final byte alone decided, so `CSI 1;4$r`
+   (DECCARA) was executed as `CSI 1;4r` (DECSTBM) and silently redefined the
+   scroll region. The same collision through the private prefix is closed too
+   -- `CSI ?2J` is DECSED and leaves protected cells, where it used to be
+   plain ED.
+   A rectangle is page-relative, not margin-relative, because these
+   operations do not shift a line; origin mode is the one exception and makes
+   coordinates relative to the margins in both axes. An inverted or empty
+   rectangle is ignored rather than clamped, as DECSTBM and DECSLRM already
+   are. DECCRA copies through a buffer so an overlapping copy is not smeared.
+   DECCARA and DECRARA accept only the four VT500 attribute parameters and
+   their clearing forms.
    Left/right margins are implemented (issue #3): DECLRMM (`CSI ?69h`) enables
    the model, `CSI Pl;Pr s` is DECSLRM while it is on and SCOSC while it is
    off, and insertion, deletion, scrolling, autowrap, CR, BS, HT and origin

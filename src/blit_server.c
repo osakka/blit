@@ -102,6 +102,11 @@ extern char **environ;
 #define BLIT_ATTR_ITALIC 128
 #define BLIT_ATTR_BLINK 256
 #define BLIT_ATTR_STRIKE 512
+/* DECSCA's character protection (issue #2). Terminal state rather than a
+   style: it decides whether DECSERA and DECSED erase a cell, and nothing
+   draws differently because of it, so it is deliberately not part of the
+   cell style the API reports or accepts. */
+#define BLIT_ATTR_PROTECTED 1024
 #define BLIT_MAX_COMBINING 16
 
 #define BLIT_SDL_GRAPHICS_CACHE 32
@@ -639,6 +644,9 @@ typedef struct {
     int terminal_wrap_pending;
     int terminal_origin_mode;
     int terminal_autowrap;
+    /* DECSACE: whether DECCARA and DECRARA act on a rectangle (the default)
+       or on the stream between its corners. */
+    int terminal_attribute_extent_stream;
     int terminal_newline_mode;
     int terminal_insert_mode;
     int terminal_alternate_mode;
@@ -5935,6 +5943,22 @@ static void terminal_erase_cell(BlitSession *session, BlitSurface *surface,
         surface->background[y][x] = session->terminal_background + 1;
 }
 
+/* Erase a run of cells on one row. `selective` is DECSED/DECSEL/DECSERA:
+   a cell DECSCA has protected is left alone. */
+static void terminal_erase_span(BlitSession *session, BlitSurface *surface,
+                                int y, int from, int to, int selective)
+{
+    int x;
+
+    if (from < 0) from = 0;
+    if (to > surface->width - 1) to = surface->width - 1;
+    for (x = from; x <= to; ++x) {
+        if (selective && (surface->attributes[y][x] & BLIT_ATTR_PROTECTED))
+            continue;
+        terminal_erase_cell(session, surface, x, y);
+    }
+}
+
 static void terminal_erase_line(BlitSession *session, BlitSurface *surface,
                                 int y, int start)
 {
@@ -8373,6 +8397,289 @@ static int terminal_csi_has_mode(const char *sequence, int wanted)
     return 0;
 }
 
+/* The VT500 rectangular area operations (issue #2).
+ *
+ * All of them name a rectangle as Pt;Pl;Pb;Pr -- top, left, bottom, right,
+ * one-based and inclusive. An omitted or zero coordinate is the page edge.
+ * The rectangle is page-relative, *not* margin-relative: left/right margins
+ * (issue #3) confine the operations that shift a line, and these do not
+ * shift anything. Origin mode is the exception, and the only place margins
+ * enter here: with DECOM set a coordinate is relative to the top-left of the
+ * margins and clamps to them.
+ *
+ * Returns 0 when the rectangle is empty or inverted, in which case the whole
+ * operation is ignored rather than clamped or partly applied -- the rule
+ * DECSTBM and DECSLRM already follow for their own out-of-order pairs. */
+typedef struct {
+    int top;
+    int left;
+    int bottom;
+    int right;
+} BlitRectangle;
+
+static int terminal_rectangle(const BlitSession *session,
+                              const BlitSurface *surface, const int *params,
+                              int param_count, int offset, int stream,
+                              BlitRectangle *rectangle)
+{
+    int origin_top = 0;
+    int origin_left = 0;
+    int limit_bottom = surface->height - 1;
+    int limit_right = surface->width - 1;
+    int value;
+
+    if (session->terminal_origin_mode) {
+        origin_top = surface->scroll_top;
+        origin_left = surface_line_start(surface);
+        limit_bottom = surface->scroll_bottom;
+        limit_right = surface_line_end(surface);
+    }
+    value = param_count > offset ? params[offset] : 0;
+    rectangle->top = value > 0 ? origin_top + value - 1 : origin_top;
+    value = param_count > offset + 1 ? params[offset + 1] : 0;
+    rectangle->left = value > 0 ? origin_left + value - 1 : origin_left;
+    value = param_count > offset + 2 ? params[offset + 2] : 0;
+    rectangle->bottom = value > 0 ? origin_top + value - 1 : limit_bottom;
+    value = param_count > offset + 3 ? params[offset + 3] : 0;
+    rectangle->right = value > 0 ? origin_left + value - 1 : limit_right;
+    if (rectangle->top < origin_top) rectangle->top = origin_top;
+    if (rectangle->left < origin_left) rectangle->left = origin_left;
+    if (rectangle->bottom > limit_bottom) rectangle->bottom = limit_bottom;
+    if (rectangle->right > limit_right) rectangle->right = limit_right;
+    if (rectangle->top > rectangle->bottom)
+        return 0;
+    /* A stream extent runs from the first corner to the last in reading
+       order, so its columns need not be in order: DECSACE 2 with Pl 4 and Pr
+       2 is the run from column 4 of the first row to column 2 of the last,
+       which a rectangle could not express. */
+    return stream || rectangle->left <= rectangle->right;
+}
+
+static void terminal_damage_rectangle(BlitSurface *surface,
+                                      const BlitRectangle *rectangle)
+{
+    surface->damage_valid = 1;
+    surface->damage_x = rectangle->left;
+    surface->damage_y = rectangle->top;
+    surface->damage_width = rectangle->right - rectangle->left + 1;
+    surface->damage_height = rectangle->bottom - rectangle->top + 1;
+}
+
+/* DECFRA: fill a rectangle with one character, in the current pen.
+ *
+ * Pc is a character code, and DEC restricts it to the printable ranges; a
+ * value outside them is not a character to fill with, so the operation is
+ * ignored rather than filling with something invented. */
+static void terminal_fill_rectangle(BlitSession *session, BlitSurface *surface,
+                                    const int *params, int param_count)
+{
+    BlitRectangle rectangle;
+    int code = param_count > 0 ? params[0] : 0;
+    int x;
+    int y;
+
+    if (!((code >= 32 && code <= 126) || (code >= 160 && code <= 255)))
+        return;
+    if (!terminal_rectangle(session, surface, params, param_count, 1, 0,
+                            &rectangle))
+        return;
+    for (y = rectangle.top; y <= rectangle.bottom; ++y) {
+        for (x = rectangle.left; x <= rectangle.right; ++x) {
+            terminal_clear_wide_overlap(surface, x, y);
+            surface->codepoints[y][x] = (uint32_t)code;
+            surface->combining_count[y][x] = 0;
+            surface->cells[y][x] = (char)(code < 128 ? code : '?');
+            surface->attributes[y][x] = session->terminal_attributes;
+            surface->foreground[y][x] = session->terminal_foreground_set ?
+                session->terminal_foreground + 1 : 0;
+            surface->background[y][x] = session->terminal_background_set ?
+                session->terminal_background + 1 : 0;
+            surface->underline_color[y][x] = 0;
+            surface->links[y][x] = session->terminal_link;
+        }
+        terminal_normalize_wide_row(surface, y);
+    }
+    terminal_damage_rectangle(surface, &rectangle);
+}
+
+/* DECERA erases every cell in the rectangle; DECSERA erases only the cells
+   DECSCA has not protected. Both leave the pen's background behind, which is
+   the BCE behaviour the rest of the engine has. */
+static void terminal_erase_rectangle(BlitSession *session,
+                                     BlitSurface *surface, const int *params,
+                                     int param_count, int selective)
+{
+    BlitRectangle rectangle;
+    int y;
+
+    if (!terminal_rectangle(session, surface, params, param_count, 0, 0,
+                            &rectangle))
+        return;
+    for (y = rectangle.top; y <= rectangle.bottom; ++y) {
+        terminal_erase_span(session, surface, y, rectangle.left,
+                            rectangle.right, selective);
+        terminal_normalize_wide_row(surface, y);
+    }
+    terminal_damage_rectangle(surface, &rectangle);
+}
+
+/* DECCRA: copy a rectangle.
+ *
+ * Through a buffer, because DEC requires the result to be as if the source
+ * were read whole before the destination was written -- a direct copy of
+ * overlapping rectangles would read cells it had already overwritten. The
+ * source rectangle is clipped to the page; whatever the destination pushes
+ * past the page edge is dropped. */
+static void terminal_copy_rectangle(BlitSession *session,
+                                    BlitSurface *surface, const int *params,
+                                    int param_count)
+{
+    static uint32_t codepoints[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
+    static uint16_t attributes[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
+    static uint32_t foreground[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
+    static uint32_t background[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
+    BlitRectangle source;
+    BlitRectangle destination;
+    int origin_top = session->terminal_origin_mode ? surface->scroll_top : 0;
+    int origin_left = session->terminal_origin_mode ?
+        surface_line_start(surface) : 0;
+    int source_page = param_count > 4 ? params[4] : 0;
+    int destination_page = param_count > 7 ? params[7] : 0;
+    int top;
+    int left;
+    int height;
+    int width;
+    int x;
+    int y;
+
+    /* One page. A copy naming any other is not a copy Blit can make, so it
+       is ignored rather than silently done on the page it does have. */
+    if ((source_page > 1) || (destination_page > 1))
+        return;
+    if (!terminal_rectangle(session, surface, params, param_count, 0, 0,
+                            &source))
+        return;
+    top = param_count > 5 && params[5] > 0 ?
+        origin_top + params[5] - 1 : origin_top;
+    left = param_count > 6 && params[6] > 0 ?
+        origin_left + params[6] - 1 : origin_left;
+    if (top < 0 || left < 0 || top >= surface->height ||
+        left >= surface->width)
+        return;
+    height = source.bottom - source.top + 1;
+    width = source.right - source.left + 1;
+    if (top + height > surface->height)
+        height = surface->height - top;
+    if (left + width > surface->width)
+        width = surface->width - left;
+    if (height <= 0 || width <= 0)
+        return;
+    for (y = 0; y < height; ++y)
+        for (x = 0; x < width; ++x) {
+            codepoints[y][x] = surface->codepoints[source.top + y][source.left + x];
+            attributes[y][x] = surface->attributes[source.top + y][source.left + x];
+            foreground[y][x] = surface->foreground[source.top + y][source.left + x];
+            background[y][x] = surface->background[source.top + y][source.left + x];
+        }
+    for (y = 0; y < height; ++y) {
+        for (x = 0; x < width; ++x) {
+            int destination_x = left + x;
+            int destination_y = top + y;
+            terminal_clear_wide_overlap(surface, destination_x, destination_y);
+            surface->codepoints[destination_y][destination_x] = codepoints[y][x];
+            surface->combining_count[destination_y][destination_x] = 0;
+            surface->cells[destination_y][destination_x] =
+                codepoints[y][x] < 128 ? (char)codepoints[y][x] :
+                (codepoints[y][x] != 0 ? '?' : 0);
+            surface->attributes[destination_y][destination_x] = attributes[y][x];
+            surface->foreground[destination_y][destination_x] = foreground[y][x];
+            surface->background[destination_y][destination_x] = background[y][x];
+            surface->underline_color[destination_y][destination_x] = 0;
+        }
+        terminal_normalize_wide_row(surface, top + y);
+    }
+    destination.top = top;
+    destination.left = left;
+    destination.bottom = top + height - 1;
+    destination.right = left + width - 1;
+    terminal_damage_rectangle(surface, &destination);
+}
+
+/* DECCARA sets attributes inside a rectangle and DECRARA toggles them.
+ *
+ * Only the four VT500 names are accepted -- bold, underline, blink, inverse
+ * -- plus their clearing forms for DECCARA. An SGR parameter outside that set
+ * is ignored rather than applied, because these operations change attributes
+ * and not colours, and accepting 38;2;r;g;b here would be inventing a
+ * sequence.
+ *
+ * DECSACE decides the extent: a rectangle by default, or the stream from the
+ * first corner to the last in reading order. */
+static void terminal_attribute_rectangle(BlitSession *session,
+                                         BlitSurface *surface,
+                                         const int *params, int param_count,
+                                         int reverse)
+{
+    BlitRectangle rectangle;
+    uint16_t set = 0;
+    uint16_t clear = 0;
+    int index;
+    int x;
+    int y;
+
+    if (!terminal_rectangle(session, surface, params, param_count, 0,
+                            session->terminal_attribute_extent_stream,
+                            &rectangle))
+        return;
+    for (index = 4; index < param_count; ++index) {
+        switch (params[index]) {
+        case 0:
+            /* For DECCARA, clear all four. For DECRARA, toggle all four. */
+            set |= (uint16_t)(BLIT_ATTR_BOLD | BLIT_ATTR_UNDERLINE |
+                              BLIT_ATTR_BLINK | BLIT_ATTR_INVERSE);
+            if (!reverse) {
+                clear |= set;
+                set = 0;
+            }
+            break;
+        case 1: set |= BLIT_ATTR_BOLD; break;
+        case 4: set |= BLIT_ATTR_UNDERLINE; break;
+        case 5: set |= BLIT_ATTR_BLINK; break;
+        case 7: set |= BLIT_ATTR_INVERSE; break;
+        case 22: if (!reverse) clear |= BLIT_ATTR_BOLD; break;
+        case 24: if (!reverse) clear |= BLIT_ATTR_UNDERLINE; break;
+        case 25: if (!reverse) clear |= BLIT_ATTR_BLINK; break;
+        case 27: if (!reverse) clear |= BLIT_ATTR_INVERSE; break;
+        default: break;
+        }
+    }
+    if (set == 0 && clear == 0)
+        return;
+    for (y = rectangle.top; y <= rectangle.bottom; ++y) {
+        int from = rectangle.left;
+        int to = rectangle.right;
+        if (session->terminal_attribute_extent_stream) {
+            /* The stream extent runs from the first corner to the last in
+               reading order, so only the first and last rows are partial. */
+            from = y == rectangle.top ? rectangle.left : 0;
+            to = y == rectangle.bottom ? rectangle.right : surface->width - 1;
+        }
+        for (x = from; x <= to; ++x) {
+            uint16_t attributes = surface->attributes[y][x];
+            if (reverse)
+                attributes ^= set;
+            else
+                attributes = (uint16_t)((attributes & ~clear) | set);
+            surface->attributes[y][x] = attributes;
+        }
+    }
+    if (session->terminal_attribute_extent_stream) {
+        rectangle.left = 0;
+        rectangle.right = surface->width - 1;
+    }
+    terminal_damage_rectangle(surface, &rectangle);
+}
+
 static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
                                const char *sequence)
 {
@@ -8384,6 +8691,16 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
     int has_second = 0;
     char prefix = 0;
     char command;
+    /* The intermediate byte, 0x20..0x2F, which sits between the parameters
+       and the final byte. It used to be invisible: `command` was the last
+       byte and nothing looked at what came before it, so CSI 1;4$r
+       (DECCARA) dispatched to the CSI 1;4r branch and redefined the scroll
+       region instead -- a measured collision, issue #2. Every branch for a
+       final byte that a VT500 also uses with an intermediate now requires
+       this to be zero. */
+    char intermediate = 0;
+    int params[16];
+    int param_count = 0;
 
     /* Any cursor-addressing/control sequence consumes a deferred wrap. */
     session->terminal_wrap_pending = 0;
@@ -8399,13 +8716,48 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
        infer the command from only the first two parameters. */
     command = sequence[strlen(sequence) - 1];
 
+    /* Parse the whole parameter list once. first/second are the first two,
+       so every existing branch reads what it always did; the rectangular
+       operations need up to eight. An omitted parameter is recorded as 0,
+       which is how each of them spells "the default". */
+    {
+        const char *scan = cursor;
+        while (param_count < (int)(sizeof(params) / sizeof(params[0]))) {
+            int value = 0;
+            int present = 0;
+            if (*scan >= '0' && *scan <= '9')
+                present = terminal_number(&scan, &value);
+            params[param_count++] = value;
+            if (param_count == 1)
+                has_first = present;
+            else if (param_count == 2)
+                has_second = present;
+            if (*scan != ';')
+                break;
+            ++scan;
+        }
+        if (param_count > 0)
+            first = params[0];
+        if (param_count > 1)
+            second = params[1];
+        /* The intermediate is whatever sits between the parameters and the
+           final byte. */
+        if (*scan >= 0x20 && *scan <= 0x2f && scan[1] != '\0')
+            intermediate = *scan;
+    }
+    /* Keep `cursor` where the original parse left it: after the first two
+       parameters, which is what the branches that read it expect. */
     while (*cursor >= '0' && *cursor <= '9') {
-        has_first = terminal_number(&cursor, &first);
+        int ignored = 0;
+        terminal_number(&cursor, &ignored);
         break;
     }
     if (*cursor == ';') {
         ++cursor;
-        has_second = terminal_number(&cursor, &second);
+        {
+            int ignored = 0;
+            terminal_number(&cursor, &ignored);
+        }
     }
     /* ADR 0059: these are the Kitty keyboard protocol's flag sequences, not
        cursor save/restore. Blit honours no keyboard enhancement flag, so a
@@ -8665,7 +9017,7 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
                                    session->terminal_last_codepoint,
                                    session->terminal_last_width > 0 ?
                                    session->terminal_last_width : 1);
-    } else if (!private_mode && command == 'X') {
+    } else if (!private_mode && intermediate == 0 && command == 'X') {
         int count = has_first && first > 0 ? first : 1;
         int x;
         if (count > surface->width - surface->cursor_x)
@@ -8685,12 +9037,13 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         snprintf(reply, sizeof(reply), "\033[%d;%dR",
                  surface->cursor_y + 1, surface->cursor_x + 1);
         terminal_write_reply(session, reply);
-    } else if (!private_mode && command == 't' && has_first && first == 18) {
+    } else if (!private_mode && intermediate == 0 && command == 't' &&
+               has_first && first == 18) {
         char reply[64];
         snprintf(reply, sizeof(reply), "\033[8;%d;%dt",
                  surface->height, surface->width);
         terminal_write_reply(session, reply);
-    } else if (!private_mode && command == 's') {
+    } else if (!private_mode && intermediate == 0 && command == 's') {
         if (surface->lrmm_enabled) {
             /* DECSLRM. Per DEC an out-of-order or out-of-range pair is
                ignored rather than clamped, which is what DECSTBM above does
@@ -8767,7 +9120,35 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         mark_cursor_damage(surface, surface->cursor_x, surface->cursor_y);
         if (cursor_was_visible != surface->cursor_visible)
             mark_surface_full_damage(surface);
-    } else if (!private_mode && command == 'r') {
+    } else if (!private_mode && intermediate == '$' && command == 'x') {
+        terminal_fill_rectangle(session, surface, params, param_count);
+    } else if (!private_mode && intermediate == '$' && command == 'z') {
+        terminal_erase_rectangle(session, surface, params, param_count, 0);
+    } else if (!private_mode && intermediate == '$' && command == '{') {
+        terminal_erase_rectangle(session, surface, params, param_count, 1);
+    } else if (!private_mode && intermediate == '$' && command == 'v') {
+        terminal_copy_rectangle(session, surface, params, param_count);
+    } else if (!private_mode && intermediate == '$' && command == 'r') {
+        terminal_attribute_rectangle(session, surface, params, param_count, 0);
+    } else if (!private_mode && intermediate == '$' && command == 't') {
+        terminal_attribute_rectangle(session, surface, params, param_count, 1);
+    } else if (!private_mode && intermediate == '*' && command == 'x') {
+        /* DECSACE. 0 and 1 are the rectangle, 2 is the stream; anything else
+           leaves the mode alone rather than guessing. */
+        if (!has_first || first == 0 || first == 1)
+            session->terminal_attribute_extent_stream = 0;
+        else if (first == 2)
+            session->terminal_attribute_extent_stream = 1;
+    } else if (!private_mode && intermediate == '"' && command == 'q') {
+        /* DECSCA. 1 protects a cell from DECSERA and DECSED; 0 and 2 clear
+           the protection. It applies to cells written from now on, which is
+           why it lives in the pen and not on a rectangle. */
+        if (has_first && first == 1)
+            session->terminal_attributes |= BLIT_ATTR_PROTECTED;
+        else
+            session->terminal_attributes &=
+                (uint16_t)~BLIT_ATTR_PROTECTED;
+    } else if (!private_mode && intermediate == 0 && command == 'r') {
         int top = has_first && first > 0 ? first - 1 : 0;
         int bottom = has_second && second > 0 ? second - 1 :
             surface->height - 1;
@@ -8780,7 +9161,7 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         }
     } else if (command == 'm') {
         terminal_apply_sgr(session, sequence);
-    } else if (!private_mode && command == 'q') {
+    } else if (!private_mode && intermediate == ' ' && command == 'q') {
         int style = has_first ? first : 0;
         if (style >= 0 && style <= 6) {
             /* DECSCUSR: 0 is the terminal's default blinking block.  Blit
@@ -8852,7 +9233,7 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
             surface->cursor_y = surface->height - 1;
         }
         mark_cursor_damage(surface, surface->cursor_x, surface->cursor_y);
-    } else if (command == '@' || command == 'P') {
+    } else if (intermediate == 0 && (command == '@' || command == 'P')) {
         int amount = has_first && first > 0 ? first : 1;
         int left = surface_line_start(surface);
         int right = surface_line_end(surface);
@@ -8950,7 +9331,7 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         while (count-- > 0)
             surface->cursor_x = terminal_next_tab(surface, surface->cursor_x);
         mark_cursor_damage(surface, surface->cursor_x, surface->cursor_y);
-    } else if (command == 'L' || command == 'M') {
+    } else if (intermediate == 0 && (command == 'L' || command == 'M')) {
         int count = has_first && first > 0 ? first : 1;
         int top = surface->cursor_y;
         int bottom = surface->scroll_bottom;
@@ -8988,7 +9369,8 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         surface->damage_y = top;
         surface->damage_width = right - left + 1;
         surface->damage_height = bottom - top + 1;
-    } else if (prefix == 0 && (command == 'S' || command == 'T')) {
+    } else if (prefix == 0 && intermediate == 0 &&
+               (command == 'S' || command == 'T')) {
         int count = has_first && first > 0 ? first : 1;
         int top = surface->scroll_top;
         int bottom = surface->scroll_bottom;
@@ -9055,34 +9437,48 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         int mode = has_first ? first : 0;
         int y;
         int start;
+        /* With the private prefix this is DECSED, which leaves the cells
+           DECSCA protected. It used to be executed as plain ED, erasing them
+           -- the same class of collision as CSI 1;4$r being taken for
+           DECSTBM, arriving through the prefix instead of the intermediate
+           (issue #2). */
+        int selective = private_mode;
         if (mode == 0) {
-            terminal_erase_line(session, surface, surface->cursor_y,
-                                surface->cursor_x);
+            terminal_erase_span(session, surface, surface->cursor_y,
+                                surface->cursor_x, surface->width - 1,
+                                selective);
             for (y = surface->cursor_y + 1; y < surface->height; ++y)
-                terminal_erase_line(session, surface, y, 0);
+                terminal_erase_span(session, surface, y, 0,
+                                    surface->width - 1, selective);
         } else if (mode == 1) {
             for (y = 0; y < surface->cursor_y; ++y)
-                terminal_erase_line(session, surface, y, 0);
+                terminal_erase_span(session, surface, y, 0,
+                                    surface->width - 1, selective);
             for (start = 0; start <= surface->cursor_x; ++start)
-                terminal_erase_cell(session, surface, start, surface->cursor_y);
+                terminal_erase_span(session, surface, surface->cursor_y,
+                                    start, start, selective);
         } else if (mode == 2 || mode == 3) {
             session->terminal_frame_batch = 1;
             for (y = 0; y < surface->height; ++y)
-                terminal_erase_line(session, surface, y, 0);
-            if (mode == 3)
+                terminal_erase_span(session, surface, y, 0,
+                                    surface->width - 1, selective);
+            if (mode == 3 && !selective)
                 terminal_scrollback_release(surface);
         }
     } else if (command == 'K') {
         int mode = has_first ? first : 0;
-        int x;
+        /* DECSEL with the private prefix, for the same reason. */
+        int selective = private_mode;
         if (mode == 0)
-            terminal_erase_line(session, surface, surface->cursor_y,
-                                surface->cursor_x);
-        else if (mode == 1) {
-            for (x = 0; x <= surface->cursor_x; ++x)
-                terminal_erase_cell(session, surface, x, surface->cursor_y);
-        } else if (mode == 2)
-            terminal_erase_line(session, surface, surface->cursor_y, 0);
+            terminal_erase_span(session, surface, surface->cursor_y,
+                                surface->cursor_x, surface->width - 1,
+                                selective);
+        else if (mode == 1)
+            terminal_erase_span(session, surface, surface->cursor_y, 0,
+                                surface->cursor_x, selective);
+        else if (mode == 2)
+            terminal_erase_span(session, surface, surface->cursor_y, 0,
+                                surface->width - 1, selective);
     }
 }
 

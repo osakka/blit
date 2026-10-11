@@ -1219,14 +1219,6 @@ assert_equal('1b50312b72343336463d3332333533361b5c' \
              '1b50312b723532343734323d333832463338324633381b5c',
              row_text(snapshot), 'XTGETTCAP answers every name in a request')
 
-# Issue #3: the VT400/VT500 left/right margin model. DECLRMM (CSI ?69h) did
-# nothing and the DECSLRM that follows it was swallowed by the SCOSC branch, so
-# margin-aware editors got full-width behaviour.
-#
-# Every vector here sets margins at columns 3..6 of a twelve-column surface, so
-# the two columns to the left and the six to the right are the evidence: an
-# operation that respects the margins leaves them alone, and one that does not
-# moves them.
 def margin_rows(snapshot)
   grid = {}
   snapshot.fetch('cells').each do |cell|
@@ -1236,6 +1228,251 @@ def margin_rows(snapshot)
     (0...snapshot.fetch('width')).map { |x| grid[[x, y]] || ' ' }.join
   end
 end
+
+# Issue #2: the VT500 rectangular area operations. All seven were parsed to
+# nothing, and two were worse than ignored: the CSI parser took the final byte
+# alone, so CSI 1;4$r (DECCARA) dispatched to the CSI 1;4r branch and
+# redefined the scroll region instead. The parser records the intermediate
+# byte now and dispatches on the pair.
+def rect_flags(snapshot, flag)
+  grid = {}
+  snapshot.fetch('cells').each do |cell|
+    grid[[cell.fetch('x', 0), cell.fetch('y', 0)]] = cell['style'] || {}
+  end
+  (0...snapshot.fetch('height')).map do |y|
+    (0...snapshot.fetch('width')).map do |x|
+      (grid[[x, y]] || {})[flag] ? 'B' : '.'
+    end.join
+  end
+end
+
+RECT_FILL = "printf 'AAAA1\\r\\nBBBB2\\r\\nCCCC3\\r\\nDDDD4'"
+
+snapshot = run_case(base, 'decfra-fill-rectangle',
+                    "#{RECT_FILL}; printf '\\033[88;1;1;3;4$x'", width: 10, height: 6)
+assert_equal(['XXXX1     ', 'XXXX2     ', 'XXXX3     ', 'DDDD4     ',
+              '          ', '          '],
+             margin_rows(snapshot), 'DECFRA fills the rectangle with Pc')
+
+# Pc outside the printable ranges is not a character to fill with, so the
+# operation is ignored rather than filling with something invented.
+snapshot = run_case(base, 'decfra-rejects-a-control-code',
+                    "#{RECT_FILL}; printf '\\033[7;1;1;3;4$x'", width: 10, height: 6)
+assert_equal(['AAAA1     ', 'BBBB2     ', 'CCCC3     ', 'DDDD4     ',
+              '          ', '          '],
+             margin_rows(snapshot), 'DECFRA ignores a non-printable Pc')
+
+snapshot = run_case(base, 'decera-erase-rectangle',
+                    "#{RECT_FILL}; printf '\\033[1;1;2;4$z'", width: 10, height: 6)
+assert_equal(['    1     ', '    2     ', 'CCCC3     ', 'DDDD4     ',
+              '          ', '          '],
+             margin_rows(snapshot), 'DECERA erases the rectangle')
+
+# DECSERA leaves the cells DECSCA protected. This is the only test of the
+# protected attribute, which DECSCA (CSI 1"q) is the only way to set.
+snapshot = run_case(base, 'decsera-leaves-protected-cells',
+                    "printf 'ab\\033[1\"qcd\\033[0\"qef'; printf '\\033[1;1;1;6${'",
+                    width: 10, height: 4)
+assert_equal(['  cd      ', '          ', '          ', '          '],
+             margin_rows(snapshot),
+             'DECSERA erases only the cells DECSCA did not protect')
+
+snapshot = run_case(base, 'deccra-copy-rectangle',
+                    "#{RECT_FILL}; printf '\\033[1;1;2;4;1;3;1$v'", width: 10, height: 6)
+assert_equal(['AAAA1     ', 'BBBB2     ', 'AAAA3     ', 'BBBB4     ',
+              '          ', '          '],
+             margin_rows(snapshot), 'DECCRA copies the rectangle')
+
+# Overlapping source and destination. DEC requires the result to be as if the
+# source were read whole before the destination was written, so a direct copy
+# -- which would read cells it had already overwritten -- is wrong here.
+snapshot = run_case(base, 'deccra-overlapping-copy',
+                    "#{RECT_FILL}; printf '\\033[1;1;3;4;1;2;1$v'", width: 10, height: 6)
+assert_equal(['AAAA1     ', 'AAAA2     ', 'BBBB3     ', 'CCCC4     ',
+              '          ', '          '],
+             margin_rows(snapshot),
+             'DECCRA copies through a buffer, so an overlap is not smeared')
+
+snapshot = run_case(base, 'deccara-set-attributes',
+                    "#{RECT_FILL}; printf '\\033[1;1;2;3;1$r'", width: 10, height: 6)
+assert_equal(['BBB.......', 'BBB.......', '..........', '..........',
+              '..........', '..........'],
+             rect_flags(snapshot, 'bold'),
+             'DECCARA sets the attribute inside the rectangle only')
+
+snapshot = run_case(base, 'decrara-toggles-attributes',
+                    "#{RECT_FILL}; printf '\\033[1;1;3;5;1$r\\033[1;2;1;4;1$t'",
+                    width: 10, height: 6)
+assert_equal(['B...B.....', 'BBBBB.....', 'BBBBB.....', '..........',
+              '..........', '..........'],
+             rect_flags(snapshot, 'bold'),
+             'DECRARA toggles the attribute rather than setting it')
+
+# An inverted column pair is ignored as a rectangle...
+snapshot = run_case(base, 'deccara-ignores-an-inverted-rectangle',
+                    "#{RECT_FILL}; printf '\\033[1;4;3;2;1$r'", width: 6, height: 4)
+assert_equal(['......', '......', '......', '......'],
+             rect_flags(snapshot, 'bold'),
+             'DECCARA ignores a rectangle whose left is past its right')
+
+# ...and is the whole point of the stream extent, which runs from the first
+# corner to the last in reading order and so has no column ordering to break.
+snapshot = run_case(base, 'decsace-stream-extent',
+                    "#{RECT_FILL}; printf '\\033[2*x\\033[1;4;3;2;1$r'",
+                    width: 6, height: 4)
+assert_equal(['...BBB', 'BBBBBB', 'BB....', '......'],
+             rect_flags(snapshot, 'bold'),
+             'DECSACE 2 makes the extent the stream between the corners')
+
+# DECSED and DECSEL: the same collision arriving through the private prefix
+# instead of the intermediate. CSI ?2J used to be executed as CSI 2J, erasing
+# the cells DECSCA had protected.
+snapshot = run_case(base, 'decsed-leaves-protected-cells',
+                    "printf 'ab\\033[1\"qcd\\033[0\"qef'; printf '\\033[?2J'",
+                    width: 10, height: 4)
+assert_equal(['  cd      ', '          ', '          ', '          '],
+             margin_rows(snapshot),
+             'DECSED erases only the cells DECSCA did not protect')
+
+snapshot = run_case(base, 'ed-erases-protected-cells',
+                    "printf 'ab\\033[1\"qcd\\033[0\"qef'; printf '\\033[2J'",
+                    width: 10, height: 4)
+assert_equal(['          ', '          ', '          ', '          '],
+             margin_rows(snapshot),
+             'plain ED erases everything, protection included')
+
+snapshot = run_case(base, 'decsel-leaves-protected-cells',
+                    "printf 'ab\\033[1\"qcd\\033[0\"qef'; printf '\\033[1;1H\\033[?0K'",
+                    width: 10, height: 4)
+assert_equal(['  cd      ', '          ', '          ', '          '],
+             margin_rows(snapshot),
+             'DECSEL erases only the cells DECSCA did not protect')
+
+# The collision this ticket measured: CSI 1;4$r was executed as CSI 1;4r, so
+# an application changing attributes in a rectangle silently got its scroll
+# region redefined. The difference is visible through what IL does afterwards:
+# with the region at 1..4, an insert at line 5 is outside it and does nothing.
+snapshot = run_case(base, 'decstbm-restricts-insert-line',
+                    "printf 'L1\\r\\nL2\\r\\nL3\\r\\nL4\\r\\nL5'; " \
+                    "printf '\\033[1;4r\\033[5;1H\\033[2L'", width: 10, height: 6)
+assert_equal(['L1        ', 'L2        ', 'L3        ', 'L4        ',
+              'L5        ', '          '],
+             margin_rows(snapshot),
+             'DECSTBM 1;4 leaves line 5 outside the region, so IL does nothing')
+
+snapshot = run_case(base, 'deccara-is-not-decstbm',
+                    "printf 'L1\\r\\nL2\\r\\nL3\\r\\nL4\\r\\nL5'; " \
+                    "printf '\\033[1;4$r\\033[5;1H\\033[2L'", width: 10, height: 6)
+assert_equal(['L1        ', 'L2        ', 'L3        ', 'L4        ',
+              '          ', '          '],
+             margin_rows(snapshot),
+             'CSI 1;4$r is DECCARA and leaves the scroll region alone')
+
+
+snapshot = run_case(base, 'decfra-fill-rectangle',
+                    "#{RECT_FILL}; printf '\\033[88;1;1;3;4$x'", width: 10, height: 6)
+assert_equal(['XXXX1     ', 'XXXX2     ', 'XXXX3     ', 'DDDD4     ',
+              '          ', '          '],
+             margin_rows(snapshot), 'DECFRA fills the rectangle with Pc')
+
+# Pc outside the printable ranges is not a character to fill with, so the
+# operation is ignored rather than filling with something invented.
+snapshot = run_case(base, 'decfra-rejects-a-control-code',
+                    "#{RECT_FILL}; printf '\\033[7;1;1;3;4$x'", width: 10, height: 6)
+assert_equal(['AAAA1     ', 'BBBB2     ', 'CCCC3     ', 'DDDD4     ',
+              '          ', '          '],
+             margin_rows(snapshot), 'DECFRA ignores a non-printable Pc')
+
+snapshot = run_case(base, 'decera-erase-rectangle',
+                    "#{RECT_FILL}; printf '\\033[1;1;2;4$z'", width: 10, height: 6)
+assert_equal(['    1     ', '    2     ', 'CCCC3     ', 'DDDD4     ',
+              '          ', '          '],
+             margin_rows(snapshot), 'DECERA erases the rectangle')
+
+# DECSERA leaves the cells DECSCA protected. This is the only test of the
+# protected attribute, which DECSCA (CSI 1"q) is the only way to set.
+snapshot = run_case(base, 'decsera-leaves-protected-cells',
+                    "printf 'ab\\033[1\"qcd\\033[0\"qef'; printf '\\033[1;1;1;6${'",
+                    width: 10, height: 4)
+assert_equal(['  cd      ', '          ', '          ', '          '],
+             margin_rows(snapshot),
+             'DECSERA erases only the cells DECSCA did not protect')
+
+snapshot = run_case(base, 'deccra-copy-rectangle',
+                    "#{RECT_FILL}; printf '\\033[1;1;2;4;1;3;1$v'", width: 10, height: 6)
+assert_equal(['AAAA1     ', 'BBBB2     ', 'AAAA3     ', 'BBBB4     ',
+              '          ', '          '],
+             margin_rows(snapshot), 'DECCRA copies the rectangle')
+
+# Overlapping source and destination. DEC requires the result to be as if the
+# source were read whole before the destination was written, so a direct copy
+# -- which would read cells it had already overwritten -- is wrong here.
+snapshot = run_case(base, 'deccra-overlapping-copy',
+                    "#{RECT_FILL}; printf '\\033[1;1;3;4;1;2;1$v'", width: 10, height: 6)
+assert_equal(['AAAA1     ', 'AAAA2     ', 'BBBB3     ', 'CCCC4     ',
+              '          ', '          '],
+             margin_rows(snapshot),
+             'DECCRA copies through a buffer, so an overlap is not smeared')
+
+snapshot = run_case(base, 'deccara-set-attributes',
+                    "#{RECT_FILL}; printf '\\033[1;1;2;3;1$r'", width: 10, height: 6)
+assert_equal(['BBB.......', 'BBB.......', '..........', '..........',
+              '..........', '..........'],
+             rect_flags(snapshot, 'bold'),
+             'DECCARA sets the attribute inside the rectangle only')
+
+snapshot = run_case(base, 'decrara-toggles-attributes',
+                    "#{RECT_FILL}; printf '\\033[1;1;3;5;1$r\\033[1;2;1;4;1$t'",
+                    width: 10, height: 6)
+assert_equal(['B...B.....', 'BBBBB.....', 'BBBBB.....', '..........',
+              '..........', '..........'],
+             rect_flags(snapshot, 'bold'),
+             'DECRARA toggles the attribute rather than setting it')
+
+# An inverted column pair is ignored as a rectangle...
+snapshot = run_case(base, 'deccara-ignores-an-inverted-rectangle',
+                    "#{RECT_FILL}; printf '\\033[1;4;3;2;1$r'", width: 6, height: 4)
+assert_equal(['......', '......', '......', '......'],
+             rect_flags(snapshot, 'bold'),
+             'DECCARA ignores a rectangle whose left is past its right')
+
+# ...and is the whole point of the stream extent, which runs from the first
+# corner to the last in reading order and so has no column ordering to break.
+snapshot = run_case(base, 'decsace-stream-extent',
+                    "#{RECT_FILL}; printf '\\033[2*x\\033[1;4;3;2;1$r'",
+                    width: 6, height: 4)
+assert_equal(['...BBB', 'BBBBBB', 'BB....', '......'],
+             rect_flags(snapshot, 'bold'),
+             'DECSACE 2 makes the extent the stream between the corners')
+
+# The collision this ticket measured: CSI 1;4$r was executed as CSI 1;4r, so
+# an application changing attributes in a rectangle silently got its scroll
+# region redefined. The difference is visible through what IL does afterwards:
+# with the region at 1..4, an insert at line 5 is outside it and does nothing.
+snapshot = run_case(base, 'decstbm-restricts-insert-line',
+                    "printf 'L1\\r\\nL2\\r\\nL3\\r\\nL4\\r\\nL5'; " \
+                    "printf '\\033[1;4r\\033[5;1H\\033[2L'", width: 10, height: 6)
+assert_equal(['L1        ', 'L2        ', 'L3        ', 'L4        ',
+              'L5        ', '          '],
+             margin_rows(snapshot),
+             'DECSTBM 1;4 leaves line 5 outside the region, so IL does nothing')
+
+snapshot = run_case(base, 'deccara-is-not-decstbm',
+                    "printf 'L1\\r\\nL2\\r\\nL3\\r\\nL4\\r\\nL5'; " \
+                    "printf '\\033[1;4$r\\033[5;1H\\033[2L'", width: 10, height: 6)
+assert_equal(['L1        ', 'L2        ', 'L3        ', 'L4        ',
+              '          ', '          '],
+             margin_rows(snapshot),
+             'CSI 1;4$r is DECCARA and leaves the scroll region alone')
+
+# Issue #3: the VT400/VT500 left/right margin model. DECLRMM (CSI ?69h) did
+# nothing and the DECSLRM that follows it was swallowed by the SCOSC branch, so
+# margin-aware editors got full-width behaviour.
+#
+# Every vector here sets margins at columns 3..6 of a twelve-column surface, so
+# the two columns to the left and the six to the right are the evidence: an
+# operation that respects the margins leaves them alone, and one that does not
+# moves them.
 
 FILL = "printf 'AAAA1\\r\\nBBBB2\\r\\nCCCC3\\r\\nDDDD4'"
 MARGINS = "printf '\\033[?69h\\033[3;6s'"
