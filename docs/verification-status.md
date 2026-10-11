@@ -3320,3 +3320,196 @@ Control values are deliberately not persisted — they are the card's own state
 and the card keeps them, so storing and re-applying would make Blit fight
 `alsactl` for something that already survives a reboot.
 
+
+## 0.1.456: a display rotates, and what power costs
+
+Epic #64 stage 5 (#69). A display's `configuration` was `{}`, and ADR 0064
+recorded that as a decision rather than an omission: selecting a mode resizes
+every surface, and a Hibr desktop's cells come from its owner (ADR 0063), so it
+needs issue #60's resize protocol first. This stage is the settings that resize
+nothing — and the measurements came before the design, which is why the shape
+is what it is rather than what the ticket guessed.
+
+Four facts settled the stage, all measured on 192.168.10.54 (kernel 6.12.101,
+SDL 3.4.16):
+
+```
+/sys/class/drm/card0-DP-1/dpms   mode 444; a root write returns EACCES
+/dev/dri/card0                   one open fd, pid 17721 = blit (SDL has master)
+/sys/class/backlight             exists, empty
+SDL_kmsdrmvideo.c:2201           SDL publishes its master fd per window
+```
+
+The first is stronger than the ticket's claim, and in a useful direction: the
+`dpms` attribute is read-only **to root**, so sysfs is not an avenue on any
+backend — that is the kernel, not SDL holding master. The fourth is the one
+that turned the stage from a gap into a feature:
+`SDL_PROP_WINDOW_KMSDRM_DRM_FD_NUMBER` is ADR 0067's "cooperation with SDL"
+branch, and it exists in the vendored build.
+
+### `capabilities` is derived, and that is the contract
+
+```
+mode-report   always
+rotation      the SDL path. Blit's own render transform, no DRM master.
+brightness    only where a backlight is attributed.
+```
+
+`configuration` offers exactly what `capabilities` claims and a PATCH accepts
+exactly that. `mode` is still refused, with `invalid_display_property`. This is
+ADR 0064's own reasoning applied per property instead of per resource, and
+`display_device_api_gate.rb` was rewritten to assert the new rule rather than
+deleted: a property offered without the capability, or a capability with
+nothing to set, now fails.
+
+### Rotation: the contract is a corner, not an enum
+
+`rotation` is the angle, clockwise, by which Blit rotates the image before
+presenting it; at 90 what was drawn at logical (0, 0) appears at the physical
+**top-right**. It is stated as a corner because every enum that could stand in
+for it disagrees — DRM's `ROTATE_90` is anticlockwise, RandR calls the same
+transform "right", SDL's render angle is clockwise.
+
+`bounds` became the *logical* rectangle and `modes` stayed physical, with
+`state.physical` beside them. That one choice is why rotation needed no new
+plumbing: the cell grid, the pointer hit test and the topology placements all
+already work in that space. `xrandr` reports the same split.
+
+Two sites learn about rotation. The scene-to-panel draw, which all three
+present paths now share — the pointer-cache fast path presents the cached scene
+without rebuilding it, so a rotation applied only in the full-redraw path would
+un-rotate itself the moment the pointer moved. And `render_pointer`, which
+draws after the scene in panel coordinates, and transforms both its hotspot and
+the arrow's own shape.
+
+### What the gates assert, and what they do not
+
+`display_geometry_gate.c` re-implements SDL's draw model — a destination
+rectangle rotated clockwise about its own centre — and asserts that a texel
+placed by that model lands exactly where `blit_rotate_point` says it does, for
+four rotations and five positions each. The two are used by different code (one
+presents the scene, the other places the pointer on top of it), and a
+disagreement is a cursor that drifts away from where it is clicking, which a
+screenshot gate cannot see because the pointer is drawn after the capture it
+would be compared against. Teeth: the anticlockwise point transform fails 8
+assertions; the output rectangle in place of the scene's fails the footprint at
+90 and 270.
+
+`display_settings_gate.rb` is six scenarios, and the one that carries the stage
+is the screenshot. A full block is drawn in the first cell, and the ink is
+counted in all four corner rectangles at every rotation:
+
+```
+  0: 0=128 90=0   180=0   270=0
+ 90: 0=0   90=128 180=0   270=0
+180: 0=0   90=0   180=128 270=0
+270: 0=0   90=0   180=0   270=128
+```
+
+128 is exactly a cell, 8x16. The diagonal is what a server that stores the
+number and presents unrotated cannot produce: with the present reverted, the
+ink stays in the 0 corner for all four and six assertions fail. Requiring
+*exactly* the cell area rather than most of it matters — a scene texture left
+at the renderer's output size scales instead of rotating and yields 120, which
+any looser threshold would have accepted.
+
+Five teeth builds, each a working-tree copy with one change reverted:
+
+```
+rotation stored, presented unrotated   6 failures, the screenshot scenario
+no refusal under a live surface        3 failures
+nothing persisted                      3 failures
+scene texture at the output's size     2 failures, 120 lit pixels not 128
+brightness claimed with no backlight   1 failure
+```
+
+### Power is reported and not settable, and that is deliberate
+
+`state.power` carries the connector's DPMS state, read through SDL's published
+master fd, and `state.connector` names the connector it was matched to. The
+match is **by name** and not by index, because SDL enumerates only the
+connectors it drives while the kernel enumerates all eight on this host — so
+display 0 is connector 0 only by luck.
+
+`power` is not in `capabilities`, because nothing can set it yet. Shipping the
+read first was not caution for its own sake: it is the only way to prove the fd
+and the attribution without the write, and the write carries a hazard that is
+worth stating before taking it. SDL's `KMSDRM_WaitPageflip` polls with
+`timeout = -1`. A display turned off while a flip is outstanding, if the kernel
+did not deliver that flip's event, is an unbounded wait on the single thread
+that also serves the API — and the API is the only channel to this host. The
+remainder of #69 suspends presentation before the write and resumes after it,
+and the host test will prove the output quiescent, by `present_calls`, before
+turning anything off.
+
+### What is not claimed
+
+- `/sys/class/graphics/fb0/blank` was not tried. fbdev emulation is one device
+  for the whole card, so it could not express "turn off this one display" even
+  if it worked behind a master. That is a structural argument, not a
+  measurement, and it is recorded as one.
+- The direct-KMS path has no rotation transform and says so by omitting the
+  capability. No reachable machine runs that path — the development container
+  is an unprivileged LXC with no `/dev/dri` and `CapEff=0`, the host runs SDL,
+  and `vkms` exists on neither — so writing it would be code that stays at
+  *implemented* forever. It joins #20/#21's hardware-blocked list instead.
+- Whether the unprivileged profile can write
+  `/sys/class/backlight/*/brightness` is not measured: the gate uses fabricated
+  files and the host has no backlight. Same unmeasured-group caveat as #68's
+  control device.
+- On a multi-display host, rotating one display changes its width and a stored
+  topology placement may stop tiling; re-`PUT /v1/topology`. Both machines here
+  have one output, so that is a stated consequence.
+- Done-when 2 of #69 asks for a gate for display power on the direct-KMS path.
+  That half is unmeetable as written, for the reason above, and is recorded on
+  the ticket rather than reinterpreted.
+
+### Host-accepted on 192.168.10.54
+
+`tools/probes/host_display_settings.rb`. The three things no gate can reach:
+SDL's published fd really yielding a connector, the rotated present on
+`opengles2` rather than SDL's software renderer, and a real Hibr desktop being
+handed the rotated grid.
+
+```
+display display-1 name=DP-1 bounds=1920x2160 physical=1920x2160 cell=8x16 inset=4
+capabilities mode-report,rotation
+state power="on" connector="DP-1" backlight=nil
+```
+
+The connector was matched **by name** out of eight on this card, through
+`SDL_PROP_WINDOW_KMSDRM_DRM_FD_NUMBER`, and its DPMS state read. That is the
+whole of what 0.1.456 claims about power, and it is the fact the rest of #69
+needs.
+
+The same diagonal as the gate, on a 1920×2160 panel and a real GL renderer:
+
+```
+  0: 0=128 90=0   180=0   270=0
+ 90: 0=0   90=128 180=0   270=0
+180: 0=0   90=0   180=128 270=0
+270: 0=0   90=0   180=0   270=128
+```
+
+A stored rotation applied at boot after an orderly restart — `bounds=2160x1920`,
+`configuration={"rotation"=>90}` — and then the desktop:
+
+```
+rotated desktop 270x120 printable=32173
+upright desktop 240x135 printable=32203
+```
+
+270×120 is 2160/8 by 1920/16, which is the rotated grid. Both are 32,400 cells,
+which is why the *count* was never the evidence and the dimensions are: a
+server that stored the rotation and handed out the unrotated grid would report
+the same 32,400. Everything was restored: rotation 0, the stored entry removed,
+a fresh upright desktop, `errors=[]` and `warnings=[]`.
+
+### #69 is not closed by this release
+
+Done-when 2 asks for display power on the direct-KMS path with a gate. Its
+premise has changed rather than failed: power is reachable **under SDL** on
+this host, through the fd above, so it is worth implementing rather than
+recording as a gap — which is the opposite of what the ticket expected and
+better than it. The write, the presentation suspension it needs, and the
+quiescence protocol for testing it safely are the remainder of the stage.

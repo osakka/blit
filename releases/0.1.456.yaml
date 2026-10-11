@@ -131,20 +131,20 @@ screenshot_nonblocking_live_acceptance: not_rerun_candidate
 qemu_hibr_lifecycle_acceptance: not_rerun_candidate
 qemu_four_output_pixel_acceptance: not_rerun_candidate
 qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
-live_deployment: pending
-live_current_version: pending
+live_deployment: pass_supervised_update_verified_0_1_456
+live_current_version: 0.1.456
 live_block_cursor_acceptance: carried_from_0_1_425
 live_italic_acceptance: carried_from_0_1_425
 live_session_default_acceptance: carried_from_0_1_425
 live_sync_output_acceptance: carried_from_0_1_425
-live_hibr_desktop_acceptance: pending
+live_hibr_desktop_acceptance: pass_240x135_32203_printable_and_270x120_32173_rotated
 live_idle_frame_acceptance: carried_from_0_1_425
 live_physical_multi_display: unavailable_one_output
 live_physical_button_trace_contract: open
 physical_evdev_acceptance: open
 physical_multi_monitor_acceptance: open
 physical_high_refresh_acceptance: open
-live_display_settings: pending
+live_display_settings: pass_connector_dp1_matched_power_on_read_four_rotations_128px_diagonal_stored_rotation_applied_at_boot_and_restored
 notes: >-
   Epic #64 stage 5 (#69): a display rotates, and power is reported.
 
