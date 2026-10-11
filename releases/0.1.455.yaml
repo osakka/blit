@@ -75,7 +75,7 @@ audio_card_teeth: pass_seven_of_eight_fail_pre_change_35_checks
 audio_control_arithmetic_acceptance: pass_settles_on_six_ranges_and_the_rule_in_five_shapes
 audio_control_arithmetic_teeth: pass_123_assertions_fail_with_truncation
 audio_group_in_unit: pass_both_profiles_grant_audio
-live_audio_controls: pending
+live_audio_controls: pass_six_cards_real_ioctl_both_ranges_rule_in_three_shapes_and_restored
 live_keyboard_settings: carried_from_0_1_453
 live_settings_persistence: carried_from_0_1_452
 input_device_route_acceptance: carried_from_0_1_436
@@ -122,13 +122,13 @@ screenshot_nonblocking_live_acceptance: not_rerun_candidate
 qemu_hibr_lifecycle_acceptance: not_rerun_candidate
 qemu_four_output_pixel_acceptance: not_rerun_candidate
 qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
-live_deployment: pending
-live_current_version: pending
+live_deployment: pass_supervised_update_verified_0_1_455
+live_current_version: 0.1.455
 live_block_cursor_acceptance: carried_from_0_1_425
 live_italic_acceptance: carried_from_0_1_425
 live_session_default_acceptance: carried_from_0_1_425
 live_sync_output_acceptance: carried_from_0_1_425
-live_hibr_desktop_acceptance: pending
+live_hibr_desktop_acceptance: pass_32400_printable_revision_859
 live_idle_frame_acceptance: carried_from_0_1_425
 live_physical_multi_display: unavailable_one_output
 live_physical_button_trace_contract: open
@@ -214,3 +214,62 @@ notes: >-
   unknown-property discipline, a baseline the teeth build shares.
 
   Suite: 58 pass, 5 skip, 0 fail.
+
+  Host-accepted on 192.168.10.54 with tools/probes/host_audio_controls.rb --
+  the real SNDRV_CTL_IOCTL_* round-trip, which no gate can do:
+
+    cards: 6                                    pcms: 12
+      Device      6 elements  shares=2  volume=PCM Playback Volume
+      Generic    28 elements  shares=4  volume=(none)
+      Generic_1  13 elements  shares=2  volume=Master Playback Volume
+      RC          3 elements  shares=1  volume=(none)
+      QuadCast    8 elements  shares=2  volume=(none)
+      Meet        2 elements  shares=1  volume=(none)
+
+    the most shared mixer: Generic, 4 PCMs
+      audio-generic-pcm3-p, -pcm7-p, -pcm8-p, -pcm9-p
+
+  Four PCMs on one mixer is the case the card-owned model exists for, and it
+  is on this hardware rather than hypothetical.
+
+  The resolution rule in three of its shapes, all real: `Device` resolves to
+  its sole PCM Playback Volume; `Generic_1` resolves to Master Playback
+  Volume, beating the PCM Playback Volume it also has; `QuadCast` has two
+  playback volumes and no Master and is refused with
+  audio_control_ambiguous. Three cards have no playback volume at all.
+
+  Both range classes measured, because the quantisation is only visible on
+  one of them -- the probe exercises every resolved card rather than the
+  first, which is a correction made after the first run measured only half
+  the story:
+
+    Device     PCM Playback Volume  0..255  1 channel
+      asked  25% -> card holds [64]      -> reads back 25%
+      asked  50% -> card holds [128]     -> reads back 50%
+      asked  75% -> card holds [191]     -> reads back 75%
+
+    Generic_1  Master Playback Volume  0..87  2 channels
+      asked  25% -> card holds [22, 22]  -> reads back 25%
+      asked  50% -> card holds [44, 44]  -> reads back 51%
+      asked  75% -> card holds [65, 65]  -> reads back 75%
+
+  A span of 255 holds every percentage; a span of 87 cannot, and 50% comes
+  back as 51%. That is why what gets reported is the read-back. Writing the
+  read-back settles rather than drifting, asserted on both.
+
+  mute inverted the playback switch on both cards, two channels took the same
+  value, an out-of-range named write was refused, an unknown element was a
+  404, and every value the probe touched was restored -- [102] and [60, 60].
+
+  Every control device was accessible, which is the root profile working; the
+  unprivileged profile's access is still only a group in a unit file and not a
+  measurement.
+
+  The deployment was clean, #63 holding in a sixth release:
+
+    14:50:12 Stopping blit.service ...
+    14:50:12 blit: package installed; exiting for the unit restart
+    14:50:12 Started blit.service ...
+
+  The desktop came back with 32,400 printable cells at revision 859, errors
+  and warnings both empty.

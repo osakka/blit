@@ -3257,3 +3257,66 @@ server, because nothing woke the loop. The `select` wait is now clamped to the
 remaining flush window, the same shape the attach reassert already used, and a
 write that cannot reach the disk says so once rather than failing in silence.
 
+## 0.1.455: a card's mixer, on real hardware
+
+Epic #64 stage 4 (#68). The ALSA control ioctls are the thing under test here,
+and no gate can serve one: a fabricated control node is a regular file, so
+`tools/tests/audio_card_gate.rb` reads a stand-in and this is where the real
+`SNDRV_CTL_IOCTL_*` round-trip happens.
+
+Measured on 192.168.10.54, all six cards:
+
+```
+cards: 6                                    pcms: 12
+  Device      6 elements  shares=2  volume=PCM Playback Volume
+  Generic    28 elements  shares=4  volume=(none)
+  Generic_1  13 elements  shares=2  volume=Master Playback Volume
+  RC          3 elements  shares=1  volume=(none)
+  QuadCast    8 elements  shares=2  volume=(none)
+  Meet        2 elements  shares=1  volume=(none)
+
+the most shared mixer: Generic, 4 PCMs
+```
+
+Four PCMs on one mixer is the case the card-owned model exists for, and it is
+on this hardware rather than hypothetical. The resolution rule's three
+interesting shapes are all real: a card resolving its sole playback volume, a
+card where `Master` beats a `PCM Playback Volume` that also exists, and a card
+with two candidates and no `Master` that is refused with
+`audio_control_ambiguous`.
+
+Both range classes, because the quantisation is only visible on one:
+
+```
+Device     PCM Playback Volume  0..255  1 channel
+  asked  25% -> [64]       -> reads back 25%
+  asked  50% -> [128]      -> reads back 50%
+  asked  75% -> [191]      -> reads back 75%
+
+Generic_1  Master Playback Volume  0..87  2 channels
+  asked  25% -> [22, 22]   -> reads back 25%
+  asked  50% -> [44, 44]   -> reads back 51%
+  asked  75% -> [65, 65]   -> reads back 75%
+```
+
+A span of 255 holds every percentage; a span of 87 cannot — 88 values against
+101 percentages — so 50% comes back as 51%. That is why what Blit reports is
+the read-back. Writing the read-back settles rather than drifting, asserted on
+both cards.
+
+The probe originally tested only the first resolved card, which measured only
+half of that; it exercises every resolved card now. Every value it touches is
+restored — `[102]` and `[60, 60]`.
+
+**What is not claimed.** Every control device was accessible, which is the
+root profile working. The `audio` group is now in both unit files, but that
+the *unprivileged* profile can open `/dev/snd/controlC*` is a group in a unit
+file and not a measurement: the gate runs as the developer against fabricated
+files and this host runs root. `state.control_accessible` is reported
+separately from a PCM's `accessible` so an operator who switches profiles can
+see the difference immediately.
+
+Control values are deliberately not persisted — they are the card's own state
+and the card keeps them, so storing and re-applying would make Blit fight
+`alsactl` for something that already survives a reboot.
+

@@ -102,68 +102,75 @@ ambiguous.each do |entry|
         "#{entry['id']} refuses a volume it cannot resolve, got #{code}")
 end
 
-# The write path, on a card that resolves. Read, write, read back, restore.
-subject = resolved.first
-id = subject.fetch('id')
-element_name = subject.dig('configuration', 'volume_control')
-element = subject.fetch('controls').find { |c| c['name'] == element_name }
-original = element.fetch('values')
-puts format('  subject: %s %s range=%d..%d channels=%d value=%s',
-            id, element_name, element.fetch('minimum'),
-            element.fetch('maximum'), element.fetch('channels'),
-            original.inspect)
+# The write path, on *every* card that resolves -- not just the first. The
+# quantisation is only visible on a range coarser than 100 steps, and this
+# host has one of each: a 0..255 PCM volume where every percentage is exact,
+# and a 0..87 Master where 50% is 44 and reads back as 51%. Testing one would
+# have measured only half the story.
+def exercise(subject)
+    id = subject.fetch('id')
+  element_name = subject.dig('configuration', 'volume_control')
+  element = subject.fetch('controls').find { |c| c['name'] == element_name }
+  original = element.fetch('values')
+  puts format('  subject: %s %s range=%d..%d channels=%d value=%s',
+              id, element_name, element.fetch('minimum'),
+              element.fetch('maximum'), element.fetch('channels'),
+              original.inspect)
 
-[25, 50, 75].each do |percent|
-  code, patched = configure(id, { 'volume_percent' => percent })
-  check(code == 200, "PATCH #{percent}% -> #{code} #{patched.to_h['detail'].inspect}")
-  next unless code == 200
+  [25, 50, 75].each do |percent|
+    code, patched = configure(id, { 'volume_percent' => percent })
+    check(code == 200, "PATCH #{percent}% -> #{code} #{patched.to_h['detail'].inspect}")
+    next unless code == 200
 
-  written = patched.fetch('controls').find { |c| c['name'] == element_name }
-  back = patched.dig('configuration', 'volume_percent')
-  puts format('    asked %3d%% -> card holds %-12s -> reads back %3d%%',
-              percent, written.fetch('values').inspect, back)
-  check(written.fetch('values').uniq.length == 1,
-        'every channel took the same value')
-  # The settling property, on real hardware: writing the read-back lands on
-  # the same raw value.
-  _, again = configure(id, { 'volume_percent' => back })
-  settled = again.to_h.fetch('controls', [])
-                 .find { |c| c['name'] == element_name }.to_h
-  check(settled['values'] == written.fetch('values'),
-        "and writing the read-back settles rather than drifting: " \
-        "#{written.fetch('values').inspect} then #{settled['values'].inspect}")
+    written = patched.fetch('controls').find { |c| c['name'] == element_name }
+    back = patched.dig('configuration', 'volume_percent')
+    puts format('    asked %3d%% -> card holds %-12s -> reads back %3d%%',
+                percent, written.fetch('values').inspect, back)
+    check(written.fetch('values').uniq.length == 1,
+          'every channel took the same value')
+    # The settling property, on real hardware: writing the read-back lands on
+    # the same raw value.
+    _, again = configure(id, { 'volume_percent' => back })
+    settled = again.to_h.fetch('controls', [])
+                   .find { |c| c['name'] == element_name }.to_h
+    check(settled['values'] == written.fetch('values'),
+          "and writing the read-back settles rather than drifting: " \
+          "#{written.fetch('values').inspect} then #{settled['values'].inspect}")
+  end
+
+  # mute, and that it is the switch's inverse.
+  if subject.dig('configuration', 'mute_control')
+    switch_name = subject.dig('configuration', 'mute_control')
+    switch_original = subject.fetch('controls')
+                             .find { |c| c['name'] == switch_name }.fetch('values')
+    _, muted = configure(id, { 'mute' => true })
+    switch = muted.to_h.fetch('controls', []).find { |c| c['name'] == switch_name }.to_h
+    puts "    mute true -> #{switch_name} #{switch['values'].inspect}"
+    check(switch['values'].to_a.all?(&:zero?),
+          "muting turns the playback switch off, got #{switch['values'].inspect}")
+    _, unmuted = configure(id, { 'mute' => false })
+    check(unmuted.to_h.fetch('controls', []).find { |c| c['name'] == switch_name }
+            .to_h['values'] == switch_original,
+          'and unmuting restores it')
+  end
+
+  # A named write and an out-of-range refusal, on the element's own range.
+  code, problem = configure(id, { 'controls' => { element_name => element.fetch('maximum') + 1 } })
+  puts "    out of range -> #{code} #{problem.to_h['code']}"
+  check(code == 400,
+        "a value past the element's maximum is refused, got #{code}")
+  code, = configure(id, { 'controls' => { 'No Such Control' => 1 } })
+  check(code == 404, "an unknown element is a 404, got #{code}")
+
+  # Restore.
+  configure(id, { 'controls' => { element_name => original.first } })
+  restored = card(id).fetch('controls').find { |c| c['name'] == element_name }
+  puts "    restored: #{restored.fetch('values').inspect}"
+  check(restored.fetch('values') == original,
+        "the host is left as it was found, got #{restored.fetch('values').inspect}")
 end
 
-# mute, and that it is the switch's inverse.
-if subject.dig('configuration', 'mute_control')
-  switch_name = subject.dig('configuration', 'mute_control')
-  switch_original = subject.fetch('controls')
-                           .find { |c| c['name'] == switch_name }.fetch('values')
-  _, muted = configure(id, { 'mute' => true })
-  switch = muted.to_h.fetch('controls', []).find { |c| c['name'] == switch_name }.to_h
-  puts "    mute true -> #{switch_name} #{switch['values'].inspect}"
-  check(switch['values'].to_a.all?(&:zero?),
-        "muting turns the playback switch off, got #{switch['values'].inspect}")
-  _, unmuted = configure(id, { 'mute' => false })
-  check(unmuted.to_h.fetch('controls', []).find { |c| c['name'] == switch_name }
-          .to_h['values'] == switch_original,
-        'and unmuting restores it')
-end
-
-# A named write and an out-of-range refusal, on the element's own range.
-code, problem = configure(id, { 'controls' => { element_name => element.fetch('maximum') + 1 } })
-puts "    out of range -> #{code} #{problem.to_h['code']}"
-check(code == 400,
-      "a value past the element's maximum is refused, got #{code}")
-code, = configure(id, { 'controls' => { 'No Such Control' => 1 } })
-check(code == 404, "an unknown element is a 404, got #{code}")
-
-# Restore.
-configure(id, { 'controls' => { element_name => original.first } })
-restored = card(id).fetch('controls').find { |c| c['name'] == element_name }
-puts "    restored: #{restored.fetch('values').inspect}"
-check(restored.fetch('values') == original,
-      "the host is left as it was found, got #{restored.fetch('values').inspect}")
+resolved.each { |entry| exercise(entry) }
 
 if $failures.empty?
   puts "LIVE_AUDIO_PASS cards=#{listing.length} pcms=#{pcms.length} " \
