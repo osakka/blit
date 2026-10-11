@@ -21509,11 +21509,27 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                 last_row = first_row +
                     plan->surfaces[plan_index].damage_height;
                 {
+                    /* Issue #72. The clear has to cover exactly what the
+                       repaint below covers, and the repaint covers whole
+                       *rows*: it walks `column = 0` to `surface->width` for
+                       every damaged row. Clearing only the damage rectangle's
+                       columns left the two disagreeing, and the disagreement
+                       is invisible until a cell goes from ink to blank outside
+                       those columns -- because a blank cell with the default
+                       background draws nothing at all, so its old pixels
+                       simply stayed. On the live host that was a screensaver
+                       leaving a solid trail of itself across the panel: 8407
+                       cells painted that the cell snapshot said were blank.
+
+                       Clearing the full width of the damaged rows is the safe
+                       direction of the two. It can only erase pixels the
+                       repaint is about to write, and it makes the incremental
+                       path correct whatever the damage rectangle's columns
+                       happen to be. */
                     SDL_FRect damage;
-                    damage.x = surface_origin_x +
-                        plan->surfaces[plan_index].damage_x * (float)cell_width;
+                    damage.x = surface_origin_x;
                     damage.y = (float)surface_origin_y + first_row * (float)cell_height;
-                    damage.w = plan->surfaces[plan_index].damage_width * (float)cell_width;
+                    damage.w = (float)surface->width * (float)cell_width;
                     damage.h = plan->surfaces[plan_index].damage_height * (float)cell_height;
                     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
                     SDL_RenderFillRect(renderer, &damage);
@@ -21530,12 +21546,13 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                 graphics_clip.w = surface->width * cell_width;
                 graphics_clip.h = surface->height * cell_height;
                 if (!full_redraw) {
-                    graphics_clip.x += plan->surfaces[plan_index].damage_x *
-                        cell_width;
+                    /* Issue #72: the same rows the clear above took, at the
+                       same full width. This clip restores the wallpaper layer
+                       inside whatever was just cleared, so if it covered less
+                       than the clear did the scene would develop black holes
+                       exactly where the fix widened the clear. */
                     graphics_clip.y += plan->surfaces[plan_index].damage_y *
                         cell_height;
-                    graphics_clip.w = plan->surfaces[plan_index].damage_width *
-                        cell_width;
                     graphics_clip.h = plan->surfaces[plan_index].damage_height *
                         cell_height;
                 }

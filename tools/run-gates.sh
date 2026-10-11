@@ -243,6 +243,7 @@ suite_renderer() {
     run_gate sync_output_gate.rb ruby tools/tests/sync_output_gate.rb
     run_gate cell_paint_gate.rb ruby tools/tests/cell_paint_gate.rb
     run_gate motion_trail_gate.rb ruby tools/tests/motion_trail_gate.rb
+    run_gate deferred_damage_gate.rb ruby tools/tests/deferred_damage_gate.rb
     run_gate pointer_geometry_gate.rb ruby tools/tests/pointer_geometry_gate.rb
     run_gate mouse_report_gate.rb ruby tools/tests/mouse_report_gate.rb
     run_gate key_encoding_gate.rb ruby tools/tests/key_encoding_gate.rb
