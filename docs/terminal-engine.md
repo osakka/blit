@@ -113,6 +113,12 @@ shell conformance path is stable.
    Device status replies include DA1/DA2, XTVERSION, CPR, window size,
    DECRQSS, and XTGETTCAP; erase operations preserve the active background
    colour according to BCE semantics.
+   DECRQSS answers every setting Blit owns the state for (issue #5): DECSTBM,
+   DECSCUSR, SGR, DECSLRM, DECSCA, DECSCL, DECSLPP, DECSCPP, DECSNLS and
+   DECSACE, and returns the invalid-request form only for a setting it does
+   not. It used to answer three. DECSCL reports the level DA1 reports rather
+   than a level Blit does not select; DECSCPP and DECSLPP agree with the
+   `cols` and `lines` XTGETTCAP answers because both read the surface.
    The VT500 rectangular area operations are implemented (issue #2): DECFRA
    `$x`, DECERA `$z`, DECSERA `${`, DECCRA `$v`, DECCARA `$r`, DECRARA `$t`
    and DECSACE `*x`, with DECSCA `"q` providing the character protection

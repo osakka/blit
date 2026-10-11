@@ -8202,6 +8202,49 @@ static void terminal_apply_string(BlitSession *session, BlitSurface *surface)
                 used += snprintf(reply + used, sizeof(reply) - (size_t)used, ";8");
             snprintf(reply + used, sizeof(reply) - (size_t)used, "m\033\\");
             terminal_write_reply(session, reply);
+        } else if (strcmp(query, "s") == 0) {
+            /* DECSLRM. The left/right margins exist since issue #3, and a
+               client that saves and restores settings around a mode switch
+               has to be able to read them back. */
+            snprintf(reply, sizeof(reply), "\033P1$r%d;%ds\033\\",
+                     surface_line_start(surface) + 1,
+                     surface_line_end(surface) + 1);
+            terminal_write_reply(session, reply);
+        } else if (strcmp(query, "\"q") == 0) {
+            /* DECSCA, from the pen's protection bit (issue #2). 1 is
+               protected, 2 is not; DEC uses 2 rather than 0 in the report. */
+            snprintf(reply, sizeof(reply), "\033P1$r%d\"q\033\\",
+                     (session->terminal_attributes & BLIT_ATTR_PROTECTED) ?
+                     1 : 2);
+            terminal_write_reply(session, reply);
+        } else if (strcmp(query, "\"p") == 0) {
+            /* DECSCL. Blit does not select a conformance level -- there is
+               one and it is fixed -- so this reports the level DA1 reports,
+               with 8-bit controls off. Reporting something DA1 contradicts
+               would be worse than refusing. */
+            terminal_write_reply(session, "\033P1$r62;1\"p\033\\");
+        } else if (strcmp(query, "t") == 0) {
+            /* DECSLPP: lines per page. The same height /v1/surfaces reports
+               and the same value XTGETTCAP answers for `lines`. */
+            snprintf(reply, sizeof(reply), "\033P1$r%dt\033\\",
+                     surface->height);
+            terminal_write_reply(session, reply);
+        } else if (strcmp(query, "$|") == 0) {
+            /* DECSCPP: columns per page. */
+            snprintf(reply, sizeof(reply), "\033P1$r%d$|\033\\",
+                     surface->width);
+            terminal_write_reply(session, reply);
+        } else if (strcmp(query, "*|") == 0) {
+            /* DECSNLS: lines per screen. Blit has one page, so this is the
+               page height. */
+            snprintf(reply, sizeof(reply), "\033P1$r%d*|\033\\",
+                     surface->height);
+            terminal_write_reply(session, reply);
+        } else if (strcmp(query, "*x") == 0) {
+            /* DECSACE: the extent DECCARA and DECRARA act on (issue #2). */
+            snprintf(reply, sizeof(reply), "\033P1$r%d*x\033\\",
+                     session->terminal_attribute_extent_stream ? 2 : 1);
+            terminal_write_reply(session, reply);
         } else {
             terminal_write_reply(session, "\033P0$r\033\\");
         }

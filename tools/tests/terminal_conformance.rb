@@ -1185,6 +1185,66 @@ assert_equal('1b5b3f3075', row_text(snapshot),
              'CSI ? u reports what is honoured, not what was requested')
 puts 'PASS kitty-keyboard-query'
 
+# Issue #5. DECRQSS answered only DECSTBM, DECSCUSR and SGR and returned the
+# invalid-request form for everything else, so a client that saves and restores
+# terminal settings around a mode switch -- the one workflow DECRQSS exists for
+# -- could read back nothing but the scroll region, the cursor shape and the
+# pen. Each setting below is one Blit owns the state for; several only became
+# answerable once #2 and #3 created that state.
+# The reply is captured before it is printed, and DECLRMM is reset in between:
+# the DECSLRM case leaves margins at 3..9, and printing the hex dump inside
+# them wraps it at column 9 -- which is #3's autowrap working, and would read
+# as this vector failing.
+def decrqss(base, name, setup, query, count)
+  run_case(base, name,
+           "stty -icanon -echo min 0 time 5; #{setup}" \
+           "printf '\\033P$q#{query}\\033\\\\'; " \
+           "reply=$(dd if=/dev/tty bs=1 count=#{count} 2>/dev/null | " \
+           "od -An -tx1 | tr -d ' \\n'); printf '\\033[?69l'; " \
+           "printf '%s' \"$reply\"",
+           width: 100, height: 4)
+end
+
+snapshot = decrqss(base, 'decrqss-decslrm',
+                   "printf '\\033[?69h\\033[3;9s'; ", 's', 11)
+assert_equal('1b50312472333b39731b5c', row_text(snapshot),
+             'DECRQSS reports the left/right margins DECSLRM set')
+
+snapshot = decrqss(base, 'decrqss-decsca',
+                   "printf '\\033[1\"q'; ", '"q', 10)
+assert_equal('1b503124723122711b5c', row_text(snapshot),
+             'DECRQSS reports the character protection DECSCA set')
+
+# DECSCL: Blit does not select a conformance level, there is one and it is
+# fixed, so this reports the level DA1 reports. Reporting something DA1
+# contradicts would be worse than refusing.
+snapshot = decrqss(base, 'decrqss-decscl', '', '"p', 13)
+assert_equal('1b5031247236323b3122701b5c', row_text(snapshot),
+             'DECRQSS reports the conformance level DA1 reports')
+
+snapshot = decrqss(base, 'decrqss-decslpp', '', 't', 9)
+assert_equal('1b5031247234741b5c', row_text(snapshot),
+             'DECRQSS reports the page height')
+
+snapshot = decrqss(base, 'decrqss-decscpp', '', '$|', 13)
+assert_equal('1b50312472313030247c1b5c', row_text(snapshot),
+             'DECRQSS reports the page width')
+
+snapshot = decrqss(base, 'decrqss-decsnls', '', '*|', 10)
+assert_equal('1b50312472342a7c1b5c', row_text(snapshot),
+             'DECRQSS reports the lines per screen')
+
+snapshot = decrqss(base, 'decrqss-decsace',
+                   "printf '\\033[2*x'; ", '*x', 10)
+assert_equal('1b50312472322a781b5c', row_text(snapshot),
+             'DECRQSS reports the extent DECSACE selected')
+
+# A setting Blit genuinely does not implement still returns the
+# invalid-request form, which is what makes the answers above mean something.
+snapshot = decrqss(base, 'decrqss-unknown-setting', '', 'ZZ', 7)
+assert_equal('1b503024721b5c', row_text(snapshot),
+             'DECRQSS refuses a setting Blit does not own')
+
 # Issue #4. XTGETTCAP used to answer the failure status with the names echoed
 # back, for every request -- so TN, colors and RGB all reported *unsupported*
 # on a server that advertises TERM=xterm-kitty and supports all three. A
