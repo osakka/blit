@@ -274,6 +274,66 @@ of "nothing arrived".
 An unfiltered trace request still returns the surface ring, as it always has,
 so `graphics_payload` has to be named to be read.
 
+## Settings
+
+Blit keeps its own settings and the API writes them (ADR 0067). They live in
+`/var/lib/blit/settings.json`, which the unit owns through
+`StateDirectory=blit`, and the supported way to read, back up, restore or
+reset them is the resource rather than the file:
+
+```text
+GET    /v1/settings     the whole document, with a revision
+PUT    /v1/settings     If-Match, replaces it
+DELETE /v1/settings     reset to defaults
+```
+
+`PUT` replaces rather than merges, because a merge cannot express "this and
+nothing else", which is what restoring a backup means. Each entry is validated
+by the same code a `PATCH` on that device goes through, so a stored setting
+cannot be accepted where a live one would be refused; `applied`, `refused` and
+`refusal` report what happened. A refused entry is **kept**, not deleted: a
+property that contradicts the kinds the kernel reports today is far likelier
+to be a re-probe than a controller's mistake, so it lies dormant and applies
+again when the device reads the way it did.
+
+Precedence runs in one direction: a stored value wins, an environment variable
+is the boot default **only where the document is silent**, and an accepted API
+write stores. The trap is worth knowing before you hit it — once a setting has
+been written through the API, editing `blit.env` for that setting changes
+nothing. `DELETE /v1/settings` is the way back.
+
+Two kinds of id are deliberately absent from the document. An
+`input-node-<basename>` id says in itself that it is not stable, so restoring
+against it could apply one device's settings to whatever took its place; and a
+device's `route` names a `session-N` target, which does not survive a restart
+either. Both are reported in the device item and both are honest gaps rather
+than oversights.
+
+### When settings are the problem
+
+A document that cannot be read never stops a boot. It is renamed to
+`settings.json.broken`, the defaults apply, and `/v1/diagnostics` carries
+`settings_document_unreadable` in its enumerated `warnings` — so the way you
+find out is the place you already look.
+
+A setting can be perfectly valid and still lock a machine out: `enabled:
+false` on its only keyboard. There are two recoveries, and the second exists
+because the first needs the API that the setting may have taken away.
+
+```sh
+# with the API
+curl -X DELETE -H "Authorization: Bearer $TOKEN" .../v1/settings
+
+# without it: boot past the document, leaving it intact
+systemctl edit blit    # Environment=BLIT_SETTINGS=ignore
+```
+
+`BLIT_SETTINGS=ignore` starts from the defaults and does **not** rewrite the
+document, because an operator recovering a machine should not also lose what
+was in it. In that mode a `PUT` is refused — a write that could not stick is
+worse than a refusal — but a `DELETE` still clears the stored document, so the
+recovery can be finished without a shell.
+
 ## Restart intents
 
 Two things restart Blit, and which one applies is part of the contract rather

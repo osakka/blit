@@ -256,6 +256,93 @@ paths:
           $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
+  /v1/settings:
+    get:
+      tags: [settings]
+      operationId: getSettings
+      summary: Get the stored settings document
+      description: >-
+        Blit's own settings (ADR 0067), keyed by the stable device ids of
+        ADR 0064. The document is a resource so that backing a machine's
+        settings up, cloning them to another, or resetting them are API
+        operations -- which is what keeps the file behind `path` an
+        implementation detail of the `version` field rather than a contract.
+      responses:
+        '200':
+          description: The settings document as it stands
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Settings'
+        default:
+          $ref: '#/components/responses/Problem'
+    put:
+      tags: [settings]
+      operationId: replaceSettings
+      summary: Replace the stored settings document
+      description: >-
+        Replaces, it does not merge: the devices are reset to their defaults
+        and then every entry the document names is applied, because a merge
+        could not express "this and nothing else", which is what restoring a
+        backup means. Each entry is validated by the same code a PATCH on that
+        device goes through; `applied` and `refused` report the outcome and
+        `refusal` names the first entry that did not take. An entry for a
+        device that is not present is stored and applied when it appears.
+        Refused with `settings_not_persisted` when the server was started
+        with `BLIT_SETTINGS=ignore`, because a write that could not stick is
+        worse than a refusal.
+      parameters:
+        - in: header
+          name: If-Match
+          required: false
+          description: The document revision this write was composed against.
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [document]
+              properties:
+                document:
+                  type: object
+                  description: The whole document, in the shape `GET` returns.
+              additionalProperties: false
+      responses:
+        '200':
+          description: The document was replaced
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Settings'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      tags: [settings]
+      operationId: resetSettings
+      summary: Reset every setting to its default and remove the document
+      description: >-
+        The recoverable half of ADR 0067's first failure shape: a setting can
+        be perfectly valid and still lock a machine out -- `enabled: false` on
+        its only keyboard -- so undoing it must not require knowing which
+        setting did it. This is allowed even under `BLIT_SETTINGS=ignore`,
+        where it clears the document that boot is deliberately not reading, so
+        that recovery can be finished without a shell.
+      parameters:
+        - in: header
+          name: If-Match
+          required: false
+          schema: {type: string}
+      responses:
+        '200':
+          description: Settings reset
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Settings'
+        default:
+          $ref: '#/components/responses/Problem'
   /v1/diagnostics:
     get:
       tags: [diagnostics]
@@ -1322,7 +1409,7 @@ components:
           additionalProperties: false
         resources:
           type: object
-          required: [graphics, displays, audio, input_devices, input_routes, topology, fonts, diagnostics, runtime_diagnostics]
+          required: [graphics, displays, audio, input_devices, input_routes, topology, fonts, settings, diagnostics, runtime_diagnostics]
           properties:
             graphics: {type: string}
             displays: {type: string}
@@ -1331,6 +1418,7 @@ components:
             input_routes: {type: string}
             topology: {type: string}
             fonts: {type: string}
+            settings: {type: string}
             diagnostics: {type: string}
             runtime_diagnostics: {type: string}
           additionalProperties: false
@@ -1565,6 +1653,62 @@ components:
           $ref: '#/components/schemas/Revision'
       additionalProperties: false
 
+    Settings:
+      type: object
+      required: [revision, path, persisted, document]
+      properties:
+        revision: {$ref: '#/components/schemas/Revision'}
+        path:
+          type: string
+          description: >-
+            Where the document is kept. Reported for an operator's benefit and
+            for backups; it is not a write surface, and its format is free to
+            change behind `document.version`.
+        persisted:
+          type: boolean
+          description: >-
+            false when the server was started with `BLIT_SETTINGS=ignore`,
+            which starts from the defaults and leaves the document untouched.
+        applied:
+          type: integer
+          minimum: 0
+          description: PUT only. Entries that were applied.
+        refused:
+          type: integer
+          minimum: 0
+          description: >-
+            PUT only. Entries that did not apply. A stored entry is kept
+            rather than deleted when it is refused: a property that
+            contradicts the kinds the kernel reports today is far likelier to
+            be a re-probe than a controller's mistake, so it lies dormant and
+            applies again when the device reads the way it did (ADR 0067).
+        refusal:
+          type: string
+          description: PUT only. The first entry that did not apply, and why.
+        document:
+          type: object
+          required: [version, input_devices, audio_devices]
+          description: >-
+            Keyed by the stable ids of ADR 0064, never by node. An
+            `input-node-<basename>` id is deliberately absent: that id says in
+            itself that it is not stable, so restoring against it could apply
+            one device's settings to whatever took its place. A device's
+            `route` is absent for the same reason -- it names a `session-N`
+            target, and a session id does not survive a restart either. Only
+            what differs from the default is written. Unknown keys are
+            preserved across a rewrite, so running an older release does not
+            eat a newer one's settings.
+          properties:
+            version: {type: integer, minimum: 1}
+            input_devices:
+              type: object
+              additionalProperties:
+                type: object
+                description: The same object a PATCH on that device carries.
+            audio_devices:
+              type: object
+              additionalProperties:
+                type: object
     Diagnostics:
       type: object
       required: [revision, health, resources, render, graphics, errors, warnings]
@@ -1687,11 +1831,15 @@ components:
             `output_without_session` whenever an output has nothing on it,
             declared or not -- a display server presenting nothing is worth
             saying out loud, and Blit cannot know on its own whether a given
-            output is supposed to be showing something.
+            output is supposed to be showing something; and
+            `settings_document_unreadable` when the stored settings could not
+            be read, which never stops a boot (ADR 0067) and so would
+            otherwise be invisible.
           items:
             type: string
             enum: [display_presentation_failed, input_device_missing,
-                   unauthenticated_network_listener, output_without_session]
+                   unauthenticated_network_listener, output_without_session,
+                   settings_document_unreadable]
       additionalProperties: false
     RuntimeDiagnostics:
       type: object

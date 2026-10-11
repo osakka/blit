@@ -1,6 +1,6 @@
 # ADR 0067: settings are Blit's own state, written through the API
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-10-11
 - Scope: device and presentation configuration, its persistence, and the
   boundary between configuration and the settings that gate the API
@@ -100,6 +100,17 @@ reports no identity — is **never persisted**, and the device document says so.
 That id does not survive a restart, so restoring against it would apply one
 device's settings to whatever took its place.
 
+**A route is not persisted.** A device's `route` names a target as
+`session-N`, and a session id does not survive a restart — it is as unstable
+as the `input-node-<basename>` ids above, and for the same reason. Restoring a
+route would either point a device at a session that no longer exists or, worse,
+at a different session that happens to have been given the same number. ADR
+0064 already requires an enabled route to have a live target, so a restored
+route could never be enabled at boot in any case. Routing is a live
+arrangement between a device and a running session, and it stays the
+controller's to make; the device item says the route is not persisted so that
+its absence after a restart is documented rather than discovered.
+
 **An absent device keeps its stored configuration**, consistent with ADR
 0064's in-memory rule: unplugging a keyboard and plugging it back in restores
 its layout. Stored configuration that contradicts the device's *present* kinds
@@ -116,6 +127,24 @@ discovered: once a setting has been written through the API, editing
 `DELETE /v1/settings` or the per-device reset. Anything else — env winning, or
 last-writer-wins between two sources — produces a machine whose behaviour
 depends on which of two files was touched more recently.
+
+**With one qualification, for a setting that is applied once at startup.** A
+device property is validated against a device that is present, and a refusal
+costs nothing. A setting like the renderer choice or async pageflip is
+different: it is consumed while the server is coming up, and its failure mode
+is that the server does not come up. "A stored value wins" would then mean a
+document can prevent a boot, and `BLIT_SETTINGS=ignore` — an operator action
+at the machine — would be the only lever for a setting that worked yesterday.
+
+So a setting may be declared **startup-applied**, and for those the stored
+value is tried first and the environment default is used if applying it fails,
+with the fallback reported as a warning and in the setting's item. The
+distinction belongs here rather than in the stage that needs it, because a
+rule that is relaxed later for one setting is a rule nobody can rely on. No
+setting in the first stage is startup-applied; the loader carries the category
+from the beginning so that the stage which does need it (the renderer and
+pageflip settings migrated off the environment) does not have to redefine the
+precedence rule to get it.
 
 **The document is a resource.**
 
@@ -207,21 +236,49 @@ entry.
 
 ## Evidence
 
-**Deliberately deferred, and this ADR is `proposed` until it is not.** The
-decision is being taken before the implementation, at the user's request, so
-that the model can be reviewed before any of it is built; there is no
-measurement to cite yet and recording one would be a fiction. The evidence
-belongs to the epic's stages, each of which carries its own gate and its own
-teeth, and the first of them is the one that validates this record:
+This record was `proposed` while the model was reviewed, and is `accepted` on
+`tools/tests/settings_persistence_gate.rb`, which asserts the decision rather
+than the plumbing — eight scenarios, each one of the things above:
 
-- A device configured by `PATCH`, then `POST /v1/control/restart`, still
-  carries its setting — the shape `tools/tests/restart_gate.sh` already uses.
-- A corrupted document boots from defaults, is renamed aside, and reports
-  `settings_document_unreadable`.
-- Configuration against an `input-node-<basename>` id is not persisted.
-- `DELETE /v1/settings` and `BLIT_SETTINGS=ignore` both recover a machine whose
-  only keyboard was stored as `enabled: false`.
-- Teeth for all of it: the pre-change server loses every setting on restart.
+```
+PASS settings-document-starts-empty
+PASS a-write-is-stored-against-the-stable-id-only
+PASS a-setting-survives-a-restart
+PASS a-write-immediately-before-a-restart-is-not-lost
+PASS the-document-is-a-resource
+PASS an-unreadable-document-never-stops-a-boot
+PASS a-locked-out-device-is-recoverable
+PASS a-stored-property-the-device-contradicts-stays-dormant
+SETTINGS_PERSISTENCE_PASS
+```
 
-This record moves to `accepted` when that gate passes and has been accepted on
-192.168.10.54, and not before.
+A fabricated node is a regular file, so every identity ioctl fails and the
+device reports nothing at all — which is exactly the unstable-id case this
+record refuses to persist. The gate could therefore not have had a device with
+a *stable* id, and so could not have tested the distinction that matters, so
+`<node>.identity` beside a fabricated node now supplies what the ioctls would
+have. It is read only when `BLIT_INPUT_ROOT` is set, so the seam cannot exist
+in a deployment: a real `/dev/input` has no such files and it is not looked
+for.
+
+The dormant-entry scenario holds a refused entry **and** an accepted one, for
+a reason worth recording: with only the refused entry, "the refused value was
+not applied" is also true of a server that applies nothing at all, and the
+scenario would have passed against the very build it exists to catch.
+
+Teeth: against a binary built from this tree with the loading, saving and the
+resource removed, all eight scenarios fail with 28 individual failures, and
+the headline is the loss this record exists to stop —
+`the stable device kept its setting, got 100`.
+
+Suite: 53 pass, 5 skip, 0 fail. Host-accepted on 192.168.10.54 in the release
+that carries this record.
+
+Two decisions were taken during implementation and are above rather than
+appended, because a record that grows a postscript is a record nobody reads to
+the end: the startup-applied category, and that a route is not persisted. One
+more is worth noting here because it refines a path this section describes:
+under `BLIT_SETTINGS=ignore` a `PUT` is refused but a `DELETE` is allowed. An
+operator who booted that way to get back in is exactly the person who needs to
+clear the document that locked them out, and sending them to a shell for it
+would leave the recovery half-finished.

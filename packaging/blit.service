@@ -9,6 +9,13 @@ User=root
 Group=root
 SupplementaryGroups=video render input
 EnvironmentFile=-/etc/blit/blit.env
+# ADR 0067. /var/lib/blit holds the settings document the API writes, so the
+# directory has to belong to whoever the unit runs as. StateDirectory= is the
+# only correct way to say that: with the default root profile nothing changes,
+# and with the unprivileged drop-in (ADR 0065) systemd creates and owns it as
+# `blit` instead -- which it could not do before, because the directory was
+# root:root 0755 and the blit user is in group blit alone.
+StateDirectory=blit
 Environment=LD_LIBRARY_PATH=/usr/lib/blit/lib
 ExecStart=/usr/bin/blit 8080
 Restart=on-failure

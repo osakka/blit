@@ -57,6 +57,12 @@ extern char **environ;
 #define BLIT_MAX_CELL_ROWS 160
 #define BLIT_MAX_INPUT_DEVICES 32
 #define BLIT_MAX_AUDIO_DEVICES 64
+/* ADR 0067. The settings document, and how long a burst of writes is allowed
+   to coalesce before it reaches the disk. The capacity is generous because a
+   per-device keymap is the largest thing in it: a hundred-odd codes at four
+   levels is a few kilobytes per keyboard. */
+#define BLIT_SETTINGS_CAPACITY 65536
+#define BLIT_SETTINGS_FLUSH_US 500000
 #define BLIT_MAX_SAMPLE_RATES 16
 #define BLIT_MAX_KEYMAP_OVERRIDES 128
 #define BLIT_MAX_OPEN_QUEUE 64
@@ -958,6 +964,17 @@ typedef struct {
     unsigned long long graphics_payloads_kitty;
     unsigned long long graphics_payloads_sixel;
     unsigned long long graphics_payloads_rejected;
+    /* ADR 0067: Blit's own settings. `settings_enabled` is 0 when
+       BLIT_SETTINGS=ignore has been used to boot past a stored setting that
+       locked the machine out -- the document is then left untouched, because
+       an operator recovering a machine should not also lose what was in it. */
+    char settings_path[256];
+    int settings_enabled;
+    int settings_unreadable;
+    int settings_dirty;
+    uint64_t settings_dirty_us;
+    unsigned long long settings_revision;
+    char settings_document[BLIT_SETTINGS_CAPACITY];
 } BlitRuntime;
 
 static unsigned long long blit_graphics_generation;
@@ -985,6 +1002,14 @@ static int runtime_terminal_cell_height(const BlitRuntime *runtime)
     if (value < 1) value = 16;
     return value * (runtime->font_scale > 0 ? runtime->font_scale : 1);
 }
+
+/* ADR 0067. Declared here because a device acquires its stored settings in
+   the scan that discovers it, which is well above the settings module. */
+static void settings_apply_input_device(BlitRuntime *runtime,
+                                        BlitInputDevice *device);
+static void settings_apply_audio_device(BlitRuntime *runtime,
+                                        BlitAudioDevice *audio);
+static void settings_mark_dirty(BlitRuntime *runtime);
 
 static int display_index_for_output(const BlitRuntime *runtime,
                                     int output_index);
@@ -2381,6 +2406,7 @@ static void server_json(const BlitRuntime *runtime, char *body, size_t capacity)
              "\"audio-inventory\",\"audio-device-configuration\","
              "\"display-devices\",\"input-devices\","
              "\"input-device-configuration\",\"input-routes\","
+             "\"settings-persistence\","
              "\"network-terminal-input\",\"diagnostics\","
              "\"runtime-diagnostics\",\"lifecycle-control\","
              "\"effects\",\"overlays\",\"font-selection\"],\"display_count\":%d,"
@@ -2390,6 +2416,7 @@ static void server_json(const BlitRuntime *runtime, char *body, size_t capacity)
              "\"audio\":\"/v1/audio\",\"input_devices\":\"/v1/input/devices\","
              "\"input_routes\":\"/v1/input/routes\",\"topology\":\"/v1/topology\","
              "\"fonts\":\"/v1/fonts\","
+             "\"settings\":\"/v1/settings\","
              "\"diagnostics\":\"/v1/diagnostics\","
              "\"runtime_diagnostics\":\"/v1/diagnostics/runtime\","
              "\"effects\":\"/v1/effects\","
@@ -2612,10 +2639,21 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
                 "%s\"input_device_missing\"", first_warning ? "" : ",");
             first_warning = 0;
         }
-        if (idle_outputs > 0)
+        if (idle_outputs > 0) {
             warning_used += (size_t)snprintf(warnings + warning_used,
                 sizeof(warnings) - warning_used,
                 "%s\"output_without_session\"", first_warning ? "" : ",");
+            first_warning = 0;
+        }
+        /* ADR 0067. A settings document that could not be read never stops a
+           boot -- it is renamed aside and the defaults apply -- so the only
+           way anyone learns is here. A startup line nobody reads is not an
+           answer to "why did my keyboard layout go". */
+        if (runtime->settings_unreadable)
+            warning_used += (size_t)snprintf(warnings + warning_used,
+                sizeof(warnings) - warning_used,
+                "%s\"settings_document_unreadable\"",
+                first_warning ? "" : ",");
         snprintf(warnings + warning_used, sizeof(warnings) - warning_used, "]");
     }
     {
@@ -3233,6 +3271,8 @@ static void scan_audio_devices(BlitRuntime *runtime, int announce)
                                 &discovered);
             if (discovered) {
                 discovered_any = 1;
+                settings_apply_audio_device(runtime,
+                    find_audio_device_pcm(runtime, card, device, 1));
                 if (announce)
                     broadcast_audio_device_changed(runtime,
                         find_audio_device_pcm(runtime, card, device, 1),
@@ -3243,6 +3283,8 @@ static void scan_audio_devices(BlitRuntime *runtime, int announce)
                                 &discovered);
             if (discovered) {
                 discovered_any = 1;
+                settings_apply_audio_device(runtime,
+                    find_audio_device_pcm(runtime, card, device, 0));
                 if (announce)
                     broadcast_audio_device_changed(runtime,
                         find_audio_device_pcm(runtime, card, device, 0),
@@ -3511,6 +3553,55 @@ static void read_opened_device_identity(int fd, BlitOpenedDevice *opened)
         snprintf(opened->phys, sizeof(opened->phys), "%s", text);
 }
 
+/* A fabricated node is a regular file, so every identity ioctl fails and the
+   device reports nothing at all -- which is precisely the case ADR 0064 gives
+   an `input-node-<basename>` id and ADR 0067 refuses to persist. A gate
+   therefore could not fabricate a device with a *stable* id, and so could not
+   test the distinction that matters.
+
+   So a sidecar beside the node supplies what the ioctls would have:
+
+       <node>.identity:  bustype:vendor:product:version:uniq:phys:name
+
+   Read only when BLIT_INPUT_ROOT is set, so it cannot exist in a deployment:
+   a real /dev/input has no such files and the seam is not even looked for.
+   Both paths that create a device entry call it -- the direct probe and the
+   opener thread's adoption -- because a seam that works down one of two paths
+   is worse than none. */
+static void read_input_identity_sidecar(BlitInputDevice *device)
+{
+    char sidecar[320];
+    char line[512];
+    char *field[7];
+    char *cursor;
+    int count = 0;
+
+    if (getenv("BLIT_INPUT_ROOT") == NULL)
+        return;
+    snprintf(sidecar, sizeof(sidecar), "%s.identity", device->node);
+    line[0] = '\0';
+    if (!read_text_file(sidecar, line, sizeof(line)) || line[0] == '\0')
+        return;
+    cursor = line;
+    while (count < 7) {
+        field[count++] = cursor;
+        cursor = strchr(cursor, ':');
+        if (cursor == NULL)
+            break;
+        *cursor++ = '\0';
+    }
+    while (count < 7)
+        field[count++] = (char *)"";
+    device->bustype = (unsigned short)strtoul(field[0], NULL, 16);
+    device->vendor = (unsigned short)strtoul(field[1], NULL, 16);
+    device->product = (unsigned short)strtoul(field[2], NULL, 16);
+    device->version = (unsigned short)strtoul(field[3], NULL, 16);
+    snprintf(device->uniq, sizeof(device->uniq), "%s", field[4]);
+    snprintf(device->phys, sizeof(device->phys), "%s", field[5]);
+    if (field[6][0] != '\0')
+        snprintf(device->name, sizeof(device->name), "%s", field[6]);
+}
+
 static void read_input_device_strings(int fd, BlitInputDevice *device)
 {
     struct input_id identity;
@@ -3633,6 +3724,7 @@ static BlitInputDevice *record_input_device(BlitRuntime *runtime,
         snprintf(device->node, sizeof(device->node), "%s", node);
         snprintf(device->name, sizeof(device->name), "%s", node);
         read_input_device_strings(fd, device);
+        read_input_identity_sidecar(device);
         assign_input_device_id(runtime, device);
         device->first_seen_us = monotonic_us();
         /* A device starts at revision 1, not 0: the revision is what a
@@ -3641,6 +3733,11 @@ static BlitInputDevice *record_input_device(BlitRuntime *runtime,
         device->revision = 1;
         if (discovered != NULL)
             *discovered = 1;
+        /* ADR 0067. This is the only place a device acquires its id, so it is
+           the only place stored settings have to be applied: the boot scan and
+           a hotplug an hour later come through here alike, with no second code
+           path to keep in step. */
+        settings_apply_input_device(runtime, device);
     }
     probe_input_device(fd, &kinds, &capabilities);
     if (device->kinds != kinds || device->capabilities != capabilities)
@@ -3749,11 +3846,17 @@ static BlitInputDevice *record_opened_device(BlitRuntime *runtime,
         device->version = opened->version;
         snprintf(device->uniq, sizeof(device->uniq), "%s", opened->uniq);
         snprintf(device->phys, sizeof(device->phys), "%s", opened->phys);
+        read_input_identity_sidecar(device);
         assign_input_device_id(runtime, device);
         device->first_seen_us = monotonic_us();
         device->revision = 1;
         if (discovered != NULL)
             *discovered = 1;
+        /* The opener thread's path to a new entry, and the second of the two
+           places a device acquires its id. Both apply stored settings, or a
+           device opened off the thread would come up at the defaults while
+           one opened directly came up configured (ADR 0067). */
+        settings_apply_input_device(runtime, device);
     }
     if (device->kinds != opened->kinds ||
         device->capabilities != opened->capabilities)
@@ -13863,6 +13966,551 @@ static int apply_input_device_configuration(BlitRuntime *runtime,
     return 1;
 }
 
+/* The audio counterpart, separated for the same reason (ADR 0067): a stored
+   default must be validated by the code a PATCH goes through, not by a second
+   reader of the same property. */
+static int apply_audio_device_configuration(BlitRuntime *runtime,
+                                            BlitAudioDevice *audio,
+                                            const char *configuration,
+                                            BlitConfigProblem *problem)
+{
+    char scalars[512];
+    const char *rejected;
+    int make_default = 0;
+    int default_requested;
+    int changed = 0;
+    int i;
+
+    if (!json_object_scalars(configuration, scalars, sizeof(scalars))) {
+        config_problem(problem, 400, "Bad Request",
+                       "invalid_device_configuration",
+                       "A device configuration must be a JSON object of "
+                       "properties.");
+        return 0;
+    }
+    rejected = audio_device_rejected_property(configuration);
+    if (rejected != NULL) {
+        char detail[256];
+        snprintf(detail, sizeof(detail),
+                 "An audio device configuration carries \"%s\", which is "
+                 "not a writable property. Writable: default.", rejected);
+        config_problem(problem, 400, "Bad Request", "invalid_device_property",
+                       detail);
+        return 0;
+    }
+    default_requested = json_bool(scalars, "default", &make_default);
+    if (json_key_cursor(scalars, "default") != NULL && !default_requested) {
+        config_problem(problem, 400, "Bad Request",
+                       "invalid_device_configuration",
+                       "default must be a JSON boolean.");
+        return 0;
+    }
+    if (default_requested && make_default != audio->is_default) {
+        if (make_default) {
+            /* One default per direction: choosing an output is choosing
+               between outputs, so the others give it up. */
+            for (i = 0; i < BLIT_MAX_AUDIO_DEVICES; ++i) {
+                BlitAudioDevice *other = &runtime->audio_devices[i];
+                if (other->used && other != audio && other->is_default &&
+                    other->playback == audio->playback) {
+                    other->is_default = 0;
+                    ++other->revision;
+                }
+            }
+        }
+        audio->is_default = make_default;
+        changed = 1;
+    }
+    if (changed) {
+        ++audio->revision;
+        ++runtime->audio_devices_revision;
+    }
+    return 1;
+}
+
+/* ADR 0067. Blit's own settings, written through the API.
+ *
+ * Until this, a device's configuration lived only in memory: ADR 0064 said so
+ * deliberately and deferred the decision. Issue #63 then measured what a
+ * release costs -- the unit stops and starts -- so every pointer speed,
+ * keyboard layout and default audio device was lost on every update, and the
+ * stated recovery ("a controller re-applies what it wants") assumed a control
+ * panel that is running, authenticated, and there before anybody touches the
+ * machine. At boot none of that holds.
+ *
+ * The document is keyed by the stable id ADR 0064 derives from what a device
+ * reports about itself, and a stored configuration is replayed through
+ * `apply_input_device_configuration` -- the same code a PATCH goes through --
+ * so a restored setting cannot be validated differently from a live one.
+ */
+
+/* One member of a JSON object: its key and the text of its value. Returns the
+   cursor to continue from, or NULL at the end of the object. The repo has no
+   JSON parser and does not need one; the document's shape is Blit's own and
+   one level of nesting per class is all of it. */
+static const char *json_next_member(const char *cursor, char *key,
+                                    size_t key_capacity, char *value,
+                                    size_t value_capacity)
+{
+    size_t used = 0;
+    int depth = 0;
+
+    if (cursor == NULL || key_capacity == 0 || value_capacity == 0)
+        return NULL;
+    key[0] = '\0';
+    value[0] = '\0';
+    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\n' ||
+           *cursor == '\r' || *cursor == ',' || *cursor == '{')
+        ++cursor;
+    if (*cursor != '"')
+        return NULL;
+    ++cursor;
+    while (*cursor != '\0' && *cursor != '"') {
+        if (used + 1 >= key_capacity)
+            return NULL;
+        key[used++] = *cursor++;
+    }
+    if (*cursor != '"')
+        return NULL;
+    key[used] = '\0';
+    ++cursor;
+    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\n' ||
+           *cursor == '\r')
+        ++cursor;
+    if (*cursor != ':')
+        return NULL;
+    ++cursor;
+    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\n' ||
+           *cursor == '\r')
+        ++cursor;
+    used = 0;
+    for (; *cursor != '\0'; ++cursor) {
+        if (used + 2 >= value_capacity)
+            return NULL;
+        if (*cursor == '"') {
+            value[used++] = *cursor++;
+            while (*cursor != '\0' && *cursor != '"') {
+                if (used + 3 >= value_capacity)
+                    return NULL;
+                value[used++] = *cursor;
+                if (*cursor == '\\' && cursor[1] != '\0')
+                    value[used++] = *++cursor;
+                ++cursor;
+            }
+            if (*cursor != '"')
+                return NULL;
+            value[used++] = '"';
+            if (depth == 0) {
+                value[used] = '\0';
+                return cursor + 1;
+            }
+            continue;
+        }
+        if (*cursor == '{' || *cursor == '[')
+            ++depth;
+        else if (*cursor == '}' || *cursor == ']') {
+            if (depth == 0) {
+                /* The end of the enclosing object with no value read. */
+                value[used] = '\0';
+                return used > 0 ? cursor : NULL;
+            }
+            if (--depth == 0) {
+                value[used++] = *cursor;
+                value[used] = '\0';
+                return cursor + 1;
+            }
+        } else if (depth == 0 && (*cursor == ',' || *cursor == '}')) {
+            value[used] = '\0';
+            return cursor;
+        }
+        value[used++] = *cursor;
+    }
+    return NULL;
+}
+
+/* The slice of `document` stored for `id` under `section`, or NULL. */
+static int settings_member(const char *document, const char *section,
+                           const char *id, char *out, size_t capacity)
+{
+    const char *cursor = json_key_cursor(document, section);
+    char key[BLIT_INPUT_ID_CAPACITY];
+
+    if (cursor == NULL)
+        return 0;
+    while (*cursor != '\0' && *cursor != '{')
+        ++cursor;
+    if (*cursor != '{')
+        return 0;
+    ++cursor;
+    while ((cursor = json_next_member(cursor, key, sizeof(key), out,
+                                      capacity)) != NULL)
+        if (strcmp(key, id) == 0)
+            return out[0] == '{';
+    return 0;
+}
+
+/* A device's configuration as the document stores it, which is exactly the
+   object a PATCH would carry -- that equality is what lets the loader replay
+   it rather than reimplement it. Only what differs from the default is
+   written, so a device nobody has configured contributes nothing and the
+   document stays readable.
+
+   A route is deliberately absent: it names a session-N target, and a session
+   id does not survive a restart any more than an input-node id does (ADR
+   0067). Restoring one would point a device at a session that is gone, or at
+   a different session that happened to be given the same number. */
+static size_t settings_input_configuration(const BlitInputDevice *device,
+                                           char *out, size_t capacity)
+{
+    size_t used = 0;
+    int first = 1;
+
+    out[0] = '\0';
+    json_appendf(out, capacity, &used, "{");
+    if (!device->enabled) {
+        json_appendf(out, capacity, &used, "\"enabled\":false");
+        first = 0;
+    }
+    if (device->sensitivity_percent != BLIT_INPUT_SENSITIVITY_DEFAULT) {
+        json_appendf(out, capacity, &used, "%s\"sensitivity_percent\":%d",
+                     first ? "" : ",", device->sensitivity_percent);
+        first = 0;
+    }
+    if (device->natural_scroll) {
+        json_appendf(out, capacity, &used, "%s\"natural_scroll\":true",
+                     first ? "" : ",");
+        first = 0;
+    }
+    if (device->keymap_count > 0) {
+        int i;
+        json_appendf(out, capacity, &used,
+                     "%s\"keymap\":{\"base\":\"us\",\"keys\":{",
+                     first ? "" : ",");
+        first = 0;
+        for (i = 0; i < device->keymap_count; ++i) {
+            int level;
+            json_appendf(out, capacity, &used, "%s\"%d\":[",
+                         i == 0 ? "" : ",", device->keymap_codes[i]);
+            for (level = 0; level < 4; ++level) {
+                char escaped[64];
+                json_escape(device->keymap_levels[i][level], escaped,
+                            sizeof(escaped));
+                json_appendf(out, capacity, &used, "%s\"%s\"",
+                             level == 0 ? "" : ",", escaped);
+            }
+            json_appendf(out, capacity, &used, "]");
+        }
+        json_appendf(out, capacity, &used, "}}");
+    }
+    json_appendf(out, capacity, &used, "}");
+    return first ? 0 : used;
+}
+
+static size_t settings_audio_configuration(const BlitAudioDevice *audio,
+                                           char *out, size_t capacity)
+{
+    size_t used = 0;
+
+    out[0] = '\0';
+    if (!audio->is_default)
+        return 0;
+    json_appendf(out, capacity, &used, "{\"default\":true}");
+    return used;
+}
+
+/* Everything the document holds for a class that is not a device Blit can see
+   right now, copied across from the document being replaced. An unplugged
+   device keeps its settings, which is the whole point of an id derived from
+   the device rather than from its node -- and a device that has not been
+   attached at all since boot has to keep them too, or the first save after a
+   restart would quietly delete every entry for hardware that happens to be
+   unplugged today. */
+static void settings_copy_unseen(BlitRuntime *runtime, const char *section,
+                                 int input, char *out, size_t capacity,
+                                 size_t *used, int *first)
+{
+    const char *cursor = json_key_cursor(runtime->settings_document, section);
+    char key[BLIT_INPUT_ID_CAPACITY];
+    char value[8192];
+
+    if (cursor == NULL)
+        return;
+    while (*cursor != '\0' && *cursor != '{')
+        ++cursor;
+    if (*cursor != '{')
+        return;
+    ++cursor;
+    while ((cursor = json_next_member(cursor, key, sizeof(key), value,
+                                      sizeof(value))) != NULL) {
+        if (value[0] != '{')
+            continue;
+        if (input ? find_input_device_id(runtime, key) != NULL
+                  : find_audio_device_id(runtime, key) != NULL)
+            continue;
+        json_appendf(out, capacity, used, "%s\"%s\":%s",
+                     *first ? "" : ",", key, value);
+        *first = 0;
+    }
+}
+
+/* The document as it should be on disk right now. */
+static size_t settings_build(BlitRuntime *runtime, char *out, size_t capacity)
+{
+    size_t used = 0;
+    int first;
+    int i;
+
+    out[0] = '\0';
+    json_appendf(out, capacity, &used,
+                 "{\"version\":1,\"input_devices\":{");
+    first = 1;
+    for (i = 0; i < BLIT_MAX_INPUT_DEVICES; ++i) {
+        BlitInputDevice *device = &runtime->input_devices[i];
+        char configuration[8192];
+        if (!device->used)
+            continue;
+        /* An `input-node-<basename>` id says in itself that it is not stable
+           (ADR 0064): it is what a device that reports no identity gets, and
+           it is derived from a node number the kernel reassigns. Persisting
+           against it would restore one device's settings onto whatever took
+           its place, so it is not persisted at all -- and the item says so
+           rather than leaving a controller to discover it. */
+        if (strncmp(device->id, "input-node-", 11) == 0)
+            continue;
+        if (settings_input_configuration(device, configuration,
+                                         sizeof(configuration)) == 0)
+            continue;
+        json_appendf(out, capacity, &used, "%s\"%s\":%s",
+                     first ? "" : ",", device->id, configuration);
+        first = 0;
+    }
+    settings_copy_unseen(runtime, "input_devices", 1, out, capacity, &used,
+                         &first);
+    json_appendf(out, capacity, &used, "},\"audio_devices\":{");
+    first = 1;
+    for (i = 0; i < BLIT_MAX_AUDIO_DEVICES; ++i) {
+        BlitAudioDevice *audio = &runtime->audio_devices[i];
+        char configuration[128];
+        if (!audio->used)
+            continue;
+        if (settings_audio_configuration(audio, configuration,
+                                         sizeof(configuration)) == 0)
+            continue;
+        json_appendf(out, capacity, &used, "%s\"%s\":%s",
+                     first ? "" : ",", audio->id, configuration);
+        first = 0;
+    }
+    settings_copy_unseen(runtime, "audio_devices", 0, out, capacity, &used,
+                         &first);
+    json_appendf(out, capacity, &used, "}}");
+    return used;
+}
+
+static void settings_mark_dirty(BlitRuntime *runtime)
+{
+    if (runtime == NULL || !runtime->settings_enabled)
+        return;
+    if (!runtime->settings_dirty)
+        runtime->settings_dirty_us = monotonic_us();
+    runtime->settings_dirty = 1;
+}
+
+/* Atomic, because the failure this is for is a document truncated by a power
+   cut: a temporary file beside the real one, fsync, rename. */
+static int settings_write(const char *path, const char *text, size_t length)
+{
+    char temporary[320];
+    int fd;
+    ssize_t written;
+
+    snprintf(temporary, sizeof(temporary), "%s.new", path);
+    fd = open(temporary, O_WRONLY | O_CREAT | O_TRUNC, 0640);
+    if (fd < 0)
+        return 0;
+    written = write(fd, text, length);
+    if (written != (ssize_t)length || fsync(fd) != 0) {
+        close(fd);
+        unlink(temporary);
+        return 0;
+    }
+    close(fd);
+    if (rename(temporary, path) != 0) {
+        unlink(temporary);
+        return 0;
+    }
+    return 1;
+}
+
+/* Coalesced: a slider dragging sensitivity_percent must not be one fsync per
+   pixel. `force` is the teardown flush, which is one place now rather than
+   three -- issue #63 made the API restart's exec, the update install's exit
+   and SIGTERM converge on the same return from main. */
+static void settings_flush(BlitRuntime *runtime, int force)
+{
+    static char document[BLIT_SETTINGS_CAPACITY];
+    size_t length;
+
+    if (runtime == NULL || !runtime->settings_enabled || !runtime->settings_dirty)
+        return;
+    if (!force &&
+        monotonic_us() - runtime->settings_dirty_us <
+            (uint64_t)BLIT_SETTINGS_FLUSH_US)
+        return;
+    length = settings_build(runtime, document, sizeof(document));
+    if (length == 0 || length + 1 >= sizeof(document)) {
+        runtime->settings_dirty = 0;
+        return;
+    }
+    if (settings_write(runtime->settings_path, document, length)) {
+        snprintf(runtime->settings_document,
+                 sizeof(runtime->settings_document), "%s", document);
+        ++runtime->settings_revision;
+        runtime->settings_dirty = 0;
+    }
+}
+
+/* Read the document, or decide it cannot be read. An unparseable document
+   must never stop a boot: it is renamed aside, the defaults apply, and
+   /v1/diagnostics carries settings_document_unreadable -- in the enumerated
+   warnings, where issue #55 taught this host to look, rather than in a
+   startup line nobody reads. */
+static void settings_load(BlitRuntime *runtime)
+{
+    char broken[320];
+    int fd;
+    ssize_t received;
+
+    runtime->settings_document[0] = '\0';
+    if (!runtime->settings_enabled)
+        return;
+    fd = open(runtime->settings_path, O_RDONLY);
+    if (fd < 0)
+        return;
+    received = read(fd, runtime->settings_document,
+                    sizeof(runtime->settings_document) - 1);
+    close(fd);
+    if (received < 0)
+        received = 0;
+    runtime->settings_document[received] = '\0';
+    if (received == 0)
+        return;
+    if (json_key_cursor(runtime->settings_document, "version") == NULL ||
+        json_key_cursor(runtime->settings_document, "input_devices") == NULL) {
+        snprintf(broken, sizeof(broken), "%s.broken", runtime->settings_path);
+        rename(runtime->settings_path, broken);
+        runtime->settings_document[0] = '\0';
+        runtime->settings_unreadable = 1;
+        fprintf(stderr, "blit: settings document unreadable; kept as %s\n",
+                broken);
+    }
+}
+
+/* Applied when a device enters the table, which is the only place a device
+   acquires its id -- so this runs for a device found by the boot scan and for
+   one hotplugged an hour later, with no second code path.
+ *
+ * Device configuration is validated against a device that is present and a
+ * refusal costs nothing, so for these the stored value simply wins. A setting
+ * consumed while the server is coming up is the other category ADR 0067
+ * names -- startup-applied, falling back to its environment default when
+ * applying it fails -- and nothing here is in it yet. */
+static void settings_apply_input_device(BlitRuntime *runtime,
+                                        BlitInputDevice *device)
+{
+    char configuration[8192];
+    BlitConfigProblem problem;
+
+    if (!runtime->settings_enabled || runtime->settings_document[0] == '\0')
+        return;
+    if (strncmp(device->id, "input-node-", 11) == 0)
+        return;
+    if (!settings_member(runtime->settings_document, "input_devices",
+                         device->id, configuration, sizeof(configuration)))
+        return;
+    memset(&problem, 0, sizeof(problem));
+    if (!apply_input_device_configuration(runtime, device, configuration,
+                                          &problem))
+        /* Kept, not deleted. A stored property that contradicts the kinds the
+           kernel reports today is far likelier to be a re-probe than a
+           controller's mistake, so it lies dormant and applies again when the
+           device reads the way it did (ADR 0067). */
+        fprintf(stderr, "blit: stored configuration for %s not applied: %s\n",
+                device->id, problem.detail);
+}
+
+static void settings_apply_audio_device(BlitRuntime *runtime,
+                                        BlitAudioDevice *audio)
+{
+    char configuration[256];
+    BlitConfigProblem problem;
+
+    if (!runtime->settings_enabled || runtime->settings_document[0] == '\0')
+        return;
+    if (!settings_member(runtime->settings_document, "audio_devices",
+                         audio->id, configuration, sizeof(configuration)))
+        return;
+    memset(&problem, 0, sizeof(problem));
+    if (!apply_audio_device_configuration(runtime, audio, configuration,
+                                          &problem))
+        fprintf(stderr, "blit: stored configuration for %s not applied: %s\n",
+                audio->id, problem.detail);
+}
+
+static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
+{
+    static char document[BLIT_SETTINGS_CAPACITY];
+    size_t used = 0;
+
+    settings_build(runtime, document, sizeof(document));
+    json_appendf(body, capacity, &used,
+                 "{\"revision\":%llu,\"path\":\"%s\",\"persisted\":%s,"
+                 "\"document\":%s}",
+                 runtime->settings_revision, runtime->settings_path,
+                 runtime->settings_enabled ? "true" : "false",
+                 document[0] != '\0' ? document : "{}");
+}
+
+/* Back to the defaults, in memory and on disk. This is the recoverable half
+   of ADR 0067's first failure shape: a *valid* setting that locks the machine
+   out -- enabled:false on the only keyboard -- has to be undoable, and
+   undoable without knowing which setting did it. The other half is
+   BLIT_SETTINGS=ignore, which an operator at the machine uses when the API is
+   exactly what they have lost. */
+static void settings_reset(BlitRuntime *runtime)
+{
+    int i;
+
+    runtime->settings_document[0] = '\0';
+    for (i = 0; i < BLIT_MAX_INPUT_DEVICES; ++i) {
+        BlitInputDevice *device = &runtime->input_devices[i];
+        if (!device->used)
+            continue;
+        if (!device->enabled) {
+            device->enabled = 1;
+            runtime->evdev_rescan_requested = 1;
+        }
+        device->sensitivity_percent = BLIT_INPUT_SENSITIVITY_DEFAULT;
+        device->natural_scroll = 0;
+        device->keymap_count = 0;
+        memset(device->keymap_codes, 0, sizeof(device->keymap_codes));
+        memset(device->keymap_levels, 0, sizeof(device->keymap_levels));
+        ++device->revision;
+        broadcast_input_device_changed(runtime, device, "configured");
+    }
+    for (i = 0; i < BLIT_MAX_AUDIO_DEVICES; ++i) {
+        BlitAudioDevice *audio = &runtime->audio_devices[i];
+        if (!audio->used || !audio->is_default)
+            continue;
+        audio->is_default = 0;
+        ++audio->revision;
+    }
+    ++runtime->input_devices_revision;
+    ++runtime->audio_devices_revision;
+    unlink(runtime->settings_path);
+    runtime->settings_dirty = 0;
+    ++runtime->settings_revision;
+}
+
 static void handle_request(int fd, BlitRuntime *runtime,
                            BlitHttpClient *client, const char *request)
 {
@@ -14561,6 +15209,123 @@ static void handle_request(int fd, BlitRuntime *runtime,
                               "OK", "application/json", body);
         return;
     }
+    if (strcmp(path, "/v1/settings") == 0 &&
+        (strcmp(method, "PUT") == 0 || strcmp(method, "DELETE") == 0)) {
+        /* ADR 0067. The document is a resource so that backing a machine's
+           settings up, cloning them to another, or resetting them are API
+           operations -- which is what keeps the file an implementation detail
+           behind its `version` field rather than a contract. */
+        /* A PUT in ignore mode would apply and not stick, which is worse
+           than a refusal. A DELETE is the opposite: an operator who booted
+           with BLIT_SETTINGS=ignore to get back in is exactly the person who
+           needs to clear the document that locked them out, and making them
+           reach for a shell to do it would leave the recovery half-finished.
+           So the DELETE goes through and removes the document this boot is
+           deliberately not reading. */
+        if (!runtime->settings_enabled && strcmp(method, "PUT") == 0) {
+            send_problem(fd, 409, "Conflict", "settings_not_persisted",
+                         "The server was started with BLIT_SETTINGS=ignore, so a write would apply without being stored. Restart without it to configure, or DELETE to clear the stored document.");
+            return;
+        }
+        if (!if_match_revision(fd, request, runtime->settings_revision))
+            return;
+        if (strcmp(method, "DELETE") == 0) {
+            settings_reset(runtime);
+            settings_json(runtime, body, sizeof(body));
+            send_http(fd, 200, "OK", "application/json", body);
+            return;
+        }
+        {
+            const char *document_cursor = json_key_cursor(payload, "document");
+            static char document[BLIT_SETTINGS_CAPACITY];
+            char key[BLIT_INPUT_ID_CAPACITY];
+            static char value[8192];
+            const char *cursor;
+            int applied = 0;
+            int refused = 0;
+            char refusal[320];
+
+            if (document_cursor == NULL ||
+                !json_object_slice(document_cursor, document,
+                                   sizeof(document))) {
+                send_problem(fd, 400, "Bad Request", "invalid_settings",
+                             "A settings write carries the whole document under \"document\", as a JSON object.");
+                return;
+            }
+            refusal[0] = '\0';
+            /* Replace, not merge: reset to the defaults first, then apply
+               every entry the document names. A merge could not express "this
+               and nothing else", which is what restoring a backup means. */
+            settings_reset(runtime);
+            snprintf(runtime->settings_document,
+                     sizeof(runtime->settings_document), "%s", document);
+            cursor = json_key_cursor(document, "input_devices");
+            while (cursor != NULL && *cursor != '\0' && *cursor != '{')
+                ++cursor;
+            if (cursor != NULL && *cursor == '{') {
+                ++cursor;
+                while ((cursor = json_next_member(cursor, key, sizeof(key),
+                                                  value,
+                                                  sizeof(value))) != NULL) {
+                    BlitInputDevice *device = find_input_device_id(runtime,
+                                                                   key);
+                    BlitConfigProblem problem;
+                    if (value[0] != '{' || device == NULL)
+                        continue;
+                    memset(&problem, 0, sizeof(problem));
+                    if (apply_input_device_configuration(runtime, device,
+                                                         value, &problem))
+                        ++applied;
+                    else {
+                        ++refused;
+                        if (refusal[0] == '\0')
+                            snprintf(refusal, sizeof(refusal), "%s: %s", key,
+                                     problem.detail);
+                    }
+                }
+            }
+            cursor = json_key_cursor(document, "audio_devices");
+            while (cursor != NULL && *cursor != '\0' && *cursor != '{')
+                ++cursor;
+            if (cursor != NULL && *cursor == '{') {
+                ++cursor;
+                while ((cursor = json_next_member(cursor, key, sizeof(key),
+                                                  value,
+                                                  sizeof(value))) != NULL) {
+                    BlitAudioDevice *audio = find_audio_device_id(runtime,
+                                                                   key);
+                    BlitConfigProblem problem;
+                    if (value[0] != '{' || audio == NULL)
+                        continue;
+                    memset(&problem, 0, sizeof(problem));
+                    if (apply_audio_device_configuration(runtime, audio, value,
+                                                         &problem))
+                        ++applied;
+                    else {
+                        ++refused;
+                        if (refusal[0] == '\0')
+                            snprintf(refusal, sizeof(refusal), "%s: %s", key,
+                                     problem.detail);
+                    }
+                }
+            }
+            settings_mark_dirty(runtime);
+            settings_flush(runtime, 1);
+            {
+                size_t used = 0;
+                json_appendf(body, sizeof(body), &used,
+                             "{\"revision\":%llu,\"path\":\"%s\","
+                             "\"persisted\":true,\"applied\":%d,"
+                             "\"refused\":%d,\"refusal\":\"%s\","
+                             "\"document\":%s}",
+                             runtime->settings_revision,
+                             runtime->settings_path, applied, refused,
+                             refusal, document);
+            }
+            send_http(fd, 200, "OK", "application/json", body);
+            return;
+        }
+    }
     if (strcmp(path, "/v1/topology") == 0 && strcmp(method, "PUT") == 0) {
         int columns;
         int rows;
@@ -14810,17 +15575,12 @@ static void handle_request(int fd, BlitRuntime *runtime,
         const char *audio_id = path + strlen("/v1/audio/");
         BlitAudioDevice *audio = find_audio_device_id(runtime, audio_id);
         char configuration[512];
-        char scalars[512];
         const char *configuration_cursor = json_key_cursor(payload,
                                                            "configuration");
-        const char *rejected;
+        BlitConfigProblem problem;
         int requested_revision = 0;
         int has_requested_revision = json_key_cursor(payload,
                                                      "revision") != NULL;
-        int make_default = 0;
-        int default_requested;
-        int changed = 0;
-        int i;
 
         if (*audio_id == '\0' || audio == NULL) {
             send_problem(fd, 404, "Not Found", "audio_device_not_found",
@@ -14847,48 +15607,18 @@ static void handle_request(int fd, BlitRuntime *runtime,
             return;
         if (configuration_cursor == NULL ||
             !json_object_slice(configuration_cursor, configuration,
-                               sizeof(configuration)) ||
-            !json_object_scalars(configuration, scalars, sizeof(scalars))) {
+                               sizeof(configuration))) {
             send_problem(fd, 400, "Bad Request", "invalid_device_configuration",
                          "A device update carries its writable properties under configuration, as a JSON object.");
             return;
         }
-        rejected = audio_device_rejected_property(configuration);
-        if (rejected != NULL) {
-            char detail[256];
-            snprintf(detail, sizeof(detail),
-                     "An audio device configuration carries \"%s\", which is "
-                     "not a writable property. Writable: default.", rejected);
-            send_problem(fd, 400, "Bad Request", "invalid_device_property",
-                         detail);
+        if (!apply_audio_device_configuration(runtime, audio, configuration,
+                                              &problem)) {
+            send_problem(fd, problem.status, problem.title, problem.code,
+                         problem.detail);
             return;
         }
-        default_requested = json_bool(scalars, "default", &make_default);
-        if (json_key_cursor(scalars, "default") != NULL && !default_requested) {
-            send_problem(fd, 400, "Bad Request", "invalid_device_configuration",
-                         "default must be a JSON boolean.");
-            return;
-        }
-        if (default_requested && make_default != audio->is_default) {
-            if (make_default) {
-                /* One default per direction: choosing an output is choosing
-                   between outputs, so the others give it up. */
-                for (i = 0; i < BLIT_MAX_AUDIO_DEVICES; ++i) {
-                    BlitAudioDevice *other = &runtime->audio_devices[i];
-                    if (other->used && other != audio && other->is_default &&
-                        other->playback == audio->playback) {
-                        other->is_default = 0;
-                        ++other->revision;
-                    }
-                }
-            }
-            audio->is_default = make_default;
-            changed = 1;
-        }
-        if (changed) {
-            ++audio->revision;
-            ++runtime->audio_devices_revision;
-        }
+        settings_mark_dirty(runtime);
         if (audio_device_item_json(audio, body, sizeof(body)) >=
             sizeof(body)) {
             send_problem(fd, 500, "Internal Server Error",
@@ -14955,6 +15685,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
                          problem.detail);
             return;
         }
+        settings_mark_dirty(runtime);
         if (input_device_item_json(runtime, device, body, sizeof(body)) >=
             sizeof(body)) {
             send_problem(fd, 500, "Internal Server Error",
@@ -15204,6 +15935,9 @@ static void handle_request(int fd, BlitRuntime *runtime,
         send_http(fd, 200, "OK", "application/json", body);
     } else if (strcmp(path, "/v1/fonts") == 0) {
         fonts_json(runtime, body, sizeof(body));
+        send_http(fd, 200, "OK", "application/json", body);
+    } else if (strcmp(path, "/v1/settings") == 0) {
+        settings_json(runtime, body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
     } else if (strcmp(path, "/v1/diagnostics") == 0) {
         diagnostics_json(runtime, body, sizeof(body));
@@ -20611,6 +21345,31 @@ int main(int argc, char **argv)
         const char *expect = getenv("BLIT_EXPECT_DESKTOP");
         runtime.expect_desktop = expect != NULL && expect[0] == '1';
     }
+    /* ADR 0067. The settings document, read before the first scan so that a
+       device found at boot acquires its stored configuration in the same place
+       a device hotplugged an hour later does.
+     *
+     * BLIT_SETTINGS=ignore is the recovery path that does not need the API: a
+     * stored setting can be valid and still lock the machine out --
+     * enabled:false on the only keyboard -- and an API-only deployment has
+     * nothing else to reach for. It starts from the defaults and leaves the
+     * document alone, because an operator recovering a machine should not also
+     * lose what was in it. BLIT_SETTINGS_PATH exists so a gate can point the
+     * document somewhere writable; the deployed path is the packaged one. */
+    {
+        const char *mode = getenv("BLIT_SETTINGS");
+        const char *path = getenv("BLIT_SETTINGS_PATH");
+        snprintf(runtime.settings_path, sizeof(runtime.settings_path), "%s",
+                 path != NULL && path[0] != '\0' ? path :
+                     "/var/lib/blit/settings.json");
+        runtime.settings_enabled = !(mode != NULL &&
+                                     strcmp(mode, "ignore") == 0);
+        settings_load(&runtime);
+        if (!runtime.settings_enabled)
+            fprintf(stderr, "blit: BLIT_SETTINGS=ignore; starting from the "
+                            "defaults and leaving %s alone\n",
+                    runtime.settings_path);
+    }
     snprintf(runtime.listener_bind, sizeof(runtime.listener_bind), "%s",
              bind_address);
     runtime.listener_port = port;
@@ -20963,6 +21722,7 @@ int main(int argc, char **argv)
            land between the drain and the select, and the queue is cheap to
            check. The pipe is what stops select() sleeping through one. */
         service_evdev_opener(&runtime, 1);
+        settings_flush(&runtime, 0);
         if (ready > 0 && FD_ISSET(server_fd, &readable)) {
             client_fd = accept(server_fd, NULL, NULL);
             if (client_fd < 0) {
@@ -21105,6 +21865,12 @@ int main(int argc, char **argv)
             if (runtime.evdev_gamepad_fds[input_index] >= 0)
                 close(runtime.evdev_gamepad_fds[input_index]);
     }
+    /* The settings flush, forced. This is one place rather than three because
+       issue #63 made the exit paths converge: the API restart's exec, the
+       update install's exit and SIGTERM all return through here. A write
+       accepted inside the coalescing window must still reach the disk, and a
+       restart is exactly when it would not. */
+    settings_flush(&runtime, 1);
     destroy_outputs(&runtime);
     blit_font_free(&runtime.font);
     if (runtime.sdl_ready)
