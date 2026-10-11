@@ -1,0 +1,186 @@
+release: 0.1.448
+package: blit_0.1.448-1_amd64.deb
+package_sha256: 24cd2ed61d6677c56a0229be8f206e1ac3d908185e39067b8448ada1c775a78e
+source_commit: 999e7aa655356ca7f65a44ca5934bd87c25c4f6a
+package_documentation_commit: 999e7aa655356ca7f65a44ca5934bd87c25c4f6a
+server_binary_sha256: c6a5e7e7ed6210fad918ed6140cf43a8e08cf86be1e6276487070330e7e7ce68
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: ed37dff18e0ba8ad638990b28287ab1aeb22ada5fe7345a3eb17a39733598d87
+hibr_root: /tmp/hibr-0.99.100
+hibr_version: 0.99.100
+tcc_build_acceptance: pass
+openapi_yaml: pass
+api_schema_gate: pass_36_paths
+package_artifact_acceptance: pass_manifest_hashes_match_package_and_reproducible
+network_auth_acceptance: pass_four_listener_postures_loopback_default_refusal_and_override_warning
+terminal_conformance: pass_with_sixel_bound_hls_palette_and_decsdm
+live_terminal_feature_acceptance: carried_from_0_1_447
+session_lifecycle_acceptance: pass
+session_write_resize_acceptance: pass
+stream_replay_acceptance: pass
+font_api_acceptance: pass
+hibr_font_manifest_acceptance: pass
+glyph_geometry_local_pixel_acceptance: pass
+sdl_glyph_filter_acceptance: pass
+external_pointer_composition: pass
+pointer_damage_atomic_acceptance: pass_three_consecutive_runs_frame_counter_wait
+pointer_wallpaper_stress_acceptance: pass
+hidden_cursor_damage_acceptance: pass
+sdl_background_batch_acceptance: pass
+sdl_graphics_cache_acceptance: pass
+sdl_wallpaper_damage_acceptance: pass
+screenshot_overlay_acceptance: pass
+pixel_frame_acceptance: pass
+render_state_agreement_acceptance: pass
+adapter_coalesce_acceptance: pass_idle_frame_zero_requests
+kitty_placement_pixel_acceptance: pass_crop_offset_numbered_and_z_order_by_pixel
+kitty_placement_conformance_acceptance: pass_delete_targets_and_unsupported_key_refusals
+sixel_decoder_pixel_acceptance: pass_ten_scenarios_palette_hls_bound_p2_cursor_decsdm_scroll
+sixel_decoder_teeth: pass_ten_of_ten_scenarios_fail_pre_change_32_checks
+graphics_bound_publication_acceptance: pass_diagnostics_equals_xtsmgraphics_equals_enforced
+sync_output_acceptance: pass_held_frame_and_hidden_writes_one_and_two_surfaces
+cell_paint_acceptance: pass_cursor_glyph_italic_distinct_session_defaults
+pointer_geometry_acceptance: pass_inset_honoured_and_pane_less_at_corner
+mouse_report_acceptance: pass_wheel_byte_96_hover_gated_per_cell_drops_counted
+key_encoding_acceptance: pass_119_encodings_plus_per_device_keymap_and_modifiers
+frame_quiet_starvation_acceptance: pass_longest_stagnant_run_1_was_29
+capture_witness_acceptance: pass_one_source_presented_flag_presented_revision
+motion_trail_acceptance: pass_799_blank_cells_no_unaccounted_pixels
+render_state_agreement_acceptance: pass_30_blue_cells_was_vacuous
+bold_cell_containment_acceptance: pass_8px_drawn_0_spilled
+wide_glyph_acceptance: pass_4_samples_4_distinct_shapes_two_cells_each
+font_identity_acceptance: pass_929_1182_primary_and_49899_16x16_wide
+desktop_repaint_acceptance: pass_pty_authored_0_cells_unpainted_reported_after_window_retires
+gate_port_isolation_acceptance: carried_from_0_1_431
+input_identity_acceptance: carried_from_0_1_433
+input_device_api_acceptance: carried_from_0_1_432
+input_device_config_acceptance: pass_one_rule_for_where_a_property_applies
+input_device_route_acceptance: carried_from_0_1_436
+audio_device_api_acceptance: pass_node_is_the_authority_hotplug_retires_three_runs
+display_device_api_acceptance: pass_envelope_item_matches_collection_no_writable_property
+main_block_key_table_acceptance: carried_from_0_1_435
+live_input_device_table_acceptance: carried_from_0_1_433
+live_input_device_config_acceptance: pass_one_rule_for_where_a_property_applies
+live_main_block_key_acceptance: carried_from_0_1_435
+live_per_device_keymap_acceptance: carried_from_0_1_441
+live_device_kinds_acceptance: carried_from_0_1_442
+live_listener_posture_acceptance: carried_from_0_1_443
+live_evdev_opener_acceptance: carried_from_0_1_444
+live_output_occupancy_acceptance: carried_from_0_1_445
+live_device_routing_acceptance: carried_from_0_1_436
+live_audio_device_acceptance: pass_12_pcms_unchanged_by_node_authority_all_accessible
+json_escape_acceptance: carried_from_0_1_431
+live_cell_property_refusal_acceptance: carried_from_0_1_431
+live_unpainted_report_acceptance: carried_from_0_1_430
+live_wide_glyph_acceptance: carried_from_0_1_428
+live_render_state_agreement_acceptance: carried_from_0_1_427
+evdev_scan_open_count_acceptance: carried_from_0_1_431
+evdev_open_latency_acceptance: carried_from_0_1_444
+output_occupancy_acceptance: pass_warning_always_error_only_when_declared
+performance_schema_agreement_acceptance: pass_89_required_89_described_both_directions
+graphics_kitty_zlib_acceptance: pass_pixel_crc32_identical_to_raw
+graphics_xtsmgraphics_acceptance: pass_no_scroll_and_4096_square_reported
+terminal_kitty_keyboard_acceptance: pass_cursor_unmoved_query_reports_zero
+hibr_singleton_local_acceptance: pass
+hibr_resume_guard_acceptance: pass
+restart_gate: pass
+shutdown_gate: pass
+update_idle_timeout_acceptance: pass
+update_reset_acceptance: pass
+update_cancel_acceptance: pass
+frame_rate_settled_acceptance: pass
+terminal_soak_120s_acceptance: pass
+screenshot_nonblocking_live_acceptance: not_rerun_candidate
+qemu_hibr_lifecycle_acceptance: not_rerun_candidate
+qemu_four_output_pixel_acceptance: not_rerun_candidate
+qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
+live_deployment: pending
+live_current_version: pending
+live_block_cursor_acceptance: carried_from_0_1_425
+live_italic_acceptance: carried_from_0_1_425
+live_session_default_acceptance: carried_from_0_1_425
+live_sync_output_acceptance: carried_from_0_1_425
+live_hibr_desktop_acceptance: pending
+live_idle_frame_acceptance: carried_from_0_1_425
+live_physical_multi_display: unavailable_one_output
+live_physical_button_trace_contract: open
+physical_evdev_acceptance: open
+physical_multi_monitor_acceptance: open
+physical_high_refresh_acceptance: open
+notes: >-
+  The sixel group: #8, #9, #10 and #11, which are one function and were one
+  story -- a stream a VT340 draws produced either nothing or something
+  visibly wrong.
+
+  #8. The bound was a literal 512 and overflow discarded the whole image
+  instead of clipping. A terminal-width image on this host's 1920-pixel
+  output was refused outright. Sixel has no reliable size declaration, so a
+  decoder that aborts on the first out-of-range pixel throws away images it
+  could have drawn. The bound is the graphics image bound now -- 4096 square,
+  which at four bytes a pixel is exactly the 64 MiB graphics byte budget --
+  and the canvas grows band by band, so an 80x40 picture does not pay for a
+  full-size buffer.
+
+  Two of #8's parts were separate bugs in the same place. The non-repeat band
+  check was `y + 5 >= 512`, which refused a band whose first bit alone was in
+  range. And `!` carried its own 512 cap, so `!1920~` would still have been
+  refused after the buffer grew. The duplication that hid the first is gone
+  too: a pixel is written in one place now, which is how the off-by-one came
+  to exist in one of two inlined copies and not the other.
+
+  #9. Pu=1 discarded the image. HLS is the VT340's own colour model and an
+  approximate conversion is visibly fine, so rejecting was the worst
+  available outcome. DEC puts blue at zero degrees, so the angle is rotated
+  before the usual conversion: 120 is red and 240 is green, which is what the
+  vectors pin. Components clamp; a colour space Blit does not model leaves
+  the register alone rather than costing the picture.
+
+  #10. Every colour register was white except index 0, so an image that
+  defined some colours and defaulted the rest rendered partly correct and
+  partly as white blocks -- harder to diagnose than a failure, because the
+  image did appear. The first sixteen are the VT340's documented colours now
+  and the rest come from the same 256-colour palette the text path uses,
+  which also removed the duplicate cube-and-ramp arithmetic.
+  terminal_indexed_colour is the one rule for what an index means. The
+  palette belongs to the session, not to one DCS string; RIS and DECSTR drop
+  it.
+
+  #11. P2 was never read, so every image behaved as "transparent background"
+  while a bare `DCS q` asks for the opposite. The cursor never moved, so text
+  printed after an image was written over it and several images stacked at one
+  origin. Modes 80 and 8452 did not exist.
+
+  Mode 80's polarity is load-bearing and was checked against xterm's own
+  ctlseqs before a line was written, not assumed from the ticket's wording.
+  DECSDM *set* is display mode -- image homed, cursor untouched; reset, the
+  power-up default, is sixel scrolling. xterm carried the inverse for years,
+  which is exactly why DECRQM has to answer, and it does. Blit differs from
+  DEC on one point and docs/terminal-engine.md says so: in display mode DEC
+  clips to the graphics region, Blit clips to the screen.
+
+  Recorded rather than fixed: an image sits at an absolute pixel offset and
+  does not move when the text scrolls later. The scroll a sixel image causes
+  is accounted for in that image's own origin, which is what #11 asked for;
+  making previously placed images follow the text is a separate change and is
+  filed as one.
+
+  The gate reads the framebuffer, because state cannot tell these apart -- a
+  rejected image and an image full of white blocks both leave the session
+  document looking healthy. Ten scenarios, each in its own session, since
+  BLIT_GRAPHICS_MAX_IMAGES is 8 and the scenario that scrolls the screen 249
+  times should not share a surface with one about to read pixels.
+
+  Teeth: against a binary built from this tree with the change reverted, all
+  ten scenarios fail, 32 individual checks. Measured on both binaries rather
+  than inferred -- XTSMGRAPHICS item 2 answered
+
+    pre-change   ESC [ ? 2 ; 0 ; 512 ; 512 S
+    post-change  ESC [ ? 2 ; 0 ; 4096 ; 4096 S
+
+  and the DECRQM default-state vector answered 0, unrecognised, rather than 2.
+
+  One gate-harness fix found while reading the teeth output: the PASS lines
+  printed unconditionally after a block that could fail, so the gate read
+  green above its own failures. A PASS line is earned now.
+
+  Suite: 50 pass, 5 skip, 0 fail.
