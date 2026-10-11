@@ -53,8 +53,13 @@ retiring the stale detached Hibr hold left by the failed run, the ordinary
 packaged `blit-session.hibr` API launch stayed `running`, registered its owner,
 and reached 32,400 printable cells at 240x135. The captured 1920x2160
 framebuffer contained the Hibr menu bar, wallpaper, desktop icons, and status
-line. A versioned API input write was accepted while the owner remained
-registered. This is live one-output evidence; physical pointer events and
+line **as terminal cell art**: that capture holds ten distinct colours in
+total and no bitmap was presented at any point -- `graphics_images` was 0,
+`graphics_texture_uploads` 0 and `pixel_frames_accepted` 0. The wording above
+used to stop at "contained the Hibr menu bar, wallpaper, desktop icons, and
+status line", which is true of cell art and easy to read as a picture having
+been presented. It had not been (issue #19). A versioned API input write was
+accepted while the owner remained registered. This is live one-output evidence; physical pointer events and
 additional physical outputs remain open.
 
 The same live 0.1.409 service now has explicit API routes for the discovered

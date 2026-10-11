@@ -211,6 +211,7 @@ it with surface updates. The harness therefore also requests filtered views:
 /v1/diagnostics/trace?kind=keyboard_key
 /v1/diagnostics/trace?kind=surface_update
 /v1/diagnostics/trace?kind=render_path
+/v1/diagnostics/trace?kind=graphics_payload
 ```
 
 Filtering changes only the diagnostic response; it does not alter input,
@@ -242,6 +243,36 @@ uses the safe default; the oldest matching events are discarded first.
 not every
 deferred cell chunk. This keeps the bounded trace useful under high-volume
 terminal output while preserving the atomic-frame evidence.
+
+`graphics_payload` is one entry per Kitty or sixel payload that reached the
+terminal parser, written after the decode so it records both what arrived and
+what became of it:
+
+```text
+protocol=sixel session=session-3 bytes=1942 header=DCS0;1;0q
+  images=0->1 rejected=0 reason=-
+protocol=kitty session=session-3 bytes=42 header=Ga=T,f=24,s=2,v=2,t=f,q=2
+  images=0->0 rejected=1 reason=unsupported-key
+```
+
+This is the only way to tell a producer that sent no image from an image Blit
+decoded and discarded: both leave a session with zero images, no errors and a
+healthy document (issue #19). `header` is the leading control bytes, captured
+before the decoder runs, because the Kitty decoder writes into the buffer it
+parses.
+
+These entries have their own ring rather than sharing the one that holds input
+and render evidence. Graphics payloads arrive at whatever rate the application
+sends them -- a video player through Kitty is as busy as a terminal redrawing
+-- and the point of that ring is that a busy producer cannot evict the causal
+evidence; sharing it would have traded one blind spot for another. The
+counters `graphics_payloads`, `graphics_payloads_kitty`,
+`graphics_payloads_sixel` and `graphics_payloads_rejected` in the performance
+document survive eviction of any ring, so a zero there is the strongest form
+of "nothing arrived".
+
+An unfiltered trace request still returns the surface ring, as it always has,
+so `graphics_payload` has to be named to be read.
 
 ## Real-host troubleshooting protocol
 

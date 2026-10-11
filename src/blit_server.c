@@ -933,6 +933,14 @@ typedef struct {
     int diagnostic_critical_trace_count;
     int diagnostic_critical_trace_next;
     char diagnostic_critical_trace[BLIT_MAX_TRACE_EVENTS][768];
+    /* Graphics payloads get their own ring. They arrive at whatever rate the
+       application sends them -- a video player through Kitty is as busy as a
+       terminal redrawing -- and the critical ring exists precisely so a busy
+       producer cannot evict input and render evidence. Sharing it would have
+       traded one blind spot for another (issue #19). */
+    int diagnostic_graphics_trace_count;
+    int diagnostic_graphics_trace_next;
+    char diagnostic_graphics_trace[BLIT_MAX_TRACE_EVENTS][768];
     int sdl_screenshot_written;
     uint32_t screenshot_requested_mask;
     char sdl_error[256];
@@ -940,6 +948,16 @@ typedef struct {
     char update_token[256];
     char update_state[32];
     char update_detail[256];
+    /* Graphics payloads as they enter the terminal parser, counted before
+       anything can reject them. Without these, "the producer sent no image"
+       and "Blit discarded the image" look identical from outside: both leave
+       a session with zero images and a healthy document (issue #19). The
+       trace entry beside them carries the detail; these survive its
+       eviction. */
+    unsigned long long graphics_payloads;
+    unsigned long long graphics_payloads_kitty;
+    unsigned long long graphics_payloads_sixel;
+    unsigned long long graphics_payloads_rejected;
 } BlitRuntime;
 
 static unsigned long long blit_graphics_generation;
@@ -1900,7 +1918,11 @@ static void diagnostic_trace(BlitRuntime *runtime, const char *kind,
     if (runtime == NULL)
         return;
     json_escape(detail != NULL ? detail : "", escaped, sizeof(escaped));
-    if (kind != NULL && strcmp(kind, "surface_update") != 0) {
+    if (kind != NULL && strcmp(kind, "graphics_payload") == 0) {
+        events = runtime->diagnostic_graphics_trace;
+        event_count = &runtime->diagnostic_graphics_trace_count;
+        event_next = &runtime->diagnostic_graphics_trace_next;
+    } else if (kind != NULL && strcmp(kind, "surface_update") != 0) {
         events = runtime->diagnostic_critical_trace;
         event_count = &runtime->diagnostic_critical_trace_count;
         event_next = &runtime->diagnostic_critical_trace_next;
@@ -1926,13 +1948,20 @@ static void diagnostic_trace_json(BlitRuntime *runtime, char *body,
                                   int limit)
 {
     size_t used = 0;
-    int critical = kind_filter != NULL && kind_filter[0] != '\0' &&
+    /* Which ring the filter is asking about. An absent filter still means the
+       surface ring, as it always has. */
+    int named = kind_filter != NULL && kind_filter[0] != '\0';
+    int graphics = named && strcmp(kind_filter, "graphics_payload") == 0;
+    int critical = named && !graphics &&
         strcmp(kind_filter, "surface_update") != 0;
-    char (*events)[768] = critical ? runtime->diagnostic_critical_trace :
+    char (*events)[768] = graphics ? runtime->diagnostic_graphics_trace :
+        critical ? runtime->diagnostic_critical_trace :
         runtime->diagnostic_trace;
-    int count = critical ? runtime->diagnostic_critical_trace_count :
+    int count = graphics ? runtime->diagnostic_graphics_trace_count :
+        critical ? runtime->diagnostic_critical_trace_count :
         runtime->diagnostic_trace_count;
-    int next = critical ? runtime->diagnostic_critical_trace_next :
+    int next = graphics ? runtime->diagnostic_graphics_trace_next :
+        critical ? runtime->diagnostic_critical_trace_next :
         runtime->diagnostic_trace_next;
     int index = (next - count +
                  BLIT_MAX_TRACE_EVENTS) % BLIT_MAX_TRACE_EVENTS;
@@ -2183,6 +2212,9 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"stream_queue_bytes\":%llu,\"stream_queue_peak_bytes\":%llu,"
         "\"stream_dropped_events\":%llu,"
         "\"stream_backpressure_disconnects\":%llu,"
+        "\"graphics_payloads\":%llu,\"graphics_payloads_kitty\":%llu,"
+        "\"graphics_payloads_sixel\":%llu,"
+        "\"graphics_payloads_rejected\":%llu,"
         "\"graphics_cache_hits\":%llu,\"graphics_texture_uploads\":%llu,"
         "\"last_graphics_upload_ms\":%.3f,\"max_graphics_upload_ms\":%.3f,"
         "\"background_batches\":%llu,\"background_quads\":%llu,"
@@ -2266,6 +2298,10 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         runtime->diagnostic_stream_queue_peak_bytes,
         runtime->diagnostic_stream_dropped_events,
         runtime->diagnostic_stream_backpressure_disconnects,
+        runtime->graphics_payloads,
+        runtime->graphics_payloads_kitty,
+        runtime->graphics_payloads_sixel,
+        runtime->graphics_payloads_rejected,
         diagnostic_graphics_cache_hits(runtime),
         diagnostic_graphics_texture_uploads(runtime),
         diagnostic_last_graphics_upload_ms(runtime),
@@ -8463,15 +8499,88 @@ static void terminal_report_termcap(BlitSession *session,
     }
 }
 
-static void terminal_apply_string(BlitSession *session, BlitSurface *surface)
+/* How many of this session's image slots are in use. The decode outcome is
+   read as a delta across it, because a graphics sequence can also replace or
+   delete an image rather than add one. */
+static int session_graphics_in_use(const BlitSession *session)
+{
+    int count = 0;
+    int i;
+
+    for (i = 0; i < BLIT_GRAPHICS_MAX_IMAGES; ++i)
+        if (session->graphics[i].used)
+            ++count;
+    return count;
+}
+
+/* One trace entry per graphics payload that reaches the parser, carrying what
+   arrived and what became of it.
+
+   Issue #19 is the reason this exists: the live desktop presents no bitmap at
+   all, and from outside Blit "the producer never sent an image" and "Blit
+   decoded it and threw it away" are the same observation -- zero images, no
+   errors, a healthy session. The entry is written after the decode so it can
+   say which of the two happened, and `kind` is a graphics kind rather than
+   `surface_update`, so a busy external terminal cannot evict it; the counters
+   on the runtime survive even that. */
+static void trace_graphics_payload(BlitRuntime *runtime, BlitSession *session,
+                                   const char *protocol, const char *header,
+                                   int bytes, int images_before,
+                                   unsigned long rejected_before)
+{
+    char detail[512];
+    int images_after = session_graphics_in_use(session);
+    unsigned long rejected = session->graphics_rejected - rejected_before;
+
+    ++runtime->graphics_payloads;
+    if (strcmp(protocol, "kitty") == 0)
+        ++runtime->graphics_payloads_kitty;
+    else
+        ++runtime->graphics_payloads_sixel;
+    if (rejected > 0)
+        ++runtime->graphics_payloads_rejected;
+    snprintf(detail, sizeof(detail),
+             "protocol=%s session=session-%llu bytes=%d header=%s "
+             "images=%d->%d rejected=%lu reason=%s",
+             protocol, session->id, bytes, header, images_before,
+             images_after, rejected,
+             rejected > 0 && session->graphics_last_error[0] != '\0' ?
+                 session->graphics_last_error : "-");
+    diagnostic_trace(runtime, "graphics_payload", detail);
+}
+
+/* The leading control bytes of a payload, for the trace. Taken before the
+   decoder runs because terminal_apply_kitty writes into the buffer it
+   parses. */
+static void graphics_payload_header(const char *payload, char *out,
+                                    size_t capacity)
+{
+    size_t length = 0;
+
+    while (payload[length] != '\0' && payload[length] != ';' &&
+           length + 1 < capacity && length < 48)
+        ++length;
+    memcpy(out, payload, length);
+    out[length] = '\0';
+}
+
+static void terminal_apply_string(BlitRuntime *runtime, BlitSession *session,
+                                  BlitSurface *surface)
 {
     const char *payload = session->terminal_string;
     char reply[512];
+    char header[64];
+    int payload_bytes = session->terminal_string_length;
+    int images_before = session_graphics_in_use(session);
+    unsigned long rejected_before = session->graphics_rejected;
     int used;
 
     session->terminal_string[session->terminal_string_length] = '\0';
     if (session->terminal_string_type == '_') {
+        graphics_payload_header(payload, header, sizeof(header));
         terminal_apply_kitty(session, surface);
+        trace_graphics_payload(runtime, session, "kitty", header,
+                               payload_bytes, images_before, rejected_before);
         return;
     }
     if (session->terminal_string_type != 'P')
@@ -8514,8 +8623,13 @@ static void terminal_apply_string(BlitSession *session, BlitSurface *surface)
             /* P1 is the pixel aspect ratio and P3 the horizontal grid size,
                both of which Blit draws at 1:1 and so ignores; P2 is the
                background select the decoder needs (issue #11). */
+            snprintf(header, sizeof(header), "DCS%d;%d;%dq", positional[0],
+                     positional[1], positional[2]);
             terminal_apply_sixel(session, surface, introducer + 1,
                                  positional[1]);
+            trace_graphics_payload(runtime, session, "sixel", header,
+                                   payload_bytes, images_before,
+                                   rejected_before);
             return;
         }
     }
@@ -9989,7 +10103,8 @@ advance_cursor:
     }
 }
 
-static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
+static int terminal_consume_output(BlitRuntime *runtime, BlitSession *session,
+                                   BlitSurface *surface,
                                    const unsigned char *data, size_t length)
 {
     unsigned char combined[sizeof(session->terminal_utf8_pending) + 768];
@@ -10120,7 +10235,8 @@ static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
                 if (session->terminal_string_type == ']')
                     terminal_apply_osc(session, surface);
                 else
-                    terminal_apply_string(session, surface);
+                    terminal_apply_string(runtime, session,
+                                          surface);
                 session->terminal_escape = 0;
             } else if (byte == '\a' && session->terminal_string_type == ']') {
                 terminal_apply_osc(session, surface);
@@ -10139,7 +10255,8 @@ static int terminal_consume_output(BlitSession *session, BlitSurface *surface,
                 if (session->terminal_string_type == ']')
                     terminal_apply_osc(session, surface);
                 else
-                    terminal_apply_string(session, surface);
+                    terminal_apply_string(runtime, session,
+                                          surface);
                 session->terminal_escape = 0;
             } else {
                 session->terminal_escape = 3;
@@ -12839,7 +12956,8 @@ static void service_session_output(BlitRuntime *runtime, int fd)
             if (runtime->sessions[i].surface_mode != BLIT_SURFACE_EXTERNAL &&
                 surface != NULL &&
                 !session_surface_is_owner_authored(&runtime->sessions[i]) &&
-                terminal_consume_output(&runtime->sessions[i], surface, output,
+                terminal_consume_output(runtime, &runtime->sessions[i],
+                                        surface, output,
                                         (size_t)received)) {
                 ++surface->revision;
                 surface_delta_json(surface, surface_event,
