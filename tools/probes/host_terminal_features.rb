@@ -34,8 +34,33 @@ got = rows("stty -icanon -echo min 0 time 5; printf '\\033P+q544e\\033\\\\'; dd 
 tn = got.first.strip
 puts "XTGETTCAP TN: #{tn}"
 failures << "TN: #{tn}" unless tn == '1b50312b72353434453d373837343635373236443244364236393734373437391b5c'
+
+# Issue #2: DECFRA fills a rectangle, and CSI 1;4$r is DECCARA rather than
+# DECSTBM -- which this host measured as identical before 0.1.447.
+got = rows("printf 'AAAA1\\r\\nBBBB2\\r\\nCCCC3\\r\\nDDDD4'; printf '\\033[88;1;1;3;4$x'", 10, 6)
+want = ['XXXX1     ', 'XXXX2     ', 'XXXX3     ', 'DDDD4     ', '          ', '          ']
+puts 'DECFRA:'
+got.each { |r| puts "  |#{r}|" }
+failures << "DECFRA: #{got.inspect}" unless got == want
+
+stbm = rows("printf 'L1\\r\\nL2\\r\\nL3\\r\\nL4\\r\\nL5'; printf '\\033[1;4r\\033[5;1H\\033[2L'", 8, 6)
+cara = rows("printf 'L1\\r\\nL2\\r\\nL3\\r\\nL4\\r\\nL5'; printf '\\033[1;4$r\\033[5;1H\\033[2L'", 8, 6)
+puts "CSI 1;4r  -> #{stbm.map(&:rstrip).inspect}"
+puts "CSI 1;4$r -> #{cara.map(&:rstrip).inspect}"
+failures << 'CSI 1;4$r is still executed as DECSTBM' if stbm == cara
+
+# Issue #5: DECRQSS answers a setting it used to refuse.
+got = rows("stty -icanon -echo min 0 time 5; printf '\\033[2*x'; " \
+           "printf '\\033P$q*x\\033\\\\'; " \
+           "reply=$(dd if=/dev/tty bs=1 count=10 2>/dev/null | od -An -tx1 | " \
+           "tr -d ' \\n'); printf '%s' \"$reply\"", 60, 4)
+sace = got.first.strip
+puts "DECRQSS DECSACE: #{sace}"
+failures << "DECSACE: #{sace}" unless sace == '1b50312472322a781b5c'
+
 if failures.empty?
-  puts 'LIVE_TERMINAL_PASS margins=confined xtgettcap=TN'
+  puts 'LIVE_TERMINAL_PASS margins=confined xtgettcap=TN decfra=filled ' \
+       'deccara=not_decstbm decrqss=decsace'
 else
   failures.each { |f| warn "live terminal: #{f}" }
   exit 1
