@@ -2983,3 +2983,55 @@ routing diagnostics explicit. On the live host, the packaged Hibr entrypoint
 produced one complete 1920x2160 graphics image, and API motion plus both button
 edges reached session 1 with `routing=display-fallback`. This is the expected
 route for a primary display-attached session with no pane ID.
+
+## 0.1.449: the graphics boundary is Hibr's side, measured
+
+Issue #19 asked whether the live desktop presents no bitmap because Hibr never
+sends one or because Blit decodes one and discards it. Before 0.1.449 that
+question could not be answered from Blit's evidence: both leave a session with
+zero images, no errors and a healthy document. It can be now.
+
+Measured on 192.168.10.54 running 0.1.449, with the packaged
+`blit-session.hibr` desktop launched through the API, owner registered, 32,400
+printable cells at 240x135, revision 860:
+
+```
+performance.graphics_payloads            0
+performance.graphics_payloads_kitty      0
+performance.graphics_payloads_sixel      0
+performance.graphics_payloads_rejected   0
+performance.graphics_texture_uploads     0
+performance.graphics_cache_hits          0
+performance.pixel_frames_accepted        0
+surface-1.graphics_images                0
+performance.terminal_bytes           33454
+trace?kind=graphics_payload              0 events
+```
+
+Three independent arrival paths, all zero: no graphics escape sequence reached
+the terminal parser, no API pixel frame arrived, and nothing was rejected.
+33,454 bytes of terminal output did arrive. The desktop is complete and
+correct **cell art** -- the captured 1920x2160 framebuffer holds **9 distinct
+colours**, dominated by `#0d1b2a` over 4,030,905 pixels:
+
+```
+#0d1b2a 4030905   #16324a 64208   #1b3a5c 29730   #000000 16324
+#101820    3775   #cbd5e0  1438   #63b3ed   640   #4a5568   154
+#ffffff      26
+```
+
+The instrument was proven live in the same process rather than assumed: a
+probe session on the same host emitting one sixel moved `graphics_payloads`
+from 0 to 1 and produced
+
+```
+protocol=sixel session=session-2 bytes=21 header=DCS0;0;0q
+  images=0->1 rejected=0 reason=-
+```
+
+So a zero beside the desktop is a measurement, not a dead counter. The
+boundary is on Hibr's side: the desktop emits no image by any route Blit can
+receive one. Blit's graphics decoders are not implicated, and the sixel and
+Kitty gaps fixed in 0.1.446 through 0.1.448 were real but are not the cause of
+this symptom.
+

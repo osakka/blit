@@ -41,7 +41,7 @@ sixel_decoder_teeth: carried_from_0_1_448
 graphics_bound_publication_acceptance: carried_from_0_1_448
 graphics_payload_trace_acceptance: pass_arrival_and_outcome_per_payload_own_ring_negative_asserted
 graphics_payload_trace_teeth: pass_counters_absent_pre_change
-live_graphics_boundary: pending
+live_graphics_boundary: hibr_side_zero_payloads_zero_pixel_frames_9_framebuffer_colours
 sync_output_acceptance: pass_held_frame_and_hidden_writes_one_and_two_surfaces
 cell_paint_acceptance: pass_cursor_glyph_italic_distinct_session_defaults
 pointer_geometry_acceptance: pass_inset_honoured_and_pane_less_at_corner
@@ -98,13 +98,13 @@ screenshot_nonblocking_live_acceptance: not_rerun_candidate
 qemu_hibr_lifecycle_acceptance: not_rerun_candidate
 qemu_four_output_pixel_acceptance: not_rerun_candidate
 qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
-live_deployment: pending
-live_current_version: pending
+live_deployment: pass_supervised_update_verified_0_1_449
+live_current_version: 0.1.449
 live_block_cursor_acceptance: carried_from_0_1_425
 live_italic_acceptance: carried_from_0_1_425
 live_session_default_acceptance: carried_from_0_1_425
 live_sync_output_acceptance: carried_from_0_1_425
-live_hibr_desktop_acceptance: pending
+live_hibr_desktop_acceptance: pass_32400_printable_revision_860
 live_idle_frame_acceptance: carried_from_0_1_425
 live_physical_multi_display: unavailable_one_output
 live_physical_button_trace_contract: open
@@ -164,3 +164,34 @@ notes: >-
   counters are absent and the gate stops on them.
 
   Suite: 51 pass, 5 skip, 0 fail.
+
+  Host-accepted on 192.168.10.54, and #19's boundary settled there rather than
+  argued. The packaged desktop, owner registered, 32,400 printable cells at
+  240x135, revision 860:
+
+    graphics_payloads            0
+    graphics_payloads_kitty      0
+    graphics_payloads_sixel      0
+    graphics_payloads_rejected   0
+    graphics_texture_uploads     0
+    pixel_frames_accepted        0
+    surface-1.graphics_images    0
+    terminal_bytes           33454
+    trace?kind=graphics_payload  0 events
+
+  Three independent arrival paths, all zero, while 33,454 bytes of terminal
+  output did arrive. The captured 1920x2160 framebuffer holds 9 distinct
+  colours, 4,030,905 of its pixels being #0d1b2a: complete, correct cell art
+  and no bitmap at any point.
+
+  The instrument was proven live in the same process rather than assumed -- a
+  probe session emitting one sixel on the same host moved graphics_payloads
+  from 0 to 1 with
+
+    protocol=sixel session=session-2 bytes=21 header=DCS0;0;0q
+      images=0->1 rejected=0 reason=-
+
+  so the desktop's zero is a measurement and not a dead counter. The boundary
+  is Hibr's side; Blit's decoders are not implicated, and the sixel and Kitty
+  gaps fixed in 0.1.446-0.1.448 were real but are not the cause of this
+  symptom.
