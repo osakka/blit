@@ -4,6 +4,7 @@
 #include "blit_kms.h"
 #include "blit_font.h"
 #include "blit_graphics.h"
+#include "blit_input_pointer.h"
 #include "blit_unicode_width.h"
 #include "blit_input_identity.h"
 
@@ -362,6 +363,24 @@ typedef struct {
 #define BLIT_MODIFIER_NUM_LOCK 7
 #define BLIT_MAX_MODIFIER_OVERRIDES 32
 
+/* Issue #67. A pointer's buttons, as against the codes that produce them.
+   The map's keys are evdev codes -- any of them, so BTN_SIDE can be made
+   useful -- and its values are the three buttons a terminal mouse report can
+   carry, plus `none` to disable one. */
+#define BLIT_POINTER_BUTTON_LEFT 0
+#define BLIT_POINTER_BUTTON_MIDDLE 1
+#define BLIT_POINTER_BUTTON_RIGHT 2
+#define BLIT_POINTER_BUTTON_NONE 3
+#define BLIT_POINTER_BUTTON_UNMAPPED (-1)
+#define BLIT_MAX_BUTTON_OVERRIDES 16
+
+#define BLIT_INPUT_SCROLL_STEP_DEFAULT 1
+#define BLIT_INPUT_SCROLL_STEP_MAX 10
+#define BLIT_INPUT_DEADZONE_MAX 50
+#define BLIT_MAX_INVERT_AXES 16
+
+
+
 typedef struct {
     int used;
     int seen;
@@ -401,6 +420,16 @@ typedef struct {
     int keymap_count;
     unsigned short keymap_codes[BLIT_MAX_KEYMAP_OVERRIDES];
     char keymap_levels[BLIT_MAX_KEYMAP_OVERRIDES][4][8];
+    /* Issue #67. A pointer's buttons, its scroll step, its acceleration
+       profile, and a gamepad's deadzone and inverted axes. */
+    int button_count;
+    unsigned short button_codes[BLIT_MAX_BUTTON_OVERRIDES];
+    unsigned char button_targets[BLIT_MAX_BUTTON_OVERRIDES];
+    int scroll_step;
+    int acceleration_adaptive;
+    int deadzone_percent;
+    int invert_axis_count;
+    unsigned short invert_axes[BLIT_MAX_INVERT_AXES];
     /* Issue #66. What a key *is*, as against what it types. Sparse, by evdev
        code, per device for the same reason the keymap is. */
     int modifier_count;
@@ -447,9 +476,6 @@ typedef struct {
     unsigned long long revision;
 } BlitInputDevice;
 
-#define BLIT_INPUT_SENSITIVITY_DEFAULT 100
-#define BLIT_INPUT_SENSITIVITY_MIN 10
-#define BLIT_INPUT_SENSITIVITY_MAX 1000
 
 /* ADR 0064 stage 5: an audio device is one ALSA PCM in one direction, not one
  * card.
@@ -1031,6 +1057,7 @@ typedef struct {
     int settings_enabled;
     int settings_unreadable;
     int settings_dirty;
+    int settings_write_reported;
     uint64_t settings_dirty_us;
     unsigned long long settings_revision;
     char settings_document[BLIT_SETTINGS_CAPACITY];
@@ -3851,6 +3878,7 @@ static BlitInputDevice *record_input_device(BlitRuntime *runtime,
         device->used = 1;
         device->enabled = 1;
         device->sensitivity_percent = BLIT_INPUT_SENSITIVITY_DEFAULT;
+        device->scroll_step = BLIT_INPUT_SCROLL_STEP_DEFAULT;
         /* Until EVIOCGLED reports this keyboard's own LED, assume its keypad
            types digits -- what it did before NumLock was honoured at all. */
         device->num_lock = 1;
@@ -3938,18 +3966,53 @@ static int input_device_supports(const BlitInputDevice *device, unsigned kind)
    device that carries configuration is kept in the table rather than
    retired: a stable id is worthless if what is attached to it evaporates
    while the device is unplugged. */
-/* Scale a relative pointer delta by a device's sensitivity.
- *
- * The pointer position is a float, so the scale does not have to round per
- * event and a 50% setting does not throw away every second count of a
- * one-count movement. The percentage is an integer because the request
- * parser here has json_int and no float reader, and a percentage is the
- * resolution a control panel offers anyway. */
-static float scale_pointer_delta(int value, int sensitivity_percent)
+static const char *input_pointer_button_name(int target)
 {
-    if (sensitivity_percent == BLIT_INPUT_SENSITIVITY_DEFAULT)
-        return (float)value;
-    return (float)value * (float)sensitivity_percent / 100.0f;
+    switch (target) {
+    case BLIT_POINTER_BUTTON_LEFT: return "left";
+    case BLIT_POINTER_BUTTON_MIDDLE: return "middle";
+    case BLIT_POINTER_BUTTON_RIGHT: return "right";
+    case BLIT_POINTER_BUTTON_NONE: return "none";
+    default: return "";
+    }
+}
+
+static int input_pointer_button_from_name(const char *name)
+{
+    int target;
+
+    for (target = BLIT_POINTER_BUTTON_LEFT;
+         target <= BLIT_POINTER_BUTTON_NONE; ++target)
+        if (strcmp(input_pointer_button_name(target), name) == 0)
+            return target;
+    return BLIT_POINTER_BUTTON_UNMAPPED;
+}
+
+/* The button an evdev code produces on this device: its override if it has
+   one, the default for the three a pointer always has, and otherwise nothing
+   -- a code neither mapped nor default is not a button and must not be
+   dispatched as one. */
+static int input_device_button_target(const BlitInputDevice *device,
+                                      unsigned short code)
+{
+    int i;
+
+    if (device != NULL)
+        for (i = 0; i < device->button_count; ++i)
+            if (device->button_codes[i] == code)
+                return (int)device->button_targets[i];
+    if (code == BTN_LEFT) return BLIT_POINTER_BUTTON_LEFT;
+    if (code == BTN_MIDDLE) return BLIT_POINTER_BUTTON_MIDDLE;
+    if (code == BTN_RIGHT) return BLIT_POINTER_BUTTON_RIGHT;
+    return BLIT_POINTER_BUTTON_UNMAPPED;
+}
+
+/* The curve and the scale live in blit_input_pointer.h, as a pure function a
+   gate can assert exactly at its boundaries without a server (issue #67). */
+static float scale_pointer_delta(int value, int sensitivity_percent,
+                                 int adaptive)
+{
+    return blit_scale_pointer_delta(value, sensitivity_percent, adaptive);
 }
 
 static int input_device_configured(const BlitInputDevice *device)
@@ -3957,7 +4020,12 @@ static int input_device_configured(const BlitInputDevice *device)
     return !device->enabled ||
         device->sensitivity_percent != BLIT_INPUT_SENSITIVITY_DEFAULT ||
         device->natural_scroll || device->route_target[0] != '\0' ||
-        device->keymap_count > 0;
+        device->keymap_count > 0 || device->modifier_count > 0 ||
+        device->button_count > 0 || device->acceleration_adaptive ||
+        device->scroll_step > BLIT_INPUT_SCROLL_STEP_DEFAULT ||
+        device->deadzone_percent > 0 || device->invert_axis_count > 0 ||
+        device->repeat_configured || device->caps_lock_boot >= 0 ||
+        device->num_lock_boot >= 0;
 }
 
 /* Record what the opener thread found. The same bookkeeping as
@@ -3985,6 +4053,7 @@ static BlitInputDevice *record_opened_device(BlitRuntime *runtime,
         device->used = 1;
         device->enabled = 1;
         device->sensitivity_percent = BLIT_INPUT_SENSITIVITY_DEFAULT;
+        device->scroll_step = BLIT_INPUT_SCROLL_STEP_DEFAULT;
         device->num_lock = 1;
         device->caps_lock_boot = -1;
         device->num_lock_boot = -1;
@@ -4350,11 +4419,44 @@ static size_t input_device_item_json(const BlitRuntime *runtime,
        input_device_supports applies to the PATCH: a control panel sees
        exactly the properties it may write. A keyboard does not get a
        scroll-direction toggle it cannot use. */
-    if (input_device_supports(device, BLIT_INPUT_KIND_POINTER))
+    if (input_device_supports(device, BLIT_INPUT_KIND_POINTER)) {
         complete &= json_appendf(body, capacity, &used,
-            ",\"sensitivity_percent\":%d,\"natural_scroll\":%s",
+            ",\"sensitivity_percent\":%d,\"natural_scroll\":%s,"
+            "\"scroll_step\":%d,\"acceleration\":{\"profile\":\"%s\"}",
             device->sensitivity_percent,
-            device->natural_scroll ? "true" : "false");
+            device->natural_scroll ? "true" : "false",
+            device->scroll_step > 0 ? device->scroll_step :
+                BLIT_INPUT_SCROLL_STEP_DEFAULT,
+            device->acceleration_adaptive ? "adaptive" : "flat");
+        if (device->button_count > 0) {
+            int button_index;
+            complete &= json_appendf(body, capacity, &used, ",\"buttons\":{");
+            for (button_index = 0; button_index < device->button_count;
+                 ++button_index)
+                complete &= json_appendf(body, capacity, &used,
+                    "%s\"%u\":\"%s\"", button_index == 0 ? "" : ",",
+                    (unsigned)device->button_codes[button_index],
+                    input_pointer_button_name(
+                        (int)device->button_targets[button_index]));
+            complete &= json_appendf(body, capacity, &used, "}");
+        }
+    }
+    if (input_device_supports(device, BLIT_INPUT_KIND_GAMEPAD)) {
+        if (device->deadzone_percent > 0)
+            complete &= json_appendf(body, capacity, &used,
+                ",\"deadzone_percent\":%d", device->deadzone_percent);
+        if (device->invert_axis_count > 0) {
+            int axis_index;
+            complete &= json_appendf(body, capacity, &used,
+                                     ",\"invert_axes\":[");
+            for (axis_index = 0; axis_index < device->invert_axis_count;
+                 ++axis_index)
+                complete &= json_appendf(body, capacity, &used, "%s%u",
+                    axis_index == 0 ? "" : ",",
+                    (unsigned)device->invert_axes[axis_index]);
+            complete &= json_appendf(body, capacity, &used, "]");
+        }
+    }
     /* The keyboard properties, by the same rule. repeat is reported only
        where the kernel autorepeats -- a device without EV_REP has no rate to
        show and none to set (issue #66) -- and the values are what the last
@@ -6089,7 +6191,8 @@ static const char *input_device_rejected_property(const char *configuration)
     static const char *const writable[] = {
         "enabled", "sensitivity_percent", "natural_scroll", "route", "keymap",
         "repeat_delay_ms", "repeat_rate_hz", "caps_lock_boot",
-        "num_lock_boot", "modifiers"
+        "num_lock_boot", "modifiers", "buttons", "scroll_step",
+        "acceleration", "deadzone_percent", "invert_axes"
     };
 
     return json_rejected_property(configuration, writable,
@@ -6102,6 +6205,152 @@ static const char *input_device_rejected_property(const char *configuration)
 static const char *input_modifiers_rejected_property(const char *modifiers)
 {
     return NULL;
+}
+
+/* Parse the button map, and refuse one that sends two codes to one button.
+ *
+ * That refusal is the whole reason this is not a two-line parse. The aggregate
+ * mouse report holds one state per logical button, so two codes aliased onto
+ * one of them means pressing both and releasing one reports released while
+ * the other is still down -- the same defect the modifier remap avoids by
+ * keying its held set on the physical code (issue #66), but here the state
+ * belongs to the terminal protocol and cannot be re-derived.
+ *
+ * The check is on the *effective* map, defaults included, which is what makes
+ * the common mistake catchable: mapping BTN_LEFT to right and leaving
+ * BTN_RIGHT alone leaves both producing right. */
+/* The integers of a JSON array value. json_object_scalars drops arrays, so
+   this reads the one place a configuration needs a list of numbers. */
+static int json_int_array(const char *json, const char *key, int *out,
+                          int capacity, int *count)
+{
+    const char *cursor = json_key_cursor(json, key);
+
+    *count = 0;
+    if (cursor == NULL)
+        return 0;
+    while (*cursor != '\0' && *cursor != '[' && *cursor != ',' &&
+           *cursor != '}')
+        ++cursor;
+    if (*cursor != '[')
+        return -1;
+    ++cursor;
+    for (;;) {
+        char *end = NULL;
+        long value;
+        while (*cursor == ' ' || *cursor == '\t' || *cursor == '\n' ||
+               *cursor == '\r' || *cursor == ',')
+            ++cursor;
+        if (*cursor == ']')
+            return 1;
+        if (*cursor < '0' || *cursor > '9')
+            return -1;
+        value = strtol(cursor, &end, 10);
+        if (end == cursor || *count >= capacity)
+            return -1;
+        out[(*count)++] = (int)value;
+        cursor = end;
+    }
+}
+
+static int parse_input_buttons(const char *buttons, BlitInputDevice *parsed,
+                               const char **reason)
+{
+    static char detail[256];
+    const char *cursor = buttons;
+    char key[32];
+    char value[64];
+    unsigned short effective_codes[BLIT_MAX_BUTTON_OVERRIDES + 3];
+    int effective_targets[BLIT_MAX_BUTTON_OVERRIDES + 3];
+    int effective_count = 0;
+    int i;
+    int j;
+
+    parsed->button_count = 0;
+    while (*cursor != '\0' && *cursor != '{')
+        ++cursor;
+    if (*cursor != '{') {
+        *reason = "buttons must be a JSON object of evdev code to button.";
+        return 0;
+    }
+    ++cursor;
+    while ((cursor = json_next_member(cursor, key, sizeof(key), value,
+                                      sizeof(value))) != NULL) {
+        char *end = NULL;
+        long code = strtol(key, &end, 10);
+        int target;
+        char name[32];
+        size_t length;
+        if (end == key || (end != NULL && *end != '\0') || code < 1 ||
+            code > KEY_MAX) {
+            *reason = "every key of buttons must be an evdev code from 1 "
+                      "through KEY_MAX.";
+            return 0;
+        }
+        length = strlen(value);
+        if (value[0] != '"' || length < 2 || value[length - 1] != '"' ||
+            length - 2 >= sizeof(name)) {
+            *reason = "every value of buttons must be left, middle, right or "
+                      "none.";
+            return 0;
+        }
+        memcpy(name, value + 1, length - 2);
+        name[length - 2] = '\0';
+        target = input_pointer_button_from_name(name);
+        if (target == BLIT_POINTER_BUTTON_UNMAPPED) {
+            *reason = "a button must be one of left, middle, right, none.";
+            return 0;
+        }
+        if (parsed->button_count >= BLIT_MAX_BUTTON_OVERRIDES) {
+            *reason = "too many button overrides for one device.";
+            return 0;
+        }
+        parsed->button_codes[parsed->button_count] = (unsigned short)code;
+        parsed->button_targets[parsed->button_count] = (unsigned char)target;
+        ++parsed->button_count;
+    }
+    /* The effective map: every overridden code, plus the three defaults that
+       no override has claimed. */
+    for (i = 0; i < parsed->button_count; ++i) {
+        effective_codes[effective_count] = parsed->button_codes[i];
+        effective_targets[effective_count] = (int)parsed->button_targets[i];
+        ++effective_count;
+    }
+    {
+        static const unsigned short defaults[3] = {
+            BTN_LEFT, BTN_MIDDLE, BTN_RIGHT
+        };
+        static const int default_targets[3] = {
+            BLIT_POINTER_BUTTON_LEFT, BLIT_POINTER_BUTTON_MIDDLE,
+            BLIT_POINTER_BUTTON_RIGHT
+        };
+        for (i = 0; i < 3; ++i) {
+            int overridden = 0;
+            for (j = 0; j < parsed->button_count; ++j)
+                if (parsed->button_codes[j] == defaults[i])
+                    overridden = 1;
+            if (overridden)
+                continue;
+            effective_codes[effective_count] = defaults[i];
+            effective_targets[effective_count] = default_targets[i];
+            ++effective_count;
+        }
+    }
+    for (i = 0; i < effective_count; ++i)
+        for (j = i + 1; j < effective_count; ++j)
+            if (effective_targets[i] == effective_targets[j] &&
+                effective_targets[i] != BLIT_POINTER_BUTTON_NONE) {
+                snprintf(detail, sizeof(detail),
+                         "codes %u and %u would both produce the %s button, "
+                         "and one state cannot be held by two codes. Map the "
+                         "other one too, or map it to none.",
+                         (unsigned)effective_codes[i],
+                         (unsigned)effective_codes[j],
+                         input_pointer_button_name(effective_targets[i]));
+                *reason = detail;
+                return 0;
+            }
+    return 1;
 }
 
 static int parse_input_modifiers(const char *modifiers,
@@ -14295,6 +14544,21 @@ static int apply_input_device_configuration(BlitRuntime *runtime,
     const char *modifiers_cursor;
     static BlitInputDevice parsed_modifiers;
     int modifiers_requested = 0;
+    char buttons[1024];
+    const char *buttons_cursor;
+    static BlitInputDevice parsed_buttons;
+    int buttons_requested = 0;
+    int scroll_step = 0;
+    int scroll_step_requested;
+    char acceleration[128];
+    const char *acceleration_cursor;
+    int acceleration_adaptive = 0;
+    int acceleration_requested = 0;
+    int deadzone = 0;
+    int deadzone_requested;
+    int invert_axes[BLIT_MAX_INVERT_AXES];
+    int invert_axis_count = 0;
+    int invert_requested;
     int changed = 0;
 
     /* An unknown property is refused and named. Accepting it silently is
@@ -14429,6 +14693,116 @@ static int apply_input_device_configuration(BlitRuntime *runtime,
             return 0;
         }
         modifiers_requested = 1;
+    }
+    scroll_step_requested = json_int(scalars, "scroll_step", &scroll_step);
+    deadzone_requested = json_int(scalars, "deadzone_percent", &deadzone);
+    if ((json_key_cursor(scalars, "scroll_step") != NULL &&
+         !scroll_step_requested) ||
+        (json_key_cursor(scalars, "deadzone_percent") != NULL &&
+         !deadzone_requested)) {
+        config_problem(problem, 400, "Bad Request",
+                       "invalid_device_configuration",
+                       "scroll_step and deadzone_percent must be integers.");
+        return 0;
+    }
+    invert_requested = json_int_array(configuration, "invert_axes",
+                                      invert_axes, BLIT_MAX_INVERT_AXES,
+                                      &invert_axis_count);
+    if (invert_requested < 0) {
+        config_problem(problem, 400, "Bad Request",
+                       "invalid_device_configuration",
+                       "invert_axes must be an array of at most 16 evdev "
+                       "absolute-axis codes.");
+        return 0;
+    }
+    buttons_cursor = json_key_cursor(configuration, "buttons");
+    acceleration_cursor = json_key_cursor(configuration, "acceleration");
+    if (buttons_cursor != NULL || acceleration_cursor != NULL ||
+        scroll_step_requested) {
+        if (!input_device_supports(device, BLIT_INPUT_KIND_POINTER)) {
+            config_problem(problem, 422, "Unprocessable Entity",
+                           "device_property_not_applicable",
+                           "buttons, scroll_step and acceleration apply to a device Blit reads as a pointer, or to one of no known kind.");
+            return 0;
+        }
+    }
+    if ((deadzone_requested || invert_requested > 0) &&
+        !input_device_supports(device, BLIT_INPUT_KIND_GAMEPAD)) {
+        config_problem(problem, 422, "Unprocessable Entity",
+                       "device_property_not_applicable",
+                       "deadzone_percent and invert_axes apply to a device Blit reads as a gamepad, or to one of no known kind.");
+        return 0;
+    }
+    if (scroll_step_requested &&
+        (scroll_step < 1 || scroll_step > BLIT_INPUT_SCROLL_STEP_MAX)) {
+        char detail[160];
+        snprintf(detail, sizeof(detail),
+                 "scroll_step must be an integer from 1 through %d.",
+                 BLIT_INPUT_SCROLL_STEP_MAX);
+        config_problem(problem, 400, "Bad Request",
+                       "invalid_device_configuration", detail);
+        return 0;
+    }
+    if (deadzone_requested &&
+        (deadzone < 0 || deadzone > BLIT_INPUT_DEADZONE_MAX)) {
+        char detail[160];
+        snprintf(detail, sizeof(detail),
+                 "deadzone_percent must be an integer from 0 through %d.",
+                 BLIT_INPUT_DEADZONE_MAX);
+        config_problem(problem, 400, "Bad Request",
+                       "invalid_device_configuration", detail);
+        return 0;
+    }
+    if (invert_requested > 0) {
+        int i;
+        for (i = 0; i < invert_axis_count; ++i)
+            if (invert_axes[i] < 0 || invert_axes[i] > ABS_MAX) {
+                config_problem(problem, 400, "Bad Request",
+                               "invalid_device_configuration",
+                               "every entry of invert_axes must be an evdev absolute-axis code.");
+                return 0;
+            }
+    }
+    if (acceleration_cursor != NULL) {
+        char profile[32];
+        if (!json_object_slice(acceleration_cursor, acceleration,
+                               sizeof(acceleration)) ||
+            !json_string(acceleration, "profile", profile,
+                         sizeof(profile))) {
+            config_problem(problem, 400, "Bad Request",
+                           "invalid_device_acceleration",
+                           "acceleration must be a JSON object with a profile of flat or adaptive.");
+            return 0;
+        }
+        if (strcmp(profile, "flat") == 0)
+            acceleration_adaptive = 0;
+        else if (strcmp(profile, "adaptive") == 0)
+            acceleration_adaptive = 1;
+        else {
+            config_problem(problem, 400, "Bad Request",
+                           "invalid_device_acceleration",
+                           "an acceleration profile must be flat or adaptive.");
+            return 0;
+        }
+        acceleration_requested = 1;
+    }
+    if (buttons_cursor != NULL) {
+        const char *reason = NULL;
+        if (!json_object_slice(buttons_cursor, buttons, sizeof(buttons))) {
+            config_problem(problem, 400, "Bad Request",
+                           "invalid_device_buttons",
+                           "buttons must be a JSON object of evdev code to button.");
+            return 0;
+        }
+        memset(&parsed_buttons, 0, sizeof(parsed_buttons));
+        if (!parse_input_buttons(buttons, &parsed_buttons, &reason)) {
+            config_problem(problem, 400, "Bad Request",
+                           "invalid_device_buttons",
+                           reason != NULL ? reason :
+                           "buttons could not be parsed.");
+            return 0;
+        }
+        buttons_requested = 1;
     }
     if ((sensitivity_requested || natural_scroll_requested) &&
         !input_device_supports(device, BLIT_INPUT_KIND_POINTER)) {
@@ -14578,6 +14952,46 @@ static int apply_input_device_configuration(BlitRuntime *runtime,
         device->repeat_period_ms = period;
         input_device_apply_repeat(runtime, device);
         changed = 1;
+    }
+    if (buttons_requested &&
+        (parsed_buttons.button_count != device->button_count ||
+         memcmp(parsed_buttons.button_codes, device->button_codes,
+                sizeof(device->button_codes)) != 0 ||
+         memcmp(parsed_buttons.button_targets, device->button_targets,
+                sizeof(device->button_targets)) != 0)) {
+        device->button_count = parsed_buttons.button_count;
+        memcpy(device->button_codes, parsed_buttons.button_codes,
+               sizeof(device->button_codes));
+        memcpy(device->button_targets, parsed_buttons.button_targets,
+               sizeof(device->button_targets));
+        changed = 1;
+    }
+    if (scroll_step_requested && scroll_step != device->scroll_step) {
+        device->scroll_step = scroll_step;
+        changed = 1;
+    }
+    if (acceleration_requested &&
+        acceleration_adaptive != device->acceleration_adaptive) {
+        device->acceleration_adaptive = acceleration_adaptive;
+        changed = 1;
+    }
+    if (deadzone_requested && deadzone != device->deadzone_percent) {
+        device->deadzone_percent = deadzone;
+        changed = 1;
+    }
+    if (invert_requested > 0) {
+        int i;
+        int differs = invert_axis_count != device->invert_axis_count;
+        for (i = 0; !differs && i < invert_axis_count; ++i)
+            differs = device->invert_axes[i] !=
+                (unsigned short)invert_axes[i];
+        if (differs) {
+            device->invert_axis_count = invert_axis_count;
+            memset(device->invert_axes, 0, sizeof(device->invert_axes));
+            for (i = 0; i < invert_axis_count; ++i)
+                device->invert_axes[i] = (unsigned short)invert_axes[i];
+            changed = 1;
+        }
     }
     if (caps_boot_requested && device->caps_lock_boot != caps_boot) {
         device->caps_lock_boot = caps_boot;
@@ -14762,6 +15176,45 @@ static size_t settings_input_configuration(const BlitInputDevice *device,
         json_appendf(out, capacity, &used, "%s\"natural_scroll\":true",
                      first ? "" : ",");
         first = 0;
+    }
+    if (device->button_count > 0) {
+        int i;
+        json_appendf(out, capacity, &used, "%s\"buttons\":{",
+                     first ? "" : ",");
+        first = 0;
+        for (i = 0; i < device->button_count; ++i)
+            json_appendf(out, capacity, &used, "%s\"%u\":\"%s\"",
+                         i == 0 ? "" : ",",
+                         (unsigned)device->button_codes[i],
+                         input_pointer_button_name(
+                             (int)device->button_targets[i]));
+        json_appendf(out, capacity, &used, "}");
+    }
+    if (device->scroll_step > BLIT_INPUT_SCROLL_STEP_DEFAULT) {
+        json_appendf(out, capacity, &used, "%s\"scroll_step\":%d",
+                     first ? "" : ",", device->scroll_step);
+        first = 0;
+    }
+    if (device->acceleration_adaptive) {
+        json_appendf(out, capacity, &used,
+                     "%s\"acceleration\":{\"profile\":\"adaptive\"}",
+                     first ? "" : ",");
+        first = 0;
+    }
+    if (device->deadzone_percent > 0) {
+        json_appendf(out, capacity, &used, "%s\"deadzone_percent\":%d",
+                     first ? "" : ",", device->deadzone_percent);
+        first = 0;
+    }
+    if (device->invert_axis_count > 0) {
+        int i;
+        json_appendf(out, capacity, &used, "%s\"invert_axes\":[",
+                     first ? "" : ",");
+        first = 0;
+        for (i = 0; i < device->invert_axis_count; ++i)
+            json_appendf(out, capacity, &used, "%s%u", i == 0 ? "" : ",",
+                         (unsigned)device->invert_axes[i]);
+        json_appendf(out, capacity, &used, "]");
     }
     if (device->repeat_configured) {
         json_appendf(out, capacity, &used,
@@ -15055,6 +15508,14 @@ static void settings_flush(BlitRuntime *runtime, int force)
                  sizeof(runtime->settings_document), "%s", document);
         ++runtime->settings_revision;
         runtime->settings_dirty = 0;
+    } else if (!runtime->settings_write_reported) {
+        /* Said once, not on every retry. A settings write that fails in
+           silence is the shape that cost an afternoon: the API reports the
+           configuration as applied and persisted, and nothing anywhere says
+           the document never reached the disk. */
+        runtime->settings_write_reported = 1;
+        fprintf(stderr, "blit: cannot write %s: %s\n",
+                runtime->settings_path, strerror(errno));
     }
 }
 
@@ -15188,6 +15649,14 @@ static void settings_reset(BlitRuntime *runtime)
         }
         device->sensitivity_percent = BLIT_INPUT_SENSITIVITY_DEFAULT;
         device->natural_scroll = 0;
+        device->button_count = 0;
+        memset(device->button_codes, 0, sizeof(device->button_codes));
+        memset(device->button_targets, 0, sizeof(device->button_targets));
+        device->scroll_step = BLIT_INPUT_SCROLL_STEP_DEFAULT;
+        device->acceleration_adaptive = 0;
+        device->deadzone_percent = 0;
+        device->invert_axis_count = 0;
+        memset(device->invert_axes, 0, sizeof(device->invert_axes));
         device->repeat_configured = 0;
         device->caps_lock_boot = -1;
         device->num_lock_boot = -1;
@@ -16197,21 +16666,54 @@ static void handle_request(int fd, BlitRuntime *runtime,
             runtime->evdev_mouse_y = (float)y;
             update_pointer_position(runtime, "api-pointer");
         } else if (strcmp(kind, "pointer_button") == 0) {
-            if (!json_int(payload, "button", &button) ||
+            /* Either a logical button, which is what this always took, or an
+               evdev `code`, which goes through the named device's button map
+               the way a real press does (issue #67). The second form is what
+               makes the map reachable at all: without it the map could only
+               be set, never exercised, and a gate could assert the state and
+               nothing about the behaviour. */
+            int code = 0;
+            if (json_int(payload, "code", &code)) {
+                int target = input_device_button_target(inject_device,
+                    (unsigned short)code);
+                if (code < 1 || code > KEY_MAX ||
+                    !json_bool(payload, "pressed", &pressed)) {
+                    send_problem(fd, 400, "Bad Request", "invalid_input_event",
+                                 "An evdev pointer button requires a code of 1..KEY_MAX and a pressed boolean.");
+                    runtime->input_source = NULL;
+                    return;
+                }
+                if (target == BLIT_POINTER_BUTTON_UNMAPPED) {
+                    send_problem(fd, 422, "Unprocessable Entity",
+                                 "device_property_not_applicable",
+                                 "That evdev code is not a button on this device: it is neither one of the three a pointer always has nor named in the device's buttons map.");
+                    runtime->input_source = NULL;
+                    return;
+                }
+                /* A code mapped to `none` is accepted and delivers nothing,
+                   which is what disabling a button means. */
+                if (target != BLIT_POINTER_BUTTON_NONE)
+                    dispatch_pointer_button(runtime, target, pressed,
+                                            "api-pointer");
+            } else if (!json_int(payload, "button", &button) ||
                 !json_bool(payload, "pressed", &pressed) ||
                 button < 0 || button > 2) {
                 send_problem(fd, 400, "Bad Request", "invalid_input_event",
-                             "Pointer buttons require button 0..2 and pressed boolean.");
+                             "Pointer buttons require button 0..2, or an evdev code, and a pressed boolean.");
                 runtime->input_source = NULL;
                 return;
+            } else {
+                dispatch_pointer_button(runtime, button, pressed,
+                                        "api-pointer");
             }
-            dispatch_pointer_button(runtime, button, pressed, "api-pointer");
         } else if (strcmp(kind, "pointer_relative") == 0) {
             int dx = 0;
             int dy = 0;
             int sensitivity = inject_device != NULL ?
                 inject_device->sensitivity_percent :
                 BLIT_INPUT_SENSITIVITY_DEFAULT;
+            int adaptive = inject_device != NULL &&
+                inject_device->acceleration_adaptive;
             if ((json_key_cursor(payload, "dx") != NULL &&
                  !json_int(payload, "dx", &dx)) ||
                 (json_key_cursor(payload, "dy") != NULL &&
@@ -16224,8 +16726,10 @@ static void handle_request(int fd, BlitRuntime *runtime,
             }
             /* The same accumulation a REL_X/REL_Y pair takes, scaled by the
                same per-device sensitivity. */
-            runtime->evdev_mouse_x += scale_pointer_delta(dx, sensitivity);
-            runtime->evdev_mouse_y += scale_pointer_delta(dy, sensitivity);
+            runtime->evdev_mouse_x += scale_pointer_delta(dx, sensitivity,
+                                                          adaptive);
+            runtime->evdev_mouse_y += scale_pointer_delta(dy, sensitivity,
+                                                          adaptive);
             update_evdev_pointer(runtime);
         } else if (strcmp(kind, "pointer_wheel") == 0) {
             int direction;
@@ -16235,13 +16739,26 @@ static void handle_request(int fd, BlitRuntime *runtime,
                 runtime->input_source = NULL;
                 return;
             }
-            direction = (inject_device != NULL &&
-                         inject_device->natural_scroll) ? -delta : delta;
-            broadcast_evdev_pointer(runtime, "pointer_wheel",
-                                     direction > 0 ? 64 : 65, 1, delta,
-                                     "api-pointer");
-            send_mouse_report(runtime, 0, runtime->pointer_x,
-                              runtime->pointer_y, direction > 0 ? 64 : 65, 0);
+            {
+                int step = inject_device != NULL &&
+                    inject_device->scroll_step > 0 ?
+                    inject_device->scroll_step :
+                    BLIT_INPUT_SCROLL_STEP_DEFAULT;
+                int emitted;
+                direction = (inject_device != NULL &&
+                             inject_device->natural_scroll) ? -delta : delta;
+                /* scroll_step is how many reports one notch produces, which
+                   is the difference between a usable and an unusable
+                   high-resolution wheel (issue #67). */
+                for (emitted = 0; emitted < step; ++emitted) {
+                    broadcast_evdev_pointer(runtime, "pointer_wheel",
+                                             direction > 0 ? 64 : 65, 1, delta,
+                                             "api-pointer");
+                    send_mouse_report(runtime, 0, runtime->pointer_x,
+                                      runtime->pointer_y,
+                                      direction > 0 ? 64 : 65, 0);
+                }
+            }
         } else if (strcmp(kind, "key") == 0) {
             int key_code;
             int key_value;
@@ -20456,7 +20973,38 @@ static void service_evdev_gamepad(BlitRuntime *runtime)
                 runtime->evdev_gamepad_reported[device_index] = 1;
             }
             if (event.type == EV_KEY || event.type == EV_ABS) {
-                broadcast_evdev_gamepad(runtime, &event);
+                struct input_event adjusted = event;
+                BlitInputDevice *configuration = runtime->input_source;
+                /* Deadzone and inversion apply to the axes and to nothing
+                   else: a button is not an axis, and a deadzone on one would
+                   silently swallow presses. A copy, so the raw event is never
+                   mutated under the reader (issue #67). */
+                if (adjusted.type == EV_ABS && configuration != NULL) {
+                    int i;
+                    for (i = 0; i < configuration->invert_axis_count; ++i)
+                        if (configuration->invert_axes[i] == adjusted.code) {
+                            adjusted.value = -adjusted.value;
+                            break;
+                        }
+                    if (configuration->deadzone_percent > 0) {
+                        int magnitude = adjusted.value < 0 ?
+                            -adjusted.value : adjusted.value;
+                        /* A percentage of the axis's own reported range,
+                           which is what makes one setting mean the same thing
+                           on a 0..255 stick and a -32768..32767 one. */
+                        struct input_absinfo range;
+                        int threshold = 0;
+                        memset(&range, 0, sizeof(range));
+                        if (ioctl(runtime->evdev_gamepad_fds[device_index],
+                                  EVIOCGABS(adjusted.code), &range) == 0 &&
+                            range.maximum > range.minimum)
+                            threshold = (range.maximum - range.minimum) *
+                                configuration->deadzone_percent / 200;
+                        if (threshold > 0 && magnitude <= threshold)
+                            adjusted.value = 0;
+                    }
+                }
+                broadcast_evdev_gamepad(runtime, &adjusted);
                 record_input_dispatch(runtime, input_started_us);
             }
         }
@@ -20490,6 +21038,8 @@ static void service_evdev_mouse(BlitRuntime *runtime)
         BlitInputDevice *configuration;
         int sensitivity;
         int natural_scroll;
+        int adaptive;
+        int scroll_step;
         if (runtime->evdev_mouse_fds[device_index] < 0) continue;
         configuration = input_device_for_slot(runtime,
                                               runtime->evdev_mouse_paths,
@@ -20499,6 +21049,10 @@ static void service_evdev_mouse(BlitRuntime *runtime)
             BLIT_INPUT_SENSITIVITY_DEFAULT;
         natural_scroll = configuration != NULL ?
             configuration->natural_scroll : 0;
+        adaptive = configuration != NULL &&
+            configuration->acceleration_adaptive;
+        scroll_step = configuration != NULL && configuration->scroll_step > 0 ?
+            configuration->scroll_step : BLIT_INPUT_SCROLL_STEP_DEFAULT;
         runtime->input_source = configuration;
         while ((received = read(runtime->evdev_mouse_fds[device_index],
                                 &event, sizeof(event))) ==
@@ -20518,6 +21072,7 @@ static void service_evdev_mouse(BlitRuntime *runtime)
             if (event.type == EV_REL) {
                 if (event.code == REL_WHEEL || event.code == REL_HWHEEL) {
                     int button;
+                    int emitted;
                     ++runtime->diagnostic_evdev_mouse_wheel_events;
                     if (configuration != NULL) ++configuration->pointer_wheel;
                     int direction = natural_scroll ? -event.value :
@@ -20526,11 +21081,13 @@ static void service_evdev_mouse(BlitRuntime *runtime)
                         button = direction > 0 ? 66 : 67;
                     else
                         button = direction > 0 ? 64 : 65;
-                    broadcast_evdev_pointer(runtime, "pointer_wheel", button,
-                                             1, event.value,
-                                             "evdev-pointer");
-                    send_mouse_report(runtime, 0, runtime->evdev_mouse_x,
-                                      runtime->evdev_mouse_y, button, 0);
+                    for (emitted = 0; emitted < scroll_step; ++emitted) {
+                        broadcast_evdev_pointer(runtime, "pointer_wheel",
+                                                 button, 1, event.value,
+                                                 "evdev-pointer");
+                        send_mouse_report(runtime, 0, runtime->evdev_mouse_x,
+                                          runtime->evdev_mouse_y, button, 0);
+                    }
                     record_input_dispatch(runtime, input_started_us);
                     continue;
                 }
@@ -20538,12 +21095,12 @@ static void service_evdev_mouse(BlitRuntime *runtime)
                     ++runtime->diagnostic_evdev_mouse_motion_events;
                     if (configuration != NULL) ++configuration->pointer_motion;
                     runtime->evdev_mouse_x +=
-                        scale_pointer_delta(event.value, sensitivity);
+                        scale_pointer_delta(event.value, sensitivity, adaptive);
                 } else if (event.code == REL_Y) {
                     ++runtime->diagnostic_evdev_mouse_motion_events;
                     if (configuration != NULL) ++configuration->pointer_motion;
                     runtime->evdev_mouse_y +=
-                        scale_pointer_delta(event.value, sensitivity);
+                        scale_pointer_delta(event.value, sensitivity, adaptive);
                 }
             } else if (event.type == EV_SYN && event.code == SYN_REPORT) {
                 ++runtime->diagnostic_evdev_mouse_syncs;
@@ -20551,10 +21108,17 @@ static void service_evdev_mouse(BlitRuntime *runtime)
                 update_evdev_pointer(runtime);
                 record_input_dispatch(runtime, input_started_us);
             } else if (event.type == EV_KEY &&
-                       (event.code == BTN_LEFT ||
-                        event.code == BTN_MIDDLE ||
-                        event.code == BTN_RIGHT)) {
-                int button;
+                       input_device_button_target(configuration,
+                                                  event.code) !=
+                           BLIT_POINTER_BUTTON_UNMAPPED) {
+                /* The button this code produces on this device: its override
+                   if it has one, otherwise the default for the three a
+                   pointer always has. A code that is neither is not a button
+                   -- the filter deliberately does not widen to all of EV_KEY,
+                   or a pointer with keyboard keys would start dispatching
+                   letters as clicks (issue #67). */
+                int button = input_device_button_target(configuration,
+                                                        event.code);
                 /* Linux input_event.value is 0=release, 1=press, and
                    2=autorepeat.  Mouse-button autorepeat is not a new
                    click; forwarding it as a press creates duplicate or
@@ -20563,12 +21127,8 @@ static void service_evdev_mouse(BlitRuntime *runtime)
                     ++runtime->diagnostic_evdev_mouse_button_repeats_ignored;
                     continue;
                 }
-                if (event.code == BTN_LEFT)
-                    button = 0;
-                else if (event.code == BTN_MIDDLE)
-                    button = 1;
-                else
-                    button = 2;
+                if (button == BLIT_POINTER_BUTTON_NONE)
+                    continue;
                 ++runtime->diagnostic_evdev_mouse_button_events;
                 if (configuration != NULL) ++configuration->pointer_buttons;
                 int release = event.value == 0;
@@ -22449,6 +23009,21 @@ int main(int argc, char **argv)
                 if (reassert_wait_ms < wait_ms)
                     wait_ms = reassert_wait_ms;
             }
+        }
+        /* A settings write that is still coalescing is a deadline, the same
+           shape as the attach reassert above, and it has to clamp the wait
+           for the same reason: the loop is otherwise entirely event-driven,
+           so on a quiet server nothing would wake it and an accepted write
+           would sit in memory indefinitely. Found by a gate that configured a
+           device, stopped talking to the server, and waited for the document
+           to appear (ADR 0067). */
+        if (runtime.settings_dirty) {
+            uint64_t elapsed_us = now - runtime.settings_dirty_us;
+            int flush_wait_ms = elapsed_us >= (uint64_t)BLIT_SETTINGS_FLUSH_US ?
+                0 : (int)((BLIT_SETTINGS_FLUSH_US - elapsed_us + 999ULL) /
+                          1000ULL);
+            if (flush_wait_ms < wait_ms)
+                wait_ms = flush_wait_ms;
         }
         /* A bounded stream service turn may leave complete WebSocket
            messages in Blit's user-space receive buffer after the kernel socket

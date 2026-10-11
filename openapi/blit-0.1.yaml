@@ -799,6 +799,26 @@ paths:
                             maxItems: 4
                             items: {type: string, maxLength: 4}
                       additionalProperties: false
+                    buttons:
+                      type: object
+                      description: >-
+                        Evdev code to button (issue #67). Replaces the whole
+                        map; an empty object clears it.
+                      additionalProperties:
+                        type: string
+                        enum: [left, middle, right, none]
+                    scroll_step: {type: integer, minimum: 1, maximum: 10}
+                    acceleration:
+                      type: object
+                      required: [profile]
+                      additionalProperties: false
+                      properties:
+                        profile: {type: string, enum: [flat, adaptive]}
+                    deadzone_percent: {type: integer, minimum: 0, maximum: 50}
+                    invert_axes:
+                      type: array
+                      maxItems: 16
+                      items: {type: integer, minimum: 0}
                     repeat_delay_ms: {type: integer, minimum: 10, maximum: 10000}
                     repeat_rate_hz: {type: integer, minimum: 1, maximum: 255}
                     caps_lock_boot: {type: boolean}
@@ -2236,6 +2256,77 @@ components:
               description: >-
                 Pointer devices only. Inverts the wheel direction this device
                 reports.
+            buttons:
+              type: object
+              additionalProperties:
+                type: string
+                enum: [left, middle, right, none]
+              description: >-
+                A sparse map from evdev code to the button that code produces,
+                per device. Left-handed is `{"272":"right","273":"left"}`; a
+                side button becomes useful with `{"275":"middle"}`; `none`
+                disables a button.
+
+                A map that would make two codes produce the same button is
+                refused, and the refusal names both codes. The terminal mouse
+                report holds one state per button, so two codes aliased onto
+                one of them means pressing both and releasing one reports
+                released while the other is still down. The check is on the
+                *effective* map, defaults included -- so mapping `272` to
+                right and leaving `273` alone is refused, because both would
+                then produce right.
+            scroll_step:
+              type: integer
+              minimum: 1
+              maximum: 10
+              default: 1
+              description: >-
+                How many wheel reports one notch produces. The difference
+                between a usable and an unusable high-resolution wheel.
+                Composes with `natural_scroll`, which decides the direction.
+            acceleration:
+              type: object
+              additionalProperties: false
+              required: [profile]
+              properties:
+                profile:
+                  type: string
+                  enum: [flat, adaptive]
+                  default: flat
+              description: >-
+                `flat` is `sensitivity_percent` and nothing else, which is
+                what this always did and is still the default --
+                `sensitivity_percent` means exactly what it meant before this
+                property existed. `adaptive` multiplies it again by a factor
+                that rises with the size of the delta: untouched at or below
+                2 counts, tripled at or above 20, linear between.
+
+                The curve is defined on the magnitude of one event's delta and
+                not on a speed in counts per second. That makes it exact and
+                therefore testable, at the cost of depending on the device's
+                report rate -- a 1000 Hz mouse sends small deltas for the hand
+                speed that makes a 125 Hz mouse send large ones, so `adaptive`
+                feels different on different hardware. The numbers are in
+                `src/blit_input_pointer.h` and asserted by
+                `tools/tests/pointer_curve_gate.c`.
+            deadzone_percent:
+              type: integer
+              minimum: 0
+              maximum: 50
+              description: >-
+                Gamepad axes only. An absolute value within this percentage of
+                half the axis's own reported range reads as zero. A percentage
+                of the reported range, so one setting means the same thing on
+                a 0..255 stick and a -32768..32767 one.
+            invert_axes:
+              type: array
+              maxItems: 16
+              items: {type: integer, minimum: 0}
+              description: >-
+                Gamepad axes only. The evdev absolute-axis codes whose sign is
+                flipped. Applied to a copy of the event before it is
+                broadcast, and to `EV_ABS` only -- a button is not an axis,
+                and a deadzone on one would silently swallow presses.
             repeat_delay_ms:
               type: integer
               minimum: 10

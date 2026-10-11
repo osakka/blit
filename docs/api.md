@@ -472,6 +472,64 @@ only a trace entry identifying an evdev source proves physical-device
 delivery. There must be one deliberate pointer owner for a
 display-attached session; competing routes are a configuration error.
 
+### Pointer and gamepad settings
+
+| property | what it is |
+|---|---|
+| `sensitivity_percent` | the linear multiplier, unchanged by anything below |
+| `natural_scroll` | inverts the wheel direction |
+| `buttons` | a sparse map from evdev code to the button it produces |
+| `scroll_step` | how many reports one wheel notch produces |
+| `acceleration` | `{"profile":"flat"}` or `{"profile":"adaptive"}` |
+| `deadzone_percent` | gamepad axes: what reads as zero |
+| `invert_axes` | gamepad axes: which have their sign flipped |
+
+**`buttons` refuses to let two codes hold one button.** Left-handed is
+`{"272":"right","273":"left"}`. Mapping only `272` to right is refused, and
+the refusal names both codes: `273` still produces right by default, and the
+terminal mouse report holds one state per button — so pressing both and
+releasing one would report released while the other was still down. Map the
+other one too, or map it to `none`. A code that is neither one of the three a
+pointer always has nor named in the map is not a button at all, which is why
+a pointer that also reports keyboard keys does not dispatch letters as clicks.
+
+**`acceleration: flat` is the default and is what this always did.**
+`sensitivity_percent` means exactly what it meant before the property
+existed. `adaptive` multiplies it again by a factor that rises with the size
+of the delta: untouched at or below 2 counts, tripled at or above 20, linear
+between.
+
+```
+delta   flat (100%)   adaptive (100%)
+    2             2                 2
+   11            11                22
+   20            20                60
+```
+
+The curve is defined on the magnitude of one event's delta rather than a
+speed in counts per second. That is a deliberate trade: it makes the curve
+exact and therefore testable, at the cost of depending on the device's report
+rate — a 1000 Hz mouse sends small deltas for the hand speed that makes a
+125 Hz mouse send large ones, so `adaptive` feels different on different
+hardware. The numbers live in `src/blit_input_pointer.h`.
+
+**Middle-button emulation does not exist**, and its absence is a decision
+rather than an omission: it needs a deferred press, which means a timer in an
+event loop that is otherwise entirely event-driven. It is issue #71 with the
+design written down.
+
+```text
+PATCH /v1/input/devices/{device_id}
+  { "configuration": { "buttons": { "272": "right", "273": "left" },
+                       "scroll_step": 3,
+                       "acceleration": { "profile": "adaptive" } } }
+```
+
+An empty `buttons` object clears the map. The gamepad properties are refused
+on a pointer and the pointer properties on a keyboard, by the same rule as
+everything else: a device of no known kind accepts anything, a device of a
+known kind refuses what contradicts it.
+
 ### Keyboard settings
 
 A keyboard's writable properties, all under `configuration` and all written
