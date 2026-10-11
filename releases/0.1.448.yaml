@@ -15,6 +15,7 @@ package_artifact_acceptance: pass_manifest_hashes_match_package_and_reproducible
 network_auth_acceptance: pass_four_listener_postures_loopback_default_refusal_and_override_warning
 terminal_conformance: pass_with_sixel_bound_hls_palette_and_decsdm
 live_terminal_feature_acceptance: carried_from_0_1_447
+live_sixel_acceptance: pass_physical_output_pixels_palette_hls_p2_and_api_bound_cursor_modes
 session_lifecycle_acceptance: pass
 session_write_resize_acceptance: pass
 stream_replay_acceptance: pass
@@ -94,13 +95,13 @@ screenshot_nonblocking_live_acceptance: not_rerun_candidate
 qemu_hibr_lifecycle_acceptance: not_rerun_candidate
 qemu_four_output_pixel_acceptance: not_rerun_candidate
 qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
-live_deployment: pending
-live_current_version: pending
+live_deployment: pass_supervised_update_verified_0_1_448
+live_current_version: 0.1.448
 live_block_cursor_acceptance: carried_from_0_1_425
 live_italic_acceptance: carried_from_0_1_425
 live_session_default_acceptance: carried_from_0_1_425
 live_sync_output_acceptance: carried_from_0_1_425
-live_hibr_desktop_acceptance: pending
+live_hibr_desktop_acceptance: pass_32400_printable_revision_859
 live_idle_frame_acceptance: carried_from_0_1_425
 live_physical_multi_display: unavailable_one_output
 live_physical_button_trace_contract: open
@@ -184,3 +185,33 @@ notes: >-
   green above its own failures. A PASS line is earned now.
 
   Suite: 50 pass, 5 skip, 0 fail.
+
+  Host-accepted on 192.168.10.54 with tools/probes/host_sixel.rb, and the
+  colour half of it on the physical 1920x2160 output rather than through the
+  state document -- the pixel scenario runs on display-1 while the supervised
+  restart has the desktop down, which is the one window where the output is
+  free. Measured there:
+
+    published bounds   sixel 4096x4096, 256 registers, 67108864 bytes
+    !1920~             width 1920, clipped to placement 480x6
+    682 bands + W      height 4096, nothing rejected
+    two images         origins y=0 and y=16, cursor {x:0, y:2}
+    DECSET 8452        cursor {x:3, y:1}
+    DECSET 80          image origin (0,0), cursor {x:9, y:3} untouched
+
+    #1 undefined       [51, 51, 204]    VT340 blue
+    #2 undefined       [204, 33, 33]    VT340 red
+    #3 undefined       [51, 204, 51]    VT340 green
+    HLS 120;50;100     [255, 0, 0]
+    HLS 0;50;100       [0, 0, 255]      DEC's hue origin
+    HLS 240;50;100     [0, 255, 0]
+    P2=0 unset pixel   [0, 0, 255]      the current SGR background
+    P2=0 set pixel     [255, 0, 0]
+
+  Every one of those eight colours was white, or the image absent, before this
+  release. One probe mechanic worth recording: create_session caps a single
+  argument at 256 bytes, so the seven-image scenario arrives as positional
+  parameters -- `sh -c SCRIPT sh A B C` -- rather than inside the script.
+
+  The desktop came back with 32,400 printable cells at revision 859; errors
+  and warnings both empty.
