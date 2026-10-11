@@ -1,0 +1,180 @@
+release: 0.1.447
+package: blit_0.1.447-1_amd64.deb
+package_sha256: d9b0143be47d03cc3fa558368fa78201518e16a8454fd3eb4b57953ac22b866d
+source_commit: 1ff715deb8a4575194ad71230e773494aa346739
+package_documentation_commit: 1ff715deb8a4575194ad71230e773494aa346739
+server_binary_sha256: b8aeb07757c57648b997eb3f9fc9b895ff20ebc46aa5eef2719485f5189ef5df
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: ed37dff18e0ba8ad638990b28287ab1aeb22ada5fe7345a3eb17a39733598d87
+hibr_root: /tmp/hibr-0.99.100
+hibr_version: 0.99.100
+tcc_build_acceptance: pass
+openapi_yaml: pass
+api_schema_gate: pass_36_paths
+package_artifact_acceptance: pass_manifest_hashes_match_package_and_reproducible
+network_auth_acceptance: pass_four_listener_postures_loopback_default_refusal_and_override_warning
+terminal_conformance: pass_with_rectangular_operations_and_full_decrqss
+live_terminal_feature_acceptance: PENDING
+session_lifecycle_acceptance: pass
+session_write_resize_acceptance: pass
+stream_replay_acceptance: pass
+font_api_acceptance: pass
+hibr_font_manifest_acceptance: pass
+glyph_geometry_local_pixel_acceptance: pass
+sdl_glyph_filter_acceptance: pass
+external_pointer_composition: pass
+pointer_damage_atomic_acceptance: pass_three_consecutive_runs_frame_counter_wait
+pointer_wallpaper_stress_acceptance: pass
+hidden_cursor_damage_acceptance: pass
+sdl_background_batch_acceptance: pass
+sdl_graphics_cache_acceptance: pass
+sdl_wallpaper_damage_acceptance: pass
+screenshot_overlay_acceptance: pass
+pixel_frame_acceptance: pass
+render_state_agreement_acceptance: pass
+adapter_coalesce_acceptance: pass_idle_frame_zero_requests
+kitty_placement_pixel_acceptance: pass_crop_offset_numbered_and_z_order_by_pixel
+kitty_placement_conformance_acceptance: pass_delete_targets_and_unsupported_key_refusals
+sync_output_acceptance: pass_held_frame_and_hidden_writes_one_and_two_surfaces
+cell_paint_acceptance: pass_cursor_glyph_italic_distinct_session_defaults
+pointer_geometry_acceptance: pass_inset_honoured_and_pane_less_at_corner
+mouse_report_acceptance: pass_wheel_byte_96_hover_gated_per_cell_drops_counted
+key_encoding_acceptance: pass_119_encodings_plus_per_device_keymap_and_modifiers
+frame_quiet_starvation_acceptance: pass_longest_stagnant_run_1_was_29
+capture_witness_acceptance: pass_one_source_presented_flag_presented_revision
+motion_trail_acceptance: pass_799_blank_cells_no_unaccounted_pixels
+render_state_agreement_acceptance: pass_30_blue_cells_was_vacuous
+bold_cell_containment_acceptance: pass_8px_drawn_0_spilled
+wide_glyph_acceptance: pass_4_samples_4_distinct_shapes_two_cells_each
+font_identity_acceptance: pass_929_1182_primary_and_49899_16x16_wide
+desktop_repaint_acceptance: pass_pty_authored_0_cells_unpainted_reported_after_window_retires
+gate_port_isolation_acceptance: carried_from_0_1_431
+input_identity_acceptance: carried_from_0_1_433
+input_device_api_acceptance: carried_from_0_1_432
+input_device_config_acceptance: pass_one_rule_for_where_a_property_applies
+input_device_route_acceptance: carried_from_0_1_436
+audio_device_api_acceptance: pass_node_is_the_authority_hotplug_retires_three_runs
+display_device_api_acceptance: pass_envelope_item_matches_collection_no_writable_property
+main_block_key_table_acceptance: carried_from_0_1_435
+live_input_device_table_acceptance: carried_from_0_1_433
+live_input_device_config_acceptance: pass_one_rule_for_where_a_property_applies
+live_main_block_key_acceptance: carried_from_0_1_435
+live_per_device_keymap_acceptance: carried_from_0_1_441
+live_device_kinds_acceptance: carried_from_0_1_442
+live_listener_posture_acceptance: carried_from_0_1_443
+live_evdev_opener_acceptance: carried_from_0_1_444
+live_output_occupancy_acceptance: carried_from_0_1_445
+live_device_routing_acceptance: carried_from_0_1_436
+live_audio_device_acceptance: pass_12_pcms_unchanged_by_node_authority_all_accessible
+json_escape_acceptance: carried_from_0_1_431
+live_cell_property_refusal_acceptance: carried_from_0_1_431
+live_unpainted_report_acceptance: carried_from_0_1_430
+live_wide_glyph_acceptance: carried_from_0_1_428
+live_render_state_agreement_acceptance: carried_from_0_1_427
+evdev_scan_open_count_acceptance: carried_from_0_1_431
+evdev_open_latency_acceptance: carried_from_0_1_444
+output_occupancy_acceptance: pass_warning_always_error_only_when_declared
+performance_schema_agreement_acceptance: pass_89_required_89_described_both_directions
+graphics_kitty_zlib_acceptance: pass_pixel_crc32_identical_to_raw
+graphics_xtsmgraphics_acceptance: pass_no_scroll_and_enforced_limits_reported
+terminal_kitty_keyboard_acceptance: pass_cursor_unmoved_query_reports_zero
+hibr_singleton_local_acceptance: pass
+hibr_resume_guard_acceptance: pass
+restart_gate: pass
+shutdown_gate: pass
+update_idle_timeout_acceptance: pass
+update_reset_acceptance: pass
+update_cancel_acceptance: pass
+frame_rate_settled_acceptance: pass
+terminal_soak_120s_acceptance: pass
+screenshot_nonblocking_live_acceptance: not_rerun_candidate
+qemu_hibr_lifecycle_acceptance: not_rerun_candidate
+qemu_four_output_pixel_acceptance: not_rerun_candidate
+qemu_pixel_stream_240_acceptance: open_tcg_deadline_capacity
+live_deployment: PENDING
+live_current_version: PENDING
+live_block_cursor_acceptance: carried_from_0_1_425
+live_italic_acceptance: carried_from_0_1_425
+live_session_default_acceptance: carried_from_0_1_425
+live_sync_output_acceptance: carried_from_0_1_425
+live_hibr_desktop_acceptance: PENDING
+live_idle_frame_acceptance: carried_from_0_1_425
+live_physical_multi_display: unavailable_one_output
+live_physical_button_trace_contract: open
+physical_evdev_acceptance: open
+physical_multi_monitor_acceptance: open
+physical_high_refresh_acceptance: open
+notes: >-
+  Two more terminal tickets: the VT500 rectangular area operations (#2) and
+  DECRQSS (#5).
+
+  #2. All seven were parsed to nothing, and two were worse than ignored: the
+  CSI parser took sequence[strlen - 1] as the command and nothing looked at
+  what came before it, so CSI 1;4$r (DECCARA) dispatched to the CSI 1;4r
+  branch and silently redefined the scroll region. An application changing
+  attributes in a rectangle got its scroll region changed instead.
+
+  So the parser change came first and alone: an intermediate field for the
+  0x20..0x2F byte between the parameters and the final byte, a params[16]
+  array parsed once with first and second derived from it, and
+  intermediate == 0 added to every existing branch whose final byte a VT500
+  also uses with one -- r, s, t, x, z, @, P, L, M, S, T. The full suite ran at
+  49 pass, 0 fail after that step with no operation added, which is the proof
+  the dispatch is unchanged where it should be rather than an argument that it
+  is.
+
+  Then the seven: DECFRA $x, DECERA $z, DECSERA ${, DECCRA $v, DECCARA $r,
+  DECRARA $t and DECSACE *x. Plus DECSCA "q, the only way to set the character
+  protection DECSERA needs, and so BLIT_ATTR_PROTECTED -- terminal state
+  rather than a style, deliberately not part of the cell style the API reports
+  or accepts, because nothing draws differently because of it.
+
+  A rectangle is page-relative, not margin-relative: #3's accessors confine the
+  operations that shift a line and these shift nothing. Origin mode is the one
+  exception and the only place margins enter. An inverted or empty rectangle is
+  ignored rather than clamped, as DECSTBM and DECSLRM already are -- except for
+  the stream extent, where DECSACE 2 with Pl past Pr is the run from one corner
+  to the other and has no column ordering to break. That exception was found by
+  the DECSACE vector failing: the rectangle check rejected the pair before the
+  stream logic could see it.
+
+  DECCRA copies through a buffer, so an overlapping copy is not smeared, and
+  names one page: a copy naming any other is ignored rather than silently done
+  on the page Blit does have. DECFRA ignores a Pc outside the printable ranges.
+  DECCARA and DECRARA accept only the four VT500 attribute parameters and their
+  clearing forms.
+
+  Found while implementing #2: the same collision arrives through the private
+  prefix. CSI ?2J (DECSED) and CSI ?0K (DECSEL) were executed as plain ED and
+  EL, erasing the cells DECSCA had protected -- which could not have been
+  noticed before, because protection did not exist. Both are selective now.
+
+  #5. DECRQSS answered three settings and returned the invalid-request form for
+  everything else, so a client that saves and restores settings around a mode
+  switch -- the one workflow DECRQSS exists for -- could read back nothing but
+  the scroll region, the cursor shape and the pen. It answers ten now:
+  DECSLRM, DECSCA, DECSCL, DECSLPP, DECSCPP, DECSNLS and DECSACE joined the
+  three. Three of those only became answerable in this release, which is why
+  #5 was sequenced after #2 and #3 rather than answered twice.
+
+  DECSCL reports the level DA1 reports. Blit does not select a conformance
+  level -- there is one and it is fixed -- and reporting something DA1
+  contradicts would be worse than refusing. Worth recording rather than
+  quietly fixing: DA1 answers 62, the VT220 class, while the engine now
+  implements the VT400/VT500 rectangular operations and margins. Raising DA1
+  changes what clients then expect of everything else, so it is left alone and
+  DECSCL agrees with it rather than with the documentation.
+
+  DECSCPP and DECSLPP read the surface, so they agree with #4's cols and lines
+  by construction rather than by coincidence.
+
+  Twenty-four vectors across the two tickets. One of them caught #3 working:
+  with margins at 3..9 the hex dump of a DECRQSS reply wrapped at column 9,
+  because autowrap now happens at the right margin.
+
+  Teeth: with the intermediate parse removed, DECFRA is parsed to nothing and
+  CSI 1;4r and CSI 1;4$r produce identical screens -- #2's own measurement.
+  With the seven new DECRQSS settings removed, the DECSLRM vector gets the
+  invalid-request form.
+
+  Suite: 49 pass, 5 skip, 0 fail.
