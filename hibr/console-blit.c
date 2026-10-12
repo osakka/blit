@@ -13,6 +13,7 @@
  */
 #include "hibr.h"
 #include "display.h"
+#include "../src/blit_evdev_char.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -1083,9 +1084,8 @@ static void cb_key_name(str *out, unsigned long long code,
 	if (ctrl) s_cat(out, "ctrl-");
 	if (alt) s_cat(out, "alt-");
 	if (shift) s_cat(out, "shift-");
-	if (code >= KEY_A && code <= KEY_Z) {
-		letter[0] = (char)('a' + code - KEY_A); letter[1] = '\0'; s_cat(out, letter); return;
-	}
+	letter[0] = blit_evdev_char(code);
+	if (letter[0]) { letter[1] = '\0'; s_cat(out, letter); return; }
 	if (code >= KEY_1 && code <= KEY_9) {
 		letter[0] = (char)('1' + code - KEY_1); letter[1] = '\0'; s_cat(out, letter); return;
 	}
