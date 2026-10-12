@@ -21177,23 +21177,45 @@ static void capture_requested_screenshot(BlitRuntime *runtime,
    thing only while nothing is rotated. */
 /* The cached scene is an optimisation with a precondition: that the backend
    preserves a render target's contents between passes, so that repainting
-   only the damaged rows leaves the rest of the previous frame intact. That
-   holds for SDL's software renderer, which is what every gate here runs
-   against. Whether it holds for a given GL driver is a question no gate in
-   this repository can answer, because the development container has no GPU.
-
-   BLIT_SDL_SCENE_CACHE=0 turns the cache off and makes every frame a full
-   redraw, so the precondition can be tested where it matters: on the live
-   host, by measuring the same workload with it on and off. It is a diagnostic
-   seam, not a setting -- it belongs with BLIT_SDL_GLYPH_BATCH and the other
-   hooks a measurement uses, and it is deliberately not in the API. */
-static int sdl_scene_cache_enabled(void)
+   only the damaged rows leaves the rest of the previous frame intact.
+ 
+   That precondition is *false* on the live host's opengles2 path, measured
+   rather than reasoned about. Same machine, same screensaver, cache on
+   against cache off:
+ 
+     on    stale 170 of 329 cells drawn, and 740 earlier under a busier saver
+     off   stale 0, six samples, on a workload with 10875 cells drawn and
+           1015 changing between reads
+ 
+   It took five reproductions to get there, every one of them clean, because
+   every one ran against SDL's software renderer -- where the precondition
+   does hold, which is why the whole gate suite agrees the renderer is
+   correct. The development container has no GPU, so no gate here can see
+   this.
+ 
+   So the cache is now enabled only where it is known to be sound: the
+   software renderer the gates exercise. Everywhere else a frame is drawn
+   whole. The cost of that was measured on the same host before choosing it --
+   3.3ms to render and 0.6ms to present against a 16ms budget, with no missed
+   deadlines -- which is a cheap price for a screen that matches its own cell
+   data.
+ 
+   BLIT_SDL_SCENE_CACHE=1 forces it back on for anyone who has measured their
+   own backend and found it sound; =0 forces it off. The variable overrides
+   the default in both directions precisely so the next person can repeat the
+   measurement rather than take this comment's word for it. */
+static int sdl_scene_cache_enabled(const BlitRuntime *runtime)
 {
     const char *value = getenv("BLIT_SDL_SCENE_CACHE");
-    return !(value != NULL && strcmp(value, "0") == 0);
+
+    if (value != NULL && value[0] != '\0')
+        return strcmp(value, "0") != 0;
+    return runtime != NULL &&
+        strcmp(runtime->sdl_renderer_name, "software") == 0;
 }
 
-static int ensure_sdl_scene_texture(BlitOutput *output, int logical_width,
+static int ensure_sdl_scene_texture(const BlitRuntime *runtime,
+                                    BlitOutput *output, int logical_width,
                                     int logical_height)
 {
     int width = logical_width;
@@ -21201,7 +21223,7 @@ static int ensure_sdl_scene_texture(BlitOutput *output, int logical_width,
 
     if (output == NULL || output->renderer == NULL)
         return 0;
-    if (!sdl_scene_cache_enabled()) {
+    if (!sdl_scene_cache_enabled(runtime)) {
         if (output->scene_texture != NULL) {
             SDL_DestroyTexture(output->scene_texture);
             output->scene_texture = NULL;
@@ -21623,7 +21645,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             finish_sdl_output(runtime, output_index, 0);
             continue;
         }
-        full_redraw = !sdl_scene_cache_enabled() ||
+        full_redraw = !sdl_scene_cache_enabled(runtime) ||
             !runtime->outputs[output_index].initialized ||
             graphics_changed ||
             /* The software pointer is composed after the complete cached
@@ -21674,7 +21696,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             int scene_display = display_index_for_output(runtime,
                                                          output_index);
             scene_target = ensure_sdl_scene_texture(
-                &runtime->outputs[output_index],
+                runtime, &runtime->outputs[output_index],
                 scene_display >= 0 ?
                     runtime->displays[scene_display].bounds.w : 0,
                 scene_display >= 0 ?
