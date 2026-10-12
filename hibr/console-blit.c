@@ -1171,6 +1171,25 @@ static int cb_key(int ms, str *out)
 			return 1;
 		}
 		if (!strstr(frame, "\"kind\":\"key\"") || !cb_json_number(frame, "code", &code)) continue;
+		/* A release is not a keystroke.
+		 *
+		 * Blit publishes all three transitions -- press, autorepeat and
+		 * release -- and says which is which with "pressed" and
+		 * "repeat". This translated every one of them into a key, so a
+		 * single tap of Escape arrived as two keystrokes: anything the
+		 * desktop toggles went on and immediately back off, and whether
+		 * it ended up on depended on how many autorepeats happened to
+		 * fit inside the hold. That is the "on/off/on/off and I don't
+		 * know which way it lands" a user sees.
+		 *
+		 * Autorepeat is deliberately still a keystroke: holding a key
+		 * repeating it is what a terminal does, and dropping repeats
+		 * here would break held cursor keys for every application. */
+		if (!strstr(frame, "\"pressed\":true")) {
+			CB_TRACE("console-blit: key release ignored code=%llu",
+				(unsigned long long)code);
+			continue;
+		}
 		CB_TRACE("console-blit: key frame code=%llu", (unsigned long long)code);
 		shift = strstr(frame, "\"shift\":true") != 0;
 		ctrl = strstr(frame, "\"ctrl\":true") != 0;

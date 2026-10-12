@@ -956,6 +956,20 @@ typedef struct {
     int evdev_watch_fd;
     int snd_watch_fd;
     int audio_rescan_requested;
+    /* The chord that stops the server from the keyboard. X11 called it zap,
+       and it exists for the same reason: when the screen is wrong or input is
+       not reaching anything, the operator is sitting in front of a machine
+       whose only other control channel is the API they may not be able to
+       get to. It is deliberately a *shutdown* and not a restart -- the unit's
+       Restart=on-failure does not re-run a clean exit, so this stops the
+       server and leaves it stopped.
+
+       Programmable rather than hardwired, because which chord is safe depends
+       on what else is running: a desktop that uses Ctrl+Alt+Backspace itself
+       wants a different one, and a kiosk wants it disabled. */
+    int shutdown_key_enabled;
+    int shutdown_key_code;
+    unsigned shutdown_key_modifiers;
     int evdev_rescan_requested;
     /* A rescan is the only thing that retires an absent device, and it is
        armed by inotify. A burst of removals -- a USB hub dropping thirteen
@@ -1297,6 +1311,8 @@ static void dispatch_evdev_key_event(BlitRuntime *runtime,
                                      const char *device_id);
 static void dispatch_pointer_button(BlitRuntime *runtime, int button,
                                     int pressed, const char *device_id);
+static size_t shutdown_key_json(const BlitRuntime *runtime, char *body,
+                                size_t capacity);
 
 static void effect_json(const BlitRuntime *runtime, char *body,
                         size_t capacity)
@@ -16857,6 +16873,18 @@ static size_t settings_build(BlitRuntime *runtime, char *out, size_t capacity,
     }
     settings_copy_unseen(runtime, "displays", BLIT_SETTINGS_DISPLAY, out,
                          capacity, &used, &first);
+    /* The server's own settings. Only the shutdown chord so far, and only
+       when it differs from the default -- the document is a record of what
+       somebody chose, not a dump of every value. */
+    json_appendf(out, capacity, &used, "},\"server\":{");
+    if (!runtime->shutdown_key_enabled ||
+        runtime->shutdown_key_code != KEY_BACKSPACE ||
+        runtime->shutdown_key_modifiers != ((1u << BLIT_MODIFIER_CTRL) |
+                                            (1u << BLIT_MODIFIER_ALT))) {
+        char chord[256];
+        shutdown_key_json(runtime, chord, sizeof(chord));
+        json_appendf(out, capacity, &used, "\"shutdown_key\":%s", chord);
+    }
     json_appendf(out, capacity, &used, "}}");
     return used;
 }
@@ -17033,6 +17061,62 @@ static void settings_apply_audio_device(BlitRuntime *runtime,
    ordering is stage 1's bug restated: a stored input setting used to be
    applied where the device entry was allocated, which was before the kernel
    had been asked what the device could do. */
+/* The server section, applied at boot. A chord that cannot be parsed leaves
+   the default in place rather than leaving the machine with no way to stop
+   the server from its own keyboard. */
+static void settings_apply_server(BlitRuntime *runtime)
+{
+    const char *cursor;
+    char chord[256];
+    int enabled = 1;
+    int code = 0;
+
+    if (!runtime->settings_enabled || runtime->settings_document[0] == '\0')
+        return;
+    cursor = json_key_cursor(runtime->settings_document, "server");
+    if (cursor == NULL)
+        return;
+    cursor = json_key_cursor(cursor, "shutdown_key");
+    if (cursor == NULL || !json_object_slice(cursor, chord, sizeof(chord)))
+        return;
+    if (json_bool(chord, "enabled", &enabled))
+        runtime->shutdown_key_enabled = enabled ? 1 : 0;
+    if (json_int(chord, "code", &code) && code > 0 && code <= 767)
+        runtime->shutdown_key_code = code;
+    {
+        const char *scan = json_key_cursor(chord, "modifiers");
+        unsigned modifiers = 0;
+        if (scan != NULL) {
+            while (*scan != '\0' && *scan != '[' && *scan != ',' &&
+                   *scan != '}')
+                ++scan;
+            if (*scan == '[') {
+                for (; *scan != '\0' && *scan != ']'; ++scan) {
+                    char name[24];
+                    size_t length = 0;
+                    int role;
+                    if (*scan != '"')
+                        continue;
+                    ++scan;
+                    while (*scan != '"' && *scan != '\0' &&
+                           length + 1 < sizeof(name))
+                        name[length++] = *scan++;
+                    name[length] = '\0';
+                    role = input_modifier_role_from_name(name);
+                    if (role == BLIT_MODIFIER_SHIFT ||
+                        role == BLIT_MODIFIER_CTRL ||
+                        role == BLIT_MODIFIER_ALT ||
+                        role == BLIT_MODIFIER_ALTGR)
+                        modifiers |= 1u << role;
+                    if (*scan == '\0')
+                        break;
+                }
+                runtime->shutdown_key_modifiers = modifiers;
+            }
+        }
+    }
+}
+
 static void settings_apply_displays(BlitRuntime *runtime)
 {
     int i;
@@ -17157,6 +17241,88 @@ static void handle_request(int fd, BlitRuntime *runtime,
         }
     }
 
+    if (strcmp(path, "/v1/control/shutdown-key") == 0 &&
+        (strcmp(method, "GET") == 0 || strcmp(method, "PUT") == 0)) {
+        if (strcmp(method, "GET") == 0) {
+            shutdown_key_json(runtime, body, sizeof(body));
+            send_http(fd, 200, "OK", "application/json", body);
+            return;
+        }
+        {
+            int enabled = runtime->shutdown_key_enabled;
+            int code = runtime->shutdown_key_code;
+            unsigned modifiers = 0;
+            char list[256];
+            const char *cursor = json_key_cursor(payload, "modifiers");
+            int seen_modifiers = cursor != NULL;
+
+            if (json_key_cursor(payload, "enabled") != NULL &&
+                !json_bool(payload, "enabled", &enabled)) {
+                send_problem(fd, 400, "Bad Request", "invalid_shutdown_key",
+                             "enabled must be a JSON boolean.");
+                return;
+            }
+            if (json_key_cursor(payload, "code") != NULL &&
+                (!json_int(payload, "code", &code) || code < 1 || code > 767)) {
+                send_problem(fd, 400, "Bad Request", "invalid_shutdown_key",
+                             "code is the Linux evdev key code, 1 through 767.");
+                return;
+            }
+            if (seen_modifiers) {
+                const char *scan = cursor;
+                while (*scan != '\0' && *scan != '[' && *scan != ',' &&
+                       *scan != '}')
+                    ++scan;
+                if (*scan != '[') {
+                    send_problem(fd, 400, "Bad Request", "invalid_shutdown_key",
+                                 "modifiers is an array of modifier names.");
+                    return;
+                }
+                (void)list;
+                for (; *scan != '\0' && *scan != ']'; ++scan) {
+                    char name[24];
+                    size_t length = 0;
+                    if (*scan != '"')
+                        continue;
+                    ++scan;
+                    while (*scan != '"' && *scan != '\0' &&
+                           length + 1 < sizeof(name))
+                        name[length++] = *scan++;
+                    name[length] = '\0';
+                    {
+                        int role = input_modifier_role_from_name(name);
+                        if (role != BLIT_MODIFIER_SHIFT &&
+                            role != BLIT_MODIFIER_CTRL &&
+                            role != BLIT_MODIFIER_ALT &&
+                            role != BLIT_MODIFIER_ALTGR) {
+                            char detail[200];
+                            snprintf(detail, sizeof(detail),
+                                     "\"%s\" is not a modifier this chord can "
+                                     "match. Accepted: shift, control, alt, "
+                                     "altgr. Meta is not tracked per keyboard, "
+                                     "so a chord naming it could never fire.",
+                                     name);
+                            send_problem(fd, 400, "Bad Request",
+                                         "invalid_shutdown_key", detail);
+                            return;
+                        }
+                        modifiers |= 1u << role;
+                    }
+                    if (*scan == '\0')
+                        break;
+                }
+            } else {
+                modifiers = runtime->shutdown_key_modifiers;
+            }
+            runtime->shutdown_key_enabled = enabled ? 1 : 0;
+            runtime->shutdown_key_code = code;
+            runtime->shutdown_key_modifiers = modifiers;
+            settings_mark_dirty(runtime);
+            shutdown_key_json(runtime, body, sizeof(body));
+            send_http(fd, 200, "OK", "application/json", body);
+            return;
+        }
+    }
     if (strcmp(path, "/v1/control/shutdown") == 0 &&
         strcmp(method, "POST") == 0) {
         blit_running = 0;
@@ -23304,6 +23470,53 @@ static int send_evdev_key(BlitRuntime *runtime, unsigned short code)
    the stream broadcast. A real device and POST /v1/input/inject share this, so
    an injected key cannot take a different path from a real one -- which is the
    only thing that makes injection worth having. */
+/* Every modifier the chord names has to be held on the keyboard the key came
+   from. Per keyboard, not pooled, for the reason evdev_sync_modifiers gives:
+   Control held on one keyboard says nothing about a key pressed on another,
+   and a chord that accepted that would fire on a stray combination.
+
+   Only the modifiers the server actually tracks can be named. Meta is not one
+   of them -- evdev_refresh_modifiers does not derive it -- so the API refuses
+   it rather than accepting a chord that could never match. */
+static int shutdown_chord_held(const BlitRuntime *runtime,
+                               const BlitInputDevice *keyboard)
+{
+    unsigned wanted = runtime->shutdown_key_modifiers;
+
+    if (keyboard == NULL)
+        return 0;
+    if ((wanted & (1u << BLIT_MODIFIER_CTRL)) && !keyboard->ctrl)
+        return 0;
+    if ((wanted & (1u << BLIT_MODIFIER_ALT)) && !keyboard->alt)
+        return 0;
+    if ((wanted & (1u << BLIT_MODIFIER_SHIFT)) && !keyboard->shift)
+        return 0;
+    if ((wanted & (1u << BLIT_MODIFIER_ALTGR)) && !keyboard->altgr)
+        return 0;
+    return 1;
+}
+
+static size_t shutdown_key_json(const BlitRuntime *runtime, char *body,
+                                size_t capacity)
+{
+    size_t used = 0;
+    int role;
+    int first = 1;
+
+    json_appendf(body, capacity, &used,
+                 "{\"enabled\":%s,\"code\":%d,\"modifiers\":[",
+                 runtime->shutdown_key_enabled ? "true" : "false",
+                 runtime->shutdown_key_code);
+    for (role = BLIT_MODIFIER_SHIFT; role <= BLIT_MODIFIER_ALTGR; ++role)
+        if (runtime->shutdown_key_modifiers & (1u << role)) {
+            json_appendf(body, capacity, &used, "%s\"%s\"",
+                         first ? "" : ",", input_modifier_role_name(role));
+            first = 0;
+        }
+    json_appendf(body, capacity, &used, "]}");
+    return used;
+}
+
 static void dispatch_evdev_key_event(BlitRuntime *runtime,
                                      const struct input_event *event,
                                      const char *device_id)
@@ -23322,6 +23535,22 @@ static void dispatch_evdev_key_event(BlitRuntime *runtime,
     /* Autorepeat does not change what is held. */
     if (event->value != 2)
         evdev_key_set_held(keyboard, event->code, event->value != 0);
+    /* Before anything else does something with this key. On press only: a
+       chord that also fired on release would stop the server twice, and on
+       autorepeat it would fire for as long as the operator held it. */
+    if (event->value == 1 && runtime->shutdown_key_enabled &&
+        runtime->shutdown_key_code > 0 &&
+        event->code == (unsigned short)runtime->shutdown_key_code &&
+        shutdown_chord_held(runtime, keyboard)) {
+        char detail[160];
+        snprintf(detail, sizeof(detail),
+                 "code=%d device=%s; stopping the server", event->code,
+                 device_id != NULL ? device_id : "unknown");
+        fprintf(stderr, "blit: shutdown key pressed: %s\n", detail);
+        diagnostic_log(runtime, "warning", "shutdown_key_pressed", detail);
+        blit_running = 0;
+        return;
+    }
     /* Issue #66. The remap decides what this code *is*, and takes precedence
        over what the code would otherwise mean: a CapsLock remapped to Control
        must not also toggle CapsLock. A code with a role never reaches the
@@ -24347,7 +24576,22 @@ int main(int argc, char **argv)
                      "/var/lib/blit/settings.json");
         runtime.settings_enabled = !(mode != NULL &&
                                      strcmp(mode, "ignore") == 0);
+        /* Ctrl+Alt+Backspace, the chord X11 used for the same job. Enabled
+           by default: a server whose screen or input has gone wrong is
+           exactly when an operator needs it, and that is not the moment to
+           discover it was off.
+
+           Set *before* the document is read, not after. Assigning a default
+           after applying stored settings silently overwrites what was stored
+           -- the same ordering mistake stage 1 made with input devices, and
+           it is just as invisible: everything works until the first
+           restart. */
+        runtime.shutdown_key_enabled = 1;
+        runtime.shutdown_key_code = KEY_BACKSPACE;
+        runtime.shutdown_key_modifiers = (1u << BLIT_MODIFIER_CTRL) |
+            (1u << BLIT_MODIFIER_ALT);
         settings_load(&runtime);
+        settings_apply_server(&runtime);
         if (!runtime.settings_enabled)
             fprintf(stderr, "blit: BLIT_SETTINGS=ignore; starting from the "
                             "defaults and leaving %s alone\n",

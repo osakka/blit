@@ -706,6 +706,73 @@ paths:
                   detail: {type: string}
         default:
           $ref: '#/components/responses/Problem'
+  /v1/control/shutdown-key:
+    get:
+      tags: [control]
+      operationId: getShutdownKey
+      summary: Read the chord that stops the server from the keyboard
+      responses:
+        '200':
+          description: The configured chord
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShutdownKey'
+        default:
+          $ref: '#/components/responses/Problem'
+    put:
+      tags: [control]
+      operationId: setShutdownKey
+      summary: Program the chord that stops the server
+      description: >-
+        The chord exists for the case where an operator is in front of a
+        machine whose screen or input has gone wrong and whose only other
+        control channel is this API. It performs the same orderly stop as
+        `POST /v1/control/shutdown`, and exits 0 — so a unit with
+        `Restart=on-failure` leaves it stopped rather than restarting it.
+
+        It fires on press only, never on release or autorepeat, and every
+        modifier it names must be held **on the keyboard the key came from**:
+        Control held on one keyboard says nothing about a key pressed on
+        another. Holding extra modifiers beyond those named still fires it.
+
+        Fields omitted from the request keep their current value. The chord is
+        persisted (ADR 0067), so one moved off a combination the desktop uses
+        survives the next release.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                enabled: {type: boolean}
+                code:
+                  type: integer
+                  minimum: 1
+                  maximum: 767
+                  description: The Linux evdev key code. 14 is Backspace.
+                modifiers:
+                  type: array
+                  items:
+                    type: string
+                    enum: [shift, control, alt, altgr]
+                  description: >-
+                    `meta` is refused: it is not derived per keyboard, so a
+                    chord naming it could never match, and accepting one would
+                    leave the operator believing they had a working chord.
+              additionalProperties: false
+      responses:
+        '200':
+          description: The updated chord
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShutdownKey'
+        '400':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /v1/control/shutdown:
     post:
       tags: [control]
@@ -2915,6 +2982,19 @@ components:
         target_session_id: {$ref: '#/components/schemas/ResourceId'}
         enabled: {type: boolean}
       additionalProperties: false
+    ShutdownKey:
+      type: object
+      required: [enabled, code, modifiers]
+      properties:
+        enabled: {type: boolean}
+        code: {type: integer, minimum: 1, maximum: 767}
+        modifiers:
+          type: array
+          items:
+            type: string
+            enum: [shift, control, alt, altgr]
+      additionalProperties: false
+
     Topology:
       type: object
       required: [id, revision, layout, outputs, panes]

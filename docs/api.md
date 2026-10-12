@@ -175,13 +175,14 @@ path is added, removed, or renamed; the schema remains the authoritative count.
 
 ### Method-level reference
 
-This is the stable mental model for the 39 paths; the OpenAPI file remains the
+This is the stable mental model for the 40 paths; the OpenAPI file remains the
 exact method, parameter, and response reference:
 
 ```text
 GET    /v1/version                         compatibility handshake
 GET    /v1/server                          capabilities and links
 GET    /v1/graphics /displays /audio       hardware inventory
+GET/PUT /v1/control/shutdown-key           the keyboard stop chord
 GET/PATCH /v1/displays/{id}                rotation and brightness
 GET/PATCH /v1/audio/cards[/{id}]           a card's mixer
 GET/PUT /v1/fonts /topology /effects       revisioned configuration
@@ -802,6 +803,38 @@ the listen port; this also works for a TCC-built development fixture without
 silently switching to another installed binary. Package installation uses the separate
 `/v1/control/update` flow and must be verified through
 `/v1/control/update/status` and `/v1/version`.
+
+## Stopping the server from the keyboard
+
+`GET`/`PUT /v1/control/shutdown-key` programs a chord that stops the server,
+defaulting to **Ctrl+Alt+Backspace** and **enabled**. It exists for the case
+an operator actually hits: the screen is wrong or input is not reaching
+anything, and the only other control channel is this API, which may be exactly
+what they cannot get to.
+
+```json
+{ "enabled": true, "code": 14, "modifiers": ["control", "alt"] }
+```
+
+`code` is the Linux evdev key code; 14 is Backspace. Fields omitted from a
+`PUT` keep their current value, and the chord is persisted (ADR 0067) so one
+moved off a combination the desktop itself uses survives the next release.
+
+What it does and does not do, because a safety valve that misfires is worse
+than none:
+
+- It performs the same orderly stop as `POST /v1/control/shutdown` and exits
+  **0**, so a unit with `Restart=on-failure` leaves it stopped rather than
+  bringing it straight back.
+- It fires on **press only** — never on release, never on autorepeat.
+- Every modifier it names must be held **on the keyboard the key came from**.
+  Control held on one keyboard says nothing about a key pressed on another,
+  and a chord that pooled them would fire on stray combinations. Holding
+  *extra* modifiers still fires it.
+- `meta` is refused with 400: it is not derived per keyboard, so a chord
+  naming it could never match, and accepting one would leave an operator
+  believing they had a working chord.
+- `enabled: false` turns it off entirely, which is what a kiosk wants.
 
 ## Errors and compatibility
 
