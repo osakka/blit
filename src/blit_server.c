@@ -21175,6 +21175,24 @@ static void capture_requested_screenshot(BlitRuntime *runtime,
    display's logical rectangle -- the connector's mode with its axes exchanged
    at 90 and 270. It used to be the renderer's output size, which is the same
    thing only while nothing is rotated. */
+/* The cached scene is an optimisation with a precondition: that the backend
+   preserves a render target's contents between passes, so that repainting
+   only the damaged rows leaves the rest of the previous frame intact. That
+   holds for SDL's software renderer, which is what every gate here runs
+   against. Whether it holds for a given GL driver is a question no gate in
+   this repository can answer, because the development container has no GPU.
+
+   BLIT_SDL_SCENE_CACHE=0 turns the cache off and makes every frame a full
+   redraw, so the precondition can be tested where it matters: on the live
+   host, by measuring the same workload with it on and off. It is a diagnostic
+   seam, not a setting -- it belongs with BLIT_SDL_GLYPH_BATCH and the other
+   hooks a measurement uses, and it is deliberately not in the API. */
+static int sdl_scene_cache_enabled(void)
+{
+    const char *value = getenv("BLIT_SDL_SCENE_CACHE");
+    return !(value != NULL && strcmp(value, "0") == 0);
+}
+
 static int ensure_sdl_scene_texture(BlitOutput *output, int logical_width,
                                     int logical_height)
 {
@@ -21183,6 +21201,13 @@ static int ensure_sdl_scene_texture(BlitOutput *output, int logical_width,
 
     if (output == NULL || output->renderer == NULL)
         return 0;
+    if (!sdl_scene_cache_enabled()) {
+        if (output->scene_texture != NULL) {
+            SDL_DestroyTexture(output->scene_texture);
+            output->scene_texture = NULL;
+        }
+        return 0;
+    }
     if (output->scene_texture != NULL) {
         float existing_width = 0.0f;
         float existing_height = 0.0f;
@@ -21598,7 +21623,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             finish_sdl_output(runtime, output_index, 0);
             continue;
         }
-        full_redraw = !runtime->outputs[output_index].initialized ||
+        full_redraw = !sdl_scene_cache_enabled() ||
+            !runtime->outputs[output_index].initialized ||
             graphics_changed ||
             /* The software pointer is composed after the complete cached
              * scene is copied to the output. It is not part of scene_texture,
