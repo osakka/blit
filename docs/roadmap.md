@@ -3,44 +3,40 @@
 The roadmap is ordered by dependency. A later milestone must not become a
 second, parallel implementation of an earlier one.
 
-## Current position — release 0.1.410
+## Current position — release 0.1.465
 
-The current candidate closes the production Hibr launch contract by packaging
-an explicit `HIBR_RC` runtime file for API-launched Hibr children. This keeps
-the live systemd path aligned with the validated QEMU path without copying or
-modifying Hibr's desktop implementation. The previous candidate added
-surface-content counters and separates the
-four-output Hibr visual gate into two explicit cases: stock Hibr content on
-the primary with intentionally blank auxiliary joins, and a deterministic
-window workload that populates all four outputs. The exact TCC build, package,
-schema, terminal, input, lifecycle, four-output, Hibr, restart, producer
-cadence, and soak
-evidence is recorded in [`releases/0.1.409.yaml`](../releases/0.1.409.yaml)
-and [`verification-status.md`](verification-status.md).
+The current candidate fixes issue #75, found on the physical host before a
+new Hibr run: returning an input property to its default changed live state
+but the settings merge resurrected the old non-default value. The focused gate
+now proves both sides of the corrected ADR 0067 rule—known applicable values
+reset cleanly, while unknown future values and known values made temporarily
+inapplicable by a device re-probe remain preserved. The physical host remains
+on 0.1.464 until the candidate completes its package and deployment gates.
 
-This is not a physical-host completion claim. The supplied live host is
-running the prior 0.1.409 deployment and exposes one output at 60 Hz. Explicit physical evdev
-routes and live pointer motion have been observed; a source-qualified physical
-button trace, multiple physical monitors, physical 120/240 Hz scanout, and
-broader live Hibr geometry remain open. QEMU/VKMS remains the repeatable
-multi-output acceptance oracle; the physical host remains the final
-host-specific evidence boundary.
+The preceding releases corrected two other boundaries relevant to the same
+live acceptance cycle. Release 0.1.463 stopped assuming that an SDL
+OpenGL/OpenGLES render target preserves pixels between frames and therefore
+uses full-scene redraws on the live `opengles2` backend (issue #72). Release
+0.1.464 replaced alphabetic evdev range arithmetic with the actual QWERTY key
+positions used by Linux input. Neither result is promoted to final physical
+acceptance until one traced Hibr session is measured on the exact deployed
+artifact.
 
-The next implementation boundary is measured cadence and physical experience:
-separate producer/update rate from presentation/scanout rate, instrument any
-slow Hibr producer path, and only then make a hardware claim. The current
-0.1.405 settled local dummy-backend frame gate measures 59.996 Hz with zero
-missed deadlines under its 60 Hz workload; that is useful renderer evidence,
-but it is not a 60 Hz physical scanout claim and is intentionally not hidden
-by changing the gate. The supplied live host remains separately measured at
-60 Hz presentation with zero missed deadlines. Hibr producer cadence is
-workload-dependent and must be reported separately from presentation cadence;
-current live input evidence is recorded in the verification ledger.
+The supplied host currently exposes one 1920x2160 output at 60 Hz. With no
+session attached it reports the correct 16 ms refresh-aware target, SDL vsync,
+and no sustained frame rate because an idle output presents no frames. Its
+persisted keyboard lockout has been repaired through `PUT /v1/settings`; this
+is an operational correction on 0.1.464, not evidence that the 0.1.465 fix is
+deployed.
 
-The next engineering priority is therefore not another launcher or parallel
-renderer. It is closing those named hardware evidence gaps while preserving
-the single canonical terminal state, atomic frame boundary, API diagnostics,
-and one-primary-Hibr-owner invariants below.
+The immediate sequence is deliberately linear: complete and deploy 0.1.465,
+restart and prove the keyboard default survived, then launch exactly one
+traced Hibr primary and measure producer cadence, presentation cadence,
+screenshots/cell agreement, physical keyboard delivery, and physical pointer
+motion/buttons. Rendering issue #72 and hotplug issue #74 remain the existing
+work ledger; physical multiple monitors (#20) and 120/240 Hz scanout (#21)
+remain open hardware gates rather than claims inferred from this one-output
+host.
 
 ## Historical platform position
 

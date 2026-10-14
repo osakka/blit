@@ -7067,17 +7067,84 @@ static const char *input_route_rejected_property(const char *route)
                                   sizeof(writable) / sizeof(writable[0]));
 }
 
+enum {
+    BLIT_INPUT_PROPERTY_ENABLED = 0,
+    BLIT_INPUT_PROPERTY_SENSITIVITY,
+    BLIT_INPUT_PROPERTY_NATURAL_SCROLL,
+    BLIT_INPUT_PROPERTY_ROUTE,
+    BLIT_INPUT_PROPERTY_KEYMAP,
+    BLIT_INPUT_PROPERTY_REPEAT_DELAY,
+    BLIT_INPUT_PROPERTY_REPEAT_RATE,
+    BLIT_INPUT_PROPERTY_CAPS_LOCK_BOOT,
+    BLIT_INPUT_PROPERTY_NUM_LOCK_BOOT,
+    BLIT_INPUT_PROPERTY_MODIFIERS,
+    BLIT_INPUT_PROPERTY_BUTTONS,
+    BLIT_INPUT_PROPERTY_SCROLL_STEP,
+    BLIT_INPUT_PROPERTY_ACCELERATION,
+    BLIT_INPUT_PROPERTY_DEADZONE,
+    BLIT_INPUT_PROPERTY_INVERT_AXES,
+    BLIT_INPUT_PROPERTY_COUNT
+};
+
+/* One vocabulary for validation and persistence. If these were two lists, a
+   property added to PATCH but not to the settings merge would become immortal
+   the first time a controller tried to reset it to its default (issue #75). */
+static const char *const blit_input_device_properties[] = {
+    "enabled", "sensitivity_percent", "natural_scroll", "route", "keymap",
+    "repeat_delay_ms", "repeat_rate_hz", "caps_lock_boot",
+    "num_lock_boot", "modifiers", "buttons", "scroll_step",
+    "acceleration", "deadzone_percent", "invert_axes"
+};
+
+static int input_device_property_index(const char *property)
+{
+    int index;
+
+    for (index = 0; index < BLIT_INPUT_PROPERTY_COUNT; ++index)
+        if (strcmp(property, blit_input_device_properties[index]) == 0)
+            return index;
+    return -1;
+}
+
+/* -1 is unknown and must survive a downgrade rewrite; 0 is known but not
+   applicable to what this device currently reports and therefore remains
+   dormant; 1 means the live device owns the value. A live-owned property
+   absent from its serialised configuration has deliberately returned to its
+   default and must not be copied back from the old document. */
+static int input_device_property_applicability(const BlitInputDevice *device,
+                                               const char *property)
+{
+    switch (input_device_property_index(property)) {
+    case BLIT_INPUT_PROPERTY_ENABLED:
+    case BLIT_INPUT_PROPERTY_ROUTE:
+        return 1;
+    case BLIT_INPUT_PROPERTY_SENSITIVITY:
+    case BLIT_INPUT_PROPERTY_NATURAL_SCROLL:
+    case BLIT_INPUT_PROPERTY_BUTTONS:
+    case BLIT_INPUT_PROPERTY_SCROLL_STEP:
+    case BLIT_INPUT_PROPERTY_ACCELERATION:
+        return input_device_supports(device, BLIT_INPUT_KIND_POINTER);
+    case BLIT_INPUT_PROPERTY_KEYMAP:
+    case BLIT_INPUT_PROPERTY_CAPS_LOCK_BOOT:
+    case BLIT_INPUT_PROPERTY_NUM_LOCK_BOOT:
+    case BLIT_INPUT_PROPERTY_MODIFIERS:
+        return input_device_supports(device, BLIT_INPUT_KIND_KEYBOARD);
+    case BLIT_INPUT_PROPERTY_REPEAT_DELAY:
+    case BLIT_INPUT_PROPERTY_REPEAT_RATE:
+        return (device->capabilities & BLIT_INPUT_CAP_REPEAT) != 0;
+    case BLIT_INPUT_PROPERTY_DEADZONE:
+    case BLIT_INPUT_PROPERTY_INVERT_AXES:
+        return input_device_supports(device, BLIT_INPUT_KIND_GAMEPAD);
+    default:
+        return -1;
+    }
+}
+
 static const char *input_device_rejected_property(const char *configuration)
 {
-    static const char *const writable[] = {
-        "enabled", "sensitivity_percent", "natural_scroll", "route", "keymap",
-        "repeat_delay_ms", "repeat_rate_hz", "caps_lock_boot",
-        "num_lock_boot", "modifiers", "buttons", "scroll_step",
-        "acceleration", "deadzone_percent", "invert_axes"
-    };
-
-    return json_rejected_property(configuration, writable,
-                                  sizeof(writable) / sizeof(writable[0]));
+    return json_rejected_property(configuration,
+                                  blit_input_device_properties,
+                                  BLIT_INPUT_PROPERTY_COUNT);
 }
 
 /* Issue #66. The modifier remap, parsed into a scratch device the way the
@@ -15520,7 +15587,7 @@ static int apply_input_device_configuration(BlitRuntime *runtime,
        device of no known kind accepts anything, a known kind refuses what
        contradicts it. */
     if ((caps_boot_requested || num_boot_requested) &&
-        !input_device_supports(device, BLIT_INPUT_KIND_KEYBOARD)) {
+        input_device_property_applicability(device, "caps_lock_boot") != 1) {
         config_problem(problem, 422, "Unprocessable Entity",
                        "device_property_not_applicable",
                        "caps_lock_boot and num_lock_boot apply to a device Blit reads as a keyboard, or to one of no known kind.");
@@ -15531,7 +15598,7 @@ static int apply_input_device_configuration(BlitRuntime *runtime,
        to set. Refusing says so, where accepting would store a number that
        changes nothing. */
     if ((repeat_delay_requested || repeat_rate_requested) &&
-        !(device->capabilities & BLIT_INPUT_CAP_REPEAT)) {
+        input_device_property_applicability(device, "repeat_delay_ms") != 1) {
         config_problem(problem, 422, "Unprocessable Entity",
                        "device_property_not_applicable",
                        "repeat_delay_ms and repeat_rate_hz apply to a device that reports EV_REP, which this one does not; its capabilities would include \"repeat\".");
@@ -15562,7 +15629,7 @@ static int apply_input_device_configuration(BlitRuntime *runtime,
     modifiers_cursor = json_key_cursor(configuration, "modifiers");
     if (modifiers_cursor != NULL) {
         const char *reason = NULL;
-        if (!input_device_supports(device, BLIT_INPUT_KIND_KEYBOARD)) {
+        if (input_device_property_applicability(device, "modifiers") != 1) {
             config_problem(problem, 422, "Unprocessable Entity",
                            "device_property_not_applicable",
                            "modifiers applies to a device Blit reads as a keyboard, or to one of no known kind.");
@@ -15610,7 +15677,7 @@ static int apply_input_device_configuration(BlitRuntime *runtime,
     acceleration_cursor = json_key_cursor(configuration, "acceleration");
     if (buttons_cursor != NULL || acceleration_cursor != NULL ||
         scroll_step_requested) {
-        if (!input_device_supports(device, BLIT_INPUT_KIND_POINTER)) {
+        if (input_device_property_applicability(device, "buttons") != 1) {
             config_problem(problem, 422, "Unprocessable Entity",
                            "device_property_not_applicable",
                            "buttons, scroll_step and acceleration apply to a device Blit reads as a pointer, or to one of no known kind.");
@@ -15618,7 +15685,7 @@ static int apply_input_device_configuration(BlitRuntime *runtime,
         }
     }
     if ((deadzone_requested || invert_requested > 0) &&
-        !input_device_supports(device, BLIT_INPUT_KIND_GAMEPAD)) {
+        input_device_property_applicability(device, "deadzone_percent") != 1) {
         config_problem(problem, 422, "Unprocessable Entity",
                        "device_property_not_applicable",
                        "deadzone_percent and invert_axes apply to a device Blit reads as a gamepad, or to one of no known kind.");
@@ -15696,7 +15763,8 @@ static int apply_input_device_configuration(BlitRuntime *runtime,
         buttons_requested = 1;
     }
     if ((sensitivity_requested || natural_scroll_requested) &&
-        !input_device_supports(device, BLIT_INPUT_KIND_POINTER)) {
+        input_device_property_applicability(device,
+                                            "sensitivity_percent") != 1) {
         config_problem(problem, 422, "Unprocessable Entity",
                                 "device_property_not_applicable",
                                 "sensitivity_percent and natural_scroll apply to a device Blit reads as a pointer, or to one of no known kind.");
@@ -15772,7 +15840,7 @@ static int apply_input_device_configuration(BlitRuntime *runtime,
     if (keymap_cursor != NULL) {
         const char *keymap_rejected;
         const char *reason = NULL;
-        if (!input_device_supports(device, BLIT_INPUT_KIND_KEYBOARD)) {
+        if (input_device_property_applicability(device, "keymap") != 1) {
             config_problem(problem, 422, "Unprocessable Entity",
                                     "device_property_not_applicable",
                                     "keymap applies to a device Blit reads as a keyboard, or to one of no known kind.");
@@ -16667,7 +16735,8 @@ static size_t settings_audio_configuration(const BlitAudioDevice *audio,
    The same merge is what keeps a newer release's property alive when an older
    one writes the document: it does not recognise the key, so it would drop
    it, and a downgrade would quietly eat settings. */
-static size_t settings_merge_object(const char *fresh, const char *stored,
+static size_t settings_merge_object(const BlitInputDevice *device,
+                                    const char *fresh, const char *stored,
                                     char *out, size_t capacity)
 {
     size_t used = 0;
@@ -16704,6 +16773,13 @@ static size_t settings_merge_object(const char *fresh, const char *stored,
                                           sizeof(value))) != NULL) {
             snprintf(probe, sizeof(probe), "\"%s\"", key);
             if (fresh != NULL && strstr(fresh, probe) != NULL)
+                continue;
+            /* A property this live device owns and no longer serialises has
+               returned to its default. Copying its old value back made a
+               successful reset last only until restart (issue #75). Unknown
+               properties and known-but-inapplicable properties still carry
+               the downgrade/dormancy rule ADR 0067 requires. */
+            if (input_device_property_applicability(device, key) == 1)
                 continue;
             json_appendf(out, capacity, &used, "%s\"%s\":%s",
                          first ? "" : ",", key, value);
@@ -16832,7 +16908,8 @@ static size_t settings_build(BlitRuntime *runtime, char *out, size_t capacity,
         if (!settings_member(runtime->settings_document, "input_devices",
                              device->id, stored, sizeof(stored)))
             stored[0] = '\0';
-        if (settings_merge_object(live[0] != '\0' ? live : NULL, stored,
+        if (settings_merge_object(device,
+                                  live[0] != '\0' ? live : NULL, stored,
                                   configuration,
                                   sizeof(configuration)) == 0)
             continue;

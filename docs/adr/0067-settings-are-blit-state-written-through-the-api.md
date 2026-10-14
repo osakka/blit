@@ -119,6 +119,17 @@ device the kernel now reports as a keyboard is not applied and not deleted,
 because the contradiction is far more likely to be a kernel re-probe than a
 controller mistake.
 
+The merge therefore has three outcomes, not a generic "old keys win" rule.
+The writable-property vocabulary used by `PATCH` is also the persistence
+vocabulary: a known property applicable to the live device and absent from
+its serialised non-default configuration has been reset to its default and is
+removed; a known property that the device's present kinds or capabilities do
+not support remains dormant; and an unknown property is retained for forward
+compatibility. Keeping separate lists for validation and persistence is not
+allowed. Issue #75 demonstrated why: enabling a keyboard succeeded in memory,
+but the old `enabled:false` was copied back as though it were an unknown future
+property and disabled the keyboard again on restart.
+
 **Precedence, stated once and in one direction.** A stored value wins. An
 environment variable is the boot default **only where the document is silent**.
 An accepted API write stores. The trap this creates has to be named rather than
@@ -254,12 +265,14 @@ entry.
 
 This record was `proposed` while the model was reviewed, and is `accepted` on
 `tools/tests/settings_persistence_gate.rb`, which asserts the decision rather
-than the plumbing — eight scenarios, each one of the things above:
+than the plumbing — ten scenarios, each one of the things above:
 
 ```
 PASS settings-document-starts-empty
 PASS a-write-is-stored-against-the-stable-id-only
 PASS a-setting-survives-a-restart
+PASS a-known-property-reset-to-default-stays-reset
+PASS an-unknown-property-survives-a-known-write
 PASS a-write-immediately-before-a-restart-is-not-lost
 PASS the-document-is-a-resource
 PASS an-unreadable-document-never-stops-a-boot
@@ -282,10 +295,14 @@ a reason worth recording: with only the refused entry, "the refused value was
 not applied" is also true of a server that applies nothing at all, and the
 scenario would have passed against the very build it exists to catch.
 
-Teeth: against a binary built from this tree with the loading, saving and the
-resource removed, all eight scenarios fail with 28 individual failures, and
+Teeth: against a binary built with the loading, saving and the resource
+removed, the original eight scenarios fail with 28 individual failures, and
 the headline is the loss this record exists to stop —
-`the stable device kept its setting, got 100`.
+`the stable device kept its setting, got 100`. Against release 0.1.464, the
+issue #75 scenario fails both of its assertions: `enabled:false` remains in
+the document and is restored after restart. The unknown-property scenario
+passes on both sides, proving the correction did not discard the compatibility
+behavior in order to make the reset pass.
 
 Suite: 53 pass, 5 skip, 0 fail. Host-accepted on 192.168.10.54 in the release
 that carries this record.

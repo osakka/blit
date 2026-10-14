@@ -226,6 +226,85 @@ Dir.mktmpdir('blit-settings') do |root|
           "#{settings.is_a?(Hash) ? settings['revision'].inspect : settings.inspect}")
   end
 
+  # Issue #75. The document stores only deviations from defaults, so a known
+  # property deliberately returned to its default disappears from the live
+  # configuration object. That absence means "remove the old value", not
+  # "copy the old value back as if it came from a newer release". The latter
+  # made enabled:false immortal: PATCH enabled:true worked only until restart.
+  verdict('a-known-property-reset-to-default-stays-reset') do
+    stop
+    File.write(document, JSON.dump(
+      'version' => 1,
+      'input_devices' => { STABLE => { 'enabled' => false } },
+      'audio_devices' => {}))
+    start(env)
+    check(devices[STABLE].to_h.dig('configuration', 'enabled') == false,
+          'the stored non-default is applied before the reset')
+    _, before = request('GET', '/v1/settings')
+    before_revision = before.to_h.fetch('revision', 0).to_i
+    device_revision = devices.fetch(STABLE).fetch('revision')
+    code, = request('PATCH', "/v1/input/devices/#{STABLE}",
+                    { 'configuration' => { 'enabled' => true } },
+                    { 'If-Match' => device_revision.to_s })
+    check(code == 200, "PATCH enabled:true -> #{code}")
+    begin
+      Timeout.timeout(10) do
+        loop do
+          _, settings = request('GET', '/v1/settings')
+          break if settings.to_h.fetch('revision', 0).to_i > before_revision
+
+          sleep 0.1
+        end
+      end
+    rescue Timeout::Error
+      check(false, 'the reset reached the coalesced settings document')
+    end
+    stored = File.exist?(document) ? JSON.parse(File.read(document)) : {}
+    check(!stored.dig('input_devices').to_h.fetch(STABLE, {}).key?('enabled'),
+          'the known value reset to its default is removed, got ' \
+          "#{stored.dig('input_devices', STABLE).inspect}")
+    stop
+    start(env)
+    check(devices[STABLE].to_h.dig('configuration', 'enabled') == true,
+          'the reset survives a restart instead of resurrecting enabled:false')
+  end
+
+  # The #75 fix must not buy reset semantics by discarding what the merge was
+  # built to protect. A property from a newer release is refused by this one,
+  # kept dormant, and copied beside a later known write.
+  verdict('an-unknown-property-survives-a-known-write') do
+    stop
+    future = { 'mode' => 'from-a-newer-release' }
+    File.write(document, JSON.dump(
+      'version' => 1,
+      'input_devices' => { STABLE => { 'future_pointer_policy' => future } },
+      'audio_devices' => {}))
+    start(env)
+    revision = devices.fetch(STABLE).fetch('revision')
+    code, = request('PATCH', "/v1/input/devices/#{STABLE}",
+                    { 'configuration' => { 'sensitivity_percent' => 140 } },
+                    { 'If-Match' => revision.to_s })
+    check(code == 200, "PATCH beside an unknown property -> #{code}")
+    begin
+      Timeout.timeout(10) do
+        sleep 0.1 until File.exist?(document) &&
+          JSON.parse(File.read(document))
+              .dig('input_devices', STABLE, 'sensitivity_percent') == 140
+      end
+    rescue Timeout::Error
+      check(false, 'the known write reached the settings document')
+    end
+    stored = File.exist?(document) ? JSON.parse(File.read(document)) : {}
+    check(stored.dig('input_devices', STABLE, 'future_pointer_policy') == future,
+          'an unknown future property remains dormant, got ' \
+          "#{stored.dig('input_devices', STABLE).inspect}")
+    # Keep this downgrade-only fixture out of the scenarios that follow. This
+    # release correctly refuses the object carrying an unknown property at
+    # load; the assertion above is only that a rewrite does not eat it.
+    code, = request('DELETE', '/v1/settings')
+    check(code == 200, "DELETE after the future-property fixture -> #{code}")
+  end
+
   # A write accepted inside the coalescing window has to reach the disk, and a
   # restart is exactly when it would not. This is the teardown flush.
   verdict('a-write-immediately-before-a-restart-is-not-lost') do

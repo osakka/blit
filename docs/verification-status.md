@@ -3,6 +3,32 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 0.1.465 current candidate
+
+Issue #75 was reproduced on the physical host while preparing the next input
+and rendering run. Blit 0.1.464 accepted a revision-matched
+`configuration.enabled=true` write for the only keyboard and opened its evdev
+descriptor, but after the coalescing interval `/v1/settings` still held
+`enabled:false` at revision 14. The settings merge could not distinguish a
+known property omitted because it returned to its default from an unknown
+future property that must survive a downgrade; it copied the old value back,
+so the next restart would disable the keyboard again.
+
+The serializer now uses the same input-property vocabulary as request
+validation and makes the ADR 0067 distinction explicit: known and applicable
+properties absent from live non-default state are removed, known but presently
+inapplicable properties remain dormant, and unknown properties are preserved.
+The focused gate fails twice against 0.1.464 (`enabled:false` remains and is
+restored after restart) and passes against the candidate, including a separate
+future-property preservation scenario.
+
+The live 0.1.464 host was repaired through the whole-document API rather than
+by editing its state file: settings revision 17 has no keyboard override, the
+keyboard reports `enabled:true`, `open:true`, and runtime reports one keyboard.
+That is an operational state correction, not deployment evidence for the
+0.1.465 source fix. Package, full-suite, deployment, and post-restart host
+acceptance remain pending and will be recorded in the release manifest.
+
 ## 0.1.410 current candidate
 
 The terminal-input JSON decoder now handles the complete bounded JSON escape
