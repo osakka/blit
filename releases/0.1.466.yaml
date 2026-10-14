@@ -1,0 +1,54 @@
+release: 0.1.466
+package: blit_0.1.466-1_amd64.deb
+package_sha256: 20cc9e3818c9de7fded3d5ea2f7f041b64b7fbf4075dca2993bed4a2594e162f
+source_commit: 2964d3c0dc6d594218e71630febf234dcca5a1b3
+package_documentation_commit: 2964d3c0dc6d594218e71630febf234dcca5a1b3
+server_binary_sha256: c5d810d6d0501de817ffa29d3c77291038322dc58d1a8c443821832d81a07c90
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: b55eeced21483b08ed1e58f46d6dff5d43ecb495de91ba1f0f74c25af9285518
+hibr_version: 0.99.191
+hibr_adapter_build: pass_exact_released_headers
+tcc_version: 0.9.27_x86_64_linux
+tcc_build_acceptance: pass_server_helper_adapter
+openapi_yaml: pass
+api_schema_gate: pass_40_paths
+full_local_suite: pass_69_skip_4_fail_0
+adapter_input_acceptance: pass_pointer_origin_zero_buttons_3_wheel_2_function_keys_12_resolved_text_6
+adapter_provider_acceptance: pass_pane_ownership_watched_wakeup_utf8_width_resize_poll_0
+adapter_coalesce_acceptance: pass_revision_170_idle_requests_0
+input_stream_text_acceptance: pass_plain_shift_altgr_shift_release_omitted
+external_pointer_incremental_acceptance: pass_pointer_cache_hit
+external_pointer_full_rebuild_acceptance: pass_pointer_cache_hit
+motion_trail_acceptance: pass_blank_cells_799_steps_12
+render_state_agreement_acceptance: pass_blank_cells_30
+frame_rate_settled_acceptance: pass_59_999_hz_zero_missed_deadlines
+terminal_soak_120s_acceptance: pass_4_sessions_11992_snapshots_1090_resizes
+package_reproducibility: pass_two_independent_builds_byte_identical
+package_artifact_acceptance: pass_manifest_hashes_match_package_and_reproducible
+qemu_hibr_lifecycle_acceptance: unavailable_missing_kernel_and_initramfs
+live_host: 192.168.10.54
+live_predeployment_version: 0.1.465
+live_deployment: pending
+live_hibr_desktop_acceptance: pending
+live_menu_bar_stability: pending
+live_pointer_motion_cadence: pending
+live_pointer_button_acceptance: pending
+live_keyboard_acceptance: pending
+live_watched_output_acceptance: pending
+live_trail_accumulation: pending_issue_72
+live_input_hotplug: pending_issue_74
+physical_multi_monitor_acceptance: unavailable_one_output
+physical_high_refresh_acceptance: open_issue_21
+notes: >-
+  This release corrects one Hibr provider boundary without modifying Hibr.
+  Pane ownership, stacking, clipping, watched application descriptors,
+  UTF-8 width, shadows, input coordinates, button identity, wheel events,
+  function keys and resolved keymap text now follow released Hibr 0.99.191.
+  The adapter also replaces a synchronous geometry request after every input
+  wait with SIGWINCH-driven resize detection, and OpenGLES full-content
+  rebuild mode retains a complete scene snapshot for pointer-only frames.
+
+  Local gates do not close the physical-host tickets. Issues #72, #74,
+  #76, #77 and #78 remain open until this exact package is deployed and its
+  menu stability, physical input, application wakeup and pointer cadence are
+  captured from the real host.
