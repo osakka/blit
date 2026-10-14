@@ -10,8 +10,10 @@ new Hibr run: returning an input property to its default changed live state
 but the settings merge resurrected the old non-default value. The focused gate
 now proves both sides of the corrected ADR 0067 rule—known applicable values
 reset cleanly, while unknown future values and known values made temporarily
-inapplicable by a device re-probe remain preserved. The physical host remains
-on 0.1.464 until the candidate completes its package and deployment gates.
+inapplicable by a device re-probe remain preserved. The physical host is on
+0.1.465 and passed the disable, re-enable, persistence, restart, and evdev
+reopen sequence; the exact revisions and package hash are in the verification
+ledger and release manifest.
 
 The preceding releases corrected two other boundaries relevant to the same
 live acceptance cycle. Release 0.1.463 stopped assuming that an SDL
@@ -25,13 +27,11 @@ artifact.
 The supplied host currently exposes one 1920x2160 output at 60 Hz. With no
 session attached it reports the correct 16 ms refresh-aware target, SDL vsync,
 and no sustained frame rate because an idle output presents no frames. Its
-persisted keyboard lockout has been repaired through `PUT /v1/settings`; this
-is an operational correction on 0.1.464, not evidence that the 0.1.465 fix is
-deployed.
+persisted keyboard lockout is removed, and the 0.1.465 post-restart state has
+one enabled, open keyboard and one pointer.
 
-The immediate sequence is deliberately linear: complete and deploy 0.1.465,
-restart and prove the keyboard default survived, then launch exactly one
-traced Hibr primary and measure producer cadence, presentation cadence,
+The immediate sequence is deliberately linear: launch exactly one traced Hibr
+primary on the accepted 0.1.465 host and measure producer cadence, presentation cadence,
 screenshots/cell agreement, physical keyboard delivery, and physical pointer
 motion/buttons. Rendering issue #72 and hotplug issue #74 remain the existing
 work ledger; physical multiple monitors (#20) and 120/240 Hz scanout (#21)

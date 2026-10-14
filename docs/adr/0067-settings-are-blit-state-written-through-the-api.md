@@ -304,8 +304,10 @@ the document and is restored after restart. The unknown-property scenario
 passes on both sides, proving the correction did not discard the compatibility
 behavior in order to make the reset pass.
 
-Suite: 53 pass, 5 skip, 0 fail. Host-accepted on 192.168.10.54 in the release
-that carries this record.
+The 0.1.465 full suite reports 64 pass, 5 explicit skip, and 0 fail. The #75
+default-reset refinement is host-accepted on 192.168.10.54: disable persisted
+at revision 26, re-enable removed the override at revision 27, and after an
+in-process restart the keyboard was enabled, open, and counted by runtime.
 
 Two decisions were taken during implementation and are above rather than
 appended, because a record that grows a postscript is a record nobody reads to

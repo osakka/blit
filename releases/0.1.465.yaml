@@ -1,0 +1,59 @@
+release: 0.1.465
+package: blit_0.1.465-1_amd64.deb
+package_sha256: c977de538edbb9c5ab75f4644138223e9d22c0f2f20246a351ad8c8db0d70828
+source_commit: 4d009ba51e7807e7f2b4eaef968512335ec31216
+package_documentation_commit: 4d009ba51e7807e7f2b4eaef968512335ec31216
+server_binary_sha256: 3002f17293afe6f6f8f03c9b5d9388766652458e561925812695618ea9be6099
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: 5dc338d56be4f2523b564f51f6d256cd787f6d4781b35500f6dc2060ef4b6170
+hibr_version: 0.99.127
+hibr_adapter_build: carried_from_0_1_464_unchanged_source_and_hash
+tcc_version: 0.9.27_x86_64_linux
+tcc_build_acceptance: pass
+openapi_yaml: pass
+api_schema_gate: pass_40_paths
+full_local_suite: pass_64_skip_5_fail_0
+settings_persistence_acceptance: pass_10_scenarios
+settings_default_reset_teeth: pass_0_1_464_fails_document_removal_and_restart_assertions
+settings_unknown_property_acceptance: pass_preserved_beside_known_write
+input_hotplug_cycle_acceptance: pass_30_cycles
+input_device_route_acceptance: pass
+key_encoding_acceptance: pass_119_cases
+main_block_key_table_acceptance: pass_26_letters_10_digits_12_punctuation_4_non_characters
+deferred_damage_acceptance: pass_cells_336_painted_337_stale_0_missing_0
+motion_trail_acceptance: pass_blank_cells_799_steps_12
+render_state_agreement_acceptance: pass_blank_cells_30
+frame_rate_settled_acceptance: pass_59_999_hz_zero_missed_deadlines
+terminal_soak_120s_acceptance: pass_4_sessions_12380_snapshots_1126_resizes
+package_reproducibility: pass_two_independent_builds_byte_identical
+package_artifact_acceptance: pass_manifest_hashes_match_package_and_reproducible
+qemu_hibr_lifecycle_acceptance: not_rerun_candidate
+live_host: 192.168.10.54
+live_predeployment_version: 0.1.464
+live_predeployment_settings_repair: pass_revision_17_keyboard_override_removed_via_api
+live_deployment: pass_supervised_update_api_0_1_465
+live_current_version: 0.1.465
+live_post_restart_settings_acceptance: pass_disabled_revision_26_enabled_revision_27_restart_open_true_keyboards_1
+live_hibr_desktop_acceptance: pending
+live_trail_accumulation: pending
+live_physical_button_trace_contract: open
+physical_multi_monitor_acceptance: unavailable_one_output
+physical_high_refresh_acceptance: open
+notes: >-
+  Issue #75 was found before launching the next Hibr acceptance run. A
+  revision-matched PATCH enabled the live host's sole keyboard and opened its
+  evdev descriptor, but the coalesced settings document retained
+  enabled:false and would restore it after restart. The serializer treated a
+  known property omitted because it returned to its default as though it were
+  an unknown future property.
+
+  Validation and persistence now share one input-property vocabulary. A known
+  property applicable to the live device is removed when its non-default
+  serialisation omits it; a known but presently inapplicable property remains
+  dormant; and an unknown property remains preserved for downgrade safety.
+  The new gate fails twice against 0.1.464 and passes against this source.
+
+  The live 0.1.464 settings document was repaired through PUT /v1/settings so
+  a restart cannot re-disable the keyboard while this candidate is being
+  packaged. That operational correction is not deployment evidence for this
+  release. No Hibr source was modified.

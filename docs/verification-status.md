@@ -22,12 +22,22 @@ The focused gate fails twice against 0.1.464 (`enabled:false` remains and is
 restored after restart) and passes against the candidate, including a separate
 future-property preservation scenario.
 
-The live 0.1.464 host was repaired through the whole-document API rather than
-by editing its state file: settings revision 17 has no keyboard override, the
-keyboard reports `enabled:true`, `open:true`, and runtime reports one keyboard.
-That is an operational state correction, not deployment evidence for the
-0.1.465 source fix. Package, full-suite, deployment, and post-restart host
-acceptance remain pending and will be recorded in the release manifest.
+The TCC-built candidate passed the canonical full suite with 64 passes, five
+explicit skips, and zero failures, including the 120-second four-session soak
+and a settled 59.999 Hz renderer workload. Two independent Debian builds were
+byte-identical; the artifact gate matched the package, server, update helper,
+adapter, schema, and documentation hashes. The package SHA-256 is
+`c977de538edbb9c5ab75f4644138223e9d22c0f2f20246a351ad8c8db0d70828`.
+
+The supervised update API deployed 0.1.465 to the physical host. The exact
+live sequence then persisted `enabled:false` at settings revision 26,
+re-enabled the keyboard and removed that property at revision 27, requested an
+in-process restart, and required the reported uptime to reset. After the
+asynchronous evdev opener settled, the keyboard reported `enabled:true` and
+`open:true`, runtime reported one keyboard, and settings revision 27 still had
+no keyboard override. This closes issue #75 on the named host. No Hibr session
+was running during the settings acceptance; rendering and physical input
+acceptance remain separate next steps.
 
 ## 0.1.410 current candidate
 
