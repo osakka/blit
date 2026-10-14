@@ -3,10 +3,10 @@
 ## Decision
 
 blit remains the standalone display server. The Hibr desktop is an external
-client of Blit's OpenAPI and WebSocket contracts. An optional `console-blit`
-Hibr module implements the existing `console`/`display` boundary for Hibr
-programs that explicitly request that provider; it is not a desktop launcher
-and is not required by the held `desktop`/`desktop --join` path.
+client of Blit's OpenAPI and WebSocket contracts. The `console-blit` Hibr
+module implements the existing `console`/`display` boundary for Blit's
+packaged held-desktop entrypoint and for standalone programs that explicitly
+request it. It is a transport/provider adapter, not a desktop implementation.
 
 Blit starts terminal children with `DT_BIDI=on` and `HIBR_GFX=kitty` by
 default. This is intentional: Blit stores and draws cells in display order,
@@ -93,8 +93,9 @@ adapter and Hibr's native `pty`, `term`, and `hold` modules only. An explicit
 `HIBR_RC` always wins, so controlled fixtures retain their own paths.
 
 `console-blit` remains available for standalone, non-held Hibr programs that
-explicitly need the cell-level Blit provider. It is not part of the held
-desktop integration path.
+explicitly need the cell-level Blit provider. It is also the provider loaded
+by the packaged held-desktop integration path; direct `/usr/bin/desktop`
+continues to exercise Hibr's native console provider instead.
 
 ### Desktop invocation options
 
@@ -174,8 +175,22 @@ The hibr module should be a transport adapter only:
   chunks; a frame that fits in one request is `presentation: immediate`,
   because Blit answers 409 `frame_not_open` to a commit with no preceding
   defer.
-- `console key` waits on the WebSocket stream and returns decoded input.
-- `console watch` subscribes to terminal and surface events.
+- `console key` waits on the WebSocket stream and returns decoded input. The
+  stream's terminal cells are one-based while Hibr's provider coordinates are
+  zero-based, so `console-blit` subtracts exactly once at this boundary. Its
+  pixel fallback uses the session's authoritative `cell_pixels`, including a
+  font-scale change, and reports the same values through `console cellpx`.
+  Linux F1 through F12 codes become Hibr's native `f1` through `f12` names,
+  including the non-contiguous F11/F12 codes. Printable keys use the stream's
+  Blit-resolved UTF-8 `text`, after per-device keymap, Shift, CapsLock, and
+  AltGr processing; the adapter owns no second keyboard layout. Hibr's console
+  contract remains unchanged; see [ADR 0068](adr/0068-the-hibr-adapter-translates-input-vocabulary.md).
+- `console watch` adds a Hibr application descriptor to the same wait as the
+  input WebSocket. Readiness wakes the desktop immediately but leaves the
+  descriptor for its owning application to drain; `console key -q` excludes
+  watched descriptors deliberately.
+- local pane ownership, clipping, stack order and hit testing follow Hibr's
+  provider contract. They do not create a second set of Blit topology panes.
 - console mouse reports become blit input events.
 - terminal resize becomes a surface/session resize mutation.
 - a replay gap is repaired with the canonical surface snapshot endpoint.
@@ -270,10 +285,10 @@ the documented `--resume` path, while auxiliary clients always use `--join`.
 
 The standalone PTY route and the ABI-level `console-blit` provider are
 operational. `console-blit` owns no duplicate surface model: it forwards cell
-mutations and cursor state to Blit, reads topology for named-pane rectangles,
-and consumes the server's default all-subscriptions WebSocket stream for
-keyboard and mouse input. Its flush path drains full-screen clears iteratively,
-so the stock Hibr desktop remains alive under large redraws.
+mutations and cursor state to Blit, keeps Hibr-local pane composition separate
+from physical topology, and subscribes one session-owned WebSocket to input
+events only. Its flush path drains full-screen clears iteratively, so the stock
+Hibr desktop remains alive under large redraws.
 
 The current QEMU evidence covers the packaged Hibr desktop, primary plus
 auxiliary `--join` sessions, the four logical pane layouts, and input-route
@@ -284,7 +299,18 @@ both displays; a dedicated Blit test workload creates a window and validates
 Hibr `move`, `resize`, and `focus` across the joined display. The fixture must
 also provide the BusyBox `mkdir` applet because Hibr invokes `mkdir` as an
 external command during control-socket setup. Blit does not modify Hibr. The
-adapter deliberately does not send a redundant WebSocket subscription control
-frame; the gateway's default subscription set is the current source of truth.
+adapter sends one masked subscription control frame naming `input` and the
+owning terminal session. This bounds its frame reader away from large surface
+messages and lets session teardown close the stream deterministically.
 Resource links remain an explicitly deferred extension because they are not
 part of the display ownership contract.
+
+The adapter input vocabulary has an independent executable gate. It feeds the
+real adapter WebSocket frames and proves zero-based Hibr pointer coordinates,
+font-scaled pixel fallback, all three button names, wheel events, and F1
+through F12 names. `adapter_provider_gate.sh` separately proves pane ownership,
+clipping/stacking, watched-descriptor wakeups, UTF-8 width, and shadows against
+the exact pinned Hibr release. It also proves that a steady `console resizing`
+check performs no HTTP poll; SIGWINCH is the resize edge. Physical-host clicks,
+shortcuts, redraws, and application wakeups are still measured after package deployment; passing
+translation/provider gates are not reported as physical acceptance.

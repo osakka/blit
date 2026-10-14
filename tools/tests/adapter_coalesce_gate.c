@@ -99,6 +99,34 @@ void s_num(str *s, long v)
 	s_cat(s, b);
 }
 
+int u8dec(const char *p, size_t n, unsigned *cp)
+{
+	const unsigned char *s = (const unsigned char *)p;
+	if (!p || n == 0 || !cp) return 0;
+	if (s[0] < 0x80) { *cp = s[0]; return 1; }
+	if (n >= 2 && (s[0] & 0xe0) == 0xc0) {
+		*cp = ((unsigned)(s[0] & 0x1f) << 6) | (s[1] & 0x3f); return 2;
+	}
+	if (n >= 3 && (s[0] & 0xf0) == 0xe0) {
+		*cp = ((unsigned)(s[0] & 0x0f) << 12) |
+			((unsigned)(s[1] & 0x3f) << 6) | (s[2] & 0x3f); return 3;
+	}
+	if (n >= 4 && (s[0] & 0xf8) == 0xf0) {
+		*cp = ((unsigned)(s[0] & 7) << 18) |
+			((unsigned)(s[1] & 0x3f) << 12) |
+			((unsigned)(s[2] & 0x3f) << 6) | (s[3] & 0x3f); return 4;
+	}
+	*cp = 0xfffd; return 1;
+}
+
+int u8w(unsigned cp)
+{
+	if ((cp >= 0x300 && cp <= 0x36f) || cp == 0x200d) return 0;
+	if (cp >= 0x1100 && (cp <= 0x115f || cp == 0x2329 || cp == 0x232a ||
+	    (cp >= 0x2e80 && cp <= 0xa4cf))) return 2;
+	return 1;
+}
+
 #include "console-blit.c"
 
 /* --- the gate ----------------------------------------------------------- */

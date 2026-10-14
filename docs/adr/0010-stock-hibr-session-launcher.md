@@ -1,6 +1,6 @@
 # ADR 0010: Launch the stock Hibr session in one module-owning process
 
-- Status: Accepted
+- Status: Accepted; production-path wording amended by ADR 0069
 - Date: 2026-10-07
 
 ## Context
@@ -31,4 +31,6 @@ The fixture tests Hibr's actual held-session and `--join` behavior, including
 supervisor restart and auxiliary reconnect, while remaining independent of
 Hibr's install prefix and root module-search policy. The launcher is an
 integration fixture, not a runtime shell wrapper or a replacement for Hibr's
-desktop command. A physical multi-monitor run remains a separate release gate.
+desktop command. The packaged `blit-session.hibr` entrypoint now applies the
+same one-process provider rule in production, as ADR 0069 records. A physical
+multi-monitor run remains a separate release gate.

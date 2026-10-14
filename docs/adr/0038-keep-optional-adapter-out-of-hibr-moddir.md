@@ -1,6 +1,6 @@
 # ADR 0038: Keep the optional Blit adapter outside Hibr's module directory
 
-Status: accepted
+Status: accepted; integration-path statement amended by ADR 0069
 
 ## Context
 
@@ -19,9 +19,12 @@ The Debian package installs `console-blit.so` under
 The Blit-owned adapter entrypoint loads that file explicitly and loads Hibr's
 `pty`, `term`, and `hold` modules from the external Hibr installation.
 
-The canonical held desktop path remains `/usr/bin/desktop` with
-`surface_mode: terminal`; it does not load `console-blit`. Hibr source and
-installed Hibr modules remain outside Blit's ownership boundary.
+The canonical native-provider test path remains `/usr/bin/desktop` with
+`surface_mode: terminal`; it does not load `console-blit`. The packaged Blit
+held-desktop path is now the explicit `/usr/share/blit/hibr/blit-session.hibr`
+entrypoint, which loads the adapter by absolute path as specified by ADR 0069.
+Hibr source and installed Hibr modules remain outside Blit's ownership
+boundary.
 
 ## Consequences
 

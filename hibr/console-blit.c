@@ -35,6 +35,10 @@
 #define CB_IMAGE_UNDER 2U
 #define CB_GLYPH_CAP 16
 #define CB_MAX_PANES 256
+#define CB_MAX_WATCHED 256
+#define CB_CELL_WIDTH 8
+#define CB_CELL_HEIGHT 16
+#define CB_SHADOWED (1U << 16)
 
 typedef struct {
 	int x, y;
@@ -46,6 +50,7 @@ typedef struct {
 	sh *shell;
 	int opened;
 	int rows, cols;
+	int cell_width, cell_height;
 	int cursor_x, cursor_y, cursor_visible;
 	unsigned long long revision;
 	unsigned pen_fg, pen_bg, pen_attr;
@@ -69,10 +74,26 @@ typedef struct {
 	cb_cell *shadow;
 	size_t shadow_count;
 	int *last_write;
+	/* Hibr panes are not just coordinate aliases. While `behind` is on,
+	 * absolute wallpaper writes must skip every cell a pane owns; writes
+	 * through a pane bypass that mask. The native console has the same
+	 * ownership map. Omitting it let a wallpaper erase unchanged windows
+	 * and, since Hibr 0.99.129, the separately gated menu bar. */
+	unsigned char *ownership;
+	size_t ownership_count;
+	int ownership_valid;
+	int behind;
 	int shadow_cursor_x, shadow_cursor_y, shadow_cursor_visible;
 	int shadow_cursor_known;
 	int ws_fd;
 	int ws_subscribed;
+	int watched[CB_MAX_WATCHED];
+	size_t watched_count;
+	int quiet_wait;
+	unsigned long long consumed;
+	unsigned long long drawn;
+	unsigned dark_default_fg, dark_default_bg;
+	int bidi;
 	int mouse_mode;
 	/* Buttons currently held, so drag mode knows when motion is a drag. */
 	unsigned mouse_buttons;
@@ -89,6 +110,35 @@ typedef struct {
 
 static cb_state cb;
 static cb_pane cb_panes[CB_MAX_PANES];
+static size_t cb_pane_count;
+static volatile sig_atomic_t cb_resize_pending;
+static struct sigaction cb_previous_winch;
+static int cb_winch_installed;
+
+static void cb_winch(int signal_number)
+{
+	(void)signal_number;
+	cb_resize_pending = 1;
+}
+
+static int cb_install_winch(void)
+{
+	struct sigaction action;
+	memset(&action, 0, sizeof(action));
+	action.sa_handler = cb_winch;
+	sigemptyset(&action.sa_mask);
+	if (sigaction(SIGWINCH, &action, &cb_previous_winch) != 0) return 0;
+	cb_winch_installed = 1;
+	return 1;
+}
+
+static void cb_restore_winch(void)
+{
+	if (cb_winch_installed)
+		sigaction(SIGWINCH, &cb_previous_winch, NULL);
+	cb_winch_installed = 0;
+	cb_resize_pending = 0;
+}
 
 static int cb_trace_enabled(void)
 {
@@ -102,6 +152,9 @@ static int cb_trace_enabled(void)
 
 static long cb_flush(void);
 static int cb_prect(const char *name, int *row, int *col, int *h, int *w);
+static void cb_watch_add(int fd);
+static void cb_watch_del(int fd);
+static int cb_waiting(void);
 
 static int cb_write_all(int fd, const void *data, size_t length)
 {
@@ -194,6 +247,39 @@ static int cb_json_int(const char *json, const char *key, int *value)
 	unsigned long long n;
 	if (!cb_json_number(json, key, &n)) return 0;
 	*value = (int)n;
+	return 1;
+}
+
+static int cb_json_string(const char *json, const char *key, char *value,
+			  size_t capacity)
+{
+	char needle[64];
+	const char *p;
+	size_t used = 0;
+	if (!value || capacity == 0) return 0;
+	value[0] = '\0';
+	snprintf(needle, sizeof(needle), "\"%s\"", key);
+	p = strstr(json, needle);
+	if (!p) return 0;
+	p += strlen(needle);
+	while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') ++p;
+	if (*p++ != ':') return 0;
+	while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') ++p;
+	if (*p++ != '"') return 0;
+	while (*p && *p != '"') {
+		unsigned char c = (unsigned char)*p++;
+		if (c == '\\') {
+			c = (unsigned char)*p++;
+			if (c == 'n') c = '\n';
+			else if (c == 'r') c = '\r';
+			else if (c == 't') c = '\t';
+			else if (c != '"' && c != '\\' && c != '/') return 0;
+		}
+		if (used + 1 >= capacity) return 0;
+		value[used++] = (char)c;
+	}
+	if (*p != '"') return 0;
+	value[used] = '\0';
 	return 1;
 }
 
@@ -295,6 +381,24 @@ static int cb_register_owner(void)
 	return 1;
 }
 
+static int cb_refresh_cell_metrics(void)
+{
+	char path[256], response[CB_HTTP_CAP];
+	const char *pixels;
+	int width, height;
+
+	if (!cb.session[0]) return 0;
+	snprintf(path, sizeof(path), "/v1/terminal-sessions/%s", cb.session + 8);
+	if (!cb_http("GET", path, "", response, sizeof(response))) return 0;
+	pixels = strstr(response, "\"cell_pixels\"");
+	if (pixels == NULL || !cb_json_int(pixels, "width", &width) ||
+	    !cb_json_int(pixels, "height", &height) || width < 1 || height < 1)
+		return 0;
+	cb.cell_width = width;
+	cb.cell_height = height;
+	return 1;
+}
+
 static void cb_shadow_forget(void)
 {
 	if (cb.shadow != NULL)
@@ -308,21 +412,28 @@ static void cb_shadow_forget(void)
 static int cb_shadow_reset(void)
 {
 	size_t count = (size_t)cb.rows * (size_t)cb.cols;
+	size_t i;
 
 	if (cb.rows <= 0 || cb.cols <= 0) return 0;
 	if (count != cb.shadow_count) {
 		free(cb.shadow);
 		free(cb.last_write);
+		free(cb.ownership);
 		cb.shadow = (cb_cell *)calloc(count, sizeof(*cb.shadow));
 		cb.last_write = (int *)malloc(count * sizeof(*cb.last_write));
-		if (!cb.shadow || !cb.last_write) {
-			free(cb.shadow); free(cb.last_write);
-			cb.shadow = NULL; cb.last_write = NULL;
+		cb.ownership = (unsigned char *)calloc(count, 1);
+		if (!cb.shadow || !cb.last_write || !cb.ownership) {
+			free(cb.shadow); free(cb.last_write); free(cb.ownership);
+			cb.shadow = NULL; cb.last_write = NULL; cb.ownership = NULL;
 			cb.shadow_count = 0;
+			cb.ownership_count = 0;
 			return 0;
 		}
 		cb.shadow_count = count;
+		cb.ownership_count = count;
 	}
+	for (i = 0; i < cb.shadow_count; ++i) cb.last_write[i] = -1;
+	cb.ownership_valid = 0;
 	cb_shadow_forget();
 	return 1;
 }
@@ -339,6 +450,18 @@ static int cb_cursor_changed(void)
 		cb.shadow_cursor_x != cb.cursor_x ||
 		cb.shadow_cursor_y != cb.cursor_y ||
 		cb.shadow_cursor_visible != cb.cursor_visible;
+}
+
+static void cb_index_pending(void)
+{
+	size_t i;
+	if (cb.last_write == NULL) return;
+	for (i = 0; i < cb.shadow_count; ++i) cb.last_write[i] = -1;
+	for (i = 0; i < cb.pending_count; ++i) {
+		size_t index = (size_t)cb.pending[i].y * (size_t)cb.cols +
+			(size_t)cb.pending[i].x;
+		if (index < cb.shadow_count) cb.last_write[index] = (int)i;
+	}
 }
 
 /* Reduce a frame to what actually changed, preserving write order.
@@ -372,11 +495,14 @@ static void cb_coalesce_pending(void)
 		++kept;
 	}
 	cb.pending_count = kept;
+	cb_index_pending();
 }
 
-static int cb_add_pending(int x, int y, const char *text)
+static int cb_add_styled(int x, int y, const char *text,
+			 unsigned fg, unsigned bg, unsigned attr)
 {
 	cb_cell *cell;
+	size_t index;
 	if (x < 0 || y < 0 || x >= cb.cols || y >= cb.rows || !text || !*text)
 		return HIBR_FAIL;
 	if (cb.pending_count == cb.pending_capacity) {
@@ -400,8 +526,30 @@ static int cb_add_pending(int x, int y, const char *text)
 	memset(cell, 0, sizeof(*cell));
 	cell->x = x; cell->y = y;
 	strncpy(cell->text, text, sizeof(cell->text) - 1);
-	cell->fg = cb.pen_fg; cell->bg = cb.pen_bg; cell->attr = cb.pen_attr;
+	cell->fg = fg; cell->bg = bg; cell->attr = attr;
+	index = (size_t)y * (size_t)cb.cols + (size_t)x;
+	if (cb.last_write != NULL && index < cb.shadow_count)
+		cb.last_write[index] = (int)(cb.pending_count - 1);
 	return HIBR_OK;
+}
+
+static int cb_add_pending(int x, int y, const char *text)
+{
+	return cb_add_styled(x, y, text, cb.pen_fg, cb.pen_bg, cb.pen_attr);
+}
+
+static const cb_cell *cb_effective_cell(int x, int y)
+{
+	size_t index;
+	int pending_index;
+	if (x < 0 || y < 0 || x >= cb.cols || y >= cb.rows ||
+	    cb.shadow == NULL || cb.last_write == NULL)
+		return NULL;
+	index = (size_t)y * (size_t)cb.cols + (size_t)x;
+	pending_index = cb.last_write[index];
+	if (pending_index >= 0 && (size_t)pending_index < cb.pending_count)
+		return &cb.pending[pending_index];
+	return &cb.shadow[index];
 }
 
 static void cb_colour_json(char *out, size_t capacity, unsigned colour)
@@ -570,6 +718,7 @@ static long cb_flush(void)
 			memmove(cb.pending, cb.pending + sent_count,
 				(cb.pending_count - (size_t)sent_count) * sizeof(*cb.pending));
 		cb.pending_count -= (size_t)sent_count;
+		cb_index_pending();
 	} while (cb.pending_count > 0);
 	cb.shadow_cursor_x = cb.cursor_x;
 	cb.shadow_cursor_y = cb.cursor_y;
@@ -585,6 +734,8 @@ static int cb_open(sh *s)
 	if (cb.opened) return HIBR_OK;
 	memset(&cb, 0, sizeof(cb));
 	cb.ws_fd = -1;
+	cb.cell_width = CB_CELL_WIDTH;
+	cb.cell_height = CB_CELL_HEIGHT;
 	cb.shell = s;
 	v = hibr_get(s, "BLIT_SURFACE_ID");
 	if (!v || !*v) v = getenv("BLIT_SURFACE_ID");
@@ -631,6 +782,10 @@ static int cb_open(sh *s)
 			cb.surface, response);
 		return HIBR_FAIL;
 	}
+	/* A session's cell pixels follow Blit's selected font and scale. The
+	 * defaults preserve compatibility with a pre-capability server, while a
+	 * current server is authoritative for pointer fallback and images. */
+	cb_refresh_cell_metrics();
 	/* Hibr's native console starts with its cursor hidden (cn_cvis is a
 	 * zero-initialized state).  Match that contract until an explicit
 	 * `console cursor row col` request enables it; otherwise the desktop's
@@ -643,6 +798,10 @@ static int cb_open(sh *s)
 			cb.surface);
 		return HIBR_FAIL;
 	}
+	if (!cb_install_winch()) {
+		lg(HIBR_LERR, "console-blit: cannot install SIGWINCH handler");
+		return HIBR_FAIL;
+	}
 	cb.opened = 1;
 	lg(HIBR_LDBG, "console-blit: opened surface=%s session=%s size=%dx%d revision=%llu",
 		cb.surface, cb.session[0] ? cb.session : "(none)",
@@ -653,11 +812,15 @@ static int cb_open(sh *s)
 static void cb_close(sh *s)
 {
 	(void)s;
+	cb_restore_winch();
 	if (cb.ws_fd >= 0) close(cb.ws_fd);
 	free(cb.pending);
 	free(cb.shadow);
 	free(cb.last_write);
+	free(cb.ownership);
 	memset(&cb, 0, sizeof(cb));
+	memset(cb_panes, 0, sizeof(cb_panes));
+	cb_pane_count = 0;
 	cb.ws_fd = -1;
 }
 
@@ -671,22 +834,78 @@ static void cb_size(int *rows, int *cols)
 
 static int cb_resized(void)
 {
-	int rows, cols;
+	int rows, cols, old_cell_width, old_cell_height;
 	char path[256], response[CB_HTTP_CAP];
-	if (!cb.opened) return 0;
+	if (!cb.opened || !cb_resize_pending) return 0;
+	/* Consume the edge before the bounded refresh. A second SIGWINCH during
+	 * the request remains pending and is observed on the next desktop tick. */
+	cb_resize_pending = 0;
 	snprintf(path, sizeof(path), "/v1/surfaces/%s/cells", cb.surface);
-	if (!cb_http("GET", path, "", response, sizeof(response))) return 0;
+	if (!cb_http("GET", path, "", response, sizeof(response))) {
+		cb_resize_pending = 1;
+		return 0;
+	}
 	if (!cb_json_int(response, "width", &cols) ||
-	    !cb_json_int(response, "height", &rows)) return 0;
-	if (rows == cb.rows && cols == cb.cols) return 0;
-	cb.rows = rows; cb.cols = cols; cb.pending_count = 0;
-	cb_shadow_reset();
+	    !cb_json_int(response, "height", &rows)) {
+		cb_resize_pending = 1;
+		return 0;
+	}
+	old_cell_width = cb.cell_width;
+	old_cell_height = cb.cell_height;
+	cb_refresh_cell_metrics();
+	if (rows != cb.rows || cols != cb.cols ||
+	    old_cell_width != cb.cell_width ||
+	    old_cell_height != cb.cell_height) {
+		cb.rows = rows; cb.cols = cols; cb.pending_count = 0;
+		cb_shadow_reset();
+	}
+	/* Like Hibr's native cn_pending, the result reports the resize edge,
+	 * not whether two successive geometry reads happened to differ. */
 	return 1;
 }
 
 static void cb_pen(unsigned fg, unsigned bg, unsigned attr)
 {
 	cb.pen_fg = fg; cb.pen_bg = bg; cb.pen_attr = attr;
+}
+
+static void cb_ownership_invalidate(void)
+{
+	cb.ownership_valid = 0;
+}
+
+static int cb_ownership_sync(void)
+{
+	size_t i;
+	int r, c;
+	if (cb.ownership == NULL || cb.ownership_count != cb.shadow_count)
+		return 0;
+	if (cb.ownership_valid) return 1;
+	memset(cb.ownership, 0, cb.ownership_count);
+	for (i = 0; i < cb_pane_count; ++i) {
+		const cb_pane *p = &cb_panes[i];
+		for (r = p->row; r < p->row + p->height; ++r) {
+			if (r < 0 || r >= cb.rows) continue;
+			for (c = p->col; c < p->col + p->width; ++c) {
+				if (c < 0 || c >= cb.cols) continue;
+				cb.ownership[(size_t)r * (size_t)cb.cols +
+					(size_t)c] = 1;
+			}
+		}
+	}
+	cb.ownership_valid = 1;
+	return 1;
+}
+
+static int cb_owned_behind(int row, int col)
+{
+	if (!cb.behind) return 0;
+	/* Allocation failure must preserve the foreground, not let a wallpaper
+	 * overwrite it. Skipping the background frame is recoverable; erasing a
+	 * pane whose owner did not redraw is not. */
+	if (!cb_ownership_sync()) return 1;
+	if (row < 0 || row >= cb.rows || col < 0 || col >= cb.cols) return 0;
+	return cb.ownership[(size_t)row * (size_t)cb.cols + (size_t)col] != 0;
 }
 
 static void cb_clear(void)
@@ -698,30 +917,72 @@ static void cb_clear(void)
 			cb_add_pending(x, y, " ");
 }
 
-static int cb_put(int row, int col, const char *text)
+static int cb_put_bounded(int row, int col, const char *text,
+			  int max_width, int pane_write)
 {
 	const unsigned char *p = (const unsigned char *)text;
-	int x = col;
-	while (p && *p && x < cb.cols) {
+	size_t remaining = text != NULL ? strlen(text) : 0;
+	int x = col, last_x = -1;
+	while (p && remaining > 0 && *p && x < cb.cols) {
 		char glyph[CB_GLYPH_CAP];
-		size_t n = 1;
-		if (*p >= 0xc0 && *p < 0xe0) n = 2;
-		else if (*p >= 0xe0 && *p < 0xf0) n = 3;
-		else if (*p >= 0xf0) n = 4;
-		if (n >= sizeof(glyph)) n = 1;
-		memcpy(glyph, p, n); glyph[n] = '\0';
-		if (cb_add_pending(x, row, glyph) != HIBR_OK) return x - col;
-		p += n; ++x;
+		unsigned codepoint = 0;
+		int decoded = u8dec((const char *)p, remaining, &codepoint);
+		int width;
+		if (decoded <= 0 || (size_t)decoded > remaining) decoded = 1;
+		width = u8w(codepoint);
+		if (width < 0 || width > 2) width = 1;
+		if (width == 0) {
+			const cb_cell *previous = last_x >= 0 ?
+				cb_effective_cell(last_x, row) : NULL;
+			if (previous != NULL && previous->text[0] != '\0' &&
+			    strlen(previous->text) + (size_t)decoded < sizeof(glyph)) {
+				cb_cell combined = *previous;
+				size_t used = strlen(combined.text);
+				memcpy(combined.text + used, p, (size_t)decoded);
+				combined.text[used + (size_t)decoded] = '\0';
+				if (cb_add_styled(last_x, row, combined.text,
+					combined.fg, combined.bg, combined.attr) != HIBR_OK)
+					return x - col;
+			}
+			p += decoded;
+			remaining -= (size_t)decoded;
+			continue;
+		}
+		if (max_width >= 0 && x - col + width > max_width) break;
+		if (x + width > cb.cols) break;
+		if ((size_t)decoded >= sizeof(glyph)) decoded = 1;
+		memcpy(glyph, p, (size_t)decoded); glyph[decoded] = '\0';
+		if (pane_write || !cb_owned_behind(row, x)) {
+			if (cb_add_pending(x, row, glyph) != HIBR_OK) return x - col;
+			last_x = x;
+		}
+		p += decoded;
+		remaining -= (size_t)decoded;
+		x += width;
 	}
 	return x - col;
 }
 
+static int cb_put(int row, int col, const char *text)
+{
+	return cb_put_bounded(row, col, text, -1, 0);
+}
+
+static void cb_fill_bounded(int row, int col, int h, int w,
+			    const char *text, int pane_write)
+{
+	int y, x, advanced;
+	for (y = row; y < row + h; ++y)
+		for (x = col; x < col + w;) {
+			advanced = cb_put_bounded(y, x, text, col + w - x,
+				pane_write);
+			x += advanced > 0 ? advanced : 1;
+		}
+}
+
 static void cb_fill(int row, int col, int h, int w, const char *text)
 {
-	int y, x;
-	for (y = row; y < row + h; ++y)
-		for (x = col; x < col + w; ++x)
-			cb_put(y, x, text);
+	cb_fill_bounded(row, col, h, w, text, 0);
 }
 
 static void cb_cursor(int row, int col, int visible)
@@ -752,6 +1013,46 @@ static unsigned cb_attr(const char *text)
 	return attr;
 }
 
+static unsigned cb_dim_colour(unsigned value, int percent,
+			      unsigned default_value)
+{
+	unsigned red, green, blue;
+	if (percent < 0) percent = 0;
+	if (percent > 100) percent = 100;
+	if (value == DP_DEFAULT) value = default_value;
+	if ((value & 0xf000000u) != DP_RGB) return value;
+	red = (value >> 16) & 0xffu;
+	green = (value >> 8) & 0xffu;
+	blue = value & 0xffu;
+	red = (red * (unsigned)percent + 50u) / 100u;
+	green = (green * (unsigned)percent + 50u) / 100u;
+	blue = (blue * (unsigned)percent + 50u) / 100u;
+	return DP_RGB | (red << 16) | (green << 8) | blue;
+}
+
+static void cb_darken(int row, int col, int height, int width,
+		      int percent, int once)
+{
+	int r, c;
+	for (r = row; r < row + height; ++r) {
+		for (c = col; c < col + width; ++c) {
+			const cb_cell *effective = cb_effective_cell(c, r);
+			cb_cell darkened;
+			if (effective == NULL || effective->text[0] == '\0') continue;
+			if (once && (effective->attr & CB_SHADOWED)) continue;
+			darkened = *effective;
+			darkened.fg = cb_dim_colour(darkened.fg, percent,
+				cb.dark_default_fg);
+			darkened.bg = cb_dim_colour(darkened.bg, percent,
+				cb.dark_default_bg);
+			darkened.attr |= DP_DIM;
+			if (once) darkened.attr |= CB_SHADOWED;
+			cb_add_styled(c, r, darkened.text, darkened.fg,
+				darkened.bg, darkened.attr);
+		}
+	}
+}
+
 static int cb_open(sh *s);
 static void cb_close(sh *s);
 static int cb_colour(const char *text, unsigned *out);
@@ -767,10 +1068,10 @@ static void cb_mouse(int mode);
 
 static cb_pane *cb_find_pane(const char *name)
 {
-	int i;
+	size_t i;
 	if (!name || !*name) return 0;
-	for (i = 0; i < CB_MAX_PANES; ++i)
-		if (cb_panes[i].used && !strcmp(cb_panes[i].name, name))
+	for (i = 0; i < cb_pane_count; ++i)
+		if (!strcmp(cb_panes[i].name, name))
 			return &cb_panes[i];
 	return 0;
 }
@@ -779,16 +1080,89 @@ static cb_pane *cb_set_pane(const char *name, int row, int col,
 					int height, int width)
 {
 	cb_pane *p = cb_find_pane(name);
-	int i;
+	if (!name || !*name || height < 1 || width < 1) return 0;
 	if (!p) {
-		for (i = 0; i < CB_MAX_PANES; ++i)
-			if (!cb_panes[i].used) { p = &cb_panes[i]; break; }
+		if (cb_pane_count >= CB_MAX_PANES) return 0;
+		p = &cb_panes[cb_pane_count++];
 	}
-	if (!p || !name || !*name || height < 1 || width < 1) return 0;
 	p->used = 1;
 	snprintf(p->name, sizeof(p->name), "%s", name);
 	p->row = row; p->col = col; p->height = height; p->width = width;
+	cb_ownership_invalidate();
 	return p;
+}
+
+static void cb_clear_panes(void)
+{
+	memset(cb_panes, 0, sizeof(cb_panes));
+	cb_pane_count = 0;
+	cb_ownership_invalidate();
+}
+
+static int cb_pane_index(const cb_pane *pane)
+{
+	if (pane == NULL || pane < cb_panes ||
+	    pane >= cb_panes + cb_pane_count) return -1;
+	return (int)(pane - cb_panes);
+}
+
+static void cb_raise_pane(cb_pane *pane)
+{
+	int index = cb_pane_index(pane);
+	cb_pane saved;
+	if (index < 0 || (size_t)index + 1 == cb_pane_count) return;
+	saved = cb_panes[index];
+	memmove(&cb_panes[index], &cb_panes[index + 1],
+		(cb_pane_count - (size_t)index - 1) * sizeof(cb_panes[0]));
+	cb_panes[cb_pane_count - 1] = saved;
+}
+
+static void cb_lower_pane(cb_pane *pane)
+{
+	int index = cb_pane_index(pane);
+	cb_pane saved;
+	if (index <= 0) return;
+	saved = cb_panes[index];
+	memmove(&cb_panes[1], &cb_panes[0], (size_t)index * sizeof(cb_panes[0]));
+	cb_panes[0] = saved;
+}
+
+static int cb_drop_pane(cb_pane *pane)
+{
+	int index = cb_pane_index(pane);
+	if (index < 0) return 0;
+	memmove(&cb_panes[index], &cb_panes[index + 1],
+		(cb_pane_count - (size_t)index - 1) * sizeof(cb_panes[0]));
+	--cb_pane_count;
+	memset(&cb_panes[cb_pane_count], 0, sizeof(cb_panes[0]));
+	cb_ownership_invalidate();
+	return 1;
+}
+
+static int cb_pane_put(const cb_pane *pane, int row, int col,
+		       const char *text)
+{
+	int room;
+	if (pane == NULL || row < 0 || row >= pane->height || col < 0)
+		return 0;
+	room = pane->width - col;
+	if (room <= 0) return 0;
+	return cb_put_bounded(pane->row + row, pane->col + col, text, room, 1);
+}
+
+static int cb_pane_fill(const cb_pane *pane, int row, int col,
+			int height, int width, const char *text)
+{
+	if (pane == NULL || height <= 0 || width <= 0 ||
+	    row >= pane->height || col >= pane->width) return 0;
+	if (row < 0) { height += row; row = 0; }
+	if (col < 0) { width += col; col = 0; }
+	if (row + height > pane->height) height = pane->height - row;
+	if (col + width > pane->width) width = pane->width - col;
+	if (height <= 0 || width <= 0) return 0;
+	cb_fill_bounded(pane->row + row, pane->col + col,
+		height, width, text, 1);
+	return 1;
 }
 
 static void cb_return(sh *s, const char *value)
@@ -833,7 +1207,7 @@ static int cb_colour_name(const char *text, unsigned *out)
 static int cb_console(sh *s, int ac, char **av)
 {
 	const char *sub = ac > 1 ? av[1] : "";
-	int rows, cols, row, col, i;
+	int rows, cols, i;
 	/* Every console subcommand that reaches this provider, so "the command
 	 * never arrived" and "the handler did nothing" can be told apart.
 	 * `cell` dominates the log, so it is excluded to keep the rest legible. */
@@ -851,9 +1225,15 @@ static int cb_console(sh *s, int ac, char **av)
 		s_ch(&result, ' '); s_num(&result, cols); cb_return(s, result.p); s_free(&result);
 		return HIBR_OK;
 	}
-	if (!strcmp(sub, "resized") || !strcmp(sub, "reassert"))
+	if (!strcmp(sub, "resized") || !strcmp(sub, "resizing"))
 		return cb_resized() ? HIBR_OK : HIBR_FAIL;
-	if (!strcmp(sub, "clear")) { cb_clear(); return HIBR_OK; }
+	if (!strcmp(sub, "reassert")) {
+		/* A resize/reattach invalidates what the physical output is known to
+		 * hold even when the logical grid happened to keep its dimensions. */
+		cb_shadow_forget();
+		return HIBR_OK;
+	}
+	if (!strcmp(sub, "clear")) { cb_clear(); ++cb.drawn; return HIBR_OK; }
 	if (!strcmp(sub, "pen")) {
 		if (ac < 3) { fg = bg = DP_DEFAULT; attr = 0; }
 		else if (cb_colour_name(av[2], &fg) != HIBR_OK) return HIBR_FAIL;
@@ -871,38 +1251,121 @@ static int cb_console(sh *s, int ac, char **av)
 		cb_return(s, "kitty 8 16");
 		return HIBR_OK;
 	}
-	if (!strcmp(sub, "put") || !strcmp(sub, "fill")) {
-		int pane_offset = 0;
-		if (ac > 2 && !strcmp(av[2], "-p")) {
-			if (ac < 4 || !(p = cb_find_pane(av[3]))) return HIBR_FAIL;
-			pane_offset = 1;
-			row = p->row; col = p->col;
-		} else { row = 0; col = 0; }
-		if (!strcmp(sub, "put")) {
-			int base = pane_offset ? 4 : 2;
-			if (ac < base + 3) return HIBR_FAIL;
-			return cb_put(row + atoi(av[base]), col + atoi(av[base + 1]), av[base + 2]) >= 0 ? HIBR_OK : HIBR_FAIL;
-		}
-		{
-			int base = pane_offset ? 4 : 2;
-			if (ac < base + 5) return HIBR_FAIL;
-			cb_fill(row + atoi(av[base]), col + atoi(av[base + 1]),
-				atoi(av[base + 2]), atoi(av[base + 3]), av[base + 4]);
+	if (!strcmp(sub, "put")) {
+		int argument = 2;
+		/* -r means the caller already supplied display order. The adapter
+		 * currently performs no second bidi transform, so the flag changes
+		 * parsing only; accepting it is still essential because otherwise
+		 * its literal bytes were parsed as row zero. */
+		if (argument < ac && !strcmp(av[argument], "-r")) ++argument;
+		if (argument < ac && !strcmp(av[argument], "-p")) {
+			if (argument + 4 >= ac ||
+			    !(p = cb_find_pane(av[argument + 1]))) return HIBR_FAIL;
+			cb_pane_put(p, atoi(av[argument + 2]),
+				atoi(av[argument + 3]), av[argument + 4]);
 			return HIBR_OK;
 		}
+		if (argument + 2 >= ac) return HIBR_FAIL;
+		cb_put(atoi(av[argument]), atoi(av[argument + 1]),
+			av[argument + 2]);
+		++cb.drawn;
+		return HIBR_OK;
+	}
+	if (!strcmp(sub, "fill")) {
+		int argument = 2;
+		const char *text;
+		if (argument < ac && !strcmp(av[argument], "-p")) {
+			if (argument + 5 >= ac ||
+			    !(p = cb_find_pane(av[argument + 1]))) return HIBR_FAIL;
+			text = argument + 6 < ac ? av[argument + 6] : " ";
+			return cb_pane_fill(p, atoi(av[argument + 2]),
+				atoi(av[argument + 3]), atoi(av[argument + 4]),
+				atoi(av[argument + 5]), text) ? HIBR_OK : HIBR_FAIL;
+		}
+		if (argument + 3 >= ac) return HIBR_FAIL;
+		text = argument + 4 < ac ? av[argument + 4] : " ";
+		cb_fill(atoi(av[argument]), atoi(av[argument + 1]),
+			atoi(av[argument + 2]), atoi(av[argument + 3]), text);
+		++cb.drawn;
+		return HIBR_OK;
 	}
 	if (!strcmp(sub, "flush")) {
 		long n = cb_flush(); s_init(&result); s_num(&result, n);
 		cb_return(s, result.p); s_free(&result); return n < 0 ? HIBR_FAIL : HIBR_OK;
 	}
 	if (!strcmp(sub, "key")) {
-		int r;
+		int r, argument = 2;
+		cb.quiet_wait = 0;
+		if (argument < ac && !strcmp(av[argument], "-q")) {
+			cb.quiet_wait = 1;
+			++argument;
+		}
 		s_init(&result);
-		r = cb_key(ac > 2 ? atoi(av[2]) : -1, &result);
+		r = cb_key(argument < ac ? atoi(av[argument]) : -1, &result);
+		cb.quiet_wait = 0;
 		if (r == 1) { cb_return(s, result.p); s_free(&result); return HIBR_OK; }
 		s_free(&result);
 		return HIBR_FAIL;
 	}
+	if (!strcmp(sub, "watch") || !strcmp(sub, "unwatch")) {
+		if (ac < 3) return HIBR_FAIL;
+		if (sub[0] == 'w') cb_watch_add(atoi(av[2]));
+		else cb_watch_del(atoi(av[2]));
+		return HIBR_OK;
+	}
+	if (!strcmp(sub, "waiting"))
+		return cb_waiting() ? HIBR_OK : HIBR_FAIL;
+	if (!strcmp(sub, "consumed") || !strcmp(sub, "drawn")) {
+		unsigned long long value = sub[0] == 'c' ? cb.consumed : cb.drawn;
+		s_init(&result); s_num(&result, (long)value);
+		cb_return(s, result.p); s_free(&result); return HIBR_OK;
+	}
+	if (!strcmp(sub, "behind")) {
+		cb.behind = ac > 2 && (!strcmp(av[2], "on") || !strcmp(av[2], "1"));
+		if (cb.behind && !cb_ownership_sync()) return HIBR_FAIL;
+		return HIBR_OK;
+	}
+	if (!strcmp(sub, "darkdefault")) {
+		if (ac < 4 || cb_colour_name(av[2], &fg) != HIBR_OK ||
+		    cb_colour_name(av[3], &bg) != HIBR_OK) return HIBR_FAIL;
+		cb.dark_default_fg = fg; cb.dark_default_bg = bg;
+		return HIBR_OK;
+	}
+	if (!strcmp(sub, "darken")) {
+		int argument = 2, once = 0, percent;
+		if (argument < ac && !strcmp(av[argument], "-s")) {
+			once = 1; ++argument;
+		}
+		if (argument + 3 >= ac) return HIBR_FAIL;
+		percent = argument + 4 < ac ? atoi(av[argument + 4]) : 55;
+		cb_darken(atoi(av[argument]), atoi(av[argument + 1]),
+			atoi(av[argument + 2]), atoi(av[argument + 3]),
+			percent, once);
+		++cb.drawn;
+		return HIBR_OK;
+	}
+	if (!strcmp(sub, "shade")) {
+		char colour[16];
+		unsigned value;
+		int percent = ac > 3 ? atoi(av[3]) : 55;
+		if (ac < 3 || cb_colour_name(av[2], &value) != HIBR_OK ||
+		    (value & 0xf000000u) != DP_RGB) return HIBR_FAIL;
+		value = cb_dim_colour(value, percent, 0);
+		snprintf(colour, sizeof(colour), "#%06x", value & 0xffffffu);
+		cb_return(s, colour);
+		return HIBR_OK;
+	}
+	if (!strcmp(sub, "bidi")) {
+		if (ac > 2) {
+			if (!strcmp(av[2], "on")) cb.bidi = 1;
+			else if (!strcmp(av[2], "off")) cb.bidi = 0;
+			else return HIBR_FAIL;
+			return HIBR_OK;
+		}
+		return cb.bidi ? HIBR_OK : HIBR_FAIL;
+	}
+	if (!strcmp(sub, "signals") || !strcmp(sub, "imgdetail"))
+		return HIBR_OK;
 	if (!strcmp(sub, "mouse")) {
 		/* Hibr's native console treats a bare `console mouse` as a query:
 		 * it returns the current mode and leaves it alone (console.c's
@@ -927,14 +1390,16 @@ static int cb_console(sh *s, int ac, char **av)
 		return HIBR_OK;
 	}
 	if (!strcmp(sub, "pane")) {
-		if (ac > 2 && !strcmp(av[2], "clear")) { memset(cb_panes, 0, sizeof(cb_panes)); return HIBR_OK; }
+		if (ac > 2 && !strcmp(av[2], "clear")) { cb_clear_panes(); return HIBR_OK; }
 		if (ac > 2 && !strcmp(av[2], "list")) {
-			s_init(&result); for (i = 0; i < CB_MAX_PANES; ++i) if (cb_panes[i].used) { if (result.n) s_ch(&result, ' '); s_cat(&result, cb_panes[i].name); }
+			s_init(&result); for (i = 0; (size_t)i < cb_pane_count; ++i) { if (result.n) s_ch(&result, ' '); s_cat(&result, cb_panes[i].name); }
 			cb_return(s, result.p ? result.p : ""); s_free(&result); return HIBR_OK;
 		}
 		if (ac == 4 && (!strcmp(av[2], "drop") || !strcmp(av[2], "raise") || !strcmp(av[2], "lower"))) {
 			p = cb_find_pane(av[3]); if (!p) return HIBR_FAIL;
-			if (!strcmp(av[2], "drop")) memset(p, 0, sizeof(*p));
+			if (!strcmp(av[2], "drop")) cb_drop_pane(p);
+			else if (!strcmp(av[2], "raise")) cb_raise_pane(p);
+			else cb_lower_pane(p);
 			return HIBR_OK;
 		}
 		if (ac == 3) {
@@ -946,10 +1411,10 @@ static int cb_console(sh *s, int ac, char **av)
 	}
 	if (!strcmp(sub, "hit")) {
 		if (ac < 4) return HIBR_FAIL;
-		for (i = CB_MAX_PANES - 1; i >= 0; --i) if (cb_panes[i].used && atoi(av[2]) >= cb_panes[i].row && atoi(av[2]) < cb_panes[i].row + cb_panes[i].height && atoi(av[3]) >= cb_panes[i].col && atoi(av[3]) < cb_panes[i].col + cb_panes[i].width) { cb_return(s, cb_panes[i].name); return HIBR_OK; }
+		for (i = (int)cb_pane_count - 1; i >= 0; --i) if (atoi(av[2]) >= cb_panes[i].row && atoi(av[2]) < cb_panes[i].row + cb_panes[i].height && atoi(av[3]) >= cb_panes[i].col && atoi(av[3]) < cb_panes[i].col + cb_panes[i].width) { cb_return(s, cb_panes[i].name); return HIBR_OK; }
 		cb_return(s, ""); return HIBR_FAIL;
 	}
-	if (!strcmp(sub, "link") || !strcmp(sub, "darkdefault") || !strcmp(sub, "shade") || !strcmp(sub, "darken") || !strcmp(sub, "reassert")) return HIBR_OK;
+	if (!strcmp(sub, "link")) return HIBR_OK;
 	return HIBR_FAIL;
 }
 
@@ -1059,6 +1524,83 @@ static int cb_ws_open(void)
 	return 1;
 }
 
+static void cb_watch_add(int fd)
+{
+	size_t i;
+	if (fd < 0) return;
+	for (i = 0; i < cb.watched_count; ++i)
+		if (cb.watched[i] == fd) return;
+	if (cb.watched_count < CB_MAX_WATCHED)
+		cb.watched[cb.watched_count++] = fd;
+}
+
+static void cb_watch_del(int fd)
+{
+	size_t i;
+	for (i = 0; i < cb.watched_count; ++i) {
+		if (cb.watched[i] != fd) continue;
+		memmove(&cb.watched[i], &cb.watched[i + 1],
+			(cb.watched_count - i - 1) * sizeof(cb.watched[0]));
+		--cb.watched_count;
+		return;
+	}
+}
+
+static void cb_watch_prune(void)
+{
+	int i;
+	for (i = (int)cb.watched_count - 1; i >= 0; --i)
+		if (fcntl(cb.watched[i], F_GETFD) < 0) cb_watch_del(cb.watched[i]);
+}
+
+/* Wait on the network input stream and Hibr's application descriptors as
+ * one event source. Returning 2 means an application fd woke the desktop;
+ * its owner drains it, while the console itself returns no key. Omitting
+ * this made Hibr sleep for DT_IDLEMS (60 seconds by default) while terminal
+ * output was already waiting. */
+static int cb_wait_ready(int timeout_ms)
+{
+	fd_set readable;
+	struct timeval timeout;
+	struct timeval *timeout_pointer = NULL;
+	int maximum, selected;
+	size_t i;
+	if (cb.ws_fd < 0 && !cb_ws_open()) return -1;
+	FD_ZERO(&readable);
+	FD_SET(cb.ws_fd, &readable);
+	maximum = cb.ws_fd;
+	if (!cb.quiet_wait) {
+		for (i = 0; i < cb.watched_count; ++i) {
+			if (cb.watched[i] < 0 || cb.watched[i] >= FD_SETSIZE) continue;
+			FD_SET(cb.watched[i], &readable);
+			if (cb.watched[i] > maximum) maximum = cb.watched[i];
+		}
+	}
+	if (timeout_ms >= 0) {
+		timeout.tv_sec = timeout_ms / 1000;
+		timeout.tv_usec = (timeout_ms % 1000) * 1000;
+		timeout_pointer = &timeout;
+	}
+	selected = select(maximum + 1, &readable, NULL, NULL, timeout_pointer);
+	if (selected < 0) {
+		if (errno == EBADF) cb_watch_prune();
+		return 0;
+	}
+	if (selected == 0) return 0;
+	if (FD_ISSET(cb.ws_fd, &readable)) return 1;
+	return 2;
+}
+
+static int cb_waiting(void)
+{
+	fd_set readable;
+	struct timeval timeout = { 0, 0 };
+	if (cb.ws_fd < 0 && !cb_ws_open()) return 0;
+	FD_ZERO(&readable);
+	FD_SET(cb.ws_fd, &readable);
+	return select(cb.ws_fd + 1, &readable, NULL, NULL, &timeout) > 0;
+}
+
 static int cb_ws_text(char *text, size_t capacity, int timeout_ms)
 {
 	unsigned char header[2], ext[2];
@@ -1076,6 +1618,22 @@ static int cb_ws_text(char *text, size_t capacity, int timeout_ms)
 	return (header[0] & 0x0f) == 1;
 }
 
+/* Blit's stream names terminal cells in the terminal protocol's one-based
+ * coordinates. Hibr's display/console provider API names the same cells from
+ * zero, like every draw and hit-test operation it exposes. This adapter is
+ * the only boundary between those contracts, so translate here and nowhere
+ * else. Zero is retained defensively for an unmatched/edge event rather than
+ * becoming -1. */
+static int cb_hibr_cell(int terminal_cell)
+{
+	return terminal_cell > 0 ? terminal_cell - 1 : 0;
+}
+
+static int cb_pixel_cell(int pixel, int cell_pixels)
+{
+	return pixel > 0 ? pixel / cell_pixels : 0;
+}
+
 static void cb_key_name(str *out, unsigned long long code,
 			int shift, int ctrl, int alt)
 {
@@ -1090,6 +1648,19 @@ static void cb_key_name(str *out, unsigned long long code,
 		letter[0] = (char)('1' + code - KEY_1); letter[1] = '\0'; s_cat(out, letter); return;
 	}
 	if (code == KEY_0) { s_ch(out, '0'); return; }
+	/* Linux keeps F1..F10 contiguous, then leaves a gap before F11/F12.
+	 * Hibr's native console names F1..F12, so preserve that complete
+	 * vocabulary instead of silently consuming its menu key (F10). */
+	if (code >= KEY_F1 && code <= KEY_F10) {
+		s_ch(out, 'f');
+		s_num(out, (long)(code - KEY_F1 + 1));
+		return;
+	}
+	if (code == KEY_F11 || code == KEY_F12) {
+		s_ch(out, 'f');
+		s_num(out, code == KEY_F11 ? 11 : 12);
+		return;
+	}
 	switch (code) {
 	case KEY_ENTER: name = "enter"; break; case KEY_ESC: name = "escape"; break;
 	case KEY_BACKSPACE: name = "backspace"; break; case KEY_TAB: name = "tab"; break;
@@ -1103,21 +1674,50 @@ static void cb_key_name(str *out, unsigned long long code,
 	if (name) s_cat(out, name);
 }
 
+static void cb_stream_key_name(str *out, const char *frame,
+			       unsigned long long code, int shift, int ctrl,
+			       int alt)
+{
+	char resolved[16];
+	if (cb_json_string(frame, "text", resolved, sizeof(resolved)) &&
+	    resolved[0] != '\0') {
+		/* Blit owns the device keymap, locks and AltGr state. Its text is
+		 * already shifted, so adding "shift-" here would turn native Hibr's
+		 * `A` into a different key named `shift-a`. Ctrl/Alt remain action
+		 * modifiers in Hibr's key vocabulary. */
+		if (ctrl) s_cat(out, "ctrl-");
+		if (alt) s_cat(out, "alt-");
+		if (ctrl && resolved[0] == ' ' && resolved[1] == '\0') {
+			s_cat(out, "space");
+		} else {
+			if (ctrl && resolved[1] == '\0' &&
+			    resolved[0] >= 'A' && resolved[0] <= 'Z')
+				resolved[0] = (char)(resolved[0] - 'A' + 'a');
+			s_cat(out, resolved);
+		}
+		return;
+	}
+	/* Compatibility with an older Blit stream that has no resolved text,
+	 * and the canonical path for named non-printing keys. */
+	cb_key_name(out, code, shift, ctrl, alt);
+}
+
 static int cb_key(int ms, str *out)
 {
 	char frame[1024];
 	char session_needle[96];
 	unsigned long long code;
-	int shift, ctrl, alt;
+	int shift, ctrl, alt, ready;
 	if (!cb.opened || !out) return -1;
-	if (cb.ws_fd < 0 && !cb_ws_open()) return -1;
 	snprintf(session_needle, sizeof(session_needle),
 		"\"session_id\":\"%s\"", cb.session);
 	if (!cb.ws_subscribed) {
 		cb.ws_subscribed = 1;
 	}
 	for (;;) {
-		if (!cb_ws_text(frame, sizeof(frame), ms)) return 0;
+		ready = cb_wait_ready(ms);
+		if (ready != 1) return ready < 0 ? -1 : 0;
+		if (!cb_ws_text(frame, sizeof(frame), 1000)) return 0;
 		if (strstr(frame, "\"type\":\"input\"") != 0 &&
 			(!cb.session[0] || !strstr(frame, session_needle)))
 			continue;
@@ -1132,9 +1732,18 @@ static int cb_key(int ms, str *out)
 			     (cb.mouse_mode == 2 && cb.mouse_buttons != 0)) &&
 			    cb_json_int(frame, "x", &x) &&
 			    cb_json_int(frame, "y", &y)) {
-				if (!have_cell) { column = x / 8 + 1; row = y / 8 + 1; }
+				if (have_cell) {
+					column = cb_hibr_cell(column);
+					row = cb_hibr_cell(row);
+				} else {
+					column = cb_pixel_cell(x, cb.cell_width > 0 ?
+						cb.cell_width : CB_CELL_WIDTH);
+					row = cb_pixel_cell(y, cb.cell_height > 0 ?
+						cb.cell_height : CB_CELL_HEIGHT);
+				}
 				s_cat(out, "mouse motion "); s_num(out, row);
 				s_ch(out, ' '); s_num(out, column);
+				++cb.consumed;
 				return 1;
 			}
 			continue;
@@ -1162,12 +1771,35 @@ static int cb_key(int ms, str *out)
 			}
 			if (!cb_json_int(frame, "column", &column) ||
 			    !cb_json_int(frame, "row", &row)) {
-				column = x / 8 + 1; row = y / 8 + 1;
+				column = cb_pixel_cell(x, cb.cell_width > 0 ?
+					cb.cell_width : CB_CELL_WIDTH);
+				row = cb_pixel_cell(y, cb.cell_height > 0 ?
+					cb.cell_height : CB_CELL_HEIGHT);
+			} else {
+				column = cb_hibr_cell(column);
+				row = cb_hibr_cell(row);
 			}
-			name = button == 1 ? "right" : button == 2 ? "middle" : "left";
+			name = button == 1 ? "middle" : button == 2 ? "right" : "left";
 			s_cat(out, "mouse "); s_cat(out, pressed ? "press " : "release ");
 			s_cat(out, name); s_ch(out, ' '); s_num(out, row);
 			s_ch(out, ' '); s_num(out, column);
+			++cb.consumed;
+			return 1;
+		}
+		if (strstr(frame, "\"kind\":\"pointer_wheel\"") != 0) {
+			int delta = 0, x = 0, y = 0;
+			int column, row;
+			if (cb.mouse_mode == 0 || !cb_json_int(frame, "delta", &delta) ||
+			    delta == 0 || !cb_json_int(frame, "x", &x) ||
+			    !cb_json_int(frame, "y", &y))
+				continue;
+			column = cb_pixel_cell(x, cb.cell_width > 0 ?
+				cb.cell_width : CB_CELL_WIDTH);
+			row = cb_pixel_cell(y, cb.cell_height > 0 ?
+				cb.cell_height : CB_CELL_HEIGHT);
+			s_cat(out, delta > 0 ? "mouse wheelup " : "mouse wheeldown ");
+			s_num(out, row); s_ch(out, ' '); s_num(out, column);
+			++cb.consumed;
 			return 1;
 		}
 		if (!strstr(frame, "\"kind\":\"key\"") || !cb_json_number(frame, "code", &code)) continue;
@@ -1194,8 +1826,12 @@ static int cb_key(int ms, str *out)
 		shift = strstr(frame, "\"shift\":true") != 0;
 		ctrl = strstr(frame, "\"ctrl\":true") != 0;
 		alt = strstr(frame, "\"alt\":true") != 0;
-		cb_key_name(out, code, shift, ctrl, alt);
-		return out->n ? 1 : 0;
+		cb_stream_key_name(out, frame, code, shift, ctrl, alt);
+		if (out->n) {
+			++cb.consumed;
+			return 1;
+		}
+		return 0;
 	}
 }
 
@@ -1212,8 +1848,8 @@ static void cb_mouse(int mode)
 }
 static void cb_cellpx(int *w, int *h)
 {
-	if (w) *w = 8;
-	if (h) *h = 16;
+	if (w) *w = cb.cell_width > 0 ? cb.cell_width : CB_CELL_WIDTH;
+	if (h) *h = cb.cell_height > 0 ? cb.cell_height : CB_CELL_HEIGHT;
 }
 static int cb_image(sh *s, const char *pane, int row, int col, int h, int w,
 			const unsigned char *rgb, int iw, int ih, unsigned flags)
@@ -1240,7 +1876,8 @@ static int cb_image(sh *s, const char *pane, int row, int col, int h, int w,
 		return 0;
 	}
 	if (!cb.image_id) cb.image_id = 1;
-	x = col * 8; y = row * 16;
+	x = col * (cb.cell_width > 0 ? cb.cell_width : CB_CELL_WIDTH);
+	y = row * (cb.cell_height > 0 ? cb.cell_height : CB_CELL_HEIGHT);
 	length = snprintf(begin, sizeof(begin),
 		"{\"type\":\"pixel_frame_begin\",\"session_id\":\"%s\","
 		"\"image_id\":%u,\"width\":%d,\"height\":%d,"
@@ -1287,8 +1924,19 @@ static int cb_prect(const char *name, int *row, int *col, int *h, int *w)
 {
 	char path[64], response[CB_HTTP_CAP], needle[256];
 	const char *pane;
+	cb_pane *local;
 	if (!cb.opened || !name || !*name || !row || !col || !h || !w)
 		return 0;
+	/* Hibr window/bar panes are adapter-local composition state. Blit's
+	 * topology panes are physical display subdivisions and occupy a separate
+	 * namespace. Prefer the local pane so img and every other display API
+	 * client receives the same rectangle `console put -p` uses. */
+	local = cb_find_pane(name);
+	if (local != NULL) {
+		*row = local->row; *col = local->col;
+		*h = local->height; *w = local->width;
+		return 1;
+	}
 	snprintf(path, sizeof(path), "/v1/topology");
 	if (!cb_http("GET", path, "", response, sizeof(response))) return 0;
 	snprintf(needle, sizeof(needle), "\"id\":\"%s\"", name);

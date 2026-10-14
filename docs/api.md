@@ -576,6 +576,13 @@ only a trace entry identifying an evdev source proves physical-device
 delivery. There must be one deliberate pointer owner for a
 display-attached session; competing routes are a configuration error.
 
+A streamed keyboard press or autorepeat carries optional `event.text` after
+Blit has applied that source device's keymap, Shift, CapsLock, and AltGr. A
+consumer must use it for printable input rather than reconstructing a US
+layout from `event.code`. The evdev code remains the source of truth for named
+non-text keys such as Escape, arrows, and function keys. Releases omit
+`text`, as do modifier and other non-printing keys.
+
 ### Audio: a card's mixer
 
 A mixer belongs to the **card**, not to a PCM, and the API says so rather

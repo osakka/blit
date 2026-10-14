@@ -4,6 +4,13 @@
 # External Hibr surfaces must retain atomic commit boundaries without forcing a
 # complete scene rebuild for every pointer motion. This gate uses the public
 # API only and checks the renderer path trace rather than assuming a frame rate.
+#
+# BLIT_TEST_SCENE_CACHE=0 exercises the physical host's conservative content
+# policy: every content change is rebuilt in full because incremental render-
+# target preservation is not trusted. The complete result must still become an
+# immutable scene snapshot that pointer-only frames can copy. Conflating those
+# two policies was the live 0.1.465 failure: 60 idle pointer motions produced
+# 60 full redraws, 60 cache misses and zero cache hits.
 
 require 'json'
 require 'net/http'
@@ -14,8 +21,10 @@ require_relative 'gate_port'
 port = gate_port(Integer(ENV.fetch('BLIT_EXTERNAL_POINTER_PORT', '19252')))
 base = URI("http://127.0.0.1:#{port}")
 log = "/tmp/blit-external-pointer-#{Process.pid}.log"
+incremental_content = ENV.fetch('BLIT_TEST_SCENE_CACHE', '1') != '0'
 pid = Process.spawn({'SDL_VIDEODRIVER' => 'dummy',
                      'BLIT_RENDERER' => 'software',
+                     'BLIT_SDL_SCENE_CACHE' => incremental_content ? '1' : '0',
                      'LD_LIBRARY_PATH' => 'build/sdl3-kms'},
                     'build/blit/blit-server', port.to_s,
                     out: log, err: [:child, :out])
@@ -89,16 +98,21 @@ begin
   pointer_hits = performance.fetch('pointer_cache_hits')
   raise "external pointer cache was not used: #{performance.inspect}" unless
     pointer_hits >= 5
-  raise 'external cell damage did not render incrementally' unless
+  expected_content_path = incremental_content ? 'path=incremental-damage' :
+                                                'path=full-redraw'
+  raise "external cell damage did not use #{expected_content_path}" unless
     details.any? { |detail| detail.include?('external_changed=1') &&
-      detail.include?('graphics_changed=0') }
+      detail.include?('graphics_changed=0') &&
+      detail.include?(expected_content_path) }
   raise 'pointer-cache render path was not observed' unless
     details.any? { |detail| detail.include?('path=pointer-cache') }
   raise 'surface transport/mode was not classified' unless
     surface_details.any? { |detail| detail.include?('transport=api-cells') &&
       detail.include?('surface_mode=external') &&
       detail.include?('presentation=commit') }
-  puts "EXTERNAL_POINTER_COMPOSITION_PASS pointer_cache_hits=#{pointer_hits} " \
+  puts "EXTERNAL_POINTER_COMPOSITION_PASS content_policy=" \
+       "#{incremental_content ? 'incremental' : 'full-rebuild'} " \
+       "pointer_cache_hits=#{pointer_hits} " \
        "pointer_cache_misses=#{performance.fetch('pointer_cache_misses')}"
 ensure
   begin

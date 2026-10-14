@@ -3591,6 +3591,31 @@ components:
           required: [time_us]
           properties:
             time_us: {type: integer, minimum: 0}
+            kind:
+              type: string
+              description: The input event kind.
+            code:
+              type: integer
+              minimum: 0
+              description: Linux evdev code for keyboard and gamepad events.
+            pressed:
+              type: boolean
+              description: Keyboard or button edge state.
+            repeat:
+              type: boolean
+              description: True for a keyboard autorepeat event.
+            shift: {type: boolean}
+            ctrl: {type: boolean}
+            alt: {type: boolean}
+            text:
+              type: string
+              maxLength: 8
+              description: >-
+                Keyboard press/repeat only, and omitted for a non-text key.
+                The printable UTF-8 text resolved by the source device's
+                keymap, Shift, CapsLock and AltGr state. Consumers use this
+                instead of deriving a character from the physical evdev code;
+                code remains authoritative for named non-text keys.
           additionalProperties: true
       additionalProperties: false
     StreamTerminalOutput:

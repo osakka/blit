@@ -3707,3 +3707,55 @@ re-enabled              keyboards 4 of peak 4   warnings []
 The two stale probe settings left on the microphone's HID interfaces by
 earlier `host_*` probes were cleared with `PUT /v1/settings`, leaving the
 document carrying the audio default alone.
+
+## 0.1.466 candidate: Hibr input translation, before host acceptance
+
+Issues #76 and #77 came from one instrumented Hibr primary on the physical
+0.1.465 host, not from visual inference. API injection placed the pointer over
+the visible Theme control and sent both primary-button edges. Blit's bounded
+trace routed them to session 4 and focused that session; the adapter log
+accepted both events in Hibr mouse mode 2; the authoritative surface revision
+did not change. An injected Linux F10 event followed the same route and was
+accepted by the adapter without changing the surface, while Escape advanced
+the revision and opened Hibr's menu.
+
+Issue #78 records the provider-state defects found while following that same
+frame from Hibr's public console contract to Blit's surface boundary.
+
+The native Hibr console decoder names mouse cells from zero and accepts
+`f1` through `f12`. `console-blit` was forwarding Blit's one-based stream
+cells unchanged, deriving fallback rows with an 8-pixel divisor despite its
+16-pixel cell height, mapping no function keys, swapping normalized middle and
+right buttons, and dropping wheel events. Fallback geometry now comes from
+the session's authoritative cell pixels, so font scale does not create a
+second mismatch. Hibr source was read for its public provider vocabulary and
+was not modified.
+
+`tools/tests/adapter_input_gate.sh` feeds the shipped adapter actual WebSocket
+frames. The pre-fix source failed 17 checks: four coordinate cases, twelve
+function keys, and modified F10. The candidate passes against the exact
+package-pinned released Hibr 0.99.191 checkout:
+
+```text
+ADAPTER_INPUT_PASS pointer_origin=zero buttons=3 wheel=2 function_keys=12 resolved_text=6
+```
+
+Issue #78 extended the audit from input vocabulary to provider semantics.
+Against the same released checkout, the provider gate proves pane ownership,
+drop/clipping/stack order, watched application output, quiet waits, wide and
+combining UTF-8, idempotent shadows, and the absence of steady-state resize
+polls. The old `console resizing` implementation issued a synchronous geometry
+request after each input wait, directly coupling mouse event rate to API work:
+
+```text
+ADAPTER_PROVIDER_PASS pane_ownership=1 watched_wakeup=1 utf8_width=1 resize_poll=0
+```
+
+The production adapter and server compile with TCC 0.9.27 against that
+checkout. The complete local pre-deployment run on 2026-10-14 reports 69
+passed, 0 failed, and four explicit skips: the separately invoked QEMU oracle,
+a not-yet-built package artifact, and two physical-live gates. These are still
+implementation and local-gate results only. Package reproducibility,
+deployment, F10 activation, visible button/wheel interaction, immediate
+terminal output, and stable physical rendering remain pending and must be
+recorded before #72, #76, #77, or #78 is closed.

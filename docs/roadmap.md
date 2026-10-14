@@ -3,17 +3,33 @@
 The roadmap is ordered by dependency. A later milestone must not become a
 second, parallel implementation of an earlier one.
 
-## Current position — release 0.1.465
+## Current position — 0.1.466 input-boundary candidate
 
-The current candidate fixes issue #75, found on the physical host before a
-new Hibr run: returning an input property to its default changed live state
-but the settings merge resurrected the old non-default value. The focused gate
-now proves both sides of the corrected ADR 0067 rule—known applicable values
-reset cleanly, while unknown future values and known values made temporarily
-inapplicable by a device re-probe remain preserved. The physical host is on
-0.1.465 and passed the disable, re-enable, persistence, restart, and evdev
-reopen sequence; the exact revisions and package hash are in the verification
-ledger and release manifest.
+The next linear release addresses physical-host findings #76, #77, and #78
+without changing Hibr. Blit's diagnostic trace and the adapter log proved that API
+pointer edges and F10 reached the one running Hibr session. The adapter then
+forwarded one-based terminal cells into Hibr's zero-based console API and
+discarded all function keys because it had no Hibr key-name mapping. It also
+swapped middle/right buttons, discarded the wheel, ignored Hibr pane ownership,
+and never woke for watched application output. ADRs 0068 and 0069 make
+`console-blit` the single translation/provider boundary. The focused gates now
+pass pointer origin, font-scaled geometry, all buttons, wheel, F1 through F12,
+pane ownership/stacking/clipping, UTF-8 width, shadows, and watched-descriptor
+wakeup against released Hibr 0.99.191. Resize detection is now SIGWINCH-driven
+instead of one synchronous HTTP request per input event. Physical-host acceptance remains
+pending until the exact package keeps the menu and windows stable, opens
+Hibr's F10 menu, activates a visible control with a click, scrolls with the
+wheel, and redraws application output immediately.
+
+Release 0.1.465 fixed issue #75, found on the physical host before this input
+run: returning an input property to its default changed live state but the
+settings merge resurrected the old non-default value. The focused gate proves
+both sides of the corrected ADR 0067 rule—known applicable values reset
+cleanly, while unknown future values and known values made temporarily
+inapplicable by a device re-probe remain preserved. The physical host passed
+the disable, re-enable, persistence, restart, and evdev reopen sequence; the
+exact revisions and package hash are in the verification ledger and release
+manifest.
 
 The preceding releases corrected two other boundaries relevant to the same
 live acceptance cycle. Release 0.1.463 stopped assuming that an SDL
@@ -30,13 +46,15 @@ and no sustained frame rate because an idle output presents no frames. Its
 persisted keyboard lockout is removed, and the 0.1.465 post-restart state has
 one enabled, open keyboard and one pointer.
 
-The immediate sequence is deliberately linear: launch exactly one traced Hibr
-primary on the accepted 0.1.465 host and measure producer cadence, presentation cadence,
-screenshots/cell agreement, physical keyboard delivery, and physical pointer
-motion/buttons. Rendering issue #72 and hotplug issue #74 remain the existing
-work ledger; physical multiple monitors (#20) and 120/240 Hz scanout (#21)
-remain open hardware gates rather than claims inferred from this one-output
-host.
+The immediate sequence remains deliberately linear: package 0.1.466 from the
+gated source, prove the package artifact, commit and push that reproducible
+candidate, deploy it through the supervised API, attach exactly one Hibr
+primary, then exercise #76-#78 with API input and physical input. Producer and
+presentation cadence, screenshots/cell agreement, and pointer-cache counters
+are captured in the same run. Rendering issue #72 and hotplug issue #74 remain
+open until that evidence says otherwise; physical multiple monitors (#20) and
+120/240 Hz scanout (#21) remain hardware gates rather than claims inferred
+from this one-output host.
 
 ## Historical platform position
 

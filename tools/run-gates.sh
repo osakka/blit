@@ -237,6 +237,9 @@ suite_renderer() {
     run_gate pointer_target_gate.rb ruby tools/tests/pointer_target_gate.rb
     run_gate pointer_wallpaper_stress_gate.rb ruby tools/tests/pointer_wallpaper_stress_gate.rb
     run_gate external_pointer_composition_gate.rb ruby tools/tests/external_pointer_composition_gate.rb
+    run_gate external_pointer_full_rebuild_gate.rb env \
+        BLIT_TEST_SCENE_CACHE=0 BLIT_EXTERNAL_POINTER_PORT=19282 \
+        ruby tools/tests/external_pointer_composition_gate.rb
     run_gate sdl_background_batch_gate.rb ruby tools/tests/sdl_background_batch_gate.rb
     run_gate sdl_graphics_cache_gate.rb ruby tools/tests/sdl_graphics_cache_gate.rb
     run_gate kitty_placement_gate.rb ruby tools/tests/kitty_placement_gate.rb
@@ -249,6 +252,7 @@ suite_renderer() {
     run_gate pointer_geometry_gate.rb ruby tools/tests/pointer_geometry_gate.rb
     run_gate mouse_report_gate.rb ruby tools/tests/mouse_report_gate.rb
     run_gate key_encoding_gate.rb ruby tools/tests/key_encoding_gate.rb
+    run_gate input_stream_text_gate.rb ruby tools/tests/input_stream_text_gate.rb
     run_gate keyboard_settings_gate.rb ruby tools/tests/keyboard_settings_gate.rb
     run_gate pointer_settings_gate.rb ruby tools/tests/pointer_settings_gate.rb
     run_gate display_settings_gate.rb ruby tools/tests/display_settings_gate.rb
@@ -262,6 +266,8 @@ suite_hibr() {
     # Needs only the Hibr headers, not a Hibr process: it compiles the shipped
     # display provider into a harness. Skips (77) without BLIT_HIBR_ROOT.
     run_gate adapter_coalesce_gate.sh "$ROOT"/tools/tests/adapter_coalesce_gate.sh
+    run_gate adapter_input_gate.sh "$ROOT"/tools/tests/adapter_input_gate.sh
+    run_gate adapter_provider_gate.sh "$ROOT"/tools/tests/adapter_provider_gate.sh
     run_gate desktop_repaint_gate.rb ruby tools/tests/desktop_repaint_gate.rb
     run_gate output_occupancy_gate.rb ruby tools/tests/output_occupancy_gate.rb
     run_gate hibr_resume_guard_gate.sh "$ROOT"/tools/tests/hibr_resume_guard_gate.sh

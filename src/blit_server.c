@@ -21252,9 +21252,9 @@ static void capture_requested_screenshot(BlitRuntime *runtime,
    display's logical rectangle -- the connector's mode with its axes exchanged
    at 90 and 270. It used to be the renderer's output size, which is the same
    thing only while nothing is rotated. */
-/* The cached scene is an optimisation with a precondition: that the backend
-   preserves a render target's contents between passes, so that repainting
-   only the damaged rows leaves the rest of the previous frame intact.
+/* Incrementally updating a cached scene has a precondition: the backend must
+   preserve a render target's contents between passes, so that repainting only
+   the damaged rows leaves the rest of the previous frame intact.
  
    That precondition is *false* on the live host's opengles2 path, measured
    rather than reasoned about. Same machine, same screensaver, cache on
@@ -21270,18 +21270,25 @@ static void capture_requested_screenshot(BlitRuntime *runtime,
    correct. The development container has no GPU, so no gate here can see
    this.
  
-   So the cache is now enabled only where it is known to be sound: the
-   software renderer the gates exercise. Everywhere else a frame is drawn
-   whole. The cost of that was measured on the same host before choosing it --
-   3.3ms to render and 0.6ms to present against a 16ms budget, with no missed
-   deadlines -- which is a cheap price for a screen that matches its own cell
-   data.
+   So incremental content updates are enabled only where they are known to be
+   sound: the software renderer the gates exercise. Everywhere else a changed
+   scene is rebuilt whole. The complete result is still stored in a target
+   texture: copying that immutable snapshot for pointer-only frames does not
+   depend on preserving untouched pixels across incremental render passes.
+   Conflating those policies made every mouse movement rebuild all 32,400
+   cells on the live host even when the desktop was idle.
+
+   Full content rebuild cost was measured on the same host before choosing it
+   -- 3.3ms to render and 0.6ms to present against a 16ms budget, with no
+   missed deadlines -- which is a cheap price for a screen that matches its
+   own cell data. Pointer-only frames now copy that complete scene instead of
+   paying the rebuild cost again.
  
    BLIT_SDL_SCENE_CACHE=1 forces it back on for anyone who has measured their
    own backend and found it sound; =0 forces it off. The variable overrides
    the default in both directions precisely so the next person can repeat the
    measurement rather than take this comment's word for it. */
-static int sdl_scene_cache_enabled(const BlitRuntime *runtime)
+static int sdl_incremental_scene_updates_enabled(const BlitRuntime *runtime)
 {
     const char *value = getenv("BLIT_SDL_SCENE_CACHE");
 
@@ -21300,13 +21307,12 @@ static int ensure_sdl_scene_texture(const BlitRuntime *runtime,
 
     if (output == NULL || output->renderer == NULL)
         return 0;
-    if (!sdl_scene_cache_enabled(runtime)) {
-        if (output->scene_texture != NULL) {
-            SDL_DestroyTexture(output->scene_texture);
-            output->scene_texture = NULL;
-        }
-        return 0;
-    }
+    /* A scene snapshot and incremental scene updates are different
+       capabilities. Even when BLIT_SDL_SCENE_CACHE=0 requires every content
+       change to rebuild the target in full, retain that complete target so a
+       pointer-only frame can copy it. If target textures are unsupported,
+       creation below fails closed and the existing direct full-redraw path
+       remains the one implementation. */
     if (output->scene_texture != NULL) {
         float existing_width = 0.0f;
         float existing_height = 0.0f;
@@ -21722,7 +21728,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             finish_sdl_output(runtime, output_index, 0);
             continue;
         }
-        full_redraw = !sdl_scene_cache_enabled(runtime) ||
+        full_redraw = !sdl_incremental_scene_updates_enabled(runtime) ||
             !runtime->outputs[output_index].initialized ||
             graphics_changed ||
             /* The software pointer is composed after the complete cached
@@ -23749,13 +23755,26 @@ static void dispatch_evdev_key_event(BlitRuntime *runtime,
         }
     }
     {
-        char input_event[256];
+        char input_event[384];
+        char text[8];
+        char escaped_text[32];
+        char text_field[64];
+        int text_length = 0;
         BlitSession *target = keyboard_target(runtime);
+        text_field[0] = '\0';
+        if (event->value != 0 && !modifier_only)
+            text_length = evdev_key_character(keyboard, event->code, text,
+                                              sizeof(text));
+        if (text_length > 0) {
+            json_escape(text, escaped_text, sizeof(escaped_text));
+            snprintf(text_field, sizeof(text_field), ",\"text\":\"%s\"",
+                     escaped_text);
+        }
         snprintf(input_event, sizeof(input_event),
                  "{\"type\":\"input\",\"session_id\":\"session-%llu\","
                  "\"device_id\":\"%s\",\"event\":{"
                  "\"kind\":\"key\",\"time_us\":%llu,\"code\":%u,\"pressed\":%s,"
-                 "\"repeat\":%s,\"shift\":%s,\"ctrl\":%s,\"alt\":%s}}",
+                 "\"repeat\":%s,\"shift\":%s,\"ctrl\":%s,\"alt\":%s%s}}",
                  target != NULL ? target->id : 0ULL,
                  device_id != NULL ? device_id : "evdev-keyboard",
                  (unsigned long long)monotonic_us(),
@@ -23763,7 +23782,7 @@ static void dispatch_evdev_key_event(BlitRuntime *runtime,
                  event->value == 2 ? "true" : "false",
                  keyboard->shift ? "true" : "false",
                  keyboard->ctrl ? "true" : "false",
-                 keyboard->alt ? "true" : "false");
+                 keyboard->alt ? "true" : "false", text_field);
         broadcast_stream(runtime, input_event, BLIT_STREAM_INPUT);
     }
 }

@@ -89,6 +89,8 @@ security policy, or compatibility rule requires a new ADR.
 - [0065 — The privilege and authentication model](0065-the-privilege-and-authentication-model.md)
 - [0066 — The terminal names no file Blit opens](0066-the-terminal-names-no-file-blit-opens.md)
 - [0067 — Settings are Blit's own state, written through the API](0067-settings-are-blit-state-written-through-the-api.md)
+- [0068 — The Hibr adapter translates input into Hibr's console vocabulary](0068-the-hibr-adapter-translates-input-vocabulary.md)
+- [0069 — The Hibr adapter preserves Hibr's provider semantics](0069-the-hibr-adapter-preserves-provider-semantics.md)
 
 ## Adding an ADR
 

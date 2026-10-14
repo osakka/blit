@@ -272,8 +272,8 @@ tools/probes/stage_hibr_qemu.sh /tmp/hibr-initroot-current /path/to/hibr
 ```
 
 The staging helper replaces and version-checks the canonical Blit binary on
-every run, then stages the optional Blit `console-blit.so` provider and
-adapter files for provider-specific probes. It does not modify the Hibr
+every run, then stages the Blit `console-blit.so` provider and adapter files
+for provider and held-desktop probes. It does not modify the Hibr
 checkout. It also rebuilds the repository-owned HTTP, PTY, WebSocket, and
 uinput probe helpers with TCC, preventing stale binaries from entering the
 initramfs. It stages the same checked-in Hibr Unicode font used by the Debian
@@ -326,6 +326,31 @@ BLIT_HIBR_ROOT=/path/to/hibr \
 The adapter is compiled against the exact Hibr checkout that will load it.
 `BLIT_HIBR_ROOT` is mandatory; a package build must not silently reuse an
 adapter compiled against another Hibr ABI.
+
+The focused input-boundary gate uses that same checkout and the shipped
+adapter source:
+
+```sh
+BLIT_HIBR_ROOT=/path/to/hibr tools/tests/adapter_input_gate.sh
+```
+
+It sends real WebSocket text frames through `console-blit`, then checks the
+one-based Blit to zero-based Hibr cell translation, font-scaled pixel
+fallback, left/middle/right button identity, vertical wheel events, and Hibr
+names for F1 through F12. This isolates adapter semantics from evdev discovery
+and widget behavior; the physical host remains the final click and shortcut
+acceptance boundary.
+
+The provider-state gate covers the other half of the same adapter contract:
+
+```sh
+BLIT_HIBR_ROOT=/path/to/hibr tools/tests/adapter_provider_gate.sh
+```
+
+It proves pane ownership/behind painting, pane clipping and stack order,
+watched application-descriptor wakeups, quiet-wait exclusion, Hibr's UTF-8
+cell widths, idempotent shadows, and zero HTTP resize polls during steady input.
+It must be built against the same pinned released Hibr as the package.
 
 The stream reconnect/replay gate runs against that exact binary with the
 dummy video backend:
