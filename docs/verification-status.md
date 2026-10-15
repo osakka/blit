@@ -3,6 +3,29 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 0.1.487 candidate: Hibr-compatible Kitty continuation uploads
+
+The live 0.1.486 capture established that the login screen and desktop cells
+were present, but the authenticated graphics trace recorded 768 Kitty
+`unsupported-action` rejections. Hibr's unchanged Kitty encoder sends the
+opening wallpaper chunk with `i=<id>` and deliberately omits `i` from each
+`q=2,m=1` / `q=2,m=0` continuation. Blit was incorrectly interpreting the
+omitted id as image zero, so the visible wallpaper record remained
+`complete:false`.
+
+0.1.487 keeps the current upload id per terminal session and resolves those
+id-less continuations before decoding. This is a Blit-only correction; the
+Hibr source tree is unchanged. The focused TCC probe and
+`tools/tests/graphics_trace_gate.rb` both pass with the exact Hibr wire form:
+the continuation is accepted, the image reaches `complete:true`, and the
+trace records `rejected=0`. The terminal and renderer suites pass
+(`RUN_GATES_PASS pass=46 skip=0 fail=0`).
+
+The live host still requires a fresh 0.1.487 deployment before its wallpaper
+trace and screenshot can be called accepted. The current captured screenshot
+is evidence that the login box renders, not proof that the multi-chunk
+wallpaper path is fixed on the host until that deployment is installed.
+
 ## 0.1.486 candidate: Blit login-manager root entrypoint
 
 The root login failure found during the 0.1.485 Hibr acceptance attempt was

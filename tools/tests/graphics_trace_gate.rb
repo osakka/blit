@@ -195,13 +195,31 @@ check(detail.include?('images=0->1'),
 check(detail.include?('header=Ga=T,f=24,s=2,v=2,q=2'),
       "the entry records the control keys: #{detail}")
 
+# Hibr splits a Kitty upload at 4096 base64 bytes. The opening chunk carries
+# i=<id>; every q=2 continuation deliberately omits i and means "continue the
+# current transmission". This is the exact wire shape that used to leave the
+# live wallpaper incomplete on the real host.
+state = emit([
+  '\\033_Ga=T,f=24,s=1,v=1,i=7,m=1;/w\\033\\\\',
+  '\\033_Gq=2,m=0;AA\\033\\\\'
+])
+after = counters
+check(after['graphics_payloads'] == 5 && after['graphics_payloads_kitty'] == 3,
+      "the id-less Kitty continuation is counted, got #{after.inspect}")
+check(state.fetch('graphics').any? { |image| image['id'] == 7 && image['complete'] },
+      "the id-less Kitty continuation completes image 7, got #{state.inspect}")
+detail = trace.last.to_h['detail'].to_s
+puts "kitty continuation: #{detail}"
+check(detail.include?('header=Gq=2,m=0') && detail.include?('rejected=0'),
+      "the id-less continuation is accepted: #{detail}")
+
 # A key the protocol defines and Blit refuses still arrives, which is the
 # distinction the ticket is about.
 state = emit(['\\033_Ga=T,f=24,s=2,v=2,t=f,q=2;AAAAAAAAAAAAAAAA\\033\\\\'])
 after = counters
-check(after['graphics_payloads'] == 4 &&
+check(after['graphics_payloads'] == 6 &&
       after['graphics_payloads_rejected'] == 2 &&
-      after['graphics_payloads_kitty'] == 2,
+      after['graphics_payloads_kitty'] == 4,
       "a refused transmission medium arrives and is counted, got #{after.inspect}")
 detail = trace.last.to_h['detail'].to_s
 puts "kitty refused: #{detail}"
@@ -215,7 +233,7 @@ after = counters
 check(after == before,
       "DECRQSS, XTGETTCAP and OSC are not graphics payloads, got " \
       "#{before.inspect} then #{after.inspect}")
-check(trace.length == 4,
+check(trace.length == 6,
       "no trace entry for a non-graphics string, got #{trace.length}")
 
 # Graphics payloads have their own ring rather than sharing the critical one.

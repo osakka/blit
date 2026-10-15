@@ -6,8 +6,9 @@
 int main(int argc, char **argv)
 {
     static const char transmit[] =
-        "\033_Ga=t,f=24,s=1,v=1,i=7,m=1;/w\033\\"
-        "\033_Ga=t,i=7,m=0;AA\033\\";
+        "\033_Ga=T,f=24,s=1,v=1,i=7,m=1;/w\033\\"
+        /* Kitty continuation chunks carry q/m but deliberately omit i. */
+        "\033_Gq=2,m=0;AA\033\\";
     static const char place[] = "\033_Ga=p,i=7;\033\\";
     static const char rejected[] = "\033_Ga=t,f=24,s=513,v=1,i=8;AAAA\033\\";
     static const char deleted[] = "\033_Ga=d,i=7;\033\\";

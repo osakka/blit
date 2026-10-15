@@ -95,6 +95,10 @@ shell conformance path is stable.
    placements, the `a i c p q x y z` delete targets) and the refusal of
    unimplemented keys are specified in
    [ADR 0060](adr/0060-kitty-placements-source-rectangles-and-delete-targets.md).
+   Multi-chunk Kitty uploads keep the opening chunk's image id in the owning
+   terminal session; conforming `q=2,m=1` and `q=2,m=0` continuations omit
+   `i=` and are resolved to that current upload. See
+   [ADR 0084](adr/0084-kitty-continuations-use-the-current-upload.md).
    The `CSI >` modifyOtherKeys family and the Kitty keyboard flag prefixes are
    parsed and consumed without leaking their control parameters into cell
    attributes.

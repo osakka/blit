@@ -801,6 +801,11 @@ typedef struct {
     int terminal_string_type;
     char terminal_string[4096];
     int terminal_string_length;
+    /* Kitty continuation chunks intentionally omit `i=`. Keep the image
+       selected by the opening transmission until its final chunk arrives;
+       this is per PTY stream, not global state. */
+    unsigned int terminal_kitty_upload_id;
+    int terminal_kitty_upload_active;
     char terminal_title[128];
     char terminal_clipboard[4096];
     char terminal_notification[1024];
@@ -9685,6 +9690,13 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
         kitty_reply(session, image_id, quiet, "EINVAL");
         return;
     }
+    /* Hibr's first chunk carries i=<id>; q=2 continuation chunks omit i by
+       design. The omission means "continue the current transmission", not
+       image zero. Resolve it after parsing the optional parameters, because
+       kitty_parameter_int() writes its fallback into image_id. */
+    if (action[0] == '\0' && image_id == 0 &&
+        session->terminal_kitty_upload_active)
+        image_id = (int)session->terminal_kitty_upload_id;
     /* Keys the protocol defines that this does not implement are refused,
        not skipped: skipping one answers OK and draws the wrong pixels. */
     {
@@ -9744,6 +9756,11 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
     if (strcmp(action, "T") == 0) {
         display_on_complete = 1;
         snprintf(action, sizeof(action), "t");
+    }
+    if (action[0] != '\0' && more) {
+        /* Subsequent chunks carry no image id. */
+        session->terminal_kitty_upload_id = (unsigned int)image_id;
+        session->terminal_kitty_upload_active = 1;
     }
     if (strcmp(action, "d") == 0) {
         /* The target defaults to a, every visible placement. x and y here
@@ -10034,6 +10051,9 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
         }
         image->complete = 1;
         image->generation = next_graphics_generation();
+        if (session->terminal_kitty_upload_active &&
+            session->terminal_kitty_upload_id == image->id)
+            session->terminal_kitty_upload_active = 0;
         if (image->advance > 0) {
             kitty_advance_cursor(session, surface, image,
                                  (unsigned int)(image->advance - 1));
