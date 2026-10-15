@@ -20,9 +20,9 @@ package_artifact_acceptance: pending_manifest_gate
 qemu_hibr_lifecycle_acceptance: unavailable_missing_kernel_and_initramfs
 live_host: 192.168.10.54
 live_predeployment_version: 0.1.474
-live_deployment: pending
-live_cell_grid_acceptance: pending
-live_join_acceptance: pending
+live_deployment: pass_supervised_update_server_0.1.475
+live_cell_grid_acceptance: pass_live_hibr_primary_lower_pane_screenshot
+live_join_acceptance: not_run_primary_only
 physical_multi_monitor_acceptance: unavailable_one_output
 physical_high_refresh_acceptance: open_issue_21
 notes: >-
