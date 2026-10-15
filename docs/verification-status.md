@@ -17,8 +17,14 @@ output, which preserves the cursor across differently phased displays.
 The TCC build and focused frame-rate, pointer atomicity, pointer-cache,
 full-rebuild, and motion-trail gates pass. The frame-rate workload reached
 60.000 Hz with zero missed deadlines while its faster-than-refresh producer
-burst stayed below the bounded 125% guard. Live deployment and physical Hibr
-window-motion acceptance remain pending for this candidate.
+burst stayed below the bounded 125% guard. The reproducible 0.1.470 package is
+deployed through the supervised API on `192.168.10.54`; `/v1/version` reports
+0.1.470, exactly one primary Hibr owner is registered and painted, and a
+120-event API pointer burst produced contiguous live render-trace intervals
+of 15.209–16.486 ms (mean 15.971 ms) with zero missed deadlines. Physical
+window-motion acceptance remains pending because the API burst isolates the
+presentation scheduler but does not prove the operator's hand movement or
+Hibr's drag action.
 
 ## 0.1.469 KVM source identity diagnostics
 
