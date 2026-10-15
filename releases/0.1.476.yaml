@@ -1,0 +1,32 @@
+release: 0.1.476
+package: blit_0.1.476-1_amd64.deb
+package_sha256: 0b51f25367d6bacae42d4603a41fa55e1770166d6a0fa7c6d1dd548590fbded0
+source_commit: 1df20cc
+package_documentation_commit: 1df20cc
+server_binary_sha256: cc8edfe80bc66096c5ab317f34396b4c50f8625dd9824f024b9106e7107e1f1e
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.191
+hibr_adapter_build: pass_exact_released_headers
+tcc_version: 0.9.27_x86_64_linux
+tcc_build_acceptance: pass_server_helper_adapter
+openapi_yaml: pass
+focused_hibr_join_mirror: pass_primary_cells_read_only_join_primary_input
+focused_hibr_suite: pass_11_skip_1_qemu_oracle
+focused_renderer_suite: pass_42_fail_0
+package_reproducibility: pass_rebuild_same_sha256
+package_artifact_acceptance: pass_manifest_and_contents
+qemu_hibr_lifecycle_acceptance: unavailable_missing_kernel_and_initramfs
+live_host: 192.168.10.54
+live_predeployment_version: 0.1.475
+live_deployment: pending
+live_join_acceptance: pending_package_deployment
+physical_multi_monitor_acceptance: unavailable_one_output
+physical_high_refresh_acceptance: open_issue_21
+notes: >-
+  Hibr desktop --join sessions are now Blit read-only mirror surfaces. The
+  primary Hibr adapter remains the sole cell and graphics source; joined-pane
+  input is canonicalized to the primary owner. Hibr source is unchanged. The
+  local gate proves committed primary cells, mirror write rejection, and
+  joined-pane pointer routing. Physical wallpaper, context-menu, and union
+  window-placement acceptance remain pending on the authorized host.

@@ -17,8 +17,11 @@ stream.
 The exact TCC build passes `hibr_join_mirror_gate.rb`, `hibr_singleton_gate.rb`,
 `pointer_settings_gate.rb`, and `api_schema_gate.rb`. The gate proves cell
 mirroring, read-only enforcement, and joined-pane-to-primary input routing.
-The package and physical-host wallpaper/context-menu acceptance are pending;
-no live-display or multi-monitor claim is made from this local evidence.
+The Debian artifact passed the manifest/content gate and a reproducible rebuild
+with the same SHA-256; its exact hashes are recorded in
+[`releases/0.1.476.yaml`](../releases/0.1.476.yaml). Physical-host
+wallpaper/context-menu acceptance remains pending; no live-display or
+multi-monitor claim is made from this local evidence.
 
 ## 0.1.472 fractional font-scale contract
 
