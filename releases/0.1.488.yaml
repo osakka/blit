@@ -1,0 +1,28 @@
+release: 0.1.488
+package: blit_0.1.488-1_amd64.deb
+package_sha256: 2db93a1888a5acf4aa7059cd2a3955d61f6cae20f2b023e131c71bcb6fa717e0
+source_commit: c74ce54
+package_documentation_commit: c74ce54
+server_binary_sha256: 411352e70e86d8e30149144dd9830646aaa5e940d7edc9db8cdc304cb88bdaf9
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.191
+hibr_adapter_build: carried_forward_from_0.1.487_pinned_artifact
+tcc_version: 0.9.27_x86_64_linux
+focused_kitty_delete: pass_hibr_header_only_delete_pixel_cleared
+focused_terminal_renderer: pass_run_gates_46_0_0
+package_reproducibility: pass_rebuilt_identical
+package_artifact_acceptance: pass
+qemu_hibr_lifecycle_acceptance: unavailable_missing_kernel_and_initramfs
+live_host: 192.168.10.54
+live_deployment: pending_operator_install
+live_login_acceptance: pending_hibr_79_root_pam_logind
+physical_multi_monitor_acceptance: unavailable_one_output
+physical_high_refresh_acceptance: open_issue_21
+notes: >-
+  0.1.488 accepts Hibr's header-only Kitty image delete and carries the
+  graphics-scene identity into direct KMS dirty-view detection. The focused
+  gate proves the image pixel is present, survives incremental cell damage,
+  and is cleared after the exact Hibr delete form. Hibr source was not
+  modified. The adapter is the unchanged pinned artifact from 0.1.487;
+  package installation and live graphics acceptance remain pending.
