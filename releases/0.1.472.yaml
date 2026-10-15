@@ -1,8 +1,8 @@
 release: 0.1.472
 package: blit_0.1.472-1_amd64.deb
-package_sha256: pending_documentation_rebuild
+package_sha256: f6c2b8eb736b53f86847f3893651ed9f5cdec1999272eb39c6050ec63230f120
 source_commit: 6778ef5
-package_documentation_commit: pending_documentation_rebuild
+package_documentation_commit: 070e173
 server_binary_sha256: 1f5d2cbdd13e1bbcb01b98384aac6721c58b59747a19b982277f5e4003fa3a0e
 update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
 hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
@@ -13,8 +13,8 @@ tcc_build_acceptance: pass_server
 openapi_yaml: pass
 focused_font_renderer_suite: pass_47_fail_0
 font_scale_contract: pass_21_values_1.0_to_3.0_tenth_steps
-package_reproducibility: pending_documentation_rebuild
-package_artifact_acceptance: pending_documentation_rebuild
+package_reproducibility: pending_manifest_gate
+package_artifact_acceptance: pending_manifest_gate
 qemu_hibr_lifecycle_acceptance: unavailable_missing_kernel_and_initramfs
 live_host: 192.168.10.54
 live_predeployment_version: 0.1.471
