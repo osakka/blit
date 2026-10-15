@@ -1,0 +1,34 @@
+release: 0.1.480
+package: blit_0.1.480-1_amd64.deb
+package_sha256: bdbb08c55e9026b0ac312d3acbf189736524e588ba5abf1a278c6faa7ffaca28
+source_commit: 79ece81
+package_documentation_commit: 79ece81
+server_binary_sha256: a276811f7fd05cf35201ca46dec4a6ff0bbe0fb3813f1c577cf68b5613216075
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.191
+hibr_adapter_build: pass_exact_released_headers
+tcc_version: 0.9.27_x86_64_linux
+tcc_build_acceptance: pass_server_helper_adapter
+openapi_yaml: pass
+focused_hibr_join_viewport: pass_native_pty_distinct_surfaces_join_write_rejected_primary_input
+focused_hibr_join_placement: pass_hibr_syntax_and_coordinate_contract
+focused_hibr_suite: pass_9_skip_1_qemu_oracle
+focused_schema_renderer_suite: pass_45_fail_0_inherited_0.1.479
+package_reproducibility: pass
+package_artifact_acceptance: pass
+qemu_hibr_lifecycle_acceptance: unavailable_missing_kernel_and_initramfs
+live_host: 192.168.10.54
+live_predeployment_version: 0.1.479
+live_deployment: pass_0.1.480_supervised_update
+live_join_acceptance: failed_partial_repaint_noop_hold_move; superseded_0.1.481
+physical_multi_monitor_acceptance: unavailable_one_output
+physical_high_refresh_acceptance: open_issue_21
+notes: >-
+  This release keeps the primary Hibr client at logical union slot zero and
+  projects additional Blit panes into deterministic horizontal Hibr slots.
+  Blit still presents each local PTY viewport in its authoritative physical
+  pane, so a stacked 1x2 topology keeps the desktop bar on the lower primary
+  without mirroring. Hibr source is unchanged. The exact QEMU oracle and
+  physical host still need to validate final multi-display and reconnect
+  behavior.

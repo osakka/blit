@@ -64,4 +64,6 @@ asserts the complete move/attach boundary is present. The API join gate proves
 distinct PTY-backed surfaces and pane-hit-tested input. Live acceptance must
 additionally show the upper and lower panes as distinct stacked viewports of
 one desktop, with the desktop bar remaining on the physical primary, and
-record the Hibr `hold clients` coordinates.
+record the Hibr `hold clients` coordinates. Full spanning-picture acceptance
+is separately blocked on Hibr's viewport-aware hold picture propagation,
+tracked in [Hibr #238](https://git.home.arpa/itdlabs/hibr/issues/238).

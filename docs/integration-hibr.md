@@ -99,6 +99,14 @@ mirror the primary surface. Direct Hibr invocations without Blit's topology
 environment retain Hibr's documented default placement
 ([ADR 0080](adr/0080-map-blit-panes-to-hibr-hold-union-coordinates.md)).
 
+Picture propagation is a separate Hibr capability. Hibr's current hold
+contract does not emit a spanning Kitty/Sixel bitmap to a client whose
+viewport contains only part of that bitmap, so Blit cannot claim joined
+wallpaper completeness from cell/PTY evidence alone. The required Hibr-side
+viewport clipping/re-emission is tracked in
+[Hibr #238](https://git.home.arpa/itdlabs/hibr/issues/238); Blit does not patch
+Hibr source to work around it.
+
 The package also installs `blit-runtime-console.hibr`, and the entrypoint sets
 `HIBR_RC` to it when the caller has not supplied an explicit fixture or
 operator RC. This is required for API-launched Hibr children under systemd:

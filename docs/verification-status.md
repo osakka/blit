@@ -3,7 +3,7 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
-## 0.1.478 Hibr native-PTY candidate
+## 0.1.481 Hibr native-PTY live evidence
 
 Live 0.1.477 evidence identified the remaining join defect: the primary
 `console-blit` adapter painted its API surface, but Hibr's hold PTY had no
@@ -16,10 +16,20 @@ clients.
 
 The focused TCC server gate now runs both clients in `terminal` mode and proves
 distinct PTY output on distinct surfaces, joined-surface write rejection, and
-joined-pane input routing to the primary. Renderer/schema gates remain green
-from 0.1.477. The exact Hibr QEMU oracle and live 0.1.478 package deployment
-must still prove populated wallpaper, Kitty/Sixel graphics, context menus,
-window placement, and reconnect behavior.
+joined-pane input routing to the primary. The 0.1.481 live deployment on
+`192.168.10.54` has exactly one Hibr hold session with one primary and one
+join; `hold clients` reports the primary at `0 0 67 240` and the join at
+`0 240 67 240`. The captured SDL screenshot shows the lower physical primary
+with Hibr's desktop bar and the upper physical join as a distinct viewport;
+pointer press/release from the upper pane routes to the primary owner.
+
+Spanning Kitty/Sixel wallpaper is not yet accepted: Hibr's hold picture rule
+does not send a bitmap to a client whose rectangle does not contain the whole
+picture, so the upper viewport lacks that wallpaper region. This is recorded
+with exact reproduction and acceptance criteria in
+[Hibr #238](https://git.home.arpa/itdlabs/hibr/issues/238). Blit source does not
+patch Hibr's picture semantics. The exact Hibr QEMU oracle, context menus,
+window placement, and reconnect behavior remain open.
 
 The preceding 0.1.477 artifact and evidence remain recorded in
 [`releases/0.1.477.yaml`](../releases/0.1.477.yaml); its mirror-primary live

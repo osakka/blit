@@ -15,13 +15,13 @@ focused_hibr_join_viewport: pass_native_pty_distinct_surfaces_join_write_rejecte
 focused_hibr_join_placement: pass_hibr_syntax_and_coordinate_contract
 focused_hibr_suite: pass_9_skip_1_qemu_oracle
 focused_schema_renderer_suite: pass_45_fail_0
-package_reproducibility: pending_release_gate
-package_artifact_acceptance: pending_release_gate
+package_reproducibility: pass
+package_artifact_acceptance: pass
 qemu_hibr_lifecycle_acceptance: unavailable_missing_kernel_and_initramfs
 live_host: 192.168.10.54
 live_predeployment_version: 0.1.480
-live_deployment: pending_package_deployment
-live_join_acceptance: pending_package_deployment
+live_deployment: pass_0.1.481_supervised_update
+live_join_acceptance: pass_distinct_ptys_primary_bar_upper_viewport_input; blocked_spanning_picture_hibr_238
 physical_multi_monitor_acceptance: unavailable_one_output
 physical_high_refresh_acceptance: open_issue_21
 notes: >-
@@ -29,4 +29,6 @@ notes: >-
   Repositioning an already-canonical primary cleared Hibr's held-client front
   buffer and produced a partial black repaint during join startup. The native
   PTY boundary and the horizontal Hibr slot projection are unchanged. Hibr
-  source is unchanged.
+  source is unchanged. Live hold clients were verified as exactly one session
+  with a primary at 0 0 67 240 and a join at 0 240 67 240; the screenshot and
+  pointer trace passed. Spanning wallpaper remains blocked by Hibr #238.
