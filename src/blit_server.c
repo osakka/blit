@@ -9655,8 +9655,20 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
     if (payload[0] == 'G') ++payload;
     separator = strchr(payload, ';');
     if (separator == NULL) {
-        graphics_reject(session, "missing-payload");
-        return;
+        char no_payload_action[8];
+        /* Hibr's canonical Kitty delete has no data section and therefore
+           correctly ends after the header:
+             ESC_Ga=d,d=I,q=2,i=<id>ESC\\
+           Do not require a semicolon for that form. Every other action still
+           needs the payload delimiter, so malformed uploads remain rejected.
+           This is also deliberately checked before mutating the terminator. */
+        if (!kitty_parameter(payload, 'a', no_payload_action,
+                             sizeof(no_payload_action)) ||
+            strcmp(no_payload_action, "d") != 0) {
+            graphics_reject(session, "missing-payload");
+            return;
+        }
+        separator = payload + strlen(payload);
     }
     *separator = '\0';
     has_action = kitty_parameter(payload, 'a', action, sizeof(action));
@@ -22428,6 +22440,12 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                 session_default_background(render_source);
             views[view_count].graphics = render_source->graphics;
             views[view_count].graphics_count = BLIT_GRAPHICS_MAX_IMAGES;
+            /* KMS cannot infer an image-only mutation from the terminal
+               surface revision. Carry the complete graphics-scene identity
+               into the view so deleting or moving a Kitty/Sixel placement
+               forces a repaint even when no cell changed. */
+            views[view_count].graphics_signature =
+                graphics_scene_signature(runtime, output_index_for_surface);
             ++view_count;
         }
         kms_present_started = monotonic_us();

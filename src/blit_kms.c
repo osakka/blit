@@ -57,6 +57,7 @@ typedef struct {
     unsigned long long last_visual_revision;
     unsigned long long last_surface_ids[KMS_MAX_VIEWS];
     unsigned long long last_surface_revisions[KMS_MAX_VIEWS];
+    unsigned long long last_surface_graphics_signatures[KMS_MAX_VIEWS];
     int last_damage_valid;
     int last_damage_x;
     int last_damage_y;
@@ -848,7 +849,9 @@ static int output_view_unchanged(const KmsOutput *output,
     int i;
     for (i = 0; i < output->last_view_count && i < KMS_MAX_VIEWS; ++i)
         if (output->last_surface_ids[i] == view->surface_id)
-            return output->last_surface_revisions[i] == view->surface_revision;
+            return output->last_surface_revisions[i] == view->surface_revision &&
+                output->last_surface_graphics_signatures[i] ==
+                    view->graphics_signature;
     return 0;
 }
 
@@ -858,6 +861,7 @@ static void remember_output_views(KmsOutput *output,
 {
     unsigned long long previous_ids[KMS_MAX_VIEWS];
     unsigned long long previous_revisions[KMS_MAX_VIEWS];
+    unsigned long long previous_graphics_signatures[KMS_MAX_VIEWS];
     int previous_count = output->last_view_count < KMS_MAX_VIEWS ?
         output->last_view_count : KMS_MAX_VIEWS;
     int view_index;
@@ -868,6 +872,8 @@ static void remember_output_views(KmsOutput *output,
     for (i = 0; i < previous_count; ++i) {
         previous_ids[i] = output->last_surface_ids[i];
         previous_revisions[i] = output->last_surface_revisions[i];
+        previous_graphics_signatures[i] =
+            output->last_surface_graphics_signatures[i];
     }
     output->last_view_count = output_view_count;
     for (view_index = 0; view_index < view_count &&
@@ -877,6 +883,8 @@ static void remember_output_views(KmsOutput *output,
         output->last_surface_ids[stored] = views[view_index].surface_id;
         output->last_surface_revisions[stored] =
             views[view_index].surface_revision;
+        output->last_surface_graphics_signatures[stored] =
+            views[view_index].graphics_signature;
         /* A synchronized view was not drawn.  Remembering the revision it
            carries mid-batch would make the release frame look like one that
            had already been presented, and it would never be drawn.  Keep the
@@ -886,6 +894,9 @@ static void remember_output_views(KmsOutput *output,
                 if (previous_ids[i] == views[view_index].surface_id)
                     output->last_surface_revisions[stored] =
                         previous_revisions[i];
+                if (previous_ids[i] == views[view_index].surface_id)
+                    output->last_surface_graphics_signatures[stored] =
+                        previous_graphics_signatures[i];
         ++stored;
     }
 }

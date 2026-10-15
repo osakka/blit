@@ -82,13 +82,18 @@ begin
   rgb = ([255, 0, 0] * (4 * 8)).pack('C*')
   data = Base64.strict_encode64(rgb)
   kitty = "\\033_Ga=T,f=24,s=4,v=8,c=2,r=2,z=-1,i=77,m=0,q=2;#{data}\\033\\\\"
-  command = "printf '%b' '#{kitty}'; sleep 4"
+  delete = "\\033_Ga=d,d=I,i=77,q=2\\033\\\\"
+  # Keep the child alive after the delete. A stopped session intentionally
+  # retains its last protocol metadata for diagnostics, so checking that
+  # metadata after exit cannot prove that the live scene was cleared.
+  command = "printf '%b' \"$1\"; sleep 2; printf '%b' \"$2\"; printf 'DELETED\\n'; sleep 20"
   created = request(base, :post, '/v1/terminal-sessions',
-                    'command' => '/bin/sh', 'arguments' => ['-c', command],
+                    'command' => '/bin/sh',
+                    'arguments' => ['-c', command, 'sh', kitty, delete],
                     'surface' => {'width' => 20, 'height' => 8})
   id = created.fetch('id')
 
-  Timeout.timeout(5) do
+  Timeout.timeout(10) do
     loop do
       state = request(base, :get, "/v1/terminal-sessions/#{id}")
       break if state.fetch('graphics', []).any? do |image|
@@ -115,8 +120,25 @@ begin
   after_pixel = pixel(screenshot(base), 19, 35)
   raise "wallpaper was lost after incremental damage: #{after_pixel.inspect}" unless
     after_pixel[0, 3] == [0, 0, 255]
+  deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 10
+  loop do
+    state = request(base, :get, "/v1/terminal-sessions/#{id}")
+    break if state.fetch('graphics', []).none? { |image| image.fetch('visible', false) }
+    if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+      trace = request(base, :get,
+                      '/v1/diagnostics/trace?kind=graphics_payload&limit=20')
+      raise "wallpaper delete was not observed while session was alive: " \
+            "graphics=#{state.fetch('graphics').inspect} trace=#{trace.inspect}"
+    end
+    sleep 0.05
+  end
+  sleep 0.15
+  deleted_pixel = pixel(screenshot(base), 19, 35)
+  raise "wallpaper remained after image delete: #{deleted_pixel.inspect}" unless
+    deleted_pixel[0, 3] == [0, 0, 0]
   puts "SDL_WALLPAPER_DAMAGE_PASS before=#{before_pixel[0, 3].join(',')} " \
-       "after=#{after_pixel[0, 3].join(',')}"
+       "after=#{after_pixel[0, 3].join(',')} " \
+       "deleted=#{deleted_pixel[0, 3].join(',')}"
 ensure
   begin
     request(base, :delete, "/v1/terminal-sessions/#{id}") if id

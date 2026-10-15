@@ -3,6 +3,31 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 0.1.488 candidate: Hibr-compatible Kitty graphics deletion and KMS invalidation
+
+0.1.488 fixes two independent stale-pixel causes at the Blit boundary. Hibr's
+header-only Kitty delete (`a=d,d=I,q=2,i=<id>`) is now accepted without a
+semicolon, so a deleted wallpaper/image is removed from the live graphics
+scene. Direct KMS now includes the graphics-scene signature in its unchanged
+view decision, so an image-only move or delete triggers the repaint needed to
+clear the pixels it exposed. Hibr source is unchanged.
+
+The focused pixel gate passes with exact evidence:
+
+```text
+SDL_WALLPAPER_DAMAGE_PASS before=0,0,255 after=0,0,255 deleted=0,0,0
+```
+
+The full renderer suite passes:
+
+```text
+RUN_GATES_PASS pass=43 skip=0 fail=0
+```
+
+This closes the confirmed parser/invalidation defects. It does not claim that
+every live overlap is caused by Kitty/Sixel: a live capture must still show a
+non-empty graphics trace before graphics transport is assigned as the cause.
+
 ## 0.1.487 candidate: Hibr-compatible Kitty continuation uploads
 
 The live 0.1.486 capture established that the login screen and desktop cells

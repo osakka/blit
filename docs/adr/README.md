@@ -106,6 +106,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0082 — Atomic presentation boundary for one Hibr desktop](0082-atomic-hibr-join-presentation-boundary.md)
 - [0083 — Blit supervises Hibr's root-owned login manager](0083-blit-root-owned-hibr-login-manager.md)
 - [0084 — Kitty continuation chunks use the current upload](0084-kitty-continuations-use-the-current-upload.md)
+- [0085 — Graphics mutations invalidate every presentation backend](0085-graphics-mutations-invalidate-every-presentation-backend.md)
 
 ## Adding an ADR
 

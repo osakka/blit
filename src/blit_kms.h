@@ -57,6 +57,10 @@ typedef struct {
     int synchronized;
     const BlitGraphicsImage *graphics;
     int graphics_count;
+    /* Graphics placement/lifetime is independent of terminal cell revision.
+       The KMS presenter uses this identity to notice an image-only delete or
+       move and repaint the pixels that the old placement exposed. */
+    unsigned long long graphics_signature;
 } BlitKmsSurfaceView;
 
 typedef struct {
