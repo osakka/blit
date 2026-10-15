@@ -3,6 +3,23 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 0.1.470 refresh-bound damage coalescing candidate
+
+The live trace identified the jerky-motion root cause: Hibr surface commits
+arrived about every 5 ms while the GLES2 backend rebuilt the full 1920x2160
+scene for each event. The event-driven scheduler was re-phasing after each
+completed frame and allowed pointer/pixel damage to bypass the output deadline.
+0.1.470 retains pending work per output and presents the newest complete state
+only when that output's refresh deadline is due; input and API handling remain
+immediate. Pointer damage is now retained independently for every affected
+output, which preserves the cursor across differently phased displays.
+
+The TCC build and focused frame-rate, pointer atomicity, pointer-cache,
+full-rebuild, and motion-trail gates pass. The frame-rate workload reached
+60.000 Hz with zero missed deadlines while its faster-than-refresh producer
+burst stayed below the bounded 125% guard. Live deployment and physical Hibr
+window-motion acceptance remain pending for this candidate.
+
 ## 0.1.469 KVM source identity diagnostics
 
 The live KVM check showed that raw mouse and keyboard counters could increase

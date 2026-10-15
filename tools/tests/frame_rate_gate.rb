@@ -103,6 +103,7 @@ begin
                baseline_terminal_bytes, terminal_bytes) unless
     terminal_bytes > baseline_terminal_bytes
   target_interval_ms = outputs.map { |output| output.fetch('target_interval_ms') }.max
+  target_refresh_hz = outputs.map { |output| output.fetch('refresh_hz') }.max
   raise 'frame-rate window never completed' unless performance.fetch('frame_rate_window_ms') >= 500
   raise 'frame-rate window did not advance during workload' unless
     performance.fetch('frame_rate_window_sequence') >= required_window_sequence
@@ -110,12 +111,17 @@ begin
   raise format('frame-rate below required minimum: %.3f < %.3f Hz',
                performance.fetch('frame_rate_hz'), minimum_hz) unless
     performance.fetch('frame_rate_hz') >= minimum_hz
+  maximum_hz = target_refresh_hz * 1.25
+  raise format('producer burst escaped refresh coalescing: %.3f > %.3f Hz',
+               performance.fetch('frame_rate_hz'), maximum_hz) unless
+    performance.fetch('frame_rate_hz') <= maximum_hz
   raise 'frame-rate measurement is stale' unless performance.fetch('frame_rate_age_ms') <= 2000
   raise 'frame-rate frame count invalid' unless performance.fetch('frame_rate_frames') >= 1
   raise 'refresh deadline was missed' unless performance.fetch('frame_rate_missed_deadlines').zero?
-  puts format('FRAME_RATE_PASS hz=%.3f min_hz=%.3f frames=%d window_ms=%d age_ms=%d window_max_render_ms=%.3f target_interval_ms=%.3f window_missed_deadlines=%d terminal_bytes=%d',
+  puts format('FRAME_RATE_PASS hz=%.3f min_hz=%.3f max_hz=%.3f frames=%d window_ms=%d age_ms=%d window_max_render_ms=%.3f target_interval_ms=%.3f window_missed_deadlines=%d terminal_bytes=%d',
               performance.fetch('frame_rate_hz'),
               minimum_hz,
+              maximum_hz,
               performance.fetch('frame_rate_frames'),
               performance.fetch('frame_rate_window_ms'),
               performance.fetch('frame_rate_age_ms'),

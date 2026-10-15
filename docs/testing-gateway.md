@@ -521,7 +521,15 @@ selected display cadence and scheduler target. The same object includes
 `terminal_reads`, `present_calls`, `last_loop_gap_ms`, and
 `max_loop_gap_ms`, `last_select_ms`, and `max_select_ms`, which distinguish
 kernel-wait stalls from other event-loop stalls and presentation stalls. The
-completed bounded loop-gap window is exposed as `loop_gap_window_ms`,
+pending terminal, pointer, overlay, and pixel work is coalesced to each
+output's deadline; a producer can update state faster than the display without
+forcing a present for every event. During a motion test, compare the interval
+between `render_path` trace timestamps with
+`snapshot.render.outputs[].target_interval_ms`. A trace that follows the
+producer faster than that interval is a scheduler regression, not evidence of
+a faster display. Pointer damage is retained independently for the old and new
+output when a pointer crosses displays.
+The completed bounded loop-gap window is exposed as `loop_gap_window_ms`,
 `loop_gap_window_sequence`, and `loop_gap_window_max_ms`. The sequence advances
 once per completed 500 ms window; use it to take two runtime samples and avoid
 mistaking a partial or stale sample for the interval being investigated.

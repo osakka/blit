@@ -896,6 +896,10 @@ typedef struct {
     float previous_pointer_y;
     int previous_pointer_output;
     int pointer_dirty;
+    /* Pointer damage is retained per output until that output has reached a
+       refresh deadline.  A single global dirty bit loses the new cursor when
+       two outputs have different phases and only one is due. */
+    unsigned int pointer_dirty_outputs;
     int evdev_mouse_fds[BLIT_MAX_INPUT_DEVICES];
     char evdev_mouse_paths[BLIT_MAX_INPUT_DEVICES][128];
     int evdev_mouse_count;
@@ -1596,12 +1600,49 @@ static void reset_render_schedule(BlitRuntime *runtime, uint64_t now)
         runtime->render_interval_ms;
 }
 
+static void rephase_idle_render_schedule(BlitRuntime *runtime, uint64_t now)
+{
+    int i;
+
+    /* A new event after a genuinely idle period should not inherit a large
+       stale deadline debt.  A short idle gap is different: preserving the
+       already scheduled deadline coalesces producer bursts into the display
+       refresh cadence instead of presenting once for every PTY or mouse
+       event. */
+    for (i = 0; i < runtime->output_count; ++i) {
+        uint64_t period = output_render_period_us(runtime, i);
+        if (runtime->render_next_us[i] == 0 ||
+            (now > runtime->render_next_us[i] &&
+             now - runtime->render_next_us[i] >= period))
+            runtime->render_next_us[i] = now;
+    }
+}
+
 static uint32_t all_output_mask(const BlitRuntime *runtime)
 {
     if (runtime->output_count >= 32)
         return 0xffffffffU;
     return runtime->output_count > 0 ?
         (1U << runtime->output_count) - 1U : 0;
+}
+
+static int pointer_dirty_for_output(const BlitRuntime *runtime,
+                                    int output_index)
+{
+    return runtime->pointer_dirty && output_index >= 0 &&
+        output_index < 32 &&
+        (runtime->pointer_dirty_outputs & (1U << output_index)) != 0;
+}
+
+static void mark_pointer_dirty_outputs(BlitRuntime *runtime,
+                                       int previous_output,
+                                       int current_output)
+{
+    if (previous_output >= 0 && previous_output < 32)
+        runtime->pointer_dirty_outputs |= 1U << previous_output;
+    if (current_output >= 0 && current_output < 32)
+        runtime->pointer_dirty_outputs |= 1U << current_output;
+    runtime->pointer_dirty = runtime->pointer_dirty_outputs != 0;
 }
 
 static uint32_t due_output_mask(const BlitRuntime *runtime, uint64_t now)
@@ -1614,20 +1655,6 @@ static uint32_t due_output_mask(const BlitRuntime *runtime, uint64_t now)
             now >= runtime->render_next_us[i])
             mask |= 1U << i;
     }
-    /* Pointer damage belongs only to the output that lost the pointer and the
-       output that received it. Redrawing every display for one motion makes
-       multi-display pointer input needlessly expensive and visibly choppy. */
-    if (runtime->pointer_dirty) {
-        if (runtime->previous_pointer_output >= 0 &&
-            runtime->previous_pointer_output < runtime->output_count)
-            mask |= 1U << runtime->previous_pointer_output;
-        if (runtime->pointer_output >= 0 &&
-            runtime->pointer_output < runtime->output_count)
-            mask |= 1U << runtime->pointer_output;
-    }
-    for (i = 0; i < runtime->output_count; ++i)
-        if (runtime->pixel_frames_pending[i] > 0)
-            mask |= 1U << i;
     return mask;
 }
 
@@ -1667,17 +1694,6 @@ static int render_wait_ms(const BlitRuntime *runtime, uint64_t now)
         uint64_t delta = runtime->terminal_frame_quiet_until_us - now;
         wait_ms = (int)((delta + 999ULL) / 1000ULL);
         if (wait_ms < 1) wait_ms = 1;
-    }
-    if (runtime->pointer_dirty) {
-        if (runtime->terminal_frame_quiet_until_us > now)
-            return wait_ms;
-        /* Direct KMS may still own the output's back buffer until its page
-           flip event arrives.  A zero-timeout select while that flip is
-           pending spins the gateway at 100% CPU and prevents the bounded
-           flip-timeout path from being serviced.  SDL can present the cached
-           scene immediately; KMS yields briefly and still services input
-           and DRM events without adding visible pointer latency. */
-        return runtime->direct_kms ? 1 : 0;
     }
     for (i = 0; i < runtime->output_count; ++i) {
         uint64_t delta;
@@ -12761,7 +12777,8 @@ static void apply_display_placements(BlitRuntime *runtime,
         runtime->pointer_output = output_index_for_display_index(runtime,
             display_index_at(runtime, runtime->pointer_x,
                              runtime->pointer_y));
-    runtime->pointer_dirty = 1;
+    runtime->pointer_dirty_outputs = all_output_mask(runtime);
+    runtime->pointer_dirty = runtime->pointer_dirty_outputs != 0;
     runtime->render_pending = 1;
 }
 
@@ -21656,12 +21673,11 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             if ((kms_submitted_output_mask & (1U << surface_index)) &&
                 runtime->pixel_frames_pending[surface_index] > 0)
                 --runtime->pixel_frames_pending[surface_index];
-        /* A pending DRM page flip means the back buffer is still owned by
-           the CRTC. Keep pointer damage live until every deferred output has
-           had a submission opportunity; otherwise the next pointer position
-           can be lost while the old frame remains on screen. */
-        if (kms_deferred_output_mask == 0)
-            runtime->pointer_dirty = 0;
+        /* Retain pointer damage for outputs whose refresh deadline has not
+           arrived yet. A single global clear used to lose the cursor on a
+           differently phased secondary output. */
+        runtime->pointer_dirty_outputs &= ~kms_submitted_output_mask;
+        runtime->pointer_dirty = runtime->pointer_dirty_outputs != 0;
         return;
     }
 
@@ -21723,7 +21739,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                         &runtime->overlays[overlay_index], output_index))
                     ++overlay_count;
         }
-        pointer_only = runtime->pointer_dirty &&
+        pointer_only = pointer_dirty_for_output(runtime, output_index) &&
             runtime->outputs[output_index].initialized &&
             runtime->outputs[output_index].scene_texture != NULL &&
             !target_changed;
@@ -21750,7 +21766,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             target_count != runtime->outputs[output_index].last_target_count ||
             runtime->topology_revision !=
                 runtime->outputs[output_index].last_topology_revision;
-        if (runtime->pointer_dirty)
+        if (pointer_dirty_for_output(runtime, output_index))
             ++runtime->diagnostic_pointer_cache_misses;
         {
             char detail[256];
@@ -21760,7 +21776,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                          "incremental-damage",
                      target_count, active_output_surface_count(runtime, output_index),
                      target_changed, external_target_changed,
-                     runtime->pointer_dirty,
+                     pointer_dirty_for_output(runtime, output_index),
                      runtime->outputs[output_index].initialized,
                      graphics_changed,
                      graphics_scene_count(runtime, output_index),
@@ -21805,13 +21821,13 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                can be caused by another display's PTY or by a stream event;
                do not submit another clear/present for this output. */
             if (!runtime->outputs[output_index].initialized &&
-                !runtime->pointer_dirty &&
+                !pointer_dirty_for_output(runtime, output_index) &&
                 !(runtime->screenshot_requested_mask & (1U << output_index)))
                 continue;
             if (!runtime->outputs[output_index].initialized) {
                 SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
                 SDL_RenderClear(renderer);
-            } else if (runtime->pointer_dirty) {
+            } else if (pointer_dirty_for_output(runtime, output_index)) {
                 SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
                 SDL_RenderClear(renderer);
             }
@@ -21826,7 +21842,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                 SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
             if (!runtime->outputs[output_index].initialized)
                 SDL_RenderClear(renderer);
-            else if (runtime->pointer_dirty) {
+            else if (pointer_dirty_for_output(runtime, output_index)) {
                 SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
                 SDL_RenderClear(renderer);
             }
@@ -21848,7 +21864,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
            avoid SDL_RenderPresent, until damage or pointer state requires a
            new frame. */
         if (runtime->outputs[output_index].initialized &&
-            !runtime->pointer_dirty && !target_changed) {
+            !pointer_dirty_for_output(runtime, output_index) &&
+            !target_changed) {
             if (runtime->screenshot_requested_mask & (1U << output_index)) {
                 /* Cached screenshot requests observe the scene texture and
                    current software cursor without rebuilding terminal cells,
@@ -22333,7 +22350,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
         if (rendered && session != NULL)
             session->terminal_frame_batch = 0;
     }
-    runtime->pointer_dirty = 0;
+    runtime->pointer_dirty_outputs &= ~output_mask;
+    runtime->pointer_dirty = runtime->pointer_dirty_outputs != 0;
     {
         uint64_t elapsed = monotonic_us() - diagnostic_render_started;
         double milliseconds = (double)elapsed / 1000.0;
@@ -22771,7 +22789,8 @@ static void update_pointer_position(BlitRuntime *runtime,
         old_y != runtime->pointer_y || old_output != runtime->pointer_output;
     if (!changed)
         return;
-    runtime->pointer_dirty = 1;
+    mark_pointer_dirty_outputs(runtime, runtime->previous_pointer_output,
+                               runtime->pointer_output);
     runtime->render_pending = 1;
     {
         char input_event[512];
@@ -24006,7 +24025,8 @@ static void service_sdl_events(BlitRuntime *runtime)
                                                          event.motion.windowID);
             runtime->pointer_x = x;
             runtime->pointer_y = y;
-    runtime->pointer_dirty = 1;
+    mark_pointer_dirty_outputs(runtime, runtime->previous_pointer_output,
+                               runtime->pointer_output);
     runtime->render_pending = 1;
     {
         char detail[160];
@@ -24866,7 +24886,10 @@ int main(int argc, char **argv)
             runtime.displays[0].bounds.y : 0) +
             (runtime.displays[0].bounds.h > 0 ?
              runtime.displays[0].bounds.h / 2.0f : 0.0f);
-        runtime.pointer_dirty = 1;
+        runtime.pointer_dirty_outputs = runtime.pointer_output >= 0 &&
+            runtime.pointer_output < 32 ?
+                1U << runtime.pointer_output : 0;
+        runtime.pointer_dirty = runtime.pointer_dirty_outputs != 0;
         runtime.render_pending = 1;
     }
 
@@ -25234,12 +25257,12 @@ int main(int argc, char **argv)
             if (runtime.streams[i].used && runtime.streams[i].receive_length > 0)
                 service_stream(&runtime, runtime.streams[i].fd);
         now = monotonic_us();
-        /* A refresh schedule is only meaningful while work is pending.  If
-           the display was idle and a new terminal/input event arrived, start
-           a fresh phase at that event instead of reporting every idle refresh
-           period as a missed deadline. */
+        /* Rephase only after a genuinely idle interval.  Resetting the phase
+           for every new event made a moving Hibr window present at producer
+           cadence (often several hundred Hz) instead of coalescing updates to
+           each output's refresh deadline. */
         if (!pending_before_events && runtime.render_pending)
-            reset_render_schedule(&runtime, now);
+            rephase_idle_render_schedule(&runtime, now);
         if (runtime.render_pending &&
             now >= runtime.terminal_frame_quiet_until_us &&
             (output_mask = due_output_mask(&runtime, now)) != 0) {

@@ -93,6 +93,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0069 — The Hibr adapter preserves Hibr's provider semantics](0069-the-hibr-adapter-preserves-provider-semantics.md)
 - [0070 — The scene cache is used only where render targets are known to persist](0070-the-scene-cache-needs-a-backend-that-preserves-render-targets.md)
 - [0071 — Historical evdev diagnostics carry device identity](0071-historical-evdev-source-identity.md)
+- [0072 — Coalesce pending damage at each output refresh boundary](0072-refresh-bound-damage-coalescing.md)
 
 ## Adding an ADR
 

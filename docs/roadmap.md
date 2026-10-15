@@ -3,7 +3,19 @@
 The roadmap is ordered by dependency. A later milestone must not become a
 second, parallel implementation of an earlier one.
 
-## Current position — 0.1.466 input-boundary candidate
+## Current position — 0.1.470 refresh-bound presentation candidate
+
+The next release closes the refresh-scheduling defect found on the physical
+host: Hibr window movement produced surface commits about every 5 ms, and the
+live GLES2 path rebuilt the full scene for each one. Blit now preserves each
+output's refresh phase, coalesces terminal/pointer/pixel work to the next due
+slot, and retains pointer damage independently across outputs. The local TCC
+frame-rate workload reaches 60 Hz with zero missed deadlines and passes a
+producer-burst upper bound. Live deployment must still prove the trace and
+physical Hibr motion on the exact package; no physical high-refresh claim is
+made for the one-output host.
+
+## Historical position — 0.1.466 input-boundary candidate
 
 The next linear release addresses physical-host findings #76, #77, and #78
 without changing Hibr. Blit's diagnostic trace and the adapter log proved that API
