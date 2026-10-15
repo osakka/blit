@@ -13,8 +13,8 @@ tcc_build_acceptance: pass_server
 openapi_yaml: pass
 focused_font_renderer_suite: pass_47_fail_0
 font_scale_contract: pass_21_values_1.0_to_3.0_tenth_steps
-package_reproducibility: pending_manifest_gate
-package_artifact_acceptance: pending_manifest_gate
+package_reproducibility: pass_two_independent_builds_byte_identical
+package_artifact_acceptance: pass_manifest_hashes_match_package_and_reproducible
 qemu_hibr_lifecycle_acceptance: unavailable_missing_kernel_and_initramfs
 live_host: 192.168.10.54
 live_predeployment_version: 0.1.471
