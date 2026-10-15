@@ -1,0 +1,30 @@
+release: 0.1.472
+package: blit_0.1.472-1_amd64.deb
+package_sha256: 0940f8a698cd81ec65e4c746f17aaff899a2e0c51fe6108147b1ec73619e1f8b
+source_commit: 6778ef5
+package_documentation_commit: 6778ef5
+server_binary_sha256: 1f5d2cbdd13e1bbcb01b98384aac6721c58b59747a19b982277f5e4003fa3a0e
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.191
+hibr_adapter_build: pass_exact_released_headers
+tcc_version: 0.9.27_x86_64_linux
+tcc_build_acceptance: pass_server
+openapi_yaml: pass
+focused_font_renderer_suite: pass_47_fail_0
+font_scale_contract: pass_21_values_1.0_to_3.0_tenth_steps
+package_reproducibility: pending_manifest_gate
+package_artifact_acceptance: pending_manifest_gate
+qemu_hibr_lifecycle_acceptance: unavailable_missing_kernel_and_initramfs
+live_host: 192.168.10.54
+live_predeployment_version: 0.1.471
+live_deployment: pending
+live_font_scale_acceptance: pending
+physical_multi_monitor_acceptance: unavailable_one_output
+physical_high_refresh_acceptance: open_issue_21
+notes: >-
+  This release extends the API-selectable font scale from integer values to
+  exact tenth-step values. The server stores fixed-point tenths and applies
+  one nearest-pixel cell-metric rule across SDL, direct KMS, panes, PTYs,
+  display-session reflow, surface origins, and pointer hit-testing. Hibr
+  source is unchanged.
