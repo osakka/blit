@@ -60,6 +60,18 @@ evidence that Blit is painting the incomplete Hibr cell scene without stale
 pixels or a pane-origin error; it does not turn absent Hibr picture payloads
 into a complete joined wallpaper.
 
+The same live capture also isolates the apparent display-wide shadow. Blit's
+effects are disabled and its overlay list is empty. The Hibr cell snapshots
+contain `#070f17` in 69.6% of the lower pane and 83.7% of the upper pane,
+while the wallpaper colour is `#0d1b2a`. Hibr's desktop settings define a
+55% shadow darkening, and `#070f17` is the corresponding darkened colour.
+Therefore the dark regions are Hibr shadow cells, not an SDL effect, stale
+frame, or Blit overlay. Hibr's `DT_SHADOW` is enabled by default and its
+window/bar shadow geometry is calculated in the joined desktop union; the
+wallpaper remains primary-display-confined. This combination explains the
+large shadow-like regions in the physical photograph and remains part of the
+Hibr #240 joined-union contract, not a Blit compositor defect.
+
 Live 0.1.477 evidence identified the remaining join defect: the primary
 `console-blit` adapter painted its API surface, but Hibr's hold PTY had no
 primary stream to fan out, leaving the joined pane black. A native-Hibr probe
