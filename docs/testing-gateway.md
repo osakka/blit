@@ -378,6 +378,17 @@ critical diagnostic trace that no render occurs between the bounded Hibr frame
 barrier opening and its release. A timeout is allowed only at the display
 refresh deadline; it cannot be extended by continued writes.
 
+The native Kitty query acknowledgement is covered locally as well:
+
+```sh
+ruby tools/tests/kitty_query_gate.rb
+```
+
+The gate sends the header-only `a=q` probe, reads Blit's `OK` reply through a
+raw PTY, and confirms that the query does not create an image. This matters for
+Hibr wallpaper startup because Hibr performs this probe before transmitting the
+actual image payload.
+
 The stream reconnect/replay gate runs against that exact binary with the
 dummy video backend:
 

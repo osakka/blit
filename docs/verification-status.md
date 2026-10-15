@@ -21,7 +21,7 @@ panes as separate terminals. It is the remaining Hibr 2-D union and picture
 propagation boundary tracked by Hibr #240 and #238. The screenshot is evidence
 that the implementation is not complete; it is not a claim of success.
 
-Blit now applies a bounded one-refresh presentation barrier to the primary and
+Blit 0.1.483 applies a bounded one-refresh presentation barrier to the primary and
 joined PTYs of one Hibr desktop. The barrier prevents a dirty member from being
 presented alone while its sibling's redraw is already in flight, releases
 immediately when all active members contribute damage, and times out at the
@@ -30,6 +30,14 @@ display interval so a quiet join cannot freeze the primary. The focused gate
 `render_path` event occurs between barrier open and release. This fixes the
 Blit-side partial-frame presentation boundary only; it does not create the
 missing Kitty/Sixel payload that Hibr did not send.
+
+The subsequent live capture also isolated a Blit Kitty protocol defect: the
+header-only `a=q` capability probe was incorrectly treated as a malformed
+image upload. Hibr therefore received an error before sending its wallpaper.
+The fix is in the next candidate (0.1.484), with
+`tools/tests/kitty_query_gate.rb` proving the raw-PTY `OK` reply and zero image
+allocation. Until that candidate is deployed, the live 0.1.483 screenshot
+must still be read as pre-fix evidence for the missing wallpaper.
 
 The earlier 0.1.481 visual acceptance is revoked by the subsequent
 physical capture. The live 1x2 result is one Hibr desktop, not two terminal

@@ -9763,16 +9763,25 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
             kitty_reply(session, image_id, quiet, "EINVAL");
             return;
         }
-        query.capacity = (size_t)width * (size_t)height *
-            (format == 24 ? 3U : 4U);
-        query.pixels = (unsigned char *)malloc(query.capacity);
-        if (query.pixels == NULL ||
-            !kitty_decode_chunk(&query, separator + 1) ||
-            query.base64_tail_length != 0 || query.bytes != query.capacity) {
-            free(query.pixels);
-            graphics_reject(session, "query-data");
-            kitty_reply(session, image_id, quiet, "EINVAL");
-            return;
+        /* Kitty's capability probe is query-only: the `a=q` form carries the
+           dimensions and format in the header, then an empty data section.
+           It is not a one-pixel upload. Hibr uses precisely this form before
+           sending a wallpaper; treating the empty section as malformed makes
+           a well-behaved producer stop before it ever transmits the image. If
+           a query does carry data, retain the strict size/decode validation so
+           malformed probes are still rejected. */
+        if (separator[1] != '\0') {
+            query.capacity = (size_t)width * (size_t)height *
+                (format == 24 ? 3U : 4U);
+            query.pixels = (unsigned char *)malloc(query.capacity);
+            if (query.pixels == NULL ||
+                !kitty_decode_chunk(&query, separator + 1) ||
+                query.base64_tail_length != 0 || query.bytes != query.capacity) {
+                free(query.pixels);
+                graphics_reject(session, "query-data");
+                kitty_reply(session, image_id, quiet, "EINVAL");
+                return;
+            }
         }
         free(query.pixels);
         snprintf(response, sizeof(response), "OK");

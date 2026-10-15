@@ -242,6 +242,7 @@ suite_renderer() {
         ruby tools/tests/external_pointer_composition_gate.rb
     run_gate sdl_background_batch_gate.rb ruby tools/tests/sdl_background_batch_gate.rb
     run_gate sdl_graphics_cache_gate.rb ruby tools/tests/sdl_graphics_cache_gate.rb
+    run_gate kitty_query_gate.rb ruby tools/tests/kitty_query_gate.rb
     run_gate kitty_placement_gate.rb ruby tools/tests/kitty_placement_gate.rb
     run_gate sixel_decoder_gate.rb ruby tools/tests/sixel_decoder_gate.rb
     run_gate graphics_trace_gate.rb ruby tools/tests/graphics_trace_gate.rb
