@@ -3,6 +3,21 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 0.1.467 live Alt-drag correction
+
+The live host was updated through the supervised API to `0.1.467`, and the
+existing primary was restarted cleanly before one new primary was created.
+The new session registered its Hibr owner and painted 32,400 cells on the
+single 60 Hz output.
+
+The root cause of the window-movement report was then confirmed at the source
+boundary: Hibr's window manager requires `alt-press` followed by `alt-drag`,
+but the Blit pointer stream previously omitted pointer modifier state. The
+new live WebSocket stream carries `alt:true` while the held Alt state is
+active, and the adapter gate translates it to `mouse alt-drag`. Hibr source
+was not changed. Physical Alt-drag after this deployment remains the final
+operator check.
+
 ## 0.1.466 live acceptance
 
 The reproducible `0.1.466-1` package was uploaded through the supervised update
