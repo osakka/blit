@@ -336,8 +336,9 @@ BLIT_HIBR_ROOT=/path/to/hibr tools/tests/adapter_input_gate.sh
 
 It sends real WebSocket text frames through `console-blit`, then checks the
 one-based Blit to zero-based Hibr cell translation, font-scaled pixel
-fallback, left/middle/right button identity, vertical wheel events, and Hibr
-names for F1 through F12. This isolates adapter semantics from evdev discovery
+fallback, left/middle/right button identity including the button field in
+drag actions, vertical wheel events, and Hibr names for F1 through F12. This
+isolates adapter semantics from evdev discovery
 and widget behavior; the physical host remains the final click and shortcut
 acceptance boundary.
 

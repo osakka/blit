@@ -262,6 +262,20 @@ static void cb_mouse_action(str *out, const char *frame, const char *action)
 	s_cat(out, action);
 }
 
+/* Hibr's console vocabulary includes the held button in a drag report:
+ * `mouse drag left row column`. A press/release has always carried that
+ * name; use the same lowest-numbered held button for motion. Blit has one
+ * shared pointer and may report more than one held button, while Hibr's
+ * action vocabulary has one button slot, so this deterministic choice is
+ * the only lossless interpretation at this boundary. */
+static const char *cb_mouse_button_name(unsigned buttons)
+{
+	if (buttons & 1U) return "left";
+	if (buttons & 2U) return "middle";
+	if (buttons & 4U) return "right";
+	return "left";
+}
+
 static int cb_json_string(const char *json, const char *key, char *value,
 			  size_t capacity)
 {
@@ -1758,6 +1772,10 @@ static int cb_key(int ms, str *out)
 					cb_mouse_action(out, frame, "drag");
 				else
 					cb_mouse_action(out, frame, "motion");
+				if (cb.mouse_buttons != 0) {
+					s_ch(out, ' ');
+					s_cat(out, cb_mouse_button_name(cb.mouse_buttons));
+				}
 				s_ch(out, ' '); s_num(out, row);
 				s_ch(out, ' '); s_num(out, column);
 				++cb.consumed;

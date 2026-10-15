@@ -185,6 +185,12 @@ The hibr module should be a transport adapter only:
   Blit-resolved UTF-8 `text`, after per-device keymap, Shift, CapsLock, and
   AltGr processing; the adapter owns no second keyboard layout. Hibr's console
   contract remains unchanged; see [ADR 0068](adr/0068-the-hibr-adapter-translates-input-vocabulary.md).
+- A held pointer motion becomes Hibr's complete drag action, including the
+  button: `mouse drag left row column` (or the corresponding modifier prefix).
+  This field is required by Hibr's parser; omitting it shifts the row/column
+  arguments and makes horizontal movement appear vertical. The adapter picks
+  the lowest-numbered held button when more than one is down. The focused
+  adapter gate protects this boundary; see [ADR 0070](adr/0070-pointer-modifiers-cross-the-hibr-boundary.md).
 - `console watch` adds a Hibr application descriptor to the same wait as the
   input WebSocket. Readiness wakes the desktop immediately but leaves the
   descriptor for its owning application to drain; `console key -q` excludes

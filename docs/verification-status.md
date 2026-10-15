@@ -3,6 +3,18 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 0.1.468 drag-action correction
+
+The live drag investigation found a second, narrower defect at the Blit-owned
+Hibr adapter boundary. Hibr's documented console protocol requires a held
+button in every drag action (`mouse drag left row column`); the adapter had
+sent `mouse drag row column`. Hibr therefore parsed the column as the row and
+an empty column, which explains directional movement that appeared vertical
+only. The correction adds the deterministic held-button name to plain and
+modifier-prefixed drags. Hibr source remains untouched. The focused adapter
+gate passes the corrected contract; live package deployment and a controlled
+physical drag acceptance remain pending.
+
 ## 0.1.467 live Alt-drag correction
 
 The live host was updated through the supervised API to `0.1.467`, and the
