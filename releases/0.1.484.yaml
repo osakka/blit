@@ -1,0 +1,33 @@
+release: 0.1.484
+package: blit_0.1.484-1_amd64.deb
+package_sha256: a100c752364f8f65732d2f76fbe7409866a00510b88f93e273ce017c4d94e4f2
+source_commit: 4574b05
+package_documentation_commit: 4574b05
+server_binary_sha256: cef9376513e24ef93f2e987cfb536a8856859e0230898d796bed2572634e0ac5
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.191
+hibr_adapter_build: pass_pinned_hibr_0.99.191
+tcc_version: 0.9.27_x86_64_linux
+focused_kitty_query: pass_header_only_ok_zero_images
+focused_hibr_join_frame_barrier: pass_no_render_between_open_and_release
+focused_hibr_join_viewport: pass_native_pty_distinct_surfaces_projected_input_coordinates
+focused_renderer_suite: pass_graphics_wallpaper_damage_frame_rate
+pre_handoff_suite: fail_existing_font_api_scale_1_1_geometry_gate
+pre_handoff_suite_counts: pass_71_skip_3_fail_1
+package_reproducibility: pass_rebuilt_identical
+package_artifact_acceptance: pass
+qemu_hibr_lifecycle_acceptance: unavailable_missing_kernel_and_initramfs
+live_host: 192.168.10.54
+live_deployment: pending_operator_install
+live_join_acceptance: pending_0.1.484_wallpaper_and_atomic_join_capture
+physical_multi_monitor_acceptance: unavailable_one_output
+physical_high_refresh_acceptance: open_issue_21
+notes: >-
+  0.1.484 retains the bounded one-refresh presentation barrier for the primary
+  and joined PTYs of one logical Hibr desktop and fixes Kitty's header-only
+  a=q capability probe. The probe now receives the required OK response
+  without allocating an image, allowing Hibr to continue to its wallpaper
+  upload. The local query, join-barrier, graphics, wallpaper-damage, and
+  refresh gates pass. The broad suite still has the unrelated fractional-font
+  scale-1.1 geometry failure. Hibr 2-D union semantics remain tracked by #240.
