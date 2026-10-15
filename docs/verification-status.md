@@ -31,13 +31,15 @@ display interval so a quiet join cannot freeze the primary. The focused gate
 Blit-side partial-frame presentation boundary only; it does not create the
 missing Kitty/Sixel payload that Hibr did not send.
 
-The subsequent live capture also isolated a Blit Kitty protocol defect: the
-header-only `a=q` capability probe was incorrectly treated as a malformed
-image upload. Hibr therefore received an error before sending its wallpaper.
-The fix is in the next candidate (0.1.484), with
-`tools/tests/kitty_query_gate.rb` proving the raw-PTY `OK` reply and zero image
-allocation. Until that candidate is deployed, the live 0.1.483 screenshot
-must still be read as pre-fix evidence for the missing wallpaper.
+The subsequent live capture also exercised the Kitty capability boundary. Hibr's
+deployed probe is the documented one-pixel `a=q ...;AAAA` form; 0.1.483 already
+accepted it. 0.1.484 additionally accepts the header-only form and proves the
+raw-PTY `OK` reply without allocating an image, but that compatibility change
+is not the cause of the missing live wallpaper. After 0.1.484 deployment the
+live trace records six Kitty queries, zero rejections, and zero image uploads.
+That is direct evidence that Hibr did not send the picture in this run; Blit
+cannot render a bitmap absent from the PTY stream. Picture/theme state and
+joined picture propagation remain the Hibr boundary tracked by #238.
 
 The earlier 0.1.481 visual acceptance is revoked by the subsequent
 physical capture. The live 1x2 result is one Hibr desktop, not two terminal

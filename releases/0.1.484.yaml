@@ -25,9 +25,12 @@ physical_multi_monitor_acceptance: unavailable_one_output
 physical_high_refresh_acceptance: open_issue_21
 notes: >-
   0.1.484 retains the bounded one-refresh presentation barrier for the primary
-  and joined PTYs of one logical Hibr desktop and fixes Kitty's header-only
-  a=q capability probe. The probe now receives the required OK response
-  without allocating an image, allowing Hibr to continue to its wallpaper
-  upload. The local query, join-barrier, graphics, wallpaper-damage, and
-  refresh gates pass. The broad suite still has the unrelated fractional-font
-  scale-1.1 geometry failure. Hibr 2-D union semantics remain tracked by #240.
+  and joined PTYs of one logical Hibr desktop and accepts Kitty's valid
+  header-only a=q compatibility form. The local query, join-barrier, graphics,
+  wallpaper-damage, and refresh gates pass. Live 0.1.484 records Hibr's
+  one-pixel Kitty queries with zero rejections but zero image uploads, so this
+  release does not claim to have repaired the missing wallpaper; the picture
+  was not present in the Hibr PTY stream. Hibr picture/theme state and joined
+  picture propagation remain tracked by #238, while 2-D union semantics remain
+  tracked by #240. The broad suite still has the unrelated fractional-font
+  scale-1.1 geometry failure.
