@@ -1,0 +1,35 @@
+release: 0.1.483
+package: blit_0.1.483-1_amd64.deb
+package_sha256: f1a750462a4d7ef91d469811a45f3562b9e8ffcea63f54d04fa87bc54a61281e
+source_commit: 1e972fd
+package_documentation_commit: 1e972fd
+server_binary_sha256: 4a5e64d34009e18037d7df880561acfc6685828f93100fc567cbf39001f32057
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.191
+hibr_adapter_build: pass_pinned_hibr_0.99.191
+tcc_version: 0.9.27_x86_64_linux
+focused_hibr_join_frame_barrier: pass_no_render_between_open_and_release
+focused_hibr_join_viewport: pass_native_pty_distinct_surfaces_projected_input_coordinates
+focused_pointer_damage_atomic: pass
+focused_renderer_suite: pass_wallpaper_damage_graphics_cache_frame_rate
+pre_handoff_suite: fail_existing_font_api_scale_1_1_geometry_gate
+pre_handoff_suite_counts: pass_71_skip_3_fail_1
+package_reproducibility: pass_rebuilt_identical
+qemu_hibr_lifecycle_acceptance: unavailable_missing_kernel_and_initramfs
+live_host: 192.168.10.54
+live_deployment: pending_operator_install
+live_join_acceptance: blocked_hibr_240_2d_union_and_hibr_238_picture_propagation
+physical_multi_monitor_acceptance: unavailable_one_output
+physical_high_refresh_acceptance: open_issue_21
+notes: >-
+  0.1.483 adds a bounded one-refresh presentation barrier for the primary and
+  joined PTYs of one logical Hibr desktop. The focused gate deliberately
+  staggers the PTY redraws and proves no render occurs between barrier open and
+  release. This fixes the Blit-side partial-frame presentation boundary but
+  does not synthesize a Kitty/Sixel image that Hibr did not send. Live 0.1.482
+  still reports zero decoded graphics images and Hibr issues #240 and #238
+  remain the blockers for complete vertical-join desktop and spanning-picture
+  acceptance. The broad local suite also exposed an existing fractional-font
+  gate failure at scale 1.1; this release does not claim that unrelated gate
+  is fixed.
