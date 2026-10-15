@@ -1,0 +1,33 @@
+release: 0.1.478
+package: blit_0.1.478-1_amd64.deb
+package_sha256: 37091c380a322438a1f13b317769b72b13d9eddd7f38a2613eda9f79a00969ad
+source_commit: b79208c
+package_documentation_commit: b79208c
+server_binary_sha256: 5ea9aa053dfef1c358f627cf9ab97b1d9b9af30d0528b619ba83fbe69e214a68
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.191
+hibr_adapter_build: pass_exact_released_headers
+tcc_version: 0.9.27_x86_64_linux
+tcc_build_acceptance: pass_server_helper_adapter
+openapi_yaml: pass
+focused_hibr_join_viewport: pass_native_pty_distinct_surfaces_join_write_rejected_primary_input
+focused_hibr_suite: pass_8_skip_1_qemu_oracle
+focused_renderer_suite: inherited_0.1.477_pass_45_fail_0
+package_reproducibility: pending_release_gate
+package_artifact_acceptance: pending_release_gate
+qemu_hibr_lifecycle_acceptance: unavailable_missing_kernel_and_initramfs
+live_host: 192.168.10.54
+live_predeployment_version: 0.1.477
+live_deployment: pending_operator_install
+live_join_acceptance: pending_package_deployment
+physical_multi_monitor_acceptance: unavailable_one_output
+physical_high_refresh_acceptance: open_issue_21
+notes: >-
+  This release fixes the live 0.1.477 blank-join diagnosis. The packaged
+  Hibr desktop now uses Hibr's native console and Blit's PTY parser for both
+  the primary and every hold-client viewport. The console-blit module remains
+  available only for explicit API-owned external sessions. Hibr source is
+  unchanged. The exact QEMU oracle and physical host still need to validate
+  wallpaper, protocol graphics, context menus, window placement, and
+  reconnect behavior.
