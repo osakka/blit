@@ -26,6 +26,15 @@ window-motion acceptance remains pending because the API burst isolates the
 presentation scheduler but does not prove the operator's hand movement or
 Hibr's drag action.
 
+The live font sweep then exercised the existing ADR 0047 API one step at a
+time. Scale 1 was accepted with 8x16 cells, scale 2 with 16x32 cells, and
+scale 3 with 24x48 cells. Scale 4 and scale 0 were rejected with
+`invalid_font_scale`. The three installed profiles—`blit-hibr-terminus16`,
+`uni2-terminus16`, and `lat15-terminus16`—were each selected successfully via
+`PUT /v1/fonts`; the original Hibr profile at scale 1 was restored. The Hibr
+primary remained registered and painted, proving this is a live geometry/font
+operation rather than a restart requirement.
+
 ## 0.1.469 KVM source identity diagnostics
 
 The live KVM check showed that raw mouse and keyboard counters could increase
