@@ -15,8 +15,13 @@ surface origins, and pointer hit-testing. Hibr source is unchanged.
 The focused suite exercised all 21 valid values, representative rendered
 pixels at 1.0, 1.1, 2.0, 2.3, and 3.0, display-session reflow, and rejection
 of 0.9, 1.05, and 3.1. The full focused font/renderer suite passed 47/47.
-Live deployment and the matching API sweep are recorded in the 0.1.472
-release manifest after the package is installed on `192.168.10.54`.
+The exact package was then installed through the supervised updater on
+`192.168.10.54`; `/v1/version` reports 0.1.472. The live API sweep accepted
+all 21 values on one running primary Hibr session, including 1.1 as 9x18,
+2.3 as 18x37, and 3.0 as 24x48. The live session remained registered and
+painted, the SDL3 output reported 60 Hz with zero missed deadlines, and
+1920x2160 screenshots were captured at 1.1 and 3.0. The exact package and
+live evidence are recorded in [`releases/0.1.472.yaml`](../releases/0.1.472.yaml).
 
 ## 0.1.471 font-scale physical-pixel correction candidate
 
