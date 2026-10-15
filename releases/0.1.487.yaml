@@ -1,0 +1,28 @@
+release: 0.1.487
+package: blit_0.1.487-1_amd64.deb
+package_sha256: 3f44ebbe6de18c4933efad3072dfe0548b16607ab60b0ecd4db4d8a895518029
+source_commit: 089d2e2
+package_documentation_commit: 089d2e2
+server_binary_sha256: 3c18ef958d7132d8b4f3d0764b84e0ca8c95feb5ba69b24ff96327c787fc782d
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.191
+hibr_adapter_build: pass_pinned_hibr_0.99.191
+tcc_version: 0.9.27_x86_64_linux
+focused_kitty_continuation: pass_hibr_wire_form_complete_image
+focused_terminal_renderer: pass_run_gates_46_0_0
+package_reproducibility: pass_rebuilt_identical
+package_artifact_acceptance: pass
+qemu_hibr_lifecycle_acceptance: unavailable_missing_kernel_and_initramfs
+live_host: 192.168.10.54
+live_deployment: pending_operator_install
+live_login_acceptance: pending_hibr_79_root_pam_logind
+physical_multi_monitor_acceptance: unavailable_one_output
+physical_high_refresh_acceptance: open_issue_21
+notes: >-
+  0.1.487 fixes the Blit Kitty parser's handling of Hibr's conforming
+  multi-chunk wallpaper uploads. Hibr names the opening chunk and omits the
+  image id from q=2 continuations; Blit now keeps that id per terminal stream
+  until the complete image is decoded. Hibr source was not modified. The
+  live host must receive this package before its graphics trace can be
+  accepted.
