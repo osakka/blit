@@ -3,6 +3,27 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 0.1.466 live acceptance
+
+The reproducible `0.1.466-1` package was uploaded through the supervised update
+API to `192.168.10.54` and `/v1/version` returned `0.1.466`. The live host
+reported one 60 Hz 1920x2160 output with refresh-aware scheduling at 16 ms.
+
+The API then created exactly one Hibr primary using the packaged
+`blit-session.hibr` entrypoint. Session 1 reported `hibr_desktop.role=primary`,
+held session `blit`, a registered owner, an owner-painted surface, and 32,400
+populated cells at 240x135. A cached framebuffer capture contained the full
+menu bar, wallpaper, icons, cursor, and Hibr menu. API-injected pointer motion,
+left-button press/release, and F10 key events were accepted and appeared in
+the diagnostic trace; the probe recorded zero missed deadlines and render
+times between 0.6 and 13.9 ms.
+
+The operator subsequently confirmed that the physical mouse and keyboard work
+on the live display. This closes the single-output manual input smoke check,
+but not sustained physical-motion cadence, multi-output joins, hotplug, or
+the outstanding screensaver trail issue (#72). Those require separate
+evidence and remain open.
+
 ## 0.1.465 current candidate
 
 Issue #75 was reproduced on the physical host while preparing the next input

@@ -28,13 +28,14 @@ package_artifact_acceptance: pass_manifest_hashes_match_package_and_reproducible
 qemu_hibr_lifecycle_acceptance: unavailable_missing_kernel_and_initramfs
 live_host: 192.168.10.54
 live_predeployment_version: 0.1.465
-live_deployment: pending
-live_hibr_desktop_acceptance: pending
-live_menu_bar_stability: pending
-live_pointer_motion_cadence: pending
-live_pointer_button_acceptance: pending
-live_keyboard_acceptance: pending
-live_watched_output_acceptance: pending
+live_deployment: pass_api_verified_server_0.1.466
+live_hibr_desktop_acceptance: pass_single_primary_owner_registered_32400_cells
+live_menu_bar_stability: pass_cached_screenshot_full_menu_bar_wallpaper_icons
+live_pointer_motion_cadence: pass_api_injected_frames_0_missed_deadlines
+live_pointer_button_acceptance: pass_api_injected_left_button_trace
+live_keyboard_acceptance: pass_api_injected_f10_menu_trace
+live_watched_output_acceptance: pass_owner_registered_painted_surface_revision_858
+live_physical_input_report: pass_user_observed_mouse_and_keyboard
 live_trail_accumulation: pending_issue_72
 live_input_hotplug: pending_issue_74
 physical_multi_monitor_acceptance: unavailable_one_output
@@ -48,7 +49,10 @@ notes: >-
   wait with SIGWINCH-driven resize detection, and OpenGLES full-content
   rebuild mode retains a complete scene snapshot for pointer-only frames.
 
-  Local gates do not close the physical-host tickets. Issues #72, #74,
-  #76, #77 and #78 remain open until this exact package is deployed and its
-  menu stability, physical input, application wakeup and pointer cadence are
-  captured from the real host.
+  The exact package is now deployed on the supplied host. API evidence proves
+  one primary owner, 32,400 populated cells, a complete screenshot, accepted
+  pointer/button/key traces, and zero missed deadlines during the probe. The
+  user also confirmed physical mouse and keyboard operation. Physical movement
+  cadence under sustained motion, application wakeup under a real workload,
+  input hotplug, and additional physical outputs remain separate acceptance
+  items; no issue is closed from API injection alone.
