@@ -12,8 +12,12 @@ sent `mouse drag row column`. Hibr therefore parsed the column as the row and
 an empty column, which explains directional movement that appeared vertical
 only. The correction adds the deterministic held-button name to plain and
 modifier-prefixed drags. Hibr source remains untouched. The focused adapter
-gate passes the corrected contract; live package deployment and a controlled
-physical drag acceptance remain pending.
+gate passes the corrected contract. The live host now runs 0.1.468 with one
+registered, painted Hibr primary; a synthetic diagonal drag moved the window
+with both axes. Physical pointer motion has also been observed with both axes,
+but a physical button/drag acceptance is still pending. A separate capture
+also shows a stale-render artifact that must be diagnosed independently of
+the drag-coordinate correction.
 
 ## 0.1.467 live Alt-drag correction
 

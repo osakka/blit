@@ -28,10 +28,10 @@ package_artifact_acceptance: pass_manifest_hashes_match_package_and_reproducible
 qemu_hibr_lifecycle_acceptance: unavailable_missing_kernel_and_initramfs
 live_host: 192.168.10.54
 live_predeployment_version: 0.1.467
-live_deployment: pending
-live_hibr_desktop_acceptance: pending
-live_drag_direction_acceptance: pending_controlled_live_deployment
-live_physical_input_report: pending_post_update_operator_check
+live_deployment: pass_api_verified_server_0.1.468_after_supervised_restart
+live_hibr_desktop_acceptance: pass_one_primary_owner_registered_owner_painted_32400_cells
+live_drag_direction_acceptance: pass_api_synthetic_diagonal_drag
+live_physical_input_report: partial_evdev_motion_trace_x_and_y; button_drag_pending
 live_trail_accumulation: pending_issue_72
 live_input_hotplug: pending_issue_74
 physical_multi_monitor_acceptance: unavailable_one_output
@@ -42,5 +42,7 @@ notes: >-
   shifted the row/column arguments and made horizontal movement appear
   vertical-only. Plain and modifier-prefixed drags now include the
   deterministic lowest-numbered held button. Hibr source and desktop
-  configuration remain unchanged. Live deployment and physical drag
-  acceptance remain pending.
+  configuration remain unchanged. The package is deployed and the live
+  primary is owner-registered and painted. An API-injected diagonal drag
+  moved correctly; the physical button/drag check and the separate stale
+  render artifact remain open.
