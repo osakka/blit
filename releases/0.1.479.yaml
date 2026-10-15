@@ -1,0 +1,34 @@
+release: 0.1.479
+package: blit_0.1.479-1_amd64.deb
+package_sha256: 3164ccd5e91af571e63b5501bf4177025a59bd9c77a37b7c83400ff3d02b690d
+source_commit: fad2c89
+package_documentation_commit: fad2c89
+server_binary_sha256: 8072649da06a37a004196649f54da49561c8c2a663ea9875c6b5c158d2a180cd
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.191
+hibr_adapter_build: pass_exact_released_headers
+tcc_version: 0.9.27_x86_64_linux
+tcc_build_acceptance: pass_server_helper_adapter
+openapi_yaml: pass
+focused_hibr_join_viewport: pass_native_pty_distinct_surfaces_join_write_rejected_primary_input
+focused_hibr_join_placement: pass_hibr_syntax_and_coordinate_contract
+focused_hibr_suite: pass_9_skip_1_qemu_oracle
+focused_schema_renderer_suite: pass_45_fail_0
+package_reproducibility: pass
+package_artifact_acceptance: pending_release_gate
+qemu_hibr_lifecycle_acceptance: unavailable_missing_kernel_and_initramfs
+live_host: 192.168.10.54
+live_predeployment_version: 0.1.478
+live_deployment: pending_operator_install
+live_join_acceptance: pending_package_deployment
+physical_multi_monitor_acceptance: unavailable_one_output
+physical_high_refresh_acceptance: open_issue_21
+notes: >-
+  This release maps Blit's authoritative logical pane coordinates into Hibr's
+  hold union. The Blit-owned launcher moves Hibr's existing primary client to
+  the primary pane origin before attaching each join at its own origin, so a
+  stacked 1x2 topology is a real vertical desktop union rather than Hibr's
+  default right-edge placement. Hibr source is unchanged. The exact QEMU
+  oracle and physical host still need to validate the final stacked screenshot
+  and reconnect behavior.
