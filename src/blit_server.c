@@ -121,7 +121,7 @@ extern char **environ;
 #define BLIT_LOGIN_RESTART_DELAY_US 1000000ULL
 #define BLIT_EVDEV_MOUSE_ACTIVITY_US 500000ULL
 #define BLIT_DEFAULT_LOGIN_COMMAND "/usr/bin/hibr"
-#define BLIT_DEFAULT_LOGIN_SCRIPT "/usr/share/hibr/desktop/login/login.hibr"
+#define BLIT_DEFAULT_LOGIN_SCRIPT "/usr/share/blit/hibr/blit-login.hibr"
 #define BLIT_DEFAULT_LOGIN_SESSION_COMMAND "/usr/bin/hibr /usr/share/blit/hibr/blit-login-session.hibr"
 #define BLIT_DEFAULT_FOREGROUND 0xbed2beU
 #define BLIT_ATTR_BOLD 1

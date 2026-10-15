@@ -1,0 +1,28 @@
+#!/usr/bin/env hibr
+# Blit's root login entrypoint.
+#
+# Hibr's stock login screen deliberately asks for the sys module only after it
+# has entered its strict root path.  A root invocation must load that module
+# before the script is sourced, otherwise SYS_MOD is undeclared and the login
+# screen exits before it can open the console.  Keep this compatibility seam
+# in Blit: Hibr's login implementation, PAM flow, and session selection remain
+# the single source of truth.
+
+strict
+
+mod load sys || {
+	echo "blit-login: unable to load Hibr sys module" >&2
+	exit 1
+}
+
+login=${BLIT_HIBR_LOGIN_SCRIPT:-/usr/share/hibr/desktop/login/login.hibr}
+if [ ! -r "$login" ]; then
+	echo "blit-login: Hibr login script not readable: $login" >&2
+	exit 1
+fi
+
+# Source, rather than exec, so Hibr's own LG_HERE-relative imports and login
+# function stay intact.  The stock script calls lg_main only when it is the
+# process entrypoint; this shim calls that same function after sourcing it.
+source "$login" "$@"
+lg_main "$@"

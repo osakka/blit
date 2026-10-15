@@ -7,6 +7,7 @@ RUNTIME_BINARY=$ROOT/build/blit/blit-server
 UPDATE_HELPER=$ROOT/build/blit/blit-update-helper
 HIBR_ADAPTER=$ROOT/build/blit/console-blit.so
 HIBR_ENTRYPOINT=$ROOT/hibr/blit-session.hibr
+HIBR_LOGIN_WRAPPER=$ROOT/hibr/blit-login.hibr
 HIBR_LOGIN_ENTRYPOINT=$ROOT/hibr/blit-login-session.hibr
 HIBR_RUNTIME_RC=$ROOT/hibr/blit-runtime-console.hibr
 HIBR_VERSION_FILE=$ROOT/packaging/HIBR_VERSION
@@ -16,6 +17,7 @@ VERSION_FILE=$ROOT/packaging/VERSION
 if [ ! -x "$RUNTIME_BINARY" ] || [ ! -x "$UPDATE_HELPER" ] ||
    [ ! -x "$BUNDLE/bin/blit-server" ] ||
    [ ! -f "$VERSION_FILE" ] || [ ! -f "$HIBR_ENTRYPOINT" ] ||
+   [ ! -f "$HIBR_LOGIN_WRAPPER" ] ||
    [ ! -f "$HIBR_LOGIN_ENTRYPOINT" ] ||
    [ ! -f "$HIBR_ADAPTER" ] || [ ! -f "$HIBR_VERSION_FILE" ]; then
 	echo "blit: canonical build outputs are incomplete" >&2
@@ -94,12 +96,14 @@ cp -a "$UPDATE_HELPER" "$stage/usr/lib/blit/bin/blit-update-helper"
 # explicit Blit entrypoint loads this optional provider by absolute path.
 cp -a "$HIBR_ADAPTER" "$stage/usr/lib/blit/hibr/console-blit.so"
 cp -a "$HIBR_ENTRYPOINT" "$stage/usr/share/blit/hibr/blit-session.hibr"
+cp -a "$HIBR_LOGIN_WRAPPER" "$stage/usr/share/blit/hibr/blit-login.hibr"
 cp -a "$HIBR_LOGIN_ENTRYPOINT" \
     "$stage/usr/share/blit/hibr/blit-login-session.hibr"
 cp -a "$HIBR_RUNTIME_RC" "$stage/usr/share/blit/hibr/blit-runtime-console.hibr"
 cp -a "$ROOT/hibr/blit-live-image-probe.hibr" \
     "$stage/usr/share/blit/probes/blit-live-image-probe.hibr"
 chmod 0755 "$stage/usr/share/blit/hibr/blit-session.hibr"
+chmod 0755 "$stage/usr/share/blit/hibr/blit-login.hibr"
 chmod 0755 "$stage/usr/share/blit/hibr/blit-login-session.hibr"
 chmod 0644 "$stage/usr/share/blit/hibr/blit-runtime-console.hibr"
 chmod 0755 "$stage/usr/share/blit/probes/blit-live-image-probe.hibr"

@@ -3,6 +3,23 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 0.1.486 candidate: Blit login-manager root entrypoint
+
+The root login failure found during the 0.1.485 Hibr acceptance attempt was
+reproduced exactly: Hibr's unchanged `login.hibr` reached `need sys` with
+`SYS_MOD` undeclared and exited before opening the login screen. This is the
+expected result when the root entrypoint has not loaded Hibr's `sys` module.
+
+0.1.486 makes the boundary explicit in the Blit package. Its
+`blit-login.hibr` shim runs `mod load sys`, sources Hibr's installed
+`login/login.hibr`, and invokes its existing `lg_main`. No Hibr source or
+login behavior is copied. `hibr -n hibr/blit-login.hibr` passes, and the
+package gate requires the shim and its explicit module load.
+
+The controlled lifecycle gate remains unchanged; live PAM/logind acceptance
+still requires Hibr #79 on the provided host or a VM. This change removes the
+known missing-module blocker but does not claim that root PAM is complete.
+
 ## 0.1.485 candidate: Blit login-manager boundary
 
 Blit #83 now has a first-class `/v1/login` resource. The root-owned service
@@ -25,7 +42,7 @@ that acceptance remains Hibr #79 on a VM or real host. Hibr provider and join
 issues remain separate and are not modified by this Blit change.
 
 The reproducible package `blit_0.1.485-1_amd64.deb` has SHA-256
-`93dd948fe6f77dc2c88c6cada69e5e4e56cf575e030ac315f79cf84667333a76`; the
+`0376c45fdcc07957d791d4b09462dbc1e8033b9203da3becd0b9ff1741fbe368`; the
 package artifact gate rebuilt it byte-identically and verified the packaged
 server, updater, adapter, schema, documentation, service, and login hook.
 

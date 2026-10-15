@@ -167,11 +167,13 @@ curl --fail http://HOST:8080/v1/login
 curl --fail --request DELETE http://HOST:8080/v1/login
 ```
 
-Blit runs Hibr's login script as its root child because Hibr's PAM flow needs
-that boundary. Hibr's `auth run` then executes the selected desktop or shell as
-the authenticated user. Blit never reads the password and never changes the
-Hibr source tree. When the login process exits after logout, Blit retires its
-PTY/surface and starts a fresh login screen after a bounded delay. The
+Blit runs its packaged login entrypoint as its root child because Hibr's PAM
+flow needs that boundary. The entrypoint loads Hibr's `sys` module and sources
+the installed Hibr login script; Hibr's `auth run` then executes the selected
+desktop or shell as the authenticated user. Blit never reads the password and
+never changes the Hibr source tree. When the login process exits after logout,
+Blit retires its PTY/surface and starts a fresh login screen after a bounded
+delay. The
 `login_manager` marker in the returned terminal session distinguishes this
 supervised boundary from an ordinary PTY session.
 

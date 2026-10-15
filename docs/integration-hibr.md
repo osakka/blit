@@ -31,8 +31,9 @@ clients use blit without hibr.
 ## Login manager
 
 Blit #83 adds one root-owned login boundary without changing Hibr. A packaged
-service with `BLIT_LOGIN_AUTOSTART=1` starts Hibr's installed
-`login/login.hibr` through a Blit PTY. Hibr performs PAM authentication and
+service with `BLIT_LOGIN_AUTOSTART=1` starts Blit's `blit-login.hibr` entrypoint
+through a Blit PTY. That entrypoint explicitly loads Hibr's `sys` module, then
+sources the installed `login/login.hibr`; Hibr performs PAM authentication and
 uses `auth run` to start the person's selected desktop or shell; Blit retains
 KMS, evdev, and the network API for the whole session.
 
@@ -46,7 +47,10 @@ curl --fail http://127.0.0.1:8080/v1/login
 curl --fail --request DELETE http://127.0.0.1:8080/v1/login
 ```
 
-Blit's `blit-login-session.hibr` is the `LG_SESSIONCMD` hook. It starts the
+Blit's `blit-login.hibr` is only the module-loading compatibility seam; it does
+not implement the login screen. Hibr's sourced script remains the source of
+truth for PAM, screen behavior, and session selection. Blit's
+`blit-login-session.hibr` is the `LG_SESSIONCMD` hook. It starts the
 existing Blit-owned desktop entrypoint for `desktop` and the user's shell for
 `shell`; it does not implement authentication or desktop behavior. Logout
 retires the login PTY and Blit starts a fresh login screen. Hibr's root-path
