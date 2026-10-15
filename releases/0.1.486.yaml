@@ -1,0 +1,31 @@
+release: 0.1.486
+package: blit_0.1.486-1_amd64.deb
+package_sha256: c27525d48c7456fa230d55962719a22136a78ca78d4be1f47424ea8ab966f548
+source_commit: d22b770
+package_documentation_commit: d22b770
+server_binary_sha256: 157313f0265f5f65ffd642a98b557be1665c3f1b44d28dea641f1e3439cb6038
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.191
+hibr_adapter_build: pass_pinned_hibr_0.99.191
+tcc_version: 0.9.27_x86_64_linux
+focused_login_manager: pass_root_service_restart_stop_and_sys_shim
+focused_api_schema: pass_paths_41
+focused_terminal: pass_terminal_conformance_session_resize
+focused_network_auth: pass
+focused_lifecycle: pass_14_0_0
+package_reproducibility: pass_rebuilt_identical
+package_artifact_acceptance: pass
+qemu_hibr_lifecycle_acceptance: unavailable_missing_kernel_and_initramfs
+live_host: 192.168.10.54
+live_deployment: pending_operator_install
+live_login_acceptance: pending_hibr_79_root_pam_logind
+physical_multi_monitor_acceptance: unavailable_one_output
+physical_high_refresh_acceptance: open_issue_21
+notes: >-
+  0.1.486 keeps the 0.1.485 root-owned login manager and adds the explicit
+  Blit-owned login entrypoint required by Hibr's strict root path. The shim
+  loads Hibr's sys module, sources the installed Hibr login.hibr, and calls
+  its existing lg_main. This removes the reproduced SYS_MOD undeclared
+  startup failure without copying or modifying Hibr source. Hibr #79 remains
+  the external VM/real-host PAM and logind acceptance ticket.
