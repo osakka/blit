@@ -245,7 +245,10 @@ pane and starts desktop --join for the upper pane. Pane bounds are terminal
 cell bounds, not arbitrary pixel rectangles. If the display's cell grid has an
 odd number of rows, the lower pane owns the extra row so the two panes remain
 contiguous and no black terminal band is left at the bottom; the rule is
-specified by ADR 0075.
+specified by ADR 0075. The topology output's `cell_grid` is the single source
+of truth for the complete-cell rectangle and its centred pixel origin; the
+adapter must not derive a second origin from the font name or display mode
+(ADR 0076).
 
 The production join flow is:
 

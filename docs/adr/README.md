@@ -96,6 +96,8 @@ security policy, or compatibility rule requires a new ADR.
 - [0072 — Coalesce pending damage at each output refresh boundary](0072-refresh-bound-damage-coalescing.md)
 - [0073 — Keep font scaling in the physical cell-metric boundary](0073-font-scaling-uses-physical-cell-metrics.md)
 - [0074 — Support tenth-step font scales with deterministic pixel rounding](0074-font-scale-tenths-and-pixel-rounding.md)
+- [0075 — Pane grid partitions own the remainder](0075-pane-grid-partitions-own-the-remainder.md)
+- [0076 — Center the complete-cell display grid](0076-center-the-complete-cell-grid.md)
 
 ## Adding an ADR
 

@@ -428,7 +428,12 @@ never leaves an unowned row or column. If the grid is odd, the final pane on
 that axis owns the one-cell remainder: an 80x45 grid with rows: 2 is
 y:0,height:22 followed by y:22,height:23. This is intentional; equal
 physical pixel heights are impossible when both panes must contain whole
-terminal cells. See ADR 0075 in docs/adr.
+terminal cells. Each topology output also publishes `cell_grid`: the complete
+cell count, physical cell metrics, fitted pixel rectangle, centred origin, and
+the excluded pixel remainder. Surface placement and pointer hit-testing use
+that same origin. A scale that leaves two pixels at the right is therefore not
+a missing column or a renderer drift; it is the documented remainder. See
+ADRs 0075 and 0076 in docs/adr.
 
 ### Display settings: rotation, brightness, and what power costs
 

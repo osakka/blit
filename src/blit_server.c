@@ -9,6 +9,7 @@
 #include "blit_input_identity.h"
 #include "blit_audio_control.h"
 #include "blit_display_geometry.h"
+#include "blit_cell_geometry.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -1257,6 +1258,19 @@ static int runtime_terminal_cell_height(const BlitRuntime *runtime)
         blit_font_height(&runtime->font);
     if (value < 1) value = 16;
     return scale_dimension(value, runtime->font_scale_tenths);
+}
+
+/* ADR 0076. Quantize a display once, then reuse the result everywhere a
+ * terminal grid meets pixels. In particular, pane origins and hit testing
+ * must include the same centred remainder as the renderer. */
+static void runtime_display_cell_geometry(const BlitRuntime *runtime,
+                                          const BlitDisplay *display,
+                                          BlitCellGeometry *geometry)
+{
+    blit_cell_geometry_compute(
+        display->bounds.w, display->bounds.h,
+        runtime_terminal_cell_width(runtime),
+        runtime_terminal_cell_height(runtime), geometry);
 }
 
 static void input_device_apply_repeat(BlitRuntime *runtime,
@@ -3535,15 +3549,25 @@ static void topology_json(const BlitRuntime *runtime, char *body, size_t capacit
         used = strlen(body);
     }
     for (i = 0; i < runtime->display_count && used < capacity; ++i) {
+        BlitCellGeometry geometry;
+        runtime_display_cell_geometry(runtime, &runtime->displays[i],
+                                      &geometry);
         used += (size_t)snprintf(
             body + used, capacity - used,
             "%s{\"display_id\":\"display-%llu\",\"bounds\":{"
             "\"x\":%d,\"y\":%d,\"width\":%d,\"height\":%d},"
-            "\"rotation\":%d,\"scale\":1}",
+            "\"rotation\":%d,\"scale\":1,\"cell_grid\":{"
+            "\"columns\":%d,\"rows\":%d,\"cell_width\":%d,"
+            "\"cell_height\":%d,\"pixel_width\":%d,"
+            "\"pixel_height\":%d,\"origin_x\":%d,\"origin_y\":%d,"
+            "\"remainder_x\":%d,\"remainder_y\":%d}}",
             i == 0 ? "" : ",", runtime->displays[i].id,
             runtime->displays[i].bounds.x, runtime->displays[i].bounds.y,
             runtime->displays[i].bounds.w, runtime->displays[i].bounds.h,
-            runtime->displays[i].rotation);
+            runtime->displays[i].rotation, geometry.columns, geometry.rows,
+            geometry.cell_width, geometry.cell_height, geometry.pixel_width,
+            geometry.pixel_height, geometry.origin_x, geometry.origin_y,
+            geometry.remainder_x, geometry.remainder_y);
     }
     used += (size_t)snprintf(body + used, capacity - used, "],\"panes\":[");
     for (i = 0; i < runtime->pane_count && used < capacity; ++i) {
@@ -19324,12 +19348,15 @@ static void discover_panes(BlitRuntime *runtime)
     for (display_index = 0; display_index < runtime->display_count;
          ++display_index) {
         BlitDisplay *display = &runtime->displays[display_index];
-        int cell_width = runtime_terminal_cell_width(runtime);
-        int cell_height = runtime_terminal_cell_height(runtime);
-        int grid_width = display->bounds.w > 0 ? display->bounds.w / cell_width : 80;
-        int grid_height = display->bounds.h > 0 ? display->bounds.h / cell_height : 24;
+        BlitCellGeometry geometry;
+        int grid_width;
+        int grid_height;
         int row;
         int column;
+
+        runtime_display_cell_geometry(runtime, display, &geometry);
+        grid_width = geometry.columns;
+        grid_height = geometry.rows;
 
         for (row = 0; row < rows; ++row) {
             for (column = 0; column < columns; ++column) {
@@ -21488,13 +21515,22 @@ static void surface_origin_px(BlitRuntime *runtime, const BlitSurface *surface,
 {
     const BlitPane *pane = session != NULL && session->pane_id[0] != '\0' ?
         find_pane_id(runtime, session->pane_id) : NULL;
+    int display_index = display_index_for_output(runtime, output_index);
+    BlitCellGeometry geometry;
     int index;
 
-    *origin_x = BLIT_SURFACE_INSET_PX;
-    *origin_y = BLIT_SURFACE_INSET_PX;
+    if (display_index >= 0)
+        runtime_display_cell_geometry(runtime, &runtime->displays[display_index],
+                                      &geometry);
+    else
+        blit_cell_geometry_compute(0, 0, cell_width, cell_height, &geometry);
+    *origin_x = geometry.origin_x + BLIT_SURFACE_INSET_PX;
+    *origin_y = geometry.origin_y + BLIT_SURFACE_INSET_PX;
     if (pane != NULL) {
-        *origin_x = pane->x * cell_width + BLIT_SURFACE_INSET_PX;
-        *origin_y = pane->y * cell_height + BLIT_SURFACE_INSET_PX;
+        *origin_x = geometry.origin_x + pane->x * cell_width +
+            BLIT_SURFACE_INSET_PX;
+        *origin_y = geometry.origin_y + pane->y * cell_height +
+            BLIT_SURFACE_INSET_PX;
         return;
     }
     for (index = 0; index < BLIT_MAX_SESSIONS; ++index) {

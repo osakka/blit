@@ -3029,6 +3029,8 @@ components:
               bounds: {$ref: '#/components/schemas/Bounds'}
               rotation: {type: integer, enum: [0, 90, 180, 270]}
               scale: {type: number, exclusiveMinimum: 0}
+              cell_grid:
+                $ref: '#/components/schemas/CellGrid'
             additionalProperties: false
         panes:
           type: array
@@ -3060,6 +3062,26 @@ components:
         display_id: {$ref: '#/components/schemas/ResourceId'}
         x: {type: integer}
         y: {type: integer}
+      additionalProperties: false
+    CellGrid:
+      type: object
+      description: >-
+        The complete-cell terminal grid fitted inside the display. Pixels in
+        the remainders are intentionally outside the grid and are split
+        evenly around it; pane and input coordinates use origin_x/origin_y.
+      required: [columns, rows, cell_width, cell_height, pixel_width,
+        pixel_height, origin_x, origin_y, remainder_x, remainder_y]
+      properties:
+        columns: {type: integer, minimum: 1}
+        rows: {type: integer, minimum: 1}
+        cell_width: {type: integer, minimum: 1}
+        cell_height: {type: integer, minimum: 1}
+        pixel_width: {type: integer, minimum: 1}
+        pixel_height: {type: integer, minimum: 1}
+        origin_x: {type: integer, minimum: 0}
+        origin_y: {type: integer, minimum: 0}
+        remainder_x: {type: integer, minimum: 0}
+        remainder_y: {type: integer, minimum: 0}
       additionalProperties: false
     Pane:
       type: object

@@ -1,9 +1,11 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# API regression gate for odd terminal-grid partitions. It deliberately uses
-# a 1.6 font scale against the dummy display so its quantized height is odd;
-# the pre-ADR-0075 implementation left the last row unowned.
+# API regression gate for display cell geometry and odd terminal-grid
+# partitions. It deliberately uses a 1.6 font scale against the dummy display
+# so the display has quantized remainders and an odd cell height; the
+# pre-ADR-0076 implementation left the grid one-sided, while the pre-ADR-0075
+# implementation left the last row unowned.
 
 require 'json'
 require 'net/http'
@@ -54,10 +56,34 @@ original = request(base, 'GET', '/v1/topology')
 original_layout = original.fetch('layout')
 begin
   fonts = request(base, 'PUT', '/v1/fonts', {'scale' => 1.6})
+  cell_width = fonts.fetch('active').fetch('cell_pixels').fetch('width')
   cell_height = fonts.fetch('active').fetch('cell_pixels').fetch('height')
-  display_height = request(base, 'GET', '/v1/topology').fetch('outputs').first
-                       .fetch('bounds').fetch('height')
+  output = request(base, 'GET', '/v1/topology').fetch('outputs').first
+  display_width = output.fetch('bounds').fetch('width')
+  display_height = output.fetch('bounds').fetch('height')
+  grid = output.fetch('cell_grid')
+  expected_columns = display_width / cell_width
   grid_height = display_height / cell_height
+  raise "grid columns mismatch: #{grid.inspect}" unless
+    grid.fetch('columns') == expected_columns
+  raise "grid rows mismatch: #{grid.inspect}" unless
+    grid.fetch('rows') == grid_height
+  expected_pixel_width = expected_columns * cell_width
+  expected_pixel_height = grid_height * cell_height
+  expected_remainder_x = display_width - expected_pixel_width
+  expected_remainder_y = display_height - expected_pixel_height
+  raise "grid pixel width mismatch: #{grid.inspect}" unless
+    grid.fetch('pixel_width') == expected_pixel_width
+  raise "grid pixel height mismatch: #{grid.inspect}" unless
+    grid.fetch('pixel_height') == expected_pixel_height
+  raise "grid origin x is not centred: #{grid.inspect}" unless
+    grid.fetch('origin_x') == expected_remainder_x / 2
+  raise "grid origin y is not centred: #{grid.inspect}" unless
+    grid.fetch('origin_y') == expected_remainder_y / 2
+  raise "grid remainder x mismatch: #{grid.inspect}" unless
+    grid.fetch('remainder_x') == expected_remainder_x
+  raise "grid remainder y mismatch: #{grid.inspect}" unless
+    grid.fetch('remainder_y') == expected_remainder_y
   raise "test grid is not odd: #{display_height}/#{cell_height}=#{grid_height}" if
     grid_height.even?
 
@@ -78,7 +104,8 @@ begin
   raise "remainder was not assigned to bottom: #{top.inspect} #{bottom.inspect}" unless
     bottom.fetch('height') == top.fetch('height') + 1
 
-  puts "PANE_SPLIT_GEOMETRY_PASS grid_rows=#{grid_height} " \
+  puts "PANE_SPLIT_GEOMETRY_PASS grid=#{grid.fetch('columns')}x#{grid_height} " \
+       "origin=#{grid.fetch('origin_x')},#{grid.fetch('origin_y')} " \
        "top_rows=#{top.fetch('height')} bottom_rows=#{bottom.fetch('height')}"
 ensure
   current = request(base, 'GET', '/v1/topology')
