@@ -1,0 +1,39 @@
+release: 0.1.482
+package: blit_0.1.482-1_amd64.deb
+package_sha256: 40a13e892c773aa08c302f631afbe753d966e0a2ae48e13817153d0c5e144130
+source_commit: 778c656
+package_documentation_commit: 778c656
+server_binary_sha256: d3625377361e48d591e2eafa44063fe19f09f0ed54837349ceb5d6475e3e8321
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.191
+hibr_adapter_build: skipped_local_hibr_0.99.199_does_not_match_release_abi
+tcc_version: 0.9.27_x86_64_linux
+tcc_build_acceptance: pass_server_helper_existing_adapter
+openapi_yaml: pass
+focused_hibr_join_viewport: pass_native_pty_distinct_surfaces_projected_input_coordinates
+focused_hibr_join_placement: pass_hibr_syntax_and_coordinate_contract
+focused_pointer_target: pass
+focused_pointer_geometry: pass
+focused_hibr_suite: pending_full_gate
+focused_schema_renderer_suite: pending_full_gate
+package_reproducibility: pending_gate
+package_artifact_acceptance: pending_gate
+qemu_hibr_lifecycle_acceptance: unavailable_missing_kernel_and_initramfs
+live_host: 192.168.10.54
+live_predeployment_version: 0.1.481
+live_deployment: pending
+live_join_acceptance: blocked_hibr_240_2d_union_and_hibr_238_picture_propagation
+physical_multi_monitor_acceptance: unavailable_one_output
+physical_high_refresh_acceptance: open_issue_21
+notes: >-
+  This release translates mouse motion, buttons, wheel, pointer state, and
+  evdev pointer input from a physical joined pane into the single Hibr
+  desktop's projected logical union column. The regression gate proves the
+  upper-pane event is not interpreted at the primary pane's local coordinate.
+  This is a Blit-side correctness fix, not full vertical-join acceptance. The
+  live photograph and fresh capture still show incomplete upper viewport
+  content, broken scene/picture propagation, and visual coordinate symptoms.
+  Hibr source is unchanged. Full physical 2-D joins remain blocked on Hibr
+  issues #240 and #238; prior visual acceptance based only on distinct PTYs,
+  60Hz presentation, and a pointer trace is revoked.
