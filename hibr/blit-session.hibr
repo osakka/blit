@@ -105,11 +105,15 @@ if [ "$blit_join" = 1 ] &&
 		echo "$0: no primary client in held session $blit_session" >&2
 		exit 1
 	fi
-	# Reassert the primary's canonical logical origin. This is deliberately
-	# explicit even when it is already (0,0): it makes the boundary idempotent
-	# after a held session has been rearranged through Hibr's control panel.
-	hold move "$blit_session" "$blit_primary_client" \
-		"$BLIT_HIBR_PRIMARY_ROW" "$BLIT_HIBR_PRIMARY_COL" || exit 1
+	# Reassert the primary's canonical logical origin only when it has actually
+	# been rearranged through Hibr's control panel. A no-op `hold move` clears
+	# Hibr's client front buffer and would turn a correct primary into a partial
+	# repaint during the join handshake.
+	if [ "$BLIT_HIBR_PRIMARY_ROW" != 0 ] ||
+		[ "$BLIT_HIBR_PRIMARY_COL" != 0 ]; then
+		hold move "$blit_session" "$blit_primary_client" \
+			"$BLIT_HIBR_PRIMARY_ROW" "$BLIT_HIBR_PRIMARY_COL" || exit 1
+	fi
 	if [ -n "$blit_name" ]; then
 		hold attach -m -n "$blit_name" "$blit_session" \
 			"$BLIT_HIBR_PANE_ROW" "$BLIT_HIBR_PANE_COL"
