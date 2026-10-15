@@ -82,14 +82,12 @@ mod load "$moddir/img.so" || exit 1
 mod load "$moddir/pty.so" || exit 1
 mod load "$moddir/term.so" || exit 1
 mod load "$moddir/hold.so" || exit 1
-# A physical pane topology is already expressed in Blit's cell coordinates.
-# Hibr's stock --join policy always appends a client to the right edge of the
-# current union, which is correct for a normal terminal but wrong for a Blit
-# split such as primary-bottom/join-top.  Move the held primary into its
-# physical union position before attaching this pane at its own position.
-# This remains in the Blit-owned launcher so Hibr's desktop implementation is
-# untouched; without these variables, retain Hibr's stock behavior for direct
-# Hibr invocations and other controlled uses of this entrypoint.
+# Blit keeps physical pane placement separate from Hibr's horizontal desktop
+# union. The primary stays at logical (0,0), and the server supplies a stable
+# logical column for each join. This remains in the Blit-owned launcher so
+# Hibr's desktop implementation is untouched; without these variables, retain
+# Hibr's stock behavior for direct Hibr invocations and other controlled uses
+# of this entrypoint.
 if [ "$blit_join" = 1 ] &&
 	[ -n "${BLIT_HIBR_PANE_ROW:-}" ] &&
 	[ -n "${BLIT_HIBR_PANE_COL:-}" ] &&
@@ -107,6 +105,9 @@ if [ "$blit_join" = 1 ] &&
 		echo "$0: no primary client in held session $blit_session" >&2
 		exit 1
 	fi
+	# Reassert the primary's canonical logical origin. This is deliberately
+	# explicit even when it is already (0,0): it makes the boundary idempotent
+	# after a held session has been rearranged through Hibr's control panel.
 	hold move "$blit_session" "$blit_primary_client" \
 		"$BLIT_HIBR_PRIMARY_ROW" "$BLIT_HIBR_PRIMARY_COL" || exit 1
 	if [ -n "$blit_name" ]; then

@@ -89,14 +89,15 @@ joined pane is delivered to the primary owner. Direct cell mutation of a
 joined surface is rejected with `hibr_join_surface_read_only`
 ([ADR 0079](adr/0079-hibr-desktop-uses-the-native-pty-boundary.md)).
 
-For a Blit topology, the entrypoint also receives each pane's logical cell
-origin. On the first join it moves Hibr's existing primary hold client to the
-primary pane's origin, then attaches the join at its own origin. This maps a
-1x2 physical stack (primary below, join above) into one vertical Hibr union;
-2x1 and 2x2 use the same coordinates. It does not use Hibr's default
-right-edge offset and it does not mirror the primary surface. Direct Hibr
-invocations without Blit's topology environment retain Hibr's documented
-default placement ([ADR 0080](adr/0080-map-blit-panes-to-hibr-hold-union-coordinates.md)).
+For a Blit topology, the entrypoint also receives a deterministic logical
+column for each pane. The primary remains Hibr's logical slot zero and each
+join attaches in the next horizontal Hibr slot, while Blit presents those
+local PTY viewports in their authoritative physical panes. This keeps Hibr's
+primary bar/window placement on the physical primary even for a 1x2 stack
+(primary below, join above); 2x1 and 2x2 use the same projection. It does not
+mirror the primary surface. Direct Hibr invocations without Blit's topology
+environment retain Hibr's documented default placement
+([ADR 0080](adr/0080-map-blit-panes-to-hibr-hold-union-coordinates.md)).
 
 The package also installs `blit-runtime-console.hibr`, and the entrypoint sets
 `HIBR_RC` to it when the caller has not supplied an explicit fixture or

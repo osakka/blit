@@ -1326,6 +1326,34 @@ static const char *pane_surface_id(const BlitRuntime *runtime,
                                    const BlitPane *pane);
 static void discover_panes(BlitRuntime *runtime);
 static BlitPane *find_pane_id(BlitRuntime *runtime, const char *pane_id);
+
+/* Hibr's desktop currently owns a horizontal hold-union contract: its
+   primary display is located by column, while its desktop bar/window
+   placement deliberately begins at union row zero.  Keep the physical Blit
+   topology independent from that Hibr coordinate system.  The primary is
+   logical slot zero and every other pane gets a stable horizontal slot in
+   pane-enumeration order.  Blit still maps each resulting PTY viewport to
+   the pane's physical rectangle. */
+static int hibr_logical_column(const BlitRuntime *runtime,
+                               const BlitPane *pane,
+                               const BlitPane *primary)
+{
+    int i;
+    int column;
+
+    if (pane == NULL || primary == NULL || pane == primary)
+        return 0;
+    column = primary->width;
+    for (i = 0; i < runtime->pane_count; ++i) {
+        const BlitPane *candidate = &runtime->panes[i];
+        if (!candidate->used || candidate == primary)
+            continue;
+        if (candidate == pane)
+            break;
+        column += candidate->width;
+    }
+    return column;
+}
 static int display_index_for_id(const BlitRuntime *runtime, const char *id);
 static void focus_session(BlitRuntime *runtime, BlitSession *target);
 static void disable_input_routes_for_target(BlitRuntime *runtime,
@@ -13913,6 +13941,8 @@ static int create_session(BlitRuntime *runtime, const char *json,
     char hibr_desktop_session[128];
     BlitSession *hibr_owner = NULL;
     BlitPane *hibr_owner_pane = NULL;
+    int hibr_pane_column = 0;
+    int hibr_primary_column = 0;
     const char *command_name;
     int i;
 
@@ -13968,6 +13998,9 @@ static int create_session(BlitRuntime *runtime, const char *json,
         if (hibr_owner == NULL)
             return -3;
         hibr_owner_pane = find_pane_id(runtime, hibr_owner->pane_id);
+        hibr_primary_column = hibr_logical_column(runtime,
+                                                  hibr_owner_pane,
+                                                  hibr_owner_pane);
     }
     /* The deployed launcher is blit-session.hibr, not `desktop`, so looking
        only at `desktop` meant a resumed desktop did not report itself as one
@@ -14073,22 +14106,26 @@ static int create_session(BlitRuntime *runtime, const char *json,
                 _exit(126);
         if (pane_id[0] != '\0' && setenv("BLIT_PANE_ID", pane_id, 1) != 0)
             _exit(126);
-        /* Hibr's hold union is logical cell space.  Tell the Blit-owned
-           entrypoint where this physical pane belongs so a stacked topology
-           can move the primary client and attach the join above it, while a
-           side-by-side topology keeps the natural horizontal offsets. */
+        /* Hibr's desktop currently has a horizontal union coordinate system.
+           Keep the primary at logical (0,0) and give every join a stable
+           horizontal slot; Blit still presents that local PTY viewport in
+           the authoritative physical pane selected by the API topology. */
         if (hibr_process && pane != NULL) {
             char pane_row[32];
             char pane_column[32];
-            snprintf(pane_row, sizeof(pane_row), "%d", pane->y);
-            snprintf(pane_column, sizeof(pane_column), "%d", pane->x);
+            hibr_pane_column = hibr_logical_column(runtime, pane,
+                                                   hibr_owner_pane != NULL ?
+                                                   hibr_owner_pane : pane);
+            snprintf(pane_row, sizeof(pane_row), "%d", 0);
+            snprintf(pane_column, sizeof(pane_column), "%d",
+                     hibr_pane_column);
             if (setenv("BLIT_HIBR_PANE_ROW", pane_row, 1) != 0 ||
                 setenv("BLIT_HIBR_PANE_COL", pane_column, 1) != 0)
                 _exit(126);
             if (hibr_desktop_join && hibr_owner_pane != NULL) {
-                snprintf(pane_row, sizeof(pane_row), "%d", hibr_owner_pane->y);
+                snprintf(pane_row, sizeof(pane_row), "%d", 0);
                 snprintf(pane_column, sizeof(pane_column), "%d",
-                         hibr_owner_pane->x);
+                         hibr_primary_column);
                 if (setenv("BLIT_HIBR_PRIMARY_ROW", pane_row, 1) != 0 ||
                     setenv("BLIT_HIBR_PRIMARY_COL", pane_column, 1) != 0)
                     _exit(126);
