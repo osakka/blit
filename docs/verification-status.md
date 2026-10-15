@@ -3,9 +3,25 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
-## 0.1.481 Hibr native-PTY live evidence
+## 0.1.482 Hibr native-PTY live evidence
 
-The earlier visual acceptance for this release is revoked by the subsequent
+0.1.482 is deployed on `192.168.10.54`. The live API reports one Hibr
+desktop session named `blit` with one primary client on the lower pane and one
+`--join` client on the upper pane. It does not create two desktop instances.
+The live renderer reports 60 Hz, a 16 ms refresh-aware interval, zero missed
+deadlines, and zero API/render errors. An injected motion at physical `(100,
+100)` in the upper pane produced the diagnostic coordinate `column=253,
+row=6`: the pane-local column is translated into the single desktop's
+projected union coordinate before delivery to the primary owner.
+
+The live screenshot still fails visual acceptance: the upper joined viewport is
+mostly flat/incomplete and the full wallpaper/desktop scene is not present.
+This is not a presentation-rate failure and is not fixed by treating the
+panes as separate terminals. It is the remaining Hibr 2-D union and picture
+propagation boundary tracked by Hibr #240 and #238. The screenshot is evidence
+that the implementation is not complete; it is not a claim of success.
+
+The earlier 0.1.481 visual acceptance is revoked by the subsequent
 physical capture. The live 1x2 result is one Hibr desktop, not two terminal
 instances, but the lower primary and upper join do not form a complete,
 coordinate-consistent physical desktop: the upper pane is mostly empty, the
