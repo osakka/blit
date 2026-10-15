@@ -73,7 +73,7 @@ paths:
       summary: Select a font profile and/or logical font scale
       description: >-
         Blit recomputes pane geometry and resizes attached PTYs. Hibr is not
-        modified. Scale is bounded to 1 through 3.
+        modified. Scale is bounded to 1.0 through 3.0 in 0.1 increments.
       requestBody:
         required: true
         content:
@@ -1595,7 +1595,7 @@ components:
       minProperties: 1
       properties:
         font_id: {$ref: '#/components/schemas/ResourceId'}
-        scale: {type: integer, minimum: 1, maximum: 3}
+        scale: {type: number, minimum: 1.0, maximum: 3.0, multipleOf: 0.1}
       additionalProperties: false
     FontProfiles:
       type: object
@@ -1608,7 +1608,7 @@ components:
           properties:
             id: {$ref: '#/components/schemas/ResourceId'}
             path: {type: string}
-            scale: {type: integer, minimum: 1, maximum: 3}
+            scale: {type: number, minimum: 1.0, maximum: 3.0, multipleOf: 0.1}
             cell_pixels:
               type: object
               required: [width, height]
@@ -2231,7 +2231,7 @@ components:
                   render_width: {type: integer, minimum: 0}
                   render_height: {type: integer, minimum: 0}
                 additionalProperties: false
-            font_scale: {type: integer, minimum: 1}
+            font_scale: {type: number, minimum: 1.0, maximum: 3.0, multipleOf: 0.1}
             direct_kms: {type: boolean}
             renderer: {type: string}
             presentation_sync:

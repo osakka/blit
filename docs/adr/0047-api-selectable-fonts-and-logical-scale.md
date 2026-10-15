@@ -1,6 +1,6 @@
 # ADR-0047: API-selectable fonts and logical scale
 
-Status: Accepted
+Status: Accepted; scale range superseded by ADR 0074
 
 ## Context
 

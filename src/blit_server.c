@@ -55,6 +55,8 @@ extern char **environ;
    will attribute the offset to the renderer, which is how issue #31 was
    first misread. It is reported by /v1/diagnostics as surface_inset_px. */
 #define BLIT_SURFACE_INSET_PX 4
+#define BLIT_FONT_SCALE_MIN_TENTHS 10
+#define BLIT_FONT_SCALE_MAX_TENTHS 30
 
 #define BLIT_MAX_DISPLAYS 16
 #define BLIT_MAX_PANES 64
@@ -887,7 +889,7 @@ typedef struct {
     unsigned long long motion_report_session;
     int motion_report_column;
     int motion_report_row;
-    int font_scale;
+    int font_scale_tenths;
     int pointer_valid;
     int pointer_output;
     float pointer_x;
@@ -1198,12 +1200,55 @@ static unsigned long long next_graphics_generation(void)
     return blit_graphics_generation;
 }
 
+/* A scale is public API state in tenths, not a binary floating-point value.
+   Physical cell dimensions still have to be whole pixels, so every consumer
+   uses this one nearest-pixel rule. */
+static int scale_dimension(int base, int scale_tenths)
+{
+    if (base < 1)
+        base = 1;
+    if (scale_tenths < BLIT_FONT_SCALE_MIN_TENTHS)
+        scale_tenths = BLIT_FONT_SCALE_MIN_TENTHS;
+    return (base * scale_tenths + 5) / 10;
+}
+
+static double font_scale_value(const BlitRuntime *runtime)
+{
+    return (double)runtime->font_scale_tenths / 10.0;
+}
+
+static int parse_font_scale_text(const char *text)
+{
+    char *end;
+    double value;
+    double scaled;
+    int tenths;
+
+    if (text == NULL || text[0] == '\0')
+        return 0;
+    value = strtod(text, &end);
+    if (end == text || !(value >= 1.0 && value <= 3.0))
+        return 0;
+    while (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n')
+        ++end;
+    if (*end != '\0')
+        return 0;
+    scaled = value * 10.0;
+    tenths = (int)(scaled + 0.5);
+    if (tenths < BLIT_FONT_SCALE_MIN_TENTHS ||
+        tenths > BLIT_FONT_SCALE_MAX_TENTHS ||
+        scaled < (double)tenths - 0.000001 ||
+        scaled > (double)tenths + 0.000001)
+        return 0;
+    return tenths;
+}
+
 static int runtime_terminal_cell_width(const BlitRuntime *runtime)
 {
     int value = runtime->direct_kms ? blit_kms_cell_width(runtime->kms) :
         blit_font_width(&runtime->font);
     if (value < 1) value = 8;
-    return value * (runtime->font_scale > 0 ? runtime->font_scale : 1);
+    return scale_dimension(value, runtime->font_scale_tenths);
 }
 
 static int runtime_terminal_cell_height(const BlitRuntime *runtime)
@@ -1211,7 +1256,7 @@ static int runtime_terminal_cell_height(const BlitRuntime *runtime)
     int value = runtime->direct_kms ? blit_kms_cell_height(runtime->kms) :
         blit_font_height(&runtime->font);
     if (value < 1) value = 16;
-    return value * (runtime->font_scale > 0 ? runtime->font_scale : 1);
+    return scale_dimension(value, runtime->font_scale_tenths);
 }
 
 static void input_device_apply_repeat(BlitRuntime *runtime,
@@ -1407,8 +1452,7 @@ static void render_pointer(BlitRuntime *runtime, int output_index)
             { 4.0f, 10.0f, 6.0f, 15.0f }
         };
         int rotation = runtime->displays[display_index].rotation;
-        float scale = (float)(runtime->font_scale > 0 ?
-                              runtime->font_scale : 1);
+        float scale = (float)font_scale_value(runtime);
         float panel_width = (float)runtime->displays[display_index]
             .physical_width;
         float panel_height = (float)runtime->displays[display_index]
@@ -3010,7 +3054,7 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              "\"render\":{\"pending\":%s,\"interval_ms\":%d,"
              "\"effective_interval_ms\":%d,\"mode\":\"refresh-aware\","
              "\"outputs\":%s,"
-             "\"font_scale\":%d,\"surface_inset_px\":%d,"
+             "\"font_scale\":%.1f,\"surface_inset_px\":%d,"
              "\"direct_kms\":%s,"
              "\"renderer\":\"%s\","
              "\"glyph_path\":\"%s\","
@@ -3042,7 +3086,7 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              runtime->render_pending ? "true" : "false",
              runtime->render_interval_ms, runtime->render_effective_interval_ms,
              scheduler,
-             runtime->font_scale,
+             font_scale_value(runtime),
              BLIT_SURFACE_INSET_PX,
              runtime->direct_kms ? "true" : "false", escaped_renderer,
              runtime->direct_kms ? "kms" :
@@ -5711,6 +5755,32 @@ static int json_int(const char *json, const char *key, int *value)
            *cursor == '\n') ++cursor;
     *value = (int)strtol(cursor, &end, 10);
     return end != cursor;
+}
+
+static int json_font_scale_tenths(const char *json, const char *key)
+{
+    const char *cursor;
+    char value[64];
+    size_t length = 0;
+
+    cursor = json_key_cursor(json, key);
+    if (cursor == NULL)
+        return 0;
+    cursor += strlen(key) + 2;
+    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
+           *cursor == '\n') ++cursor;
+    if (*cursor++ != ':')
+        return 0;
+    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
+           *cursor == '\n') ++cursor;
+    while (*cursor != '\0' && length + 1 < sizeof(value) &&
+           *cursor != ',' && *cursor != '}' && *cursor != ' ' &&
+           *cursor != '\t' && *cursor != '\r' && *cursor != '\n')
+        value[length++] = *cursor++;
+    value[length] = '\0';
+    if (length == 0)
+        return 0;
+    return parse_font_scale_text(value);
 }
 
 static int json_bool(const char *json, const char *key, int *value)
@@ -14154,16 +14224,16 @@ static void fonts_json(const BlitRuntime *runtime, char *body, size_t capacity)
     json_escape(runtime->font.path, escaped_path, sizeof(escaped_path));
     used += (size_t)snprintf(body + used, capacity - used,
         "{\"revision\":1,\"active\":{\"id\":\"%s\",\"path\":\"%s\","
-        "\"scale\":%d,\"cell_pixels\":{\"width\":%d,\"height\":%d},"
+        "\"scale\":%.1f,\"cell_pixels\":{\"width\":%d,\"height\":%d},"
         /* The loaded font's own identity.  Without it nothing can tell that a
            run picked up a different artifact under the same name, which is
            exactly how a stale 540-glyph copy in the build tree rendered
            characters as '?' while the released package drew them. */
         "\"glyphs\":%lu,\"mappings\":%lu},"
         "\"profiles\":[",
-        active_id, escaped_path, runtime->font_scale,
-        blit_font_width(&runtime->font) * runtime->font_scale,
-        blit_font_height(&runtime->font) * runtime->font_scale,
+        active_id, escaped_path, font_scale_value(runtime),
+        runtime_terminal_cell_width(runtime),
+        runtime_terminal_cell_height(runtime),
         (unsigned long)runtime->font.glyph_count,
         (unsigned long)runtime->font.unicode_count);
     for (i = 0; i < blit_font_profile_count() && used + 128 < capacity; ++i) {
@@ -14193,13 +14263,14 @@ static int font_path_for_id(const char *id, char *path, size_t capacity)
 }
 
 static int apply_font_configuration(BlitRuntime *runtime, const char *path,
-                                    int scale)
+                                    int scale_tenths)
 {
     BlitFont candidate;
     int i;
 
     if (runtime == NULL || path == NULL || path[0] == '\0' ||
-        scale < 1 || scale > 3)
+        scale_tenths < BLIT_FONT_SCALE_MIN_TENTHS ||
+        scale_tenths > BLIT_FONT_SCALE_MAX_TENTHS)
         return 0;
     memset(&candidate, 0, sizeof(candidate));
     if (strcmp(path, runtime->font.path) != 0 &&
@@ -14211,7 +14282,7 @@ static int apply_font_configuration(BlitRuntime *runtime, const char *path,
         blit_font_free(&runtime->font);
         runtime->font = candidate;
     }
-    runtime->font_scale = scale;
+    runtime->font_scale_tenths = scale_tenths;
     if (!runtime->direct_kms) {
         for (i = 0; i < runtime->output_count; ++i) {
             BlitOutput *output = &runtime->outputs[i];
@@ -17473,7 +17544,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
     if (strcmp(path, "/v1/fonts") == 0 && strcmp(method, "PUT") == 0) {
         char font_id[128];
         char font_path[256];
-        int requested_scale;
+        int requested_scale_tenths;
         int has_scale = strstr(payload, "\"scale\"") != NULL;
         int has_font_id = json_string(payload, "font_id", font_id,
                                       sizeof(font_id));
@@ -17482,11 +17553,14 @@ static void handle_request(int fd, BlitRuntime *runtime,
                          "font_id or scale is required.");
             return;
         }
-        requested_scale = runtime->font_scale;
-        if (has_scale && (!json_int(payload, "scale", &requested_scale) ||
-                          requested_scale < 1 || requested_scale > 3)) {
+        requested_scale_tenths = runtime->font_scale_tenths;
+        if (has_scale &&
+            (!(requested_scale_tenths = json_font_scale_tenths(payload,
+                                                               "scale")) ||
+             requested_scale_tenths < BLIT_FONT_SCALE_MIN_TENTHS ||
+             requested_scale_tenths > BLIT_FONT_SCALE_MAX_TENTHS)) {
             send_problem(fd, 400, "Bad Request", "invalid_font_scale",
-                         "scale must be an integer from 1 through 3.");
+                         "scale must be a number from 1.0 through 3.0 in 0.1 increments.");
             return;
         }
         if (has_font_id) {
@@ -17503,7 +17577,8 @@ static void handle_request(int fd, BlitRuntime *runtime,
         } else {
             snprintf(font_path, sizeof(font_path), "%s", runtime->font.path);
         }
-        if (!apply_font_configuration(runtime, font_path, requested_scale)) {
+        if (!apply_font_configuration(runtime, font_path,
+                                      requested_scale_tenths)) {
             send_problem(fd, 422, "Unprocessable Entity", "font_apply_failed",
                          "The font could not be loaded or applied to all sessions.");
             return;
@@ -19249,12 +19324,8 @@ static void discover_panes(BlitRuntime *runtime)
     for (display_index = 0; display_index < runtime->display_count;
          ++display_index) {
         BlitDisplay *display = &runtime->displays[display_index];
-        int cell_width = (runtime->direct_kms ?
-            blit_kms_cell_width(runtime->kms) : blit_font_width(&runtime->font)) *
-            runtime->font_scale;
-        int cell_height = (runtime->direct_kms ?
-            blit_kms_cell_height(runtime->kms) : blit_font_height(&runtime->font)) *
-            runtime->font_scale;
+        int cell_width = runtime_terminal_cell_width(runtime);
+        int cell_height = runtime_terminal_cell_height(runtime);
         int grid_width = display->bounds.w > 0 ? display->bounds.w / cell_width : 80;
         int grid_height = display->bounds.h > 0 ? display->bounds.h / cell_height : 24;
         int pane_width = grid_width / columns;
@@ -21606,18 +21677,16 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                 int origin_y;
                 surface_origin_px(runtime, surface, session,
                                   output_index_for_surface,
-                                  blit_kms_cell_width(runtime->kms) *
-                                      runtime->font_scale,
-                                  blit_kms_cell_height(runtime->kms) *
-                                      runtime->font_scale,
+                                  runtime_terminal_cell_width(runtime),
+                                  runtime_terminal_cell_height(runtime),
                                   &origin_x, &origin_y);
                 views[view_count].origin_x = origin_x;
                 views[view_count].origin_y = origin_y;
             }
             views[view_count].cell_width =
-                blit_kms_cell_width(runtime->kms) * runtime->font_scale;
+                runtime_terminal_cell_width(runtime);
             views[view_count].cell_height =
-                blit_kms_cell_height(runtime->kms) * runtime->font_scale;
+                runtime_terminal_cell_height(runtime);
             views[view_count].columns = surface->width;
             views[view_count].rows = surface->height;
             views[view_count].stride = BLIT_MAX_CELL_COLS;
@@ -24650,7 +24719,7 @@ int main(int argc, char **argv)
     diagnostic_log(&runtime, "info", "server_start", "Blit gateway starting");
     blit_font_load(&runtime.font);
     blit_font_load_wide(&runtime.wide_font);
-    runtime.font_scale = 1;
+    runtime.font_scale_tenths = BLIT_FONT_SCALE_MIN_TENTHS;
     /* With no keyboard to ask, assume every keypad types digits, which is
        what it did before NumLock was honoured at all. EVIOCGLED corrects a
        real keyboard from its own LED as soon as one is opened, and a device
@@ -24664,8 +24733,11 @@ int main(int argc, char **argv)
         const char *render_interval = getenv("BLIT_RENDER_INTERVAL_MS");
         const char *screenshot_dir = getenv("BLIT_SDL_SCREENSHOT_DIR");
         const char *screenshot_after = getenv("BLIT_SDL_SCREENSHOT_AFTER");
-        if (font_scale != NULL)
-            runtime.font_scale = atoi(font_scale);
+        if (font_scale != NULL) {
+            int parsed_scale = parse_font_scale_text(font_scale);
+            if (parsed_scale > 0)
+                runtime.font_scale_tenths = parsed_scale;
+        }
         if (render_interval != NULL)
             runtime.render_interval_ms = atoi(render_interval);
         if (screenshot_dir != NULL)
@@ -24673,8 +24745,6 @@ int main(int argc, char **argv)
                      sizeof(runtime.sdl_screenshot_dir), "%s", screenshot_dir);
         runtime.sdl_screenshot_after = screenshot_after != NULL ?
             (unsigned long)strtoul(screenshot_after, NULL, 10) : 1;
-        if (runtime.font_scale < 1 || runtime.font_scale > 3)
-            runtime.font_scale = 1;
         if (runtime.render_interval_ms < 1 || runtime.render_interval_ms > 100)
             runtime.render_interval_ms = 16;
     }

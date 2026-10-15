@@ -101,17 +101,50 @@ begin
           cells)
   raise 'scale-1 glyph geometry did not render' unless
     wait_solid(base, 4, 4, 8, 16, [255, 255, 255])
-  scaled = request(URI("#{base}/v1/fonts"), Net::HTTP::Put, {'scale' => 2})
-  raise 'scale was not applied' unless scaled.fetch('active').fetch('scale') == 2
-  raise 'cell width did not double' unless scaled.fetch('active').fetch('cell_pixels').fetch('width') == active.fetch('cell_pixels').fetch('width') * 2
-  after = request(URI("#{base}/v1/surfaces/#{surface_id}/summary"))
-  raise 'surface was not reflowed' unless after['width'] < before['width'] && after['height'] < before['height']
-  raise 'scale-2 glyph geometry did not double' unless
-    wait_solid(base, 4, 4, 16, 32, [255, 255, 255])
+  scales = (10..30).map { |tenths| tenths / 10.0 }
+  representative_scales = [1.0, 1.1, 2.0, 2.3, 3.0]
+  scales.each do |scale|
+    scaled = request(URI("#{base}/v1/fonts"), Net::HTTP::Put,
+                     {'scale' => scale})
+    actual = scaled.fetch('active')
+    expected_width = (8 * (scale * 10).round + 5) / 10
+    expected_height = (16 * (scale * 10).round + 5) / 10
+    raise "scale #{scale} was not applied" unless
+      (actual.fetch('scale') - scale).abs < 0.0001
+    raise "scale #{scale} width mismatch" unless
+      actual.fetch('cell_pixels').fetch('width') == expected_width
+    raise "scale #{scale} height mismatch" unless
+      actual.fetch('cell_pixels').fetch('height') == expected_height
+    after = request(URI("#{base}/v1/surfaces/#{surface_id}/summary"))
+    raise "scale #{scale} did not reflow surface" unless
+      after['width'] <= before['width'] && after['height'] <= before['height']
+    if representative_scales.include?(scale)
+      current = request(URI("#{base}/v1/surfaces/#{surface_id}/summary"))
+      request(URI("#{base}/v1/surfaces/#{surface_id}/cells"), Net::HTTP::Put,
+              {'base_revision' => current.fetch('revision'),
+               'cells' => [{ 'x' => 0, 'y' => 0, 'text' => '█',
+                             'style' => { 'foreground' => '#ffffff',
+                                          'background' => '#000000' } }]})
+      raise "scale #{scale} glyph geometry did not render" unless
+        wait_solid(base, 4, 4, expected_width, expected_height,
+                   [255, 255, 255])
+    end
+  end
+
+  [0.9, 1.05, 3.1].each do |invalid_scale|
+    invalid = Net::HTTP::Put.new(URI("#{base}/v1/fonts"))
+    invalid['Content-Type'] = 'application/json'
+    invalid.body = JSON.generate({'scale' => invalid_scale})
+    response = Net::HTTP.start(base.hostname, base.port) { |http| http.request(invalid) }
+    raise "invalid scale #{invalid_scale} was accepted" unless response.code == '400'
+    problem = JSON.parse(response.body)
+    raise "invalid scale #{invalid_scale} has wrong code" unless
+      problem.fetch('code') == 'invalid_font_scale'
+  end
 
   selected = available.first.fetch('id')
   selected_state = request(URI("#{base}/v1/fonts"), Net::HTTP::Put,
-                           {'font_id' => selected, 'scale' => 1})
+                           {'font_id' => selected, 'scale' => 1.0})
   raise 'font profile was not selected' unless selected_state.fetch('active').fetch('id') == selected
   raise 'scale was not restored' unless selected_state.fetch('active').fetch('scale') == 1
 ensure
@@ -119,4 +152,4 @@ ensure
   Net::HTTP.start(base.hostname, base.port) { |http| http.request(delete) }
 end
 
-puts 'font API gate: PASS (profile listing, pixel scale, display-session reflow, profile restore)'
+puts 'font API gate: PASS (profiles, tenth-step scales 1.0..3.0, rounded pixels, reflow, rejection, restore)'

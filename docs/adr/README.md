@@ -95,6 +95,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0071 — Historical evdev diagnostics carry device identity](0071-historical-evdev-source-identity.md)
 - [0072 — Coalesce pending damage at each output refresh boundary](0072-refresh-bound-damage-coalescing.md)
 - [0073 — Keep font scaling in the physical cell-metric boundary](0073-font-scaling-uses-physical-cell-metrics.md)
+- [0074 — Support tenth-step font scales with deterministic pixel rounding](0074-font-scale-tenths-and-pixel-rounding.md)
 
 ## Adding an ADR
 

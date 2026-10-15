@@ -3,6 +3,21 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 0.1.472 fractional font-scale contract
+
+The font API now accepts `1.0` through `3.0` in exact tenth-step increments;
+integer requests remain compatible. The runtime stores tenths as fixed-point
+state and applies one nearest-pixel rule to every physical cell boundary, so
+an 8x16 font at 1.1 is reported and rendered as a 9x18 cell. That same metric
+drives SDL, direct KMS, panes, PTY pixel sizes, display-session reflow,
+surface origins, and pointer hit-testing. Hibr source is unchanged.
+
+The focused suite exercised all 21 valid values, representative rendered
+pixels at 1.0, 1.1, 2.0, 2.3, and 3.0, display-session reflow, and rejection
+of 0.9, 1.05, and 3.1. The full focused font/renderer suite passed 47/47.
+Live deployment and the matching API sweep are recorded in the 0.1.472
+release manifest after the package is installed on `192.168.10.54`.
+
 ## 0.1.471 font-scale physical-pixel correction candidate
 
 The live scale-3 screenshot exposed a gap in the previous 0.1.470 evidence:

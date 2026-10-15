@@ -524,9 +524,12 @@ Two limits are worth knowing rather than discovering:
   is a stated consequence rather than a tested one.
 
 `GET /v1/fonts` lists profiles and the active cell size. `PUT /v1/fonts` can
-select `font_id`, `scale` from 1 through 3, or both. Blit recalculates pane
-geometry and resizes attached PTYs. This is a display geometry operation; it
-does not change Hibr source or terminal protocol state.
+select `font_id`, `scale` from 1.0 through 3.0 in 0.1 increments, or both.
+Integer JSON values such as `2` remain valid and mean `2.0`. Blit recalculates
+pane geometry and resizes attached PTYs. Because a framebuffer cell cannot be
+fractional, the physical width and height use one shared nearest-pixel rule;
+for example, an 8x16 font at scale 1.1 is a 9x18 cell. This is a display
+geometry operation; it does not change Hibr source or terminal protocol state.
 
 ## Terminal surfaces and atomic updates
 
