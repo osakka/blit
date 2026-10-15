@@ -22762,7 +22762,7 @@ static void update_pointer_position(BlitRuntime *runtime,
     runtime->pointer_dirty = 1;
     runtime->render_pending = 1;
     {
-        char input_event[384];
+        char input_event[512];
         int target_col = 0;
         int target_row = 0;
         BlitSession *routed = input_route_target(runtime, "evdev-pointer");
@@ -22784,12 +22784,16 @@ static void update_pointer_position(BlitRuntime *runtime,
                  "{\"type\":\"input\",\"session_id\":\"session-%llu\","
                  "\"device_id\":\"%s\",\"event\":{"
                  "\"kind\":\"pointer_motion\",\"time_us\":%llu,\"x\":%.1f,"
-                 "\"y\":%.1f,\"output\":%d,\"column\":%d,\"row\":%d}}",
+                 "\"y\":%.1f,\"output\":%d,\"column\":%d,\"row\":%d,"
+                 "\"shift\":%s,\"ctrl\":%s,\"alt\":%s}}",
                  target != NULL ? target->id : 0ULL,
                  device_id != NULL ? device_id : "evdev-pointer",
                  (unsigned long long)monotonic_us(),
                  runtime->pointer_x, runtime->pointer_y,
-                 runtime->pointer_output, target_col, target_row);
+                 runtime->pointer_output, target_col, target_row,
+                 (mouse_modifier_bits(runtime) & 4) ? "true" : "false",
+                 (mouse_modifier_bits(runtime) & 16) ? "true" : "false",
+                 (mouse_modifier_bits(runtime) & 8) ? "true" : "false");
         broadcast_stream(runtime, input_event, BLIT_STREAM_INPUT);
     }
     /* Raw evdev is authoritative when it is available.  Do not warp SDL's
@@ -22813,9 +22817,10 @@ static void broadcast_evdev_pointer(BlitRuntime *runtime, const char *kind,
                                     int button, int pressed, int delta,
                                     const char *device_id)
 {
-    char input_event[384];
+    char input_event[512];
     int column = 0;
     int row = 0;
+    int modifiers = mouse_modifier_bits(runtime);
     BlitSession *routed = input_route_target(runtime, "evdev-pointer");
     BlitSession *target = mouse_target(runtime, runtime->pointer_output,
         runtime->pointer_x, runtime->pointer_y, &column, &row);
@@ -22833,24 +22838,32 @@ static void broadcast_evdev_pointer(BlitRuntime *runtime, const char *kind,
                  "{\"type\":\"input\",\"session_id\":\"session-%llu\","
                  "\"device_id\":\"%s\",\"event\":{"
                  "\"kind\":\"pointer_wheel\",\"time_us\":%llu,\"delta\":%d,"
-                 "\"x\":%.1f,\"y\":%.1f,\"output\":%d}}",
+                 "\"x\":%.1f,\"y\":%.1f,\"output\":%d,"
+                 "\"shift\":%s,\"ctrl\":%s,\"alt\":%s}}",
                  target != NULL ? target->id : 0ULL,
                  device_id != NULL ? device_id : "evdev-pointer",
                  (unsigned long long)monotonic_us(), delta,
                  runtime->pointer_x, runtime->pointer_y,
-                 runtime->pointer_output);
+                 runtime->pointer_output,
+                 (modifiers & 4) ? "true" : "false",
+                 (modifiers & 16) ? "true" : "false",
+                 (modifiers & 8) ? "true" : "false");
     } else {
         snprintf(input_event, sizeof(input_event),
                  "{\"type\":\"input\",\"session_id\":\"session-%llu\","
                  "\"device_id\":\"%s\",\"event\":{"
                  "\"kind\":\"pointer_button\",\"time_us\":%llu,\"button\":%d,"
                  "\"pressed\":%s,\"x\":%.1f,\"y\":%.1f,"
-                 "\"output\":%d,\"column\":%d,\"row\":%d}}",
+                 "\"output\":%d,\"column\":%d,\"row\":%d,"
+                 "\"shift\":%s,\"ctrl\":%s,\"alt\":%s}}",
                  target != NULL ? target->id : 0ULL,
                  device_id != NULL ? device_id : "evdev-pointer",
                  (unsigned long long)monotonic_us(), button,
                  pressed ? "true" : "false", runtime->pointer_x,
-                 runtime->pointer_y, runtime->pointer_output, column, row);
+                 runtime->pointer_y, runtime->pointer_output, column, row,
+                 (modifiers & 4) ? "true" : "false",
+                 (modifiers & 16) ? "true" : "false",
+                 (modifiers & 8) ? "true" : "false");
     }
     broadcast_stream(runtime, input_event, BLIT_STREAM_INPUT);
 }

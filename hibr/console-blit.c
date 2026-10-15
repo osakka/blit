@@ -250,6 +250,18 @@ static int cb_json_int(const char *json, const char *key, int *value)
 	return 1;
 }
 
+/* Blit owns the modifier state for the shared pointer. Hibr's console
+ * vocabulary carries those modifiers on the mouse action itself, for
+ * example `alt-press` and `alt-drag`; keep this conversion at the provider
+ * boundary. Missing fields remain false for older Blit streams. */
+static void cb_mouse_action(str *out, const char *frame, const char *action)
+{
+	if (strstr(frame, "\"ctrl\":true") != 0) s_cat(out, "ctrl-");
+	if (strstr(frame, "\"alt\":true") != 0) s_cat(out, "alt-");
+	if (strstr(frame, "\"shift\":true") != 0) s_cat(out, "shift-");
+	s_cat(out, action);
+}
+
 static int cb_json_string(const char *json, const char *key, char *value,
 			  size_t capacity)
 {
@@ -1741,7 +1753,12 @@ static int cb_key(int ms, str *out)
 					row = cb_pixel_cell(y, cb.cell_height > 0 ?
 						cb.cell_height : CB_CELL_HEIGHT);
 				}
-				s_cat(out, "mouse motion "); s_num(out, row);
+				s_cat(out, "mouse ");
+				if (cb.mouse_buttons != 0)
+					cb_mouse_action(out, frame, "drag");
+				else
+					cb_mouse_action(out, frame, "motion");
+				s_ch(out, ' '); s_num(out, row);
 				s_ch(out, ' '); s_num(out, column);
 				++cb.consumed;
 				return 1;
@@ -1780,7 +1797,9 @@ static int cb_key(int ms, str *out)
 				row = cb_hibr_cell(row);
 			}
 			name = button == 1 ? "middle" : button == 2 ? "right" : "left";
-			s_cat(out, "mouse "); s_cat(out, pressed ? "press " : "release ");
+			s_cat(out, "mouse ");
+			cb_mouse_action(out, frame, pressed ? "press" : "release");
+			s_ch(out, ' ');
 			s_cat(out, name); s_ch(out, ' '); s_num(out, row);
 			s_ch(out, ' '); s_num(out, column);
 			++cb.consumed;
@@ -1797,7 +1816,9 @@ static int cb_key(int ms, str *out)
 				cb.cell_width : CB_CELL_WIDTH);
 			row = cb_pixel_cell(y, cb.cell_height > 0 ?
 				cb.cell_height : CB_CELL_HEIGHT);
-			s_cat(out, delta > 0 ? "mouse wheelup " : "mouse wheeldown ");
+			s_cat(out, "mouse ");
+			cb_mouse_action(out, frame, delta > 0 ? "wheelup" : "wheeldown");
+			s_ch(out, ' ');
 			s_num(out, row); s_ch(out, ' '); s_num(out, column);
 			++cb.consumed;
 			return 1;

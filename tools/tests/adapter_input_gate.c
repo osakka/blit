@@ -205,6 +205,40 @@ static void expect_frame(const char *what, const char *json, int mouse_mode,
 	expect_frame_metrics(what, json, mouse_mode, 8, 16, want);
 }
 
+static void expect_drag_frame(const char *what, const char *json,
+			      const char *want)
+{
+	int sockets[2];
+	int result;
+	str output;
+
+	if (socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) != 0) {
+		perror("socketpair");
+		exit(2);
+	}
+	memset(&cb, 0, sizeof(cb));
+	cb.opened = 1;
+	cb.ws_fd = sockets[1];
+	cb.mouse_mode = 2;
+	cb.mouse_buttons = 1;
+	snprintf(cb.session, sizeof(cb.session), "session-4");
+	if (!send_text_frame(sockets[0], json)) {
+		perror("write WebSocket frame");
+		exit(2);
+	}
+	s_init(&output);
+	result = cb_key(100, &output);
+	if (result != 1) {
+		printf("  FAIL %-42s result=%d expected=1\n", what, result);
+		++failures;
+	} else {
+		expect_text(what, output.p, want);
+	}
+	s_free(&output);
+	close(sockets[0]);
+	close(sockets[1]);
+}
+
 static void expect_key(const char *what, unsigned long long code,
 		       int shift, const char *want)
 {
@@ -248,6 +282,22 @@ int main(void)
 		"\"kind\":\"pointer_button\",\"button\":2,\"pressed\":true,"
 		"\"x\":160.0,\"y\":1736.0,\"column\":21,\"row\":109}}",
 		2, "mouse press right 108 20");
+	expect_frame("Alt is attached to a button action",
+		"{\"type\":\"input\",\"session_id\":\"session-4\",\"event\":{"
+		"\"kind\":\"pointer_button\",\"button\":0,\"pressed\":true,"
+		"\"x\":160.0,\"y\":1736.0,\"column\":21,\"row\":109,"
+		"\"alt\":true}}",
+		2, "mouse alt-press left 108 20");
+	expect_drag_frame("Alt is retained during a drag",
+		"{\"type\":\"input\",\"session_id\":\"session-4\",\"event\":{"
+		"\"kind\":\"pointer_motion\",\"x\":160.0,\"y\":1736.0,"
+		"\"column\":21,\"row\":109,\"alt\":true}}",
+		"mouse alt-drag 108 20");
+	expect_frame("Shift is attached to wheel actions",
+		"{\"type\":\"input\",\"session_id\":\"session-4\",\"event\":{"
+		"\"kind\":\"pointer_wheel\",\"delta\":1,\"x\":160.0,"
+		"\"y\":1736.0,\"shift\":true}}",
+		2, "mouse shift-wheelup 108 20");
 	expect_frame("motion uses the same coordinate contract",
 		"{\"type\":\"input\",\"session_id\":\"session-4\",\"event\":{"
 		"\"kind\":\"pointer_motion\",\"x\":160.0,\"y\":1736.0,"
@@ -325,6 +375,6 @@ int main(void)
 		return 1;
 	}
 	printf("ADAPTER_INPUT_PASS pointer_origin=zero buttons=3 wheel=2 "
-	       "function_keys=12 resolved_text=6\n");
+	       "mouse_modifiers=3 function_keys=12 resolved_text=6\n");
 	return 0;
 }
