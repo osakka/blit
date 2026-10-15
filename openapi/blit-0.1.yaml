@@ -2516,7 +2516,14 @@ components:
         id: {$ref: '#/components/schemas/ResourceId'}
         revision: {$ref: '#/components/schemas/Revision'}
         display_id: {$ref: '#/components/schemas/ResourceId'}
-        bounds: {$ref: '#/components/schemas/Bounds'}
+        bounds:
+          allOf:
+            - {$ref: '#/components/schemas/Bounds'}
+          description: >-
+            Authoritative terminal-cell bounds. Each topology axis is
+            partitioned by integer boundaries, so adjacent panes are
+            contiguous and an odd grid remainder belongs to the final pane on
+            that axis; physical pixel bounds are derived from /v1/fonts.
         color:
           type: string
           pattern: '^#[0-9A-Fa-f]{6}$'

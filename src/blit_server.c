@@ -19328,20 +19328,32 @@ static void discover_panes(BlitRuntime *runtime)
         int cell_height = runtime_terminal_cell_height(runtime);
         int grid_width = display->bounds.w > 0 ? display->bounds.w / cell_width : 80;
         int grid_height = display->bounds.h > 0 ? display->bounds.h / cell_height : 24;
-        int pane_width = grid_width / columns;
-        int pane_height = grid_height / rows;
         int row;
         int column;
 
-        if (pane_width < 1) pane_width = 1;
-        if (pane_height < 1) pane_height = 1;
-        if (pane_width > BLIT_MAX_CELL_COLS) pane_width = BLIT_MAX_CELL_COLS;
-        if (pane_height > BLIT_MAX_CELL_ROWS) pane_height = BLIT_MAX_CELL_ROWS;
         for (row = 0; row < rows; ++row) {
             for (column = 0; column < columns; ++column) {
                 BlitPane *pane;
+                int pane_x = (grid_width * column) / columns;
+                int pane_y = (grid_height * row) / rows;
+                int pane_right = (grid_width * (column + 1)) / columns;
+                int pane_bottom = (grid_height * (row + 1)) / rows;
+                int pane_width = pane_right - pane_x;
+                int pane_height = pane_bottom - pane_y;
                 if (runtime->pane_count >= BLIT_MAX_PANES)
                     return;
+                /* Partition the already quantized terminal grid by
+                   boundaries, rather than flooring one shared half-size.
+                   A 45-row display split into two panes is therefore 22
+                   rows above and 23 below: every row is owned, and the
+                   deliberate remainder goes to the final pane. The same
+                   rule works for 2x2 layouts. */
+                if (pane_width < 1) pane_width = 1;
+                if (pane_height < 1) pane_height = 1;
+                if (pane_width > BLIT_MAX_CELL_COLS)
+                    pane_width = BLIT_MAX_CELL_COLS;
+                if (pane_height > BLIT_MAX_CELL_ROWS)
+                    pane_height = BLIT_MAX_CELL_ROWS;
                 pane = &runtime->panes[runtime->pane_count++];
                 memset(pane, 0, sizeof(*pane));
                 pane->used = 1;
@@ -19349,8 +19361,8 @@ static void discover_panes(BlitRuntime *runtime)
                          "display-%llu", display->id);
                 snprintf(pane->id, sizeof(pane->id), "pane-display-%llu-%d",
                          display->id, row * columns + column + 1);
-                pane->x = column * pane_width;
-                pane->y = row * pane_height;
+                pane->x = pane_x;
+                pane->y = pane_y;
                 pane->width = pane_width;
                 pane->height = pane_height;
             }

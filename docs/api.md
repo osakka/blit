@@ -422,6 +422,14 @@ bounds, and presentation state. `PUT /v1/topology` changes the logical
 placement using the schema's revision and idempotency controls. Pane splits are
 logical Blit layout resources; they do not create extra physical monitors.
 
+Pane bounds are terminal-cell rectangles derived from the reported physical
+cell metrics. Blit partitions each axis by integer boundaries, so a split
+never leaves an unowned row or column. If the grid is odd, the final pane on
+that axis owns the one-cell remainder: an 80x45 grid with rows: 2 is
+y:0,height:22 followed by y:22,height:23. This is intentional; equal
+physical pixel heights are impossible when both panes must contain whole
+terminal cells. See ADR 0075 in docs/adr.
+
 ### Display settings: rotation, brightness, and what power costs
 
 A display's `configuration` used to be `{}`, and that was a decision rather

@@ -239,6 +239,14 @@ detachment, reconnection, and recovery when a pane or display disappears. A
 missing pane must not cause Blit to invent a replacement desktop, and Blit
 must not restart Hibr processes.
 
+For a 1x2 split, row zero is the upper pane and row one is the lower pane.
+The orchestration explicitly attaches the primary Hibr desktop to the lower
+pane and starts desktop --join for the upper pane. Pane bounds are terminal
+cell bounds, not arbitrary pixel rectangles. If the display's cell grid has an
+odd number of rows, the lower pane owns the extra row so the two panes remain
+contiguous and no black terminal band is left at the bottom; the rule is
+specified by ADR 0075.
+
 The production join flow is:
 
 1. The Blit API configures or discovers the physical-display split.
