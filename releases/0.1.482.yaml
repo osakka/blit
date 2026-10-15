@@ -2,7 +2,7 @@ release: 0.1.482
 package: blit_0.1.482-1_amd64.deb
 package_sha256: 2f7cc86fc14ede4892f05be872bddf8f25c8209c234936d847b6759100e69862
 source_commit: 778c656
-package_documentation_commit: 778c656
+package_documentation_commit: 2199cbc
 server_binary_sha256: d3625377361e48d591e2eafa44063fe19f09f0ed54837349ceb5d6475e3e8321
 update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
 hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
