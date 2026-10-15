@@ -1384,10 +1384,8 @@ static void render_pointer(BlitRuntime *runtime, int output_index)
     if (display_index < 0)
         return;
     renderer = runtime->outputs[output_index].renderer;
-    x = (runtime->pointer_x - runtime->displays[display_index].bounds.x) /
-        runtime->font_scale;
-    y = (runtime->pointer_y - runtime->displays[display_index].bounds.y) /
-        runtime->font_scale;
+    x = runtime->pointer_x - runtime->displays[display_index].bounds.x;
+    y = runtime->pointer_y - runtime->displays[display_index].bounds.y;
     /* KMSDRM does not reliably provide a hardware cursor.  Draw a small
        high-contrast software cursor so pointer visibility is independent of
        the compositor, desktop shell, or terminal mouse-reporting mode.
@@ -1397,8 +1395,8 @@ static void render_pointer(BlitRuntime *runtime, int output_index)
        grid it is hit-testing against -- is logical. Both the hotspot and the
        arrow's own shape go through the transform: rotating the hotspot alone
        would leave an arrow pointing the wrong way on a rotated panel, and the
-       shape is where that shows. The sizes are font-scaled units, so the
-       panel's size is divided the same way x and y were. */
+       shape is where that shows. The position is physical output space and
+       the arrow dimensions follow the active font scale. */
     {
         static const float arrow[6][4] = {
             { 0.0f, 0.0f, 0.0f, 15.0f },
@@ -1412,9 +1410,9 @@ static void render_pointer(BlitRuntime *runtime, int output_index)
         float scale = (float)(runtime->font_scale > 0 ?
                               runtime->font_scale : 1);
         float panel_width = (float)runtime->displays[display_index]
-            .physical_width / scale;
+            .physical_width;
         float panel_height = (float)runtime->displays[display_index]
-            .physical_height / scale;
+            .physical_height;
         int line;
 
         for (line = 0; line < 6; ++line) {
@@ -1428,11 +1426,12 @@ static void render_pointer(BlitRuntime *runtime, int output_index)
             else if (line == 3)
                 SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
             blit_rotate_point(rotation, (int)panel_width, (int)panel_height,
-                              x + arrow[line][0], y + arrow[line][1],
+                              x + arrow[line][0] * scale,
+                              y + arrow[line][1] * scale,
                               &from_x, &from_y);
             blit_rotate_point(rotation, (int)panel_width, (int)panel_height,
-                              x + arrow[line][2], y + arrow[line][3], &to_x,
-                              &to_y);
+                              x + arrow[line][2] * scale,
+                              y + arrow[line][3] * scale, &to_x, &to_y);
             SDL_RenderLine(renderer, from_x, from_y, to_x, to_y);
         }
     }
@@ -14221,7 +14220,7 @@ static int apply_font_configuration(BlitRuntime *runtime, const char *path,
             output->glyph_atlas = create_sdl_glyph_atlas(
                 output->renderer, &runtime->font,
                 &output->glyph_atlas_columns);
-            SDL_SetRenderScale(output->renderer, (float)scale, (float)scale);
+            SDL_SetRenderScale(output->renderer, 1.0f, 1.0f);
             output->initialized = 0;
         }
     }
@@ -14241,6 +14240,19 @@ static int apply_font_configuration(BlitRuntime *runtime, const char *path,
         if (pane != NULL) {
             width = pane->width;
             height = pane->height;
+        } else if (session->hibr_process || session->display_id[0] != '\0') {
+            int display_index = session->display_id[0] != '\0' ?
+                display_index_for_id(runtime, session->display_id) : 0;
+            if (display_index < 0 || display_index >= runtime->display_count)
+                return 0;
+            width = runtime->displays[display_index].bounds.w /
+                runtime_terminal_cell_width(runtime);
+            height = runtime->displays[display_index].bounds.h /
+                runtime_terminal_cell_height(runtime);
+            if (width < 1) width = 1;
+            if (height < 1) height = 1;
+            if (width > BLIT_MAX_CELL_COLS) width = BLIT_MAX_CELL_COLS;
+            if (height > BLIT_MAX_CELL_ROWS) height = BLIT_MAX_CELL_ROWS;
         } else if (surface != NULL) {
             width = surface->width;
             height = surface->height;
@@ -19378,8 +19390,10 @@ static void initialize_outputs(BlitRuntime *runtime)
                     "blit: SDL renderer display=%llu cannot enable vsync: %s\n",
                     display->id, SDL_GetError());
         }
-        SDL_SetRenderScale(renderer, (float)runtime->font_scale,
-                           (float)runtime->font_scale);
+        /* Render targets and cached scenes are physical-sized textures.
+           Font scale is carried by the shared cell metrics, never by a
+           renderer transform. */
+        SDL_SetRenderScale(renderer, 1.0f, 1.0f);
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderClear(renderer);
         SDL_RenderPresent(renderer);
@@ -21436,10 +21450,10 @@ static void present_sdl_scene(BlitRuntime *runtime, int output_index)
     int display_index = display_index_for_output(runtime, output_index);
     int rotation = display_index >= 0 ?
         runtime->displays[display_index].rotation : 0;
-    float scale = (float)(runtime->font_scale > 0 ? runtime->font_scale : 1);
     SDL_FRect destination;
 
     SDL_SetRenderTarget(renderer, NULL);
+    SDL_SetRenderScale(renderer, 1.0f, 1.0f);
     if (scene == NULL)
         return;
     if (rotation == 0) {
@@ -21450,11 +21464,9 @@ static void present_sdl_scene(BlitRuntime *runtime, int output_index)
         runtime->displays[display_index].physical_width,
         runtime->displays[display_index].physical_height,
         &destination.x, &destination.y, &destination.w, &destination.h);
-    SDL_SetRenderScale(renderer, 1.0f, 1.0f);
     SDL_RenderTextureRotated(renderer, scene, NULL, &destination,
                              blit_rotation_angle(rotation), NULL,
                              SDL_FLIP_NONE);
-    SDL_SetRenderScale(renderer, scale, scale);
 }
 
 static void finish_sdl_output(BlitRuntime *runtime, int output_index,
@@ -21488,8 +21500,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
     int output_index;
     int plan_index;
     int row;
-    int cell_width = blit_font_width(&runtime->font);
-    int cell_height = blit_font_height(&runtime->font);
+    int cell_width = runtime_terminal_cell_width(runtime);
+    int cell_height = runtime_terminal_cell_height(runtime);
     float italic_lean = (float)((cell_height + 15) / 16);
     /* Issue #72. Damage is cleared only for a surface this pass actually
        painted. It used to be cleared for every surface that *targets* an
@@ -22430,12 +22442,8 @@ static BlitSession *mouse_target(BlitRuntime *runtime, int output_index,
         pixel_x -= runtime->displays[display_index].bounds.x;
         pixel_y -= runtime->displays[display_index].bounds.y;
     }
-    pixel_x /= runtime->font_scale;
-    pixel_y /= runtime->font_scale;
-    cell_width = runtime->direct_kms ? blit_kms_cell_width(runtime->kms) :
-        blit_font_width(&runtime->font);
-    cell_height = runtime->direct_kms ? blit_kms_cell_height(runtime->kms) :
-        blit_font_height(&runtime->font);
+    cell_width = runtime_terminal_cell_width(runtime);
+    cell_height = runtime_terminal_cell_height(runtime);
     snprintf(display_id, sizeof(display_id), "display-%llu",
              runtime->outputs[output_index].display_id);
     /* Surfaces in a pane are tested first.  A pane-less surface stacks from

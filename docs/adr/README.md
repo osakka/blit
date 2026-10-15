@@ -94,6 +94,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0070 — The scene cache is used only where render targets are known to persist](0070-the-scene-cache-needs-a-backend-that-preserves-render-targets.md)
 - [0071 — Historical evdev diagnostics carry device identity](0071-historical-evdev-source-identity.md)
 - [0072 — Coalesce pending damage at each output refresh boundary](0072-refresh-bound-damage-coalescing.md)
+- [0073 — Keep font scaling in the physical cell-metric boundary](0073-font-scaling-uses-physical-cell-metrics.md)
 
 ## Adding an ADR
 

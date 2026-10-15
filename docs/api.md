@@ -407,6 +407,16 @@ reports physical outputs; `/v1/topology` reports logical placement.
 
 ## Displays, topology, and fonts
 
+`PUT /v1/fonts` applies the selected profile and scale to pixels, not only to
+metadata. The reported `cell_pixels` dimensions are the physical cell metrics
+used by the renderer, PTY resize, pane/display geometry, pointer hit-testing,
+and Kitty/Sixel placement. SDL scene textures remain physical-sized output
+textures; changing scale does not rely on a backend-specific renderer
+transform. A display-attached Hibr session is reflowed to the new display grid
+and receives the existing resize/reassert contract. Hibr source is never
+modified by this operation. Pixel acceptance is covered by the local font API
+gate and should be repeated with the live screenshot endpoint after deployment.
+
 `GET /v1/displays` reports physical outputs, active modes, supported modes,
 bounds, and presentation state. `PUT /v1/topology` changes the logical
 placement using the schema's revision and idempotency controls. Pane splits are
