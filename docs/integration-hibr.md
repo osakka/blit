@@ -195,6 +195,18 @@ The hibr module should be a transport adapter only:
 - terminal resize becomes a surface/session resize mutation.
 - a replay gap is repaired with the canonical surface snapshot endpoint.
 
+A pointer event reaching the adapter is not the same as a click reaching the
+desktop, and the difference is easy to lose days to. Hibr's console delivers
+mouse reports to the session only while a mouse mode is active, which the
+owning application turns on by sending `console mouse <mode>`; with no mode
+set the adapter correctly discards the event. A Blit-hosted desktop that never
+enables reporting therefore cannot be clicked, however correct Blit's
+`pointer_button` events are — and Blit's own diagnostics will show the event
+published, routed, and arriving at the right session the whole time. When
+investigating "the mouse does not work", establish which of the two claims is
+failing before changing anything: Blit publishing the event, or the owner
+having asked for it.
+
 The OpenAPI schema remains normative for all wire messages. The module must
 not duplicate layout, revision, style, cursor, or frame semantics.
 

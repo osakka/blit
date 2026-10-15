@@ -3741,6 +3741,9 @@ the reasons that probe is shaped the way it is:
 
 ### 0.1.461: a chord that stops the server, and a key release that was not a keystroke
 
+**Host-accepted.** The operator used the chord on the physical machine:
+*"ctrl-alt-backspace works, I've killed it, looks nice!"*
+
 `GET`/`PUT /v1/control/shutdown-key` programs a chord, defaulting to
 Ctrl+Alt+Backspace and enabled. It performs the same orderly stop as
 `POST /v1/control/shutdown` and exits 0, so a unit with `Restart=on-failure`
@@ -3778,6 +3781,11 @@ nothing was checking. Issue #81 tracks the missing check.
 
 ### 0.1.462 and 0.1.463: the scene cache's precondition
 
+**Host-accepted** for the trail: *"The screen looks better"*. The menu bar
+flicker reported immediately afterwards is a separate matter — screen and cell
+data agree exactly and the menu bar is absent from the cell data, so that is
+the desktop owner's behaviour, which the cache had been hiding.
+
 Recorded in full in [ADR 0070](adr/0070-the-scene-cache-needs-a-backend-that-preserves-render-targets.md).
 
 Five reproductions were built for #72 and every one passed — all of them
@@ -3798,6 +3806,13 @@ override set, the host reports `renderer = opengles2`,
 `render paths = {'full-redraw': 6}` and `pointer_cache_hits = 0`.
 
 ### 0.1.464: evdev numbers letters by QWERTY row
+
+**Validated, not host-accepted.** The gate has teeth (55 failures against the
+old arithmetic) and the fix is deployed, but the operator has not confirmed
+that the keyboard types correctly on the machine; their next report concerned
+the menu bar and the mouse. Host acceptance for this release is outstanding
+and must not be inferred from the gate. The standing reason this distinction
+is kept: the person who can see the screen is not the one running the tests.
 
 Reported as "the keyboard does not type qwerty, g is , and f is d". The
 adapter computed a letter as `'a' + code - KEY_A`, which assumes the codes run
