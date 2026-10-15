@@ -18,8 +18,9 @@ package_artifact_acceptance: pass_manifest_hashes_match_package_and_reproducible
 qemu_hibr_lifecycle_acceptance: unavailable_missing_kernel_and_initramfs
 live_host: 192.168.10.54
 live_predeployment_version: 0.1.472
-live_deployment: pending
-live_pane_split_acceptance: pending
+live_deployment: pass_supervised_update_server_0.1.473
+live_pane_split_acceptance: pass_1920x2160_scale3_grid_80x45_top22_bottom23_primary_bottom_no_bottom_band
+live_join_acceptance: fail_hibr_0.99.191_owner_registered_zero_writes
 physical_multi_monitor_acceptance: unavailable_one_output
 physical_high_refresh_acceptance: open_issue_21
 notes: >-
@@ -27,4 +28,7 @@ notes: >-
   previous floor-based split left one unowned row or column; boundary-based
   partitioning assigns the remainder to the final pane, so a 1x2 80x45 grid
   is 80x22 above and 80x23 below. The lower pane remains the explicit primary
-  target. Hibr source is unchanged.
+  target. The live primary paints correctly in the lower pane; the live Hibr
+  0.99.191 join probe registers on the upper pane but produces zero cell
+  writes, so the auxiliary join remains an explicit integration blocker.
+  Hibr source is unchanged.

@@ -340,3 +340,13 @@ the exact pinned Hibr release. It also proves that a steady `console resizing`
 check performs no HTTP poll; SIGWINCH is the resize edge. Physical-host clicks,
 shortcuts, redraws, and application wakeups are still measured after package deployment; passing
 translation/provider gates are not reported as physical acceptance.
+
+The live host verification is narrower and must be read separately. Blit
+0.1.473 on the single 1920x2160 output passes the 1x2 geometry contract:
+scale 3 produces an 80x45 grid, with the primary on the lower 80x23 pane and
+no unowned bottom row. The same host's Hibr 0.99.191 auxiliary join registers
+but currently emits zero cell writes, so Blit reports hibr_desktop_unpainted
+and the auxiliary is removed after the probe. This is an Hibr join-lifecycle
+integration blocker, not evidence against the pane partition or SDL renderer.
+Hibr source remains out of scope; the next integration cycle must use this
+exact API/session evidence with the Hibr maintainers.
