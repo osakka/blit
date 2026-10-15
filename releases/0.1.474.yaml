@@ -1,0 +1,35 @@
+release: 0.1.474
+package: blit_0.1.474-1_amd64.deb
+package_sha256: 5be000f9fe314135d1d505b3849ff2cbecd909b28c398c6d9fbe08540e60033a
+source_commit: a929297
+package_documentation_commit: a929297
+server_binary_sha256: ebe6fcdeb2e74576d4ef27a267e445c2a2254302422966cf806911cc11e14a8d
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.191
+hibr_adapter_build: pass_exact_released_headers
+tcc_version: 0.9.27_x86_64_linux
+tcc_build_acceptance: pass_server
+openapi_yaml: pass
+focused_cell_geometry: pass_scale_1.6_grid_78x29_origin_5x7
+focused_pane_split_geometry: pass_odd_grid_contiguous_remainder
+focused_terminal_suite: pass_3_fail_0
+package_reproducibility: pass_two_independent_builds_byte_identical
+package_artifact_acceptance: pass_manifest_hashes_match_package_and_reproducible
+qemu_hibr_lifecycle_acceptance: unavailable_missing_kernel_and_initramfs
+live_host: 192.168.10.54
+live_predeployment_version: 0.1.473
+live_deployment: pending
+live_cell_grid_acceptance: pending
+live_join_acceptance: fail_hibr_0.99.191_owner_registered_zero_writes
+physical_multi_monitor_acceptance: unavailable_one_output
+physical_high_refresh_acceptance: open_issue_21
+notes: >-
+  This release makes the complete-cell display grid the sole geometry rule.
+  Font-scaled cells are quantized by floor division, the usable pixel
+  rectangle is centred, and the API publishes its dimensions, origin, and
+  excluded remainder under topology outputs[].cell_grid. Pane partitioning
+  continues to assign every complete cell to exactly one pane. Hibr source is
+  unchanged. The live joined Hibr client remains an integration blocker when
+  no desktop content is placed on its Hibr display; this release does not
+  invent or mirror Hibr desktop semantics.
