@@ -1,6 +1,6 @@
 # ADR 0078: Hibr joins are independent viewports of one desktop
 
-- Status: accepted
+- Status: superseded by [ADR 0079](0079-hibr-desktop-uses-the-native-pty-boundary.md)
 - Date: 2026-10-15
 - Scope: Hibr `desktop --join`, hold-client PTYs, surface ownership, input,
   and pane presentation

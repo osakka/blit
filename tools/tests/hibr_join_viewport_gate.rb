@@ -93,7 +93,7 @@ panes = split.fetch('panes').sort_by { |pane| pane.fetch('pixel_region').fetch('
 top_pane = panes.fetch(0).fetch('id')
 bottom_pane = panes.fetch(1).fetch('id')
 
-create = lambda do |arguments, pane_id, surface_mode = 'external'|
+create = lambda do |arguments, pane_id, surface_mode = 'terminal'|
   code, body = request(base, 'POST', '/v1/terminal-sessions', {
     'command' => FAKE_DESKTOP,
     'arguments' => arguments,
@@ -126,6 +126,8 @@ begin
   primary_snapshot = request(base, 'GET', "/v1/surfaces/#{primary_surface}").last
   raise 'join viewport output leaked into primary surface' if
     surface_text(primary_snapshot).include?('JOINED')
+  raise 'primary PTY output was not parsed into primary surface' unless
+    surface_text(primary_snapshot).include?('PRIMARY')
   raise 'primary viewport unexpectedly contains joined output' if
     surface_text(joined).include?('PRIMARY')
 

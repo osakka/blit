@@ -4,9 +4,11 @@
 
 blit remains the standalone display server. The Hibr desktop is an external
 client of Blit's OpenAPI and WebSocket contracts. The `console-blit` Hibr
-module implements the existing `console`/`display` boundary for Blit's
-packaged held-desktop entrypoint and for standalone programs that explicitly
-request it. It is a transport/provider adapter, not a desktop implementation.
+module implements the existing `console`/`display` boundary for standalone
+programs that explicitly request an API-owned surface. It is a
+transport/provider adapter, not a desktop implementation. The packaged held
+desktop uses Hibr's native console and Blit's PTY terminal parser so hold
+clients receive the same stream as Kitty and xterm.
 
 Blit starts terminal children with `DT_BIDI=on` and `HIBR_GFX=kitty` by
 default. This is intentional: Blit stores and draws cells in display order,
@@ -39,11 +41,11 @@ direct DRM/KMS outputs (SDL3 is optional for effects)
 ## Compatibility probe
 
 The packaged Blit integration runs the unchanged Hibr desktop through the
-package's Hibr entrypoint. That entrypoint loads Blit's `console-blit` display
-provider plus Hibr's existing `img`, `pty`, `term`, and `hold` modules in one
-Hibr process, then sources the stock `session.hibr`. This is required for
-wallpaper/canvas pixels to reach Blit's image scene and for the Hibr desktop
-to use the same display provider as its terminal cells. The complete Hibr
+package's Hibr entrypoint. That entrypoint loads Hibr's existing `img`, `pty`,
+`term`, and `hold` modules in one Hibr process, then sources the stock
+`session.hibr`. Hibr's native console writes the desktop's terminal and
+Kitty/Sixel stream to the PTY, which Blit parses for both the primary and every
+joined hold client. The complete Hibr
 desktop tree must remain installed in Hibr's own standard locations, including
 `desktop.hibr`, `wm/`, `widgets/`, themes, applications, and control-panel
 files.
@@ -75,18 +77,17 @@ curl --fail --request POST \
   http://127.0.0.1:8080/v1/terminal-sessions
 ```
 
-Use `/usr/bin/desktop` only when deliberately testing Hibr's native display
-provider. It is not the Blit graphics integration path and does not prove
-wallpaper/canvas presentation through Blit.
+Use `/usr/bin/desktop` only when deliberately testing Hibr without Blit's API
+and renderer. The packaged entrypoint uses the same native Hibr terminal
+provider while Blit remains the presentation boundary.
 
-The packaged entrypoint uses the `console-blit` provider only for the primary.
-The primary Hibr surface is the single desktop owner. Each `desktop --join`
-client is a Hibr hold client with its own PTY viewport; Blit parses that PTY
-into the joined pane, so it is a distinct surface rather than a copy of the
-primary. Hit-tested input from the joined pane is delivered to the primary
-owner. Direct cell mutation of a joined surface is rejected with
-`hibr_join_surface_read_only`
-([ADR 0078](adr/0078-hibr-joins-are-independent-viewports.md)).
+The packaged entrypoint uses Hibr's native console for the primary and every
+`desktop --join` client. Blit parses the primary PTY and each joined hold
+client's own PTY into distinct surfaces; there is one Hibr desktop, not a
+framebuffer copy and not a second provider owner. Hit-tested input from the
+joined pane is delivered to the primary owner. Direct cell mutation of a
+joined surface is rejected with `hibr_join_surface_read_only`
+([ADR 0079](adr/0079-hibr-desktop-uses-the-native-pty-boundary.md)).
 
 The package also installs `blit-runtime-console.hibr`, and the entrypoint sets
 `HIBR_RC` to it when the caller has not supplied an explicit fixture or
@@ -95,10 +96,9 @@ they do not inherit the QEMU fixture's environment. The RC loads the Blit
 adapter and Hibr's native `pty`, `term`, and `hold` modules only. An explicit
 `HIBR_RC` always wins, so controlled fixtures retain their own paths.
 
-`console-blit` remains available for standalone, non-held Hibr programs that
-explicitly need the cell-level Blit provider. It is also the provider loaded
-by the packaged held-desktop integration path; direct `/usr/bin/desktop`
-continues to exercise Hibr's native console provider instead.
+`console-blit` remains available for standalone, non-held Hibr programs and
+explicit `surface_mode: external` sessions that need the cell-level Blit
+provider. It is not loaded by the packaged held-desktop path.
 
 ### Desktop invocation options
 
@@ -117,13 +117,11 @@ reinterpret them:
 - `--standby` waits for a later join request and is appropriate for a display
   that should remain available without joining immediately.
 
-Blit fails any API-launched Hibr attachment closedly if its bounded startup
-discovery finds no token-bearing Hibr owner. This applies to a fresh primary,
-`--join`, and `--resume`; the session becomes `failed` with the
-`hibr_attach_unresolved` diagnostic instead of remaining `running` with a
-partial surface. Inspect `hibr_attachment` in the session response and the
-diagnostic trace before retrying; do not start another primary against the
-same held name until Hibr's own lifecycle has been resolved.
+An explicitly external API-owned Hibr attachment fails closedly if its bounded
+startup discovery finds no token-bearing Hibr owner. Native terminal primaries
+and joins do not require that adapter handshake; inspect their PTY output and
+terminal diagnostics instead. In either mode, do not start another primary
+against the same held name until Hibr's own lifecycle has been resolved.
 
 For a provider-backed Hibr process, the Blit-owned adapter registers its PID
 at `/v1/terminal-sessions/{id}/hibr-owner` using the per-session token that
@@ -132,23 +130,24 @@ handshake, not a second display owner; it only gives Blit an exact process to
 resize and signal. The session response reports `owner_registered` and
 `owner_pid` alongside the bounded fallback discovery counters.
 
-The probe has been run successfully with the Hibr desktop built by TCC. This
-mode uses the external surface boundary above; it does not depend on Blit's
-ANSI terminal parser for desktop rendering.
+The optional adapter probe has been run successfully with the Hibr desktop
+built by TCC. The packaged held-desktop mode intentionally depends on Blit's
+terminal parser for the native Hibr PTY boundary.
 
 ## QEMU verification record
 
 The repeatable VKMS QEMU fixture verifies these boundaries independently:
 
-- the Blit provider opens a surface, submits styled cells, and advances the
-  server-owned revision;
+- a native Hibr primary and its hold clients emit terminal streams that Blit
+  parses into their own surfaces, while the optional provider gate separately
+  proves API-owned cells;
 - a primary desktop and a `--join` client remain attached to separate panes on
   two outputs;
 - the four-pane acceptance mode starts one primary and three `--join` clients
   in a Blit-owned `2x2` layout and verifies four attached surfaces in one
   held desktop session;
-- the primary surface is the only Hibr-authored surface; a joined surface is
-  populated from that primary state and never becomes a second writer;
+- the primary and every joined surface are distinct PTY viewports of one Hibr
+  desktop; no joined surface becomes a second desktop writer;
 - a direct Hibr executable launch is required for `hold` re-exec; launching
   through the ELF loader breaks Hibr's executable self-discovery;
 - the minimal Alpine fixture must provide the glibc loader and `libc.so.6` at

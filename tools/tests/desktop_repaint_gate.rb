@@ -1,7 +1,9 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# Issue #32 / ADR 0063. A Hibr desktop's cells belong to its owner.
+# Issue #32 / ADR 0063. An explicitly external Hibr surface's cells belong to
+# its adapter owner. Native Hibr terminal desktops are covered by the join
+# viewport gate and deliberately parse their PTY output.
 #
 # A desktop reattached with --resume came back blank and reported itself
 # healthy: `hold attach` replays the held session's terminal stream, Blit's
@@ -117,7 +119,9 @@ def desktop(launcher, work, name, extra = [])
                  'arguments' => [record, '--session', name,
                                  '--name', 'display-1'] + extra,
                  'display_id' => 'display-1',
-                 'surface_mode' => 'terminal',
+                 # Use explicit external mode because this gate tests the
+                 # adapter-owner/unpainted diagnostic, not native PTY parsing.
+                 'surface_mode' => 'external',
                  'surface' => { 'width' => 60, 'height' => 12 })
   token = nil
   Timeout.timeout(10) do

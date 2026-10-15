@@ -99,7 +99,8 @@ security policy, or compatibility rule requires a new ADR.
 - [0075 — Pane grids are quantized inside physical pane regions](0075-pane-grid-partitions-own-the-remainder.md)
 - [0076 — Center the complete-cell display grid](0076-center-the-complete-cell-grid.md)
 - [0077 — Hibr joins mirror one authoritative desktop (superseded)](0077-hibr-joins-mirror-one-authoritative-desktop.md)
-- [0078 — Hibr joins are independent viewports of one desktop](0078-hibr-joins-are-independent-viewports.md)
+- [0078 — Hibr joins are independent viewports of one desktop (superseded)](0078-hibr-joins-are-independent-viewports.md)
+- [0079 — The packaged Hibr desktop uses the native PTY boundary](0079-hibr-desktop-uses-the-native-pty-boundary.md)
 
 ## Adding an ADR
 

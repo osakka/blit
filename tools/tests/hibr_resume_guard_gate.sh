@@ -34,7 +34,7 @@ done
 [ "$ready" -eq 1 ] || { echo "RESUME_GUARD_FAIL server_not_ready"; exit 1; }
 
 response=$(curl -fsS --max-time 5 -H 'Content-Type: application/json' \
-    --data '{"command":"'"$root"'/tools/tests/fixtures/desktop","arguments":["--resume"],"surface":{"width":80,"height":24}}' \
+    --data '{"command":"'"$root"'/tools/tests/fixtures/desktop","arguments":["--resume"],"surface_mode":"external","surface":{"width":80,"height":24}}' \
     "http://127.0.0.1:$port/v1/terminal-sessions")
 session_id=$(printf '%s' "$response" | sed -n 's/.*"id":"\([0-9][0-9]*\)".*/\1/p')
 [ -n "$session_id" ] || { echo "RESUME_GUARD_FAIL no_session_id"; exit 1; }

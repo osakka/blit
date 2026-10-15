@@ -1,12 +1,16 @@
 #!/usr/bin/env hibr
 # Blit's ordinary-console Hibr entrypoint.
 #
-# This entrypoint is used for held desktop sessions.  The primary process
-# loads Blit's display provider and is the one desktop writer.  A --join
-# process is only Hibr's hold client: hold renders that client's own viewport
-# to its PTY, and Blit parses that PTY into the joined pane.  Do not open a
-# second Blit display provider for a join; doing so makes it look like a
-# second desktop owner and bypasses hold's union-grid semantics.
+# This entrypoint is used for held desktop sessions.  Hibr's native console
+# provider writes the primary desktop to its PTY; Blit parses that stream.
+# A --join process is only Hibr's hold client: hold renders that client's own
+# viewport to its PTY, and Blit parses that PTY into the joined pane.  This is
+# the only path that preserves Hibr's union-grid, wallpaper, graphics, and
+# input semantics without creating a second desktop state owner.
+#
+# The optional api provider is retained for explicit standalone integration
+# tests.  It must be paired with surface_mode=external by the API client and
+# is never selected by this packaged desktop entrypoint.
 
 d=${0%/*}
 [ "$d" = "$0" ] && d=.
@@ -18,6 +22,7 @@ if [ -z "$moddir" ]; then
 	moddir=/usr/lib/hibr
 fi
 adapter=${BLIT_HIBR_ADAPTER:-/usr/lib/blit/hibr/console-blit.so}
+provider=${BLIT_HIBR_PROVIDER:-terminal}
 desktop=${BLIT_HIBR_DESKTOP_SESSION:-}
 blit_join=0
 for argument in "$@"; do
@@ -50,8 +55,13 @@ fi
 # The Debian package supplies symlinks for Hibr's sibling desktop tree beside
 # this launcher, preserving the stock session's relative-import semantics.
 export HIBR_MODPATH=${HIBR_MODPATH:-$moddir}
-if [ "$blit_join" = 0 ]; then
+if [ "$provider" = "api" ] && [ "$blit_join" = 0 ]; then
 	mod load "$adapter" || exit 1
+fi
+if [ "$provider" != "terminal" ] &&
+   [ "$provider" != "api" ]; then
+	echo "$0: BLIT_HIBR_PROVIDER must be terminal or api" >&2
+	exit 1
 fi
 mod load "$moddir/img.so" || exit 1
 mod load "$moddir/pty.so" || exit 1
@@ -61,7 +71,7 @@ mod load "$moddir/hold.so" || exit 1
 # transition. The initial launcher remains the ownership-scoped Hibr client;
 # relying on the detached child's later `need display` can allow Hibr's native
 # console provider to win before the Blit adapter is opened.
-if [ "$blit_join" = 0 ]; then
+if [ "$provider" = "api" ] && [ "$blit_join" = 0 ]; then
 	console open || exit 1
 fi
 # Hibr's stock desktop defaults DT_TERMMS to 70 ms, which is suitable for a

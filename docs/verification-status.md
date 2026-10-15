@@ -3,29 +3,28 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
-## 0.1.477 Hibr independent-viewport candidate
+## 0.1.478 Hibr native-PTY candidate
 
-The join boundary has been corrected to match Hibr's hold contract. A Hibr
-`desktop --join` session is forced to `surface_mode: terminal`; the primary
-alone loads Blit's display provider, while each join remains a Hibr hold client
-whose own PTY is parsed into its own Blit pane. There is one logical Hibr
-desktop, but no framebuffer copy and no second desktop owner. Joined-surface
-cell mutation is rejected with `hibr_join_surface_read_only`, and hit-tested
-input is routed to the primary Hibr owner. Hibr source is unchanged.
+Live 0.1.477 evidence identified the remaining join defect: the primary
+`console-blit` adapter painted its API surface, but Hibr's hold PTY had no
+primary stream to fan out, leaving the joined pane black. A native-Hibr probe
+then produced real joined PTY cells, while the primary was incorrectly
+rejected by Blit's adapter-owner requirement. The fix makes the packaged
+entrypoint use Hibr's native console and makes Blit parse both primary and join
+PTYs. The adapter remains available only for explicit `surface_mode: external`
+clients.
 
-The focused TCC server gate passes
-`hibr_join_viewport_gate.rb`: distinct PTY output remains isolated to distinct
-surfaces, direct joined-surface writes are rejected, and joined-pane pointer
-routing records the primary as `input_session`. This is server-side evidence;
-the exact Hibr QEMU/physical gates must still prove wallpaper, protocol
-graphics, context menus, window placement, and reconnect behavior. The package
-`blit_0.1.477-1_amd64.deb` passes the manifest/content and reproducible-build
-gates from the exact committed TCC binary. Live deployment is not claimed
-until that artifact is installed on `192.168.10.54`.
+The focused TCC server gate now runs both clients in `terminal` mode and proves
+distinct PTY output on distinct surfaces, joined-surface write rejection, and
+joined-pane input routing to the primary. Renderer/schema gates remain green
+from 0.1.477. The exact Hibr QEMU oracle and live 0.1.478 package deployment
+must still prove populated wallpaper, Kitty/Sixel graphics, context menus,
+window placement, and reconnect behavior.
 
-The preceding 0.1.476 mirror candidate is retained as historical evidence in
-[`releases/0.1.476.yaml`](../releases/0.1.476.yaml) and superseded by ADR 0078;
-it must not be used as the current join contract.
+The preceding 0.1.477 artifact and evidence remain recorded in
+[`releases/0.1.477.yaml`](../releases/0.1.477.yaml); its mirror-primary live
+behavior is superseded by ADR 0079 and must not be used as the current join
+contract.
 
 ## 0.1.472 fractional font-scale contract
 

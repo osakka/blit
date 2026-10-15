@@ -13328,13 +13328,12 @@ static void service_attach_reasserts(BlitRuntime *runtime, uint64_t now)
                     session->id, strerror(errno));
 
         ++session->attach_reassert_attempts;
-        /* Every Hibr desktop client must complete the adapter ownership
-           handshake.  A fresh primary without it is just as misleading as a
-           stale --resume attachment: the PTY can continue producing cells
-           while the real desktop is owned by another console/provider.  The
-           bounded token-scoped discovery window remains the safety boundary;
-           valid primary and --join clients register before it expires. */
+        /* An explicitly external Hibr provider must complete the adapter
+           ownership handshake.  The packaged desktop uses Hibr's native
+           console and its PTY is the source of truth, so it must not be
+           rejected for lacking an API owner. */
         if (session->hibr_process && !session->hibr_desktop_join &&
+            session_surface_is_owner_authored(session) &&
             !session->hibr_owner_registered &&
             session->attach_reassert_attempts >=
                 session->attach_reassert_max_attempts &&
@@ -14159,8 +14158,9 @@ static int create_session(BlitRuntime *runtime, const char *json,
             }
             /* A Hibr --join process is not a second desktop writer.  It is a
                real hold client whose PTY carries its own viewport, so Blit
-               parses that stream into this pane.  The primary alone uses the
-               API-owned display provider. */
+               parses that stream into this pane.  The packaged primary uses
+               the same native Hibr PTY path; an explicitly external provider
+               is the only API-owned exception. */
             session->surface_mode = hibr_desktop_join ? BLIT_SURFACE_TERMINAL :
                 (strcmp(surface_mode, "external") == 0 ?
                  BLIT_SURFACE_EXTERNAL :
@@ -14168,12 +14168,11 @@ static int create_session(BlitRuntime *runtime, const char *json,
                   BLIT_SURFACE_MIRROR : BLIT_SURFACE_TERMINAL));
             snprintf(session->state, sizeof(session->state), "%s",
                      hibr_process ? "running" : "starting");
-            if (hibr_process && !hibr_desktop_join) {
-                /* Hibr's adapter path can publish the initial surface through
-                   Blit's API without writing terminal bytes to the PTY. Arm
-                   the ownership-scoped geometry reassert at creation time so
-                   that path receives the same resize contract as a PTY-first
-                   desktop. Owner discovery remains bounded and retryable. */
+            if (hibr_process && !hibr_desktop_join &&
+                session_surface_is_owner_authored(session)) {
+                /* An external Hibr provider publishes through the API rather
+                   than the PTY. Arm its ownership-scoped geometry reassert;
+                   native Hibr terminal sessions use the normal PTY path. */
                 session->attach_reassert_pending = 1;
                 session->attach_reassert_attempts = 0;
                 session->attach_reassert_max_attempts = 32;
@@ -23433,14 +23432,14 @@ static BlitSession *keyboard_target(BlitRuntime *runtime)
     return NULL;
 }
 
-/* ADR 0057: true when this session's surface is authored by the primary
-   Hibr display provider over the API rather than by its PTY byte stream.
-   A --join client is deliberately excluded: hold renders that client's
-   viewport to its PTY and the normal terminal parser owns the joined pane. */
+/* ADR 0057 and ADR 0079: true only for an explicitly external Hibr provider.
+   The packaged desktop uses Hibr's native console, so both the primary and
+   each hold client are parsed from their own PTY streams. */
 static int session_surface_is_owner_authored(const BlitSession *session)
 {
     return session != NULL &&
-        session->hibr_desktop_primary;
+        session->hibr_desktop_primary &&
+        session->surface_mode == BLIT_SURFACE_EXTERNAL;
 }
 
 static int evdev_key_is_held(const BlitInputDevice *device,
