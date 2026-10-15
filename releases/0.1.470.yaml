@@ -1,0 +1,33 @@
+release: 0.1.470
+package: blit_0.1.470-1_amd64.deb
+package_sha256: 3e2515bef48e8674016fcaa913d5dbd311674f9dfabf10733a5529fe4ada87ad
+source_commit: 67a7bf6
+package_documentation_commit: 67a7bf6
+server_binary_sha256: c60b23ad73c5184675e5407bf1d42a1ed8d48544daf7346a03e83b937b1c6af4
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.191
+hibr_adapter_build: pass_exact_released_headers
+tcc_version: 0.9.27_x86_64_linux
+tcc_build_acceptance: pass_server_helper_adapter
+openapi_yaml: pass
+full_local_suite: pass_69_skip_4_fail_0
+frame_rate_acceptance: pass_59_999_hz_zero_missed_deadlines_burst_guard_75_hz
+pointer_scheduler_acceptance: pass_atomicity_cache_full_rebuild_motion_trail
+package_reproducibility: pass_two_independent_builds_byte_identical
+package_artifact_acceptance: pass_manifest_hashes_match_package_and_reproducible
+qemu_hibr_lifecycle_acceptance: unavailable_missing_kernel_and_initramfs
+live_host: 192.168.10.54
+live_predeployment_version: 0.1.469
+live_deployment: pending_supervised_update
+live_hibr_desktop_acceptance: pending_post_deployment_recreation
+live_motion_trace_acceptance: pending_post_deployment_capture
+physical_multi_monitor_acceptance: unavailable_one_output
+physical_high_refresh_acceptance: open_issue_21
+notes: >-
+  This release makes the per-output refresh deadline authoritative for pending
+  terminal, pointer, overlay, and API pixel work. It retains pointer damage
+  independently across affected outputs and re-phases only after a genuinely
+  stale idle interval. The live pre-fix trace showed full GLES2 redraws about
+  every 5 ms during Hibr window movement; live trace and physical motion
+  acceptance remain deliberately pending until the exact package is deployed.
