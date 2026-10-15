@@ -1354,6 +1354,45 @@ static int hibr_logical_column(const BlitRuntime *runtime,
     }
     return column;
 }
+static BlitSession *hibr_desktop_owner(BlitRuntime *runtime,
+                                       const char *session_name);
+
+/* Convert a pane-local terminal coordinate into the coordinate space of the
+   Hibr desktop owner.  `mouse_target` deliberately returns 1-based local
+   coordinates because that is what a terminal mouse report carries.  A join
+   is then routed to the primary Hibr PTY, whose hold union is currently the
+   horizontal projection above.  Sending the local coordinate unchanged was
+   the input bug: a click in the physical upper pane was interpreted at the
+   same local point in the primary pane, while the joined viewport itself was
+   placed at a different logical column.  Keep this transform beside the
+   placement function so every input path shares one source of truth.
+
+   The row remains local by design for the current Hibr contract.  A future
+   Hibr 2-D union contract must replace this projection with both row and
+   column offsets as one versioned boundary; it must not add a second ad-hoc
+   transform in an individual input path. */
+static void hibr_input_coordinates(const BlitRuntime *runtime,
+                                   const BlitSession *target,
+                                   int *column, int *row)
+{
+    BlitSession *owner;
+    BlitPane *pane;
+    BlitPane *owner_pane;
+
+    if (runtime == NULL || target == NULL || column == NULL || row == NULL ||
+        !target->hibr_desktop_join ||
+        target->hibr_desktop_session[0] == '\0')
+        return;
+    owner = hibr_desktop_owner((BlitRuntime *)runtime,
+                               target->hibr_desktop_session);
+    if (owner == NULL)
+        return;
+    pane = find_pane_id((BlitRuntime *)runtime, target->pane_id);
+    owner_pane = find_pane_id((BlitRuntime *)runtime, owner->pane_id);
+    if (pane == NULL || owner_pane == NULL)
+        return;
+    *column += hibr_logical_column(runtime, pane, owner_pane);
+}
 static int display_index_for_id(const BlitRuntime *runtime, const char *id);
 static void focus_session(BlitRuntime *runtime, BlitSession *target);
 static void disable_input_routes_for_target(BlitRuntime *runtime,
@@ -22936,6 +22975,7 @@ static void send_mouse_report(BlitRuntime *runtime, SDL_WindowID window_id,
     BlitSession *session = mouse_target(runtime, output_index, pixel_x,
                                         pixel_y, &column, &row);
     BlitSession *routed = input_route_target(runtime, "evdev-pointer");
+    BlitSession *coordinate_session = routed != NULL ? routed : session;
     int code;
 
     if (routed != NULL) {
@@ -22943,6 +22983,7 @@ static void send_mouse_report(BlitRuntime *runtime, SDL_WindowID window_id,
         if (column == 0) column = 1;
         if (row == 0) row = 1;
     }
+    hibr_input_coordinates(runtime, coordinate_session, &column, &row);
     session = hibr_input_owner(runtime, session);
     if (session != NULL && !release && button == 0)
         focus_session(runtime, session);
@@ -23000,6 +23041,7 @@ static void send_mouse_motion_report(BlitRuntime *runtime,
     BlitSession *session = mouse_target(runtime, output_index, pixel_x,
                                         pixel_y, &column, &row);
     BlitSession *routed = input_route_target(runtime, "evdev-pointer");
+    BlitSession *coordinate_session = routed != NULL ? routed : session;
     int button = active_mouse_button(runtime);
     char report[64];
 
@@ -23008,6 +23050,7 @@ static void send_mouse_motion_report(BlitRuntime *runtime,
         if (column == 0) column = 1;
         if (row == 0) row = 1;
     }
+    hibr_input_coordinates(runtime, coordinate_session, &column, &row);
     session = hibr_input_owner(runtime, session);
     if (session == NULL || session->pty_fd < 0)
         return;
@@ -23108,13 +23151,16 @@ static void update_pointer_position(BlitRuntime *runtime,
             runtime->pointer_x, runtime->pointer_y, &target_col, &target_row);
         BlitSession *input_target;
         if (routed != NULL) target = routed;
+        hibr_input_coordinates(runtime, routed != NULL ? routed : target,
+                               &target_col, &target_row);
         input_target = hibr_input_owner(runtime, target);
         {
             char detail[256];
             snprintf(detail, sizeof(detail),
-                     "x=%.1f y=%.1f output=%d device=%s target_session=%llu input_session=%llu routing=%s",
+                     "x=%.1f y=%.1f output=%d column=%d row=%d device=%s target_session=%llu input_session=%llu routing=%s",
                      runtime->pointer_x, runtime->pointer_y,
                      runtime->pointer_output,
+                     target_col, target_row,
                      device_id != NULL ? device_id : "evdev-pointer",
                      target != NULL ? target->id : 0ULL,
                      input_target != NULL ? input_target->id : 0ULL,
@@ -23166,8 +23212,11 @@ static void broadcast_evdev_pointer(BlitRuntime *runtime, const char *kind,
     BlitSession *target = mouse_target(runtime, runtime->pointer_output,
         runtime->pointer_x, runtime->pointer_y, &column, &row);
     BlitSession *input_target;
+    BlitSession *coordinate_session;
     if (routed != NULL)
         target = routed;
+    coordinate_session = routed != NULL ? routed : target;
+    hibr_input_coordinates(runtime, coordinate_session, &column, &row);
     input_target = hibr_input_owner(runtime, target);
     if (strcmp(kind, "pointer_wheel") == 0) {
         char detail[256];
@@ -23225,14 +23274,17 @@ static void dispatch_pointer_button(BlitRuntime *runtime, int button,
     BlitSession *input_target;
     if (routed != NULL)
         target = routed;
+    hibr_input_coordinates(runtime, routed != NULL ? routed : target,
+                           &column, &row);
     input_target = hibr_input_owner(runtime, target);
     if (button < 0 || button > 2)
         return;
     snprintf(detail, sizeof(detail),
              "button=%d pressed=%d device=%s x=%.1f y=%.1f "
-             "target_session=%llu input_session=%llu routing=%s",
+             "column=%d row=%d target_session=%llu input_session=%llu routing=%s",
              button, pressed, device_id != NULL ? device_id : "unknown",
              runtime->pointer_x, runtime->pointer_y,
+             column, row,
              target != NULL ? target->id : 0ULL,
              input_target != NULL ? input_target->id : 0ULL,
              pointer_routing_name(target, routed));

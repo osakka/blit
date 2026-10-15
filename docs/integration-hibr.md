@@ -89,15 +89,25 @@ joined pane is delivered to the primary owner. Direct cell mutation of a
 joined surface is rejected with `hibr_join_surface_read_only`
 ([ADR 0079](adr/0079-hibr-desktop-uses-the-native-pty-boundary.md)).
 
-For a Blit topology, the entrypoint also receives a deterministic logical
+For a Blit topology, the entrypoint currently receives a deterministic logical
 column for each pane. The primary remains Hibr's logical slot zero and each
 join attaches in the next horizontal Hibr slot, while Blit presents those
-local PTY viewports in their authoritative physical panes. This keeps Hibr's
-primary bar/window placement on the physical primary even for a 1x2 stack
-(primary below, join above); 2x1 and 2x2 use the same projection. It does not
-mirror the primary surface. Direct Hibr invocations without Blit's topology
-environment retain Hibr's documented default placement
+local PTY viewports in their authoritative physical panes. This is a
+compatibility projection only. It keeps Hibr's primary bar/window placement on
+the physical primary for a 1x2 stack (primary below, join above), but it does
+not make the physical stack a correct 2-D Hibr desktop and does not provide
+complete joined wallpaper/window content. Direct Hibr invocations without
+Blit's topology environment retain Hibr's documented default placement
 ([ADR 0080](adr/0080-map-blit-panes-to-hibr-hold-union-coordinates.md)).
+
+Blit translates pointer motion, buttons, and wheel coordinates from the
+joined pane's local cells into that projected Hibr union column before routing
+the event to the primary PTY. The same logical coordinates are exposed in the
+diagnostic trace. This closes a Blit-side coordinate defect, but full physical
+vertical-join acceptance remains blocked on Hibr's 2-D union/layout contract
+in [Hibr #240](https://git.home.arpa/itdlabs/hibr/issues/240). Spanning
+Kitty/Sixel propagation remains tracked in
+[Hibr #238](https://git.home.arpa/itdlabs/hibr/issues/238).
 
 Picture propagation is a separate Hibr capability. Hibr's current hold
 contract does not emit a spanning Kitty/Sixel bitmap to a client whose

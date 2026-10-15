@@ -91,7 +91,8 @@ split = request(base, 'PUT', '/v1/topology', {
 }).last
 panes = split.fetch('panes').sort_by { |pane| pane.fetch('pixel_region').fetch('y') }
 top_pane = panes.fetch(0).fetch('id')
-bottom_pane = panes.fetch(1).fetch('id')
+bottom = panes.fetch(1)
+bottom_pane = bottom.fetch('id')
 
 create = lambda do |arguments, pane_id, surface_mode = 'terminal'|
   code, body = request(base, 'POST', '/v1/terminal-sessions', {
@@ -158,9 +159,13 @@ begin
   expected = "input_session=#{primary.fetch('id')}"
   raise "join input was not routed to primary: #{detail.inspect}" unless
     detail&.include?(expected)
+  expected_column = bottom.fetch('bounds').fetch('width') + 1
+  raise "join input used pane-local coordinates: #{detail.inspect}" unless
+    detail&.include?("column=#{expected_column} row=1")
 
   puts "hibr join viewport gate: PASS primary=#{primary.fetch('id')} " \
-       "join=#{join.fetch('id')} distinct_surfaces=true input=#{expected}"
+       "join=#{join.fetch('id')} distinct_surfaces=true " \
+       "input=#{expected} logical_column=#{expected_column}"
 ensure
   sessions.each do |id|
     request(base, 'DELETE', "/v1/terminal-sessions/#{id}")

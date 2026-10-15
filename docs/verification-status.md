@@ -5,6 +5,15 @@ an evidence record, not a claim that the complete product is released.
 
 ## 0.1.481 Hibr native-PTY live evidence
 
+The earlier visual acceptance for this release is revoked by the subsequent
+physical capture. The live 1x2 result is one Hibr desktop, not two terminal
+instances, but the lower primary and upper join do not form a complete,
+coordinate-consistent physical desktop: the upper pane is mostly empty, the
+wallpaper is incomplete, and pointer/context-menu coordinates disagree. The
+fresh capture also shows that distinct PTY surfaces and a nominal 60 Hz output
+are not sufficient acceptance evidence. Hibr #240 now tracks the required 2-D
+union/layout contract; Hibr #238 tracks spanning picture propagation.
+
 Live 0.1.477 evidence identified the remaining join defect: the primary
 `console-blit` adapter painted its API surface, but Hibr's hold PTY had no
 primary stream to fan out, leaving the joined pane black. A native-Hibr probe
@@ -19,17 +28,20 @@ distinct PTY output on distinct surfaces, joined-surface write rejection, and
 joined-pane input routing to the primary. The 0.1.481 live deployment on
 `192.168.10.54` has exactly one Hibr hold session with one primary and one
 join; `hold clients` reports the primary at `0 0 67 240` and the join at
-`0 240 67 240`. The captured SDL screenshot shows the lower physical primary
-with Hibr's desktop bar and the upper physical join as a distinct viewport;
-pointer press/release from the upper pane routes to the primary owner.
+`0 240 67 240`. The API evidence proves distinct PTY surfaces and
+primary-owner routing, but not a correct physical desktop. The focused Blit
+fix now translates joined-pane input into the projected Hibr union column;
+its local gate asserts the exact logical coordinate.
 
 Spanning Kitty/Sixel wallpaper is not yet accepted: Hibr's hold picture rule
 does not send a bitmap to a client whose rectangle does not contain the whole
 picture, so the upper viewport lacks that wallpaper region. This is recorded
 with exact reproduction and acceptance criteria in
 [Hibr #238](https://git.home.arpa/itdlabs/hibr/issues/238). Blit source does not
-patch Hibr's picture semantics. The exact Hibr QEMU oracle, context menus,
-window placement, and reconnect behavior remain open.
+patch Hibr's picture semantics. The 2-D desktop/input contract is tracked in
+[Hibr #240](https://git.home.arpa/itdlabs/hibr/issues/240). The exact Hibr
+QEMU oracle, context menus, window placement, and reconnect behavior remain
+open.
 
 The preceding 0.1.477 artifact and evidence remain recorded in
 [`releases/0.1.477.yaml`](../releases/0.1.477.yaml); its mirror-primary live

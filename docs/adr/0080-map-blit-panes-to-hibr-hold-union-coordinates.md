@@ -1,8 +1,10 @@
 # ADR 0080: Map Blit panes to Hibr hold-union coordinates
 
-- Status: accepted
+- Status: superseded for physical vertical-join acceptance; retained as a
+  compatibility projection
 - Date: 2026-10-15
 - Supersedes: the stock horizontal-only placement of the packaged Blit join launcher
+- Superseded by: [ADR 0081](0081-hibr-joins-require-a-2d-union-contract.md)
 
 ## Context
 
@@ -42,12 +44,17 @@ The coordinates are logical cells, not pixels. Blit's pane partitioner has
 already removed incomplete edge rows and columns and owns the rounding and
 centering decision. The Hibr slot projection is intentionally separate from
 physical `(x,y)` so Hibr's current horizontal desktop contract remains valid.
+This is a compatibility projection, not proof that a physically stacked
+desktop is correct: input must be translated into the projected union column,
+and the Hibr desktop still cannot place its full scene or wallpaper in a true
+2-D physical join.
 
 ## Consequences
 
 - A 1x2 stack can place the primary at the bottom and the join above it while
   keeping Hibr's primary logical viewport at slot zero; the upper pane is a
-  real desktop viewport, not a mirror.
+  real PTY viewport, not a mirror, but it is not accepted as a complete
+  physical desktop until Hibr supports the 2-D contract in ADR 0081.
 - A 2x1 or 2x2 topology uses the same deterministic Hibr slot projection
   without a special physical-orientation case.
 - Hibr's primary client remains the desktop's primary display, so its menu,
@@ -62,8 +69,12 @@ physical `(x,y)` so Hibr's current horizontal desktop contract remains valid.
 The source gate parses the launcher with the installed Hibr interpreter and
 asserts the complete move/attach boundary is present. The API join gate proves
 distinct PTY-backed surfaces and pane-hit-tested input. Live acceptance must
-additionally show the upper and lower panes as distinct stacked viewports of
-one desktop, with the desktop bar remaining on the physical primary, and
-record the Hibr `hold clients` coordinates. Full spanning-picture acceptance
-is separately blocked on Hibr's viewport-aware hold picture propagation,
-tracked in [Hibr #238](https://git.home.arpa/itdlabs/hibr/issues/238).
+additionally show the upper and lower panes as complete stacked viewports of
+one desktop, with physical pointer coordinates matching context-menu/window
+coordinates, and record the Hibr `hold clients` coordinates. The current
+compatibility projection is not sufficient for that acceptance. Full
+spanning-picture acceptance is separately blocked on Hibr's viewport-aware
+hold picture propagation, tracked in
+[Hibr #238](https://git.home.arpa/itdlabs/hibr/issues/238); the 2-D layout and
+input contract is tracked in
+[Hibr #240](https://git.home.arpa/itdlabs/hibr/issues/240).
