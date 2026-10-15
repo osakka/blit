@@ -1,0 +1,32 @@
+release: 0.1.481
+package: blit_0.1.481-1_amd64.deb
+package_sha256: 523573de18e1e217a1c05ff2883c41aeb575992ffdc1003673fe29d7787120e3
+source_commit: 8dc361f
+package_documentation_commit: 8dc361f
+server_binary_sha256: 358d3ae60e19696c6bf0a86902c36c39ef8a271210df1573e1a33d527266726b
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.191
+hibr_adapter_build: pass_exact_released_headers
+tcc_version: 0.9.27_x86_64_linux
+tcc_build_acceptance: pass_server_helper_adapter
+openapi_yaml: pass
+focused_hibr_join_viewport: pass_native_pty_distinct_surfaces_join_write_rejected_primary_input
+focused_hibr_join_placement: pass_hibr_syntax_and_coordinate_contract
+focused_hibr_suite: pass_9_skip_1_qemu_oracle
+focused_schema_renderer_suite: pass_45_fail_0
+package_reproducibility: pending_release_gate
+package_artifact_acceptance: pending_release_gate
+qemu_hibr_lifecycle_acceptance: unavailable_missing_kernel_and_initramfs
+live_host: 192.168.10.54
+live_predeployment_version: 0.1.480
+live_deployment: pending_package_deployment
+live_join_acceptance: pending_package_deployment
+physical_multi_monitor_acceptance: unavailable_one_output
+physical_high_refresh_acceptance: open_issue_21
+notes: >-
+  This release removes a no-op hold move from the pane-aware Hibr launcher.
+  Repositioning an already-canonical primary cleared Hibr's held-client front
+  buffer and produced a partial black repaint during join startup. The native
+  PTY boundary and the horizontal Hibr slot projection are unchanged. Hibr
+  source is unchanged.
