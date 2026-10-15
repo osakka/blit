@@ -553,6 +553,13 @@ changed pointer position; all of them remaining unchanged means the kernel
 device produced no records for Blit during the window. The endpoint also
 reports `last_evdev_mouse_path` and `last_evdev_mouse_event_age_ms` so a stale
 or changing device can be identified without shell access to the desktop.
+The path is historical: Linux can renumber `/dev/input/eventN` during a KVM
+or USB re-enumeration. Pair it with `last_evdev_mouse_device_id` and
+`last_evdev_mouse_device_present`; an empty ID or `false` means the last event
+came from a device generation that is no longer in the current input table.
+The keyboard has the corresponding `last_evdev_keyboard_device_id` and
+`last_evdev_keyboard_device_present` fields. This prevents a historical node
+path from being mistaken for the currently opened device.
 The runtime also reports `sdl_mouse_events_discarded`,
 `sdl_mouse_events_processed`, `sdl_mouse_motion_events`, and
 `sdl_mouse_button_events`. With an evdev device present, discarded SDL mouse

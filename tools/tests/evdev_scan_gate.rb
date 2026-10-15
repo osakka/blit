@@ -73,6 +73,18 @@ end
 
 performance = get('/v1/diagnostics/runtime').fetch('performance')
 resources = get('/v1/diagnostics/runtime').fetch('snapshot').fetch('resources')
+source_fields = %w[last_evdev_mouse_device_id last_evdev_mouse_device_present
+                   last_evdev_keyboard_device_id
+                   last_evdev_keyboard_device_present]
+missing_source_fields = source_fields.reject { |field| performance.key?(field) }
+unless missing_source_fields.empty?
+  abort "evdev scan gate: runtime diagnostics missing source identity fields " \
+        "#{missing_source_fields.inspect}"
+end
+unless [performance['last_evdev_mouse_device_present'],
+        performance['last_evdev_keyboard_device_present']].all? { |value| [true, false].include?(value) }
+  abort 'evdev scan gate: source presence fields must be JSON booleans'
+end
 opens = performance.fetch('evdev_scan_opens')
 scan_ms = performance.fetch('max_evdev_scan_ms')
 loop_gap_ms = performance.fetch('max_loop_gap_ms')

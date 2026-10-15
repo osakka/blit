@@ -3,6 +3,22 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 0.1.469 KVM source identity diagnostics
+
+The live KVM check showed that raw mouse and keyboard counters could increase
+while `last_evdev_*_path` named an event node no longer present in the current
+inventory. The path is historical after Linux re-enumerates a USB device, so
+0.1.469 adds the associated input resource ID and a current `present` flag for
+both mouse and keyboard sources. The OpenAPI schema, runtime implementation,
+diagnostic guide, ADR 0071, and evdev scan gate are updated together. Hibr
+source and input ownership are unchanged.
+
+The focused schema, network, evdev scan, renderer, input, Hibr, terminal, and
+hotplug-cycle gates pass. The complete local suite reached 69 passes, 3
+explicit skips, and 0 product-test failures; its package gate was rerun after
+the 0.1.469 release manifest was added. Live deployment and post-KVM
+verification remain pending until the package is published.
+
 ## 0.1.468 drag-action correction
 
 The live drag investigation found a second, narrower defect at the Blit-owned
