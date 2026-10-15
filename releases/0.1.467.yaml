@@ -1,0 +1,45 @@
+release: 0.1.467
+package: blit_0.1.467-1_amd64.deb
+package_sha256: 67619889e7ead6e00e6004bc23865c643e2966a8b756a684646137c4e475f70c
+source_commit: 1a20c0a65384cb3e7089ed57293c0badeb7cc788
+package_documentation_commit: 1a20c0a65384cb3e7089ed57293c0badeb7cc788
+server_binary_sha256: eb627d317a33af82bef09af323654382f66fa26fb97d53a55990924308194372
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: c3bb944a39b81f35883131ec1473cb5d31e5367f92a7fe35c7a9757f681754b6
+hibr_version: 0.99.191
+hibr_adapter_build: pass_exact_released_headers
+tcc_version: 0.9.27_x86_64_linux
+tcc_build_acceptance: pass_server_helper_adapter
+openapi_yaml: pass
+api_schema_gate: pass_40_paths
+full_local_suite: pass_69_skip_3_fail_0
+adapter_input_acceptance: pass_pointer_origin_zero_buttons_3_wheel_2_mouse_modifiers_3_function_keys_12_resolved_text_6
+adapter_provider_acceptance: pass_pane_ownership_watched_wakeup_utf8_width_resize_poll_0
+adapter_coalesce_acceptance: pass_revision_170_idle_requests_0
+input_stream_text_acceptance: pass_plain_shift_altgr_shift_release_omitted
+external_pointer_incremental_acceptance: pass_pointer_cache_hit
+external_pointer_full_rebuild_acceptance: pass_pointer_cache_hit
+motion_trail_acceptance: pass_blank_cells_799_steps_12
+render_state_agreement_acceptance: pass_blank_cells_30
+frame_rate_settled_acceptance: pass_59_999_hz_zero_missed_deadlines
+terminal_soak_120s_acceptance: pass_4_sessions_12108_snapshots_1101_resizes
+package_reproducibility: pass_two_independent_builds_byte_identical
+package_artifact_acceptance: pass_manifest_hashes_match_package_and_reproducible
+qemu_hibr_lifecycle_acceptance: unavailable_missing_kernel_and_initramfs
+live_host: 192.168.10.54
+live_predeployment_version: 0.1.466
+live_deployment: pending
+live_hibr_desktop_acceptance: pending
+live_alt_drag_acceptance: pending
+live_physical_input_report: pending
+live_trail_accumulation: pending_issue_72
+live_input_hotplug: pending_issue_74
+physical_multi_monitor_acceptance: unavailable_one_output
+physical_high_refresh_acceptance: open_issue_21
+notes: >-
+  This release carries pointer modifier state across the Blit WebSocket input
+  stream. The provider adapter translates the state into Hibr's native
+  ctrl-alt-press, alt-drag, and shift-wheel action vocabulary. Hibr source and
+  desktop configuration remain unchanged. The local adapter gate covers the
+  modified button, drag, and wheel forms; live Alt-drag acceptance remains
+  pending deployment.
