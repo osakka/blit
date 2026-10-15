@@ -103,6 +103,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0079 — The packaged Hibr desktop uses the native PTY boundary](0079-hibr-desktop-uses-the-native-pty-boundary.md)
 - [0080 — Map Blit panes to Hibr hold-union coordinates](0080-map-blit-panes-to-hibr-hold-union-coordinates.md)
 - [0081 — Physical Hibr joins require a 2-D union contract](0081-hibr-joins-require-a-2d-union-contract.md)
+- [0082 — Atomic presentation boundary for one Hibr desktop](0082-atomic-hibr-join-presentation-boundary.md)
 
 ## Adding an ADR
 

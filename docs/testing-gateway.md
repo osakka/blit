@@ -366,6 +366,18 @@ joined surface is read-only, and checks that a pointer hit in the joined pane
 is routed to the primary session. Physical wallpaper/context-menu acceptance
 still requires the exact package on a real display.
 
+The native PTY presentation boundary for one primary plus one join is covered
+separately:
+
+```sh
+ruby tools/tests/hibr_join_frame_barrier_gate.rb
+```
+
+It deliberately staggers the two PTY redraws, then verifies through the
+critical diagnostic trace that no render occurs between the bounded Hibr frame
+barrier opening and its release. A timeout is allowed only at the display
+refresh deadline; it cannot be extended by continued writes.
+
 The stream reconnect/replay gate runs against that exact binary with the
 dummy video backend:
 

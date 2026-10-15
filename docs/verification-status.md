@@ -21,6 +21,16 @@ panes as separate terminals. It is the remaining Hibr 2-D union and picture
 propagation boundary tracked by Hibr #240 and #238. The screenshot is evidence
 that the implementation is not complete; it is not a claim of success.
 
+Blit now applies a bounded one-refresh presentation barrier to the primary and
+joined PTYs of one Hibr desktop. The barrier prevents a dirty member from being
+presented alone while its sibling's redraw is already in flight, releases
+immediately when all active members contribute damage, and times out at the
+display interval so a quiet join cannot freeze the primary. The focused gate
+`tools/tests/hibr_join_frame_barrier_gate.rb` passes and verifies that no
+`render_path` event occurs between barrier open and release. This fixes the
+Blit-side partial-frame presentation boundary only; it does not create the
+missing Kitty/Sixel payload that Hibr did not send.
+
 The earlier 0.1.481 visual acceptance is revoked by the subsequent
 physical capture. The live 1x2 result is one Hibr desktop, not two terminal
 instances, but the lower primary and upper join do not form a complete,

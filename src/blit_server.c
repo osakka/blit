@@ -100,6 +100,11 @@ extern char **environ;
    as many short writes.  Hold presentation briefly after the latest read so
    the renderer never exposes the clear/redraw interval between those writes. */
 #define BLIT_TERMINAL_FRAME_QUIET_US 8000ULL
+/* A Hibr desktop with joins is one logical scene delivered through multiple
+   PTYs.  Give the other viewport one display interval to contribute its
+   damage, then present whatever arrived.  This is deliberately bounded: a
+   missing or quiet join must never stall the primary surface indefinitely. */
+#define BLIT_HIBR_FRAME_BARRIER_FALLBACK_US 16000ULL
 /* How long a Hibr desktop may hold a registered owner without painting
    anything before that is reported as a fault (issue #32). Generous on
    purpose: a fresh desktop paints within a second, and the cost of being
@@ -877,6 +882,7 @@ typedef struct {
     unsigned long long topology_revision;
     int render_pending;
     uint64_t terminal_frame_quiet_until_us;
+    uint64_t hibr_frame_barrier_until_us;
     uint64_t render_last_us;
     int render_interval_ms;
     int render_effective_interval_ms;
@@ -1412,6 +1418,11 @@ static BlitSurface *find_surface_id(BlitRuntime *runtime,
                                     unsigned long long surface_id);
 static BlitSession *find_session_id(BlitRuntime *runtime,
                                     unsigned long long session_id);
+static int hibr_frame_barrier_active(const BlitRuntime *runtime,
+                                     uint64_t now);
+static void arm_hibr_frame_barrier(BlitRuntime *runtime,
+                                   const BlitSession *session,
+                                   uint64_t now);
 static BlitSession *hibr_input_owner(BlitRuntime *runtime,
                                      BlitSession *session);
 static BlitSession *hibr_render_source(BlitRuntime *runtime,
@@ -1835,6 +1846,13 @@ static int render_wait_ms(const BlitRuntime *runtime, uint64_t now)
         uint64_t delta = runtime->terminal_frame_quiet_until_us - now;
         wait_ms = (int)((delta + 999ULL) / 1000ULL);
         if (wait_ms < 1) wait_ms = 1;
+    }
+    if (hibr_frame_barrier_active(runtime, now)) {
+        uint64_t delta = runtime->hibr_frame_barrier_until_us - now;
+        int barrier_wait = (int)((delta + 999ULL) / 1000ULL);
+        if (barrier_wait < 1) barrier_wait = 1;
+        if (barrier_wait < wait_ms)
+            wait_ms = barrier_wait;
     }
     for (i = 0; i < runtime->output_count; ++i) {
         uint64_t delta;
@@ -13945,6 +13963,104 @@ static BlitSession *hibr_render_source(BlitRuntime *runtime,
     return session;
 }
 
+/* A native Hibr desktop is one logical scene even though its primary and
+   joined hold clients arrive over separate PTYs.  The PTYs do not provide a
+   shared read boundary, so one member can become dirty a few milliseconds
+   before another.  Treat the group as a bounded presentation unit: if at
+   least one member has damage, wait for all members that have damage to
+   arrive, or until the one-refresh deadline expires.
+
+   This is a presentation rule only.  It does not merge the terminal grids,
+   mirror a join, or invent a missing Kitty/Sixel picture.  Each viewport
+   remains authoritative for its own PTY output. */
+static void hibr_frame_barrier_group_state(const BlitRuntime *runtime,
+                                           const char *desktop_name,
+                                           int *members, int *dirty)
+{
+    int i;
+
+    *members = 0;
+    *dirty = 0;
+    for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
+        const BlitSession *session = &runtime->sessions[i];
+        BlitSurface *surface;
+
+        if (!session->used || session->surface_retired ||
+            (!session->hibr_desktop_primary && !session->hibr_desktop_join) ||
+            session->hibr_desktop_session[0] == '\0' ||
+            strcmp(session->hibr_desktop_session, desktop_name) != 0)
+            continue;
+        surface = find_surface_id((BlitRuntime *)runtime, session->id);
+        ++*members;
+        if (surface != NULL && surface->used && surface->damage_valid &&
+            !surface->frame_open)
+            ++*dirty;
+    }
+}
+
+static int hibr_frame_barrier_is_incomplete(const BlitRuntime *runtime)
+{
+    int i;
+
+    for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
+        const BlitSession *session = &runtime->sessions[i];
+        int members;
+        int dirty;
+
+        if (!session->used || !session->hibr_desktop_primary ||
+            session->hibr_desktop_session[0] == '\0')
+            continue;
+        hibr_frame_barrier_group_state(runtime,
+                                       session->hibr_desktop_session,
+                                       &members, &dirty);
+        if (members > 1 && dirty > 0 && dirty < members)
+            return 1;
+    }
+    return 0;
+}
+
+static int hibr_frame_barrier_active(const BlitRuntime *runtime,
+                                     uint64_t now)
+{
+    return runtime->hibr_frame_barrier_until_us > now &&
+        hibr_frame_barrier_is_incomplete(runtime);
+}
+
+static void arm_hibr_frame_barrier(BlitRuntime *runtime,
+                                   const BlitSession *session,
+                                   uint64_t now)
+{
+    int members;
+    int dirty;
+    uint64_t period = BLIT_HIBR_FRAME_BARRIER_FALLBACK_US;
+    uint64_t deadline;
+
+    if (session == NULL || (!session->hibr_desktop_primary &&
+                            !session->hibr_desktop_join) ||
+        session->hibr_desktop_session[0] == '\0')
+        return;
+    hibr_frame_barrier_group_state(runtime, session->hibr_desktop_session,
+                                   &members, &dirty);
+    if (members < 2 || dirty < 1)
+        return;
+    if (runtime->output_count > 0)
+        period = output_render_period_us(runtime, 0);
+    deadline = now + period;
+    /* Never extend an open barrier.  A producer that continually writes
+       chunks must not turn this bounded coalescing rule into a hang. */
+    if (runtime->hibr_frame_barrier_until_us > now)
+        return;
+    runtime->hibr_frame_barrier_until_us = deadline;
+    {
+        char detail[192];
+        snprintf(detail, sizeof(detail),
+                 "desktop=%s members=%d dirty=%d deadline_us=%llu period_us=%llu",
+                 session->hibr_desktop_session, members, dirty,
+                 (unsigned long long)deadline, (unsigned long long)period);
+        diagnostic_trace(runtime, "hibr_frame_barrier", detail);
+    }
+}
+
 static int create_session(BlitRuntime *runtime, const char *json,
                            BlitSession **created)
 {
@@ -15107,6 +15223,8 @@ static void service_session_output(BlitRuntime *runtime, int fd)
                                    sizeof(surface_event));
                 broadcast_stream(runtime, surface_event, BLIT_STREAM_SURFACES);
                 runtime->render_pending = 1;
+                arm_hibr_frame_barrier(runtime, &runtime->sessions[i],
+                                       monotonic_us());
                 if (runtime->sessions[i].terminal_frame_batch) {
                     uint64_t now_us = monotonic_us();
                     /* Open the coalescing window once; never extend it. The
@@ -25629,8 +25747,21 @@ int main(int argc, char **argv)
            each output's refresh deadline. */
         if (!pending_before_events && runtime.render_pending)
             rephase_idle_render_schedule(&runtime, now);
+        if (runtime.hibr_frame_barrier_until_us > 0 &&
+            !hibr_frame_barrier_is_incomplete(&runtime)) {
+            diagnostic_trace(&runtime, "hibr_frame_barrier_release",
+                             "all_active_members_dirty");
+            runtime.hibr_frame_barrier_until_us = 0;
+        } else if (runtime.hibr_frame_barrier_until_us > 0 &&
+                   now >= runtime.hibr_frame_barrier_until_us &&
+                   hibr_frame_barrier_is_incomplete(&runtime)) {
+            diagnostic_trace(&runtime, "hibr_frame_barrier_timeout",
+                             "deadline_expired_bounded_release");
+            runtime.hibr_frame_barrier_until_us = 0;
+        }
         if (runtime.render_pending &&
             now >= runtime.terminal_frame_quiet_until_us &&
+            !hibr_frame_barrier_active(&runtime, now) &&
             (output_mask = due_output_mask(&runtime, now)) != 0) {
             render_current_surfaces(&runtime, output_mask);
             advance_render_schedule(&runtime, now, output_mask);
