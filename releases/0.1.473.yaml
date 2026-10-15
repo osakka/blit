@@ -1,0 +1,30 @@
+release: 0.1.473
+package: blit_0.1.473-1_amd64.deb
+package_sha256: 1c05d010b3a5969ca730f46c79ce1bd7d299ffbc0111d96b9321dda8330774a0
+source_commit: 8d486e4
+package_documentation_commit: 8d486e4
+server_binary_sha256: 2416de5e5e256fc7ee10ea6a0353d541426d9dda87d875d9df11b52ead2e5997
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.191
+hibr_adapter_build: pass_exact_released_headers
+tcc_version: 0.9.27_x86_64_linux
+tcc_build_acceptance: pass_server
+openapi_yaml: pass
+focused_pane_split_geometry: pass_odd_grid_contiguous_remainder
+focused_terminal_suite: pass_3_fail_0
+package_reproducibility: pass_two_independent_builds_byte_identical
+package_artifact_acceptance: pass_manifest_hashes_match_package_and_reproducible
+qemu_hibr_lifecycle_acceptance: unavailable_missing_kernel_and_initramfs
+live_host: 192.168.10.54
+live_predeployment_version: 0.1.472
+live_deployment: pending
+live_pane_split_acceptance: pending
+physical_multi_monitor_acceptance: unavailable_one_output
+physical_high_refresh_acceptance: open_issue_21
+notes: >-
+  This release fixes logical pane partitioning for odd terminal grids. The
+  previous floor-based split left one unowned row or column; boundary-based
+  partitioning assigns the remainder to the final pane, so a 1x2 80x45 grid
+  is 80x22 above and 80x23 below. The lower pane remains the explicit primary
+  target. Hibr source is unchanged.
