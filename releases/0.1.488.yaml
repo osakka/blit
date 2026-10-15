@@ -15,7 +15,7 @@ package_reproducibility: pass_rebuilt_identical
 package_artifact_acceptance: pass
 qemu_hibr_lifecycle_acceptance: unavailable_missing_kernel_and_initramfs
 live_host: 192.168.10.54
-live_deployment: pending_operator_install
+live_deployment: pass_api_verified_0.1.488
 live_login_acceptance: pending_hibr_79_root_pam_logind
 physical_multi_monitor_acceptance: unavailable_one_output
 physical_high_refresh_acceptance: open_issue_21
@@ -25,4 +25,7 @@ notes: >-
   gate proves the image pixel is present, survives incremental cell damage,
   and is cleared after the exact Hibr delete form. Hibr source was not
   modified. The adapter is the unchanged pinned artifact from 0.1.487;
-  package installation and live graphics acceptance remain pending.
+  the package is installed on 192.168.10.54 and /v1/version reports 0.1.488.
+  The post-restart trace contains one Kitty capability query, zero image
+  uploads, and zero rejections; the captured screen is therefore not an image
+  transport acceptance.

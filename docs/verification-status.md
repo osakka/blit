@@ -24,6 +24,12 @@ The full renderer suite passes:
 RUN_GATES_PASS pass=43 skip=0 fail=0
 ```
 
+The package is deployed on `192.168.10.54`; `/v1/version` reports `0.1.488`.
+The post-restart live trace contains one Kitty capability query, zero image
+uploads, and zero rejections. The captured live screen is a clean Hibr login
+saver, so it confirms the deployment and presentation path but is not a
+Kitty/Sixel image-transport acceptance.
+
 This closes the confirmed parser/invalidation defects. It does not claim that
 every live overlap is caused by Kitty/Sixel: a live capture must still show a
 non-empty graphics trace before graphics transport is assigned as the cause.
