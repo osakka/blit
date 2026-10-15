@@ -3,6 +3,27 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 0.1.471 font-scale physical-pixel correction candidate
+
+The live scale-3 screenshot exposed a gap in the previous 0.1.470 evidence:
+`/v1/fonts` reported 24x48 cells and the pointer changed size, but the SDL
+terminal glyphs remained at the base 8x16 raster size. The display-attached
+Hibr surface also retained its old grid. This was a real renderer defect, not
+an Hibr defect; Hibr source was not changed.
+
+0.1.471 moves font scale into one physical cell-metric boundary. SDL scene
+textures stay at physical output size, SDL drawing uses the scaled metrics
+directly, pointer hit-testing uses those same metrics, and a display-attached
+Hibr session reflows to the new display grid. The strengthened local font API
+gate now checks pixels at scale 1 and scale 2, not only JSON metadata. The
+focused font/renderer run passed 47/47, and the reproducible package is
+`blit_0.1.471-1_amd64.deb` with the exact checksum in
+[`releases/0.1.471.yaml`](../releases/0.1.471.yaml).
+
+Live deployment and scale-3 screenshot acceptance remain pending until the
+exact package is installed on `192.168.10.54`. No physical multi-monitor or
+physical high-refresh claim is made here.
+
 ## 0.1.470 refresh-bound damage coalescing candidate
 
 The live trace identified the jerky-motion root cause: Hibr surface commits

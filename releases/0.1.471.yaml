@@ -1,0 +1,30 @@
+release: 0.1.471
+package: blit_0.1.471-1_amd64.deb
+package_sha256: d047f2be485379a03710617f8214a589e9dc538d2924b8c3604c5acd873e7a35
+source_commit: fed236e
+package_documentation_commit: fed236e
+server_binary_sha256: 3e1aa17e56250984ba63e3a0023f4a36fc684e704f0e7775d94ec4110b744c4c
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.191
+hibr_adapter_build: pass_exact_released_headers
+tcc_version: 0.9.27_x86_64_linux
+tcc_build_acceptance: pass_server
+openapi_yaml: pass
+focused_font_renderer_suite: pass_47_fail_0
+frame_rate_acceptance: inherited_0.1.470
+pointer_scheduler_acceptance: inherited_0.1.470
+package_reproducibility: pass_two_independent_builds_byte_identical
+package_artifact_acceptance: pass_manifest_hashes_match_package_and_reproducible
+qemu_hibr_lifecycle_acceptance: unavailable_missing_kernel_and_initramfs
+live_host: 192.168.10.54
+live_predeployment_version: 0.1.470
+live_deployment: pending
+live_font_pixel_acceptance: pending
+physical_multi_monitor_acceptance: unavailable_one_output
+physical_high_refresh_acceptance: open_issue_21
+notes: >-
+  This release closes the font-scale rendering boundary identified by live
+  scale-3 evidence: SDL now renders with one physical cell-metric source,
+  display-attached Hibr surfaces reflow with the display grid, and pointer
+  hit-testing follows the same physical coordinates. Hibr source is unchanged.
