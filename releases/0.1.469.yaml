@@ -1,0 +1,43 @@
+release: 0.1.469
+package: blit_0.1.469-1_amd64.deb
+package_sha256: c520e8d774eeb6d0426de8d3230f4544d149a443c64677e7ffbd3dc41565ccaa
+source_commit: 96e4486
+package_documentation_commit: 96e4486
+server_binary_sha256: bab10942c60dcd55d831f96e60cd51c5bb1f557b34490fd2aa2dfe0dd546977b
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.191
+hibr_adapter_build: pass_exact_released_headers
+tcc_version: 0.9.27_x86_64_linux
+tcc_build_acceptance: pass_server_helper_adapter
+openapi_yaml: pass
+api_schema_gate: pass_40_paths
+full_local_suite: pass_69_skip_3_fail_0
+adapter_input_acceptance: pass_pointer_origin_zero_buttons_3_wheel_2_mouse_modifiers_3_function_keys_12_resolved_text_6
+adapter_provider_acceptance: pass_pane_ownership_watched_wakeup_utf8_width_resize_poll_0
+adapter_coalesce_acceptance: pass_revision_170_idle_requests_0
+input_source_diagnostics_acceptance: pass_schema_and_evdev_scan_fields
+input_stream_text_acceptance: pass_plain_shift_altgr_shift_release_omitted
+external_pointer_incremental_acceptance: pass_pointer_cache_hit
+external_pointer_full_rebuild_acceptance: pass_pointer_cache_hit
+motion_trail_acceptance: pass_blank_cells_799_steps_12
+render_state_agreement_acceptance: pass_blank_cells_30
+frame_rate_settled_acceptance: pass_59_999_hz_zero_missed_deadlines
+terminal_soak_120s_acceptance: pass_4_sessions_12400_snapshots_1128_resizes
+package_reproducibility: pending_artifact_gate
+package_artifact_acceptance: pending_artifact_gate
+qemu_hibr_lifecycle_acceptance: unavailable_missing_kernel_and_initramfs
+live_host: 192.168.10.54
+live_predeployment_version: 0.1.468
+live_deployment: pending_supervised_update
+live_hibr_desktop_acceptance: pending
+live_input_hotplug: pending_post_deployment_capture
+physical_multi_monitor_acceptance: unavailable_one_output
+physical_high_refresh_acceptance: open_issue_21
+notes: >-
+  This release makes historical evdev source identity explicit after KVM or
+  USB re-enumeration. Existing event paths remain for kernel correlation, but
+  runtime diagnostics now pair each last mouse/keyboard event with its input
+  resource ID and current presence. Hibr source and input ownership are
+  unchanged. Live deployment is intentionally not claimed until the
+  supervised package update and post-KVM API capture complete.
