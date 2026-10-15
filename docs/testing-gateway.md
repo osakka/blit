@@ -357,7 +357,7 @@ The Blit-owned join contract has a local gate that does not require a running
 Hibr installation:
 
 ```sh
-ruby tools/tests/hibr_join_mirror_gate.rb
+ruby tools/tests/hibr_join_viewport_gate.rb
 ```
 
 It creates one primary and one `desktop --join` fixture, proves that the

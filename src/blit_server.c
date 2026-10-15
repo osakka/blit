@@ -777,11 +777,6 @@ typedef struct {
     unsigned long long hibr_owner_writes;
     uint64_t hibr_owner_registered_us;
     int hibr_unpainted_reported;
-    /* A Hibr join is a presentation surface, not a second desktop writer.
-       Keep the source revision here so the mirror is copied once per source
-       frame, while the primary remains the sole owner of desktop state. */
-    unsigned long long hibr_mirror_source_id;
-    unsigned long long hibr_mirror_source_revision;
     char hibr_session_token[64];
     int terminal_escape;
     /* Hibr emits a single SGR containing bold plus truecolor foreground and
@@ -1354,7 +1349,6 @@ static BlitSession *hibr_input_owner(BlitRuntime *runtime,
                                      BlitSession *session);
 static BlitSession *hibr_render_source(BlitRuntime *runtime,
                                        BlitSession *session);
-static void sync_hibr_join_mirrors(BlitRuntime *runtime);
 static BlitGraphicsImage *graphics_image_find(BlitSession *session,
                                               unsigned int id);
 static void graphics_image_release(BlitGraphicsImage *image);
@@ -1821,7 +1815,6 @@ static void render_current_surfaces(BlitRuntime *runtime,
     int i;
 
     memset(&plan, 0, sizeof(plan));
-    sync_hibr_join_mirrors(runtime);
     plan.revision = runtime->frame_revision;
     for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
         BlitSurface *surface = runtime->surfaces[i];
@@ -13341,7 +13334,7 @@ static void service_attach_reasserts(BlitRuntime *runtime, uint64_t now)
            while the real desktop is owned by another console/provider.  The
            bounded token-scoped discovery window remains the safety boundary;
            valid primary and --join clients register before it expires. */
-        if (session->hibr_process &&
+        if (session->hibr_process && !session->hibr_desktop_join &&
             !session->hibr_owner_registered &&
             session->attach_reassert_attempts >=
                 session->attach_reassert_max_attempts &&
@@ -13876,107 +13869,14 @@ static BlitSession *hibr_input_owner(BlitRuntime *runtime,
     return session;
 }
 
+/* A joined pane is a real Hibr hold client.  Its PTY carries the rectangle
+   that hold rendered for that client, so its own terminal surface is the
+   render source.  Only input is canonicalized to the primary desktop owner. */
 static BlitSession *hibr_render_source(BlitRuntime *runtime,
                                        BlitSession *session)
 {
-    return hibr_input_owner(runtime, session);
-}
-
-static void sync_hibr_join_mirrors(BlitRuntime *runtime)
-{
-    int index;
-
-    if (runtime == NULL)
-        return;
-    for (index = 0; index < BLIT_MAX_SESSIONS; ++index) {
-        BlitSession *join = &runtime->sessions[index];
-        BlitSession *primary;
-        BlitSurface *source;
-        BlitSurface *destination;
-        int row;
-        int column;
-        int rows;
-        int columns;
-
-        if (!join->used || !join->hibr_desktop_join ||
-            join->surface_mode != BLIT_SURFACE_MIRROR)
-            continue;
-        primary = hibr_input_owner(runtime, join);
-        source = primary != NULL ? find_surface_id(runtime, primary->id) : NULL;
-        destination = find_surface_id(runtime, join->id);
-        if (primary == NULL || source == NULL || destination == NULL ||
-            source->frame_open)
-            continue;
-        if (join->hibr_mirror_source_id == primary->id &&
-            join->hibr_mirror_source_revision == source->revision)
-            continue;
-
-        rows = destination->height;
-        columns = destination->width;
-        for (row = 0; row < rows; ++row) {
-            memset(destination->cells[row], 0,
-                   sizeof(destination->cells[row]));
-            memset(destination->codepoints[row], 0,
-                   sizeof(destination->codepoints[row]));
-            memset(destination->combining[row], 0,
-                   sizeof(destination->combining[row]));
-            memset(destination->combining_count[row], 0,
-                   sizeof(destination->combining_count[row]));
-            memset(destination->foreground[row], 0,
-                   sizeof(destination->foreground[row]));
-            memset(destination->background[row], 0,
-                   sizeof(destination->background[row]));
-            memset(destination->underline_color[row], 0,
-                   sizeof(destination->underline_color[row]));
-            memset(destination->attributes[row], 0,
-                   sizeof(destination->attributes[row]));
-            memset(destination->links[row], 0,
-                   sizeof(destination->links[row]));
-            if (row >= source->height)
-                continue;
-            if (columns > source->width)
-                columns = source->width;
-            memcpy(destination->cells[row], source->cells[row],
-                   (size_t)columns * sizeof(destination->cells[row][0]));
-            memcpy(destination->codepoints[row], source->codepoints[row],
-                   (size_t)columns * sizeof(destination->codepoints[row][0]));
-            memcpy(destination->combining[row], source->combining[row],
-                   (size_t)columns * sizeof(destination->combining[row][0]));
-            memcpy(destination->combining_count[row],
-                   source->combining_count[row],
-                   (size_t)columns * sizeof(destination->combining_count[row][0]));
-            memcpy(destination->foreground[row], source->foreground[row],
-                   (size_t)columns * sizeof(destination->foreground[row][0]));
-            memcpy(destination->background[row], source->background[row],
-                   (size_t)columns * sizeof(destination->background[row][0]));
-            memcpy(destination->underline_color[row],
-                   source->underline_color[row],
-                   (size_t)columns * sizeof(destination->underline_color[row][0]));
-            memcpy(destination->attributes[row], source->attributes[row],
-                   (size_t)columns * sizeof(destination->attributes[row][0]));
-            memcpy(destination->links[row], source->links[row],
-                   (size_t)columns * sizeof(destination->links[row][0]));
-        }
-        destination->cursor_x = source->cursor_x < destination->width ?
-            source->cursor_x : destination->width - 1;
-        destination->cursor_y = source->cursor_y < destination->height ?
-            source->cursor_y : destination->height - 1;
-        destination->cursor_visible = source->cursor_visible;
-        destination->cursor_style = source->cursor_style;
-        destination->damage_valid = 1;
-        destination->damage_x = 0;
-        destination->damage_y = 0;
-        destination->damage_width = destination->width;
-        destination->damage_height = destination->height;
-        destination->frame_open = 0;
-        ++destination->revision;
-        if (destination->revision == 0)
-            destination->revision = 1;
-        join->hibr_mirror_source_id = primary->id;
-        join->hibr_mirror_source_revision = source->revision;
-        runtime->render_pending = 1;
-        diagnostic_trace(runtime, "hibr_join_mirror", "primary surface copied to joined pane");
-    }
+    (void)runtime;
+    return session;
 }
 
 static int create_session(BlitRuntime *runtime, const char *json,
@@ -14257,17 +14157,18 @@ static int create_session(BlitRuntime *runtime, const char *json,
                                  "%s", value);
                 }
             }
-            /* A Hibr --join process is not a second desktop writer.  Its
-               pane is always the Blit mirror of the primary owner, regardless
-               of the launcher's default surface mode. */
-            session->surface_mode = hibr_desktop_join ? BLIT_SURFACE_MIRROR :
+            /* A Hibr --join process is not a second desktop writer.  It is a
+               real hold client whose PTY carries its own viewport, so Blit
+               parses that stream into this pane.  The primary alone uses the
+               API-owned display provider. */
+            session->surface_mode = hibr_desktop_join ? BLIT_SURFACE_TERMINAL :
                 (strcmp(surface_mode, "external") == 0 ?
                  BLIT_SURFACE_EXTERNAL :
                  (strcmp(surface_mode, "mirror") == 0 ?
                   BLIT_SURFACE_MIRROR : BLIT_SURFACE_TERMINAL));
             snprintf(session->state, sizeof(session->state), "%s",
                      hibr_process ? "running" : "starting");
-            if (hibr_process) {
+            if (hibr_process && !hibr_desktop_join) {
                 /* Hibr's adapter path can publish the initial surface through
                    Blit's API without writing terminal bytes to the PTY. Arm
                    the ownership-scoped geometry reassert at creation time so
@@ -17967,11 +17868,9 @@ static void handle_request(int fd, BlitRuntime *runtime,
             return;
         }
         if (find_session_id(runtime, surface->owner_session_id) != NULL &&
-            find_session_id(runtime, surface->owner_session_id)->hibr_desktop_join &&
-            find_session_id(runtime, surface->owner_session_id)->surface_mode ==
-                BLIT_SURFACE_MIRROR) {
-            send_problem(fd, 409, "Conflict", "mirror_surface_read_only",
-                         "A Hibr joined surface is derived from its primary desktop.");
+            find_session_id(runtime, surface->owner_session_id)->hibr_desktop_join) {
+            send_problem(fd, 409, "Conflict", "hibr_join_surface_read_only",
+                         "A Hibr joined surface is populated by its hold-client PTY; mutate the primary desktop instead.");
             return;
         }
         if (idempotency_replay(runtime, fd, request, method, path, payload))
@@ -18086,11 +17985,6 @@ static void handle_request(int fd, BlitRuntime *runtime,
 
         if (idempotency_replay(runtime, fd, request, method, path, payload))
             return;
-
-        /* Joined surfaces are derived from the primary at the presentation
-           boundary. Sync before validating an explicit frame plan so that
-           the plan contains the mirror revision that will actually draw. */
-        sync_hibr_join_mirrors(runtime);
 
         if (!json_int(payload, "base_revision", &base_revision)) {
             send_problem(fd, 400, "Bad Request", "invalid_frame_request",
@@ -23539,17 +23433,14 @@ static BlitSession *keyboard_target(BlitRuntime *runtime)
     return NULL;
 }
 
-/* ADR 0057: true when this session's surface is authored by a registered
-   owner over the API rather than by its PTY byte stream. Gated on the
-   desktop role, which is set at session create from the launch arguments,
-   not on hibr_owner_registered, which arrives asynchronously -- the
-   handshake window is exactly when a stray PTY write does the most damage
-   and is the state that produced a "running" session with a blank
-   surface. */
+/* ADR 0057: true when this session's surface is authored by the primary
+   Hibr display provider over the API rather than by its PTY byte stream.
+   A --join client is deliberately excluded: hold renders that client's
+   viewport to its PTY and the normal terminal parser owns the joined pane. */
 static int session_surface_is_owner_authored(const BlitSession *session)
 {
     return session != NULL &&
-        (session->hibr_desktop_primary || session->hibr_desktop_join);
+        session->hibr_desktop_primary;
 }
 
 static int evdev_key_is_held(const BlitInputDevice *device,

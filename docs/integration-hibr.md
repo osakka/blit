@@ -79,13 +79,14 @@ Use `/usr/bin/desktop` only when deliberately testing Hibr's native display
 provider. It is not the Blit graphics integration path and does not prove
 wallpaper/canvas presentation through Blit.
 
-The packaged entrypoint uses the `console-blit` provider for the primary and
-every `desktop --join` client. The primary Hibr surface is the single source
-of truth. Each joined surface is a Blit-owned read-only mirror of the primary's
-committed cells and graphics, and hit-tested input from the joined pane is
-delivered to the primary owner's input stream. This avoids a second writer and
-does not require Hibr to emit an ANSI stream for Blit to parse
-([ADR 0077](adr/0077-hibr-joins-mirror-one-authoritative-desktop.md)).
+The packaged entrypoint uses the `console-blit` provider only for the primary.
+The primary Hibr surface is the single desktop owner. Each `desktop --join`
+client is a Hibr hold client with its own PTY viewport; Blit parses that PTY
+into the joined pane, so it is a distinct surface rather than a copy of the
+primary. Hit-tested input from the joined pane is delivered to the primary
+owner. Direct cell mutation of a joined surface is rejected with
+`hibr_join_surface_read_only`
+([ADR 0078](adr/0078-hibr-joins-are-independent-viewports.md)).
 
 The package also installs `blit-runtime-console.hibr`, and the entrypoint sets
 `HIBR_RC` to it when the caller has not supplied an explicit fixture or
@@ -324,9 +325,10 @@ Hibr desktop remains alive under large redraws.
 
 The current QEMU evidence covers the packaged Hibr desktop, primary plus
 auxiliary `--join` sessions, the four logical pane layouts, and input-route
-creation over TCP to a two-output VKMS fixture. The new join-mirror gate covers
-the ownership and input-routing contract; a QEMU screenshot gate still needs
-to prove the same mirror with real Kitty/Sixel wallpaper. With the current
+creation over TCP to a two-output VKMS fixture. The join-viewport gate covers
+distinct PTY surfaces, ownership, and input routing; the QEMU screenshot gate
+must prove the same independent viewports with real Kitty/Sixel wallpaper.
+With the current
 Hibr executable and modules staged, the control client reports both displays;
 a dedicated Blit test workload creates a window and validates Hibr `move`,
 `resize`, and `focus` across the joined display. The fixture must also provide
@@ -348,12 +350,12 @@ check performs no HTTP poll; SIGWINCH is the resize edge. Physical-host clicks,
 shortcuts, redraws, and application wakeups are still measured after package deployment; passing
 translation/provider gates are not reported as physical acceptance.
 
-The local join-mirror gate now proves the server-side contract without
-modifying Hibr: one primary and one `--join` session are created, the primary
-cell `PRIMARY` is observed on the joined surface, direct writes to the mirror
-are rejected with `mirror_surface_read_only`, and a pointer hit in the joined
-pane is traced with the primary as `input_session`. This is a Blit integration
-gate, not physical-display acceptance. The live host still needs a fresh
-package deployment and screenshot/input validation before we claim that the
-wallpaper, context menu, and full Hibr window-placement experience work on
-the real display.
+The local join-viewport gate now proves the server-side contract without
+modifying Hibr: one primary and one `--join` session are created, each PTY
+paints a different surface, direct writes to the joined surface are rejected
+with `hibr_join_surface_read_only`, and a pointer hit in the joined pane is
+traced with the primary as `input_session`. This is a Blit integration gate,
+not physical-display acceptance. The live host still needs a fresh package
+deployment and screenshot/input validation before we claim that the wallpaper,
+context menu, and full Hibr window-placement experience work on the real
+display.

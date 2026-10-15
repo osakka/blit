@@ -105,7 +105,7 @@ panes, input routing, and diagnostics.
   and direct-KMS capability behavior.
 - [hibr integration](integration-hibr.md) — standalone-service decision,
   PTY compatibility probe, the operational console-module adapter, and the
-  primary-to-join mirror contract.
+  one-desktop independent-viewport join contract.
 - [ADR index](adr/README.md) — decisions that constrain implementation.
 - [Verification status](verification-status.md) — the current evidence ledger,
   release gates, and explicitly unverified items.

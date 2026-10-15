@@ -3,25 +3,28 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
-## 0.1.476 Hibr join mirror candidate
+## 0.1.477 Hibr independent-viewport candidate
 
-The join integration now has one explicit source of truth. A Hibr
-`desktop --join` session is forced to Blit's `mirror` surface mode: Blit copies
-the primary's committed cells and cursor at the presentation boundary,
-renders the primary's Kitty/Sixel graphics in the joined pane, rejects direct
-mirror writes, and routes joined-pane pointer/keyboard input to the primary
-Hibr owner. Hibr source is unchanged. This replaces the earlier incomplete
-assumption that a joined adapter surface would receive an independent PTY
-stream.
+The join boundary has been corrected to match Hibr's hold contract. A Hibr
+`desktop --join` session is forced to `surface_mode: terminal`; the primary
+alone loads Blit's display provider, while each join remains a Hibr hold client
+whose own PTY is parsed into its own Blit pane. There is one logical Hibr
+desktop, but no framebuffer copy and no second desktop owner. Joined-surface
+cell mutation is rejected with `hibr_join_surface_read_only`, and hit-tested
+input is routed to the primary Hibr owner. Hibr source is unchanged.
 
-The exact TCC build passes `hibr_join_mirror_gate.rb`, `hibr_singleton_gate.rb`,
-`pointer_settings_gate.rb`, and `api_schema_gate.rb`. The gate proves cell
-mirroring, read-only enforcement, and joined-pane-to-primary input routing.
-The Debian artifact passed the manifest/content gate and a reproducible rebuild
-with the same SHA-256; its exact hashes are recorded in
-[`releases/0.1.476.yaml`](../releases/0.1.476.yaml). Physical-host
-wallpaper/context-menu acceptance remains pending; no live-display or
-multi-monitor claim is made from this local evidence.
+The focused TCC server gate passes
+`hibr_join_viewport_gate.rb`: distinct PTY output remains isolated to distinct
+surfaces, direct joined-surface writes are rejected, and joined-pane pointer
+routing records the primary as `input_session`. This is server-side evidence;
+the exact Hibr QEMU/physical gates must still prove wallpaper, protocol
+graphics, context menus, window placement, and reconnect behavior. The package
+and live deployment are not claimed until the release artifact is built from
+the final commit and installed on `192.168.10.54`.
+
+The preceding 0.1.476 mirror candidate is retained as historical evidence in
+[`releases/0.1.476.yaml`](../releases/0.1.476.yaml) and superseded by ADR 0078;
+it must not be used as the current join contract.
 
 ## 0.1.472 fractional font-scale contract
 
