@@ -1,0 +1,33 @@
+release: 0.1.475
+package: blit_0.1.475-1_amd64.deb
+package_sha256: cb56381785f2f2de6c4b5a95004e0ceaf5a76ec435c132ab02792d40b05e1146
+source_commit: 9645c80
+package_documentation_commit: 9645c80
+server_binary_sha256: ee5904ea4dbf18829a3b09045c59678ccfd67c9c3be1e9d46acb410bd262b920
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.191
+hibr_adapter_build: pass_exact_released_headers
+tcc_version: 0.9.27_x86_64_linux
+tcc_build_acceptance: pass_server
+openapi_yaml: pass
+focused_cell_geometry: pass_scale_1.6_grid_78x29_origin_5x7
+focused_pane_split_geometry: pass_physical_regions_complete_grids
+focused_terminal_suite: pass_3_fail_0
+focused_renderer_suite: pass_45_fail_0
+package_reproducibility: pending_manifest_gate
+package_artifact_acceptance: pending_manifest_gate
+qemu_hibr_lifecycle_acceptance: unavailable_missing_kernel_and_initramfs
+live_host: 192.168.10.54
+live_predeployment_version: 0.1.474
+live_deployment: pending
+live_cell_grid_acceptance: pending
+live_join_acceptance: pending
+physical_multi_monitor_acceptance: unavailable_one_output
+physical_high_refresh_acceptance: open_issue_21
+notes: >-
+  Pane geometry now partitions the physical output before quantizing each pane.
+  A 1x2 split on the live 1920x2160, 48px-cell output produces two 80x22
+  grids centred in 1920x1080 regions, preventing a Hibr menu row from
+  crossing the physical hinge. Hibr source is unchanged. The live joined Hibr
+  client remains a separate integration acceptance item.
