@@ -1,0 +1,46 @@
+release: 0.1.468
+package: blit_0.1.468-1_amd64.deb
+package_sha256: 98952c22ac11bf8b0d730f12c03339719a23912e5ca200d4b6a90b4151801b51
+source_commit: 7cdd723
+package_documentation_commit: 7cdd723
+server_binary_sha256: 2610a0181fb87eb15becb47a75e3b8ad962927bc9a71b68feea83756351e1aa0
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.191
+hibr_adapter_build: pass_exact_released_headers
+tcc_version: 0.9.27_x86_64_linux
+tcc_build_acceptance: pass_server_helper_adapter
+openapi_yaml: pass
+api_schema_gate: pass_40_paths
+full_local_suite: pass_69_skip_4_fail_0
+adapter_input_acceptance: pass_pointer_origin_zero_buttons_3_wheel_2_mouse_modifiers_3_function_keys_12_resolved_text_6
+adapter_provider_acceptance: pass_pane_ownership_watched_wakeup_utf8_width_resize_poll_0
+adapter_coalesce_acceptance: pass_revision_170_idle_requests_0
+input_stream_text_acceptance: pass_plain_shift_altgr_shift_release_omitted
+external_pointer_incremental_acceptance: pass_pointer_cache_hit
+external_pointer_full_rebuild_acceptance: pass_pointer_cache_hit
+motion_trail_acceptance: pass_blank_cells_799_steps_12
+render_state_agreement_acceptance: pass_blank_cells_30
+frame_rate_settled_acceptance: pass_59_999_hz_zero_missed_deadlines
+terminal_soak_120s_acceptance: pass_4_sessions_12268_snapshots_1116_resizes
+package_reproducibility: pass_two_independent_builds_byte_identical
+package_artifact_acceptance: pass_manifest_hashes_match_package_and_reproducible
+qemu_hibr_lifecycle_acceptance: unavailable_missing_kernel_and_initramfs
+live_host: 192.168.10.54
+live_predeployment_version: 0.1.467
+live_deployment: pending
+live_hibr_desktop_acceptance: pending
+live_drag_direction_acceptance: pending_controlled_live_deployment
+live_physical_input_report: pending_post_update_operator_check
+live_trail_accumulation: pending_issue_72
+live_input_hotplug: pending_issue_74
+physical_multi_monitor_acceptance: unavailable_one_output
+physical_high_refresh_acceptance: open_issue_21
+notes: >-
+  This release corrects the Blit-owned Hibr provider adapter's drag action.
+  Hibr requires the held button in `mouse drag left row column`; omitting it
+  shifted the row/column arguments and made horizontal movement appear
+  vertical-only. Plain and modifier-prefixed drags now include the
+  deterministic lowest-numbered held button. Hibr source and desktop
+  configuration remain unchanged. Live deployment and physical drag
+  acceptance remain pending.
