@@ -50,6 +50,16 @@ fresh capture also shows that distinct PTY surfaces and a nominal 60 Hz output
 are not sufficient acceptance evidence. Hibr #240 now tracks the required 2-D
 union/layout contract; Hibr #238 tracks spanning picture propagation.
 
+The live renderer-versus-state comparison was then corrected to use the
+topology-reported origin of each pane. The former probe always sampled the
+top-left pane, which produced a false failure for the lower surface. With the
+correct origin, `host_render_agreement.rb` passes for both live surfaces
+(`surface-1` and `surface-2`): the pixels in every checked blank cell equal
+the background reported by that surface's API snapshot. This is strong
+evidence that Blit is painting the incomplete Hibr cell scene without stale
+pixels or a pane-origin error; it does not turn absent Hibr picture payloads
+into a complete joined wallpaper.
+
 Live 0.1.477 evidence identified the remaining join defect: the primary
 `console-blit` adapter painted its API surface, but Hibr's hold PTY had no
 primary stream to fan out, leaving the joined pane black. A native-Hibr probe

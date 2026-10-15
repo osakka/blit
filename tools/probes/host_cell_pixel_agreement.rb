@@ -36,8 +36,6 @@ BASE = URI(ENV.fetch('BLIT_LIVE', 'http://192.168.10.54:8080'))
 TOKEN = ENV.fetch('BLIT_AUTH_TOKEN')
 SAMPLES = Integer(ENV.fetch('BLIT_SAMPLES', '6'), 10)
 INTERVAL = Float(ENV.fetch('BLIT_INTERVAL', '8'))
-CELL_W = 8
-CELL_H = 16
 
 def get(path, raw: false)
   uri = BASE + path
@@ -60,8 +58,9 @@ def drawn_set(doc)
   [out, (cursor['visible'] ? [cursor['x'], cursor['y']] : nil)]
 end
 
-# Every pixel of every cell. The inset is where the surface starts on the panel.
-def painted_set(bmp, inset, columns, rows)
+# Every pixel of every cell. The topology-derived origin is where this surface
+# starts on the panel; it includes the pane's grid remainder and API inset.
+def painted_set(bmp, origin_x, origin_y, cell_width, cell_height, columns, rows)
   width = bmp[18, 4].unpack1('l<')
   height = bmp[22, 4].unpack1('l<')
   stride = (width * 3 + 3) & ~3
@@ -69,12 +68,12 @@ def painted_set(bmp, inset, columns, rows)
   (0...rows).each do |cy|
     (0...columns).each do |cx|
       found = false
-      (0...CELL_H).each do |dy|
-        y = inset + cy * CELL_H + dy
+      (0...cell_height).each do |dy|
+        y = origin_y + cy * cell_height + dy
         next if y >= height
 
-        (0...CELL_W).each do |dx|
-          x = inset + cx * CELL_W + dx
+        (0...cell_width).each do |dx|
+          x = origin_x + cx * cell_width + dx
           next if x >= width
 
           offset = 54 + (height - 1 - y) * stride + x * 3
@@ -94,15 +93,15 @@ def painted_set(bmp, inset, columns, rows)
   lit
 end
 
-def pointer_cells
+def pointer_cells(origin_x, origin_y, cell_width, cell_height)
   pointer = get('/v1/diagnostics').fetch('render').fetch('pointer')
   return Set.new unless pointer['valid']
 
   cells = Set.new
   [[pointer['x'], pointer['y']],
    [pointer['previous_x'], pointer['previous_y']]].each do |x, y|
-    cx = ((x - 4) / CELL_W).floor
-    cy = ((y - 4) / CELL_H).floor
+    cx = ((x - origin_x) / cell_width).floor
+    cy = ((y - origin_y) / cell_height).floor
     (0..2).each { |dx| (0..2).each { |dy| cells << [cx + dx, cy + dy] } }
   end
   cells
@@ -110,6 +109,14 @@ end
 
 surface = ARGV[0] || abort('usage: host_cell_pixel_agreement.rb SURFACE_ID')
 inset = get('/v1/diagnostics').fetch('render').fetch('surface_inset_px')
+topology = get('/v1/topology')
+pane = topology.fetch('panes').find { |candidate| candidate['surface_id'] == surface }
+abort "surface #{surface} has no topology pane" unless pane
+grid = pane.fetch('cell_grid')
+cell_width = grid.fetch('cell_width')
+cell_height = grid.fetch('cell_height')
+origin_x = pane.fetch('pixel_region').fetch('x') + grid.fetch('origin_x') + inset
+origin_y = pane.fetch('pixel_region').fetch('y') + grid.fetch('origin_y') + inset
 failures = []
 worst = 0
 SAMPLES.times do |sample|
@@ -117,9 +124,10 @@ SAMPLES.times do |sample|
   bmp = get('/v1/diagnostics/screenshots/display-1?cached=1', raw: true)
   after, cursor_b = drawn_set(get("/v1/surfaces/#{surface}/cells"))
   geometry = get("/v1/surfaces/#{surface}/summary")
-  lit = painted_set(bmp, inset, geometry.fetch('width'), geometry.fetch('height'))
+  lit = painted_set(bmp, origin_x, origin_y, cell_width, cell_height,
+                   geometry.fetch('width'), geometry.fetch('height'))
 
-  excluded = pointer_cells
+  excluded = pointer_cells(origin_x, origin_y, cell_width, cell_height)
   excluded << cursor_a if cursor_a
   excluded << cursor_b if cursor_b
   stale = lit - (before | after) - excluded

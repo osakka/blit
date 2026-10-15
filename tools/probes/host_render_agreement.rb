@@ -18,7 +18,7 @@ require 'json'; require 'net/http'; require 'uri'
 HOST = ARGV[0] || '192.168.10.54:8080'; TOKEN = ARGV[1] || 'hellomonkeyboy'
 SURFACE = ARGV[2] || 'surface-6'
 ATTEMPTS = Integer(ARGV[3] || '12')
-BASE = URI("http://#{HOST}"); CW = 8; CH = 16
+BASE = URI("http://#{HOST}")
 def req(m, p)
   u = BASE + p; r = { 'GET' => Net::HTTP::Get }.fetch(m).new(u)
   r['Authorization'] = "Bearer #{TOKEN}"
@@ -28,6 +28,14 @@ def json(p) = JSON.parse(req('GET', p).body)
 diag = json('/v1/diagnostics'); INSET = diag['render']['surface_inset_px']
 disp = json('/v1/displays')['displays'][0]
 W = disp['bounds']['width']; H = disp['bounds']['height']
+topology = json('/v1/topology')
+pane = topology.fetch('panes').find { |candidate| candidate['surface_id'] == SURFACE }
+abort "surface #{SURFACE} has no topology pane" unless pane
+grid = pane.fetch('cell_grid')
+CW = grid.fetch('cell_width')
+CH = grid.fetch('cell_height')
+ORIGIN_X = pane.fetch('pixel_region').fetch('x') + grid.fetch('origin_x') + INSET
+ORIGIN_Y = pane.fetch('pixel_region').fetch('y') + grid.fetch('origin_y') + INSET
 def capture
   r = req('GET', "/v1/diagnostics/screenshots/#{'display-1'}")
   raise "capture #{r.code}" unless r.code == '200'
@@ -66,7 +74,7 @@ ATTEMPTS.times do |i|
     bad = 0
     (0...CH).each do |dy|
       (0...CW).each do |dx|
-        ax = INSET + x * CW + dx; ay = INSET + y * CH + dy
+        ax = ORIGIN_X + x * CW + dx; ay = ORIGIN_Y + y * CH + dy
         next if ax >= W || ay >= H
         bad += 1 if px(cap[:body], ax, ay) != want
       end
