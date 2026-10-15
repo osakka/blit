@@ -293,6 +293,11 @@ int main(void)
 		"\"kind\":\"pointer_motion\",\"x\":160.0,\"y\":1736.0,"
 		"\"column\":21,\"row\":109,\"alt\":true}}",
 		"mouse alt-drag 108 20");
+	expect_drag_frame("A held button becomes a Hibr drag",
+		"{\"type\":\"input\",\"session_id\":\"session-4\",\"event\":{"
+		"\"kind\":\"pointer_motion\",\"x\":160.0,\"y\":1736.0,"
+		"\"column\":21,\"row\":109}}",
+		"mouse drag 108 20");
 	expect_frame("Shift is attached to wheel actions",
 		"{\"type\":\"input\",\"session_id\":\"session-4\",\"event\":{"
 		"\"kind\":\"pointer_wheel\",\"delta\":1,\"x\":160.0,"

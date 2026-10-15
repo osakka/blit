@@ -6,12 +6,14 @@
 
 ## Context
 
-Hibr's desktop window manager implements Alt-move by matching an `alt-press`
-followed by `alt-drag`. Blit already tracked the shared keyboard modifier
-state and applied it when encoding mouse reports directly to a terminal, but
-the API input stream's pointer events omitted `shift`, `ctrl`, and `alt`.
-The adapter therefore delivered an ordinary press/drag to Hibr. Normal
-clicks worked while Alt-drag window movement did not.
+Hibr's desktop window manager implements movement by matching a `press`
+followed by `drag`, and Alt-move by matching `alt-press` followed by
+`alt-drag`. Blit already tracked the shared keyboard modifier state and
+applied it when encoding mouse reports directly to a terminal, but the API
+input stream's pointer events omitted `shift`, `ctrl`, and `alt`. The adapter
+also labeled every pointer motion as `motion`, even while a button was held.
+Normal clicks worked while title-bar drag and Alt-drag window movement did
+not.
 
 ## Decision
 
@@ -24,8 +26,9 @@ servers. Hibr source and desktop configuration remain unchanged.
 ## Consequences
 
 The same modifier state now reaches Hibr whether the pointer originated in
-evdev, SDL fallback, or API injection. Window movement, resize gestures, and
-modifier-aware application mouse callbacks can distinguish modified input
-from an ordinary click. The adapter input gate covers button, drag, and wheel
-modifier forms; live acceptance must still verify the physical Alt-drag
-gesture.
+evdev, SDL fallback, or API injection. Held-button motion is emitted as
+`drag`, while unbuttoned motion remains `motion`. Window movement, resize
+gestures, and modifier-aware application mouse callbacks can distinguish
+modified input from an ordinary click. The adapter input gate covers button,
+drag, and wheel modifier forms; live acceptance must still verify the
+physical gestures.
