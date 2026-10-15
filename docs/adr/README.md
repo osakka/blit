@@ -91,6 +91,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0067 — Settings are Blit's own state, written through the API](0067-settings-are-blit-state-written-through-the-api.md)
 - [0068 — The Hibr adapter translates input into Hibr's console vocabulary](0068-the-hibr-adapter-translates-input-vocabulary.md)
 - [0069 — The Hibr adapter preserves Hibr's provider semantics](0069-the-hibr-adapter-preserves-provider-semantics.md)
+- [0070 — The scene cache is used only where render targets are known to persist](0070-the-scene-cache-needs-a-backend-that-preserves-render-targets.md)
 
 ## Adding an ADR
 

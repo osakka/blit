@@ -3708,6 +3708,133 @@ The two stale probe settings left on the microphone's HID interfaces by
 earlier `host_*` probes were cleared with `PUT /v1/settings`, leaving the
 document carrying the audio default alone.
 
+## 0.1.461 through 0.1.464: a keyboard stop chord, the trail's real cause, and a retraction
+
+Four releases driven by an operator using the machine rather than by the
+ticket list, and one claim withdrawn.
+
+### The retraction, first
+
+0.1.457 and 0.1.458 were recorded above as resolving issue #72. **They did
+not.** Each fixed a real defect with a real mechanism, and the symptom
+survived both. With a line saver running, the host measured residue climbing
+432, 469, 551, 605, 740 and collapsing to 44 when a whole frame landed —
+`stale` far exceeding `missing` throughout, which is residue and not sampling.
+
+The clean readings behind the earlier claim were taken while the desktop was
+static and during a quieter phase of a different saver. The operator was right
+and the instrument was being read wrong.
+
+Four separate measurement faults produced confident wrong answers during this
+work, and they are recorded in `tools/probes/host_cell_pixel_agreement.rb` as
+the reasons that probe is shaped the way it is:
+
+1. sampling one pixel per cell — reported `painted=0` on a screen a full scan
+   saw as 1536 cells, and produced the quoted 2832-stale figure
+2. non-atomic sampling — `stale` and `missing` in roughly equal numbers, which
+   is the signature of the sampling, not the renderer
+3. the software mouse pointer — three stale cells that survived a forced
+   redraw, a fresh capture and deleting every surface turned out to be the
+   arrow
+4. `?cached=1` versus a fresh capture — the cached form shows the panel, a
+   fresh one forces a render that repairs the state and hides the fault
+
+### 0.1.461: a chord that stops the server, and a key release that was not a keystroke
+
+`GET`/`PUT /v1/control/shutdown-key` programs a chord, defaulting to
+Ctrl+Alt+Backspace and enabled. It performs the same orderly stop as
+`POST /v1/control/shutdown` and exits 0, so a unit with `Restart=on-failure`
+leaves it stopped. `tools/tests/shutdown_key_gate.rb` asserts the ways it
+could be useless or dangerous rather than merely absent: a bare Backspace is
+inert, near misses are inert, it fires on press and not on release or
+autorepeat, every modifier must be held on the keyboard the key came from, it
+is programmable, a reprogrammed chord survives a restart, disabling works, and
+the exit status is 0.
+
+Persistence repeated stage 1's ordering bug — the default was assigned after
+the stored document was applied, so it silently overwrote it. Invisible until
+the first restart; the gate caught it.
+
+The same release fixed `console-blit` translating a key *release* into a
+keystroke. Blit publishes all three transitions and labels them, verified on
+the live stream:
+
+```text
+{"kind":"key","code":1,"pressed":true,"repeat":false}    press
+{"kind":"key","code":1,"pressed":true,"repeat":true}     autorepeat
+{"kind":"key","code":1,"pressed":false,"repeat":false}   release
+```
+
+The adapter emitted a key for every one. A single tap of Escape arrived as two
+keystrokes, so anything the desktop toggled went on and straight back off, and
+whether it landed on depended on how many autorepeats fitted inside the hold.
+Autorepeat deliberately still produces a keystroke.
+
+`packaging/HIBR_VERSION` said 0.99.100 while the host ran 0.99.127, and
+`build-deb.sh` does not rebuild the adapter — so every release since had
+shipped a `console-blit.so` built against headers two dozen point versions
+behind the runtime loading it. The ABI was 16 in both, which is why it worked;
+nothing was checking. Issue #81 tracks the missing check.
+
+### 0.1.462 and 0.1.463: the scene cache's precondition
+
+Recorded in full in [ADR 0070](adr/0070-the-scene-cache-needs-a-backend-that-preserves-render-targets.md).
+
+Five reproductions were built for #72 and every one passed — all of them
+against SDL's software renderer, where the cache's precondition holds. 0.1.462
+added `BLIT_SDL_SCENE_CACHE` so the precondition could be measured on the
+hardware where it does not, and the A/B settled it:
+
+```text
+cache on     stale 170 of 329 cells drawn; 740 under a busier saver
+cache off    stale 0 across six samples, on a harder workload --
+             10875 cells drawn and 1015 changing between the bracketing reads
+```
+
+0.1.463 made the cache conditional on the `software` renderer. Cost measured
+on the same host before choosing the default: 3.3 ms to render, 0.6 ms to
+present, against a 16 ms budget, no missed deadlines. After deployment with no
+override set, the host reports `renderer = opengles2`,
+`render paths = {'full-redraw': 6}` and `pointer_cache_hits = 0`.
+
+### 0.1.464: evdev numbers letters by QWERTY row
+
+Reported as "the keyboard does not type qwerty, g is , and f is d". The
+adapter computed a letter as `'a' + code - KEY_A`, which assumes the codes run
+alphabetically. evdev numbers keys by position in the QWERTY rows:
+
+```text
+KEY_A 30  KEY_S 31  KEY_D 32  KEY_F 33  KEY_G 34
+KEY_Q 16  KEY_W 17  KEY_E 18  KEY_Z 44  KEY_M 50
+```
+
+F came out as `d`, the reported symptom exactly. Because `KEY_Z` is 44, the
+range `KEY_A..KEY_Z` spanned the home row and its punctuation rather than the
+alphabet, so q w e r t y u i o p x c v b n m and every punctuation key
+produced no character at all. The digits were right by luck.
+
+This survived because the keyboard measurement taken earlier in the session
+used a plain terminal session, which goes through Blit's own keycode table and
+is correct. A desktop goes through the adapter's — a different path with no
+gate at the time.
+
+The mapping is now a table in `src/blit_evdev_char.h`, shared by the adapter
+and `tools/tests/evdev_char_gate.c`. The gate asserts all 26 letters rather
+than a sample for a specific reason: the old arithmetic was correct for
+exactly one letter, `KEY_A`, where the offset is zero, so a spot check would
+have passed against it. Teeth: with the arithmetic restored the gate reports
+55 failures, including `code 33 gave 'd' (100), wanted 'f'`.
+
+### What this sequence says about the suite
+
+Two faults in four releases were invisible to a green suite for the same
+reason: the gate environment is not the deployment environment. The renderer
+fault needed a GPU the container does not have (#79); the keyboard fault
+needed the adapter's key path, which had no gate until #76/#77 added one.
+
+A passing suite means the behaviour the suite can reach is correct. It is not
+a statement about the behaviour it cannot.
+
 ## 0.1.466 candidate: Hibr input translation, before host acceptance
 
 Issues #76 and #77 came from one instrumented Hibr primary on the physical

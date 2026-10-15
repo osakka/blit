@@ -97,6 +97,67 @@ run `tools/tests/qemu_hibr_lifecycle_gate.sh` explicitly. A physical host is
 evidence for that host and its current hardware only; it cannot prove untested
 monitor counts, refresh modes, GPUs, or input devices.
 
+## What a green suite does not mean
+
+`RUN_GATES_PASS pass=69 skip=4 fail=0` means the behaviour the suite can reach
+is correct. It is not a statement about the behaviour it cannot reach, and the
+distance between those two has cost this project multiple releases. The known
+blind spots, so that a green run is read for what it is:
+
+**The renderer under test is not the renderer that ships.** Every renderer
+gate runs against SDL's `software` backend in a container with no GPU; the
+physical host presents through `opengles2`. The two disagree on whether a
+render target keeps its contents between passes, and an optimisation that
+assumed it did produced a visible screensaver trail that survived two
+"fixed" claims. Five reproductions were written for that defect and all five
+passed, because all five ran on `software`. See ADR 0070 and issue #79.
+
+**A gate that cannot fail is not evidence.** Every gate should be run once
+against the reverted change and observed to fail; a gate added alongside a fix
+and never seen red proves only that it is consistent with the fix.
+`deferred_damage_gate.rb` has no teeth and its header says so and why —
+that is the minimum honest treatment, not a precedent to copy.
+`evdev_char_gate.c` asserts all 26 letters rather than a sample for this
+reason: the arithmetic it replaced was correct for exactly one letter, so a
+spot check would have passed against the bug.
+
+**The fixtures are not the devices.** A fabricated evdev node is a regular
+file, so it is never opened as a keyboard and `state.open` stays false — the
+hotplug gate exercises the device table but not the poll set, which had to be
+measured on the host directly. Fabricated nodes also cannot reproduce a USB
+hub that resets 66 times.
+
+**The deployment path is partly unexercised.** The direct-KMS presentation
+path is not covered by the default run; `physical_multi_display_gate.rb`,
+`screenshot_nonblocking_gate.sh`, and the QEMU oracle are opt-in and absent
+from the reported totals. `tools/probes/host_cell_pixel_agreement.rb`, which
+states the cells-versus-pixels invariant, is run by no automated path at all.
+Unprivileged-profile access to backlight and control devices is unmeasured.
+A skip that is never taken is indistinguishable from a test that does not
+exist.
+
+**The external boundary is the thinnest-covered and the most load-bearing.**
+`console-blit` is Blit-owned code compiled against external Hibr headers and
+loaded into an external process. Two of four consecutive releases fixed
+defects there — a key *release* translated into a keystroke, and
+`'a' + code - KEY_A`, which assumes evdev numbers letters alphabetically when
+it numbers them by QWERTY row. Both were invisible to a green suite, because
+a plain terminal session goes through Blit's own correct keycode table and a
+desktop does not. ADRs 0068 and 0069 and issue #81.
+
+**A desktop's behaviour is not Blit's behaviour.** An owned surface takes
+input from the event stream rather than the PTY (ADR 0057), so "keys not
+delivered" is the expected reading for a desktop and not a fault. A pointer
+click reaches Hibr only once the owner enables mouse reporting; a Blit-hosted
+desktop that never sends `console mouse <mode>` cannot be clicked no matter
+how correct Blit's `pointer_button` events are. Blit publishing an event and
+the desktop acting on it are separate claims requiring separate evidence.
+
+The general rule behind all of these: **the gate environment is not the
+deployment environment**, and a fault that lives in the difference is one a
+green suite will report as absent. When the machine and the suite disagree,
+the machine is right.
+
 ## Evidence and claims
 
 The verification ledger records the source commit, TCC version, package,

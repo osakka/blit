@@ -577,9 +577,16 @@ for terminal writes whose complete cell state is unchanged. This is especially
 important for Hibr wallpaper themes, which may repeatedly emit the same glyph
 grid. The atlas does not change the canonical surface or direct-KMS renderer;
 the initial full redraw and pointer-only cached-scene paths must be measured
-separately. In multi-pane SDL output, the scene cache is also retained across
-ordinary pane damage; full composition is reserved for first frame, pointer,
-topology, and surface-count changes.
+separately. In multi-pane SDL output the scene cache is retained across
+ordinary pane damage, with full composition reserved for first frame, pointer,
+topology, and surface-count changes — **but only on the `software` renderer**.
+ADR 0070 restricts the cache to that backend, because retaining a cached scene
+assumes the backend preserves a render target between passes and that is false
+on the host's `opengles2` path. Every other backend composes whole frames, so
+the cached-scene and pointer-only paths described here are what the gates
+exercise rather than what a GPU deployment runs. `BLIT_SDL_SCENE_CACHE`
+overrides the default in both directions for anyone repeating the
+measurement.
 
 The shutdown gate verifies that `POST /v1/control/shutdown` acknowledges the
 request and the Blit process exits cleanly:
