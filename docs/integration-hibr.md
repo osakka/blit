@@ -242,13 +242,14 @@ must not restart Hibr processes.
 For a 1x2 split, row zero is the upper pane and row one is the lower pane.
 The orchestration explicitly attaches the primary Hibr desktop to the lower
 pane and starts desktop --join for the upper pane. Pane bounds are terminal
-cell bounds, not arbitrary pixel rectangles. If the display's cell grid has an
-odd number of rows, the lower pane owns the extra row so the two panes remain
-contiguous and no black terminal band is left at the bottom; the rule is
-specified by ADR 0075. The topology output's `cell_grid` is the single source
-of truth for the complete-cell rectangle and its centred pixel origin; the
-adapter must not derive a second origin from the font name or display mode
-(ADR 0076).
+cell bounds, not arbitrary pixel rectangles. Blit partitions the physical
+output first, then centres a complete-cell grid independently inside each
+physical pane region. This prevents a menu or glyph row from straddling a
+hinge when the physical half-height is not divisible by the current cell
+height. The topology reports each pane's `pixel_region` and pane-local
+`cell_grid`; those are the single source of truth for SDL placement and input
+mapping (ADR 0075). The adapter must not derive a second origin from the font
+name or display mode (ADR 0076).
 
 The production join flow is:
 

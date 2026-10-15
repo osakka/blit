@@ -1,11 +1,10 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# API regression gate for display cell geometry and odd terminal-grid
-# partitions. It deliberately uses a 1.6 font scale against the dummy display
-# so the display has quantized remainders and an odd cell height; the
-# pre-ADR-0076 implementation left the grid one-sided, while the pre-ADR-0075
-# implementation left the last row unowned.
+# API regression gate for display cell geometry and pane-region quantization.
+# It deliberately uses a 1.6 font scale against the dummy display so each
+# half-region has a cell remainder. The pre-ADR-0075 implementation quantized
+# the whole display first, which put a terminal row across the physical split.
 
 require 'json'
 require 'net/http'
@@ -92,21 +91,53 @@ begin
                   {'revision' => current.fetch('revision'),
                    'layout' => {'columns' => 1, 'rows' => 2}},
                   'If-Match' => current.fetch('revision').to_s)
-  panes = split.fetch('panes').sort_by { |pane| pane.fetch('bounds').fetch('y') }
+  panes = split.fetch('panes').sort_by { |pane| pane.fetch('pixel_region').fetch('y') }
   raise "expected two panes, got #{panes.length}" unless panes.length == 2
   top = panes.fetch(0).fetch('bounds')
   bottom = panes.fetch(1).fetch('bounds')
-  raise "top starts at #{top.fetch('y')}" unless top.fetch('y').zero?
-  raise "bottom does not meet top: #{top.inspect} #{bottom.inspect}" unless
-    bottom.fetch('y') == top.fetch('y') + top.fetch('height')
-  raise "partition lost rows: #{top.inspect} #{bottom.inspect}" unless
-    bottom.fetch('y') + bottom.fetch('height') == grid_height
-  raise "remainder was not assigned to bottom: #{top.inspect} #{bottom.inspect}" unless
-    bottom.fetch('height') == top.fetch('height') + 1
+  top_region = panes.fetch(0).fetch('pixel_region')
+  bottom_region = panes.fetch(1).fetch('pixel_region')
+  raise "top region starts at #{top_region.inspect}" unless
+    top_region.fetch('x').zero? && top_region.fetch('y').zero?
+  raise "regions do not meet: #{top_region.inspect} #{bottom_region.inspect}" unless
+    bottom_region.fetch('y') == top_region.fetch('y') + top_region.fetch('height')
+  raise "regions do not cover output: #{top_region.inspect} #{bottom_region.inspect}" unless
+    bottom_region.fetch('y') + bottom_region.fetch('height') == display_height
+  [panes.fetch(0), panes.fetch(1)].each do |pane|
+    bounds = pane.fetch('bounds')
+    region = pane.fetch('pixel_region')
+    pane_grid = pane.fetch('cell_grid')
+    raise "pane grid columns mismatch: #{pane.inspect}" unless
+      pane_grid.fetch('columns') == bounds.fetch('width')
+    raise "pane grid rows mismatch: #{pane.inspect}" unless
+      pane_grid.fetch('rows') == bounds.fetch('height')
+    raise "pane grid pixel width mismatch: #{pane.inspect}" unless
+      pane_grid.fetch('pixel_width') == pane_grid.fetch('columns') * cell_width
+    raise "pane grid pixel height mismatch: #{pane.inspect}" unless
+      pane_grid.fetch('pixel_height') == pane_grid.fetch('rows') * cell_height
+    raise "pane grid origin x mismatch: #{pane.inspect}" unless
+      pane_grid.fetch('origin_x') == region.fetch('x') +
+        (region.fetch('width') - pane_grid.fetch('pixel_width')) / 2
+    raise "pane grid origin y mismatch: #{pane.inspect}" unless
+      pane_grid.fetch('origin_y') == region.fetch('y') +
+        (region.fetch('height') - pane_grid.fetch('pixel_height')) / 2
+    raise "pane grid escapes physical region: #{pane.inspect}" unless
+      pane_grid.fetch('origin_x') >= region.fetch('x') &&
+      pane_grid.fetch('origin_y') >= region.fetch('y') &&
+      pane_grid.fetch('origin_x') + pane_grid.fetch('pixel_width') <=
+        region.fetch('x') + region.fetch('width') &&
+      pane_grid.fetch('origin_y') + pane_grid.fetch('pixel_height') <=
+        region.fetch('y') + region.fetch('height')
+  end
+  raise "logical pane rows are not equal: #{top.inspect} #{bottom.inspect}" unless
+    top.fetch('height') == bottom.fetch('height')
 
-  puts "PANE_SPLIT_GEOMETRY_PASS grid=#{grid.fetch('columns')}x#{grid_height} " \
-       "origin=#{grid.fetch('origin_x')},#{grid.fetch('origin_y')} " \
-       "top_rows=#{top.fetch('height')} bottom_rows=#{bottom.fetch('height')}"
+  puts "PANE_SPLIT_GEOMETRY_PASS output_grid=#{grid.fetch('columns')}x#{grid_height} " \
+       "pane_grid=#{top.fetch('width')}x#{top.fetch('height')} " \
+       "top_origin=#{panes.fetch(0).fetch('cell_grid').fetch('origin_x')}," \
+       "#{panes.fetch(0).fetch('cell_grid').fetch('origin_y')} " \
+       "bottom_origin=#{panes.fetch(1).fetch('cell_grid').fetch('origin_x')}," \
+       "#{panes.fetch(1).fetch('cell_grid').fetch('origin_y')}"
 ensure
   current = request(base, 'GET', '/v1/topology')
   request(base, 'PUT', '/v1/topology',

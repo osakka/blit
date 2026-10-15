@@ -23,6 +23,45 @@ typedef struct {
 
 static void blit_cell_geometry_compute(int display_width, int display_height,
                                        int cell_width, int cell_height,
+                                       BlitCellGeometry *geometry);
+
+/* A logical pane is a physical region first and a terminal grid second.
+ * Computing the grid from the whole display and then splitting its rows is
+ * incorrect when a physical region contains a fractional number of cells:
+ * the resulting terminal row straddles the physical seam.  Keep this
+ * partition rule beside the display rule so rendering, input, PTY sizing,
+ * and the topology API cannot grow separate calculations. */
+static void blit_cell_geometry_partition_compute(
+    int display_width, int display_height, int cell_width, int cell_height,
+    int parts_x, int parts_y, int part_x, int part_y,
+    int *region_x, int *region_y, int *region_width, int *region_height,
+    BlitCellGeometry *geometry)
+{
+    int left;
+    int top;
+    int right;
+    int bottom;
+
+    if (parts_x < 1) parts_x = 1;
+    if (parts_y < 1) parts_y = 1;
+    if (part_x < 0) part_x = 0;
+    if (part_y < 0) part_y = 0;
+    if (part_x >= parts_x) part_x = parts_x - 1;
+    if (part_y >= parts_y) part_y = parts_y - 1;
+    left = (display_width * part_x) / parts_x;
+    top = (display_height * part_y) / parts_y;
+    right = (display_width * (part_x + 1)) / parts_x;
+    bottom = (display_height * (part_y + 1)) / parts_y;
+    if (region_x != NULL) *region_x = left;
+    if (region_y != NULL) *region_y = top;
+    if (region_width != NULL) *region_width = right - left;
+    if (region_height != NULL) *region_height = bottom - top;
+    blit_cell_geometry_compute(right - left, bottom - top,
+                               cell_width, cell_height, geometry);
+}
+
+static void blit_cell_geometry_compute(int display_width, int display_height,
+                                       int cell_width, int cell_height,
                                        BlitCellGeometry *geometry)
 {
     if (cell_width < 1)

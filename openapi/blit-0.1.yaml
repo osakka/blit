@@ -2520,10 +2520,11 @@ components:
           allOf:
             - {$ref: '#/components/schemas/Bounds'}
           description: >-
-            Authoritative terminal-cell bounds. Each topology axis is
-            partitioned by integer boundaries, so adjacent panes are
-            contiguous and an odd grid remainder belongs to the final pane on
-            that axis; physical pixel bounds are derived from /v1/fonts.
+            Authoritative terminal-cell bounds. Physical pane regions are
+            partitioned first and each region is quantized independently, so
+            no terminal row or column crosses a physical pane boundary.
+            Physical placement is reported by the pane's pixel_region and
+            cell_grid fields.
         color:
           type: string
           pattern: '^#[0-9A-Fa-f]{6}$'
@@ -3085,11 +3086,23 @@ components:
       additionalProperties: false
     Pane:
       type: object
-      required: [id, display_id, bounds, surface_id]
+      required: [id, display_id, bounds, pixel_region, cell_grid, surface_id]
       properties:
         id: {$ref: '#/components/schemas/ResourceId'}
         display_id: {$ref: '#/components/schemas/ResourceId'}
         bounds: {$ref: '#/components/schemas/Bounds'}
+        pixel_region:
+          $ref: '#/components/schemas/Bounds'
+          description: >-
+            The physical region assigned to this pane before complete-cell
+            quantization. Its coordinates are relative to the output.
+        cell_grid:
+          allOf:
+            - $ref: '#/components/schemas/CellGrid'
+          description: >-
+            The complete-cell grid fitted inside this pane's physical region.
+            This is independent of the enclosing output grid so a pane split
+            cannot place a terminal row across a physical panel boundary.
         surface_id:
           oneOf:
             - {$ref: '#/components/schemas/ResourceId'}

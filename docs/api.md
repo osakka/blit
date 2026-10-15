@@ -422,18 +422,22 @@ bounds, and presentation state. `PUT /v1/topology` changes the logical
 placement using the schema's revision and idempotency controls. Pane splits are
 logical Blit layout resources; they do not create extra physical monitors.
 
-Pane bounds are terminal-cell rectangles derived from the reported physical
-cell metrics. Blit partitions each axis by integer boundaries, so a split
-never leaves an unowned row or column. If the grid is odd, the final pane on
-that axis owns the one-cell remainder: an 80x45 grid with rows: 2 is
-y:0,height:22 followed by y:22,height:23. This is intentional; equal
-physical pixel heights are impossible when both panes must contain whole
-terminal cells. Each topology output also publishes `cell_grid`: the complete
-cell count, physical cell metrics, fitted pixel rectangle, centred origin, and
-the excluded pixel remainder. Surface placement and pointer hit-testing use
-that same origin. A scale that leaves two pixels at the right is therefore not
-a missing column or a renderer drift; it is the documented remainder. See
-ADRs 0075 and 0076 in docs/adr.
+Pane bounds are terminal-cell rectangles, but Blit derives them by partitioning
+the physical output first and quantizing each physical pane region separately.
+This prevents a terminal row from crossing a physical panel boundary. For a
+1920x2160 output at 48px cells, a 1x2 split therefore reports two 80x22 panes
+inside 1920x1080 regions; the 24px remainder in each region is centred and is
+not painted as a partial row. The enclosing output may consequently have one
+more complete row than the sum of its pane rows.
+
+Each topology pane publishes `pixel_region` and a pane-local `cell_grid`. The
+pane grid is the authoritative physical placement for rendering and pointer
+hit-testing; the pane's terminal-cell `bounds` remain the authoritative Hibr
+and PTY dimensions. Each topology output also publishes its enclosing
+`cell_grid`, which describes the complete-cell display rectangle and its
+remainder. Clients must use these reported values rather than reconstructing
+positions from font names, display modes, or hard-coded halves. See ADRs 0075
+and 0076 in docs/adr.
 
 ### Display settings: rotation, brightness, and what power costs
 

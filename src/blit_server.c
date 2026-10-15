@@ -168,6 +168,19 @@ typedef struct {
     int used;
     char id[128];
     char display_id[128];
+    /* The pane's physical region and its independently centred complete-cell
+       grid. A pane is not allowed to borrow a row from the neighbouring
+       physical region. */
+    int pixel_region_x;
+    int pixel_region_y;
+    int pixel_region_width;
+    int pixel_region_height;
+    int pixel_grid_origin_x;
+    int pixel_grid_origin_y;
+    int pixel_grid_width;
+    int pixel_grid_height;
+    int pixel_grid_remainder_x;
+    int pixel_grid_remainder_y;
     int x;
     int y;
     int width;
@@ -3577,9 +3590,23 @@ static void topology_json(const BlitRuntime *runtime, char *body, size_t capacit
             body + used, capacity - used,
             "%s{\"id\":\"%s\",\"display_id\":\"%s\","
             "\"bounds\":{\"x\":%d,\"y\":%d,\"width\":%d,\"height\":%d},"
+            "\"pixel_region\":{\"x\":%d,\"y\":%d,\"width\":%d,\"height\":%d},"
+            "\"cell_grid\":{\"columns\":%d,\"rows\":%d,"
+            "\"cell_width\":%d,\"cell_height\":%d,"
+            "\"pixel_width\":%d,\"pixel_height\":%d,"
+            "\"origin_x\":%d,\"origin_y\":%d,"
+            "\"remainder_x\":%d,\"remainder_y\":%d},"
             "\"surface_id\":%s%s%s}",
             i == 0 ? "" : ",", pane->id, pane->display_id, pane->x,
             pane->y, pane->width, pane->height,
+            pane->pixel_region_x, pane->pixel_region_y,
+            pane->pixel_region_width, pane->pixel_region_height,
+            pane->width, pane->height,
+            runtime_terminal_cell_width(runtime),
+            runtime_terminal_cell_height(runtime),
+            pane->pixel_grid_width, pane->pixel_grid_height,
+            pane->pixel_grid_origin_x, pane->pixel_grid_origin_y,
+            pane->pixel_grid_remainder_x, pane->pixel_grid_remainder_y,
             surface_id != NULL ? "\"" : "null",
             surface_id != NULL ? surface_id : "",
             surface_id != NULL ? "\"" : "");
@@ -19348,39 +19375,51 @@ static void discover_panes(BlitRuntime *runtime)
     for (display_index = 0; display_index < runtime->display_count;
          ++display_index) {
         BlitDisplay *display = &runtime->displays[display_index];
-        BlitCellGeometry geometry;
-        int grid_width;
-        int grid_height;
+        int cell_width = runtime_terminal_cell_width(runtime);
+        int cell_height = runtime_terminal_cell_height(runtime);
         int row;
         int column;
-
-        runtime_display_cell_geometry(runtime, display, &geometry);
-        grid_width = geometry.columns;
-        grid_height = geometry.rows;
 
         for (row = 0; row < rows; ++row) {
             for (column = 0; column < columns; ++column) {
                 BlitPane *pane;
-                int pane_x = (grid_width * column) / columns;
-                int pane_y = (grid_height * row) / rows;
-                int pane_right = (grid_width * (column + 1)) / columns;
-                int pane_bottom = (grid_height * (row + 1)) / rows;
-                int pane_width = pane_right - pane_x;
-                int pane_height = pane_bottom - pane_y;
+                BlitCellGeometry pane_geometry;
+                BlitCellGeometry prior_geometry;
+                int region_x;
+                int region_y;
+                int region_width;
+                int region_height;
+                int pane_x = 0;
+                int pane_y = 0;
+                int prior;
                 if (runtime->pane_count >= BLIT_MAX_PANES)
                     return;
-                /* Partition the already quantized terminal grid by
-                   boundaries, rather than flooring one shared half-size.
-                   A 45-row display split into two panes is therefore 22
-                   rows above and 23 below: every row is owned, and the
-                   deliberate remainder goes to the final pane. The same
-                   rule works for 2x2 layouts. */
-                if (pane_width < 1) pane_width = 1;
-                if (pane_height < 1) pane_height = 1;
-                if (pane_width > BLIT_MAX_CELL_COLS)
-                    pane_width = BLIT_MAX_CELL_COLS;
-                if (pane_height > BLIT_MAX_CELL_ROWS)
-                    pane_height = BLIT_MAX_CELL_ROWS;
+                /* Partition physical pixels first, then quantize each
+                   physical region independently. For a 2160px display
+                   split into two 1080px panels at 48px cells this produces
+                   22+22 rows, each centred inside its own panel; a terminal
+                   row can never straddle the physical hinge. */
+                blit_cell_geometry_partition_compute(
+                    display->bounds.w, display->bounds.h,
+                    cell_width, cell_height, columns, rows,
+                    column, row, &region_x, &region_y,
+                    &region_width, &region_height, &pane_geometry);
+                for (prior = 0; prior < column; ++prior) {
+                    blit_cell_geometry_partition_compute(
+                        display->bounds.w, display->bounds.h,
+                        cell_width, cell_height, columns, rows,
+                        prior, row, NULL, NULL, NULL, NULL,
+                        &prior_geometry);
+                    pane_x += prior_geometry.columns;
+                }
+                for (prior = 0; prior < row; ++prior) {
+                    blit_cell_geometry_partition_compute(
+                        display->bounds.w, display->bounds.h,
+                        cell_width, cell_height, columns, rows,
+                        column, prior, NULL, NULL, NULL, NULL,
+                        &prior_geometry);
+                    pane_y += prior_geometry.rows;
+                }
                 pane = &runtime->panes[runtime->pane_count++];
                 memset(pane, 0, sizeof(*pane));
                 pane->used = 1;
@@ -19390,8 +19429,24 @@ static void discover_panes(BlitRuntime *runtime)
                          display->id, row * columns + column + 1);
                 pane->x = pane_x;
                 pane->y = pane_y;
-                pane->width = pane_width;
-                pane->height = pane_height;
+                pane->width = pane_geometry.columns;
+                pane->height = pane_geometry.rows;
+                if (pane->width < 1) pane->width = 1;
+                if (pane->height < 1) pane->height = 1;
+                if (pane->width > BLIT_MAX_CELL_COLS)
+                    pane->width = BLIT_MAX_CELL_COLS;
+                if (pane->height > BLIT_MAX_CELL_ROWS)
+                    pane->height = BLIT_MAX_CELL_ROWS;
+                pane->pixel_region_x = region_x;
+                pane->pixel_region_y = region_y;
+                pane->pixel_region_width = region_width;
+                pane->pixel_region_height = region_height;
+                pane->pixel_grid_origin_x = region_x + pane_geometry.origin_x;
+                pane->pixel_grid_origin_y = region_y + pane_geometry.origin_y;
+                pane->pixel_grid_width = pane_geometry.pixel_width;
+                pane->pixel_grid_height = pane_geometry.pixel_height;
+                pane->pixel_grid_remainder_x = pane_geometry.remainder_x;
+                pane->pixel_grid_remainder_y = pane_geometry.remainder_y;
             }
         }
     }
@@ -21527,10 +21582,11 @@ static void surface_origin_px(BlitRuntime *runtime, const BlitSurface *surface,
     *origin_x = geometry.origin_x + BLIT_SURFACE_INSET_PX;
     *origin_y = geometry.origin_y + BLIT_SURFACE_INSET_PX;
     if (pane != NULL) {
-        *origin_x = geometry.origin_x + pane->x * cell_width +
-            BLIT_SURFACE_INSET_PX;
-        *origin_y = geometry.origin_y + pane->y * cell_height +
-            BLIT_SURFACE_INSET_PX;
+        /* Pane grids are centred inside their own physical regions. Using
+           the enclosing display grid here would put a 22-row pane at 1056px
+           on a 1080px physical half and make its first row cross the hinge. */
+        *origin_x = pane->pixel_grid_origin_x + BLIT_SURFACE_INSET_PX;
+        *origin_y = pane->pixel_grid_origin_y + BLIT_SURFACE_INSET_PX;
         return;
     }
     for (index = 0; index < BLIT_MAX_SESSIONS; ++index) {
