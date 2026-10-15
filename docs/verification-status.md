@@ -16,8 +16,10 @@ source and input ownership are unchanged.
 The focused schema, network, evdev scan, renderer, input, Hibr, terminal, and
 hotplug-cycle gates pass. The complete local suite reached 69 passes, 3
 explicit skips, and 0 product-test failures; its package gate was rerun after
-the 0.1.469 release manifest was added. Live deployment and post-KVM
-verification remain pending until the package is published.
+the 0.1.469 release manifest was added. The reproducible package was then
+installed through the supervised update API on `192.168.10.54`, where
+`/v1/version` reports 0.1.469 and exactly one Hibr primary is registered and
+painted. A post-deployment KVM input capture is still pending.
 
 ## 0.1.468 drag-action correction
 

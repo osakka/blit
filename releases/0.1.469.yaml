@@ -29,8 +29,8 @@ package_artifact_acceptance: pass_manifest_hashes_match_package_and_reproducible
 qemu_hibr_lifecycle_acceptance: unavailable_missing_kernel_and_initramfs
 live_host: 192.168.10.54
 live_predeployment_version: 0.1.468
-live_deployment: pending_supervised_update
-live_hibr_desktop_acceptance: pending
+live_deployment: pass_api_verified_server_0.1.469_after_supervised_update
+live_hibr_desktop_acceptance: pass_one_primary_owner_registered_owner_painted_32400_cells
 live_input_hotplug: pending_post_deployment_capture
 physical_multi_monitor_acceptance: unavailable_one_output
 physical_high_refresh_acceptance: open_issue_21
@@ -39,5 +39,5 @@ notes: >-
   USB re-enumeration. Existing event paths remain for kernel correlation, but
   runtime diagnostics now pair each last mouse/keyboard event with its input
   resource ID and current presence. Hibr source and input ownership are
-  unchanged. Live deployment is intentionally not claimed until the
-  supervised package update and post-KVM API capture complete.
+  unchanged. The package is deployed and the primary Hibr owner is painted;
+  the post-deployment KVM API capture remains the final live input check.
