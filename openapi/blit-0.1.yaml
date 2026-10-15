@@ -15,6 +15,7 @@ tags:
   - name: hardware
   - name: topology
   - name: terminals
+  - name: login
   - name: frames
   - name: effects
   - name: diagnostics
@@ -51,6 +52,59 @@ paths:
                   server_version: {type: string}
                   api_version: {type: string}
                 additionalProperties: false
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/login:
+    get:
+      tags: [login]
+      operationId: getLoginManager
+      summary: Get the supervised Hibr login-manager state
+      responses:
+        '200':
+          description: Login-manager state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginManager'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      tags: [login]
+      operationId: startLoginManager
+      summary: Start or reattach Blit's root-owned Hibr login manager
+      description: >-
+        Blit keeps KMS and evdev ownership as root. Hibr owns PAM
+        authentication and runs the selected desktop or shell as the
+        authenticated user. If the login process ends, Blit starts a fresh
+        login screen while this manager remains enabled.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartLoginManager'
+      responses:
+        '201':
+          description: Login manager started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginManager'
+        '200':
+          description: Login manager was already running
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginManager'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      tags: [login]
+      operationId: stopLoginManager
+      summary: Stop the supervised Hibr login manager
+      responses:
+        '204':
+          description: Login manager stopped and disabled
         default:
           $ref: '#/components/responses/Problem'
   /v1/fonts:
@@ -3108,6 +3162,39 @@ components:
             - {$ref: '#/components/schemas/ResourceId'}
             - {type: 'null'}
       additionalProperties: false
+    StartLoginManager:
+      type: object
+      properties:
+        display_id:
+          $ref: '#/components/schemas/ResourceId'
+          description: Physical display for the login pane.
+        pane_id:
+          $ref: '#/components/schemas/ResourceId'
+          description: Logical pane for the login screen.
+      additionalProperties: false
+    LoginManager:
+      type: object
+      required: [state, enabled, command, script, display_id, pane_id, session]
+      properties:
+        state:
+          type: string
+          enum: [disabled, starting, running, stopped, failed, backoff]
+        enabled: {type: boolean}
+        command: {type: string}
+        script: {type: string}
+        display_id:
+          oneOf:
+            - {$ref: '#/components/schemas/ResourceId'}
+            - {type: 'null'}
+        pane_id:
+          oneOf:
+            - {$ref: '#/components/schemas/ResourceId'}
+            - {type: 'null'}
+        session:
+          oneOf:
+            - {$ref: '#/components/schemas/TerminalSession'}
+            - {type: 'null'}
+      additionalProperties: false
     CreateTerminalSession:
       type: object
       required: [command]
@@ -3237,6 +3324,9 @@ components:
         exit_code: {type: integer}
         focused: {type: boolean}
         surface_mode: {type: string, enum: [terminal, external, mirror]}
+        login_manager:
+          type: boolean
+          description: True only for the root-owned Hibr login-manager session.
         cursor: {$ref: '#/components/schemas/Cursor'}
         terminal_capabilities:
           $ref: '#/components/schemas/TerminalCapabilities'

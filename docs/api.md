@@ -149,6 +149,38 @@ Clients should discover before mutating:
 Do not infer capabilities from a screenshot or from a device filename. A
 resource is usable only when its API state and capability fields say it is.
 
+## Hibr login manager
+
+`/v1/login` is the single Blit-owned login boundary. It is separate from
+ordinary terminal-session creation so there cannot be two login screens or an
+ambiguous restart owner.
+
+```sh
+# Start the configured Hibr login screen on the first discovered pane.
+curl --fail --header 'Content-Type: application/json' \
+  --request POST http://HOST:8080/v1/login --data '{}'
+
+# Observe the login process and the authenticated child session.
+curl --fail http://HOST:8080/v1/login
+
+# Stop and disable the login manager.
+curl --fail --request DELETE http://HOST:8080/v1/login
+```
+
+Blit runs Hibr's login script as its root child because Hibr's PAM flow needs
+that boundary. Hibr's `auth run` then executes the selected desktop or shell as
+the authenticated user. Blit never reads the password and never changes the
+Hibr source tree. When the login process exits after logout, Blit retires its
+PTY/surface and starts a fresh login screen after a bounded delay. The
+`login_manager` marker in the returned terminal session distinguishes this
+supervised boundary from an ordinary PTY session.
+
+The package enables this behavior with `BLIT_LOGIN_AUTOSTART=1`. The service
+must be root-owned for the login endpoint; an unprivileged Blit profile may
+run ordinary sessions but must reject login-manager start. Root-path PAM and
+logind acceptance still require the Hibr VM/real-host test described by Hibr
+issue #79.
+
 ## Endpoint map
 
 This table is an orientation aid, not a second schema. The OpenAPI document is
@@ -160,6 +192,7 @@ status codes.
 | Identity | `GET /v1/version`, `GET /v1/server` | Compatibility and server capabilities |
 | Hardware | `GET /v1/graphics`, `/v1/displays`, `/v1/audio` | Discover renderers, outputs, modes, and sound devices |
 | Fonts/topology | `GET/PUT /v1/fonts`, `GET/PUT /v1/topology` | Select logical cell geometry and pane placement |
+| Login | `GET/POST/DELETE /v1/login` | Supervise one root-owned Hibr login screen and its authenticated child session |
 | Terminals | `POST /v1/terminal-sessions`, `GET/PATCH/DELETE /v1/terminal-sessions/{id}`, `POST /v1/terminal-sessions/{id}/input` | Create, place, inspect, drive, and stop PTY sessions |
 | Hibr | `GET /v1/terminal-sessions/{id}/hibr-owner` | Inspect the primary/join ownership attachment |
 | Surfaces | `GET/PUT /v1/surfaces/{id}/cells`, `GET /v1/surfaces/{id}/summary`, `GET /v1/surfaces/{id}/scrollback` | Read and revision-update authoritative terminal state |

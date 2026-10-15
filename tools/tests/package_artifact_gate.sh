@@ -53,6 +53,7 @@ manifest_hash_matches hibr_adapter_sha256 \
 test -x "$stage/usr/lib/blit/bin/blit-server"
 test -f "$stage/usr/lib/blit/hibr/console-blit.so"
 test -x "$stage/usr/share/blit/hibr/blit-session.hibr"
+test -x "$stage/usr/share/blit/hibr/blit-login-session.hibr"
 test -f "$stage/usr/share/blit/hibr/blit-runtime-console.hibr"
 grep -q 'BLIT_HIBR_ADAPTER' "$stage/usr/share/blit/hibr/blit-runtime-console.hibr"
 grep -q 'console open' "$stage/usr/share/blit/hibr/blit-session.hibr"

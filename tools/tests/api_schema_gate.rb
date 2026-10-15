@@ -13,7 +13,7 @@ schema = YAML.load_file(schema_path)
 raise 'schema is not OpenAPI 3.1' unless schema.fetch('openapi') == '3.1.0'
 
 paths = schema.fetch('paths')
-raise "unexpected path count #{paths.length}" unless paths.length == 40
+raise "unexpected path count #{paths.length}" unless paths.length == 41
 
 session_path = paths.fetch('/v1/terminal-sessions/{session_id}')
 raise 'session path must not accept terminal input directly' if session_path.key?('post')

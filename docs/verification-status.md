@@ -3,6 +3,27 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 0.1.485 candidate: Blit login-manager boundary
+
+Blit #83 now has a first-class `/v1/login` resource. The root-owned service
+supervises Hibr's login script in one PTY, exposes its state and underlying
+`login_manager` session, stops it deterministically, and recreates a fresh
+login session after the login process exits. The package configuration enables
+this manager with `BLIT_LOGIN_AUTOSTART=1`; Hibr remains an external runtime
+and its source tree is unchanged.
+
+The focused root-service gate passed with TCC-built 0.1.485 source using a
+controlled `/bin/true` login command:
+
+```text
+LOGIN_MANAGER_GATE_PASS restart=1->2 stop_status=204
+```
+
+This proves Blit's lifecycle, privilege gate, API resource, and restart
+behavior. It does not prove PAM, logind, or a real authenticated Hibr desktop;
+that acceptance remains Hibr #79 on a VM or real host. Hibr provider and join
+issues remain separate and are not modified by this Blit change.
+
 ## 0.1.482 Hibr native-PTY live evidence
 
 0.1.482 is deployed on `192.168.10.54`. The live API reports one Hibr

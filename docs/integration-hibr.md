@@ -28,6 +28,31 @@ The SDL3 state engine must not be linked into hibr, and hibr must not become a
 second owner of display state. This preserves process isolation and lets other
 clients use blit without hibr.
 
+## Login manager
+
+Blit #83 adds one root-owned login boundary without changing Hibr. A packaged
+service with `BLIT_LOGIN_AUTOSTART=1` starts Hibr's installed
+`login/login.hibr` through a Blit PTY. Hibr performs PAM authentication and
+uses `auth run` to start the person's selected desktop or shell; Blit retains
+KMS, evdev, and the network API for the whole session.
+
+The resource is API-controlled:
+
+```sh
+curl --fail --request POST \
+  --header 'Content-Type: application/json' \
+  --data '{}' http://127.0.0.1:8080/v1/login
+curl --fail http://127.0.0.1:8080/v1/login
+curl --fail --request DELETE http://127.0.0.1:8080/v1/login
+```
+
+Blit's `blit-login-session.hibr` is the `LG_SESSIONCMD` hook. It starts the
+existing Blit-owned desktop entrypoint for `desktop` and the user's shell for
+`shell`; it does not implement authentication or desktop behavior. Logout
+retires the login PTY and Blit starts a fresh login screen. Hibr's root-path
+PAM/logind test is tracked by [Hibr #79](https://git.home.arpa/itdlabs/hibr/issues/79).
+Blit does not close or modify that Hibr issue.
+
 ```text
 hibr desktop / desktop --join
         |

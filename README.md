@@ -109,6 +109,8 @@ package is an alternate source of behavior.
 - OpenAPI 3.1 source of truth in [`openapi/blit-0.1.yaml`](openapi/blit-0.1.yaml).
 - WebSocket event and bounded pixel-stream upgrade at `/v1/stream`.
 - PTY-backed terminal sessions with revisioned cell surfaces and scrollback.
+- A single supervised Hibr login manager with root-owned KMS/input and
+  per-user desktop or shell children.
 - Direct KMS and SDL3 presentation paths, refresh-aware scheduling, and
   diagnostics for frames, render time, missed deadlines, input, and streams.
 - Logical multi-display topology and pane layouts, including Hibr primary plus
@@ -194,6 +196,10 @@ the following sequence as a transaction boundary:
 version -> capabilities -> outputs/topology -> session -> surface/input
         -> stream/diagnostics -> cleanup -> zero-resource verification
 ```
+
+On a packaged Hibr host, `/v1/login` is the lifecycle boundary for the
+authenticated desktop or shell: logout retires the user session and returns
+to a fresh login screen.
 
 `openapi/blit-0.1.yaml` is the machine-readable contract; `docs/api.md` is
 the operator and client guide. The schema gate checks that the documented

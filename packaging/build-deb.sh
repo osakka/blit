@@ -7,6 +7,7 @@ RUNTIME_BINARY=$ROOT/build/blit/blit-server
 UPDATE_HELPER=$ROOT/build/blit/blit-update-helper
 HIBR_ADAPTER=$ROOT/build/blit/console-blit.so
 HIBR_ENTRYPOINT=$ROOT/hibr/blit-session.hibr
+HIBR_LOGIN_ENTRYPOINT=$ROOT/hibr/blit-login-session.hibr
 HIBR_RUNTIME_RC=$ROOT/hibr/blit-runtime-console.hibr
 HIBR_VERSION_FILE=$ROOT/packaging/HIBR_VERSION
 OUT=${1:-$ROOT}
@@ -15,6 +16,7 @@ VERSION_FILE=$ROOT/packaging/VERSION
 if [ ! -x "$RUNTIME_BINARY" ] || [ ! -x "$UPDATE_HELPER" ] ||
    [ ! -x "$BUNDLE/bin/blit-server" ] ||
    [ ! -f "$VERSION_FILE" ] || [ ! -f "$HIBR_ENTRYPOINT" ] ||
+   [ ! -f "$HIBR_LOGIN_ENTRYPOINT" ] ||
    [ ! -f "$HIBR_ADAPTER" ] || [ ! -f "$HIBR_VERSION_FILE" ]; then
 	echo "blit: canonical build outputs are incomplete" >&2
 	exit 1
@@ -92,10 +94,13 @@ cp -a "$UPDATE_HELPER" "$stage/usr/lib/blit/bin/blit-update-helper"
 # explicit Blit entrypoint loads this optional provider by absolute path.
 cp -a "$HIBR_ADAPTER" "$stage/usr/lib/blit/hibr/console-blit.so"
 cp -a "$HIBR_ENTRYPOINT" "$stage/usr/share/blit/hibr/blit-session.hibr"
+cp -a "$HIBR_LOGIN_ENTRYPOINT" \
+    "$stage/usr/share/blit/hibr/blit-login-session.hibr"
 cp -a "$HIBR_RUNTIME_RC" "$stage/usr/share/blit/hibr/blit-runtime-console.hibr"
 cp -a "$ROOT/hibr/blit-live-image-probe.hibr" \
     "$stage/usr/share/blit/probes/blit-live-image-probe.hibr"
 chmod 0755 "$stage/usr/share/blit/hibr/blit-session.hibr"
+chmod 0755 "$stage/usr/share/blit/hibr/blit-login-session.hibr"
 chmod 0644 "$stage/usr/share/blit/hibr/blit-runtime-console.hibr"
 chmod 0755 "$stage/usr/share/blit/probes/blit-live-image-probe.hibr"
 # Hibr's stock session resolves desktop.hibr and its sibling directories from
@@ -179,6 +184,10 @@ BLIT_UPDATE_TOKEN_FILE=/etc/blit/update.token
 # error after a grace window long enough for a desktop to start. Remove the
 # line on a host that deliberately runs Blit with no session.
 BLIT_EXPECT_DESKTOP=1
+# Issue #83. Keep one root-owned Hibr login manager on the primary pane. Hibr
+# authenticates and drops the selected desktop or shell; Blit retains KMS and
+# evdev ownership and recreates the login screen after logout.
+BLIT_LOGIN_AUTOSTART=1
 LANG=C.UTF-8
 LC_ALL=C.UTF-8
 CONFIG
@@ -205,6 +214,9 @@ if ! grep -q '^BLIT_AUTH_TOKEN=' /etc/blit/blit.env; then
 fi
 if ! grep -q '^BLIT_EXPECT_DESKTOP=' /etc/blit/blit.env; then
     printf '%s\n' 'BLIT_EXPECT_DESKTOP=1' >> /etc/blit/blit.env
+fi
+if ! grep -q '^BLIT_LOGIN_AUTOSTART=' /etc/blit/blit.env; then
+    printf '%s\n' 'BLIT_LOGIN_AUTOSTART=1' >> /etc/blit/blit.env
 fi
 if ! grep -q '^LANG=' /etc/blit/blit.env; then
     printf '%s\n' 'LANG=C.UTF-8' >> /etc/blit/blit.env

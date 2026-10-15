@@ -118,7 +118,11 @@ extern char **environ;
 #define BLIT_MAX_SCROLLBACK_LINES 1000
 #define BLIT_MAX_OVERLAYS 16
 #define BLIT_UPDATE_IDLE_TIMEOUT_US 30000000ULL
+#define BLIT_LOGIN_RESTART_DELAY_US 1000000ULL
 #define BLIT_EVDEV_MOUSE_ACTIVITY_US 500000ULL
+#define BLIT_DEFAULT_LOGIN_COMMAND "/usr/bin/hibr"
+#define BLIT_DEFAULT_LOGIN_SCRIPT "/usr/share/hibr/desktop/login/login.hibr"
+#define BLIT_DEFAULT_LOGIN_SESSION_COMMAND "/usr/bin/hibr /usr/share/blit/hibr/blit-login-session.hibr"
 #define BLIT_DEFAULT_FOREGROUND 0xbed2beU
 #define BLIT_ATTR_BOLD 1
 #define BLIT_ATTR_DIM 2
@@ -775,6 +779,7 @@ typedef struct {
     int hibr_owner_registered;
     int hibr_resume_requested;
     int hibr_attach_unresolved;
+    int login_manager;
     /* Cell requests the owner has had accepted for this session's surface,
        and when it registered. A desktop whose owner registered and then never
        painted is the blank-but-healthy state of issue #32, and these are what
@@ -972,6 +977,15 @@ typedef struct {
        the health document said nothing. */
     int expect_desktop;
     uint64_t outputs_idle_since_us;
+    int login_enabled;
+    unsigned long long login_session_id;
+    uint64_t login_restart_due_us;
+    char login_command[256];
+    char login_script[256];
+    char login_session_command[512];
+    char login_display_id[128];
+    char login_pane_id[128];
+    int login_start_reported;
     int opener_notify[2];
     unsigned long long diagnostic_open_requests;
     unsigned long long diagnostic_open_requests_dropped;
@@ -1418,6 +1432,7 @@ static BlitSurface *find_surface_id(BlitRuntime *runtime,
                                     unsigned long long surface_id);
 static BlitSession *find_session_id(BlitRuntime *runtime,
                                     unsigned long long session_id);
+static void destroy_session(BlitRuntime *runtime, BlitSession *session);
 static int hibr_frame_barrier_active(const BlitRuntime *runtime,
                                      uint64_t now);
 static void arm_hibr_frame_barrier(BlitRuntime *runtime,
@@ -2863,7 +2878,7 @@ static void server_json(const BlitRuntime *runtime, char *body, size_t capacity)
              "\"display-devices\",\"input-devices\","
              "\"input-device-configuration\",\"input-routes\","
              "\"settings-persistence\","
-             "\"network-terminal-input\",\"diagnostics\","
+             "\"login-manager\",\"network-terminal-input\",\"diagnostics\","
              "\"runtime-diagnostics\",\"lifecycle-control\","
              "\"effects\",\"overlays\",\"font-selection\"],\"display_count\":%d,"
              "\"display_backend\":{\"name\":\"%s\",\"ready\":%s,"
@@ -2873,7 +2888,7 @@ static void server_json(const BlitRuntime *runtime, char *body, size_t capacity)
              "\"audio_cards\":\"/v1/audio/cards\","
              "\"input_devices\":\"/v1/input/devices\","
              "\"input_routes\":\"/v1/input/routes\",\"topology\":\"/v1/topology\","
-             "\"fonts\":\"/v1/fonts\","
+             "\"fonts\":\"/v1/fonts\",\"login\":\"/v1/login\","
              "\"settings\":\"/v1/settings\","
              "\"diagnostics\":\"/v1/diagnostics\","
              "\"runtime_diagnostics\":\"/v1/diagnostics/runtime\","
@@ -13041,16 +13056,19 @@ static void refresh_session_state(BlitRuntime *runtime, BlitSession *session)
     if (result == session->process_id) {
         if (WIFEXITED(status)) {
             session->exit_code = WEXITSTATUS(status);
-            if (!session->hibr_process || session->hibr_desktop_join)
+            if (session->login_manager || !session->hibr_process ||
+                session->hibr_desktop_join)
                 snprintf(session->state, sizeof(session->state),
                          session->exit_code == 0 ? "stopped" : "failed");
         } else if (WIFSIGNALED(status)) {
             session->exit_code = 128 + WTERMSIG(status);
-            if (!session->hibr_process || session->hibr_desktop_join)
+            if (session->login_manager || !session->hibr_process ||
+                session->hibr_desktop_join)
                 snprintf(session->state, sizeof(session->state), "failed");
         } else {
             session->exit_code = -1;
-            if (!session->hibr_process || session->hibr_desktop_join)
+            if (session->login_manager || !session->hibr_process ||
+                session->hibr_desktop_join)
                 snprintf(session->state, sizeof(session->state), "failed");
         }
         session->child_exited = 1;
@@ -13059,20 +13077,23 @@ static void refresh_session_state(BlitRuntime *runtime, BlitSession *session)
            protocol reply) immediately before exit.  Do not retire the
            surface here: service_session_output must drain those bytes before
            it observes EOF and closes the PTY. */
-        if (!session->hibr_process || session->hibr_desktop_join) {
+        if (session->login_manager || !session->hibr_process ||
+            session->hibr_desktop_join) {
             disable_input_routes_for_target(runtime, target_id);
             remove_session_streams(runtime, target_id);
         }
     } else if (result < 0 && errno != EINTR) {
         session->exit_code = -1;
-        if (!session->hibr_process || session->hibr_desktop_join)
+        if (session->login_manager || !session->hibr_process ||
+            session->hibr_desktop_join)
             snprintf(session->state, sizeof(session->state), "failed");
         session->child_exited = 1;
         if (session->pty_fd >= 0) {
             close(session->pty_fd);
             session->pty_fd = -1;
         }
-        if (!session->hibr_process || session->hibr_desktop_join) {
+        if (session->login_manager || !session->hibr_process ||
+            session->hibr_desktop_join) {
             retire_session_surface(runtime, session);
             disable_input_routes_for_target(runtime, target_id);
             remove_session_streams(runtime, target_id);
@@ -13523,6 +13544,9 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
              session->focused ? "true" : "false",
              surface_mode_name(session->surface_mode));
     used = strlen(body);
+    used += (size_t)snprintf(body + used, capacity - used,
+                             ",\"login_manager\":%s",
+                             session->login_manager ? "true" : "false");
     used += (size_t)snprintf(body + used, capacity - used,
                              ",\"title\":\"%s\"", escaped_title);
     if (session->terminal_clipboard[0] != '\0')
@@ -14452,6 +14476,198 @@ static int create_session(BlitRuntime *runtime, const char *json,
     return 0;
 }
 
+/* Blit owns the login-manager lifecycle, while Hibr owns authentication and
+   the per-user session.  Keep the login command construction here rather than
+   teaching the generic session API about a second command vocabulary. */
+static int create_login_session(BlitRuntime *runtime, BlitSession **created)
+{
+    char command[512];
+    char request[2048];
+    char script[512];
+    char session_command[1024];
+    char pane_id[256];
+    char escaped_command[512];
+    char escaped_script[512];
+    char escaped_session_command[1024];
+    char escaped_pane_id[256];
+    int written;
+    int result;
+    int pane_index;
+
+    if (geteuid() != 0)
+        return -1;
+    snprintf(command, sizeof(command), "%s", runtime->login_command);
+    snprintf(script, sizeof(script), "%s", runtime->login_script);
+    snprintf(session_command, sizeof(session_command), "%s",
+             runtime->login_session_command);
+    if (command[0] == '\0' || access(command, X_OK) != 0)
+        return -2;
+    if (script[0] != '\0' && access(script, R_OK) != 0)
+        return -2;
+
+    pane_id[0] = '\0';
+    if (runtime->login_pane_id[0] != '\0' &&
+        find_pane_id(runtime, runtime->login_pane_id) != NULL) {
+        snprintf(pane_id, sizeof(pane_id), "%s", runtime->login_pane_id);
+    } else if (runtime->pane_count > 0) {
+        for (pane_index = 0; pane_index < runtime->pane_count; ++pane_index)
+            if (runtime->panes[pane_index].used) {
+                if (runtime->login_display_id[0] != '\0' &&
+                    strcmp(runtime->panes[pane_index].display_id,
+                           runtime->login_display_id) != 0)
+                    continue;
+                snprintf(pane_id, sizeof(pane_id), "%s",
+                         runtime->panes[pane_index].id);
+                break;
+            }
+    }
+    if (pane_id[0] == '\0' && runtime->login_display_id[0] == '\0' &&
+        runtime->display_count > 0)
+        snprintf(runtime->login_display_id, sizeof(runtime->login_display_id),
+                 "display-%llu", runtime->displays[0].id);
+    if (pane_id[0] == '\0' && runtime->login_display_id[0] == '\0')
+        return -3;
+    if (pane_id[0] != '\0') {
+        BlitPane *login_pane = find_pane_id(runtime, pane_id);
+        snprintf(runtime->login_pane_id, sizeof(runtime->login_pane_id),
+                 "%s", pane_id);
+        if (runtime->login_display_id[0] == '\0' && login_pane != NULL)
+            snprintf(runtime->login_display_id,
+                     sizeof(runtime->login_display_id), "%s",
+                     login_pane->display_id);
+    }
+
+    json_escape(command, escaped_command, sizeof(escaped_command));
+    json_escape(script, escaped_script, sizeof(escaped_script));
+    json_escape(session_command, escaped_session_command,
+                sizeof(escaped_session_command));
+    json_escape(pane_id, escaped_pane_id, sizeof(escaped_pane_id));
+    if (script[0] != '\0') {
+        if (pane_id[0] != '\0') {
+            written = snprintf(request, sizeof(request),
+                "{\"command\":\"%s\",\"arguments\":[\"%s\"],"
+                "\"pane_id\":\"%s\",\"environment\":{"
+                "\"LG_SESSIONCMD\":\"%s\"}}",
+                escaped_command, escaped_script, escaped_pane_id,
+                escaped_session_command);
+        } else {
+            written = snprintf(request, sizeof(request),
+                "{\"command\":\"%s\",\"arguments\":[\"%s\"],"
+                "\"display_id\":\"%s\",\"environment\":{"
+                "\"LG_SESSIONCMD\":\"%s\"}}",
+                escaped_command, escaped_script, runtime->login_display_id,
+                escaped_session_command);
+        }
+    } else if (pane_id[0] != '\0') {
+        written = snprintf(request, sizeof(request),
+            "{\"command\":\"%s\",\"pane_id\":\"%s\","
+            "\"environment\":{\"LG_SESSIONCMD\":\"%s\"}}",
+            escaped_command, escaped_pane_id, escaped_session_command);
+    } else {
+        written = snprintf(request, sizeof(request),
+            "{\"command\":\"%s\",\"display_id\":\"%s\","
+            "\"environment\":{\"LG_SESSIONCMD\":\"%s\"}}",
+            escaped_command, runtime->login_display_id,
+            escaped_session_command);
+    }
+    if (written < 0 || (size_t)written >= sizeof(request))
+        return -4;
+    result = create_session(runtime, request, created);
+    if (result != 1)
+        return -4;
+    (*created)->login_manager = 1;
+    runtime->login_session_id = (*created)->id;
+    runtime->login_restart_due_us = 0;
+    return 1;
+}
+
+static void login_manager_json(BlitRuntime *runtime, char *body,
+                               size_t capacity)
+{
+    BlitSession *session = runtime->login_session_id != 0 ?
+        find_session_id(runtime, runtime->login_session_id) : NULL;
+    const char *state = runtime->login_enabled ? "starting" : "disabled";
+    char session_body[8192];
+    char escaped_command[512];
+    char escaped_script[512];
+    char escaped_display[256];
+    char escaped_pane[256];
+    char display_value[300];
+    char pane_value[300];
+
+    json_escape(runtime->login_command, escaped_command,
+                sizeof(escaped_command));
+    json_escape(runtime->login_script, escaped_script, sizeof(escaped_script));
+    json_escape(runtime->login_display_id, escaped_display,
+                sizeof(escaped_display));
+    json_escape(runtime->login_pane_id, escaped_pane, sizeof(escaped_pane));
+    if (runtime->login_display_id[0] != '\0')
+        snprintf(display_value, sizeof(display_value), "\"%s\"",
+                 escaped_display);
+    else
+        snprintf(display_value, sizeof(display_value), "null");
+    if (runtime->login_pane_id[0] != '\0')
+        snprintf(pane_value, sizeof(pane_value), "\"%s\"", escaped_pane);
+    else
+        snprintf(pane_value, sizeof(pane_value), "null");
+
+    if (session != NULL) {
+        refresh_session_state(runtime, session);
+        state = session->state;
+        session_json(runtime, session, session_body, sizeof(session_body));
+    } else if (runtime->login_enabled) {
+        state = runtime->login_restart_due_us != 0 ? "backoff" : "stopped";
+    }
+    snprintf(body, capacity,
+             "{\"state\":\"%s\",\"enabled\":%s,"
+             "\"command\":\"%s\",\"script\":\"%s\","
+             "\"display_id\":%s,\"pane_id\":%s,\"session\":%s}",
+             state, runtime->login_enabled ? "true" : "false",
+             escaped_command, escaped_script,
+             display_value, pane_value,
+             session != NULL ? session_body : "null");
+}
+
+static void service_login_manager(BlitRuntime *runtime, uint64_t now)
+{
+    BlitSession *session;
+    char detail[256];
+    int result;
+
+    if (!runtime->login_enabled)
+        return;
+    session = runtime->login_session_id != 0 ?
+        find_session_id(runtime, runtime->login_session_id) : NULL;
+    if (session != NULL) {
+        refresh_session_state(runtime, session);
+        if (strcmp(session->state, "running") == 0 ||
+            strcmp(session->state, "starting") == 0)
+            return;
+        if (runtime->login_restart_due_us == 0)
+            runtime->login_restart_due_us = now + BLIT_LOGIN_RESTART_DELAY_US;
+        if (now < runtime->login_restart_due_us)
+            return;
+        destroy_session(runtime, session);
+        session = NULL;
+    }
+    if (runtime->login_restart_due_us != 0 &&
+        now < runtime->login_restart_due_us)
+        return;
+    result = create_login_session(runtime, &session);
+    if (result == 1) {
+        runtime->login_start_reported = 0;
+        return;
+    }
+    if (!runtime->login_start_reported) {
+        snprintf(detail, sizeof(detail),
+                 "login manager start failed: result=%d command=%s",
+                 result, runtime->login_command);
+        diagnostic_log(runtime, "error", "login_manager_start_failed", detail);
+        runtime->login_start_reported = 1;
+    }
+    runtime->login_restart_due_us = now + 5000000ULL;
+}
+
 static int resize_session_surface(BlitSession *session, BlitSurface *surface,
                                   int width, int height)
 {
@@ -14731,6 +14947,9 @@ static void destroy_session(BlitRuntime *runtime, BlitSession *session)
     int i;
 
     snprintf(target_id, sizeof(target_id), "session-%llu", session->id);
+
+    if (session->login_manager && runtime->login_session_id == session->id)
+        runtime->login_session_id = 0;
 
     refresh_session_state(runtime, session);
     if (strcmp(session->state, "running") == 0 ||
@@ -17843,6 +18062,85 @@ static void handle_request(int fd, BlitRuntime *runtime,
         send_http(fd, 202, "Accepted", "application/json",
                   "{\"state\":\"restarting\",\"detail\":\""
                   "restart accepted; cleanup is in progress\"}");
+        return;
+    }
+
+    if (strcmp(path, "/v1/login") == 0 &&
+        (strcmp(method, "GET") == 0 || strcmp(method, "POST") == 0 ||
+         strcmp(method, "DELETE") == 0)) {
+        BlitSession *login_session = runtime->login_session_id != 0 ?
+            find_session_id(runtime, runtime->login_session_id) : NULL;
+        int result;
+
+        if (strcmp(method, "GET") == 0) {
+            login_manager_json(runtime, body, sizeof(body));
+            send_http(fd, 200, "OK", "application/json", body);
+            return;
+        }
+        if (strcmp(method, "DELETE") == 0) {
+            runtime->login_enabled = 0;
+            runtime->login_restart_due_us = 0;
+            runtime->login_start_reported = 0;
+            if (login_session != NULL)
+                destroy_session(runtime, login_session);
+            send_http(fd, 204, "No Content", "application/json", "");
+            return;
+        }
+        if (json_string(payload, "display_id", runtime->login_display_id,
+                        sizeof(runtime->login_display_id)) &&
+            !display_id_is_known(runtime, runtime->login_display_id)) {
+            send_problem(fd, 404, "Not Found", "display_not_found",
+                         "The requested login display does not exist.");
+            return;
+        }
+        if (json_string(payload, "pane_id", runtime->login_pane_id,
+                        sizeof(runtime->login_pane_id)) &&
+            find_pane_id(runtime, runtime->login_pane_id) == NULL) {
+            send_problem(fd, 404, "Not Found", "pane_not_found",
+                         "The requested login pane does not exist.");
+            return;
+        }
+        if (geteuid() != 0) {
+            send_problem(fd, 403, "Forbidden", "login_requires_root",
+                         "The Hibr login manager must be supervised by the root Blit service.");
+            return;
+        }
+        runtime->login_enabled = 1;
+        runtime->login_restart_due_us = 0;
+        runtime->login_start_reported = 0;
+        if (login_session != NULL) {
+            refresh_session_state(runtime, login_session);
+            if (strcmp(login_session->state, "running") == 0 ||
+                strcmp(login_session->state, "starting") == 0) {
+                login_manager_json(runtime, body, sizeof(body));
+                send_http(fd, 200, "OK", "application/json", body);
+                return;
+            }
+            destroy_session(runtime, login_session);
+        }
+        result = create_login_session(runtime, &login_session);
+        if (result == -1) {
+            send_problem(fd, 403, "Forbidden", "login_requires_root",
+                         "The Hibr login manager must be supervised by the root Blit service.");
+            return;
+        }
+        if (result == -2) {
+            send_problem(fd, 503, "Service Unavailable", "login_runtime_missing",
+                         "The configured Hibr login executable or script is unavailable.");
+            return;
+        }
+        if (result == -3) {
+            send_problem(fd, 409, "Conflict", "login_display_unavailable",
+                         "The login manager requires a discovered display or pane.");
+            return;
+        }
+        if (result != 1) {
+            send_problem(fd, 503, "Service Unavailable", "login_start_failed",
+                         "The Hibr login manager PTY could not be created.");
+            return;
+        }
+        login_manager_json(runtime, body, sizeof(body));
+        send_http(fd, 201, "Created", "application/json", body);
         return;
     }
 
@@ -25251,6 +25549,35 @@ int main(int argc, char **argv)
         const char *expect = getenv("BLIT_EXPECT_DESKTOP");
         runtime.expect_desktop = expect != NULL && expect[0] == '1';
     }
+    {
+        const char *login_autostart = getenv("BLIT_LOGIN_AUTOSTART");
+        const char *login_command = getenv("BLIT_LOGIN_COMMAND");
+        const char *login_script = getenv("BLIT_LOGIN_SCRIPT");
+        const char *login_session_command =
+            getenv("BLIT_LOGIN_SESSION_COMMAND");
+        runtime.login_enabled = login_autostart != NULL &&
+            login_autostart[0] == '1';
+        snprintf(runtime.login_command, sizeof(runtime.login_command), "%s",
+                 login_command != NULL && login_command[0] != '\0' ?
+                     login_command : BLIT_DEFAULT_LOGIN_COMMAND);
+        snprintf(runtime.login_script, sizeof(runtime.login_script), "%s",
+                 login_script != NULL ? login_script :
+                     BLIT_DEFAULT_LOGIN_SCRIPT);
+        snprintf(runtime.login_session_command,
+                 sizeof(runtime.login_session_command), "%s",
+                 login_session_command != NULL && login_session_command[0] != '\0' ?
+                     login_session_command : BLIT_DEFAULT_LOGIN_SESSION_COMMAND);
+        {
+            const char *login_display = getenv("BLIT_LOGIN_DISPLAY_ID");
+            const char *login_pane = getenv("BLIT_LOGIN_PANE_ID");
+            if (login_display != NULL)
+                snprintf(runtime.login_display_id,
+                         sizeof(runtime.login_display_id), "%s", login_display);
+            if (login_pane != NULL)
+                snprintf(runtime.login_pane_id,
+                         sizeof(runtime.login_pane_id), "%s", login_pane);
+        }
+    }
     /* ADR 0067. The settings document, read before the first scan so that a
        device found at boot acquires its stored configuration in the same place
        a device hotplugged an hour later does.
@@ -25475,6 +25802,7 @@ int main(int argc, char **argv)
         }
         for (i = 0; i < BLIT_MAX_SESSIONS; ++i)
             refresh_session_state(&runtime, &runtime.sessions[i]);
+        service_login_manager(&runtime, monotonic_us());
 
         pending_before_events = runtime.render_pending;
         sdl_events_started_us = monotonic_us();

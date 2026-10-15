@@ -281,6 +281,7 @@ suite_hibr() {
 }
 
 suite_lifecycle() {
+    run_gate login_manager_gate.sh "$ROOT"/tools/tests/login_manager_gate.sh
     run_gate restart_gate.sh "$ROOT"/tools/tests/restart_gate.sh
     run_gate shutdown_gate.sh "$ROOT"/tools/tests/shutdown_gate.sh
     run_gate shutdown_key_gate.rb ruby tools/tests/shutdown_key_gate.rb

@@ -1,0 +1,25 @@
+#!/usr/bin/env hibr
+# Blit's login-manager session hook.
+#
+# login.hibr invokes LG_SESSIONCMD as the authenticated user and appends the
+# selected session name. Keep this launcher in Blit so the login boundary uses
+# the same Blit-owned Hibr entrypoint as API-created desktops without changing
+# Hibr's login or desktop files.
+
+strict
+
+session=${1-desktop}
+case "$session" in
+desktop)
+    launcher=${BLIT_HIBR_SESSION_LAUNCHER:-/usr/share/blit/hibr/blit-session.hibr}
+    exec "$HIBR" "$launcher" --session=desktop --resume
+    ;;
+shell)
+    sh=${SHELL:-/bin/sh}
+    exec -a "-${sh##*/}" "$sh"
+    ;;
+*)
+    echo "blit-login-session: unsupported session '$session'" >&2
+    exit 2
+    ;;
+esac
