@@ -25,9 +25,24 @@ adapter=${BLIT_HIBR_ADAPTER:-/usr/lib/blit/hibr/console-blit.so}
 provider=${BLIT_HIBR_PROVIDER:-terminal}
 desktop=${BLIT_HIBR_DESKTOP_SESSION:-}
 blit_join=0
+blit_session=desktop
+blit_name=
+blit_expect=
 for argument in "$@"; do
+	if [ -n "$blit_expect" ]; then
+		case "$blit_expect" in
+			session) blit_session=$argument ;;
+			name) blit_name=$argument ;;
+		esac
+		blit_expect=
+		continue
+	fi
 	case "$argument" in
 		--join|-j) blit_join=1 ;;
+		--session=*) blit_session=${argument#--session=} ;;
+		--name=*) blit_name=${argument#--name=} ;;
+		--session|-s) blit_expect=session ;;
+		--name|-n) blit_expect=name ;;
 	esac
 done
 if [ -z "$desktop" ] && [ -f "$d/session.hibr" ]; then
@@ -67,6 +82,42 @@ mod load "$moddir/img.so" || exit 1
 mod load "$moddir/pty.so" || exit 1
 mod load "$moddir/term.so" || exit 1
 mod load "$moddir/hold.so" || exit 1
+# A physical pane topology is already expressed in Blit's cell coordinates.
+# Hibr's stock --join policy always appends a client to the right edge of the
+# current union, which is correct for a normal terminal but wrong for a Blit
+# split such as primary-bottom/join-top.  Move the held primary into its
+# physical union position before attaching this pane at its own position.
+# This remains in the Blit-owned launcher so Hibr's desktop implementation is
+# untouched; without these variables, retain Hibr's stock behavior for direct
+# Hibr invocations and other controlled uses of this entrypoint.
+if [ "$blit_join" = 1 ] &&
+	[ -n "${BLIT_HIBR_PANE_ROW:-}" ] &&
+	[ -n "${BLIT_HIBR_PANE_COL:-}" ] &&
+	[ -n "${BLIT_HIBR_PRIMARY_ROW:-}" ] &&
+	[ -n "${BLIT_HIBR_PRIMARY_COL:-}" ]; then
+	blit_clients=$(hold clients "$blit_session") || exit 1
+	blit_primary_client=
+	while IFS=' ' read -r blit_client blit_row blit_col blit_rows \
+		blit_cols blit_primary; do
+		[ "$blit_primary" = 1 ] || continue
+		blit_primary_client=$blit_client
+		break
+	done <<< "$blit_clients"
+	if [ -z "$blit_primary_client" ]; then
+		echo "$0: no primary client in held session $blit_session" >&2
+		exit 1
+	fi
+	hold move "$blit_session" "$blit_primary_client" \
+		"$BLIT_HIBR_PRIMARY_ROW" "$BLIT_HIBR_PRIMARY_COL" || exit 1
+	if [ -n "$blit_name" ]; then
+		hold attach -m -n "$blit_name" "$blit_session" \
+			"$BLIT_HIBR_PANE_ROW" "$BLIT_HIBR_PANE_COL"
+	else
+		hold attach -m "$blit_session" \
+			"$BLIT_HIBR_PANE_ROW" "$BLIT_HIBR_PANE_COL"
+	fi
+	exit $?
+fi
 # Open Blit's provider before the stock desktop enters its held-session
 # transition. The initial launcher remains the ownership-scoped Hibr client;
 # relying on the detached child's later `need display` can allow Hibr's native

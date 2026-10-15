@@ -13911,6 +13911,8 @@ static int create_session(BlitRuntime *runtime, const char *json,
     int hibr_desktop_join = 0;
     int hibr_desktop_result;
     char hibr_desktop_session[128];
+    BlitSession *hibr_owner = NULL;
+    BlitPane *hibr_owner_pane = NULL;
     const char *command_name;
     int i;
 
@@ -13961,9 +13963,12 @@ static int create_session(BlitRuntime *runtime, const char *json,
     if (hibr_desktop_result > 0 && hibr_desktop_primary &&
         hibr_desktop_owner(runtime, hibr_desktop_session) != NULL)
         return -2;
-    if (hibr_desktop_result > 0 && hibr_desktop_join &&
-        hibr_desktop_owner(runtime, hibr_desktop_session) == NULL)
-        return -3;
+    if (hibr_desktop_result > 0 && hibr_desktop_join) {
+        hibr_owner = hibr_desktop_owner(runtime, hibr_desktop_session);
+        if (hibr_owner == NULL)
+            return -3;
+        hibr_owner_pane = find_pane_id(runtime, hibr_owner->pane_id);
+    }
     /* The deployed launcher is blit-session.hibr, not `desktop`, so looking
        only at `desktop` meant a resumed desktop did not report itself as one
        -- the one fact a blank reattachment most needed to state. */
@@ -14068,6 +14073,27 @@ static int create_session(BlitRuntime *runtime, const char *json,
                 _exit(126);
         if (pane_id[0] != '\0' && setenv("BLIT_PANE_ID", pane_id, 1) != 0)
             _exit(126);
+        /* Hibr's hold union is logical cell space.  Tell the Blit-owned
+           entrypoint where this physical pane belongs so a stacked topology
+           can move the primary client and attach the join above it, while a
+           side-by-side topology keeps the natural horizontal offsets. */
+        if (hibr_process && pane != NULL) {
+            char pane_row[32];
+            char pane_column[32];
+            snprintf(pane_row, sizeof(pane_row), "%d", pane->y);
+            snprintf(pane_column, sizeof(pane_column), "%d", pane->x);
+            if (setenv("BLIT_HIBR_PANE_ROW", pane_row, 1) != 0 ||
+                setenv("BLIT_HIBR_PANE_COL", pane_column, 1) != 0)
+                _exit(126);
+            if (hibr_desktop_join && hibr_owner_pane != NULL) {
+                snprintf(pane_row, sizeof(pane_row), "%d", hibr_owner_pane->y);
+                snprintf(pane_column, sizeof(pane_column), "%d",
+                         hibr_owner_pane->x);
+                if (setenv("BLIT_HIBR_PRIMARY_ROW", pane_row, 1) != 0 ||
+                    setenv("BLIT_HIBR_PRIMARY_COL", pane_column, 1) != 0)
+                    _exit(126);
+            }
+        }
         /* ADR 0064 stage 5. A chosen default PCM reaches a child as ALSA's
            own environment variables, which is the whole of what Blit can
            honour: it has no audio engine, so it cannot route a stream, and

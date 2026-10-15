@@ -101,6 +101,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0077 — Hibr joins mirror one authoritative desktop (superseded)](0077-hibr-joins-mirror-one-authoritative-desktop.md)
 - [0078 — Hibr joins are independent viewports of one desktop (superseded)](0078-hibr-joins-are-independent-viewports.md)
 - [0079 — The packaged Hibr desktop uses the native PTY boundary](0079-hibr-desktop-uses-the-native-pty-boundary.md)
+- [0080 — Map Blit panes to Hibr hold-union coordinates](0080-map-blit-panes-to-hibr-hold-union-coordinates.md)
 
 ## Adding an ADR
 
