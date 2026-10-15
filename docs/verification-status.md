@@ -19,8 +19,9 @@ surfaces, direct joined-surface writes are rejected, and joined-pane pointer
 routing records the primary as `input_session`. This is server-side evidence;
 the exact Hibr QEMU/physical gates must still prove wallpaper, protocol
 graphics, context menus, window placement, and reconnect behavior. The package
-and live deployment are not claimed until the release artifact is built from
-the final commit and installed on `192.168.10.54`.
+`blit_0.1.477-1_amd64.deb` passes the manifest/content and reproducible-build
+gates from the exact committed TCC binary. Live deployment is not claimed
+until that artifact is installed on `192.168.10.54`.
 
 The preceding 0.1.476 mirror candidate is retained as historical evidence in
 [`releases/0.1.476.yaml`](../releases/0.1.476.yaml) and superseded by ADR 0078;
