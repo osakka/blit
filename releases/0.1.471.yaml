@@ -1,6 +1,6 @@
 release: 0.1.471
 package: blit_0.1.471-1_amd64.deb
-package_sha256: d047f2be485379a03710617f8214a589e9dc538d2924b8c3604c5acd873e7a35
+package_sha256: 6cd758b16a887a672b567980013517cf7ec1e39ad8ef8393400fa341ec5c2da8
 source_commit: fed236e
 package_documentation_commit: fed236e
 server_binary_sha256: 3e1aa17e56250984ba63e3a0023f4a36fc684e704f0e7775d94ec4110b744c4c
