@@ -353,6 +353,19 @@ watched application-descriptor wakeups, quiet-wait exclusion, Hibr's UTF-8
 cell widths, idempotent shadows, and zero HTTP resize polls during steady input.
 It must be built against the same pinned released Hibr as the package.
 
+The Blit-owned join contract has a local gate that does not require a running
+Hibr installation:
+
+```sh
+ruby tools/tests/hibr_join_mirror_gate.rb
+```
+
+It creates one primary and one `desktop --join` fixture, proves that the
+primary's committed cells appear on the joined surface, verifies that the
+joined surface is read-only, and checks that a pointer hit in the joined pane
+is routed to the primary session. Physical wallpaper/context-menu acceptance
+still requires the exact package on a real display.
+
 The stream reconnect/replay gate runs against that exact binary with the
 dummy video backend:
 

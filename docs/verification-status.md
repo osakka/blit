@@ -3,6 +3,23 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 0.1.476 Hibr join mirror candidate
+
+The join integration now has one explicit source of truth. A Hibr
+`desktop --join` session is forced to Blit's `mirror` surface mode: Blit copies
+the primary's committed cells and cursor at the presentation boundary,
+renders the primary's Kitty/Sixel graphics in the joined pane, rejects direct
+mirror writes, and routes joined-pane pointer/keyboard input to the primary
+Hibr owner. Hibr source is unchanged. This replaces the earlier incomplete
+assumption that a joined adapter surface would receive an independent PTY
+stream.
+
+The exact TCC build passes `hibr_join_mirror_gate.rb`, `hibr_singleton_gate.rb`,
+`pointer_settings_gate.rb`, and `api_schema_gate.rb`. The gate proves cell
+mirroring, read-only enforcement, and joined-pane-to-primary input routing.
+The package and physical-host wallpaper/context-menu acceptance are pending;
+no live-display or multi-monitor claim is made from this local evidence.
+
 ## 0.1.472 fractional font-scale contract
 
 The font API now accepts `1.0` through `3.0` in exact tenth-step increments;

@@ -80,10 +80,12 @@ provider. It is not the Blit graphics integration path and does not prove
 wallpaper/canvas presentation through Blit.
 
 The packaged entrypoint uses the `console-blit` provider for the primary and
-every `desktop --join` client. Blit owns one PTY-backed terminal session per
-physical surface and keeps each surface authoritative; Hibr's hold layer
-remains the single source of truth for desktop/session state and fans the
-joined desktop to its clients.
+every `desktop --join` client. The primary Hibr surface is the single source
+of truth. Each joined surface is a Blit-owned read-only mirror of the primary's
+committed cells and graphics, and hit-tested input from the joined pane is
+delivered to the primary owner's input stream. This avoids a second writer and
+does not require Hibr to emit an ANSI stream for Blit to parse
+([ADR 0077](adr/0077-hibr-joins-mirror-one-authoritative-desktop.md)).
 
 The package also installs `blit-runtime-console.hibr`, and the entrypoint sets
 `HIBR_RC` to it when the caller has not supplied an explicit fixture or
@@ -144,8 +146,8 @@ The repeatable VKMS QEMU fixture verifies these boundaries independently:
 - the four-pane acceptance mode starts one primary and three `--join` clients
   in a Blit-owned `2x2` layout and verifies four attached surfaces in one
   held desktop session;
-- the primary and joined Hibr surfaces receive independent PTY streams through
-  Blit's terminal parser;
+- the primary surface is the only Hibr-authored surface; a joined surface is
+  populated from that primary state and never becomes a second writer;
 - a direct Hibr executable launch is required for `hold` re-exec; launching
   through the ELF loader breaks Hibr's executable self-discovery;
 - the minimal Alpine fixture must provide the glibc loader and `libc.so.6` at
@@ -322,15 +324,16 @@ Hibr desktop remains alive under large redraws.
 
 The current QEMU evidence covers the packaged Hibr desktop, primary plus
 auxiliary `--join` sessions, the four logical pane layouts, and input-route
-creation over TCP to a two-output VKMS fixture. Both Hibr surfaces reach
-`running`, receive independent terminal streams, and advance revisions. With
-the current Hibr executable and modules staged, the control client reports
-both displays; a dedicated Blit test workload creates a window and validates
-Hibr `move`, `resize`, and `focus` across the joined display. The fixture must
-also provide the BusyBox `mkdir` applet because Hibr invokes `mkdir` as an
-external command during control-socket setup. Blit does not modify Hibr. The
-adapter sends one masked subscription control frame naming `input` and the
-owning terminal session. This bounds its frame reader away from large surface
+creation over TCP to a two-output VKMS fixture. The new join-mirror gate covers
+the ownership and input-routing contract; a QEMU screenshot gate still needs
+to prove the same mirror with real Kitty/Sixel wallpaper. With the current
+Hibr executable and modules staged, the control client reports both displays;
+a dedicated Blit test workload creates a window and validates Hibr `move`,
+`resize`, and `focus` across the joined display. The fixture must also provide
+the BusyBox `mkdir` applet because Hibr invokes `mkdir` as an external command
+during control-socket setup. Blit does not modify Hibr. The adapter sends one
+masked subscription control frame naming `input` and the owning primary
+terminal session. This bounds its frame reader away from large surface
 messages and lets session teardown close the stream deterministically.
 Resource links remain an explicitly deferred extension because they are not
 part of the display ownership contract.
@@ -345,12 +348,12 @@ check performs no HTTP poll; SIGWINCH is the resize edge. Physical-host clicks,
 shortcuts, redraws, and application wakeups are still measured after package deployment; passing
 translation/provider gates are not reported as physical acceptance.
 
-The live host verification is narrower and must be read separately. Blit
-0.1.473 on the single 1920x2160 output passes the 1x2 geometry contract:
-scale 3 produces an 80x45 grid, with the primary on the lower 80x23 pane and
-no unowned bottom row. The same host's Hibr 0.99.191 auxiliary join registers
-but currently emits zero cell writes, so Blit reports hibr_desktop_unpainted
-and the auxiliary is removed after the probe. This is an Hibr join-lifecycle
-integration blocker, not evidence against the pane partition or SDL renderer.
-Hibr source remains out of scope; the next integration cycle must use this
-exact API/session evidence with the Hibr maintainers.
+The local join-mirror gate now proves the server-side contract without
+modifying Hibr: one primary and one `--join` session are created, the primary
+cell `PRIMARY` is observed on the joined surface, direct writes to the mirror
+are rejected with `mirror_surface_read_only`, and a pointer hit in the joined
+pane is traced with the primary as `input_session`. This is a Blit integration
+gate, not physical-display acceptance. The live host still needs a fresh
+package deployment and screenshot/input validation before we claim that the
+wallpaper, context menu, and full Hibr window-placement experience work on
+the real display.

@@ -104,7 +104,8 @@ panes, input routing, and diagnostics.
 - [Effect testing](testing-effects.md) — deterministic SDL effect validation
   and direct-KMS capability behavior.
 - [hibr integration](integration-hibr.md) — standalone-service decision,
-  PTY compatibility probe, and the operational console-module adapter.
+  PTY compatibility probe, the operational console-module adapter, and the
+  primary-to-join mirror contract.
 - [ADR index](adr/README.md) — decisions that constrain implementation.
 - [Verification status](verification-status.md) — the current evidence ledger,
   release gates, and explicitly unverified items.

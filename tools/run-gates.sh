@@ -264,6 +264,7 @@ suite_renderer() {
 
 suite_hibr() {
     run_gate hibr_singleton_gate.rb ruby tools/tests/hibr_singleton_gate.rb
+    run_gate hibr_join_mirror_gate.rb ruby tools/tests/hibr_join_mirror_gate.rb
     # Needs only the Hibr headers, not a Hibr process: it compiles the shipped
     # display provider into a harness. Skips (77) without BLIT_HIBR_ROOT.
     run_gate adapter_coalesce_gate.sh "$ROOT"/tools/tests/adapter_coalesce_gate.sh

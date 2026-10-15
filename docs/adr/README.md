@@ -98,6 +98,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0074 — Support tenth-step font scales with deterministic pixel rounding](0074-font-scale-tenths-and-pixel-rounding.md)
 - [0075 — Pane grids are quantized inside physical pane regions](0075-pane-grid-partitions-own-the-remainder.md)
 - [0076 — Center the complete-cell display grid](0076-center-the-complete-cell-grid.md)
+- [0077 — Hibr joins mirror one authoritative desktop](0077-hibr-joins-mirror-one-authoritative-desktop.md)
 
 ## Adding an ADR
 

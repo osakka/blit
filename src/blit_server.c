@@ -777,6 +777,11 @@ typedef struct {
     unsigned long long hibr_owner_writes;
     uint64_t hibr_owner_registered_us;
     int hibr_unpainted_reported;
+    /* A Hibr join is a presentation surface, not a second desktop writer.
+       Keep the source revision here so the mirror is copied once per source
+       frame, while the primary remains the sole owner of desktop state. */
+    unsigned long long hibr_mirror_source_id;
+    unsigned long long hibr_mirror_source_revision;
     char hibr_session_token[64];
     int terminal_escape;
     /* Hibr emits a single SGR containing bold plus truecolor foreground and
@@ -1345,6 +1350,11 @@ static BlitSurface *find_surface_id(BlitRuntime *runtime,
                                     unsigned long long surface_id);
 static BlitSession *find_session_id(BlitRuntime *runtime,
                                     unsigned long long session_id);
+static BlitSession *hibr_input_owner(BlitRuntime *runtime,
+                                     BlitSession *session);
+static BlitSession *hibr_render_source(BlitRuntime *runtime,
+                                       BlitSession *session);
+static void sync_hibr_join_mirrors(BlitRuntime *runtime);
 static BlitGraphicsImage *graphics_image_find(BlitSession *session,
                                               unsigned int id);
 static void graphics_image_release(BlitGraphicsImage *image);
@@ -1811,6 +1821,7 @@ static void render_current_surfaces(BlitRuntime *runtime,
     int i;
 
     memset(&plan, 0, sizeof(plan));
+    sync_hibr_join_mirrors(runtime);
     plan.revision = runtime->frame_revision;
     for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
         BlitSurface *surface = runtime->surfaces[i];
@@ -3039,6 +3050,7 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
         int index;
         for (index = 0; index < BLIT_MAX_SESSIONS; ++index)
             if (runtime->sessions[index].used &&
+                !runtime->sessions[index].hibr_desktop_join &&
                 runtime->sessions[index].hibr_unpainted_reported &&
                 runtime->sessions[index].hibr_owner_writes == 0)
                 unpainted = 1;
@@ -13232,7 +13244,8 @@ static void service_unpainted_desktops(BlitRuntime *runtime, uint64_t now)
         BlitSession *session = &runtime->sessions[i];
         char detail[256];
 
-        if (!session->used || session->hibr_unpainted_reported ||
+        if (!session->used || session->hibr_desktop_join ||
+            session->hibr_unpainted_reported ||
             !session->hibr_owner_registered ||
             session->hibr_owner_writes != 0 ||
             session->hibr_owner_registered_us == 0 ||
@@ -13847,6 +13860,125 @@ static BlitSession *hibr_desktop_owner(BlitRuntime *runtime,
     return NULL;
 }
 
+/* Hibr's API adapter makes the primary surface the authoritative desktop
+   state.  A joined pane must therefore use that same owner for input and
+   graphics, even though it has its own surface geometry and hit-test area. */
+static BlitSession *hibr_input_owner(BlitRuntime *runtime,
+                                     BlitSession *session)
+{
+    if (session != NULL && session->hibr_desktop_join &&
+        session->hibr_desktop_session[0] != '\0') {
+        BlitSession *owner = hibr_desktop_owner(
+            runtime, session->hibr_desktop_session);
+        if (owner != NULL)
+            return owner;
+    }
+    return session;
+}
+
+static BlitSession *hibr_render_source(BlitRuntime *runtime,
+                                       BlitSession *session)
+{
+    return hibr_input_owner(runtime, session);
+}
+
+static void sync_hibr_join_mirrors(BlitRuntime *runtime)
+{
+    int index;
+
+    if (runtime == NULL)
+        return;
+    for (index = 0; index < BLIT_MAX_SESSIONS; ++index) {
+        BlitSession *join = &runtime->sessions[index];
+        BlitSession *primary;
+        BlitSurface *source;
+        BlitSurface *destination;
+        int row;
+        int column;
+        int rows;
+        int columns;
+
+        if (!join->used || !join->hibr_desktop_join ||
+            join->surface_mode != BLIT_SURFACE_MIRROR)
+            continue;
+        primary = hibr_input_owner(runtime, join);
+        source = primary != NULL ? find_surface_id(runtime, primary->id) : NULL;
+        destination = find_surface_id(runtime, join->id);
+        if (primary == NULL || source == NULL || destination == NULL ||
+            source->frame_open)
+            continue;
+        if (join->hibr_mirror_source_id == primary->id &&
+            join->hibr_mirror_source_revision == source->revision)
+            continue;
+
+        rows = destination->height;
+        columns = destination->width;
+        for (row = 0; row < rows; ++row) {
+            memset(destination->cells[row], 0,
+                   sizeof(destination->cells[row]));
+            memset(destination->codepoints[row], 0,
+                   sizeof(destination->codepoints[row]));
+            memset(destination->combining[row], 0,
+                   sizeof(destination->combining[row]));
+            memset(destination->combining_count[row], 0,
+                   sizeof(destination->combining_count[row]));
+            memset(destination->foreground[row], 0,
+                   sizeof(destination->foreground[row]));
+            memset(destination->background[row], 0,
+                   sizeof(destination->background[row]));
+            memset(destination->underline_color[row], 0,
+                   sizeof(destination->underline_color[row]));
+            memset(destination->attributes[row], 0,
+                   sizeof(destination->attributes[row]));
+            memset(destination->links[row], 0,
+                   sizeof(destination->links[row]));
+            if (row >= source->height)
+                continue;
+            if (columns > source->width)
+                columns = source->width;
+            memcpy(destination->cells[row], source->cells[row],
+                   (size_t)columns * sizeof(destination->cells[row][0]));
+            memcpy(destination->codepoints[row], source->codepoints[row],
+                   (size_t)columns * sizeof(destination->codepoints[row][0]));
+            memcpy(destination->combining[row], source->combining[row],
+                   (size_t)columns * sizeof(destination->combining[row][0]));
+            memcpy(destination->combining_count[row],
+                   source->combining_count[row],
+                   (size_t)columns * sizeof(destination->combining_count[row][0]));
+            memcpy(destination->foreground[row], source->foreground[row],
+                   (size_t)columns * sizeof(destination->foreground[row][0]));
+            memcpy(destination->background[row], source->background[row],
+                   (size_t)columns * sizeof(destination->background[row][0]));
+            memcpy(destination->underline_color[row],
+                   source->underline_color[row],
+                   (size_t)columns * sizeof(destination->underline_color[row][0]));
+            memcpy(destination->attributes[row], source->attributes[row],
+                   (size_t)columns * sizeof(destination->attributes[row][0]));
+            memcpy(destination->links[row], source->links[row],
+                   (size_t)columns * sizeof(destination->links[row][0]));
+        }
+        destination->cursor_x = source->cursor_x < destination->width ?
+            source->cursor_x : destination->width - 1;
+        destination->cursor_y = source->cursor_y < destination->height ?
+            source->cursor_y : destination->height - 1;
+        destination->cursor_visible = source->cursor_visible;
+        destination->cursor_style = source->cursor_style;
+        destination->damage_valid = 1;
+        destination->damage_x = 0;
+        destination->damage_y = 0;
+        destination->damage_width = destination->width;
+        destination->damage_height = destination->height;
+        destination->frame_open = 0;
+        ++destination->revision;
+        if (destination->revision == 0)
+            destination->revision = 1;
+        join->hibr_mirror_source_id = primary->id;
+        join->hibr_mirror_source_revision = source->revision;
+        runtime->render_pending = 1;
+        diagnostic_trace(runtime, "hibr_join_mirror", "primary surface copied to joined pane");
+    }
+}
+
 static int create_session(BlitRuntime *runtime, const char *json,
                            BlitSession **created)
 {
@@ -14125,10 +14257,14 @@ static int create_session(BlitRuntime *runtime, const char *json,
                                  "%s", value);
                 }
             }
-            session->surface_mode = strcmp(surface_mode, "external") == 0 ?
-                BLIT_SURFACE_EXTERNAL :
-                (strcmp(surface_mode, "mirror") == 0 ?
-                 BLIT_SURFACE_MIRROR : BLIT_SURFACE_TERMINAL);
+            /* A Hibr --join process is not a second desktop writer.  Its
+               pane is always the Blit mirror of the primary owner, regardless
+               of the launcher's default surface mode. */
+            session->surface_mode = hibr_desktop_join ? BLIT_SURFACE_MIRROR :
+                (strcmp(surface_mode, "external") == 0 ?
+                 BLIT_SURFACE_EXTERNAL :
+                 (strcmp(surface_mode, "mirror") == 0 ?
+                  BLIT_SURFACE_MIRROR : BLIT_SURFACE_TERMINAL));
             snprintf(session->state, sizeof(session->state), "%s",
                      hibr_process ? "running" : "starting");
             if (hibr_process) {
@@ -17830,6 +17966,14 @@ static void handle_request(int fd, BlitRuntime *runtime,
             free(snapshot);
             return;
         }
+        if (find_session_id(runtime, surface->owner_session_id) != NULL &&
+            find_session_id(runtime, surface->owner_session_id)->hibr_desktop_join &&
+            find_session_id(runtime, surface->owner_session_id)->surface_mode ==
+                BLIT_SURFACE_MIRROR) {
+            send_problem(fd, 409, "Conflict", "mirror_surface_read_only",
+                         "A Hibr joined surface is derived from its primary desktop.");
+            return;
+        }
         if (idempotency_replay(runtime, fd, request, method, path, payload))
             return;
         if (!json_int(payload, "base_revision", &base_revision) ||
@@ -17942,6 +18086,11 @@ static void handle_request(int fd, BlitRuntime *runtime,
 
         if (idempotency_replay(runtime, fd, request, method, path, payload))
             return;
+
+        /* Joined surfaces are derived from the primary at the presentation
+           boundary. Sync before validating an explicit frame plan so that
+           the plan contains the mirror revision that will actually draw. */
+        sync_hibr_join_mirrors(runtime);
 
         if (!json_int(payload, "base_revision", &base_revision)) {
             send_problem(fd, 400, "Bad Request", "invalid_frame_request",
@@ -20400,6 +20549,7 @@ static unsigned long long graphics_scene_signature(const BlitRuntime *runtime,
     for (session_index = 0; session_index < BLIT_MAX_SESSIONS;
          ++session_index) {
         const BlitSession *session = &runtime->sessions[session_index];
+        const BlitSession *graphics_session;
         BlitSurface *surface;
         if (!session->used)
             continue;
@@ -20407,16 +20557,21 @@ static unsigned long long graphics_scene_signature(const BlitRuntime *runtime,
         if (surface == NULL || !surface_targets_output((BlitRuntime *)runtime,
                                                         surface, output_index))
             continue;
+        graphics_session = hibr_render_source((BlitRuntime *)runtime,
+                                               (BlitSession *)session);
+        if (graphics_session == NULL)
+            graphics_session = session;
         for (image_index = 0; image_index < BLIT_GRAPHICS_MAX_IMAGES;
              ++image_index) {
-            const BlitGraphicsImage *image = &session->graphics[image_index];
+            const BlitGraphicsImage *image =
+                &graphics_session->graphics[image_index];
             if (!image->used)
                 continue;
             /* The signature describes the graphics scene, not session
              * membership. A session with no images must contribute nothing;
              * otherwise an ordinary surface/session transition is reported
              * as graphics_changed and forces a full redraw. */
-            signature ^= session->id;
+            signature ^= graphics_session->id;
             signature *= 1099511628211ULL;
             signature ^= image->id;
             signature *= 1099511628211ULL;
@@ -20490,6 +20645,7 @@ static int graphics_scene_count(const BlitRuntime *runtime, int output_index)
     for (session_index = 0; session_index < BLIT_MAX_SESSIONS;
          ++session_index) {
         const BlitSession *session = &runtime->sessions[session_index];
+        const BlitSession *graphics_session;
         BlitSurface *surface;
         if (!session->used)
             continue;
@@ -20497,9 +20653,13 @@ static int graphics_scene_count(const BlitRuntime *runtime, int output_index)
         if (surface == NULL || !surface_targets_output((BlitRuntime *)runtime,
                                                         surface, output_index))
             continue;
+        graphics_session = hibr_render_source((BlitRuntime *)runtime,
+                                               (BlitSession *)session);
+        if (graphics_session == NULL)
+            graphics_session = session;
         for (image_index = 0; image_index < BLIT_GRAPHICS_MAX_IMAGES;
              ++image_index)
-            if (session->graphics[image_index].used)
+            if (graphics_session->graphics[image_index].used)
                 ++count;
     }
     return count;
@@ -21755,11 +21915,15 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
              view_count < BLIT_MAX_SESSIONS; ++surface_index) {
             BlitSurface *surface = runtime->surfaces[surface_index];
             BlitSession *session;
+            BlitSession *render_source;
             BlitPane *pane;
             int output_index_for_surface = 0;
             if (surface == NULL || !surface->used) continue;
             session = find_session_id(runtime, surface->owner_session_id);
             if (session == NULL) continue;
+            render_source = hibr_render_source(runtime, session);
+            if (render_source == NULL)
+                render_source = session;
             pane = find_pane_id(runtime, session->pane_id);
             if (session->display_id[0] != '\0') {
                 for (output_index_for_surface = 0;
@@ -21819,10 +21983,10 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                held -- and blit_kms_present leaves its pixels alone. */
             views[view_count].synchronized = session->terminal_synchronized;
             views[view_count].default_foreground =
-                session_default_foreground(session);
+                session_default_foreground(render_source);
             views[view_count].default_background =
-                session_default_background(session);
-            views[view_count].graphics = session->graphics;
+                session_default_background(render_source);
+            views[view_count].graphics = render_source->graphics;
             views[view_count].graphics_count = BLIT_GRAPHICS_MAX_IMAGES;
             ++view_count;
         }
@@ -22076,6 +22240,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             BlitSurface *surface = find_surface_id(
                 runtime, plan->surfaces[plan_index].surface_id);
             BlitSession *session;
+            BlitSession *render_source;
             BlitPane *pane;
             char display_id[128];
             float surface_origin_x;
@@ -22094,6 +22259,9 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             session = find_session_id(runtime, surface->owner_session_id);
             if (session == NULL)
                 continue;
+            render_source = hibr_render_source(runtime, session);
+            if (render_source == NULL)
+                render_source = session;
             /* Hold the last presented pixels: they are already in the
                cached scene texture and the incremental path does not touch
                this surface's rectangle.  A genuine full redraw has cleared
@@ -22101,8 +22269,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                current cells and tear once rather than leave a hole. */
             if (session->terminal_synchronized && !full_redraw)
                 continue;
-            default_foreground = session_default_foreground(session);
-            default_background = session_default_background(session);
+            default_foreground = session_default_foreground(render_source);
+            default_background = session_default_background(render_source);
             pane = find_pane_id(runtime, session->pane_id);
             if (session->display_id[0] == '\0') {
                 if (output_index != 0)
@@ -22183,7 +22351,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                    holes whenever Hibr updates one cell over a wallpaper. */
                 SDL_SetRenderClipRect(renderer, &graphics_clip);
                 api_images_drawn += render_sdl_graphics(
-                    &runtime->outputs[output_index], session->graphics,
+                    &runtime->outputs[output_index], render_source->graphics,
                     BLIT_GRAPHICS_MAX_IMAGES, surface_origin_x,
                     (float)surface_origin_y, 1);
                 SDL_SetRenderClipRect(renderer, NULL);
@@ -22483,7 +22651,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                 graphics_clip.h = surface->height * cell_height;
                 SDL_SetRenderClipRect(renderer, &graphics_clip);
                 api_images_drawn += render_sdl_graphics(
-                    &runtime->outputs[output_index], session->graphics,
+                    &runtime->outputs[output_index], render_source->graphics,
                     BLIT_GRAPHICS_MAX_IMAGES, surface_origin_x,
                     (float)surface_origin_y, 0);
                 SDL_SetRenderClipRect(renderer, NULL);
@@ -22819,6 +22987,7 @@ static void send_mouse_report(BlitRuntime *runtime, SDL_WindowID window_id,
         if (column == 0) column = 1;
         if (row == 0) row = 1;
     }
+    session = hibr_input_owner(runtime, session);
     if (session != NULL && !release && button == 0)
         focus_session(runtime, session);
     if (session == NULL || session->pty_fd < 0)
@@ -22883,6 +23052,7 @@ static void send_mouse_motion_report(BlitRuntime *runtime,
         if (column == 0) column = 1;
         if (row == 0) row = 1;
     }
+    session = hibr_input_owner(runtime, session);
     if (session == NULL || session->pty_fd < 0)
         return;
     if (session->terminal_mouse_mode != 1002 &&
@@ -22980,15 +23150,18 @@ static void update_pointer_position(BlitRuntime *runtime,
         BlitSession *routed = input_route_target(runtime, "evdev-pointer");
         BlitSession *target = mouse_target(runtime, runtime->pointer_output,
             runtime->pointer_x, runtime->pointer_y, &target_col, &target_row);
+        BlitSession *input_target;
         if (routed != NULL) target = routed;
+        input_target = hibr_input_owner(runtime, target);
         {
             char detail[256];
             snprintf(detail, sizeof(detail),
-                     "x=%.1f y=%.1f output=%d device=%s target_session=%llu routing=%s",
+                     "x=%.1f y=%.1f output=%d device=%s target_session=%llu input_session=%llu routing=%s",
                      runtime->pointer_x, runtime->pointer_y,
                      runtime->pointer_output,
                      device_id != NULL ? device_id : "evdev-pointer",
                      target != NULL ? target->id : 0ULL,
+                     input_target != NULL ? input_target->id : 0ULL,
                      pointer_routing_name(target, routed));
             diagnostic_trace(runtime, "pointer_motion", detail);
         }
@@ -22998,7 +23171,7 @@ static void update_pointer_position(BlitRuntime *runtime,
                  "\"kind\":\"pointer_motion\",\"time_us\":%llu,\"x\":%.1f,"
                  "\"y\":%.1f,\"output\":%d,\"column\":%d,\"row\":%d,"
                  "\"shift\":%s,\"ctrl\":%s,\"alt\":%s}}",
-                 target != NULL ? target->id : 0ULL,
+                 input_target != NULL ? input_target->id : 0ULL,
                  device_id != NULL ? device_id : "evdev-pointer",
                  (unsigned long long)monotonic_us(),
                  runtime->pointer_x, runtime->pointer_y,
@@ -23036,14 +23209,17 @@ static void broadcast_evdev_pointer(BlitRuntime *runtime, const char *kind,
     BlitSession *routed = input_route_target(runtime, "evdev-pointer");
     BlitSession *target = mouse_target(runtime, runtime->pointer_output,
         runtime->pointer_x, runtime->pointer_y, &column, &row);
+    BlitSession *input_target;
     if (routed != NULL)
         target = routed;
+    input_target = hibr_input_owner(runtime, target);
     if (strcmp(kind, "pointer_wheel") == 0) {
         char detail[256];
         snprintf(detail, sizeof(detail),
-                 "delta=%d x=%.1f y=%.1f target_session=%llu routing=%s",
+                 "delta=%d x=%.1f y=%.1f target_session=%llu input_session=%llu routing=%s",
                  delta, runtime->pointer_x, runtime->pointer_y,
                  target != NULL ? target->id : 0ULL,
+                 input_target != NULL ? input_target->id : 0ULL,
                  pointer_routing_name(target, routed));
         diagnostic_trace(runtime, "pointer_wheel", detail);
         snprintf(input_event, sizeof(input_event),
@@ -23052,7 +23228,7 @@ static void broadcast_evdev_pointer(BlitRuntime *runtime, const char *kind,
                  "\"kind\":\"pointer_wheel\",\"time_us\":%llu,\"delta\":%d,"
                  "\"x\":%.1f,\"y\":%.1f,\"output\":%d,"
                  "\"shift\":%s,\"ctrl\":%s,\"alt\":%s}}",
-                 target != NULL ? target->id : 0ULL,
+                 input_target != NULL ? input_target->id : 0ULL,
                  device_id != NULL ? device_id : "evdev-pointer",
                  (unsigned long long)monotonic_us(), delta,
                  runtime->pointer_x, runtime->pointer_y,
@@ -23068,7 +23244,7 @@ static void broadcast_evdev_pointer(BlitRuntime *runtime, const char *kind,
                  "\"pressed\":%s,\"x\":%.1f,\"y\":%.1f,"
                  "\"output\":%d,\"column\":%d,\"row\":%d,"
                  "\"shift\":%s,\"ctrl\":%s,\"alt\":%s}}",
-                 target != NULL ? target->id : 0ULL,
+                 input_target != NULL ? input_target->id : 0ULL,
                  device_id != NULL ? device_id : "evdev-pointer",
                  (unsigned long long)monotonic_us(), button,
                  pressed ? "true" : "false", runtime->pointer_x,
@@ -23090,16 +23266,19 @@ static void dispatch_pointer_button(BlitRuntime *runtime, int button,
                                        runtime->pointer_x, runtime->pointer_y,
                                        &column, &row);
     BlitSession *routed = input_route_target(runtime, "evdev-pointer");
+    BlitSession *input_target;
     if (routed != NULL)
         target = routed;
+    input_target = hibr_input_owner(runtime, target);
     if (button < 0 || button > 2)
         return;
     snprintf(detail, sizeof(detail),
              "button=%d pressed=%d device=%s x=%.1f y=%.1f "
-             "target_session=%llu routing=%s",
+             "target_session=%llu input_session=%llu routing=%s",
              button, pressed, device_id != NULL ? device_id : "unknown",
              runtime->pointer_x, runtime->pointer_y,
              target != NULL ? target->id : 0ULL,
+             input_target != NULL ? input_target->id : 0ULL,
              pointer_routing_name(target, routed));
     diagnostic_trace(runtime, "pointer_button", detail);
     if (pressed)
@@ -23348,15 +23527,15 @@ static BlitSession *keyboard_target(BlitRuntime *runtime)
     int i;
     BlitSession *routed = input_route_target(runtime, "evdev-keyboard");
     if (routed != NULL)
-        return routed;
+        return hibr_input_owner(runtime, routed);
     for (i = 0; i < BLIT_MAX_SESSIONS; ++i)
         if (runtime->sessions[i].used && runtime->sessions[i].focused &&
             runtime->sessions[i].pty_fd >= 0)
-            return &runtime->sessions[i];
-    if (session != NULL) return session;
+            return hibr_input_owner(runtime, &runtime->sessions[i]);
+    if (session != NULL) return hibr_input_owner(runtime, session);
     for (i = 0; i < BLIT_MAX_SESSIONS; ++i)
         if (runtime->sessions[i].used && runtime->sessions[i].pty_fd >= 0)
-            return &runtime->sessions[i];
+            return hibr_input_owner(runtime, &runtime->sessions[i]);
     return NULL;
 }
 

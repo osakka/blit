@@ -3148,8 +3148,11 @@ components:
           description: >-
             terminal lets Blit parse ordinary PTY output into the surface.
             external keeps the PTY for lifecycle and input while an adapter
-            owns all surface mutations and revisions. mirror lets Blit parse
-            a joined Hibr/hold stream copied from a primary desktop.
+            owns all surface mutations and revisions. mirror is a read-only
+            presentation surface derived from the primary Hibr desktop: Blit
+            mirrors its committed cells and renders its Kitty/Sixel graphics,
+            while input hit in the joined pane is routed to the primary owner.
+            A Hibr desktop --join session is forced into this mode.
       additionalProperties: false
     TerminalInput:
       type: object
