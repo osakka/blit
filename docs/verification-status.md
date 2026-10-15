@@ -24,6 +24,11 @@ behavior. It does not prove PAM, logind, or a real authenticated Hibr desktop;
 that acceptance remains Hibr #79 on a VM or real host. Hibr provider and join
 issues remain separate and are not modified by this Blit change.
 
+The reproducible package `blit_0.1.485-1_amd64.deb` has SHA-256
+`93dd948fe6f77dc2c88c6cada69e5e4e56cf575e030ac315f79cf84667333a76`; the
+package artifact gate rebuilt it byte-identically and verified the packaged
+server, updater, adapter, schema, documentation, service, and login hook.
+
 ## 0.1.482 Hibr native-PTY live evidence
 
 0.1.482 is deployed on `192.168.10.54`. The live API reports one Hibr

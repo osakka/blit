@@ -1,0 +1,32 @@
+release: 0.1.485
+package: blit_0.1.485-1_amd64.deb
+package_sha256: 93dd948fe6f77dc2c88c6cada69e5e4e56cf575e030ac315f79cf84667333a76
+source_commit: e7cad36
+package_documentation_commit: e7cad36
+server_binary_sha256: ac1a7fd7947f12dad7661922815f9bac7786d09fbdca7e9e286f1d869d92e5bd
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.191
+hibr_adapter_build: pass_pinned_hibr_0.99.191
+tcc_version: 0.9.27_x86_64_linux
+focused_login_manager: pass_root_service_restart_and_stop
+focused_api_schema: pass_paths_41
+focused_terminal: pass_terminal_conformance_session_resize
+focused_network_auth: pass
+focused_lifecycle: pass_14_0_0
+package_reproducibility: pass_rebuilt_identical
+package_artifact_acceptance: pass
+qemu_hibr_lifecycle_acceptance: unavailable_missing_kernel_and_initramfs
+live_host: 192.168.10.54
+live_deployment: pending_operator_install
+live_login_acceptance: pending_hibr_79_root_pam_logind
+physical_multi_monitor_acceptance: unavailable_one_output
+physical_high_refresh_acceptance: open_issue_21
+notes: >-
+  0.1.485 adds Blit's first-class root-owned Hibr login manager. `/v1/login`
+  starts, observes, and stops one login boundary; an exited login process is
+  replaced after a bounded delay. The package enables BLIT_LOGIN_AUTOSTART=1
+  and carries the Blit-owned LG_SESSIONCMD hook. The focused root gate uses a
+  controlled command and proves lifecycle behavior, but does not claim PAM,
+  logind, or a real authenticated Hibr desktop. Hibr #79 is the external
+  root-path acceptance ticket. Hibr source was not modified.
