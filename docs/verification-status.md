@@ -45,7 +45,9 @@ a DA1 reply that did not advertise sixel (#87). New gates
 `sdl_graphics_band_gate.rb` and `sixel_slot_gate.rb` fail on the 0.1.507
 binary (band gate: 0 of 512 wallpaper pixels visible; slot gate: 5 pictures
 rejected with `image-store-full`) and pass on the fix; the renderer and
-terminal suites pass (48 gates). Validated on the dummy SDL backend only.
+terminal suites pass (49 gates). Validated on the dummy SDL backend, and for
+direct KMS by `kms_compose_gate` on a memory buffer (it fails on the 0.1.507
+compositor at the explicit-black case).
 Not deployed, not host-accepted. The live half-block fallback on the host is
 not yet explained by these defects and needs a Hibr debug log from a restored
 desktop.

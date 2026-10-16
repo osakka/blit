@@ -261,6 +261,7 @@ suite_renderer() {
     run_gate sdl_wallpaper_damage_gate.rb ruby tools/tests/sdl_wallpaper_damage_gate.rb
     run_gate sdl_graphics_band_gate.rb ruby tools/tests/sdl_graphics_band_gate.rb
     run_gate sixel_slot_gate.rb ruby tools/tests/sixel_slot_gate.rb
+    run_gate kms_compose_gate.sh "$ROOT"/tools/tests/kms_compose_gate.sh
     run_gate screenshot_overlay_gate.sh "$ROOT"/tools/tests/screenshot_overlay_gate.sh
     run_gate render_state_agreement_gate.rb ruby tools/tests/render_state_agreement_gate.rb
     run_gate pane_split_geometry_gate.rb ruby tools/tests/pane_split_geometry_gate.rb

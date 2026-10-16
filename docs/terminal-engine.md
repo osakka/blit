@@ -321,8 +321,9 @@ default colour (OSC 11, or black) is instead the floor of the surface. A cell
 with an explicit colour, including explicit black on a non-black default, is
 opaque. Hibr's wallpaper is `z = -1073741825` and depends on all of this. OSC
 10/11 queries are always answered, from the session default when nothing was
-configured. The KMS compositor does not yet implement the bands (issue filed
-separately).
+configured. The direct KMS compositor applies the same bands and floor (issue #88,
+`tools/tests/kms_compose_gate.c` drives `draw_view` against a memory buffer);
+an image placed, moved or deleted redraws the whole view there.
 
 A session has eight image slots shared by Kitty, sixel and API images. A
 sixel has no id a client can place again, so one that scrolls off the page is

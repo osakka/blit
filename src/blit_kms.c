@@ -470,9 +470,17 @@ static void draw_glyph(KmsOutput *output, const BlitFont *font,
     }
 }
 
+/* Kitty z bands, shared with the SDL path (issue #84, #88): below
+   -2^30 an image is under cell backgrounds, from there up to zero it is over
+   backgrounds and under text, and from zero up it is over text. */
+#define KMS_GRAPHICS_Z_UNDER_BACKGROUND (-1073741824)
+
+/* The image is clipped to [clip_x0,clip_x1) x [clip_y0,clip_y1), an absolute
+   rectangle, so an image drawn below the text on a damaged redraw cannot
+   paint over text outside the damage. */
 static void draw_graphic(KmsOutput *output, const BlitGraphicsDraw *draw,
-                         int origin_x, int origin_y, int clip_width,
-                         int clip_height)
+                         int origin_x, int origin_y, int clip_x0, int clip_y0,
+                         int clip_x1, int clip_y1)
 {
     const BlitGraphicsImage *image = draw->image;
     int width = draw->width;
@@ -489,16 +497,14 @@ static void draw_graphic(KmsOutput *output, const BlitGraphicsDraw *draw,
     if (width == draw->src_w && height == draw->src_h) {
         int destination_x = origin_x + draw->x;
         int destination_y = origin_y + draw->y;
-        int first_x = destination_x > origin_x ? destination_x : origin_x;
-        int first_y = destination_y > origin_y ? destination_y : origin_y;
+        int first_x = destination_x > clip_x0 ? destination_x : clip_x0;
+        int first_y = destination_y > clip_y0 ? destination_y : clip_y0;
         int last_x = destination_x + width;
         int last_y = destination_y + height;
-        int clip_last_x = origin_x + clip_width;
-        int clip_last_y = origin_y + clip_height;
         int y;
 
-        if (last_x > clip_last_x) last_x = clip_last_x;
-        if (last_y > clip_last_y) last_y = clip_last_y;
+        if (last_x > clip_x1) last_x = clip_x1;
+        if (last_y > clip_y1) last_y = clip_y1;
         if (first_x < 0) first_x = 0;
         if (first_y < 0) first_y = 0;
         if (last_x > output->mode.hdisplay) last_x = output->mode.hdisplay;
@@ -560,8 +566,8 @@ static void draw_graphic(KmsOutput *output, const BlitGraphicsDraw *draw,
             uint32_t *destination;
             unsigned int alpha;
             if (px < 0 || px >= output->mode.hdisplay ||
-                px < origin_x || px >= origin_x + clip_width ||
-                py < origin_y || py >= origin_y + clip_height) continue;
+                px < clip_x0 || px >= clip_x1 ||
+                py < clip_y0 || py >= clip_y1) continue;
             source = image->pixels +
                 ((size_t)source_y * (size_t)image->width + (size_t)source_x) *
                 (size_t)bytes_per_pixel;
@@ -606,6 +612,14 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
     int background_seen = 0;
     int italic_lean = (ch + 15) / 16;
     uint32_t uniform_background = 0;
+    uint32_t floor_colour = view->default_background;
+    BlitGraphicsDraw draws[BLIT_GRAPHICS_MAX_DRAWS];
+    int draw_count = 0;
+    int draw_index;
+    int clip_x0;
+    int clip_y0;
+    int clip_x1;
+    int clip_y1;
     if (view->damage_valid) {
         first_row = view->damage_y;
         last_row = view->damage_y + view->damage_height;
@@ -616,6 +630,30 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
         if (last_row > view->rows) last_row = view->rows;
         if (last_column > view->columns) last_column = view->columns;
     }
+    clip_x0 = view->origin_x + first_column * cw;
+    clip_y0 = view->origin_y + first_row * ch;
+    clip_x1 = view->origin_x + last_column * cw;
+    clip_y1 = view->origin_y + last_row * ch;
+    if (clip_x1 > view->origin_x + view->columns * cw)
+        clip_x1 = view->origin_x + view->columns * cw;
+    if (clip_y1 > view->origin_y + view->rows * ch)
+        clip_y1 = view->origin_y + view->rows * ch;
+    if (last_row <= first_row || last_column <= first_column)
+        return;
+    /* The terminal's default background is the floor of the view, not a quad
+       drawn over whatever is below it: a cell that resolves to the default
+       colour is transparent to an image under the text, and an explicit
+       colour -- explicit black included -- is opaque. */
+    fill_rect(output, clip_x0, clip_y0, clip_x1 - clip_x0,
+              clip_y1 - clip_y0, floor_colour);
+    if (view->graphics != NULL)
+        draw_count = blit_graphics_collect(view->graphics,
+                                           view->graphics_count, draws,
+                                           BLIT_GRAPHICS_MAX_DRAWS);
+    for (draw_index = 0; draw_index < draw_count; ++draw_index)
+        if (draws[draw_index].z < KMS_GRAPHICS_Z_UNDER_BACKGROUND)
+            draw_graphic(output, &draws[draw_index], view->origin_x,
+                         view->origin_y, clip_x0, clip_y0, clip_x1, clip_y1);
     /* Hibr themes commonly paint a single background across a complete
        surface.  Detect that case once so the hot cell loop does not invoke
        fill_rect for every cell; mixed backgrounds retain the exact old path. */
@@ -632,7 +670,8 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
             }
         }
     }
-    if (background_uniform && background_seen && uniform_background != 0)
+    if (background_uniform && background_seen &&
+        uniform_background != floor_colour)
         fill_rect(output, view->origin_x + first_column * cw,
                   view->origin_y + first_row * ch,
                   (last_column - first_column) * cw,
@@ -651,7 +690,7 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
                        view_cell_background(view, row * view->stride + run_end) ==
                        run_background)
                     ++run_end;
-                if (run_background != 0) {
+                if (run_background != floor_colour) {
                     fill_rect(output,
                               view->origin_x + run_column * cw,
                               view->origin_y + row * ch,
@@ -662,6 +701,11 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
             }
         }
     }
+    for (draw_index = 0; draw_index < draw_count; ++draw_index)
+        if (draws[draw_index].z >= KMS_GRAPHICS_Z_UNDER_BACKGROUND &&
+            draws[draw_index].z < 0)
+            draw_graphic(output, &draws[draw_index], view->origin_x,
+                         view->origin_y, clip_x0, clip_y0, clip_x1, clip_y1);
     for (row = first_row; row < last_row; ++row) {
         for (column = first_column; column < last_column; ++column) {
             int index = row * view->stride + column;
@@ -680,7 +724,7 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
             int y = view->origin_y + row * ch;
             if (attr & 8) { uint32_t t = fg; fg = bg; bg = t; }
             if (attr & 2) fg = (fg & 0xfefefeU) >> 1;
-            if (cp == ' ' && bg == 0 && !(attr & 4) &&
+            if (cp == ' ' && bg == floor_colour && !(attr & 4) &&
                 (view->combining_count == NULL ||
                  view->combining_count[index] == 0))
                 continue;
@@ -716,16 +760,10 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
             }
         }
     }
-    if (view->graphics != NULL) {
-        BlitGraphicsDraw draws[BLIT_GRAPHICS_MAX_DRAWS];
-        int count = blit_graphics_collect(view->graphics, view->graphics_count,
-                                          draws, BLIT_GRAPHICS_MAX_DRAWS);
-        int index;
-        for (index = 0; index < count; ++index)
-            draw_graphic(output, &draws[index], view->origin_x,
-                         view->origin_y, view->columns * cw,
-                         view->rows * ch);
-    }
+    for (draw_index = 0; draw_index < draw_count; ++draw_index)
+        if (draws[draw_index].z >= 0)
+            draw_graphic(output, &draws[draw_index], view->origin_x,
+                         view->origin_y, clip_x0, clip_y0, clip_x1, clip_y1);
     if (view->cursor_visible && view->cursor_x >= 0 && view->cursor_y >= 0 &&
         view->cursor_y < view->rows) {
         int cursor_column = view->cursor_x < view->columns ?
@@ -852,6 +890,17 @@ static int output_view_unchanged(const KmsOutput *output,
             return output->last_surface_revisions[i] == view->surface_revision &&
                 output->last_surface_graphics_signatures[i] ==
                     view->graphics_signature;
+    return 0;
+}
+
+static int output_graphics_unchanged(const KmsOutput *output,
+                                     const BlitKmsSurfaceView *view)
+{
+    int i;
+    for (i = 0; i < output->last_view_count && i < KMS_MAX_VIEWS; ++i)
+        if (output->last_surface_ids[i] == view->surface_id)
+            return output->last_surface_graphics_signatures[i] ==
+                view->graphics_signature;
     return 0;
 }
 
@@ -1432,6 +1481,7 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
             if (views[view_index].display_id == output->info.id) {
                 BlitKmsSurfaceView draw = views[view_index];
                 int pointer_damage = 0;
+                int graphics_view_changed = 0;
                 /* Hold the last presented pixels.  They are already in this
                    buffer: a non-full frame is rebuilt from the front buffer
                    above, so leaving the view undrawn preserves it.  A genuine
@@ -1456,6 +1506,18 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                                            &draw.damage_height);
                 }
                 if (pointer_damage) draw.damage_valid = 1;
+                /* An image placed, moved or deleted is not bounded by the
+                   cells' damage, and an image below the text repaints
+                   everything it lies under, so the whole view is redrawn. */
+                graphics_view_changed = !full_redraw &&
+                    !output_graphics_unchanged(output, &views[view_index]);
+                if (graphics_view_changed) {
+                    draw.damage_valid = 1;
+                    draw.damage_x = 0;
+                    draw.damage_y = 0;
+                    draw.damage_width = draw.columns;
+                    draw.damage_height = draw.rows;
+                }
                 if (draw.damage_valid)
                     include_damage(&next_damage_valid, &next_damage_x,
                                    &next_damage_y, &next_damage_width,
@@ -1473,11 +1535,18 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                     !pointer_damage)
                     continue;
                 if (pointer_damage) draw.damage_valid = 1;
-                if (!full_redraw && views[view_index].damage_valid) {
-                    int damage_x = views[view_index].damage_x;
-                    int damage_y = views[view_index].damage_y;
-                    int damage_right = damage_x + views[view_index].damage_width;
-                    int damage_bottom = damage_y + views[view_index].damage_height;
+                if (!full_redraw && (views[view_index].damage_valid ||
+                                     graphics_view_changed)) {
+                    int damage_x = graphics_view_changed ? 0 :
+                        views[view_index].damage_x;
+                    int damage_y = graphics_view_changed ? 0 :
+                        views[view_index].damage_y;
+                    int damage_right = graphics_view_changed ?
+                        views[view_index].columns :
+                        damage_x + views[view_index].damage_width;
+                    int damage_bottom = graphics_view_changed ?
+                        views[view_index].rows :
+                        damage_y + views[view_index].damage_height;
                     int cw = views[view_index].cell_width > 0 ?
                         views[view_index].cell_width : KMS_FONT_W;
                     int ch = views[view_index].cell_height > 0 ?
