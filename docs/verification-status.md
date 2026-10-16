@@ -3,6 +3,25 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 0.1.498 candidate: use Hibr's installed desktop tree
+
+The live menu investigation found that Blit's packaged integration tree
+omitted Hibr's `system/` sibling. The packaged launcher therefore registered
+ordinary applications but not Hibr's own Control Panel, Applications
+Catalogue, Modules, or Task Manager entries. This was a Blit packaging/path
+defect; Hibr source, modules, and desktop files were not modified.
+
+The launcher now sources Hibr's installed
+`/usr/share/hibr/desktop/session.hibr` directly. Blit no longer creates a
+second symlink tree beside Hibr's installation. QEMU retains an explicit
+`BLIT_HIBR_DESKTOP_SESSION` override for its complete staged fixture. The
+package regression gate asserts both the direct installed-session path and the
+absence of the old mirrored session/system paths.
+
+Implementation commit: `c514f50` (`source Hibr desktop from its installed
+tree`). Package and reproducibility evidence follows after the 0.1.498
+artifact is built from this commit.
+
 ## 0.1.497 candidate: authenticated diagnostic bundles
 
 The live troubleshooting path now uses one shared bearer-aware transport for
