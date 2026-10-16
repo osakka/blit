@@ -11,6 +11,7 @@ hibr_adapter_build: carried_forward_from_0.1.487_pinned_artifact
 tcc_version: 0.9.27_x86_64_linux
 focused_rotation_panes: pass_90deg_96x64_return_0deg_128x48
 focused_terminal_renderer: pass_run_gates_renderer_43_0_0
+focused_resume_repaint: pass_pty_output_blocked_owner_unpainted_diagnostic
 package_reproducibility: pass_rebuilt_identical
 package_artifact_acceptance: pass
 qemu_hibr_lifecycle_acceptance: unavailable_missing_kernel_and_initramfs
@@ -23,4 +24,6 @@ notes: >-
   0.1.489 closes Blit issue #73. Accepted display rotation now rebuilds the
   complete-cell pane geometry in the same operation. Live surfaces remain
   refused with display_rotation_in_use until issue #60 supplies the owner
-  resize protocol. Hibr source was not modified.
+  resize protocol. The Hibr resume gate also proves that PTY replay cannot
+  author an owned surface, and an owner that never paints is reported as
+  hibr_desktop_unpainted. Hibr source was not modified.
