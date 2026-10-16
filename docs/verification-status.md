@@ -3,6 +3,25 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 0.1.509: canonical observation API and live presentation-path matrix
+
+The exact `0.1.509` package is deployed on `192.168.10.54`. The authenticated
+observation endpoint was used to run each presentation path and record the
+identity fields needed to distinguish them:
+
+| User-facing path | Backend | Video driver | Renderer | Presentation sync | Ready | Output |
+| --- | --- | --- | --- | --- | --- | --- |
+| SDL/OpenGL | `sdl3` | `kmsdrm` | `opengles2` | `sdl-vsync` | yes | `DP-1`, 1920x2160@60 Hz |
+| SDL/software | `sdl3` | `kmsdrm` | `software` | `scheduler-only` | yes | `DP-1`, 1920x2160@59.99 Hz |
+| direct KMS | `drm-kms` | `direct-kms` | none | `drm-page-flip` | yes | `KMS connector 93`, 1920x2160@60 Hz |
+
+Each observation reported an empty health error and empty diagnostic warning
+list. “SDL/KMS” is not a third top-level backend here: it is the SDL3 video
+path using the KMSDRM video driver. The server was restored after the matrix
+to SDL/KMSDRM + OpenGL ES2 with the login manager running. This is exact
+backend/readiness evidence, not visual acceptance; the user’s login is the
+next physical desktop observation.
+
 ## 0.1.508: canonical observation API
 
 Source now defines the schema-first `GET /v1/diagnostics/observation` endpoint

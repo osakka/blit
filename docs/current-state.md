@@ -7,9 +7,9 @@ work actually stopped.
 
 ## Status at the last review
 
-Blit `0.1.508` is deployed on the authorized host at `192.168.10.54` and
+Blit `0.1.509` is deployed on the authorized host at `192.168.10.54` and
 reports API version `0.1`. The matching package identity is recorded in
-[`releases/0.1.508.yaml`](../releases/0.1.508.yaml). Hibr source was not
+[`releases/0.1.509.yaml`](../releases/0.1.509.yaml). Hibr source was not
 modified.
 
 The source branch now contains and has pushed the rendering/protocol fixes from
@@ -29,10 +29,26 @@ rewrite those references unless a new, explicitly accepted ADR supersedes ADR
 0004. “SDL3/KMSDRM” and “direct DRM/KMS” are distinct paths and must not be
 collapsed into one undocumented implementation.
 
-The `0.1.508` package adds the authenticated
+The `0.1.509` package carries the authenticated
 `GET /v1/diagnostics/observation` endpoint. It is a schema-first aggregate of
 the existing serializers for one operational state dump. The endpoint is
 installed and live-verified on `192.168.10.54`.
+
+The exact live presentation-path mapping was revalidated on 2026-10-16:
+
+- SDL/OpenGL means `backend=sdl3`, `video_driver=kmsdrm`,
+  `renderer=opengles2`, and `presentation_sync=sdl-vsync`;
+- SDL/software means `backend=sdl3`, `video_driver=kmsdrm`,
+  `renderer=software`, and `presentation_sync=scheduler-only`;
+- direct KMS means `backend=drm-kms`, `direct_kms=true`,
+  `video_driver=direct-kms`, no SDL renderer, and
+  `presentation_sync=drm-page-flip`.
+
+All three live paths reached `ready=true` on the single 1920x2160@60 Hz
+output with empty diagnostic errors and warnings. This validates path
+selection and readiness only; it is not visual acceptance of the Hibr desktop.
+The host was then restored to SDL/KMSDRM + OpenGLES2, with the login manager
+running and ready for the next physical observation.
 
 The product is **not visually accepted**. The latest authenticated screenshot
 capture showed a coherent flat-colour scene with the menu/status line but no
@@ -62,7 +78,7 @@ timing counters are healthy.
 ### Latest live read-only boundary
 
 On 2026-10-16, the post-deployment observation query to `192.168.10.54`
-reported `0.1.508`, SDL3/OpenGLES2, one `DP-1` output at 1920x2160@60 Hz,
+reported `0.1.509`, SDL3/OpenGLES2, one `DP-1` output at 1920x2160@60 Hz,
 one running login-manager session, and two keyboards/two pointers discovered.
 The observation endpoint returned `observation_version: 1`, the
 `single_event_loop_turn` marker, 158 presentation calls, zero missed deadlines
