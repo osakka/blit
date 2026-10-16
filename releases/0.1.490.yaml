@@ -1,0 +1,26 @@
+release: 0.1.490
+package: blit_0.1.490-1_amd64.deb
+package_sha256: c8dfccebb2a9bb0ee9e529a0b935bd88ec0ba0508e98d212bcc0f64cadd8d085
+source_commit: be1354c
+package_documentation_commit: be1354c
+server_binary_sha256: 32c7475eefb80ddf8d870bd7258c4ab015a20e139f6544c2e36076af4f7efd80
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.191
+hibr_adapter_build: tcc_from_exact_pinned_checkout
+focused_hibr_compatibility: pass_pinned_0.99.191_runtime_probe_mismatch_0.99.206
+focused_terminal_renderer: pass_run_gates_renderer_43_0_0
+package_reproducibility: pass_rebuilt_identical
+package_artifact_acceptance: pass
+physical_host_deployment: pending_issue_81_acceptance
+physical_multi_monitor_acceptance: unavailable_one_output
+physical_high_refresh_acceptance: open_issue_21
+notes: >-
+  0.1.490 closes the package-provenance portion of Blit issue #81. The
+  package builder refuses to run without BLIT_HIBR_ROOT and compiles the
+  adapter against the checkout whose HIBR_VER matches packaging/HIBR_VERSION.
+  Runtime diagnostics report the packaged pin and the configured Hibr
+  executable's startup version; the local controlled probe found host Hibr
+  0.99.206 against the packaged 0.99.191 pin and correctly reported
+  compatible=false. Hibr source was not modified. Physical-host deployment
+  and acceptance remain pending.
