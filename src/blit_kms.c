@@ -48,6 +48,12 @@ typedef struct {
     drmModeCrtc *old_crtc;
     KmsBuffer front;
     KmsBuffer back;
+    /* Terminal glyphs and graphics are composed into ordinary RAM.  Writing
+       individual pixels directly to a mapped dumb buffer is especially slow
+       on the fast-changing full-screen terminal workload; a sequential copy
+       into the scanout buffer is both faster and remains atomic at page flip. */
+    void *scene;
+    uint64_t scene_size;
     int flip_pending;
     volatile int flip_done;
     long long flip_started_us;
@@ -243,6 +249,36 @@ static void copy_front_to_back(KmsOutput *output)
                (const unsigned char *)output->front.map +
                    (size_t)row * output->front.pitch,
                output->mode.hdisplay * sizeof(uint32_t));
+}
+
+static int ensure_scene_buffer(KmsOutput *output)
+{
+    if (output == NULL || output->back.size == 0)
+        return 0;
+    if (output->scene != NULL && output->scene_size == output->back.size)
+        return 1;
+    free(output->scene);
+    output->scene = calloc(1, (size_t)output->back.size);
+    if (output->scene == NULL) {
+        output->scene_size = 0;
+        return 0;
+    }
+    output->scene_size = output->back.size;
+    return 1;
+}
+
+static void copy_scene_to_back(KmsOutput *output)
+{
+    int row;
+
+    if (output == NULL || output->scene == NULL || output->back.map == NULL)
+        return;
+    for (row = 0; row < output->mode.vdisplay; ++row)
+        memcpy((unsigned char *)output->back.map +
+                   (size_t)row * output->back.pitch,
+               (const unsigned char *)output->scene +
+                   (size_t)row * output->back.pitch,
+               (size_t)output->mode.hdisplay * sizeof(uint32_t));
 }
 
 static void fill_rect(KmsOutput *output, int x, int y, int width, int height,
@@ -1485,16 +1521,20 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
             output->modeset_fallback;
         if (modeset_frame)
             output->flip_pending = 0;
+        {
+            void *scanout_map = output->back.map;
+            int render_scene = ensure_scene_buffer(output);
+            if (render_scene)
+                output->back.map = output->scene;
         if (trace_phases)
             fprintf(stderr, "blit: KMS phase connector=%u wait_us=%lld\n",
                     output->connector, kms_now_us() - output_started);
         if (full_redraw) {
             memset(output->back.map, 0, output->back.size);
             output->pointer_background_valid = 0;
-        } else {
-            /* The two scanout buffers alternate ownership after every page
-               flip.  Preserve the complete displayed scene before applying
-               this frame's smaller damage rectangle. */
+        } else if (!render_scene) {
+            /* Fallback for an allocation failure: preserve the complete
+               displayed scene before applying smaller damage. */
             copy_front_to_back(output);
         }
         if (pointer_changed)
@@ -1605,6 +1645,10 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
             write_screenshot(kms, output);
             ++completed_captures;
         }
+        if (render_scene) {
+            output->back.map = scanout_map;
+            copy_scene_to_back(output);
+        }
         {
             unsigned int flags = DRM_MODE_PAGE_FLIP_EVENT;
             int flip_result;
@@ -1687,6 +1731,7 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
             output->info.max_present_ms = output->info.last_present_ms;
         ++output->info.present_calls;
         remember_output_views(output, views, view_count, output_view_count);
+        }
     }
     if (!deferred) {
         kms->pointer_state_valid = 1;
@@ -1793,6 +1838,9 @@ void blit_kms_close(BlitKms *kms)
         }
         free_buffer(kms->fd, &output->front);
         free_buffer(kms->fd, &output->back);
+        free(output->scene);
+        output->scene = NULL;
+        output->scene_size = 0;
     }
     if (kms->fd >= 0) close(kms->fd);
     free(kms);

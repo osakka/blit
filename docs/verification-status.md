@@ -3,7 +3,7 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
-## 0.1.512 candidate: KMS scaling and login-pane invariant
+## 0.1.513 candidate: KMS scene cache, scaling, and login-pane invariant
 
 The source candidate targets the measured direct-KMS workload in which Hibr's
 opaque 960x1080 wallpaper is placed at 1920x2160. The compositor now uses a
@@ -13,10 +13,12 @@ per-destination-pixel source-coordinate divisions that were present during
 full wallpaper redraws. It also makes the session returned by `/v1/login`
 explicitly inherit the requested pane before topology derives the surface
 assignment, closing the live mismatch in which the lower-pane request
-returned a session on the upper pane. See [ADR 0102](adr/0102-kms-integer-scale-fast-path.md).
+returned a session on the upper pane. Direct-KMS composition now renders into
+a persistent CPU scene before the sequential scanout copy; see [ADR 0102](adr/0102-kms-integer-scale-fast-path.md)
+and [ADR 0103](adr/0103-kms-cpu-scene-cache.md).
 
 Local evidence: `tools/tests/kms_compose_gate.sh` passes with
-`KMS_COMPOSE_PASS full=512`. The TCC server build must report `0.1.512`.
+`KMS_COMPOSE_PASS full=512`. The TCC server build must report `0.1.513`.
 Live package, presentation-timing, and screenshot evidence is pending. The required live
 configuration remains direct KMS, one physical output, one lower-half pane,
 and one primary Hibr session; no join is part of this performance check.

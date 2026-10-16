@@ -72,6 +72,30 @@ static void buffer_coherence_gate(void)
                  (long)back_pixels[i], (long)front_pixels[i]);
 }
 
+static void scene_copy_gate(void)
+{
+    KmsOutput scene_output;
+    size_t i;
+
+    memset(&scene_output, 0, sizeof(scene_output));
+    scene_output.mode.hdisplay = W;
+    scene_output.mode.vdisplay = H;
+    scene_output.back.map = back_pixels;
+    scene_output.back.pitch = W * sizeof(uint32_t);
+    scene_output.back.size = sizeof(back_pixels);
+    if (!ensure_scene_buffer(&scene_output))
+        fail("CPU scene buffer was not allocated", 0, 1);
+    for (i = 0; i < sizeof(back_pixels) / sizeof(back_pixels[0]); ++i)
+        ((uint32_t *)scene_output.scene)[i] = 0x203040U + (uint32_t)i;
+    memset(back_pixels, 0, sizeof(back_pixels));
+    copy_scene_to_back(&scene_output);
+    for (i = 0; i < sizeof(back_pixels) / sizeof(back_pixels[0]); ++i)
+        if (back_pixels[i] != 0x203040U + (uint32_t)i)
+            fail("scanout copy does not contain the complete CPU scene",
+                 (long)back_pixels[i], (long)(0x203040U + i));
+    free(scene_output.scene);
+}
+
 static void place(int z)
 {
     BlitGraphicsImage *image = &images[0];
@@ -130,6 +154,7 @@ int main(void)
     uint32_t face = 0x101820U;
 
     buffer_coherence_gate();
+    scene_copy_gate();
 
     output.mode.hdisplay = W;
     output.mode.vdisplay = H;
