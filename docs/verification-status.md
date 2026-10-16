@@ -3,14 +3,16 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
-## Unreleased 0.1.508: canonical observation API
+## 0.1.508: canonical observation API
 
 Source now defines the schema-first `GET /v1/diagnostics/observation` endpoint
 and composes it from the existing focused resource serializers. The OpenAPI
 schema gate, TCC build, focused observation gate, and complete schema/API gate
-pass locally. The endpoint has not yet been packaged or deployed; the live
-host remains 0.1.507. Host acceptance still requires installing the exact
-0.1.508 package and querying the endpoint with the authenticated Bash client.
+pass locally. The exact package was installed through the supervised update
+path and the authenticated Bash client confirmed `0.1.508` on
+`192.168.10.54`. The live response reported SDL3/OpenGLES2, one
+1920x2160@60 Hz output, one running login-manager session, 158 presentation
+calls, zero missed deadlines at capture, and one graphics payload.
 
 ## Latest review: 0.1.507 is not visually accepted
 

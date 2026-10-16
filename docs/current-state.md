@@ -7,9 +7,9 @@ work actually stopped.
 
 ## Status at the last review
 
-Blit `0.1.507` is deployed on the authorized host at `192.168.10.54` and
+Blit `0.1.508` is deployed on the authorized host at `192.168.10.54` and
 reports API version `0.1`. The matching package identity is recorded in
-[`releases/0.1.507.yaml`](../releases/0.1.507.yaml). Hibr source was not
+[`releases/0.1.508.yaml`](../releases/0.1.508.yaml). Hibr source was not
 modified.
 
 The source branch now contains and has pushed the rendering/protocol fixes from
@@ -29,11 +29,10 @@ rewrite those references unless a new, explicitly accepted ADR supersedes ADR
 0004. “SDL3/KMSDRM” and “direct DRM/KMS” are distinct paths and must not be
 collapsed into one undocumented implementation.
 
-The next source version, `0.1.508`, adds the authenticated
+The `0.1.508` package adds the authenticated
 `GET /v1/diagnostics/observation` endpoint. It is a schema-first aggregate of
-the existing serializers for one operational state dump; its focused schema
-and TCC API gate pass locally. It is not yet deployed to `192.168.10.54`, so
-the live host remains `0.1.507` until the package is built and installed.
+the existing serializers for one operational state dump. The endpoint is
+installed and live-verified on `192.168.10.54`.
 
 The product is **not visually accepted**. The latest authenticated screenshot
 capture showed a coherent flat-colour scene with the menu/status line but no
@@ -62,16 +61,14 @@ timing counters are healthy.
 
 ### Latest live read-only boundary
 
-On 2026-10-16, a read-only authenticated query to `192.168.10.54` reported
-the deployed `0.1.507` SDL3/OpenGLES2 server with one output and one running
-session. That session was the login manager (`login_manager: true`), not a Hibr
-desktop: `hibr_attachment.owner_registered: false`, `owner_pid: 0`,
-`owner_writes: 0`, and `hibr_desktop.role: none`. Its graphics inventory was
-empty. The bounded graphics trace contained Kitty capability queries and one
-delete request, but no Kitty image transmit (`a=T`) payload. The server
-therefore cannot yet answer the #86 wallpaper question from this state; the
-next valid capture must be taken after one real primary desktop owner is
-registered. No live mutation was performed.
+On 2026-10-16, the post-deployment observation query to `192.168.10.54`
+reported `0.1.508`, SDL3/OpenGLES2, one `DP-1` output at 1920x2160@60 Hz,
+one running login-manager session, and two keyboards/two pointers discovered.
+The observation endpoint returned `observation_version: 1`, the
+`single_event_loop_turn` marker, 158 presentation calls, zero missed deadlines
+at capture, and one graphics payload. It does not change the visual acceptance
+status: the running session is still the login manager rather than a Hibr
+desktop, so #86 and the complete desktop/join capture remain open.
 
 ## Non-negotiable claim rule
 
