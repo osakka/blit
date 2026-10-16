@@ -3,6 +3,41 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 0.1.510: direct-KMS frame-boundary fix and live renderer matrix
+
+The exact `0.1.510` package is deployed on `192.168.10.54`. Hibr source was
+not modified. The direct KMS compositor now copies the complete displayed
+front buffer into the acquired back buffer before applying damage; see
+[ADR 0101](adr/0101-kms-incremental-frames-copy-the-presented-buffer.md).
+
+The local coherence gate and TCC build passed. The live renderer matrix was
+then exercised through the authenticated API:
+
+| Path | Runtime identity | Focused probe | Result |
+| --- | --- | --- | --- |
+| SDL/OpenGL | `sdl3`, `kmsdrm`, `opengles2`, `sdl-vsync` | cell updates, pointer motion, Hibr primary/join, Kitty image movement | no missed deadline in focused probes |
+| SDL/software | `sdl3`, `kmsdrm`, `software`, `scheduler-only` | cell updates and pointer motion | one startup scheduler miss; no subsequent focused miss |
+| direct KMS | `drm-kms`, `direct-kms`, `drm-page-flip` | full-frame coherence gate and pointer motion | no missed deadline in focused probe |
+
+The live SDL/OpenGL run accepted one Hibr primary in the lower pane and one
+Hibr `--join` in the upper pane as distinct running surfaces. The Kitty image
+probe recorded a complete 32x32 image, one texture upload, cache reuse, and
+zero rejected graphics payloads. The final live observation was restored to
+SDL/KMSDRM + OpenGLES2 at 59.99 Hz with the same primary/join topology.
+
+Evidence captures and JSON observations are retained outside Git under:
+
+- `/tmp/blit-direct-kms-fixed-motion-20261016/`
+- `/tmp/blit-sdl-gl-motion-20261016/`
+- `/tmp/blit-live-hibr-join-sdl-gl-20261016/`
+- `/tmp/blit-live-kitty-motion-20261016/`
+- `/tmp/blit-final-live-20261016/`
+
+This is bounded renderer/composition evidence, not a claim of complete
+physical acceptance. Physical fast window dragging, physical button/key
+traces, context-menu placement, and end-to-end Hibr interaction remain open
+acceptance boundaries.
+
 ## 0.1.509: canonical observation API and live presentation-path matrix
 
 The exact `0.1.509` package is deployed on `192.168.10.54`. The authenticated

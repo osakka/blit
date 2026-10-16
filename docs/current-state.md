@@ -7,16 +7,17 @@ work actually stopped.
 
 ## Status at the last review
 
-Blit `0.1.509` is deployed on the authorized host at `192.168.10.54` and
+Blit `0.1.510` is deployed on the authorized host at `192.168.10.54` and
 reports API version `0.1`. The matching package identity is recorded in
-[`releases/0.1.509.yaml`](../releases/0.1.509.yaml). Hibr source was not
+[`releases/0.1.510.yaml`](../releases/0.1.510.yaml). Hibr source was not
 modified.
 
-The source branch now contains and has pushed the rendering/protocol fixes from
-issues #84, #85, #87, and #88 at commit `739800f`. Those fixes are validated by
-the SDL graphics-band gate, the sixel-slot gate, the direct-KMS compositor gate,
-and the completed terminal-conformance cases, but they are not yet deployed to
-the host and are therefore not host-accepted.
+The source branch contains the direct-KMS frame-boundary fix at commit
+`222912a` and the 0.1.510 release record at `c9ec723`. The fix is validated by
+the KMS coherence gate, TCC build, renderer gates, and the live direct-KMS
+motion probe. The SDL scene-cache and graphics-path evidence is recorded in
+the 0.1.510 verification section. These are scoped claims, not blanket visual
+acceptance of every Hibr interaction.
 
 ### Architecture decision check
 
@@ -29,7 +30,7 @@ rewrite those references unless a new, explicitly accepted ADR supersedes ADR
 0004. “SDL3/KMSDRM” and “direct DRM/KMS” are distinct paths and must not be
 collapsed into one undocumented implementation.
 
-The `0.1.509` package carries the authenticated
+The `0.1.510` package carries the authenticated
 `GET /v1/diagnostics/observation` endpoint. It is a schema-first aggregate of
 the existing serializers for one operational state dump. The endpoint is
 installed and live-verified on `192.168.10.54`.
@@ -45,25 +46,24 @@ The exact live presentation-path mapping was revalidated on 2026-10-16:
   `presentation_sync=drm-page-flip`.
 
 All three live paths reached `ready=true` on the single 1920x2160@60 Hz
-output with empty diagnostic errors and warnings. This validates path
-selection and readiness only; it is not visual acceptance of the Hibr desktop.
-The host was then restored to SDL/KMSDRM + OpenGLES2, with the login manager
-running and ready for the next physical observation.
+output with empty diagnostic errors and warnings. Focused synthetic and live
+composition probes also completed without a focused deadline miss; the
+software path had one startup scheduler miss during handoff. The host was then
+restored to SDL/KMSDRM + OpenGLES2 with one Hibr primary in the lower pane and
+one Hibr join in the upper pane, ready for physical observation.
 
-The product is **not visually accepted**. The latest authenticated screenshot
-capture showed a coherent flat-colour scene with the menu/status line but no
-Kitty graphics in either live session. Earlier captures also showed a stale
-surface containing `[desktop ended, status 0]` and a failed join containing
-`hibr: hold: no such session`. These are live failures, not acceptable desktop
-output.
+The product is **not fully physically accepted**. The latest bounded live
+capture showed a coherent two-pane Hibr primary/join composition, and the
+Kitty image probe completed without rejection or stale-pixel evidence. It did
+not exercise a real window drag, physical click/key delivery, or context-menu
+placement, so those acceptance claims remain open.
 
 The following narrower claims are supported:
 
 - the server answers `/v1/version` and `/v1/diagnostics/runtime` over TCP;
 - a fresh primary plus one `--join` can be created through the API when the
   primary establishes the Hibr hold first;
-- API-injected pointer stress reached 600 input events and 531 presentations
-  with zero new missed deadlines in that interval;
+- the current live renderer matrix completed its focused synthetic workloads;
 - the deterministic pointer-damage, motion-trail, wallpaper-stress, and Hibr
   frame-barrier gates pass locally;
 - physical acceptance is **not measured**: the latest 20-second capture saw no
@@ -77,14 +77,15 @@ timing counters are healthy.
 
 ### Latest live read-only boundary
 
-On 2026-10-16, the post-deployment observation query to `192.168.10.54`
-reported `0.1.509`, SDL3/OpenGLES2, one `DP-1` output at 1920x2160@60 Hz,
-one running login-manager session, and two keyboards/two pointers discovered.
-The observation endpoint returned `observation_version: 1`, the
-`single_event_loop_turn` marker, 158 presentation calls, zero missed deadlines
-at capture, and one graphics payload. It does not change the visual acceptance
-status: the running session is still the login manager rather than a Hibr
-desktop, so #86 and the complete desktop/join capture remain open.
+On 2026-10-16, the final live observation query to `192.168.10.54` reported
+`0.1.510`, SDL3/OpenGLES2, one 1920x2160@59.99 Hz output, one Hibr primary
+surface in the lower pane, and one Hibr join surface in the upper pane. The
+bounded final capture used for the renderer record had one inherited
+startup missed deadline; the focused motion and composition probes added none.
+A later readback showed five cumulative missed deadlines after the longer
+service lifetime, while the current frame-rate window reported zero missed
+deadlines and no diagnostic errors. This does not close physical interaction
+acceptance.
 
 ## Non-negotiable claim rule
 

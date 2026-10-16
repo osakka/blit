@@ -119,6 +119,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0096 — Carry the full Hibr Kitty chunk in the APC buffer](0096-kitty-apc-buffer-carries-the-full-hibr-chunk.md)
 - [0097 — Reassert the Hibr terminal contract after authentication](0097-reassert-hibr-terminal-contract-after-login.md)
 - [0099 — Use a ping-pong scene cache for SDL damage composition](0099-ping-pong-scene-cache-for-sdl-damage.md)
+- [0101 — KMS incremental frames begin from the presented buffer](0101-kms-incremental-frames-copy-the-presented-buffer.md)
 
 ## Adding an ADR
 
