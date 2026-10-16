@@ -26,7 +26,7 @@ import sys
 
 path, base_url, duration, auth_mode, started = sys.argv[1:]
 pathlib.Path(path).write_text(json.dumps({
-    "capture": "blit-live-diagnostics-v2",
+    "capture": "blit-live-diagnostics-v3",
     "started_at": started,
     "base_url": base_url,
     "duration_seconds": int(duration),
@@ -52,6 +52,7 @@ get input-devices.json /v1/input/devices
 get input-routes.json /v1/input/routes
 get fonts.json /v1/fonts
 get settings.json /v1/settings
+get sessions.json /v1/terminal-sessions
 get diagnostics-start.json /v1/diagnostics
 get runtime-start.json /v1/diagnostics/runtime
 get trace-start.json '/v1/diagnostics/trace?limit=128'

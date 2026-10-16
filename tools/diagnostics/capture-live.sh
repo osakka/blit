@@ -9,7 +9,7 @@ output_dir=${3:-"diagnostics/live-$(date -u +%Y%m%dT%H%M%SZ)"}
 screenshots=${4:-yes}
 surface_ids=${BLIT_SURFACE_IDS-}
 trace_limit=${BLIT_TRACE_LIMIT:-8}
-session_ids=${BLIT_SESSION_IDS:-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16}
+session_ids=${BLIT_SESSION_IDS-}
 display_ids=${BLIT_DISPLAY_IDS-}
 
 case "$trace_limit" in
@@ -33,7 +33,7 @@ import sys
 
 path, base_url, duration, screenshots, trace_limit, auth_mode, started = sys.argv[1:]
 pathlib.Path(path).write_text(json.dumps({
-    "capture": "blit-live-diagnostics-v2",
+    "capture": "blit-live-diagnostics-v3",
     "started_at": started,
     "base_url": base_url,
     "duration_seconds": int(duration),
@@ -96,22 +96,35 @@ get_surface_summaries() {
 
 get_session_details() {
     local session_id file_name
-    local -a ids
-    IFS=',' read -r -a ids <<< "$session_ids"
-    for session_id in "${ids[@]}"; do
-        case "$session_id" in
-            ''|*[!0-9]*) echo "capture: invalid BLIT_SESSION_IDS entry: $session_id" >&2; exit 2 ;;
-        esac
-        file_name="session-${session_id}.json"
-        # A missing session is normal: the API has no list route yet, so this
-        # bounded probe discovers live sessions without creating anything.
-        if diag_curl --fail --silent --connect-timeout 3 --max-time 10 \
-            "$base_url/v1/terminal-sessions/$session_id" > "$output_dir/.$file_name.tmp"; then
-            mv "$output_dir/.$file_name.tmp" "$output_dir/$file_name"
-        else
-            unlink "$output_dir/.$file_name.tmp" 2>/dev/null || true
-        fi
-    done
+    get sessions.json /v1/terminal-sessions
+    if [ -n "$session_ids" ]; then
+        IFS=',' read -r -a ids <<< "$session_ids"
+        for session_id in "${ids[@]}"; do
+            case "$session_id" in
+                ''|*[!0-9]*) echo "capture: invalid BLIT_SESSION_IDS entry: $session_id" >&2; exit 2 ;;
+            esac
+            file_name="session-${session_id}.json"
+            if diag_curl --fail --silent --connect-timeout 3 --max-time 10 \
+                "$base_url/v1/terminal-sessions/$session_id" > "$output_dir/.$file_name.tmp"; then
+                mv "$output_dir/.$file_name.tmp" "$output_dir/$file_name"
+            else
+                unlink "$output_dir/.$file_name.tmp" 2>/dev/null || true
+            fi
+        done
+    else
+        python3 - "$output_dir/sessions.json" <<'PY'
+import json
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1]).parent
+sessions = json.loads(pathlib.Path(sys.argv[1]).read_text())
+for session in sessions.get("sessions", []):
+    session_id = str(session["id"])
+    (root / f"session-{session_id}.json").write_text(
+        json.dumps(session, indent=2) + "\n", encoding="utf-8")
+PY
+    fi
 }
 
 get_display_ids() {

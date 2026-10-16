@@ -1273,6 +1273,33 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
   /v1/terminal-sessions:
+    get:
+      tags: [terminals]
+      operationId: listTerminalSessions
+      summary: List all live terminal sessions
+      description: >-
+        Return the authoritative live session inventory. This endpoint exists
+        so diagnostics and control clients do not infer session identity by
+        probing guessed numeric IDs. The result includes login-manager and
+        Hibr primary/join bindings for every currently used session.
+      responses:
+        '200':
+          description: Live terminal-session inventory
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sessions, count]
+                properties:
+                  sessions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TerminalSession'
+                  count:
+                    type: integer
+                    minimum: 0
+        default:
+          $ref: '#/components/responses/Problem'
     post:
       tags: [terminals]
       operationId: createTerminalSession

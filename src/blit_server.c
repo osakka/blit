@@ -18858,6 +18858,42 @@ static void handle_request(int fd, BlitRuntime *runtime,
     }
 
     if (strcmp(path, "/v1/terminal-sessions") == 0 &&
+        strcmp(method, "GET") == 0) {
+        char session_body[65536];
+        size_t used = 0;
+        int session_index;
+        int session_count = 0;
+        int first = 1;
+
+        /* Session discovery is an inventory read, not a bounded probe over
+           guessed numeric ids.  Diagnostic clients need the same live
+           session set that topology and runtime diagnostics use, especially
+           when the login manager has retired and recreated a PTY. */
+        used += (size_t)snprintf(body + used, sizeof(body) - used,
+                                 "{\"sessions\":[");
+        for (session_index = 0; session_index < BLIT_MAX_SESSIONS;
+             ++session_index) {
+            BlitSession *session = &runtime->sessions[session_index];
+
+            if (!session->used)
+                continue;
+            session_json(runtime, session, session_body,
+                         sizeof(session_body));
+            used += (size_t)snprintf(body + used, sizeof(body) - used,
+                                     "%s%s", first ? "" : ",",
+                                     session_body);
+            first = 0;
+        }
+        for (session_index = 0; session_index < BLIT_MAX_SESSIONS;
+             ++session_index)
+            if (runtime->sessions[session_index].used)
+                ++session_count;
+        used += (size_t)snprintf(body + used, sizeof(body) - used,
+                                 "],\"count\":%d}", session_count);
+        send_http(fd, 200, "OK", "application/json", body);
+        return;
+    }
+    if (strcmp(path, "/v1/terminal-sessions") == 0 &&
         strcmp(method, "POST") == 0) {
         BlitSession *session;
         int create_result;

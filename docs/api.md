@@ -196,7 +196,7 @@ status codes.
 | Fonts/topology | `GET/PUT /v1/fonts`, `GET/PUT /v1/topology` | Select logical cell geometry and pane placement |
 | Settings | `GET/PUT/DELETE /v1/settings` | Inspect, replace, or reset API-owned server settings |
 | Login | `GET/POST/DELETE /v1/login` | Supervise one root-owned Hibr login screen and its authenticated child session |
-| Terminals | `POST /v1/terminal-sessions`, `GET/PATCH/DELETE /v1/terminal-sessions/{id}`, `POST /v1/terminal-sessions/{id}/input` | Create, place, inspect, drive, and stop PTY sessions |
+| Terminals | `GET/POST /v1/terminal-sessions`, `GET/PATCH/DELETE /v1/terminal-sessions/{id}`, `POST /v1/terminal-sessions/{id}/input` | Inventory, create, place, inspect, drive, and stop PTY sessions |
 | Hibr | `GET /v1/terminal-sessions/{id}/hibr-owner` | Inspect the primary/join ownership attachment |
 | Surfaces | `GET/PUT /v1/surfaces/{id}/cells`, `GET /v1/surfaces/{id}/summary`, `GET /v1/surfaces/{id}/scrollback` | Read and revision-update authoritative terminal state |
 | Input | `GET /v1/input/devices`, `GET/POST /v1/input/inject`, `GET/PUT /v1/input/routes` | Discover, diagnose, and route physical or synthetic input |
@@ -223,6 +223,7 @@ GET/PATCH /v1/displays/{id}                rotation and brightness
 GET/PATCH /v1/audio/cards[/{id}]           a card's mixer
 GET/PUT /v1/fonts /topology /effects       revisioned configuration
 GET/PUT/DELETE /v1/settings                persisted server and font settings
+GET    /v1/terminal-sessions               authoritative live session inventory
 POST   /v1/terminal-sessions               create a PTY-backed session
 GET/PATCH/DELETE /v1/terminal-sessions/{id} lifecycle and placement
 POST   /v1/terminal-sessions/{id}/input    terminal input bytes

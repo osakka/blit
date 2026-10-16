@@ -53,7 +53,10 @@ is reported independently because a short pointer burst is not a sustained
 frame-rate workload. Warnings are observations, not pass/fail claims.
 
 The capture also records `graphics.json`, `audio.json`, `fonts.json`,
-`settings.json`, `capture-metadata.json`, and `capture-complete.json`. Each
+`settings.json`, `sessions.json`, `capture-metadata.json`, and
+`capture-complete.json`. `sessions.json` is the authoritative live session
+inventory from `GET /v1/terminal-sessions`; captures no longer probe a guessed
+numeric session range. Each
 `screenshots/*.bmp` has a matching `.headers` file retaining the API capture
 frame and surface-revision identity. These files let a screenshot be compared
 with the exact runtime and surface state that produced it. The command writes
@@ -142,6 +145,22 @@ local Hibr shell or a physical keyboard. It collects the hardware/topology
 inventory, runtime counters, bounded event trace, and synchronized framebuffer
 screenshots.
 
+For the standard stacked Hibr experiment—one authenticated primary in the
+bottom pane and one `--join` in the top pane—use the read-only split capture:
+
+```sh
+tools/diagnostics/hibr-split-capture.sh \
+  http://192.168.10.54:8080 10 \
+  diagnostics/hibr-split-$(date -u +%Y%m%dT%H%M%SZ)
+```
+
+It writes `hibr-split-verdict.json` and `.txt`. The verdict checks ownership,
+pane tiling, primary/join surface identity, closed frame batches, graphics or
+cell production, display refresh timing, and Hibr frame-barrier timeouts. It
+does not mutate topology, sessions, input routes, Hibr settings, or login
+state. A failed verdict names the first missing boundary; it does not infer a
+cause from the screenshot alone.
+
 For a low-cost surface check, use the compact summary endpoint instead of the
 full cell snapshot:
 
@@ -164,11 +183,10 @@ surface summary. The filtered trace views are taken at the start and end so
 the capture itself does not repeatedly serialize diagnostic history on the
 single-threaded gateway.
 
-Because the current API is resource-oriented and does not expose a broad
-session-list response, the harness also probes the bounded session ID range
-`1..16` and writes `session-N.json` only for sessions that exist. Set
-`BLIT_SESSION_IDS=3,10` when a run should inspect only known sessions. This
-never creates, focuses, resizes, or deletes a session.
+The harness records the authoritative `sessions.json` inventory and writes
+`session-N.json` for every live session. Set `BLIT_SESSION_IDS=3,10` when a
+run should inspect only known sessions after the inventory has been captured.
+This never creates, focuses, resizes, or deletes a session.
 
 Run it from a machine that can reach Blit:
 

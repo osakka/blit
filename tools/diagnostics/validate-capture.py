@@ -19,6 +19,7 @@ REQUIRED = (
     "input-routes.json",
     "fonts.json",
     "settings.json",
+    "sessions.json",
     "diagnostics-start.json",
     "runtime-start.json",
     "trace-start.json",
@@ -47,7 +48,7 @@ def main() -> int:
         complete = load(root, "capture-complete.json")
         for name in REQUIRED[2:]:
             load(root, name)
-        if metadata.get("capture") != "blit-live-diagnostics-v2":
+        if metadata.get("capture") != "blit-live-diagnostics-v3":
             raise ValueError("unsupported capture metadata version")
         if metadata.get("authentication") not in {"none", "bearer", "bearer-file"}:
             raise ValueError("invalid authentication mode")
@@ -55,6 +56,11 @@ def main() -> int:
             raise ValueError("capture-complete.json does not report complete")
         if "Bearer " in json.dumps(metadata):
             raise ValueError("capture metadata contains an authorization header")
+
+        sessions = load(root, "sessions.json")
+        listed = sessions.get("sessions")
+        if not isinstance(listed, list) or sessions.get("count") != len(listed):
+            raise ValueError("sessions.json is not an authoritative inventory")
 
         displays = load(root, "displays.json")
         display_ids = []
