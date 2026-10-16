@@ -1027,14 +1027,17 @@ static void remember_output_views(KmsOutput *output,
            carries mid-batch would make the release frame look like one that
            had already been presented, and it would never be drawn.  Keep the
            revision this output last actually put on screen. */
-        if (views[view_index].synchronized)
-            for (i = 0; i < previous_count; ++i)
-                if (previous_ids[i] == views[view_index].surface_id)
-                    output->last_surface_revisions[stored] =
-                        previous_revisions[i];
-                if (previous_ids[i] == views[view_index].surface_id)
-                    output->last_surface_graphics_signatures[stored] =
-                        previous_graphics_signatures[i];
+        if (views[view_index].synchronized) {
+            for (i = 0; i < previous_count; ++i) {
+                if (previous_ids[i] != views[view_index].surface_id)
+                    continue;
+                output->last_surface_revisions[stored] =
+                    previous_revisions[i];
+                output->last_surface_graphics_signatures[stored] =
+                    previous_graphics_signatures[i];
+                break;
+            }
+        }
         ++stored;
     }
 }
