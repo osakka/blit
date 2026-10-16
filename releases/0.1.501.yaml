@@ -1,0 +1,22 @@
+release: 0.1.501
+package: blit_0.1.501-1_amd64.deb
+package_sha256: a838599ec3de562881f06ce01bf410ac838c76c7e88ded3e457eab270059c7c7
+source_commit: aefdc4474eef9fc17bbe47999cb6dc6a1210c61b
+package_documentation_commit: aefdc4474eef9fc17bbe47999cb6dc6a1210c61b
+server_binary_sha256: 3aeca54176571d884b4904e914e76cbf1418b3f56fd98cc526c3249db9962baa
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.212
+hibr_adapter_build: tcc_from_exact_pinned_checkout
+tcc_build_acceptance: pass_server_helper_adapter
+focused_packaging_regression: pass_direct_installed_hibr_tree_no_mirror
+package_reproducibility: pending
+package_artifact_acceptance: pending
+full_local_gates: login_manager_focus_pass
+qemu_hibr_oracle: skipped_missing_kernel_initramfs
+physical_host_deployment: pending
+notes: >-
+  0.1.501 adds structured login_session_exit evidence to the diagnostics
+  runtime log. It does not change Hibr authentication or session behavior.
+  The package uses Hibr 0.99.212 and sources the installed desktop session
+  directly without a mirrored Hibr tree.
