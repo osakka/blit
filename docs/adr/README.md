@@ -122,6 +122,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0101 — KMS incremental frames begin from the presented buffer](0101-kms-incremental-frames-copy-the-presented-buffer.md)
 - [0102 — Bounded integer-scale fast path for opaque KMS graphics](0102-kms-integer-scale-fast-path.md)
 - [0103 — Compose direct-KMS frames in a persistent CPU scene](0103-kms-cpu-scene-cache.md)
+- [0104 — Relocate an auto-started login manager to an explicit pane](0104-login-target-relocation-and-pane-redraw.md)
 
 ## Adding an ADR
 

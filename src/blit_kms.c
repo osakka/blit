@@ -64,6 +64,8 @@ typedef struct {
     unsigned long long last_surface_ids[KMS_MAX_VIEWS];
     unsigned long long last_surface_revisions[KMS_MAX_VIEWS];
     unsigned long long last_surface_graphics_signatures[KMS_MAX_VIEWS];
+    int last_surface_origin_x[KMS_MAX_VIEWS];
+    int last_surface_origin_y[KMS_MAX_VIEWS];
     unsigned char pointer_background[KMS_POINTER_W * KMS_POINTER_H * 4];
     int pointer_background_valid;
     int pointer_background_x;
@@ -971,8 +973,21 @@ static int output_view_unchanged(const KmsOutput *output,
     for (i = 0; i < output->last_view_count && i < KMS_MAX_VIEWS; ++i)
         if (output->last_surface_ids[i] == view->surface_id)
             return output->last_surface_revisions[i] == view->surface_revision &&
+                output->last_surface_origin_x[i] == view->origin_x &&
+                output->last_surface_origin_y[i] == view->origin_y &&
                 output->last_surface_graphics_signatures[i] ==
                     view->graphics_signature;
+    return 0;
+}
+
+static int output_view_moved(const KmsOutput *output,
+                             const BlitKmsSurfaceView *view)
+{
+    int i;
+    for (i = 0; i < output->last_view_count && i < KMS_MAX_VIEWS; ++i)
+        if (output->last_surface_ids[i] == view->surface_id)
+            return output->last_surface_origin_x[i] != view->origin_x ||
+                output->last_surface_origin_y[i] != view->origin_y;
     return 0;
 }
 
@@ -1017,6 +1032,8 @@ static void remember_output_views(KmsOutput *output,
             views[view_index].surface_revision;
         output->last_surface_graphics_signatures[stored] =
             views[view_index].graphics_signature;
+        output->last_surface_origin_x[stored] = views[view_index].origin_x;
+        output->last_surface_origin_y[stored] = views[view_index].origin_y;
         /* A synchronized view was not drawn.  Remembering the revision it
            carries mid-batch would make the release frame look like one that
            had already been presented, and it would never be drawn.  Keep the
@@ -1492,6 +1509,8 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                 if (views[view_index].synchronized)
                     continue;
                 if (!output_view_unchanged(output, &views[view_index])) {
+                    if (output_view_moved(output, &views[view_index]))
+                        full_redraw = 1;
                     output_changed = 1;
                     break;
                 }

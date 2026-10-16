@@ -75,12 +75,12 @@ window movement, physical mouse, keyboard, or joined coordinate system works.
 An unchanged or incomplete screenshot is a failed visual result even when
 timing counters are healthy.
 
-### 0.1.513 performance and login-placement candidate
+### 0.1.514 performance and login-placement candidate
 
-The source candidate for `0.1.513` retains the bounded integer-scale KMS
+The source candidate for `0.1.514` retains the bounded integer-scale KMS
 graphics path in [ADR 0102](adr/0102-kms-integer-scale-fast-path.md), adds
 the persistent CPU scene described in [ADR 0103](adr/0103-kms-cpu-scene-cache.md), and
-closes a separate login-resource invariant: the session returned by
+closes the auto-start login relocation invariant in [ADR 0104](adr/0104-login-target-relocation-and-pane-redraw.md): the session returned by
 `/v1/login` is explicitly attached to the requested pane before topology
 derives its surface assignment. This targets the observed mismatch where the
 login resource named the lower pane while its session occupied the upper

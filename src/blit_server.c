@@ -18876,6 +18876,36 @@ static void handle_request(int fd, BlitRuntime *runtime,
             refresh_session_state(runtime, login_session);
             if (strcmp(login_session->state, "running") == 0 ||
                 strcmp(login_session->state, "starting") == 0) {
+                /* BLIT_LOGIN_AUTOSTART may have created the manager on the
+                   default pane before an API client supplies its explicit
+                   target.  The resource target and the live session must be
+                   one state: relocate the existing manager before reporting
+                   success, otherwise its old pixels remain on screen. */
+                if (runtime->login_pane_id[0] != '\0' &&
+                    strcmp(login_session->pane_id,
+                           runtime->login_pane_id) != 0) {
+                    BlitPane *login_pane = find_pane_id(
+                        runtime, runtime->login_pane_id);
+                    BlitSurface *login_surface = find_surface_id(
+                        runtime, login_session->id);
+                    if (login_pane == NULL || login_surface == NULL ||
+                        !resize_session_surface(login_session, login_surface,
+                                                login_pane->width,
+                                                login_pane->height)) {
+                        send_problem(fd, 409, "Conflict",
+                                     "login_pane_move_failed",
+                                     "The running login manager could not be moved to the requested pane.");
+                        return;
+                    }
+                    snprintf(login_session->pane_id,
+                             sizeof(login_session->pane_id), "%s",
+                             login_pane->id);
+                    snprintf(login_session->display_id,
+                             sizeof(login_session->display_id), "%s",
+                             login_pane->display_id);
+                    ++runtime->topology_revision;
+                    runtime->render_pending = 1;
+                }
                 login_manager_json(runtime, body, sizeof(body));
                 send_http(fd, 200, "OK", "application/json", body);
                 return;
