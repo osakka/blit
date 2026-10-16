@@ -113,6 +113,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0089 — Server presentation settings are API-owned state](0089-server-settings-are-api-owned.md)
 - [0090 — Full-frame composition has an explicit workload budget](0090-full-frame-composition-budget.md)
 - [0091 — Generate release identity from the package](0091-generated-release-identity.md)
+- [0092 — Authenticated, correlated diagnostic bundles](0092-authenticated-diagnostic-bundles.md)
 
 ## Adding an ADR
 

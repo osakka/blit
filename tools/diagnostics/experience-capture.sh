@@ -3,6 +3,7 @@ set -euo pipefail
 
 # A single operator transaction. The timed phase never requests screenshots;
 # framebuffer readback is deliberately a separate, post-timing action.
+source "$(CDPATH= cd -- "$(dirname "$0")" && pwd)/http.sh"
 base_url=${1:?usage: experience-capture.sh http://host:8080 [seconds] [output-dir] [screenshots]}
 duration=${2:-10}
 output_dir=${3:-"diagnostics/experience-$(date -u +%Y%m%dT%H%M%SZ)"}
@@ -32,8 +33,9 @@ for display in data.get("displays", data.get("outputs", [])):
 PY
     while IFS= read -r display_id; do
         [ -n "$display_id" ] || continue
-        curl --fail --silent --show-error --max-time 30 \
+        diag_curl --fail --silent --show-error --max-time 30 \
             "$base_url/v1/diagnostics/screenshots/$display_id?cached=1" \
+            -D "$output_dir/screenshots/$display_id.bmp.headers" \
             > "$output_dir/screenshots/$display_id.bmp"
     done < "$output_dir/display-ids.txt"
     sha256sum "$output_dir"/screenshots/*.bmp \
@@ -42,3 +44,5 @@ fi
 
 python3 tools/diagnostics/analyze-experience.py "$output_dir" \
     > "$output_dir/analysis.txt"
+python3 tools/diagnostics/validate-capture.py "$output_dir" \
+    > "$output_dir/validation.txt"

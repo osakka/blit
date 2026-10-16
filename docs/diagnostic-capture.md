@@ -6,10 +6,17 @@ For a report involving mouse movement, blinking, trails, missing clicks, or
 intermittent redraws, run this from a reachable Bash host:
 
 ```sh
+# This must be the API bearer token, not the separate package-update token.
+export BLIT_AUTH_TOKEN_FILE=/secure/path/to/api-token
 tools/diagnostics/troubleshoot-experience.sh \
   http://192.168.10.54:8080 15 \
   diagnostics/troubleshoot-$(date -u +%Y%m%dT%H%M%SZ)
 ```
+
+Use `BLIT_AUTH_TOKEN` instead when the token is already held by a secure
+process environment. Never put a token in the URL, command arguments, logs,
+or the capture directory. The shared diagnostic transport rejects setting
+both token forms and records only the authentication mode in metadata.
 
 While it prints `recording`, reproduce the symptom with the real mouse and
 keyboard. The command writes `verdict.json`, `verdict.txt`, raw 250 ms runtime
@@ -44,6 +51,14 @@ as `damage-driven-present-calls-not-vblank-rate` and only warns about a low
 present rate when terminal or graphics scene work was observed. Input activity
 is reported independently because a short pointer burst is not a sustained
 frame-rate workload. Warnings are observations, not pass/fail claims.
+
+The capture also records `graphics.json`, `audio.json`, `fonts.json`,
+`settings.json`, `capture-metadata.json`, and `capture-complete.json`. Each
+`screenshots/*.bmp` has a matching `.headers` file retaining the API capture
+frame and surface-revision identity. These files let a screenshot be compared
+with the exact runtime and surface state that produced it. The command writes
+`validation.txt` only after the required JSON and screenshot/header invariants
+pass; a missing or malformed artifact makes the capture fail.
 
 Interpret the first missing boundary in this order:
 
@@ -179,6 +194,11 @@ pointer-latency or redraw-cadence measurement.
 
 The output directory contains:
 
+- `capture-metadata.json` and `capture-complete.json`: the bounded capture
+  contract, authentication mode, requested duration/trace limit, and whether
+  the transaction completed;
+- `validation.txt`: the mechanical completeness result for the bundle;
+
 - `trace-*.json`: input events, surface presentation boundaries, and renderer
   path decisions;
 - `runtime-*.json`: frame timing, input counters, stream health, and session
@@ -189,7 +209,8 @@ The output directory contains:
 - `screenshots/*.bmp` and `screenshot-sha256.txt`: authoritative lossless
   framebuffer evidence. When `ffmpeg` is installed, matching
   `screenshots/*.png` and `screenshot-png-sha256.txt` are also emitted for
-  direct inspection;
+  direct inspection. Each BMP has a `.headers` companion with its capture
+  frame and surface-revision identity;
 - the start/end hardware and topology snapshots.
 
 Interpretation is causal: a physical click must appear as `pointer_button`,

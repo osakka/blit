@@ -3,6 +3,26 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 0.1.497 candidate: authenticated diagnostic bundles
+
+The live troubleshooting path now uses one shared bearer-aware transport for
+all diagnostic tools. The canonical collector records capability/settings
+documents, capture metadata/completion state, filtered wheel and graphics
+traces, and screenshot response headers containing frame and surface-revision
+identity. `validate-capture.py` rejects incomplete or malformed bundles, and
+the local bearer-file regression gate passes. Hibr source was not modified.
+
+The 0.1.497 package is built after this source commit; the exact artifact and
+reproducibility result will be recorded in `releases/0.1.497.yaml`.
+
+The strengthened collector was exercised read-only against `192.168.10.54`
+with bearer authentication. It discovered one 1920×2160 OpenGLES2 output at
+60 Hz, one session and one surface, and produced a validated screenshot whose
+headers identified frame `443107` and surface revision `surface-1=561712`.
+The two-second timing window observed no active input or surface work, so it
+does not diagnose the visual artifact; it proves the evidence path is now
+usable and makes the next reproduction falsifiable.
+
 ## 0.1.496 candidate: generated release identity
 
 The release tooling slice of issue #27 now derives the package identity from

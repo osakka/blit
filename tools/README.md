@@ -7,6 +7,13 @@ run an installed server. They are reproducible developer tooling:
   and small protocol probes used by the acceptance gates.
 - `tools/tests/` contains repeatable contract and network tests.
 - `packaging/build-deb.sh` is a build-time packaging script.
+- `tools/diagnostics/http.sh` is the shared authenticated read-only transport
+  for live captures. `capture-live.sh` is the canonical evidence collector;
+  the experience, troubleshooting, pointer, and input tools use its transport
+  rather than carrying separate token handling.
+- `tools/diagnostics/validate-capture.py` is the completeness check for the
+  canonical bundle; it verifies JSON, completion metadata, and screenshot
+  capture headers.
 
 The installed runtime is the TCC-built `blit-server` binary, exposed as
 `/usr/bin/blit`. Hibr owns desktop lifecycle and is started with its own

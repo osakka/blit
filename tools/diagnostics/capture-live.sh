@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+source "$(CDPATH= cd -- "$(dirname "$0")" && pwd)/http.sh"
+
 base_url=${1:?usage: capture-live.sh http://host:8080 [seconds] [output-dir] [screenshots]}
 duration=${2:-10}
 output_dir=${3:-"diagnostics/live-$(date -u +%Y%m%dT%H%M%SZ)"}
@@ -22,10 +24,28 @@ mkdir -p "$output_dir"
 if [ "$screenshots" = "yes" ]; then
     mkdir -p "$output_dir/screenshots"
 fi
+capture_started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+python3 - "$output_dir/capture-metadata.json" "$base_url" "$duration" \
+    "$screenshots" "$trace_limit" "$diag_auth_mode" "$capture_started" <<'PY'
+import json
+import pathlib
+import sys
+
+path, base_url, duration, screenshots, trace_limit, auth_mode, started = sys.argv[1:]
+pathlib.Path(path).write_text(json.dumps({
+    "capture": "blit-live-diagnostics-v2",
+    "started_at": started,
+    "base_url": base_url,
+    "duration_seconds": int(duration),
+    "screenshots": screenshots,
+    "trace_limit": int(trace_limit),
+    "authentication": auth_mode,
+}, indent=2) + "\n", encoding="utf-8")
+PY
 
 if [ -z "$surface_ids" ]; then
     topology_probe="$output_dir/.topology-probe.json"
-    if ! curl --fail --silent --show-error --connect-timeout 3 --max-time 10 \
+    if ! diag_curl --fail --silent --show-error --connect-timeout 3 --max-time 10 \
         "$base_url/v1/topology" > "$topology_probe"; then
         echo "capture: unable to discover surfaces from /v1/topology; set BLIT_SURFACE_IDS" >&2
         unlink "$topology_probe" 2>/dev/null || true
@@ -52,7 +72,7 @@ get() {
     local name=$1 path=$2 tmp attempt
     tmp="$output_dir/.capture-${name//\//_}.tmp"
     for attempt in 1 2 3; do
-        if curl --fail --silent --show-error --connect-timeout 3 --max-time 30 \
+        if diag_curl --fail --silent --show-error --connect-timeout 3 --max-time 30 \
             "$base_url$path" > "$tmp"; then
             mv "$tmp" "$output_dir/$name"
             return 0
@@ -85,7 +105,7 @@ get_session_details() {
         file_name="session-${session_id}.json"
         # A missing session is normal: the API has no list route yet, so this
         # bounded probe discovers live sessions without creating anything.
-        if curl --fail --silent --connect-timeout 3 --max-time 10 \
+        if diag_curl --fail --silent --connect-timeout 3 --max-time 10 \
             "$base_url/v1/terminal-sessions/$session_id" > "$output_dir/.$file_name.tmp"; then
             mv "$output_dir/.$file_name.tmp" "$output_dir/$file_name"
         else
@@ -133,11 +153,15 @@ PY
 
 get version.json /v1/version
 get server.json /v1/server
+get graphics.json /v1/graphics
+get audio.json /v1/audio
 get displays.json /v1/displays
 get_display_ids
 get topology.json /v1/topology
 get input-devices.json /v1/input/devices
 get input-routes.json /v1/input/routes
+get fonts.json /v1/fonts
+get settings.json /v1/settings
 get_session_details
 derive_surface_ids_from_sessions
 if [ -z "$surface_ids" ]; then
@@ -148,7 +172,7 @@ get_surface_summaries
 get diagnostics-start.json /v1/diagnostics
 get runtime-start.json /v1/diagnostics/runtime
 get trace-start.json "/v1/diagnostics/trace?limit=$trace_limit"
-for kind in pointer_button pointer_motion keyboard_key render_path surface_update; do
+for kind in pointer_button pointer_motion pointer_wheel keyboard_key render_path surface_update graphics_payload; do
     get "trace-${kind}-start.json" "/v1/diagnostics/trace?kind=${kind}&limit=$trace_limit"
 done
 
@@ -163,9 +187,10 @@ while [ $(( $(date +%s) - start )) -lt "$duration" ]; do
         for display_id in "${displays[@]}"; do
             [ -n "$display_id" ] || continue
             screenshot="$output_dir/screenshots/${stamp}-${display_id}.bmp"
-            curl --fail --silent --show-error --max-time 30 \
+            diag_curl --fail --silent --show-error --max-time 30 \
                 "$base_url/v1/diagnostics/screenshots/$display_id" \
-                > "$screenshot"
+                -D "$screenshot.headers" > "$screenshot.tmp"
+            mv "$screenshot.tmp" "$screenshot"
             sha256sum "$screenshot" >> "$output_dir/screenshot-sha256.txt"
         done
     fi
@@ -178,9 +203,24 @@ get_surface_summaries
 get_session_details
 get runtime-end.json /v1/diagnostics/runtime
 get trace-end.json "/v1/diagnostics/trace?limit=$trace_limit"
-for kind in pointer_button pointer_motion keyboard_key render_path surface_update; do
+for kind in pointer_button pointer_motion pointer_wheel keyboard_key render_path surface_update graphics_payload; do
     get "trace-${kind}-end.json" "/v1/diagnostics/trace?kind=${kind}&limit=$trace_limit"
 done
 
-printf 'capture_dir=%s polls=%s screenshots=%s trace_limit=%s\n' \
-    "$output_dir" "$index" "$screenshots" "$trace_limit"
+capture_finished=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+python3 - "$output_dir/capture-complete.json" "$index" "$capture_finished" <<'PY'
+import json
+import pathlib
+import sys
+
+path, polls, finished = sys.argv[1:]
+pathlib.Path(path).write_text(json.dumps({
+    "finished_at": finished,
+    "polls": int(polls),
+    "status": "complete",
+}, indent=2) + "\n", encoding="utf-8")
+PY
+python3 "$(CDPATH= cd -- "$(dirname "$0")" && pwd)/validate-capture.py" \
+    "$output_dir" > "$output_dir/validation.txt"
+printf 'capture_dir=%s polls=%s screenshots=%s trace_limit=%s auth=%s\n' \
+    "$output_dir" "$index" "$screenshots" "$trace_limit" "$diag_auth_mode"

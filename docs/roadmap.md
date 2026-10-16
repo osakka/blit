@@ -3,7 +3,17 @@
 The roadmap is ordered by dependency. A later milestone must not become a
 second, parallel implementation of an earlier one.
 
-## Current position — 0.1.496 generated-release-identity candidate
+## Current position — 0.1.497 authenticated-diagnostics candidate
+
+The live troubleshooting path now has one shared authenticated transport and
+one canonical capture contract. Captures include capability/settings state,
+runtime and filtered traces, screenshot frame/revision headers, authentication
+mode, completion metadata, and mechanical completeness validation. This
+removes the previous ambiguity between an unauthenticated capture failure and
+a rendering failure. The renderer still requires live OpenGLES2/KMS evidence;
+this tooling makes that next diagnosis trustworthy.
+
+## Previous position — 0.1.496 generated-release-identity candidate
 
 The release workflow now generates the package identity fields from the
 Debian artifact itself: package/version, archive checksum, shipped binary

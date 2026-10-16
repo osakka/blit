@@ -1,19 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+source "$(CDPATH= cd -- "$(dirname "$0")" && pwd)/http.sh"
+
 base_url=${1:?usage: verify-live-input.sh http://host:8080 [output-dir]}
 output_dir=${2:-"diagnostics/input-probe-$(date -u +%Y%m%dT%H%M%SZ)"}
 mkdir -p "$output_dir"
 
 get() {
     local name=$1 path=$2
-    curl --fail --silent --show-error --max-time 30 \
+    diag_curl --fail --silent --show-error --max-time 30 \
         "$base_url$path" > "$output_dir/$name"
 }
 
 post() {
     local name=$1 body=$2
-    curl --fail --silent --show-error --max-time 30 \
+    diag_curl --fail --silent --show-error --max-time 30 \
         -X POST -H 'Content-Type: application/json' \
         -d "$body" "$base_url/v1/input/inject" > "$output_dir/$name"
 }

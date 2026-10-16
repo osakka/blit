@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+source "$(CDPATH= cd -- "$(dirname "$0")" && pwd)/http.sh"
+
 base_url=${1:?usage: pointer-artifact-capture.sh http://host:8080 [output-dir] [screenshots] [physical|api]}
 output_dir=${2:-"diagnostics/pointer-$(date -u +%Y%m%dT%H%M%SZ)"}
 screenshots=${3:-no}
@@ -24,13 +26,13 @@ fi
 
 get() {
     local name=$1 path=$2
-    curl --fail --silent --show-error --max-time 30 \
+    diag_curl --fail --silent --show-error --max-time 30 \
         "$base_url$path" > "$output_dir/$name"
 }
 
 get_optional_session() {
     local name=$1 path=$2 status
-    status=$(curl --silent --show-error --max-time 30 \
+    status=$(diag_curl --silent --show-error --max-time 30 \
         -o "$output_dir/$name" -w '%{http_code}' \
         "$base_url$path")
     case "$status" in
@@ -49,7 +51,7 @@ get_optional_session() {
 discover_session_id() {
     [ -n "$session_id" ] && return 0
     for candidate in $(seq 1 64); do
-        if curl --fail --silent --show-error --max-time 5 \
+        if diag_curl --fail --silent --show-error --max-time 5 \
             "$base_url/v1/terminal-sessions/$candidate" \
             > "$output_dir/.session-probe.json"; then
             session_id=$candidate
@@ -96,9 +98,9 @@ capture() {
         for display_id in "${displays[@]}"; do
             [ -n "$display_id" ] || continue
             screenshot="$output_dir/screenshots/${label}-${display_id}.bmp"
-            curl --fail --silent --show-error --max-time 30 \
+            diag_curl --fail --silent --show-error --max-time 30 \
                 "$base_url/v1/diagnostics/screenshots/$display_id?cached=1" \
-                > "$screenshot"
+                -D "$screenshot.headers" > "$screenshot"
             sha256sum "$screenshot" >> "$output_dir/screenshot-sha256.txt"
         done
     fi
@@ -118,7 +120,7 @@ if [ "$mode" = api ]; then
     for point in '300 300' '900 900' '1500 1500' '1100 1100'; do
         x=${point% *}
         y=${point#* }
-        curl --fail --silent --show-error --max-time 5 \
+        diag_curl --fail --silent --show-error --max-time 5 \
             -X POST "$base_url/v1/input/inject" \
             -H 'Content-Type: application/json' \
             --data "{\"kind\":\"pointer_motion\",\"x\":$x,\"y\":$y}" \
@@ -132,6 +134,6 @@ else
     capture physical
 fi
 
-get runtime-end.json /v1/diagnostics/runtime
+    get runtime-end.json /v1/diagnostics/runtime
 get trace-end.json /v1/diagnostics/trace
 printf 'capture_dir=%s screenshots=%s mode=%s\n' "$output_dir" "$screenshots" "$mode"

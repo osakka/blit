@@ -178,6 +178,7 @@ trap cleanup EXIT HUP INT TERM
 suite_schema() {
     run_gate api_schema_gate.rb ruby tools/tests/api_schema_gate.rb
     run_gate stream_replay_gate.rb ruby tools/tests/stream_replay_gate.rb
+    run_gate diagnostic_auth_gate.sh "$ROOT"/tools/tests/diagnostic_auth_gate.sh
     # network_auth_gate.sh invokes http_fragmentation_gate.rb and
     # http_backpressure_gate.rb itself, passing them its port. They are
     # sub-gates: running either standalone connects to nothing and raises.
