@@ -14,10 +14,12 @@ package_reproducibility: pass_rebuilt_identical
 package_artifact_acceptance: pass
 full_local_gates: pass_76_skip_3_fail_0
 qemu_hibr_oracle: skipped_missing_kernel_initramfs
-physical_host_deployment: pending
+physical_host_deployment: pass_compatibility_login_screen_only_desktop_pending
 notes: >-
   0.1.500 rebuilds the Blit adapter against Hibr 0.99.212, the current
   released version reported by the physical host. The packaged launcher
   sources Hibr's installed /usr/share/hibr/desktop/session.hibr directly; no
   Hibr source or installed Hibr desktop file was modified and no mirrored Hibr
-  tree is packaged.
+  tree is packaged. Live deployment reports compatible=true, but the host is
+  currently at the login manager with no registered desktop owner, so desktop
+  menu, input, and join acceptance remain pending.

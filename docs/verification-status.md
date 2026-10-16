@@ -15,6 +15,13 @@ The current candidate follows ADR 0093 and pins Hibr 0.99.212, using the
 released tag from the local Hibr checkout. It must be rebuilt, gated, and
 deployed before any physical desktop behavior is accepted.
 
+The exact 0.1.500 package passed the full local suite (`76 passed, 3
+explicitly skipped, 0 failed`), was deployed through the supervised update
+API, and reports `hibr_compatibility.compatible=true` on the physical host.
+The host is currently at Blit's Hibr login manager with no registered Hibr
+desktop owner, so menu, input, and join behavior are not yet physical-host
+accepted for this candidate. No second desktop was started for this check.
+
 ## 0.1.499 candidate: match the installed Hibr ABI
 
 The first direct-installed-tree package was deployed to the live host as
