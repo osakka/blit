@@ -1,0 +1,26 @@
+release: 0.1.489
+package: blit_0.1.489-1_amd64.deb
+package_sha256: 207d97dbbfea821aa87290e0c7a4d4d09804681ee942c2de20baebbcee16ba84
+source_commit: d8d364f
+package_documentation_commit: d8d364f
+server_binary_sha256: a9f8b6bbe45854556e0275584d66b1e57e67434c61115d92ea3bfd45cf996e5f
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.191
+hibr_adapter_build: carried_forward_from_0.1.487_pinned_artifact
+tcc_version: 0.9.27_x86_64_linux
+focused_rotation_panes: pass_90deg_96x64_return_0deg_128x48
+focused_terminal_renderer: pass_run_gates_renderer_43_0_0
+package_reproducibility: pass_rebuilt_identical
+package_artifact_acceptance: pass
+qemu_hibr_lifecycle_acceptance: unavailable_missing_kernel_and_initramfs
+live_host: 192.168.10.54
+live_deployment: pending_operator_install
+live_rotation_pane_acceptance: pending
+physical_multi_monitor_acceptance: unavailable_one_output
+physical_high_refresh_acceptance: open_issue_21
+notes: >-
+  0.1.489 closes Blit issue #73. Accepted display rotation now rebuilds the
+  complete-cell pane geometry in the same operation. Live surfaces remain
+  refused with display_rotation_in_use until issue #60 supplies the owner
+  resize protocol. Hibr source was not modified.
