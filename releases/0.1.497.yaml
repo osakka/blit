@@ -1,0 +1,27 @@
+release: 0.1.497
+package: blit_0.1.497-1_amd64.deb
+package_sha256: bc77e72e8f5f193b7264f5e7d6a6e1b9aad92c8d7e4bcb43ccf27640e0c0f7dc
+source_commit: bb33a39
+package_documentation_commit: bb33a39
+server_binary_sha256: 0eeb1252d0df5b199b38ee36a4bfb16130e7e73210a23bdd9579e52b2376300e
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.191
+hibr_adapter_build: tcc_from_exact_pinned_checkout
+tcc_build_acceptance: pass_server_helper_adapter
+focused_diagnostics: pass_authenticated_capture_and_bundle_validation
+focused_api_schema: pass_paths_41
+package_reproducibility: pass_rebuilt_identical
+package_artifact_acceptance: pass
+physical_host_diagnostics: pass_authenticated_one_display_capture
+physical_multi_monitor_acceptance: unavailable_one_output
+physical_high_refresh_acceptance: open_issue_21
+notes: >-
+  0.1.497 carries the authenticated and correlated live-diagnostics tooling
+  slice. The canonical collector records capability/settings state, runtime
+  and filtered traces, screenshot frame and surface-revision headers, and
+  completeness metadata. The package was built with TCC against the exact
+  pinned Hibr 0.99.191 checkout. The live host capture observed one
+  1920x2160 OpenGLES2 output at 60 Hz and validated one screenshot; its short
+  window had no active input or surface work, so it is observability evidence,
+  not a rendering acceptance claim. Hibr source was not modified.
