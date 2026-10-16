@@ -3,7 +3,16 @@
 The roadmap is ordered by dependency. A later milestone must not become a
 second, parallel implementation of an earlier one.
 
-## Current position — 0.1.495 composition-budget candidate
+## Current position — 0.1.496 generated-release-identity candidate
+
+The release workflow now generates the package identity fields from the
+Debian artifact itself: package/version, archive checksum, shipped binary
+hashes, and the packaged Hibr pin. The package gate fails on drift, while
+physical, GPU, Hibr-behaviour, and refresh claims remain explicit measured
+evidence. This closes the provenance portion of issue #27. CI and automatic
+live-update rollback/restore remain open parts of that issue.
+
+## Previous position — 0.1.495 composition-budget candidate
 
 The full-redraw SDL path now has an executable budget gate (issue #80). The
 gate can drive a full 240×135 terminal surface, authenticate to a remote host,

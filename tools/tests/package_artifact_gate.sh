@@ -17,6 +17,11 @@ actual_hash=$(sha256sum "$package" | awk '{print $1}')
 manifest_hash=$(sed -n 's/^package_sha256: //p' "$manifest")
 test "$actual_hash" = "$manifest_hash"
 
+# The machine-owned release identity must be reproducible from the package;
+# human acceptance fields may remain in the same YAML record, but hashes and
+# package provenance must not be hand-copied.
+"$root/tools/release/generate-manifest.sh" --check "$package" "$manifest"
+
 stage=$(mktemp -d /tmp/blit-package-gate.XXXXXX)
 cleanup() { rm -rf "$stage"; }
 trap cleanup EXIT HUP INT TERM

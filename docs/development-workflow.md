@@ -174,6 +174,25 @@ BLIT_HIBR_ROOT=/path/to/hibr-$(sed -n '1p' packaging/HIBR_VERSION) \
   packaging/build-deb.sh /tmp/blit-package
 ```
 
+The machine-owned identity fields in `releases/<version>.yaml` are generated
+from the package, not copied by hand. After building the package from the
+source/documentation commit, generate or check them with:
+
+```sh
+BLIT_SOURCE_COMMIT=$(git rev-parse HEAD) \
+BLIT_DOCUMENTATION_COMMIT=$(git rev-parse HEAD) \
+  tools/release/generate-manifest.sh \
+  /path/to/blit_X.Y.Z-1_amd64.deb /tmp/generated-release-identity.yaml
+
+tools/release/generate-manifest.sh --check \
+  /path/to/blit_X.Y.Z-1_amd64.deb releases/X.Y.Z.yaml
+```
+
+The generator owns package/version/checksum/hash/Hibr-pin facts. Measured
+acceptance fields and notes remain explicit evidence in the release record;
+the generator never invents physical, GPU, Hibr, or refresh results. The
+release identity decision is [ADR 0091](adr/0091-generated-release-identity.md).
+
 When evidence contradicts an assumption, stop repeating the same invocation.
 Preserve the log, identify the boundary that produced the contradiction, and
 fix or instrument that boundary before the next cycle.

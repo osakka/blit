@@ -3,6 +3,28 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 0.1.496 candidate: generated release identity
+
+The release tooling slice of issue #27 now derives the package identity from
+the Debian artifact rather than trusting hand-copied hashes. The focused gate
+passed against the 0.1.495 package and existing release record, and a
+deliberately stale server hash was rejected. The package artifact gate now
+invokes the same check. The adapter build-method field remains explicit
+evidence because an archive cannot prove which external checkout or compiler
+produced its embedded adapter. Hibr source was not modified.
+
+Focused evidence:
+
+```text
+RELEASE_MANIFEST_PASS package=0.1.495-1 manifest=releases/0.1.495.yaml
+RELEASE_MANIFEST_GENERATOR_PASS fields=9
+NEGATIVE_DRIFT_PASS
+PACKAGE_ARTIFACT_PASS version=0.1.495-1 sha256=de362664dba1949f0952d1d7906a1a16dfd9e61f17a4014f99a8399e55703333 reproducible=skipped
+```
+
+The 0.1.496 package is built after this source commit; CI and automatic
+live-update rollback/restore remain open portions of issue #27.
+
 ## 0.1.495 candidate: full-frame composition budget
 
 0.1.495 adds the executable evidence boundary for Blit issue #80. The timing
