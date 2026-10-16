@@ -47,6 +47,10 @@
 
 extern char **environ;
 
+#ifndef BLIT_HIBR_VERSION
+#define BLIT_HIBR_VERSION "unknown"
+#endif
+
 /* Every surface is drawn inset from its pane origin by this many pixels on
    both axes. It is a presentation margin, not part of the cell geometry, so
    a cell at (column,row) occupies
@@ -991,6 +995,8 @@ typedef struct {
     char login_display_id[128];
     char login_pane_id[128];
     int login_start_reported;
+    char hibr_runtime_version[64];
+    int hibr_runtime_probe_ok;
     int opener_notify[2];
     unsigned long long diagnostic_open_requests;
     unsigned long long diagnostic_open_requests_dropped;
@@ -1485,6 +1491,10 @@ static void update_pointer_position(BlitRuntime *runtime,
 static void broadcast_evdev_pointer(BlitRuntime *runtime, const char *kind,
                                     int button, int pressed, int delta,
                                     const char *device_id);
+static int run_capture_command(const char *command, const char *argument,
+                               char *output, size_t capacity);
+static int probe_hibr_version(const char *command, char *version,
+                              size_t capacity);
 static int session_surface_is_owner_authored(const BlitSession *session);
 static int send_evdev_key(BlitRuntime *runtime, unsigned short code);
 static void evdev_sync_modifiers(BlitRuntime *runtime);
@@ -2674,7 +2684,10 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
 
     diagnostics_json(runtime, snapshot, sizeof(snapshot));
     used = (size_t)snprintf(body, capacity,
-        "{\"snapshot\":%s,\"performance\":{\"uptime_ms\":%llu,"
+        "{\"snapshot\":%s,\"hibr_compatibility\":{"
+        "\"pinned_version\":\"%s\",\"runtime_version\":\"%s\","
+        "\"probe\":\"%s\",\"compatible\":%s},"
+        "\"performance\":{\"uptime_ms\":%llu,"
         "\"frames\":%llu,\"last_frame_gap_ms\":%.3f,"
         "\"max_frame_gap_ms\":%.3f,\"last_render_ms\":%.3f,"
         "\"max_render_ms\":%.3f,\"missed_deadlines\":%llu,"
@@ -2750,6 +2763,12 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"evdev_scan_opens\":%llu},"
         "\"logs\":[",
         snapshot,
+        BLIT_HIBR_VERSION,
+        runtime->hibr_runtime_probe_ok ? runtime->hibr_runtime_version : "",
+        runtime->hibr_runtime_probe_ok ? "available" : "unavailable",
+        runtime->hibr_runtime_probe_ok ?
+            (strcmp(BLIT_HIBR_VERSION, runtime->hibr_runtime_version) == 0 ?
+                "true" : "false") : "null",
         runtime->started_us > 0 && now >= runtime->started_us ?
             (unsigned long long)((now - runtime->started_us) / 1000ULL) : 0,
         runtime->diagnostic_frames, runtime->diagnostic_last_frame_gap_ms,
@@ -25020,6 +25039,31 @@ static int run_capture_command(const char *command, const char *argument,
     return 1;
 }
 
+static int probe_hibr_version(const char *command, char *version,
+                              size_t capacity)
+{
+    char output[128];
+    const char *start;
+    size_t length = 0;
+
+    if (command == NULL || command[0] == '\0' || version == NULL ||
+        capacity < 2 || !run_capture_command(command, "--version", output,
+                                             sizeof(output)))
+        return 0;
+    start = strstr(output, "hibr ");
+    if (start == NULL)
+        return 0;
+    start += 5;
+    while ((start[length] >= '0' && start[length] <= '9') ||
+           start[length] == '.')
+        ++length;
+    if (length == 0 || length >= capacity)
+        return 0;
+    memcpy(version, start, length);
+    version[length] = '\0';
+    return 1;
+}
+
 static int run_capture_command2(const char *command, const char *argument1,
                                 const char *argument2, char *output,
                                 size_t capacity)
@@ -25621,6 +25665,15 @@ int main(int argc, char **argv)
                          sizeof(runtime.login_pane_id), "%s", login_pane);
         }
     }
+    runtime.hibr_runtime_probe_ok = probe_hibr_version(
+        runtime.login_command, runtime.hibr_runtime_version,
+        sizeof(runtime.hibr_runtime_version));
+    if (!runtime.hibr_runtime_probe_ok)
+        diagnostic_log(&runtime, "warning", "hibr_version_unavailable",
+                       "configured Hibr command did not report a version");
+    else if (strcmp(BLIT_HIBR_VERSION, runtime.hibr_runtime_version) != 0)
+        diagnostic_log(&runtime, "error", "hibr_version_mismatch",
+                       "running Hibr version differs from the packaged adapter pin");
     /* ADR 0067. The settings document, read before the first scan so that a
        device found at boot acquires its stored configuration in the same place
        a device hotplugged an hour later does.

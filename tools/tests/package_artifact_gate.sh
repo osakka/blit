@@ -80,6 +80,19 @@ fi
 # release ritual runs it once.
 reproducible=skipped
 if [ "${BLIT_GATE_REBUILD:-0}" = 1 ]; then
+    negative=$(mktemp /tmp/blit-package-negative.XXXXXX)
+    if BLIT_HIBR_ROOT= "$root/packaging/build-deb.sh" \
+           "$(dirname "$negative")" >"$negative" 2>&1; then
+        echo "PACKAGE_ARTIFACT_FAIL package build accepted missing BLIT_HIBR_ROOT" >&2
+        rm -f "$negative"
+        exit 1
+    fi
+    grep -q 'BLIT_HIBR_ROOT is required for a package build' "$negative" || {
+        echo "PACKAGE_ARTIFACT_FAIL missing-Hibr rejection was not explicit" >&2
+        rm -f "$negative"
+        exit 1
+    }
+    rm -f "$negative"
     rebuild=$(mktemp -d /tmp/blit-package-rebuild.XXXXXX)
     if BLIT_HIBR_ROOT=${BLIT_HIBR_ROOT:-} "$root/packaging/build-deb.sh" \
            "$rebuild" >/dev/null 2>&1 &&

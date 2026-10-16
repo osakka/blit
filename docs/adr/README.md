@@ -107,6 +107,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0083 — Blit supervises Hibr's root-owned login manager](0083-blit-root-owned-hibr-login-manager.md)
 - [0084 — Kitty continuation chunks use the current upload](0084-kitty-continuations-use-the-current-upload.md)
 - [0085 — Graphics mutations invalidate every presentation backend](0085-graphics-mutations-invalidate-every-presentation-backend.md)
+- [0086 — Package the adapter from the pinned Hibr checkout](0086-package-the-adapter-from-the-pinned-hibr.md)
 
 ## Adding an ADR
 

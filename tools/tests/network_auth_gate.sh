@@ -97,6 +97,14 @@ if [ "$unauth" != 401 ] || [ "$auth" != 200 ] ||
     exit 1
 fi
 ruby -rjson -e 'JSON.parse(File.read(ARGV.fetch(0)))' "$RUNTIME_DIAGNOSTICS"
+ruby -rjson -e '
+  compatibility = JSON.parse(File.read(ARGV.fetch(0))).fetch("hibr_compatibility")
+  %w[pinned_version runtime_version probe compatible].each do |key|
+    abort "network gate: missing Hibr compatibility field #{key}" unless compatibility.key?(key)
+  end
+  abort "network gate: invalid Hibr compatibility probe" unless
+    %w[available unavailable].include?(compatibility.fetch("probe"))
+' "$RUNTIME_DIAGNOSTICS"
 # The performance document and its schema must agree, in both directions.
 # They had drifted twice: input_keys_dropped and input_reports_dropped were
 # emitted and not described at all, and last_sdl_present_ms /

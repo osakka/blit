@@ -166,6 +166,14 @@ means source and focused tests pass; “validated” means the matching runtime
 artifact passed the relevant end-to-end gate. Screenshots supplement API/state
 assertions; neither substitutes for the other.
 
+Building a Debian artifact requires the exact pinned Hibr checkout as an
+explicit input; omission fails closed:
+
+```sh
+BLIT_HIBR_ROOT=/path/to/hibr-$(sed -n '1p' packaging/HIBR_VERSION) \
+  packaging/build-deb.sh /tmp/blit-package
+```
+
 When evidence contradicts an assumption, stop repeating the same invocation.
 Preserve the log, identify the boundary that produced the contradiction, and
 fix or instrument that boundary before the next cycle.

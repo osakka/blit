@@ -5,10 +5,15 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 output=${1:-$ROOT/build/blit/blit-server}
 target=${2:-server}
 version=$(sed -n '1p' "$ROOT/packaging/VERSION")
+hibr_version=$(sed -n '1p' "$ROOT/packaging/HIBR_VERSION")
 
 case "$version" in
     [0-9]*.[0-9]*.[0-9]*) ;;
     *) echo "blit: invalid version in packaging/VERSION" >&2; exit 1 ;;
+esac
+case "$hibr_version" in
+    [0-9]*.[0-9]*.[0-9]*) ;;
+    *) echo "blit: invalid version in packaging/HIBR_VERSION" >&2; exit 1 ;;
 esac
 
 mkdir -p "$(dirname -- "$output")"
@@ -16,6 +21,7 @@ case "$target" in
     server)
         tcc -O2 -std=c99 \
             "-DBLIT_BUILD_VERSION=\"$version\"" \
+            "-DBLIT_HIBR_VERSION=\"$hibr_version\"" \
             -I"$ROOT/vendor/SDL3/include" \
             -I"$ROOT/build/deps/prefix/include" \
             -I"$ROOT/build/deps/prefix/include/libdrm" \

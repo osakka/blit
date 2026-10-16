@@ -5,7 +5,6 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 BUNDLE=$ROOT/build/blit-desktop-current
 RUNTIME_BINARY=$ROOT/build/blit/blit-server
 UPDATE_HELPER=$ROOT/build/blit/blit-update-helper
-HIBR_ADAPTER=$ROOT/build/blit/console-blit.so
 HIBR_ENTRYPOINT=$ROOT/hibr/blit-session.hibr
 HIBR_LOGIN_WRAPPER=$ROOT/hibr/blit-login.hibr
 HIBR_LOGIN_ENTRYPOINT=$ROOT/hibr/blit-login-session.hibr
@@ -13,13 +12,28 @@ HIBR_RUNTIME_RC=$ROOT/hibr/blit-runtime-console.hibr
 HIBR_VERSION_FILE=$ROOT/packaging/HIBR_VERSION
 OUT=${1:-$ROOT}
 VERSION_FILE=$ROOT/packaging/VERSION
+HIBR_ROOT=${BLIT_HIBR_ROOT:-}
+
+# The adapter is part of the package's ABI boundary. Reusing a .so from the
+# ignored build directory made its Hibr provenance unknowable: a package
+# could carry an adapter compiled against a different checkout while the
+# source and HIBR_VERSION file looked correct. Require the exact checkout and
+# compile the adapter into this package's staging tree below.
+if [ -z "$HIBR_ROOT" ]; then
+	echo "blit: BLIT_HIBR_ROOT is required for a package build" >&2
+	exit 1
+fi
+if [ ! -d "$HIBR_ROOT/include" ] || [ ! -d "$HIBR_ROOT/mods" ]; then
+	echo "blit: Hibr headers/modules not found under $HIBR_ROOT" >&2
+	exit 1
+fi
 
 if [ ! -x "$RUNTIME_BINARY" ] || [ ! -x "$UPDATE_HELPER" ] ||
    [ ! -x "$BUNDLE/bin/blit-server" ] ||
    [ ! -f "$VERSION_FILE" ] || [ ! -f "$HIBR_ENTRYPOINT" ] ||
    [ ! -f "$HIBR_LOGIN_WRAPPER" ] ||
    [ ! -f "$HIBR_LOGIN_ENTRYPOINT" ] ||
-   [ ! -f "$HIBR_ADAPTER" ] || [ ! -f "$HIBR_VERSION_FILE" ]; then
+   [ ! -f "$HIBR_VERSION_FILE" ]; then
 	echo "blit: canonical build outputs are incomplete" >&2
 	exit 1
 fi
@@ -94,7 +108,8 @@ cp -a "$UPDATE_HELPER" "$stage/usr/lib/blit/bin/blit-update-helper"
 # ABI. Keep it outside Hibr's module search directory: the stock desktop's
 # `need display` must continue to select Hibr's native console provider. The
 # explicit Blit entrypoint loads this optional provider by absolute path.
-cp -a "$HIBR_ADAPTER" "$stage/usr/lib/blit/hibr/console-blit.so"
+BLIT_HIBR_ROOT="$HIBR_ROOT" "$ROOT/tools/build-tcc.sh" \
+	"$stage/usr/lib/blit/hibr/console-blit.so" adapter >/dev/null
 cp -a "$HIBR_ENTRYPOINT" "$stage/usr/share/blit/hibr/blit-session.hibr"
 cp -a "$HIBR_LOGIN_WRAPPER" "$stage/usr/share/blit/hibr/blit-login.hibr"
 cp -a "$HIBR_LOGIN_ENTRYPOINT" \

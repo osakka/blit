@@ -3,6 +3,33 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 0.1.490 candidate: pinned Hibr adapter provenance and runtime compatibility
+
+0.1.490 closes the release-integrity part of Blit issue #81. The Debian
+builder now requires `BLIT_HIBR_ROOT` and compiles `console-blit.so` into the
+package staging tree with TCC; it cannot copy an arbitrary adapter from the
+ignored build directory. The server binary embeds the same
+`packaging/HIBR_VERSION` value and `/v1/diagnostics/runtime` reports the
+packaged pin, the version returned by the configured Hibr command at startup,
+the probe state, and compatibility. A mismatch is also a structured runtime
+log event. Hibr source remains untouched.
+
+The exact pinned fixture is Hibr `0.99.191` from `/tmp/hibr-0.99.191`. The
+negative package gate rejects an omitted checkout, and the positive package
+build compiles the adapter from that checkout. The package artifact gate also
+rebuilds the package byte-identically. The TCC/API/renderer evidence is:
+
+```text
+API_SCHEMA_PASS paths=41 terminal_input=/v1/terminal-sessions/{session_id}/input
+NETWORK_AUTH_PASS ... runtime_diagnostics=200 ...
+RUN_GATES_PASS pass=43 skip=0 fail=0
+PACKAGE_ARTIFACT_PASS version=0.1.490-1 reproducible=yes
+```
+
+This candidate has not yet been deployed to the physical host. The live
+acceptance must report the host's actual Hibr version through the new API
+field before issue #81 can be closed.
+
 ## 0.1.489 candidate: rotation rebuilds pane geometry
 
 0.1.489 closes Blit issue #73. A display rotation changes the logical pixel
