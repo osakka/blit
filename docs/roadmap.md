@@ -3,7 +3,17 @@
 The roadmap is ordered by dependency. A later milestone must not become a
 second, parallel implementation of an earlier one.
 
-## Current position — 0.1.494 server-settings candidate
+## Current position — 0.1.495 composition-budget candidate
+
+The full-redraw SDL path now has an executable budget gate (issue #80). The
+gate can drive a full 240×135 terminal surface, authenticate to a remote host,
+assert refresh cadence and missed deadlines, and enforce an explicit maximum
+render time. On the supplied 60 Hz OpenGLES2 host it measured 59.916 Hz,
+zero missed deadlines, and 16.789 ms worst render against a 17 ms threshold.
+The scene cache remains disabled on OpenGLES2 until render-target persistence
+is proven independently. Higher-refresh hardware remains covered by #21.
+
+## Historical position — 0.1.494 server-settings candidate
 
 Blit now moves the presentation settings that used to be environment-only
 behind the API-owned settings document (issue #70). Render cadence, requested

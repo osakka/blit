@@ -33,6 +33,8 @@ end
 def request(base, method, path, body = nil)
   Net::HTTP.start(base.host, base.port, open_timeout: 2, read_timeout: 3) do |http|
     req = method.new(path)
+    req['Authorization'] = "Bearer #{ENV['BLIT_GATE_AUTH_TOKEN']}" if
+      ENV['BLIT_GATE_AUTH_TOKEN'] && !ENV['BLIT_GATE_AUTH_TOKEN'].empty?
     if body
       req['Content-Type'] = 'application/json'
       req.body = JSON.generate(body)
@@ -44,6 +46,11 @@ def request(base, method, path, body = nil)
     body.empty? ? nil : JSON.parse(body)
   end
 end
+
+surface_width = Integer(ENV.fetch('BLIT_GATE_SURFACE_WIDTH', '80'), 10)
+surface_height = Integer(ENV.fetch('BLIT_GATE_SURFACE_HEIGHT', '24'), 10)
+raise 'surface width must be 1..512' unless surface_width.between?(1, 512)
+raise 'surface height must be 1..256' unless surface_height.between?(1, 256)
 
 Timeout.timeout(8) do
   loop do
@@ -71,9 +78,10 @@ begin
   session = request(base, Net::HTTP::Post, '/v1/terminal-sessions',
                    'command' => '/bin/sh',
                    'arguments' => ['-c',
-                     "i=0; while [ \"$i\" -lt 1200 ]; do printf 'BLIT_FRAME_%s\\n' \"$i\"; i=$((i + 1)); sleep 0.005; done"],
+                     "i=0; while [ \"$i\" -lt 1200 ]; do printf '%*s\\n' #{surface_width} '' | tr ' ' X; i=$((i + 1)); sleep 0.005; done"],
                    'surface_mode' => 'terminal',
-                   'surface' => {'width' => 80, 'height' => 24})
+                   'surface' => {'width' => surface_width,
+                                 'height' => surface_height})
   session_id = session.fetch('id')
   samples = []
   deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 12
@@ -104,6 +112,8 @@ begin
     terminal_bytes > baseline_terminal_bytes
   target_interval_ms = outputs.map { |output| output.fetch('target_interval_ms') }.max
   target_refresh_hz = outputs.map { |output| output.fetch('refresh_hz') }.max
+  max_render_budget_ms = Float(ENV.fetch(
+    'BLIT_GATE_MAX_RENDER_MS', '20.000'))
   raise 'frame-rate window never completed' unless performance.fetch('frame_rate_window_ms') >= 500
   raise 'frame-rate window did not advance during workload' unless
     performance.fetch('frame_rate_window_sequence') >= required_window_sequence
@@ -118,14 +128,19 @@ begin
   raise 'frame-rate measurement is stale' unless performance.fetch('frame_rate_age_ms') <= 2000
   raise 'frame-rate frame count invalid' unless performance.fetch('frame_rate_frames') >= 1
   raise 'refresh deadline was missed' unless performance.fetch('frame_rate_missed_deadlines').zero?
-  puts format('FRAME_RATE_PASS hz=%.3f min_hz=%.3f max_hz=%.3f frames=%d window_ms=%d age_ms=%d window_max_render_ms=%.3f target_interval_ms=%.3f window_missed_deadlines=%d terminal_bytes=%d',
+  raise format('full-scene render exceeded budget: %.3f > %.3f ms',
+               performance.fetch('frame_rate_max_render_ms'),
+               max_render_budget_ms) unless
+    performance.fetch('frame_rate_max_render_ms') <= max_render_budget_ms
+  puts format('FRAME_RATE_PASS hz=%.3f min_hz=%.3f max_hz=%.3f frames=%d window_ms=%d age_ms=%d window_max_render_ms=%.3f render_budget_ms=%.3f target_interval_ms=%.3f window_missed_deadlines=%d terminal_bytes=%d',
               performance.fetch('frame_rate_hz'),
               minimum_hz,
               maximum_hz,
               performance.fetch('frame_rate_frames'),
               performance.fetch('frame_rate_window_ms'),
               performance.fetch('frame_rate_age_ms'),
-              performance.fetch('frame_rate_max_render_ms'), target_interval_ms,
+              performance.fetch('frame_rate_max_render_ms'), max_render_budget_ms,
+              target_interval_ms,
               performance.fetch('frame_rate_missed_deadlines'), terminal_bytes)
 ensure
   if session_id

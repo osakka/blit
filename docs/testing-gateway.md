@@ -491,8 +491,8 @@ The frame-rate gate creates a bounded PTY producer and samples the versioned
 runtime diagnostics endpoint. It requires a completed, fresh measurement
 window, a configurable minimum measured rate, and zero missed refresh
 deadlines; cumulative frame counters alone are not treated as a refresh-rate
-measurement. The windowed render maximum is reported for diagnosis. It is not
-used as a hard failure criterion because SDL vsync presentation time can
+measurement. The windowed render maximum is reported for diagnosis and can be
+made a hard failure criterion because SDL vsync presentation time can
 include the wait for the next physical vblank; missed deadlines are the
 authoritative cadence failure:
 
@@ -513,6 +513,24 @@ silently starting a local dummy server:
 ```sh
 BLIT_GATE_SERVER=http://192.168.10.54:8080 ruby tools/tests/frame_rate_gate.rb
 ```
+
+For a full-surface physical composition workload, provide the API token and
+the surface dimensions. The 60 Hz release acceptance uses a 17 ms render
+budget; the default 20 ms value is only a local dummy-backend smoke budget:
+
+```sh
+BLIT_GATE_SERVER=http://192.168.10.54:8080 \
+BLIT_GATE_AUTH_TOKEN=YOUR_API_TOKEN \
+BLIT_GATE_MIN_HZ=55 \
+BLIT_GATE_SURFACE_WIDTH=240 BLIT_GATE_SURFACE_HEIGHT=135 \
+BLIT_GATE_MAX_RENDER_MS=17 \
+  ruby tools/tests/frame_rate_gate.rb
+```
+
+The gate deletes its temporary session in `ensure`. A threshold failure is a
+real budget failure and must not be changed to make a run green without a new
+measurement and an ADR update. The 17 ms value is specific to the measured
+60 Hz host; it is not evidence for 120/240 Hz hardware.
 
 The hidden-cursor damage gate verifies that repeated VT cursor addressing with
 the cursor disabled does not schedule presentation frames:

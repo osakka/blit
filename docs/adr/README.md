@@ -111,6 +111,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0087 — Scroll terminal graphics with their owning rows](0087-graphics-scroll-with-terminal-rows.md)
 - [0088 — Opt-in deferred middle-button emulation](0088-opt-in-middle-button-emulation.md)
 - [0089 — Server presentation settings are API-owned state](0089-server-settings-are-api-owned.md)
+- [0090 — Full-frame composition has an explicit workload budget](0090-full-frame-composition-budget.md)
 
 ## Adding an ADR
 

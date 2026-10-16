@@ -3,6 +3,24 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 0.1.495 candidate: full-frame composition budget
+
+0.1.495 adds the executable evidence boundary for Blit issue #80. The timing
+gate accepts authenticated remote endpoints and configurable surface
+dimensions, so it can exercise a full 240×135 terminal surface instead of a
+small smoke workload. The release host threshold is 17 ms at 60 Hz; the gate
+also requires at least 55 Hz and zero missed deadlines.
+
+Physical evidence on `192.168.10.54` (SDL3/OpenGLES2, 1920×2160 at 60 Hz):
+
+```text
+FRAME_RATE_PASS hz=59.916 min_hz=55.000 max_hz=75.000 frames=30 window_ms=500 age_ms=0 window_max_render_ms=16.789 render_budget_ms=17.000 target_interval_ms=16.000 window_missed_deadlines=0
+```
+
+The same workload failed with a 14 ms threshold at 16.848 ms, proving the
+budget assertion is not decorative. No scene-cache change is claimed; the
+OpenGLES2 cache remains disabled under ADR 0070.
+
 ## 0.1.494 candidate: API-owned server presentation settings
 
 0.1.494 addresses Blit issue #70. The settings document now persists render
