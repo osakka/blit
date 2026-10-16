@@ -86,12 +86,15 @@ desktop tree must remain installed in Hibr's own standard locations, including
 `desktop.hibr`, `wm/`, `widgets/`, themes, applications, and control-panel
 files.
 
-The packaged entrypoint sources `/usr/share/hibr/desktop/session.hibr`
-directly. It does not copy or symlink Hibr's desktop tree into a Blit-owned
-directory; that would create a second path model and could omit a sibling such
-as `system/`, which is where Hibr registers Control Panel, Catalogue, Modules,
-and Task Manager. QEMU fixtures may override `BLIT_HIBR_DESKTOP_SESSION` with
-their complete staged Hibr tree.
+The packaged entrypoint executes `/usr/share/hibr/desktop/session.hibr` as
+Hibr's script entrypoint for the terminal-provider path. This is required
+because Hibr's session resolves its sibling `desktop.hibr` from its own
+`$0`; sourcing it through a Blit wrapper would redirect that import into the
+Blit directory. It does not copy or symlink Hibr's desktop tree into a
+Blit-owned directory; that would create a second path model and could omit a
+sibling such as `system/`, which is where Hibr registers Control Panel,
+Catalogue, Modules, and Task Manager. QEMU fixtures may override
+`BLIT_HIBR_DESKTOP_SESSION` with their complete staged Hibr tree.
 
 Start the direct server binary, with no Blit shell launcher involved:
 

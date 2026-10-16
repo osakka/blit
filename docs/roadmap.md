@@ -3,7 +3,16 @@
 The roadmap is ordered by dependency. A later milestone must not become a
 second, parallel implementation of an earlier one.
 
-## Current position — 0.1.502 Hibr ABI compatibility candidate
+## Current position — 0.1.503 Hibr session-entrypoint candidate
+
+The ABI contract is accepted on the live host. The next blocker was proven by
+the live screenshot: Hibr's installed session was sourced with the wrong
+`$0`, so its sibling window-manager imports resolved in Blit's directory and
+the authenticated child exited normally. The fix executes Hibr's installed
+session at its own path. Acceptance requires the API-created desktop and the
+login-manager handoff to remain running with an owner registered.
+
+## Previous position — 0.1.502 Hibr ABI compatibility candidate
 
 Blit now uses Hibr's documented numeric module ABI as its runtime
 compatibility contract. The exact Hibr release remains a build and runtime

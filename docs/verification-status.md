@@ -3,6 +3,19 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 0.1.503 candidate: preserve Hibr session-relative imports
+
+The live login attempts provided the missing evidence: keyboard input was
+delivered, authentication completed, and both desktop children exited with
+status 0. A screenshot of a controlled API-created desktop showed Hibr
+looking for `/usr/share/blit/hibr/desktop.hibr` and then reporting its desktop
+functions missing. The cause was Blit sourcing Hibr's installed
+`session.hibr` through the wrapper, which changed Hibr's `$0` path. Blit now
+executes the installed session as the script entrypoint for the native
+terminal-provider path; the API-provider path remains separate. Hibr source
+and installation are not modified. The candidate must be rebuilt, gated,
+deployed, and retested through login.
+
 ## 0.1.502 candidate: use Hibr ABI as the compatibility contract
 
 Hibr `--version` reports both its release and its module ABI, and Hibr's

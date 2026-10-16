@@ -64,11 +64,13 @@ runtime_rc=${BLIT_HIBR_RUNTIME_RC:-$launcher_dir/blit-runtime-console.hibr}
 if [ -z "${HIBR_RC:-}" ] && [ -f "$runtime_rc" ]; then
 	export HIBR_RC=$runtime_rc
 fi
-# Run the real desktop file in this same Hibr process.  The launcher RC loads
-# the optional Blit provider before this entrypoint; exec-ing a second Hibr process here
-# would discard that provided display interface before desktop.hibr starts.
-# The packaged session path is Hibr's own installed session, preserving the
-# stock tree's relative-import semantics without a mirrored integration tree.
+# The terminal-provider desktop must be executed with Hibr's installed session
+# as the script entrypoint. Hibr's session resolves its sibling desktop.hibr
+# from $0; sourcing it through this wrapper would leave $0 pointing at Blit's
+# launcher and redirect that import into /usr/share/blit/hibr. Executing the
+# installed script preserves Hibr's native relative-import semantics without a
+# mirrored integration tree. The terminal provider is intentionally native:
+# Blit parses the PTY stream, so this process does not need the API adapter.
 export HIBR_MODPATH=${HIBR_MODPATH:-$moddir}
 if [ "$provider" = "api" ] && [ "$blit_join" = 0 ]; then
 	mod load "$adapter" || exit 1
@@ -135,4 +137,7 @@ fi
 # Blit's scheduler already applies the display's refresh interval, so remove
 # that second throttle by default while preserving an explicit caller choice.
 DT_TERMMS=${DT_TERMMS-0}
+if [ "$provider" = "terminal" ]; then
+	exec "$HIBR" "$desktop" "$@"
+fi
 source "$desktop" "$@"

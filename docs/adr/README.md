@@ -115,6 +115,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0091 — Generate release identity from the package](0091-generated-release-identity.md)
 - [0092 — Authenticated, correlated diagnostic bundles](0092-authenticated-diagnostic-bundles.md)
 - [0094 — Use Hibr module ABI for runtime compatibility](0094-hibr-abi-is-the-runtime-compatibility-contract.md)
+- [0095 — Execute the installed Hibr session at its own path](0095-execute-installed-hibr-session-at-its-own-path.md)
 
 ## Adding an ADR
 
