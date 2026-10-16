@@ -193,6 +193,10 @@ if [ ! -f /etc/blit/blit.env ]; then
     umask 077
     cat > /etc/blit/blit.env <<'CONFIG'
 BLIT_BIND_ADDRESS=0.0.0.0
+# The validated physical-motion test profile is direct DRM/KMS.  Keep this
+# explicit at the service boundary; otherwise a restart silently selects the
+# SDL/KMSDRM path and invalidates renderer comparisons.
+BLIT_DISPLAY_BACKEND=kms
 BLIT_UPDATE_TOKEN_FILE=/etc/blit/update.token
 # Issue #55. This package exists to present a desktop, so an output with
 # nothing on it is a fault a monitor should see rather than a warning it has
@@ -233,6 +237,9 @@ if ! grep -q '^BLIT_EXPECT_DESKTOP=' /etc/blit/blit.env; then
 fi
 if ! grep -q '^BLIT_LOGIN_AUTOSTART=' /etc/blit/blit.env; then
     printf '%s\n' 'BLIT_LOGIN_AUTOSTART=1' >> /etc/blit/blit.env
+fi
+if ! grep -q '^BLIT_DISPLAY_BACKEND=' /etc/blit/blit.env; then
+    printf '%s\n' 'BLIT_DISPLAY_BACKEND=kms' >> /etc/blit/blit.env
 fi
 if ! grep -q '^LANG=' /etc/blit/blit.env; then
     printf '%s\n' 'LANG=C.UTF-8' >> /etc/blit/blit.env
