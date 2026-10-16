@@ -1,0 +1,27 @@
+release: 0.1.502
+package: blit_0.1.502-1_amd64.deb
+package_sha256: e467c9b5f1ba095db3bb5dc6b9b91e1f661b9df881cee41c781cb978e5300198
+source_commit: 08921de
+package_documentation_commit: 08921de
+server_binary_sha256: 69e398430021925693b866dccbad7bb93af281923f28581af0582201b009e70b
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.212
+hibr_abi: 16
+hibr_adapter_build: tcc_from_exact_pinned_checkout
+tcc_build_acceptance: pass_server_helper_adapter
+focused_schema_network_login_gates: pass
+package_reproducibility: pass
+package_artifact_acceptance: pass
+full_local_gates: 75_pass_3_skip_1_transient_frame_budget_outlier_retry_pass
+qemu_hibr_oracle: skipped_missing_kernel_initramfs
+physical_host_deployment: pending
+notes: >-
+  0.1.502 changes runtime compatibility from exact Hibr release equality to
+  the documented Hibr module ABI contract. The package is built against
+  Hibr 0.99.212 ABI 16; a live-style probe accepted Hibr 0.99.213 ABI 16.
+  Exact release values remain provenance. It also reports structured
+  login_session_exit evidence and does not modify Hibr source or installation.
+  The complete local run recorded one 20.756 ms full-scene sample against the
+  20 ms budget; three immediate focused retries and the timing suite passed,
+  with no threshold change.

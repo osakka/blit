@@ -19,6 +19,13 @@ retains the structured `login_session_exit` event from 0.1.501. The package,
 schema, focused gates, and live deployment must be completed before the
 authenticated desktop login is retested.
 
+The TCC build, schema/network/login focused gates, package artifact gate, and
+reproducibility check pass. The complete local run recorded 75 passes, three
+explicit environment skips, and one transient frame-budget sample at 20.756
+ms against the 20 ms limit. Three immediate frame-rate retries and the timing
+suite passed without changing the threshold. This is recorded as evidence,
+not converted into a false full-suite pass.
+
 ## 0.1.501 candidate: retain login child exit evidence
 
 The live Hibr login loop exposed an observability gap: Blit retired the
