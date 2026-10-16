@@ -25,6 +25,13 @@ probe recorded a complete 32x32 image, one texture upload, cache reuse, and
 zero rejected graphics payloads. The final live observation was restored to
 SDL/KMSDRM + OpenGLES2 at 59.99 Hz with the same primary/join topology.
 
+An API-driven context-menu probe then moved the pointer to `(500,1500)` and
+sent a right-button press/release. The trace identified `target_session=2`
+through pane hit-testing, and the display capture showed the menu at that
+location. After dismissal, the `surface-2` cell snapshot returned to the
+expected desktop background cells. This proves the Blit API dispatch and
+surface/screenshot path; it is not a physical evdev click acceptance test.
+
 Evidence captures and JSON observations are retained outside Git under:
 
 - `/tmp/blit-direct-kms-fixed-motion-20261016/`
