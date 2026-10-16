@@ -3,6 +3,31 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 0.1.507 candidate: ping-pong SDL scene composition
+
+The real 0.1.506 host reproduced the reported fast-update symptom through a
+controlled API workload: approximately 55 pointer updates per second produced
+about 28 presentations per second and 16 additional missed 60 Hz deadlines
+in five seconds. The OpenGLES2 path had disabled incremental scene damage
+because a single render-target texture did not preserve its contents when
+rebound, so changed Hibr surfaces rebuilt both panes from scratch.
+
+0.1.507 keeps two SDL scene render targets. Each content update copies the
+last complete scene into the work texture, applies the canonical damage, and
+swaps the textures only before presentation. This removes the implicit
+render-target persistence assumption without changing Hibr or the terminal
+protocol boundary. The TCC renderer/Hibr suites passed 54 gates, the schema
+and package gates passed, and the exact package was deployed to the live host.
+
+The same five-second high-rate control workload after deployment produced no
+new missed deadlines, a maximum present time of 16.882 ms at a 60 Hz output,
+and a maximum loop gap of 17.026 ms. Three one-second idle screenshots had
+the identical SHA-256 (`f240696d9fe8b5b58c8515564220806b68875566a3c7e68495ebba6bf06b9390`)
+and the live two-pane screenshot showed the Kitty wallpaper on both panes.
+This is strong composition evidence, not yet a claim of physical fast-window
+drag acceptance: that still requires a capture with a real drag crossing the
+evdev boundary and a window available to move.
+
 ## 0.1.505 candidate: reassert the Hibr graphics contract after login
 
 The live surface showed half-block wallpaper and literal truecolor control
