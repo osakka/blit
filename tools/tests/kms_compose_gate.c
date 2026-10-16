@@ -20,6 +20,8 @@ static uint32_t background[COLS * ROWS];
 static uint16_t attributes[COLS * ROWS];
 static unsigned char image_pixels[4 * 8 * 3];
 static BlitGraphicsImage images[BLIT_GRAPHICS_MAX_IMAGES];
+static uint32_t front_pixels[W * H];
+static uint32_t back_pixels[W * H];
 
 static void fail(const char *what, long got, long want)
 {
@@ -45,6 +47,29 @@ static void reset(void)
     memset(background, 0, sizeof(background));
     memset(attributes, 0, sizeof(attributes));
     memset(images, 0, sizeof(images));
+}
+
+static void buffer_coherence_gate(void)
+{
+    KmsOutput pair;
+    int i;
+
+    memset(&pair, 0, sizeof(pair));
+    pair.mode.hdisplay = W;
+    pair.mode.vdisplay = H;
+    pair.front.map = front_pixels;
+    pair.front.pitch = W * sizeof(uint32_t);
+    pair.back.map = back_pixels;
+    pair.back.pitch = W * sizeof(uint32_t);
+    for (i = 0; i < W * H; ++i) {
+        front_pixels[i] = 0x102030U + (uint32_t)i;
+        back_pixels[i] = 0xa0b0c0U;
+    }
+    copy_front_to_back(&pair);
+    for (i = 0; i < W * H; ++i)
+        if (back_pixels[i] != front_pixels[i])
+            fail("back buffer is not a complete front-buffer copy",
+                 (long)back_pixels[i], (long)front_pixels[i]);
 }
 
 static void place(int z)
@@ -103,6 +128,8 @@ int main(void)
     long full;
     long got;
     uint32_t face = 0x101820U;
+
+    buffer_coherence_gate();
 
     output.mode.hdisplay = W;
     output.mode.vdisplay = H;

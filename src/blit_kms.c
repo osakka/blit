@@ -58,11 +58,6 @@ typedef struct {
     unsigned long long last_surface_ids[KMS_MAX_VIEWS];
     unsigned long long last_surface_revisions[KMS_MAX_VIEWS];
     unsigned long long last_surface_graphics_signatures[KMS_MAX_VIEWS];
-    int last_damage_valid;
-    int last_damage_x;
-    int last_damage_y;
-    int last_damage_width;
-    int last_damage_height;
     unsigned char pointer_background[KMS_POINTER_W * KMS_POINTER_H * 4];
     int pointer_background_valid;
     int pointer_background_x;
@@ -228,50 +223,26 @@ static void swap_buffers(KmsOutput *output)
     output->back = temporary;
 }
 
-static void copy_rect(KmsOutput *output, int x, int y, int width, int height)
+/* After a page-flip, front is the buffer currently scanned out and back is
+   the buffer that was displayed one frame earlier.  An incremental frame is
+   drawn into back, so it must begin as a complete copy of front.  Copying
+   only the previous damage rectangle leaves older pixels everywhere else in
+   back; pointer motion and window movement then expose those pixels as
+   trails.  This is the same complete-scene invariant used by the SDL scene
+   ping-pong path. */
+static void copy_front_to_back(KmsOutput *output)
 {
     int row;
-    int first_x = x < 0 ? 0 : x;
-    int first_y = y < 0 ? 0 : y;
-    int last_x = x + width;
-    int last_y = y + height;
-    size_t bytes;
 
-    if (last_x > output->mode.hdisplay) last_x = output->mode.hdisplay;
-    if (last_y > output->mode.vdisplay) last_y = output->mode.vdisplay;
-    if (first_x >= last_x || first_y >= last_y) return;
-    bytes = (size_t)(last_x - first_x) * sizeof(uint32_t);
-    for (row = first_y; row < last_y; ++row) {
-        unsigned char *destination = (unsigned char *)output->back.map +
-            (size_t)row * output->back.pitch + (size_t)first_x * sizeof(uint32_t);
-        const unsigned char *source = (const unsigned char *)output->front.map +
-            (size_t)row * output->front.pitch + (size_t)first_x * sizeof(uint32_t);
-        memcpy(destination, source, bytes);
-    }
-}
-
-static void include_damage(int *valid, int *x, int *y, int *width, int *height,
-                           int damage_x, int damage_y,
-                           int damage_width, int damage_height)
-{
-    int right;
-    int bottom;
-
-    if (damage_width <= 0 || damage_height <= 0) return;
-    right = damage_x + damage_width;
-    bottom = damage_y + damage_height;
-    if (!*valid) {
-        *valid = 1;
-        *x = damage_x;
-        *y = damage_y;
-        *width = damage_width;
-        *height = damage_height;
+    if (output == NULL || output->front.map == NULL ||
+        output->back.map == NULL)
         return;
-    }
-    if (damage_x < *x) *x = damage_x;
-    if (damage_y < *y) *y = damage_y;
-    if (right > *x + *width) *width = right - *x;
-    if (bottom > *y + *height) *height = bottom - *y;
+    for (row = 0; row < output->mode.vdisplay; ++row)
+        memcpy((unsigned char *)output->back.map +
+                   (size_t)row * output->back.pitch,
+               (const unsigned char *)output->front.map +
+                   (size_t)row * output->front.pitch,
+               output->mode.hdisplay * sizeof(uint32_t));
 }
 
 static void fill_rect(KmsOutput *output, int x, int y, int width, int height,
@@ -1381,11 +1352,6 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         long long draw_started = 0;
         long long flip_started = 0;
         int modeset_frame;
-        int next_damage_valid = 0;
-        int next_damage_x = 0;
-        int next_damage_y = 0;
-        int next_damage_width = 0;
-        int next_damage_height = 0;
         int trace_phases = getenv("BLIT_KMS_TRACE_PHASES") != NULL;
         if (output->info.presentation_state == BLIT_KMS_PRESENTATION_FAILED)
             continue;
@@ -1449,32 +1415,14 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         if (full_redraw) {
             memset(output->back.map, 0, output->back.size);
             output->pointer_background_valid = 0;
-            next_damage_valid = 1;
-            next_damage_width = output->mode.hdisplay;
-            next_damage_height = output->mode.vdisplay;
-        } else if (output->last_damage_valid) {
-            copy_rect(output, output->last_damage_x, output->last_damage_y,
-                      output->last_damage_width, output->last_damage_height);
         } else {
-            memcpy(output->back.map, output->front.map, output->back.size);
-            next_damage_valid = 1;
-            next_damage_width = output->mode.hdisplay;
-            next_damage_height = output->mode.vdisplay;
+            /* The two scanout buffers alternate ownership after every page
+               flip.  Preserve the complete displayed scene before applying
+               this frame's smaller damage rectangle. */
+            copy_front_to_back(output);
         }
         if (pointer_changed)
             restore_pointer_background(output);
-        if (pointer_changed && !full_redraw) {
-            include_damage(&next_damage_valid, &next_damage_x, &next_damage_y,
-                           &next_damage_width, &next_damage_height,
-                           (int)kms->previous_pointer_x - output->info.x,
-                           (int)kms->previous_pointer_y - output->info.y,
-                           KMS_POINTER_W, KMS_POINTER_H);
-            include_damage(&next_damage_valid, &next_damage_x, &next_damage_y,
-                           &next_damage_width, &next_damage_height,
-                           (int)pointer_x - output->info.x,
-                           (int)pointer_y - output->info.y,
-                           KMS_POINTER_W, KMS_POINTER_H);
-        }
         if (trace_phases)
             draw_started = kms_now_us();
         for (view_index = 0; view_index < view_count; ++view_index)
@@ -1518,18 +1466,6 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                     draw.damage_width = draw.columns;
                     draw.damage_height = draw.rows;
                 }
-                if (draw.damage_valid)
-                    include_damage(&next_damage_valid, &next_damage_x,
-                                   &next_damage_y, &next_damage_width,
-                                   &next_damage_height,
-                                   draw.origin_x + draw.damage_x *
-                                       (draw.cell_width > 0 ? draw.cell_width : KMS_FONT_W),
-                                   draw.origin_y + draw.damage_y *
-                                       (draw.cell_height > 0 ? draw.cell_height : KMS_FONT_H),
-                                   draw.damage_width *
-                                       (draw.cell_width > 0 ? draw.cell_width : KMS_FONT_W),
-                                   draw.damage_height *
-                                       (draw.cell_height > 0 ? draw.cell_height : KMS_FONT_H));
                 if (!full_redraw && output_view_unchanged(output,
                                                            &views[view_index]) &&
                     !pointer_damage)
@@ -1576,13 +1512,6 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
             }
         draw_kms_effects(output, effect_enabled, effect_intensity);
         draw_kms_overlays(output, overlays, overlay_count);
-        if (effect_enabled) {
-            next_damage_valid = 1;
-            next_damage_x = 0;
-            next_damage_y = 0;
-            next_damage_width = output->mode.hdisplay;
-            next_damage_height = output->mode.vdisplay;
-        }
         if (pointer_visible && pointer_x >= output->info.x &&
             pointer_x < output->info.x + output->info.width &&
             pointer_y >= output->info.y && pointer_y < output->info.y + output->info.height) {
@@ -1631,11 +1560,6 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                         *views[view_index].damage_consumed = 1;
                 output->initialized = 1;
                 output->last_visual_revision = visual_revision;
-                output->last_damage_valid = 1;
-                output->last_damage_x = 0;
-                output->last_damage_y = 0;
-                output->last_damage_width = output->mode.hdisplay;
-                output->last_damage_height = output->mode.vdisplay;
                 remember_output_views(output, views, view_count,
                                       output_view_count);
                 output->info.last_present_ms =
@@ -1675,11 +1599,6 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                 *views[view_index].damage_consumed = 1;
         output->initialized = 1;
         output->last_visual_revision = visual_revision;
-        output->last_damage_valid = next_damage_valid;
-        output->last_damage_x = next_damage_x;
-        output->last_damage_y = next_damage_y;
-        output->last_damage_width = next_damage_width;
-        output->last_damage_height = next_damage_height;
         if (trace_phases)
             fprintf(stderr,
                     "blit: KMS phase connector=%u draw_us=%lld flip_us=%lld total_us=%lld\n",
