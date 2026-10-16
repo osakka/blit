@@ -75,14 +75,15 @@ window movement, physical mouse, keyboard, or joined coordinate system works.
 An unchanged or incomplete screenshot is a failed visual result even when
 timing counters are healthy.
 
-### 0.1.511 performance candidate
+### 0.1.512 performance and login-placement candidate
 
-The source candidate for `0.1.511` adds the bounded integer-scale KMS graphics
-path in [ADR 0102](adr/0102-kms-integer-scale-fast-path.md). It targets the
-measured live workload: an opaque 960x1080 wallpaper placed at 1920x2160.
-The local KMS pixel gate passes. The package has not yet been deployed and no
-live improvement is claimed until the same direct-KMS lower-pane workload is
-measured again.
+The source candidate for `0.1.512` retains the bounded integer-scale KMS
+graphics path in [ADR 0102](adr/0102-kms-integer-scale-fast-path.md) and
+closes a separate login-resource invariant: the session returned by
+`/v1/login` is explicitly attached to the requested pane before topology
+derives its surface assignment. This targets the observed mismatch where the
+login resource named the lower pane while its session occupied the upper
+pane. The package is not yet deployed and no live improvement is claimed.
 
 ### Latest live read-only boundary
 

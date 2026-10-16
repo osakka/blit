@@ -3,18 +3,21 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
-## 0.1.511 candidate: bounded integer-scale KMS graphics path
+## 0.1.512 candidate: KMS scaling and login-pane invariant
 
 The source candidate targets the measured direct-KMS workload in which Hibr's
 opaque 960x1080 wallpaper is placed at 1920x2160. The compositor now uses a
 bounded integer-scale replication path for opaque RGB/RGBA images and retains
 the general scaler for alpha or non-integer placements. This avoids the
 per-destination-pixel source-coordinate divisions that were present during
-full wallpaper redraws. See [ADR 0102](adr/0102-kms-integer-scale-fast-path.md).
+full wallpaper redraws. It also makes the session returned by `/v1/login`
+explicitly inherit the requested pane before topology derives the surface
+assignment, closing the live mismatch in which the lower-pane request
+returned a session on the upper pane. See [ADR 0102](adr/0102-kms-integer-scale-fast-path.md).
 
 Local evidence: `tools/tests/kms_compose_gate.sh` passes with
-`KMS_COMPOSE_PASS full=512`, and the TCC server build succeeds. Live package,
-presentation-timing, and screenshot evidence is pending. The required live
+`KMS_COMPOSE_PASS full=512`. The TCC server build must report `0.1.512`.
+Live package, presentation-timing, and screenshot evidence is pending. The required live
 configuration remains direct KMS, one physical output, one lower-half pane,
 and one primary Hibr session; no join is part of this performance check.
 

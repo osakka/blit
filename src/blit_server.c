@@ -14912,6 +14912,22 @@ static int create_login_session(BlitRuntime *runtime, BlitSession **created)
     result = create_session(runtime, request, created);
     if (result != 1)
         return -4;
+    /* The login resource is the owner of the requested pane.  Keep the
+       session metadata on that same canonical id before topology derives its
+       surface assignment.  This closes the otherwise ambiguous state where
+       GET /v1/login reports the requested pane while the returned session
+       remains attached to a different pane after a backend handoff. */
+    if (pane_id[0] != '\0') {
+        snprintf((*created)->pane_id, sizeof((*created)->pane_id), "%s",
+                 pane_id);
+        {
+            BlitPane *login_pane = find_pane_id(runtime, pane_id);
+            if (login_pane != NULL)
+                snprintf((*created)->display_id,
+                         sizeof((*created)->display_id), "%s",
+                         login_pane->display_id);
+        }
+    }
     (*created)->login_manager = 1;
     runtime->login_session_id = (*created)->id;
     runtime->login_restart_due_us = 0;
