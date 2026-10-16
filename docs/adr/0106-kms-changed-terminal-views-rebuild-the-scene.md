@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted — 2026-10-16.
+Superseded by [ADR 0108](0108-surface-local-kms-damage-boundary.md) —
+2026-10-17.
 
 ## Decision
 

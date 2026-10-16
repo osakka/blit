@@ -124,7 +124,8 @@ security policy, or compatibility rule requires a new ADR.
 - [0103 — Compose direct-KMS frames in a persistent CPU scene](0103-kms-cpu-scene-cache.md)
 - [0104 — Relocate an auto-started login manager to an explicit pane](0104-login-target-relocation-and-pane-redraw.md)
 - [0105 — KMS screenshots capture the composed frame](0105-kms-screenshot-capture-boundary.md)
-- [0106 — Changed KMS terminal views rebuild the scene](0106-kms-changed-terminal-views-rebuild-the-scene.md)
+- [0106 — Changed KMS terminal views rebuild the scene (superseded)](0106-kms-changed-terminal-views-rebuild-the-scene.md)
+- [0108 — Surface-local KMS damage retains an atomic output boundary](0108-surface-local-kms-damage-boundary.md)
 - [0107 — The direct-KMS test profile survives package restart](0107-direct-kms-test-profile-survives-restart.md)
 
 ## Adding an ADR

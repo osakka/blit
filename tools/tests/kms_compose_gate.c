@@ -118,7 +118,8 @@ static void place(int z)
     image->z = z;
 }
 
-static void draw(uint32_t default_background, int damage_column)
+static void draw_damage(uint32_t default_background, int damage_column,
+                        int damage_row, int damage_width, int damage_height)
 {
     BlitKmsSurfaceView view;
     memset(&view, 0, sizeof(view));
@@ -140,11 +141,16 @@ static void draw(uint32_t default_background, int damage_column)
     if (damage_column >= 0) {
         view.damage_valid = 1;
         view.damage_x = damage_column;
-        view.damage_y = 5;
-        view.damage_width = 1;
-        view.damage_height = 1;
+        view.damage_y = damage_row;
+        view.damage_width = damage_width;
+        view.damage_height = damage_height;
     }
     draw_view(&output, NULL, NULL, &view);
+}
+
+static void draw(uint32_t default_background, int damage_column)
+{
+    draw_damage(default_background, damage_column, 5, 1, 1);
 }
 
 int main(void)
@@ -219,6 +225,19 @@ int main(void)
     foreground[10] = WHITE + 1;
     draw(face, 10);
     if (count(WHITE) < got) fail("F: damaged redraw erased text under the wallpaper", count(WHITE), got);
+
+    /* A moving graphics placement must clear its old rectangle and paint the
+       new one within one surface-local atomic damage region. */
+    reset();
+    place(-1073741825);
+    images[0].y = 5 * CH;
+    images[0].x = 0;
+    draw(face, -1);
+    got = count(RED);
+    images[0].x = 4 * CW;
+    draw_damage(face, 0, 5, 6, 2);
+    if (count(RED) != got)
+        fail("H: moved graphic left stale pixels", count(RED), got);
 
     printf("KMS_COMPOSE_PASS full=%ld\n", full);
     return 0;
