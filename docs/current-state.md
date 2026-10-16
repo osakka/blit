@@ -7,7 +7,7 @@ work actually stopped.
 
 ## Status at the last review
 
-The current source candidate is `0.1.515`. It retains the direct-KMS scene
+The current source candidate is `0.1.516`. It retains the direct-KMS scene
 buffer and explicit login-pane relocation from ADRs 0103 and 0104, and fixes
 the KMS diagnostic screenshot boundary in ADR 0105. Hibr source was not
 modified.

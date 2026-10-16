@@ -6,19 +6,21 @@ Accepted — 2026-10-16.
 
 ## Decision
 
-The direct-KMS screenshot path captures the output after the current scene has
-been composed and copied into the page-flip buffer, immediately before the
-buffer is submitted. It must not read the previous scanout buffer while the
-current frame is still in the private scene buffer.
+The direct-KMS screenshot request forces one bounded present for its output.
+The resulting capture reads the output after the current scene has been
+composed and copied into the page-flip buffer, immediately before the buffer
+is submitted. It must not read the previous scanout buffer while the current
+frame is still in the private scene buffer.
 
 ## Context
 
 Blit composes terminal cells, pointers, effects, and Kitty/Sixel graphics in a
 RAM scene buffer and then copies that scene into the KMS back buffer. The
-previous capture point was before that copy. A screenshot could therefore show
-an older moving frame even though the authoritative surface and the next page
-flip were correct. This made the diagnostic artifact indistinguishable from a
-stale-pixel renderer failure.
+previous capture point was before that copy, and the API request did not force a
+present when the surface itself was unchanged. A screenshot could therefore
+show an older moving frame even though the authoritative surface and the next
+page flip were correct. This made the diagnostic artifact indistinguishable
+from a stale-pixel renderer failure.
 
 ## Consequences
 

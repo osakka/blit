@@ -1435,6 +1435,7 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                      uint32_t output_mask, const BlitKmsOverlay *overlays,
                      int overlay_count, unsigned long long visual_revision,
                      int effect_enabled, int effect_intensity,
+                     uint32_t screenshot_output_mask,
                      uint32_t *submitted_output_mask,
                      uint32_t *deferred_output_mask)
 {
@@ -1496,6 +1497,7 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         if (output_view_count != output->last_view_count)
             full_redraw = 1;
         output_changed = full_redraw || capture ||
+            (screenshot_output_mask & (1U << i)) != 0 ||
             (pointer_changed &&
              (pointer_intersects_output(output, kms->previous_pointer_x,
                                         kms->previous_pointer_y,

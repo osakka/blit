@@ -23333,6 +23333,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                              runtime->effect.enabled &&
                                  strcmp(runtime->effect.preset, "scanlines") == 0,
                              runtime->effect.intensity,
+                             runtime->screenshot_requested_mask,
                              &kms_submitted_output_mask,
                              &kms_deferred_output_mask) < 0)
             fprintf(stderr, "blit: direct KMS present failed\n");
