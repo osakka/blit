@@ -13,7 +13,28 @@ schema = YAML.load_file(schema_path)
 raise 'schema is not OpenAPI 3.1' unless schema.fetch('openapi') == '3.1.0'
 
 paths = schema.fetch('paths')
-raise "unexpected path count #{paths.length}" unless paths.length == 41
+raise "unexpected path count #{paths.length}" unless paths.length == 42
+
+observation_path = paths.fetch('/v1/diagnostics/observation')
+observation_get = observation_path.fetch('get')
+raise 'observation operation id changed' unless
+  observation_get.fetch('operationId') == 'getObservation'
+raise 'observation schema changed' unless
+  observation_get.dig('responses', '200', 'content', 'application/json',
+                       'schema', '$ref') == '#/components/schemas/Observation'
+observation = schema.fetch('components').fetch('schemas').fetch('Observation')
+required_observation_fields = %w[observation_version captured_monotonic_us
+                                  consistency version server diagnostics runtime
+                                  graphics displays audio audio_cards input_devices
+                                  input_routes topology fonts settings login
+                                  sessions effects overlays]
+missing_observation_fields = required_observation_fields -
+  observation.fetch('required')
+raise "observation fields missing #{missing_observation_fields.inspect}" unless
+  missing_observation_fields.empty?
+raise 'server resource link for observation is missing' unless
+  schema.fetch('components').fetch('schemas').fetch('ServerDetails')
+    .dig('properties', 'resources', 'properties', 'observation')
 
 session_path = paths.fetch('/v1/terminal-sessions/{session_id}')
 raise 'session path must not accept terminal input directly' if session_path.key?('post')
@@ -31,4 +52,4 @@ raise 'terminal input receipt schema changed' unless
   post.dig('responses', '202', 'content', 'application/json', 'schema', '$ref') ==
   '#/components/schemas/TerminalInputReceipt'
 
-puts "API_SCHEMA_PASS paths=#{paths.length} terminal_input=/v1/terminal-sessions/{session_id}/input"
+puts "API_SCHEMA_PASS paths=#{paths.length} observation=/v1/diagnostics/observation terminal_input=/v1/terminal-sessions/{session_id}/input"

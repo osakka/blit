@@ -144,7 +144,8 @@ Clients should discover before mutating:
 3. `GET /v1/graphics`, `/v1/displays`, `/v1/audio` — hardware inventory.
 4. `GET /v1/input/devices` and `/v1/input/routes` — input sources and policy.
 5. `GET /v1/topology` and `GET /v1/fonts` — logical layout and cell geometry.
-6. `GET /v1/diagnostics/runtime` — readiness, cadence, and bounded logs.
+6. `GET /v1/diagnostics/observation` — one canonical read-only state dump.
+7. `GET /v1/diagnostics/runtime` — readiness, cadence, and bounded logs.
 
 Do not infer capabilities from a screenshot or from a device filename. A
 resource is usable only when its API state and capability fields say it is.
@@ -202,11 +203,11 @@ status codes.
 | Input | `GET /v1/input/devices`, `GET/POST /v1/input/inject`, `GET/PUT /v1/input/routes` | Discover, diagnose, and route physical or synthetic input |
 | Presentation | `POST /v1/frames`, `GET /v1/stream` | Commit coherent frames and consume event/pixel streams |
 | Graphics | `GET/PUT /v1/effects`, `POST/DELETE /v1/overlays/{id}` | Configure effects and bounded overlays |
-| Diagnostics | `GET /v1/diagnostics`, `/runtime`, `/trace`, `/screenshots/{display_id}` | Inspect state, timing, events, and evidence captures |
+| Diagnostics | `GET /v1/diagnostics`, `/runtime`, `/observation`, `/trace`, `/screenshots/{display_id}` | Inspect aggregate state, timing, events, and evidence captures |
 | Control | `POST /v1/control/shutdown`, `/restart` | Stop or restart the supervised server |
 | Updates | `POST /v1/control/update`, `GET /status`, `POST /cancel`, `/reset` | Upload and supervise a verified package update |
 
-The schema currently contains 33 path templates. Keep this table synchronized when a
+The schema currently contains 42 path templates. Keep this table synchronized when a
 path is added, removed, or renamed; the schema remains the authoritative count.
 
 ### Method-level reference
@@ -234,6 +235,7 @@ GET/POST /v1/input/*                       discover, route, or inject input
 POST   /v1/frames                          explicit coherent frame boundary
 GET    /v1/stream                          events and bounded pixel frames
 GET    /v1/diagnostics*                    state, timing, traces, screenshots
+GET    /v1/diagnostics/observation         one canonical operational state dump
 POST   /v1/control/{shutdown,restart}      orderly service control
 POST/GET /v1/control/update*               verified package supervision
 POST/DELETE /v1/overlays[/{id}]            bounded graphic overlays
@@ -260,6 +262,7 @@ curl --fail "${auth[@]}" "$base/v1/version"
 curl --fail "${auth[@]}" "$base/v1/server"
 curl --fail "${auth[@]}" "$base/v1/displays"
 curl --fail "${auth[@]}" "$base/v1/topology"
+curl --fail "${auth[@]}" "$base/v1/diagnostics/observation"
 curl --fail "${auth[@]}" "$base/v1/diagnostics/runtime"
 ```
 
@@ -877,6 +880,30 @@ keyboards on one server can carry different layouts, different repeat rates
 and different remaps, which is what makes per-device routing usable.
 
 ## Diagnostics and screenshots
+
+`GET /v1/diagnostics/observation` is the canonical incident snapshot. It is
+authenticated and read-only, and returns the version, server posture,
+backend/resource diagnostics, runtime counters and logs, graphics/displays,
+audio, input devices/routes, topology, fonts, settings, login manager,
+terminal sessions, effects, and overlays in one response. It is assembled
+during one event-loop turn from the same serializers as the focused endpoints;
+the `consistency` field says `single_event_loop_turn` and
+`captured_monotonic_us` identifies when the capture began. It intentionally
+does not include terminal cell contents or framebuffer bytes: pair it with a
+surface snapshot and `GET /v1/diagnostics/screenshots/{display_id}` when pixel
+evidence is required.
+
+```sh
+curl --fail --header "Authorization: Bearer $BLIT_AUTH_TOKEN" \
+  http://HOST:8080/v1/diagnostics/observation > observation.json
+
+# A compact operator summary, retaining the full observation on disk.
+jq '{version, server: {version: .server.server_version,
+   backend: .server.display_backend, listener: .server.listener},
+   health: .diagnostics.health, resources: .diagnostics.resources,
+   render: .diagnostics.render, performance: .runtime.performance,
+   sessions: .sessions.count, displays: .displays.count}' observation.json
+```
 
 Use `GET /v1/diagnostics` for current health/resource state and
 `GET /v1/diagnostics/runtime` for counters. The runtime response includes

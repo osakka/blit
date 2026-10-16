@@ -571,6 +571,27 @@ paths:
                 $ref: '#/components/schemas/RuntimeDiagnostics'
         default:
           $ref: '#/components/responses/Problem'
+  /v1/diagnostics/observation:
+    get:
+      tags: [diagnostics]
+      operationId: getObservation
+      summary: Dump one canonical read-only server state observation
+      description: >-
+        Return the operational state needed to diagnose a live server in one
+        authenticated request. The envelope is assembled from the same
+        serializers as the focused resources and is captured during one
+        event-loop turn. It does not include terminal cell contents or
+        framebuffer bytes; use the surface and screenshot resources for those
+        bounded evidence artifacts.
+      responses:
+        '200':
+          description: Canonical operational state observation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Observation'
+        default:
+          $ref: '#/components/responses/Problem'
   /v1/diagnostics/trace:
     get:
       tags: [diagnostics]
@@ -1752,7 +1773,7 @@ components:
           additionalProperties: false
         resources:
           type: object
-          required: [graphics, displays, audio, audio_cards, input_devices, input_routes, topology, fonts, settings, diagnostics, runtime_diagnostics]
+          required: [graphics, displays, audio, audio_cards, input_devices, input_routes, topology, fonts, settings, diagnostics, runtime_diagnostics, observation]
           properties:
             graphics: {type: string}
             displays: {type: string}
@@ -1765,6 +1786,7 @@ components:
             settings: {type: string}
             diagnostics: {type: string}
             runtime_diagnostics: {type: string}
+            observation: {type: string}
           additionalProperties: false
         listener:
           type: object
@@ -2642,6 +2664,118 @@ components:
               code: {type: string}
               detail: {type: string}
             additionalProperties: false
+      additionalProperties: false
+    Observation:
+      type: object
+      required: [observation_version, captured_monotonic_us, consistency,
+                 version, server, diagnostics, runtime, graphics, displays,
+                 audio, audio_cards, input_devices, input_routes, topology,
+                 fonts, settings, login, sessions, effects, overlays]
+      description: >-
+        One bounded operational state dump. Every resource member uses the
+        response shape of its focused endpoint, so this envelope is suitable
+        for incident capture without becoming a second state model. Terminal
+        cell contents and framebuffer bytes are intentionally excluded.
+      properties:
+        observation_version: {type: integer, const: 1}
+        captured_monotonic_us: {type: integer, minimum: 0}
+        consistency: {type: string, const: single_event_loop_turn}
+        version:
+          type: object
+          required: [server_version, api_version]
+          properties:
+            server_version: {type: string}
+            api_version: {type: string, const: '0.1'}
+          additionalProperties: false
+        server: {$ref: '#/components/schemas/ServerDetails'}
+        diagnostics: {$ref: '#/components/schemas/Diagnostics'}
+        runtime: {$ref: '#/components/schemas/RuntimeDiagnostics'}
+        graphics:
+          type: object
+          required: [revision, graphics_cards]
+          properties:
+            revision: {$ref: '#/components/schemas/Revision'}
+            graphics_cards:
+              type: array
+              items: {$ref: '#/components/schemas/GraphicsCard'}
+          additionalProperties: false
+        displays:
+          type: object
+          required: [revision, displays, count, dropped]
+          properties:
+            revision: {$ref: '#/components/schemas/Revision'}
+            displays:
+              type: array
+              items: {$ref: '#/components/schemas/Display'}
+            count: {type: integer, minimum: 0}
+            dropped: {type: integer, minimum: 0}
+          additionalProperties: false
+        audio:
+          type: object
+          required: [revision, devices, count, dropped]
+          properties:
+            revision: {$ref: '#/components/schemas/Revision'}
+            devices:
+              type: array
+              items: {$ref: '#/components/schemas/AudioDevice'}
+            count: {type: integer, minimum: 0}
+            dropped: {type: integer, minimum: 0}
+          additionalProperties: false
+        audio_cards:
+          type: object
+          required: [revision, cards]
+          properties:
+            revision: {$ref: '#/components/schemas/Revision'}
+            cards:
+              type: array
+              items: {$ref: '#/components/schemas/AudioCard'}
+          additionalProperties: false
+        input_devices:
+          type: object
+          required: [revision, devices, count, dropped]
+          properties:
+            revision: {$ref: '#/components/schemas/Revision'}
+            devices:
+              type: array
+              items: {$ref: '#/components/schemas/InputDevice'}
+            count: {type: integer, minimum: 0}
+            dropped: {type: integer, minimum: 0}
+          additionalProperties: false
+        input_routes:
+          type: object
+          required: [revision, routes]
+          properties:
+            revision: {$ref: '#/components/schemas/Revision'}
+            routes:
+              type: array
+              items: {$ref: '#/components/schemas/InputRoute'}
+          additionalProperties: false
+        topology: {$ref: '#/components/schemas/Topology'}
+        fonts: {$ref: '#/components/schemas/FontProfiles'}
+        settings: {$ref: '#/components/schemas/Settings'}
+        login: {$ref: '#/components/schemas/LoginManager'}
+        sessions:
+          type: object
+          required: [sessions, count]
+          properties:
+            sessions:
+              type: array
+              items: {$ref: '#/components/schemas/TerminalSession'}
+            count: {type: integer, minimum: 0}
+          additionalProperties: false
+        effects: {$ref: '#/components/schemas/EffectState'}
+        overlays:
+          type: object
+          required: [revision, backend, overlays]
+          properties:
+            revision: {$ref: '#/components/schemas/Revision'}
+            backend:
+              type: string
+              enum: [sdl3, drm-kms, unavailable]
+            overlays:
+              type: array
+              items: {$ref: '#/components/schemas/Overlay'}
+          additionalProperties: false
       additionalProperties: false
     EffectState:
       type: object

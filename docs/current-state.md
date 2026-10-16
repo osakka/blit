@@ -29,6 +29,12 @@ rewrite those references unless a new, explicitly accepted ADR supersedes ADR
 0004. “SDL3/KMSDRM” and “direct DRM/KMS” are distinct paths and must not be
 collapsed into one undocumented implementation.
 
+The next source version, `0.1.508`, adds the authenticated
+`GET /v1/diagnostics/observation` endpoint. It is a schema-first aggregate of
+the existing serializers for one operational state dump; its focused schema
+and TCC API gate pass locally. It is not yet deployed to `192.168.10.54`, so
+the live host remains `0.1.507` until the package is built and installed.
+
 The product is **not visually accepted**. The latest authenticated screenshot
 capture showed a coherent flat-colour scene with the menu/status line but no
 Kitty graphics in either live session. Earlier captures also showed a stale

@@ -1476,6 +1476,10 @@ static void destroy_sdl_graphics_cache(BlitOutput *output);
 static uint64_t monotonic_us(void);
 static void diagnostics_json(const BlitRuntime *runtime, char *body,
                              size_t capacity);
+static void terminal_sessions_json(BlitRuntime *runtime, char *body,
+                                   size_t capacity);
+static void observation_json(BlitRuntime *runtime, char *body,
+                             size_t capacity);
 static void remove_http_client(BlitRuntime *runtime, int index);
 static void terminal_clear_cell(BlitSurface *surface, int x, int y);
 static void terminal_clear_wide_overlap(BlitSurface *surface, int x, int y);
@@ -2960,7 +2964,8 @@ static void server_json(const BlitRuntime *runtime, char *body, size_t capacity)
              "\"input-device-configuration\",\"input-routes\","
              "\"settings-persistence\","
              "\"login-manager\",\"network-terminal-input\",\"diagnostics\","
-             "\"runtime-diagnostics\",\"lifecycle-control\","
+             "\"runtime-diagnostics\",\"observation-snapshot\","
+             "\"lifecycle-control\","
              "\"effects\",\"overlays\",\"font-selection\"],\"display_count\":%d,"
              "\"display_backend\":{\"name\":\"%s\",\"ready\":%s,"
              "\"error\":\"%s\"},\"resources\":{"
@@ -2973,6 +2978,7 @@ static void server_json(const BlitRuntime *runtime, char *body, size_t capacity)
              "\"settings\":\"/v1/settings\","
              "\"diagnostics\":\"/v1/diagnostics\","
              "\"runtime_diagnostics\":\"/v1/diagnostics/runtime\","
+             "\"observation\":\"/v1/diagnostics/observation\","
              "\"effects\":\"/v1/effects\","
              "\"overlays\":\"/v1/overlays\"},"
              /* ADR 0065: the posture the server actually came up with, so an
@@ -14028,6 +14034,35 @@ static const char *pane_surface_id(const BlitRuntime *runtime,
     return NULL;
 }
 
+/* The session collection is shared by its inventory endpoint and the
+   aggregate observation. Keeping one serializer is important: a diagnostic
+   client must not receive a different answer merely because it asked for the
+   state bundle instead of the focused resource. */
+static void terminal_sessions_json(BlitRuntime *runtime, char *body,
+                                   size_t capacity)
+{
+    size_t used = 0;
+    int session_index;
+    int session_count = 0;
+    int first = 1;
+
+    json_appendf(body, capacity, &used, "{\"sessions\":[");
+    for (session_index = 0; session_index < BLIT_MAX_SESSIONS;
+         ++session_index) {
+        BlitSession *session = &runtime->sessions[session_index];
+        char session_body[65536];
+
+        if (!session->used)
+            continue;
+        session_json(runtime, session, session_body, sizeof(session_body));
+        json_appendf(body, capacity, &used, "%s%s", first ? "" : ",",
+                     session_body);
+        first = 0;
+        ++session_count;
+    }
+    json_appendf(body, capacity, &used, "],\"count\":%d}", session_count);
+}
+
 static void send_problem(int fd, int status, const char *reason,
                          const char *code, const char *detail)
 {
@@ -18498,6 +18533,63 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
                  runtime->expect_desktop ? "true" : "false");
 }
 
+/* A read-only, point-in-event-loop-turn state dump for operators and
+   automated incident capture. Each member is produced by the same serializer
+   as its focused endpoint; this is an envelope, not a second state model.
+   The response is deliberately bounded by the HTTP response buffer and the
+   server's fixed resource capacities. Terminal cell contents remain on the
+   surface snapshot endpoints so an observation cannot become an unbounded
+   framebuffer export. */
+static void observation_json(BlitRuntime *runtime, char *body,
+                             size_t capacity)
+{
+    static char component[4194304];
+    size_t used = 0;
+    uint64_t captured = monotonic_us();
+
+    refresh_display_power(runtime);
+    json_appendf(body, capacity, &used,
+                 "{\"observation_version\":1,"
+                 "\"captured_monotonic_us\":%llu,"
+                 "\"consistency\":\"single_event_loop_turn\","
+                 "\"version\":{\"server_version\":\"%s\","
+                 "\"api_version\":\"0.1\"},",
+                 (unsigned long long)captured, blit_version);
+
+    server_json(runtime, component, sizeof(component));
+    json_appendf(body, capacity, &used, "\"server\":%s,", component);
+    diagnostics_json(runtime, component, sizeof(component));
+    json_appendf(body, capacity, &used, "\"diagnostics\":%s,", component);
+    runtime_diagnostics_json(runtime, component, sizeof(component));
+    json_appendf(body, capacity, &used, "\"runtime\":%s,", component);
+    graphics_json(component, sizeof(component));
+    json_appendf(body, capacity, &used, "\"graphics\":%s,", component);
+    displays_json(runtime, component, sizeof(component));
+    json_appendf(body, capacity, &used, "\"displays\":%s,", component);
+    audio_devices_json(runtime, component, sizeof(component));
+    json_appendf(body, capacity, &used, "\"audio\":%s,", component);
+    audio_cards_json(runtime, component, sizeof(component));
+    json_appendf(body, capacity, &used, "\"audio_cards\":%s,", component);
+    input_devices_json(runtime, component, sizeof(component));
+    json_appendf(body, capacity, &used, "\"input_devices\":%s,", component);
+    input_routes_json(runtime, component, sizeof(component));
+    json_appendf(body, capacity, &used, "\"input_routes\":%s,", component);
+    topology_json(runtime, component, sizeof(component));
+    json_appendf(body, capacity, &used, "\"topology\":%s,", component);
+    fonts_json(runtime, component, sizeof(component));
+    json_appendf(body, capacity, &used, "\"fonts\":%s,", component);
+    settings_json(runtime, component, sizeof(component));
+    json_appendf(body, capacity, &used, "\"settings\":%s,", component);
+    login_manager_json(runtime, component, sizeof(component));
+    json_appendf(body, capacity, &used, "\"login\":%s,", component);
+    terminal_sessions_json(runtime, component, sizeof(component));
+    json_appendf(body, capacity, &used, "\"sessions\":%s,", component);
+    effect_json(runtime, component, sizeof(component));
+    json_appendf(body, capacity, &used, "\"effects\":%s,", component);
+    overlays_json(runtime, component, sizeof(component));
+    json_appendf(body, capacity, &used, "\"overlays\":%s}", component);
+}
+
 /* Back to the defaults, in memory and on disk. This is the recoverable half
    of ADR 0067's first failure shape: a *valid* setting that locks the machine
    out -- enabled:false on the only keyboard -- has to be undoable, and
@@ -18911,37 +19003,11 @@ static void handle_request(int fd, BlitRuntime *runtime,
 
     if (strcmp(path, "/v1/terminal-sessions") == 0 &&
         strcmp(method, "GET") == 0) {
-        char session_body[65536];
-        size_t used = 0;
-        int session_index;
-        int session_count = 0;
-        int first = 1;
-
         /* Session discovery is an inventory read, not a bounded probe over
            guessed numeric ids.  Diagnostic clients need the same live
            session set that topology and runtime diagnostics use, especially
            when the login manager has retired and recreated a PTY. */
-        used += (size_t)snprintf(body + used, sizeof(body) - used,
-                                 "{\"sessions\":[");
-        for (session_index = 0; session_index < BLIT_MAX_SESSIONS;
-             ++session_index) {
-            BlitSession *session = &runtime->sessions[session_index];
-
-            if (!session->used)
-                continue;
-            session_json(runtime, session, session_body,
-                         sizeof(session_body));
-            used += (size_t)snprintf(body + used, sizeof(body) - used,
-                                     "%s%s", first ? "" : ",",
-                                     session_body);
-            first = 0;
-        }
-        for (session_index = 0; session_index < BLIT_MAX_SESSIONS;
-             ++session_index)
-            if (runtime->sessions[session_index].used)
-                ++session_count;
-        used += (size_t)snprintf(body + used, sizeof(body) - used,
-                                 "],\"count\":%d}", session_count);
+        terminal_sessions_json(runtime, body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
         return;
     }
@@ -20411,6 +20477,9 @@ static void handle_request(int fd, BlitRuntime *runtime,
         send_http(fd, 200, "OK", "application/json", body);
     } else if (strcmp(path, "/v1/diagnostics/runtime") == 0) {
         runtime_diagnostics_json(runtime, body, sizeof(body));
+        send_http(fd, 200, "OK", "application/json", body);
+    } else if (strcmp(path, "/v1/diagnostics/observation") == 0) {
+        observation_json(runtime, body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
     } else if (strncmp(path, "/v1/diagnostics/trace",
                        strlen("/v1/diagnostics/trace")) == 0 &&
