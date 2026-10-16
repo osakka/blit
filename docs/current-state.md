@@ -12,6 +12,23 @@ reports API version `0.1`. The matching package identity is recorded in
 [`releases/0.1.507.yaml`](../releases/0.1.507.yaml). Hibr source was not
 modified.
 
+The source branch now contains and has pushed the rendering/protocol fixes from
+issues #84, #85, #87, and #88 at commit `739800f`. Those fixes are validated by
+the SDL graphics-band gate, the sixel-slot gate, the direct-KMS compositor gate,
+and the completed terminal-conformance cases, but they are not yet deployed to
+the host and are therefore not host-accepted.
+
+### Architecture decision check
+
+There is no accepted decision to deprecate the direct DRM/KMS or non-SDL
+backend. ADR 0004 remains accepted and defines direct DRM/KMS as the
+correctness-critical terminal presentation path; SDL3 is the adapter for the
+optional canvas/effects path. The OpenAPI contract, source, package, tests, and
+verification ledger all still describe both paths. Do not remove KMS code or
+rewrite those references unless a new, explicitly accepted ADR supersedes ADR
+0004. “SDL3/KMSDRM” and “direct DRM/KMS” are distinct paths and must not be
+collapsed into one undocumented implementation.
+
 The product is **not visually accepted**. The latest authenticated screenshot
 capture showed a coherent flat-colour scene with the menu/status line but no
 Kitty graphics in either live session. Earlier captures also showed a stale
@@ -36,6 +53,19 @@ These results do not prove that the wallpaper, desktop scene, context menus,
 window movement, physical mouse, keyboard, or joined coordinate system works.
 An unchanged or incomplete screenshot is a failed visual result even when
 timing counters are healthy.
+
+### Latest live read-only boundary
+
+On 2026-10-16, a read-only authenticated query to `192.168.10.54` reported
+the deployed `0.1.507` SDL3/OpenGLES2 server with one output and one running
+session. That session was the login manager (`login_manager: true`), not a Hibr
+desktop: `hibr_attachment.owner_registered: false`, `owner_pid: 0`,
+`owner_writes: 0`, and `hibr_desktop.role: none`. Its graphics inventory was
+empty. The bounded graphics trace contained Kitty capability queries and one
+delete request, but no Kitty image transmit (`a=T`) payload. The server
+therefore cannot yet answer the #86 wallpaper question from this state; the
+next valid capture must be taken after one real primary desktop owner is
+registered. No live mutation was performed.
 
 ## Non-negotiable claim rule
 
@@ -120,6 +150,31 @@ claim cycle:
 Do not change Hibr source. If the evidence identifies a Hibr hold, viewport,
 picture-propagation, or desktop-semantic defect, record or update the Hibr
 issue and keep the Blit diagnosis separate.
+
+## Open-backlog order
+
+The open issues are worked in evidence order, not issue-number order:
+
+1. **#86 — live Kitty wallpaper discriminator.** Capture Hibr's graphics
+   decision and Blit's per-session graphics trace on the deployed binary. The
+   first missing boundary determines whether the next change belongs in Blit
+   or needs a separate Hibr issue.
+2. **#84, #85, #87, #88 — renderer/protocol fixes.** These are implemented and
+   pushed, but require package deployment and host acceptance before they can
+   be closed.
+3. **#76, #77, #78 — `console-blit` input/provider boundary.** Exercise only
+   after a complete static scene is visible, so input evidence is not confused
+   with a missing wallpaper or stale surface.
+4. **#79, #20, #21 — hardware/renderer coverage gates.** These need GPU,
+   multiple physical outputs, or high-refresh hardware and cannot be closed by
+   a local SDL software run.
+5. **#22, #27, #60, #64, #82, #83.** These are coverage, workflow, resize,
+   persistent configuration, image-build, and login-manager work to schedule
+   after the live rendering boundary is established.
+
+This order is a triage record, not a second backlog. Gitea issues remain the
+authoritative task records; this document records only the dependency order
+and the evidence required to move between them.
 
 ## Evidence locations
 
