@@ -1,0 +1,28 @@
+release: 0.1.493
+package: blit_0.1.493-1_amd64.deb
+package_sha256: 32ae2e3b3a21e0e01d12fa74c0cdcd3d8cafdbb4d90d4ca0284e6d4c13814b7e
+source_commit: 5599756
+package_documentation_commit: 5599756
+server_binary_sha256: 087608c8caf1c56b3f19c17ca2d13f600c2cac945d72d36526ba148d5565cfc1
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.191
+hibr_adapter_build: tcc_from_exact_pinned_checkout
+focused_settings: pass_server_precedence_font_topology_persistence
+focused_font: pass_tenth_step_scale_and_centered_grid_origin
+focused_api_schema: pass_paths_41
+focused_renderer: pass_run_gates_renderer_43_0_0
+focused_terminal: pass_run_gates_terminal_3_0_0
+package_reproducibility: pass_rebuilt_identical
+package_artifact_acceptance: pass
+physical_host_acceptance: pending_issue_70_render_settings
+physical_multi_monitor_acceptance: unavailable_one_output
+physical_high_refresh_acceptance: open_issue_21
+notes: >-
+  0.1.493 addresses Blit issue #70. Render cadence, requested renderer,
+  direct-KMS asynchronous pageflip policy, empty-output expectation, pane
+  layout, and font profile/scale are API-owned settings. Environment values
+  are boot defaults only when the document is silent. Pane layout remains
+  live-owned by /v1/topology and is persisted through the settings document.
+  BLIT_EVDEV_MOUSE remains a compatibility boot override and is deliberately
+  not duplicated in the stable input-device API. Hibr source was not modified.
