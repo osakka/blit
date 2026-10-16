@@ -120,6 +120,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0097 — Reassert the Hibr terminal contract after authentication](0097-reassert-hibr-terminal-contract-after-login.md)
 - [0099 — Use a ping-pong scene cache for SDL damage composition](0099-ping-pong-scene-cache-for-sdl-damage.md)
 - [0101 — KMS incremental frames begin from the presented buffer](0101-kms-incremental-frames-copy-the-presented-buffer.md)
+- [0102 — Bounded integer-scale fast path for opaque KMS graphics](0102-kms-integer-scale-fast-path.md)
 
 ## Adding an ADR
 

@@ -525,6 +525,82 @@ static void draw_graphic(KmsOutput *output, const BlitGraphicsDraw *draw,
         }
         return;
     }
+
+    /* Hibr wallpapers commonly arrive as an opaque RGB image and are placed
+       at an exact integer scale (for example 960x1080 -> 1920x2160).  The
+       general scaler below is correct, but its destination-pixel divisions
+       make every damaged redraw needlessly expensive.  Replicate each source
+       pixel over its integer destination rectangle instead.  Keep this path
+       deliberately bounded and opaque-only: filtered and alpha images retain
+       the general compositor semantics below. */
+    if ((image->format == 24 || (image->format == 32 && image->opaque)) &&
+        width % draw->src_w == 0 && height % draw->src_h == 0 &&
+        width / draw->src_w <= 8 && height / draw->src_h <= 8) {
+        int scale_x = width / draw->src_w;
+        int scale_y = height / draw->src_h;
+        int destination_x = origin_x + draw->x;
+        int destination_y = origin_y + draw->y;
+        int first_x = destination_x > clip_x0 ? destination_x : clip_x0;
+        int first_y = destination_y > clip_y0 ? destination_y : clip_y0;
+        int last_x = destination_x + width;
+        int last_y = destination_y + height;
+        int source_y;
+
+        if (last_x > clip_x1) last_x = clip_x1;
+        if (last_y > clip_y1) last_y = clip_y1;
+        if (first_x < 0) first_x = 0;
+        if (first_y < 0) first_y = 0;
+        if (last_x > output->mode.hdisplay) last_x = output->mode.hdisplay;
+        if (last_y > output->mode.vdisplay) last_y = output->mode.vdisplay;
+        if (first_x >= last_x || first_y >= last_y)
+            return;
+
+        for (source_y = 0; source_y < draw->src_h; ++source_y) {
+            int row_y = destination_y + source_y * scale_y;
+            int row_last_y = row_y + scale_y;
+            int visible_y0 = row_y > first_y ? row_y : first_y;
+            int visible_y1 = row_last_y < last_y ? row_last_y : last_y;
+            int source_x;
+            if (visible_y0 >= visible_y1)
+                continue;
+            for (source_x = 0; source_x < draw->src_w; ++source_x) {
+                int column_x = destination_x + source_x * scale_x;
+                int column_last_x = column_x + scale_x;
+                int visible_x0 = column_x > first_x ? column_x : first_x;
+                int visible_x1 = column_last_x < last_x ? column_last_x : last_x;
+                const unsigned char *source;
+                uint32_t colour;
+                int y;
+                if (visible_x0 >= visible_x1)
+                    continue;
+                source = image->pixels +
+                    ((size_t)(draw->src_y + source_y) * (size_t)image->width +
+                     (size_t)(draw->src_x + source_x)) *
+                    (size_t)bytes_per_pixel;
+                if (image->format == 32) {
+                    uint32_t rgba;
+                    memcpy(&rgba, source, sizeof(rgba));
+                    colour = ((rgba & 0x000000ffU) << 16) |
+                        (rgba & 0x0000ff00U) |
+                        ((rgba & 0x00ff0000U) >> 16);
+                } else {
+                    colour = ((uint32_t)source[0] << 16) |
+                        ((uint32_t)source[1] << 8) | source[2];
+                }
+                for (y = visible_y0; y < visible_y1; ++y) {
+                    uint32_t *destination =
+                        (uint32_t *)((unsigned char *)output->back.map +
+                                     (size_t)y * output->back.pitch) +
+                        visible_x0;
+                    int x;
+                    for (x = visible_x0; x < visible_x1; ++x)
+                        *destination++ = colour;
+                }
+            }
+        }
+        return;
+    }
+
     for (destination_y = 0; destination_y < height; ++destination_y) {
         int py = origin_y + draw->y + destination_y;
         int source_y = draw->src_y + destination_y * draw->src_h / height;

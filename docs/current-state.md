@@ -75,6 +75,15 @@ window movement, physical mouse, keyboard, or joined coordinate system works.
 An unchanged or incomplete screenshot is a failed visual result even when
 timing counters are healthy.
 
+### 0.1.511 performance candidate
+
+The source candidate for `0.1.511` adds the bounded integer-scale KMS graphics
+path in [ADR 0102](adr/0102-kms-integer-scale-fast-path.md). It targets the
+measured live workload: an opaque 960x1080 wallpaper placed at 1920x2160.
+The local KMS pixel gate passes. The package has not yet been deployed and no
+live improvement is claimed until the same direct-KMS lower-pane workload is
+measured again.
+
 ### Latest live read-only boundary
 
 On 2026-10-16, the final live observation query to `192.168.10.54` reported
