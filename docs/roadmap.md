@@ -3,7 +3,22 @@
 The roadmap is ordered by dependency. A later milestone must not become a
 second, parallel implementation of an earlier one.
 
-## Current position — 0.1.503 Hibr session-entrypoint candidate
+## Current position — 0.1.507 live visual-acceptance blocker
+
+0.1.507 is deployed on the authorized one-output host and its API, package
+identity, deterministic renderer gates, and synthetic pointer timing path have
+been checked. That is not visual or physical acceptance. The latest live
+capture showed an incomplete flat-colour scene with no graphics in either
+session; a separate capture observed no physical evdev input. A previous live
+state also retained an ended primary surface and a failed orphan join.
+
+The next work must establish a complete static Hibr scene first, prove the
+Kitty payload and placement path, then measure real window movement with a
+physical evdev trace. Do not call timing stability “UI stability”, and do not
+modify Hibr source. The full restart sequence is in
+[current-state.md](current-state.md).
+
+## Previous position — 0.1.503 Hibr session-entrypoint candidate
 
 The ABI contract is accepted on the live host. The next blocker was proven by
 the live screenshot: Hibr's installed session was sourced with the wrong
@@ -85,7 +100,7 @@ restart behavior are covered by the focused pointer gate. The package and
 physical-host acceptance remain pending; hardware multi-monitor and high-
 refresh claims remain separate acceptance gates.
 
-## Current position — 0.1.470 refresh-bound presentation candidate
+## Historical position — 0.1.470 refresh-bound presentation candidate
 
 The next release closes the refresh-scheduling defect found on the physical
 host: Hibr window movement produced surface commits about every 5 ms, and the

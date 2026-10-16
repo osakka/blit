@@ -7,7 +7,7 @@
 ## Context
 
 Blit's terminal engine already handles wide characters correctly as *state*:
-the Unicode 15.1 width table ([ADR 0007](0007-unicode-width-table.md)) gives a
+the Unicode 15.1 width table ([ADR 0007](0007-terminal-utf8-and-hibr-font-boundary.md)) gives a
 CJK ideograph two cells, the second carries `BLIT_ATTR_CONTINUATION`, and
 `GET /v1/surfaces/{id}/cells` reports `"width": 2`. A client reading the API
 sees exactly the right thing.

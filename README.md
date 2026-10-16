@@ -55,6 +55,12 @@ Keep these evidence boundaries separate:
 The [verification ledger](docs/verification-status.md) is the single place
 where these claims are separated.
 
+The current release is not visually accepted. Read the
+[current state and restart point](docs/current-state.md) before resuming work:
+it records the latest live screenshot, the stale-primary/join failure mode,
+the missing physical-input evidence, and the exact next investigation. Do not
+infer a correct UI from healthy timing counters or a successful API response.
+
 ## Five-minute operator path
 
 The package installs a systemd service and the native `blit` executable. The
@@ -221,6 +227,7 @@ silently depending on a route that the server does not implement.
 - [Roadmap](docs/roadmap.md)
 - [ADR index](docs/adr/README.md)
 - [Verification status](docs/verification-status.md)
+- [Current state and restart point](docs/current-state.md)
 
 ## Project boundaries
 

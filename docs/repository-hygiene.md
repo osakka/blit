@@ -99,3 +99,14 @@ published, its checksum and source commit belong in `releases/<version>.yaml`.
 These terms are intentionally strict. A screenshot, a QEMU result, or an API
 health response cannot be promoted to physical-host acceptance without the
 matching evidence.
+
+## No inference from partial evidence
+
+Timing stability, process liveness, API acceptance, pixel correctness, physical
+input delivery, and Hibr interaction are different claims. Never use a broad
+word such as “stable”, “working”, “correct”, “complete”, or “fixed” when only a
+narrower boundary was measured. A screenshot that is incomplete or visually
+wrong is a failed visual result even if frame timing is healthy. A synthetic
+input trace is not physical input evidence. A Blit input receipt is not proof
+that Hibr acted on the event. Record the first unproven boundary explicitly;
+do not fill it with inference. See [the current restart point](current-state.md).

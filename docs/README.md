@@ -109,6 +109,8 @@ panes, input routing, and diagnostics.
 - [ADR index](adr/README.md) — decisions that constrain implementation.
 - [Verification status](verification-status.md) — the current evidence ledger,
   release gates, and explicitly unverified items.
+- [Current state and restart point](current-state.md) — the latest live
+  evidence, strict claim rules, recovery sequence, and next investigation.
 
 ## How to read a result
 
@@ -130,6 +132,15 @@ remote troubleshooting surface. It combines the normal diagnostics snapshot
 with uptime, rendered-frame count, measured render duration, missed refresh
 deadlines, and a bounded in-memory event log. It is intentionally bounded so
 diagnostics cannot consume unbounded server memory.
+
+## Claim discipline
+
+“Stable” is never a synonym for visually correct. Timing, lifecycle, pixels,
+physical input, and Hibr behaviour are separate evidence boundaries. An
+incomplete screenshot or missing physical trace keeps the result incomplete,
+even when API requests succeed and timing counters are healthy. The current
+restart point and the exact evidence required next are recorded in
+[current-state.md](current-state.md).
 
 ## Documentation maintenance
 

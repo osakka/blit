@@ -140,6 +140,14 @@ The gate is a renderer regression test, not physical-input acceptance. The
 physical acceptance boundary remains `verify-live-physical.sh`, run while the
 real pointer is being moved.
 
+The screenshot is an independent correctness gate, not decoration. If it is
+incomplete, duplicated, stale, flat where a known wallpaper should be, or
+otherwise inconsistent with the expected scene, the visual result is failed
+even when API input was accepted, sessions are alive, render timing is within
+budget, or local deterministic gates pass. Do not describe that result as
+“stable” or “working”; identify the first missing boundary and preserve the
+capture.
+
 The real-host capture harness records Blit's API state without depending on a
 local Hibr shell or a physical keyboard. It collects the hardware/topology
 inventory, runtime counters, bounded event trace, and synchronized framebuffer

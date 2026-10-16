@@ -159,8 +159,10 @@ Tests:
   alternate screen;
 - PTY `TIOCSWINSZ` tests proving dimensions and redraw agree.
 
-Exit condition: the Hibr desktop conformance workload produces stable surface
-snapshots across repeated runs and no renderer is involved in the assertions.
+Exit condition: the Hibr desktop conformance workload produces repeatable,
+revision-traceable surface snapshots across repeated runs and no renderer is
+involved in the assertions. “Repeatable” here describes the fixture output
+only; it is not a visual or physical-host acceptance claim.
 
 ### Gate 3 — presentation adapters
 

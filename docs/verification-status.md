@@ -3,6 +3,39 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## Latest review: 0.1.507 is not visually accepted
+
+The 0.1.507 package is deployed on `192.168.10.54` and `/v1/version` reports
+`server_version=0.1.507`, `api_version=0.1`. The live server can create one
+primary Hibr session and one `--join` session through the API, but the latest
+fresh-session screenshot showed a flat-colour scene with the menu/status line
+and no Kitty graphics in either session. The sessions were alive and had
+distinct surface revisions; that is process/surface evidence, not visual
+correctness.
+
+A preceding live capture showed the more specific stale-resource failure:
+the retained primary surface contained `[desktop ended, status 0]`, while a
+new join reported `hibr: hold: no such session`. Removing the exited resources,
+starting a fresh primary without `--resume`, waiting for its desktop surface,
+and then creating the join produced running sessions. This is now the
+documented recovery sequence; it is not an acceptance result.
+
+The controlled API pointer workload delivered 600 synthetic motion events and
+produced 531 presentations with zero new missed deadlines in that interval.
+The local pointer-damage, motion-trail, wallpaper-stress, and Hibr
+frame-barrier gates passed. These facts narrow the timing path but do not prove
+that Hibr emitted the expected scene or that a real window can be dragged.
+
+The authenticated 20-second physical capture recorded zero evdev motion and
+zero evdev button events. Physical window movement therefore remains
+unmeasured, not passed. The next acceptance transaction must include a visible
+window, physical evdev traces, Hibr surface revisions, render-path traces, and
+a screenshot. See [current-state.md](current-state.md).
+
+The claim vocabulary is strict: timing stability is only timing stability;
+process liveness is only process liveness; an incomplete screenshot is a
+failed visual result. No broader claim may be inferred from these observations.
+
 ## 0.1.507 candidate: ping-pong SDL scene composition
 
 The real 0.1.506 host reproduced the reported fast-update symptom through a
@@ -23,10 +56,11 @@ The same five-second high-rate control workload after deployment produced no
 new missed deadlines, a maximum present time of 16.882 ms at a 60 Hz output,
 and a maximum loop gap of 17.026 ms. Three one-second idle screenshots had
 the identical SHA-256 (`f240696d9fe8b5b58c8515564220806b68875566a3c7e68495ebba6bf06b9390`)
-and the live two-pane screenshot showed the Kitty wallpaper on both panes.
-This is strong composition evidence, not yet a claim of physical fast-window
-drag acceptance: that still requires a capture with a real drag crossing the
-evdev boundary and a window available to move.
+and one live two-pane screenshot showed the Kitty wallpaper on both panes.
+That was a bounded historical composition observation, not current visual
+acceptance. It did not prove a complete Hibr desktop, physical fast-window
+dragging, or a persistent join. The later live review above supersedes any
+broader interpretation of that screenshot.
 
 ## 0.1.505 candidate: reassert the Hibr graphics contract after login
 
