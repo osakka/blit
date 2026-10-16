@@ -51,6 +51,7 @@ typedef struct {
     int src_y;
     int src_w;
     int src_h;
+    int scroll_anchored;
 } BlitGraphicsPlacement;
 
 /* Renderer-neutral graphics record.  Kitty and sixel decoders both publish
@@ -80,6 +81,7 @@ typedef struct {
     int src_y;
     int src_w;
     int src_h;
+    int scroll_anchored;
     /* Placements addressed by a nonzero placement id. The fields above are
        the default placement, the one with id 0, which is also the only one
        sixel and API frames have. */

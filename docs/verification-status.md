@@ -3,6 +3,24 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 0.1.491 candidate: graphics follow terminal-row scrolling
+
+0.1.491 addresses Blit issue #62. Kitty and sixel placements now carry an
+explicit page-anchor state and move with later index, reverse-index,
+scroll-region, and insert/delete-line operations. Destination and source
+rectangles clip together at the active page boundary. API-owned pixel frames
+remain absolute scene objects. Hibr source is unchanged.
+
+Focused gates pass:
+
+```text
+SIXEL_DECODER_PASS
+KITTY_PLACEMENT_PASS
+```
+
+The full renderer gate and reproducible package evidence are pending for this
+candidate.
+
 ## 0.1.490 candidate: pinned Hibr adapter provenance and runtime compatibility
 
 0.1.490 closes the release-integrity part of Blit issue #81. The Debian

@@ -209,9 +209,14 @@ it wants -- which is exactly why DECRQM has to answer. Blit also differs from
 DEC on one point and says so here: in display mode DEC clips the image to the
 graphics region, and Blit clips it to the screen.
 
-Images are placed at absolute pixel offsets and do not move when the text
-scrolls afterwards. The scrolling a sixel image causes is accounted for in
-that image's own origin; a previously placed image stays where it was put.
+Images placed by Kitty and sixel are page-anchored graphics: subsequent index,
+scroll-region, and insert/delete-line operations move them with their owning
+text rows and clip them at the active page boundary. A placement that leaves
+the page is retained only as bounded image data and is no longer visible;
+Blit does not claim graphics scrollback. API pixel frames are scene-owned and
+remain at their absolute coordinates when terminal text scrolls. This
+distinction is explicit in the graphics record rather than inferred from the
+current pixel position (issue #62).
 
 The direct KMS test remains the hardware oracle; the terminal engine must not
 introduce a second display or terminal implementation.

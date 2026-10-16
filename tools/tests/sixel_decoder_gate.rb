@@ -406,6 +406,24 @@ verdict('sixel-scroll-at-the-bottom') do
   end
 end
 
+# An image placed on an existing text row follows a later text scroll. This
+# is distinct from the scroll the image itself can cause above: it exercises
+# the graphics/text ownership boundary after placement.
+verdict('sixel-scroll-after-placement') do
+  scenario('scroll-after-placement', [
+    cup(2, 1), solid_sixel('', '#1;2;100;0;0'), "\033[1S"
+  ].join, images: 1) do |bmp, state, _summary, _cells|
+    image = state.fetch('graphics').first
+    check(!image.nil?, 'the placed image remains in the graphics state')
+    if image
+      check(image.fetch('y').zero?,
+            "the image follows one later SU row, got #{image.fetch('y')}")
+    end
+    check(at(bmp, 0, 0) == RED,
+          'the later text scroll moves the placed image pixels')
+  end
+end
+
 # The published bound is the enforced bound. A client sizes its image to
 # what it was told, so these must be the numbers XTSMGRAPHICS answers with
 # and the numbers the decoder clips at.

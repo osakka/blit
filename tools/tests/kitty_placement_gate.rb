@@ -195,6 +195,34 @@ Dir.mktmpdir('kitty-placement') do |dir|
   request('DELETE', "/v1/terminal-sessions/#{session}")
 end
 
+# A cursor-placed Kitty image follows a later SU as well as the text. This is
+# the post-placement case; the image-caused cursor advance is not involved.
+Dir.mktmpdir('kitty-scroll') do |dir|
+  File.write(File.join(dir, 'a'),
+             "\\033[?25l#{cup(2, 1)}#{esc("a=T,#{common},i=8,C=1", payload)}\\033[1S")
+  created = JSON.parse(request('POST', '/v1/terminal-sessions',
+    'command' => '/bin/sh',
+    'arguments' => ['-c', "printf '%b' \"$(cat #{dir}/a)\"; sleep 60"],
+    'surface' => { 'width' => 60, 'height' => 12 },
+    'display_id' => 'display-1').body)
+  abort("kitty-placement gate: scroll create failed #{created}") unless created['id']
+  session = created.fetch('id')
+  Timeout.timeout(10) do
+    loop do
+      image = json("/v1/terminal-sessions/#{session}")['graphics']
+                         .to_a.find { |g| g['id'] == 8 }
+      break if image && image['complete']
+      sleep 0.1
+    end
+  end
+  sleep 1.5
+  image = json("/v1/terminal-sessions/#{session}")['graphics']
+                 .find { |g| g['id'] == 8 }
+  check(image && image.fetch('y').zero?,
+        "Kitty image follows later SU, got #{image && image['y']}")
+  request('DELETE', "/v1/terminal-sessions/#{session}")
+end
+
 unless $failures.empty?
   warn "kitty-placement gate: #{$failures.length} failure(s)"
   exit 1

@@ -8277,6 +8277,110 @@ static void terminal_copy_cell(BlitSurface *surface, int destination,
     surface->links[y][destination] = surface->links[y][source];
 }
 
+/* Move one graphics placement with the text rows that own it. A placement
+   created by Kitty or sixel is cursor/page anchored; an API pixel frame is a
+   scene object and deliberately remains at its absolute coordinate. When a
+   scroll crosses the active page boundary, clip the destination and source
+   rectangle together. A placement that leaves the page is retained as image
+   data but is no longer visible. */
+static int terminal_scroll_graphics_rect(const BlitGraphicsImage *image,
+                                         int *x, int *y, int *width,
+                                         int *height, int *src_y, int *src_h,
+                                         int *visible, int anchored,
+                                         int top, int bottom, int left,
+                                         int right, int delta, int cw, int ch)
+{
+    int page_top = top * ch;
+    int page_bottom = (bottom + 1) * ch;
+    int page_left = left * cw;
+    int page_right = (right + 1) * cw;
+    int source_height;
+    int old_height;
+    int new_y;
+    int clip_top;
+    int clip_bottom;
+    int cut;
+
+    if (image == NULL || x == NULL || y == NULL || width == NULL ||
+        height == NULL || src_y == NULL || src_h == NULL || visible == NULL ||
+        !*visible || !anchored)
+        return 0;
+    /* A zero placement width/height means "the source rectangle's edge" in
+       Kitty. Resolve that protocol shorthand before applying the scroll. */
+    if (*width < 1) *width = image->width;
+    if (*height < 1)
+        *height = *src_h > 0 ? *src_h : image->height;
+    if (*width < 1 || *height < 1 ||
+        *x >= page_right || *x + *width <= page_left ||
+        *y >= page_bottom || *y + *height <= page_top ||
+        *y / ch < top || *y / ch > bottom)
+        return 0;
+    source_height = *src_h > 0 ? *src_h : image->height - *src_y;
+    if (source_height < 1) return 0;
+    old_height = *height;
+    new_y = *y + delta * ch;
+    clip_top = new_y < page_top ? page_top : new_y;
+    clip_bottom = new_y + old_height > page_bottom ?
+        page_bottom : new_y + old_height;
+    if (clip_bottom <= clip_top) {
+        *visible = 0;
+        return 1;
+    }
+    if (clip_top > new_y) {
+        cut = clip_top - new_y;
+        *src_y += (int)((long long)cut * source_height / old_height);
+    }
+    if (clip_top > new_y || clip_bottom < new_y + old_height) {
+        int kept = clip_bottom - clip_top;
+        int source_kept = (int)((long long)kept * source_height / old_height);
+        if (source_kept < 1) source_kept = 1;
+        *src_h = source_kept;
+        *height = kept;
+    }
+    *y = clip_top;
+    return 1;
+}
+
+static void terminal_scroll_graphics(BlitSession *session,
+                                     BlitSurface *surface, int top, int bottom,
+                                     int left, int right, int delta)
+{
+    int image_index;
+    int moved = 0;
+    int cw = session->terminal_cell_width > 0 ?
+        session->terminal_cell_width : 8;
+    int ch = session->terminal_cell_height > 0 ?
+        session->terminal_cell_height : 16;
+
+    for (image_index = 0; image_index < BLIT_GRAPHICS_MAX_IMAGES;
+         ++image_index) {
+        BlitGraphicsImage *image = &session->graphics[image_index];
+        int slot;
+        int image_moved = 0;
+        if (!image->used || !image->complete) continue;
+        if (image->visible)
+            image_moved |= terminal_scroll_graphics_rect(
+                image, &image->x, &image->y, &image->placement_width,
+                &image->placement_height, &image->src_y, &image->src_h,
+                &image->visible, image->scroll_anchored, top, bottom, left,
+                right, delta, cw, ch);
+        for (slot = 0; slot < BLIT_GRAPHICS_MAX_PLACEMENTS; ++slot) {
+            BlitGraphicsPlacement *placement = &image->placements[slot];
+            if (!placement->used) continue;
+            image_moved |= terminal_scroll_graphics_rect(
+                image, &placement->x, &placement->y, &placement->width,
+                &placement->height, &placement->src_y, &placement->src_h,
+                &placement->used, placement->scroll_anchored, top, bottom,
+                left, right, delta, cw, ch);
+        }
+        if (image_moved) {
+            ++image->revision;
+            moved = 1;
+        }
+    }
+    if (moved) mark_surface_full_damage(surface);
+}
+
 static void terminal_scroll_up(BlitSession *session, BlitSurface *surface)
 {
     int y;
@@ -8331,6 +8435,8 @@ static void terminal_scroll_up(BlitSession *session, BlitSurface *surface)
     surface->damage_width = surface->width;
     surface->damage_height = bottom - top + 1;
     surface->cursor_y = bottom;
+    terminal_scroll_graphics(session, surface, top, bottom, 0,
+                             surface->width - 1, -1);
 }
 
 /* Copy one row's cells within a column range. A whole-row copy is this with
@@ -8567,7 +8673,7 @@ static void terminal_index(BlitSession *session, BlitSurface *surface)
         terminal_scroll_up(session, surface);
 }
 
-static void terminal_reverse_index(BlitSurface *surface)
+static void terminal_reverse_index(BlitSession *session, BlitSurface *surface)
 {
     int y;
     int top = surface->scroll_top;
@@ -8585,6 +8691,8 @@ static void terminal_reverse_index(BlitSurface *surface)
     surface->damage_y = top;
     surface->damage_width = surface->width;
     surface->damage_height = bottom - top + 1;
+    terminal_scroll_graphics(session, surface, top, bottom, 0,
+                             surface->width - 1, 1);
 }
 
 static void terminal_reset_tabs(BlitSurface *surface)
@@ -9403,6 +9511,7 @@ typedef struct {
     int src_y;
     int src_w;
     int src_h;
+    int scroll_anchored;
 } KittyPlacement;
 
 static int kitty_placement_get(const BlitGraphicsImage *image,
@@ -9464,6 +9573,7 @@ static int kitty_place(BlitGraphicsImage *image, const KittyPlacement *request)
         image->src_y = request->src_y;
         image->src_w = request->src_w;
         image->src_h = request->src_h;
+        image->scroll_anchored = request->scroll_anchored;
         ++image->revision;
         return 1;
     }
@@ -9487,6 +9597,7 @@ static int kitty_place(BlitGraphicsImage *image, const KittyPlacement *request)
     image->placements[free_slot].src_y = request->src_y;
     image->placements[free_slot].src_w = request->src_w;
     image->placements[free_slot].src_h = request->src_h;
+    image->placements[free_slot].scroll_anchored = request->scroll_anchored;
     ++image->revision;
     return 1;
 }
@@ -9769,6 +9880,7 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
     placement.src_y = src_y;
     placement.src_w = src_w;
     placement.src_h = src_h;
+    placement.scroll_anchored = 1;
     /* o is the transmission's compression. The protocol defines exactly one
        value, so anything else is refused rather than quietly treated as raw
        bytes -- treating it as raw is what made an o=z transmission fail the
@@ -10490,6 +10602,7 @@ static void terminal_apply_sixel(BlitSession *session, BlitSurface *surface,
         image->src_y = source_y;
         image->src_w = visible_width;
         image->src_h = visible_height;
+        image->scroll_anchored = 1;
         image->placement_width = visible_width;
         image->placement_height = visible_height;
         image->revision = 1;
@@ -12028,6 +12141,8 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         surface->damage_y = top;
         surface->damage_width = right - left + 1;
         surface->damage_height = bottom - top + 1;
+        terminal_scroll_graphics(session, surface, top, bottom, left, right,
+                                 command == 'L' ? count : -count);
     } else if (prefix == 0 && intermediate == 0 &&
                (command == 'S' || command == 'T')) {
         int count = has_first && first > 0 ? first : 1;
@@ -12056,6 +12171,8 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         surface->damage_y = top;
         surface->damage_width = right - left + 1;
         surface->damage_height = bottom - top + 1;
+        terminal_scroll_graphics(session, surface, top, bottom, left, right,
+                                 command == 'S' ? -count : count);
     } else if (command == 'E' || command == 'F') {
         int count = has_first && first > 0 ? first : 1;
         surface->cursor_y += command == 'E' ? count : -count;
@@ -12325,7 +12442,7 @@ static int terminal_consume_output(BlitRuntime *runtime, BlitSession *session,
                 terminal_index(session, surface);
                 session->terminal_escape = 0;
             } else if (byte == 'M') {
-                terminal_reverse_index(surface);
+                terminal_reverse_index(session, surface);
                 session->terminal_escape = 0;
             } else if (byte == 'E') {
                 surface->cursor_x = 0;
@@ -12575,7 +12692,7 @@ static int terminal_consume_output(BlitRuntime *runtime, BlitSession *session,
             ++offset;
         } else if (byte == 0x8d) {
             /* C1 RI: reverse index within the active scroll region. */
-            terminal_reverse_index(surface);
+            terminal_reverse_index(session, surface);
             session->terminal_wrap_pending = 0;
             ++offset;
         } else if (byte >= 0x20) {
@@ -12639,7 +12756,7 @@ static int terminal_consume_output(BlitRuntime *runtime, BlitSession *session,
                         surface->cursor_x < surface->width)
                         surface->tab_stops[surface->cursor_x] = 1;
                 } else {
-                    terminal_reverse_index(surface);
+                    terminal_reverse_index(session, surface);
                 }
                 session->terminal_wrap_pending = 0;
                 offset += consumed;
