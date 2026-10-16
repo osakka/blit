@@ -19,8 +19,13 @@ package regression gate asserts both the direct installed-session path and the
 absence of the old mirrored session/system paths.
 
 Implementation commit: `c514f50` (`source Hibr desktop from its installed
-tree`). Package and reproducibility evidence follows after the 0.1.498
-artifact is built from this commit.
+tree`). The TCC-built 0.1.498 package passed the packaging regression and
+reproducibility gates against the exact pinned Hibr 0.99.191 checkout:
+
+```text
+PACKAGE_ARTIFACT_PASS version=0.1.498-1 reproducible=yes
+RELEASE_MANIFEST_PASS package=0.1.498-1 manifest=releases/0.1.498.yaml
+```
 
 ## 0.1.497 candidate: authenticated diagnostic bundles
 
