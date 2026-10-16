@@ -3,6 +3,22 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 0.1.504 candidate: preserve complete Hibr Kitty PNG chunks
+
+Live graphics traces identified a concrete transport defect: Hibr's Kitty
+wallpaper chunks carry 4096 base64 bytes, while Blit's terminal APC buffer was
+4096 bytes total. The control header consumed part of that capacity, so every
+chunk was truncated to 4095 bytes and the final PNG transmission was rejected
+as incomplete. The parser buffer is now a bounded 16 KiB buffer; graphics and
+decoded-image limits remain unchanged.
+
+The focused TCC graphics gate now emits the same wire shape for both raw RGB
+and a real multi-chunk `f=100` RGBA PNG. It verifies complete Kitty images,
+exact 64x64 dimensions, 64x64x4 decoded bytes, full trace chunk lengths, and
+zero new rejections. The renderer gate passes 43/43 with no skips. This is
+local evidence only until the package is deployed and the live Hibr wallpaper
+trace and screenshot show a complete Kitty image.
+
 ## 0.1.503 candidate: preserve Hibr session-relative imports
 
 The live login attempts provided the missing evidence: keyboard input was
@@ -342,6 +358,23 @@ The live host still requires a fresh 0.1.487 deployment before its wallpaper
 trace and screenshot can be called accepted. The current captured screenshot
 is evidence that the login box renders, not proof that the multi-chunk
 wallpaper path is fixed on the host until that deployment is installed.
+
+## 0.1.504 candidate: preserve complete Hibr Kitty chunks
+
+The 0.1.503 live capture showed the actual rendering failure shape: Hibr sent
+thousands of Kitty wallpaper chunks, Blit recorded them at 4095 bytes, and
+the final upload was rejected as `incomplete-data`. The terminal string buffer
+was exactly 4096 bytes, so it could not hold Hibr's 4096 base64 bytes plus the
+Kitty APC header. The resulting image inventory was empty while the desktop
+continued rendering its terminal stream.
+
+0.1.504 raises only the bounded terminal-string capacity to 16 KiB. Hibr and
+its encoder are unchanged; decoded image limits are unchanged. The graphics
+trace gate now builds a TCC probe that emits four 4096-byte chunks and passes
+only when the image is complete, all four trace payloads are accepted, and no
+rejection is added. The package and live-host acceptance remain pending until
+this build is deployed and the authenticated live trace reports the same
+successful boundary.
 
 ## 0.1.486 candidate: Blit login-manager root entrypoint
 

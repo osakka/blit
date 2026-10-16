@@ -99,6 +99,17 @@ shell conformance path is stable.
    terminal session; conforming `q=2,m=1` and `q=2,m=0` continuations omit
    `i=` and are resolved to that current upload. See
    [ADR 0084](adr/0084-kitty-continuations-use-the-current-upload.md).
+   Hibr also sends 4096 base64 bytes per Kitty chunk. The bounded APC buffer
+   therefore carries the control header and the complete chunk before decode;
+   the boundary is covered by the large-chunk graphics trace gate and
+   [ADR 0096](adr/0096-kitty-apc-buffer-carries-the-full-hibr-chunk.md).
+   Hibr wallpaper is Kitty `f=100` PNG data, not a request to synthesize
+   half-block cells. Blit accumulates the complete bounded transmission,
+   decodes PNG into RGBA graphics, and presents those pixels in the graphics
+   scene. Half-block or block output is only a separately selected terminal
+   rendering mode; it is never an automatic substitute for a rejected or
+   incomplete Kitty image. The trace gate exercises a multi-chunk PNG and
+   rejects neither its full chunks nor its decoded image.
    The `CSI >` modifyOtherKeys family and the Kitty keyboard flag prefixes are
    parsed and consumed without leaking their control parameters into cell
    attributes.

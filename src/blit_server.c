@@ -74,6 +74,12 @@ extern char **environ;
 #define BLIT_REQUEST_SIZE 8192
 #define BLIT_MAX_CELL_COLS 512
 #define BLIT_MAX_CELL_ROWS 160
+/* Kitty permits a 4096-byte base64 chunk.  The APC header is carried in the
+   same terminal string, so a 4096-byte string buffer truncates every Hibr
+   continuation before the decoder sees its final base64 quartet.  Keep the
+   bounded parser buffer larger than the protocol chunk plus its header; this
+   is terminal-stream storage, not an image allocation. */
+#define BLIT_TERMINAL_STRING_CAPACITY 16384
 #define BLIT_MAX_INPUT_DEVICES 32
 #define BLIT_MAX_AUDIO_DEVICES 64
 /* ADR 0067. The settings document, and how long a burst of writes is allowed
@@ -819,7 +825,7 @@ typedef struct {
     unsigned char terminal_utf8_pending[4];
     int terminal_utf8_pending_length;
     int terminal_string_type;
-    char terminal_string[4096];
+    char terminal_string[BLIT_TERMINAL_STRING_CAPACITY];
     int terminal_string_length;
     /* Kitty continuation chunks intentionally omit `i=`. Keep the image
        selected by the opening transmission until its final chunk arrives;
