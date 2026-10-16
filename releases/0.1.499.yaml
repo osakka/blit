@@ -1,0 +1,22 @@
+release: 0.1.499
+package: blit_0.1.499-1_amd64.deb
+package_sha256: e9a7bfd5b4c13e9002279c87fb8d86e93078279ff9b20061d88d0fdd30273d3b
+source_commit: 2e338703150cfd46e431db5b6edf949a1ae218e8
+package_documentation_commit: 2e338703150cfd46e431db5b6edf949a1ae218e8
+server_binary_sha256: 3323c4940dc838cb24bbb3f2704078ef372479863ae546af1872ff12e0eabf3a
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.204
+hibr_adapter_build: tcc_from_exact_pinned_checkout
+tcc_build_acceptance: pass_server_helper_adapter
+focused_packaging_regression: pass_direct_installed_hibr_tree_no_mirror
+package_reproducibility: pass_rebuilt_identical
+package_artifact_acceptance: pass
+full_local_gates: pass_76_skip_3_fail_0
+qemu_hibr_oracle: skipped_missing_kernel_initramfs
+physical_host_deployment: pending
+notes: >-
+  0.1.499 rebuilds the Blit adapter against the Hibr release installed on the
+  physical host, 0.99.204. The packaged launcher sources Hibr's installed
+  /usr/share/hibr/desktop/session.hibr directly; no Hibr source or installed
+  Hibr desktop file was modified and no mirrored Hibr tree is packaged.
