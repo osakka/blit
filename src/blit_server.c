@@ -796,6 +796,7 @@ typedef struct {
     int hibr_resume_requested;
     int hibr_attach_unresolved;
     int login_manager;
+    int login_exit_reported;
     /* Cell requests the owner has had accepted for this session's surface,
        and when it registered. A desktop whose owner registered and then never
        painted is the blank-but-healthy state of issue #32, and these are what
@@ -14877,6 +14878,14 @@ static void service_login_manager(BlitRuntime *runtime, uint64_t now)
         if (strcmp(session->state, "running") == 0 ||
             strcmp(session->state, "starting") == 0)
             return;
+        if (session->login_manager && !session->login_exit_reported) {
+            snprintf(detail, sizeof(detail),
+                     "session=%llu state=%s exit_code=%d child_exited=%s",
+                     session->id, session->state, session->exit_code,
+                     session->child_exited ? "true" : "false");
+            diagnostic_log(runtime, "error", "login_session_exit", detail);
+            session->login_exit_reported = 1;
+        }
         if (runtime->login_restart_due_us == 0)
             runtime->login_restart_due_us = now + BLIT_LOGIN_RESTART_DELAY_US;
         if (now < runtime->login_restart_due_us)

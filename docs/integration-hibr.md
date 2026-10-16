@@ -57,6 +57,13 @@ retires the login PTY and Blit starts a fresh login screen. Hibr's root-path
 PAM/logind test is tracked by [Hibr #79](https://git.home.arpa/itdlabs/hibr/issues/79).
 Blit does not close or modify that Hibr issue.
 
+If an authenticated child exits and the login screen returns, inspect
+`GET /v1/diagnostics/runtime` immediately. The bounded diagnostic log contains
+one `login_session_exit` event with the retired session ID, state, and exit
+code. This distinguishes a PAM refusal, which stays in Hibr's login screen,
+from a desktop/session handoff that exited; it does not expose passwords or
+copy Hibr's private login log into Blit.
+
 ```text
 hibr desktop / desktop --join
         |

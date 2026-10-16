@@ -3,6 +3,15 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 0.1.501 candidate: retain login child exit evidence
+
+The live Hibr login loop exposed an observability gap: Blit retired the
+authenticated login child before `/v1/diagnostics/runtime` could identify why
+it exited. This candidate records one bounded `login_session_exit` diagnostic
+event with the session ID, state, and exit code before the login manager
+restarts. It changes no Hibr code or login behavior; it makes the existing
+handoff falsifiable through the API.
+
 ## 0.1.500 candidate: match the installed Hibr ABI
 
 The 0.1.499 package was built and gated against Hibr 0.99.204 after the live

@@ -64,6 +64,10 @@ for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
 done
 test -n "$second_id"
 test "$second_id" != "$first_id"
+runtime=$(curl --fail --silent --show-error \
+    -H "Authorization: Bearer $token" \
+    "http://127.0.0.1:$port/v1/diagnostics/runtime")
+printf '%s\n' "$runtime" | grep -q 'login_session_exit'
 
 code=$(curl --silent --show-error -o /dev/null -w '%{http_code}' \
     -H "Authorization: Bearer $token" -X DELETE \
