@@ -1425,6 +1425,29 @@ paths:
                 $ref: '#/components/schemas/TerminalInputReceipt'
         default:
           $ref: '#/components/responses/Problem'
+  /v1/terminal-sessions/{session_id}/graphics:
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+    delete:
+      tags: [terminals]
+      operationId: clearTerminalSessionGraphics
+      summary: Remove all retained graphics from a terminal surface
+      description: >-
+        Explicitly removes all Kitty, Sixel, and API-owned graphic objects
+        from the session surface and invalidates the full surface for the next
+        presentation. This is a lifecycle recovery operation for a producer
+        that changes rendering mode or restarts without sending its protocol
+        delete. It does not alter terminal cells and does not reinterpret an
+        ordinary terminal clear, because Kitty graphics persist until deleted.
+      responses:
+        '200':
+          description: Session after all graphics were removed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TerminalSession'
+        default:
+          $ref: '#/components/responses/Problem'
   /v1/terminal-sessions/{session_id}/hibr-owner:
     parameters:
       - $ref: '#/components/parameters/SessionId'

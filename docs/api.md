@@ -207,7 +207,7 @@ status codes.
 | Control | `POST /v1/control/shutdown`, `/restart` | Stop or restart the supervised server |
 | Updates | `POST /v1/control/update`, `GET /status`, `POST /cancel`, `/reset` | Upload and supervise a verified package update |
 
-The schema currently contains 42 path templates. Keep this table synchronized when a
+The schema currently contains 43 path templates. Keep this table synchronized when a
 path is added, removed, or renamed; the schema remains the authoritative count.
 
 ### Method-level reference
@@ -228,6 +228,7 @@ GET    /v1/terminal-sessions               authoritative live session inventory
 POST   /v1/terminal-sessions               create a PTY-backed session
 GET/PATCH/DELETE /v1/terminal-sessions/{id} lifecycle and placement
 POST   /v1/terminal-sessions/{id}/input    terminal input bytes
+DELETE /v1/terminal-sessions/{id}/graphics explicit retained-graphics reset
 GET    /v1/terminal-sessions/{id}/hibr-owner Hibr ownership state
 GET/PUT /v1/surfaces/{id}/cells            authoritative cell snapshot/update
 GET    /v1/surfaces/{id}/summary/scrollback repair and inspection

@@ -13,7 +13,7 @@ schema = YAML.load_file(schema_path)
 raise 'schema is not OpenAPI 3.1' unless schema.fetch('openapi') == '3.1.0'
 
 paths = schema.fetch('paths')
-raise "unexpected path count #{paths.length}" unless paths.length == 42
+raise "unexpected path count #{paths.length}" unless paths.length == 43
 
 observation_path = paths.fetch('/v1/diagnostics/observation')
 observation_get = observation_path.fetch('get')

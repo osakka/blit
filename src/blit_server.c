@@ -19472,6 +19472,44 @@ static void handle_request(int fd, BlitRuntime *runtime,
     }
     if (strncmp(path, "/v1/terminal-sessions/",
                 strlen("/v1/terminal-sessions/")) == 0 &&
+        strcmp(path + strlen(path) - 9, "/graphics") == 0 &&
+        strcmp(method, "DELETE") == 0) {
+        const char *suffix = path + strlen(path) - 9;
+        char session_path[128];
+        size_t session_path_length = (size_t)(suffix - path);
+        BlitSession *session;
+        BlitSurface *surface;
+
+        if (session_path_length == 0 || session_path_length >=
+            sizeof(session_path)) {
+            send_problem(fd, 404, "Not Found", "session_not_found",
+                         "The terminal session does not exist.");
+            return;
+        }
+        memcpy(session_path, path, session_path_length);
+        session_path[session_path_length] = '\0';
+        session = find_session(runtime, session_path);
+        if (session == NULL) {
+            send_problem(fd, 404, "Not Found", "session_not_found",
+                         "The terminal session does not exist.");
+            return;
+        }
+        surface = find_surface_id(runtime, session->id);
+        if (surface == NULL) {
+            send_problem(fd, 409, "Conflict", "surface_not_available",
+                         "The terminal session has no graphics-capable surface.");
+            return;
+        }
+        /* Explicit lifecycle recovery. Do not infer this from CSI clear:
+           Kitty images intentionally persist until explicitly deleted. */
+        kitty_delete(session, surface, 'A', 0, 0, 0, 0, 0);
+        ++session->revision;
+        session_json(runtime, session, body, sizeof(body));
+        send_http(fd, 200, "OK", "application/json", body);
+        return;
+    }
+    if (strncmp(path, "/v1/terminal-sessions/",
+                strlen("/v1/terminal-sessions/")) == 0 &&
         (strcmp(method, "GET") == 0 || strcmp(method, "PATCH") == 0 ||
          strcmp(method, "DELETE") == 0)) {
         BlitSession *session = find_session(runtime, path);
