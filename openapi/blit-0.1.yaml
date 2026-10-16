@@ -2423,15 +2423,21 @@ components:
         snapshot: {$ref: '#/components/schemas/Diagnostics'}
         hibr_compatibility:
           type: object
-          required: [pinned_version, runtime_version, probe, compatible]
+          required: [pinned_version, runtime_version, pinned_abi, runtime_abi,
+                     probe, compatible]
           description: >-
-            The Hibr version the shipped adapter was compiled for and the
-            version reported by the configured Hibr command at Blit startup.
-            `compatible` is null when the command could not be probed; a
-            mismatch is false and is also written to the runtime log.
+            The Hibr release and module ABI the shipped adapter was compiled
+            for, and the release and module ABI reported by the configured
+            Hibr command at Blit startup. The module ABI is the compatibility
+            contract; releases are retained as provenance and may drift while
+            the ABI remains equal. `compatible` is null when the command
+            could not be probed; an ABI mismatch is false and is also written
+            to the runtime log.
           properties:
             pinned_version: {type: string}
             runtime_version: {type: string}
+            pinned_abi: {type: integer, minimum: 1}
+            runtime_abi: {type: integer, minimum: 0}
             probe:
               type: string
               enum: [available, unavailable]

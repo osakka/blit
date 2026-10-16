@@ -3,6 +3,22 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 0.1.502 candidate: use Hibr ABI as the compatibility contract
+
+Hibr `--version` reports both its release and its module ABI, and Hibr's
+module documentation defines `HIBR_ABI` as the load-time compatibility
+boundary. Blit now packages that ABI in `HIBR_ABI`, validates it when building
+the TCC adapter, reports both pinned and runtime identities through
+`/v1/diagnostics/runtime`, and decides compatibility from ABI equality. Exact
+release values remain provenance. This allows a host to advance from Hibr
+0.99.212 to 0.99.213 while ABI 16 remains stable, while still failing closed
+on a future ABI change. Hibr source and installation are not modified.
+
+This candidate also renames the mismatch event to `hibr_abi_mismatch` and
+retains the structured `login_session_exit` event from 0.1.501. The package,
+schema, focused gates, and live deployment must be completed before the
+authenticated desktop login is retested.
+
 ## 0.1.501 candidate: retain login child exit evidence
 
 The live Hibr login loop exposed an observability gap: Blit retired the

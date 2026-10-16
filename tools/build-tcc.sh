@@ -6,6 +6,7 @@ output=${1:-$ROOT/build/blit/blit-server}
 target=${2:-server}
 version=$(sed -n '1p' "$ROOT/packaging/VERSION")
 hibr_version=$(sed -n '1p' "$ROOT/packaging/HIBR_VERSION")
+hibr_abi=$(sed -n '1p' "$ROOT/packaging/HIBR_ABI")
 
 case "$version" in
     [0-9]*.[0-9]*.[0-9]*) ;;
@@ -15,6 +16,9 @@ case "$hibr_version" in
     [0-9]*.[0-9]*.[0-9]*) ;;
     *) echo "blit: invalid version in packaging/HIBR_VERSION" >&2; exit 1 ;;
 esac
+case "$hibr_abi" in
+    ''|*[!0-9]*) echo "blit: invalid ABI in packaging/HIBR_ABI" >&2; exit 1 ;;
+esac
 
 mkdir -p "$(dirname -- "$output")"
 case "$target" in
@@ -22,6 +26,7 @@ case "$target" in
         tcc -O2 -std=c99 \
             "-DBLIT_BUILD_VERSION=\"$version\"" \
             "-DBLIT_HIBR_VERSION=\"$hibr_version\"" \
+            "-DBLIT_HIBR_ABI=$hibr_abi" \
             -I"$ROOT/vendor/SDL3/include" \
             -I"$ROOT/build/deps/prefix/include" \
             -I"$ROOT/build/deps/prefix/include/libdrm" \
@@ -47,9 +52,15 @@ case "$target" in
         expected_hibr_version=$(sed -n '1p' "$ROOT/packaging/HIBR_VERSION")
         actual_hibr_version=$(sed -n 's/^#define HIBR_VER "\(.*\)"/\1/p' \
             "$hibr_root/include/hibr.h" | head -n 1)
+        actual_hibr_abi=$(sed -n 's/^#define HIBR_ABI \(.*\)u/\1/p' \
+            "$hibr_root/include/hibr.h" | head -n 1)
         if [ -z "$expected_hibr_version" ] ||
            [ "$actual_hibr_version" != "$expected_hibr_version" ]; then
             echo "blit: Hibr adapter target mismatch: expected $expected_hibr_version, found $actual_hibr_version under $hibr_root" >&2
+            exit 1
+        fi
+        if [ "$actual_hibr_abi" != "$hibr_abi" ]; then
+            echo "blit: Hibr adapter ABI mismatch: expected $hibr_abi, found $actual_hibr_abi under $hibr_root" >&2
             exit 1
         fi
         tcc -O2 -std=c99 -shared -fPIC \

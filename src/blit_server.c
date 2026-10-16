@@ -50,6 +50,9 @@ extern char **environ;
 #ifndef BLIT_HIBR_VERSION
 #define BLIT_HIBR_VERSION "unknown"
 #endif
+#ifndef BLIT_HIBR_ABI
+#define BLIT_HIBR_ABI 0
+#endif
 
 /* Every surface is drawn inset from its pane origin by this many pixels on
    both axes. It is a presentation margin, not part of the cell geometry, so
@@ -1026,6 +1029,7 @@ typedef struct {
     int login_start_reported;
     char hibr_runtime_version[64];
     int hibr_runtime_probe_ok;
+    int hibr_runtime_abi;
     int opener_notify[2];
     unsigned long long diagnostic_open_requests;
     unsigned long long diagnostic_open_requests_dropped;
@@ -2726,6 +2730,7 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
     used = (size_t)snprintf(body, capacity,
         "{\"snapshot\":%s,\"hibr_compatibility\":{"
         "\"pinned_version\":\"%s\",\"runtime_version\":\"%s\","
+        "\"pinned_abi\":%d,\"runtime_abi\":%d,"
         "\"probe\":\"%s\",\"compatible\":%s},"
         "\"performance\":{\"uptime_ms\":%llu,"
         "\"frames\":%llu,\"last_frame_gap_ms\":%.3f,"
@@ -2805,9 +2810,11 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         snapshot,
         BLIT_HIBR_VERSION,
         runtime->hibr_runtime_probe_ok ? runtime->hibr_runtime_version : "",
+        BLIT_HIBR_ABI,
+        runtime->hibr_runtime_probe_ok ? runtime->hibr_runtime_abi : 0,
         runtime->hibr_runtime_probe_ok ? "available" : "unavailable",
         runtime->hibr_runtime_probe_ok ?
-            (strcmp(BLIT_HIBR_VERSION, runtime->hibr_runtime_version) == 0 ?
+            (runtime->hibr_runtime_abi == BLIT_HIBR_ABI ?
                 "true" : "false") : "null",
         runtime->started_us > 0 && now >= runtime->started_us ?
             (unsigned long long)((now - runtime->started_us) / 1000ULL) : 0,
@@ -25752,16 +25759,18 @@ static int run_capture_command(const char *command, const char *argument,
     return 1;
 }
 
-static int probe_hibr_version(const char *command, char *version,
-                              size_t capacity)
+static int probe_hibr_identity(const char *command, char *version,
+                               size_t capacity, int *abi)
 {
     char output[128];
     const char *start;
+    const char *abi_start;
     size_t length = 0;
+    int parsed_abi;
 
     if (command == NULL || command[0] == '\0' || version == NULL ||
-        capacity < 2 || !run_capture_command(command, "--version", output,
-                                             sizeof(output)))
+        abi == NULL || capacity < 2 ||
+        !run_capture_command(command, "--version", output, sizeof(output)))
         return 0;
     start = strstr(output, "hibr ");
     if (start == NULL)
@@ -25774,6 +25783,13 @@ static int probe_hibr_version(const char *command, char *version,
         return 0;
     memcpy(version, start, length);
     version[length] = '\0';
+    abi_start = strstr(start + length, " abi ");
+    if (abi_start == NULL)
+        return 0;
+    parsed_abi = atoi(abi_start + 5);
+    if (parsed_abi <= 0)
+        return 0;
+    *abi = parsed_abi;
     return 1;
 }
 
@@ -26406,15 +26422,18 @@ int main(int argc, char **argv)
                          sizeof(runtime.login_pane_id), "%s", login_pane);
         }
     }
-    runtime.hibr_runtime_probe_ok = probe_hibr_version(
+    runtime.hibr_runtime_probe_ok = probe_hibr_identity(
         runtime.login_command, runtime.hibr_runtime_version,
-        sizeof(runtime.hibr_runtime_version));
+        sizeof(runtime.hibr_runtime_version), &runtime.hibr_runtime_abi);
     if (!runtime.hibr_runtime_probe_ok)
         diagnostic_log(&runtime, "warning", "hibr_version_unavailable",
                        "configured Hibr command did not report a version");
+    else if (runtime.hibr_runtime_abi != BLIT_HIBR_ABI)
+        diagnostic_log(&runtime, "error", "hibr_abi_mismatch",
+                       "running Hibr module ABI differs from the packaged adapter ABI");
     else if (strcmp(BLIT_HIBR_VERSION, runtime.hibr_runtime_version) != 0)
-        diagnostic_log(&runtime, "error", "hibr_version_mismatch",
-                       "running Hibr version differs from the packaged adapter pin");
+        diagnostic_log(&runtime, "info", "hibr_version_drift",
+                       "running Hibr release differs while the documented module ABI matches");
     /* ADR 0067. The settings document, read before the first scan so that a
        device found at boot acquires its stored configuration in the same place
        a device hotplugged an hour later does.

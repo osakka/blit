@@ -3,7 +3,16 @@
 The roadmap is ordered by dependency. A later milestone must not become a
 second, parallel implementation of an earlier one.
 
-## Current position — 0.1.500 installed-Hibr ABI candidate
+## Current position — 0.1.502 Hibr ABI compatibility candidate
+
+Blit now uses Hibr's documented numeric module ABI as its runtime
+compatibility contract. The exact Hibr release remains a build and runtime
+provenance field, so a compatible host patch release does not falsely block
+the login handoff. The next acceptance boundary is a rebuilt, gated package
+deployed to the live host, followed by one authenticated login attempt whose
+`login_session_exit` or desktop-owner evidence is collected through the API.
+
+## Previous position — 0.1.500 installed-Hibr ABI candidate
 
 The live deployment of 0.1.498 proved the direct installed Hibr session path.
 The 0.1.499 candidate was then rejected by its own compatibility diagnostic:

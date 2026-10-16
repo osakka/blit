@@ -114,6 +114,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0090 — Full-frame composition has an explicit workload budget](0090-full-frame-composition-budget.md)
 - [0091 — Generate release identity from the package](0091-generated-release-identity.md)
 - [0092 — Authenticated, correlated diagnostic bundles](0092-authenticated-diagnostic-bundles.md)
+- [0094 — Use Hibr module ABI for runtime compatibility](0094-hibr-abi-is-the-runtime-compatibility-contract.md)
 
 ## Adding an ADR
 

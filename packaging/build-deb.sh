@@ -10,6 +10,7 @@ HIBR_LOGIN_WRAPPER=$ROOT/hibr/blit-login.hibr
 HIBR_LOGIN_ENTRYPOINT=$ROOT/hibr/blit-login-session.hibr
 HIBR_RUNTIME_RC=$ROOT/hibr/blit-runtime-console.hibr
 HIBR_VERSION_FILE=$ROOT/packaging/HIBR_VERSION
+HIBR_ABI_FILE=$ROOT/packaging/HIBR_ABI
 OUT=${1:-$ROOT}
 VERSION_FILE=$ROOT/packaging/VERSION
 HIBR_ROOT=${BLIT_HIBR_ROOT:-}
@@ -33,7 +34,7 @@ if [ ! -x "$RUNTIME_BINARY" ] || [ ! -x "$UPDATE_HELPER" ] ||
    [ ! -f "$VERSION_FILE" ] || [ ! -f "$HIBR_ENTRYPOINT" ] ||
    [ ! -f "$HIBR_LOGIN_WRAPPER" ] ||
    [ ! -f "$HIBR_LOGIN_ENTRYPOINT" ] ||
-   [ ! -f "$HIBR_VERSION_FILE" ]; then
+   [ ! -f "$HIBR_VERSION_FILE" ] || [ ! -f "$HIBR_ABI_FILE" ]; then
 	echo "blit: canonical build outputs are incomplete" >&2
 	exit 1
 fi
@@ -157,6 +158,7 @@ ln -s /usr/lib/blit/bin/blit-server "$stage/usr/bin/blit"
 cp -a "$BUNDLE/README.md" "$stage/usr/share/doc/blit/"
 cp -a "$VERSION_FILE" "$stage/usr/share/doc/blit/VERSION"
 cp -a "$HIBR_VERSION_FILE" "$stage/usr/share/doc/blit/HIBR_VERSION"
+cp -a "$HIBR_ABI_FILE" "$stage/usr/share/doc/blit/HIBR_ABI"
 if [ -d "$ROOT/docs" ]; then
 	cp -a "$ROOT/docs" "$stage/usr/share/doc/blit/"
 else

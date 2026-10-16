@@ -99,7 +99,7 @@ fi
 ruby -rjson -e 'JSON.parse(File.read(ARGV.fetch(0)))' "$RUNTIME_DIAGNOSTICS"
 ruby -rjson -e '
   compatibility = JSON.parse(File.read(ARGV.fetch(0))).fetch("hibr_compatibility")
-  %w[pinned_version runtime_version probe compatible].each do |key|
+  %w[pinned_version runtime_version pinned_abi runtime_abi probe compatible].each do |key|
     abort "network gate: missing Hibr compatibility field #{key}" unless compatibility.key?(key)
   end
   abort "network gate: invalid Hibr compatibility probe" unless

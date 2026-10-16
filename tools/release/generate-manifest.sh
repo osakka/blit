@@ -45,6 +45,7 @@ render_manifest() {
     helper_sha256=$8
     adapter_sha256=$9
     hibr_version=${10}
+    hibr_abi=${11}
 
     cat <<EOF
 release: $release
@@ -56,6 +57,7 @@ server_binary_sha256: $server_sha256
 update_helper_sha256: $helper_sha256
 hibr_adapter_sha256: $adapter_sha256
 hibr_version: $hibr_version
+hibr_abi: $hibr_abi
 EOF
 }
 
@@ -88,7 +90,9 @@ generate() {
     helper="$stage/usr/lib/blit/bin/blit-update-helper"
     adapter="$stage/usr/lib/blit/hibr/console-blit.so"
     hibr_file="$stage/usr/share/doc/blit/HIBR_VERSION"
-    for required in "$server" "$helper" "$adapter" "$hibr_file"; do
+    hibr_abi_file="$stage/usr/share/doc/blit/HIBR_ABI"
+    for required in "$server" "$helper" "$adapter" "$hibr_file" \
+        "$hibr_abi_file"; do
         test -f "$required" || fail "package is missing $required"
     done
     server_sha256=$(sha256sum "$server" | awk '{print $1}')
@@ -96,6 +100,10 @@ generate() {
     adapter_sha256=$(sha256sum "$adapter" | awk '{print $1}')
     hibr_version=$(sed -n '1p' "$hibr_file")
     [ "$hibr_version" != "" ] || fail "packaged HIBR_VERSION is empty"
+    hibr_abi=$(sed -n '1p' "$hibr_abi_file")
+    case "$hibr_abi" in
+        ''|*[!0-9]*) fail "packaged HIBR_ABI is invalid" ;;
+    esac
 
     if [ -n "$output" ]; then
         output_dir=$(dirname "$output")
@@ -104,13 +112,13 @@ generate() {
         render_manifest "$package" "$package_version" "$release" \
             "$package_sha256" "$source_commit" "$documentation_commit" \
             "$server_sha256" "$helper_sha256" "$adapter_sha256" \
-            "$hibr_version" >"$temporary"
+            "$hibr_version" "$hibr_abi" >"$temporary"
         mv -f "$temporary" "$output"
     else
         render_manifest "$package" "$package_version" "$release" \
             "$package_sha256" "$source_commit" "$documentation_commit" \
             "$server_sha256" "$helper_sha256" "$adapter_sha256" \
-            "$hibr_version"
+            "$hibr_version" "$hibr_abi"
     fi
 }
 

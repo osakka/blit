@@ -10,37 +10,44 @@ to contain a stale adapter even when the source and release metadata named a
 different Hibr version.
 
 The package also needs to report whether the Hibr executable it will launch
-matches the adapter pin. A package hash alone cannot answer that host-runtime
-question.
+is compatible with the adapter. A package hash or exact release string alone
+cannot answer that host-runtime question: Hibr's documented module boundary
+is its numeric `HIBR_ABI`.
 
 ## Decision
 
 `packaging/build-deb.sh` requires `BLIT_HIBR_ROOT` and compiles
 `console-blit.so` into the package staging tree with the canonical TCC build
 script. The build script validates the checkout's `include/hibr.h` against
-`packaging/HIBR_VERSION`; no pre-existing adapter is accepted as package
-input.
+both `packaging/HIBR_VERSION` and `packaging/HIBR_ABI`; no pre-existing
+adapter is accepted as package input.
 
 The server binary is compiled with the same Hibr pin and exposes
 `hibr_compatibility` in `/v1/diagnostics/runtime`. At startup it invokes the
 configured Hibr command with `--version` without a shell, records the result,
-and reports `compatible: false` on a mismatch or `compatible: null` when the
-probe is unavailable. A mismatch is also a structured runtime log event.
+and reports `compatible: false` on an ABI mismatch or `compatible: null` when
+the probe is unavailable. A release mismatch with an equal ABI is
+informational drift and is accepted. Both identities are exposed for
+provenance, and an ABI mismatch is also a structured runtime log event.
 
 ## Consequences
 
 - A package build cannot silently reuse an adapter from another Hibr checkout.
 - The release gate proves both the negative case (no checkout means no package)
   and the positive exact-pinned build.
-- Operators can distinguish a package built for one Hibr from a host running
-  another through the existing diagnostics API.
+- Operators can distinguish the packaged Hibr release and ABI from the host's
+  runtime release and ABI through the existing diagnostics API.
+- Patch or minor release movement within the same documented module ABI no
+  longer causes a false compatibility failure; an ABI change still fails
+  closed.
 - The startup probe is bounded to one non-shell `hibr --version` invocation;
   an unavailable or non-conforming command is reported, not treated as a
   compatible runtime.
 
 ## Verification
 
-- `tools/build-tcc.sh` compiles the server with `packaging/HIBR_VERSION`.
+- `tools/build-tcc.sh` compiles the server with `packaging/HIBR_VERSION` and
+  `packaging/HIBR_ABI`.
 - `tools/tests/package_artifact_gate.sh` rejects a package build without
   `BLIT_HIBR_ROOT`, rebuilds with the exact pinned checkout, and checks the
   resulting package hashes and reproducibility.
