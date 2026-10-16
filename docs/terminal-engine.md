@@ -125,6 +125,9 @@ shell conformance path is stable.
    SGR italic (`3`/`23`), blink (`5`/`6`/`25`), and strike (`9`/`29`) are
    retained in the canonical style and exposed consistently through the API,
    SDL, and KMS paths.
+   DA1 answers `CSI ? 62 ; 4 ; 22 c` (level 2, sixel, ANSI colour); the `4`
+   is load-bearing, because Hibr treats a DA1 reply without it as a definite
+   "no sixel" and falls back to half blocks (issue #87).
    Device status replies include DA1/DA2, XTVERSION, CPR, window size,
    DECRQSS, and XTGETTCAP; erase operations preserve the active background
    colour according to BCE semantics.
@@ -306,3 +309,22 @@ is implemented as a full-grid `E` fill for diagnostics and terminal probes.
 Supported terminal status queries include device attributes (`CSI c`), device
 status (`CSI 5 n`), cursor position (`CSI 6 n`), and DEC mode reports
 (`CSI ? Ps $ p` / `CSI Ps $ p`) for the modes Blit owns.
+
+### Layering and slot lifetime (issues #84, #85)
+
+Graphics are composed per surface in this order: images with
+`z < -1073741824` (under cell backgrounds), opaque background quads, images
+with `-1073741824 <= z < 0` (over backgrounds, under text), glyphs, cursor,
+images with `z >= 0`. A cell whose resolved background equals the terminal
+default draws no quad, so an image under the text shows through it; the
+default colour (OSC 11, or black) is instead the floor of the surface. A cell
+with an explicit colour, including explicit black on a non-black default, is
+opaque. Hibr's wallpaper is `z = -1073741825` and depends on all of this. OSC
+10/11 queries are always answered, from the session default when nothing was
+configured. The KMS compositor does not yet implement the bands (issue filed
+separately).
+
+A session has eight image slots shared by Kitty, sixel and API images. A
+sixel has no id a client can place again, so one that scrolls off the page is
+released immediately, and a full table reclaims the oldest complete image
+with no placement before refusing with `image-store-full`.

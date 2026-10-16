@@ -1111,8 +1111,8 @@ snapshot = run_case(base, 'da2-query',
 assert_equal('1b5b3e313b31303b3063', row_text(snapshot), 'DA2 reply')
 
 snapshot = run_case(base, 'da1-query',
-                    "stty -icanon -echo min 0 time 5; printf '\\033[c'; dd if=/dev/tty bs=1 count=9 2>/dev/null | od -An -tx1 | tr -d ' \\n'")
-assert_equal('1b5b3f36323b323263', row_text(snapshot), 'DA1 reply')
+                    "stty -icanon -echo min 0 time 5; printf '\\033[c'; dd if=/dev/tty bs=1 count=11 2>/dev/null | od -An -tx1 | tr -d ' \\n'", width: 80)
+assert_equal('1b5b3f36323b343b323263', row_text(snapshot), 'DA1 reply advertises sixel')
 
 snapshot = run_case(base, 'xtversion-query',
                     "stty -icanon -echo min 0 time 5; printf '\\033[>q'; dd if=/dev/tty bs=1 count=19 2>/dev/null | od -An -tx1 | tr -d ' \\n'", width: 80)
@@ -1743,8 +1743,8 @@ assert_equal('B', cells.fetch([1, 1]).fetch('text'), 'vertical-tab line feed')
 assert_equal('C', cells.fetch([2, 2]).fetch('text'), 'form-feed line feed')
 
 snapshot = run_case(base, 'legacy-decid-query',
-                    "stty -icanon -echo min 0 time 5; printf '\\033Z'; dd if=/dev/tty bs=1 count=9 2>/dev/null | od -An -tx1 | tr -d ' \\n'")
-assert_equal('1b5b3f36323b323263', row_text(snapshot), 'legacy DECID reply')
+                    "stty -icanon -echo min 0 time 5; printf '\\033Z'; dd if=/dev/tty bs=1 count=11 2>/dev/null | od -An -tx1 | tr -d ' \\n'", width: 80)
+assert_equal('1b5b3f36323b343b323263', row_text(snapshot), 'legacy DECID reply')
 
 run_session_field_case(base, 'osc-title-bel', "printf '\\033]0;bel title\\007'",
                        'title', 'bel title')

@@ -80,6 +80,9 @@ extern char **environ;
    bounded parser buffer larger than the protocol chunk plus its header; this
    is terminal-stream storage, not an image allocation. */
 #define BLIT_TERMINAL_STRING_CAPACITY 16384
+/* DA1: VT500 class 62, 4 = sixel graphics, 22 = ANSI colour. A client that
+   is told sixel is absent never sends it (Gitea #87). */
+#define BLIT_DA1_REPLY "\033[?62;4;22c"
 #define BLIT_MAX_INPUT_DEVICES 32
 #define BLIT_MAX_AUDIO_DEVICES 64
 /* ADR 0067. The settings document, and how long a burst of writes is allowed
@@ -8457,6 +8460,11 @@ static void terminal_scroll_graphics(BlitSession *session,
         if (image_moved) {
             ++image->revision;
             moved = 1;
+            /* A sixel has no id a client can place again, so once it has
+               scrolled off nothing can ever show it. Keeping it only held
+               one of the eight slots for good (Gitea #85). */
+            if (!image->visible && strcmp(image->protocol, "sixel") == 0)
+                graphics_image_release(image);
         }
     }
     if (moved) mark_surface_full_damage(surface);
@@ -9155,12 +9163,21 @@ static void terminal_apply_osc(BlitSession *session, BlitSurface *surface)
         const char *configured = command == 10 ?
             session->terminal_default_foreground :
             session->terminal_default_background;
-        if (terminal_colour_reply(configured, colour, sizeof(colour))) {
-            char reply[96];
-            snprintf(reply, sizeof(reply), "\033]%d;%s\033\\",
-                     command, colour);
-            terminal_write_reply(session, reply);
+        char reply[96];
+        if (!terminal_colour_reply(configured, colour, sizeof(colour))) {
+            /* No configured value still has a default, and it is the one
+               the renderer paints with. Staying silent made a client guess,
+               and Hibr's cn_opaque guesses wrong (Gitea #84). */
+            char fallback[8];
+            uint32_t effective = command == 10 ?
+                session_default_foreground(session) :
+                session_default_background(session);
+            snprintf(fallback, sizeof(fallback), "#%06x",
+                     (unsigned)(effective & 0xffffffU));
+            terminal_colour_reply(fallback, colour, sizeof(colour));
         }
+        snprintf(reply, sizeof(reply), "\033]%d;%s\033\\", command, colour);
+        terminal_write_reply(session, reply);
     } else if (command == 10 || command == 11) {
         /* A set changes what every unstyled cell is painted with, so the
            whole surface has to be repainted, not just the cursor cell. */
@@ -9747,6 +9764,31 @@ static int kitty_image_has_placement(const BlitGraphicsImage *image)
     for (slot = 0; slot < BLIT_GRAPHICS_MAX_PLACEMENTS; ++slot)
         if (image->placements[slot].used) return 1;
     return 0;
+}
+
+/* A slot for a new image when the store is full: the least recently changed
+   complete Kitty or sixel image that nothing shows. Anything still on screen,
+   still uploading, or owned by the API is left alone. */
+static BlitGraphicsImage *graphics_reclaim_unshown(BlitSession *session)
+{
+    BlitGraphicsImage *oldest = NULL;
+    int index;
+
+    for (index = 0; index < BLIT_GRAPHICS_MAX_IMAGES; ++index) {
+        BlitGraphicsImage *image = &session->graphics[index];
+        if (!image->used || !image->complete ||
+            kitty_image_has_placement(image) ||
+            (strcmp(image->protocol, "kitty") != 0 &&
+             strcmp(image->protocol, "sixel") != 0))
+            continue;
+        if (oldest == NULL || image->revision < oldest->revision)
+            oldest = image;
+    }
+    if (oldest != NULL) {
+        graphics_image_release(oldest);
+        ++session->graphics_evicted;
+    }
+    return oldest;
 }
 
 /* a=d. Lowercase targets remove placements and keep the image's data;
@@ -10590,6 +10632,8 @@ static void terminal_apply_sixel(BlitSession *session, BlitSurface *surface,
             image = &session->graphics[i];
             break;
         }
+    if (image == NULL)
+        image = graphics_reclaim_unshown(session);
     if (image == NULL) {
         free(canvas.pixels);
         graphics_reject(session, "image-store-full");
@@ -11882,7 +11926,7 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
     } else if (!private_mode && command == 'c') {
         if (!has_first || first == 0)
             /* Match Hibr's VT220-compatible primary device identity. */
-            terminal_write_reply(session, "\033[?62;22c");
+            terminal_write_reply(session, BLIT_DA1_REPLY);
     } else if (!private_mode && command == 'n' && has_first && first == 5) {
         terminal_write_reply(session, "\033[0n");
     } else if (!private_mode && command == 'n' && has_first && first == 6) {
@@ -12575,7 +12619,7 @@ static int terminal_consume_output(BlitRuntime *runtime, BlitSession *session,
                 session->terminal_escape = 0;
             } else if (byte == 'Z') {
                 /* VT100/VT500 DECID is the legacy spelling of DA1. */
-                terminal_write_reply(session, "\033[?62;22c");
+                terminal_write_reply(session, BLIT_DA1_REPLY);
                 session->terminal_escape = 0;
             } else {
                 session->terminal_escape = 0;
@@ -22589,10 +22633,20 @@ static SDL_Texture *sdl_graphics_texture(BlitOutput *output,
     return texture;
 }
 
+/* Kitty z bands: below -2^30 is under cell backgrounds, [-2^30, 0) is over
+   backgrounds but under text, and 0 or more is over text. */
+#define BLIT_GRAPHICS_Z_UNDER_BACKGROUND (-1073741824)
+
+enum {
+    BLIT_GRAPHICS_LAYER_OVER_TEXT = 0,
+    BLIT_GRAPHICS_LAYER_UNDER_BACKGROUND = 1,
+    BLIT_GRAPHICS_LAYER_UNDER_TEXT = 2
+};
+
 static int render_sdl_graphics(BlitOutput *output,
                                const BlitGraphicsImage *images,
                                int image_count, float origin_x, float origin_y,
-                               int under_text)
+                               int layer)
 {
     SDL_Renderer *renderer = output != NULL ? output->renderer : NULL;
     BlitGraphicsDraw draws[BLIT_GRAPHICS_MAX_DRAWS];
@@ -22606,7 +22660,11 @@ static int render_sdl_graphics(BlitOutput *output,
         SDL_FRect source;
         SDL_FRect destination;
 
-        if ((under_text && draw->z >= 0) || (!under_text && draw->z < 0))
+        if (layer == BLIT_GRAPHICS_LAYER_UNDER_BACKGROUND ?
+                draw->z >= BLIT_GRAPHICS_Z_UNDER_BACKGROUND :
+            layer == BLIT_GRAPHICS_LAYER_UNDER_TEXT ?
+                (draw->z < BLIT_GRAPHICS_Z_UNDER_BACKGROUND || draw->z >= 0) :
+                draw->z < 0)
             continue;
         texture = sdl_graphics_texture(output, draw->image);
         if (texture == NULL) continue;
@@ -23416,6 +23474,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             int column;
             uint32_t default_foreground;
             uint32_t default_background;
+            SDL_Rect under_text_clip = {0, 0, 0, 0};
 
             if (surface == NULL || !surface->used ||
                 surface->revision != plan->surfaces[plan_index].surface_revision)
@@ -23485,10 +23544,29 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                     damage.y = (float)surface_origin_y + first_row * (float)cell_height;
                     damage.w = (float)surface->width * (float)cell_width;
                     damage.h = plan->surfaces[plan_index].damage_height * (float)cell_height;
-                    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+                    SDL_SetRenderDrawColor(renderer,
+                        (unsigned char)(default_background >> 16),
+                        (unsigned char)(default_background >> 8),
+                        (unsigned char)default_background, 255);
                     SDL_RenderFillRect(renderer, &damage);
                     SDL_SetRenderDrawColor(renderer, 190, 210, 190, 255);
                 }
+            } else if (default_background != 0) {
+                /* The scene was cleared to black. A cell that takes the
+                   default background draws no quad of its own (so images
+                   below the text can show through it), which means the
+                   default colour has to be the surface's own floor. */
+                SDL_FRect floor_rect;
+                floor_rect.x = surface_origin_x;
+                floor_rect.y = (float)surface_origin_y;
+                floor_rect.w = (float)surface->width * (float)cell_width;
+                floor_rect.h = (float)surface->height * (float)cell_height;
+                SDL_SetRenderDrawColor(renderer,
+                    (unsigned char)(default_background >> 16),
+                    (unsigned char)(default_background >> 8),
+                    (unsigned char)default_background, 255);
+                SDL_RenderFillRect(renderer, &floor_rect);
+                SDL_SetRenderDrawColor(renderer, 190, 210, 190, 255);
             }
             last_row = full_redraw ? surface->height : last_row;
             if (last_row > BLIT_MAX_CELL_ROWS)
@@ -23519,8 +23597,10 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                 api_images_drawn += render_sdl_graphics(
                     &runtime->outputs[output_index], render_source->graphics,
                     BLIT_GRAPHICS_MAX_IMAGES, surface_origin_x,
-                    (float)surface_origin_y, 1);
+                    (float)surface_origin_y,
+                    BLIT_GRAPHICS_LAYER_UNDER_BACKGROUND);
                 SDL_SetRenderClipRect(renderer, NULL);
+                under_text_clip = graphics_clip;
             }
 
             /* Wallpaper themes commonly express nearly every terminal cell
@@ -23547,7 +23627,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                         foreground = background ? background : 0;
                         background = swapped;
                     }
-                    if (background == 0) {
+                    if (background == default_background) {
                         ++column;
                         continue;
                     }
@@ -23597,6 +23677,12 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                 }
             }
             flush_sdl_background_batch(&runtime->outputs[output_index]);
+            SDL_SetRenderClipRect(renderer, &under_text_clip);
+            api_images_drawn += render_sdl_graphics(
+                &runtime->outputs[output_index], render_source->graphics,
+                BLIT_GRAPHICS_MAX_IMAGES, surface_origin_x,
+                (float)surface_origin_y, BLIT_GRAPHICS_LAYER_UNDER_TEXT);
+            SDL_SetRenderClipRect(renderer, NULL);
             for (row = first_row; row < last_row; ++row) {
                 for (column = 0; column < surface->width &&
                      column < BLIT_MAX_CELL_COLS; ++column) {

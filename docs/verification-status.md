@@ -36,6 +36,20 @@ The claim vocabulary is strict: timing stability is only timing stability;
 process liveness is only process liveness; an incomplete screenshot is a
 failed visual result. No broader claim may be inferred from these observations.
 
+## Unreleased: rendering contract fixes (#84, #85, #87) -- validated, not host-accepted
+
+Three server defects behind the Sixel/half-block/Kitty inconsistency are fixed
+in source: Kitty z bands and default-background transparency in the SDL path
+(#84), sixel slots never released so the ninth picture was refused (#85), and
+a DA1 reply that did not advertise sixel (#87). New gates
+`sdl_graphics_band_gate.rb` and `sixel_slot_gate.rb` fail on the 0.1.507
+binary (band gate: 0 of 512 wallpaper pixels visible; slot gate: 5 pictures
+rejected with `image-store-full`) and pass on the fix; the renderer and
+terminal suites pass (48 gates). Validated on the dummy SDL backend only.
+Not deployed, not host-accepted. The live half-block fallback on the host is
+not yet explained by these defects and needs a Hibr debug log from a restored
+desktop.
+
 ## 0.1.507 candidate: ping-pong SDL scene composition
 
 The real 0.1.506 host reproduced the reported fast-update symptom through a
