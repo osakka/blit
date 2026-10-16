@@ -1,0 +1,25 @@
+release: 0.1.496
+package: blit_0.1.496-1_amd64.deb
+package_sha256: 545c5549eec6e695b3081ddb4370274a6c07f0537925414c61bce4956cbbac15
+source_commit: d65b975
+package_documentation_commit: d65b975
+server_binary_sha256: bed9ddcf94c5e6b0337646fb9d37817a17797778f7822c45570b606b51e7056a
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.191
+hibr_adapter_build: tcc_from_exact_pinned_checkout
+tcc_build_acceptance: pass_server_helper_adapter
+focused_release_identity: pass_generated_from_package
+focused_api_schema: pass_paths_41
+package_reproducibility: pass_rebuilt_identical
+package_artifact_acceptance: pass
+physical_host_acceptance: not_run
+physical_multi_monitor_acceptance: unavailable_one_output
+physical_high_refresh_acceptance: open_issue_21
+notes: >-
+  0.1.496 carries the issue #27 release-provenance tooling slice. The
+  machine-owned identity fields above were generated from this exact Debian
+  archive and the package gate verifies them; acceptance notes remain
+  explicit evidence. The package was built with TCC against the exact pinned
+  Hibr 0.99.191 checkout. Hibr source was not modified. CI and automatic
+  live-update rollback/restore remain open portions of issue #27.
