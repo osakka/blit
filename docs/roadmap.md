@@ -3,13 +3,14 @@
 The roadmap is ordered by dependency. A later milestone must not become a
 second, parallel implementation of an earlier one.
 
-## Current position — 0.1.499 installed-Hibr ABI candidate
+## Current position — 0.1.500 installed-Hibr ABI candidate
 
-The live deployment of 0.1.498 proved the direct installed Hibr session path,
-but its runtime diagnostics exposed that the host runs Hibr 0.99.204 while the
-package adapter was pinned to 0.99.191. This candidate rebuilds the adapter
-against the exact host release. Physical Hibr acceptance remains blocked until
-the candidate reports `compatible=true` on the live host and the desktop menu,
+The live deployment of 0.1.498 proved the direct installed Hibr session path.
+The 0.1.499 candidate was then rejected by its own compatibility diagnostic:
+the host had advanced to Hibr 0.99.212 while that package was pinned to
+0.99.204. This candidate rebuilds the adapter against the host's current
+released version. Physical Hibr acceptance remains blocked until the
+candidate reports `compatible=true` on the live host and the desktop menu,
 input, joins, and rendering are retested on that exact package.
 
 ## Previous position — 0.1.497 authenticated-diagnostics candidate

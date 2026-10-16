@@ -3,6 +3,18 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 0.1.500 candidate: match the installed Hibr ABI
+
+The 0.1.499 package was built and gated against Hibr 0.99.204 after the live
+host reported that version. Before deployment, the host advanced to Hibr
+0.99.212. After deployment, Blit's diagnostics correctly reported
+`hibr_compatibility.compatible=false`; 0.1.499 is rejected as a physical-host
+artifact. No Hibr source or installed file was modified by Blit.
+
+The current candidate follows ADR 0093 and pins Hibr 0.99.212, using the
+released tag from the local Hibr checkout. It must be rebuilt, gated, and
+deployed before any physical desktop behavior is accepted.
+
 ## 0.1.499 candidate: match the installed Hibr ABI
 
 The first direct-installed-tree package was deployed to the live host as
@@ -12,15 +24,15 @@ was running Hibr 0.99.204. The server correctly reported this as
 `hibr_compatibility.compatible=false`; the package is not accepted as the
 final host artifact.
 
-The packaging pin is now 0.99.204, selected from the Hibr release tag that
-matches the live host. The adapter remains compiled from the exact pinned
-checkout, and the launcher still sources `/usr/share/hibr/desktop/session.hibr`
-directly. No Hibr source, installed file, or Hibr repository state is changed.
+The packaging pin was 0.99.204, selected from the Hibr release tag that
+matched the host at that point. The adapter was compiled from the exact pinned
+checkout, and the launcher sourced `/usr/share/hibr/desktop/session.hibr`
+directly. No Hibr source, installed file, or Hibr repository state was changed.
 
 The 0.1.498 deployment remains useful evidence: the update path, direct
 installed-session boundary, and diagnostic mismatch reporting all worked. The
-0.1.499 candidate must pass the complete package gates and then be deployed
-before any Hibr desktop behavior is called accepted.
+0.1.499 package is retained as rejected compatibility evidence; 0.1.500 is the
+candidate for the current host.
 
 ## 0.1.498 candidate: use Hibr's installed desktop tree
 
