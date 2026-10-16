@@ -19,7 +19,11 @@ after rotation back to 0. The full gate result is:
 DISPLAY_SETTINGS_PASS capabilities=derived rotation=presented refusal=in-use persistence=connector-name brightness=seam
 ```
 
-Hibr source is unchanged.
+The 0.1.489 package is installed on `192.168.10.54`; `/v1/version` reports
+`0.1.489`, and the live topology reports matching `1920×2160` display and
+`240×135` pane bounds. The live rotation write was deliberately not forced:
+the login surface is attached and the API correctly returns the existing
+`display_rotation_in_use` refusal. Hibr source is unchanged.
 
 ## 0.1.488 candidate: Hibr-compatible Kitty graphics deletion and KMS invalidation
 

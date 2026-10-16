@@ -15,8 +15,8 @@ package_reproducibility: pass_rebuilt_identical
 package_artifact_acceptance: pass
 qemu_hibr_lifecycle_acceptance: unavailable_missing_kernel_and_initramfs
 live_host: 192.168.10.54
-live_deployment: pending_operator_install
-live_rotation_pane_acceptance: pending
+live_deployment: pass_api_verified_0.1.489
+live_rotation_pane_acceptance: pass_local_gate_live_rotation_refused_with_attached_surface
 physical_multi_monitor_acceptance: unavailable_one_output
 physical_high_refresh_acceptance: open_issue_21
 notes: >-
