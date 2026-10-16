@@ -16,6 +16,13 @@ so Hibr must perform right-to-left ordering, while Hibr's console still uses
 the Kitty graphics protocol. An API session may explicitly override either
 environment value when integrating a different terminal client.
 
+The login manager's authenticated `auth run` boundary starts the selected
+desktop with a clean environment. Therefore the Blit-owned
+`blit-session.hibr` entrypoint reasserts these defaults (and
+`COLORTERM=truecolor`) after authentication, while preserving explicit
+overrides. Without this boundary reassertion Hibr correctly falls back to
+half-block wallpaper even though the Blit PTY advertises Kitty support.
+
 Blit implements the Kitty placement model: `x y w h` crop the image, `X Y`
 offset within the cell, `p` numbers up to 8 placements per image, and
 `a=d` supports the `a i c p q x y z` targets

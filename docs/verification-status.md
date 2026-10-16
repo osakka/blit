@@ -3,6 +3,21 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 0.1.505 candidate: reassert the Hibr graphics contract after login
+
+The live surface showed half-block wallpaper and literal truecolor control
+text while Blit's Kitty trace contained only Hibr's capability query and a
+delete. Source inspection of Hibr's unchanged authentication boundary proved
+that `auth run` clears the environment before launching the selected desktop;
+the desktop therefore never received Blit's `HIBR_GFX=kitty` default. Blit's
+own `blit-session.hibr` now reasserts `HIBR_GFX=kitty`, `DT_BIDI=on`, and
+`COLORTERM=truecolor` after that boundary, preserving explicit overrides.
+
+The local terminal and package gates must pass, then the live host must be
+restarted from the 0.1.505 package. Acceptance is not complete until the
+authenticated live trace records a complete Kitty upload and texture upload;
+the old half-block screenshot is retained as the pre-fix evidence.
+
 ## 0.1.504 candidate: preserve complete Hibr Kitty PNG chunks
 
 Live graphics traces identified a concrete transport defect: Hibr's Kitty

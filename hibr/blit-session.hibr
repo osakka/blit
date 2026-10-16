@@ -64,6 +64,14 @@ runtime_rc=${BLIT_HIBR_RUNTIME_RC:-$launcher_dir/blit-runtime-console.hibr}
 if [ -z "${HIBR_RC:-}" ] && [ -f "$runtime_rc" ]; then
 	export HIBR_RC=$runtime_rc
 fi
+# Hibr's root login boundary intentionally starts the authenticated command
+# with a clean environment. Reassert the Blit terminal contract here, after
+# that boundary, so the desktop does not silently fall back to half blocks.
+# Keep explicit caller values: API sessions may deliberately select `sixel`,
+# `off`, or a different bidi policy for a controlled compatibility test.
+export DT_BIDI=${DT_BIDI:-on}
+export HIBR_GFX=${HIBR_GFX:-kitty}
+export COLORTERM=${COLORTERM:-truecolor}
 # The terminal-provider desktop must be executed with Hibr's installed session
 # as the script entrypoint. Hibr's session resolves its sibling desktop.hibr
 # from $0; sourcing it through this wrapper would leave $0 pointing at Blit's

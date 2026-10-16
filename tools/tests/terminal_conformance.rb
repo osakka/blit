@@ -1016,6 +1016,19 @@ assert_equal('#101820', style.fetch('background'),
              'Hibr combined truecolor background')
 assert_equal(true, style.fetch('bold'), 'Hibr combined truecolor bold')
 
+snapshot = run_case(base, 'fragmented-hibr-combined-truecolor-sgr',
+                    "printf '\\033[0;38;2;215;101;43'; " \
+                    "sleep 0.02; " \
+                    "printf ';48;2;216;102;43m▀\\033[0m'")
+cells = cell_map(snapshot)
+style = cells.fetch([0, 0]).fetch('style')
+assert_equal('#d7652b', style.fetch('foreground'),
+             'fragmented Hibr truecolor foreground')
+assert_equal('#d8662b', style.fetch('background'),
+             'fragmented Hibr truecolor background')
+assert_equal('▀', cells.fetch([0, 0]).fetch('text'),
+             'fragmented Hibr truecolor glyph')
+
 snapshot = run_case(base, 'indexed-color-sgr',
                     "printf '\\033[38;5;196;48;5;232mC'")
 cells = cell_map(snapshot)
