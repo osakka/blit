@@ -3,6 +3,25 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 0.1.499 candidate: match the installed Hibr ABI
+
+The first direct-installed-tree package was deployed to the live host as
+0.1.498. Its post-deployment diagnostics exposed a second, independent
+boundary issue: the package was built against Hibr 0.99.191 while the host
+was running Hibr 0.99.204. The server correctly reported this as
+`hibr_compatibility.compatible=false`; the package is not accepted as the
+final host artifact.
+
+The packaging pin is now 0.99.204, selected from the Hibr release tag that
+matches the live host. The adapter remains compiled from the exact pinned
+checkout, and the launcher still sources `/usr/share/hibr/desktop/session.hibr`
+directly. No Hibr source, installed file, or Hibr repository state is changed.
+
+The 0.1.498 deployment remains useful evidence: the update path, direct
+installed-session boundary, and diagnostic mismatch reporting all worked. The
+0.1.499 candidate must pass the complete package gates and then be deployed
+before any Hibr desktop behavior is called accepted.
+
 ## 0.1.498 candidate: use Hibr's installed desktop tree
 
 The live menu investigation found that Blit's packaged integration tree
