@@ -122,16 +122,11 @@ chmod 0755 "$stage/usr/share/blit/hibr/blit-login.hibr"
 chmod 0755 "$stage/usr/share/blit/hibr/blit-login-session.hibr"
 chmod 0644 "$stage/usr/share/blit/hibr/blit-runtime-console.hibr"
 chmod 0755 "$stage/usr/share/blit/probes/blit-live-image-probe.hibr"
-# Hibr's stock session resolves desktop.hibr and its sibling directories from
-# its own $0 directory. The Blit launcher stays in a separate integration
-# directory, so provide only symlinks back to Hibr's installed tree; never
-# copy or fork Hibr's desktop implementation.
-for desktop_entry in \
-    desktop.hibr session.hibr apps colours control-panel control-strip \
-    desk-accessories img lang lib login savers themes widgets wm; do
-    ln -s "/usr/share/hibr/desktop/$desktop_entry" \
-        "$stage/usr/share/blit/hibr/$desktop_entry"
-done
+# The packaged launcher sources Hibr's installed session directly. Hibr's
+# session resolves its own sibling tree from that source path, so a second
+# integration tree of symlinks would be both unnecessary and a second path
+# model that can silently omit a desktop component. QEMU fixtures may still
+# set BLIT_HIBR_DESKTOP_SESSION to their complete staged Hibr tree.
 chmod 0755 "$stage/usr/lib/blit/bin/blit-update-helper"
 cp -a "$ROOT/packaging/blit-update-helper.service" \
     "$stage/lib/systemd/system/"

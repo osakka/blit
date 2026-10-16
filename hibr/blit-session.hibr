@@ -12,11 +12,11 @@
 # tests.  It must be paired with surface_mode=external by the API client and
 # is never selected by this packaged desktop entrypoint.
 
-d=${0%/*}
-[ "$d" = "$0" ] && d=.
+launcher_dir=${0%/*}
+[ "$launcher_dir" = "$0" ] && launcher_dir=.
 moddir=${BLIT_HIBR_MODPATH:-}
-if [ -z "$moddir" ] && [ -d "$d/mods" ]; then
-	moddir=$d/mods
+if [ -z "$moddir" ] && [ -d "$launcher_dir/mods" ]; then
+	moddir=$launcher_dir/mods
 fi
 if [ -z "$moddir" ]; then
 	moddir=/usr/lib/hibr
@@ -45,8 +45,8 @@ for argument in "$@"; do
 		--name|-n) blit_expect=name ;;
 	esac
 done
-if [ -z "$desktop" ] && [ -f "$d/session.hibr" ]; then
-	desktop=$d/session.hibr
+if [ -z "$desktop" ] && [ -f "$launcher_dir/session.hibr" ]; then
+	desktop=$launcher_dir/session.hibr
 fi
 if [ -z "$desktop" ]; then
 	desktop=/usr/share/hibr/desktop/session.hibr
@@ -60,15 +60,15 @@ fi
 # the installed Blit RC when the caller did not provide one; QEMU and other
 # controlled fixtures retain their explicit RC and therefore keep their own
 # staged module paths.
-runtime_rc=${BLIT_HIBR_RUNTIME_RC:-$d/blit-runtime-console.hibr}
+runtime_rc=${BLIT_HIBR_RUNTIME_RC:-$launcher_dir/blit-runtime-console.hibr}
 if [ -z "${HIBR_RC:-}" ] && [ -f "$runtime_rc" ]; then
 	export HIBR_RC=$runtime_rc
 fi
 # Run the real desktop file in this same Hibr process.  The launcher RC loads
 # the optional Blit provider before this entrypoint; exec-ing a second Hibr process here
 # would discard that provided display interface before desktop.hibr starts.
-# The Debian package supplies symlinks for Hibr's sibling desktop tree beside
-# this launcher, preserving the stock session's relative-import semantics.
+# The packaged session path is Hibr's own installed session, preserving the
+# stock tree's relative-import semantics without a mirrored integration tree.
 export HIBR_MODPATH=${HIBR_MODPATH:-$moddir}
 if [ "$provider" = "api" ] && [ "$blit_join" = 0 ]; then
 	mod load "$adapter" || exit 1

@@ -65,6 +65,10 @@ grep -q 'mod load sys' "$stage/usr/share/blit/hibr/blit-login.hibr"
 grep -q 'source "\$login"' "$stage/usr/share/blit/hibr/blit-login.hibr"
 grep -q 'BLIT_HIBR_ADAPTER' "$stage/usr/share/blit/hibr/blit-runtime-console.hibr"
 grep -q 'console open' "$stage/usr/share/blit/hibr/blit-session.hibr"
+grep -q 'desktop=/usr/share/hibr/desktop/session.hibr' \
+    "$stage/usr/share/blit/hibr/blit-session.hibr"
+test ! -e "$stage/usr/share/blit/hibr/session.hibr"
+test ! -e "$stage/usr/share/blit/hibr/system"
 test -f "$stage/usr/lib/blit/openapi/blit-0.1.yaml"
 strings "$stage/usr/lib/blit/bin/blit-server" | grep -Fx "$release" >/dev/null
 cmp -s "$root/build/blit/blit-server" "$stage/usr/lib/blit/bin/blit-server"
