@@ -3109,7 +3109,9 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
     int idle_outputs = 0;
     char warnings[224];
     const char *presentation_sync;
+    const char *video_driver;
     char escaped_renderer[128];
+    char escaped_video_driver[128];
     int i;
     for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
         if (runtime->sessions[i].used) ++sessions;
@@ -3126,6 +3128,11 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
     json_escape(runtime->sdl_error, escaped_error, sizeof(escaped_error));
     json_escape(runtime->sdl_renderer_name, escaped_renderer,
                 sizeof(escaped_renderer));
+    video_driver = runtime->direct_kms ? "direct-kms" :
+        (SDL_GetCurrentVideoDriver() != NULL ?
+             SDL_GetCurrentVideoDriver() : "unavailable");
+    json_escape(video_driver, escaped_video_driver,
+                sizeof(escaped_video_driver));
     presentation_sync = runtime->direct_kms ?
         (runtime->kms_async_pageflip ?
              "drm-page-flip-async" : "drm-page-flip") :
@@ -3275,6 +3282,7 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              "\"outputs\":%s,"
              "\"font_scale\":%.1f,\"surface_inset_px\":%d,"
              "\"direct_kms\":%s,"
+             "\"video_driver\":\"%s\","
              "\"renderer\":\"%s\","
              "\"glyph_path\":\"%s\","
              "\"presentation_sync\":\"%s\","
@@ -3307,7 +3315,8 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              scheduler,
              font_scale_value(runtime),
              BLIT_SURFACE_INSET_PX,
-             runtime->direct_kms ? "true" : "false", escaped_renderer,
+             runtime->direct_kms ? "true" : "false", escaped_video_driver,
+             escaped_renderer,
              runtime->direct_kms ? "kms" :
                  (runtime->output_count > 0 &&
                   runtime->outputs[0].glyph_geometry_enabled ?

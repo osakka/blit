@@ -893,6 +893,11 @@ does not include terminal cell contents or framebuffer bytes: pair it with a
 surface snapshot and `GET /v1/diagnostics/screenshots/{display_id}` when pixel
 evidence is required.
 
+For SDL presentation, `diagnostics.render.video_driver` is the exact SDL video
+driver selected at startup (for example `kmsdrm`); `direct_kms` is `true` only
+for Blit's separate direct DRM/KMS backend. `renderer` is the SDL renderer
+(for example `opengles2`), not the video driver.
+
 ```sh
 curl --fail --header "Authorization: Bearer $BLIT_AUTH_TOKEN" \
   http://HOST:8080/v1/diagnostics/observation > observation.json

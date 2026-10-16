@@ -127,5 +127,8 @@ raise 'observation diagnostics is missing health' unless
   observation['diagnostics']['health'].is_a?(Hash)
 raise 'observation runtime is missing performance' unless
   observation['runtime']['performance'].is_a?(Hash)
+raise 'observation render is missing the exact video driver' unless
+  observation['diagnostics']['render']['video_driver'].is_a?(String) &&
+  !observation['diagnostics']['render']['video_driver'].empty?
 
 puts "OBSERVATION_API_PASS fields=#{required.length} sessions=#{observation['sessions']['count']} displays=#{observation['displays']['count']}"

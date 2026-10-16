@@ -2362,7 +2362,7 @@ components:
           additionalProperties: false
         render:
           type: object
-          required: [pending, interval_ms, effective_interval_ms, mode, outputs, font_scale, direct_kms, renderer, presentation_sync, pointer]
+          required: [pending, interval_ms, effective_interval_ms, mode, outputs, font_scale, direct_kms, video_driver, renderer, presentation_sync, pointer]
           properties:
             pending: {type: boolean}
             interval_ms: {type: integer, minimum: 1}
@@ -2389,6 +2389,7 @@ components:
                 additionalProperties: false
             font_scale: {type: number, minimum: 1.0, maximum: 3.0, multipleOf: 0.1}
             direct_kms: {type: boolean}
+            video_driver: {type: string}
             renderer: {type: string}
             presentation_sync:
               type: string
