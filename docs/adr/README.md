@@ -110,6 +110,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0086 — Package the adapter from the pinned Hibr checkout](0086-package-the-adapter-from-the-pinned-hibr.md)
 - [0087 — Scroll terminal graphics with their owning rows](0087-graphics-scroll-with-terminal-rows.md)
 - [0088 — Opt-in deferred middle-button emulation](0088-opt-in-middle-button-emulation.md)
+- [0089 — Server presentation settings are API-owned state](0089-server-settings-are-api-owned.md)
 
 ## Adding an ADR
 

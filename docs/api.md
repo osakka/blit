@@ -194,6 +194,7 @@ status codes.
 | Identity | `GET /v1/version`, `GET /v1/server` | Compatibility and server capabilities |
 | Hardware | `GET /v1/graphics`, `/v1/displays`, `/v1/audio` | Discover renderers, outputs, modes, and sound devices |
 | Fonts/topology | `GET/PUT /v1/fonts`, `GET/PUT /v1/topology` | Select logical cell geometry and pane placement |
+| Settings | `GET/PUT/DELETE /v1/settings` | Inspect, replace, or reset API-owned server settings |
 | Login | `GET/POST/DELETE /v1/login` | Supervise one root-owned Hibr login screen and its authenticated child session |
 | Terminals | `POST /v1/terminal-sessions`, `GET/PATCH/DELETE /v1/terminal-sessions/{id}`, `POST /v1/terminal-sessions/{id}/input` | Create, place, inspect, drive, and stop PTY sessions |
 | Hibr | `GET /v1/terminal-sessions/{id}/hibr-owner` | Inspect the primary/join ownership attachment |
@@ -221,6 +222,7 @@ GET/PUT /v1/control/shutdown-key           the keyboard stop chord
 GET/PATCH /v1/displays/{id}                rotation and brightness
 GET/PATCH /v1/audio/cards[/{id}]           a card's mixer
 GET/PUT /v1/fonts /topology /effects       revisioned configuration
+GET/PUT/DELETE /v1/settings                persisted server and font settings
 POST   /v1/terminal-sessions               create a PTY-backed session
 GET/PATCH/DELETE /v1/terminal-sessions/{id} lifecycle and placement
 POST   /v1/terminal-sessions/{id}/input    terminal input bytes
@@ -582,6 +584,40 @@ pane geometry and resizes attached PTYs. Because a framebuffer cell cannot be
 fractional, the physical width and height use one shared nearest-pixel rule;
 for example, an 8x16 font at scale 1.1 is a 9x18 cell. This is a display
 geometry operation; it does not change Hibr source or terminal protocol state.
+
+### API-owned server settings
+
+`GET /v1/settings` is the authoritative view of persisted presentation
+settings. The response has three relevant parts: `document` is the sparse
+stored document, `effective` is what this process is using now, and
+`revision` is the optimistic-concurrency value for replacement. The document
+contains `font` (`font_id`, `scale`) and `server` values for
+`render_interval_ms`, `renderer`, `kms_async_pageflip`, and `expect_desktop`.
+The environment variables with the corresponding names are boot defaults only
+when the document is silent. A stored renderer request is applied at the next
+start; `effective.renderer_requested` and `effective.renderer_active` make
+that distinction explicit.
+
+Pane layout is owned live by `PUT /v1/topology`; its selected `1x1`, `1x2`,
+`2x1`, or `2x2` layout is persisted in the settings document so it survives a
+restart. Changing an occupied layout is refused with `topology_in_use`.
+
+Replace the complete document with `If-Match` (omitted only for an initial
+write):
+
+```sh
+curl --fail --request PUT \
+  --header 'Content-Type: application/json' \
+  --header 'If-Match: REVISION' \
+  --data '{"document":{"version":1,"input_devices":{},"audio_devices":{},"font":{"font_id":"blit-hibr-terminus16","scale":1.1},"server":{"render_interval_ms":16,"pane_layout":"1x2","renderer":"software","kms_async_pageflip":false,"expect_desktop":true}}}' \
+  http://HOST:8080/v1/settings
+```
+
+`DELETE /v1/settings` clears the document and restores boot defaults. It does
+not alter authentication, bind address, command allowlists, update
+credentials, or test seams. `BLIT_EVDEV_MOUSE` is a compatibility boot
+override only; stable input devices and their API configuration are the
+supported input boundary. See ADR 0089 and ADR 0067.
 
 ## Terminal surfaces and atomic updates
 

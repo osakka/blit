@@ -912,6 +912,22 @@ typedef struct {
     uint64_t render_last_us;
     int render_interval_ms;
     int render_effective_interval_ms;
+    int boot_render_interval_ms;
+    int boot_pane_columns;
+    int boot_pane_rows;
+    int boot_kms_async_pageflip;
+    int boot_expect_desktop;
+    char boot_renderer_request[64];
+    char renderer_request[64];
+    int renderer_configured;
+    int render_interval_configured;
+    int pane_layout_configured;
+    int kms_async_pageflip;
+    int kms_async_configured;
+    int expect_desktop_configured;
+    int font_configured;
+    char boot_font_path[512];
+    int boot_font_scale_tenths;
     uint64_t render_next_us[BLIT_MAX_DISPLAYS];
     unsigned long render_missed_deadlines[BLIT_MAX_DISPLAYS];
     int test_refresh_override;
@@ -3087,7 +3103,7 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
     json_escape(runtime->sdl_renderer_name, escaped_renderer,
                 sizeof(escaped_renderer));
     presentation_sync = runtime->direct_kms ?
-        (getenv("BLIT_KMS_ASYNC_PAGEFLIP") != NULL ?
+        (runtime->kms_async_pageflip ?
              "drm-page-flip-async" : "drm-page-flip") :
         (runtime->output_count == 0 ||
          runtime->output_count != runtime->display_count ||
@@ -15044,6 +15060,10 @@ static int apply_font_configuration(BlitRuntime *runtime, const char *path,
         }
     }
     discover_panes(runtime);
+    /* A font change alters every cell's physical rectangle. Rebuilding the
+       atlas and reflowing surfaces is not enough: the next presentation must
+       be scheduled even when the document was otherwise idle. */
+    runtime->render_pending = 1;
     for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
         BlitSession *session = &runtime->sessions[i];
         BlitSurface *surface;
@@ -17828,6 +17848,37 @@ static void settings_copy_unseen(BlitRuntime *runtime, const char *section,
     }
 }
 
+static void settings_copy_unseen_server(BlitRuntime *runtime, char *out,
+                                        size_t capacity, size_t *used,
+                                        int *first)
+{
+    static const char *const known[] = {
+        "render_interval_ms", "pane_layout", "renderer",
+        "kms_async_pageflip", "expect_desktop", "shutdown_key"
+    };
+    const char *cursor = json_key_cursor(runtime->settings_document, "server");
+    char key[64];
+    char value[2048];
+    int i;
+
+    if (cursor == NULL)
+        return;
+    while (*cursor != '\0' && *cursor != '{') ++cursor;
+    if (*cursor != '{') return;
+    ++cursor;
+    while ((cursor = json_next_member(cursor, key, sizeof(key), value,
+                                      sizeof(value))) != NULL) {
+        for (i = 0; i < (int)(sizeof(known) / sizeof(known[0])); ++i)
+            if (strcmp(key, known[i]) == 0)
+                break;
+        if (i == (int)(sizeof(known) / sizeof(known[0]))) {
+            json_appendf(out, capacity, used, "%s\"%s\":%s",
+                         *first ? "" : ",", key, value);
+            *first = 0;
+        }
+    }
+}
+
 /* The document as it should be on disk right now. */
 static size_t settings_build(BlitRuntime *runtime, char *out, size_t capacity,
                              unsigned long long revision)
@@ -17907,18 +17958,60 @@ static size_t settings_build(BlitRuntime *runtime, char *out, size_t capacity,
     }
     settings_copy_unseen(runtime, "displays", BLIT_SETTINGS_DISPLAY, out,
                          capacity, &used, &first);
-    /* The server's own settings. Only the shutdown chord so far, and only
-       when it differs from the default -- the document is a record of what
-       somebody chose, not a dump of every value. */
+    json_appendf(out, capacity, &used, "},\"font\":{");
+    first = 1;
+    if (runtime->font_configured) {
+        const char *font_id = blit_font_profile_for_path(runtime->font.path);
+        json_appendf(out, capacity, &used,
+                     "\"font_id\":\"%s\",\"scale\":%.1f",
+                     font_id != NULL ? font_id : "",
+                     font_scale_value(runtime));
+        first = 0;
+    }
     json_appendf(out, capacity, &used, "},\"server\":{");
+    first = 1;
+    if (runtime->render_interval_configured) {
+        json_appendf(out, capacity, &used,
+                     "\"render_interval_ms\":%d",
+                     runtime->render_interval_ms);
+        first = 0;
+    }
+    if (runtime->pane_layout_configured) {
+        json_appendf(out, capacity, &used, "%s\"pane_layout\":\"%dx%d\"",
+                     first ? "" : ",", runtime->pane_columns,
+                     runtime->pane_rows);
+        first = 0;
+    }
+    if (runtime->renderer_configured) {
+        json_appendf(out, capacity, &used, "%s\"renderer\":\"%s\"",
+                     first ? "" : ",", runtime->renderer_request);
+        first = 0;
+    }
+    if (runtime->kms_async_configured) {
+        json_appendf(out, capacity, &used,
+                     "%s\"kms_async_pageflip\":%s", first ? "" : ",",
+                     runtime->kms_async_pageflip ? "true" : "false");
+        first = 0;
+    }
+    if (runtime->expect_desktop_configured) {
+        json_appendf(out, capacity, &used,
+                     "%s\"expect_desktop\":%s", first ? "" : ",",
+                     runtime->expect_desktop ? "true" : "false");
+        first = 0;
+    }
+    /* The shutdown chord is also a server setting. Only values that differ
+       from the boot default are written, keeping the document sparse. */
     if (!runtime->shutdown_key_enabled ||
         runtime->shutdown_key_code != KEY_BACKSPACE ||
         runtime->shutdown_key_modifiers != ((1u << BLIT_MODIFIER_CTRL) |
                                             (1u << BLIT_MODIFIER_ALT))) {
         char chord[256];
         shutdown_key_json(runtime, chord, sizeof(chord));
-        json_appendf(out, capacity, &used, "\"shutdown_key\":%s", chord);
+        json_appendf(out, capacity, &used, "%s\"shutdown_key\":%s",
+                     first ? "" : ",", chord);
+        first = 0;
     }
+    settings_copy_unseen_server(runtime, out, capacity, &used, &first);
     json_appendf(out, capacity, &used, "}}");
     return used;
 }
@@ -18071,6 +18164,42 @@ static void settings_apply_input_device(BlitRuntime *runtime,
                 device->id, problem.detail);
 }
 
+static void settings_apply_font(BlitRuntime *runtime)
+{
+    const char *cursor;
+    char configuration[512];
+    char font_id[128];
+    char path[512];
+    int scale_tenths;
+
+    runtime->font_configured = 0;
+    if (!runtime->settings_enabled || runtime->settings_document[0] == '\0')
+        return;
+    cursor = json_key_cursor(runtime->settings_document, "font");
+    if (cursor == NULL || !json_object_slice(cursor, configuration,
+                                             sizeof(configuration)))
+        return;
+    if (!json_string(configuration, "font_id", font_id, sizeof(font_id)) ||
+        !font_path_for_id(font_id, path, sizeof(path))) {
+        fprintf(stderr, "blit: stored font selection is not available\n");
+        return;
+    }
+    scale_tenths = runtime->font_scale_tenths;
+    if (json_key_cursor(configuration, "scale") != NULL) {
+        scale_tenths = json_font_scale_tenths(configuration, "scale");
+        if (scale_tenths < BLIT_FONT_SCALE_MIN_TENTHS ||
+            scale_tenths > BLIT_FONT_SCALE_MAX_TENTHS) {
+            fprintf(stderr, "blit: stored font scale is invalid\n");
+            return;
+        }
+    }
+    if (!apply_font_configuration(runtime, path, scale_tenths)) {
+        fprintf(stderr, "blit: stored font selection could not be applied\n");
+        return;
+    }
+    runtime->font_configured = 1;
+}
+
 static void settings_apply_audio_device(BlitRuntime *runtime,
                                         BlitAudioDevice *audio)
 {
@@ -18101,16 +18230,60 @@ static void settings_apply_audio_device(BlitRuntime *runtime,
 static void settings_apply_server(BlitRuntime *runtime)
 {
     const char *cursor;
+    char server[2048];
     char chord[256];
     int enabled = 1;
     int code = 0;
 
+    runtime->render_interval_configured = 0;
+    runtime->pane_layout_configured = 0;
+    runtime->renderer_configured = 0;
+    runtime->kms_async_configured = 0;
+    runtime->expect_desktop_configured = 0;
+    runtime->renderer_request[0] = '\0';
+    runtime->render_interval_ms = runtime->boot_render_interval_ms;
+    runtime->pane_columns = runtime->boot_pane_columns;
+    runtime->pane_rows = runtime->boot_pane_rows;
+    runtime->kms_async_pageflip = runtime->boot_kms_async_pageflip;
+    runtime->expect_desktop = runtime->boot_expect_desktop;
+    snprintf(runtime->renderer_request, sizeof(runtime->renderer_request),
+             "%s", runtime->boot_renderer_request);
     if (!runtime->settings_enabled || runtime->settings_document[0] == '\0')
         return;
     cursor = json_key_cursor(runtime->settings_document, "server");
-    if (cursor == NULL)
+    if (cursor == NULL || !json_object_slice(cursor, server, sizeof(server)))
         return;
-    cursor = json_key_cursor(cursor, "shutdown_key");
+    {
+        int value;
+        if (json_int(server, "render_interval_ms", &value) &&
+            value >= 1 && value <= 100) {
+            runtime->render_interval_ms = value;
+            runtime->render_interval_configured = 1;
+        }
+        if (json_string(server, "renderer", runtime->renderer_request,
+                        sizeof(runtime->renderer_request)))
+            runtime->renderer_configured = 1;
+        if (json_bool(server, "kms_async_pageflip", &value)) {
+            runtime->kms_async_pageflip = value;
+            runtime->kms_async_configured = 1;
+        }
+        if (json_bool(server, "expect_desktop", &value)) {
+            runtime->expect_desktop = value;
+            runtime->expect_desktop_configured = 1;
+        }
+        if (json_string(server, "pane_layout", chord, sizeof(chord))) {
+            int columns = 0;
+            int rows = 0;
+            char trailing;
+            if (sscanf(chord, "%dx%d%c", &columns, &rows, &trailing) == 2 &&
+                columns >= 1 && columns <= 2 && rows >= 1 && rows <= 2) {
+                runtime->pane_columns = columns;
+                runtime->pane_rows = rows;
+                runtime->pane_layout_configured = 1;
+            }
+        }
+    }
+    cursor = json_key_cursor(server, "shutdown_key");
     if (cursor == NULL || !json_object_slice(cursor, chord, sizeof(chord)))
         return;
     if (json_bool(chord, "enabled", &enabled))
@@ -18151,6 +18324,59 @@ static void settings_apply_server(BlitRuntime *runtime)
     }
 }
 
+static int settings_server_layout(const char *document, int *columns,
+                                  int *rows, int *present)
+{
+    const char *cursor;
+    char server[2048];
+    char layout[32];
+    char trailing;
+
+    if (columns == NULL || rows == NULL || present == NULL)
+        return 0;
+    *columns = 0;
+    *rows = 0;
+    *present = 0;
+    if (document == NULL)
+        return 1;
+    cursor = json_key_cursor(document, "server");
+    if (cursor == NULL || !json_object_slice(cursor, server, sizeof(server)))
+        return 1;
+    cursor = json_key_cursor(server, "pane_layout");
+    if (cursor == NULL)
+        return 1;
+    *present = 1;
+    if (!json_string(server, "pane_layout", layout, sizeof(layout)) ||
+        sscanf(layout, "%dx%d%c", columns, rows, &trailing) != 2 ||
+        *columns < 1 || *columns > 2 || *rows < 1 || *rows > 2)
+        return 0;
+    return 1;
+}
+
+static int runtime_has_attached_panes(const BlitRuntime *runtime)
+{
+    int i;
+
+    for (i = 0; i < BLIT_MAX_SESSIONS; ++i)
+        if (runtime->sessions[i].used && runtime->sessions[i].pane_id[0])
+            return 1;
+    return 0;
+}
+
+static void settings_apply_pane_layout(BlitRuntime *runtime, int old_columns,
+                                       int old_rows)
+{
+    int i;
+
+    if (old_columns == runtime->pane_columns && old_rows == runtime->pane_rows)
+        return;
+    discover_panes(runtime);
+    for (i = 0; i < runtime->output_count; ++i)
+        runtime->outputs[i].initialized = 0;
+    runtime->render_pending = 1;
+    ++runtime->topology_revision;
+}
+
 static void settings_apply_displays(BlitRuntime *runtime)
 {
     int i;
@@ -18182,10 +18408,20 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
                    runtime->settings_revision);
     json_appendf(body, capacity, &used,
                  "{\"revision\":%llu,\"path\":\"%s\",\"persisted\":%s,"
-                 "\"document\":%s}",
+                 "\"document\":%s,\"effective\":{"
+                 "\"render_interval_ms\":%d,\"pane_layout\":\"%dx%d\","
+                 "\"renderer_requested\":\"%s\",\"renderer_active\":\"%s\","
+                 "\"kms_async_pageflip\":%s,\"expect_desktop\":%s}}",
                  runtime->settings_revision, runtime->settings_path,
                  runtime->settings_enabled ? "true" : "false",
-                 document[0] != '\0' ? document : "{}");
+                 document[0] != '\0' ? document : "{}",
+                 runtime->render_interval_ms, runtime->pane_columns,
+                 runtime->pane_rows, runtime->renderer_request,
+                 runtime->direct_kms ? "drm-kms" :
+                     (runtime->sdl_renderer_name[0] != '\0' ?
+                         runtime->sdl_renderer_name : "unavailable"),
+                 runtime->kms_async_pageflip ? "true" : "false",
+                 runtime->expect_desktop ? "true" : "false");
 }
 
 /* Back to the defaults, in memory and on disk. This is the recoverable half
@@ -18199,6 +18435,26 @@ static void settings_reset(BlitRuntime *runtime)
     int i;
 
     runtime->settings_document[0] = '\0';
+    apply_font_configuration(runtime, runtime->boot_font_path,
+                             runtime->boot_font_scale_tenths);
+    runtime->font_configured = 0;
+    runtime->render_interval_ms = runtime->boot_render_interval_ms;
+    runtime->pane_columns = runtime->boot_pane_columns;
+    runtime->pane_rows = runtime->boot_pane_rows;
+    runtime->renderer_request[0] = '\0';
+    snprintf(runtime->renderer_request, sizeof(runtime->renderer_request),
+             "%s", runtime->boot_renderer_request);
+    runtime->render_interval_configured = 0;
+    runtime->pane_layout_configured = 0;
+    runtime->renderer_configured = 0;
+    runtime->kms_async_pageflip = runtime->boot_kms_async_pageflip;
+    runtime->kms_async_configured = 0;
+    runtime->expect_desktop = runtime->boot_expect_desktop;
+    runtime->expect_desktop_configured = 0;
+    if (runtime->kms_async_pageflip)
+        setenv("BLIT_KMS_ASYNC_PAGEFLIP", "1", 1);
+    else
+        unsetenv("BLIT_KMS_ASYNC_PAGEFLIP");
     for (i = 0; i < BLIT_MAX_INPUT_DEVICES; ++i) {
         BlitInputDevice *device = &runtime->input_devices[i];
         if (!device->used)
@@ -18514,6 +18770,8 @@ static void handle_request(int fd, BlitRuntime *runtime,
                          "The font could not be loaded or applied to all sessions.");
             return;
         }
+        runtime->font_configured = 1;
+        settings_mark_dirty(runtime);
         fonts_json(runtime, body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
         return;
@@ -19144,7 +19402,20 @@ static void handle_request(int fd, BlitRuntime *runtime,
         if (!if_match_revision(fd, request, runtime->settings_revision))
             return;
         if (strcmp(method, "DELETE") == 0) {
+            if (runtime->pane_columns != runtime->boot_pane_columns ||
+                runtime->pane_rows != runtime->boot_pane_rows) {
+                if (runtime_has_attached_panes(runtime)) {
+                    send_problem(fd, 409, "Conflict", "topology_in_use",
+                                 "The settings reset cannot change the pane layout while a pane is attached.");
+                    return;
+                }
+            }
+            {
+                int old_columns = runtime->pane_columns;
+                int old_rows = runtime->pane_rows;
             settings_reset(runtime);
+                settings_apply_pane_layout(runtime, old_columns, old_rows);
+            }
             settings_json(runtime, body, sizeof(body));
             send_http(fd, 200, "OK", "application/json", body);
             return;
@@ -19158,12 +19429,36 @@ static void handle_request(int fd, BlitRuntime *runtime,
             int applied = 0;
             int refused = 0;
             char refusal[320];
+            int requested_columns = 0;
+            int requested_rows = 0;
+            int requested_layout = 0;
+            int old_columns;
+            int old_rows;
 
             if (document_cursor == NULL ||
                 !json_object_slice(document_cursor, document,
                                    sizeof(document))) {
                 send_problem(fd, 400, "Bad Request", "invalid_settings",
                              "A settings write carries the whole document under \"document\", as a JSON object.");
+                return;
+            }
+            if (!settings_server_layout(document, &requested_columns,
+                                        &requested_rows, &requested_layout)) {
+                send_problem(fd, 400, "Bad Request", "invalid_settings_server",
+                             "server.pane_layout must be one of 1x1, 1x2, 2x1, or 2x2.");
+                return;
+            }
+            if (!requested_layout) {
+                requested_columns = runtime->boot_pane_columns;
+                requested_rows = runtime->boot_pane_rows;
+            }
+            old_columns = runtime->pane_columns;
+            old_rows = runtime->pane_rows;
+            if ((requested_columns != old_columns ||
+                 requested_rows != old_rows) &&
+                runtime_has_attached_panes(runtime)) {
+                send_problem(fd, 409, "Conflict", "topology_in_use",
+                             "The settings document cannot change the pane layout while a pane is attached.");
                 return;
             }
             refusal[0] = '\0';
@@ -19173,6 +19468,13 @@ static void handle_request(int fd, BlitRuntime *runtime,
             settings_reset(runtime);
             snprintf(runtime->settings_document,
                      sizeof(runtime->settings_document), "%s", document);
+            settings_apply_font(runtime);
+            settings_apply_server(runtime);
+            settings_apply_pane_layout(runtime, old_columns, old_rows);
+            if (runtime->kms_async_pageflip)
+                setenv("BLIT_KMS_ASYNC_PAGEFLIP", "1", 1);
+            else
+                unsetenv("BLIT_KMS_ASYNC_PAGEFLIP");
             cursor = json_key_cursor(document, "input_devices");
             while (cursor != NULL && *cursor != '\0' && *cursor != '{')
                 ++cursor;
@@ -19319,6 +19621,13 @@ static void handle_request(int fd, BlitRuntime *runtime,
         }
         runtime->pane_columns = columns;
         runtime->pane_rows = rows;
+        /* Pane layout is topology, not a second settings resource. The
+           topology API is the live owner; the settings document only keeps
+           the selected layout across a restart. A boot-default layout is
+           omitted so the environment remains the documented fallback. */
+        runtime->pane_layout_configured =
+            columns != runtime->boot_pane_columns ||
+            rows != runtime->boot_pane_rows;
         if (layout_changed)
             discover_panes(runtime);
         if (placements_present)
@@ -19330,6 +19639,8 @@ static void handle_request(int fd, BlitRuntime *runtime,
             runtime->render_pending = 1;
         }
         ++runtime->topology_revision;
+        settings_mark_dirty(runtime);
+        settings_flush(runtime, 1);
         topology_json(runtime, body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
         idempotency_store(runtime, request, method, path, payload, 200,
@@ -20244,13 +20555,10 @@ static void discover_displays(BlitRuntime *runtime)
 
 static void discover_panes(BlitRuntime *runtime)
 {
-    const char *layout = getenv("BLIT_PANE_LAYOUT");
     int columns = runtime->pane_columns;
     int rows = runtime->pane_rows;
     int display_index;
 
-    if (columns == 0 && layout != NULL)
-        sscanf(layout, "%dx%d", &columns, &rows);
     if (columns < 1 || columns > 2 || rows < 1 || rows > 2) {
         columns = 1;
         rows = 1;
@@ -20340,7 +20648,8 @@ static void discover_panes(BlitRuntime *runtime)
 
 static void initialize_outputs(BlitRuntime *runtime)
 {
-    const char *renderer_name = getenv("BLIT_RENDERER");
+    const char *renderer_name = runtime->renderer_request[0] != '\0' ?
+        runtime->renderer_request : NULL;
     const char *glyph_batch_mode = getenv("BLIT_SDL_GLYPH_BATCH");
     int i;
 
@@ -25924,6 +26233,8 @@ int main(int argc, char **argv)
     {
         const char *font_scale = getenv("BLIT_FONT_SCALE");
         const char *render_interval = getenv("BLIT_RENDER_INTERVAL_MS");
+        const char *renderer = getenv("BLIT_RENDERER");
+        const char *async_pageflip = getenv("BLIT_KMS_ASYNC_PAGEFLIP");
         const char *screenshot_dir = getenv("BLIT_SDL_SCREENSHOT_DIR");
         const char *screenshot_after = getenv("BLIT_SDL_SCREENSHOT_AFTER");
         if (font_scale != NULL) {
@@ -25933,6 +26244,10 @@ int main(int argc, char **argv)
         }
         if (render_interval != NULL)
             runtime.render_interval_ms = atoi(render_interval);
+        if (renderer != NULL)
+            snprintf(runtime.renderer_request,
+                     sizeof(runtime.renderer_request), "%s", renderer);
+        runtime.kms_async_pageflip = async_pageflip != NULL;
         if (screenshot_dir != NULL)
             snprintf(runtime.sdl_screenshot_dir,
                      sizeof(runtime.sdl_screenshot_dir), "%s", screenshot_dir);
@@ -25941,6 +26256,29 @@ int main(int argc, char **argv)
         if (runtime.render_interval_ms < 1 || runtime.render_interval_ms > 100)
             runtime.render_interval_ms = 16;
     }
+    runtime.boot_render_interval_ms = runtime.render_interval_ms;
+    runtime.boot_kms_async_pageflip = runtime.kms_async_pageflip;
+    snprintf(runtime.boot_renderer_request, sizeof(runtime.boot_renderer_request),
+             "%s", runtime.renderer_request);
+    runtime.boot_pane_columns = 1;
+    runtime.boot_pane_rows = 1;
+    {
+        const char *layout = getenv("BLIT_PANE_LAYOUT");
+        int columns = 0;
+        int rows = 0;
+        if (layout != NULL && sscanf(layout, "%dx%d", &columns, &rows) == 2 &&
+            columns >= 1 && columns <= 2 && rows >= 1 && rows <= 2) {
+            runtime.boot_pane_columns = columns;
+            runtime.boot_pane_rows = rows;
+            runtime.pane_columns = columns;
+            runtime.pane_rows = rows;
+        }
+    }
+    runtime.boot_expect_desktop = getenv("BLIT_EXPECT_DESKTOP") != NULL &&
+        getenv("BLIT_EXPECT_DESKTOP")[0] == '1';
+    snprintf(runtime.boot_font_path, sizeof(runtime.boot_font_path), "%s",
+             runtime.font.path);
+    runtime.boot_font_scale_tenths = runtime.font_scale_tenths;
     {
         int input_index;
         for (input_index = 0; input_index < BLIT_MAX_INPUT_DEVICES;
@@ -26026,8 +26364,7 @@ int main(int argc, char **argv)
            output with nothing on it is an error a monitor can act on rather
            than a warning it has to interpret. Off by default: an idle server
            is not a broken one, and every gate in this repository runs one. */
-        const char *expect = getenv("BLIT_EXPECT_DESKTOP");
-        runtime.expect_desktop = expect != NULL && expect[0] == '1';
+        runtime.expect_desktop = runtime.boot_expect_desktop;
     }
     {
         const char *login_autostart = getenv("BLIT_LOGIN_AUTOSTART");
@@ -26101,7 +26438,12 @@ int main(int argc, char **argv)
         runtime.shutdown_key_modifiers = (1u << BLIT_MODIFIER_CTRL) |
             (1u << BLIT_MODIFIER_ALT);
         settings_load(&runtime);
+        settings_apply_font(&runtime);
         settings_apply_server(&runtime);
+        if (runtime.kms_async_pageflip)
+            setenv("BLIT_KMS_ASYNC_PAGEFLIP", "1", 1);
+        else
+            unsetenv("BLIT_KMS_ASYNC_PAGEFLIP");
         if (!runtime.settings_enabled)
             fprintf(stderr, "blit: BLIT_SETTINGS=ignore; starting from the "
                             "defaults and leaving %s alone\n",

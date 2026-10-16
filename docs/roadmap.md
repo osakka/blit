@@ -3,7 +3,20 @@
 The roadmap is ordered by dependency. A later milestone must not become a
 second, parallel implementation of an earlier one.
 
-## Current position — 0.1.492 input-deadline candidate
+## Current position — 0.1.493 server-settings candidate
+
+Blit now moves the presentation settings that used to be environment-only
+behind the API-owned settings document (issue #70). Render cadence, requested
+renderer, direct-KMS async pageflip policy, empty-output expectation, and font
+profile/scale have a documented precedence rule: the environment is the boot
+default only while the document is silent. Pane layout remains owned by
+`/v1/topology` and is persisted through the same document. The focused
+settings, font, topology-geometry, and schema gates pass; package and physical
+host acceptance remain pending for this candidate. `BLIT_EVDEV_MOUSE` is
+documented as a compatibility boot override and is not duplicated in the API;
+stable input-device resources are the supported ownership boundary.
+
+## Historical position — 0.1.492 input-deadline candidate
 
 Blit now has the complete implementation boundary for issue #71: opt-in
 per-pointer left-plus-right middle-button emulation, bounded latency, and a

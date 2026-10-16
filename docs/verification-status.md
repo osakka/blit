@@ -3,6 +3,30 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 0.1.493 candidate: API-owned server presentation settings
+
+0.1.493 addresses Blit issue #70. The settings document now persists render
+cadence, pane layout, requested renderer, direct-KMS async pageflip policy,
+empty-output expectation, and the selected font profile/scale. The environment
+is used only as the boot default when the document is silent. `/v1/settings`
+reports the requested and active renderer separately; `/v1/topology` remains
+the live owner of pane layout and persists that choice through the document.
+`BLIT_EVDEV_MOUSE` is explicitly retired from the API because stable input
+device resources supersede a node-path override. Hibr source remains
+unchanged.
+
+Focused evidence so far:
+
+```text
+SETTINGS_PERSISTENCE_PASS
+font API gate: PASS (profiles, tenth-step scales 1.0..3.0, rounded pixels, reflow, rejection, restore)
+PANE_SPLIT_GEOMETRY_PASS output_grid=78x29 pane_grid=78x14 top_origin=5,10 bottom_origin=5,394
+API_SCHEMA_PASS paths=41 terminal_input=/v1/terminal-sessions/{session_id}/input
+```
+
+The reproducible package, full renderer/terminal gates, and physical-host
+acceptance are still pending for this candidate.
+
 ## 0.1.492 candidate: opt-in deferred middle-button emulation
 
 0.1.492 addresses Blit issue #71. Pointer devices now expose an implemented,

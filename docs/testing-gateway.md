@@ -748,7 +748,8 @@ initial grid can be selected with `BLIT_PANE_LAYOUT=1x1`, `2x1`, `1x2`, or
 `2x2`.
 
 The split can also be changed through the topology API before sessions are
-attached:
+attached. The selected layout is persisted by `/v1/settings`, so it is not
+necessary to recreate the split after a supervised restart:
 
 ```sh
 curl --fail --request PUT \
@@ -759,6 +760,8 @@ curl --fail --request PUT \
 
 Blit rejects layout changes while a pane is occupied with
 `topology_in_use`; detach or stop joined sessions before changing the grid.
+The environment value is a first-boot default only. A stored API setting wins
+until `DELETE /v1/settings` restores the boot defaults.
 
 Resize a running terminal through the same session resource. The gateway
 updates the PTY window size, preserves the overlapping cells on both the main

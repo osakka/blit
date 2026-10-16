@@ -119,15 +119,22 @@ begin
     raise "scale #{scale} did not reflow surface" unless
       after['width'] <= before['width'] && after['height'] <= before['height']
     if representative_scales.include?(scale)
+      grid = request(URI("#{base}/v1/topology")).fetch('outputs').first
+        .fetch('cell_grid')
+      expected_x = grid.fetch('origin_x') + 4
+      expected_y = grid.fetch('origin_y') + 4
       current = request(URI("#{base}/v1/surfaces/#{surface_id}/summary"))
       request(URI("#{base}/v1/surfaces/#{surface_id}/cells"), Net::HTTP::Put,
               {'base_revision' => current.fetch('revision'),
                'cells' => [{ 'x' => 0, 'y' => 0, 'text' => '█',
                              'style' => { 'foreground' => '#ffffff',
                                           'background' => '#000000' } }]})
-      raise "scale #{scale} glyph geometry did not render" unless
-        wait_solid(base, 4, 4, expected_width, expected_height,
-                   [255, 255, 255])
+      unless wait_solid(base, expected_x, expected_y,
+                        expected_width, expected_height,
+                        [255, 255, 255])
+        raise "scale #{scale} glyph geometry did not render at " \
+          "#{expected_x},#{expected_y}"
+      end
     end
   end
 

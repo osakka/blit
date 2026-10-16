@@ -2169,7 +2169,7 @@ components:
       additionalProperties: false
     Settings:
       type: object
-      required: [revision, path, persisted, document]
+      required: [revision, path, persisted, document, effective]
       properties:
         revision: {$ref: '#/components/schemas/Revision'}
         path:
@@ -2233,6 +2233,43 @@ components:
               type: object
               additionalProperties:
                 type: object
+            font:
+              type: object
+              additionalProperties: false
+              properties:
+                font_id: {type: string}
+                scale: {type: number, minimum: 1.0, maximum: 3.0}
+            server:
+              type: object
+              description: >-
+                Persisted server settings. Authentication, binding, command
+                allowlists, update credentials, and test seams remain boot-only
+                by ADR 0067/0065. BLIT_EVDEV_MOUSE is also deliberately
+                retired from the API because stable input-device resources
+                replace a node-path override.
+              properties:
+                render_interval_ms: {type: integer, minimum: 1, maximum: 100}
+                pane_layout:
+                  type: string
+                  pattern: '^[12]x[12]$'
+                renderer: {type: string, maxLength: 63}
+                kms_async_pageflip: {type: boolean}
+                expect_desktop: {type: boolean}
+                shutdown_key:
+                  $ref: '#/components/schemas/ShutdownKey'
+              additionalProperties: true
+        effective:
+          type: object
+          required: [render_interval_ms, pane_layout, renderer_requested,
+                     renderer_active, kms_async_pageflip, expect_desktop]
+          properties:
+            render_interval_ms: {type: integer, minimum: 1, maximum: 100}
+            pane_layout: {type: string}
+            renderer_requested: {type: string}
+            renderer_active: {type: string}
+            kms_async_pageflip: {type: boolean}
+            expect_desktop: {type: boolean}
+          additionalProperties: false
     Diagnostics:
       type: object
       required: [revision, health, resources, render, graphics, errors, warnings]

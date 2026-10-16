@@ -466,6 +466,94 @@ Dir.mktmpdir('blit-settings') do |root|
           'while the live device carries both of its own properties, got ' \
           "#{stored.dig('input_devices', STABLE).inspect}")
   end
+
+  # Issue #70. These were previously boot-only environment variables. The
+  # document must be silent before the environment is allowed to supply the
+  # effective value, and a stored value must win after both a restart and a
+  # release-shaped replacement. Pane layout is topology at runtime, so the
+  # settings resource persists it while /v1/topology remains its live owner.
+  verdict('server-settings-follow-document-over-boot-environment') do
+    boot = { 'BLIT_RENDER_INTERVAL_MS' => '23',
+             'BLIT_PANE_LAYOUT' => '2x1',
+             'BLIT_RENDERER' => 'software',
+             'BLIT_KMS_ASYNC_PAGEFLIP' => '1',
+             'BLIT_EXPECT_DESKTOP' => '1' }
+    stop
+    File.delete(document) if File.exist?(document)
+    start(env.merge(boot))
+    _, settings = request('GET', '/v1/settings')
+    effective = settings.to_h.fetch('effective', {})
+    check(effective['render_interval_ms'] == 23,
+          "silent document honours BLIT_RENDER_INTERVAL_MS, got #{effective.inspect}")
+    check(effective['pane_layout'] == '2x1',
+          "silent document honours BLIT_PANE_LAYOUT, got #{effective.inspect}")
+    check(effective['renderer_requested'] == 'software',
+          "silent document honours BLIT_RENDERER, got #{effective.inspect}")
+    check(effective['kms_async_pageflip'] == true,
+          "silent document honours BLIT_KMS_ASYNC_PAGEFLIP, got #{effective.inspect}")
+    check(effective['expect_desktop'] == true,
+          "silent document honours BLIT_EXPECT_DESKTOP, got #{effective.inspect}")
+
+    _, topology = request('GET', '/v1/topology')
+    code, = request('PUT', '/v1/topology',
+                    { 'revision' => topology.fetch('revision'),
+                      'layout' => { 'columns' => 1, 'rows' => 2 } })
+    check(code == 200, "PUT /v1/topology persists pane layout -> #{code}")
+    _, settings = request('GET', '/v1/settings')
+    check(settings.dig('document', 'server', 'pane_layout') == '1x2',
+          "topology is the live owner and persists its layout, got #{settings.dig('document', 'server').inspect}")
+
+    _, fonts = request('GET', '/v1/fonts')
+    font_id = fonts.to_h.fetch('profiles', [])
+      .find { |profile| profile['available'] }&.fetch('id')
+    replacement = {
+      'version' => 1,
+      'input_devices' => {},
+      'audio_devices' => {},
+      'font' => { 'font_id' => font_id, 'scale' => 1.1 },
+      'server' => { 'render_interval_ms' => 7,
+                    'pane_layout' => '1x2',
+                    'renderer' => 'software',
+                    'kms_async_pageflip' => false,
+                    'expect_desktop' => false }
+    }
+    code, = request('PUT', '/v1/settings', { 'document' => replacement })
+    check(code == 200, "PUT server settings -> #{code}")
+    _, settings = request('GET', '/v1/settings')
+    effective = settings.to_h.fetch('effective', {})
+    check(effective['render_interval_ms'] == 7 &&
+          effective['pane_layout'] == '1x2' &&
+          effective['renderer_requested'] == 'software' &&
+          effective['kms_async_pageflip'] == false &&
+          effective['expect_desktop'] == false,
+          "stored server settings are effective, got #{effective.inspect}")
+    check(settings.dig('document', 'font', 'scale') == 1.1,
+          "font scale is persisted (font_id=#{font_id.inspect}), got #{settings.dig('document', 'font').inspect}")
+
+    stop
+    start(env.merge(boot))
+    _, settings = request('GET', '/v1/settings')
+    effective = settings.to_h.fetch('effective', {})
+    check(effective['render_interval_ms'] == 7 &&
+          effective['pane_layout'] == '1x2' &&
+          effective['kms_async_pageflip'] == false &&
+          effective['expect_desktop'] == false,
+          "stored values beat the environment after restart, got #{effective.inspect}")
+    check(settings.dig('document', 'font', 'scale') == 1.1,
+          "font scale survives a restart (font_id=#{font_id.inspect})")
+
+    code, = request('DELETE', '/v1/settings')
+    check(code == 200, "DELETE server settings -> #{code}")
+    _, settings = request('GET', '/v1/settings')
+    effective = settings.to_h.fetch('effective', {})
+    check(effective['render_interval_ms'] == 23 &&
+          effective['pane_layout'] == '2x1' &&
+          effective['kms_async_pageflip'] == true &&
+          effective['expect_desktop'] == true,
+          "DELETE restores boot defaults, got #{effective.inspect}")
+    check(settings.dig('document', 'font') == {},
+          "DELETE removes the persisted font choice, got #{settings.dig('document', 'font').inspect}")
+  end
 end
 
 unless $failures.empty?
