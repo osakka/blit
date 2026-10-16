@@ -980,17 +980,6 @@ static int output_view_unchanged(const KmsOutput *output,
     return 0;
 }
 
-static int output_view_moved(const KmsOutput *output,
-                             const BlitKmsSurfaceView *view)
-{
-    int i;
-    for (i = 0; i < output->last_view_count && i < KMS_MAX_VIEWS; ++i)
-        if (output->last_surface_ids[i] == view->surface_id)
-            return output->last_surface_origin_x[i] != view->origin_x ||
-                output->last_surface_origin_y[i] != view->origin_y;
-    return 0;
-}
-
 static int output_graphics_unchanged(const KmsOutput *output,
                                      const BlitKmsSurfaceView *view)
 {
@@ -1511,8 +1500,14 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                 if (views[view_index].synchronized)
                     continue;
                 if (!output_view_unchanged(output, &views[view_index])) {
-                    if (output_view_moved(output, &views[view_index]))
-                        full_redraw = 1;
+                    /* A changed terminal grid may erase cells, scroll, move
+                       graphics, or expose pixels from a prior frame.  The
+                       damage rectangle is not sufficient to prove that the
+                       persistent scene contains no stale pixels, especially
+                       when several PTY writes coalesce before one refresh.
+                       Rebuild the complete scene for the changed view, then
+                       submit one atomic page flip. */
+                    full_redraw = 1;
                     output_changed = 1;
                     break;
                 }

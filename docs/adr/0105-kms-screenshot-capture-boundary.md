@@ -36,3 +36,8 @@ The controlled KMS motion test writes a moving terminal cell, then clears the
 surface and writes `done`. The final screenshot must show `done` and must not
 contain a prior motion frame. The KMS composition gate and live API capture
 must agree on the same lower-pane surface state.
+
+The screenshot request does not replace the scene correctness rule: a changed
+unsynchronized terminal view first causes a complete scene rebuild, so the
+captured frame also verifies that the normal movement/update path has no stale
+pixels.
