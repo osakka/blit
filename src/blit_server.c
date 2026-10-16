@@ -668,6 +668,7 @@ typedef struct {
     SDL_Window *window;
     SDL_Renderer *renderer;
     SDL_Texture *scene_texture;
+    SDL_Texture *scene_work_texture;
     SDL_Texture *glyph_atlas;
     /* ADR 0062: wide glyphs come from a 16x16 font with fifty thousand
        bitmaps, which will not fit an atlas built up front. This one is a
@@ -15229,7 +15230,10 @@ static void destroy_session(BlitRuntime *runtime, BlitSession *session)
         destroy_sdl_graphics_cache(&runtime->outputs[i]);
         if (runtime->outputs[i].scene_texture != NULL)
             SDL_DestroyTexture(runtime->outputs[i].scene_texture);
+        if (runtime->outputs[i].scene_work_texture != NULL)
+            SDL_DestroyTexture(runtime->outputs[i].scene_work_texture);
         runtime->outputs[i].scene_texture = NULL;
+        runtime->outputs[i].scene_work_texture = NULL;
         runtime->outputs[i].initialized = 0;
         runtime->outputs[i].last_graphics_signature = 0;
         runtime->outputs[i].last_target_count = 0;
@@ -17196,6 +17200,10 @@ static int apply_display_rotation(BlitRuntime *runtime, int display_index,
         if (runtime->outputs[output_index].scene_texture != NULL) {
             SDL_DestroyTexture(runtime->outputs[output_index].scene_texture);
             runtime->outputs[output_index].scene_texture = NULL;
+        }
+        if (runtime->outputs[output_index].scene_work_texture != NULL) {
+            SDL_DestroyTexture(runtime->outputs[output_index].scene_work_texture);
+            runtime->outputs[output_index].scene_work_texture = NULL;
         }
         runtime->outputs[output_index].initialized = 0;
     }
@@ -20856,7 +20864,10 @@ static void destroy_outputs(BlitRuntime *runtime)
         destroy_sdl_graphics_cache(&runtime->outputs[i]);
         if (runtime->outputs[i].scene_texture != NULL)
             SDL_DestroyTexture(runtime->outputs[i].scene_texture);
+        if (runtime->outputs[i].scene_work_texture != NULL)
+            SDL_DestroyTexture(runtime->outputs[i].scene_work_texture);
         runtime->outputs[i].scene_texture = NULL;
+        runtime->outputs[i].scene_work_texture = NULL;
         if (runtime->outputs[i].glyph_atlas != NULL)
             SDL_DestroyTexture(runtime->outputs[i].glyph_atlas);
         if (runtime->outputs[i].wide_atlas != NULL)
@@ -22744,32 +22755,31 @@ static void capture_requested_screenshot(BlitRuntime *runtime,
    correct. The development container has no GPU, so no gate here can see
    this.
  
-   So incremental content updates are enabled only where they are known to be
-   sound: the software renderer the gates exercise. Everywhere else a changed
-   scene is rebuilt whole. The complete result is still stored in a target
-   texture: copying that immutable snapshot for pointer-only frames does not
-   depend on preserving untouched pixels across incremental render passes.
-   Conflating those policies made every mouse movement rebuild all 32,400
-   cells on the live host even when the desktop was idle.
+   So the scene cache uses two render-target textures. A content frame copies
+   the last complete scene into the other texture, applies only the committed
+   damage, and swaps the two pointers before presentation. The copy is an
+   explicit source-to-destination operation; it does not assume that rebinding
+   one GLES2 render target preserves its old pixels. Pointer-only frames still
+   copy the immutable current scene directly to the output.
 
-   Full content rebuild cost was measured on the same host before choosing it
-   -- 3.3ms to render and 0.6ms to present against a 16ms budget, with no
-   missed deadlines -- which is a cheap price for a screen that matches its
-   own cell data. Pointer-only frames now copy that complete scene instead of
-   paying the rebuild cost again.
- 
-   BLIT_SDL_SCENE_CACHE=1 forces it back on for anyone who has measured their
-   own backend and found it sound; =0 forces it off. The variable overrides
-   the default in both directions precisely so the next person can repeat the
-   measurement rather than take this comment's word for it. */
-static int sdl_incremental_scene_updates_enabled(const BlitRuntime *runtime)
+   BLIT_SDL_SCENE_CACHE=1 forces incremental composition when the two
+   textures are available; =0 forces a full rebuild. The variable overrides
+   the default in both directions so a backend can be measured without
+   silently selecting a second implementation. */
+static int sdl_incremental_scene_updates_enabled(const BlitRuntime *runtime,
+                                                 const BlitOutput *output)
 {
     const char *value = getenv("BLIT_SDL_SCENE_CACHE");
 
     if (value != NULL && value[0] != '\0')
         return strcmp(value, "0") != 0;
-    return runtime != NULL &&
-        strcmp(runtime->sdl_renderer_name, "software") == 0;
+    /* A single SDL render-target texture is not a safe incremental backing
+       store on every backend: the live GLES2 path can discard its contents
+       when the target is rebound. The output therefore keeps a second
+       texture and copies the last complete scene into it before applying
+       damage. That makes incremental composition backend-independent. */
+    return runtime != NULL && output != NULL &&
+        output->scene_texture != NULL && output->scene_work_texture != NULL;
 }
 
 static int ensure_sdl_scene_texture(const BlitRuntime *runtime,
@@ -22787,18 +22797,24 @@ static int ensure_sdl_scene_texture(const BlitRuntime *runtime,
        pointer-only frame can copy it. If target textures are unsupported,
        creation below fails closed and the existing direct full-redraw path
        remains the one implementation. */
-    if (output->scene_texture != NULL) {
+    if (output->scene_texture != NULL || output->scene_work_texture != NULL) {
         float existing_width = 0.0f;
         float existing_height = 0.0f;
 
         if (width > 0 && height > 0 &&
+            output->scene_texture != NULL &&
             SDL_GetTextureSize(output->scene_texture, &existing_width,
                                &existing_height) &&
             ((int)existing_width != width || (int)existing_height != height)) {
-            SDL_DestroyTexture(output->scene_texture);
+            if (output->scene_texture != NULL)
+                SDL_DestroyTexture(output->scene_texture);
+            if (output->scene_work_texture != NULL)
+                SDL_DestroyTexture(output->scene_work_texture);
             output->scene_texture = NULL;
+            output->scene_work_texture = NULL;
             output->initialized = 0;
-        } else {
+        } else if (output->scene_texture != NULL &&
+                   output->scene_work_texture != NULL) {
             return 1;
         }
     }
@@ -22806,16 +22822,40 @@ static int ensure_sdl_scene_texture(const BlitRuntime *runtime,
         (!SDL_GetRenderOutputSize(output->renderer, &width, &height) ||
          width < 1 || height < 1))
         return 0;
-    output->scene_texture = SDL_CreateTexture(
-        output->renderer, SDL_PIXELFORMAT_RGBA8888,
-        SDL_TEXTUREACCESS_TARGET, width, height);
-    if (output->scene_texture == NULL) {
+    if (output->scene_texture == NULL)
+        output->scene_texture = SDL_CreateTexture(
+            output->renderer, SDL_PIXELFORMAT_RGBA8888,
+            SDL_TEXTUREACCESS_TARGET, width, height);
+    if (output->scene_work_texture == NULL)
+        output->scene_work_texture = SDL_CreateTexture(
+            output->renderer, SDL_PIXELFORMAT_RGBA8888,
+            SDL_TEXTUREACCESS_TARGET, width, height);
+    if (output->scene_texture == NULL || output->scene_work_texture == NULL) {
         fprintf(stderr, "blit: SDL scene cache unavailable: %s\n",
                 SDL_GetError());
+        if (output->scene_texture != NULL)
+            SDL_DestroyTexture(output->scene_texture);
+        if (output->scene_work_texture != NULL)
+            SDL_DestroyTexture(output->scene_work_texture);
+        output->scene_texture = NULL;
+        output->scene_work_texture = NULL;
         return 0;
     }
     SDL_SetTextureBlendMode(output->scene_texture, SDL_BLENDMODE_NONE);
+    SDL_SetTextureBlendMode(output->scene_work_texture, SDL_BLENDMODE_NONE);
     return 1;
+}
+
+static void swap_sdl_scene_textures(BlitOutput *output)
+{
+    SDL_Texture *scene;
+
+    if (output == NULL || output->scene_texture == NULL ||
+        output->scene_work_texture == NULL)
+        return;
+    scene = output->scene_texture;
+    output->scene_texture = output->scene_work_texture;
+    output->scene_work_texture = scene;
 }
 
 /* ADR 0061: a surface's pixel origin on an output, computed in one place.
@@ -23217,7 +23257,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             finish_sdl_output(runtime, output_index, 0);
             continue;
         }
-        full_redraw = !sdl_incremental_scene_updates_enabled(runtime) ||
+        full_redraw = !sdl_incremental_scene_updates_enabled(
+                runtime, &runtime->outputs[output_index]) ||
             !runtime->outputs[output_index].initialized ||
             graphics_changed ||
             /* The software pointer is composed after the complete cached
@@ -23274,9 +23315,18 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                 scene_display >= 0 ?
                     runtime->displays[scene_display].bounds.h : 0);
         }
-        if (scene_target)
-            SDL_SetRenderTarget(renderer,
-                                runtime->outputs[output_index].scene_texture);
+        if (scene_target) {
+            SDL_Texture *target =
+                runtime->outputs[output_index].scene_work_texture != NULL ?
+                runtime->outputs[output_index].scene_work_texture :
+                runtime->outputs[output_index].scene_texture;
+            SDL_SetRenderTarget(renderer, target);
+            if (!full_redraw &&
+                runtime->outputs[output_index].scene_texture != NULL &&
+                runtime->outputs[output_index].scene_work_texture != NULL)
+                SDL_RenderTexture(renderer,
+                    runtime->outputs[output_index].scene_texture, NULL, NULL);
+        }
         if (target_count == 0 && overlay_count == 0) {
             /* The output is already in its empty state.  A pending render
                can be caused by another display's PTY or by a stream event;
@@ -23292,6 +23342,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                 SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
                 SDL_RenderClear(renderer);
             }
+            if (scene_target)
+                swap_sdl_scene_textures(&runtime->outputs[output_index]);
             finish_sdl_output(runtime, output_index, scene_target);
             /* A later session needs a full first frame, even if this output
                was previously presenting the empty desktop. */
@@ -23313,6 +23365,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                                runtime->displays[display_index_for_output(
                                    runtime, output_index)].bounds.h);
             render_sdl_overlays(runtime, renderer, output_index);
+            if (scene_target)
+                swap_sdl_scene_textures(&runtime->outputs[output_index]);
             finish_sdl_output(runtime, output_index, scene_target);
             runtime->outputs[output_index].initialized = 1;
             runtime->outputs[output_index].last_topology_revision =
@@ -23777,6 +23831,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                            runtime->displays[display_index_for_output(
                                runtime, output_index)].bounds.h);
         render_sdl_overlays(runtime, renderer, output_index);
+        if (scene_target)
+            swap_sdl_scene_textures(&runtime->outputs[output_index]);
         finish_sdl_output(runtime, output_index, scene_target);
         if (api_images_drawn > 0 &&
             runtime->pixel_frames_pending[output_index] > 0)

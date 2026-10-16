@@ -57,8 +57,10 @@ gate can drive a full 240×135 terminal surface, authenticate to a remote host,
 assert refresh cadence and missed deadlines, and enforce an explicit maximum
 render time. On the supplied 60 Hz OpenGLES2 host it measured 59.916 Hz,
 zero missed deadlines, and 16.789 ms worst render against a 17 ms threshold.
-The scene cache remains disabled on OpenGLES2 until render-target persistence
-is proven independently. Higher-refresh hardware remains covered by #21.
+The OpenGLES2 scene cache is now implemented with two render targets and an
+explicit copy-before-damage boundary (ADR 0099), so it no longer depends on
+implicit render-target persistence. Live rapid-update acceptance remains
+pending; higher-refresh hardware remains covered by #21.
 
 ## Historical position — 0.1.494 server-settings candidate
 

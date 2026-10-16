@@ -118,6 +118,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0095 — Execute the installed Hibr session at its own path](0095-execute-installed-hibr-session-at-its-own-path.md)
 - [0096 — Carry the full Hibr Kitty chunk in the APC buffer](0096-kitty-apc-buffer-carries-the-full-hibr-chunk.md)
 - [0097 — Reassert the Hibr terminal contract after authentication](0097-reassert-hibr-terminal-contract-after-login.md)
+- [0099 — Use a ping-pong scene cache for SDL damage composition](0099-ping-pong-scene-cache-for-sdl-damage.md)
 
 ## Adding an ADR
 

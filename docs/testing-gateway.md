@@ -649,14 +649,13 @@ grid. The atlas does not change the canonical surface or direct-KMS renderer;
 the initial full redraw and pointer-only cached-scene paths must be measured
 separately. In multi-pane SDL output the scene cache is retained across
 ordinary pane damage, with full composition reserved for first frame, pointer,
-topology, and surface-count changes — **but only on the `software` renderer**.
-ADR 0070 restricts the cache to that backend, because retaining a cached scene
-assumes the backend preserves a render target between passes and that is false
-on the host's `opengles2` path. Every other backend composes whole frames, so
-the cached-scene and pointer-only paths described here are what the gates
-exercise rather than what a GPU deployment runs. `BLIT_SDL_SCENE_CACHE`
-overrides the default in both directions for anyone repeating the
-measurement.
+graphics, topology, and surface-count changes. SDL uses two scene render
+targets: it copies the last complete scene into the work target before
+applying damage, so the cache does not assume that a backend preserves a
+render target when it is rebound. ADR 0099 records this boundary. Every
+backend still has an explicit full-rebuild fallback, and
+`BLIT_SDL_SCENE_CACHE` overrides the default in both directions for anyone
+repeating the measurement.
 
 The shutdown gate verifies that `POST /v1/control/shutdown` acknowledges the
 request and the Blit process exits cleanly:
