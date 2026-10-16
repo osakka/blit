@@ -14,14 +14,15 @@ focused_renderer: pass_run_gates_renderer_43_0_0
 focused_terminal: pass_run_gates_terminal_3_0_0
 package_reproducibility: pass_rebuilt_identical
 package_artifact_acceptance: pass
-physical_host_acceptance: pending_0.1.495_deployment
+physical_host_acceptance: pass_supervised_update_and_full_surface_budget_192.168.10.54
 physical_multi_monitor_acceptance: unavailable_one_output
 physical_high_refresh_acceptance: open_issue_21
 notes: >-
   0.1.495 addresses Blit issue #80. The frame-rate gate now supports an
   authenticated remote endpoint, configurable full-surface dimensions, and an
   explicit maximum render budget. On 192.168.10.54, a 240x135 workload at
-  60 Hz measured 59.916 Hz, zero missed deadlines, and 16.789 ms worst render
-  against a 17 ms threshold; a 14 ms threshold failed at 16.848 ms. The
-  OpenGLES2 scene cache remains disabled because render-target persistence is
-  not proven. Hibr source was not modified.
+  60 Hz measured 61.183 Hz, zero missed deadlines, and 16.892 ms worst render
+  against a 17 ms threshold after supervised deployment; a 14 ms threshold
+  failed before deployment at 16.848 ms. The OpenGLES2 scene cache remains
+  disabled because render-target persistence is not proven. Hibr source was
+  not modified.
