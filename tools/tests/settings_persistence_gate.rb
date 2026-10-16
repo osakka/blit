@@ -527,6 +527,9 @@ Dir.mktmpdir('blit-settings') do |root|
           effective['kms_async_pageflip'] == false &&
           effective['expect_desktop'] == false,
           "stored server settings are effective, got #{effective.inspect}")
+    _, diagnostics = request('GET', '/v1/diagnostics/runtime')
+    check(diagnostics.dig('snapshot', 'render', 'interval_ms') == 7,
+          "diagnostics report the live render interval, got #{diagnostics.dig('snapshot', 'render').inspect}")
     check(settings.dig('document', 'font', 'scale') == 1.1,
           "font scale is persisted (font_id=#{font_id.inspect}), got #{settings.dig('document', 'font').inspect}")
 
@@ -551,6 +554,9 @@ Dir.mktmpdir('blit-settings') do |root|
           effective['kms_async_pageflip'] == true &&
           effective['expect_desktop'] == true,
           "DELETE restores boot defaults, got #{effective.inspect}")
+    _, diagnostics = request('GET', '/v1/diagnostics/runtime')
+    check(diagnostics.dig('snapshot', 'render', 'interval_ms') == 23,
+          "diagnostics report the restored render interval, got #{diagnostics.dig('snapshot', 'render').inspect}")
     check(settings.dig('document', 'font') == {},
           "DELETE removes the persisted font choice, got #{settings.dig('document', 'font').inspect}")
   end

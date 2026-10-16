@@ -3,9 +3,9 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
-## 0.1.493 candidate: API-owned server presentation settings
+## 0.1.494 candidate: API-owned server presentation settings
 
-0.1.493 addresses Blit issue #70. The settings document now persists render
+0.1.494 addresses Blit issue #70. The settings document now persists render
 cadence, pane layout, requested renderer, direct-KMS async pageflip policy,
 empty-output expectation, and the selected font profile/scale. The environment
 is used only as the boot default when the document is silent. `/v1/settings`

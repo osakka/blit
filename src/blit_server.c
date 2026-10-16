@@ -19415,6 +19415,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
                 int old_rows = runtime->pane_rows;
             settings_reset(runtime);
                 settings_apply_pane_layout(runtime, old_columns, old_rows);
+                reset_render_schedule(runtime, monotonic_us());
             }
             settings_json(runtime, body, sizeof(body));
             send_http(fd, 200, "OK", "application/json", body);
@@ -19471,6 +19472,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
             settings_apply_font(runtime);
             settings_apply_server(runtime);
             settings_apply_pane_layout(runtime, old_columns, old_rows);
+            reset_render_schedule(runtime, monotonic_us());
             if (runtime->kms_async_pageflip)
                 setenv("BLIT_KMS_ASYNC_PAGEFLIP", "1", 1);
             else

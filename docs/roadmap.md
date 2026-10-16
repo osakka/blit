@@ -3,7 +3,7 @@
 The roadmap is ordered by dependency. A later milestone must not become a
 second, parallel implementation of an earlier one.
 
-## Current position — 0.1.493 server-settings candidate
+## Current position — 0.1.494 server-settings candidate
 
 Blit now moves the presentation settings that used to be environment-only
 behind the API-owned settings document (issue #70). Render cadence, requested
