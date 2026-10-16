@@ -90,6 +90,7 @@ done
 
 get runtime-end.json /v1/diagnostics/runtime
 get trace-end.json '/v1/diagnostics/trace?limit=128'
+get diagnostics-end.json /v1/diagnostics
 for kind in pointer_motion pointer_button pointer_wheel keyboard_key surface_update render_path graphics_payload; do
     get "trace-$kind-end.json" "/v1/diagnostics/trace?kind=$kind&limit=128"
 done
