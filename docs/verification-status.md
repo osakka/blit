@@ -23,10 +23,33 @@ output and captures after the persistent scene is copied to the page-flip
 buffer, so a capture cannot report the previous scanout frame; see [ADR 0105](adr/0105-kms-screenshot-capture-boundary.md). A changed unsynchronized terminal view now rebuilds the complete persistent KMS scene before the page flip, preventing stale pixels from the incremental path.
 
 Local evidence: `tools/tests/kms_compose_gate.sh` passes with
-`KMS_COMPOSE_PASS full=512`. The TCC server build must report `0.1.517`.
-Live package, presentation-timing, and screenshot evidence is pending. The required live
-configuration remains direct KMS, one physical output, one lower-half pane,
-and one primary Hibr session; no join is part of this performance check.
+`KMS_COMPOSE_PASS full=512`; the TCC server build reports `0.1.517`. The
+package gate passes for `build/packages-517/blit_0.1.517-1_amd64.deb`, whose
+SHA-256 is recorded in [`releases/0.1.517.yaml`](../releases/0.1.517.yaml).
+
+Live evidence on `192.168.10.54` is complete for this renderer boundary:
+
+- `/v1/version` reports `0.1.517`; `/v1/server` reports ready direct
+  `drm-kms`.
+- The API-only handoff and `/v1/login` request place one login session in
+  `pane-display-93-2`; `pane-display-93-1` has no surface.
+- A lower-pane shell moved a coloured label through 120 rapid terminal
+  updates, cleared the grid, and wrote `done`. The final surface had six
+  non-empty cells and the API screenshot showed only `done`; the screenshot
+  contained no earlier moving label. The artifact is
+  `/tmp/blit-kms-0.1.517/motion-screen.png`.
+- The screenshot-free timing sample measured 131 frames over 5121 ms, a
+  4.533 ms maximum KMS present, and a 13.316 ms maximum rolling loop gap.
+  These are compositor measurements for the controlled workload, not a claim
+  of physical-input acceptance or sustained 131 FPS.
+- The restored Hibr login capture is
+  `/tmp/blit-kms-0.1.517/hibr-login-screen.png`; it shows a clean lower login
+  pane and a black upper pane.
+
+The required live configuration remains direct KMS, one physical output, one
+lower-half pane, and one primary Hibr session; no join is part of this
+performance check. Physical mouse/keyboard acceptance and Hibr desktop
+interaction remain separate acceptance evidence.
 
 ## 0.1.510: direct-KMS frame-boundary fix and live renderer matrix
 

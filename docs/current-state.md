@@ -12,6 +12,12 @@ buffer and explicit login-pane relocation from ADRs 0103 and 0104, and fixes
 the KMS diagnostic screenshot boundary in ADR 0105. Hibr source was not
 modified.
 
+The live host was validated through the authenticated API after deployment:
+0.1.517 is ready in direct `drm-kms` mode, one lower-pane Hibr login is active,
+the upper pane is empty, and the controlled fast-motion terminal scene clears
+without stale pixels. The evidence and its limits are recorded in the 0.1.517
+section of [`verification-status.md`](verification-status.md).
+
 Blit `0.1.510` is deployed on the authorized host at `192.168.10.54` and
 reports API version `0.1`. The matching package identity is recorded in
 [`releases/0.1.510.yaml`](../releases/0.1.510.yaml). Hibr source was not
