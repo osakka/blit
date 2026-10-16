@@ -21,8 +21,15 @@ INPUT_DEVICE_CONFIG_PASS ...
 POINTER_SETTINGS_PASS
 ```
 
-The reproducible package, full renderer/terminal gates, and physical-host
-acceptance are pending for this candidate.
+The exact pinned-Hibr package is reproducible and the full local gates pass:
+
+```text
+RUN_GATES_PASS pass=43 skip=0 fail=0
+RUN_GATES_PASS pass=3 skip=0 fail=0
+PACKAGE_ARTIFACT_PASS version=0.1.492-1 sha256=142b6994b6f9170ad99a1958968e6b1f3771f664bfe30e5ead2851d6aaa0f291 reproducible=yes
+```
+
+Physical-host deployment and acceptance remain pending for this candidate.
 
 ## 0.1.491 candidate: graphics follow terminal-row scrolling
 

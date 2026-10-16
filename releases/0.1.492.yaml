@@ -1,0 +1,26 @@
+release: 0.1.492
+package: blit_0.1.492-1_amd64.deb
+package_sha256: 142b6994b6f9170ad99a1958968e6b1f3771f664bfe30e5ead2851d6aaa0f291
+source_commit: a7b90f1
+package_documentation_commit: a7b90f1
+server_binary_sha256: 943960edf6df6d92f66f8cba1f7655f97cb7c5822280a6d879e91450f0f37d81
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.191
+hibr_adapter_build: tcc_from_exact_pinned_checkout
+focused_middle_button: pass_pointer_settings_idle_deadline_chord_release
+focused_api_schema: pass_paths_41
+focused_renderer: pass_run_gates_renderer_43_0_0
+focused_terminal: pass_run_gates_terminal_3_0_0
+package_reproducibility: pass_rebuilt_identical
+package_artifact_acceptance: pass
+physical_host_deployment: pending_issue_71_acceptance
+physical_multi_monitor_acceptance: unavailable_one_output
+physical_high_refresh_acceptance: open_issue_21
+notes: >-
+  0.1.492 addresses Blit issue #71. Middle-button emulation is opt-in per
+  pointer device, bounded to a 50..500 ms window, and flushed by an idle loop
+  deadline. The focused gate proves a single press, motion during the window,
+  a left/right middle chord, middle release, consumed chord-member release,
+  and settings persistence across restart. Hibr source was not modified. The
+  exact pinned Hibr 0.99.191 adapter is compiled into the package.
