@@ -1660,13 +1660,16 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         }
         if (trace_phases)
             flip_started = kms_now_us();
-        if (capture) {
-            write_screenshot(kms, output);
-            ++completed_captures;
-        }
         if (render_scene) {
             output->back.map = scanout_map;
             copy_scene_to_back(output);
+        }
+        /* Capture the frame composed by this present call.  Capturing before
+           the scene-buffer copy reads the previous scanout buffer and makes
+           diagnostics disagree with the authoritative surface state. */
+        if (capture) {
+            write_screenshot(kms, output);
+            ++completed_captures;
         }
         {
             unsigned int flags = DRM_MODE_PAGE_FLIP_EVENT;

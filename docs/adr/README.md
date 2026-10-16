@@ -123,6 +123,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0102 — Bounded integer-scale fast path for opaque KMS graphics](0102-kms-integer-scale-fast-path.md)
 - [0103 — Compose direct-KMS frames in a persistent CPU scene](0103-kms-cpu-scene-cache.md)
 - [0104 — Relocate an auto-started login manager to an explicit pane](0104-login-target-relocation-and-pane-redraw.md)
+- [0105 — KMS screenshots capture the composed frame](0105-kms-screenshot-capture-boundary.md)
 
 ## Adding an ADR
 

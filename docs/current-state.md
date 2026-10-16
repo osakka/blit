@@ -7,6 +7,11 @@ work actually stopped.
 
 ## Status at the last review
 
+The current source candidate is `0.1.515`. It retains the direct-KMS scene
+buffer and explicit login-pane relocation from ADRs 0103 and 0104, and fixes
+the KMS diagnostic screenshot boundary in ADR 0105. Hibr source was not
+modified.
+
 Blit `0.1.510` is deployed on the authorized host at `192.168.10.54` and
 reports API version `0.1`. The matching package identity is recorded in
 [`releases/0.1.510.yaml`](../releases/0.1.510.yaml). Hibr source was not
