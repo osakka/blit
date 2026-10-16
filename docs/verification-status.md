@@ -3,6 +3,31 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 0.1.523 live direct-KMS surface-local damage and cadence
+
+The exact `0.1.523` package is deployed on `192.168.10.54`. Hibr source was
+not modified. The live API reports `drm-kms`, `direct_kms=true`,
+`direct-kms`, `drm-page-flip`, and one 1920x2160@60 Hz output. The persisted
+1x2 test topology places the supervised login manager in the lower pane and
+leaves the upper pane empty.
+
+The compositor changed from full-output rebuilding on every changed terminal
+view to surface-local damage in [ADR 0108](adr/0108-surface-local-kms-damage-boundary.md).
+Startup, view-count, origin, and output-wide changes still force a complete
+output rebuild. The KMS composition gate passes, including a moved graphics
+placement with no pixels left at its old position.
+
+The controlled live fast-terminal workload measured 61.957–63.137 Hz,
+14.085–16.892 ms last frame gaps, and 10.903 ms maximum KMS present time.
+Its measurement windows added zero missed deadlines. The lifetime diagnostic
+counter contains startup/login-relocation gaps and is not used as motion-pass
+evidence. Direct-KMS frame-rate counters now update through the same path as
+SDL, so `0 Hz` is no longer reported merely because the active backend is KMS.
+
+This is bounded renderer evidence. It does not claim a visually accepted Hibr
+desktop, physical mouse/keyboard acceptance, wallpaper/Kitty/Sixel acceptance,
+or a working join.
+
 ## 0.1.517 candidate: atomic KMS scene rebuild, login-pane invariant, and screenshot evidence
 
 The source candidate targets the measured direct-KMS workload in which Hibr's

@@ -7,28 +7,27 @@ work actually stopped.
 
 ## Status at the last review
 
-The current source candidate is `0.1.517`. It retains the direct-KMS scene
-buffer and explicit login-pane relocation from ADRs 0103 and 0104, and fixes
-the KMS diagnostic screenshot boundary in ADR 0105. Hibr source was not
-modified.
+The current source candidate is `0.1.523`. Hibr source was not modified.
 
-The live host was validated through the authenticated API after deployment:
-0.1.517 is ready in direct `drm-kms` mode, one lower-pane Hibr login is active,
-the upper pane is empty, and the controlled fast-motion terminal scene clears
-without stale pixels. The evidence and its limits are recorded in the 0.1.517
-section of [`verification-status.md`](verification-status.md).
+The authenticated live host at `192.168.10.54` reports `0.1.523` with
+`backend=drm-kms`, `direct_kms=true`, `video_driver=direct-kms`,
+`presentation_sync=drm-page-flip`, and one 1920x2160@60 Hz output. The
+persisted 1x2 topology has the supervised login manager in the lower pane and
+no surface in the upper pane; this is the controlled single-desktop test
+state, not a primary-plus-join acceptance result.
 
-Blit `0.1.510` is deployed on the authorized host at `192.168.10.54` and
-reports API version `0.1`. The matching package identity is recorded in
-[`releases/0.1.510.yaml`](../releases/0.1.510.yaml). Hibr source was not
-modified.
+ADR 0108 narrows changed-view composition to surface-local damage while
+retaining an atomic page-flip boundary. The live fast-terminal workload then
+measured 61.957–63.137 Hz, 14.085–16.892 ms last frame gaps, and a 10.903 ms
+maximum KMS present time, with zero new missed deadlines in its measurement
+windows. The cumulative counter still contains startup/login-relocation
+events, including a 4.646 s maximum historical gap; that is not reported as
+motion-pass evidence. Direct-KMS frame-rate counters are now populated by the
+same diagnostics path as SDL.
 
-The source branch contains the direct-KMS frame-boundary fix at commit
-`222912a` and the 0.1.510 release record at `c9ec723`. The fix is validated by
-the KMS coherence gate, TCC build, renderer gates, and the live direct-KMS
-motion probe. The SDL scene-cache and graphics-path evidence is recorded in
-the 0.1.510 verification section. These are scoped claims, not blanket visual
-acceptance of every Hibr interaction.
+The package identity is recorded in [`releases/0.1.523.yaml`](../releases/0.1.523.yaml).
+These are bounded renderer measurements, not visual acceptance of the Hibr
+desktop, physical input, wallpaper, graphics protocol, or joins.
 
 ### Architecture decision check
 
