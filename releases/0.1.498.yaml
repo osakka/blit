@@ -1,0 +1,25 @@
+release: 0.1.498
+package: blit_0.1.498-1_amd64.deb
+package_sha256: 294cbf92202f2d89072eaeef05625d61e53e49738946c3459467e6d3f7974787
+source_commit: f3281cc975b585f29905270f648acbbe9460e77c
+package_documentation_commit: f3281cc975b585f29905270f648acbbe9460e77c
+server_binary_sha256: 7d3ca6c118231ddca747981b15a6300ee2955e4f8e9e4351dd4ebf537fa7df74
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.191
+hibr_adapter_build: tcc_from_exact_pinned_checkout
+tcc_build_acceptance: pass_server_helper_adapter
+focused_packaging_regression: pass_direct_installed_hibr_tree_no_mirror
+package_reproducibility: pass_rebuilt_identical
+package_artifact_acceptance: pass
+full_local_gates: pass_75_skip_4_fail_0
+qemu_hibr_oracle: skipped_missing_kernel_initramfs
+physical_host_deployment: pending
+notes: >-
+  0.1.498 fixes the Blit packaging boundary found during live menu
+  investigation. The packaged launcher now sources Hibr's installed
+  /usr/share/hibr/desktop/session.hibr directly, so Hibr's system directory
+  registers Control Panel, Applications Catalogue, Modules, and Task Manager
+  exactly as in a normal Hibr installation. No Hibr source or installed Hibr
+  desktop file was modified. The package was built with TCC against the exact
+  pinned Hibr 0.99.191 checkout.
