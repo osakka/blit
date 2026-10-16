@@ -1,0 +1,25 @@
+release: 0.1.491
+package: blit_0.1.491-1_amd64.deb
+package_sha256: d69e9525b31e478702d17d3f59f0694eced74f662664151d8d394d5213ff6cfd
+source_commit: 65cc9a9
+package_documentation_commit: 65cc9a9
+server_binary_sha256: 0de325658382d0189ac48c53dfdd1aab36a6c5f04d4b5a2a8255d557a9a69136
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.191
+hibr_adapter_build: tcc_from_exact_pinned_checkout
+focused_sixel_scroll: pass_sixel_scroll_after_placement
+focused_kitty_scroll: pass_kitty_scroll_after_placement
+focused_terminal: pass_run_gates_terminal_3_0_0
+focused_renderer: pass_run_gates_renderer_43_0_0
+package_reproducibility: pass_rebuilt_identical
+package_artifact_acceptance: pass
+physical_host_deployment: pending_issue_62_acceptance
+physical_multi_monitor_acceptance: unavailable_one_output
+physical_high_refresh_acceptance: open_issue_21
+notes: >-
+  0.1.491 addresses Blit issue #62. Kitty and sixel page-anchored graphics
+  move with later terminal row operations and clip at the active page
+  boundary; API pixel frames remain absolute scene objects. Hibr source was
+  not modified. The exact pinned Hibr 0.99.191 adapter is compiled into the
+  package. Physical-host deployment and acceptance remain pending.
