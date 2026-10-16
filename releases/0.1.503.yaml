@@ -1,0 +1,25 @@
+release: 0.1.503
+package: blit_0.1.503-1_amd64.deb
+package_sha256: 2a51e5cecce5695b7b8c11d5280b346379a30cd343293f9aaf8d30129fa5fe3c
+source_commit: 7318a3b
+package_documentation_commit: 7318a3b
+server_binary_sha256: a8ccde397b4876498e661f836ed44ff259c42bfcf826838efddd7b6bc043e31c
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.212
+hibr_abi: 16
+hibr_adapter_build: tcc_from_exact_pinned_checkout
+tcc_build_acceptance: pass_server_helper_adapter
+focused_schema_network_login_gates: pass
+package_reproducibility: pending
+package_artifact_acceptance: pending
+full_local_gates: pending
+qemu_hibr_oracle: skipped_missing_kernel_initramfs
+physical_host_deployment: pending
+notes: >-
+  0.1.503 executes Hibr's installed desktop session as its own script
+  entrypoint for the native terminal-provider path. The previous live
+  candidate sourced that script through Blit's wrapper, causing Hibr's $0
+  relative import of desktop.hibr to resolve under /usr/share/blit/hibr;
+  the authenticated child then exited cleanly after reporting missing
+  desktop functions. This candidate changes no Hibr source or installation.
