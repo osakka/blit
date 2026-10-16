@@ -22,6 +22,18 @@ to SDL/KMSDRM + OpenGL ES2 with the login manager running. This is exact
 backend/readiness evidence, not visual acceptance; the user’s login is the
 next physical desktop observation.
 
+### Manual physical comparison, 2026-10-16
+
+The three modes were then presented one at a time for user login and direct
+visual comparison. In SDL/KMSDRM + OpenGLES2, the static picture-rendered
+background was reported correct, but movement of approximately one block per
+second caused rendering to break. SDL/KMSDRM + software produced the same
+reported result. Direct KMS displayed the background image and desktop
+content, but left more persistent artefacts during movement, including at very
+slow movement. These are physical visual observations; they do not by
+themselves identify the failing composition boundary or replace screenshot,
+damage, and input traces.
+
 ## 0.1.508: canonical observation API
 
 Source now defines the schema-first `GET /v1/diagnostics/observation` endpoint
