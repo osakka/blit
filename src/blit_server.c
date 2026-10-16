@@ -16897,6 +16897,11 @@ static int apply_display_rotation(BlitRuntime *runtime, int display_index,
     display->rotation = rotation;
     set_display_geometry(display, display->bounds.x, display->bounds.y,
                          display->physical_width, display->physical_height);
+    /* A rotation changes the logical display rectangle and therefore the
+       quantized pane grid. There are no attached surfaces here (the caller
+       refuses those above), so rebuild the topology in the same operation
+       instead of leaving pane bounds in the old orientation. */
+    discover_panes(runtime);
     ++runtime->displays_revision;
     ++runtime->topology_revision;
     return 1;

@@ -248,15 +248,29 @@ Dir.mktmpdir('blit-display') do |root|
           "configuration after 90: #{after.to_h['configuration'].inspect}")
     # Two documents report a display's rectangle, and before #69 the topology
     # one printed a literal zero for rotation.
-    topology = json('GET', '/v1/topology').last.to_h.fetch('outputs', []).first.to_h
+    topology_document = json('GET', '/v1/topology').last.to_h
+    topology = topology_document.fetch('outputs', []).first.to_h
     check(topology['rotation'] == 90,
           "topology rotation: #{topology.inspect}")
     check(topology.dig('bounds', 'width') == PANEL_H,
           "topology bounds: #{topology['bounds'].inspect}")
+    pane = topology_document.fetch('panes', []).first.to_h
+    check(pane.dig('bounds', 'width') == PANEL_H / CELL_W &&
+          pane.dig('bounds', 'height') == PANEL_W / CELL_H,
+          "pane grid after 90: #{pane['bounds'].inspect}")
     code, problem = patch('rotation' => 45)
     check(code == 400, "rotation 45 -> #{code}")
     check(problem.to_h['code'] == 'invalid_display_rotation',
           "45 refusal code: #{problem.inspect}")
+    code, = patch('rotation' => 0)
+    check(code == 200, "rotate back to 0 -> #{code}")
+    topology_document = json('GET', '/v1/topology').last.to_h
+    pane = topology_document.fetch('panes', []).first.to_h
+    check(pane.dig('bounds', 'width') == PANEL_W / CELL_W &&
+          pane.dig('bounds', 'height') == PANEL_H / CELL_H,
+          "pane grid after 0: #{pane['bounds'].inspect}")
+    code, = patch('rotation' => 90)
+    check(code == 200, "restore rotation 90 -> #{code}")
   end
 
   # ---- the grid a session receives follows the rotated rectangle ----------

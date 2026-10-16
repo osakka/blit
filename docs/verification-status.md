@@ -3,6 +3,24 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 0.1.489 candidate: rotation rebuilds pane geometry
+
+0.1.489 closes Blit issue #73. A display rotation changes the logical pixel
+rectangle and therefore the complete-cell pane grid. `apply_display_rotation`
+now recomputes panes in the same accepted operation; live surfaces are still
+refused with the existing resize-protocol conflict because their owner must
+repaint the new geometry.
+
+The display settings gate now asserts both directions: the dummy 1024×768
+output reports a 96×64 pane after 90° rotation and returns to a 128×48 pane
+after rotation back to 0. The full gate result is:
+
+```text
+DISPLAY_SETTINGS_PASS capabilities=derived rotation=presented refusal=in-use persistence=connector-name brightness=seam
+```
+
+Hibr source is unchanged.
+
 ## 0.1.488 candidate: Hibr-compatible Kitty graphics deletion and KMS invalidation
 
 0.1.488 fixes two independent stale-pixel causes at the Blit boundary. Hibr's
