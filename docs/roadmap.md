@@ -3,6 +3,16 @@
 The roadmap is ordered by dependency. A later milestone must not become a
 second, parallel implementation of an earlier one.
 
+## Current position — 0.1.492 input-deadline candidate
+
+Blit now has the complete implementation boundary for issue #71: opt-in
+per-pointer left-plus-right middle-button emulation, bounded latency, and a
+deadline integrated into the event-driven loop. The API schema, settings
+round-trip, idle flush, motion preservation, chord translation, release, and
+restart behavior are covered by the focused pointer gate. The package and
+physical-host acceptance remain pending; hardware multi-monitor and high-
+refresh claims remain separate acceptance gates.
+
 ## Current position — 0.1.470 refresh-bound presentation candidate
 
 The next release closes the refresh-scheduling defect found on the physical

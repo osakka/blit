@@ -3,6 +3,27 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 0.1.492 candidate: opt-in deferred middle-button emulation
+
+0.1.492 addresses Blit issue #71. Pointer devices now expose an implemented,
+disabled-by-default `middle_button_emulation` setting with a bounded 50..500
+ms window. When enabled, a left/right chord emits one middle press and
+release; a single press is flushed as itself when its deadline expires, even
+when the event loop is otherwise idle. Motion is not swallowed, state is per
+device, and API injection with `device_id` uses the same path as evdev input.
+Hibr source remains unchanged.
+
+Focused evidence so far:
+
+```text
+API_SCHEMA_PASS paths=41 terminal_input=/v1/terminal-sessions/{session_id}/input
+INPUT_DEVICE_CONFIG_PASS ...
+POINTER_SETTINGS_PASS
+```
+
+The reproducible package, full renderer/terminal gates, and physical-host
+acceptance are pending for this candidate.
+
 ## 0.1.491 candidate: graphics follow terminal-row scrolling
 
 0.1.491 addresses Blit issue #62. Kitty and sixel placements now carry an

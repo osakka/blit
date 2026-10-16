@@ -440,6 +440,9 @@ typedef struct {
 #define BLIT_INPUT_SCROLL_STEP_MAX 10
 #define BLIT_INPUT_DEADZONE_MAX 50
 #define BLIT_MAX_INVERT_AXES 16
+#define BLIT_MIDDLE_BUTTON_WINDOW_DEFAULT 150
+#define BLIT_MIDDLE_BUTTON_WINDOW_MIN 50
+#define BLIT_MIDDLE_BUTTON_WINDOW_MAX 500
 
 
 
@@ -489,6 +492,15 @@ typedef struct {
     unsigned char button_targets[BLIT_MAX_BUTTON_OVERRIDES];
     int scroll_step;
     int acceleration_adaptive;
+    /* Issue #71. A left/right press is held briefly only when this opt-in
+       emulation is enabled. The pending state belongs to the device, not the
+       aggregate pointer, so two mice cannot complete each other's chord. */
+    int middle_button_emulation_enabled;
+    int middle_button_window_ms;
+    int middle_pending_button;
+    uint64_t middle_pending_deadline_us;
+    int middle_emulated_down;
+    unsigned int middle_suppressed_buttons;
     int deadzone_percent;
     int invert_axis_count;
     unsigned short invert_axes[BLIT_MAX_INVERT_AXES];
@@ -1503,6 +1515,17 @@ static void dispatch_evdev_key_event(BlitRuntime *runtime,
                                      const char *device_id);
 static void dispatch_pointer_button(BlitRuntime *runtime, int button,
                                     int pressed, const char *device_id);
+static void dispatch_pointer_button_raw(BlitRuntime *runtime, int button,
+                                        int pressed, const char *device_id);
+static void dispatch_pointer_button_from_device(BlitRuntime *runtime,
+                                                BlitInputDevice *device,
+                                                int button, int pressed,
+                                                const char *device_id);
+static void flush_middle_button_pending(BlitRuntime *runtime,
+                                        BlitInputDevice *device);
+static void service_middle_button_deadlines(BlitRuntime *runtime,
+                                            uint64_t now);
+static int middle_button_wait_ms(const BlitRuntime *runtime, uint64_t now);
 static size_t shutdown_key_json(const BlitRuntime *runtime, char *body,
                                 size_t capacity);
 
@@ -4998,6 +5021,9 @@ static BlitInputDevice *record_input_device(BlitRuntime *runtime,
         device->enabled = 1;
         device->sensitivity_percent = BLIT_INPUT_SENSITIVITY_DEFAULT;
         device->scroll_step = BLIT_INPUT_SCROLL_STEP_DEFAULT;
+        device->middle_button_window_ms = BLIT_MIDDLE_BUTTON_WINDOW_DEFAULT;
+        device->middle_pending_button = -1;
+        device->middle_suppressed_buttons = 0;
         /* Until EVIOCGLED reports this keyboard's own LED, assume its keypad
            types digits -- what it did before NumLock was honoured at all. */
         device->num_lock = 1;
@@ -5154,6 +5180,8 @@ static int input_device_configured(const BlitInputDevice *device)
         device->natural_scroll || device->route_target[0] != '\0' ||
         device->keymap_count > 0 || device->modifier_count > 0 ||
         device->button_count > 0 || device->acceleration_adaptive ||
+        device->middle_button_emulation_enabled ||
+        device->middle_button_window_ms != BLIT_MIDDLE_BUTTON_WINDOW_DEFAULT ||
         device->scroll_step > BLIT_INPUT_SCROLL_STEP_DEFAULT ||
         device->deadzone_percent > 0 || device->invert_axis_count > 0 ||
         device->repeat_configured || device->caps_lock_boot >= 0 ||
@@ -5186,6 +5214,9 @@ static BlitInputDevice *record_opened_device(BlitRuntime *runtime,
         device->enabled = 1;
         device->sensitivity_percent = BLIT_INPUT_SENSITIVITY_DEFAULT;
         device->scroll_step = BLIT_INPUT_SCROLL_STEP_DEFAULT;
+        device->middle_button_window_ms = BLIT_MIDDLE_BUTTON_WINDOW_DEFAULT;
+        device->middle_pending_button = -1;
+        device->middle_suppressed_buttons = 0;
         device->num_lock = 1;
         device->caps_lock_boot = -1;
         device->num_lock_boot = -1;
@@ -5572,6 +5603,13 @@ static size_t input_device_item_json(const BlitRuntime *runtime,
                         (int)device->button_targets[button_index]));
             complete &= json_appendf(body, capacity, &used, "}");
         }
+        complete &= json_appendf(body, capacity, &used,
+            ",\"middle_button_emulation\":{\"enabled\":%s,"
+            "\"window_ms\":%d}",
+            device->middle_button_emulation_enabled ? "true" : "false",
+            device->middle_button_window_ms > 0 ?
+                device->middle_button_window_ms :
+                BLIT_MIDDLE_BUTTON_WINDOW_DEFAULT);
     }
     if (input_device_supports(device, BLIT_INPUT_KIND_GAMEPAD)) {
         if (device->deadzone_percent > 0)
@@ -7344,6 +7382,15 @@ static const char *input_route_rejected_property(const char *route)
                                   sizeof(writable) / sizeof(writable[0]));
 }
 
+static const char *middle_button_emulation_rejected_property(
+    const char *configuration)
+{
+    static const char *const writable[] = { "enabled", "window_ms" };
+
+    return json_rejected_property(configuration, writable,
+                                  sizeof(writable) / sizeof(writable[0]));
+}
+
 enum {
     BLIT_INPUT_PROPERTY_ENABLED = 0,
     BLIT_INPUT_PROPERTY_SENSITIVITY,
@@ -7358,6 +7405,7 @@ enum {
     BLIT_INPUT_PROPERTY_BUTTONS,
     BLIT_INPUT_PROPERTY_SCROLL_STEP,
     BLIT_INPUT_PROPERTY_ACCELERATION,
+    BLIT_INPUT_PROPERTY_MIDDLE_BUTTON_EMULATION,
     BLIT_INPUT_PROPERTY_DEADZONE,
     BLIT_INPUT_PROPERTY_INVERT_AXES,
     BLIT_INPUT_PROPERTY_COUNT
@@ -7370,7 +7418,8 @@ static const char *const blit_input_device_properties[] = {
     "enabled", "sensitivity_percent", "natural_scroll", "route", "keymap",
     "repeat_delay_ms", "repeat_rate_hz", "caps_lock_boot",
     "num_lock_boot", "modifiers", "buttons", "scroll_step",
-    "acceleration", "deadzone_percent", "invert_axes"
+    "acceleration", "middle_button_emulation", "deadzone_percent",
+    "invert_axes"
 };
 
 static int input_device_property_index(const char *property)
@@ -7400,6 +7449,7 @@ static int input_device_property_applicability(const BlitInputDevice *device,
     case BLIT_INPUT_PROPERTY_BUTTONS:
     case BLIT_INPUT_PROPERTY_SCROLL_STEP:
     case BLIT_INPUT_PROPERTY_ACCELERATION:
+    case BLIT_INPUT_PROPERTY_MIDDLE_BUTTON_EMULATION:
         return input_device_supports(device, BLIT_INPUT_KIND_POINTER);
     case BLIT_INPUT_PROPERTY_KEYMAP:
     case BLIT_INPUT_PROPERTY_CAPS_LOCK_BOOT:
@@ -16327,6 +16377,13 @@ static int apply_input_device_configuration(BlitRuntime *runtime,
     const char *acceleration_cursor;
     int acceleration_adaptive = 0;
     int acceleration_requested = 0;
+    char middle_emulation[256];
+    const char *middle_emulation_cursor;
+    int middle_emulation_enabled = 0;
+    int middle_emulation_window = 0;
+    int middle_emulation_enabled_requested = 0;
+    int middle_emulation_window_requested = 0;
+    int middle_emulation_requested = 0;
     int deadzone = 0;
     int deadzone_requested;
     int invert_axes[BLIT_MAX_INVERT_AXES];
@@ -16559,6 +16616,56 @@ static int apply_input_device_configuration(BlitRuntime *runtime,
         }
         acceleration_requested = 1;
     }
+    middle_emulation_cursor = json_key_cursor(configuration,
+                                               "middle_button_emulation");
+    if (middle_emulation_cursor != NULL) {
+        const char *rejected_middle;
+        if (input_device_property_applicability(
+                device, "middle_button_emulation") != 1) {
+            config_problem(problem, 422, "Unprocessable Entity",
+                           "device_property_not_applicable",
+                           "middle_button_emulation applies to a device Blit reads as a pointer, or to one of no known kind.");
+            return 0;
+        }
+        if (!json_object_slice(middle_emulation_cursor, middle_emulation,
+                                sizeof(middle_emulation))) {
+            config_problem(problem, 400, "Bad Request",
+                           "invalid_middle_button_emulation",
+                           "middle_button_emulation must be an object with enabled and window_ms.");
+            return 0;
+        }
+        rejected_middle = middle_button_emulation_rejected_property(
+            middle_emulation);
+        if (rejected_middle != NULL) {
+            config_problem(problem, 400, "Bad Request",
+                           "invalid_device_property",
+                           "middle_button_emulation accepts only enabled and window_ms.");
+            return 0;
+        }
+        middle_emulation_enabled_requested = json_bool(
+            middle_emulation, "enabled", &middle_emulation_enabled);
+        middle_emulation_window_requested = json_int(
+            middle_emulation, "window_ms", &middle_emulation_window);
+        if (!middle_emulation_enabled_requested ||
+            !middle_emulation_window_requested) {
+            config_problem(problem, 400, "Bad Request",
+                           "invalid_middle_button_emulation",
+                           "middle_button_emulation requires boolean enabled and integer window_ms.");
+            return 0;
+        }
+        if (middle_emulation_window < BLIT_MIDDLE_BUTTON_WINDOW_MIN ||
+            middle_emulation_window > BLIT_MIDDLE_BUTTON_WINDOW_MAX) {
+            char detail[192];
+            snprintf(detail, sizeof(detail),
+                     "middle_button_emulation.window_ms must be an integer from %d through %d.",
+                     BLIT_MIDDLE_BUTTON_WINDOW_MIN,
+                     BLIT_MIDDLE_BUTTON_WINDOW_MAX);
+            config_problem(problem, 400, "Bad Request",
+                           "invalid_middle_button_emulation", detail);
+            return 0;
+        }
+        middle_emulation_requested = 1;
+    }
     if (buttons_cursor != NULL) {
         const char *reason = NULL;
         if (!json_object_slice(buttons_cursor, buttons, sizeof(buttons))) {
@@ -16747,6 +16854,26 @@ static int apply_input_device_configuration(BlitRuntime *runtime,
     if (acceleration_requested &&
         acceleration_adaptive != device->acceleration_adaptive) {
         device->acceleration_adaptive = acceleration_adaptive;
+        changed = 1;
+    }
+    if (middle_emulation_requested &&
+        (middle_emulation_enabled !=
+             device->middle_button_emulation_enabled ||
+         middle_emulation_window != device->middle_button_window_ms)) {
+        /* A configuration change cannot strand a press that was already
+           deferred under the old policy. Flush it through the same raw path
+           before replacing the policy. */
+        flush_middle_button_pending(runtime, device);
+        if (!middle_emulation_enabled && device->middle_emulated_down) {
+            dispatch_pointer_button_from_device(runtime, device,
+                                                BLIT_POINTER_BUTTON_MIDDLE,
+                                                0, "api-pointer");
+            device->middle_emulated_down = 0;
+        }
+        device->middle_suppressed_buttons = 0;
+        device->middle_button_emulation_enabled =
+            middle_emulation_enabled;
+        device->middle_button_window_ms = middle_emulation_window;
         changed = 1;
     }
     if (deadzone_requested && deadzone != device->deadzone_percent) {
@@ -17458,6 +17585,16 @@ static size_t settings_input_configuration(const BlitInputDevice *device,
                      first ? "" : ",");
         first = 0;
     }
+    if (device->middle_button_emulation_enabled ||
+        device->middle_button_window_ms != BLIT_MIDDLE_BUTTON_WINDOW_DEFAULT) {
+        json_appendf(out, capacity, &used,
+                     "%s\"middle_button_emulation\":{\"enabled\":%s,"
+                     "\"window_ms\":%d}", first ? "" : ",",
+                     device->middle_button_emulation_enabled ? "true" :
+                         "false",
+                     device->middle_button_window_ms);
+        first = 0;
+    }
     if (device->deadzone_percent > 0) {
         json_appendf(out, capacity, &used, "%s\"deadzone_percent\":%d",
                      first ? "" : ",", device->deadzone_percent);
@@ -18077,6 +18214,13 @@ static void settings_reset(BlitRuntime *runtime)
         memset(device->button_targets, 0, sizeof(device->button_targets));
         device->scroll_step = BLIT_INPUT_SCROLL_STEP_DEFAULT;
         device->acceleration_adaptive = 0;
+        flush_middle_button_pending(runtime, device);
+        device->middle_button_emulation_enabled = 0;
+        device->middle_button_window_ms = BLIT_MIDDLE_BUTTON_WINDOW_DEFAULT;
+        device->middle_pending_button = -1;
+        device->middle_pending_deadline_us = 0;
+        device->middle_emulated_down = 0;
+        device->middle_suppressed_buttons = 0;
         device->deadzone_percent = 0;
         device->invert_axis_count = 0;
         memset(device->invert_axes, 0, sizeof(device->invert_axes));
@@ -23865,8 +24009,8 @@ static void broadcast_evdev_pointer(BlitRuntime *runtime, const char *kind,
     broadcast_stream(runtime, input_event, BLIT_STREAM_INPUT);
 }
 
-static void dispatch_pointer_button(BlitRuntime *runtime, int button,
-                                    int pressed, const char *device_id)
+static void dispatch_pointer_button_raw(BlitRuntime *runtime, int button,
+                                        int pressed, const char *device_id)
 {
     char detail[256];
     int column = 0;
@@ -23901,6 +24045,138 @@ static void dispatch_pointer_button(BlitRuntime *runtime, int button,
                       button, !pressed);
     if (!pressed)
         runtime->mouse_buttons &= ~(1U << button);
+}
+
+static void dispatch_pointer_button_from_device(BlitRuntime *runtime,
+                                                BlitInputDevice *device,
+                                                int button, int pressed,
+                                                const char *device_id)
+{
+    BlitInputDevice *previous = runtime->input_source;
+
+    runtime->input_source = device;
+    dispatch_pointer_button_raw(runtime, button, pressed, device_id);
+    runtime->input_source = previous;
+}
+
+static void flush_middle_button_pending(BlitRuntime *runtime,
+                                        BlitInputDevice *device)
+{
+    int pending;
+
+    if (runtime == NULL || device == NULL)
+        return;
+    pending = device->middle_pending_button;
+    if (pending < BLIT_POINTER_BUTTON_LEFT ||
+        pending > BLIT_POINTER_BUTTON_RIGHT ||
+        pending == BLIT_POINTER_BUTTON_MIDDLE)
+        return;
+    device->middle_pending_button = -1;
+    device->middle_pending_deadline_us = 0;
+    dispatch_pointer_button_from_device(runtime, device, pending, 1,
+                                        "evdev-pointer");
+}
+
+static void dispatch_pointer_button(BlitRuntime *runtime, int button,
+                                    int pressed, const char *device_id)
+{
+    BlitInputDevice *device = runtime != NULL ? runtime->input_source : NULL;
+    uint64_t now;
+
+    if (runtime == NULL || button < BLIT_POINTER_BUTTON_LEFT ||
+        button > BLIT_POINTER_BUTTON_RIGHT)
+        return;
+    if (device == NULL || !device->middle_button_emulation_enabled ||
+        button == BLIT_POINTER_BUTTON_MIDDLE) {
+        dispatch_pointer_button_raw(runtime, button, pressed, device_id);
+        return;
+    }
+
+    now = monotonic_us();
+    if (pressed) {
+        if (device->middle_emulated_down) {
+            /* A new physical press while the emulated button is held is a
+               real button event; the chord that produced middle has already
+               consumed its two constituent presses. */
+            dispatch_pointer_button_raw(runtime, button, pressed, device_id);
+            return;
+        }
+        if (device->middle_pending_button < 0) {
+            device->middle_pending_button = button;
+            device->middle_pending_deadline_us = now +
+                (uint64_t)(device->middle_button_window_ms > 0 ?
+                    device->middle_button_window_ms :
+                    BLIT_MIDDLE_BUTTON_WINDOW_DEFAULT) * 1000ULL;
+            return;
+        }
+        if (device->middle_pending_button == button) {
+            flush_middle_button_pending(runtime, device);
+            dispatch_pointer_button_raw(runtime, button, pressed, device_id);
+            return;
+        }
+        device->middle_pending_button = -1;
+        device->middle_pending_deadline_us = 0;
+        device->middle_emulated_down = 1;
+        device->middle_suppressed_buttons =
+            (1U << BLIT_POINTER_BUTTON_LEFT) |
+            (1U << BLIT_POINTER_BUTTON_RIGHT);
+        dispatch_pointer_button_raw(runtime, BLIT_POINTER_BUTTON_MIDDLE, 1,
+                                    device_id);
+        return;
+    }
+
+    if (device->middle_suppressed_buttons & (1U << button)) {
+        device->middle_suppressed_buttons &= ~(1U << button);
+        if (device->middle_emulated_down) {
+            device->middle_emulated_down = 0;
+            dispatch_pointer_button_raw(runtime, BLIT_POINTER_BUTTON_MIDDLE,
+                                        0, device_id);
+        }
+        return;
+    }
+    if (device->middle_pending_button == button) {
+        flush_middle_button_pending(runtime, device);
+        dispatch_pointer_button_raw(runtime, button, 0, device_id);
+        return;
+    }
+    if (device->middle_pending_button >= 0)
+        return;
+    dispatch_pointer_button_raw(runtime, button, 0, device_id);
+}
+
+static void service_middle_button_deadlines(BlitRuntime *runtime,
+                                            uint64_t now)
+{
+    int i;
+
+    for (i = 0; i < BLIT_MAX_INPUT_DEVICES; ++i) {
+        BlitInputDevice *device = &runtime->input_devices[i];
+        if (!device->used || device->middle_pending_button < 0 ||
+            device->middle_pending_deadline_us == 0 ||
+            now < device->middle_pending_deadline_us)
+            continue;
+        flush_middle_button_pending(runtime, device);
+    }
+}
+
+static int middle_button_wait_ms(const BlitRuntime *runtime, uint64_t now)
+{
+    uint64_t soonest = 0;
+    int i;
+
+    for (i = 0; i < BLIT_MAX_INPUT_DEVICES; ++i) {
+        const BlitInputDevice *device = &runtime->input_devices[i];
+        if (!device->used || device->middle_pending_button < 0 ||
+            device->middle_pending_deadline_us == 0)
+            continue;
+        if (device->middle_pending_deadline_us <= now)
+            return 0;
+        if (soonest == 0 || device->middle_pending_deadline_us < soonest)
+            soonest = device->middle_pending_deadline_us;
+    }
+    if (soonest == 0)
+        return -1;
+    return (int)((soonest - now + 999ULL) / 1000ULL);
 }
 
 static void broadcast_evdev_gamepad(BlitRuntime *runtime,
@@ -26149,7 +26425,13 @@ int main(int argc, char **argv)
             else if (runtime.outputs_idle_since_us == 0)
                 runtime.outputs_idle_since_us = now;
         }
+        service_middle_button_deadlines(&runtime, now);
         wait_ms = render_wait_ms(&runtime, now);
+        {
+            int middle_wait = middle_button_wait_ms(&runtime, now);
+            if (middle_wait >= 0 && middle_wait < wait_ms)
+                wait_ms = middle_wait;
+        }
         for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
             BlitSession *session = &runtime.sessions[i];
             if (session->used && session->attach_reassert_pending &&
@@ -26207,6 +26489,7 @@ int main(int argc, char **argv)
             runtime.diagnostic_max_select_ms)
             runtime.diagnostic_max_select_ms =
                 runtime.diagnostic_last_select_ms;
+        service_middle_button_deadlines(&runtime, monotonic_us());
         if (kms_fd >= 0 && ready > 0 && FD_ISSET(kms_fd, &readable))
             kms_ready = 1;
         if (runtime.direct_kms && runtime.kms != NULL) {

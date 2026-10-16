@@ -757,10 +757,23 @@ rate — a 1000 Hz mouse sends small deltas for the hand speed that makes a
 125 Hz mouse send large ones, so `adaptive` feels different on different
 hardware. The numbers live in `src/blit_input_pointer.h`.
 
-**Middle-button emulation does not exist**, and its absence is a decision
-rather than an omission: it needs a deferred press, which means a timer in an
-event loop that is otherwise entirely event-driven. It is issue #71 with the
-design written down.
+`middle_button_emulation` is opt-in per pointer device. It reports and accepts
+`{"enabled":false,"window_ms":150}` by default; `window_ms` is 50 through
+500 ms. When enabled, a left or right press is held for that window. If the
+other button arrives first, Blit emits one middle press; when either physical
+button is released, it emits one middle release. If the window expires, the
+original press is emitted as itself. Motion continues to be dispatched while a
+press is pending, and the event-loop wait is clamped to the earliest pending
+deadline so an idle server still flushes it. The setting is absent from the
+persistent document at its default and is restored through the same settings
+path as the other per-device properties.
+
+```text
+PATCH /v1/input/devices/{device_id}
+  { "configuration": {
+      "middle_button_emulation": { "enabled": true, "window_ms": 150 }
+  } }
+```
 
 ```text
 PATCH /v1/input/devices/{device_id}

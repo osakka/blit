@@ -1081,6 +1081,22 @@ paths:
                       additionalProperties: false
                       properties:
                         profile: {type: string, enum: [flat, adaptive]}
+                    middle_button_emulation:
+                      type: object
+                      required: [enabled, window_ms]
+                      additionalProperties: false
+                      description: >-
+                        Opt-in per-device left-plus-right middle-button
+                        emulation. A single left or right press is deferred
+                        until window_ms expires; a left/right pair inside the
+                        window emits one middle press.
+                      properties:
+                        enabled: {type: boolean, default: false}
+                        window_ms:
+                          type: integer
+                          minimum: 50
+                          maximum: 500
+                          default: 150
                     deadzone_percent: {type: integer, minimum: 0, maximum: 50}
                     invert_axes:
                       type: array
@@ -2819,6 +2835,13 @@ components:
                 feels different on different hardware. The numbers are in
                 `src/blit_input_pointer.h` and asserted by
                 `tools/tests/pointer_curve_gate.c`.
+            middle_button_emulation:
+              type: object
+              required: [enabled, window_ms]
+              additionalProperties: false
+              properties:
+                enabled: {type: boolean}
+                window_ms: {type: integer, minimum: 50, maximum: 500}
             deadzone_percent:
               type: integer
               minimum: 0

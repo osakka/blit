@@ -109,6 +109,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0085 — Graphics mutations invalidate every presentation backend](0085-graphics-mutations-invalidate-every-presentation-backend.md)
 - [0086 — Package the adapter from the pinned Hibr checkout](0086-package-the-adapter-from-the-pinned-hibr.md)
 - [0087 — Scroll terminal graphics with their owning rows](0087-graphics-scroll-with-terminal-rows.md)
+- [0088 — Opt-in deferred middle-button emulation](0088-opt-in-middle-button-emulation.md)
 
 ## Adding an ADR
 

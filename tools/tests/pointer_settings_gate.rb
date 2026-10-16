@@ -103,6 +103,15 @@ def trace(kind, limit = 32)
     .last.to_h.fetch('events', [])
 end
 
+def wait_for
+  deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 1.0
+  loop do
+    return if yield
+    raise Timeout::Error if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+    sleep 0.005
+  end
+end
+
 INPUT_ROOT = Dir.mktmpdir('blit-ptr')
 DOCUMENT = File.join(INPUT_ROOT, 'settings.json')
 at_exit { FileUtils.remove_entry(INPUT_ROOT) rescue nil }
@@ -189,6 +198,58 @@ verdict('a-pointer-starts-flat-with-one-report-a-notch') do
         'and no button map at all, rather than an identity one to read past')
   check(configuration['sensitivity_percent'] == 100,
         "with the sensitivity this always had, got #{configuration['sensitivity_percent'].inspect}")
+  check(configuration['middle_button_emulation'] ==
+        { 'enabled' => false, 'window_ms' => 150 },
+        "with middle emulation explicitly disabled, got #{configuration.inspect}")
+end
+
+verdict('middle-button-emulation-has-an-idle-deadline-and-keeps-motion') do
+  code, = configure(POINTER,
+                    { 'middle_button_emulation' =>
+                        { 'enabled' => true, 'window_ms' => 50 } })
+  check(code == 200, "PATCH middle emulation -> #{code}")
+  before_buttons = trace('pointer_button').length
+  before_motion = trace('pointer_motion').length
+  inject('kind' => 'pointer_button', 'code' => BTN_LEFT, 'pressed' => true,
+         'device_id' => POINTER)
+  check(trace('pointer_button').length == before_buttons,
+        'the first press is deferred while the chord window is open')
+  inject('kind' => 'pointer_motion', 'x' => 13, 'y' => 17,
+         'device_id' => POINTER)
+  check(trace('pointer_motion').length > before_motion,
+        'motion is dispatched while a press is pending')
+  wait_for { trace('pointer_button').length > before_buttons }
+  check(trace('pointer_button').last.to_h['detail'].to_s.include?('button=0') &&
+        trace('pointer_button').last.to_h['detail'].to_s.include?('pressed=1'),
+        'an idle deadline flushes the original left press')
+  inject('kind' => 'pointer_button', 'code' => BTN_LEFT, 'pressed' => false,
+         'device_id' => POINTER)
+
+  configure(POINTER, { 'middle_button_emulation' =>
+                          { 'enabled' => true, 'window_ms' => 150 } })
+  chord_before = trace('pointer_button').length
+  inject('kind' => 'pointer_button', 'code' => BTN_LEFT, 'pressed' => true,
+         'device_id' => POINTER)
+  inject('kind' => 'pointer_button', 'code' => BTN_RIGHT, 'pressed' => true,
+         'device_id' => POINTER)
+  chord_events = trace('pointer_button').drop(chord_before)
+  check(chord_events.length == 1 &&
+        chord_events.first.to_h['detail'].to_s.include?('button=1') &&
+        chord_events.first.to_h['detail'].to_s.include?('pressed=1'),
+        "a left/right chord emits one middle press, got #{chord_events.inspect}")
+  inject('kind' => 'pointer_button', 'code' => BTN_LEFT, 'pressed' => false,
+         'device_id' => POINTER)
+  release_events = trace('pointer_button').drop(chord_before)
+  check(release_events.length == 2 &&
+        release_events.last.to_h['detail'].to_s.include?('button=1') &&
+        release_events.last.to_h['detail'].to_s.include?('pressed=0'),
+        "releasing either chord member emits one middle release, got #{release_events.inspect}")
+  inject('kind' => 'pointer_button', 'code' => BTN_RIGHT, 'pressed' => false,
+         'device_id' => POINTER)
+  check(trace('pointer_button').drop(chord_before).length == 2,
+        'the consumed chord member release is not leaked as a right release')
+  configure(POINTER, { 'middle_button_emulation' =>
+                          { 'enabled' => false, 'window_ms' => 150 } })
 end
 
 verdict('a-button-map-swaps-what-the-terminal-is-told') do
@@ -349,7 +410,9 @@ verdict('pointer-and-gamepad-settings-survive-a-restart') do
   configure(POINTER, { 'buttons' => { BTN_LEFT.to_s => 'right',
                                       BTN_RIGHT.to_s => 'left' },
                        'scroll_step' => 4,
-                       'acceleration' => { 'profile' => 'adaptive' } })
+                       'acceleration' => { 'profile' => 'adaptive' },
+                       'middle_button_emulation' =>
+                         { 'enabled' => true, 'window_ms' => 125 } })
   # Asserted through GET /v1/settings rather than by reading the file. ADR
   # 0067 makes the document a resource precisely so that where it is kept is
   # an implementation detail, and a gate that reads the path is asserting the
@@ -364,6 +427,9 @@ verdict('pointer-and-gamepad-settings-survive-a-restart') do
   check(stored.to_h.dig(POINTER, 'scroll_step') == 4 &&
         stored.to_h.dig(POINTER, 'acceleration') == { 'profile' => 'adaptive' },
         "with the step and the profile, got #{stored.to_h[POINTER].inspect}")
+  check(stored.to_h.dig(POINTER, 'middle_button_emulation') ==
+        { 'enabled' => true, 'window_ms' => 125 },
+        "and middle-button emulation, got #{stored.to_h[POINTER].inspect}")
   check(stored.to_h.dig(GAMEPAD, 'deadzone_percent') == 15 &&
         stored.to_h.dig(GAMEPAD, 'invert_axes') == [0, 1],
         "and the gamepad's, got #{stored.to_h[GAMEPAD].inspect}")
@@ -379,13 +445,17 @@ verdict('pointer-and-gamepad-settings-survive-a-restart') do
   check(configuration['scroll_step'] == 4 &&
         configuration['acceleration'] == { 'profile' => 'adaptive' },
         "all of it is in force again after a restart, got #{configuration.inspect}")
+  check(configuration['middle_button_emulation'] ==
+        { 'enabled' => true, 'window_ms' => 125 },
+        "including middle-button emulation after a restart, got #{configuration.inspect}")
   check(configuration['buttons'] == { BTN_LEFT.to_s => 'right',
                                       BTN_RIGHT.to_s => 'left' },
         "including the map, got #{configuration['buttons'].inspect}")
   inject('kind' => 'pointer_button', 'code' => BTN_LEFT, 'pressed' => true,
          'device_id' => POINTER)
+  wait_for { trace('pointer_button').last.to_h['detail'].to_s.include?('button=2') }
   detail = trace('pointer_button').last.to_h['detail'].to_s
-  check(detail.include?('button=2'),
+  check(detail.include?('button=2') && detail.include?('pressed=1'),
         'and the swap still swaps, measured rather than read back, got ' \
         "#{detail.inspect}")
   inject('kind' => 'pointer_button', 'code' => BTN_LEFT, 'pressed' => false,
