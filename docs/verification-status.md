@@ -26,6 +26,35 @@ and top-left last; the screenshot reports the new revision but returns
 `pixels=[[255,0,0],[16,32,48]] expected=red,red`. The temporary shell surface
 is created in the free pane and deleted by the probe. The exact same probe
 must pass after deployment before this defect is closed.
+### 0.1.530 exact package and physical-host follow-up
+
+Source `590ea31` and manifest `releases/0.1.530.yaml` identify the TCC-built
+package. Artifact verification passes with `reproducible=yes`; SHA-256 is
+`0f62c457dc0cadf78731c51271a0023353668c0d0dc3696384a849b10f811071`.
+The API updater confirms live `server_version=0.1.530` on 192.168.10.54.
+
+- Identical two-corner probe: `LIVE_DAMAGE_UNION_PASS revision=3
+  display=display-93 both-corners=exact` (the pre-update run failed).
+- Existing motion probe: 12/12 accepted steps, no discarded captures.
+- Kitty probe: exact RGBy quadrants, untouched background, and deletion.
+- New `host_pty_pointer_stress.rb`: 600 genuine PTY animation frames,
+  106 concurrent pointer API requests, 100,352 checked blank pixels,
+  zero stale pixels. Its final state and BMP revisions agree.
+- Existing live Hibr saver state/pixel probe: three samples, zero stale cells,
+  zero missing cells, with continuing state churn (520, 1164, 736 cells).
+
+The stress evidence is under the ignored local directory
+`diagnostics/rendering-20261017/pty-pointer/`; screenshots before and after
+deployment are in `diagnostics/rendering-20261017/`. Temporary sessions were
+deleted; keyboard focus and pointer position were restored. Backend and pane
+topology were unchanged. Hibr source was not changed.
+
+The bounded stress capture measured 36.57 page-flip submissions per second over
+3.391 seconds including the producer's initial one-second wait. That mixed
+interval does **not** establish 60-Hz motion. Authenticated Hibr dragging,
+steady producer timing, and complete protocol conformance remain separate
+acceptance items. The login manager is the only remaining Blit session.
+
 Historical entries below describe their own versions and do not override
 this current failure status.
 

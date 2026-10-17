@@ -9,7 +9,7 @@ work actually stopped.
 
 ### 2026-10-17 rendering root defects, candidate 0.1.530
 
-The live 0.1.529 desktop remains visually broken. Prior evdev fairness and
+The pre-fix live 0.1.529 desktop was visually broken. Prior evdev fairness and
 cadence measurements did not establish rendering correctness. Two actual
 defects are now reproduced by failing-before/passing-after tests: damage
 rectangles shrink on left/up updates, and concurrent KMS pointer work replaces
@@ -17,14 +17,22 @@ pending terminal damage before retiring the revision. Partial scroll/DEC
 rectangle paths also overwrite outstanding damage. These are Blit defects;
 Hibr source has not been modified.
 
-Candidate 0.1.530 corrects these through one shared rectangle-union operation
+Deployed 0.1.530 corrects these through one shared rectangle-union operation
 and separate pointer accumulation; see [ADR 0116](adr/0116-damage-union-preserves-all-pending-work.md)
 and [issue #89](https://git.home.arpa/itdlabs/blit/issues/89). The previous
 uncommitted full-output redraw proposal was withdrawn before deployment.
 The actual KMS presenter now matches a fresh complete render at every pixel in
-128 mixed-content/pointer frames in a memory-backed test. Live deployment and
-Hibr interaction remain required before claiming the observed problem fixed.
+128 mixed-content/pointer frames in a memory-backed test. The identical live
+two-corner defect fails on 0.1.529 and passes on 0.1.530. A 600-frame real PTY
+animation with concurrent pointer requests leaves zero stale pixels in
+100,352 checked blank pixels. Three Hibr login-saver samples report zero stale
+or missing cells. Authenticated Hibr window dragging and refresh-rate
+acceptance remain pending; neither is inferred from these tests.
 The TCC-built candidate passes renderer/terminal gates: 51 pass, 0 skip, 0 fail.
+The exact deployed package is recorded in `releases/0.1.530.yaml` and is
+reproducible. Live motion and Kitty image/deletion probes also pass. Temporary
+probe sessions were removed and keyboard focus restored to the one existing
+login-manager session. The topology/backend were preserved.
 
 The sections below are historical evidence for 0.1.529 and earlier builds.
 
