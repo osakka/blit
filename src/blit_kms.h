@@ -88,6 +88,12 @@ typedef struct {
     double last_present_ms;
     double max_present_ms;
     unsigned long long present_calls;
+    unsigned long long flip_completions;
+    uint32_t vblank_sequence;
+    unsigned long long vblank_timestamp_us;
+    unsigned long long vblank_span_count;
+    unsigned long long vblank_span_us;
+    double observed_refresh_hz;
 } BlitKmsDisplayInfo;
 
 #define BLIT_KMS_PRESENTATION_AVAILABLE 0

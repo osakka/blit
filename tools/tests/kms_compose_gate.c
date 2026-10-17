@@ -24,6 +24,31 @@ static uint32_t front_pixels[W * H];
 static uint32_t back_pixels[W * H];
 static void place(int z);
 
+static void vblank_clock_gate(void)
+{
+    KmsOutput target;
+    memset(&target, 0, sizeof(target));
+    target.info.refresh_hz = 59.997;
+    kms_flip_handler(-1, 10, 10, 0, &target);
+    kms_flip_handler(-1, 70, 11, 0, &target);
+    kms_flip_handler(-1, 130, 12, 0, &target);
+    if (target.info.flip_completions != 3 ||
+        target.info.vblank_span_count != 120 ||
+        target.info.vblank_span_us != 2000000 ||
+        target.info.observed_refresh_hz != 60.0) {
+        fprintf(stderr, "KMS_VBLANK_FAIL clock/sequence confused with present count or nominal rate\n");
+        exit(1);
+    }
+    memset(&target, 0, sizeof(target));
+    kms_flip_handler(-1, UINT32_MAX - 1, 20, 0, &target);
+    kms_flip_handler(-1, 1, 20, 50000, &target);
+    if (target.info.vblank_span_count != 3 || target.info.observed_refresh_hz != 60.0) {
+        fprintf(stderr, "KMS_VBLANK_FAIL sequence wrap\n");
+        exit(1);
+    }
+    puts("KMS_VBLANK_PASS timestamps=measured skipped-sequences=independent wrap=correct");
+}
+
 static void mode_refresh_gate(void)
 {
     drmModeModeInfo mode;
@@ -484,6 +509,7 @@ int main(void)
     uint32_t face = 0x101820U;
 
     buffer_coherence_gate();
+    vblank_clock_gate();
     mode_refresh_gate();
     output_ready_mask_gate();
     scene_copy_gate();

@@ -1115,6 +1115,7 @@ typedef struct {
     int sdl_ready;
     int direct_kms;
     uint32_t kms_retry_outputs;
+    unsigned long long kms_vblank_traced[BLIT_MAX_DISPLAYS];
     /* Issue #69. A DRM connector's power state is read at most once a second:
        it is three ioctls per connector and nothing changes it but Blit. */
     uint64_t display_power_checked_us;
@@ -1919,6 +1920,29 @@ static void retry_ready_kms_outputs(BlitRuntime *runtime, uint32_t ready,
         runtime->render_pending = 1;
         snprintf(detail, sizeof(detail), "ready_retry_mask=0x%x", retry);
         diagnostic_trace(runtime, "kms_frame_retry", detail);
+    }
+}
+
+static void trace_kms_vblank(BlitRuntime *runtime)
+{
+    int i;
+    for (i = 0; i < runtime->output_count; ++i) {
+        BlitKmsDisplayInfo info;
+        char detail[320];
+        if (blit_kms_display_info(runtime->kms, i, &info) != 0 ||
+            info.flip_completions == 0 ||
+            info.flip_completions == runtime->kms_vblank_traced[i] ||
+            (info.flip_completions != 1 && info.flip_completions % 60 != 0))
+            continue;
+        runtime->kms_vblank_traced[i] = info.flip_completions;
+        snprintf(detail, sizeof(detail),
+                 "display=display-%llu completions=%llu vblank_sequence=%u "
+                 "timestamp_us=%llu span_vblanks=%llu span_us=%llu "
+                 "observed_refresh_hz=%.6f nominal_refresh_hz=%.6f",
+                 info.id, info.flip_completions, info.vblank_sequence,
+                 info.vblank_timestamp_us, info.vblank_span_count,
+                 info.vblank_span_us, info.observed_refresh_hz, info.refresh_hz);
+        diagnostic_trace(runtime, "kms_vblank", detail);
     }
 }
 
@@ -27400,6 +27424,7 @@ int main(int argc, char **argv)
             if (serviced < 0)
                 fprintf(stderr, "blit: KMS event service failed\n");
             else if (serviced > 0) {
+                trace_kms_vblank(&runtime);
                 runtime.render_pending = 1;
                 retry_ready_kms_outputs(&runtime,
                     blit_kms_ready_output_mask(runtime.kms), monotonic_us());

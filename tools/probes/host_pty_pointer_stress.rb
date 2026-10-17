@@ -114,6 +114,13 @@ begin
   File.write(File.join(OUT,'runtime-samples.json'),JSON.pretty_generate(samples))
   File.write(File.join(OUT,'render-trace.json'),
     JSON.pretty_generate(data('/v1/diagnostics/trace?kind=render_path&limit=256')))
+  clocks = data('/v1/diagnostics/trace?kind=kms_vblank&limit=16')
+  File.write(File.join(OUT,'vblank-trace.json'), JSON.pretty_generate(clocks))
+  clock_event = clocks.fetch('events').reverse.find { |event|
+    event['detail'].include?("display=#{display} ") &&
+      event['detail'].match?(/observed_refresh_hz=(?!0\.000000)/)
+  }
+  puts "PTY_POINTER_VBLANK #{clock_event['detail']}" if clock_event
   bad = []; checked = 0
   state.fetch('cells').each do |cell|
     next unless cell['text'] == ' '

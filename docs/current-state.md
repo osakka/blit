@@ -7,6 +7,17 @@ work actually stopped.
 
 ## Status at the last review
 
+### 2026-10-17 candidate 0.1.534: observe the DRM vblank clock
+
+0.1.533 is deployed and reports the unchanged 1920x2160 mode at 59.997 Hz.
+Its repeated 6000-frame whole-pane pixel check passes, but strict cadence
+still fails at 59.902 submissions/s over 32.820 s. Mode rounding does not
+explain it. [ADR 0120](adr/0120-kms-vblank-clock-is-observable.md) captures
+the DRM callback's previously discarded sequence/time through bounded trace
+events. Known-clock, skipped-sequence and wrap tests pass. The same live soak
+must discriminate clock behavior from missed refreshes before further timing
+changes or a rate acceptance claim. This cycle is observability only.
+
 ### 2026-10-17 candidate 0.1.533: exact KMS mode refresh
 
 0.1.532 is deployed and the short strict real-host test passes at 59.832 Hz

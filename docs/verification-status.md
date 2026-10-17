@@ -3,6 +3,22 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-17: candidate 0.1.534 DRM clock evidence
+
+Exact 0.1.533 is deployed from `bc1a0e5`, package SHA-256
+`e1b69b90242dd991a38c37d7f29babefa05df0b7fd5555b294aaf2a6d165ab24`,
+reproducible artifact check passed. Active-mode metadata is 59.997 Hz with
+unchanged resolution/selection. The repeated 6000-frame soak checks 2,051,904
+blank pixels with zero stale pixels but **fails** its strict rate check:
+59.902 submissions/s over 32.820 s, minimum 59.967. Mode rounding alone does
+not explain this. Evidence: `diagnostics/rendering-20261017/refresh-soak-533/`.
+
+Candidate 0.1.534 records the actual DRM sequence/time without altering
+presentation. The callback fixture distinguishes nominal 59.997 Hz from an
+observed 60-Hz fixture with three completions spanning 120 vblanks. uint32
+wrap, KMS ownership and full-reference pixel tests pass. Live clock/submission
+correlation remains pending.
+
 ## 2026-10-17: candidate 0.1.533 fractional KMS refresh
 
 Exact 0.1.532 is deployed: package SHA-256

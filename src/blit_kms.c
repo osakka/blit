@@ -122,8 +122,25 @@ static void kms_flip_handler(int fd, unsigned int frame, unsigned int sec,
                              unsigned int usec, void *data)
 {
     KmsOutput *output = (KmsOutput *)data;
-    (void)fd; (void)frame; (void)sec; (void)usec;
+    (void)fd;
     if (output != NULL) {
+        unsigned long long timestamp = (unsigned long long)sec * 1000000ULL + usec;
+        if (output->info.flip_completions == 0) {
+            output->info.vblank_sequence = frame;
+            output->info.vblank_timestamp_us = timestamp;
+        } else if (timestamp > output->info.vblank_timestamp_us) {
+            uint32_t delta = frame - output->info.vblank_sequence;
+            if (delta != 0) {
+                output->info.vblank_span_count += delta;
+                output->info.vblank_span_us += timestamp - output->info.vblank_timestamp_us;
+                output->info.observed_refresh_hz =
+                    (double)output->info.vblank_span_count * 1000000.0 /
+                    (double)output->info.vblank_span_us;
+                output->info.vblank_sequence = frame;
+                output->info.vblank_timestamp_us = timestamp;
+            }
+        }
+        ++output->info.flip_completions;
         output->flip_done = 1;
         output->flip_pending = 0;
         output->flip_started_us = 0;

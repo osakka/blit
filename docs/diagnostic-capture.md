@@ -1,5 +1,12 @@
 # Live diagnostic capture
 
+Direct KMS exposes clock evidence at
+`GET /v1/diagnostics/trace?kind=kms_vblank&limit=16`. Events report the display,
+completed flips, DRM sequence/timestamp, accumulated vblank count/time, observed
+refresh, and nominal mode refresh. Sequence/time deltas measure the DRM clock
+even when Blit submits occasional frames; completions count submitted flips.
+Events occur on first completion and every 60 completions. See ADR 0120.
+
 ## Physical symptom capture (canonical)
 
 For a report involving mouse movement, blinking, trails, missing clicks, or
