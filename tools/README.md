@@ -33,3 +33,12 @@ that explicitly load the provider. It is separate from desktop orchestration.
 motion-trail gate. It creates a bounded static API surface, moves a known
 block through it, and compares only coherent capture revisions. It cleans
 up its own session and is not a Hibr desktop test.
+
+`host_kitty_composition.rb` is the live direct-KMS graphics boundary probe. It
+creates a bounded API surface, paints a known cell background, emits a known
+2x2 RGB Kitty image from the child PTY, captures exact image and surrounding
+cell pixels, emits the Kitty image delete, and verifies that the old image
+pixels return to the cell background. It is not a Hibr desktop or physical
+input test. Both live probes discover the output and pane geometry from
+`/v1/topology`; direct-KMS screenshots are decoded from their advertised BMP
+bit depth.

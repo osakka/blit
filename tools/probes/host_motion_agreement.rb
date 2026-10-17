@@ -64,8 +64,11 @@ def capture(base, token, display_id)
 end
 
 def pixel(bmp, width, height, x, y)
-  stride = (width * 3 + 3) & ~3
-  offset = 54 + (height - 1 - y) * stride + x * 3
+  bits = bmp.getbyte(28) | (bmp.getbyte(29) << 8)
+  bytes = bits / 8
+  raise "unsupported BMP depth #{bits}" unless [3, 4].include?(bytes)
+  stride = (width * bytes + 3) & ~3
+  offset = 54 + (height - 1 - y) * stride + x * bytes
   [bmp.getbyte(offset + 2), bmp.getbyte(offset + 1), bmp.getbyte(offset)]
 end
 
@@ -113,8 +116,10 @@ abort 'no free pane for live motion probe' unless pane
 grid = pane.fetch('cell_grid')
 columns = [30, grid.fetch('columns')].min
 rows = [16, grid.fetch('rows')].min
-origin_x = pane.fetch('pixel_region').fetch('x') + grid.fetch('origin_x') + inset
-origin_y = pane.fetch('pixel_region').fetch('y') + grid.fetch('origin_y') + inset
+# The topology's cell-grid origin is already in display coordinates. The
+# pixel_region is a containing rectangle, not another offset to add.
+origin_x = grid.fetch('origin_x') + inset
+origin_y = grid.fetch('origin_y') + inset
 cell_w = grid.fetch('cell_width')
 cell_h = grid.fetch('cell_height')
 background = [0x10, 0x20, 0x30]

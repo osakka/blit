@@ -3,6 +3,33 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 0.1.524 live API-owned cell and Kitty composition boundary
+
+On 2026-10-17, the authenticated direct-KMS host at `192.168.10.54` reported
+one 1920x2160@60 Hz output and the persisted 1x2 topology. The corrected
+`tools/probes/host_motion_agreement.rb` updated a known block twelve times in
+the free lower pane and passed:
+`MOTION_PASS steps=12 accepted=12 discarded=0 direct_kms=true
+display=display-93`. The probe now uses the topology's display-global cell
+origin and reads the BMP bit depth from the capture header; the earlier
+lower-pane result made before those corrections is not evidence.
+
+`tools/probes/host_kitty_composition.rb` then created a separate API-owned
+surface, painted a known `#102030` cell background, emitted a 2x2 RGB Kitty
+image from the child PTY, and captured the direct-KMS framebuffer. All four
+image quadrants matched exact RGB values and an untouched cell matched the
+known background. A Kitty `a=d,d=I` delete was then observed and the former
+image location returned exactly to the background:
+`KITTY_COMPOSITION_PASS display=display-93 image=9001 direct_kms=true
+pixels=exact delete=exact`.
+
+The probes cleaned up their own sessions; the host was left with only the
+supervised login-manager session. This is isolated renderer/protocol evidence,
+not acceptance of Hibr's complete desktop, wallpaper, joins, physical mouse,
+physical keyboard, or window interaction. The live runtime still reports a
+large cumulative missed-deadline count from the long-lived login-manager and
+diagnostic workload; no 60-Hz physical-performance claim is made here.
+
 ## 0.1.523 live direct-KMS surface-local damage and cadence
 
 The exact `0.1.523` package is deployed on `192.168.10.54`. Hibr source was

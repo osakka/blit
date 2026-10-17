@@ -45,8 +45,10 @@ abort "surface #{SURFACE} has no topology pane" unless pane
 grid = pane.fetch('cell_grid')
 CW = grid.fetch('cell_width')
 CH = grid.fetch('cell_height')
-ORIGIN_X = pane.fetch('pixel_region').fetch('x') + grid.fetch('origin_x') + INSET
-ORIGIN_Y = pane.fetch('pixel_region').fetch('y') + grid.fetch('origin_y') + INSET
+# The topology's cell-grid origin is already in display coordinates. The
+# pixel_region is a containing rectangle, not another offset to add.
+ORIGIN_X = grid.fetch('origin_x') + INSET
+ORIGIN_Y = grid.fetch('origin_y') + INSET
 def capture
   r = req('GET', "/v1/diagnostics/screenshots/#{DISPLAY}")
   raise "capture #{r.code}" unless r.code == '200'
@@ -55,7 +57,10 @@ def capture
   { body: r.body, revs: revs, presented: r['X-Blit-Capture-Presented'], frame: r['X-Blit-Capture-Frame'] }
 end
 def px(b, x, y)
-  stride = (W * 3 + 3) & ~3; o = 54 + (H - 1 - y) * stride + x * 3
+  bits = b.getbyte(28) | (b.getbyte(29) << 8)
+  bytes = bits / 8
+  raise "unsupported BMP depth #{bits}" unless [3, 4].include?(bytes)
+  stride = (W * bytes + 3) & ~3; o = 54 + (H - 1 - y) * stride + x * bytes
   [b.getbyte(o + 2), b.getbyte(o + 1), b.getbyte(o)]
 end
 checked = 0; mismatched = []; discarded = 0; used = nil

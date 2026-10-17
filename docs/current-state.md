@@ -12,9 +12,9 @@ The current source candidate is `0.1.524`. Hibr source was not modified.
 The authenticated live host at `192.168.10.54` reports `0.1.524` with
 `backend=drm-kms`, `direct_kms=true`, `video_driver=direct-kms`,
 `presentation_sync=drm-page-flip`, and one 1920x2160@60 Hz output. The
-persisted 1x2 topology has the supervised login manager in the lower pane and
-no surface in the upper pane; this is the controlled single-desktop test
-state, not a primary-plus-join acceptance result.
+persisted 1x2 topology currently has the supervised login manager in the
+upper pane and no surface in the lower pane; this is the controlled
+single-desktop test state, not a primary-plus-join acceptance result.
 
 ADR 0108 narrows changed-view composition to surface-local damage while
 retaining an atomic page-flip boundary. The live fast-terminal workload then
@@ -57,13 +57,24 @@ pass or fail; a static controlled surface is required for a pixel agreement
 assertion.
 
 The required static controlled surface was then run in the free lower pane.
-The direct-KMS pixel agreement passed with `TRAIL_PASS blank_cells=84
-no_unaccounted_pixels=yes`. The live moving-surface probe then updated a
-known block twelve times and passed with
+The earlier `TRAIL_PASS` verdict is not accepted: that probe added the containing
+`pixel_region` to the already display-global `cell_grid.origin_*`, so lower
+pane samples were outside the framebuffer, and the capture decoder treated
+every live BMP as 24-bit even though direct KMS advertises 32-bit captures.
+Both probe assumptions were corrected before accepting a result. The corrected live
+moving-surface probe then updated a known block twelve times and passed with
 `MOTION_PASS steps=12 accepted=12 discarded=0 direct_kms=true
-display=display-93`. These results prove the canonical cell-to-pixel mapping
-and bounded damage path for an API-owned surface on this host. They do not
-prove Hibr's saver, wallpaper/Kitty composition, desktop windows, or physical
+display=display-93`. A separate live Kitty composition probe painted
+`#102030`, emitted a 2x2 RGB image, verified exact red/green/blue/yellow image
+quadrants plus an untouched background cell, deleted the image through Kitty,
+and verified exact background restoration:
+`KITTY_COMPOSITION_PASS display=display-93 image=9001 direct_kms=true
+pixels=exact delete=exact`.
+
+These results prove the canonical cell-to-pixel mapping, bounded damage path,
+direct-KMS BMP capture decoding, and isolated Kitty composition/invalidation
+for API-owned surfaces on this host. They do not prove Hibr's saver,
+wallpaper/desktop scene, desktop windows, joined coordinates, or physical
 input; those remain separate tests.
 
 ### Architecture decision check
