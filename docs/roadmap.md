@@ -35,7 +35,8 @@ joins remain separate, unimplemented acceptance boundaries.
 
 Candidate 0.1.539 adds exact named-client association with expiring native
 observations and a bounded asynchronous per-user query. Local identity/native
-CLI/controller tests pass; final broad/package/physical acceptance is pending.
+CLI/controller tests pass; the full local/package run passes89 tests with
+three explicit skips and no failures. Physical named-login acceptance is pending.
 The live 0.1.538 client is still unnamed and must not be guessed into this
 registry. After safe deployment and a fresh named login, retire the obsolete
 native horizontal projection and integrate standby/release joins (#96).

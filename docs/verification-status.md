@@ -65,6 +65,19 @@ This does not establish a physical refresh-rate guarantee or actual native/PAM
 acceptance; those remain separate. Final broad run continues on the corrected
 fixture and the same0.1.539 package.
 
+The final full run, with pinned Hibr headers and
+`BLIT_GATE_PACKAGE=blit_0.1.539-1_amd64.deb tools/run-gates.sh all`, finishes
+**89 pass / 3 skip / 0 fail**. It includes both new observer gates, the corrected
+startup-ordering fixture and quiet read-only acceptance client, existing
+schema/terminal/font/renderer/input/Hibr/lifecycle tests, the pinned-script
+package gate and the120-second four-PTY soak (11,480 snapshots; 1,044 resizes).
+The three skips are QEMU, physical multi-output and live screenshot backpressure,
+not implied passes. The artifact also independently rebuilt reproducibly.
+No production source/package changes followed5735627; subsequent commits are
+test, manifest and evidence updates. Host remains0.1.538 with its current
+authenticated desktop preserved pending safe restart clearance. Actual named
+login association on10.54 and standby joins are not claimed complete.
+
 ## 2026-10-17: deployed 0.1.538 private login identity
 
 The new `login_identity_gate.rb` fails against 0.1.537 (`login identity API

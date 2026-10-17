@@ -21,7 +21,8 @@ The 0.1.538 binary fails the new association regression (API absent). The TCC
 candidate passes identity tests, a real installed-Hibr isolated hold/client
 oracle and synthetic native-result controller tests, including UID/geometry/
 malformed/size/deadline failures, shell/wait gating, stale observation and
-nonblocking logout. Full gates/package/deployment remain pending. The candidate
+nonblocking logout. Full local/package gates now pass; physical deployment
+and named-client acceptance remain pending. The candidate
 does not automatically join or rearrange anything.
 
 A scoped API query on the unchanged 10.54 host reports UID1000, native session
@@ -36,7 +37,11 @@ The package is built from source/documentation commit `5735627`, SHA256
 `30daa8356f5068e8af101f8e90c6c62d4bc89754e256d69f5bfad91198f7eb35`.
 Artifact validation and reproducible rebuild pass. The package gate also
 compares both changed Hibr entrypoints to the manifest's source commit.
-The full gate run is underway with this exact package; no live update yet.
+The full run with this exact package finishes89 pass / 3 skip / 0 fail,
+including package verification and the120-second four-PTY soak (11,480 snapshots,
+1,044 resizes). Skips are QEMU, physical multi-output and live screenshot
+backpressure. No live update yet; user logout/restart clearance and a fresh
+login are needed for the actual named-client association check.
 `tools/probes/host_native_association.rb` is a read-only physical acceptance
 check for pre-authentication waiting and exact named-client readiness, including
 refresh after quiet intervals longer than the observation TTL. Its first run
@@ -51,6 +56,9 @@ waiting/owner_missing response. The corrected fixture delays publication500ms
 to exercise that ordering, and retains exact rejection-reason assertions.
 Production source/package identity is unchanged. See the verification ledger
 for the failed isolated run and deterministic old-fixture reproduction.
+The final broad run uses these corrected fixtures and passes. Later commits
+change tests/evidence only; the production source and package remain pinned
+to5735627 and the recorded SHA256.
 
 Next after physical named-client acceptance: retire obsolete native horizontal
 projection and integrate supported standby/release joins in one coherent
