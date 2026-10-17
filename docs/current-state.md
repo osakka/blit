@@ -48,6 +48,14 @@ live evidence under `/tmp`; the repeatable tool and its interpretation are
 tracked in `tools/diagnostics/wake-and-capture.sh` and
 `docs/diagnostic-capture.md`.
 
+The live renderer-agreement probe was also corrected to discover the physical
+display from topology; its previous `display-1` assumption caused a 404 on the
+real `display-93` host. With that correction, six attempts against the active
+login-manager saver were all discarded because the 12 MiB screenshot straddled
+a changing surface revision. This is inconclusive evidence, not a renderer
+pass or fail; a static controlled surface is required for a pixel agreement
+assertion.
+
 ### Architecture decision check
 
 There is no accepted decision to deprecate the direct DRM/KMS or non-SDL

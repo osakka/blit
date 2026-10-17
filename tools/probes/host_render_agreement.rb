@@ -7,6 +7,10 @@
 #
 #   ruby tools/probes/host_render_agreement.rb HOST:PORT TOKEN [SURFACE] [TRIES]
 #
+# If SURFACE is omitted, the first surface in /v1/topology is used. The
+# physical display is always discovered from that same topology; it is not
+# assumed to be display-1.
+#
 # Issue #29, done-when 3: state the screensaver-trail report as pass or fail.
 #
 # A blank cell must render as a solid block of its background colour; anything
@@ -16,7 +20,7 @@
 # a sample whose presented revision moved under it is discarded, not failed.
 require 'json'; require 'net/http'; require 'uri'
 HOST = ARGV[0] || '192.168.10.54:8080'; TOKEN = ARGV[1] || 'hellomonkeyboy'
-SURFACE = ARGV[2] || 'surface-6'
+SURFACE_ARG = ARGV[2]
 ATTEMPTS = Integer(ARGV[3] || '12')
 BASE = URI("http://#{HOST}")
 def req(m, p)
@@ -25,10 +29,16 @@ def req(m, p)
   Net::HTTP.start(u.hostname, u.port, read_timeout: 120) { |h| h.request(r) }
 end
 def json(p) = JSON.parse(req('GET', p).body)
-diag = json('/v1/diagnostics'); INSET = diag['render']['surface_inset_px']
-disp = json('/v1/displays')['displays'][0]
-W = disp['bounds']['width']; H = disp['bounds']['height']
 topology = json('/v1/topology')
+SURFACE = SURFACE_ARG || topology.fetch('panes').filter_map { |candidate|
+  candidate['surface_id']
+}.first
+abort 'no live surface was reported by /v1/topology' unless SURFACE
+DISPLAY = topology.fetch('outputs').first.fetch('display_id')
+diag = json('/v1/diagnostics'); INSET = diag['render']['surface_inset_px']
+disp = json('/v1/displays').fetch('displays').find { |item| item['id'] == DISPLAY }
+abort "display #{DISPLAY} is missing from /v1/displays" unless disp
+W = disp['bounds']['width']; H = disp['bounds']['height']
 pane = topology.fetch('panes').find { |candidate| candidate['surface_id'] == SURFACE }
 abort "surface #{SURFACE} has no topology pane" unless pane
 grid = pane.fetch('cell_grid')
@@ -37,7 +47,7 @@ CH = grid.fetch('cell_height')
 ORIGIN_X = pane.fetch('pixel_region').fetch('x') + grid.fetch('origin_x') + INSET
 ORIGIN_Y = pane.fetch('pixel_region').fetch('y') + grid.fetch('origin_y') + INSET
 def capture
-  r = req('GET', "/v1/diagnostics/screenshots/#{'display-1'}")
+  r = req('GET', "/v1/diagnostics/screenshots/#{DISPLAY}")
   raise "capture #{r.code}" unless r.code == '200'
   revs = {}
   (r['X-Blit-Capture-Revisions'] || '').split(',').each { |p| i, v = p.split('='); revs[i] = v.to_i if i && v }
