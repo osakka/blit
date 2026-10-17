@@ -27,6 +27,15 @@ wrapper and native join; [issue #96](https://git.home.arpa/itdlabs/blit/issues/9
 tracks proper association and removal of obsolete projection special-casing.
 No boot/logout/reconnect acceptance is claimed.
 
+A later lifecycle check found a new lower login PTY11 and held owner240371,
+with only its primary client attached. The original join was no longer a
+client of that desktop. Removed only our retired join9; started native join13
+after confirming the current authenticated desktop and arranged it above.
+Final `hold clients`: primary client-4 `(67,0,67,240)`, blit-upper
+`(0,0,67,240)`, held owner240371, union134x240. `final-native-geometry.json`
+and `final.png` record the handoff. Recovery was manual API orchestration,
+not an implemented automatic reconnect feature; issue96 covers the gap.
+
 ## 2026-10-17: requested live SDL GL switch, package unchanged
 
 The same reproducible 0.1.535 package now runs SDL3/KMSDRM/OpenGLES2 with

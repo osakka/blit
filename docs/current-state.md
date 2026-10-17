@@ -10,9 +10,9 @@ work actually stopped.
 ### 2026-10-17 requested bottom-primary/top-join live setup
 
 SDL GL and package 0.1.535 are unchanged. The existing authenticated login
-PTY id5/surface-5 is now in `pane-display-1-2` (bottom). One native
-`desktop --join` terminal id9/surface-9 runs as osakka in the upper pane,
-named `blit-upper` in Hibr. Hibr's held desktop owner remains PID239437:
+PTY initially id5/surface-5 moved to `pane-display-1-2` (bottom). One native
+`desktop --join` terminal initially id9 ran as osakka in the upper pane,
+named `blit-upper` in Hibr. At that attachment the held owner stayed PID239437:
 primary client-4 at `(67,0,67,240)`, join at `(0,0,67,240)`, union134x240.
 This is a real vertical join, not a mirror or a second primary desktop.
 
@@ -32,6 +32,15 @@ Dark residual rectangles remain visible in the lower pane after relayout;
 the cause and interactive acceptance are not established. The user has been
 asked to validate both panes; no more injected input is being sent during
 their test. Restart/login-before-join automation is not implemented here.
+
+During user testing the lower login PTY was replaced by id11 and Hibr's held
+owner changed to PID240371; `hold clients` then showed only the primary. The
+old join9 was explicitly deleted and native join13 attached to this current
+authenticated desktop. Final verified native rectangles are again primary
+`(67,0,67,240)` and join `(0,0,67,240)`, owner240371, union134x240. Evidence:
+`final-native-geometry.json`, `final.png` and headers. This demonstrates the
+missing reconnect orchestration in issue96; it must not be hidden by the
+earlier single-owner-continuity result or described as automatic recovery.
 
 ### 2026-10-17 operating-mode change: SDL GL, same 0.1.535 package
 
