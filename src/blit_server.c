@@ -23566,7 +23566,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                                "backend=kms path=direct-kms output_mask=0x%x "
                                "submitted_mask=0x%x deferred_mask=0x%x "
                                "views=%d overlays=%d present_ms=%.3f "
-                               "pointer=%d,%d valid=%d",
+                               "pointer=%.1f,%.1f valid=%d",
                                output_mask, kms_submitted_output_mask,
                                kms_deferred_output_mask, view_count,
                                kms_overlay_count, kms_present_ms,
