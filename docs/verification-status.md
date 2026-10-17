@@ -3,15 +3,16 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
-## 2026-10-17: candidate0.1.536 edge/font regressions
+## 2026-10-17: deployed 0.1.536 edge/font regressions
 
 Before correction, the actual pane API gate reports complete1024px grid plus
 inset4 clipping beyond1024; the old diamond bitmap is asymmetric/truncated.
 After removing the surplus inset and fitting complete fallback rasters, the
 focused pane geometry gate and font-fit gate pass (regular/bold diamond and
 12 independent full-mask symbol comparisons). Regenerated PSF has930glyphs,
-unchanged8x16cells; required447-codepoint manifest passes. Broad suites,
-package and exact live pixel checks are pending; no live changes yet.
+unchanged8x16cells; required447-codepoint manifest passes. At this initial
+candidate stage, broad suites, package and exact live pixel checks were
+pending; the subsequent results below supersede that pending status.
 
 The first broad run was 52 pass / 6 fail, no skips. Five failures were stale
 test assumptions about the old four-pixel sampling origin (one refused zero
@@ -22,6 +23,25 @@ refreshed. All six focused reruns pass. The full suite is being repeated.
 The new edge/font probe also passes against a local dummy-renderer server:
 21 cells / 2688 pixels, complete left/right edge cells and bold diamond.
 That is not yet physical-host evidence.
+
+The complete rerun passes **58 gates, zero failures and zero skips** across
+renderer, terminal and font suites. The package artifact gate also passes
+reproducibility for the checksum in `releases/0.1.536.yaml`. Original base
+glyphs 0–511 retain their exact bitmap bytes. Before deployment, the lower
+login target was explicitly read back as
+`BLIT_LOGIN_PANE_ID=pane-display-1-2`; SDL/backend selection was not changed.
+
+The updater subsequently verified 0.1.536 on the actual 192.168.10.54 host.
+Post-update API identity is SDL3/KMSDRM/OpenGLES2, SDL vsync, 8x16 scale 1,
+930 glyphs, zero extra inset and unchanged 240x67 panes. Diagnostics report no
+errors/warnings at that check. The physical edge/font oracle passes 21 cells /
+2688 exact pixel comparisons, including the complete rightmost bold diamond.
+Its temporary upper terminal was deleted; only the focused lower login
+manager remains. The upper native join awaits user authentication, not a
+pre-login attachment. Evidence is `diagnostics/grid-font-536/physical/` and
+the adjacent post-update API captures. These results do not claim universal
+terminal conformance, motion acceptance or resolution of issues #95/#96.
+Issues #97/#98 are closed with this bounded evidence.
 
 ## 2026-10-17: live native bottom-primary/top-join orchestration
 

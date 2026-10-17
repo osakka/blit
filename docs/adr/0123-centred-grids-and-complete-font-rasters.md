@@ -44,3 +44,10 @@ against their regenerated bitmap, not just confirm that the server starts.
 No Hibr source changes. A supervised update restarts the service; preserve
 SDL GL and the lower login pane, then attach the native upper join only after
 authentication. This does not silently implement the lifecycle work in #96.
+
+Version0.1.536 satisfies the bounded checks above:58/58 suite gates, a
+reproducible package, and21cells/2688matching pixels on the physical SDL GL
+host. Pane metrics and scale are unchanged; original base glyphs0–511 retain
+their exact bitmaps. The physical probe includes a bold diamond in the final
+column. Evidence is indexed in the verification ledger; authenticated joined
+desktop acceptance remains distinct from that probe.

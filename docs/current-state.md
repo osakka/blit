@@ -7,18 +7,37 @@ work actually stopped.
 
 ## Status at the last review
 
-### 2026-10-17 candidate0.1.536: edge fit and complete glyphs
+### 2026-10-17 deployed 0.1.536: edge fit and complete glyphs
 
 The user requested correction of the clipped right edge and icon shapes.
 [ADR0123](adr/0123-centred-grids-and-complete-font-rasters.md) records two
 reproduced defects: redundant4px presentation inset beyond the already
 centred grid (#97), and overwide fallback outlines cropped into8px (#98).
-Both regressions fail before correction. Candidate0.1.536 sets the extra
-inset to0 without changing logical dimensions; fallback rasters fit complete
-inkbounds, and diamonds have symmetric regular/bold geometry. The generated
-font has930glyphs at unchanged8x16metrics. Focused geometry/font tests pass;
-broad suites, reproducible package and live deployment are pending. The
-desktop still runs0.1.535 SDL GL with its existing native stacked join.
+Both regressions fail before correction. Version 0.1.536 sets the extra
+inset to 0 without changing logical dimensions; fallback rasters fit complete
+ink bounds, and diamonds have symmetric regular/bold geometry. The generated
+font has 930 glyphs at unchanged 8x16 metrics. The complete renderer/terminal/font
+rerun passes 58/58 with no skips; package reproducibility also passes.
+`releases/0.1.536.yaml` records the deployed artifact identity.
+
+The authorized API updater verified 0.1.536 on 192.168.10.54. SDL GL remains
+`kmsdrm`/`opengles2`/`sdl-vsync`, scale 1, with no diagnostic errors/warnings
+at the post-restart check. Each pane remains 240x67; origins are (0,4) and
+(0,1084), with diagnostic extra inset 0. The physical-host edge/font oracle
+passes all 2688 pixels across 21 cells, including both edge cells, a bold diamond
+in the last column and 18 selected normal glyphs. This proves those bounded
+geometry/bitmap assertions, not universal font quality or frame-rate acceptance.
+Original base glyph bitmap bytes 0–511 are unchanged. Issues #97/#98 are
+closed with this regression and physical-host evidence.
+
+The restart left exactly one lower login-manager terminal (id 1 at this check),
+focused, and the upper pane empty after temporary-probe cleanup. The boot
+configuration now explicitly selects `BLIT_LOGIN_PANE_ID=pane-display-1-2`.
+The user has been asked to authenticate before the native upper join is
+restored; do not attach it to the login manager or start a second primary.
+Evidence: ignored `diagnostics/grid-font-536/`, including physical verdict,
+framebuffer and post-update topology/font/backend identity. No SSH or Hibr
+source changes. Issue #96 remains the separate native-join lifecycle gap.
 
 ### 2026-10-17 requested bottom-primary/top-join live setup
 
