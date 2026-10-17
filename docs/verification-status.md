@@ -3,7 +3,7 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
-## 2026-10-17: candidate 0.1.538 private login identity
+## 2026-10-17: deployed 0.1.538 private login identity
 
 The new `login_identity_gate.rb` fails against 0.1.537 (`login identity API
 absent`), then passes against the TCC 0.1.538 candidate. It uses real Hibr,
@@ -44,6 +44,21 @@ passed by the local run. No source changes followed the packaged commit;
 later commits record the manifest and evidence only. The live version remains
 0.1.537, with deployment and actual authenticated identity acceptance awaiting
 safe logout/operator clearance. No joins were started and no Hibr core modified.
+
+Subsequent authorized physical deployment passes: after the user said ready,
+the API updater verified 0.1.538 with the exact manifest archive. Before/after
+observations agree on SDL `kmsdrm`/`opengles2`/`sdl-vsync`, active font/scale,
+both pane grids and the entire persisted settings document (clean revision
+38). One lower login terminal is focused. Pre-authentication identity reports
+waiting/null fields. After the real login boundary the installed hook reports
+verified UID/GID 1000, sender PID 247917 and desktop selection. This is not a
+claim that the sender PID is Hibr's detached held owner. The physical font/edge
+oracle also passes 21 cells/2688 pixels; its temporary upper session is deleted.
+The final observation contains one terminal and no diagnostic errors/warnings.
+The captured lower desktop shows retro_car wallpaper; the upper pane is empty.
+Evidence: `diagnostics/identity-538/deploy/` and `diagnostics/identity-538/pixels/`.
+No SSH, Hibr-core edits, renderer changes or automatic joins. Native held-owner
+readiness/association and standby lifecycle acceptance remain pending (#96).
 
 ## 2026-10-17: deployed 0.1.537 policy/persistence foundation
 

@@ -5,7 +5,7 @@ second, parallel implementation of an earlier one.
 
 ## Current position — persistent desktop policy and catalogue control panel
 
-The physical host runs 0.1.537 SDL GL. The edge/font correction has bounded
+The physical host runs 0.1.538 SDL GL. The edge/font correction has bounded
 physical pixel acceptance; the user previously accepted the 0.1.535 movement
 checkpoint. These are not universal renderer or refresh-rate guarantees.
 See current-state.md and verification-status.md for exact evidence.
@@ -22,15 +22,16 @@ save/restart persistence and unchanged geometry/backend/font verified.
 Joins, live failover,
 arbitrary layouts, and catalogue UI acceptance remain separate deliverables.
 
-Candidate 0.1.538 adds a private post-authentication identity handoff (ADR 0125),
-not automatic joins. The next boundary is real-login acceptance, then native
-per-user held-owner readiness before standby/release integration. Hibr Displays
+Version 0.1.538 adds a private post-authentication identity handoff (ADR 0125),
+not automatic joins. The deployed installed hook reports verified UID/GID 1000
+after login. The next boundary is native per-user held-owner readiness before
+standby/release integration. Hibr Displays
 actions remain session-only until explicitly saved into the same Blit store.
 Its complete local runtime run passes 86/86 executed checks (four skipped),
-and package validation/reproducible rebuild pass separately. It is not yet
-deployed: an existing logged-in session on 10.54 is being preserved pending
-logout/clearance. Physical authentication, native owner association and standby
-joins remain unproven for this candidate.
+and package validation/reproducible rebuild pass separately. Authorized API
+deployment preserves saved settings, pane geometry, renderer and font; the
+physical edge/font oracle passes again. Native owner association and standby
+joins remain separate, unimplemented acceptance boundaries.
 
 ## Historical position — 0.1.507 live visual-acceptance blocker
 

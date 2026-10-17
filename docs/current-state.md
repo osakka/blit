@@ -7,7 +7,7 @@ work actually stopped.
 
 ## Status at the last review
 
-### 2026-10-17 candidate 0.1.538: authenticated identity boundary
+### 2026-10-17 deployed 0.1.538: authenticated identity boundary
 
 ADR 0125 and the schema add `/v1/login.identity`. Only Blit's default login
 hook participates: a private inherited datagram capability crosses Hibr's
@@ -22,20 +22,33 @@ Hibr-hook fixtures for desktop and shell, rejects root/invalid/oversized/FD
 passing/foreign-ancestry messages, leaves custom commands unchanged and drops
 identity on login destruction. This is not actual PAM acceptance. The full
 local run passes 86 tests, skips four and has zero failures, including the
-120-second four-PTY soak. Package verification passes separately. Physical
-authenticated acceptance is pending; do not claim this candidate deployed.
+120-second four-PTY soak. Package verification passes separately. Following
+the user's restart clearance, the authorized API updater verified 0.1.538.
 
 The source/documentation commit is `30cdfdb`; the 0.1.538 archive and generated
 `releases/0.1.538.yaml` have passed artifact verification and reproducible
 rebuild (SHA256 `46ea81c1c116592d04b727f6934f51a787be94ab5e455c29cd1f0bdb83cf6130`).
 The four suite skips are package (verified separately), QEMU, physical
-multi-output and live screenshot backpressure. A physical capture shows the user
-logged in with Control Panel open on the lower pane; leave that live session
-untouched pending explicit logout/clearance for the update's restart. The
-captured host is still 0.1.537. Evidence: `diagnostics/identity-538/before.*`.
+multi-output and live screenshot backpressure. Before deployment, the existing
+logged-in desktop was preserved until the user gave restart clearance.
+Evidence: `diagnostics/identity-538/before.*`.
 
-Next: verify identity after a real user login, then query native per-user owner
-readiness and integrate standby/release semantics (#96). Identity alone is
+The deployed host preserves SDL `kmsdrm`/`opengles2`/`sdl-vsync`, font identity
+and scale, both 240x67 pane grids and the complete saved settings document
+(clean revision 38). A single focused lower login terminal initially reports
+identity waiting with null credentials. The physical edge/font oracle passes
+21 cells/2688 pixels again; its temporary upper terminal is removed and lower
+focus restored. After login, `/v1/login.identity` reports verified UID/GID
+1000, sender PID 247917, session kind desktop. This sender PID is historical
+handoff identity, not the held desktop owner. The final observation has one
+login terminal (id1), zero diagnostic errors/warnings, and the capture shows
+the lower desktop with retro_car wallpaper; upper pane remains empty.
+Evidence: `diagnostics/identity-538/deploy/` and `.../pixels/`. No Hibr-core edit,
+SSH, renderer change or join start. This verifies the installed login handoff,
+not native owner association, automatic joins or universal rendering quality.
+
+Next: query native per-user owner readiness and integrate standby/release
+semantics (#96). Identity alone is
 not a held owner and must not trigger joins. Issue #99 and hibr-apps #1 remain
 open; no control-panel bundle is published.
 
