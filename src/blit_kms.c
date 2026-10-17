@@ -1550,6 +1550,18 @@ int blit_kms_display_info(const BlitKms *kms, int index, BlitKmsDisplayInfo *inf
     return 0;
 }
 
+uint32_t blit_kms_ready_output_mask(const BlitKms *kms)
+{
+    uint32_t mask = 0;
+    int i;
+    if (kms == NULL) return 0;
+    for (i = 0; i < kms->output_count; ++i)
+        if (!kms->outputs[i].flip_pending &&
+            kms->outputs[i].info.presentation_state != BLIT_KMS_PRESENTATION_FAILED)
+            mask |= 1U << i;
+    return mask;
+}
+
 int blit_kms_set_display_position(BlitKms *kms, int index, int x, int y)
 {
     if (kms == NULL || index < 0 || index >= kms->output_count) return -1;

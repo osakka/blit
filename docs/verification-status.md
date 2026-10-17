@@ -3,6 +3,28 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-17: candidate 0.1.532 direct-KMS vblank retries
+
+[Issue #91](https://git.home.arpa/itdlabs/blit/issues/91) records the real
+pre-fix refresh failure: 54.123 submissions/s versus an initial 58.2-Hz
+discriminator. The captured trace identifies deferred attempts that wait for
+another software deadline after flip completion. Candidate 0.1.532 remembers
+the actual deferred outputs and retries each when KMS reports its buffer ready.
+
+The production KMS readiness mask excludes pending/failed outputs and becomes
+ready through the actual flip callback. The state-helper test verifies that
+only a ready deferred output is rescheduled immediately; a second still-busy
+output retains its deadline, and a consumed retry cannot repeat. Focused
+tests and the Hibr join barrier pass. The TCC renderer/terminal run passes
+51/51 with no skips, and API schema/observation checks pass. Deployment remains
+pending. Direct-KMS FPS now excludes deferred/no-op attempts and the existing
+global present_calls field counts KMS submissions. Their semantics are explicit
+in OpenAPI and tested against the actual submission-counter helper.
+
+The final live refresh assertion permits only one-event quantization over the
+measured interval (`refresh_hz - 1/window_seconds`), rather than accepting an
+arbitrary percentage of lost frames.
+
 ## 2026-10-17: candidate 0.1.531 bounded presentation deadlines
 
 [Issue #90](https://git.home.arpa/itdlabs/blit/issues/90) is reproduced with
@@ -14,8 +36,8 @@ flag is now cleared at the same consumption boundary as SDL.
 
 The focused Hibr join-barrier gate passes. The local dummy-backend frame-rate
 fixture records 59.999 Hz with zero window missed deadlines. The TCC
-renderer/terminal suites also pass: 51 pass, 0 skip, 0 fail. Live deployment
-remains pending; this is not a live 60-Hz claim.
+renderer/terminal suites also pass: 51 pass, 0 skip, 0 fail. Deployment was
+pending at that source-verification stage; physical follow-up is below.
 
 ### Physical follow-up: exact 0.1.531 deployed
 

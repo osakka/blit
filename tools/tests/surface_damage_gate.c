@@ -7,6 +7,46 @@ static int failures;
 static BlitSurface subject;
 static BlitSession owner;
 
+static void kms_retry_deadline_gate(void)
+{
+    BlitRuntime *runtime = calloc(1, sizeof(*runtime));
+    if (runtime == NULL) exit(2);
+    runtime->output_count = 2;
+    runtime->kms_retry_outputs = 3;
+    runtime->render_next_us[0] = 32000;
+    runtime->render_next_us[1] = 64000;
+    retry_ready_kms_outputs(runtime, 1, 17000);
+    if (runtime->render_next_us[0] != 17000 ||
+        runtime->render_next_us[1] != 64000 ||
+        runtime->kms_retry_outputs != 2 || !runtime->render_pending) {
+        fprintf(stderr, "KMS_RETRY_FAIL ready output not immediate or busy output rescheduled\n");
+        ++failures;
+    }
+    retry_ready_kms_outputs(runtime, 1, 18000);
+    if (runtime->render_next_us[0] != 17000 || runtime->kms_retry_outputs != 2) {
+        fprintf(stderr, "KMS_RETRY_FAIL consumed retry was repeated\n");
+        ++failures;
+    }
+    retry_ready_kms_outputs(runtime, 2, 19000);
+    if (runtime->render_next_us[1] != 19000 || runtime->kms_retry_outputs != 0) {
+        fprintf(stderr, "KMS_RETRY_FAIL second ready output not released\n");
+        ++failures;
+    }
+    runtime->diagnostic_frame_rate_frames = 1;
+    record_kms_frame_submission(runtime, 0);
+    if (runtime->diagnostic_frame_rate_frames != 0 || runtime->diagnostic_present_calls != 0) {
+        fprintf(stderr, "KMS_RETRY_FAIL deferred attempt counted as presentation\n");
+        ++failures;
+    }
+    runtime->diagnostic_frame_rate_frames = 1;
+    record_kms_frame_submission(runtime, 3);
+    if (runtime->diagnostic_frame_rate_frames != 1 || runtime->diagnostic_present_calls != 2) {
+        fprintf(stderr, "KMS_RETRY_FAIL actual output submissions not counted\n");
+        ++failures;
+    }
+    free(runtime);
+}
+
 static void expired_batch_deadline_gate(void)
 {
     BlitRuntime *runtime = calloc(1, sizeof(*runtime));
@@ -119,6 +159,7 @@ int main(void)
     mark_surface_damage(&subject, 2, 1);
     expect_bounds("full damage never shrinks", 0, 0, 80, 40);
     expired_batch_deadline_gate();
+    kms_retry_deadline_gate();
     if (failures) return 1;
     puts("SURFACE_DAMAGE_PASS union=both-orders DEC=union scroll=union quiet=bounded join=bounded wait=nonspinning");
     return 0;

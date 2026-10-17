@@ -24,6 +24,26 @@ static uint32_t front_pixels[W * H];
 static uint32_t back_pixels[W * H];
 static void place(int z);
 
+static void output_ready_mask_gate(void)
+{
+    BlitKms kms;
+    memset(&kms, 0, sizeof(kms));
+    kms.output_count = 3;
+    kms.outputs[0].flip_pending = 1;
+    kms.outputs[1].info.presentation_state = BLIT_KMS_PRESENTATION_PRESENTING;
+    kms.outputs[2].info.presentation_state = BLIT_KMS_PRESENTATION_FAILED;
+    if (blit_kms_ready_output_mask(&kms) != 2) {
+        fprintf(stderr, "KMS_READY_FAIL pending or failed output marked ready\n");
+        exit(1);
+    }
+    kms_flip_handler(-1, 1, 0, 0, &kms.outputs[0]);
+    if (blit_kms_ready_output_mask(&kms) != 3) {
+        fprintf(stderr, "KMS_READY_FAIL completed output not marked ready\n");
+        exit(1);
+    }
+    puts("KMS_READY_PASS pending=excluded failed=excluded completed=ready per-output=1");
+}
+
 /* Only the kernel submission is replaced. The full production KMS present,
    scene, damage, pointer and buffer-swap code executes against real memory. */
 int drmModePageFlip(int fd, uint32_t crtc, uint32_t fb,
@@ -441,6 +461,7 @@ int main(void)
     uint32_t face = 0x101820U;
 
     buffer_coherence_gate();
+    output_ready_mask_gate();
     scene_copy_gate();
     pointer_terminal_present_gate();
     incremental_matches_full_gate();

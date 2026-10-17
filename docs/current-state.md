@@ -7,6 +7,20 @@ work actually stopped.
 
 ## Status at the last review
 
+### 2026-10-17 candidate 0.1.532: retry deferred frames on vblank completion
+
+[Issue #91](https://git.home.arpa/itdlabs/blit/issues/91) tracks the measured
+52.6–54.1 Hz direct-KMS cadence on a 60-Hz output. The live refresh assertion
+fails before correction. The trace shows a pending-flip deferral, then the
+completed flip waits for another software deadline, producing some 32-ms
+submission gaps. [ADR 0118](adr/0118-retry-deferred-kms-frames-at-flip-completion.md)
+retries only previously deferred outputs whose buffers the canonical KMS
+state now reports ready. Other output deadlines and SDL remain unchanged.
+The readiness and per-output retry tests pass, as do 51 renderer/terminal gates
+and the schema/observation API checks. KMS FPS now excludes rejected/no-op
+attempts and global present_calls includes actual submissions. Live acceptance
+is pending. The host still runs 0.1.531.
+
 ### 2026-10-17 deployed 0.1.531: bounded presentation deadlines
 
 Follow-up [issue #90](https://git.home.arpa/itdlabs/blit/issues/90) reproduces
@@ -29,7 +43,7 @@ vblank retry timing is under investigation; 60-Hz physical acceptance remains
 unmet. Only the existing login manager remains, focused, with unchanged pane
 topology/backend. An authenticated Hibr dragging test is still pending login.
 
-An improved low-overhead PTY/pointer measurement on that version records
+An improved low-overhead PTY/pointer measurement on 0.1.530 records
 47.908 page-flip submissions/s in an active 3.131-second window, with zero
 stale pixels. The new benchmark polls terminal title metadata rather than
 repeatedly serializing the whole cell grid during animation. The live

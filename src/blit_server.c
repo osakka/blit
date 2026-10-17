@@ -1114,6 +1114,7 @@ typedef struct {
     int output_count;
     int sdl_ready;
     int direct_kms;
+    uint32_t kms_retry_outputs;
     /* Issue #69. A DRM connector's power state is read at most once a second:
        it is three ioctls per connector and nothing changes it but Blit. */
     uint64_t display_power_checked_us;
@@ -1477,6 +1478,8 @@ static void disable_input_routes_for_target(BlitRuntime *runtime,
 static int activate_direct_kms_fallback(BlitRuntime *runtime);
 static void destroy_sdl_graphics_cache(BlitOutput *output);
 static uint64_t monotonic_us(void);
+static void diagnostic_trace(BlitRuntime *runtime, const char *kind,
+                             const char *detail);
 static void diagnostics_json(const BlitRuntime *runtime, char *body,
                              size_t capacity);
 static void terminal_sessions_json(BlitRuntime *runtime, char *body,
@@ -1830,6 +1833,7 @@ static void reset_render_schedule(BlitRuntime *runtime, uint64_t now)
 {
     int i;
     int minimum = 0;
+    runtime->kms_retry_outputs = 0;
 
     for (i = 0; i < BLIT_MAX_DISPLAYS; ++i)
         runtime->render_next_us[i] = 0;
@@ -1899,6 +1903,23 @@ static uint32_t due_output_mask(const BlitRuntime *runtime, uint64_t now)
             mask |= 1U << i;
     }
     return mask;
+}
+
+static void retry_ready_kms_outputs(BlitRuntime *runtime, uint32_t ready,
+                                    uint64_t now)
+{
+    uint32_t retry = runtime->kms_retry_outputs & ready;
+    int i;
+    for (i = 0; i < runtime->output_count; ++i)
+        if (retry & (1U << i))
+            runtime->render_next_us[i] = now;
+    runtime->kms_retry_outputs &= ~retry;
+    if (retry) {
+        char detail[96];
+        runtime->render_pending = 1;
+        snprintf(detail, sizeof(detail), "ready_retry_mask=0x%x", retry);
+        diagnostic_trace(runtime, "kms_frame_retry", detail);
+    }
 }
 
 static void advance_render_schedule(BlitRuntime *runtime, uint64_t now,
@@ -23310,6 +23331,20 @@ static void finish_render_diagnostics(BlitRuntime *runtime,
     }
 }
 
+static void record_kms_frame_submission(BlitRuntime *runtime,
+                                         uint32_t submitted)
+{
+    int i;
+    /* The window was incremented on entry to render_outputs. A deferred or
+       unchanged attempt is not a presented frame. Count each actual output
+       submission in present_calls, and one successful composition in FPS. */
+    if (submitted == 0 && runtime->diagnostic_frame_rate_frames > 0)
+        --runtime->diagnostic_frame_rate_frames;
+    for (i = 0; i < runtime->output_count; ++i)
+        if (submitted & (1U << i))
+            ++runtime->diagnostic_present_calls;
+}
+
 static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                            uint32_t output_mask)
 {
@@ -23492,6 +23527,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             fprintf(stderr, "blit: direct KMS present failed\n");
         kms_present_ms = (double)(monotonic_us() - kms_present_started) /
             1000.0;
+        runtime->kms_retry_outputs |= kms_deferred_output_mask;
+        runtime->kms_retry_outputs &= ~kms_submitted_output_mask;
         runtime->diagnostic_last_kms_present_ms = kms_present_ms;
         if (kms_present_ms > runtime->diagnostic_max_kms_present_ms)
             runtime->diagnostic_max_kms_present_ms = kms_present_ms;
@@ -23561,6 +23598,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
            differently phased secondary output. */
         runtime->pointer_dirty_outputs &= ~kms_submitted_output_mask;
         runtime->pointer_dirty = runtime->pointer_dirty_outputs != 0;
+        record_kms_frame_submission(runtime, kms_submitted_output_mask);
         finish_render_diagnostics(runtime, diagnostic_render_started);
         return;
     }
@@ -27361,8 +27399,11 @@ int main(int argc, char **argv)
             int serviced = blit_kms_service(runtime.kms, kms_ready);
             if (serviced < 0)
                 fprintf(stderr, "blit: KMS event service failed\n");
-            else if (serviced > 0)
+            else if (serviced > 0) {
                 runtime.render_pending = 1;
+                retry_ready_kms_outputs(&runtime,
+                    blit_kms_ready_output_mask(runtime.kms), monotonic_us());
+            }
         }
         if (runtime.evdev_watch_fd >= 0 && ready > 0 &&
             FD_ISSET(runtime.evdev_watch_fd, &readable))

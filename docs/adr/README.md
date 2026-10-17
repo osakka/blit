@@ -135,6 +135,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0115 — Bound evdev service turns for refresh fairness](0115-bounded-evdev-service-for-refresh-fairness.md)
 - [0116 — Damage union preserves all pending work](0116-damage-union-preserves-all-pending-work.md)
 - [0117 — Terminal coalescing deadlines close at presentation](0117-terminal-coalescing-deadline-closes-at-presentation.md)
+- [0118 — Retry deferred KMS frames at flip completion](0118-retry-deferred-kms-frames-at-flip-completion.md)
 
 ## Adding an ADR
 
