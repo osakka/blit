@@ -28,8 +28,8 @@ modified for this operation. Temporary diagnostic terminals were removed.
 Evidence: ignored `diagnostics/join-20261017/`, including before/after
 topology/sessions, native hold placement/unchanged owner, screenshots and
 context-attempt cell captures. Upper input trace reports target/input id9.
-Dark residual rectangles remain visible in the lower pane after relayout;
-the cause and interactive acceptance are not established. The user has been
+Earlier captures showed dark residual rectangles in the lower pane after
+relayout; their cause and interactive acceptance are not established. The user has been
 asked to validate both panes; no more injected input is being sent during
 their test. Restart/login-before-join automation is not implemented here.
 
@@ -41,6 +41,9 @@ authenticated desktop. Final verified native rectangles are again primary
 `final-native-geometry.json`, `final.png` and headers. This demonstrates the
 missing reconnect orchestration in issue96; it must not be hidden by the
 earlier single-owner-continuity result or described as automatic recovery.
+The final empty-desktop capture has wallpaper in both panes and the lower
+menu bar, without those earlier window rectangles. That does not prove their
+cause fixed under application movement.
 
 ### 2026-10-17 operating-mode change: SDL GL, same 0.1.535 package
 
