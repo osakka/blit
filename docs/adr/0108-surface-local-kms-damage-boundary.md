@@ -1,6 +1,6 @@
 # ADR 0108: Surface-local KMS damage retains an atomic output boundary
 
-- Status: accepted
+- Status: accepted; damage accounting corrected by [ADR 0116](0116-damage-union-preserves-all-pending-work.md)
 - Date: 2026-10-17
 - Scope: direct-KMS terminal scene composition and refresh scheduling
 - Supersedes: the full-output change rule in [ADR 0106](0106-kms-changed-terminal-views-rebuild-the-scene.md)

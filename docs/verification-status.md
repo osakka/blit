@@ -3,6 +3,32 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-17: candidate 0.1.530 damage accounting correction
+
+Live 0.1.529 remains visually broken. [Issue #89](https://git.home.arpa/itdlabs/blit/issues/89)
+records two deterministic root defects reproduced against actual Blit code:
+left/up damage expansion discards old bounds, and simultaneous KMS pointer
+movement replaces terminal damage before consuming its revision. Partial
+scroll/DEC rectangle operations can also discard earlier pending work.
+
+Before correction, `surface_damage_gate.sh` reports five failures, including
+`got=2,1,1x1 want=2,1,59x30`. The production-presenter regression reports
+`KMS_POINTER_TERMINAL_FAIL old=ff0000 new=102030 expected=102030,ff0000`.
+After correction both pass, and 128 mixed half-block/graphics/pointer frames
+match a fresh full render at every pixel. The test simulates only the DRM page
+flip; it executes the actual scene, pointer, damage, and buffer-swap code.
+
+The TCC-built 0.1.530 binary passes the complete renderer/terminal suites:
+`RUN_GATES_PASS pass=51 skip=0 fail=0`. Package and live acceptance are pending.
+The identical defect was also reproduced on the real 0.1.529 host with
+`tools/probes/host_damage_union.rb`: one API request writes bottom-right first
+and top-left last; the screenshot reports the new revision but returns
+`pixels=[[255,0,0],[16,32,48]] expected=red,red`. The temporary shell surface
+is created in the free pane and deleted by the probe. The exact same probe
+must pass after deployment before this defect is closed.
+Historical entries below describe their own versions and do not override
+this current failure status.
+
 ## 0.1.524 live API-owned cell and Kitty composition boundary
 
 ### Source correction pending live deployment: direct-KMS cursor damage

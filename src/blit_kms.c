@@ -1,5 +1,6 @@
 #include "blit_kms.h"
 #include "blit_font.h"
+#include "blit_damage.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -1085,25 +1086,8 @@ static void include_cell_damage(int *damage_valid, int *damage_x,
                                 int *damage_height, int x, int y, int width,
                                 int height)
 {
-    int right;
-    int bottom;
-    if (width < 1 || height < 1) return;
-    right = x + width;
-    bottom = y + height;
-    if (!*damage_valid) {
-        *damage_valid = 1;
-        *damage_x = x;
-        *damage_y = y;
-        *damage_width = width;
-        *damage_height = height;
-        return;
-    }
-    if (x < *damage_x) *damage_x = x;
-    if (y < *damage_y) *damage_y = y;
-    if (right > *damage_x + *damage_width)
-        *damage_width = right - *damage_x;
-    if (bottom > *damage_y + *damage_height)
-        *damage_height = bottom - *damage_y;
+    blit_damage_include(damage_valid, damage_x, damage_y, damage_width,
+                        damage_height, x, y, width, height);
 }
 
 static int output_previous_graphics_bounds(const KmsOutput *output,
@@ -1324,26 +1308,9 @@ static void include_pointer_damage(const KmsOutput *output,
     if (last_column > view->columns) last_column = view->columns;
     if (last_row > view->rows) last_row = view->rows;
     if (first_column >= last_column || first_row >= last_row) return;
-    if (!*damage_valid) {
-        *damage_valid = 1;
-        *damage_x = first_column;
-        *damage_y = first_row;
-        *damage_width = last_column - first_column;
-        *damage_height = last_row - first_row;
-        return;
-    }
-    if (first_column < *damage_x) {
-        *damage_width += *damage_x - first_column;
-        *damage_x = first_column;
-    }
-    if (first_row < *damage_y) {
-        *damage_height += *damage_y - first_row;
-        *damage_y = first_row;
-    }
-    if (last_column > *damage_x + *damage_width)
-        *damage_width = last_column - *damage_x;
-    if (last_row > *damage_y + *damage_height)
-        *damage_height = last_row - *damage_y;
+    include_cell_damage(damage_valid, damage_x, damage_y, damage_width,
+                        damage_height, first_column, first_row,
+                        last_column - first_column, last_row - first_row);
 }
 
 static void clear_pointer_rect(KmsOutput *output, float x, float y,
@@ -1677,27 +1644,16 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                                         kms->previous_pointer_visible) ||
               pointer_intersects_output(output, pointer_x, pointer_y,
                                          pointer_visible)));
-        if (!output_changed) {
-            for (view_index = 0; view_index < view_count; ++view_index) {
-                if (views[view_index].display_id != output->info.id)
-                    continue;
-                if (views[view_index].synchronized)
-                    continue;
-                if (!output_view_unchanged(output, &views[view_index])) {
-                    /* A changed terminal grid is redrawn into the persistent
-                       scene using its authoritative damage rectangle.  The
-                       scene is then copied to the back buffer and submitted
-                       as one page flip.  A surface-local redraw preserves
-                       the atomic boundary without making a 1920x2160 output
-                       pay for a full-scene rebuild on every moving cell.
-                       Origin changes remain full-output redraws because the
-                       old surface rectangle is no longer covered by the
-                       current view's damage. */
-                    if (output_view_origin_changed(output, &views[view_index]))
-                        full_redraw = 1;
-                    output_changed = 1;
-                    break;
-                }
+        /* Inspect scene changes even when pointer/capture work has already
+           scheduled this output. Relocation must clear the old bounds. */
+        for (view_index = 0; view_index < view_count; ++view_index) {
+            if (views[view_index].display_id != output->info.id ||
+                views[view_index].synchronized)
+                continue;
+            if (!output_view_unchanged(output, &views[view_index])) {
+                if (output_view_origin_changed(output, &views[view_index]))
+                    full_redraw = 1;
+                output_changed = 1;
             }
         }
         /* A page-flipped buffer is owned by the CRTC until its event arrives.
@@ -1754,19 +1710,27 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                 if (views[view_index].synchronized && !full_redraw)
                     continue;
                 if (pointer_changed) {
+                    int pointer_x0 = 0, pointer_y0 = 0;
+                    int pointer_width = 0, pointer_height = 0;
                     include_pointer_damage(output, &views[view_index],
                                            kms->previous_pointer_x,
                                            kms->previous_pointer_y,
                                            kms->previous_pointer_visible,
-                                           &pointer_damage, &draw.damage_x,
-                                           &draw.damage_y, &draw.damage_width,
-                                           &draw.damage_height);
+                                           &pointer_damage, &pointer_x0,
+                                           &pointer_y0, &pointer_width,
+                                           &pointer_height);
                     include_pointer_damage(output, &views[view_index],
                                            pointer_x, pointer_y,
                                            pointer_visible, &pointer_damage,
-                                           &draw.damage_x, &draw.damage_y,
-                                           &draw.damage_width,
-                                           &draw.damage_height);
+                                           &pointer_x0, &pointer_y0,
+                                           &pointer_width, &pointer_height);
+                    if (pointer_damage)
+                        include_cell_damage(&draw.damage_valid,
+                                            &draw.damage_x, &draw.damage_y,
+                                            &draw.damage_width,
+                                            &draw.damage_height, pointer_x0,
+                                            pointer_y0, pointer_width,
+                                            pointer_height);
                 }
                 if (pointer_damage) draw.damage_valid = 1;
                 /* A retained image mutation is bounded by the union of its

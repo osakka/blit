@@ -7,6 +7,27 @@ work actually stopped.
 
 ## Status at the last review
 
+### 2026-10-17 rendering root defects, candidate 0.1.530
+
+The live 0.1.529 desktop remains visually broken. Prior evdev fairness and
+cadence measurements did not establish rendering correctness. Two actual
+defects are now reproduced by failing-before/passing-after tests: damage
+rectangles shrink on left/up updates, and concurrent KMS pointer work replaces
+pending terminal damage before retiring the revision. Partial scroll/DEC
+rectangle paths also overwrite outstanding damage. These are Blit defects;
+Hibr source has not been modified.
+
+Candidate 0.1.530 corrects these through one shared rectangle-union operation
+and separate pointer accumulation; see [ADR 0116](adr/0116-damage-union-preserves-all-pending-work.md)
+and [issue #89](https://git.home.arpa/itdlabs/blit/issues/89). The previous
+uncommitted full-output redraw proposal was withdrawn before deployment.
+The actual KMS presenter now matches a fresh complete render at every pixel in
+128 mixed-content/pointer frames in a memory-backed test. Live deployment and
+Hibr interaction remain required before claiming the observed problem fixed.
+The TCC-built candidate passes renderer/terminal gates: 51 pass, 0 skip, 0 fail.
+
+The sections below are historical evidence for 0.1.529 and earlier builds.
+
 The current source candidate is `0.1.529`. Hibr source was not modified. The
 latest release retains the causal PTY/direct-KMS traces and pointer-background
 correction, and adds a bounded evdev service turn for mouse, keyboard, and

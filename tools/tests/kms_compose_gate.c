@@ -22,6 +22,150 @@ static unsigned char image_pixels[4 * 8 * 3 * 2];
 static BlitGraphicsImage images[BLIT_GRAPHICS_MAX_IMAGES];
 static uint32_t front_pixels[W * H];
 static uint32_t back_pixels[W * H];
+static void place(int z);
+
+/* Only the kernel submission is replaced. The full production KMS present,
+   scene, damage, pointer and buffer-swap code executes against real memory. */
+int drmModePageFlip(int fd, uint32_t crtc, uint32_t fb,
+                    uint32_t flags, void *data)
+{
+    (void)fd; (void)crtc; (void)fb; (void)flags; (void)data;
+    return 0;
+}
+
+static void pointer_terminal_present_gate(void)
+{
+    BlitKms kms;
+    KmsOutput *target;
+    BlitKmsSurfaceView view;
+    uint32_t submitted, deferred;
+    uint32_t *shown;
+
+    memset(&kms, 0, sizeof(kms));
+    memset(&view, 0, sizeof(view));
+    memset(codepoints, 0, sizeof(codepoints));
+    memset(background, 0, sizeof(background));
+    memset(foreground, 0, sizeof(foreground));
+    memset(attributes, 0, sizeof(attributes));
+    kms.output_count = 1;
+    target = &kms.outputs[0];
+    target->info.id = 93;
+    target->info.width = W; target->info.height = H;
+    target->mode.hdisplay = W; target->mode.vdisplay = H;
+    target->front.map = front_pixels; target->back.map = back_pixels;
+    target->front.pitch = target->back.pitch = W * 4;
+    target->front.size = target->back.size = sizeof(front_pixels);
+    view.display_id = 93; view.surface_id = 1; view.surface_revision = 1;
+    view.columns = COLS; view.rows = ROWS; view.stride = COLS;
+    view.cell_width = CW; view.cell_height = CH;
+    view.codepoints = codepoints; view.background = background;
+    view.foreground = foreground; view.attributes = attributes;
+    view.default_background = 0x102030;
+    background[COLS + 2] = RED + 1;
+    blit_kms_present(&kms, &view, 1, 40, 32, 1, 1, NULL, 0,
+                     0, 0, 0, 0, &submitted, &deferred);
+    target->flip_pending = 0; /* completion of the fake kernel flip */
+    background[COLS + 2] = 0;
+    background[6 * COLS + 15] = RED + 1;
+    view.surface_revision = 2;
+    view.damage_valid = 1; view.damage_x = 2; view.damage_y = 1;
+    view.damage_width = 14; view.damage_height = 6;
+    blit_kms_present(&kms, &view, 1, 48, 32, 1, 1, NULL, 0,
+                     0, 0, 0, 0, &submitted, &deferred);
+    shown = target->front.map;
+    if (shown[CH * W + 2 * CW] != 0x102030 ||
+        shown[6 * CH * W + 15 * CW] != RED) {
+        fprintf(stderr, "KMS_POINTER_TERMINAL_FAIL old=%06x new=%06x expected=102030,ff0000\n",
+                shown[CH * W + 2 * CW], shown[6 * CH * W + 15 * CW]);
+        exit(1);
+    }
+    free(target->scene);
+    puts("KMS_POINTER_TERMINAL_PASS erase=exact replacement=exact simultaneous-pointer=1");
+}
+
+static void incremental_matches_full_gate(void)
+{
+    BlitKms kms;
+    BlitKmsSurfaceView view, reference_view;
+    KmsOutput reference;
+    KmsOutput *target;
+    uint32_t submitted, deferred;
+    int step, i, old_x = 0, old_y = 0;
+
+    memset(&kms, 0, sizeof(kms));
+    memset(&view, 0, sizeof(view));
+    memset(&reference, 0, sizeof(reference));
+    memset(codepoints, 0, sizeof(codepoints));
+    memset(foreground, 0, sizeof(foreground));
+    memset(background, 0, sizeof(background));
+    memset(attributes, 0, sizeof(attributes));
+    memset(images, 0, sizeof(images));
+    kms.output_count = 1;
+    target = &kms.outputs[0];
+    target->info.id = 93;
+    target->info.width = W; target->info.height = H;
+    target->mode.hdisplay = W; target->mode.vdisplay = H;
+    target->front.map = front_pixels; target->back.map = back_pixels;
+    target->front.pitch = target->back.pitch = W * 4;
+    target->front.size = target->back.size = sizeof(front_pixels);
+    reference.mode = target->mode;
+    reference.back.map = pixels; reference.back.pitch = W * 4;
+    reference.back.size = sizeof(pixels);
+    view.display_id = 93; view.surface_id = 1;
+    view.columns = COLS; view.rows = ROWS; view.stride = COLS;
+    view.cell_width = CW; view.cell_height = CH;
+    view.codepoints = codepoints; view.background = background;
+    view.foreground = foreground; view.attributes = attributes;
+    view.default_background = 0x102030;
+    view.graphics = images; view.graphics_count = BLIT_GRAPHICS_MAX_IMAGES;
+    for (step = 0; step < 128; ++step) {
+        int x = (step * 7 + 3) % (COLS - 1);
+        int y = (step * 3 + 1) % ROWS;
+        int px = (step * 13) % (W - KMS_POINTER_W);
+        int py = (step * 11) % (H - KMS_POINTER_H);
+        uint32_t *shown;
+        background[old_y * COLS + old_x] = 0;
+        codepoints[old_y * COLS + old_x] = 0;
+        background[y * COLS + x] = 0x305070 + 1;
+        foreground[y * COLS + x] = RED + 1;
+        codepoints[y * COLS + x] = step & 1 ? 0x2580 : 0x2584;
+        view.surface_revision = (unsigned long long)step + 1;
+        view.damage_valid = 1;
+        view.damage_x = x < old_x ? x : old_x;
+        view.damage_y = y < old_y ? y : old_y;
+        view.damage_width = (x > old_x ? x : old_x) - view.damage_x + 1;
+        view.damage_height = (y > old_y ? y : old_y) - view.damage_y + 1;
+        if ((step % 4) == 0) {
+            place(-1);
+            images[0].x = (step * 5) % (W - 2 * CW);
+            images[0].y = (step * 7) % (H - 2 * CH);
+            ++view.graphics_signature;
+        } else if ((step % 4) == 3) {
+            images[0].used = 0;
+            ++view.graphics_signature;
+        }
+        target->flip_pending = 0;
+        blit_kms_present(&kms, &view, 1, px, py, 1, 1, NULL, 0,
+                         0, 0, 0, 0, &submitted, &deferred);
+        memset(pixels, 0, sizeof(pixels));
+        reference_view = view;
+        reference_view.damage_valid = 0;
+        draw_view(&reference, NULL, NULL, &reference_view);
+        fill_rect(&reference, px, py, 2, 18, 0xffffff);
+        fill_rect(&reference, px, py, 12, 2, 0xffffff);
+        shown = target->front.map;
+        for (i = 0; i < W * H; ++i) {
+            if (shown[i] != pixels[i]) {
+                fprintf(stderr, "KMS_FULL_REFERENCE_FAIL step=%d pixel=%d,%d got=%06x want=%06x\n",
+                        step, i % W, i / W, shown[i], pixels[i]);
+                exit(1);
+            }
+        }
+        old_x = x; old_y = y;
+    }
+    free(target->scene);
+    puts("KMS_FULL_REFERENCE_PASS frames=128 every-pixel=exact half-blocks=1 graphics=move-delete pointer=simultaneous");
+}
 
 static void fail(const char *what, long got, long want)
 {
@@ -222,6 +366,7 @@ static void cursor_damage_gate(void)
              (long)pixel_at(10 * CW, 7 * CH), (long)face);
 }
 
+
 static void pointer_background_gate(void)
 {
     int i;
@@ -297,6 +442,8 @@ int main(void)
 
     buffer_coherence_gate();
     scene_copy_gate();
+    pointer_terminal_present_gate();
+    incremental_matches_full_gate();
     graphics_bounds_gate();
 
     output.mode.hdisplay = W;

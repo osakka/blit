@@ -10,6 +10,7 @@
 #include "blit_audio_control.h"
 #include "blit_display_geometry.h"
 #include "blit_cell_geometry.h"
+#include "blit_damage.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -6802,25 +6803,9 @@ static void surface_scrollback_json(const BlitSurface *surface, char *body,
 
 static void mark_surface_damage(BlitSurface *surface, int x, int y)
 {
-    int right = x + 1;
-    int bottom = y + 1;
-
-    if (!surface->damage_valid) {
-        surface->damage_valid = 1;
-        surface->damage_x = x;
-        surface->damage_y = y;
-        surface->damage_width = 1;
-        surface->damage_height = 1;
-        return;
-    }
-    if (x < surface->damage_x)
-        surface->damage_x = x;
-    if (y < surface->damage_y)
-        surface->damage_y = y;
-    if (right > surface->damage_x + surface->damage_width)
-        surface->damage_width = right - surface->damage_x;
-    if (bottom > surface->damage_y + surface->damage_height)
-        surface->damage_height = bottom - surface->damage_y;
+    blit_damage_include(&surface->damage_valid, &surface->damage_x,
+                        &surface->damage_y, &surface->damage_width,
+                        &surface->damage_height, x, y, 1, 1);
 }
 
 /* Cursor movement is not visual damage while the terminal cursor is hidden.
@@ -6835,25 +6820,10 @@ static void mark_cursor_damage(BlitSurface *surface, int x, int y)
 static void mark_surface_damage_width(BlitSurface *surface, int x, int y,
                                       int width)
 {
-    int right = x + (width > 0 ? width : 1);
-    int bottom = y + 1;
-
-    if (!surface->damage_valid) {
-        surface->damage_valid = 1;
-        surface->damage_x = x;
-        surface->damage_y = y;
-        surface->damage_width = right - x;
-        surface->damage_height = 1;
-        return;
-    }
-    if (x < surface->damage_x)
-        surface->damage_x = x;
-    if (y < surface->damage_y)
-        surface->damage_y = y;
-    if (right > surface->damage_x + surface->damage_width)
-        surface->damage_width = right - surface->damage_x;
-    if (bottom > surface->damage_y + surface->damage_height)
-        surface->damage_height = bottom - surface->damage_y;
+    blit_damage_include(&surface->damage_valid, &surface->damage_x,
+                        &surface->damage_y, &surface->damage_width,
+                        &surface->damage_height, x, y,
+                        width > 0 ? width : 1, 1);
 }
 
 static void mark_surface_full_damage(BlitSurface *surface)
@@ -6881,22 +6851,9 @@ static void mark_surface_damage_rect(BlitSurface *surface, int x, int y,
     if (bottom > surface->height) bottom = surface->height;
     if (x >= right || y >= bottom)
         return;
-    if (!surface->damage_valid) {
-        surface->damage_valid = 1;
-        surface->damage_x = x;
-        surface->damage_y = y;
-        surface->damage_width = right - x;
-        surface->damage_height = bottom - y;
-        return;
-    }
-    if (x < surface->damage_x)
-        surface->damage_x = x;
-    if (y < surface->damage_y)
-        surface->damage_y = y;
-    if (right > surface->damage_x + surface->damage_width)
-        surface->damage_width = right - surface->damage_x;
-    if (bottom > surface->damage_y + surface->damage_height)
-        surface->damage_height = bottom - surface->damage_y;
+    blit_damage_include(&surface->damage_valid, &surface->damage_x,
+                        &surface->damage_y, &surface->damage_width,
+                        &surface->damage_height, x, y, right - x, bottom - y);
 }
 
 static void mark_graphics_damage(BlitSurface *surface, int x, int y,
@@ -8574,11 +8531,7 @@ static void terminal_scroll_up(BlitSession *session, BlitSurface *surface)
     memset(surface->attributes[bottom], 0,
            sizeof(surface->attributes[bottom]));
     memset(surface->links[bottom], 0, sizeof(surface->links[bottom]));
-    surface->damage_valid = 1;
-    surface->damage_x = 0;
-    surface->damage_y = top;
-    surface->damage_width = surface->width;
-    surface->damage_height = bottom - top + 1;
+    mark_surface_damage_rect(surface, 0, top, surface->width, bottom - top + 1);
     surface->cursor_y = bottom;
     terminal_scroll_graphics(session, surface, top, bottom, 0,
                              surface->width - 1, -1);
@@ -8831,11 +8784,7 @@ static void terminal_reverse_index(BlitSession *session, BlitSurface *surface)
     for (y = bottom; y > top; --y)
         terminal_copy_row(surface, y, y - 1);
     terminal_blank_row(surface, top);
-    surface->damage_valid = 1;
-    surface->damage_x = 0;
-    surface->damage_y = top;
-    surface->damage_width = surface->width;
-    surface->damage_height = bottom - top + 1;
+    mark_surface_damage_rect(surface, 0, top, surface->width, bottom - top + 1);
     terminal_scroll_graphics(session, surface, top, bottom, 0,
                              surface->width - 1, 1);
 }
@@ -11393,11 +11342,9 @@ static int terminal_rectangle(const BlitSession *session,
 static void terminal_damage_rectangle(BlitSurface *surface,
                                       const BlitRectangle *rectangle)
 {
-    surface->damage_valid = 1;
-    surface->damage_x = rectangle->left;
-    surface->damage_y = rectangle->top;
-    surface->damage_width = rectangle->right - rectangle->left + 1;
-    surface->damage_height = rectangle->bottom - rectangle->top + 1;
+    mark_surface_damage_rect(surface, rectangle->left, rectangle->top,
+                             rectangle->right - rectangle->left + 1,
+                             rectangle->bottom - rectangle->top + 1);
 }
 
 /* DECFRA: fill a rectangle with one character, in the current pen.
@@ -12270,9 +12217,8 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
                 terminal_clear_cell(surface, x, surface->cursor_y);
         }
         terminal_normalize_wide_row(surface, surface->cursor_y);
-        mark_surface_damage(surface, left, surface->cursor_y);
-        if (surface->damage_width < right - left + 1)
-            surface->damage_width = right - left + 1;
+        mark_surface_damage_rect(surface, left, surface->cursor_y,
+                                 right - left + 1, 1);
     } else if (command == 'Z') {
         int count = has_first && first > 0 ? first : 1;
         while (count-- > 0 && surface->cursor_x > 0)
@@ -12317,11 +12263,8 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         }
         /* VT line insertion/deletion leaves the cursor at the left margin. */
         surface->cursor_x = left;
-        surface->damage_valid = 1;
-        surface->damage_x = left;
-        surface->damage_y = top;
-        surface->damage_width = right - left + 1;
-        surface->damage_height = bottom - top + 1;
+        mark_surface_damage_rect(surface, left, top, right - left + 1,
+                                 bottom - top + 1);
         terminal_scroll_graphics(session, surface, top, bottom, left, right,
                                  command == 'L' ? count : -count);
     } else if (prefix == 0 && intermediate == 0 &&
@@ -12347,11 +12290,8 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
             for (y = top; y < top + count; ++y)
                 terminal_blank_cells(surface, y, left, right);
         }
-        surface->damage_valid = 1;
-        surface->damage_x = left;
-        surface->damage_y = top;
-        surface->damage_width = right - left + 1;
-        surface->damage_height = bottom - top + 1;
+        mark_surface_damage_rect(surface, left, top, right - left + 1,
+                                 bottom - top + 1);
         terminal_scroll_graphics(session, surface, top, bottom, left, right,
                                  command == 'S' ? -count : count);
     } else if (command == 'E' || command == 'F') {
