@@ -3,6 +3,29 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-17: candidate 0.1.538 private login identity
+
+The new `login_identity_gate.rb` fails against 0.1.537 (`login identity API
+absent`), then passes against the TCC 0.1.538 candidate. It uses real Hibr,
+actual UID/GID 65534 dropping and a cleared environment to run Blit's hook for
+both desktop and shell. The target observes no inherited handoff socket or
+API token. Root, invalid payload, oversized datagram, FD-passing and
+reparented foreign sender are rejected with explicit reasons. Custom commands
+are unchanged; login destruction drops the identity and replacement has a
+new session ID. Ordinary PTY traffic cannot register identity. A missing
+acknowledgement times out after the configured five-second receive deadline;
+the session still starts with its sender descriptor closed. The first expanded
+test run exposed two fixture mistakes: TerminalInput was submitted as `text`
+instead of `data`, and Ruby's socketpair sender was nonblocking unlike the
+production sender. Both fixture corrections retain the actual assertions;
+the expanded focused test passes. Schema/lifecycle suites previously passed
+14/14 with no skips. Fixtures do not authenticate using PAM or prove held-owner
+readiness. No automatic joins or Hibr-core edits. Broad/package/physical
+acceptance are pending; live host is still 0.1.537.
+The live capture shows a logged-in lower desktop and open Control Panel.
+Deployment must wait for logout/operator clearance, not kill that session
+merely to test the new login boundary.
+
 ## 2026-10-17: deployed 0.1.537 policy/persistence foundation
 
 The old staged binary fails `login_policy_gate.rb`: a real settings `.new`

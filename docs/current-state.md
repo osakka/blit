@@ -7,6 +7,28 @@ work actually stopped.
 
 ## Status at the last review
 
+### 2026-10-17 candidate 0.1.538: authenticated identity boundary
+
+ADR 0125 and the schema add `/v1/login.identity`. Only Blit's default login
+hook participates: a private inherited datagram capability crosses Hibr's
+environment-clearing authentication boundary, then kernel sender credentials
+and login ancestry are verified. The capability is closed before desktop or
+shell exec. This changes no renderer, font, geometry or Hibr source. It does
+not set legacy desktop-role flags or create joins.
+
+The 0.1.537 binary fails the new regression because identity is absent.
+The TCC 0.1.538 candidate passes actual credential-dropping/clean-environment
+Hibr-hook fixtures for desktop and shell, rejects root/invalid/oversized/FD
+passing/foreign-ancestry messages, leaves custom commands unchanged and drops
+identity on login destruction. This is not actual PAM acceptance. Broad gates,
+package and physical authenticated acceptance are pending. Do not claim this
+candidate deployed until the subsequent verification entry records it.
+
+Next: verify identity after a real user login, then query native per-user owner
+readiness and integrate standby/release semantics (#96). Identity alone is
+not a held owner and must not trigger joins. Issue #99 and hibr-apps #1 remain
+open; no control-panel bundle is published.
+
 ### 2026-10-17 deployed 0.1.537: persistent desktop policy foundation
 
 The user approved a general API-owned lifecycle/configuration system and a

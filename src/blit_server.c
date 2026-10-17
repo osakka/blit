@@ -1,3 +1,4 @@
+#define _GNU_SOURCE 1
 #include <SDL3/SDL.h>
 #include <linux/input.h>
 #include <dirent.h>
@@ -808,6 +809,15 @@ typedef struct {
     int hibr_attach_unresolved;
     int login_manager;
     int login_exit_reported;
+    /* ADR 0125: private, single-use post-authentication handoff. Never a
+       desktop-owner declaration and never persisted. */
+    int login_identity_fd;
+    int login_identity_state; /* 0 unavailable, 1 waiting, 2 verified, 3 rejected */
+    char login_identity_reason[64];
+    uid_t login_identity_uid;
+    gid_t login_identity_gid;
+    pid_t login_identity_pid;
+    char login_identity_kind[16];
     /* Cell requests the owner has had accepted for this session's surface,
        and when it registered. A desktop whose owner registered and then never
        painted is the blank-but-healthy state of issue #32, and these are what
@@ -14490,7 +14500,7 @@ static void arm_hibr_frame_barrier(BlitRuntime *runtime,
 }
 
 static int create_session(BlitRuntime *runtime, const char *json,
-                           BlitSession **created)
+                           BlitSession **created, int inherited_fd)
 {
     struct winsize size;
     char command[256];
@@ -14651,6 +14661,8 @@ static int create_session(BlitRuntime *runtime, const char *json,
         char surface_text[64];
         char port_text[16];
         char hibr_log_path[256];
+        if (inherited_fd >= 0 && fcntl(inherited_fd, F_SETFD, 0) < 0)
+            _exit(126);
         snprintf(session_text, sizeof(session_text), "%llu", session_id);
         snprintf(surface_text, sizeof(surface_text), "surface-%llu", session_id);
         snprintf(port_text, sizeof(port_text), "%d", runtime->listen_port);
@@ -14765,6 +14777,7 @@ static int create_session(BlitRuntime *runtime, const char *json,
             ++runtime->next_session_id;
             session->process_id = process_id;
             session->pty_fd = master_fd;
+            session->login_identity_fd = -1;
             session->revision = 1;
             session->exit_code = -1;
             session->hibr_resume_requested = hibr_resume_requested;
@@ -14888,6 +14901,8 @@ static int create_login_session(BlitRuntime *runtime, BlitSession **created)
     int written;
     int result;
     int pane_index;
+    int handoff[2] = {-1, -1};
+    int identity_available = 0;
 
     if (geteuid() != 0)
         return -1;
@@ -14936,6 +14951,28 @@ static int create_login_session(BlitRuntime *runtime, BlitSession **created)
                      login_pane->display_id);
     }
 
+    /* Decorate only the packaged hook. An operator's custom command has no
+       implicit FD protocol. Fail closed for automation, not ordinary login. */
+    if (strcmp(session_command, BLIT_DEFAULT_LOGIN_SESSION_COMMAND) == 0) {
+        int yes = 1;
+        struct timeval receive_timeout = {5, 0};
+        if (socketpair(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0, handoff) == 0 &&
+            handoff[0] < FD_SETSIZE && handoff[1] < FD_SETSIZE &&
+            setsockopt(handoff[0], SOL_SOCKET, SO_PASSCRED, &yes, sizeof(yes)) == 0 &&
+            fcntl(handoff[0], F_SETFL, O_NONBLOCK) == 0 &&
+            setsockopt(handoff[1], SOL_SOCKET, SO_RCVTIMEO,
+                       &receive_timeout, sizeof(receive_timeout)) == 0) {
+            identity_available = 1;
+            snprintf(session_command, sizeof(session_command),
+                     "%s --blit-handoff-fd %d",
+                     BLIT_DEFAULT_LOGIN_SESSION_COMMAND, handoff[1]);
+        } else {
+            if (handoff[0] >= 0) close(handoff[0]);
+            if (handoff[1] >= 0) close(handoff[1]);
+            handoff[0] = handoff[1] = -1;
+            fprintf(stderr, "blit: login identity handoff unavailable\n");
+        }
+    }
     json_escape(command, escaped_command, sizeof(escaped_command));
     json_escape(script, escaped_script, sizeof(escaped_script));
     json_escape(session_command, escaped_session_command,
@@ -14969,11 +15006,25 @@ static int create_login_session(BlitRuntime *runtime, BlitSession **created)
             escaped_command, runtime->login_display_id,
             escaped_session_command);
     }
-    if (written < 0 || (size_t)written >= sizeof(request))
+    if (written < 0 || (size_t)written >= sizeof(request)) {
+        if (handoff[0] >= 0) close(handoff[0]);
+        if (handoff[1] >= 0) close(handoff[1]);
         return -4;
-    result = create_session(runtime, request, created);
-    if (result != 1)
+    }
+    result = create_session(runtime, request, created, handoff[1]);
+    if (handoff[1] >= 0) close(handoff[1]);
+    if (result != 1) {
+        if (handoff[0] >= 0) close(handoff[0]);
         return -4;
+    }
+    (*created)->login_identity_fd = handoff[0];
+    (*created)->login_identity_state = identity_available ? 1 : 0;
+    snprintf((*created)->login_identity_reason,
+             sizeof((*created)->login_identity_reason), "%s",
+             identity_available ? "awaiting_authenticated_hook" :
+             (strcmp(runtime->login_session_command,
+                     BLIT_DEFAULT_LOGIN_SESSION_COMMAND) == 0 ?
+              "handoff_setup_failed" : "custom_session_command"));
     /* The login resource is the owner of the requested pane.  Keep the
        session metadata on that same canonical id before topology derives its
        surface assignment.  This closes the otherwise ambiguous state where
@@ -14996,6 +15047,102 @@ static int create_login_session(BlitRuntime *runtime, BlitSession **created)
     return 1;
 }
 
+static void service_login_identity(BlitSession *session)
+{
+    char payload[32];
+    struct iovec vector;
+    struct msghdr message;
+    union {
+        struct cmsghdr alignment;
+        unsigned char bytes[CMSG_SPACE(sizeof(struct ucred)) +
+                            CMSG_SPACE(sizeof(int) * 8)];
+    } control;
+    struct cmsghdr *header;
+    struct ucred credential;
+    ssize_t length;
+    int credential_count = 0;
+    int unexpected_control = 0;
+    const char *reason = "invalid_message";
+    const char *kind = NULL;
+
+    if (session->login_identity_fd < 0 || session->login_identity_state != 1)
+        return;
+    memset(&message, 0, sizeof(message));
+    memset(&credential, 0, sizeof(credential));
+    vector.iov_base = payload;
+    vector.iov_len = sizeof(payload);
+    message.msg_iov = &vector;
+    message.msg_iovlen = 1;
+    message.msg_control = control.bytes;
+    message.msg_controllen = sizeof(control.bytes);
+    length = recvmsg(session->login_identity_fd, &message, MSG_DONTWAIT | MSG_CMSG_CLOEXEC);
+    if (length < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR))
+        return;
+    if (length >= 0) {
+        for (header = CMSG_FIRSTHDR(&message); header != NULL;
+             header = CMSG_NXTHDR(&message, header)) {
+            if (header->cmsg_level == SOL_SOCKET && header->cmsg_type == SCM_RIGHTS) {
+                size_t count = (header->cmsg_len - CMSG_LEN(0)) / sizeof(int);
+                size_t i;
+                int *fds = (int *)CMSG_DATA(header);
+                for (i = 0; i < count; ++i) close(fds[i]);
+                unexpected_control = 1;
+            } else if (header->cmsg_level == SOL_SOCKET &&
+                       header->cmsg_type == SCM_CREDENTIALS &&
+                       header->cmsg_len == CMSG_LEN(sizeof(credential))) {
+                memcpy(&credential, CMSG_DATA(header), sizeof(credential));
+                ++credential_count;
+            } else {
+                unexpected_control = 1;
+            }
+        }
+        if (length == 7 && memcmp(payload, "desktop", 7) == 0) kind = "desktop";
+        if (length == 5 && memcmp(payload, "shell", 5) == 0) kind = "shell";
+    }
+    if (length < 0) reason = "receive_failed";
+    else if (message.msg_flags & (MSG_TRUNC | MSG_CTRUNC)) reason = "truncated_message";
+    else if (unexpected_control || credential_count != 1) reason = "invalid_credentials";
+    else if (credential.uid == 0) reason = "root_sender";
+    else if (!process_is_descendant(credential.pid, session->process_id)) reason = "foreign_sender";
+    else if (kind != NULL) reason = "kernel_credentials_verified";
+    session->login_identity_state = strcmp(reason, "kernel_credentials_verified") == 0 ? 2 : 3;
+    snprintf(session->login_identity_reason, sizeof(session->login_identity_reason), "%s", reason);
+    if (session->login_identity_state == 2) {
+        session->login_identity_uid = credential.uid;
+        session->login_identity_gid = credential.gid;
+        session->login_identity_pid = credential.pid;
+        snprintf(session->login_identity_kind, sizeof(session->login_identity_kind), "%s", kind);
+    }
+    /* One bounded response to the waiting hook. Never block the render loop
+       or accept a second identity from this login lifetime. */
+    send(session->login_identity_fd,
+         session->login_identity_state == 2 ? "ok" : "rejected",
+         session->login_identity_state == 2 ? 2 : 8,
+         MSG_DONTWAIT | MSG_NOSIGNAL);
+    close(session->login_identity_fd);
+    session->login_identity_fd = -1;
+}
+
+static void login_identity_json(BlitSession *session, char *body, size_t capacity)
+{
+    static const char *states[] = {"unavailable", "waiting", "verified", "rejected"};
+    if (session != NULL && !session->child_exited && session->login_identity_state == 2) {
+        snprintf(body, capacity,
+                 "{\"state\":\"verified\",\"reason\":\"kernel_credentials_verified\","
+                 "\"uid\":%lu,\"gid\":%lu,\"sender_pid\":%ld,\"session_kind\":\"%s\"}",
+                 (unsigned long)session->login_identity_uid,
+                 (unsigned long)session->login_identity_gid,
+                 (long)session->login_identity_pid, session->login_identity_kind);
+    } else {
+        int active = session != NULL && !session->child_exited;
+        snprintf(body, capacity,
+                 "{\"state\":\"%s\",\"reason\":\"%s\",\"uid\":null,\"gid\":null,"
+                 "\"sender_pid\":null,\"session_kind\":null}",
+                 active ? states[session->login_identity_state] : "unavailable",
+                 active ? session->login_identity_reason : "no_active_login");
+    }
+}
+
 static void login_manager_json(BlitRuntime *runtime, char *body,
                                size_t capacity)
 {
@@ -15011,6 +15158,7 @@ static void login_manager_json(BlitRuntime *runtime, char *body,
     char pane_value[300];
     char preferred[256];
     char preferred_value[300];
+    char identity_body[512];
 
     json_escape(runtime->login_command, escaped_command,
                 sizeof(escaped_command));
@@ -15040,16 +15188,17 @@ static void login_manager_json(BlitRuntime *runtime, char *body,
     } else if (runtime->login_enabled) {
         state = runtime->login_restart_due_us != 0 ? "backoff" : "stopped";
     }
+    login_identity_json(session, identity_body, sizeof(identity_body));
     snprintf(body, capacity,
              "{\"state\":\"%s\",\"enabled\":%s,"
              "\"command\":\"%s\",\"script\":\"%s\","
              "\"display_id\":%s,\"pane_id\":%s,\"session\":%s,"
-             "\"preferred_pane_id\":%s,\"fallback\":\"%s\"}",
+             "\"preferred_pane_id\":%s,\"fallback\":\"%s\",\"identity\":%s}",
              state, runtime->login_enabled ? "true" : "false",
              escaped_command, escaped_script,
              display_value, pane_value,
              session != NULL ? session_body : "null", preferred_value,
-             runtime->login_fallback_wait ? "wait" : "first_available");
+             runtime->login_fallback_wait ? "wait" : "first_available", identity_body);
 }
 
 static void service_login_manager(BlitRuntime *runtime, uint64_t now)
@@ -15372,6 +15521,9 @@ static void stop_sessions(BlitRuntime *runtime)
         if (session->pty_fd >= 0)
             close(session->pty_fd);
         session->pty_fd = -1;
+        if (session->login_identity_fd >= 0)
+            close(session->login_identity_fd);
+        session->login_identity_fd = -1;
     }
 }
 
@@ -15394,6 +15546,8 @@ static void destroy_session(BlitRuntime *runtime, BlitSession *session)
     }
     if (session->pty_fd >= 0)
         close(session->pty_fd);
+    if (session->login_identity_fd >= 0)
+        close(session->login_identity_fd);
     disable_input_routes_for_target(runtime, target_id);
     remove_session_streams(runtime, target_id);
     /* Image records are owned by the session, but SDL textures and the
@@ -19406,7 +19560,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
                          "The requested Blit pane does not exist.");
             return;
         }
-        create_result = create_session(runtime, payload, &session);
+        create_result = create_session(runtime, payload, &session, -1);
         if (create_result == -2) {
             send_problem(fd, 409, "Conflict", "hibr_desktop_exists",
                          "The named Hibr desktop already has a primary owner; use --resume or --join.");
@@ -27579,6 +27733,11 @@ int main(int argc, char **argv)
             }
         }
         for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
+            if (runtime.sessions[i].used && runtime.sessions[i].login_identity_fd >= 0) {
+                FD_SET(runtime.sessions[i].login_identity_fd, &readable);
+                if (runtime.sessions[i].login_identity_fd > max_fd)
+                    max_fd = runtime.sessions[i].login_identity_fd;
+            }
             if (runtime.sessions[i].used && runtime.sessions[i].pty_fd >= 0) {
                 FD_SET(runtime.sessions[i].pty_fd, &readable);
                 if (runtime.sessions[i].pty_fd > max_fd)
@@ -27755,6 +27914,9 @@ int main(int argc, char **argv)
                 }
             }
             for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
+                if (runtime.sessions[i].used && runtime.sessions[i].login_identity_fd >= 0 &&
+                    FD_ISSET(runtime.sessions[i].login_identity_fd, &readable))
+                    service_login_identity(&runtime.sessions[i]);
                 if (runtime.sessions[i].used && runtime.sessions[i].pty_fd >= 0 &&
                     FD_ISSET(runtime.sessions[i].pty_fd, &readable))
                     service_session_output(&runtime, runtime.sessions[i].pty_fd);

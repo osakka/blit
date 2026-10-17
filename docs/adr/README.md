@@ -138,6 +138,11 @@ security policy, or compatibility rule requires a new ADR.
 - [0118 — Retry deferred KMS frames at flip completion](0118-retry-deferred-kms-frames-at-flip-completion.md)
 - [0119 — KMS refresh keeps the mode timing fraction](0119-kms-refresh-keeps-the-mode-timing-fraction.md)
 - [0120 — KMS vblank clock is observable](0120-kms-vblank-clock-is-observable.md)
+- [0121 — Terminal stream fragmentation cannot drop bytes](0121-terminal-stream-fragmentation-cannot-drop-bytes.md)
+- [0122 — Native Hibr join orchestration](0122-native-hibr-join-orchestration.md)
+- [0123 — Centred grids and complete font rasters](0123-centred-grids-and-complete-font-rasters.md)
+- [0124 — API-owned desktop policy and control panel](0124-api-owned-desktop-policy-and-control-panel.md)
+- [0125 — Authenticated login identity handoff](0125-authenticated-login-identity-handoff.md)
 
 ## Adding an ADR
 

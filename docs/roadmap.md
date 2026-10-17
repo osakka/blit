@@ -22,6 +22,11 @@ save/restart persistence and unchanged geometry/backend/font verified.
 Joins, live failover,
 arbitrary layouts, and catalogue UI acceptance remain separate deliverables.
 
+Candidate 0.1.538 adds a private post-authentication identity handoff (ADR 0125),
+not automatic joins. The next boundary is real-login acceptance, then native
+per-user held-owner readiness before standby/release integration. Hibr Displays
+actions remain session-only until explicitly saved into the same Blit store.
+
 ## Historical position — 0.1.507 live visual-acceptance blocker
 
 0.1.507 is deployed on the authorized one-output host and its API, package

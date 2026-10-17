@@ -178,6 +178,32 @@ delay. The
 `login_manager` marker in the returned terminal session distinguishes this
 supervised boundary from an ordinary PTY session.
 
+### Authenticated identity (0.1.538)
+
+`GET /v1/login.identity` distinguishes the login process from the user selected
+by its post-authentication hook. Before authentication it reports
+`state: waiting`, reason `awaiting_authenticated_hook`, with null UID/GID/PID
+and session kind. The default Blit-owned hook uses a private inherited channel;
+Blit verifies the kernel sender credentials and ancestry without an API token
+or any public registration endpoint. A verified example is:
+
+```json
+{"state":"verified","reason":"kernel_credentials_verified",
+ "uid":1000,"gid":1000,"sender_pid":12345,"session_kind":"desktop"}
+```
+
+The PID identifies the handoff sender, **not** the live held desktop owner.
+Verification is not desktop readiness: the selected session can also be
+`shell`. Native owner association and automatic standby joins are not yet
+implemented. Destroying/replacing the supervised login discards this identity.
+No active login reports `unavailable/no_active_login`; custom session commands
+are unchanged and report `unavailable/custom_session_command`. Setup failures
+report `unavailable/handoff_setup_failed`. Rejected messages expose null
+identity fields and a reason (`root_sender`, `foreign_sender`,
+`invalid_message`, `invalid_credentials`, `truncated_message` or
+`receive_failed`). A failed handoff does not prevent ordinary desktop/shell
+startup; it prevents trusting that login for future automation. See ADR 0125.
+
 The package enables this behavior with `BLIT_LOGIN_AUTOSTART=1`. The service
 must be root-owned for the login endpoint; an unprivileged Blit profile may
 run ordinary sessions but must reject login-manager start. Root-path PAM and

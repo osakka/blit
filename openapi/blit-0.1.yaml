@@ -3503,7 +3503,7 @@ components:
     LoginManager:
       type: object
       required: [state, enabled, command, script, display_id, pane_id, session,
-                 preferred_pane_id, fallback]
+                 preferred_pane_id, fallback, identity]
       properties:
         state:
           type: string
@@ -3515,6 +3515,7 @@ components:
             - {type: 'null'}
           description: Selection intent, distinct from the actual pane_id.
         fallback: {type: string, enum: [first_available, wait]}
+        identity: {$ref: '#/components/schemas/LoginIdentity'}
         command: {type: string}
         script: {type: string}
         display_id:
@@ -3529,6 +3530,23 @@ components:
           oneOf:
             - {$ref: '#/components/schemas/TerminalSession'}
             - {type: 'null'}
+      additionalProperties: false
+    LoginIdentity:
+      type: object
+      readOnly: true
+      required: [state, reason, uid, gid, sender_pid, session_kind]
+      description: >-
+        Private post-authentication hook identity scoped to the current login
+        terminal, not desktop readiness or a live held-owner PID. Only the
+        default Blit session hook participates. No public registration route.
+        Discarded when that supervised login session is replaced or destroyed.
+      properties:
+        state: {type: string, enum: [waiting, verified, rejected, unavailable]}
+        reason: {type: string}
+        uid: {type: [integer, 'null'], minimum: 1}
+        gid: {type: [integer, 'null'], minimum: 0}
+        sender_pid: {type: [integer, 'null'], minimum: 1}
+        session_kind: {type: [string, 'null'], enum: [desktop, shell, null]}
       additionalProperties: false
     CreateTerminalSession:
       type: object

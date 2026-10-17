@@ -24,6 +24,12 @@ raise 'effective login restart reporting missing' unless
 policy = schema.fetch('components').fetch('schemas').fetch('LoginPolicy')
 raise 'login fallback contract changed' unless
   policy.dig('properties','fallback','enum') == %w[first_available wait]
+login = schema.fetch('components').fetch('schemas').fetch('LoginManager')
+raise 'login identity observation missing' unless login['required'].include?('identity') &&
+  login.dig('properties','identity','$ref') == '#/components/schemas/LoginIdentity'
+identity = schema.fetch('components').fetch('schemas').fetch('LoginIdentity')
+raise 'login identity states changed' unless
+  identity.dig('properties','state','enum') == %w[waiting verified rejected unavailable]
 
 observation_path = paths.fetch('/v1/diagnostics/observation')
 observation_get = observation_path.fetch('get')

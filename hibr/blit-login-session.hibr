@@ -8,7 +8,38 @@
 
 strict
 
+# Numeric FD only, delivered through the root-owned login command rather
+# than an environment that auth run intentionally clears. The receiver
+# verifies kernel credentials, not this argument. Custom invocations omit it.
+handoff_fd=
+if [ "${1-}" = --blit-handoff-fd ]; then
+    handoff_fd=${2-}
+    case "$handoff_fd" in
+    ''|*[!0-9]*) echo 'blit-login-session: invalid handoff descriptor' >&2; exit 2 ;;
+    esac
+    if [ "$handoff_fd" -lt 3 ] || [ "$handoff_fd" -ge 1024 ]; then
+        echo 'blit-login-session: handoff descriptor out of range' >&2
+        exit 2
+    fi
+    shift 2
+fi
 session=${1-desktop}
+case "$session" in
+desktop|shell) ;;
+*) echo "blit-login-session: unsupported session '$session'" >&2; exit 2 ;;
+esac
+if [ -n "$handoff_fd" ]; then
+    # send produces one datagram. recv has a kernel five-second deadline set
+    # by Blit; its failure disables association, not ordinary desktop login.
+    handoff_reply=
+    if send -n "$handoff_fd" "$session"; then
+        recv "$handoff_fd" handoff_reply || true
+    fi
+    exec {handoff_fd}>&-
+    if [ "$handoff_reply" != ok ]; then
+        echo 'blit-login-session: identity unavailable; automatic joins disabled' >&2
+    fi
+fi
 case "$session" in
 desktop)
     launcher=${BLIT_HIBR_SESSION_LAUNCHER:-/usr/share/blit/hibr/blit-session.hibr}
