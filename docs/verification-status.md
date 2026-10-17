@@ -22,6 +22,15 @@ effective enabled field and independently checks the earlier startup flag;
 focused rerun passes. Broader corrected rerun/package/physical acceptance are
 pending. The real host stays 0.1.536. No Hibr-core edits or hibr-apps publication.
 
+The first schema/renderer/lifecycle/Hibr run finishes at 68 pass, 4 skip,
+2 fail. The other failure is the legacy join fixture's fixed x=10 click:
+removing the surplus four-pixel inset in 0.1.536 correctly puts that point
+in column 2, not column 1. The fixture now targets the reported first-cell
+origin and retains its exact legacy projection assertion; focused rerun
+passes. It explicitly does not prove native login-owned 2-D joins (#96).
+The four skips were QEMU and three adapter tests without their header input;
+the final all-suite run supplies the pinned Hibr checkout explicitly.
+
 ## 2026-10-17: deployed 0.1.536 edge/font regressions
 
 Before correction, the actual pane API gate reports complete1024px grid plus

@@ -6,6 +6,8 @@
 # independent local terminal viewport.  The join is not a framebuffer mirror:
 # its PTY output must paint its own Blit surface.  Pointer input still enters
 # the primary Hibr owner after the pane hit-test.
+# This tests the legacy recognized-launch projection, not ADR 0122's native
+# login-owned 2-D association (issue #96). Never infer native join acceptance.
 require 'json'
 require 'net/http'
 require 'fileutils'
@@ -93,6 +95,10 @@ panes = split.fetch('panes').sort_by { |pane| pane.fetch('pixel_region').fetch('
 top_pane = panes.fetch(0).fetch('id')
 bottom = panes.fetch(1)
 bottom_pane = bottom.fetch('id')
+top_grid = panes.fetch(0).fetch('cell_grid')
+inset = request(base, 'GET', '/v1/diagnostics').last.fetch('render').fetch('surface_inset_px')
+click_x = top_grid.fetch('origin_x') + inset + 1
+click_y = top_grid.fetch('origin_y') + inset + 1
 
 create = lambda do |arguments, pane_id, surface_mode = 'terminal'|
   code, body = request(base, 'POST', '/v1/terminal-sessions', {
@@ -140,14 +146,14 @@ begin
     code == 409 && problem['code'] == 'hibr_join_surface_read_only'
 
   code, = request(base, 'POST', '/v1/input/inject',
-                  {'kind' => 'pointer_motion', 'x' => 10, 'y' => 10})
+                  {'kind' => 'pointer_motion', 'x' => click_x, 'y' => click_y})
   raise "pointer motion injection failed: #{code}" unless code == 202
   code, = request(base, 'POST', '/v1/input/inject',
-                  {'kind' => 'pointer_button', 'x' => 10, 'y' => 10,
+                  {'kind' => 'pointer_button', 'x' => click_x, 'y' => click_y,
                    'button' => 0, 'pressed' => true})
   raise "pointer press injection failed: #{code}" unless code == 202
   code, = request(base, 'POST', '/v1/input/inject',
-                  {'kind' => 'pointer_button', 'x' => 10, 'y' => 10,
+                  {'kind' => 'pointer_button', 'x' => click_x, 'y' => click_y,
                    'button' => 0, 'pressed' => false})
   raise "pointer release injection failed: #{code}" unless code == 202
 
