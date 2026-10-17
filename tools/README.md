@@ -48,8 +48,9 @@ block cell colours against scanout pixels. It refuses retained-graphics
 surfaces and excludes unsupported styles, visible terminal cursor and a
 bounded software-pointer neighbourhood. Those exclusions are not acceptance
 claims. Set `BLIT_AUTH_TOKEN`; pass host:port and optional surface/attempts.
-The legacy positional token remains supported. A moving revision discards
-the sample; it is not reported as a renderer failure.
+The legacy positional token remains supported. A moving revision or changing
+pointer state across capture discards the sample; it is not reported as a
+renderer failure. Pointer exclusions are refreshed for every attempt.
 
 `host_utf8_stream.rb` reproduces issue #94 using a real PTY: a split UTF-8
 lead followed by a shell write larger than 4 KiB must retain its half block,

@@ -67,21 +67,20 @@ end
 sessions = json('/v1/terminal-sessions').fetch('sessions')
 session = sessions.find { |candidate| candidate['surface_id'] == SURFACE }
 abort 'cell-only agreement cannot judge retained graphics' if session && session.fetch('graphics', []).any?
-pointer = diag.fetch('render').fetch('pointer')
-pointer_positions = pointer['valid'] ? [[pointer['x'],pointer['y']],
-                                       [pointer['previous_x'],pointer['previous_y']]] : []
 checked = 0; half_blocks = 0; checked_pixels = 0
 mismatched = []; discarded = 0; used = nil
 ATTEMPTS.times do |i|
+  pointer = json('/v1/diagnostics').fetch('render').fetch('pointer')
   cap = capture
   state = json("/v1/surfaces/#{SURFACE}/cells")
+  pointer_after = json('/v1/diagnostics').fetch('render').fetch('pointer')
   reported = cap[:revs][SURFACE]
   if reported.nil?
     abort "the capture reported no revision for #{SURFACE} (headers: #{cap[:revs].inspect})"
   end
   presented_ok = cap[:presented] == 'true' ||
                  (DIRECT_KMS && cap[:presented].nil?)
-  if !presented_ok || reported != state['revision']
+  if !presented_ok || reported != state['revision'] || pointer != pointer_after
     # The sample straddled a repaint, or those pixels never reached a screen.
     # Discard it rather than reporting the skew as a defect -- three earlier
     # attempts at this comparison on a live host produced three findings that
@@ -89,6 +88,8 @@ ATTEMPTS.times do |i|
     discarded += 1
     next
   end
+  pointer_positions = pointer['valid'] ? [[pointer['x'],pointer['y']],
+                                         [pointer['previous_x'],pointer['previous_y']]] : []
   grid = {}
   state['cells'].each { |c| grid[[c.fetch('x', 0), c.fetch('y', 0)]] = c }
   checked = 0; mismatched = []; half_blocks = 0; checked_pixels = 0
@@ -129,7 +130,7 @@ ATTEMPTS.times do |i|
 end
 if used.nil?
   puts "TRAIL_INCONCLUSIVE discarded=#{discarded}/#{ATTEMPTS} " \
-       'every sample straddled a repaint; the surface is mutating faster than a 12MB capture'
+       'every sample straddled a repaint or pointer motion; no stable capture'
   exit 2
 end
 puts "sample: attempt=#{used[:attempt]} frame=#{used[:frame]} presented=#{used[:presented]} " \

@@ -3,6 +3,36 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-17: requested live SDL GL switch, package unchanged
+
+The same reproducible 0.1.535 package now runs SDL3/KMSDRM/OpenGLES2 with
+SDL vsync on 10.54. API reports ready, no diagnostic errors/warnings, and
+render/viewport 1920x2160 at scale 1. The 1x2 layout and single upper-pane
+login session are preserved; only the backend-derived output identity
+changes to `display-1`. No SSH, Hibr changes or package deployment occurred.
+
+Real-host damage union (both corners), upper/lower half-block RGB and large
+split-UTF-8 PTY assertions pass. The SDL framebuffer capture was inspected
+and already shows the Hibr desktop with Control Panel, Terminal and Task
+Manager. Evidence: ignored
+`diagnostics/renderer-switch-20261017/`, with before/after settings, topology,
+diagnostics and screenshot headers. Wallpaper is visible in the capture;
+interactive window dragging and sustained SDL refresh acceptance have not
+yet been established here;
+the preceding visual acceptance remains explicitly direct-KMS evidence.
+
+The broader colour-agreement probe has separate non-pass observations. First
+it captured a different surface after the login session was replaced;
+that is lifecycle skew, not renderer evidence. Later runs reported one cell
+(10,6), 15 pixels, at frame1491/revision355 and four cells at frame2603/
+revision380. The pointer was moving and the checker cached its exclusions
+only once before its retries. These flags are unclassified, not established
+renderer defects. The operator probe now brackets each capture with pointer
+state and discards moving samples. Its subsequent attempt correctly refuses
+retained graphics, now present in the live surface. Ruby syntax passes; a
+stationary, cell-only agreement sample remains pending. Logs and later
+diagnostics/cells are preserved, not represented as the exact flagged frame.
+
 ## 2026-10-17: authenticated 0.1.534 fails; UTF-8 read-loss regression
 
 The user's authenticated desktop has an incomplete wallpaper. Captured

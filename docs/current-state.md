@@ -7,6 +7,38 @@ work actually stopped.
 
 ## Status at the last review
 
+### 2026-10-17 operating-mode change: SDL GL, same 0.1.535 package
+
+After tagging the direct-KMS working checkpoint, the user requested SDL GL.
+The host now reports `backend=sdl3`, `direct_kms=false`,
+`video_driver=kmsdrm`, `renderer=opengles2`, and
+`presentation_sync=sdl-vsync`, ready with no diagnostic errors/warnings.
+This is SDL on bare-console KMSDRM, not X11 or Wayland. The 1920x2160 output
+and 1x2 split are unchanged; SDL names the output `display-1` rather than the
+direct-KMS connector identity `display-93`. There is one focused upper-pane
+login-manager session and an empty lower pane. The post-switch framebuffer
+already shows the Hibr desktop with Control Panel, Terminal and Task Manager;
+no inference is made about how the authentication/reattachment occurred.
+
+The renderer request was persisted through `/v1/settings`, preserving the
+rest of the document. The existing boot-owned backend selector was changed
+to SDL in `/etc/blit/blit.env`, with `SDL_VIDEODRIVER=kmsdrm`; its protected
+backup is `/etc/blit/blit.env.pre-sdl-0.1.535-20261017`. This narrowly scoped
+configuration/restart ran through the authorized terminal API using Hibr,
+not SSH. No binary, Hibr source or tag was changed. Live two-corner damage,
+upper/lower half-block colours and large split-UTF-8 PTY probes pass on SDL.
+Evidence: ignored `diagnostics/renderer-switch-20261017/`.
+The earlier movement acceptance below is for direct KMS, not automatically
+SDL GL; the captured SDL desktop alone does not establish interactive motion.
+A broader cell-colour probe first straddled replacement of surface-1 by
+surface-4. Later samples flagged one cell and four cells, but the operator
+was moving the pointer and the checker cached its exclusion positions only
+once. These are unclassified observations, not established SDL defects.
+The operator probe now brackets each capture with pointer state and discards
+motion-skew samples. The next attempt correctly refuses retained graphics,
+now present in the live surface. Do not report complete SDL pixel agreement
+from the focused probe passes. No runtime code/configuration changes followed.
+
 ### 2026-10-17 authenticated desktop exposes PTY byte loss, deployed 0.1.535
 
 The user authenticated. The 0.1.534 capture shows only the upper wallpaper
