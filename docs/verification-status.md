@@ -30,6 +30,13 @@ physical keyboard, or window interaction. The live runtime still reports a
 large cumulative missed-deadline count from the long-lived login-manager and
 diagnostic workload; no 60-Hz physical-performance claim is made here.
 
+The subsequent read-only graphics discriminator found the same boundary:
+`session-1` is `login_manager=true` with `graphics=[]`, and the filtered trace
+contains only its Kitty capability query. No authenticated Hibr desktop
+wallpaper payload is present in this live state. The next required capture is
+therefore one authenticated primary desktop, followed by its graphics state
+and screenshot, before any join is started.
+
 ## 0.1.523 live direct-KMS surface-local damage and cadence
 
 The exact `0.1.523` package is deployed on `192.168.10.54`. Hibr source was

@@ -77,6 +77,16 @@ for API-owned surfaces on this host. They do not prove Hibr's saver,
 wallpaper/desktop scene, desktop windows, joined coordinates, or physical
 input; those remain separate tests.
 
+The follow-up live graphics discriminator was then read without changing the
+host: the only remaining session was the supervised login manager
+(`login_manager=true`, `graphics=[]`). Its filtered graphics trace contained
+only the login manager's Kitty capability query; it contained no Hibr desktop
+wallpaper upload. The current host therefore does not provide an authenticated
+Hibr desktop scene from which to diagnose wallpaper or desktop composition.
+This is a missing test precondition, not evidence that Blit's Kitty renderer
+failed. The next live boundary is to capture one authenticated primary Hibr
+desktop before starting any join.
+
 ### Architecture decision check
 
 There is no accepted decision to deprecate the direct DRM/KMS or non-SDL
