@@ -44,6 +44,27 @@ now replaced by an explicit missing-contract error). Its positive physical
 waiting/ready checks are pending deployment/fresh login. Full all-suite run
 includes the new package and is in progress. Host remains 0.1.538.
 
+An isolated expanded run then reproduces `native_query_failed` during the
+geometry scenario, ruling out shared ports as a sufficient explanation.
+The synthetic helper could run before its target wrote the owner-PID file;
+it incorrectly returned exit1 for that normal startup interval. The production
+native helper already reports waiting/owner_missing for the equivalent state.
+The fixture now does likewise, and its geometry scenario deliberately delays
+owner publication by500ms and asserts that the missing-owner branch occurred.
+An in-memory reproduction of the old fixture exit1 behavior fails deterministically
+with the same geometry/native_query_failed result on its own port; the corrected
+fixture passes. The missing-client assertion also waits past the legitimate
+initial owner-missing phase rather than conflating the two waiting reasons.
+No production source or archive changed for this fixture correction.
+
+The expanded passing controller run additionally invokes the read-only
+association probe against its known fixture: three samples separated by3.2s
+quiet intervals, longer than the3s TTL, observe genuinely refreshed bindings.
+Measured maximum API request latency in that run is21.32ms (fixture bound500ms).
+This does not establish a physical refresh-rate guarantee or actual native/PAM
+acceptance; those remain separate. Final broad run continues on the corrected
+fixture and the same0.1.539 package.
+
 ## 2026-10-17: deployed 0.1.538 private login identity
 
 The new `login_identity_gate.rb` fails against 0.1.537 (`login identity API

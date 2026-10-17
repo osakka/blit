@@ -6,6 +6,7 @@ require 'net/http'
 require 'tmpdir'
 require 'timeout'
 require 'fileutils'
+require 'open3'
 require_relative 'gate_port'
 ROOT=File.expand_path('../..',__dir__)
 BINARY=ENV.fetch('BLIT_GATE_BINARY',File.join(ROOT,'build/blit/blit-server'))
@@ -51,8 +52,8 @@ Dir.mktmpdir('blit-login-observe') do |root|
   FileUtils.cp(File.join(ROOT,'tools/tests/fixtures/login_identity_target.hibr'),target)
   File.chmod(0755,target)
   %w[ready secondary missing owner_missing geometry wrong_uid overflow nul oversized timeout exit_failure expires shell waiting].each do |mode|
-    result=File.join(root,"#{mode}.result");owner_file=result+'.pid';count=result+'.count'
-    [result,owner_file,count].each{|p|File.write(p,'');File.chmod(0666,p)}
+    result=File.join(root,"#{mode}.result");owner_file=result+'.pid';count=result+'.count';startup=result+'.startup'
+    [result,owner_file,count,startup].each{|p|File.write(p,'');File.chmod(0666,p)}
     observer=File.join(root,'observer.hibr')
     action=case mode
       when 'secondary' then 'printf "ready %s 96 128 48 0 48 128 0\\n" "$owner"'
@@ -79,7 +80,11 @@ Dir.mktmpdir('blit-login-observe') do |root|
         case "$link" in socket:*|/dev/input/*|/dev/dri/*|/dev/pts/*) exit 8 ;; esac
       done
       owner=$(/bin/cat '#{owner_file}') || exit 1
-      [ -n "$owner" ] || exit 1
+      if [ -z "$owner" ]; then
+        printf 'owner_missing' > '#{startup}'
+        printf 'waiting owner_missing\n'
+        exit 0
+      fi
       #{action}
     HIBR
     File.write(observer,source)
@@ -93,6 +98,7 @@ Dir.mktmpdir('blit-login-observe') do |root|
       'BLIT_GATE_IDENTITY_MODE'=>%w[shell waiting].include?(mode) ? mode : 'desktop',
       'BLIT_GATE_HOOK'=>hook,'BLIT_GATE_TARGET'=>target,
       'BLIT_GATE_RESULT'=>result,'BLIT_GATE_OWNER_FILE'=>owner_file}
+    env['BLIT_GATE_OWNER_DELAY']='0.5' if mode=='geometry'
     log=File.join(root,'server.log')
     $pid=spawn('sudo','-n','env',*env.map{|k,v|"#{k}=#{v}"},BINARY,PORT.to_s,out:log,err:log)
     login=await{q=request('GET','/v1/login');q['desktop'] && q}
@@ -100,9 +106,11 @@ Dir.mktmpdir('blit-login-observe') do |root|
     login=await do
       q=request('GET','/v1/login');d=q['desktop']
       q if d['state']==expected && (expected!='waiting' || d['reason']!='awaiting_native_query') &&
+        (mode!='missing' || d['reason']=='client_missing') &&
         (mode!='shell' || d['reason']=='shell_selected')
     end
     d=login['desktop'];check(login.dig('session','hibr_desktop','role')=='none','native observation enabled legacy projection')
+    check(File.read(startup)=='owner_missing','startup-ordering fixture was not exercised') if mode=='geometry'
     if expected=='ready'
       check(d.dig('owner','uid')==65534 && d.dig('owner','starttime_ticks').to_i>0,'owner credentials/lifetime absent')
       check(d.dig('owner','pid')==File.read(owner_file).to_i,'wrong native owner bound')
@@ -122,6 +130,14 @@ Dir.mktmpdir('blit-login-observe') do |root|
       end
     end
     if mode=='ready'
+      # Exercise the read-only physical acceptance client against this known
+      # fixture, with quiet intervals longer than the association's TTL.
+      out,err,status=Open3.capture3({'BLIT_LIVE'=>BASE.to_s,
+        'BLIT_AUTH_TOKEN'=>'observer-admin','BLIT_EXPECT_UID'=>'65534',
+        'BLIT_EVIDENCE_DIR'=>File.join(root,'read-only-probe')},
+        'ruby',File.join(ROOT,'tools/probes/host_native_association.rb'))
+      check(status.success? && out.include?('HOST_NATIVE_ASSOCIATION_PASS'),
+        "read-only association acceptance client failed:#{err}")
       # Cancellation while the next worker is blocked must remain responsive.
       File.write(observer,"exec /bin/sleep 30\n")
       await{request('GET','/v1/login').dig('desktop','query_in_flight')}
@@ -147,4 +163,4 @@ Dir.mktmpdir('blit-login-observe') do |root|
   end
 end
 check($max_http<0.5,"native worker stalled API:#{$max_http}s")
-puts 'LOGIN_DESKTOP_OBSERVER_PASS native_payloads=synthetic identity=actual uid=verified deadline=bounded logout=nonblocking legacy_projection=unchanged'
+puts "LOGIN_DESKTOP_OBSERVER_PASS native_payloads=synthetic quiet_refresh=verified logout=nonblocking max_api_ms=#{($max_http*1000).round(2)}"

@@ -43,6 +43,15 @@ refresh after quiet intervals longer than the observation TTL. Its first run
 against live 0.1.538 rejects the absent contract without mutations. Use distinct
 evidence paths for subsequent waiting/ready samples.
 
+The read-only acceptance client now passes against the controlled local
+association fixture, including refresh across3.2s quiet intervals. An isolated
+fixture startup race was diagnosed and reproduced: its synthetic observer used
+exit1 before the target published its PID, unlike the production helper's
+waiting/owner_missing response. The corrected fixture delays publication500ms
+to exercise that ordering, and retains exact rejection-reason assertions.
+Production source/package identity is unchanged. See the verification ledger
+for the failed isolated run and deterministic old-fixture reproduction.
+
 Next after physical named-client acceptance: retire obsolete native horizontal
 projection and integrate supported standby/release joins in one coherent
 semantic change (#96), without competing placement controllers (#99).
