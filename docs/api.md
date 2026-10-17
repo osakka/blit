@@ -736,7 +736,9 @@ pane grid. Missing outputs are valid dormant intent. Saving this field does
 not move or reconnect a current desktop client. Blit's later standby
 reconciler applies initial placement once; Hibr Displays owns subsequent
 session moves. The control panel must keep live Apply separate from durable
-Save as default. See ADR 0124.
+Save as default. As of 0.1.542, neither live Apply nor its effective-state
+resource is implemented. ADR 0128 defines the pending
+`/v1/auxiliary-displays` contract; do not infer active joins from saved intent.
 
 #### Save acknowledgement and failure
 

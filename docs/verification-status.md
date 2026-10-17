@@ -15,6 +15,11 @@ package has been created and 10.54 has not been updated. This delivers only
 validated durable intent. It does not start Hibr standby clients, position
 them, or change current-session Hibr Displays choices.
 
+ADR 0128 specifies the next API/controller boundary: live Apply is volatile
+and distinct from Save as default, with asynchronous per-binding states and
+native proof of join/initial placement. This is a contract only; no Apply
+endpoint, standby reconciler, or physical acceptance exists yet.
+
 ## 2026-10-17: native association client inventory (local candidate)
 
 TCC 0.9.27 builds the server at version 0.1.541. The installed-Hibr native

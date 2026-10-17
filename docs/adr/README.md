@@ -145,6 +145,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0125 — Authenticated login identity handoff](0125-authenticated-login-identity-handoff.md)
 - [0126 — Native login desktop association](0126-native-login-desktop-association.md)
 - [0127 — Native client PTYs and login-owned joins](0127-native-client-pty-input-and-login-owned-joins.md)
+- [0128 — Live auxiliary-display Apply contract](0128-live-auxiliary-apply-contract.md)
 
 ## Adding an ADR
 

@@ -30,10 +30,12 @@ clients and their signed native rectangles from that same read-only query,
 and adds validated, restart-persistent auxiliary bindings to the existing
 settings document (`auxiliary_displays` stable output plus pane ordinal).
 Both are locally gated, but not packaged or deployed. Next: implement bounded
-standby lifecycle and one-time initial placement using these saved bindings
-and observed clients.
-Do not start the catalogue panel until those API semantics have a validated
-contract; the panel remains in `hibr-apps` issue #1.
+ADR 0128 now pins the live Apply contract separately from durable settings:
+volatile current-session policy, asynchronous per-binding effective state,
+exact native join and one-time placement proof, and conservative no-respawn
+after a standby exits. Next: implement and gate that API/controller contract.
+Do not start the catalogue panel until the packaged API implements it; the
+panel remains in `hibr-apps` issue #1.
 
 Version 0.1.538 adds a private post-authentication identity handoff (ADR 0125),
 not automatic joins. The deployed installed hook reports verified UID/GID 1000

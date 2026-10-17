@@ -73,6 +73,14 @@ cases), and OpenAPI schema gate pass locally. These are prerequisites, not
 placement automation or a second layout store. Neither candidate is newly
 deployed to 10.54. Standby lifecycle and the control panel remain outstanding.
 
+ADR 0128 pins the next contract: volatile API Apply separate from saved
+defaults, per-binding reconciliation status, and confirmation of native join
+plus one-time placement before claiming success. This is not implemented yet;
+no Apply route or standby reconciler exists. The next coding increment is that
+API/controller boundary, with tests for target absence, owner changes,
+user-movement preservation, and safe process-exit behavior. Do not build the
+Hibr Control Panel against an endpoint that is only aspirational.
+
 The next policy boundary is now pinned in ADR0124 after reviewing Hibr's
 documented `desktop --standby` lifecycle: it waits, can autojoin, remains alive
 when Hibr deliberately lets it go, and waits for explicit reattachment instead
