@@ -12537,11 +12537,14 @@ advance_cursor:
     }
 }
 
-static int terminal_consume_output(BlitRuntime *runtime, BlitSession *session,
+enum { BLIT_TERMINAL_PARSE_CHUNK_BYTES = 768 };
+
+static int terminal_consume_chunk(BlitRuntime *runtime, BlitSession *session,
                                    BlitSurface *surface,
                                    const unsigned char *data, size_t length)
 {
-    unsigned char combined[sizeof(session->terminal_utf8_pending) + 768];
+    unsigned char combined[sizeof(session->terminal_utf8_pending) +
+                           BLIT_TERMINAL_PARSE_CHUNK_BYTES];
     size_t offset = 0;
 
     /* A PTY is a byte stream, not a message transport. Join a pending UTF-8
@@ -12936,6 +12939,27 @@ static int terminal_consume_output(BlitRuntime *runtime, BlitSession *session,
         }
     }
     return 1;
+}
+
+static int terminal_consume_output(BlitRuntime *runtime, BlitSession *session,
+                                   BlitSurface *surface,
+                                   const unsigned char *data, size_t length)
+{
+    int changed = 0;
+    /* The read side accepts 64 KiB, while UTF-8 prefix joining has a small
+       bounded scratch buffer. Feed every byte through the same state machine
+       in fitting slices: neither PTY read boundaries nor a pending scalar may
+       discard the rest of a desktop flush. No allocation or recursion is
+       needed, and CSI/string/UTF-8 state remains on the canonical session. */
+    while (length > 0) {
+        size_t count = length < BLIT_TERMINAL_PARSE_CHUNK_BYTES ? length :
+            BLIT_TERMINAL_PARSE_CHUNK_BYTES;
+        changed |= terminal_consume_chunk(runtime, session, surface, data,
+                                          count);
+        data += count;
+        length -= count;
+    }
+    return changed;
 }
 
 static void frame_receipt_json(BlitRuntime *runtime, char *body,

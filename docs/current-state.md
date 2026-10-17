@@ -7,6 +7,21 @@ work actually stopped.
 
 ## Status at the last review
 
+### 2026-10-17 authenticated desktop exposes PTY byte loss, candidate 0.1.535
+
+The user authenticated. The 0.1.534 capture shows only the upper wallpaper
+portion; the surface snapshot itself has blank rows below row 22. This is
+**not a correct complete desktop**, despite the prior bounded pixel/cadence
+tests passing. [Issue #94](https://git.home.arpa/itdlabs/blit/issues/94) and
+[ADR 0121](adr/0121-terminal-stream-fragmentation-cannot-drop-bytes.md) record
+a reproduced Blit parser defect: pending UTF-8 plus a large PTY read silently
+discards that entire read because its join buffer is only 772 bytes.
+The actual service-entry pipe regression fails before and passes after
+bounded slicing through the one parser; ten fragmentation sizes also agree
+with continuous parsing. Candidate verification/deployment is in progress.
+Evidence is under ignored `diagnostics/authenticated-20261017/`. Backend,
+pane arrangement and Hibr source remain unchanged.
+
 ### 2026-10-17 deployed and bounded-validated 0.1.534
 
 The live host 192.168.10.54 runs reproducible package 0.1.534 from `8c6a26f`;

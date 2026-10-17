@@ -43,6 +43,12 @@ input test. Both live probes discover the output and pane geometry from
 `/v1/topology`; direct-KMS screenshots are decoded from their advertised BMP
 bit depth.
 
+`host_utf8_stream.rb` reproduces issue #94 using a real PTY: a split UTF-8
+lead followed by a shell write larger than 4 KiB must retain its half block,
+4000 text cells and final ANSI-positioned marker. It requires a free pane,
+restores original focus, and removes only its own temporary session. Run with
+`BLIT_AUTH_TOKEN` set; optionally set `BLIT_LIVE` and `BLIT_EVIDENCE_DIR`.
+
 `host_damage_union.rb` reproduces issue #89 through the live API, writing the
 bottom-right cell before the top-left cell and verifying both reached scanout.
 It also checks exact upper/lower half-block foreground/background colors.

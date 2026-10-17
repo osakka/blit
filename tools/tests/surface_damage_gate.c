@@ -7,6 +7,96 @@ static int failures;
 static BlitSurface subject;
 static BlitSession owner;
 
+static void utf8_fragmentation_gate(void)
+{
+    static const size_t sizes[] = {1, 2, 3, 4, 127, 767, 768, 769, 4095, 65535};
+    BlitSurface *expected = calloc(1, sizeof(*expected));
+    BlitSession *session = calloc(1, sizeof(*session));
+    unsigned char bytes[131072];
+    size_t length = 0, i, j;
+    if (expected == NULL || session == NULL) exit(2);
+    memset(&subject, 0, sizeof(subject));
+    subject.width = 80; subject.height = 40; subject.scroll_bottom = 39;
+    terminal_reset_tabs(&subject);
+    session->terminal_autowrap = 1;
+    for (i = 0; i < 1800; ++i) {
+        length += snprintf((char *)bytes + length, sizeof(bytes) - length,
+            "\033[%zu;%zuH\033[38;2;%zu;17;91;48;2;23;55;99m"
+            "\xe2\x96\x80\xc3\xa9\xf0\x9f\x9a\x80" "e\xcc\x81",
+            i % 38 + 1, i % 65 + 1, i % 256);
+    }
+    length += snprintf((char *)bytes + length, sizeof(bytes) - length,
+                       "\033]2;fragmentation-complete\007\033[40;70HEND");
+    if (length >= sizeof(bytes)) exit(2);
+    /* One continuous input to the production parser is the reference. The
+       entry point must agree for every tested fragmentation of those bytes. */
+    terminal_consume_chunk(NULL, session, &subject, bytes, length);
+    *expected = subject;
+    for (i = 0; i < sizeof(sizes) / sizeof(sizes[0]); ++i) {
+        memset(&subject, 0, sizeof(subject));
+        subject.width = 80; subject.height = 40; subject.scroll_bottom = 39;
+        terminal_reset_tabs(&subject);
+        memset(session, 0, sizeof(*session)); session->terminal_autowrap = 1;
+        for (j = 0; j < length;) {
+            size_t count = sizes[i] < length - j ? sizes[i] : length - j;
+            terminal_consume_output(NULL, session, &subject, bytes + j, count);
+            j += count;
+        }
+        if (memcmp(expected->codepoints, subject.codepoints, sizeof(subject.codepoints)) ||
+            memcmp(expected->foreground, subject.foreground, sizeof(subject.foreground)) ||
+            memcmp(expected->background, subject.background, sizeof(subject.background)) ||
+            memcmp(expected->attributes, subject.attributes, sizeof(subject.attributes)) ||
+            memcmp(expected->combining, subject.combining, sizeof(subject.combining)) ||
+            memcmp(expected->combining_count, subject.combining_count, sizeof(subject.combining_count)) ||
+            expected->cursor_x != subject.cursor_x || expected->cursor_y != subject.cursor_y ||
+            session->terminal_utf8_pending_length || session->terminal_escape ||
+            strcmp(session->terminal_title, "fragmentation-complete")) {
+            fprintf(stderr, "UTF8_FRAGMENT_FAIL chunk=%zu length=%zu pending=%d\n",
+                    sizes[i], length, session->terminal_utf8_pending_length);
+            ++failures;
+        }
+    }
+    free(expected); free(session);
+}
+
+static void utf8_large_pty_read_gate(void)
+{
+    BlitRuntime *runtime = calloc(1, sizeof(*runtime));
+    BlitSession *session;
+    unsigned char bytes[4096];
+    const char tail[] = "\033[31;70HEND";
+    int fds[2];
+    if (runtime == NULL || pipe(fds) != 0) exit(2);
+    memset(&subject, 0, sizeof(subject));
+    subject.used = 1; subject.id = 1; subject.owner_session_id = 1;
+    subject.width = 80; subject.height = 40; subject.scroll_bottom = 39;
+    runtime->surfaces[0] = &subject;
+    session = &runtime->sessions[0];
+    session->used = 1; session->id = 1; session->pty_fd = fds[0];
+    session->terminal_autowrap = 1;
+    snprintf(session->state, sizeof(session->state), "running");
+    if (write(fds[1], "\xe2", 1) != 1) exit(2);
+    service_session_output(runtime, fds[0]);
+    memset(bytes, 0, sizeof(bytes)); /* NUL is ignored, not a string terminator. */
+    bytes[0] = 0x96; bytes[1] = 0x80; /* finish U+2580 upper half block */
+    memcpy(bytes + sizeof(bytes) - sizeof(tail) + 1, tail, sizeof(tail) - 1);
+    if (write(fds[1], bytes, sizeof(bytes)) != sizeof(bytes)) exit(2);
+    service_session_output(runtime, fds[0]);
+    if (subject.codepoints[0][0] != 0x2580 ||
+        subject.codepoints[30][69] != 'E' ||
+        subject.codepoints[30][71] != 'D' ||
+        session->terminal_utf8_pending_length != 0 ||
+        runtime->diagnostic_terminal_bytes != sizeof(bytes) + 1) {
+        fprintf(stderr, "UTF8_PTY_FAIL pending prefix caused large PTY read loss: "
+                "first=%x tail=%x pending=%d bytes=%llu\n",
+                subject.codepoints[0][0], subject.codepoints[30][69],
+                session->terminal_utf8_pending_length,
+                runtime->diagnostic_terminal_bytes);
+        ++failures;
+    }
+    close(fds[0]); close(fds[1]); free(runtime);
+}
+
 static void kms_retry_deadline_gate(void)
 {
     BlitRuntime *runtime = calloc(1, sizeof(*runtime));
@@ -160,7 +250,9 @@ int main(void)
     expect_bounds("full damage never shrinks", 0, 0, 80, 40);
     expired_batch_deadline_gate();
     kms_retry_deadline_gate();
+    utf8_large_pty_read_gate();
+    utf8_fragmentation_gate();
     if (failures) return 1;
-    puts("SURFACE_DAMAGE_PASS union=both-orders DEC=union scroll=union quiet=bounded join=bounded wait=nonspinning");
+    puts("SURFACE_DAMAGE_PASS union=both-orders DEC=union scroll=union quiet=bounded join=bounded wait=nonspinning UTF8=large-PTY+10-fragmentations");
     return 0;
 }

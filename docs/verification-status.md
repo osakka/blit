@@ -3,6 +3,24 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-17: authenticated 0.1.534 fails; UTF-8 read-loss regression
+
+The user's authenticated desktop has an incomplete wallpaper. Captured
+canonical cells below row 22 are blank; the screenshot reflects that missing
+state. Prior synthetic renderer/cadence passes did not establish desktop
+correctness. Evidence: `diagnostics/authenticated-20261017/blit-auth-*`.
+
+The actual PTY service test fails on 0.1.534 with
+`first=0 tail=0 pending=1 bytes=4097`: a split U+2580 followed by a 4096-byte
+read is discarded by the parser's small prefix-join buffer. The correction
+passes this regression and a large mixed ANSI/UTF-8 corpus at ten external
+fragment sizes from 1 to 65535 bytes, comparing codepoints, colours,
+attributes, combining state, cursor and completed OSC title to continuous
+parsing. The same controlled shell/PTY reproduction on the real 0.1.534 host
+also fails: zero half-blocks, zero of 4000 text cells, and missing END marker.
+Its temporary lower-pane session was deleted; the existing desktop remains.
+Broad suite, reproducible package and corrected-host acceptance pending.
+
 ## 2026-10-17: exact 0.1.534 physical acceptance boundary
 
 Source `8c6a26f`; manifest `releases/0.1.534.yaml`; reproducible package SHA-256
