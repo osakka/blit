@@ -48,6 +48,7 @@ begin
     {'command'=>'/bin/sh', 'arguments'=>['-c','sleep 120'], 'pane_id'=>pane.fetch('id')}).body)
   session = created.fetch('id')
   surface = created.fetch('surface_id')
+  request(base, token, 'PATCH', "/v1/terminal-sessions/#{focused['id']}", {'focused'=>true}) if focused
   summary = data(base, token, "/v1/surfaces/#{surface}/summary")
   request(base, token, 'PUT', "/v1/surfaces/#{surface}/cells", {
     'base_revision'=>summary.fetch('revision'), 'cells'=>[

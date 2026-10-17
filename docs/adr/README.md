@@ -136,6 +136,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0116 — Damage union preserves all pending work](0116-damage-union-preserves-all-pending-work.md)
 - [0117 — Terminal coalescing deadlines close at presentation](0117-terminal-coalescing-deadline-closes-at-presentation.md)
 - [0118 — Retry deferred KMS frames at flip completion](0118-retry-deferred-kms-frames-at-flip-completion.md)
+- [0119 — KMS refresh keeps the mode timing fraction](0119-kms-refresh-keeps-the-mode-timing-fraction.md)
 
 ## Adding an ADR
 

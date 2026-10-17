@@ -167,6 +167,21 @@ static int choose_crtc(int fd, drmModeRes *resources,
     return -1;
 }
 
+static double mode_refresh_hz(const drmModeModeInfo *mode)
+{
+    double hz;
+    /* The kernel rounds vrefresh to an integer for the userspace modeinfo.
+       Keep the timing fraction so 59.94 Hz is not advertised as 60.0 Hz. */
+    if (mode->clock == 0 || mode->htotal == 0 || mode->vtotal == 0)
+        return mode->vrefresh > 0 ? (double)mode->vrefresh : 60.0;
+    hz = (double)mode->clock * 1000.0 /
+        ((double)mode->htotal * (double)mode->vtotal);
+    if (mode->flags & DRM_MODE_FLAG_INTERLACE) hz *= 2.0;
+    if (mode->flags & DRM_MODE_FLAG_DBLSCAN) hz /= 2.0;
+    if (mode->vscan > 1) hz /= (double)mode->vscan;
+    return hz;
+}
+
 static int choose_mode(const drmModeConnector *connector)
 {
     int preferred = 0;
@@ -1424,8 +1439,7 @@ int blit_kms_open(BlitKms *kms, char *error, size_t error_capacity)
             drmModeModeInfo *mode = &connector->modes[inventory_index];
             output->modes[inventory_index].width = mode->hdisplay;
             output->modes[inventory_index].height = mode->vdisplay;
-            output->modes[inventory_index].refresh_hz = mode->vrefresh > 0 ?
-                (double)mode->vrefresh : 60.0;
+            output->modes[inventory_index].refresh_hz = mode_refresh_hz(mode);
             output->modes[inventory_index].preferred =
                 (mode->type & DRM_MODE_TYPE_PREFERRED) != 0;
             if (inventory_index == mode_index)
@@ -1443,8 +1457,7 @@ int blit_kms_open(BlitKms *kms, char *error, size_t error_capacity)
                 output->info.x += kms->outputs[previous].info.width;
         }
         output->info.width = output->mode.hdisplay; output->info.height = output->mode.vdisplay;
-        output->info.refresh_hz = output->mode.vrefresh > 0 ?
-            (double)output->mode.vrefresh : 60.0;
+        output->info.refresh_hz = mode_refresh_hz(&output->mode);
         output->info.mode_count = output->mode_count;
         output->info.active_mode = output->active_mode;
         memcpy(output->info.modes, output->modes,

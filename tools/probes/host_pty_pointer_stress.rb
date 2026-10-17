@@ -9,6 +9,8 @@ require 'fileutils'
 BASE = URI(ENV.fetch('BLIT_LIVE', 'http://192.168.10.54:8080'))
 TOKEN = ENV.fetch('BLIT_AUTH_TOKEN', 'hellomonkeyboy')
 OUT = ENV.fetch('BLIT_EVIDENCE_DIR', 'diagnostics/rendering-20261017/pty-pointer')
+FRAMES = Integer(ENV.fetch('BLIT_STRESS_FRAMES', '600'), 10)
+raise 'BLIT_STRESS_FRAMES must be 1..12000' unless FRAMES.between?(1, 12000)
 
 def req(method, path, body = nil)
   uri = BASE + path
@@ -53,7 +55,7 @@ begin
     sleep 1
     printf '\033]0;BLIT_STRESS_ACTIVE\007'
     i=0; oldx=2; oldy=3
-    while [ "$i" -lt 600 ]; do
+    while [ "$i" -lt __FRAMES__ ]; do
       x=$((i * 17 % 34 + 2)); y=$((i * 7 % 16 + 3))
       printf '\033[%d;%dH    \033[%d;%dH\033[38;2;255;80;32m▀▄▀▄' "$oldy" "$oldx" "$y" "$x"
       oldx=$x; oldy=$y; i=$((i + 1))
@@ -62,6 +64,7 @@ begin
     printf '\033[%d;%dH    \033[1;1H\033[38;2;190;210;190mBLIT_STRESS_DONE\033]0;BLIT_STRESS_DONE\007' "$oldy" "$oldx"
     sleep 120
   SH
+  script = script.sub('__FRAMES__', FRAMES.to_s)
   # Each API argument is bounded to 256 bytes. Concatenate bounded fragments
   # in the child instead of asking the server to accept an oversized argument.
   fragments = script.each_char.each_slice(180).map(&:join)
@@ -71,6 +74,7 @@ begin
       's=$1$2$3$4$5$6$7$8; eval "$s"','blit-pty-stress',*fragments],
       'pane_id'=>pane.fetch('id')}).body)
   session = created.fetch('id'); surface = created.fetch('surface_id')
+  req('PATCH',"/v1/terminal-sessions/#{focused['id']}",{'focused'=>true}) if focused
   mover = Thread.new do
     until stop
       # Keep the pointer outside the 40x20 pixel oracle while still moving
@@ -82,10 +86,10 @@ begin
       sleep 0.003
     end
   end
-  deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 25
+  deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 25 + FRAMES * 0.01
   last_sample = 0
   loop do
-    raise 'PTY animation did not finish within 25 seconds' if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+    raise 'PTY animation exceeded its bounded deadline' if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
     # Poll the small title resource; serializing a whole 240x67 cell snapshot
     # every 30ms would itself contaminate the cadence measurement.
     status = data("/v1/terminal-sessions/#{session}")
@@ -143,7 +147,7 @@ begin
       raise "PTY_POINTER_REFRESH_FAIL submission_hz=#{hz.round(3)} minimum_hz=#{minimum_hz.round(3)}"
     end
   end
-  puts "PTY_POINTER_PASS producer_frames=600 pointer_requests=#{motions} blank_pixels=#{checked} stale_pixels=0 revision=#{state['revision']} evidence=#{OUT}"
+  puts "PTY_POINTER_PASS producer_frames=#{FRAMES} pointer_requests=#{motions} blank_pixels=#{checked} stale_pixels=0 revision=#{state['revision']} evidence=#{OUT}"
 ensure
   stop = true
   mover.value if mover

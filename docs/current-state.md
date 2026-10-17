@@ -7,6 +7,17 @@ work actually stopped.
 
 ## Status at the last review
 
+### 2026-10-17 candidate 0.1.533: exact KMS mode refresh
+
+0.1.532 is deployed and the short strict real-host test passes at 59.832 Hz
+with zero stale pixels over 2,051,904 checked pixels. Its 6000-frame soak also
+has zero stale pixels but fails the long refresh check: 59.912 submissions/s
+over 33.232 s versus the reported 60.0-Hz mode. Linux rounds mode.vrefresh;
+[ADR 0119](adr/0119-kms-refresh-keeps-the-mode-timing-fraction.md) corrects the
+active/enumerated metadata from pixel clock and totals. The actual-mode
+regression fails before and passes after; deployment and the same long soak
+remain pending. No rate tolerance is weakened and mode selection is unchanged.
+
 ### 2026-10-17 candidate 0.1.532: retry deferred frames on vblank completion
 
 [Issue #91](https://git.home.arpa/itdlabs/blit/issues/91) tracks the measured

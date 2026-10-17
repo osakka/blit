@@ -3,6 +3,27 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-17: candidate 0.1.533 fractional KMS refresh
+
+Exact 0.1.532 is deployed: package SHA-256
+`11cccbf128f97158fc51d5b075b17c3a4d10a22b2c321f55bdab82afa541b82c`,
+source `0fb9b0a`, reproducible artifact gate passed. The short strict live test
+passes at 59.832 submissions/s in 3.209 s, with 600 producer frames, 193 pointer
+requests and zero stale pixels over 2,051,904 blank pixels. Evidence:
+`diagnostics/rendering-20261017/refresh-required-532/`.
+
+The 6000-frame soak's pixel check passes, but its refresh assertion **fails**:
+1991 submissions over 33.232 s = 59.912 Hz; minimum against reported 60.0 Hz is
+59.970. Window missed-deadline counters remain zero. Evidence:
+`diagnostics/rendering-20261017/refresh-soak-532/`. This is not called a pass.
+
+The active/enumerated direct-KMS rates came from Linux's integer-rounded
+mode.vrefresh. A real-helper fixture fails at 60.000000 versus 59.940202 before
+correction. Candidate 0.1.533 calculates the timing fraction and scan factors;
+focused arithmetic, ownership and pixel gates pass. Exact live mode timing
+and the unchanged long acceptance test remain pending. The renderer behavior
+and chosen mode are unchanged from 0.1.532.
+
 ## 2026-10-17: candidate 0.1.532 direct-KMS vblank retries
 
 [Issue #91](https://git.home.arpa/itdlabs/blit/issues/91) records the real

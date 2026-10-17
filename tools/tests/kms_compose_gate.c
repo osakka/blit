@@ -24,6 +24,29 @@ static uint32_t front_pixels[W * H];
 static uint32_t back_pixels[W * H];
 static void place(int z);
 
+static void mode_refresh_gate(void)
+{
+    drmModeModeInfo mode;
+    double got;
+    memset(&mode, 0, sizeof(mode));
+    mode.clock = 148352; mode.htotal = 2200; mode.vtotal = 1125;
+    mode.vrefresh = 60;
+    got = mode_refresh_hz(&mode);
+    if (got < 59.9401 || got > 59.9403) {
+        fprintf(stderr, "KMS_REFRESH_FAIL got=%.6f expected=59.940202 rounded_vrefresh=60\n", got);
+        exit(1);
+    }
+    mode.flags = DRM_MODE_FLAG_INTERLACE;
+    if (mode_refresh_hz(&mode) < 119.8802 || mode_refresh_hz(&mode) > 119.8806) exit(1);
+    mode.flags = DRM_MODE_FLAG_DBLSCAN;
+    if (mode_refresh_hz(&mode) < 29.9700 || mode_refresh_hz(&mode) > 29.9702) exit(1);
+    mode.flags = 0; mode.vscan = 3;
+    if (mode_refresh_hz(&mode) < 19.9800 || mode_refresh_hz(&mode) > 19.9802) exit(1);
+    mode.htotal = 0;
+    if (mode_refresh_hz(&mode) != 60.0) exit(1);
+    puts("KMS_REFRESH_PASS fractional=exact interlace=2 doublescan=half vscan=third invalid=fallback");
+}
+
 static void output_ready_mask_gate(void)
 {
     BlitKms kms;
@@ -461,6 +484,7 @@ int main(void)
     uint32_t face = 0x101820U;
 
     buffer_coherence_gate();
+    mode_refresh_gate();
     output_ready_mask_gate();
     scene_copy_gate();
     pointer_terminal_present_gate();
