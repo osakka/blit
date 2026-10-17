@@ -8,12 +8,12 @@ work actually stopped.
 ## Status at the last review
 
 The current source candidate is `0.1.528`. Hibr source was not modified. The
-latest release adds causal PTY and direct-KMS render traces; it does not claim
-that the reported live desktop artifact is fixed. The previous direct-KMS
-correction bounds terminal-cursor drawing to the damaged row and columns,
-matching the existing SDL rule.
+latest release adds causal PTY and direct-KMS render traces and fixes a proven
+direct-KMS pointer-trail defect. It does not claim that the complete live Hibr
+desktop is visually accepted until that desktop is authenticated and the
+reported fast-movement case is captured.
 
-The authenticated live host at `192.168.10.54` reports `0.1.525` with
+The authenticated live host at `192.168.10.54` reports `0.1.528` with
 `backend=drm-kms`, `direct_kms=true`, `video_driver=direct-kms`,
 `presentation_sync=drm-page-flip`, and one 1920x2160@60 Hz output. The
 persisted 1x2 topology currently has the supervised login manager in the
@@ -30,11 +30,9 @@ motion-pass evidence. Direct-KMS frame-rate counters are now populated by the
 same diagnostics path as SDL.
 
 The package identity for the previous deployed build is recorded in
-[`releases/0.1.525.yaml`](../releases/0.1.525.yaml). The 0.1.527 package is
-the observability candidate and remains pending live deployment until its
-release manifest and supervised update are complete.
-These are bounded renderer measurements, not visual acceptance of the Hibr
-desktop, physical input, wallpaper, graphics protocol, or joins.
+[`releases/0.1.528.yaml`](../releases/0.1.528.yaml). These are bounded
+renderer measurements, not visual acceptance of the Hibr desktop, physical
+input, wallpaper, graphics protocol, or joins.
 
 The source commit `479f78c` makes equal-z retained-graphics ordering
 deterministic by Kitty image and placement identity. The current source cycle
@@ -42,11 +40,10 @@ adds bounded direct-KMS graphics damage: a graphics mutation repaints the
 union of its previous and current complete-cell coverage, with a complete
 view fallback when the bound is not provable. ADR 0112 records the follow-up
 cursor-damage correction. ADR 0113 records the new PTY-to-KMS causal traces;
-the 0.1.527 package was the first release containing that observability; the
-0.1.528 candidate adds the direct-KMS pointer-background correction in ADR
-0114.
+the 0.1.527 package was the first release containing that observability. ADR
+0114 records the direct-KMS pointer-background correction shipped in 0.1.528.
 
-### 0.1.528 pointer-trail correction candidate
+### 0.1.528 pointer-trail correction live evidence
 
 The local TCC build and the complete renderer/terminal gate run pass 50/50.
 The package adds no Hibr changes. It restores the saved KMS pointer background
@@ -54,9 +51,17 @@ before every non-full scene repaint, so unrelated saver/terminal damage cannot
 retain the pointer in the scene. It also records
 PTY-driven surface revisions and damage rectangles in `surface_update` traces,
 and direct-KMS output masks, view damage, cursor state, synchronization state,
-and present duration in `render_path` traces. It is not yet accepted as a live
-visual result until the exact package is deployed and one authenticated Hibr
-desktop is captured while the reported fast-movement defect is reproduced.
+and present duration in `render_path` traces. The exact package is deployed
+and the live direct-KMS motion probe passes 12/12 accepted steps. The host is
+still at the login manager, so this is not yet an authenticated Hibr desktop
+visual-acceptance result.
+
+The post-deployment screenshot shows the active login-manager saver in the
+upper pane and the intentionally empty lower pane. The live session inventory
+contains one `login_manager=true` session with no Hibr desktop role and no
+graphics images. The next required acceptance boundary is one authenticated
+primary desktop, followed by the same screenshot/trace capture while moving
+the pointer and the saver.
 
 ### 0.1.524 live login-manager wake evidence
 
