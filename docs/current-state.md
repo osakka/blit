@@ -7,7 +7,62 @@ work actually stopped.
 
 ## Status at the last review
 
-### 2026-10-17 candidate 0.1.540: correct the native join boundary
+### 2026-10-17 deployed 0.1.540: correct the native join boundary
+
+After the user's explicit deployment request and a preflight confirming they
+were logged out, the API updater installed the exact validated0.1.540 archive
+below and verified its live version. Before/after observations preserve SDL
+`kmsdrm`/`opengles2`/`sdl-vsync`, font identity/scale, both240x67 pane grids and
+the complete saved settings document (clean revision38). One lower login
+terminal(id1) is focused; its identity is waiting and native association is
+inactive/authentication_required with null owner/client. Three read-only
+pre-authentication samples pass. The physical font/edge oracle passes21cells/
+2688pixels, removes its temporary upper terminal and restores lower focus.
+The post-update observation reports no diagnostic errors or warnings.
+Evidence: `diagnostics/native-join-540/deploy/`.
+
+After the user's normal login, the three-sample ready probe passes: UID/GID1000,
+native owner254198/starttime64069385, exact named login client and projected
+ownership role primary/desktop. One recognized API join(id3), with credentials
+derived from that login (no explicit user), is attached to the upper pane.
+Initial logical coordinates are derived from its actual67-row grid, not an
+installed hardcoded layout. A temporary scoped native CLI observer confirms
+the exact name `blit-upper` at `(0,0,67,240)`, non-primary, in union134x240.
+The login remains native primary at `(67,0,67,240)` with the same owner lifetime.
+The observer terminal is deleted; only lower login1 and upper join3 remain.
+A passively collected real upper-pane press reports target3/input3/local
+column95,row21, corroborating the input boundary without injected clicks.
+
+**Visual acceptance is not complete:** both joined captures show a dark empty
+rectangle in the lower pane beneath the Control Panel's upper-pane position.
+The lower surface snapshot contains1820 blank cells in the sampled rectangle,
+all with background `#120428`. It is already in terminal cell state, so stale
+SDL pixels alone cannot explain it. This does not decide between Blit's parser
+and incoming terminal output; do not blame Hibr or change its source on that
+evidence. Capture/stream comparison is the next rendering investigation.
+The screenshots show wallpaper in both panes and the menu bar on the lower
+primary, not a universal rendering/input pass. Evidence:
+`.../deploy/{joined,settled}.{bmp,png,json}`, `lower-surface.json`,
+`upper-native-query.json`, `pointer-buttons.json`.
+
+The user then reported that moving the window cleared the orphan background.
+The new read-only `after-user-move` capture no longer shows the separate empty
+rectangle: About is in the upper pane, Control Panel and Task Manager in the
+lower, with the lower primary menu bar. The old sampled region is no longer
+uniformly blank: it contains wallpaper half-blocks and actual window contents.
+Remaining dark cells overlap the current Control Panel, so their count must
+not be called residual damage. The same native owner and layout remain active;
+no restart, move or injected input was performed by Blit diagnostics. This
+supports repaint-dependent stale content, not a proven detached layer or a
+fixed defect. Capture the responsible join/move output and compare stream
+versus parser state before assigning cause. The current surface captures have
+no Kitty/sixel records; the wallpaper sample includes `▀` cells. That is
+evidence for this half-block scene only, not acceptance of pixel graphics.
+
+Saved automatic auxiliary policy is still unimplemented: this is one explicit
+API attachment for physical validation, not boot/login provisioning. No
+Hibr-core edit, SSH or renderer change. The validation history below describes
+the pre-deployment checkpoints, including the old preserved0.1.539 desktop.
 
 The user clarified that manual join commands are not the deliverable. Continue
 ADR0124's saved API-owned auxiliary lifecycle, not an operator recipe. Its
@@ -45,8 +100,8 @@ four-PTY soak:11,312 snapshots and1,028 resizes. Skips are QEMU, physical
 multi-output and live screenshot backpressure, not implied passes. Evidence:
 `diagnostics/native-join-540/all-gates.log`.
 
-The host remains0.1.539 with its authenticated lower desktop preserved. Do not
-restart it merely to validate this candidate without safe user clearance.
+Before deployment, the host remained0.1.539 with its authenticated lower
+desktop preserved pending safe user clearance.
 A final read-only observation shows one focused lower login terminal(id3),
 verified UID1000 and native owner251045; the user has authenticated again
 during development. No join or other live mutation was performed by this

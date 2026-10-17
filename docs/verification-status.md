@@ -3,7 +3,63 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
-## 2026-10-17: candidate 0.1.540 native join PTY boundary
+## 2026-10-17: deployed 0.1.540 native join PTY boundary
+
+### Physical deployment checkpoint
+
+The user explicitly requested deployment; preflight identity was waiting,
+not an authenticated desktop. Manifest verification passes and the API updater
+installs/verifies exact0.1.540. Before/after comparisons preserve font, both
+pane grids, backend/sync/scale/inset and the complete settings document (clean
+revision38). SDL `kmsdrm`/`opengles2`/`sdl-vsync` is unchanged. One focused
+lower login terminal remains, upper pane free, no diagnostic errors/warnings.
+The three-sample read-only pre-authentication association probe passes, as does
+the physical21-cell/2688-pixel font/edge oracle; its temporary terminal is
+deleted and lower focus restored. Evidence: `diagnostics/native-join-540/deploy/`.
+After the user's normal login, the three-sample ready probe passes with
+verified UID/GID1000, native owner254198/starttime64069385 and ownership role
+primary/desktop. A recognized API upper join(id3) derives that user's identity
+without an explicit `user` parameter and requests native initial row-67,col0,
+derived from the current grid. A scoped native helper, invoked through a
+temporary API diagnostic terminal as osakka, returns exactly
+`ready 254198 134 240 0 0 67 240 0` for named client `blit-upper`. The main
+association independently reports primary row67,col0,height67,width240 in the
+same134x240 union and with the same owner/starttime. The diagnostic terminal
+is removed; only primary1 and join3 remain. Passive physical input trace
+records an upper press at target3/input3/local column95,row21. This is route
+evidence, not proof of every button/gesture or its application response.
+
+Joined and follow-up screenshots show wallpaper in both panes and the menu
+bar on the lower primary, but also a persistent dark empty rectangle in the
+lower pane beneath the upper Control Panel position. A sampled70x26 region
+contains1820 blank cells with background `#120428` in the lower surface model.
+Thus GPU cache staleness alone is insufficient; the incoming stream/parser
+boundary still needs independent evidence. Do not label the entire desktop
+visually accepted or infer a Hibr defect. Evidence: deployment `joined`/
+`settled` captures, `lower-surface.json`, `upper-native-query.json` and
+`pointer-buttons.json`. No injected clicks, Hibr-core edits, SSH or renderer
+changes. Saved automatic provisioning and complete visual/input acceptance
+remain pending despite the verified named attachment and input route.
+
+The user subsequently reports the empty rectangle disappears after moving
+the window. A new read-only capture confirms that separate orphan rectangle
+is no longer visible: About on upper, Control Panel/Task Manager on lower,
+menu on the lower primary. The same70x26 sampled region now includes wallpaper
+half-blocks and actual window content rather than1820 uniformly dark blanks.
+Its1099 remaining dark blanks overlap the currently positioned Control Panel;
+that count is not evidence of continuing orphan damage. Owner254198/starttime
+64069385 and the134x240 union remain unchanged. No diagnostic movement, input
+injection or restart was used. Evidence: `after-user-move.{bmp,png,json}` and
+`lower-after-user-move.json`. This is repaint-dependent recovery of this
+scene, not a code fix or proof of the fault's producer. The current session
+graphics arrays are empty and wallpaper cells include `▀`; do not label this
+capture a Kitty/sixel pixel-path test. Raw-output/parser comparison across the
+responsible transition is still needed.
+
+### Pre-deployment validation history
+
+References to pending deployment or the preserved0.1.539 host below describe
+the earlier validation checkpoints, not the current installed version.
 
 The revised `hibr_join_viewport_gate.rb` fails against0.1.539 with the precise
 trace `target_session=2 input_session=1 column=129 row=1`. The TCC candidate

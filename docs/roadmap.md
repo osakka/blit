@@ -5,7 +5,7 @@ second, parallel implementation of an earlier one.
 
 ## Current position — persistent desktop policy and catalogue control panel
 
-The physical host runs 0.1.539 SDL GL. The edge/font correction has bounded
+The physical host runs 0.1.540 SDL GL. The edge/font correction has bounded
 physical pixel acceptance; the user previously accepted the 0.1.535 movement
 checkpoint. These are not universal renderer or refresh-rate guarantees.
 See current-state.md and verification-status.md for exact evidence.
@@ -45,13 +45,22 @@ three samples. No join was started. Next retire obsolete native horizontal
 projection and integrate standby/release joins (#96). Never guess an old
 unnamed client into this registry.
 
-Candidate0.1.540 implements the native-boundary prerequisite: recognized
+Version0.1.540 implements the native-boundary prerequisite: recognized
 login-owned joins, derived authenticated credentials, per-client local PTY
 input instead of the obsolete horizontal/primary redirection, and generation
 cleanup (ADR0127). Raw-PTY and installed native CLI/actual-launcher oracles pass;
 the final controller/broad/package run passes90 checks with three explicit
 skips and no failures, including reproducible rebuild and120-second soak.
-Physical native-join acceptance remains pending. The host remains0.1.539.
+Authorized API deployment preserves settings, geometry, font and SDL GL;
+the pre-authentication and repeated physical font/edge checks pass. After
+login, named association/ownership projection and a recognized upper attachment
+are verified against native CLI with unchanged desktop owner and134x240 union.
+A passive real upper press targets that client's own PTY/local coordinates.
+Physical visual acceptance remains incomplete: a dark lower rectangle was
+captured in both the image and terminal cell model, then disappeared after
+the user's window movement. The latest fixed scene has no separate orphan
+rectangle. Investigate stream/parser evidence across that repaint transition;
+do not infer either a pure SDL cache fault, a Hibr defect or a completed fix.
 Manual join commands are not the requested deliverable. Continue with saved
 auxiliary policy and native standby/initial-placement reconciliation in the
 same API-owned controller/store after this boundary is accepted.
