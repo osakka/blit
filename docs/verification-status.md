@@ -26,6 +26,14 @@ The live capture shows a logged-in lower desktop and open Control Panel.
 Deployment must wait for logout/operator clearance, not kill that session
 merely to test the new login boundary.
 
+Source/documentation commit `30cdfdb144101f1b2ca5a788d3704bf5a5f3e891`
+builds package `blit_0.1.538-1_amd64.deb`, SHA256
+`46ea81c1c116592d04b727f6934f51a787be94ab5e455c29cd1f0bdb83cf6130`.
+The generated release manifest records server/helper/adapter hashes and the
+ABI-16 Hibr 0.99.225 header input. Artifact validation and a reproducible
+rebuild pass with that same package hash. The all-suite runtime run is still
+in progress; no live deployment or actual-user authentication claimed.
+
 ## 2026-10-17: deployed 0.1.537 policy/persistence foundation
 
 The old staged binary fails `login_policy_gate.rb`: a real settings `.new`

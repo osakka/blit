@@ -24,6 +24,14 @@ identity on login destruction. This is not actual PAM acceptance. Broad gates,
 package and physical authenticated acceptance are pending. Do not claim this
 candidate deployed until the subsequent verification entry records it.
 
+The source/documentation commit is `30cdfdb`; the 0.1.538 archive and generated
+`releases/0.1.538.yaml` have passed artifact verification and reproducible
+rebuild (SHA256 `46ea81c1c116592d04b727f6934f51a787be94ab5e455c29cd1f0bdb83cf6130`).
+The broad runtime run is still in progress. A physical capture shows the user
+logged in with Control Panel open on the lower pane; leave that live session
+untouched pending explicit logout/clearance for the update's restart. The
+captured host is still 0.1.537. Evidence: `diagnostics/identity-538/before.*`.
+
 Next: verify identity after a real user login, then query native per-user owner
 readiness and integrate standby/release semantics (#96). Identity alone is
 not a held owner and must not trigger joins. Issue #99 and hibr-apps #1 remain
