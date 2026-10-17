@@ -66,6 +66,22 @@ begin
   end
   raise "LIVE_DAMAGE_UNION_FAIL pixels=#{samples.inspect} expected=red,red" unless samples.all? { |p| p == [255,0,0] }
   puts "LIVE_DAMAGE_UNION_PASS revision=#{update['revision']} display=#{display} both-corners=exact"
+  summary = data(base, token, "/v1/surfaces/#{surface}/summary")
+  painted = JSON.parse(request(base, token, 'PUT', "/v1/surfaces/#{surface}/cells", {
+    'base_revision'=>summary.fetch('revision'), 'cells'=>[
+      {'x'=>5,'y'=>5,'text'=>"\u2580", 'style'=>{'foreground'=>'#ff0000','background'=>'#102030'}},
+      {'x'=>6,'y'=>5,'text'=>"\u2584", 'style'=>{'foreground'=>'#ff0000','background'=>'#102030'}}]}).body)
+  shot = request(base, token, 'GET', "/v1/diagnostics/screenshots/#{display}")
+  captured = (shot['X-Blit-Capture-Revisions'] || '').split(',').to_h { |pair| pair.split('=') }
+  raise 'half-block capture revision mismatch' unless captured[surface].to_i == painted['revision']
+  [[5, [255,0,0], [16,32,48]], [6, [16,32,48], [255,0,0]]].each do |column, top, bottom|
+    x = grid['origin_x'] + inset + column * grid['cell_width'] + grid['cell_width'] / 2
+    y = grid['origin_y'] + inset + 5 * grid['cell_height']
+    upper = rgb(shot.body, x, y + grid['cell_height'] / 4)
+    lower = rgb(shot.body, x, y + 3 * grid['cell_height'] / 4)
+    raise "LIVE_HALF_BLOCK_FAIL column=#{column} top=#{upper} bottom=#{lower}" unless upper == top && lower == bottom
+  end
+  puts "LIVE_HALF_BLOCK_PASS upper=exact lower=exact foreground=ff0000 background=102030"
 ensure
   request(base, token, 'DELETE', "/v1/terminal-sessions/#{session}") if session
 end

@@ -51,6 +51,7 @@ begin
   script = <<~'SH'
     printf '\033[?25l\033[48;2;16;32;48m\033[2J'
     sleep 1
+    printf '\033]0;BLIT_STRESS_ACTIVE\007'
     i=0; oldx=2; oldy=3
     while [ "$i" -lt 600 ]; do
       x=$((i * 17 % 34 + 2)); y=$((i * 7 % 16 + 3))
@@ -58,7 +59,7 @@ begin
       oldx=$x; oldy=$y; i=$((i + 1))
       sleep 0.004
     done
-    printf '\033[%d;%dH    \033[1;1H\033[38;2;190;210;190mBLIT_STRESS_DONE' "$oldy" "$oldx"
+    printf '\033[%d;%dH    \033[1;1H\033[38;2;190;210;190mBLIT_STRESS_DONE\033]0;BLIT_STRESS_DONE\007' "$oldy" "$oldx"
     sleep 120
   SH
   # Each API argument is bounded to 256 bytes. Concatenate bounded fragments
@@ -85,17 +86,21 @@ begin
   last_sample = 0
   loop do
     raise 'PTY animation did not finish within 25 seconds' if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
-    state = data("/v1/surfaces/#{surface}/cells")
-    marker = state.fetch('cells').select { |c| c['y'] == 0 && c['x'] < 16 }.sort_by { |c| c['x'] }.map { |c| c['text'] }.join
-    break if marker.start_with?('BLIT_STRESS_DONE')
+    # Poll the small title resource; serializing a whole 240x67 cell snapshot
+    # every 30ms would itself contaminate the cadence measurement.
+    status = data("/v1/terminal-sessions/#{session}")
+    break if status['title'] == 'BLIT_STRESS_DONE'
     now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    if now - last_sample > 0.5
+    if status['title'] == 'BLIT_STRESS_ACTIVE' && now - last_sample > 0.5
       samples << data('/v1/diagnostics/runtime')
       last_sample = now
     end
     sleep 0.03
   end
   stop = true; mover.value
+  # Remove the pointer from the measured pane before checking its whole
+  # background. This makes every blank pixel an assertion, not an exclusion.
+  req('POST','/v1/input/inject',{'kind'=>'pointer_motion','x'=>0,'y'=>0})
   shot = req('GET',"/v1/diagnostics/screenshots/#{display}")
   state = data("/v1/surfaces/#{surface}/cells")
   revisions = (shot['X-Blit-Capture-Revisions'] || '').split(',').to_h { |p| p.split('=') }
@@ -105,20 +110,31 @@ begin
   File.write(File.join(OUT,'runtime-samples.json'),JSON.pretty_generate(samples))
   bad = []; checked = 0
   state.fetch('cells').each do |cell|
-    next unless cell['x'] < 40 && cell['y'] < 20 && cell['text'] == ' '
+    next unless cell['text'] == ' '
     next unless cell.dig('style','background') == '#102030'
     grid['cell_height'].times do |dy|
       grid['cell_width'].times do |dx|
         x = grid['origin_x'] + inset + cell['x'] * grid['cell_width'] + dx
         y = grid['origin_y'] + inset + cell['y'] * grid['cell_height'] + dy
+        next if x >= shot.body[18,4].unpack1('l<') || y >= shot.body[22,4].unpack1('l<')
         bad << [cell['x'],cell['y'],dx,dy] unless pixel(shot.body,x,y) == [16,32,48]
         checked += 1
       end
     end
   end
   raise "PTY_POINTER_FAIL stale_pixels=#{bad.length} sample=#{bad.first(5)}" unless bad.empty?
-  raise 'pixel check was vacuous' unless checked >= 40 * 19 * grid['cell_width'] * grid['cell_height']
+  minimum_pixels = (state['width'] - 2) * (state['height'] - 1) *
+    grid['cell_width'] * grid['cell_height']
+  raise 'pixel check was vacuous' unless checked >= minimum_pixels
   raise 'pointer stream was not exercised' unless motions > 100
+  if samples.length > 1
+    first = samples.first; last = samples.last
+    dt = (last.dig('performance','uptime_ms') - first.dig('performance','uptime_ms')) / 1000.0
+    a = first.dig('snapshot','render','outputs').find { |o| o['display_id'] == display }
+    b = last.dig('snapshot','render','outputs').find { |o| o['display_id'] == display }
+    hz = (b['present_calls'] - a['present_calls']) / dt
+    puts "PTY_POINTER_CADENCE submission_hz=#{hz.round(3)} window_s=#{dt.round(3)} target_hz=#{b['refresh_hz']}"
+  end
   puts "PTY_POINTER_PASS producer_frames=600 pointer_requests=#{motions} blank_pixels=#{checked} stale_pixels=0 revision=#{state['revision']} evidence=#{OUT}"
 ensure
   stop = true

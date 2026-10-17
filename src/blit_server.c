@@ -1930,26 +1930,22 @@ static int render_wait_ms(const BlitRuntime *runtime, uint64_t now)
 {
     int wait_ms = 10;
     int i;
+    uint64_t not_before = now;
 
     if (!runtime->render_pending)
         return wait_ms;
-    if (runtime->terminal_frame_quiet_until_us > now) {
-        uint64_t delta = runtime->terminal_frame_quiet_until_us - now;
-        wait_ms = (int)((delta + 999ULL) / 1000ULL);
-        if (wait_ms < 1) wait_ms = 1;
-    }
-    if (hibr_frame_barrier_active(runtime, now)) {
-        uint64_t delta = runtime->hibr_frame_barrier_until_us - now;
-        int barrier_wait = (int)((delta + 999ULL) / 1000ULL);
-        if (barrier_wait < 1) barrier_wait = 1;
-        if (barrier_wait < wait_ms)
-            wait_ms = barrier_wait;
-    }
+    if (runtime->terminal_frame_quiet_until_us > not_before)
+        not_before = runtime->terminal_frame_quiet_until_us;
+    if (hibr_frame_barrier_active(runtime, now) &&
+        runtime->hibr_frame_barrier_until_us > not_before)
+        not_before = runtime->hibr_frame_barrier_until_us;
     for (i = 0; i < runtime->output_count; ++i) {
         uint64_t delta;
-        if (runtime->render_next_us[i] <= now)
+        uint64_t due = runtime->render_next_us[i];
+        if (due < not_before) due = not_before;
+        if (due <= now)
             return 0;
-        delta = runtime->render_next_us[i] - now;
+        delta = due - now;
         if ((int)((delta + 999ULL) / 1000ULL) < wait_ms)
             wait_ms = (int)((delta + 999ULL) / 1000ULL);
     }
@@ -14410,7 +14406,7 @@ static void arm_hibr_frame_barrier(BlitRuntime *runtime,
     deadline = now + period;
     /* Never extend an open barrier.  A producer that continually writes
        chunks must not turn this bounded coalescing rule into a hang. */
-    if (runtime->hibr_frame_barrier_until_us > now)
+    if (runtime->hibr_frame_barrier_until_us != 0)
         return;
     runtime->hibr_frame_barrier_until_us = deadline;
     {
@@ -15825,7 +15821,7 @@ static void service_session_output(BlitRuntime *runtime, int fd)
                        forever and nothing was ever presented. Bounding it
                        keeps the clear and its redraw in one frame while
                        guaranteeing that frame happens. */
-                    if (runtime->terminal_frame_quiet_until_us <= now_us)
+                    if (runtime->terminal_frame_quiet_until_us == 0)
                         runtime->terminal_frame_quiet_until_us = now_us +
                             BLIT_TERMINAL_FRAME_QUIET_US;
                 }
@@ -23546,9 +23542,13 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                 BlitSurface *surface = find_surface_id(
                     runtime, views[surface_index].surface_id);
                 if (surface != NULL && !views[surface_index].synchronized) {
+                    BlitSession *session = find_session_id(
+                        runtime, surface->owner_session_id);
                     surface->damage_valid = 0;
                     surface->presented_revision =
                         views[surface_index].surface_revision;
+                    if (session != NULL)
+                        session->terminal_frame_batch = 0;
                 }
             }
         for (surface_index = 0; surface_index < runtime->output_count;
@@ -27462,6 +27462,7 @@ int main(int argc, char **argv)
             !hibr_frame_barrier_active(&runtime, now) &&
             (output_mask = due_output_mask(&runtime, now)) != 0) {
             render_current_surfaces(&runtime, output_mask);
+            runtime.terminal_frame_quiet_until_us = 0;
             advance_render_schedule(&runtime, now, output_mask);
             expire_pixel_frame_pending(&runtime, monotonic_us());
             runtime.render_pending = render_work_remains(&runtime);

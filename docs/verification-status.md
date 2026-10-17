@@ -3,6 +3,28 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-17: candidate 0.1.531 bounded presentation deadlines
+
+[Issue #90](https://git.home.arpa/itdlabs/blit/issues/90) is reproduced with
+actual functions: an expired quiet deadline `1` is rearmed by a PTY read;
+an active eight-millisecond quiet window returns a zero wait; and an expired
+primary/join group barrier is rearmed by another member update. All three
+regressions fail before correction and pass afterward. The direct-KMS batch
+flag is now cleared at the same consumption boundary as SDL.
+
+The focused Hibr join-barrier gate passes. The local dummy-backend frame-rate
+fixture records 59.999 Hz with zero window missed deadlines. The TCC
+renderer/terminal suites also pass: 51 pass, 0 skip, 0 fail. Live deployment
+remains pending; this is not a live 60-Hz claim.
+
+The improved live PTY/pointer benchmark on 0.1.530 polls small title metadata
+while drawing, then obtains the large cell snapshot only after the producer
+finishes. This avoids contaminating cadence with repeated multi-megabyte JSON
+serialization. Its active window records 47.908 submissions/s over 3.131 s,
+600 producer frames, 186 pointer requests, and zero stale pixels. Evidence:
+`diagnostics/rendering-20261017/pty-pointer-low-overhead-530/`.
+The live half-block probe also confirms exact upper/lower red/navy halves.
+
 ## 2026-10-17: candidate 0.1.530 damage accounting correction
 
 Live 0.1.529 remains visually broken. [Issue #89](https://git.home.arpa/itdlabs/blit/issues/89)

@@ -7,6 +7,25 @@ work actually stopped.
 
 ## Status at the last review
 
+### 2026-10-17 candidate 0.1.531: bounded presentation deadlines
+
+Follow-up [issue #90](https://git.home.arpa/itdlabs/blit/issues/90) reproduces
+expired PTY/group deadlines being reopened by incoming output, and a zero
+`select()` wait while an eight-millisecond quiet window still prohibits
+rendering. Direct KMS also left the session batch flag set after consumption.
+The real-function regressions fail before correction and pass afterward.
+[ADR 0117](adr/0117-terminal-coalescing-deadline-closes-at-presentation.md)
+keeps deadlines fixed until presentation/release and clears consumed batch
+flags. The focused join barrier and local frame-rate gates pass (59.999 Hz
+in the dummy-backend frame-rate fixture). This is not physical-host timing.
+
+The live host remains 0.1.530 pending candidate verification/deployment.
+An improved low-overhead PTY/pointer measurement on that version records
+47.908 page-flip submissions/s in an active 3.131-second window, with zero
+stale pixels. The new benchmark polls terminal title metadata rather than
+repeatedly serializing the whole cell grid during animation. The live
+upper/lower half-block RGB pixel check also passes.
+
 ### 2026-10-17 rendering root defects, candidate 0.1.530
 
 The pre-fix live 0.1.529 desktop was visually broken. Prior evdev fairness and

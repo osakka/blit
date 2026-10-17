@@ -134,6 +134,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0114 — Restore the KMS pointer background before every repaint](0114-restore-kms-pointer-background-before-every-repaint.md)
 - [0115 — Bound evdev service turns for refresh fairness](0115-bounded-evdev-service-for-refresh-fairness.md)
 - [0116 — Damage union preserves all pending work](0116-damage-union-preserves-all-pending-work.md)
+- [0117 — Terminal coalescing deadlines close at presentation](0117-terminal-coalescing-deadline-closes-at-presentation.md)
 
 ## Adding an ADR
 
