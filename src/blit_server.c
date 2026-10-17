@@ -15829,6 +15829,7 @@ static void service_session_output(BlitRuntime *runtime, int fd)
             BlitSurface *surface = find_surface_id(runtime,
                 runtime->sessions[i].id);
             char surface_event[512];
+            int terminal_changed = 0;
 
             if (strcmp(runtime->sessions[i].state, "starting") == 0) {
                 snprintf(runtime->sessions[i].state,
@@ -15862,6 +15863,7 @@ static void service_session_output(BlitRuntime *runtime, int fd)
                 terminal_consume_output(runtime, &runtime->sessions[i],
                                         surface, output,
                                         (size_t)received)) {
+                terminal_changed = 1;
                 ++surface->revision;
                 surface_delta_json(surface, surface_event,
                                    sizeof(surface_event));
@@ -15891,6 +15893,24 @@ static void service_session_output(BlitRuntime *runtime, int fd)
                 runtime->diagnostic_max_terminal_ms)
                 runtime->diagnostic_max_terminal_ms =
                     runtime->diagnostic_last_terminal_ms;
+            if (terminal_changed && surface != NULL) {
+                char detail[640];
+                snprintf(detail, sizeof(detail),
+                         "session=%llu surface=surface-%llu bytes=%zd "
+                         "revision=%llu state=%s owner_authored=%d "
+                         "damage=%d,%d,%dx%d valid=%d cursor=%d,%d "
+                         "cursor_visible=%d frame_batch=%d synchronized=%d",
+                         runtime->sessions[i].id, surface->id, received,
+                         surface->revision, runtime->sessions[i].state,
+                         session_surface_is_owner_authored(&runtime->sessions[i]),
+                         surface->damage_x, surface->damage_y,
+                         surface->damage_width, surface->damage_height,
+                         surface->damage_valid, surface->cursor_x,
+                         surface->cursor_y, surface->cursor_visible,
+                         runtime->sessions[i].terminal_frame_batch,
+                         runtime->sessions[i].terminal_synchronized);
+                diagnostic_trace(runtime, "surface_update", detail);
+            }
             snprintf(event, sizeof(event),
                      "{\"type\":\"terminal_output\","
                      "\"session_id\":\"%llu\",\"data\":\"%s\"}",
@@ -23535,6 +23555,48 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
         runtime->diagnostic_last_kms_present_ms = kms_present_ms;
         if (kms_present_ms > runtime->diagnostic_max_kms_present_ms)
             runtime->diagnostic_max_kms_present_ms = kms_present_ms;
+        {
+            char detail[768];
+            size_t detail_used = 0;
+            int trace_view_count = view_count < 4 ? view_count : 4;
+            int trace_view;
+            int written;
+
+            written = snprintf(detail, sizeof(detail),
+                               "backend=kms path=direct-kms output_mask=0x%x "
+                               "submitted_mask=0x%x deferred_mask=0x%x "
+                               "views=%d overlays=%d present_ms=%.3f "
+                               "pointer=%d,%d valid=%d",
+                               output_mask, kms_submitted_output_mask,
+                               kms_deferred_output_mask, view_count,
+                               kms_overlay_count, kms_present_ms,
+                               runtime->pointer_x, runtime->pointer_y,
+                               runtime->pointer_valid);
+            if (written > 0)
+                detail_used = (size_t)written < sizeof(detail) ?
+                    (size_t)written : sizeof(detail) - 1;
+            for (trace_view = 0; trace_view < trace_view_count &&
+                 detail_used + 96 < sizeof(detail); ++trace_view) {
+                const BlitKmsSurfaceView *view = &views[trace_view];
+                written = snprintf(detail + detail_used,
+                                   sizeof(detail) - detail_used,
+                                   " view%d=surface-%llu/rev-%llu/"
+                                   "damage-%d,%d,%dx%d/%d/"
+                                   "cursor-%d,%d,%d/sync-%d",
+                                   trace_view, view->surface_id,
+                                   view->surface_revision,
+                                   view->damage_x, view->damage_y,
+                                   view->damage_width, view->damage_height,
+                                   view->damage_valid, view->cursor_x,
+                                   view->cursor_y, view->cursor_visible,
+                                   view->synchronized);
+                if (written > 0)
+                    detail_used += (size_t)written <
+                        sizeof(detail) - detail_used ?
+                        (size_t)written : sizeof(detail) - detail_used - 1;
+            }
+            diagnostic_trace(runtime, "render_path", detail);
+        }
         for (surface_index = 0; surface_index < view_count; ++surface_index)
             if (damage_consumed[surface_index]) {
                 BlitSurface *surface = find_surface_id(

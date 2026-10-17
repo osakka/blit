@@ -7,12 +7,13 @@ work actually stopped.
 
 ## Status at the last review
 
-The current source candidate is `0.1.524`. Hibr source was not modified. The
-latest source correction is present in the working tree but is not yet a
-live/package release: direct-KMS partial repaints now bound terminal-cursor
-drawing to the damaged row and columns, matching the existing SDL rule.
+The current source candidate is `0.1.526`. Hibr source was not modified. The
+latest release adds causal PTY and direct-KMS render traces; it does not claim
+that the reported live desktop artifact is fixed. The previous direct-KMS
+correction bounds terminal-cursor drawing to the damaged row and columns,
+matching the existing SDL rule.
 
-The authenticated live host at `192.168.10.54` reports `0.1.524` with
+The authenticated live host at `192.168.10.54` reports `0.1.525` with
 `backend=drm-kms`, `direct_kms=true`, `video_driver=direct-kms`,
 `presentation_sync=drm-page-flip`, and one 1920x2160@60 Hz output. The
 persisted 1x2 topology currently has the supervised login manager in the
@@ -28,17 +29,30 @@ events, including a 4.646 s maximum historical gap; that is not reported as
 motion-pass evidence. Direct-KMS frame-rate counters are now populated by the
 same diagnostics path as SDL.
 
-The package identity is recorded in [`releases/0.1.524.yaml`](../releases/0.1.524.yaml).
+The package identity for the previous deployed build is recorded in
+[`releases/0.1.525.yaml`](../releases/0.1.525.yaml). The 0.1.526 package is
+the observability candidate and remains pending live deployment until its
+release manifest and supervised update are complete.
 These are bounded renderer measurements, not visual acceptance of the Hibr
 desktop, physical input, wallpaper, graphics protocol, or joins.
 
 The source commit `479f78c` makes equal-z retained-graphics ordering
-deterministic by Kitty image and placement identity. The current source
-source cycle adds bounded direct-KMS graphics damage: a graphics mutation repaints
-the union of its previous and current complete-cell coverage, with a complete
-view fallback when the bound is not provable. The follow-up source correction
-is recorded in ADR 0112 and is not yet a packaged or live-host release; the
-live measurements above remain evidence for `0.1.524` only.
+deterministic by Kitty image and placement identity. The current source cycle
+adds bounded direct-KMS graphics damage: a graphics mutation repaints the
+union of its previous and current complete-cell coverage, with a complete
+view fallback when the bound is not provable. ADR 0112 records the follow-up
+cursor-damage correction. ADR 0113 records the new PTY-to-KMS causal traces;
+the 0.1.526 package is the first release containing that observability.
+
+### 0.1.526 observability candidate
+
+The local TCC build and the complete renderer/terminal gate run pass 50/50.
+The package adds no Hibr changes and no render-policy change. It records
+PTY-driven surface revisions and damage rectangles in `surface_update` traces,
+and direct-KMS output masks, view damage, cursor state, synchronization state,
+and present duration in `render_path` traces. It is not yet accepted as a live
+visual result until the exact package is deployed and one authenticated Hibr
+desktop is captured while the reported fast-movement defect is reproduced.
 
 ### 0.1.524 live login-manager wake evidence
 

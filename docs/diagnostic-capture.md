@@ -287,9 +287,22 @@ uses the safe default; the oldest matching events are discarded first.
 
 `surface_update` records the `api-cells` transport, the owning surface mode
 (`terminal`, `external`, or `mirror`), and the `immediate`/`commit` boundaries,
-not every
-deferred cell chunk. This keeps the bounded trace useful under high-volume
-terminal output while preserving the atomic-frame evidence.
+not every deferred cell chunk. PTY-driven terminal updates additionally record
+the read byte count, resulting surface revision, damage rectangle, cursor
+state, frame-batch state, and synchronization state. This keeps the bounded
+trace useful under high-volume terminal output while preserving the
+atomic-frame evidence.
+
+On the direct-KMS backend, `render_path` records the output submitted and
+deferred masks, KMS present time, pointer state, and each of the first four
+submitted views' surface revision, damage rectangle, cursor state, and
+synchronization state. Correlate a PTY `surface_update` with the following
+KMS `render_path` record before attributing a visual defect to the compositor:
+
+```text
+surface_update: session=1 surface=surface-1 bytes=... revision=... damage=...
+render_path: backend=kms path=direct-kms submitted_mask=... view0=surface-1/rev-.../damage-...
+```
 
 `graphics_payload` is one entry per Kitty or sixel payload that reached the
 terminal parser, written after the decode so it records both what arrived and
