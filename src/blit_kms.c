@@ -854,8 +854,14 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
         if (draws[draw_index].z >= 0)
             draw_graphic(output, &draws[draw_index], view->origin_x,
                          view->origin_y, clip_x0, clip_y0, clip_x1, clip_y1);
+    /* The cursor is part of the terminal view, not an output-wide overlay.
+       A partial repaint may only write inside its cell damage rectangle;
+       drawing the cursor outside that rectangle corrupts the retained scene
+       and produces a moving block/trail on the next page flip. SDL applies
+       the same row boundary before drawing its cursor. */
     if (view->cursor_visible && view->cursor_x >= 0 && view->cursor_y >= 0 &&
-        view->cursor_y < view->rows) {
+        view->cursor_y < view->rows && view->cursor_y >= first_row &&
+        view->cursor_y < last_row) {
         int cursor_column = view->cursor_x < view->columns ?
             view->cursor_x : view->columns - 1;
         int cursor_cells = 1;
@@ -874,6 +880,9 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
             cursor_attr = view->attributes[cursor_index];
         }
         if (cursor_attr & KMS_ATTR_WIDE) cursor_cells = 2;
+        if (cursor_column >= last_column ||
+            cursor_column + cursor_cells <= first_column)
+            return;
         cursor_x = view->origin_x + cursor_column * cw;
         if (view->cursor_style == 3 || view->cursor_style == 4)
             fill_rect(output, cursor_x, cursor_y + ch - 1,

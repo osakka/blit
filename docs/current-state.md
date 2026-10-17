@@ -7,7 +7,10 @@ work actually stopped.
 
 ## Status at the last review
 
-The current source candidate is `0.1.524`. Hibr source was not modified.
+The current source candidate is `0.1.524`. Hibr source was not modified. The
+latest source correction is present in the working tree but is not yet a
+live/package release: direct-KMS partial repaints now bound terminal-cursor
+drawing to the damaged row and columns, matching the existing SDL rule.
 
 The authenticated live host at `192.168.10.54` reports `0.1.524` with
 `backend=drm-kms`, `direct_kms=true`, `video_driver=direct-kms`,
@@ -30,12 +33,12 @@ These are bounded renderer measurements, not visual acceptance of the Hibr
 desktop, physical input, wallpaper, graphics protocol, or joins.
 
 The source commit `479f78c` makes equal-z retained-graphics ordering
-deterministic by Kitty image and placement identity. The current uncommitted
+deterministic by Kitty image and placement identity. The current source
 source cycle adds bounded direct-KMS graphics damage: a graphics mutation repaints
 the union of its previous and current complete-cell coverage, with a complete
-view fallback when the bound is not provable. This source is not yet a
-packaged or live-host release; the live measurements above remain evidence
-for `0.1.524` only.
+view fallback when the bound is not provable. The follow-up source correction
+is recorded in ADR 0112 and is not yet a packaged or live-host release; the
+live measurements above remain evidence for `0.1.524` only.
 
 ### 0.1.524 live login-manager wake evidence
 

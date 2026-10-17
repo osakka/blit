@@ -5,6 +5,21 @@ an evidence record, not a claim that the complete product is released.
 
 ## 0.1.524 live API-owned cell and Kitty composition boundary
 
+### Source correction pending live deployment: direct-KMS cursor damage
+
+The source comparison against Kitty, xterm, and suckless `st` found a concrete
+direct-KMS damage violation. Blit's SDL path already restricted terminal-cursor
+drawing to damaged rows; direct KMS drew the cursor unconditionally after the
+partial cell repaint. The new `tools/tests/kms_compose_gate.sh` regression
+reproduced the defect by repainting `(0,0)` and observing an unrelated cursor
+cell change. The correction bounds the cursor to the damaged row and its
+one/two-cell damaged-column footprint; see [ADR 0112](adr/0112-kms-partial-repaint-must-bound-the-terminal-cursor.md).
+
+The correction is locally verified with `KMS_COMPOSE_PASS` and the complete
+TCC renderer/terminal run `RUN_GATES_PASS pass=50 skip=0 fail=0`. It has not
+yet been packaged or deployed to `192.168.10.54`, so no live visual claim is
+made for it.
+
 On 2026-10-17, the authenticated direct-KMS host at `192.168.10.54` reported
 one 1920x2160@60 Hz output and the persisted 1x2 topology. The corrected
 `tools/probes/host_motion_agreement.rb` updated a known block twelve times in

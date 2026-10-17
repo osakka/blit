@@ -183,6 +183,45 @@ static void draw(uint32_t default_background, int damage_column)
     draw_damage(default_background, damage_column, 5, 1, 1);
 }
 
+static void cursor_damage_gate(void)
+{
+    BlitKmsSurfaceView view;
+    uint32_t face = 0x101820U;
+
+    memset(&view, 0, sizeof(view));
+    view.cell_width = CW;
+    view.cell_height = CH;
+    view.columns = COLS;
+    view.rows = ROWS;
+    view.stride = COLS;
+    view.codepoints = codepoints;
+    view.foreground = foreground;
+    view.background = background;
+    view.attributes = attributes;
+    view.default_foreground = WHITE;
+    view.default_background = face;
+    view.cursor_x = 10;
+    view.cursor_y = 7;
+    view.cursor_visible = 0;
+
+    reset();
+    view.damage_valid = 0;
+    draw_view(&output, NULL, NULL, &view);
+
+    /* Repaint a cell nowhere near the terminal cursor. A cursor write outside
+       this damage rectangle would be an out-of-bounds scene mutation. */
+    view.damage_valid = 1;
+    view.damage_x = 0;
+    view.damage_y = 0;
+    view.damage_width = 1;
+    view.damage_height = 1;
+    view.cursor_visible = 1;
+    draw_view(&output, NULL, NULL, &view);
+    if (pixel_at(10 * CW, 7 * CH) != face)
+        fail("partial KMS repaint drew the terminal cursor outside damage",
+             (long)pixel_at(10 * CW, 7 * CH), (long)face);
+}
+
 static void graphics_bounds_gate(void)
 {
     BlitKmsSurfaceView view;
@@ -237,6 +276,8 @@ int main(void)
     output.back.map = pixels;
     output.back.pitch = W * 4;
     output.back.size = sizeof(pixels);
+
+    cursor_damage_gate();
 
     reset();
     place(-1073741825);
