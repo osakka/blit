@@ -48,6 +48,14 @@ The release sequence is therefore:
 5. run the package and manifest gates;
 6. commit and push the manifest as the evidence commit.
 
+Package documentation is checked against `package_documentation_commit`, not
+the current checkout. Handoff notes necessarily advance after a release build;
+comparing them to the older archive produces a false package failure. The
+builder accepts `BLIT_PACKAGE_DOCUMENTATION_COMMIT` for reproducible rebuilds
+of that recorded snapshot, and both installed documentation locations derive
+from the same snapshot. The package checksum is not rewritten to accommodate
+later documentation-only commits.
+
 ## Consequences
 
 Package provenance is checked from the artifact that will be installed, and

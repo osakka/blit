@@ -31,6 +31,19 @@ passes. It explicitly does not prove native login-owned 2-D joins (#96).
 The four skips were QEMU and three adapter tests without their header input;
 the final all-suite run supplies the pinned Hibr checkout explicitly.
 
+The final all-suite execution reports 85 pass, 3 skip, 1 fail. All executed
+runtime tests pass, including the 120-second terminal soak. The sole failure
+is package verification comparing its documentation to newer HEAD notes,
+instead of the manifest's recorded documentation commit. The corrected gate
+compares the immutable snapshot, and rebuilds with that explicit documentation
+input; its focused rerun passes with `reproducible=yes`, same original
+package SHA256 `63d2381bae4aaa4e1c98981e9a9dfa57103cd69ec52fd720fe096055f926c991`.
+Do not describe this as a single all-suite 86-pass run: it is 85 suite passes
+plus the corrected package-gate pass. The three skipped checks are QEMU,
+physical multi-output and live screenshot backpressure. Physical acceptance
+for the new configuration contract remains pending, not covered by those
+local runtime results.
+
 ## 2026-10-17: deployed 0.1.536 edge/font regressions
 
 Before correction, the actual pane API gate reports complete1024px grid plus

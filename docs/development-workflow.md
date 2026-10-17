@@ -193,6 +193,12 @@ acceptance fields and notes remain explicit evidence in the release record;
 the generator never invents physical, GPU, Hibr, or refresh results. The
 release identity decision is [ADR 0091](adr/0091-generated-release-identity.md).
 
+Package documentation is compared with `package_documentation_commit`, not
+whatever handoff notes have since been committed to HEAD. Rebuilding that
+artifact uses `BLIT_PACKAGE_DOCUMENTATION_COMMIT=<recorded-commit>` so updated
+verification notes do not silently change the package or force a checksum
+rewrite. Both installed documentation locations derive from the same snapshot.
+
 When evidence contradicts an assumption, stop repeating the same invocation.
 Preserve the log, identify the boundary that produced the contradiction, and
 fix or instrument that boundary before the next cycle.

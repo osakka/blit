@@ -148,9 +148,6 @@ if [ -d "$ROOT/assets/fonts" ]; then
 fi
 # The repository documentation and OpenAPI schema are authoritative.  The
 # bundle is an installable runtime artifact, not a second documentation tree.
-if [ -d "$ROOT/docs" ]; then
-	cp -a "$ROOT/docs" "$stage/usr/lib/blit/docs"
-fi
 if [ -d "$ROOT/openapi" ]; then
 	cp -a "$ROOT/openapi" "$stage/usr/lib/blit/openapi"
 fi
@@ -159,11 +156,17 @@ cp -a "$BUNDLE/README.md" "$stage/usr/share/doc/blit/"
 cp -a "$VERSION_FILE" "$stage/usr/share/doc/blit/VERSION"
 cp -a "$HIBR_VERSION_FILE" "$stage/usr/share/doc/blit/HIBR_VERSION"
 cp -a "$HIBR_ABI_FILE" "$stage/usr/share/doc/blit/HIBR_ABI"
-if [ -d "$ROOT/docs" ]; then
+if [ -n "${BLIT_PACKAGE_DOCUMENTATION_COMMIT:-}" ]; then
+    documentation_commit=$(git -C "$ROOT" rev-parse --verify \
+        "$BLIT_PACKAGE_DOCUMENTATION_COMMIT^{commit}")
+    git -C "$ROOT" archive "$documentation_commit" docs | \
+        tar -x -C "$stage/usr/share/doc/blit"
+elif [ -d "$ROOT/docs" ]; then
 	cp -a "$ROOT/docs" "$stage/usr/share/doc/blit/"
 else
 	cp -a "$BUNDLE/docs" "$stage/usr/share/doc/blit/"
 fi
+cp -a "$stage/usr/share/doc/blit/docs" "$stage/usr/lib/blit/docs"
 
 mkdir -p "$stage/DEBIAN"
 cat > "$stage/DEBIAN/postinst" <<'EOF'

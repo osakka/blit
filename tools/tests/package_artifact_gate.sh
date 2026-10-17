@@ -79,8 +79,22 @@ test -f "$stage/usr/lib/blit/openapi/blit-0.1.yaml"
 strings "$stage/usr/lib/blit/bin/blit-server" | grep -Fx "$release" >/dev/null
 cmp -s "$root/build/blit/blit-server" "$stage/usr/lib/blit/bin/blit-server"
 cmp -s "$root/openapi/blit-0.1.yaml" "$stage/usr/lib/blit/openapi/blit-0.1.yaml"
+documentation_commit=$(sed -n 's/^package_documentation_commit: //p' "$manifest")
+git -C "$root" rev-parse --verify "$documentation_commit^{commit}" >/dev/null || {
+    echo "PACKAGE_ARTIFACT_FAIL recorded documentation commit unavailable" >&2
+    exit 1
+}
 for document in README.md roadmap.md verification-status.md diagnostic-capture.md; do
-    cmp -s "$root/docs/$document" "$stage/usr/share/doc/blit/docs/$document"
+    cmp -s <(git -C "$root" show "$documentation_commit:docs/$document") \
+        "$stage/usr/share/doc/blit/docs/$document" || {
+        echo "PACKAGE_ARTIFACT_FAIL documentation differs from recorded commit: $document" >&2
+        exit 1
+    }
+    cmp -s "$stage/usr/share/doc/blit/docs/$document" \
+        "$stage/usr/lib/blit/docs/$document" || {
+        echo "PACKAGE_ARTIFACT_FAIL installed documentation copies disagree: $document" >&2
+        exit 1
+    }
 done
 if dpkg-deb --contents "$package" | grep -Eq '(/|^)([^ ]*\.sh|start-blit|run-blit|attach-blit)$'; then
     echo "PACKAGE_ARTIFACT_FAIL shell implementation or launcher present" >&2
@@ -109,7 +123,9 @@ if [ "${BLIT_GATE_REBUILD:-0}" = 1 ]; then
     }
     rm -f "$negative"
     rebuild=$(mktemp -d /tmp/blit-package-rebuild.XXXXXX)
-    if BLIT_HIBR_ROOT=${BLIT_HIBR_ROOT:-} "$root/packaging/build-deb.sh" \
+    if BLIT_HIBR_ROOT=${BLIT_HIBR_ROOT:-} \
+       BLIT_PACKAGE_DOCUMENTATION_COMMIT="$documentation_commit" \
+       "$root/packaging/build-deb.sh" \
            "$rebuild" >/dev/null 2>&1 &&
        [ -f "$rebuild/$(basename "$package")" ]; then
         rebuilt_hash=$(sha256sum "$rebuild/$(basename "$package")" |
