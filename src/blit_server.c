@@ -111,6 +111,7 @@ extern char **environ;
 #define BLIT_MAX_RUNTIME_LOGS 64
 #define BLIT_MAX_TRACE_EVENTS 128
 #define BLIT_DEFAULT_TRACE_LIMIT 32
+#define BLIT_EVDEV_SERVICE_BUDGET 32
 #define BLIT_PIXEL_FRAME_QUIET_US 100000ULL
 /* A PTY is a byte stream, while a terminal desktop frame is commonly emitted
    as many short writes.  Hold presentation briefly after the latest read so
@@ -1211,6 +1212,7 @@ typedef struct {
        instead of letting the loss be invisible. */
     unsigned long long diagnostic_input_keys_dropped;
     unsigned long long diagnostic_input_reports_dropped;
+    unsigned long long diagnostic_evdev_service_budget_yields;
     uint64_t diagnostic_last_evdev_keyboard_event_us;
     char diagnostic_last_evdev_keyboard_path[128];
     char diagnostic_last_evdev_keyboard_device_id[128];
@@ -2775,6 +2777,7 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"evdev_keyboard_keys_undelivered\":%llu,"
         "\"input_keys_dropped\":%llu,"
         "\"input_reports_dropped\":%llu,"
+        "\"evdev_service_budget_yields\":%llu,"
         "\"last_evdev_keyboard_event_age_ms\":%llu,"
         "\"last_evdev_keyboard_path\":\"%s\","
         "\"last_evdev_keyboard_device_id\":\"%s\","
@@ -2869,6 +2872,7 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         runtime->diagnostic_evdev_keyboard_keys_undelivered,
         runtime->diagnostic_input_keys_dropped,
         runtime->diagnostic_input_reports_dropped,
+        runtime->diagnostic_evdev_service_budget_yields,
         runtime->diagnostic_last_evdev_keyboard_event_us > 0 &&
                 now >= runtime->diagnostic_last_evdev_keyboard_event_us ?
             (unsigned long long)((now -
@@ -25063,12 +25067,15 @@ static void service_evdev_gamepad(BlitRuntime *runtime)
     for (device_index = 0; device_index < runtime->evdev_gamepad_count;
          ++device_index) {
         int device_lost = 0;
+        int serviced = 0;
         if (runtime->evdev_gamepad_fds[device_index] < 0) continue;
         runtime->input_source = input_device_for_slot(runtime,
             runtime->evdev_gamepad_paths, device_index);
-        while ((received = read(runtime->evdev_gamepad_fds[device_index],
+        while (serviced < BLIT_EVDEV_SERVICE_BUDGET &&
+               (received = read(runtime->evdev_gamepad_fds[device_index],
                                 &event, sizeof(event))) ==
                (ssize_t)sizeof(event)) {
+            ++serviced;
             uint64_t input_started_us = monotonic_us();
             if (!runtime->evdev_gamepad_reported[device_index]) {
                 fprintf(stderr, "blit: evdev gamepad events received from %s\n",
@@ -25111,6 +25118,9 @@ static void service_evdev_gamepad(BlitRuntime *runtime)
                 record_input_dispatch(runtime, input_started_us);
             }
         }
+        if (serviced == BLIT_EVDEV_SERVICE_BUDGET) {
+            ++runtime->diagnostic_evdev_service_budget_yields;
+        }
         if (received == 0 ||
             (received < 0 && errno != EAGAIN && errno != EWOULDBLOCK &&
              errno != EINTR))
@@ -25138,6 +25148,7 @@ static void service_evdev_mouse(BlitRuntime *runtime)
     for (device_index = 0; device_index < runtime->evdev_mouse_count;
          ++device_index) {
         int device_lost = 0;
+        int serviced = 0;
         BlitInputDevice *configuration;
         int sensitivity;
         int natural_scroll;
@@ -25157,9 +25168,11 @@ static void service_evdev_mouse(BlitRuntime *runtime)
         scroll_step = configuration != NULL && configuration->scroll_step > 0 ?
             configuration->scroll_step : BLIT_INPUT_SCROLL_STEP_DEFAULT;
         runtime->input_source = configuration;
-        while ((received = read(runtime->evdev_mouse_fds[device_index],
+        while (serviced < BLIT_EVDEV_SERVICE_BUDGET &&
+               (received = read(runtime->evdev_mouse_fds[device_index],
                                 &event, sizeof(event))) ==
                (ssize_t)sizeof(event)) {
+            ++serviced;
             uint64_t input_started_us = monotonic_us();
             ++runtime->diagnostic_evdev_mouse_events;
             if (configuration != NULL) ++configuration->events;
@@ -25244,6 +25257,9 @@ static void service_evdev_mouse(BlitRuntime *runtime)
                                             !release);
                 record_input_dispatch(runtime, input_started_us);
             }
+        }
+        if (serviced == BLIT_EVDEV_SERVICE_BUDGET) {
+            ++runtime->diagnostic_evdev_service_budget_yields;
         }
         if (received == 0 ||
             (received < 0 && errno != EAGAIN && errno != EWOULDBLOCK &&
@@ -25947,12 +25963,15 @@ static void service_evdev_keyboard(BlitRuntime *runtime)
     for (device_index = 0; device_index < runtime->evdev_keyboard_count;
          ++device_index) {
         int device_lost = 0;
+        int serviced = 0;
         if (runtime->evdev_keyboard_fds[device_index] < 0) continue;
         runtime->input_source = input_device_for_slot(runtime,
             runtime->evdev_keyboard_paths, device_index);
-        while ((received = read(runtime->evdev_keyboard_fds[device_index],
+        while (serviced < BLIT_EVDEV_SERVICE_BUDGET &&
+               (received = read(runtime->evdev_keyboard_fds[device_index],
                                 &event, sizeof(event))) ==
                (ssize_t)sizeof(event)) {
+            ++serviced;
             uint64_t input_started_us = monotonic_us();
             ++runtime->diagnostic_evdev_keyboard_events;
             if (runtime->input_source != NULL)
@@ -25980,6 +25999,9 @@ static void service_evdev_keyboard(BlitRuntime *runtime)
             }
             dispatch_evdev_key_event(runtime, &event, "evdev-keyboard");
             record_input_dispatch(runtime, input_started_us);
+        }
+        if (serviced == BLIT_EVDEV_SERVICE_BUDGET) {
+            ++runtime->diagnostic_evdev_service_budget_yields;
         }
         if (received == 0 ||
             (received < 0 && errno != EAGAIN && errno != EWOULDBLOCK &&

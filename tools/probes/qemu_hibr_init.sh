@@ -68,6 +68,7 @@ $b mkdir -p /root /tmp/hibr-state /tmp/hibr-config /tmp/hibr-data
 $b mkdir -p /tmp/hibr-ctl-0
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
     *" blit.input_soak=1 "*) BLIT_INPUT_ONLY_TEST=1; BLIT_INPUT_SOAK_TEST=1 ;;
+    *" blit.input_fairness=1 "*) BLIT_INPUT_ONLY_TEST=1; BLIT_INPUT_FAIRNESS_TEST=1 ;;
     *" blit.input_only=1 "*) BLIT_INPUT_ONLY_TEST=1 ;;
 esac
 case " $($b cat /proc/cmdline 2>/dev/null || true) " in
@@ -102,7 +103,11 @@ if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
     unset BLIT_KMS_SCREENSHOT_AFTER
     export BLIT_TRACE_KEYS=1
     export BLIT_TRACE_MOUSE_BUTTONS=1
-    /blit-stage/emit-uinput >/tmp/uinput.log 2>&1 &
+    if [ "${BLIT_INPUT_FAIRNESS_TEST:-0}" = 1 ]; then
+        /blit-stage/emit-uinput --flood >/tmp/uinput.log 2>&1 &
+    else
+        /blit-stage/emit-uinput >/tmp/uinput.log 2>&1 &
+    fi
     emit_pid=$!
     echo INPUT_EMITTER_PID=$emit_pid
     # uinput creates the keyboard and both synthetic mice asynchronously.
@@ -323,7 +328,8 @@ if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
     raw_mouse_buttons=$(echo "$raw_runtime" | $b sed -n 's/.*"evdev_mouse_button_events":\([0-9][0-9]*\).*/\1/p')
     raw_mouse_repeats=$(echo "$raw_runtime" | $b sed -n 's/.*"evdev_mouse_button_repeats_ignored":\([0-9][0-9]*\).*/\1/p')
     raw_mouse_coalesced=$(echo "$raw_runtime" | $b sed -n 's/.*"evdev_mouse_button_state_coalesced":\([0-9][0-9]*\).*/\1/p')
-    echo "BLIT_INPUT_RAW_EVDEV events=${raw_mouse_events:-0} syncs=${raw_mouse_syncs:-0} motion=${raw_mouse_motion:-0} buttons=${raw_mouse_buttons:-0} repeats_ignored=${raw_mouse_repeats:-0} state_coalesced=${raw_mouse_coalesced:-0}"
+    raw_budget_yields=$(echo "$raw_runtime" | $b sed -n 's/.*"evdev_service_budget_yields":\([0-9][0-9]*\).*/\1/p')
+    echo "BLIT_INPUT_RAW_EVDEV events=${raw_mouse_events:-0} syncs=${raw_mouse_syncs:-0} motion=${raw_mouse_motion:-0} buttons=${raw_mouse_buttons:-0} repeats_ignored=${raw_mouse_repeats:-0} state_coalesced=${raw_mouse_coalesced:-0} budget_yields=${raw_budget_yields:-0}"
     if [ "${raw_mouse_events:-0}" -gt 0 ] &&
        [ "${raw_mouse_syncs:-0}" -gt 0 ] &&
        [ "${raw_mouse_motion:-0}" -gt 0 ] &&
@@ -331,6 +337,13 @@ if [ "${BLIT_INPUT_ONLY_TEST:-0}" = 1 ]; then
         echo BLIT_INPUT_RAW_EVDEV_PASS
     else
         echo BLIT_INPUT_RAW_EVDEV_FAIL
+    fi
+    if [ "${BLIT_INPUT_FAIRNESS_TEST:-0}" = 1 ]; then
+        if [ "${raw_budget_yields:-0}" -gt 0 ]; then
+            echo BLIT_INPUT_FAIRNESS_PASS
+        else
+            echo BLIT_INPUT_FAIRNESS_FAIL
+        fi
     fi
     pointer_button_trace=$($b wget -qO- \
         'http://127.0.0.1:19191/v1/diagnostics/trace?kind=pointer_button&limit=128' || true)

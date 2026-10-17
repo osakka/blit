@@ -99,8 +99,20 @@ int main(int argc, char **argv)
     int gamepad = make_gamepad();
     int i;
     int hold_after_events = argc > 1 && strcmp(argv[1], "--hold") == 0;
+    int flood = argc > 1 && strcmp(argv[1], "--flood") == 0;
     if (keyboard < 0 || mouse < 0 || mouse2 < 0 || gamepad < 0) return 1;
     sleep(8);
+    if (flood) {
+        /* Keep one physical mouse continuously readable long enough to prove
+           that the gateway returns to the main loop instead of draining an
+           unbounded evdev descriptor in one turn. The normal paced workload
+           below remains unchanged for the ordinary input gate. */
+        for (i = 0; i < 5000; ++i) {
+            emit_event(mouse, EV_REL, REL_X, (i & 1) ? 1 : -1);
+            sync_event(mouse);
+            usleep(1000);
+        }
+    }
     emit_event(keyboard, EV_KEY, KEY_LEFTBRACE, 1);
     sync_event(keyboard);
     emit_event(keyboard, EV_KEY, KEY_LEFTBRACE, 0);

@@ -7,11 +7,13 @@ work actually stopped.
 
 ## Status at the last review
 
-The current source candidate is `0.1.528`. Hibr source was not modified. The
-latest release adds causal PTY and direct-KMS render traces and fixes a proven
-direct-KMS pointer-trail defect. It does not claim that the complete live Hibr
-desktop is visually accepted until that desktop is authenticated and the
-reported fast-movement case is captured.
+The current source candidate is `0.1.529`. Hibr source was not modified. The
+latest release retains the causal PTY/direct-KMS traces and pointer-background
+correction, and adds a bounded evdev service turn for mouse, keyboard, and
+gamepad devices. It does not claim that the complete live Hibr desktop is
+visually accepted; the login manager itself is already a valid reproducer for
+the reported fast-movement case, so authentication is not a prerequisite for
+this investigation.
 
 The authenticated live host at `192.168.10.54` reports `0.1.528` with
 `backend=drm-kms`, `direct_kms=true`, `video_driver=direct-kms`,
@@ -42,6 +44,24 @@ view fallback when the bound is not provable. ADR 0112 records the follow-up
 cursor-damage correction. ADR 0113 records the new PTY-to-KMS causal traces;
 the 0.1.527 package was the first release containing that observability. ADR
 0114 records the direct-KMS pointer-background correction shipped in 0.1.528.
+
+### 0.1.529 physical-input fairness correction
+
+The live login-manager capture was taken without logging in. Two screenshots
+five seconds apart while the physical pointer was being moved showed changed
+cursor pixels but an unchanged login-manager clock/scene. That is the exact
+producer-starvation symptom: pointer work was serviced while the single event
+loop was draining physical evdev input instead of returning to PTY and render
+service. API pointer injection cannot reproduce that boundary because it
+bypasses the evdev reader.
+
+The source fix bounds each evdev device service turn to 32 records and exposes
+`performance.evdev_service_budget_yields`. The local schema and renderer
+suites pass 52/52 after the change; the QEMU fairness oracle still must be run
+before physical-host acceptance. The required live acceptance is to deploy
+the package, move the real mouse on the login manager, and correlate that
+counter with `surface_update`, `render_path`, and loop-gap traces. A screenshot
+or API response alone is not sufficient.
 
 ### 0.1.528 pointer-trail correction live evidence
 

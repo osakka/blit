@@ -294,6 +294,11 @@ tools/probes/stage_hibr_qemu.sh /tmp/hibr-initroot-current /path/to/hibr
 # Add `blit.input_only=1` to the QEMU kernel command line. The gate checks
 # PTY delivery while the network input stream also carries key releases,
 # repeats, pointer buttons, and wheel events.
+# To exercise the physical-input fairness boundary specifically, use
+# `blit.input_fairness=1` instead. The same fixture floods one synthetic evdev
+# mouse for five seconds and requires a nonzero
+# `performance.evdev_service_budget_yields` marker while the PTY/render loop
+# remains serviced.
 # For a bounded run in automation, add `blit.input_wait=8`; the default wait
 # remains 30 seconds. The fixture also enables application keypad mode and
 # verifies that KP1 reaches the PTY as the VT/SS3 sequence `ESC O q`.
@@ -606,6 +611,12 @@ Input dispatch is independently observable through `input_events`,
 keyboard, pointer, and gamepad events after evdev receipt and through Blit's
 routing path, so input latency can be separated from rendering and scanout
 latency.
+The `evdev_service_budget_yields` counter records how often a physical evdev
+device reached the bounded per-turn input budget and returned to the main loop.
+A rising value during motion is expected under a busy device; a zero value
+means only that the captured interval did not fill the budget. It is the
+counter used by the fairness regression test to prove that evdev service did
+not drain an unbounded stream in one loop turn.
 For physical mouse diagnosis, compare the lifetime `evdev_mouse_events`,
 `evdev_mouse_motion_events`, `evdev_mouse_syncs`,
 `evdev_mouse_button_events`, and `evdev_mouse_wheel_events` counters between
@@ -615,6 +626,10 @@ changed pointer position; all of them remaining unchanged means the kernel
 device produced no records for Blit during the window. The endpoint also
 reports `last_evdev_mouse_path` and `last_evdev_mouse_event_age_ms` so a stale
 or changing device can be identified without shell access to the desktop.
+During a fast-motion capture, pair `evdev_service_budget_yields` with
+`last_loop_gap_ms`, the PTY `surface_update` trace, and the `render_path`
+trace. A busy device must produce yields while the loop continues to service
+producers and presentation; an unbounded drain is a gateway defect.
 The path is historical: Linux can renumber `/dev/input/eventN` during a KVM
 or USB re-enumeration. Pair it with `last_evdev_mouse_device_id` and
 `last_evdev_mouse_device_present`; an empty ID or `false` means the last event
