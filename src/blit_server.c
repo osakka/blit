@@ -21991,6 +21991,26 @@ static unsigned long long graphics_scene_signature(const BlitRuntime *runtime,
             signature *= 1099511628211ULL;
             signature ^= image->id;
             signature *= 1099511628211ULL;
+            signature ^= (unsigned long long)(unsigned int)image->width;
+            signature *= 1099511628211ULL;
+            signature ^= (unsigned long long)(unsigned int)image->height;
+            signature *= 1099511628211ULL;
+            signature ^= (unsigned long long)(unsigned int)image->format;
+            signature *= 1099511628211ULL;
+            signature ^= (unsigned long long)(unsigned int)image->opaque;
+            signature *= 1099511628211ULL;
+            signature ^= (unsigned long long)(unsigned int)image->scroll_anchored;
+            signature *= 1099511628211ULL;
+            {
+                int protocol_index;
+                for (protocol_index = 0;
+                     protocol_index < (int)sizeof(image->protocol);
+                     ++protocol_index) {
+                    signature ^= (unsigned long long)(unsigned char)
+                        image->protocol[protocol_index];
+                    signature *= 1099511628211ULL;
+                }
+            }
             signature ^= (unsigned long long)(image->complete != 0);
             signature *= 1099511628211ULL;
             signature ^= (unsigned long long)(image->visible != 0);
@@ -22042,6 +22062,8 @@ static unsigned long long graphics_scene_signature(const BlitRuntime *runtime,
                 signature ^= (unsigned long long)(unsigned int)placed->src_w;
                 signature *= 1099511628211ULL;
                 signature ^= (unsigned long long)(unsigned int)placed->src_h;
+                signature *= 1099511628211ULL;
+                signature ^= (unsigned long long)(unsigned int)placed->scroll_anchored;
                 signature *= 1099511628211ULL;
             }
         }

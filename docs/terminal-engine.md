@@ -332,3 +332,10 @@ A session has eight image slots shared by Kitty, sixel and API images. A
 sixel has no id a client can place again, so one that scrolls off the page is
 released immediately, and a full table reclaims the oldest complete image
 with no placement before refusing with `image-store-full`.
+
+Within each z band, the flattened draw list is ordered by Kitty image id and
+then placement id. This ordering is explicit and independent of the internal
+image-slot allocation order, so equal-z overlaps have one result on SDL and
+direct KMS. Replacing a `(image id, placement id)` reference therefore changes
+one retained scene record; the presentation boundary repaints the old and new
+coverage before publishing the frame. See [ADR 0110](adr/0110-kitty-retained-scene-ordering-and-invalidation.md).

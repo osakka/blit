@@ -127,6 +127,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0106 — Changed KMS terminal views rebuild the scene (superseded)](0106-kms-changed-terminal-views-rebuild-the-scene.md)
 - [0108 — Surface-local KMS damage retains an atomic output boundary](0108-surface-local-kms-damage-boundary.md)
 - [0107 — The direct-KMS test profile survives package restart](0107-direct-kms-test-profile-survives-restart.md)
+- [0110 — Kitty-retained scene ordering and invalidation](0110-kitty-retained-scene-ordering-and-invalidation.md)
 
 ## Adding an ADR
 

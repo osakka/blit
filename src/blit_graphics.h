@@ -116,6 +116,10 @@ typedef struct {
    SDL and on KMS. */
 typedef struct {
     const BlitGraphicsImage *image;
+    /* Kitty's retained scene orders equal-z references by image id and then
+       placement id; discovery order is not a rendering contract. */
+    unsigned int image_id;
+    unsigned int placement_id;
     int x;
     int y;
     int width;
@@ -141,6 +145,8 @@ static inline int blit_graphics_draw_resolve(const BlitGraphicsImage *image,
     if (width <= 0) width = src_w;
     if (height <= 0) height = src_h;
     out->image = image;
+    out->image_id = image->id;
+    out->placement_id = 0;
     out->x = x;
     out->y = y;
     out->width = width;
@@ -153,8 +159,17 @@ static inline int blit_graphics_draw_resolve(const BlitGraphicsImage *image,
     return 1;
 }
 
-/* Every visible placement of every drawable image, ordered by z and then by
-   image and placement order. Returns the number written. */
+static inline int blit_graphics_draw_precedes(const BlitGraphicsDraw *left,
+                                              const BlitGraphicsDraw *right)
+{
+    if (left->z != right->z) return left->z < right->z;
+    if (left->image_id != right->image_id)
+        return left->image_id < right->image_id;
+    return left->placement_id < right->placement_id;
+}
+
+/* Every visible placement of every drawable image, ordered by z, image id and
+   placement id. Returns the number written. */
 static inline int blit_graphics_collect(const BlitGraphicsImage *images,
                                         int count, BlitGraphicsDraw *out,
                                         int capacity)
@@ -185,9 +200,11 @@ static inline int blit_graphics_collect(const BlitGraphicsImage *images,
                 ok = blit_graphics_draw_resolve(
                     image, p->x, p->y, p->width, p->height, p->z, p->src_x,
                     p->src_y, p->src_w, p->src_h, &draw);
+                if (ok) draw.placement_id = p->id;
             }
             if (!ok) continue;
-            for (i = written; i > 0 && out[i - 1].z > draw.z; --i)
+            for (i = written; i > 0 &&
+                 blit_graphics_draw_precedes(&draw, &out[i - 1]); --i)
                 out[i] = out[i - 1];
             out[i] = draw;
             ++written;

@@ -18,7 +18,7 @@ static uint32_t codepoints[COLS * ROWS];
 static uint32_t foreground[COLS * ROWS];
 static uint32_t background[COLS * ROWS];
 static uint16_t attributes[COLS * ROWS];
-static unsigned char image_pixels[4 * 8 * 3];
+static unsigned char image_pixels[4 * 8 * 3 * 2];
 static BlitGraphicsImage images[BLIT_GRAPHICS_MAX_IMAGES];
 static uint32_t front_pixels[W * H];
 static uint32_t back_pixels[W * H];
@@ -116,6 +116,36 @@ static void place(int z)
     image->placement_width = 2 * CW;
     image->placement_height = 2 * CH;
     image->z = z;
+}
+
+static void place_colour(BlitGraphicsImage *image, unsigned int id,
+                         unsigned char red, unsigned char green,
+                         unsigned char blue, int x)
+{
+    unsigned char *image_data = image_pixels + (id == 20 ? 0 : 4 * 8 * 3);
+    int i;
+    for (i = 0; i < 4 * 8; ++i) {
+        image_data[i * 3] = red;
+        image_data[i * 3 + 1] = green;
+        image_data[i * 3 + 2] = blue;
+    }
+    image->used = 1;
+    image->complete = 1;
+    image->visible = 1;
+    image->opaque = 1;
+    image->id = id;
+    image->width = 4;
+    image->height = 8;
+    image->format = 24;
+    image->pixels = image_data;
+    image->placement_width = 4;
+    image->placement_height = 8;
+    image->x = x;
+}
+
+static uint32_t pixel_at(int x, int y)
+{
+    return pixels[y * W + x] & 0xffffffU;
 }
 
 static void draw_damage(uint32_t default_background, int damage_column,
@@ -238,6 +268,44 @@ int main(void)
     draw_damage(face, 0, 5, 6, 2);
     if (count(RED) != got)
         fail("H: moved graphic left stale pixels", count(RED), got);
+
+    /* Kitty equal-z references are not ordered by array slot. The higher
+       image id is composited later, so protocol allocation order cannot
+       change the visible result. */
+    reset();
+    place_colour(&images[0], 20, 255, 0, 0, 0);
+    place_colour(&images[1], 10, 0, 0, 255, 0);
+    images[0].z = 0;
+    images[1].z = 0;
+    draw(0, -1);
+    if (pixel_at(1, 1) != RED)
+        fail("I: equal-z image ordering is not image-id deterministic",
+             (long)pixel_at(1, 1), RED);
+
+    /* Numbered placements coexist. Replacing one must expose the old
+       background and paint the new position in the same committed scene. */
+    reset();
+    place_colour(&images[0], 30, 255, 0, 0, 0);
+    images[0].placements[0].used = 1;
+    images[0].placements[0].id = 7;
+    images[0].placements[0].x = 40;
+    images[0].placements[0].y = 0;
+    images[0].placements[0].width = 4;
+    images[0].placements[0].height = 8;
+    images[0].placements[0].z = 0;
+    draw(0x102030U, -1);
+    if (pixel_at(41, 1) != RED)
+        fail("J: numbered placement was not drawn", (long)pixel_at(41, 1), RED);
+    images[0].placements[0].x = 80;
+    draw(0x102030U, -1);
+    if (pixel_at(41, 1) != 0x102030U || pixel_at(81, 1) != RED)
+        fail("K: placement replacement left stale pixels",
+             (long)pixel_at(41, 1), 0x102030L);
+    images[0].placements[0].used = 0;
+    draw(0x102030U, -1);
+    if (pixel_at(81, 1) != 0x102030U)
+        fail("L: placement delete left stale pixels",
+             (long)pixel_at(81, 1), 0x102030L);
 
     printf("KMS_COMPOSE_PASS full=%ld\n", full);
     return 0;
