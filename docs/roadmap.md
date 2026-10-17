@@ -33,6 +33,13 @@ deployment preserves saved settings, pane geometry, renderer and font; the
 physical edge/font oracle passes again. Native owner association and standby
 joins remain separate, unimplemented acceptance boundaries.
 
+Candidate 0.1.539 adds exact named-client association with expiring native
+observations and a bounded asynchronous per-user query. Local identity/native
+CLI/controller tests pass; final broad/package/physical acceptance is pending.
+The live 0.1.538 client is still unnamed and must not be guessed into this
+registry. After safe deployment and a fresh named login, retire the obsolete
+native horizontal projection and integrate standby/release joins (#96).
+
 ## Historical position — 0.1.507 live visual-acceptance blocker
 
 0.1.507 is deployed on the authorized one-output host and its API, package

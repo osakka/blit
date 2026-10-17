@@ -30,6 +30,11 @@ raise 'login identity observation missing' unless login['required'].include?('id
 identity = schema.fetch('components').fetch('schemas').fetch('LoginIdentity')
 raise 'login identity states changed' unless
   identity.dig('properties','state','enum') == %w[waiting verified rejected unavailable]
+raise 'native desktop association missing' unless login['required'].include?('desktop') &&
+  login.dig('properties','desktop','$ref') == '#/components/schemas/LoginDesktopAssociation'
+desktop = schema.fetch('components').fetch('schemas').fetch('LoginDesktopAssociation')
+raise 'native desktop association states changed' unless
+  desktop.dig('properties','state','enum') == %w[inactive waiting ready error]
 
 observation_path = paths.fetch('/v1/diagnostics/observation')
 observation_get = observation_path.fetch('get')

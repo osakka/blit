@@ -7,4 +7,7 @@ for path in /proc/self/fd/*; do
     [ "$link" != "$BLIT_GATE_SENDER_INODE" ] || leaked=1
 done
 printf '%s:%s:%s\n' "$leaked" "${BLIT_API_TOKEN-absent}" "$EUID" > "$BLIT_GATE_RESULT"
+if [ -n "${BLIT_GATE_OWNER_FILE-}" ]; then
+    printf '%s\n' "$$" > "$BLIT_GATE_OWNER_FILE"
+fi
 exec /bin/sleep 30

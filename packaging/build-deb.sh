@@ -116,6 +116,8 @@ cp -a "$HIBR_LOGIN_WRAPPER" "$stage/usr/share/blit/hibr/blit-login.hibr"
 cp -a "$HIBR_LOGIN_ENTRYPOINT" \
     "$stage/usr/share/blit/hibr/blit-login-session.hibr"
 cp -a "$HIBR_RUNTIME_RC" "$stage/usr/share/blit/hibr/blit-runtime-console.hibr"
+cp -a "$ROOT/hibr/blit-desktop-observe.hibr" "$stage/usr/share/blit/hibr/blit-desktop-observe.hibr"
+chmod 0755 "$stage/usr/share/blit/hibr/blit-desktop-observe.hibr"
 cp -a "$ROOT/hibr/blit-live-image-probe.hibr" \
     "$stage/usr/share/blit/probes/blit-live-image-probe.hibr"
 chmod 0755 "$stage/usr/share/blit/hibr/blit-session.hibr"

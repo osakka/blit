@@ -12,7 +12,17 @@ strict
 # than an environment that auth run intentionally clears. The receiver
 # verifies kernel credentials, not this argument. Custom invocations omit it.
 handoff_fd=
-if [ "${1-}" = --blit-handoff-fd ]; then
+client_name=
+while [ "${1-}" = --blit-handoff-fd ] || [ "${1-}" = --blit-client-name ]; do
+    if [ "$1" = --blit-client-name ]; then
+        client_name=${2-}
+        case "$client_name" in
+        ''|*[!a-zA-Z0-9_-]*) echo 'blit-login-session: invalid client name' >&2; exit 2 ;;
+        esac
+        [ "${#client_name}" -le 63 ] || exit 2
+        shift 2
+        continue
+    fi
     handoff_fd=${2-}
     case "$handoff_fd" in
     ''|*[!0-9]*) echo 'blit-login-session: invalid handoff descriptor' >&2; exit 2 ;;
@@ -22,7 +32,7 @@ if [ "${1-}" = --blit-handoff-fd ]; then
         exit 2
     fi
     shift 2
-fi
+done
 session=${1-desktop}
 case "$session" in
 desktop|shell) ;;
@@ -43,6 +53,9 @@ fi
 case "$session" in
 desktop)
     launcher=${BLIT_HIBR_SESSION_LAUNCHER:-/usr/share/blit/hibr/blit-session.hibr}
+    if [ -n "$client_name" ]; then
+        exec "$HIBR" "$launcher" --session=desktop --resume "--name=$client_name"
+    fi
     exec "$HIBR" "$launcher" --session=desktop --resume
     ;;
 shell)

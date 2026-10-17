@@ -47,6 +47,7 @@ child = fork do
          "SHELL=#{ENV.fetch('BLIT_GATE_TARGET')}",
          "BLIT_GATE_RESULT=#{ENV.fetch('BLIT_GATE_RESULT')}",
          "BLIT_GATE_SENDER_INODE=#{sender_inode}",
+         "BLIT_GATE_OWNER_FILE=#{ENV['BLIT_GATE_OWNER_FILE']}",
          *command, mode, close_others: false)
   end
 end

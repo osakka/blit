@@ -7,6 +7,35 @@ work actually stopped.
 
 ## Status at the last review
 
+### 2026-10-17 candidate 0.1.539: native login association
+
+ADR 0126 adds `/v1/login.desktop`: a read-only native hold observation,
+separate from the historical handoff sender PID. The packaged hook now names
+its desktop client uniquely. One bounded, credential-dropped helper uses
+supported Hibr CLI queries outside the presentation loop. It verifies the
+exact client, geometry and native program's kernel UID/start-time identity;
+observations expire, and logout/replacement cancels queries without touching
+the held desktop. No legacy role/input-projection flags or renderer changes.
+
+The 0.1.538 binary fails the new association regression (API absent). The TCC
+candidate passes identity tests, a real installed-Hibr isolated hold/client
+oracle and synthetic native-result controller tests, including UID/geometry/
+malformed/size/deadline failures, shell/wait gating, stale observation and
+nonblocking logout. Full gates/package/deployment remain pending. The candidate
+does not automatically join or rearrange anything.
+
+A scoped API query on the unchanged 10.54 host reports UID1000, native session
+`desktop attached 247920 67x240`, client `client-4 0 0 67 240 1`. Its temporary
+upper diagnostic terminal is removed and lower focus restored. This is actual
+native CLI evidence, not yet association with a Blit-owned name: 0.1.538's
+existing client is unnamed. Do not retrofit/guess that binding. The host remains
+0.1.538, logged in; safe deployment and a fresh login will be required after
+candidate gates pass. Evidence: `diagnostics/association-539/live-query/`.
+
+Next after physical named-client acceptance: retire obsolete native horizontal
+projection and integrate supported standby/release joins in one coherent
+semantic change (#96), without competing placement controllers (#99).
+
 ### 2026-10-17 deployed 0.1.538: authenticated identity boundary
 
 ADR 0125 and the schema add `/v1/login.identity`. Only Blit's default login

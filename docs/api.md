@@ -204,6 +204,33 @@ identity fields and a reason (`root_sender`, `foreign_sender`,
 `receive_failed`). A failed handoff does not prevent ordinary desktop/shell
 startup; it prevents trusting that login for future automation. See ADR 0125.
 
+### Native desktop association (0.1.539)
+
+`GET /v1/login.desktop` observes the exact named login client using Hibr's
+native `hold list` and `hold clients`, as the verified user. A transient unique
+client name is passed through the packaged hook's existing desktop `--name`
+argument. It is not a saved pane name or another desktop instance.
+
+`state` is `inactive` before verified authentication or for shell selection;
+`waiting` when the native owner/client is absent; `ready` when the exact client,
+grid, live owner UID and process start-time identity are verified; `error` when
+the query fails or its result is invalid. Ready results contain `owner` (PID,
+UID, starttime_ticks, union rows/columns) and `client` (name, row/column,
+rows/columns, current native primary flag). Otherwise both are null.
+`observed_monotonic_us` is the last successful query's time; results expire
+after three seconds. `query_in_flight` distinguishes background work from
+a current observation.
+
+The observer has a two-second deadline and a one-second retry interval,
+without account lookup or Hibr IPC blocking presentation. Its clean environment
+contains no API token or inherited input/display/network descriptors. Login
+replacement cancels the query and invalidates its generation. No public API
+registers a claimed owner PID. The helper never moves, promotes, detaches or
+starts a desktop/client. This is association evidence, not automatic joins or
+registration in the obsolete `hibr_desktop.role` projection. See ADR 0126.
+This stage uses the packaged `desktop` name and Hibr's default per-user hold
+namespace; custom PAM TMPDIR namespaces are not inferred.
+
 The package enables this behavior with `BLIT_LOGIN_AUTOSTART=1`. The service
 must be root-owned for the login endpoint; an unprivileged Blit profile may
 run ordinary sessions but must reject login-manager start. Root-path PAM and

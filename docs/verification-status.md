@@ -3,6 +3,36 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-17: candidate 0.1.539 native desktop association
+
+The new association assertion fails against 0.1.538: `native login association
+API absent`. TCC builds 0.1.539. Expanded identity tests pass. The helper oracle
+uses actual installed Hibr hold CLI in an isolated TMPDIR, creates only a
+uniquely named fixture held program/client and verifies exact-name lookup,
+67x240 geometry, missing owner/client and owner continuity. Its fixture is
+removed. Synthetic worker-result tests separately exercise the controller's
+real credential-drop/hook boundary and UID/start-time/geometry checks, malformed
+integer/NUL/oversized output rejection, two-second timeout, shell/wait gating,
+expiration and nonblocking logout. These are not actual PAM or native desktop
+acceptance. Broader tests and package remain pending.
+
+A scoped API-created native query on 10.54 reports UID1000, `desktop attached
+247920 67x240`, `client-4 0 0 67 240 1`. The diagnostic terminal is deleted,
+and the lower login focus restored. This proves the host's native query
+interface, not that its old unnamed client is associated with the new API.
+Host remains 0.1.538; no restart, join, renderer or Hibr-core edit. Evidence:
+`diagnostics/association-539/live-query/native.txt`.
+
+The schema/Hibr/lifecycle suite reports 27 pass / 1 skip / 0 fail (QEMU is the
+skip). A manually overlapping observer-gate invocation separately saw an
+unexpected oversized-output reason. Gate ports are now explicitly overridable,
+and the final-drain path prioritizes output-limit rejection consistently with
+the ordinary read path. The isolated expanded rerun passes, including logout
+while a query is blocked, fresh login/name/owner generation and API latency
+under its 500ms bound. The upcoming all-suite run uses the final source without
+overlapping gate ports. This history is not a claim that the initial overlapping
+execution was a clean pass or that concurrency alone proved its cause.
+
 ## 2026-10-17: deployed 0.1.538 private login identity
 
 The new `login_identity_gate.rb` fails against 0.1.537 (`login identity API

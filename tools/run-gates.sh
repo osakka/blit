@@ -273,6 +273,7 @@ suite_renderer() {
 }
 
 suite_hibr() {
+    run_gate native_hold_observer_gate.rb ruby tools/tests/native_hold_observer_gate.rb
     run_gate hibr_singleton_gate.rb ruby tools/tests/hibr_singleton_gate.rb
     run_gate hibr_join_viewport_gate.rb ruby tools/tests/hibr_join_viewport_gate.rb
     run_gate hibr_join_frame_barrier_gate.rb ruby tools/tests/hibr_join_frame_barrier_gate.rb
@@ -292,6 +293,7 @@ suite_hibr() {
 }
 
 suite_lifecycle() {
+    run_gate login_desktop_observer_gate.rb ruby tools/tests/login_desktop_observer_gate.rb
     run_gate login_identity_gate.rb ruby tools/tests/login_identity_gate.rb
     run_gate login_manager_gate.sh "$ROOT"/tools/tests/login_manager_gate.sh
     run_gate restart_gate.sh "$ROOT"/tools/tests/restart_gate.sh

@@ -3503,7 +3503,7 @@ components:
     LoginManager:
       type: object
       required: [state, enabled, command, script, display_id, pane_id, session,
-                 preferred_pane_id, fallback, identity]
+                 preferred_pane_id, fallback, identity, desktop]
       properties:
         state:
           type: string
@@ -3516,6 +3516,7 @@ components:
           description: Selection intent, distinct from the actual pane_id.
         fallback: {type: string, enum: [first_available, wait]}
         identity: {$ref: '#/components/schemas/LoginIdentity'}
+        desktop: {$ref: '#/components/schemas/LoginDesktopAssociation'}
         command: {type: string}
         script: {type: string}
         display_id:
@@ -3547,6 +3548,48 @@ components:
         gid: {type: [integer, 'null'], minimum: 0}
         sender_pid: {type: [integer, 'null'], minimum: 1}
         session_kind: {type: [string, 'null'], enum: [desktop, shell, null]}
+      additionalProperties: false
+    LoginDesktopAssociation:
+      type: object
+      readOnly: true
+      required: [state, reason, session_name, client_name, query_in_flight,
+                 observed_monotonic_us, owner, client]
+      description: >-
+        Native hold observation of the exact named login client. This is not
+        another desktop owner, an automatic join, or legacy role registration.
+        Ready observations expire after three seconds without successful refresh.
+      properties:
+        state: {type: string, enum: [inactive, waiting, ready, error]}
+        reason: {type: string}
+        session_name: {type: string, const: desktop}
+        client_name: {type: [string, 'null']}
+        query_in_flight: {type: boolean}
+        observed_monotonic_us: {type: integer, minimum: 0}
+        owner:
+          oneOf:
+            - type: object
+              required: [pid, uid, starttime_ticks, rows, columns]
+              properties:
+                pid: {type: integer, minimum: 1}
+                uid: {type: integer, minimum: 1}
+                starttime_ticks: {type: integer, minimum: 1}
+                rows: {type: integer, minimum: 1}
+                columns: {type: integer, minimum: 1}
+              additionalProperties: false
+            - {type: 'null'}
+        client:
+          oneOf:
+            - type: object
+              required: [name, row, column, rows, columns, primary]
+              properties:
+                name: {type: string}
+                row: {type: integer, minimum: 0}
+                column: {type: integer, minimum: 0}
+                rows: {type: integer, minimum: 1}
+                columns: {type: integer, minimum: 1}
+                primary: {type: boolean}
+              additionalProperties: false
+            - {type: 'null'}
       additionalProperties: false
     CreateTerminalSession:
       type: object

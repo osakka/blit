@@ -1,0 +1,53 @@
+#!/usr/bin/env hibr
+# ADR 0126. Native CLI only; stdout is a private bounded worker protocol.
+strict
+base=${1-}
+wanted=${2-}
+for name in "$base" "$wanted"; do
+    case "$name" in
+    ''|.*|*[!a-zA-Z0-9_.-]*) exit 2 ;;
+    esac
+    [ "${#name}" -le 63 ] || exit 2
+done
+mod load pty || exit 1
+mod load term || exit 1
+mod load hold || exit 1
+list := hold list || exit 1
+owner=
+while IFS=' ' read -r name status pid size extra; do
+    [ "$name" = "$base" ] || continue
+    [ -z "$extra" ] || exit 2
+    owner=$pid
+    union_rows=${size%x*}
+    union_cols=${size#*x}
+    break
+done <<< "$list"
+if [ -z "$owner" ]; then
+    printf 'waiting owner_missing\n'
+    exit 0
+fi
+clients := hold clients "$base" || exit 1
+match=
+while IFS=' ' read -r name row col rows cols primary extra; do
+    [ "$name" = "$wanted" ] || continue
+    [ -z "$extra" ] && [ -z "$match" ] || exit 2
+    match="$row $col $rows $cols $primary"
+done <<< "$clients"
+if [ -z "$match" ]; then
+    printf 'waiting client_missing\n'
+    exit 0
+fi
+# A replacement between INFO and CLIENTS is not a coherent association.
+again := hold list || exit 1
+stable=0
+while IFS=' ' read -r name status pid size extra; do
+    [ "$name" = "$base" ] || continue
+    if [ "$pid" = "$owner" ] && [ "$size" = "${union_rows}x${union_cols}" ] && [ -z "$extra" ]; then
+        stable=1
+    fi
+done <<< "$again"
+if [ "$stable" != 1 ]; then
+    printf 'waiting owner_changed\n'
+    exit 0
+fi
+printf 'ready %s %s %s %s\n' "$owner" "$union_rows" "$union_cols" "$match"

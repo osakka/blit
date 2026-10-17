@@ -1,0 +1,54 @@
+#!/usr/bin/env ruby
+# Actual installed Hibr hold CLI; isolated namespace, never Hibr source edits.
+require 'open3'
+require 'pty'
+require 'io/console'
+require 'tmpdir'
+require 'timeout'
+ROOT=File.expand_path('../..',__dir__)
+HELPER=File.join(ROOT,'hibr/blit-desktop-observe.hibr')
+LOAD='mod load pty; mod load term; mod load hold; '
+def check(ok, message) = (raise(message) unless ok)
+Dir.mktmpdir('blit-native-hold') do |root|
+  env={'TMPDIR'=>root}
+  name="blit-gate-#{Process.pid}"
+  reader=writer=pid=nil
+  begin
+    out,err,status=Open3.capture3(env,'/usr/bin/hibr',HELPER,name,'login')
+    check(status.success? && out=="waiting owner_missing\n",'absent owner inferred ready')
+    _,err,status=Open3.capture3(env,'/usr/bin/hibr','-c',"#{LOAD}hold new -d #{name} /bin/sleep 60")
+    check(status.success?,"native hold creation failed:#{err}")
+    out,_,status=Open3.capture3(env,'/usr/bin/hibr',HELPER,name,'login')
+    check(status.success? && out=="waiting client_missing\n",'missing named client inferred primary')
+    reader,writer,pid=PTY.spawn(env,'/usr/bin/hibr','-c',"#{LOAD}hold attach -n login #{name}")
+    writer.winsize=[67,240]
+    observe=-> {
+      out,err,status=Open3.capture3(env,'/usr/bin/hibr',HELPER,name,'login')
+      check(status.success?,"native observer failed:#{err}")
+      out
+    }
+    out=nil
+    Timeout.timeout(5) do
+      loop do
+        out=observe.call
+        break if out.match?(/\Aready \d+ 67 240 0 0 67 240 1\n\z/)
+        sleep 0.03
+      end
+    end
+    owner=out.split[1]
+    check(owner.to_i>1,'native owner PID missing')
+    # A move changes native geometry, not the association's client identity.
+    _,err,status=Open3.capture3(env,'/usr/bin/hibr','-c',"#{LOAD}hold move #{name} login 7 9")
+    check(status.success?,"native fixture move failed:#{err}")
+    check(observe.call.split[1]==owner,'observation changed held owner')
+    # Another name is never guessed from a lone primary client.
+    out,_,status=Open3.capture3(env,'/usr/bin/hibr',HELPER,name,'other')
+    check(status.success? && out=="waiting client_missing\n",'wrong client matched a primary')
+    puts 'NATIVE_HOLD_OBSERVER_PASS cli=installed owner=actual client=exact geometry=67x240 owner_continuity=yes'
+  ensure
+    Open3.capture3(env,'/usr/bin/hibr','-c',"#{LOAD}hold kill #{name}")
+    Process.kill('TERM',pid) rescue nil
+    Process.wait(pid) rescue nil
+    reader&.close;writer&.close
+  end
+end

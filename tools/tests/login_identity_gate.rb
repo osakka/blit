@@ -65,6 +65,7 @@ Dir.mktmpdir('blit-login-identity') do |root|
     $pid=spawn('sudo','-n','env',*env.map{|k,v|"#{k}=#{v}"},BINARY,PORT.to_s,out:log,err:log)
     login=until_ready{request('GET','/v1/login')}
     check(login['identity'].is_a?(Hash),'login identity API absent')
+    check(login['desktop'].is_a?(Hash),'native login association API absent')
     expected=%w[desktop shell].include?(mode) ? 'verified' : (%w[waiting custom].include?(mode) ? (mode=='waiting' ? 'waiting' : 'unavailable') : 'rejected')
     Timeout.timeout(8) do
       loop do

@@ -134,6 +134,9 @@ extern char **environ;
 #define BLIT_MAX_OVERLAYS 16
 #define BLIT_UPDATE_IDLE_TIMEOUT_US 30000000ULL
 #define BLIT_LOGIN_RESTART_DELAY_US 1000000ULL
+#define BLIT_NATIVE_QUERY_INTERVAL_US 1000000ULL
+#define BLIT_NATIVE_QUERY_DEADLINE_US 2000000ULL
+#define BLIT_NATIVE_OBSERVATION_TTL_US 3000000ULL
 #define BLIT_EVDEV_MOUSE_ACTIVITY_US 500000ULL
 #define BLIT_DEFAULT_LOGIN_COMMAND "/usr/bin/hibr"
 #define BLIT_DEFAULT_LOGIN_SCRIPT "/usr/share/blit/hibr/blit-login.hibr"
@@ -818,6 +821,13 @@ typedef struct {
     gid_t login_identity_gid;
     pid_t login_identity_pid;
     char login_identity_kind[16];
+    char login_client_name[64];
+    int login_desktop_state; /* 0 waiting, 1 ready, 2 error */
+    char login_desktop_reason[64];
+    uint64_t login_desktop_observed_us;
+    pid_t login_desktop_pid;
+    unsigned long long login_desktop_start_ticks;
+    int login_desktop_geometry[7]; /* union rows/cols, row/col/rows/cols, primary */
     /* Cell requests the owner has had accepted for this session's surface,
        and when it registered. A desktop whose owner registered and then never
        painted is the blank-but-healthy state of issue #32, and these are what
@@ -1049,6 +1059,15 @@ typedef struct {
     int boot_login_enabled;
     int login_fallback_wait;
     int login_start_reported;
+    /* One asynchronous native observer, scoped to a login generation. */
+    pid_t login_observer_pid;
+    int login_observer_fd;
+    unsigned long long login_observer_session;
+    uint64_t login_observer_deadline_us;
+    uint64_t login_observer_due_us;
+    int login_observer_cancelled;
+    char login_observer_output[512];
+    size_t login_observer_length;
     char hibr_runtime_version[64];
     int hibr_runtime_probe_ok;
     int hibr_runtime_abi;
@@ -14903,6 +14922,7 @@ static int create_login_session(BlitRuntime *runtime, BlitSession **created)
     int pane_index;
     int handoff[2] = {-1, -1};
     int identity_available = 0;
+    char client_name[64] = "";
 
     if (geteuid() != 0)
         return -1;
@@ -14963,9 +14983,11 @@ static int create_login_session(BlitRuntime *runtime, BlitSession **created)
             setsockopt(handoff[1], SOL_SOCKET, SO_RCVTIMEO,
                        &receive_timeout, sizeof(receive_timeout)) == 0) {
             identity_available = 1;
+            snprintf(client_name, sizeof(client_name), "blit-login-%llu-%llu",
+                     (unsigned long long)runtime->started_us, runtime->next_session_id);
             snprintf(session_command, sizeof(session_command),
-                     "%s --blit-handoff-fd %d",
-                     BLIT_DEFAULT_LOGIN_SESSION_COMMAND, handoff[1]);
+                     "%s --blit-handoff-fd %d --blit-client-name %s",
+                     BLIT_DEFAULT_LOGIN_SESSION_COMMAND, handoff[1], client_name);
         } else {
             if (handoff[0] >= 0) close(handoff[0]);
             if (handoff[1] >= 0) close(handoff[1]);
@@ -15018,6 +15040,8 @@ static int create_login_session(BlitRuntime *runtime, BlitSession **created)
         return -4;
     }
     (*created)->login_identity_fd = handoff[0];
+    snprintf((*created)->login_client_name, sizeof((*created)->login_client_name), "%s", client_name);
+    snprintf((*created)->login_desktop_reason, sizeof((*created)->login_desktop_reason), "awaiting_native_query");
     (*created)->login_identity_state = identity_available ? 1 : 0;
     snprintf((*created)->login_identity_reason,
              sizeof((*created)->login_identity_reason), "%s",
@@ -15143,6 +15167,314 @@ static void login_identity_json(BlitSession *session, char *body, size_t capacit
     }
 }
 
+static unsigned long long native_process_start_ticks(pid_t pid)
+{
+    char path[64], data[4096], *cursor, *end;
+    ssize_t length;
+    int fd, field;
+    snprintf(path, sizeof(path), "/proc/%ld/stat", (long)pid);
+    fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return 0;
+    length = read(fd, data, sizeof(data)-1);
+    close(fd);
+    if (length <= 0) return 0;
+    data[length] = '\0';
+    cursor = strrchr(data, ')');
+    if (cursor == NULL || cursor[1] != ' ') return 0;
+    cursor += 2;
+    if (*cursor == 'Z' || *cursor == 'X' || *cursor == 'x') return 0;
+    for (field = 3; field < 22; ++field) {
+        cursor = strchr(cursor, ' ');
+        if (cursor == NULL) return 0;
+        while (*cursor == ' ') ++cursor;
+    }
+    errno = 0;
+    {
+        unsigned long long ticks = strtoull(cursor, &end, 10);
+        return !errno && end != cursor && (*end == ' ' || *end == '\n') ? ticks : 0;
+    }
+}
+
+static unsigned long long native_owner_identity(pid_t pid, uid_t uid)
+{
+    char path[64], data[4096], *line;
+    unsigned long ids[4];
+    unsigned long long ticks = native_process_start_ticks(pid);
+    int fd;
+    ssize_t length;
+    if (ticks == 0) return 0;
+    snprintf(path, sizeof(path), "/proc/%ld/status", (long)pid);
+    fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return 0;
+    length = read(fd, data, sizeof(data)-1);
+    close(fd);
+    if (length <= 0) return 0;
+    data[length] = '\0';
+    line = strstr(data, "\nUid:");
+    if (line == NULL || sscanf(line+5, "%lu %lu %lu %lu", &ids[0], &ids[1], &ids[2], &ids[3]) != 4)
+        return 0;
+    if (ids[0] != uid || ids[1] != uid || ids[2] != uid || ids[3] != uid)
+        return 0;
+    return native_process_start_ticks(pid) == ticks ? ticks : 0;
+}
+
+static void cancel_login_observer(BlitRuntime *runtime)
+{
+    if (runtime->login_observer_pid <= 0 || runtime->login_observer_cancelled)
+        return;
+    if (kill(-runtime->login_observer_pid, SIGKILL) < 0)
+        kill(runtime->login_observer_pid, SIGKILL);
+    if (runtime->login_observer_fd >= 0) close(runtime->login_observer_fd);
+    runtime->login_observer_fd = -1;
+    runtime->login_observer_cancelled = 1;
+    /* Reaped by service_login_desktop, never a blocking render-loop wait. */
+}
+
+static void native_observation_result(BlitRuntime *runtime, BlitSession *session,
+                                      uint64_t now, int status)
+{
+    long pid = 0;
+    int g[7], valid = 0;
+    const char *reason = "invalid_native_observation";
+    unsigned long long ticks = 0;
+    BlitSurface *surface = find_surface_id(runtime, session->id);
+    char *output = runtime->login_observer_output;
+    output[runtime->login_observer_length] = '\0';
+    if (runtime->login_observer_length >= sizeof(runtime->login_observer_output)-1) {
+        session->login_desktop_state = 2;
+        snprintf(session->login_desktop_reason, sizeof(session->login_desktop_reason), "native_output_limit");
+        return;
+    }
+    if (memchr(output, '\0', runtime->login_observer_length) != NULL) {
+        session->login_desktop_state = 2;
+        snprintf(session->login_desktop_reason, sizeof(session->login_desktop_reason), "invalid_native_observation");
+        return;
+    }
+    if (strncmp(output, "ready ", 6) == 0) {
+        char *cursor = output+6, *end;
+        int i;
+        valid = 1;
+        for (i = 0; i < 8; ++i) {
+            long number;
+            if (*cursor < '0' || *cursor > '9') { valid = 0; break; }
+            errno = 0;
+            number = strtol(cursor, &end, 10);
+            if (errno || number < 0 || number > INT_MAX ||
+                *end != (i == 7 ? '\n' : ' ')) { valid = 0; break; }
+            if (i == 0) pid = number; else g[i-1] = (int)number;
+            cursor = end+1;
+        }
+        if (*cursor != '\0') valid = 0;
+    }
+    session->login_desktop_state = 2;
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+        reason = "native_query_failed";
+    } else if (strcmp(output, "waiting owner_missing\n") == 0 ||
+               strcmp(output, "waiting client_missing\n") == 0 ||
+               strcmp(output, "waiting owner_changed\n") == 0) {
+        session->login_desktop_state = 0;
+        reason = output[8] == 'c' ? "client_missing" :
+                 strcmp(output, "waiting owner_changed\n") == 0 ? "owner_changed" : "owner_missing";
+        session->login_desktop_observed_us = now;
+    } else if (valid &&
+               pid > 1 && pid <= INT_MAX && g[0] > 0 && g[1] > 0 &&
+               g[2] >= 0 && g[3] >= 0 && g[4] > 0 && g[5] > 0 &&
+               g[4] <= g[0] && g[5] <= g[1] &&
+               g[2] <= g[0]-g[4] && g[3] <= g[1]-g[5] &&
+               (g[6] == 0 || g[6] == 1)) {
+        ticks = native_owner_identity((pid_t)pid, session->login_identity_uid);
+        if (ticks == 0) reason = "owner_identity_mismatch";
+        else if (surface == NULL || surface->height != g[4] || surface->width != g[5])
+            reason = "client_geometry_mismatch";
+        else {
+            session->login_desktop_state = 1;
+            reason = "native_client_verified";
+            session->login_desktop_pid = (pid_t)pid;
+            session->login_desktop_start_ticks = ticks;
+            memcpy(session->login_desktop_geometry, g, sizeof(g));
+            session->login_desktop_observed_us = now;
+        }
+    }
+    snprintf(session->login_desktop_reason, sizeof(session->login_desktop_reason), "%s", reason);
+}
+
+static void service_login_desktop(BlitRuntime *runtime, uint64_t now)
+{
+    BlitSession *session = find_session_id(runtime, runtime->login_session_id);
+    int eligible = session != NULL && !session->child_exited &&
+        session->login_identity_state == 2 &&
+        strcmp(session->login_identity_kind, "desktop") == 0 && session->login_client_name[0];
+    if (runtime->login_observer_pid > 0) {
+        int status = 0;
+        pid_t result;
+        siginfo_t info;
+        if (!eligible || session->id != runtime->login_observer_session)
+            cancel_login_observer(runtime);
+        if (!runtime->login_observer_cancelled && runtime->login_observer_fd >= 0) {
+            ssize_t length = read(runtime->login_observer_fd,
+                runtime->login_observer_output + runtime->login_observer_length,
+                sizeof(runtime->login_observer_output)-1-runtime->login_observer_length);
+            if (length > 0) runtime->login_observer_length += (size_t)length;
+            if (length == 0) {
+                close(runtime->login_observer_fd);
+                runtime->login_observer_fd = -1;
+            }
+            if (runtime->login_observer_length >= sizeof(runtime->login_observer_output)-1) {
+                session->login_desktop_state = 2;
+                snprintf(session->login_desktop_reason, sizeof(session->login_desktop_reason), "native_output_limit");
+                cancel_login_observer(runtime);
+            }
+        }
+        if (!runtime->login_observer_cancelled && now >= runtime->login_observer_deadline_us) {
+            session->login_desktop_state = 2;
+            snprintf(session->login_desktop_reason, sizeof(session->login_desktop_reason), "native_query_timeout");
+            cancel_login_observer(runtime);
+        }
+        memset(&info, 0, sizeof(info));
+        if (waitid(P_PID, runtime->login_observer_pid, &info, WEXITED | WNOHANG | WNOWAIT) == 0 &&
+            info.si_pid != 0) {
+            /* The worker PID is still reserved by this unreaped child.
+               Remove any worker descendants before releasing that identity. */
+            kill(-runtime->login_observer_pid, SIGKILL);
+        }
+        result = waitpid(runtime->login_observer_pid, &status, WNOHANG);
+        if (result == 0 || (result < 0 && errno == EINTR)) return;
+        if (!runtime->login_observer_cancelled && eligible &&
+            session->id == runtime->login_observer_session && result > 0) {
+            /* A child may exit before all its final pipe bytes were read.
+               Keep draining before interpreting even a successful exit. */
+            if (runtime->login_observer_fd >= 0) {
+                ssize_t length;
+                while ((length = read(runtime->login_observer_fd,
+                    runtime->login_observer_output + runtime->login_observer_length,
+                    sizeof(runtime->login_observer_output)-1-runtime->login_observer_length)) > 0)
+                    runtime->login_observer_length += (size_t)length;
+            }
+            native_observation_result(runtime, session, now, status);
+        }
+        if (runtime->login_observer_fd >= 0) close(runtime->login_observer_fd);
+        runtime->login_observer_fd = -1;
+        runtime->login_observer_pid = 0;
+        runtime->login_observer_due_us = now + BLIT_NATIVE_QUERY_INTERVAL_US;
+        return;
+    }
+    if (!eligible || now < runtime->login_observer_due_us) return;
+    {
+        int pipes[2];
+        pid_t pid;
+        int previous_state = session->login_desktop_state;
+        char previous_reason[64];
+        snprintf(previous_reason, sizeof(previous_reason), "%s", session->login_desktop_reason);
+        runtime->login_observer_due_us = now + BLIT_NATIVE_QUERY_INTERVAL_US;
+        session->login_desktop_state = 2;
+        snprintf(session->login_desktop_reason, sizeof(session->login_desktop_reason), "native_query_setup_failed");
+        if (pipe2(pipes, O_CLOEXEC) < 0) return;
+        if (pipes[0] >= FD_SETSIZE || fcntl(pipes[0], F_SETFL, O_NONBLOCK) < 0) {
+            close(pipes[0]); close(pipes[1]); return;
+        }
+        pid = fork();
+        if (pid == 0) {
+            struct passwd *account;
+            DIR *directory;
+            struct dirent *entry;
+            const char *observer = getenv("BLIT_HIBR_OBSERVER");
+            char helper[512], account_home[512], account_name[128];
+            int null_fd = open("/dev/null", O_RDWR);
+            snprintf(helper, sizeof(helper), "%s", observer && *observer ? observer :
+                     "/usr/share/blit/hibr/blit-desktop-observe.hibr");
+            setpgid(0,0);
+            if (null_fd < 0 || dup2(pipes[1], STDOUT_FILENO) < 0 ||
+                dup2(null_fd, STDIN_FILENO) < 0 || dup2(null_fd, STDERR_FILENO) < 0) _exit(126);
+            directory = opendir("/proc/self/fd");
+            if (directory == NULL) _exit(126);
+            while ((entry = readdir(directory)) != NULL) {
+                int fd = atoi(entry->d_name);
+                if (fd > 2 && fd != dirfd(directory)) close(fd);
+            }
+            closedir(directory);
+            account = getpwuid(session->login_identity_uid);
+            if (account == NULL || account->pw_uid != session->login_identity_uid ||
+                strlen(account->pw_dir) >= sizeof(account_home) ||
+                strlen(account->pw_name) >= sizeof(account_name)) _exit(126);
+            snprintf(account_home, sizeof(account_home), "%s", account->pw_dir);
+            snprintf(account_name, sizeof(account_name), "%s", account->pw_name);
+            if (initgroups(account_name, session->login_identity_gid) != 0 ||
+                setgid(session->login_identity_gid) != 0 || setuid(session->login_identity_uid) != 0)
+                _exit(126);
+            if (clearenv() != 0 || setenv("HOME", account_home, 1) != 0 ||
+                setenv("USER", account_name, 1) != 0 || setenv("LOGNAME", account_name, 1) != 0 ||
+                setenv("PATH", "/usr/bin:/bin", 1) != 0 || setenv("TERM", "xterm-kitty", 1) != 0)
+                _exit(126);
+            execl("/usr/bin/hibr", "hibr", helper, "desktop", session->login_client_name, (char *)NULL);
+            _exit(127);
+        }
+        close(pipes[1]);
+        if (pid < 0) { close(pipes[0]); return; }
+        runtime->login_observer_fd = pipes[0];
+        runtime->login_observer_pid = pid;
+        runtime->login_observer_session = session->id;
+        runtime->login_observer_deadline_us = now + BLIT_NATIVE_QUERY_DEADLINE_US;
+        runtime->login_observer_length = 0;
+        runtime->login_observer_cancelled = 0;
+        /* Query activity does not invalidate a still-fresh previous result. */
+        session->login_desktop_state = previous_state;
+        snprintf(session->login_desktop_reason, sizeof(session->login_desktop_reason), "%s", previous_reason);
+    }
+}
+
+static void login_desktop_json(BlitRuntime *runtime, BlitSession *session,
+                                char *body, size_t capacity)
+{
+    const char *state = "inactive", *reason = "authentication_required";
+    char owner[256] = "null", client[384] = "null", name[80] = "null";
+    int active = session != NULL && !session->child_exited;
+    uint64_t observed = active ? session->login_desktop_observed_us : 0;
+    if (active && session->login_client_name[0])
+        snprintf(name, sizeof(name), "\"%s\"", session->login_client_name);
+    if (active && session->login_identity_state == 2) {
+        if (strcmp(session->login_identity_kind, "desktop") != 0) reason = "shell_selected";
+        else if (!session->login_client_name[0]) reason = "client_name_unavailable";
+        else {
+            state = session->login_desktop_state == 1 ? "ready" : session->login_desktop_state == 2 ? "error" : "waiting";
+            reason = session->login_desktop_reason;
+            if (session->login_desktop_state == 1 && monotonic_us()-observed > BLIT_NATIVE_OBSERVATION_TTL_US) {
+                state = "waiting"; reason = "observation_expired";
+            }
+            if (strcmp(state, "ready") == 0) {
+                int *g = session->login_desktop_geometry;
+                snprintf(owner, sizeof(owner), "{\"pid\":%ld,\"uid\":%lu,\"starttime_ticks\":%llu,\"rows\":%d,\"columns\":%d}",
+                    (long)session->login_desktop_pid, (unsigned long)session->login_identity_uid,
+                    session->login_desktop_start_ticks, g[0], g[1]);
+                snprintf(client, sizeof(client), "{\"name\":%s,\"row\":%d,\"column\":%d,\"rows\":%d,\"columns\":%d,\"primary\":%s}",
+                    name, g[2], g[3], g[4], g[5], g[6] ? "true" : "false");
+            }
+        }
+    }
+    snprintf(body, capacity, "{\"state\":\"%s\",\"reason\":\"%s\",\"session_name\":\"desktop\",\"client_name\":%s,"
+        "\"query_in_flight\":%s,\"observed_monotonic_us\":%llu,\"owner\":%s,\"client\":%s}",
+        state, reason, name, active && runtime->login_observer_pid > 0 &&
+        !runtime->login_observer_cancelled && runtime->login_observer_session == session->id ? "true" : "false",
+        (unsigned long long)observed, owner, client);
+}
+
+static int login_observer_wait_ms(BlitRuntime *runtime, uint64_t now)
+{
+    BlitSession *session;
+    uint64_t due;
+    if (runtime->login_observer_pid > 0) {
+        if (runtime->login_observer_cancelled) return 100;
+        if (runtime->login_observer_fd < 0) return 10;
+        due = runtime->login_observer_deadline_us;
+    } else {
+        session = find_session_id(runtime, runtime->login_session_id);
+        if (session == NULL || session->child_exited || session->login_identity_state != 2 ||
+            strcmp(session->login_identity_kind, "desktop") != 0 || !session->login_client_name[0])
+            return -1;
+        due = runtime->login_observer_due_us;
+    }
+    return now >= due ? 0 : (int)((due-now+999ULL)/1000ULL);
+}
+
 static void login_manager_json(BlitRuntime *runtime, char *body,
                                size_t capacity)
 {
@@ -15159,6 +15491,7 @@ static void login_manager_json(BlitRuntime *runtime, char *body,
     char preferred[256];
     char preferred_value[300];
     char identity_body[512];
+    char desktop_body[1024];
 
     json_escape(runtime->login_command, escaped_command,
                 sizeof(escaped_command));
@@ -15189,16 +15522,17 @@ static void login_manager_json(BlitRuntime *runtime, char *body,
         state = runtime->login_restart_due_us != 0 ? "backoff" : "stopped";
     }
     login_identity_json(session, identity_body, sizeof(identity_body));
+    login_desktop_json(runtime, session, desktop_body, sizeof(desktop_body));
     snprintf(body, capacity,
              "{\"state\":\"%s\",\"enabled\":%s,"
              "\"command\":\"%s\",\"script\":\"%s\","
              "\"display_id\":%s,\"pane_id\":%s,\"session\":%s,"
-             "\"preferred_pane_id\":%s,\"fallback\":\"%s\",\"identity\":%s}",
+             "\"preferred_pane_id\":%s,\"fallback\":\"%s\",\"identity\":%s,\"desktop\":%s}",
              state, runtime->login_enabled ? "true" : "false",
              escaped_command, escaped_script,
              display_value, pane_value,
              session != NULL ? session_body : "null", preferred_value,
-             runtime->login_fallback_wait ? "wait" : "first_available", identity_body);
+             runtime->login_fallback_wait ? "wait" : "first_available", identity_body, desktop_body);
 }
 
 static void service_login_manager(BlitRuntime *runtime, uint64_t now)
@@ -15507,6 +15841,7 @@ static int terminate_session_process(pid_t process_id)
 static void stop_sessions(BlitRuntime *runtime)
 {
     int i;
+    cancel_login_observer(runtime);
 
     for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
         BlitSession *session = &runtime->sessions[i];
@@ -15536,8 +15871,10 @@ static void destroy_session(BlitRuntime *runtime, BlitSession *session)
 
     snprintf(target_id, sizeof(target_id), "session-%llu", session->id);
 
-    if (session->login_manager && runtime->login_session_id == session->id)
+    if (session->login_manager && runtime->login_session_id == session->id) {
+        cancel_login_observer(runtime);
         runtime->login_session_id = 0;
+    }
 
     refresh_session_state(runtime, session);
     if (strcmp(session->state, "running") == 0 ||
@@ -27218,6 +27555,7 @@ int main(int argc, char **argv)
     if (!bind_requested)
         bind_address = "0.0.0.0";
     memset(&runtime, 0, sizeof(runtime));
+    runtime.login_observer_fd = -1;
     runtime.evdev_watch_fd = -1;
     runtime.snd_watch_fd = -1;
     runtime.started_us = monotonic_us();
@@ -27647,6 +27985,7 @@ int main(int argc, char **argv)
         for (i = 0; i < BLIT_MAX_SESSIONS; ++i)
             refresh_session_state(&runtime, &runtime.sessions[i]);
         service_login_manager(&runtime, monotonic_us());
+        service_login_desktop(&runtime, monotonic_us());
 
         pending_before_events = runtime.render_pending;
         sdl_events_started_us = monotonic_us();
@@ -27744,6 +28083,10 @@ int main(int argc, char **argv)
                     max_fd = runtime.sessions[i].pty_fd;
             }
         }
+        if (runtime.login_observer_fd >= 0) {
+            FD_SET(runtime.login_observer_fd, &readable);
+            if (runtime.login_observer_fd > max_fd) max_fd = runtime.login_observer_fd;
+        }
         if (kms_fd >= 0) {
             FD_SET(kms_fd, &readable);
             if (kms_fd > max_fd) max_fd = kms_fd;
@@ -27787,6 +28130,11 @@ int main(int argc, char **argv)
         }
         service_middle_button_deadlines(&runtime, now);
         wait_ms = render_wait_ms(&runtime, now);
+        {
+            int observer_wait = login_observer_wait_ms(&runtime, now);
+            if (observer_wait >= 0 && observer_wait < wait_ms)
+                wait_ms = observer_wait;
+        }
         {
             int middle_wait = middle_button_wait_ms(&runtime, now);
             if (middle_wait >= 0 && middle_wait < wait_ms)
