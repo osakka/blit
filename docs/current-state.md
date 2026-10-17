@@ -15,7 +15,7 @@ visually accepted; the login manager itself is already a valid reproducer for
 the reported fast-movement case, so authentication is not a prerequisite for
 this investigation.
 
-The authenticated live host at `192.168.10.54` reports `0.1.528` with
+The authenticated live host at `192.168.10.54` reports `0.1.529` with
 `backend=drm-kms`, `direct_kms=true`, `video_driver=direct-kms`,
 `presentation_sync=drm-page-flip`, and one 1920x2160@60 Hz output. The
 persisted 1x2 topology currently has the supervised login manager in the
@@ -47,21 +47,29 @@ the 0.1.527 package was the first release containing that observability. ADR
 
 ### 0.1.529 physical-input fairness correction
 
-The live login-manager capture was taken without logging in. Two screenshots
-five seconds apart while the physical pointer was being moved showed changed
-cursor pixels but an unchanged login-manager clock/scene. That is the exact
+The live login-manager capture was taken without logging in. Before the fix,
+two screenshots five seconds apart showed only changed cursor pixels while the
+matrix saver scene remained visually unchanged. The user-confirmed expected
+behaviour is a continuously advancing downward matrix, so that was the exact
 producer-starvation symptom: pointer work was serviced while the single event
 loop was draining physical evdev input instead of returning to PTY and render
 service. API pointer injection cannot reproduce that boundary because it
 bypasses the evdev reader.
 
 The source fix bounds each evdev device service turn to 32 records and exposes
-`performance.evdev_service_budget_yields`. The local schema and renderer
-suites pass 52/52 after the change; the QEMU fairness oracle still must be run
-before physical-host acceptance. The required live acceptance is to deploy
-the package, move the real mouse on the login manager, and correlate that
-counter with `surface_update`, `render_path`, and loop-gap traces. A screenshot
-or API response alone is not sufficient.
+`performance.evdev_service_budget_yields`. After deployment, physical motion
+raised `evdev_mouse_events` from 0 to 3,471 and the budget-yield counter from 0
+to 5 while PTY reads continued and the windowed KMS rate recovered to about
+62 Hz. The correlated direct-KMS trace showed changing pointer coordinates and
+repeated page-flip submission; there was no continuing input-induced loop
+starvation. A later quiet window reported zero new missed deadlines,
+`loop_gap_window_max_ms=13.146`, and `frame_rate_max_render_ms=4.272`.
+
+Two post-deployment screenshots five seconds apart contain different matrix
+saver frames, confirming that the saver producer continues to advance without
+login. The QEMU fairness oracle still remains to be run; these physical-host
+results validate the real evdev boundary but do not claim an authenticated
+Hibr desktop or complete visual acceptance.
 
 ### 0.1.528 pointer-trail correction live evidence
 
