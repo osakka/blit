@@ -14,8 +14,11 @@ Issue #99 and ADR 0124 sequence the next delivery: reliable API persistence
 and login startup policy, authenticated native association/standby integration
 (#96), stable bindings and explicit recovery policy, then a native Control
 Panel distributed through `itdlabs/hibr-apps`. No Hibr-core modifications.
-The panel must not own a second configuration store or controller. Existing
-Hibr standby deliberate-release semantics must not be silently overridden.
+The panel must not own a second configuration store or controller. Hibr
+standby's deliberate-release and explicit-reattach behavior now has a
+documented Blit integration rule: provision only for a fresh authenticated
+owner, apply initial placement once, and leave later Hibr Displays choices
+alone. This rule is documented in ADR 0124; policy automation is still pending.
 
 Version 0.1.537 implements the first foundation only, with physical API
 save/restart persistence and unchanged geometry/backend/font verified.

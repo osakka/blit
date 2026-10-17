@@ -64,6 +64,17 @@ API attachment for physical validation, not boot/login provisioning. No
 Hibr-core edit, SSH or renderer change. The validation history below describes
 the pre-deployment checkpoints, including the old preserved0.1.539 desktop.
 
+The next policy boundary is now pinned in ADR0124 after reviewing Hibr's
+documented `desktop --standby` lifecycle: it waits, can autojoin, remains alive
+when Hibr deliberately lets it go, and waits for explicit reattachment instead
+of forcing itself back in. Blit should provision that named client only after
+fresh authenticated ownership, then apply a configured initial position once
+when native `hold clients` first reports it attached. Later Hibr Displays moves
+must remain session choices. A user-quit standby is not automatically respawned.
+The API must report desired/effective states and preserve stable output plus
+pane-ordinal bindings. This is a design decision, not implemented behavior;
+no Hibr source or state files were changed/read for runtime control.
+
 The user clarified that manual join commands are not the deliverable. Continue
 ADR0124's saved API-owned auxiliary lifecycle, not an operator recipe. Its
 first necessary dependency is now implemented under ADR0127: remove obsolete
@@ -106,11 +117,11 @@ A final read-only observation shows one focused lower login terminal(id3),
 verified UID1000 and native owner251045; the user has authenticated again
 during development. No join or other live mutation was performed by this
 cycle. Evidence: `diagnostics/native-join-540/live-preserved.json`.
-Next after gating/physical boundary acceptance: implement saved auxiliary
-policy and native standby/initial-placement reconciliation in the existing
-controller/store. The API must apply/save intent; the user must not launch
-joins manually. Deliberate Hibr release/rearrangement must not be undone by
-continuous placement assertions. Stable selectors/failover/panel remain staged.
+Next: implement the ADR0124 saved auxiliary policy, native standby lifecycle,
+and one-shot initial placement in the existing controller/store. The API must
+apply/save intent; the user must not launch joins manually. Deliberate Hibr
+release/rearrangement must not be undone by continuous placement assertions.
+Stable selectors/failover and the catalogue panel remain staged.
 
 ### 2026-10-17 deployed 0.1.539: native login association
 

@@ -49,16 +49,38 @@ continues to mean persistence is enabled, not an acknowledgement of durability.
 
 1. Verified authenticated desktop association and native standby integration,
    using Hibr's supported per-user interface, never screen/process-name guesses.
-2. Stable bindings, explicit intentional release, bounded retries and primary
-   fallback/return policy, with observable reasons and no duplicate owners.
-3. Hibr-native Blit pane, bounded asynchronous requests, revision conflicts,
-   configuration export/import and validation/apply UX; catalogue lifecycle tests.
+   The 0.1.540 join path supplies the association and per-client lifetime
+   boundary. The next implementation adds persisted auxiliary intent and
+   starts a named `desktop --standby` client only after that association is
+   fresh. The standby runs as the authenticated desktop user and occupies its
+   configured Blit pane.
+2. Bind each auxiliary intent to a stable output selector and pane ordinal;
+   do not persist a transient terminal-session ID or enumeration-only display
+   ID. Apply the requested Hibr row/column once, after the named standby first
+   appears in the supported native `hold clients` result. A later Hibr Displays
+   move belongs to the current session and must not be continuously undone.
+   Hibr's standby process owns automatic join, deliberate release, and an
+   explicit user reattach. Blit must not restart a standby that the user quit,
+   or force a released display back into the desktop. A new authenticated
+   desktop generation may provision its configured standby again.
+3. Report desired and effective state separately, including waiting for
+   authentication, waiting for a pane, starting, joined, released, stopped,
+   and conflicts. Missing output/pane targets wait or report a conflict; they
+   never fall back onto the primary pane. Apply and Save as default remain
+   distinct API operations so a live Hibr Displays change is not persisted
+   without an explicit save.
+4. Build the Hibr-native Blit pane in `itdlabs/hibr-apps`, with bounded
+   asynchronous requests, revision conflicts, configuration export/import,
+   and validation/apply UX; then run catalogue lifecycle tests.
 
-Hibr already distinguishes standby waiting from deliberate release. Blit must
-integrate that boundary, not compete with its automatic joins. Hibr's existing
-Displays pane and a Blit policy controller must have explicit ownership of
-placement; two writers silently rearranging the same clients are rejected.
-No Hibr-core changes, SSH, renderer changes or machine-specific hardcoding.
+Hibr's documented standby registry distinguishes waiting from deliberate
+release while the standby process lives. Blit integrates that behavior through
+the authenticated per-user Hibr process and native hold interface; it does not
+read Hibr's private state files. Initial placement is a one-shot operation.
+After that, Hibr's Displays pane owns session placement unless the user
+explicitly applies a different Blit policy. Two writers silently rearranging
+the same clients are rejected. No Hibr-core changes, SSH, renderer changes or
+machine-specific hardcoding.
 
 ## Alternatives rejected
 
@@ -74,6 +96,8 @@ No Hibr-core changes, SSH, renderer changes or machine-specific hardcoding.
 Stage 1 requires red/green tests for save errors preserving the old document,
 invalid policy leaving state untouched, restart precedence, missing target with
 both fallback policies, reset/ignore recovery and preference versus assignment.
-Later stages additionally require login/logout, owner replacement, deliberate
-detach, join crash, reconnect, zero/one/multiple outputs and conflict tests.
-Physical-host/package acceptance is separate from local fixture acceptance.
+Later stages additionally require login/logout, owner replacement,
+deliberate detach and explicit reattach, standby quit, join crash, reconnect,
+zero/one/multiple outputs, missing stable bindings, revision conflicts, and
+proof that a user move is not undone. Physical-host/package acceptance is
+separate from local fixture acceptance.
