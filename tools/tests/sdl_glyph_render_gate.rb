@@ -76,9 +76,10 @@ raise 'unexpected screenshot depth' unless bits == 24 || bits == 32
 bpp = bits / 8
 stride = ((width * bpp + 3) / 4) * 4
 
+inset = request(base, 'GET', '/v1/diagnostics').fetch('render').fetch('surface_inset_px')
 foreground = lambda do |cell, row, column|
-  x = 4 + cell * 8 + column
-  y = 4 + row
+  x = inset + cell * 8 + column
+  y = inset + row
   pixel = offset + (height - 1 - y) * stride + x * bpp
   bmp.byteslice(pixel, 3).bytes == [0xbe, 0xd2, 0xbe]
 end

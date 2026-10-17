@@ -99,8 +99,9 @@ begin
   }
   request(URI("#{base}/v1/surfaces/#{surface_id}/cells"), Net::HTTP::Put,
           cells)
+  inset = request(URI("#{base}/v1/diagnostics")).fetch('render').fetch('surface_inset_px')
   raise 'scale-1 glyph geometry did not render' unless
-    wait_solid(base, 4, 4, 8, 16, [255, 255, 255])
+    wait_solid(base, inset, inset, 8, 16, [255, 255, 255])
   scales = (10..30).map { |tenths| tenths / 10.0 }
   representative_scales = [1.0, 1.1, 2.0, 2.3, 3.0]
   scales.each do |scale|
@@ -121,8 +122,8 @@ begin
     if representative_scales.include?(scale)
       grid = request(URI("#{base}/v1/topology")).fetch('outputs').first
         .fetch('cell_grid')
-      expected_x = grid.fetch('origin_x') + 4
-      expected_y = grid.fetch('origin_y') + 4
+      expected_x = grid.fetch('origin_x') + inset
+      expected_y = grid.fetch('origin_y') + inset
       current = request(URI("#{base}/v1/surfaces/#{surface_id}/summary"))
       request(URI("#{base}/v1/surfaces/#{surface_id}/cells"), Net::HTTP::Put,
               {'base_revision' => current.fetch('revision'),

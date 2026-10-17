@@ -47,6 +47,10 @@ BOX_CODEPOINTS = (
 )
 
 SPECIAL_GLYPHS = {
+    # A symmetric seven-pixel diamond leaves one column for bold's overstrike.
+    # An eight-pixel crop of a wider TTF diamond loses its right-hand tip.
+    0x25C6: (0x00, 0x00, 0x00, 0x00, 0x10, 0x38, 0x7C, 0xFE,
+              0x7C, 0x38, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00),
     # The installed monochrome fallback families do not contain these four
     # symbols. Keep their small terminal pictograms deterministic instead of
     # allowing Pillow's .notdef box into the production font.
@@ -189,15 +193,26 @@ def render(codepoint: int, font: ImageFont.FreeTypeFont) -> bytes:
     if codepoint in block_rows:
         filled = set(block_rows[codepoint])
         return bytes(0xFF if row in filled else 0 for row in range(16))
-    image = Image.new("1", (8, 16), 0)
-    draw = ImageDraw.Draw(image)
     character = chr(codepoint)
-    left, top, right, bottom = draw.textbbox((0, 0), character, font=font)
-    width = right - left
-    x = max(0, (8 - width) // 2 - left)
-    # DejaVu's 16px face has a 15px em; align its baseline into the cell.
-    y = max(0, 13 - bottom)
-    draw.text((x, y), character, fill=1, font=font)
+    # Rasterize the complete outline before measuring it: advance width is
+    # not ink width, and negative bearings must not clip the left edge either.
+    # Choose the largest native raster size that fits, rather than truncating
+    # or horizontally squeezing a 10px symbol into an 8px terminal cell.
+    for point_size in range(font.size, 0, -1):
+        face = font if point_size == font.size else font.font_variant(size=point_size)
+        left, top, right, bottom = face.getbbox(character)
+        outline = Image.new("1", (max(1, right - left), max(1, bottom - top)), 0)
+        ImageDraw.Draw(outline).text((-left, -top), character, fill=1, font=face)
+        bounds = outline.getbbox()
+        if bounds is None:
+            return bytes(16)
+        ink = outline.crop(bounds)
+        if ink.width <= 8 and ink.height <= 16:
+            break
+    else:
+        raise ValueError(f"glyph U+{codepoint:04X} cannot fit 8x16")
+    image = Image.new("1", (8, 16), 0)
+    image.paste(ink, ((8 - ink.width) // 2, max(0, 13 - ink.height)))
     pixels = image.load()
     return bytes(sum((1 << (7 - x)) for x in range(8) if pixels[x, y])
                  for y in range(16))

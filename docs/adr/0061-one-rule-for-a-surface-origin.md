@@ -4,6 +4,11 @@
 - Date: 2026-10-10
 - Scope: surface placement, pointer hit testing, both renderers
 
+Update 2026-10-17: the single-origin decision remains accepted.
+[ADR 0123](0123-centred-grids-and-complete-font-rasters.md) supersedes its
+four-pixel margin: the complete-cell grid already owns centering, so the extra
+inset is now zero. Historical defect/evidence below is retained as history.
+
 ## Context
 
 Three pieces of code needed to know where a surface sits on an output, and

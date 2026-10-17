@@ -53,6 +53,13 @@ end
 
 original = request(base, 'GET', '/v1/topology')
 original_layout = original.fetch('layout')
+inset = request(base, 'GET', '/v1/diagnostics').fetch('render').fetch('surface_inset_px')
+original.fetch('outputs').each do |output|
+  grid = output.fetch('cell_grid')
+  raise "presentation inset clips complete cells: #{grid.inspect} inset=#{inset}" if
+    grid.fetch('origin_x') + inset + grid.fetch('pixel_width') > output.dig('bounds', 'width') ||
+    grid.fetch('origin_y') + inset + grid.fetch('pixel_height') > output.dig('bounds', 'height')
+end
 begin
   fonts = request(base, 'PUT', '/v1/fonts', {'scale' => 1.6})
   cell_width = fonts.fetch('active').fetch('cell_pixels').fetch('width')

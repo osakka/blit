@@ -30,7 +30,7 @@ FONT = ENV.fetch('BLIT_GATE_FONT',
 BASE = URI("http://127.0.0.1:#{PORT}")
 CELL_W = 8
 CELL_H = 16
-INSET = 4
+INSET = 0
 
 abort("mouse-report gate: missing #{BINARY}") unless File.executable?(BINARY)
 

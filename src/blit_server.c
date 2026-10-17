@@ -55,15 +55,11 @@ extern char **environ;
 #define BLIT_HIBR_ABI 0
 #endif
 
-/* Every surface is drawn inset from its pane origin by this many pixels on
-   both axes. It is a presentation margin, not part of the cell geometry, so
-   a cell at (column,row) occupies
-   (inset + column*cell_width, inset + row*cell_height) on the framebuffer
-   rather than (column*cell_width, row*cell_height). Anything comparing
-   pixels against cell state has to apply it; a pixel check that does not
-   will attribute the offset to the renderer, which is how issue #31 was
-   first misread. It is reported by /v1/diagnostics as surface_inset_px. */
-#define BLIT_SURFACE_INSET_PX 4
+/* Cell geometry already centres complete cells inside each physical region.
+   A second margin shifts a full-width grid off-screen. Retain the diagnostic
+   field for clients, but no additional inset is applied by either renderer
+   or hit testing. Pane dimensions and Hibr's logical layout stay unchanged. */
+#define BLIT_SURFACE_INSET_PX 0
 #define BLIT_FONT_SCALE_MIN_TENTHS 10
 #define BLIT_FONT_SCALE_MAX_TENTHS 30
 
@@ -23230,9 +23226,8 @@ static void swap_sdl_scene_textures(BlitOutput *output)
 
    `cell_width`/`cell_height` are the caller's metrics, so a renderer working
    in scaled device pixels and a hit test working in unscaled surface pixels
-   both get the same rule. They do not make the inset itself scale; a
-   font_scale other than 1 still insets by the same four device pixels on both
-   paths, which is tracked on the geometry issues rather than fixed here. */
+   both get the same rule. ADR 0123 removes the redundant fixed margin;
+   complete-cell centering supplies the only pane padding at every scale. */
 static void surface_origin_px(BlitRuntime *runtime, const BlitSurface *surface,
                               const BlitSession *session, int output_index,
                               int cell_width, int cell_height,

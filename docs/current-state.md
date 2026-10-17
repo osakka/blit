@@ -7,6 +7,19 @@ work actually stopped.
 
 ## Status at the last review
 
+### 2026-10-17 candidate0.1.536: edge fit and complete glyphs
+
+The user requested correction of the clipped right edge and icon shapes.
+[ADR0123](adr/0123-centred-grids-and-complete-font-rasters.md) records two
+reproduced defects: redundant4px presentation inset beyond the already
+centred grid (#97), and overwide fallback outlines cropped into8px (#98).
+Both regressions fail before correction. Candidate0.1.536 sets the extra
+inset to0 without changing logical dimensions; fallback rasters fit complete
+inkbounds, and diamonds have symmetric regular/bold geometry. The generated
+font has930glyphs at unchanged8x16metrics. Focused geometry/font tests pass;
+broad suites, reproducible package and live deployment are pending. The
+desktop still runs0.1.535 SDL GL with its existing native stacked join.
+
 ### 2026-10-17 requested bottom-primary/top-join live setup
 
 SDL GL and package 0.1.535 are unchanged. The existing authenticated login

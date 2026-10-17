@@ -43,6 +43,13 @@ input test. Both live probes discover the output and pane geometry from
 `/v1/topology`; direct-KMS screenshots are decoded from their advertised BMP
 bit depth.
 
+`host_grid_font_edges.rb` checks complete edge cells and 19 glyph cells against
+the generated font bitmap, including a bold diamond in the last column. It
+requires a free pane and the canonical 8x16 font; it never overwrites the
+desktop. Set `BLIT_AUTH_TOKEN`, optionally `BLIT_LIVE`/`BLIT_EVIDENCE_DIR`.
+Its local dummy-renderer run checks 21 cells / 2688 pixels; physical-host
+acceptance must run independently after deployment.
+
 `host_render_agreement.rb` now compares revision-matched blank and solid/half
 block cell colours against scanout pixels. It refuses retained-graphics
 surfaces and excludes unsupported styles, visible terminal cursor and a

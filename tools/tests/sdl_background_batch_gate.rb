@@ -80,7 +80,8 @@ bits = bmp.byteslice(28, 2).unpack1('v')
 raise 'unexpected screenshot format' unless bits == 24 || bits == 32
 bytes_per_pixel = bits / 8
 stride = ((width * bytes_per_pixel + 3) / 4) * 4
-pixel = offset + (height - 1 - 5) * stride + 5 * bytes_per_pixel
+inset = request(base, 'GET', '/v1/diagnostics').fetch('render').fetch('surface_inset_px')
+pixel = offset + (height - 1 - (inset + 1)) * stride + (inset + 1) * bytes_per_pixel
 bgr = bmp.byteslice(pixel, 3).bytes
 raise "background pixel is not red: #{bgr.inspect}" unless bgr == [0, 0, 255]
 

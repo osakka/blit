@@ -6,6 +6,12 @@ same cell size. The added glyphs are rasterized from DejaVu Sans Mono, which is
 licensed under the permissive DejaVu font license; see the system font package
 for the complete license text.
 
+Fallback outlines are rendered completely, then the largest native raster
+size fitting8x16 is selected. Negative bearings and overwide glyphs must not
+be cropped by an8px canvas. Control diamonds use deterministic symmetric
+geometry with space for bold. `tools/tests/font_fit_gate.py` checks complete
+fallback masks and diamond symmetry; the manifest gate checks coverage.
+
 Regenerate it with:
 
 ```sh

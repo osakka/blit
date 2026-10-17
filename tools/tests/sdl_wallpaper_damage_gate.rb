@@ -104,7 +104,8 @@ begin
   end
   sleep 0.15
   before = screenshot(base)
-  before_pixel = pixel(before, 19, 35)
+  inset = request(base, :get, '/v1/diagnostics').fetch('render').fetch('surface_inset_px')
+  before_pixel = pixel(before, inset + 15, inset + 31)
   raise "wallpaper was not red before damage: #{before_pixel.inspect}" unless
     before_pixel[0, 3] == [0, 0, 255]
   baseline_surface_revision = request(
@@ -117,7 +118,7 @@ begin
           'base_revision' => deferred.fetch('revision'),
           'presentation' => 'commit', 'cells' => [update])
   sleep 0.15
-  after_pixel = pixel(screenshot(base), 19, 35)
+  after_pixel = pixel(screenshot(base), inset + 15, inset + 31)
   raise "wallpaper was lost after incremental damage: #{after_pixel.inspect}" unless
     after_pixel[0, 3] == [0, 0, 255]
   deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 10
@@ -133,7 +134,7 @@ begin
     sleep 0.05
   end
   sleep 0.15
-  deleted_pixel = pixel(screenshot(base), 19, 35)
+  deleted_pixel = pixel(screenshot(base), inset + 15, inset + 31)
   raise "wallpaper remained after image delete: #{deleted_pixel.inspect}" unless
     deleted_pixel[0, 3] == [0, 0, 0]
   puts "SDL_WALLPAPER_DAMAGE_PASS before=#{before_pixel[0, 3].join(',')} " \

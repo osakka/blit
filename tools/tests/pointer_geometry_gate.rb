@@ -26,7 +26,7 @@ FONT = ENV.fetch('BLIT_GATE_FONT',
 BASE = URI("http://127.0.0.1:#{PORT}")
 CELL_W = 8
 CELL_H = 16
-INSET = 4
+INSET = 0
 FB_WIDTH = Integer(ENV.fetch('BLIT_GATE_FB_WIDTH', '1024'), 10)
 FB_HEIGHT = Integer(ENV.fetch('BLIT_GATE_FB_HEIGHT', '768'), 10)
 
@@ -99,8 +99,7 @@ end
 
 failures = []
 
-# Two panes side by side, so the pane under test has a non-zero origin and an
-# omitted inset cannot hide behind a zero.
+# Two panes side by side, so an omitted pane origin cannot hide behind zero.
 topology = json('PUT', '/v1/topology', 'layout' => { 'columns' => 2, 'rows' => 1 })
 pane = topology.fetch('panes').find { |p| p.dig('bounds', 'x').to_i > 0 }
 abort('pointer-geometry gate: the second pane was not created') if pane.nil?
@@ -117,8 +116,7 @@ json('PATCH', "/v1/terminal-sessions/#{paned.fetch('id')}",
 sleep 2.0
 
 # Six pixels into the surface's first cell, and fourteen into its first row.
-# Without the inset those land in cell (1,1) instead of (0,0), which is the
-# whole defect: half a cell horizontally and a quarter of one vertically.
+# These positions must remain in local cell (0,0), with no extra margin.
 request('POST', '/v1/input/inject', 'kind' => 'pointer_motion',
         'x' => pane_x + INSET + 6, 'y' => pane_y + INSET + 14)
 request('POST', '/v1/input/inject', 'kind' => 'pointer_button',

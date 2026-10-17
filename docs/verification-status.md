@@ -3,6 +3,26 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-17: candidate0.1.536 edge/font regressions
+
+Before correction, the actual pane API gate reports complete1024px grid plus
+inset4 clipping beyond1024; the old diamond bitmap is asymmetric/truncated.
+After removing the surplus inset and fitting complete fallback rasters, the
+focused pane geometry gate and font-fit gate pass (regular/bold diamond and
+12 independent full-mask symbol comparisons). Regenerated PSF has930glyphs,
+unchanged8x16cells; required447-codepoint manifest passes. Broad suites,
+package and exact live pixel checks are pending; no live changes yet.
+
+The first broad run was 52 pass / 6 fail, no skips. Five failures were stale
+test assumptions about the old four-pixel sampling origin (one refused zero
+inset); the sixth correctly detected the old 929-glyph staged copy beside the
+930-glyph asset. Sampling assertions now use the reported geometry, preserving
+their exact pixel/rotation expectations, and the derived staged font was
+refreshed. All six focused reruns pass. The full suite is being repeated.
+The new edge/font probe also passes against a local dummy-renderer server:
+21 cells / 2688 pixels, complete left/right edge cells and bold diamond.
+That is not yet physical-host evidence.
+
 ## 2026-10-17: live native bottom-primary/top-join orchestration
 
 Same 0.1.535 SDL GL package, no binary deployment. The existing login PTY5

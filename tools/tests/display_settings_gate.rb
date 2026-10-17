@@ -314,7 +314,8 @@ Dir.mktmpdir('blit-display') do |root|
   verdict 'the-rotation-reaches-the-panel' do
     inset = json('GET', '/v1/diagnostics').last.to_h.dig('render',
                                                          'surface_inset_px')
-    check(inset.to_i.positive?, "no surface inset reported: #{inset.inspect}")
+    check(inset.is_a?(Integer) && inset >= 0,
+          "invalid surface inset reported: #{inset.inspect}")
     shots = {}
     [0, 90, 180, 270].each do |rotation|
       code, = patch('rotation' => rotation)
