@@ -1233,6 +1233,26 @@ static void restore_pointer_background(KmsOutput *output)
     output->pointer_background_valid = 0;
 }
 
+/* The software pointer is composed into the persistent scene, but its
+   underlying pixels are retained separately so pointer motion can repaint
+   only the old and new footprints. Any non-full scene repaint must restore
+   those pixels first, even when the pointer itself did not move. Otherwise an
+   unrelated terminal update leaves the pointer in the scene and the next
+   pointer move saves/restores that already-drawn pointer as if it were
+   background, producing a cursor-shaped trail. */
+static void prepare_repaint_buffer(KmsOutput *output, int full_redraw,
+                                   int render_scene)
+{
+    if (full_redraw) {
+        memset(output->back.map, 0, output->back.size);
+        output->pointer_background_valid = 0;
+    } else {
+        if (!render_scene)
+            copy_front_to_back(output);
+        restore_pointer_background(output);
+    }
+}
+
 static void save_pointer_background(KmsOutput *output, float x, float y)
 {
     int left = (int)x - output->info.x;
@@ -1712,16 +1732,12 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         if (trace_phases)
             fprintf(stderr, "blit: KMS phase connector=%u wait_us=%lld\n",
                     output->connector, kms_now_us() - output_started);
-        if (full_redraw) {
-            memset(output->back.map, 0, output->back.size);
-            output->pointer_background_valid = 0;
-        } else if (!render_scene) {
-            /* Fallback for an allocation failure: preserve the complete
-               displayed scene before applying smaller damage. */
-            copy_front_to_back(output);
-        }
-        if (pointer_changed)
-            restore_pointer_background(output);
+        /* Fallback for an allocation failure: preserve the complete
+           displayed scene before applying smaller damage. The pointer
+           background is restored for every non-full repaint, not only when
+           the pointer moved; terminal damage can otherwise preserve a
+           pointer-shaped hole in the scene cache. */
+        prepare_repaint_buffer(output, full_redraw, render_scene);
         if (trace_phases)
             draw_started = kms_now_us();
         for (view_index = 0; view_index < view_count; ++view_index)

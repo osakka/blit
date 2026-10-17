@@ -7,7 +7,7 @@ work actually stopped.
 
 ## Status at the last review
 
-The current source candidate is `0.1.527`. Hibr source was not modified. The
+The current source candidate is `0.1.528`. Hibr source was not modified. The
 latest release adds causal PTY and direct-KMS render traces; it does not claim
 that the reported live desktop artifact is fixed. The previous direct-KMS
 correction bounds terminal-cursor drawing to the damaged row and columns,
@@ -42,12 +42,16 @@ adds bounded direct-KMS graphics damage: a graphics mutation repaints the
 union of its previous and current complete-cell coverage, with a complete
 view fallback when the bound is not provable. ADR 0112 records the follow-up
 cursor-damage correction. ADR 0113 records the new PTY-to-KMS causal traces;
-the 0.1.527 package is the first release containing that observability.
+the 0.1.527 package was the first release containing that observability; the
+0.1.528 candidate adds the direct-KMS pointer-background correction in ADR
+0114.
 
-### 0.1.527 observability candidate
+### 0.1.528 pointer-trail correction candidate
 
 The local TCC build and the complete renderer/terminal gate run pass 50/50.
-The package adds no Hibr changes and no render-policy change. It records
+The package adds no Hibr changes. It restores the saved KMS pointer background
+before every non-full scene repaint, so unrelated saver/terminal damage cannot
+retain the pointer in the scene. It also records
 PTY-driven surface revisions and damage rectangles in `surface_update` traces,
 and direct-KMS output masks, view damage, cursor state, synchronization state,
 and present duration in `render_path` traces. It is not yet accepted as a live

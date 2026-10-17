@@ -222,6 +222,34 @@ static void cursor_damage_gate(void)
              (long)pixel_at(10 * CW, 7 * CH), (long)face);
 }
 
+static void pointer_background_gate(void)
+{
+    int i;
+    uint32_t face = 0x102030U;
+
+    memset(&output, 0, sizeof(output));
+    output.mode.hdisplay = W;
+    output.mode.vdisplay = H;
+    output.back.map = pixels;
+    output.back.pitch = W * sizeof(uint32_t);
+    output.back.size = sizeof(pixels);
+    for (i = 0; i < W * H; ++i)
+        pixels[i] = face;
+
+    /* Establish the same retained-scene state as a presented pointer. */
+    save_pointer_background(&output, 40, 32);
+    fill_rect(&output, 40, 32, 12, 18, WHITE);
+
+    /* A saver/terminal update elsewhere must not turn the pointer pixels
+       into the next frame's background. The production helper is the exact
+       non-full repaint boundary used by blit_kms_present(). */
+    fill_rect(&output, 0, 0, CW, CH, RED);
+    prepare_repaint_buffer(&output, 0, 1);
+    if (pixel_at(40, 32) != face || pixel_at(51, 49) != face)
+        fail("stationary pointer background was not restored before repaint",
+             (long)pixel_at(40, 32), (long)face);
+}
+
 static void graphics_bounds_gate(void)
 {
     BlitKmsSurfaceView view;
@@ -278,6 +306,7 @@ int main(void)
     output.back.size = sizeof(pixels);
 
     cursor_damage_gate();
+    pointer_background_gate();
 
     reset();
     place(-1073741825);
