@@ -7,7 +7,36 @@ work actually stopped.
 
 ## Status at the last review
 
-### 2026-10-17 candidate 0.1.539: native login association
+### 2026-10-17 deployed 0.1.539: native login association
+
+Following the user's logout/restart clearance, the API updater installed and
+verified the immutable 0.1.539 archive below on 192.168.10.54. Before/after
+observations preserve the complete saved settings document (clean revision38),
+font identity/scale, both pane grids and SDL `kmsdrm`/`opengles2`/`sdl-vsync`.
+One login terminal (id1) is focused on the lower pane. The read-only physical
+pre-authentication probe passes three samples: identity waiting, association
+inactive/authentication_required, null owner/client and no native query.
+The upper pane remains empty after the temporary font oracle passes21cells/
+2688pixels and removes its diagnostic terminal. A screenshot shows the lower
+login prompt with its animated background, not an authenticated desktop.
+Evidence: `diagnostics/association-539/deploy/`, `.../waiting/`, `.../pixels/`.
+
+After the user's normal login, the installed native association passes its
+read-only ready check: verified UID/GID1000, named client
+`blit-login-638499997805-1`, held owner PID249984/starttime63853831 and a primary
+67x240 client at native row0/column0. Three samples separated by3.2s preserve
+the same owner lifetime and observe refreshed timestamps; their ages are
+789203,150910,625710us, below the3s TTL. This is actual installed native-client
+acceptance, not an inference from fixtures or the old unnamed client.
+Evidence: `diagnostics/association-539/ready/`. The desktop screenshot shows
+retro_car wallpaper and the menu bar on the lower pane, with the upper empty.
+
+**Next boundary:** retire obsolete native horizontal input projection and
+integrate supported standby/release joins (#96), using this verified identity
+and association rather than guessing an owner. Automatic joins are not yet
+implemented. No join was started, no Hibr core was edited, and no SSH was used.
+The paragraphs below retain candidate validation history; references to the
+old host state and pending physical checks are historical.
 
 ADR 0126 adds `/v1/login.desktop`: a read-only native hold observation,
 separate from the historical handoff sender PID. The packaged hook now names

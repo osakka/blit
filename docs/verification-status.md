@@ -3,7 +3,42 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
-## 2026-10-17: candidate 0.1.539 native desktop association
+## 2026-10-17: deployed 0.1.539 native desktop association
+
+### Physical deployment checkpoint
+
+After explicit user logout/restart clearance, manifest verification passes and
+the API updater installs the exact archive recorded below, then verifies live
+server_version0.1.539. Before/after observations compare equal for the complete
+settings document, both pane grids, active font and render backend/scale/inset.
+Storage remains clean revision38. SDL `kmsdrm`/`opengles2`/`sdl-vsync` is unchanged.
+One focused lower login terminal remains; the upper pane is free.
+
+`host_native_association.rb` passes its real-host pre-authentication check:
+three read-only samples separated by3.2s, identity waiting, desktop association
+inactive, owner/client null. The temporary free-pane font oracle again passes
+21cells/2688pixels, deletes its terminal and restores lower focus. A captured
+image shows the lower login prompt and animated background. These are not
+post-authentication association, desktop interaction or universal rendering
+acceptance. Evidence: `diagnostics/association-539/{deploy,waiting,pixels}/`.
+
+Following the user's normal login, the real-host ready probe also passes:
+verified UID/GID1000, exact native client `blit-login-638499997805-1`, primary
+67x240 at row0/column0, owner PID249984 with kernel starttime63853831. Three
+read-only observations separated by3.2s retain that owner lifetime and contain
+genuinely refreshed native observations despite exceeding the3s TTL between
+requests. Observed ages are789203,150910,625710us. The API's post-authentication
+association is ready/native_client_verified. The inspected screenshot shows
+retro_car wallpaper and the menu bar on the lower pane; the upper is empty.
+Evidence: `diagnostics/association-539/ready/` and `.../deploy/desktop.{bmp,png}`.
+This verifies installed authentication/named association and quiet refresh,
+not automatic joins, failover or universal rendering/physical input quality.
+No join, Hibr-core edit or SSH was performed.
+
+### Candidate validation history
+
+The following records the pre-deployment chronology; references to a host
+still running0.1.538 below describe those earlier checkpoints.
 
 The new association assertion fails against 0.1.538: `native login association
 API absent`. TCC builds 0.1.539. Expanded identity tests pass. The helper oracle

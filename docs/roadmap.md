@@ -5,7 +5,7 @@ second, parallel implementation of an earlier one.
 
 ## Current position — persistent desktop policy and catalogue control panel
 
-The physical host runs 0.1.538 SDL GL. The edge/font correction has bounded
+The physical host runs 0.1.539 SDL GL. The edge/font correction has bounded
 physical pixel acceptance; the user previously accepted the 0.1.535 movement
 checkpoint. These are not universal renderer or refresh-rate guarantees.
 See current-state.md and verification-status.md for exact evidence.
@@ -33,13 +33,17 @@ deployment preserves saved settings, pane geometry, renderer and font; the
 physical edge/font oracle passes again. Native owner association and standby
 joins remain separate, unimplemented acceptance boundaries.
 
-Candidate 0.1.539 adds exact named-client association with expiring native
+Version 0.1.539 adds exact named-client association with expiring native
 observations and a bounded asynchronous per-user query. Local identity/native
 CLI/controller tests pass; the full local/package run passes89 tests with
-three explicit skips and no failures. Physical named-login acceptance is pending.
-The live 0.1.538 client is still unnamed and must not be guessed into this
-registry. After safe deployment and a fresh named login, retire the obsolete
-native horizontal projection and integrate standby/release joins (#96).
+three explicit skips and no failures. Authorized API deployment preserves
+settings, geometry, renderer and font. The physical pre-authentication probe
+and repeated edge/font oracle pass. Following the user's normal login, exact
+named-client readiness and quiet background refresh across the freshness TTL
+also pass on10.54: verified UID1000 and the same native owner lifetime across
+three samples. No join was started. Next retire obsolete native horizontal
+projection and integrate standby/release joins (#96). Never guess an old
+unnamed client into this registry.
 
 ## Historical position — 0.1.507 live visual-acceptance blocker
 
