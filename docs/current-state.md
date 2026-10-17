@@ -41,11 +41,13 @@ distinguishes waiting from deliberately released clients; reuse its supported
 contract after verified authentication/owner association (#96). The local
 hibr-apps repo is clean and points to itdlabs/hibr-apps; its cp_pane framework,
 catalogue generators and async job patterns have been inspected, not modified.
-The panel is tracked in hibr-apps #1 and is not published. A user decision is
-pending: whether move/primary/detach actions in Hibr's existing Displays pane
-remain session-only until explicitly saved to Blit (recommended), or
-automatically update Blit's persistent policy. Do not implement competing
-placement controllers or silently choose automatic persistence while waiting.
+The panel is tracked in hibr-apps #1 and is not published. The user has agreed:
+move/primary/detach in Hibr's existing Displays pane stay session-only until
+explicitly saved into Blit. No automatic persistence or competing placement
+controller. Apply versus Save is the intended UX; automatic remembering can
+later be a reversible policy, not a second implementation. The next step is
+verified authenticated association before standby joins (#96), not more
+manual joins against an unregistered login session.
 
 ### 2026-10-17 deployed 0.1.536: edge fit and complete glyphs
 

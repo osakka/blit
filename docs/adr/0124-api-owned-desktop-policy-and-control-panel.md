@@ -14,6 +14,15 @@ The Hibr Control Panel is an asynchronous API client, distributed from
 Configuration must distinguish intent, effective assignment and durable save
 status. An unavailable resource does not erase the user's preference.
 
+The user confirmed explicit persistence on 2026-10-17: actions in Hibr's
+existing Displays pane change the current session only. They do not silently
+rewrite Blit's saved startup intent, and Blit must not continually undo them.
+The proposed control panel distinguishes Apply (live state) from Save as
+default (persistent intent). These are UX semantics, not additional endpoints
+already implemented. Automatic remembering may be added later as a reversible
+policy through this same store/controller, not a parallel implementation.
+Reverting configuration does not promise to resurrect terminated processes.
+
 Stage 1 adds `document.login`: optional `enabled`, `preferred_pane_id` (a pane
 ID or null for automatic selection), and `fallback` (`first_available` or
 `wait`). Missing properties retain boot defaults. This section is explicitly

@@ -58,8 +58,10 @@ this cycle did not update or edit Hibr. Evidence: `diagnostics/policy-537/`.
 These are configuration and bounded pixel assertions, not authentication,
 native join recovery, physical-output failover, full Control Panel acceptance
 or a physical refresh-rate claim. No hibr-apps bundle is published yet. The
-user's persistence/ownership choice for Hibr's existing Displays pane is
-pending; issue #99 and hibr-apps #1 stay open.
+user subsequently confirmed explicit saving: Hibr's existing Displays actions
+are session-only until saved into Blit. That design choice is recorded in
+ADR 0124; it does not constitute implemented Apply/Save UI. Issue #99 and
+hibr-apps #1 stay open.
 
 ## 2026-10-17: deployed 0.1.536 edge/font regressions
 
