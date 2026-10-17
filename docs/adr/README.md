@@ -1,5 +1,7 @@
 # Architecture decision records
 
+- [0127 — Native client PTYs and login-owned joins](0127-native-client-pty-input-and-login-owned-joins.md)
+
 ADRs capture decisions that are expensive to reverse or affect multiple
 subsystems. Each record states context, options, the decision, consequences,
 and migration impact. The filename is the canonical link. A few historical

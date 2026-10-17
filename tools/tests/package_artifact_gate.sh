@@ -62,7 +62,7 @@ test -x "$stage/usr/share/blit/hibr/blit-login.hibr"
 test -x "$stage/usr/share/blit/hibr/blit-login-session.hibr"
 test -x "$stage/usr/share/blit/hibr/blit-desktop-observe.hibr"
 source_commit=$(sed -n 's/^source_commit: //p' "$manifest")
-for entrypoint in blit-login-session.hibr blit-desktop-observe.hibr; do
+for entrypoint in blit-session.hibr blit-login-session.hibr blit-desktop-observe.hibr; do
     cmp -s <(git -C "$root" show "$source_commit:hibr/$entrypoint") \
         "$stage/usr/share/blit/hibr/$entrypoint" || {
         echo "PACKAGE_ARTIFACT_FAIL Hibr entrypoint differs from recorded source: $entrypoint" >&2

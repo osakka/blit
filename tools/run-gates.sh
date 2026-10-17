@@ -274,6 +274,7 @@ suite_renderer() {
 
 suite_hibr() {
     run_gate native_hold_observer_gate.rb ruby tools/tests/native_hold_observer_gate.rb
+    run_gate native_join_pty_gate.rb ruby tools/tests/native_join_pty_gate.rb
     run_gate hibr_singleton_gate.rb ruby tools/tests/hibr_singleton_gate.rb
     run_gate hibr_join_viewport_gate.rb ruby tools/tests/hibr_join_viewport_gate.rb
     run_gate hibr_join_frame_barrier_gate.rb ruby tools/tests/hibr_join_frame_barrier_gate.rb

@@ -806,6 +806,10 @@ typedef struct {
     int hibr_desktop_primary;
     int hibr_desktop_join;
     char hibr_desktop_session[128];
+    unsigned long long native_login_id;
+    pid_t native_owner_pid;
+    unsigned long long native_owner_start_ticks;
+    uint64_t native_retire_due_us;
     pid_t hibr_owner_pid;
     int hibr_owner_registered;
     int hibr_resume_requested;
@@ -1436,72 +1440,21 @@ static const char *pane_surface_id(const BlitRuntime *runtime,
 static void discover_panes(BlitRuntime *runtime);
 static BlitPane *find_pane_id(BlitRuntime *runtime, const char *pane_id);
 
-/* Hibr's desktop currently owns a horizontal hold-union contract: its
-   primary display is located by column, while its desktop bar/window
-   placement deliberately begins at union row zero.  Keep the physical Blit
-   topology independent from that Hibr coordinate system.  The primary is
-   logical slot zero and every other pane gets a stable horizontal slot in
-   pane-enumeration order.  Blit still maps each resulting PTY viewport to
-   the pane's physical rectangle. */
-static int hibr_logical_column(const BlitRuntime *runtime,
-                               const BlitPane *pane,
-                               const BlitPane *primary)
+/* Authentication and native association are separate gates. Reuse this
+   exact predicate for launch eligibility and API role projection. */
+static int native_login_ready(const BlitSession *session, uint64_t now)
 {
-    int i;
-    int column;
-
-    if (pane == NULL || primary == NULL || pane == primary)
-        return 0;
-    column = primary->width;
-    for (i = 0; i < runtime->pane_count; ++i) {
-        const BlitPane *candidate = &runtime->panes[i];
-        if (!candidate->used || candidate == primary)
-            continue;
-        if (candidate == pane)
-            break;
-        column += candidate->width;
-    }
-    return column;
+    return session != NULL && session->used && !session->child_exited &&
+        session->login_manager && session->login_identity_state == 2 &&
+        strcmp(session->login_identity_kind, "desktop") == 0 &&
+        session->login_desktop_state == 1 &&
+        session->login_desktop_observed_us <= now &&
+        now - session->login_desktop_observed_us <= BLIT_NATIVE_OBSERVATION_TTL_US;
 }
+
 static BlitSession *hibr_desktop_owner(BlitRuntime *runtime,
                                        const char *session_name);
 
-/* Convert a pane-local terminal coordinate into the coordinate space of the
-   Hibr desktop owner.  `mouse_target` deliberately returns 1-based local
-   coordinates because that is what a terminal mouse report carries.  A join
-   is then routed to the primary Hibr PTY, whose hold union is currently the
-   horizontal projection above.  Sending the local coordinate unchanged was
-   the input bug: a click in the physical upper pane was interpreted at the
-   same local point in the primary pane, while the joined viewport itself was
-   placed at a different logical column.  Keep this transform beside the
-   placement function so every input path shares one source of truth.
-
-   The row remains local by design for the current Hibr contract.  A future
-   Hibr 2-D union contract must replace this projection with both row and
-   column offsets as one versioned boundary; it must not add a second ad-hoc
-   transform in an individual input path. */
-static void hibr_input_coordinates(const BlitRuntime *runtime,
-                                   const BlitSession *target,
-                                   int *column, int *row)
-{
-    BlitSession *owner;
-    BlitPane *pane;
-    BlitPane *owner_pane;
-
-    if (runtime == NULL || target == NULL || column == NULL || row == NULL ||
-        !target->hibr_desktop_join ||
-        target->hibr_desktop_session[0] == '\0')
-        return;
-    owner = hibr_desktop_owner((BlitRuntime *)runtime,
-                               target->hibr_desktop_session);
-    if (owner == NULL)
-        return;
-    pane = find_pane_id((BlitRuntime *)runtime, target->pane_id);
-    owner_pane = find_pane_id((BlitRuntime *)runtime, owner->pane_id);
-    if (pane == NULL || owner_pane == NULL)
-        return;
-    *column += hibr_logical_column(runtime, pane, owner_pane);
-}
 static int display_index_for_id(const BlitRuntime *runtime, const char *id);
 static void focus_session(BlitRuntime *runtime, BlitSession *target);
 static void disable_input_routes_for_target(BlitRuntime *runtime,
@@ -1533,8 +1486,6 @@ static int hibr_frame_barrier_active(const BlitRuntime *runtime,
 static void arm_hibr_frame_barrier(BlitRuntime *runtime,
                                    const BlitSession *session,
                                    uint64_t now);
-static BlitSession *hibr_input_owner(BlitRuntime *runtime,
-                                     BlitSession *session);
 static BlitSession *hibr_render_source(BlitRuntime *runtime,
                                        BlitSession *session);
 static BlitGraphicsImage *graphics_image_find(BlitSession *session,
@@ -13892,8 +13843,10 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
     char escaped_clipboard[8192];
     char escaped_notification[2048];
     char escaped_terminal_term[128];
+    int native_ready;
 
     refresh_session_state(runtime, session);
+    native_ready = native_login_ready(session, monotonic_us());
 
     for (route_index = 0; route_index < 16; ++route_index)
         if (runtime->input_routes[route_index].used &&
@@ -13983,9 +13936,9 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
     used += (size_t)snprintf(
         body + used, capacity - used,
         ",\"hibr_desktop\":{\"role\":\"%s\",\"session\":\"%s\"}",
-        session->hibr_desktop_primary ? "primary" :
+        (session->hibr_desktop_primary || native_ready) ? "primary" :
             (session->hibr_desktop_join ? "join" : "none"),
-        session->hibr_desktop_session);
+        native_ready ? "desktop" : session->hibr_desktop_session);
     used += (size_t)snprintf(
         body + used, capacity - used,
         ",\"terminal_capabilities\":{\"term\":\"%s\","
@@ -14359,7 +14312,8 @@ static int hibr_desktop_request(const char *command,
     snprintf(session_name, session_capacity, "%s", "blit");
     for (i = 0; i < argument_count; ++i) {
         const char *argument = argument_storage[i];
-        if (strcmp(argument, "--join") == 0 || strcmp(argument, "-j") == 0)
+        if (strcmp(argument, "--join") == 0 || strcmp(argument, "-j") == 0 ||
+            strcmp(argument, "--standby") == 0 || strcmp(argument, "-w") == 0)
             *is_join = 1;
         else if (strcmp(argument, "--session") == 0 ||
                  strcmp(argument, "-s") == 0) {
@@ -14380,6 +14334,11 @@ static BlitSession *hibr_desktop_owner(BlitRuntime *runtime,
                                        const char *session_name)
 {
     int i;
+    BlitSession *login = find_session_id(runtime, runtime->login_session_id);
+
+    if (strcmp(session_name, "desktop") == 0 &&
+        native_login_ready(login, monotonic_us()))
+        return login;
 
     for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
         BlitSession *session = &runtime->sessions[i];
@@ -14394,25 +14353,8 @@ static BlitSession *hibr_desktop_owner(BlitRuntime *runtime,
     return NULL;
 }
 
-/* Hibr's API adapter makes the primary surface the authoritative desktop
-   state.  A joined pane must therefore use that same owner for input and
-   graphics, even though it has its own surface geometry and hit-test area. */
-static BlitSession *hibr_input_owner(BlitRuntime *runtime,
-                                     BlitSession *session)
-{
-    if (session != NULL && session->hibr_desktop_join &&
-        session->hibr_desktop_session[0] != '\0') {
-        BlitSession *owner = hibr_desktop_owner(
-            runtime, session->hibr_desktop_session);
-        if (owner != NULL)
-            return owner;
-    }
-    return session;
-}
-
-/* A joined pane is a real Hibr hold client.  Its PTY carries the rectangle
-   that hold rendered for that client, so its own terminal surface is the
-   render source.  Only input is canonicalized to the primary desktop owner. */
+/* Native hold clients own their input and output PTY. Hibr alone
+   rewrites client-local input into its current 2-D union. */
 static BlitSession *hibr_render_source(BlitRuntime *runtime,
                                        BlitSession *session)
 {
@@ -14441,11 +14383,11 @@ static void hibr_frame_barrier_group_state(const BlitRuntime *runtime,
     for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
         const BlitSession *session = &runtime->sessions[i];
         BlitSurface *surface;
+        int native_ready = native_login_ready(session, monotonic_us());
 
         if (!session->used || session->surface_retired ||
-            (!session->hibr_desktop_primary && !session->hibr_desktop_join) ||
-            session->hibr_desktop_session[0] == '\0' ||
-            strcmp(session->hibr_desktop_session, desktop_name) != 0)
+            (!native_ready && (!session->hibr_desktop_primary && !session->hibr_desktop_join)) ||
+            strcmp(native_ready ? "desktop" : session->hibr_desktop_session, desktop_name) != 0)
             continue;
         surface = find_surface_id((BlitRuntime *)runtime, session->id);
         ++*members;
@@ -14463,12 +14405,13 @@ static int hibr_frame_barrier_is_incomplete(const BlitRuntime *runtime)
         const BlitSession *session = &runtime->sessions[i];
         int members;
         int dirty;
+        int native_ready = native_login_ready(session, monotonic_us());
 
-        if (!session->used || !session->hibr_desktop_primary ||
-            session->hibr_desktop_session[0] == '\0')
+        if (!session->used || (!native_ready && (!session->hibr_desktop_primary ||
+            session->hibr_desktop_session[0] == '\0')))
             continue;
         hibr_frame_barrier_group_state(runtime,
-                                       session->hibr_desktop_session,
+                                       native_ready ? "desktop" : session->hibr_desktop_session,
                                        &members, &dirty);
         if (members > 1 && dirty > 0 && dirty < members)
             return 1;
@@ -14491,12 +14434,15 @@ static void arm_hibr_frame_barrier(BlitRuntime *runtime,
     int dirty;
     uint64_t period = BLIT_HIBR_FRAME_BARRIER_FALLBACK_US;
     uint64_t deadline;
+    int native_ready = native_login_ready(session, now);
+    const char *group;
 
-    if (session == NULL || (!session->hibr_desktop_primary &&
+    if (session == NULL || (!native_ready && ((!session->hibr_desktop_primary &&
                             !session->hibr_desktop_join) ||
-        session->hibr_desktop_session[0] == '\0')
+        session->hibr_desktop_session[0] == '\0')))
         return;
-    hibr_frame_barrier_group_state(runtime, session->hibr_desktop_session,
+    group = native_ready ? "desktop" : session->hibr_desktop_session;
+    hibr_frame_barrier_group_state(runtime, group,
                                    &members, &dirty);
     if (members < 2 || dirty < 1)
         return;
@@ -14512,7 +14458,7 @@ static void arm_hibr_frame_barrier(BlitRuntime *runtime,
         char detail[192];
         snprintf(detail, sizeof(detail),
                  "desktop=%s members=%d dirty=%d deadline_us=%llu period_us=%llu",
-                 session->hibr_desktop_session, members, dirty,
+                 group, members, dirty,
                  (unsigned long long)deadline, (unsigned long long)period);
         diagnostic_trace(runtime, "hibr_frame_barrier", detail);
     }
@@ -14552,9 +14498,8 @@ static int create_session(BlitRuntime *runtime, const char *json,
     int hibr_desktop_result;
     char hibr_desktop_session[128];
     BlitSession *hibr_owner = NULL;
-    BlitPane *hibr_owner_pane = NULL;
-    int hibr_pane_column = 0;
-    int hibr_primary_column = 0;
+    int join_position_present = 0;
+    int join_position[2] = {0, 0};
     const char *command_name;
     int i;
 
@@ -14609,10 +14554,53 @@ static int create_session(BlitRuntime *runtime, const char *json,
         hibr_owner = hibr_desktop_owner(runtime, hibr_desktop_session);
         if (hibr_owner == NULL)
             return -3;
-        hibr_owner_pane = find_pane_id(runtime, hibr_owner->pane_id);
-        hibr_primary_column = hibr_logical_column(runtime,
-                                                  hibr_owner_pane,
-                                                  hibr_owner_pane);
+        if (hibr_owner->login_manager) {
+            /* A native login's namespace belongs to the authenticated user,
+               not the root service. An explicit different account is rejected. */
+            if (run_as_user && (run_uid != hibr_owner->login_identity_uid ||
+                               run_gid != hibr_owner->login_identity_gid))
+                return -4;
+            if (!run_as_user) {
+                run_as_user = 2; /* NSS lookup and groups happen in the child. */
+                run_uid = hibr_owner->login_identity_uid;
+                run_gid = hibr_owner->login_identity_gid;
+            }
+        }
+    }
+    {
+        const char *cursor = json;
+        char key[128], number_text[256];
+        static char value[BLIT_SETTINGS_CAPACITY];
+        while ((cursor = json_next_member(cursor, key, sizeof(key), value, sizeof(value))) != NULL) {
+            if (strcmp(key, "hibr_join_position") == 0) {
+                const char *member;
+                unsigned seen = 0;
+                if (join_position_present || !hibr_desktop_join || value[0] != '{') return -1;
+                join_position_present = 1;
+                member = value + 1;
+                while ((member = json_next_member(member, key, sizeof(key), number_text, sizeof(number_text))) != NULL) {
+                    char *end;
+                    long number;
+                    unsigned bit;
+                    int index;
+                    if (strcmp(key, "row") == 0) { bit = 1; index = 0; }
+                    else if (strcmp(key, "column") == 0) { bit = 2; index = 1; }
+                    else return -1;
+                    if (seen & bit) return -1;
+                    seen |= bit;
+                    if (!(number_text[0] == '-' || (number_text[0] >= '0' && number_text[0] <= '9'))) return -1;
+                    errno = 0; number = strtol(number_text, &end, 10);
+                    while (*end == ' ' || *end == '\n' || *end == '\t' || *end == '\r') ++end;
+                    if (errno || *end || number < -32767 || number > 32767) return -1;
+                    join_position[index] = (int)number;
+                }
+                if (seen != 3) return -1;
+            }
+        }
+        if (join_position_present)
+            for (i = 0; i < argument_count; ++i)
+                if (strcmp(argument_storage[i], "--standby") == 0 ||
+                    strcmp(argument_storage[i], "-w") == 0) return -1;
     }
     /* The deployed launcher is blit-session.hibr, not `desktop`, so looking
        only at `desktop` meant a resumed desktop did not report itself as one
@@ -14659,6 +14647,9 @@ static int create_session(BlitRuntime *runtime, const char *json,
     if (width < 1 || height < 1 || width > BLIT_MAX_CELL_COLS ||
         height > BLIT_MAX_CELL_ROWS)
         return 0;
+    if (hibr_desktop_join && hibr_owner != NULL && hibr_owner->login_manager &&
+        (pane == NULL || pane_surface_id(runtime, pane) != NULL))
+        return -5;
     if (!surface_present && pane == NULL && display_id[0] == '\0')
         return 0;
     memset(&size, 0, sizeof(size));
@@ -14680,6 +14671,28 @@ static int create_session(BlitRuntime *runtime, const char *json,
         char surface_text[64];
         char port_text[16];
         char hibr_log_path[256];
+        char run_home[512];
+        if (run_as_user == 2) {
+            run_pw = getpwuid(run_uid);
+            if (run_pw == NULL || strlen(run_pw->pw_name) >= sizeof(run_user)) _exit(126);
+            snprintf(run_user, sizeof(run_user), "%s", run_pw->pw_name);
+        }
+        if (run_as_user) {
+            if (strlen(run_pw->pw_dir) >= sizeof(run_home)) _exit(126);
+            snprintf(run_home, sizeof(run_home), "%s", run_pw->pw_dir);
+        }
+        if (hibr_desktop_join && hibr_owner != NULL && hibr_owner->login_manager) {
+            DIR *directory;
+            struct dirent *entry;
+            if (clearenv() != 0) _exit(126);
+            directory = opendir("/proc/self/fd");
+            if (directory == NULL) _exit(126);
+            while ((entry = readdir(directory)) != NULL) {
+                int fd = atoi(entry->d_name);
+                if (fd > 2 && fd != dirfd(directory)) close(fd);
+            }
+            closedir(directory);
+        }
         if (inherited_fd >= 0 && fcntl(inherited_fd, F_SETFD, 0) < 0)
             _exit(126);
         snprintf(session_text, sizeof(session_text), "%llu", session_id);
@@ -14715,35 +14728,22 @@ static int create_session(BlitRuntime *runtime, const char *json,
            ADR 0055 records the consequence: every launched child sees it.
            The API's own environment entries are applied after this and
            overwrite, so a client may set it empty to opt a child out. */
-        if (runtime->auth_token[0] != '\0' &&
+        if (!(hibr_desktop_join && hibr_owner != NULL && hibr_owner->login_manager) &&
+            runtime->auth_token[0] != '\0' &&
             setenv("BLIT_API_TOKEN", runtime->auth_token, 1) != 0)
                 _exit(126);
         if (pane_id[0] != '\0' && setenv("BLIT_PANE_ID", pane_id, 1) != 0)
             _exit(126);
-        /* Hibr's desktop currently has a horizontal union coordinate system.
-           Keep the primary at logical (0,0) and give every join a stable
-           horizontal slot; Blit still presents that local PTY viewport in
-           the authoritative physical pane selected by the API topology. */
-        if (hibr_process && pane != NULL) {
+        /* Native hold alone owns the 2-D union. Optional initial placement
+           is explicit; never infer horizontal slots or move the primary. */
+        if (join_position_present) {
             char pane_row[32];
             char pane_column[32];
-            hibr_pane_column = hibr_logical_column(runtime, pane,
-                                                   hibr_owner_pane != NULL ?
-                                                   hibr_owner_pane : pane);
-            snprintf(pane_row, sizeof(pane_row), "%d", 0);
-            snprintf(pane_column, sizeof(pane_column), "%d",
-                     hibr_pane_column);
+            snprintf(pane_row, sizeof(pane_row), "%d", join_position[0]);
+            snprintf(pane_column, sizeof(pane_column), "%d", join_position[1]);
             if (setenv("BLIT_HIBR_PANE_ROW", pane_row, 1) != 0 ||
                 setenv("BLIT_HIBR_PANE_COL", pane_column, 1) != 0)
                 _exit(126);
-            if (hibr_desktop_join && hibr_owner_pane != NULL) {
-                snprintf(pane_row, sizeof(pane_row), "%d", 0);
-                snprintf(pane_column, sizeof(pane_column), "%d",
-                         hibr_primary_column);
-                if (setenv("BLIT_HIBR_PRIMARY_ROW", pane_row, 1) != 0 ||
-                    setenv("BLIT_HIBR_PRIMARY_COL", pane_column, 1) != 0)
-                    _exit(126);
-            }
         }
         /* ADR 0064 stage 5. A chosen default PCM reaches a child as ALSA's
            own environment variables, which is the whole of what Blit can
@@ -14771,11 +14771,13 @@ static int create_session(BlitRuntime *runtime, const char *json,
         if (run_as_user) {
             if (initgroups(run_user, run_gid) != 0 ||
                 setgid(run_gid) != 0 || setuid(run_uid) != 0 ||
-                setenv("HOME", run_pw->pw_dir, 1) != 0 ||
+                setenv("HOME", run_home, 1) != 0 ||
                 setenv("USER", run_user, 1) != 0 ||
                 setenv("LOGNAME", run_user, 1) != 0)
                 _exit(126);
         }
+        if (hibr_desktop_join && hibr_owner != NULL && hibr_owner->login_manager &&
+            setenv("PATH", "/usr/bin:/bin", 1) != 0) _exit(126);
         for (environment_index = 0; environment_index < environment_count;
              ++environment_index)
             if (setenv(environment_keys[environment_index],
@@ -14803,6 +14805,11 @@ static int create_session(BlitRuntime *runtime, const char *json,
             session->hibr_process = hibr_process;
             session->hibr_desktop_primary = hibr_desktop_primary;
             session->hibr_desktop_join = hibr_desktop_join;
+            if (hibr_desktop_join && hibr_owner != NULL && hibr_owner->login_manager) {
+                session->native_login_id = hibr_owner->id;
+                session->native_owner_pid = hibr_owner->login_desktop_pid;
+                session->native_owner_start_ticks = hibr_owner->login_desktop_start_ticks;
+            }
             if (hibr_desktop_result > 0)
                 snprintf(session->hibr_desktop_session,
                          sizeof(session->hibr_desktop_session), "%s",
@@ -15473,6 +15480,42 @@ static int login_observer_wait_ms(BlitRuntime *runtime, uint64_t now)
         due = runtime->login_observer_due_us;
     }
     return now >= due ? 0 : (int)((due-now+999ULL)/1000ULL);
+}
+
+/* A login-owned client must never outlive its authentication generation or
+   follow a replacement native owner silently. Temporary query errors are not
+   proof of logout. Cancellation/reaping is asynchronous, with no frame-loop
+   waitpid sleep and no signal to the detached desktop owner. */
+static void service_native_join_lifetimes(BlitRuntime *runtime, uint64_t now)
+{
+    int i;
+    BlitSession *login = find_session_id(runtime, runtime->login_session_id);
+    for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
+        BlitSession *join = &runtime->sessions[i];
+        int invalid;
+        if (!join->used || join->native_login_id == 0) continue;
+        invalid = login == NULL || login->child_exited || login->id != join->native_login_id ||
+            login->login_identity_state != 2 || strcmp(login->login_identity_kind, "desktop") != 0;
+        if (!invalid && native_login_ready(login, now))
+            invalid = login->login_desktop_pid != join->native_owner_pid ||
+                login->login_desktop_start_ticks != join->native_owner_start_ticks;
+        if (invalid && join->native_retire_due_us == 0) {
+            char target[64];
+            if (!join->child_exited) {
+                if (kill(-join->process_id, SIGTERM) < 0) kill(join->process_id, SIGTERM);
+            }
+            join->native_retire_due_us = now + 100000ULL;
+            snprintf(target, sizeof(target), "session-%llu", join->id);
+            disable_input_routes_for_target(runtime, target);
+        }
+        if (join->native_retire_due_us == 0) continue;
+        join->focused = 0;
+        if (join->child_exited) { destroy_session(runtime, join); continue; }
+        if (now >= join->native_retire_due_us) {
+            if (kill(-join->process_id, SIGKILL) < 0) kill(join->process_id, SIGKILL);
+            join->native_retire_due_us = UINT64_MAX;
+        }
+    }
 }
 
 static void login_manager_json(BlitRuntime *runtime, char *body,
@@ -19906,6 +19949,16 @@ static void handle_request(int fd, BlitRuntime *runtime,
         if (create_result == -3) {
             send_problem(fd, 409, "Conflict", "hibr_desktop_owner_missing",
                          "A Hibr --join client requires an active primary desktop owner.");
+            return;
+        }
+        if (create_result == -4) {
+            send_problem(fd, 409, "Conflict", "hibr_desktop_identity_mismatch",
+                         "A join must use the authenticated desktop's local user and group.");
+            return;
+        }
+        if (create_result == -5) {
+            send_problem(fd, 409, "Conflict", "hibr_join_pane_unavailable",
+                         "A login-owned join requires an unoccupied logical pane.");
             return;
         }
         if (create_result < 0) {
@@ -25166,7 +25219,7 @@ static BlitSession *mouse_target(BlitRuntime *runtime, int output_index,
             int origin_y;
             int width;
             int height;
-            if (!session->used)
+            if (!session->used || session->native_retire_due_us != 0)
                 continue;
             paned = session->pane_id[0] != '\0';
             if (paned != (pass == 0))
@@ -25296,7 +25349,7 @@ static int write_input_bytes(BlitSession *session, const char *bytes,
 {
     ssize_t written;
 
-    if (session == NULL || session->pty_fd < 0 || length == 0)
+    if (session == NULL || session->pty_fd < 0 || length == 0 || session->native_retire_due_us != 0)
         return 0;
     written = write(session->pty_fd, bytes, length);
     if (written == (ssize_t)length)
@@ -25345,7 +25398,6 @@ static void send_mouse_report(BlitRuntime *runtime, SDL_WindowID window_id,
     BlitSession *session = mouse_target(runtime, output_index, pixel_x,
                                         pixel_y, &column, &row);
     BlitSession *routed = input_route_target(runtime, "evdev-pointer");
-    BlitSession *coordinate_session = routed != NULL ? routed : session;
     int code;
 
     if (routed != NULL) {
@@ -25353,8 +25405,7 @@ static void send_mouse_report(BlitRuntime *runtime, SDL_WindowID window_id,
         if (column == 0) column = 1;
         if (row == 0) row = 1;
     }
-    hibr_input_coordinates(runtime, coordinate_session, &column, &row);
-    session = hibr_input_owner(runtime, session);
+    session = session;
     if (session != NULL && !release && button == 0)
         focus_session(runtime, session);
     if (session == NULL || session->pty_fd < 0)
@@ -25411,7 +25462,6 @@ static void send_mouse_motion_report(BlitRuntime *runtime,
     BlitSession *session = mouse_target(runtime, output_index, pixel_x,
                                         pixel_y, &column, &row);
     BlitSession *routed = input_route_target(runtime, "evdev-pointer");
-    BlitSession *coordinate_session = routed != NULL ? routed : session;
     int button = active_mouse_button(runtime);
     char report[64];
 
@@ -25420,8 +25470,7 @@ static void send_mouse_motion_report(BlitRuntime *runtime,
         if (column == 0) column = 1;
         if (row == 0) row = 1;
     }
-    hibr_input_coordinates(runtime, coordinate_session, &column, &row);
-    session = hibr_input_owner(runtime, session);
+    session = session;
     if (session == NULL || session->pty_fd < 0)
         return;
     if (session->terminal_mouse_mode != 1002 &&
@@ -25521,9 +25570,7 @@ static void update_pointer_position(BlitRuntime *runtime,
             runtime->pointer_x, runtime->pointer_y, &target_col, &target_row);
         BlitSession *input_target;
         if (routed != NULL) target = routed;
-        hibr_input_coordinates(runtime, routed != NULL ? routed : target,
-                               &target_col, &target_row);
-        input_target = hibr_input_owner(runtime, target);
+        input_target = target;
         {
             char detail[256];
             snprintf(detail, sizeof(detail),
@@ -25582,12 +25629,9 @@ static void broadcast_evdev_pointer(BlitRuntime *runtime, const char *kind,
     BlitSession *target = mouse_target(runtime, runtime->pointer_output,
         runtime->pointer_x, runtime->pointer_y, &column, &row);
     BlitSession *input_target;
-    BlitSession *coordinate_session;
     if (routed != NULL)
         target = routed;
-    coordinate_session = routed != NULL ? routed : target;
-    hibr_input_coordinates(runtime, coordinate_session, &column, &row);
-    input_target = hibr_input_owner(runtime, target);
+    input_target = target;
     if (strcmp(kind, "pointer_wheel") == 0) {
         char detail[256];
         snprintf(detail, sizeof(detail),
@@ -25644,9 +25688,7 @@ static void dispatch_pointer_button_raw(BlitRuntime *runtime, int button,
     BlitSession *input_target;
     if (routed != NULL)
         target = routed;
-    hibr_input_coordinates(runtime, routed != NULL ? routed : target,
-                           &column, &row);
-    input_target = hibr_input_owner(runtime, target);
+    input_target = target;
     if (button < 0 || button > 2)
         return;
     snprintf(detail, sizeof(detail),
@@ -26049,15 +26091,15 @@ static BlitSession *keyboard_target(BlitRuntime *runtime)
     int i;
     BlitSession *routed = input_route_target(runtime, "evdev-keyboard");
     if (routed != NULL)
-        return hibr_input_owner(runtime, routed);
+        return routed;
     for (i = 0; i < BLIT_MAX_SESSIONS; ++i)
         if (runtime->sessions[i].used && runtime->sessions[i].focused &&
             runtime->sessions[i].pty_fd >= 0)
-            return hibr_input_owner(runtime, &runtime->sessions[i]);
-    if (session != NULL) return hibr_input_owner(runtime, session);
+            return &runtime->sessions[i];
+    if (session != NULL) return session;
     for (i = 0; i < BLIT_MAX_SESSIONS; ++i)
         if (runtime->sessions[i].used && runtime->sessions[i].pty_fd >= 0)
-            return hibr_input_owner(runtime, &runtime->sessions[i]);
+            return &runtime->sessions[i];
     return NULL;
 }
 
@@ -27986,6 +28028,7 @@ int main(int argc, char **argv)
             refresh_session_state(&runtime, &runtime.sessions[i]);
         service_login_manager(&runtime, monotonic_us());
         service_login_desktop(&runtime, monotonic_us());
+        service_native_join_lifetimes(&runtime, monotonic_us());
 
         pending_before_events = runtime.render_pending;
         sdl_events_started_us = monotonic_us();
@@ -28142,6 +28185,8 @@ int main(int argc, char **argv)
         }
         for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
             BlitSession *session = &runtime.sessions[i];
+            if (session->used && session->native_retire_due_us != 0 && wait_ms > 10)
+                wait_ms = 10;
             if (session->used && session->attach_reassert_pending &&
                 session->attach_reassert_due_us > now) {
                 uint64_t remaining_us = session->attach_reassert_due_us - now;

@@ -7,6 +7,38 @@ work actually stopped.
 
 ## Status at the last review
 
+### 2026-10-17 candidate 0.1.540: correct the native join boundary
+
+The user clarified that manual join commands are not the deliverable. Continue
+ADR0124's saved API-owned auxiliary lifecycle, not an operator recipe. Its
+first necessary dependency is now implemented under ADR0127: remove obsolete
+horizontal placement/input projection, admit recognized joins against the
+fresh authenticated native login association, derive the correct child user,
+and retire clients asynchronously on login/owner-generation replacement.
+Explicit initial native coordinates never move the primary. Native standby
+is classified as an auxiliary, not another desktop owner. No Hibr-core edits.
+
+The revised raw-PTY regression fails against0.1.539 (target2/input1/column129)
+and passes against the TCC candidate (target2/input2/local column1). An installed
+Hibr native CLI oracle independently verifies a134x240 vertical union and
+exactly one SGR coordinate rewrite, preserving press/release/modifier/wheel
+and keyboard bytes. The credential-dropping fixture checks login-owned joins,
+identity/occupied-pane/placement rejection, token removal and logout cleanup.
+Expanded coverage also passes owner-replacement cleanup, preservation across
+temporary query failure and refusal of new joins after observation expiry;
+maximum API latency in that controlled run is56.43ms. Derived native children
+additionally close inherited listener/device/PTY descriptors before exec.
+Broad/package validation remains in progress. This is local boundary evidence, not physical
+acceptance or completion of automatic policy.
+
+The host remains0.1.539 with its authenticated lower desktop preserved. Do not
+restart it merely to validate this candidate without safe user clearance.
+Next after gating/physical boundary acceptance: implement saved auxiliary
+policy and native standby/initial-placement reconciliation in the existing
+controller/store. The API must apply/save intent; the user must not launch
+joins manually. Deliberate Hibr release/rearrangement must not be undone by
+continuous placement assertions. Stable selectors/failover/panel remain staged.
+
 ### 2026-10-17 deployed 0.1.539: native login association
 
 Following the user's logout/restart clearance, the API updater installed and

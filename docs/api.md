@@ -227,7 +227,9 @@ contains no API token or inherited input/display/network descriptors. Login
 replacement cancels the query and invalidates its generation. No public API
 registers a claimed owner PID. The helper never moves, promotes, detaches or
 starts a desktop/client. This is association evidence, not automatic joins or
-registration in the obsolete `hibr_desktop.role` projection. See ADR 0126.
+registration in the old external-adapter ownership flags. From0.1.540, a
+fresh association safely projects the login's ownership role for native joins
+without enabling input projection. See ADRs0126 and0127.
 This stage uses the packaged `desktop` name and Hibr's default per-user hold
 namespace; custom PAM TMPDIR namespaces are not inferred.
 
@@ -476,9 +478,31 @@ primary with `409` problem responses. The server therefore has one explicit
 Hibr owner at a time rather than accidentally spawning competing desktops.
 
 The API does not rewrite Hibr configuration or patch Hibr source. A client
-should keep the returned session IDs and inspect `hibr_desktop.role` before
-starting auxiliary joins. Delete all Blit sessions at the end and confirm
+should keep the returned session IDs. From0.1.540, a login-owned join requires
+fresh `/v1/login.desktop` readiness, not authentication alone. The associated
+login projects ownership role `primary`; Hibr's primary-display choice remains
+the separate native `login.desktop.client.primary` flag. Omitting `user`
+derives the authenticated account in the child, without the service's API
+token. A conflicting explicit account returns409
+`hibr_desktop_identity_mismatch`; an occupied/missing logical pane returns409
+`hibr_join_pane_unavailable`. Delete test sessions at the end and confirm
 `/v1/diagnostics` reports zero sessions and surfaces.
+
+Native clients receive input through their own PTYs in local coordinates;
+Hibr alone translates it into the current2-D union. Blit does not forward
+joined input to the primary or add a horizontal slot offset. An optional
+`hibr_join_position: {"row": -67, "column": 0}` requests initial native
+placement through the Blit launcher; signed values are bounded to±32767 and
+both fields are required. This is a logical-cell example, not a fixed monitor
+size or automatic layout policy. It is invalid on non-join and standby
+requests. The launcher never moves the primary or reasserts later user layout.
+
+Recognized `--standby`/`-w` is an auxiliary client, not another desktop owner.
+Hibr owns its waiting/deliberately-released behavior. Login-owned clients are
+retired asynchronously when their authentication generation ends or a fresh
+observation proves native owner replacement. Temporary query errors alone do
+not trigger destruction. Saved automatic auxiliary policy and its placement/
+reconnect reconciliation are not yet implemented by this API increment.
 
 Primary and join lifetimes are intentionally different: the primary may keep
 its Blit session running while Hibr's detached owner restarts after the

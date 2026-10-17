@@ -92,38 +92,11 @@ mod load "$moddir/img.so" || exit 1
 mod load "$moddir/pty.so" || exit 1
 mod load "$moddir/term.so" || exit 1
 mod load "$moddir/hold.so" || exit 1
-# Blit keeps physical pane placement separate from Hibr's horizontal desktop
-# union. The primary stays at logical (0,0), and the server supplies a stable
-# logical column for each join. This remains in the Blit-owned launcher so
-# Hibr's desktop implementation is untouched; without these variables, retain
-# Hibr's stock behavior for direct Hibr invocations and other controlled uses
-# of this entrypoint.
+# Explicit initial native coordinates only. Never reposition a primary here:
+# Hibr owns the 2-D union and later Displays-panel placement changes.
 if [ "$blit_join" = 1 ] &&
 	[ -n "${BLIT_HIBR_PANE_ROW:-}" ] &&
-	[ -n "${BLIT_HIBR_PANE_COL:-}" ] &&
-	[ -n "${BLIT_HIBR_PRIMARY_ROW:-}" ] &&
-	[ -n "${BLIT_HIBR_PRIMARY_COL:-}" ]; then
-	blit_clients=$(hold clients "$blit_session") || exit 1
-	blit_primary_client=
-	while IFS=' ' read -r blit_client blit_row blit_col blit_rows \
-		blit_cols blit_primary; do
-		[ "$blit_primary" = 1 ] || continue
-		blit_primary_client=$blit_client
-		break
-	done <<< "$blit_clients"
-	if [ -z "$blit_primary_client" ]; then
-		echo "$0: no primary client in held session $blit_session" >&2
-		exit 1
-	fi
-	# Reassert the primary's canonical logical origin only when it has actually
-	# been rearranged through Hibr's control panel. A no-op `hold move` clears
-	# Hibr's client front buffer and would turn a correct primary into a partial
-	# repaint during the join handshake.
-	if [ "$BLIT_HIBR_PRIMARY_ROW" != 0 ] ||
-		[ "$BLIT_HIBR_PRIMARY_COL" != 0 ]; then
-		hold move "$blit_session" "$blit_primary_client" \
-			"$BLIT_HIBR_PRIMARY_ROW" "$BLIT_HIBR_PRIMARY_COL" || exit 1
-	fi
+	[ -n "${BLIT_HIBR_PANE_COL:-}" ]; then
 	if [ -n "$blit_name" ]; then
 		hold attach -m -n "$blit_name" "$blit_session" \
 			"$BLIT_HIBR_PANE_ROW" "$BLIT_HIBR_PANE_COL"

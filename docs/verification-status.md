@@ -3,6 +3,46 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-17: candidate 0.1.540 native join PTY boundary
+
+The revised `hibr_join_viewport_gate.rb` fails against0.1.539 with the precise
+trace `target_session=2 input_session=1 column=129 row=1`. The TCC candidate
+passes: target2/input2/local column1, independent primary/join surfaces. The
+old input-owner redirection and horizontal coordinate helper are removed.
+The launcher no longer moves the primary. Explicit one-shot native coordinates
+are schema-bound and do not combine with standby.
+
+`native_join_pty_gate.rb` uses installed Hibr CLI in an isolated namespace,
+not a mock desktop: two67x240 clients yield primary `(67,0,67,240)` and upper
+`(0,0,67,240)`. Raw input reaches the held program with lower row+67 exactly
+once, upper coordinates unchanged, and button press/release, Alt modifier,
+wheel and keyboard preserved. The held fixture and attach clients are removed.
+An initial Ruby thread-rescue syntax error in this new fixture was corrected
+before the oracle ran successfully; it was not a product or physical pass.
+
+The initial expanded credential-dropping observer fixture passes recognized
+login-owned join creation, derived UID/GID65534, missing service API token,
+explicit negative placement, occupied-pane/identity/schema rejection, local
+clicks and asynchronous logout cleanup (maximum API request37.46ms). Later
+coverage adds owner replacement, query-expiry preservation and refusal of new
+joins without fresh authority. Its first survival assertion incorrectly
+required `running` for a silent `/bin/sleep` fixture that legitimately remains
+`starting`; the corrected assertion permits either live state. This failure
+alone did not establish that logout signalled the reported owner. The corrected
+expanded run passes, including old-client retirement on verified owner
+replacement, survival of the replacement owner across logout, preservation of
+existing clients through a query failure, and refusal of new joins after TTL
+expiry. Its maximum API request is56.43ms. A subsequent child-only hardening
+closes inherited descriptors and copies HOME before supplementary-group NSS
+initialization; the final broad run must include that change. Broad/package
+and physical checks are still pending.
+
+The user requests saved automatic joins, not manual launch instructions. This
+increment is their native boundary prerequisite; it does not claim saved
+auxiliary policy, automatic boot/login provisioning or standby placement is
+already implemented. The real host remains0.1.539; no renderer or live
+authenticated-session change was made.
+
 ## 2026-10-17: deployed 0.1.539 native desktop association
 
 ### Physical deployment checkpoint

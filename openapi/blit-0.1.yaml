@@ -3624,6 +3624,20 @@ components:
             required for an unplaced session.
         display_id: {$ref: '#/components/schemas/ResourceId'}
         pane_id: {$ref: '#/components/schemas/ResourceId'}
+        hibr_join_position:
+          type: object
+          required: [row, column]
+          properties:
+            row: {type: integer, minimum: -32767, maximum: 32767}
+            column: {type: integer, minimum: -32767, maximum: 32767}
+          additionalProperties: false
+          description: >-
+            Optional initial native hold coordinates for a one-shot Hibr join.
+            Negative coordinates allow an attachment above or left of the
+            existing union. The Blit session launcher honors these coordinates
+            without moving the primary. Not valid for a standby invocation.
+            Later placement belongs to Hibr; no input coordinate projection
+            is performed by Blit. Requires a recognized Hibr join command.
         surface_mode:
           type: string
           enum: [terminal, external, mirror]
@@ -3635,8 +3649,8 @@ components:
             read-only presentation surface for explicit non-Hibr clients.
             A Hibr desktop --join session is forced into terminal mode: Hibr
             hold writes that client's own viewport to its PTY, Blit parses it
-            into its distinct pane, and hit-tested input is routed to the
-            primary Hibr owner.
+            into its distinct pane. Input goes to the hit-tested client's own
+            PTY in local coordinates; native hold rewrites it into the union.
       additionalProperties: false
     TerminalInput:
       type: object
@@ -3779,7 +3793,10 @@ components:
           description: >-
             Blit's enforced Hibr ownership role. A primary owns the named
             held desktop; join clients attach to that same Hibr session and
-            never create a second desktop state owner.
+            never create a second desktop state owner. A freshly associated
+            authenticated login projects primary ownership without changing
+            external-adapter flags. This is not Hibr's mutable primary-display
+            selection, reported separately by login.desktop.client.primary.
         session:
           type: string
           description: Hibr held-session name, normally `blit`.

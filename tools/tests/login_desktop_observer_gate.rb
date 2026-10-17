@@ -56,6 +56,7 @@ Dir.mktmpdir('blit-login-observe') do |root|
     [result,owner_file,count,startup].each{|p|File.write(p,'');File.chmod(0666,p)}
     observer=File.join(root,'observer.hibr')
     action=case mode
+      when 'ready' then 'printf "ready %s 24 128 0 0 24 128 1\\n" "$owner"'
       when 'secondary' then 'printf "ready %s 96 128 48 0 48 128 0\\n" "$owner"'
       when 'missing' then 'printf "waiting client_missing\\n"'
       when 'owner_missing' then 'printf "waiting owner_missing\\n"'
@@ -99,6 +100,10 @@ Dir.mktmpdir('blit-login-observe') do |root|
       'BLIT_GATE_HOOK'=>hook,'BLIT_GATE_TARGET'=>target,
       'BLIT_GATE_RESULT'=>result,'BLIT_GATE_OWNER_FILE'=>owner_file}
     env['BLIT_GATE_OWNER_DELAY']='0.5' if mode=='geometry'
+    if mode=='ready'
+      env['BLIT_PANE_LAYOUT']='1x2'
+      env['BLIT_LOGIN_PANE_ID']='pane-display-1-2'
+    end
     log=File.join(root,'server.log')
     $pid=spawn('sudo','-n','env',*env.map{|k,v|"#{k}=#{v}"},BINARY,PORT.to_s,out:log,err:log)
     login=await{q=request('GET','/v1/login');q['desktop'] && q}
@@ -109,7 +114,8 @@ Dir.mktmpdir('blit-login-observe') do |root|
         (mode!='missing' || d['reason']=='client_missing') &&
         (mode!='shell' || d['reason']=='shell_selected')
     end
-    d=login['desktop'];check(login.dig('session','hibr_desktop','role')=='none','native observation enabled legacy projection')
+    d=login['desktop'];check(login.dig('session','hibr_desktop','role')==(expected=='ready' ? 'primary' : 'none'),
+      'native role projection differs from fresh verified association')
     check(File.read(startup)=='owner_missing','startup-ordering fixture was not exercised') if mode=='geometry'
     if expected=='ready'
       check(d.dig('owner','uid')==65534 && d.dig('owner','starttime_ticks').to_i>0,'owner credentials/lifetime absent')
@@ -130,6 +136,51 @@ Dir.mktmpdir('blit-login-observe') do |root|
       end
     end
     if mode=='ready'
+      # Native login-owned API joins derive credentials, never root's namespace.
+      # This child is a raw PTY oracle, not an actual Hibr desktop.
+      child=File.join(root,'desktop');proof=File.join(root,'join-proof');input=File.join(root,'join-input')
+      [proof,input].each{|p|File.write(p,'');File.chmod(0666,p)}
+      File.write(child,<<~CHILD)
+        #!/usr/bin/ruby
+        require 'io/console';require 'json'
+        STDIN.raw!
+        File.write(#{proof.inspect},JSON.generate(uid:Process.uid,gid:Process.gid,
+          home:ENV['HOME'],token:ENV['BLIT_API_TOKEN'],row:ENV['BLIT_HIBR_PANE_ROW'],column:ENV['BLIT_HIBR_PANE_COL']))
+        STDOUT.write("\\e[?1003h\\e[?1006h");STDOUT.flush
+        loop{File.open(#{input.inspect},'ab'){|f|f.write(STDIN.readpartial(4096))}}
+      CHILD
+      File.chmod(0755,child)
+      body={command:child,arguments:['--session','desktop','--join'],pane_id:'pane-display-1-1',
+        hibr_join_position:{row:-24,column:0}}
+      refuse=->(payload,code,reason) do
+        q=Net::HTTP::Post.new(BASE+'/v1/terminal-sessions');q['Authorization']='Bearer observer-admin'
+        q['Content-Type']='application/json';q.body=JSON.generate(payload)
+        r=Net::HTTP.start(BASE.host,BASE.port,read_timeout:3){|h|h.request(q)}
+        check(r.code.to_i==code && JSON.parse(r.body)['code']==reason,"wrong native join refusal:#{r.code}:#{r.body}")
+      end
+      refuse.call(body.merge(user:'root'),409,'hibr_desktop_identity_mismatch')
+      refuse.call(body.merge(pane_id:'pane-display-1-2'),409,'hibr_join_pane_unavailable')
+      [{row:true,column:0},{row:-24},{row:0,column:1.5},{row:0,column:32768},{row:0,column:0,extra:1}].each do |bad|
+        refuse.call(body.merge(hibr_join_position:bad),400,'invalid_hibr_desktop_arguments')
+      end
+      refuse.call(body.merge(arguments:['--session','desktop']),409,'hibr_desktop_exists')
+      refuse.call(body.merge(arguments:['--session','desktop','--standby']),400,'invalid_hibr_desktop_arguments')
+      join=request('POST','/v1/terminal-sessions',body)
+      await{File.size(proof)>0}
+      details=JSON.parse(File.read(proof))
+      check(details['uid']==65534 && details['gid']==65534 && details['token'].nil?,
+        "join credentials/token boundary failed:#{details}")
+      check(details['row']=='-24' && details['column']=='0','explicit native coordinates lost')
+      await{request('GET',"/v1/terminal-sessions/#{join['id']}").dig('mouse_reporting','sgr')}
+      pane=request('GET','/v1/topology')['panes'].find{|p|p['id']=='pane-display-1-1'}
+      x=pane.dig('cell_grid','origin_x')+1;y=pane.dig('cell_grid','origin_y')+1
+      request('POST','/v1/input/inject',{kind:'pointer_motion',x:x,y:y})
+      request('POST','/v1/input/inject',{kind:'pointer_button',x:x,y:y,button:0,pressed:true})
+      request('POST','/v1/input/inject',{kind:'pointer_button',x:x,y:y,button:0,pressed:false})
+      await{File.binread(input).include?("\e[<0;1;1M") && File.binread(input).include?("\e[<0;1;1m")}
+      check(request('GET',"/v1/terminal-sessions/#{join['id']}")['focused'],'join click focused another PTY')
+      # A temporary query failure is not proof of logout and must not destroy it.
+      refuse.call(body,409,'hibr_join_pane_unavailable')
       # Exercise the read-only physical acceptance client against this known
       # fixture, with quiet intervals longer than the association's TTL.
       out,err,status=Open3.capture3({'BLIT_LIVE'=>BASE.to_s,
@@ -138,15 +189,32 @@ Dir.mktmpdir('blit-login-observe') do |root|
         'ruby',File.join(ROOT,'tools/probes/host_native_association.rb'))
       check(status.success? && out.include?('HOST_NATIVE_ASSOCIATION_PASS'),
         "read-only association acceptance client failed:#{err}")
+      # Fresh evidence of owner replacement retires the old generation-bound
+      # client, without killing either the login or the reported native owner.
+      replacement=request('POST','/v1/terminal-sessions',
+        {command:'/bin/sleep',arguments:['30'],user:'nobody',surface:{width:1,height:1}})
+      File.write(owner_file,replacement['process_id'].to_s)
+      await{request('GET','/v1/login').dig('desktop','owner','pid')==replacement['process_id']}
+      await{request('GET','/v1/terminal-sessions')['sessions'].none?{|s|s['id']==join['id']}}
+      check(request('GET','/v1/login').dig('session','id')==login.dig('session','id'),'owner replacement destroyed login')
+      join=request('POST','/v1/terminal-sessions',body)
       # Cancellation while the next worker is blocked must remain responsive.
       File.write(observer,"exec /bin/sleep 30\n")
       await{request('GET','/v1/login').dig('desktop','query_in_flight')}
+      await{request('GET','/v1/login').dig('desktop','state')!='ready'}
+      check(request('GET','/v1/terminal-sessions')['sessions'].any?{|s|s['id']==join['id']},
+        'temporary observation failure destroyed existing client')
+      refuse.call(body,409,'hibr_desktop_owner_missing')
     end
     started=Process.clock_gettime(Process::CLOCK_MONOTONIC)
     request('DELETE','/v1/login')
     check(Process.clock_gettime(Process::CLOCK_MONOTONIC)-started<1,'logout blocked on observer')
     check(request('GET','/v1/login').dig('desktop','state')=='inactive','association survived logout')
     if mode=='ready'
+      await{request('GET','/v1/terminal-sessions')['sessions'].none?{|s|s['id']==join['id']}}
+      check(%w[starting running].include?(request('GET',"/v1/terminal-sessions/#{replacement['id']}")['state']),
+        'logout signalled native owner instead of only its client')
+      request('DELETE',"/v1/terminal-sessions/#{replacement['id']}")
       File.write(observer,source)
       request('POST','/v1/login',{})
       fresh=await do

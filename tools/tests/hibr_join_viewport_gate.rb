@@ -4,10 +4,9 @@
 # API regression gate for the Hibr join contract.  A primary and a --join
 # client belong to one logical Hibr desktop, but each client has an
 # independent local terminal viewport.  The join is not a framebuffer mirror:
-# its PTY output must paint its own Blit surface.  Pointer input still enters
-# the primary Hibr owner after the pane hit-test.
-# This tests the legacy recognized-launch projection, not ADR 0122's native
-# login-owned 2-D association (issue #96). Never infer native join acceptance.
+# its PTY output must paint its own Blit surface. Pointer input enters that
+# client's own PTY in local coordinates; native hold owns union rewriting.
+# This fixture tests Blit's boundary, not native hold's own mouse parser.
 require 'json'
 require 'net/http'
 require 'fileutils'
@@ -162,16 +161,16 @@ begin
   raise "pointer trace failed: #{code}" unless code == 200
   detail = trace.fetch('events').reverse.map { |event| event.fetch('detail', '') }
                        .find { |item| item.include?("target_session=#{join.fetch('id')}") }
-  expected = "input_session=#{primary.fetch('id')}"
-  raise "join input was not routed to primary: #{detail.inspect}" unless
+  expected = "input_session=#{join.fetch('id')}"
+  raise "join input was not routed to its own PTY: #{detail.inspect}" unless
     detail&.include?(expected)
-  expected_column = bottom.fetch('bounds').fetch('width') + 1
-  raise "join input used pane-local coordinates: #{detail.inspect}" unless
+  expected_column = 1
+  raise "join input was transformed twice: #{detail.inspect}" unless
     detail&.include?("column=#{expected_column} row=1")
 
   puts "hibr join viewport gate: PASS primary=#{primary.fetch('id')} " \
        "join=#{join.fetch('id')} distinct_surfaces=true " \
-       "input=#{expected} logical_column=#{expected_column}"
+       "input=#{expected} local_column=#{expected_column}"
 ensure
   sessions.each do |id|
     request(base, 'DELETE', "/v1/terminal-sessions/#{id}")

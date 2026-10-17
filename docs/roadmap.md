@@ -45,6 +45,15 @@ three samples. No join was started. Next retire obsolete native horizontal
 projection and integrate standby/release joins (#96). Never guess an old
 unnamed client into this registry.
 
+Candidate0.1.540 implements the native-boundary prerequisite: recognized
+login-owned joins, derived authenticated credentials, per-client local PTY
+input instead of the obsolete horizontal/primary redirection, and generation
+cleanup (ADR0127). Raw-PTY and installed native CLI oracles pass; expanded
+controller and broad/package checks are pending. The host remains0.1.539.
+Manual join commands are not the requested deliverable. Continue with saved
+auxiliary policy and native standby/initial-placement reconciliation in the
+same API-owned controller/store after this boundary is accepted.
+
 ## Historical position — 0.1.507 live visual-acceptance blocker
 
 0.1.507 is deployed on the authorized one-output host and its API, package
