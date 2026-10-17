@@ -737,3 +737,26 @@ revision equals the state's revision; `tools/tests/render_state_agreement_gate.r
 discards a sample where they differ, and `tools/tests/sync_output_gate.rb`
 asserts the reported revision is *behind* the live one while a DEC 2026 batch
 is open.
+
+### Wake an idle login-manager surface without a keyboard
+
+When the operator cannot access the physical host, use the bounded wake probe:
+
+```sh
+BLIT_AUTH_TOKEN=TOKEN \
+  tools/diagnostics/wake-and-capture.sh \
+  http://HOST:8080 diagnostics/wake-test click
+cat diagnostics/wake-test/verdict.json
+```
+
+The probe reads the current pointer position, moves it by one pixel inside the
+first reported output, and captures the same state and screenshots again. The
+optional `click` action sends one button-0 press/release pair, which is the
+normal Hibr login-manager wake action for a saver. It never creates a terminal
+session, sends a key, changes an input route, or edits Hibr state. A changed
+screenshot proves only that the API event reached presentation; a changed
+surface revision additionally proves that the terminal producer changed its
+surface. Neither result by itself proves that an authenticated Hibr desktop is
+running. If the click leaves the saver, the after capture must show the login
+screen; if it does not, the screen saver was not proven stopped and the capture
+remains the authoritative evidence.

@@ -7,9 +7,9 @@ work actually stopped.
 
 ## Status at the last review
 
-The current source candidate is `0.1.523`. Hibr source was not modified.
+The current source candidate is `0.1.524`. Hibr source was not modified.
 
-The authenticated live host at `192.168.10.54` reports `0.1.523` with
+The authenticated live host at `192.168.10.54` reports `0.1.524` with
 `backend=drm-kms`, `direct_kms=true`, `video_driver=direct-kms`,
 `presentation_sync=drm-page-flip`, and one 1920x2160@60 Hz output. The
 persisted 1x2 topology has the supervised login manager in the lower pane and
@@ -25,9 +25,28 @@ events, including a 4.646 s maximum historical gap; that is not reported as
 motion-pass evidence. Direct-KMS frame-rate counters are now populated by the
 same diagnostics path as SDL.
 
-The package identity is recorded in [`releases/0.1.523.yaml`](../releases/0.1.523.yaml).
+The package identity is recorded in [`releases/0.1.524.yaml`](../releases/0.1.524.yaml).
 These are bounded renderer measurements, not visual acceptance of the Hibr
 desktop, physical input, wallpaper, graphics protocol, or joins.
+
+### 0.1.524 live login-manager wake evidence
+
+On 2026-10-17, `tools/diagnostics/wake-and-capture.sh` was run against the
+live `0.1.524` host while the only Blit session was the supervised Hibr login
+manager. A one-pixel API pointer motion was accepted and produced a changing
+surface/screenshot, confirming the visible colored lines were an active Hibr
+login-manager saver rather than a static framebuffer. An explicit API
+button-0 press/release pair then produced two button trace events and a
+screenshot containing Hibr's `User name` login box. Hibr's own login source
+intentionally keeps the saver behind that box, so the remaining animated
+background is expected login-manager composition; it is not evidence of an
+authenticated desktop or of a complete desktop render.
+
+The probe deliberately does not create a session, send a keyboard key, alter
+input routes, or modify Hibr. Its screenshot and JSON verdict are temporary
+live evidence under `/tmp`; the repeatable tool and its interpretation are
+tracked in `tools/diagnostics/wake-and-capture.sh` and
+`docs/diagnostic-capture.md`.
 
 ### Architecture decision check
 

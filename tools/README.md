@@ -22,3 +22,9 @@ launcher for Hibr.
 
 The optional `hibr/console-blit.so` provider is a C module for Hibr programs
 that explicitly load the provider. It is separate from desktop orchestration.
+
+- `wake-and-capture.sh` is the bounded live login-manager diagnostic. It
+  records before/after state and screenshots, injects one one-pixel pointer
+  motion by default or one complete pointer click when explicitly passed
+  `click`, and reports whether a surface or screenshot changed. It does not
+  create sessions, send keys, or modify Hibr.
