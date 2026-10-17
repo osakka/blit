@@ -1,7 +1,8 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# Issues #8, #9, #10, #11 on the live host. The pixel half runs on display-1
+# Issues #8, #9, #10, #11 on the live host. The pixel half runs on the
+# topology-discovered physical output
 # while nothing else owns it -- a supervised update has just restarted the
 # server, so the desktop is down and the output is free. Run this before
 # relaunching the desktop.
@@ -86,8 +87,11 @@ def scenario(chunks, images:, columns: 60, rows: 12, display: nil,
 end
 
 def pixel(bmp, width, height, x, y)
-  stride = (width * 3 + 3) & ~3
-  offset = 54 + (height - 1 - y) * stride + x * 3
+  bits = bmp.getbyte(28) | (bmp.getbyte(29) << 8)
+  bytes = bits / 8
+  raise "unsupported BMP depth #{bits}" unless [3, 4].include?(bytes)
+  stride = (width * bytes + 3) & ~3
+  offset = 54 + (height - 1 - y) * stride + x * bytes
   [bmp.getbyte(offset + 2), bmp.getbyte(offset + 1), bmp.getbyte(offset)]
 end
 
@@ -103,6 +107,7 @@ if graphics
         'a full-size sixel canvas is exactly the byte budget')
 end
 output = diagnostics.fetch('render').fetch('outputs').fetch(0)
+display_id = call('GET', '/v1/topology').last.fetch('outputs').first.fetch('display_id')
 inset = diagnostics.fetch('render').fetch('surface_inset_px')
 fb_w = output.fetch('render_width')
 fb_h = output.fetch('render_height')
@@ -179,7 +184,7 @@ scenario([HIDE + "\\033[?80h\\033[4;10H\\033Pq#2;2;0;100;0#{solid}\\033\\\\"],
         'DECSDM homes the image')
 end
 
-# --- the pixel half, on the physical output ---
+# --- the pixel half, on the topology-discovered physical output ---
 #
 # Nothing in this stream defines colours 1, 2 or 3, and the HLS triples are
 # the ones #9's ticket quotes. Every one of these used to be white or absent.
@@ -190,11 +195,11 @@ scenario([HIDE + "\\033[1;1H\\033Pq#1#{solid}\\033\\\\",
           "\\033[3;3H\\033Pq#0;1;0;50;100#{solid}\\033\\\\",
           "\\033[3;5H\\033Pq#0;1;240;50;100#{solid}\\033\\\\",
           "\\033[48;2;0;0;255m\\033[5;1H\\033Pq#1;2;100;0;0~?~\\033\\\\"],
-         images: 7, display: 'display-1') do |state, _summary|
+         images: 7, display: display_id) do |state, _summary|
   check(state['graphics'].to_a.length == 7,
         "all seven images decode, got #{state['graphics'].to_a.length} " \
         "#{state['graphics_diagnostics'].inspect}")
-  bmp = raw('/v1/diagnostics/screenshots/display-1')
+  bmp = raw("/v1/diagnostics/screenshots/#{display_id}")
   at = ->(x, y) { pixel(bmp, fb_w, fb_h, inset + x, inset + y) }
   samples = {
     'VT340 #1 (blue)' => [at.call(0, 0), [51, 51, 204]],

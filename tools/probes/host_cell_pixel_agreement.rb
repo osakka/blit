@@ -63,7 +63,10 @@ end
 def painted_set(bmp, origin_x, origin_y, cell_width, cell_height, columns, rows)
   width = bmp[18, 4].unpack1('l<')
   height = bmp[22, 4].unpack1('l<')
-  stride = (width * 3 + 3) & ~3
+  bits = bmp[28, 2].unpack1('S<')
+  bytes = bits / 8
+  abort("unsupported BMP depth #{bits}") unless [3, 4].include?(bytes)
+  stride = (width * bytes + 3) & ~3
   lit = Set.new
   (0...rows).each do |cy|
     (0...columns).each do |cx|
@@ -76,8 +79,8 @@ def painted_set(bmp, origin_x, origin_y, cell_width, cell_height, columns, rows)
           x = origin_x + cx * cell_width + dx
           next if x >= width
 
-          offset = 54 + (height - 1 - y) * stride + x * 3
-          next if offset.negative? || offset + 2 >= bmp.bytesize
+          offset = 54 + (height - 1 - y) * stride + x * bytes
+          next if offset.negative? || offset + bytes - 1 >= bmp.bytesize
 
           if bmp.getbyte(offset).to_i + bmp.getbyte(offset + 1).to_i +
              bmp.getbyte(offset + 2).to_i > 0
@@ -115,13 +118,16 @@ abort "surface #{surface} has no topology pane" unless pane
 grid = pane.fetch('cell_grid')
 cell_width = grid.fetch('cell_width')
 cell_height = grid.fetch('cell_height')
-origin_x = pane.fetch('pixel_region').fetch('x') + grid.fetch('origin_x') + inset
-origin_y = pane.fetch('pixel_region').fetch('y') + grid.fetch('origin_y') + inset
+# The topology's cell-grid origin is already in display coordinates. The
+# pixel_region is a containing rectangle, not another offset to add.
+origin_x = grid.fetch('origin_x') + inset
+origin_y = grid.fetch('origin_y') + inset
+display_id = topology.fetch('outputs').first.fetch('display_id')
 failures = []
 worst = 0
 SAMPLES.times do |sample|
   before, cursor_a = drawn_set(get("/v1/surfaces/#{surface}/cells"))
-  bmp = get('/v1/diagnostics/screenshots/display-1?cached=1', raw: true)
+  bmp = get("/v1/diagnostics/screenshots/#{display_id}?cached=1", raw: true)
   after, cursor_b = drawn_set(get("/v1/surfaces/#{surface}/cells"))
   geometry = get("/v1/surfaces/#{surface}/summary")
   lit = painted_set(bmp, origin_x, origin_y, cell_width, cell_height,
