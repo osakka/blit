@@ -7,7 +7,7 @@ work actually stopped.
 
 ## Status at the last review
 
-### 2026-10-17 authenticated desktop exposes PTY byte loss, candidate 0.1.535
+### 2026-10-17 authenticated desktop exposes PTY byte loss, deployed 0.1.535
 
 The user authenticated. The 0.1.534 capture shows only the upper wallpaper
 portion; the surface snapshot itself has blank rows below row 22. This is
@@ -18,7 +18,28 @@ a reproduced Blit parser defect: pending UTF-8 plus a large PTY read silently
 discards that entire read because its join buffer is only 772 bytes.
 The actual service-entry pipe regression fails before and passes after
 bounded slicing through the one parser; ten fragmentation sizes also agree
-with continuous parsing. Candidate verification/deployment is in progress.
+with continuous parsing. Corrected-source renderer/terminal gates pass
+51/51 (no skips/failures). Reproducible package 0.1.535 from `01b57f5` is now
+API-deployed; manifest `releases/0.1.535.yaml` records its exact identity.
+The identical real-host PTY test fails on 0.1.534 and passes on 0.1.535:
+one half block, all 4000 text cells and END retained.
+
+The user logged in again and confirmed correct rendering and movement. The
+new capture has wallpaper through row 66; Control Panel was moved via the
+API. A revision-matched pixel check passes over 14,909 eligible blank/block
+cells (13,527 block cells), 1,904,128 pixels, with zero disagreements.
+Unsupported styled glyphs and pointer neighbourhoods are excluded, not
+claimed. The separately reported right-edge shift was subsequently reported
+fixed by the user; no geometry or backend change was made in this cycle.
+
+This is the working **v0.1.535 checkpoint**, not universal conformance. The
+6000-frame cadence recheck has zero stale pixels but **fails** zero-skipped
+refresh acceptance: 1980 flips span 1986 DRM vblanks over 33.151181 seconds
+(six skips). Runtime captures one 106.169-ms loop gap; its cause is not yet
+established. [Issue #95](https://git.home.arpa/itdlabs/blit/issues/95) tracks
+this separate performance follow-up, not a passing
+rate claim. The one existing authenticated upper-pane session remains;
+the lower pane is empty after probe cleanup.
 Evidence is under ignored `diagnostics/authenticated-20261017/`. Backend,
 pane arrangement and Hibr source remain unchanged.
 

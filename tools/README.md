@@ -43,6 +43,14 @@ input test. Both live probes discover the output and pane geometry from
 `/v1/topology`; direct-KMS screenshots are decoded from their advertised BMP
 bit depth.
 
+`host_render_agreement.rb` now compares revision-matched blank and solid/half
+block cell colours against scanout pixels. It refuses retained-graphics
+surfaces and excludes unsupported styles, visible terminal cursor and a
+bounded software-pointer neighbourhood. Those exclusions are not acceptance
+claims. Set `BLIT_AUTH_TOKEN`; pass host:port and optional surface/attempts.
+The legacy positional token remains supported. A moving revision discards
+the sample; it is not reported as a renderer failure.
+
 `host_utf8_stream.rb` reproduces issue #94 using a real PTY: a split UTF-8
 lead followed by a shell write larger than 4 KiB must retain its half block,
 4000 text cells and final ANSI-positioned marker. It requires a free pane,

@@ -13,13 +13,14 @@
 #
 # Issue #29, done-when 3: state the screensaver-trail report as pass or fail.
 #
-# A blank cell must render as a solid block of its background colour; anything
-# else in that block is a pixel the cell state does not account for, which is
-# what a trail looks like. That comparison is only meaningful if the pixels and
+# Blank cells and undecorated full/half blocks have exactly known colours.
+# Retained graphics are refused; styled glyphs, terminal cursor and a bounded
+# pointer neighbourhood are excluded. Run with the pointer stationary. This
+# comparison is only meaningful if the pixels and
 # the state describe the same frame, which is what the capture headers are for:
 # a sample whose presented revision moved under it is discarded, not failed.
 require 'json'; require 'net/http'; require 'uri'
-HOST = ARGV[0] || '192.168.10.54:8080'; TOKEN = ARGV[1] || 'hellomonkeyboy'
+HOST = ARGV[0] || '192.168.10.54:8080'; TOKEN = ARGV[1] || ENV.fetch('BLIT_AUTH_TOKEN')
 SURFACE_ARG = ARGV[2]
 ATTEMPTS = Integer(ARGV[3] || '12')
 BASE = URI("http://#{HOST}")
@@ -63,7 +64,14 @@ def px(b, x, y)
   stride = (W * bytes + 3) & ~3; o = 54 + (H - 1 - y) * stride + x * bytes
   [b.getbyte(o + 2), b.getbyte(o + 1), b.getbyte(o)]
 end
-checked = 0; mismatched = []; discarded = 0; used = nil
+sessions = json('/v1/terminal-sessions').fetch('sessions')
+session = sessions.find { |candidate| candidate['surface_id'] == SURFACE }
+abort 'cell-only agreement cannot judge retained graphics' if session && session.fetch('graphics', []).any?
+pointer = diag.fetch('render').fetch('pointer')
+pointer_positions = pointer['valid'] ? [[pointer['x'],pointer['y']],
+                                       [pointer['previous_x'],pointer['previous_y']]] : []
+checked = 0; half_blocks = 0; checked_pixels = 0
+mismatched = []; discarded = 0; used = nil
 ATTEMPTS.times do |i|
   cap = capture
   state = json("/v1/surfaces/#{SURFACE}/cells")
@@ -83,21 +91,36 @@ ATTEMPTS.times do |i|
   end
   grid = {}
   state['cells'].each { |c| grid[[c.fetch('x', 0), c.fetch('y', 0)]] = c }
-  checked = 0; mismatched = []
+  checked = 0; mismatched = []; half_blocks = 0; checked_pixels = 0
+  cursor = state['cursor'] || {}
   grid.each do |(x, y), cell|
-    next unless (cell['text'] || ' ') == ' '
-    next if (cell['style'] || {})['background'].nil?
-    hex = cell['style']['background'].delete('#')
-    want = [hex[0, 2].to_i(16), hex[2, 2].to_i(16), hex[4, 2].to_i(16)]
+    glyph = cell['text'] || ' '
+    next unless [' ', "\u2580", "\u2584", "\u2588"].include?(glyph)
+    style = cell['style'] || {}
+    next if style['background'].nil? || style['foreground'].nil?
+    next if %w[bold dim italic underline blink inverse strike concealed].any? { |key| style[key] }
+    next if cursor['visible'] && cursor['x'] == x && cursor['y'] == y
+    left = ORIGIN_X + x * CW; top = ORIGIN_Y + y * CH
+    next if pointer_positions.any? { |px, py| px && py &&
+      left < px + 64 && left + CW > px - 64 && top < py + 64 && top + CH > py - 64 }
+    colours = %w[foreground background].map do |key|
+      hex = style.fetch(key).delete('#')
+      [hex[0, 2].to_i(16), hex[2, 2].to_i(16), hex[4, 2].to_i(16)]
+    end
     bad = 0
     (0...CH).each do |dy|
+      ink = glyph == "\u2588" || (glyph == "\u2580" && dy < CH / 2) ||
+            (glyph == "\u2584" && dy >= CH / 2)
+      want = colours[ink ? 0 : 1]
       (0...CW).each do |dx|
         ax = ORIGIN_X + x * CW + dx; ay = ORIGIN_Y + y * CH + dy
         next if ax >= W || ay >= H
         bad += 1 if px(cap[:body], ax, ay) != want
+        checked_pixels += 1
       end
     end
     checked += 1
+    half_blocks += 1 if glyph != ' '
     mismatched << [x, y, bad] if bad.positive?
   end
   used = { frame: cap[:frame], presented: cap[:presented], direct_kms: DIRECT_KMS,
@@ -112,9 +135,10 @@ end
 puts "sample: attempt=#{used[:attempt]} frame=#{used[:frame]} presented=#{used[:presented]} " \
      "revision=#{used[:revision]} discarded=#{discarded}"
 if mismatched.empty?
-  puts "TRAIL_PASS blank_cells=#{checked} no_unaccounted_pixels=yes"
+  abort 'cell-colour comparison was vacuous' if checked == 0
+  puts "TRAIL_PASS checked_cells=#{checked} block_cells=#{half_blocks} pixels=#{checked_pixels} no_unaccounted_pixels=yes"
 else
-  puts "TRAIL_FAIL blank_cells=#{checked} with_unaccounted_pixels=#{mismatched.length} " \
+  puts "TRAIL_FAIL checked_cells=#{checked} with_unaccounted_pixels=#{mismatched.length} " \
        "worst=#{mismatched.max_by { |m| m[2] }.inspect} sample=#{mismatched.first(6).inspect}"
   exit 1
 end

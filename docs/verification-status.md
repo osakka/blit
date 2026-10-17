@@ -19,7 +19,34 @@ attributes, combining state, cursor and completed OSC title to continuous
 parsing. The same controlled shell/PTY reproduction on the real 0.1.534 host
 also fails: zero half-blocks, zero of 4000 text cells, and missing END marker.
 Its temporary lower-pane session was deleted; the existing desktop remains.
-Broad suite, reproducible package and corrected-host acceptance pending.
+Corrected-source renderer/terminal suite: 51 pass, zero skip/fail. Package
+0.1.535 from `01b57f5` passes reproducible artifact validation, SHA-256
+`ccf8c4f8d79ab58cf93f964dd33d3063503200a6588b94ca090cc5c41cc9246d`.
+The API updater verifies this version on 10.54. The identical host probe now
+passes: one half block, 4000 text cells and END at revision 3. Evidence is
+in `diagnostics/authenticated-20261017/535-utf8/`.
+
+The authenticated 0.1.535 capture shows wallpaper through row 66, unlike the
+0.1.534 truncation below row 22. Control Panel was moved through API pointer
+press/motion/release; a revision-matched cell/pixel check passes with 14,909
+eligible cells, including 13,527 block cells, and 1,904,128 checked pixels.
+No disagreements were found. Pointer neighbourhoods, unsupported styles and
+ordinary shaped glyphs are outside this colour check. Captures are
+`535-desktop.png` and `535-drag1.png` in the same evidence directory. The user
+independently confirms correct movement/rendering and reports the temporary
+right-edge shift resolved. No geometry/backend changes were made.
+
+The 6000-frame real PTY/pointer recheck separately **fails** strict cadence:
+1980 completed flips across 1986 DRM vblanks (six skips) over 33.151181 s,
+observed clock 59.907368 Hz, measured submission 59.746 Hz. Its blank-pixel
+assertions passed before the refresh assertion failed. All six skips fall
+in one clock-sample interval; runtime records a 106.169-ms maximum loop gap,
+not an established cause. Evidence: `535-cadence/scanout-verdict.json` and
+runtime/active-vblank samples. [Issue #95](https://git.home.arpa/itdlabs/blit/issues/95)
+tracks the investigation. Do not report this workload as refresh-pass.
+
+Tag v0.1.535 records this accepted visual/movement checkpoint with explicit
+remaining performance and wider protocol/hardware acceptance work.
 
 ## 2026-10-17: exact 0.1.534 physical acceptance boundary
 
