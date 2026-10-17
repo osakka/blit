@@ -32,6 +32,17 @@ existing client is unnamed. Do not retrofit/guess that binding. The host remains
 0.1.538, logged in; safe deployment and a fresh login will be required after
 candidate gates pass. Evidence: `diagnostics/association-539/live-query/`.
 
+The package is built from source/documentation commit `5735627`, SHA256
+`30daa8356f5068e8af101f8e90c6c62d4bc89754e256d69f5bfad91198f7eb35`.
+Artifact validation and reproducible rebuild pass. The package gate also
+compares both changed Hibr entrypoints to the manifest's source commit.
+The full gate run is underway with this exact package; no live update yet.
+`tools/probes/host_native_association.rb` is a read-only physical acceptance
+check for pre-authentication waiting and exact named-client readiness, including
+refresh after quiet intervals longer than the observation TTL. Its first run
+against live 0.1.538 rejects the absent contract without mutations. Use distinct
+evidence paths for subsequent waiting/ready samples.
+
 Next after physical named-client acceptance: retire obsolete native horizontal
 projection and integrate supported standby/release joins in one coherent
 semantic change (#96), without competing placement controllers (#99).

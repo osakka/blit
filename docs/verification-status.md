@@ -33,6 +33,17 @@ under its 500ms bound. The upcoming all-suite run uses the final source without
 overlapping gate ports. This history is not a claim that the initial overlapping
 execution was a clean pass or that concurrency alone proved its cause.
 
+Package `blit_0.1.539-1_amd64.deb` is built from source/documentation commit
+`573562705e52954c2c5d7572b78b8eb162c40f6f`, SHA256
+`30daa8356f5068e8af101f8e90c6c62d4bc89754e256d69f5bfad91198f7eb35`.
+Artifact validation/reproducible rebuild pass. The gate now additionally
+compares both changed Hibr scripts to the immutable source commit, not only
+their presence/executable bit. The read-only `host_native_association.rb` probe
+rejects live 0.1.538's absent desktop field with zero mutations (initial KeyError
+now replaced by an explicit missing-contract error). Its positive physical
+waiting/ready checks are pending deployment/fresh login. Full all-suite run
+includes the new package and is in progress. Host remains 0.1.538.
+
 ## 2026-10-17: deployed 0.1.538 private login identity
 
 The new `login_identity_gate.rb` fails against 0.1.537 (`login identity API
