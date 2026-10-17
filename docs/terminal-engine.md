@@ -339,3 +339,11 @@ image-slot allocation order, so equal-z overlaps have one result on SDL and
 direct KMS. Replacing a `(image id, placement id)` reference therefore changes
 one retained scene record; the presentation boundary repaints the old and new
 coverage before publishing the frame. See [ADR 0110](adr/0110-kitty-retained-scene-ordering-and-invalidation.md).
+
+On direct KMS, a graphics-only mutation uses the union of the previous and
+current retained-graphics bounds, quantized outward to complete cells. The
+old rectangle is included so replacement and deletion reveal the cached scene;
+the current rectangle is included so the new placement is composed. If either
+scene cannot be bounded, the presenter deliberately falls back to a complete
+view redraw. This keeps the atomic frame boundary while avoiding full-output
+wallpaper work for small moving graphics. See [ADR 0111](adr/0111-bounded-retained-graphics-damage.md).

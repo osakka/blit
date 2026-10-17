@@ -66,6 +66,11 @@ typedef struct {
     unsigned long long last_surface_graphics_signatures[KMS_MAX_VIEWS];
     int last_surface_origin_x[KMS_MAX_VIEWS];
     int last_surface_origin_y[KMS_MAX_VIEWS];
+    int last_surface_graphics_valid[KMS_MAX_VIEWS];
+    int last_surface_graphics_x[KMS_MAX_VIEWS];
+    int last_surface_graphics_y[KMS_MAX_VIEWS];
+    int last_surface_graphics_width[KMS_MAX_VIEWS];
+    int last_surface_graphics_height[KMS_MAX_VIEWS];
     unsigned char pointer_background[KMS_POINTER_W * KMS_POINTER_H * 4];
     int pointer_background_valid;
     int pointer_background_x;
@@ -1004,6 +1009,113 @@ static int output_graphics_unchanged(const KmsOutput *output,
     return 0;
 }
 
+static int graphics_floor_div(int value, int divisor)
+{
+    if (value >= 0) return value / divisor;
+    return -(((-value) + divisor - 1) / divisor);
+}
+
+static int graphics_ceil_div(int value, int divisor)
+{
+    if (value >= 0) return (value + divisor - 1) / divisor;
+    return -((-value) / divisor);
+}
+
+/* Convert all visible retained graphics in a view into the smallest complete
+   cell rectangle that contains them. The KMS renderer's damage unit is a
+   cell, while Kitty placements may begin or end at a pixel offset. */
+static int graphics_bounds_for_view(const BlitKmsSurfaceView *view,
+                                    int *x, int *y, int *width, int *height)
+{
+    BlitGraphicsDraw draws[BLIT_GRAPHICS_MAX_DRAWS];
+    int draw_count;
+    int draw_index;
+    int cell_width;
+    int cell_height;
+    int left = 0;
+    int top = 0;
+    int right = 0;
+    int bottom = 0;
+    int have_bounds = 0;
+
+    if (view == NULL || view->graphics == NULL ||
+        view->columns < 1 || view->rows < 1 ||
+        view->cell_width < 1 || view->cell_height < 1)
+        return 0;
+    cell_width = view->cell_width;
+    cell_height = view->cell_height;
+    draw_count = blit_graphics_collect(view->graphics, view->graphics_count,
+                                       draws, BLIT_GRAPHICS_MAX_DRAWS);
+    for (draw_index = 0; draw_index < draw_count; ++draw_index) {
+        const BlitGraphicsDraw *draw = &draws[draw_index];
+        int draw_right = draw->x + draw->width;
+        int draw_bottom = draw->y + draw->height;
+        if (!have_bounds || draw->x < left) left = draw->x;
+        if (!have_bounds || draw->y < top) top = draw->y;
+        if (!have_bounds || draw_right > right) right = draw_right;
+        if (!have_bounds || draw_bottom > bottom) bottom = draw_bottom;
+        have_bounds = 1;
+    }
+    if (!have_bounds) return 0;
+    *x = graphics_floor_div(left, cell_width);
+    *y = graphics_floor_div(top, cell_height);
+    right = graphics_ceil_div(right, cell_width);
+    bottom = graphics_ceil_div(bottom, cell_height);
+    if (*x < 0) *x = 0;
+    if (*y < 0) *y = 0;
+    if (right > view->columns) right = view->columns;
+    if (bottom > view->rows) bottom = view->rows;
+    if (right <= *x || bottom <= *y) return 0;
+    *width = right - *x;
+    *height = bottom - *y;
+    return 1;
+}
+
+static void include_cell_damage(int *damage_valid, int *damage_x,
+                                int *damage_y, int *damage_width,
+                                int *damage_height, int x, int y, int width,
+                                int height)
+{
+    int right;
+    int bottom;
+    if (width < 1 || height < 1) return;
+    right = x + width;
+    bottom = y + height;
+    if (!*damage_valid) {
+        *damage_valid = 1;
+        *damage_x = x;
+        *damage_y = y;
+        *damage_width = width;
+        *damage_height = height;
+        return;
+    }
+    if (x < *damage_x) *damage_x = x;
+    if (y < *damage_y) *damage_y = y;
+    if (right > *damage_x + *damage_width)
+        *damage_width = right - *damage_x;
+    if (bottom > *damage_y + *damage_height)
+        *damage_height = bottom - *damage_y;
+}
+
+static int output_previous_graphics_bounds(const KmsOutput *output,
+                                           const BlitKmsSurfaceView *view,
+                                           int *x, int *y, int *width,
+                                           int *height)
+{
+    int i;
+    if (output == NULL || view == NULL) return 0;
+    for (i = 0; i < output->last_view_count && i < KMS_MAX_VIEWS; ++i)
+        if (output->last_surface_ids[i] == view->surface_id) {
+            if (!output->last_surface_graphics_valid[i]) return 0;
+            *x = output->last_surface_graphics_x[i];
+            *y = output->last_surface_graphics_y[i];
+            *width = output->last_surface_graphics_width[i];
+            *height = output->last_surface_graphics_height[i];
+            return 1;
+        }
+    return 0;
+}
+
 static void remember_output_views(KmsOutput *output,
                                   const BlitKmsSurfaceView *views,
                                   int view_count, int output_view_count)
@@ -1011,6 +1123,11 @@ static void remember_output_views(KmsOutput *output,
     unsigned long long previous_ids[KMS_MAX_VIEWS];
     unsigned long long previous_revisions[KMS_MAX_VIEWS];
     unsigned long long previous_graphics_signatures[KMS_MAX_VIEWS];
+    int previous_graphics_valid[KMS_MAX_VIEWS];
+    int previous_graphics_x[KMS_MAX_VIEWS];
+    int previous_graphics_y[KMS_MAX_VIEWS];
+    int previous_graphics_width[KMS_MAX_VIEWS];
+    int previous_graphics_height[KMS_MAX_VIEWS];
     int previous_count = output->last_view_count < KMS_MAX_VIEWS ?
         output->last_view_count : KMS_MAX_VIEWS;
     int view_index;
@@ -1023,6 +1140,14 @@ static void remember_output_views(KmsOutput *output,
         previous_revisions[i] = output->last_surface_revisions[i];
         previous_graphics_signatures[i] =
             output->last_surface_graphics_signatures[i];
+        previous_graphics_valid[i] =
+            output->last_surface_graphics_valid[i];
+        previous_graphics_x[i] = output->last_surface_graphics_x[i];
+        previous_graphics_y[i] = output->last_surface_graphics_y[i];
+        previous_graphics_width[i] =
+            output->last_surface_graphics_width[i];
+        previous_graphics_height[i] =
+            output->last_surface_graphics_height[i];
     }
     output->last_view_count = output_view_count;
     for (view_index = 0; view_index < view_count &&
@@ -1036,6 +1161,12 @@ static void remember_output_views(KmsOutput *output,
             views[view_index].graphics_signature;
         output->last_surface_origin_x[stored] = views[view_index].origin_x;
         output->last_surface_origin_y[stored] = views[view_index].origin_y;
+        output->last_surface_graphics_valid[stored] =
+            graphics_bounds_for_view(&views[view_index],
+                                     &output->last_surface_graphics_x[stored],
+                                     &output->last_surface_graphics_y[stored],
+                                     &output->last_surface_graphics_width[stored],
+                                     &output->last_surface_graphics_height[stored]);
         /* A synchronized view was not drawn.  Remembering the revision it
            carries mid-batch would make the release frame look like one that
            had already been presented, and it would never be drawn.  Keep the
@@ -1048,6 +1179,14 @@ static void remember_output_views(KmsOutput *output,
                     previous_revisions[i];
                 output->last_surface_graphics_signatures[stored] =
                     previous_graphics_signatures[i];
+                output->last_surface_graphics_valid[stored] =
+                    previous_graphics_valid[i];
+                output->last_surface_graphics_x[stored] = previous_graphics_x[i];
+                output->last_surface_graphics_y[stored] = previous_graphics_y[i];
+                output->last_surface_graphics_width[stored] =
+                    previous_graphics_width[i];
+                output->last_surface_graphics_height[stored] =
+                    previous_graphics_height[i];
                 break;
             }
         }
@@ -1605,17 +1744,54 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                                            &draw.damage_height);
                 }
                 if (pointer_damage) draw.damage_valid = 1;
-                /* An image placed, moved or deleted is not bounded by the
-                   cells' damage, and an image below the text repaints
-                   everything it lies under, so the whole view is redrawn. */
+                /* A retained image mutation is bounded by the union of its
+                   previous and current cell coverage. Redraw that union so
+                   replacement/deletion exposes the prior scene, while
+                   avoiding a full wallpaper redraw for a small placement. */
                 graphics_view_changed = !full_redraw &&
                     !output_graphics_unchanged(output, &views[view_index]);
                 if (graphics_view_changed) {
-                    draw.damage_valid = 1;
-                    draw.damage_x = 0;
-                    draw.damage_y = 0;
-                    draw.damage_width = draw.columns;
-                    draw.damage_height = draw.rows;
+                    int current_x;
+                    int current_y;
+                    int current_width;
+                    int current_height;
+                    int previous_x;
+                    int previous_y;
+                    int previous_width;
+                    int previous_height;
+                    int bounds_valid = 0;
+                    if (graphics_bounds_for_view(&views[view_index],
+                                                 &current_x, &current_y,
+                                                 &current_width,
+                                                 &current_height)) {
+                        include_cell_damage(&draw.damage_valid,
+                                            &draw.damage_x, &draw.damage_y,
+                                            &draw.damage_width,
+                                            &draw.damage_height, current_x,
+                                            current_y, current_width,
+                                            current_height);
+                        bounds_valid = 1;
+                    }
+                    if (output_previous_graphics_bounds(
+                            output, &views[view_index], &previous_x,
+                            &previous_y, &previous_width, &previous_height)) {
+                        include_cell_damage(&draw.damage_valid,
+                                            &draw.damage_x, &draw.damage_y,
+                                            &draw.damage_width,
+                                            &draw.damage_height, previous_x,
+                                            previous_y, previous_width,
+                                            previous_height);
+                        bounds_valid = 1;
+                    }
+                    /* If a scene mutation cannot be bounded, preserve the
+                       old correctness contract and repaint the whole view. */
+                    if (!bounds_valid) {
+                        draw.damage_valid = 1;
+                        draw.damage_x = 0;
+                        draw.damage_y = 0;
+                        draw.damage_width = draw.columns;
+                        draw.damage_height = draw.rows;
+                    }
                 }
                 if (!full_redraw && output_view_unchanged(output,
                                                            &views[view_index]) &&
@@ -1624,31 +1800,19 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                 if (pointer_damage) draw.damage_valid = 1;
                 if (!full_redraw && (views[view_index].damage_valid ||
                                      graphics_view_changed)) {
-                    int damage_x = graphics_view_changed ? 0 :
-                        views[view_index].damage_x;
-                    int damage_y = graphics_view_changed ? 0 :
-                        views[view_index].damage_y;
-                    int damage_right = graphics_view_changed ?
-                        views[view_index].columns :
-                        damage_x + views[view_index].damage_width;
-                    int damage_bottom = graphics_view_changed ?
-                        views[view_index].rows :
-                        damage_y + views[view_index].damage_height;
+                    int damage_x = draw.damage_x;
+                    int damage_y = draw.damage_y;
+                    int damage_right = damage_x + draw.damage_width;
+                    int damage_bottom = damage_y + draw.damage_height;
                     int cw = views[view_index].cell_width > 0 ?
                         views[view_index].cell_width : KMS_FONT_W;
                     int ch = views[view_index].cell_height > 0 ?
                         views[view_index].cell_height : KMS_FONT_H;
-                    if (pointer_damage) {
-                        if (damage_x > draw.damage_x) damage_x = draw.damage_x;
-                        if (damage_y > draw.damage_y) damage_y = draw.damage_y;
-                        if (damage_right < draw.damage_x + draw.damage_width)
-                            damage_right = draw.damage_x + draw.damage_width;
-                        if (damage_bottom < draw.damage_y + draw.damage_height)
-                            damage_bottom = draw.damage_y + draw.damage_height;
-                        draw.damage_x = damage_x;
-                        draw.damage_y = damage_y;
-                        draw.damage_width = damage_right - damage_x;
-                        draw.damage_height = damage_bottom - damage_y;
+                    if (!draw.damage_valid) {
+                        damage_x = views[view_index].damage_x;
+                        damage_y = views[view_index].damage_y;
+                        damage_right = damage_x + views[view_index].damage_width;
+                        damage_bottom = damage_y + views[view_index].damage_height;
                     }
                     fill_rect(output,
                               views[view_index].origin_x + damage_x * cw,

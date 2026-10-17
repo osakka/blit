@@ -29,6 +29,14 @@ The package identity is recorded in [`releases/0.1.524.yaml`](../releases/0.1.52
 These are bounded renderer measurements, not visual acceptance of the Hibr
 desktop, physical input, wallpaper, graphics protocol, or joins.
 
+The source commit `479f78c` makes equal-z retained-graphics ordering
+deterministic by Kitty image and placement identity. The current uncommitted
+source cycle adds bounded direct-KMS graphics damage: a graphics mutation repaints
+the union of its previous and current complete-cell coverage, with a complete
+view fallback when the bound is not provable. This source is not yet a
+packaged or live-host release; the live measurements above remain evidence
+for `0.1.524` only.
+
 ### 0.1.524 live login-manager wake evidence
 
 On 2026-10-17, `tools/diagnostics/wake-and-capture.sh` was run against the

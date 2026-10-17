@@ -183,6 +183,45 @@ static void draw(uint32_t default_background, int damage_column)
     draw_damage(default_background, damage_column, 5, 1, 1);
 }
 
+static void graphics_bounds_gate(void)
+{
+    BlitKmsSurfaceView view;
+    int x;
+    int y;
+    int width;
+    int height;
+
+    memset(&view, 0, sizeof(view));
+    view.cell_width = CW;
+    view.cell_height = CH;
+    view.columns = COLS;
+    view.rows = ROWS;
+    view.graphics = images;
+    view.graphics_count = BLIT_GRAPHICS_MAX_IMAGES;
+    reset();
+    place(-1073741825);
+    images[0].x = 40;
+    images[0].y = 17;
+    images[0].placement_width = 4;
+    images[0].placement_height = 8;
+    if (!graphics_bounds_for_view(&view, &x, &y, &width, &height) ||
+        x != 5 || y != 1 || width != 1 || height != 1)
+        fail("graphics bounds did not cover pixel-offset placement",
+             (long)(x * 1000000 + y * 10000 + width * 100 + height),
+             5010101L);
+    images[0].placements[0].used = 1;
+    images[0].placements[0].id = 9;
+    images[0].placements[0].x = 80;
+    images[0].placements[0].y = 32;
+    images[0].placements[0].width = 4;
+    images[0].placements[0].height = 8;
+    if (!graphics_bounds_for_view(&view, &x, &y, &width, &height) ||
+        x != 5 || y != 1 || width != 6 || height != 2)
+        fail("graphics bounds did not union retained placements",
+             (long)(x * 1000000 + y * 10000 + width * 100 + height),
+             5010602L);
+}
+
 int main(void)
 {
     long full;
@@ -191,6 +230,7 @@ int main(void)
 
     buffer_coherence_gate();
     scene_copy_gate();
+    graphics_bounds_gate();
 
     output.mode.hdisplay = W;
     output.mode.vdisplay = H;

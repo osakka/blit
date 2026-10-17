@@ -128,6 +128,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0108 — Surface-local KMS damage retains an atomic output boundary](0108-surface-local-kms-damage-boundary.md)
 - [0107 — The direct-KMS test profile survives package restart](0107-direct-kms-test-profile-survives-restart.md)
 - [0110 — Kitty-retained scene ordering and invalidation](0110-kitty-retained-scene-ordering-and-invalidation.md)
+- [0111 — Bound retained-graphics damage by old and new coverage](0111-bounded-retained-graphics-damage.md)
 
 ## Adding an ADR
 
