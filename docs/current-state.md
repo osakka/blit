@@ -56,6 +56,16 @@ a changing surface revision. This is inconclusive evidence, not a renderer
 pass or fail; a static controlled surface is required for a pixel agreement
 assertion.
 
+The required static controlled surface was then run in the free lower pane.
+The direct-KMS pixel agreement passed with `TRAIL_PASS blank_cells=84
+no_unaccounted_pixels=yes`. The live moving-surface probe then updated a
+known block twelve times and passed with
+`MOTION_PASS steps=12 accepted=12 discarded=0 direct_kms=true
+display=display-93`. These results prove the canonical cell-to-pixel mapping
+and bounded damage path for an API-owned surface on this host. They do not
+prove Hibr's saver, wallpaper/Kitty composition, desktop windows, or physical
+input; those remain separate tests.
+
 ### Architecture decision check
 
 There is no accepted decision to deprecate the direct DRM/KMS or non-SDL

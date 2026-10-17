@@ -36,6 +36,7 @@ SURFACE = SURFACE_ARG || topology.fetch('panes').filter_map { |candidate|
 abort 'no live surface was reported by /v1/topology' unless SURFACE
 DISPLAY = topology.fetch('outputs').first.fetch('display_id')
 diag = json('/v1/diagnostics'); INSET = diag['render']['surface_inset_px']
+DIRECT_KMS = diag.dig('render', 'direct_kms') == true
 disp = json('/v1/displays').fetch('displays').find { |item| item['id'] == DISPLAY }
 abort "display #{DISPLAY} is missing from /v1/displays" unless disp
 W = disp['bounds']['width']; H = disp['bounds']['height']
@@ -65,7 +66,9 @@ ATTEMPTS.times do |i|
   if reported.nil?
     abort "the capture reported no revision for #{SURFACE} (headers: #{cap[:revs].inspect})"
   end
-  if cap[:presented] != 'true' || reported != state['revision']
+  presented_ok = cap[:presented] == 'true' ||
+                 (DIRECT_KMS && cap[:presented].nil?)
+  if !presented_ok || reported != state['revision']
     # The sample straddled a repaint, or those pixels never reached a screen.
     # Discard it rather than reporting the skew as a defect -- three earlier
     # attempts at this comparison on a live host produced three findings that
@@ -92,7 +95,8 @@ ATTEMPTS.times do |i|
     checked += 1
     mismatched << [x, y, bad] if bad.positive?
   end
-  used = { frame: cap[:frame], presented: cap[:presented], revision: reported, attempt: i + 1 }
+  used = { frame: cap[:frame], presented: cap[:presented], direct_kms: DIRECT_KMS,
+           revision: reported, attempt: i + 1 }
   break
 end
 if used.nil?

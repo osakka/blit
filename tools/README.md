@@ -28,3 +28,8 @@ that explicitly load the provider. It is separate from desktop orchestration.
   motion by default or one complete pointer click when explicitly passed
   `click`, and reports whether a surface or screenshot changed. It does not
   create sessions, send keys, or modify Hibr.
+
+`host_motion_agreement.rb` is the live counterpart to the local
+motion-trail gate. It creates a bounded static API surface, moves a known
+block through it, and compares only coherent capture revisions. It cleans
+up its own session and is not a Hibr desktop test.
