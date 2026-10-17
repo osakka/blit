@@ -42,3 +42,28 @@ pixels return to the cell background. It is not a Hibr desktop or physical
 input test. Both live probes discover the output and pane geometry from
 `/v1/topology`; direct-KMS screenshots are decoded from their advertised BMP
 bit depth.
+
+`host_damage_union.rb` reproduces issue #89 through the live API, writing the
+bottom-right cell before the top-left cell and verifying both reached scanout.
+It also checks exact upper/lower half-block foreground/background colors.
+
+`host_pty_pointer_stress.rb` runs a genuine PTY animation alongside pointer
+traffic, waits for its final frame, checks every visible blank cell pixel, and
+compares completed flips with DRM vblank sequences during the active workload.
+It restores focus/pointer and deletes only its temporary shell session. A free
+pane is required; it does not start Hibr or change backend/topology.
+
+```sh
+export BLIT_LIVE=http://192.168.10.54:8080
+export BLIT_AUTH_TOKEN='<API token>'
+ruby tools/probes/host_damage_union.rb
+BLIT_REQUIRE_REFRESH=1 BLIT_STRESS_FRAMES=6000 \
+  BLIT_EVIDENCE_DIR=diagnostics/pty-pointer-soak \
+  ruby tools/probes/host_pty_pointer_stress.rb
+```
+
+For direct KMS, refresh acceptance requires two distinct active clock samples
+and **zero skipped vblanks**, independently of nominal mode rounding or clock
+variation. Evidence includes the final BMP/state, runtime samples, render and
+vblank traces, and a machine-readable scanout verdict. Pixel and refresh checks
+are separate. These are renderer tests, not authenticated Hibr desktop tests.

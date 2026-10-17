@@ -7,7 +7,7 @@ require 'net/http'
 require 'uri'
 
 base = URI(ENV.fetch('BLIT_LIVE', 'http://192.168.10.54:8080'))
-token = ENV.fetch('BLIT_AUTH_TOKEN', 'hellomonkeyboy')
+token = ENV.fetch('BLIT_AUTH_TOKEN')
 def request(base, token, method, path, body = nil)
   uri = base + path
   req = {'GET' => Net::HTTP::Get, 'POST' => Net::HTTP::Post,

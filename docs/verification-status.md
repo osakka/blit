@@ -3,6 +3,43 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-17: exact 0.1.534 physical acceptance boundary
+
+Source `8c6a26f`; manifest `releases/0.1.534.yaml`; reproducible package SHA-256
+`4dc79e0deffbe7d2cb727f5c3dcb1821cf521551a2f90378ccc224afc159a9de`.
+The API updater verifies this version. KMS callback/clock, fractional-mode,
+readiness, full-reference pixel and canonical surface/deadline regressions
+pass. The latest broad renderer/terminal suite was 51/51 on the 0.1.532 cycle;
+0.1.533/534 additionally received their focused timing/callback regressions.
+
+The 0.1.534 nominal-rate comparison initially **failed** at 59.906 Hz, but its
+new clock evidence records 1980 completed flips across exactly 1980 vblanks:
+zero missed display refreshes. Nominal mode timing is 59.997136 Hz; actual DRM
+clock is 59.908173 Hz. This distinguishes clock variation from lost frames.
+Earlier nominal-rate failures remain recorded; they are not retroactively
+reported as passing tests.
+
+The final independent acceptance run uses actual sequence counts, rejects
+even one skipped vblank, and passes:
+
+```text
+PTY_POINTER_SCANOUT completed=1980 vblanks=1980 skipped=0 observed_hz=59.908161 window_s=33.050589
+PTY_POINTER_REFRESH_PASS completed=1980 vblanks=1980 skipped=0 observed_hz=59.908161
+PTY_POINTER_PASS producer_frames=6000 pointer_requests=466 blank_pixels=2051904 stale_pixels=0 revision=5998
+```
+
+Evidence: `diagnostics/rendering-20261017/validated-soak-534/`, including final
+BMP/state, runtime samples, active vblank samples and `scanout-verdict.json`.
+Final live screenshot: `diagnostics/rendering-20261017/0.1.534-final.png`.
+It was inspected and shows the existing login manager's username prompt and
+clock in the upper pane, with the intentionally empty lower pane. Temporary
+sessions were removed and focus restored. Backend, topology and chosen mode
+were preserved. Hibr source was unchanged and no SSH was used.
+
+This closes the bounded renderer/cadence reproductions, not the whole delivery
+contract. Authenticated Hibr wallpaper/window dragging, joins and other
+hardware/protocol cases still require their own acceptance evidence.
+
 ## 2026-10-17: candidate 0.1.534 DRM clock evidence
 
 Exact 0.1.533 is deployed from `bc1a0e5`, package SHA-256

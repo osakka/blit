@@ -7,7 +7,7 @@ require 'uri'
 require 'fileutils'
 
 BASE = URI(ENV.fetch('BLIT_LIVE', 'http://192.168.10.54:8080'))
-TOKEN = ENV.fetch('BLIT_AUTH_TOKEN', 'hellomonkeyboy')
+TOKEN = ENV.fetch('BLIT_AUTH_TOKEN')
 OUT = ENV.fetch('BLIT_EVIDENCE_DIR', 'diagnostics/rendering-20261017/pty-pointer')
 FRAMES = Integer(ENV.fetch('BLIT_STRESS_FRAMES', '600'), 10)
 raise 'BLIT_STRESS_FRAMES must be 1..12000' unless FRAMES.between?(1, 12000)
@@ -44,6 +44,7 @@ pointer = before.fetch('snapshot').fetch('render').fetch('pointer')
 focused = data('/v1/terminal-sessions').fetch('sessions').find { |s| s['focused'] }
 inset = before.dig('snapshot','render','surface_inset_px')
 session = nil; mover = nil; stop = false; motions = 0; samples = []
+clock_baseline = nil; active_clocks = {}
 FileUtils.mkdir_p(OUT)
 File.write(File.join(OUT, 'runtime-before.json'), JSON.pretty_generate(before))
 begin
@@ -97,6 +98,15 @@ begin
     now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     if status['title'] == 'BLIT_STRESS_ACTIVE' && now - last_sample > 0.5
       samples << data('/v1/diagnostics/runtime')
+      clock_samples = data('/v1/diagnostics/trace?kind=kms_vblank&limit=16').fetch('events')
+      matching = clock_samples.select { |e| e['detail'].include?("display=#{display} ") }
+      if clock_baseline.nil?
+        clock_baseline = matching.map { |e| e['detail'][/completions=(\d+)/,1].to_i }.max || 0
+      end
+      matching.each do |e|
+        completed = e['detail'][/completions=(\d+)/,1].to_i
+        active_clocks[completed] = e if completed > clock_baseline
+      end
       last_sample = now
     end
     sleep 0.03
@@ -121,6 +131,20 @@ begin
       event['detail'].match?(/observed_refresh_hz=(?!0\.000000)/)
   }
   puts "PTY_POINTER_VBLANK #{clock_event['detail']}" if clock_event
+  File.write(File.join(OUT,'active-vblank-samples.json'),JSON.pretty_generate(active_clocks.values))
+  ordered_clocks = active_clocks.sort.map(&:last)
+  scanout = nil
+  if ordered_clocks.length > 1
+    a = ordered_clocks.first['detail']; b = ordered_clocks.last['detail']
+    completed = b[/completions=(\d+)/,1].to_i - a[/completions=(\d+)/,1].to_i
+    ticks = (b[/vblank_sequence=(\d+)/,1].to_i - a[/vblank_sequence=(\d+)/,1].to_i) & 0xffffffff
+    elapsed = (b[/timestamp_us=(\d+)/,1].to_i - a[/timestamp_us=(\d+)/,1].to_i) / 1_000_000.0
+    raise 'invalid vblank clock span' unless completed > 0 && elapsed > 0
+    scanout = {'completed'=>completed, 'vblanks'=>ticks,
+      'skipped'=>ticks-completed, 'observed_hz'=>ticks/elapsed, 'window_s'=>elapsed}
+    File.write(File.join(OUT,'scanout-verdict.json'),JSON.pretty_generate(scanout))
+    puts "PTY_POINTER_SCANOUT completed=#{completed} vblanks=#{ticks} skipped=#{ticks-completed} observed_hz=#{(ticks/elapsed).round(6)} window_s=#{elapsed.round(6)}"
+  end
   bad = []; checked = 0
   state.fetch('cells').each do |cell|
     next unless cell['text'] == ' '
@@ -150,8 +174,14 @@ begin
     # Counts in a finite window have one-event quantization uncertainty.
     # Permit that single event, not an arbitrary percentage of dropped frames.
     minimum_hz = b['refresh_hz'] - 1.0 / dt
-    if ENV['BLIT_REQUIRE_REFRESH'] == '1' && hz < minimum_hz
-      raise "PTY_POINTER_REFRESH_FAIL submission_hz=#{hz.round(3)} minimum_hz=#{minimum_hz.round(3)}"
+    if ENV['BLIT_REQUIRE_REFRESH'] == '1'
+      if before.dig('snapshot','render','direct_kms')
+        raise 'refresh acceptance requires at least two active DRM clock samples' unless scanout
+        raise "PTY_POINTER_REFRESH_FAIL skipped_vblanks=#{scanout['skipped']}" unless scanout['skipped'] == 0
+        puts "PTY_POINTER_REFRESH_PASS completed=#{scanout['completed']} vblanks=#{scanout['vblanks']} skipped=0 observed_hz=#{scanout['observed_hz'].round(6)}"
+      elsif hz < minimum_hz
+        raise "PTY_POINTER_REFRESH_FAIL submission_hz=#{hz.round(3)} minimum_hz=#{minimum_hz.round(3)}"
+      end
     end
   end
   puts "PTY_POINTER_PASS producer_frames=#{FRAMES} pointer_requests=#{motions} blank_pixels=#{checked} stale_pixels=0 revision=#{state['revision']} evidence=#{OUT}"

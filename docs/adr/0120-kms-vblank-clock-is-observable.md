@@ -19,3 +19,18 @@ The actual callback test uses known timing, skipped sequences, a deliberately
 different nominal rate, and uint32 wrap. Existing ownership and pixel tests
 must still pass. Capture the same physical soak's render and vblank traces
 before interpreting the rate discrepancy or changing its acceptance rule.
+
+## Physical result and acceptance rule
+
+The 0.1.534 physical soak reports nominal 59.997136 Hz and DRM-observed
+59.908173 Hz. During an entirely active interval, 1980 completed flips span
+exactly 1980 vblanks over 33.050583 s: zero skipped refreshes. Thus the small
+nominal/submission difference was not lost display frames.
+
+For direct KMS, the live refresh gate now requires zero skipped DRM vblanks
+between two distinct samples collected after the producer becomes active.
+Missing clock evidence is a failure. This uses the actual display clock and
+rejects even one skipped refresh; it does not relax a percentage tolerance.
+SDL retains its nominal finite-window rate check. Pixel comparison remains a
+separate mandatory assertion. Neither result establishes untested hardware
+rates, all terminal protocols, or authenticated Hibr window behavior.

@@ -7,16 +7,36 @@ work actually stopped.
 
 ## Status at the last review
 
-### 2026-10-17 candidate 0.1.534: observe the DRM vblank clock
+### 2026-10-17 deployed and bounded-validated 0.1.534
 
-0.1.533 is deployed and reports the unchanged 1920x2160 mode at 59.997 Hz.
-Its repeated 6000-frame whole-pane pixel check passes, but strict cadence
-still fails at 59.902 submissions/s over 32.820 s. Mode rounding does not
-explain it. [ADR 0120](adr/0120-kms-vblank-clock-is-observable.md) captures
-the DRM callback's previously discarded sequence/time through bounded trace
-events. Known-clock, skipped-sequence and wrap tests pass. The same live soak
-must discriminate clock behavior from missed refreshes before further timing
-changes or a rate acceptance claim. This cycle is observability only.
+The live host 192.168.10.54 runs reproducible package 0.1.534 from `8c6a26f`;
+identity is in `releases/0.1.534.yaml`. The direct-KMS 1920x2160 split topology
+is unchanged. Only its existing, focused upper-pane login manager remains;
+the temporary test terminals are removed and the username prompt is visible.
+
+The reproduced terminal damage-loss, concurrent-pointer damage overwrite,
+reopened coalescing deadlines, and delayed KMS retries are fixed. Tests failed
+before each correction. The production KMS presenter also matches a fresh
+full render at every pixel over 128 mixed-content/pointer frames.
+
+The final physical soak passes: 6000 producer frames, 466 pointer requests,
+2,051,904 checked blank pixels, zero stale pixels; 1980 completed flips span
+exactly 1980 DRM vblanks over 33.050589 s, with zero skipped refreshes. Observed
+DRM cadence is 59.908161 Hz; nominal mode timing is 59.997136 Hz. This resolves
+the small nominal-rate discrepancy without weakening a percentage threshold.
+[ADR 0120](adr/0120-kms-vblank-clock-is-observable.md) defines the independent
+clock evidence and zero-skipped-vblank acceptance rule. Trace API:
+`/v1/diagnostics/trace?kind=kms_vblank&limit=16`.
+
+Evidence and final screenshot are in ignored local
+`diagnostics/rendering-20261017/`, especially `validated-soak-534/` and
+`0.1.534-final.png`. Hibr source was not modified; no SSH was used. Remaining
+acceptance requires the user to authenticate, then actual desktop wallpaper
+and window-drag testing. Joins, other physical output counts/rates, and full
+terminal-protocol coverage are not inferred from this one-host result.
+
+The sections below are chronological evidence from prior cycles, not the
+current deployed state.
 
 ### 2026-10-17 candidate 0.1.533: exact KMS mode refresh
 
