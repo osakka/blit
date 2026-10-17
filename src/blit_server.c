@@ -7915,6 +7915,43 @@ static int apply_cell_update(BlitSurface *surface, const char *json,
     return updated;
 }
 
+/* API-owned providers such as console-blit have a live desktop theme but no
+   PTY escape sequence through which to negotiate the terminal's default pen.
+   Keep that negotiation on the same revisioned surface update as the cells:
+   one request is the source of truth, and changing the floor invalidates the
+   whole surface because unstyled cells intentionally have no per-cell colour. */
+static int terminal_defaults_from_update(const char *json,
+                                         char *foreground,
+                                         size_t foreground_capacity,
+                                         int *foreground_present,
+                                         char *background,
+                                         size_t background_capacity,
+                                         int *background_present)
+{
+    char value[32];
+    uint32_t colour;
+
+    *foreground_present = 0;
+    *background_present = 0;
+    if (json_string(json, "terminal_default_foreground", value,
+                    sizeof(value))) {
+        if (!parse_color(value, &colour))
+            return 0;
+        snprintf(foreground, foreground_capacity, "#%06x",
+                 (unsigned)(colour & 0xffffffU));
+        *foreground_present = 1;
+    }
+    if (json_string(json, "terminal_default_background", value,
+                    sizeof(value))) {
+        if (!parse_color(value, &colour))
+            return 0;
+        snprintf(background, background_capacity, "#%06x",
+                 (unsigned)(colour & 0xffffffU));
+        *background_present = 1;
+    }
+    return 1;
+}
+
 static void terminal_clear_active_screen(BlitSurface *surface)
 {
     memset(surface->cells, 0, sizeof(surface->cells));
@@ -13917,6 +13954,17 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
         "\"graphics\":[\"kitty\",\"sixel\"]}",
         escaped_terminal_term, session->terminal_cell_width,
         session->terminal_cell_height);
+    used += (size_t)snprintf(
+        body + used, capacity - used,
+        ",\"terminal_defaults\":{"
+        "\"foreground\":\"#%06x\","
+        "\"background\":\"#%06x\","
+        "\"foreground_configured\":%s,"
+        "\"background_configured\":%s}",
+        (unsigned)(session_default_foreground(session) & 0xffffffU),
+        (unsigned)(session_default_background(session) & 0xffffffU),
+        session->terminal_default_foreground[0] != '\0' ? "true" : "false",
+        session->terminal_default_background[0] != '\0' ? "true" : "false");
     /* Mouse reporting is a terminal mode the application turns on, and
        every pointer report Blit sends is gated on it. Without it in the
        response there is no way to tell "the client never enabled mouse
@@ -19169,16 +19217,23 @@ static void handle_request(int fd, BlitRuntime *runtime,
     if (strncmp(path, "/v1/surfaces/", strlen("/v1/surfaces/")) == 0 &&
         (strcmp(method, "PUT") == 0 || strcmp(method, "GET") == 0)) {
         BlitSurface *surface = find_surface(runtime, path);
+        BlitSession *surface_session;
         int base_revision;
         char presentation[16] = "immediate";
         int presentation_deferred;
         int presentation_commit;
+        char terminal_default_foreground[32];
+        char terminal_default_background[32];
+        int terminal_default_foreground_present;
+        int terminal_default_background_present;
+        int terminal_defaults_changed = 0;
 
         if (surface == NULL) {
             send_problem(fd, 404, "Not Found", "surface_not_found",
                          "The text surface does not exist.");
             return;
         }
+        surface_session = find_session_id(runtime, surface->owner_session_id);
         if (strcmp(method, "GET") == 0) {
             size_t snapshot_capacity = (size_t)surface->width *
                 (size_t)surface->height * 512U + 4096U;
@@ -19235,9 +19290,25 @@ static void handle_request(int fd, BlitRuntime *runtime,
                                   surface->revision);
             return;
         }
+        if (!terminal_defaults_from_update(
+                payload, terminal_default_foreground,
+                sizeof(terminal_default_foreground),
+                &terminal_default_foreground_present,
+                terminal_default_background,
+                sizeof(terminal_default_background),
+                &terminal_default_background_present)) {
+            send_problem(fd, 400, "Bad Request", "invalid_terminal_defaults",
+                         "Terminal default colours must be #rrggbb values.");
+            return;
+        }
         {
             const char *misplaced = NULL;
-            if (apply_cell_update(surface, payload, &misplaced) <= 0) {
+            int cell_update = apply_cell_update(surface, payload, &misplaced);
+            if (cell_update <= 0 &&
+                !(cell_update == 0 &&
+                  (terminal_default_foreground_present ||
+                   terminal_default_background_present) &&
+                  strstr(payload, "\"cells\":[]") != NULL)) {
                 if (misplaced != NULL) {
                     char detail[256];
                     snprintf(detail, sizeof(detail),
@@ -19253,6 +19324,26 @@ static void handle_request(int fd, BlitRuntime *runtime,
                              "The cells array contains no usable text updates.");
                 return;
             }
+        }
+        if (surface_session != NULL) {
+            if (terminal_default_foreground_present &&
+                strcmp(surface_session->terminal_default_foreground,
+                       terminal_default_foreground) != 0) {
+                snprintf(surface_session->terminal_default_foreground,
+                         sizeof(surface_session->terminal_default_foreground),
+                         "%s", terminal_default_foreground);
+                terminal_defaults_changed = 1;
+            }
+            if (terminal_default_background_present &&
+                strcmp(surface_session->terminal_default_background,
+                       terminal_default_background) != 0) {
+                snprintf(surface_session->terminal_default_background,
+                         sizeof(surface_session->terminal_default_background),
+                         "%s", terminal_default_background);
+                terminal_defaults_changed = 1;
+            }
+            if (terminal_defaults_changed)
+                mark_surface_full_damage(surface);
         }
         ++surface->revision;
         {
@@ -19278,12 +19369,14 @@ static void handle_request(int fd, BlitRuntime *runtime,
             snprintf(detail, sizeof(detail),
                      "surface=surface-%llu revision=%llu transport=api-cells "
                      "surface_mode=%s presentation=%s frame_open=%d "
+                     "terminal_defaults_changed=%d "
                      "damage=%d,%d,%dx%d valid=%d",
                      surface->id, surface->revision,
                      surface_session != NULL ?
                          surface_mode_name(surface_session->surface_mode) :
                          "unknown",
                      presentation, surface->frame_open,
+                     terminal_defaults_changed,
                      surface->damage_x, surface->damage_y,
                      surface->damage_width, surface->damage_height,
                      surface->damage_valid);

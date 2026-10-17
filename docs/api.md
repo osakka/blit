@@ -635,6 +635,12 @@ revisioned updates to the same cells route. The surface response contains the
 resulting revision and commit receipt; do not treat a partially received
 stream message or a screenshot as a committed frame.
 
+An API-owned terminal provider may include `terminal_default_foreground` and
+`terminal_default_background` in that same update. These are session defaults,
+not cell styles; changing either one invalidates the complete surface. Inspect
+the effective and configured values through `GET /v1/terminal-sessions/{id}`
+under `terminal_defaults`.
+
 `/v1/frames` accepts an explicit coherent-frame request. The WebSocket stream
 can carry surface deltas, terminal output, frame events, diagnostics, and
 bounded pixel frames. Pixel frames use `pixel_frame_begin` metadata followed by

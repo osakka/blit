@@ -184,6 +184,35 @@ unless face.fetch(0x0000ff, 0) == CELL_W * CELL_H
   failures << "DT_FACE=#0000ff did not paint a blank cell blue: #{face.inspect}"
 end
 
+# An API-owned provider has no PTY escape sequence for a live desktop theme.
+# Its default floor is therefore carried by the same revisioned surface
+# update as its cells. This is deliberately a defaults-only update: it must
+# repaint an otherwise empty cell and appear in session diagnostics.
+id = session('sleep 60')
+api_surface = json('GET', "/v1/terminal-sessions/#{id}").fetch('surface_id')
+api_revision = json('GET', "/v1/surfaces/#{api_surface}/summary").fetch('revision')
+defaults_write = request(
+  'PUT', "/v1/surfaces/#{api_surface}/cells",
+  'base_revision' => api_revision, 'cells' => [],
+  'terminal_default_foreground' => '#123456',
+  'terminal_default_background' => '#204060')
+unless defaults_write.code == '200'
+  abort("cell-paint gate: terminal defaults write #{defaults_write.code} " \
+        "#{defaults_write.body}")
+end
+sleep 2.0
+defaults_state = json('GET', "/v1/terminal-sessions/#{id}")
+defaults_cell = cell(screenshot, inset, 10, 5).values.tally
+request('DELETE', "/v1/terminal-sessions/#{id}")
+unless defaults_state.fetch('terminal_defaults').fetch('background') == '#204060'
+  failures << "API terminal default background was not reported: " \
+              "#{defaults_state.fetch('terminal_defaults').inspect}"
+end
+unless defaults_cell.fetch(0x204060, 0) == CELL_W * CELL_H
+  failures << "API terminal default background did not paint a blank cell: " \
+              "#{defaults_cell.inspect}"
+end
+
 # OSC 10 is also a set, not only a query: a client that changes the default
 # repaints every unstyled cell.
 id = session("printf '\\033]10;rgb:0000/ff00/0000\\033\\\\X'; sleep 60")

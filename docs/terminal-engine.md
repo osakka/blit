@@ -67,9 +67,11 @@ shell conformance path is stable.
    OSC 10/11 background and foreground queries answer from validated
    `DT_INK`/`DT_FACE` (or `BLIT_TERMINAL_FG`/`BLIT_TERMINAL_BG`) session
    environment values, preserving Hibr theme negotiation without a shell
-   wrapper. That pair is also what both renderers paint an **unstyled** cell
-   with, and what the cell snapshot reports for it, so the colour an
-   application is told is the colour it is shown. OSC 10/11 are accepted as
+   wrapper. API-owned providers may carry the same pair as
+   `terminal_default_foreground`/`terminal_default_background` on the
+   revisioned cell update. That pair is also what both renderers paint an
+   **unstyled** cell with, and what the cell snapshot reports for it, so the
+   colour an application is told is the colour it is shown. OSC 10/11 are accepted as
    sets as well as queries, in either the `rgb:RRRR/GGGG/BBBB` or `#rrggbb`
    spelling, and a set repaints the whole surface.
    Physical keys carry xterm's modifier parameter: a held Shift, Alt or Ctrl
@@ -313,11 +315,12 @@ status (`CSI 5 n`), cursor position (`CSI 6 n`), and DEC mode reports
 ### Layering and slot lifetime (issues #84, #85)
 
 Graphics are composed per surface in this order: images with
-`z < -1073741824` (under cell backgrounds), opaque background quads, images
-with `-1073741824 <= z < 0` (over backgrounds, under text), glyphs, cursor,
-images with `z >= 0`. A cell whose resolved background equals the terminal
-default draws no quad, so an image under the text shows through it; the
-default colour (OSC 11, or black) is instead the floor of the surface. A cell
+   `z < -1073741824` (under cell backgrounds), opaque background quads, images
+   with `-1073741824 <= z < 0` (over backgrounds, under text), glyphs, cursor,
+   images with `z >= 0`. A cell whose resolved background equals the terminal
+   default draws no quad, so an image under the text shows through it; the
+   default colour (OSC 11, an API terminal-default update, or black) is instead
+   the floor of the surface. A cell
 with an explicit colour, including explicit black on a non-black default, is
 opaque. Hibr's wallpaper is `z = -1073741825` and depends on all of this. OSC
 10/11 queries are always answered, from the session default when nothing was

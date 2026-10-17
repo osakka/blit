@@ -181,6 +181,17 @@ adapter and Hibr's native `pty`, `term`, and `hold` modules only. An explicit
 explicit `surface_mode: external` sessions that need the cell-level Blit
 provider. It is not loaded by the packaged held-desktop path.
 
+`console darkdefault` is Hibr's dim/shadow target, not the terminal's own
+OSC 10/11 default. The Blit adapter therefore keeps it local for Hibr's
+shadow calculations and does not publish it as a surface floor. An
+API-owned provider that really owns the terminal defaults may set
+`terminal_default_foreground` and `terminal_default_background` explicitly
+on a revisioned surface update. A native PTY session must establish its
+defaults through OSC 10/11 (or the configured `BLIT_TERMINAL_FG`/
+`BLIT_TERMINAL_BG` environment); if
+`terminal_defaults.background_configured` is false, its pixels are not yet a
+valid Hibr desktop proof.
+
 ### Desktop invocation options
 
 Hibr's `desktop` entrypoint defines the orchestration options; Blit does not

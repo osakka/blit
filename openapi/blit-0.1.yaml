@@ -3563,7 +3563,7 @@ components:
     TerminalSession:
       type: object
       required: [id, revision, surface_revision, state, surface_id, title,
-                 terminal_capabilities, hibr_attachment, hibr_desktop]
+        terminal_capabilities, terminal_defaults, hibr_attachment, hibr_desktop]
       properties:
         id: {$ref: '#/components/schemas/ResourceId'}
         revision: {$ref: '#/components/schemas/Revision'}
@@ -3600,6 +3600,8 @@ components:
         cursor: {$ref: '#/components/schemas/Cursor'}
         terminal_capabilities:
           $ref: '#/components/schemas/TerminalCapabilities'
+        terminal_defaults:
+          $ref: '#/components/schemas/TerminalDefaults'
         hibr_attachment:
           $ref: '#/components/schemas/HibrAttachmentDiagnostics'
         hibr_desktop:
@@ -3612,6 +3614,22 @@ components:
           items: {$ref: '#/components/schemas/GraphicsImage'}
         graphics_diagnostics:
           $ref: '#/components/schemas/GraphicsDiagnostics'
+      additionalProperties: false
+    TerminalDefaults:
+      type: object
+      required: [foreground, background, foreground_configured,
+                 background_configured]
+      properties:
+        foreground:
+          type: string
+          pattern: '^#[0-9a-fA-F]{6}$'
+          description: Effective foreground used for an unstyled cell.
+        background:
+          type: string
+          pattern: '^#[0-9a-fA-F]{6}$'
+          description: Effective floor used for an unstyled cell.
+        foreground_configured: {type: boolean}
+        background_configured: {type: boolean}
       additionalProperties: false
     HibrAttachmentDiagnostics:
       type: object
@@ -3883,6 +3901,20 @@ components:
               style: {$ref: '#/components/schemas/CellStyle'}
             additionalProperties: false
         cursor: {$ref: '#/components/schemas/Cursor'}
+        terminal_default_foreground:
+          type: string
+          pattern: '^#[0-9A-Fa-f]{6}$'
+          description: >-
+            Optional session terminal default foreground. It applies to cells
+            with no explicit foreground and is intended for an API-owned
+            terminal provider whose desktop theme changes its default pen.
+        terminal_default_background:
+          type: string
+          pattern: '^#[0-9A-Fa-f]{6}$'
+          description: >-
+            Optional session terminal default background. It is the floor
+            beneath unstyled cells and beneath graphics placed under text.
+            It is not a per-cell background.
         presentation:
           type: string
           enum: [immediate, defer, commit]
