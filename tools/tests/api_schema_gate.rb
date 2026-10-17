@@ -15,6 +15,16 @@ raise 'schema is not OpenAPI 3.1' unless schema.fetch('openapi') == '3.1.0'
 paths = schema.fetch('paths')
 raise "unexpected path count #{paths.length}" unless paths.length == 43
 
+settings = schema.fetch('components').fetch('schemas').fetch('Settings')
+raise 'settings durability receipt missing' unless settings['required'].include?('storage')
+raise 'login policy schema missing' unless
+  settings.dig('properties','document','properties','login','$ref') == '#/components/schemas/LoginPolicy'
+raise 'effective login restart reporting missing' unless
+  settings.dig('properties','effective','required').include?('login_restart_required')
+policy = schema.fetch('components').fetch('schemas').fetch('LoginPolicy')
+raise 'login fallback contract changed' unless
+  policy.dig('properties','fallback','enum') == %w[first_available wait]
+
 observation_path = paths.fetch('/v1/diagnostics/observation')
 observation_get = observation_path.fetch('get')
 raise 'observation operation id changed' unless

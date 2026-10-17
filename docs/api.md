@@ -624,6 +624,46 @@ credentials, or test seams. `BLIT_EVDEV_MOUSE` is a compatibility boot
 override only; stable input devices and their API configuration are the
 supported input boundary. See ADR 0089 and ADR 0067.
 
+#### Login startup policy (0.1.537)
+
+`document.login` moves login placement into the same API-owned store:
+
+```json
+{"enabled":true,"preferred_pane_id":"pane-display-1-2","fallback":"wait"}
+```
+
+Add that object to the complete document read from `GET /v1/settings`; replace
+with `PUT /v1/settings` and its revision in `If-Match`. Do not send this fragment
+as the whole document: replacement would reset unrelated settings. The saved
+policy is normalized to explicit values. Missing fields use boot defaults;
+`preferred_pane_id:null` requests automatic selection. `fallback` is `wait`
+or `first_available`. A missing preferred pane is valid intent, retained until
+available; fallback assignment never overwrites it. Current IDs are scoped to
+the backend topology, not portable monitor identities.
+
+This section is **startup-applied**. `effective.login` and
+`effective.login_restart_required` show the distinction. Saving must not kill
+an authenticated desktop. `/v1/login` remains the live start/move/stop resource
+and does not implicitly save its operations. Its `preferred_pane_id` is
+selection intent; `pane_id` is assignment. This does not implement joins,
+hotplug failover, or automatic primary migration; see ADR 0124 and issue #99.
+
+#### Save acknowledgement and failure
+
+`persisted` means persistence is enabled, not that all current changes reached
+disk. Inspect `storage.state` (`clean`, `pending`, `error`, `disabled`),
+`storage.saved_revision` and `storage.error`. Device changes may coalesce for
+500 ms. A successful settings replacement has a clean receipt from the same
+serializer as GET, with `effective` plus `applied`/`refused` details.
+
+The writer syncs file contents and the parent directory around atomic rename.
+Replacement no longer deletes the old file first. A forced save failure
+returns HTTP 503 `settings_write_failed`, not success; changes may already
+have applied in memory. Read settings and resolve the error before retrying.
+Failure after rename but before directory sync means durability is unconfirmed,
+not that the old file is guaranteed still present. Failed background writes
+retry at the coalescing interval, not every event-loop turn.
+
 ## Terminal surfaces and atomic updates
 
 The surface cell snapshot is authoritative. Use `GET /v1/surfaces/{id}/summary`

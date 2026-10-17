@@ -7,6 +7,27 @@ work actually stopped.
 
 ## Status at the last review
 
+### 2026-10-17 candidate 0.1.537: persistent desktop policy foundation
+
+The user approved a general API-owned lifecycle/configuration system and a
+native Hibr Control Panel distributed via `itdlabs/hibr-apps`. Issue #99 and
+ADR 0124 record the staged contract. The physical host remains 0.1.536; this
+cycle does not change its renderer, login or pane arrangement.
+
+Candidate source adds startup-applied `document.login`, explicit preferred
+versus assigned pane, missing-target wait/first-available policies and
+effective/restart reporting. The shared settings store now exposes save
+status and returns 503 on forced-save failure, preserving the old file until
+atomic replacement instead of unlinking it first. The old staged binary
+fails the actual disk-error regression; corrected focused tests pass including
+root login selection. Broad-suite/package/physical acceptance are pending.
+
+This is not automatic joins or failover. Hibr's existing `desktop --standby`
+distinguishes waiting from deliberately released clients; reuse its supported
+contract after verified authentication/owner association (#96). The local
+hibr-apps repo is clean and points to itdlabs/hibr-apps; its cp_pane framework,
+catalogue generators and async job patterns have been inspected, not modified.
+
 ### 2026-10-17 deployed 0.1.536: edge fit and complete glyphs
 
 The user requested correction of the clipped right edge and icon shapes.

@@ -3,7 +3,24 @@
 The roadmap is ordered by dependency. A later milestone must not become a
 second, parallel implementation of an earlier one.
 
-## Current position — 0.1.507 live visual-acceptance blocker
+## Current position — persistent desktop policy and catalogue control panel
+
+The physical host runs 0.1.536 SDL GL. The edge/font correction has bounded
+physical pixel acceptance; the user previously accepted the 0.1.535 movement
+checkpoint. These are not universal renderer or refresh-rate guarantees.
+See current-state.md and verification-status.md for exact evidence.
+
+Issue #99 and ADR 0124 sequence the next delivery: reliable API persistence
+and login startup policy, authenticated native association/standby integration
+(#96), stable bindings and explicit recovery policy, then a native Control
+Panel distributed through `itdlabs/hibr-apps`. No Hibr-core modifications.
+The panel must not own a second configuration store or controller. Existing
+Hibr standby deliberate-release semantics must not be silently overridden.
+
+Candidate 0.1.537 implements the first foundation only. Joins, live failover,
+arbitrary layouts, and catalogue UI acceptance remain separate deliverables.
+
+## Historical position — 0.1.507 live visual-acceptance blocker
 
 0.1.507 is deployed on the authorized one-output host and its API, package
 identity, deterministic renderer gates, and synthetic pointer timing path have

@@ -490,7 +490,11 @@ paths:
         device that is not present is stored and applied when it appears.
         Refused with `settings_not_persisted` when the server was started
         with `BLIT_SETTINGS=ignore`, because a write that could not stick is
-        worse than a refusal.
+        worse than a refusal. The login section is startup-applied; a save
+        never silently ends an authenticated desktop. A forced disk-write
+        failure returns 503 settings_write_failed; live changes may already
+        have applied, so read state before retrying. The previous durable
+        document is retained until its atomic replacement succeeds.
       parameters:
         - in: header
           name: If-Match
@@ -2241,7 +2245,7 @@ components:
       additionalProperties: false
     Settings:
       type: object
-      required: [revision, path, persisted, document, effective]
+      required: [revision, path, persisted, storage, document, effective]
       properties:
         revision: {$ref: '#/components/schemas/Revision'}
         path:
@@ -2255,6 +2259,15 @@ components:
           description: >-
             false when the server was started with `BLIT_SETTINGS=ignore`,
             which starts from the defaults and leaves the document untouched.
+            This is an enablement flag, not proof of a completed save; inspect storage.
+        storage:
+          type: object
+          required: [state, saved_revision, error]
+          properties:
+            state: {type: string, enum: [clean, pending, error, disabled]}
+            saved_revision: {type: integer, minimum: 0}
+            error: {type: string, enum: ['', settings_write_failed]}
+          additionalProperties: false
         applied:
           type: integer
           minimum: 0
@@ -2311,6 +2324,8 @@ components:
               properties:
                 font_id: {type: string}
                 scale: {type: number, minimum: 1.0, maximum: 3.0}
+            login:
+              $ref: '#/components/schemas/LoginPolicy'
             server:
               type: object
               description: >-
@@ -2333,7 +2348,8 @@ components:
         effective:
           type: object
           required: [render_interval_ms, pane_layout, renderer_requested,
-                     renderer_active, kms_async_pageflip, expect_desktop]
+                     renderer_active, kms_async_pageflip, expect_desktop,
+                     login, login_restart_required]
           properties:
             render_interval_ms: {type: integer, minimum: 1, maximum: 100}
             pane_layout: {type: string}
@@ -2341,7 +2357,25 @@ components:
             renderer_active: {type: string}
             kms_async_pageflip: {type: boolean}
             expect_desktop: {type: boolean}
+            login: {$ref: '#/components/schemas/LoginPolicy'}
+            login_restart_required: {type: boolean}
           additionalProperties: false
+    LoginPolicy:
+      type: object
+      description: >-
+        Startup-applied login placement. Missing fields use boot defaults.
+        A missing preferred pane is retained as intent, not rejected.
+        first_available selects a fallback; wait retains an unavailable target.
+        This is not authenticated desktop failover or automatic joins.
+        Current pane IDs are backend-scoped, not portable monitor identities.
+      properties:
+        enabled: {type: boolean}
+        preferred_pane_id:
+          oneOf:
+            - {type: string, minLength: 1, maxLength: 127, pattern: '^[A-Za-z0-9_.:-]+$'}
+            - {type: 'null'}
+        fallback: {type: string, enum: [first_available, wait]}
+      additionalProperties: false
     Diagnostics:
       type: object
       required: [revision, health, resources, render, graphics, errors, warnings]
@@ -3468,12 +3502,19 @@ components:
       additionalProperties: false
     LoginManager:
       type: object
-      required: [state, enabled, command, script, display_id, pane_id, session]
+      required: [state, enabled, command, script, display_id, pane_id, session,
+                 preferred_pane_id, fallback]
       properties:
         state:
           type: string
           enum: [disabled, starting, running, stopped, failed, backoff]
         enabled: {type: boolean}
+        preferred_pane_id:
+          oneOf:
+            - {type: string}
+            - {type: 'null'}
+          description: Selection intent, distinct from the actual pane_id.
+        fallback: {type: string, enum: [first_available, wait]}
         command: {type: string}
         script: {type: string}
         display_id:

@@ -1034,6 +1034,10 @@ typedef struct {
     char login_session_command[512];
     char login_display_id[128];
     char login_pane_id[128];
+    char login_preferred_pane_id[128];
+    char boot_login_pane_id[128];
+    int boot_login_enabled;
+    int login_fallback_wait;
     int login_start_reported;
     char hibr_runtime_version[64];
     int hibr_runtime_probe_ok;
@@ -1276,6 +1280,7 @@ typedef struct {
     int settings_write_reported;
     uint64_t settings_dirty_us;
     unsigned long long settings_revision;
+    unsigned long long settings_saved_revision;
     char settings_document[BLIT_SETTINGS_CAPACITY];
 } BlitRuntime;
 
@@ -14896,13 +14901,17 @@ static int create_login_session(BlitRuntime *runtime, BlitSession **created)
         return -2;
 
     pane_id[0] = '\0';
-    if (runtime->login_pane_id[0] != '\0' &&
-        find_pane_id(runtime, runtime->login_pane_id) != NULL) {
-        snprintf(pane_id, sizeof(pane_id), "%s", runtime->login_pane_id);
+    if (runtime->login_preferred_pane_id[0] != '\0' &&
+        find_pane_id(runtime, runtime->login_preferred_pane_id) != NULL) {
+        snprintf(pane_id, sizeof(pane_id), "%s", runtime->login_preferred_pane_id);
+    } else if (runtime->login_preferred_pane_id[0] != '\0' &&
+               runtime->login_fallback_wait) {
+        return -3;
     } else if (runtime->pane_count > 0) {
         for (pane_index = 0; pane_index < runtime->pane_count; ++pane_index)
             if (runtime->panes[pane_index].used) {
-                if (runtime->login_display_id[0] != '\0' &&
+                if (runtime->login_preferred_pane_id[0] == '\0' &&
+                    runtime->login_display_id[0] != '\0' &&
                     strcmp(runtime->panes[pane_index].display_id,
                            runtime->login_display_id) != 0)
                     continue;
@@ -15000,6 +15009,8 @@ static void login_manager_json(BlitRuntime *runtime, char *body,
     char escaped_pane[256];
     char display_value[300];
     char pane_value[300];
+    char preferred[256];
+    char preferred_value[300];
 
     json_escape(runtime->login_command, escaped_command,
                 sizeof(escaped_command));
@@ -15007,6 +15018,11 @@ static void login_manager_json(BlitRuntime *runtime, char *body,
     json_escape(runtime->login_display_id, escaped_display,
                 sizeof(escaped_display));
     json_escape(runtime->login_pane_id, escaped_pane, sizeof(escaped_pane));
+    json_escape(runtime->login_preferred_pane_id, preferred, sizeof(preferred));
+    if (preferred[0])
+        snprintf(preferred_value, sizeof(preferred_value), "\"%s\"", preferred);
+    else
+        snprintf(preferred_value, sizeof(preferred_value), "null");
     if (runtime->login_display_id[0] != '\0')
         snprintf(display_value, sizeof(display_value), "\"%s\"",
                  escaped_display);
@@ -15027,11 +15043,13 @@ static void login_manager_json(BlitRuntime *runtime, char *body,
     snprintf(body, capacity,
              "{\"state\":\"%s\",\"enabled\":%s,"
              "\"command\":\"%s\",\"script\":\"%s\","
-             "\"display_id\":%s,\"pane_id\":%s,\"session\":%s}",
+             "\"display_id\":%s,\"pane_id\":%s,\"session\":%s,"
+             "\"preferred_pane_id\":%s,\"fallback\":\"%s\"}",
              state, runtime->login_enabled ? "true" : "false",
              escaped_command, escaped_script,
              display_value, pane_value,
-             session != NULL ? session_body : "null");
+             session != NULL ? session_body : "null", preferred_value,
+             runtime->login_fallback_wait ? "wait" : "first_available");
 }
 
 static void service_login_manager(BlitRuntime *runtime, uint64_t now)
@@ -18086,6 +18104,140 @@ static void settings_copy_unseen_server(BlitRuntime *runtime, char *out,
     }
 }
 
+typedef struct {
+    int present;
+    int enabled;
+    int fallback_wait;
+    char pane_id[128];
+} BlitLoginPolicy;
+
+/* One reader for boot, replacement validation, serialization and reporting.
+   Only direct members count: nested device enabled flags are not login policy. */
+static int settings_login_policy(const BlitRuntime *runtime,
+                                  const char *document, BlitLoginPolicy *policy)
+{
+    const char *cursor;
+    char key[128];
+    static char value[BLIT_SETTINGS_CAPACITY];
+    char login[1024];
+    unsigned seen = 0;
+
+    memset(policy, 0, sizeof(*policy));
+    policy->enabled = runtime->boot_login_enabled;
+    snprintf(policy->pane_id, sizeof(policy->pane_id), "%s",
+             runtime->boot_login_pane_id);
+    if (document == NULL || document[0] == '\0')
+        return 1;
+    cursor = document;
+    while (*cursor && *cursor != '{') ++cursor;
+    if (*cursor++ != '{') return 0;
+    login[0] = '\0';
+    while ((cursor = json_next_member(cursor, key, sizeof(key), value,
+                                      sizeof(value))) != NULL) {
+        if (strcmp(key, "login") != 0) continue;
+        if (policy->present || value[0] != '{' || strlen(value) >= sizeof(login))
+            return 0;
+        policy->present = 1;
+        snprintf(login, sizeof(login), "%s", value);
+    }
+    if (!policy->present) return 1;
+    cursor = login + 1;
+    while ((cursor = json_next_member(cursor, key, sizeof(key), value,
+                                      sizeof(value))) != NULL) {
+        unsigned bit;
+        size_t value_length = strlen(value);
+        while (value_length > 0 &&
+               (value[value_length - 1] == ' ' || value[value_length - 1] == '\n' ||
+                value[value_length - 1] == '\r' || value[value_length - 1] == '\t'))
+            value[--value_length] = '\0';
+        if (strcmp(key, "enabled") == 0) {
+            bit = 1;
+            if (strcmp(value, "true") == 0) policy->enabled = 1;
+            else if (strcmp(value, "false") == 0) policy->enabled = 0;
+            else return 0;
+        } else if (strcmp(key, "preferred_pane_id") == 0) {
+            size_t length = 0;
+            const char *end;
+            bit = 2;
+            policy->pane_id[0] = '\0';
+            if (strcmp(value, "null") != 0) {
+                size_t i;
+                if (value[0] != '"') return 0;
+                end = json_unescape(value + 1, policy->pane_id,
+                                     sizeof(policy->pane_id), &length);
+                if (end == NULL || *end != '\0' || length == 0) return 0;
+                for (i = 0; i < length; ++i) {
+                    unsigned char c = policy->pane_id[i];
+                    if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                          (c >= '0' && c <= '9') || c == '-' || c == '_' ||
+                          c == '.' || c == ':')) return 0;
+                }
+            }
+        } else if (strcmp(key, "fallback") == 0) {
+            bit = 4;
+            if (strcmp(value, "\"wait\"") == 0) policy->fallback_wait = 1;
+            else if (strcmp(value, "\"first_available\"") == 0)
+                policy->fallback_wait = 0;
+            else return 0;
+        } else return 0;
+        if (seen & bit) return 0;
+        seen |= bit;
+    }
+    return 1;
+}
+
+static void login_policy_json(const BlitLoginPolicy *policy, char *out,
+                              size_t capacity)
+{
+    char pane[256];
+    char pane_value[300];
+    json_escape(policy->pane_id, pane, sizeof(pane));
+    if (pane[0]) snprintf(pane_value, sizeof(pane_value), "\"%s\"", pane);
+    else snprintf(pane_value, sizeof(pane_value), "null");
+    snprintf(out, capacity,
+             "{\"enabled\":%s,\"preferred_pane_id\":%s,\"fallback\":\"%s\"}",
+             policy->enabled ? "true" : "false", pane_value,
+             policy->fallback_wait ? "wait" : "first_available");
+}
+
+static void settings_apply_login_at_boot(BlitRuntime *runtime)
+{
+    BlitLoginPolicy policy;
+    if (!settings_login_policy(runtime, runtime->settings_document, &policy)) {
+        diagnostic_log(runtime, "warning", "invalid_settings_login",
+                       "Stored login policy invalid; boot defaults retained.");
+        return;
+    }
+    runtime->login_enabled = policy.enabled;
+    runtime->login_fallback_wait = policy.fallback_wait;
+    snprintf(runtime->login_preferred_pane_id,
+             sizeof(runtime->login_preferred_pane_id), "%s", policy.pane_id);
+    runtime->login_pane_id[0] = '\0';
+}
+
+/* Preserve unrecognized top-level extensions too, not just unknown device
+   properties. They remain opaque; preserving a field does not implement it. */
+static void settings_copy_extensions(BlitRuntime *runtime, char *out,
+                                     size_t capacity, size_t *used)
+{
+    const char *cursor = runtime->settings_document;
+    static const char *const owned[] = {"version", "revision", "input_devices",
+        "audio_devices", "displays", "font", "server", "login"};
+    static char value[BLIT_SETTINGS_CAPACITY];
+    char key[128];
+    int i;
+    while (*cursor && *cursor != '{') ++cursor;
+    if (*cursor != '{') return;
+    ++cursor;
+    while ((cursor = json_next_member(cursor, key, sizeof(key), value,
+                                      sizeof(value))) != NULL) {
+        for (i = 0; i < (int)(sizeof(owned) / sizeof(owned[0])); ++i)
+            if (strcmp(key, owned[i]) == 0) break;
+        if (i == (int)(sizeof(owned) / sizeof(owned[0])))
+            json_appendf(out, capacity, used, ",\"%s\":%s", key, value);
+    }
+}
+
 /* The document as it should be on disk right now. */
 static size_t settings_build(BlitRuntime *runtime, char *out, size_t capacity,
                              unsigned long long revision)
@@ -18219,7 +18371,18 @@ static size_t settings_build(BlitRuntime *runtime, char *out, size_t capacity,
         first = 0;
     }
     settings_copy_unseen_server(runtime, out, capacity, &used, &first);
-    json_appendf(out, capacity, &used, "}}");
+    json_appendf(out, capacity, &used, "}");
+    {
+        BlitLoginPolicy policy;
+        char login[512];
+        if (settings_login_policy(runtime, runtime->settings_document, &policy) &&
+            policy.present) {
+            login_policy_json(&policy, login, sizeof(login));
+            json_appendf(out, capacity, &used, ",\"login\":%s", login);
+        }
+    }
+    settings_copy_extensions(runtime, out, capacity, &used);
+    json_appendf(out, capacity, &used, "}");
     return used;
 }
 
@@ -18232,20 +18395,43 @@ static void settings_mark_dirty(BlitRuntime *runtime)
     runtime->settings_dirty = 1;
 }
 
-/* Atomic, because the failure this is for is a document truncated by a power
-   cut: a temporary file beside the real one, fsync, rename. */
+static int settings_sync_parent(const char *path)
+{
+    char directory[256];
+    char *slash;
+    int fd;
+    int result;
+    snprintf(directory, sizeof(directory), "%s", path);
+    slash = strrchr(directory, '/');
+    if (slash == NULL) snprintf(directory, sizeof(directory), ".");
+    else if (slash == directory) slash[1] = '\0';
+    else *slash = '\0';
+    fd = open(directory, O_RDONLY | O_DIRECTORY);
+    if (fd < 0) return 0;
+    result = fsync(fd) == 0;
+    close(fd);
+    return result;
+}
+
+/* Write all bytes, sync contents, rename atomically, then sync the directory.
+   Do not confirm a durable save merely because the file contents were synced. */
 static int settings_write(const char *path, const char *text, size_t length)
 {
     char temporary[320];
     int fd;
-    ssize_t written;
+    size_t total = 0;
 
     snprintf(temporary, sizeof(temporary), "%s.new", path);
-    fd = open(temporary, O_WRONLY | O_CREAT | O_TRUNC, 0640);
+    fd = open(temporary, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0640);
     if (fd < 0)
         return 0;
-    written = write(fd, text, length);
-    if (written != (ssize_t)length || fsync(fd) != 0) {
+    while (total < length) {
+        ssize_t written = write(fd, text + total, length - total);
+        if (written < 0 && errno == EINTR) continue;
+        if (written <= 0) break;
+        total += (size_t)written;
+    }
+    if (total != length || fsync(fd) != 0) {
         close(fd);
         unlink(temporary);
         return 0;
@@ -18255,7 +18441,7 @@ static int settings_write(const char *path, const char *text, size_t length)
         unlink(temporary);
         return 0;
     }
-    return 1;
+    return settings_sync_parent(path);
 }
 
 /* Coalesced: a slider dragging sensitivity_percent must not be one fsync per
@@ -18276,14 +18462,16 @@ static void settings_flush(BlitRuntime *runtime, int force)
     length = settings_build(runtime, document, sizeof(document),
                             runtime->settings_revision + 1);
     if (length == 0 || length + 1 >= sizeof(document)) {
-        runtime->settings_dirty = 0;
+        runtime->settings_write_reported = 1;
         return;
     }
     if (settings_write(runtime->settings_path, document, length)) {
         snprintf(runtime->settings_document,
                  sizeof(runtime->settings_document), "%s", document);
         ++runtime->settings_revision;
+        runtime->settings_saved_revision = runtime->settings_revision;
         runtime->settings_dirty = 0;
+        runtime->settings_write_reported = 0;
     } else if (!runtime->settings_write_reported) {
         /* Said once, not on every retry. A settings write that fails in
            silence is the shape that cost an afternoon: the API reports the
@@ -18293,6 +18481,8 @@ static void settings_flush(BlitRuntime *runtime, int force)
         fprintf(stderr, "blit: cannot write %s: %s\n",
                 runtime->settings_path, strerror(errno));
     }
+    if (runtime->settings_dirty)
+        runtime->settings_dirty_us = monotonic_us();
 }
 
 /* Read the document, or decide it cannot be read. An unparseable document
@@ -18326,6 +18516,7 @@ static void settings_load(BlitRuntime *runtime)
                      &stored_revision) && stored_revision > 0)
             runtime->settings_revision =
                 (unsigned long long)stored_revision;
+        runtime->settings_saved_revision = runtime->settings_revision;
     }
     if (json_key_cursor(runtime->settings_document, "version") == NULL ||
         json_key_cursor(runtime->settings_document, "input_devices") == NULL) {
@@ -18610,17 +18801,39 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
 {
     static char document[BLIT_SETTINGS_CAPACITY];
     size_t used = 0;
+    BlitLoginPolicy desired;
+    BlitLoginPolicy effective;
+    char login[512];
+    int restart_required;
+
+    settings_login_policy(runtime, runtime->settings_document, &desired);
+    memset(&effective, 0, sizeof(effective));
+    effective.enabled = runtime->login_enabled;
+    effective.fallback_wait = runtime->login_fallback_wait;
+    snprintf(effective.pane_id, sizeof(effective.pane_id), "%s",
+             runtime->login_preferred_pane_id);
+    login_policy_json(&effective, login, sizeof(login));
+    restart_required = desired.enabled != effective.enabled ||
+        desired.fallback_wait != effective.fallback_wait ||
+        strcmp(desired.pane_id, effective.pane_id) != 0;
 
     settings_build(runtime, document, sizeof(document),
                    runtime->settings_revision);
     json_appendf(body, capacity, &used,
                  "{\"revision\":%llu,\"path\":\"%s\",\"persisted\":%s,"
-                 "\"document\":%s,\"effective\":{"
+                 "\"storage\":{\"state\":\"%s\",\"saved_revision\":%llu,"
+                 "\"error\":\"%s\"},\"document\":%s,\"effective\":{"
                  "\"render_interval_ms\":%d,\"pane_layout\":\"%dx%d\","
                  "\"renderer_requested\":\"%s\",\"renderer_active\":\"%s\","
-                 "\"kms_async_pageflip\":%s,\"expect_desktop\":%s}}",
+                 "\"kms_async_pageflip\":%s,\"expect_desktop\":%s,"
+                 "\"login\":%s,\"login_restart_required\":%s}}",
                  runtime->settings_revision, runtime->settings_path,
                  runtime->settings_enabled ? "true" : "false",
+                 !runtime->settings_enabled ? "disabled" :
+                    (runtime->settings_write_reported ? "error" :
+                     (runtime->settings_dirty ? "pending" : "clean")),
+                 runtime->settings_saved_revision,
+                 runtime->settings_write_reported ? "settings_write_failed" : "",
                  document[0] != '\0' ? document : "{}",
                  runtime->render_interval_ms, runtime->pane_columns,
                  runtime->pane_rows, runtime->renderer_request,
@@ -18628,7 +18841,8 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
                      (runtime->sdl_renderer_name[0] != '\0' ?
                          runtime->sdl_renderer_name : "unavailable"),
                  runtime->kms_async_pageflip ? "true" : "false",
-                 runtime->expect_desktop ? "true" : "false");
+                 runtime->expect_desktop ? "true" : "false", login,
+                 restart_required ? "true" : "false");
 }
 
 /* A read-only, point-in-event-loop-turn state dump for operators and
@@ -18694,9 +18908,20 @@ static void observation_json(BlitRuntime *runtime, char *body,
    undoable without knowing which setting did it. The other half is
    BLIT_SETTINGS=ignore, which an operator at the machine uses when the API is
    exactly what they have lost. */
-static void settings_reset(BlitRuntime *runtime)
+static int settings_reset(BlitRuntime *runtime, int remove_file)
 {
     int i;
+
+    /* A PUT must not delete the last durable file before replacement. DELETE
+       checks failure before changing live settings. */
+    if (remove_file) {
+        int removed = unlink(runtime->settings_path);
+        if ((removed != 0 && errno != ENOENT) ||
+            (removed == 0 && !settings_sync_parent(runtime->settings_path))) {
+            runtime->settings_write_reported = 1;
+            return 0;
+        }
+    }
 
     runtime->settings_document[0] = '\0';
     apply_font_configuration(runtime, runtime->boot_font_path,
@@ -18765,9 +18990,13 @@ static void settings_reset(BlitRuntime *runtime)
     }
     ++runtime->input_devices_revision;
     ++runtime->audio_devices_revision;
-    unlink(runtime->settings_path);
     runtime->settings_dirty = 0;
     ++runtime->settings_revision;
+    if (remove_file) {
+        runtime->settings_saved_revision = runtime->settings_revision;
+        runtime->settings_write_reported = 0;
+    }
+    return 1;
 }
 
 static void handle_request(int fd, BlitRuntime *runtime,
@@ -18937,6 +19166,10 @@ static void handle_request(int fd, BlitRuntime *runtime,
                          "The requested login pane does not exist.");
             return;
         }
+        if (json_key_cursor(payload, "pane_id") != NULL)
+            snprintf(runtime->login_preferred_pane_id,
+                     sizeof(runtime->login_preferred_pane_id), "%s",
+                     runtime->login_pane_id);
         if (geteuid() != 0) {
             send_problem(fd, 403, "Forbidden", "login_requires_root",
                          "The Hibr login manager must be supervised by the root Blit service.");
@@ -19800,7 +20033,11 @@ static void handle_request(int fd, BlitRuntime *runtime,
             {
                 int old_columns = runtime->pane_columns;
                 int old_rows = runtime->pane_rows;
-            settings_reset(runtime);
+                if (!settings_reset(runtime, 1)) {
+                    send_problem(fd, 503, "Service Unavailable", "settings_write_failed",
+                                 "Settings reset could not be confirmed durable; live configuration unchanged. Inspect settings storage state.");
+                    return;
+                }
                 settings_apply_pane_layout(runtime, old_columns, old_rows);
                 reset_render_schedule(runtime, monotonic_us());
             }
@@ -19822,6 +20059,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
             int requested_layout = 0;
             int old_columns;
             int old_rows;
+            BlitLoginPolicy login_policy;
 
             if (document_cursor == NULL ||
                 !json_object_slice(document_cursor, document,
@@ -19834,6 +20072,11 @@ static void handle_request(int fd, BlitRuntime *runtime,
                                         &requested_rows, &requested_layout)) {
                 send_problem(fd, 400, "Bad Request", "invalid_settings_server",
                              "server.pane_layout must be one of 1x1, 1x2, 2x1, or 2x2.");
+                return;
+            }
+            if (!settings_login_policy(runtime, document, &login_policy)) {
+                send_problem(fd, 400, "Bad Request", "invalid_settings_login",
+                             "login accepts enabled (boolean), preferred_pane_id (pane ID or null), and fallback (first_available or wait).");
                 return;
             }
             if (!requested_layout) {
@@ -19853,7 +20096,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
             /* Replace, not merge: reset to the defaults first, then apply
                every entry the document names. A merge could not express "this
                and nothing else", which is what restoring a backup means. */
-            settings_reset(runtime);
+            settings_reset(runtime, 0);
             snprintf(runtime->settings_document,
                      sizeof(runtime->settings_document), "%s", document);
             settings_apply_font(runtime);
@@ -19916,16 +20159,21 @@ static void handle_request(int fd, BlitRuntime *runtime,
             }
             settings_mark_dirty(runtime);
             settings_flush(runtime, 1);
+            if (runtime->settings_dirty || runtime->settings_write_reported) {
+                send_problem(fd, 503, "Service Unavailable", "settings_write_failed",
+                             "Settings applied in memory but durable save could not be confirmed. Inspect GET /v1/settings before retrying.");
+                return;
+            }
             {
-                size_t used = 0;
+                size_t used;
+                char escaped_refusal[640];
+                settings_json(runtime, body, sizeof(body));
+                used = strlen(body);
+                if (used > 0) body[--used] = '\0';
+                json_escape(refusal, escaped_refusal, sizeof(escaped_refusal));
                 json_appendf(body, sizeof(body), &used,
-                             "{\"revision\":%llu,\"path\":\"%s\","
-                             "\"persisted\":true,\"applied\":%d,"
-                             "\"refused\":%d,\"refusal\":\"%s\","
-                             "\"document\":%s}",
-                             runtime->settings_revision,
-                             runtime->settings_path, applied, refused,
-                             refusal, document);
+                             ",\"applied\":%d,\"refused\":%d,\"refusal\":\"%s\"}",
+                             applied, refused, escaped_refusal);
             }
             send_http(fd, 200, "OK", "application/json", body);
             return;
@@ -26975,6 +27223,7 @@ int main(int argc, char **argv)
             getenv("BLIT_LOGIN_SESSION_COMMAND");
         runtime.login_enabled = login_autostart != NULL &&
             login_autostart[0] == '1';
+        runtime.boot_login_enabled = runtime.login_enabled;
         snprintf(runtime.login_command, sizeof(runtime.login_command), "%s",
                  login_command != NULL && login_command[0] != '\0' ?
                      login_command : BLIT_DEFAULT_LOGIN_COMMAND);
@@ -26991,9 +27240,14 @@ int main(int argc, char **argv)
             if (login_display != NULL)
                 snprintf(runtime.login_display_id,
                          sizeof(runtime.login_display_id), "%s", login_display);
-            if (login_pane != NULL)
+            if (login_pane != NULL) {
                 snprintf(runtime.login_pane_id,
                          sizeof(runtime.login_pane_id), "%s", login_pane);
+                snprintf(runtime.boot_login_pane_id,
+                         sizeof(runtime.boot_login_pane_id), "%s", login_pane);
+                snprintf(runtime.login_preferred_pane_id,
+                         sizeof(runtime.login_preferred_pane_id), "%s", login_pane);
+            }
         }
     }
     runtime.hibr_runtime_probe_ok = probe_hibr_identity(
@@ -27044,6 +27298,7 @@ int main(int argc, char **argv)
         settings_load(&runtime);
         settings_apply_font(&runtime);
         settings_apply_server(&runtime);
+        settings_apply_login_at_boot(&runtime);
         if (runtime.kms_async_pageflip)
             setenv("BLIT_KMS_ASYNC_PAGEFLIP", "1", 1);
         else

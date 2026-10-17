@@ -3,6 +3,25 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-17: candidate 0.1.537 policy/persistence foundation
+
+The old staged binary fails `login_policy_gate.rb`: a real settings `.new`
+directory prevents the atomic write, but PUT reports success. Corrected source
+passes the same failure scenario with HTTP 503, explicit error state and an
+unchanged previous durable file. The gate also verifies login startup-policy
+precedence, invalid-value rejection without mutation, missing-target wait
+and first-available fallback without erasing preference, and ignore recovery.
+Root login assignment is exercised with a `/bin/cat` fixture, not a Hibr
+authentication or physical-hotplug test. Existing settings-persistence tests
+also pass. TCC builds 0.1.537; schema gate passes.
+
+The first broad run exposed an incorrect new test assertion: it expected no
+restart flag after changing enabled back to its effective value, overlooking
+that the saved pane preference still differs. The assertion now compares the
+effective enabled field and independently checks the earlier startup flag;
+focused rerun passes. Broader corrected rerun/package/physical acceptance are
+pending. The real host stays 0.1.536. No Hibr-core edits or hibr-apps publication.
+
 ## 2026-10-17: deployed 0.1.536 edge/font regressions
 
 Before correction, the actual pane API gate reports complete1024px grid plus
