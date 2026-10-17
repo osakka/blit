@@ -48,8 +48,10 @@ unnamed client into this registry.
 Candidate0.1.540 implements the native-boundary prerequisite: recognized
 login-owned joins, derived authenticated credentials, per-client local PTY
 input instead of the obsolete horizontal/primary redirection, and generation
-cleanup (ADR0127). Raw-PTY and installed native CLI oracles pass; expanded
-controller and broad/package checks are pending. The host remains0.1.539.
+cleanup (ADR0127). Raw-PTY and installed native CLI/actual-launcher oracles pass;
+the final controller/broad/package run passes90 checks with three explicit
+skips and no failures, including reproducible rebuild and120-second soak.
+Physical native-join acceptance remains pending. The host remains0.1.539.
 Manual join commands are not the requested deliverable. Continue with saved
 auxiliary policy and native standby/initial-placement reconciliation in the
 same API-owned controller/store after this boundary is accepted.

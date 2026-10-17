@@ -37,6 +37,32 @@ closes inherited descriptors and copies HOME before supplementary-group NSS
 initialization; the final broad run must include that change. Broad/package
 and physical checks are still pending.
 
+Source/documentation commit `22acbd61e76806f62c33e630dd24e8c3a3c5d8ba`
+builds `blit_0.1.540-1_amd64.deb`, SHA256
+`7df991c9e2e724ffa44ee3f9b471222f613ae9359e1f0db5daabe85253e137ec`.
+Manifest validation, artifact checks and reproducible rebuild pass. The
+package gate also compares changed `blit-session.hibr` to the recorded source
+commit. A later test-only extension runs that actual launcher, rather than
+only direct `hold attach`, against installed Hibr0.99.240 ABI16. All three
+buttons' press/release, modified drag, both wheel directions and keyboard pass
+the same independently observed134x240 union/input oracle. It is included in
+the broad run; no production/archive
+change followed22acbd6. Package headers remain pinned0.99.225 ABI16, not the
+unrelated development Hibr tree. Physical acceptance remains separate.
+
+The final full run uses that exact package and the strengthened actual-launcher
+fixture, with `BLIT_GATE_REBUILD=1`: **90 pass / 3 skip / 0 fail**. It includes
+the final inherited-descriptor/HOME hardening, credential-dropping owner/
+expiry/logout cases, schema/terminal/font/renderer/input/Hibr/lifecycle gates,
+package rebuild and120-second four-PTY soak (11,312 snapshots;1,028 resizes).
+The skips are QEMU, physical multi-output and live screenshot backpressure.
+The local cadence fixture reports60.006Hz, not a physical refresh-rate guarantee.
+Evidence: `diagnostics/native-join-540/all-gates.log`. A final read-only host
+observation confirms0.1.539 still running, one focused lower login(id3),
+verified UID1000/native owner251045. No live join, renderer change, Hibr-core
+edit or SSH. Safe upgrade clearance and native physical join acceptance are
+pending; local test processes have exited.
+
 The user requests saved automatic joins, not manual launch instructions. This
 increment is their native boundary prerequisite; it does not claim saved
 auxiliary policy, automatic boot/login provisioning or standby placement is

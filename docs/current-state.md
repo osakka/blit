@@ -28,11 +28,29 @@ Expanded coverage also passes owner-replacement cleanup, preservation across
 temporary query failure and refusal of new joins after observation expiry;
 maximum API latency in that controlled run is56.43ms. Derived native children
 additionally close inherited listener/device/PTY descriptors before exec.
-Broad/package validation remains in progress. This is local boundary evidence, not physical
-acceptance or completion of automatic policy.
+Full local/package validation passes90 checks with three explicit skips and
+zero failures. This is local boundary evidence, not physical acceptance or
+completion of automatic policy.
+
+Package `blit_0.1.540-1_amd64.deb` is built from source/documentation commit
+`22acbd61e76806f62c33e630dd24e8c3a3c5d8ba`, SHA256
+`7df991c9e2e724ffa44ee3f9b471222f613ae9359e1f0db5daabe85253e137ec`.
+Manifest/artifact validation and a reproducible rebuild pass. The package
+gate now pins the changed `blit-session.hibr` bytes as well as the login and
+observer entrypoints. Later test-only improvements exercise the actual Blit
+launcher against installed Hibr0.99.240 ABI16, all three button press/release
+pairs, modified drag, both wheel directions and keyboard. They do not alter
+the production source/archive identity. The final run includes the120-second
+four-PTY soak:11,312 snapshots and1,028 resizes. Skips are QEMU, physical
+multi-output and live screenshot backpressure, not implied passes. Evidence:
+`diagnostics/native-join-540/all-gates.log`.
 
 The host remains0.1.539 with its authenticated lower desktop preserved. Do not
 restart it merely to validate this candidate without safe user clearance.
+A final read-only observation shows one focused lower login terminal(id3),
+verified UID1000 and native owner251045; the user has authenticated again
+during development. No join or other live mutation was performed by this
+cycle. Evidence: `diagnostics/native-join-540/live-preserved.json`.
 Next after gating/physical boundary acceptance: implement saved auxiliary
 policy and native standby/initial-placement reconciliation in the existing
 controller/store. The API must apply/save intent; the user must not launch

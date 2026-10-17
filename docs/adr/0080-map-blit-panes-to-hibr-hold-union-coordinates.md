@@ -1,10 +1,15 @@
 # ADR 0080: Map Blit panes to Hibr hold-union coordinates
 
-- Status: superseded for physical vertical-join acceptance; retained as a
-  compatibility projection
+- Status: superseded; compatibility projection removed in0.1.540
 - Date: 2026-10-15
 - Supersedes: the stock horizontal-only placement of the packaged Blit join launcher
 - Superseded by: [ADR 0081](0081-hibr-joins-require-a-2d-union-contract.md)
+  and [ADR 0127](0127-native-client-pty-input-and-login-owned-joins.md)
+
+The following is historical rationale, not current implementation guidance.
+Hibr now owns the native2-D union and per-client input rewrite (ADR0122).
+The0.1.540 source removes the old horizontal slot/primary-input projection;
+deployment acceptance is recorded separately in the verification ledger.
 
 ## Context
 
