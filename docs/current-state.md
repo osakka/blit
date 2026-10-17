@@ -7,7 +7,7 @@ work actually stopped.
 
 ## Status at the last review
 
-### 2026-10-17 candidate 0.1.531: bounded presentation deadlines
+### 2026-10-17 deployed 0.1.531: bounded presentation deadlines
 
 Follow-up [issue #90](https://git.home.arpa/itdlabs/blit/issues/90) reproduces
 expired PTY/group deadlines being reopened by incoming output, and a zero
@@ -19,7 +19,16 @@ keeps deadlines fixed until presentation/release and clears consumed batch
 flags. The focused join barrier and local frame-rate gates pass (59.999 Hz
 in the dummy-backend frame-rate fixture). This is not physical-host timing.
 
-The live host remains 0.1.530 pending candidate verification/deployment.
+The live host now runs reproducible package 0.1.531 from source `0933cad`.
+The two-corner and half-block probes pass. Two 600-frame PTY/pointer runs each
+check 2,051,904 blank pixels across the whole measured pane with zero stale
+pixels. Active submission cadence is 53.185 and 52.581 Hz on the 60-Hz output.
+The captured render trace shows deferred KMS presents followed by retries at
+the next software deadline, sometimes approximately 32 ms later. This remaining
+vblank retry timing is under investigation; 60-Hz physical acceptance remains
+unmet. Only the existing login manager remains, focused, with unchanged pane
+topology/backend. An authenticated Hibr dragging test is still pending login.
+
 An improved low-overhead PTY/pointer measurement on that version records
 47.908 page-flip submissions/s in an active 3.131-second window, with zero
 stale pixels. The new benchmark polls terminal title metadata rather than

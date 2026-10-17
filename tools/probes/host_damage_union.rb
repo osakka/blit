@@ -11,7 +11,8 @@ token = ENV.fetch('BLIT_AUTH_TOKEN', 'hellomonkeyboy')
 def request(base, token, method, path, body = nil)
   uri = base + path
   req = {'GET' => Net::HTTP::Get, 'POST' => Net::HTTP::Post,
-         'PUT' => Net::HTTP::Put, 'DELETE' => Net::HTTP::Delete}.fetch(method).new(uri)
+         'PUT' => Net::HTTP::Put, 'DELETE' => Net::HTTP::Delete,
+         'PATCH' => Net::HTTP::Patch}.fetch(method).new(uri)
   req['Authorization'] = "Bearer #{token}"
   if body
     req['Content-Type'] = 'application/json'
@@ -34,6 +35,7 @@ def rgb(bmp, x, y)
   [bmp.getbyte(o + 2), bmp.getbyte(o + 1), bmp.getbyte(o)]
 end
 topology = data(base, token, '/v1/topology')
+focused = data(base, token, '/v1/terminal-sessions').fetch('sessions').find { |s| s['focused'] }
 pane = topology.fetch('panes').find { |p| p['surface_id'].nil? }
 raise 'requires a free pane' unless pane
 grid = pane.fetch('cell_grid')
@@ -84,4 +86,5 @@ begin
   puts "LIVE_HALF_BLOCK_PASS upper=exact lower=exact foreground=ff0000 background=102030"
 ensure
   request(base, token, 'DELETE', "/v1/terminal-sessions/#{session}") if session
+  request(base, token, 'PATCH', "/v1/terminal-sessions/#{focused['id']}", {'focused'=>true}) if focused
 end

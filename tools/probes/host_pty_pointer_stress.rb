@@ -108,6 +108,8 @@ begin
   File.binwrite(File.join(OUT,'final.bmp'),shot.body)
   File.write(File.join(OUT,'surface-final.json'),JSON.pretty_generate(state))
   File.write(File.join(OUT,'runtime-samples.json'),JSON.pretty_generate(samples))
+  File.write(File.join(OUT,'render-trace.json'),
+    JSON.pretty_generate(data('/v1/diagnostics/trace?kind=render_path&limit=256')))
   bad = []; checked = 0
   state.fetch('cells').each do |cell|
     next unless cell['text'] == ' '
@@ -134,6 +136,9 @@ begin
     b = last.dig('snapshot','render','outputs').find { |o| o['display_id'] == display }
     hz = (b['present_calls'] - a['present_calls']) / dt
     puts "PTY_POINTER_CADENCE submission_hz=#{hz.round(3)} window_s=#{dt.round(3)} target_hz=#{b['refresh_hz']}"
+    if ENV['BLIT_REQUIRE_REFRESH'] == '1' && hz < b['refresh_hz'] * 0.97
+      raise "PTY_POINTER_REFRESH_FAIL submission_hz=#{hz.round(3)} minimum_hz=#{(b['refresh_hz'] * 0.97).round(3)}"
+    end
   end
   puts "PTY_POINTER_PASS producer_frames=600 pointer_requests=#{motions} blank_pixels=#{checked} stale_pixels=0 revision=#{state['revision']} evidence=#{OUT}"
 ensure

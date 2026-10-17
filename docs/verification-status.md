@@ -17,6 +17,21 @@ fixture records 59.999 Hz with zero window missed deadlines. The TCC
 renderer/terminal suites also pass: 51 pass, 0 skip, 0 fail. Live deployment
 remains pending; this is not a live 60-Hz claim.
 
+### Physical follow-up: exact 0.1.531 deployed
+
+The API updater verifies 0.1.531, built from `0933cad`, SHA-256
+`9d4b891c7340f20e7aaf0b94104aae51175a967106bca04c4bbae48094d5d54c`.
+Its manifest is `releases/0.1.531.yaml`; artifact verification reports
+`reproducible=yes`. The two-corner and half-block RGB probes pass again.
+Two whole-pane PTY/pointer runs each check 2,051,904 blank pixels with zero
+stale pixels. Cadence is 53.185 and 52.581 submissions/s in active windows.
+The captured render ring contains 14 deferred attempts among 82 entries;
+examples at 608506458026 and 608506490916 us retry only at 608506477782 and
+608506510188 us. A completed flip still waits for the software phase, making
+some consecutive submissions approximately 32 ms apart. This is the next
+timing defect; 60-Hz physical acceptance remains unmet. Evidence is under
+`diagnostics/rendering-20261017/pty-pointer-low-overhead-531-repeat/`.
+
 The improved live PTY/pointer benchmark on 0.1.530 polls small title metadata
 while drawing, then obtains the large cell snapshot only after the producer
 finishes. This avoids contaminating cadence with repeated multi-megabyte JSON
