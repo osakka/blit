@@ -26,6 +26,11 @@ Candidate 0.1.538 adds a private post-authentication identity handoff (ADR 0125)
 not automatic joins. The next boundary is real-login acceptance, then native
 per-user held-owner readiness before standby/release integration. Hibr Displays
 actions remain session-only until explicitly saved into the same Blit store.
+Its complete local runtime run passes 86/86 executed checks (four skipped),
+and package validation/reproducible rebuild pass separately. It is not yet
+deployed: an existing logged-in session on 10.54 is being preserved pending
+logout/clearance. Physical authentication, native owner association and standby
+joins remain unproven for this candidate.
 
 ## Historical position — 0.1.507 live visual-acceptance blocker
 

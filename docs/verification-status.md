@@ -34,6 +34,17 @@ ABI-16 Hibr 0.99.225 header input. Artifact validation and a reproducible
 rebuild pass with that same package hash. The all-suite runtime run is still
 in progress; no live deployment or actual-user authentication claimed.
 
+The subsequent full `BLIT_HIBR_ROOT=/tmp/hibr-225.X7SwWK tools/run-gates.sh all`
+finishes **86 pass / 4 skip / 0 fail**, including the expanded identity gate,
+existing schema/terminal/font/renderer/input/Hibr/lifecycle gates and the
+120-second four-PTY soak (11,340 snapshots; 1,031 resizes). The skips are the
+package suite entry (no BLIT_GATE_PACKAGE, artifact gate passed separately),
+QEMU, physical multi-output and live screenshot backpressure. None is claimed
+passed by the local run. No source changes followed the packaged commit;
+later commits record the manifest and evidence only. The live version remains
+0.1.537, with deployment and actual authenticated identity acceptance awaiting
+safe logout/operator clearance. No joins were started and no Hibr core modified.
+
 ## 2026-10-17: deployed 0.1.537 policy/persistence foundation
 
 The old staged binary fails `login_policy_gate.rb`: a real settings `.new`
