@@ -38,6 +38,17 @@ IDs in this first stage refer to current backend pane identities. They are
 not portable monitor identities: stable output selectors and logical pane
 names are required before general hotplug provisioning can be claimed.
 
+Auxiliary startup intent is stored in the same document as
+`auxiliary_displays`, a list of unique `{output, pane_ordinal}` bindings.
+`output` is the stable connector selector, and `pane_ordinal` is one-based,
+row-major within that output's configured 1x1–2x2 pane grid. A configured but
+currently absent output remains saved and dormant. This document field is
+intent only: saving it does not move the current Hibr desktop. Hibr Displays
+remains the live session owner; Blit's eventual standby reconciler may apply
+the configured initial placement once when a new standby first joins, but
+never undo later user moves. Current-session Apply and durable Save remain
+separate actions.
+
 Settings storage reports clean/pending/error/disabled and its last saved
 revision. Replacement must retain the old file until the atomic new write.
 A forced save failure returns an error, not a successful persistence claim;
@@ -45,12 +56,19 @@ already-applied live changes are not claimed rolled back. Clients must read
 state after the error. Ordinary device writes may still coalesce; `persisted`
 continues to mean persistence is enabled, not an acknowledgement of durability.
 
+The 0.1.542 settings contract implements validation and durable storage of
+`auxiliary_displays`; it does not start clients or apply layout. An absent
+array means no desired auxiliaries. A present empty array explicitly clears
+the desired set. Invalid replacements are rejected before current or durable
+settings change. This is still a staged delivery, not completion of the
+standby lifecycle below.
+
 ## Remaining stages
 
 1. Verified authenticated desktop association and native standby integration,
    using Hibr's supported per-user interface, never screen/process-name guesses.
    The 0.1.540 join path supplies the association and per-client lifetime
-   boundary. The next implementation adds persisted auxiliary intent and
+   boundary; 0.1.542 adds persisted auxiliary intent. The next implementation
    starts a named `desktop --standby` client only after that association is
    fresh. The standby runs as the authenticated desktop user and occupies its
    configured Blit pane.

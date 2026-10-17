@@ -3,6 +3,18 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-17: saved auxiliary intent (0.1.542 source candidate)
+
+TCC 0.9.27 builds the 0.1.542 server. The existing settings persistence gate
+passes with additional checks that two stable output/pane bindings round-trip,
+survive restart, and reject duplicate bindings, pane ordinals outside 1–4,
+unsafe output selectors, undeclared properties, and more than 16 entries.
+Every invalid replacement leaves the prior revision and saved intent intact.
+The OpenAPI schema gate passes. These are local source-candidate results; no
+package has been created and 10.54 has not been updated. This delivers only
+validated durable intent. It does not start Hibr standby clients, position
+them, or change current-session Hibr Displays choices.
+
 ## 2026-10-17: native association client inventory (local candidate)
 
 TCC 0.9.27 builds the server at version 0.1.541. The installed-Hibr native

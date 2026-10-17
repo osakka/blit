@@ -203,6 +203,41 @@ Dir.mktmpdir('blit-settings') do |root|
           "#{(stored['input_devices'] || {})[STABLE].inspect}")
   end
 
+  verdict('auxiliary-display-intent-validation-and-round-trip') do
+    code, before = request('GET', '/v1/settings')
+    check(code == 200, "GET settings before auxiliary policy -> #{code}")
+    config_doc = before.fetch('document').merge(
+      'auxiliary_displays' => [
+        {'output' => 'DP-1', 'pane_ordinal' => 1},
+        {'output' => 'eDP-1', 'pane_ordinal' => 2}
+      ])
+    code, saved = request('PUT', '/v1/settings', {'document' => config_doc},
+                          {'If-Match' => before.fetch('revision').to_s})
+    check(code == 200, "valid auxiliary policy PUT -> #{code}: #{saved.inspect}")
+    check(saved.dig('document', 'auxiliary_displays') == config_doc['auxiliary_displays'],
+          'auxiliary bindings did not round-trip through the canonical settings document')
+    check(saved['storage']['state'] == 'clean', 'auxiliary policy was not durably saved')
+
+    invalid_sets = [
+      [{'output' => 'DP-1', 'pane_ordinal' => 1}, {'output' => 'DP-1', 'pane_ordinal' => 1}],
+      [{'output' => 'DP-1', 'pane_ordinal' => 5}],
+      [{'output' => '../DP-1', 'pane_ordinal' => 1}],
+      [{'output' => 'DP-1', 'pane_ordinal' => 1, 'row' => 3}],
+      Array.new(17) {|i| {'output' => "DP-#{i}", 'pane_ordinal' => 1}}
+    ]
+    invalid_sets.each do |bindings|
+      candidate = config_doc.merge('auxiliary_displays' => bindings)
+      status, problem = request('PUT', '/v1/settings', {'document' => candidate},
+                                {'If-Match' => saved.fetch('revision').to_s})
+      check(status == 400 && problem['code'] == 'invalid_settings_auxiliary_displays',
+            "invalid auxiliary policy accepted or misreported: #{status} #{problem.inspect}")
+      current = request('GET', '/v1/settings').last
+      check(current['revision'] == saved['revision'] &&
+            current.dig('document', 'auxiliary_displays') == config_doc['auxiliary_displays'],
+            'invalid auxiliary policy changed live/durable settings')
+    end
+  end
+
   # The whole point. A restart is a real operational event -- a release is one
   # -- and before this it took every setting with it.
   verdict('a-setting-survives-a-restart') do
@@ -224,6 +259,10 @@ Dir.mktmpdir('blit-settings') do |root|
     check(settings.is_a?(Hash) && settings['revision'].to_i.positive?,
           "the document revision survives the restart, got " \
           "#{settings.is_a?(Hash) ? settings['revision'].inspect : settings.inspect}")
+    check(settings.dig('document', 'auxiliary_displays') == [
+            {'output' => 'DP-1', 'pane_ordinal' => 1},
+            {'output' => 'eDP-1', 'pane_ordinal' => 2}],
+          'saved auxiliary intent survives restart without becoming a transient pane id')
   end
 
   # Issue #75. The document stores only deviations from defaults, so a known

@@ -26,10 +26,12 @@ Joins, live failover,
 arbitrary layouts, and catalogue UI acceptance remain separate deliverables.
 
 The current implementation extends native association to expose all named
-clients and their signed native rectangles from that same read-only query.
-This prerequisite is locally built and gated, but not deployed. Next: persist
-auxiliary intent in the existing settings resource, then implement bounded
-standby lifecycle and one-time initial placement using these observed clients.
+clients and their signed native rectangles from that same read-only query,
+and adds validated, restart-persistent auxiliary bindings to the existing
+settings document (`auxiliary_displays` stable output plus pane ordinal).
+Both are locally gated, but not packaged or deployed. Next: implement bounded
+standby lifecycle and one-time initial placement using these saved bindings
+and observed clients.
 Do not start the catalogue panel until those API semantics have a validated
 contract; the panel remains in `hibr-apps` issue #1.
 

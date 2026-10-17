@@ -729,6 +729,15 @@ and does not implicitly save its operations. Its `preferred_pane_id` is
 selection intent; `pane_id` is assignment. This does not implement joins,
 hotplug failover, or automatic primary migration; see ADR 0124 and issue #99.
 
+`document.auxiliary_displays` is the saved auxiliary intent: an array of
+unique `{output, pane_ordinal}` bindings. `output` is the stable connector
+name; `pane_ordinal` is one-based row-major within that output's configured
+pane grid. Missing outputs are valid dormant intent. Saving this field does
+not move or reconnect a current desktop client. Blit's later standby
+reconciler applies initial placement once; Hibr Displays owns subsequent
+session moves. The control panel must keep live Apply separate from durable
+Save as default. See ADR 0124.
+
 #### Save acknowledgement and failure
 
 `persisted` means persistence is enabled, not that all current changes reached

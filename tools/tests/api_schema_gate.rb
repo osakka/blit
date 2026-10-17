@@ -24,6 +24,12 @@ raise 'effective login restart reporting missing' unless
 policy = schema.fetch('components').fetch('schemas').fetch('LoginPolicy')
 raise 'login fallback contract changed' unless
   policy.dig('properties','fallback','enum') == %w[first_available wait]
+settings = schema.fetch('components').fetch('schemas').fetch('Settings')
+auxiliary = settings.dig('properties','document','properties','auxiliary_displays')
+raise 'saved auxiliary binding schema missing' unless auxiliary &&
+  auxiliary['maxItems'] == 16 &&
+  auxiliary.dig('items','required') == %w[output pane_ordinal] &&
+  auxiliary.dig('items','properties','pane_ordinal','maximum') == 4
 login = schema.fetch('components').fetch('schemas').fetch('LoginManager')
 raise 'login identity observation missing' unless login['required'].include?('identity') &&
   login.dig('properties','identity','$ref') == '#/components/schemas/LoginIdentity'

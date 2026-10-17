@@ -18827,6 +18827,98 @@ static int settings_login_policy(const BlitRuntime *runtime,
     return 1;
 }
 
+/* Saved auxiliary intent is deliberately declarative. The stable connector
+   name and one-based pane ordinal survive enumeration changes; transient
+   display/pane IDs and native placement are derived when the session starts.
+   This validator does not enact intent or read/write another configuration. */
+static int settings_auxiliary_policy_valid(const char *document)
+{
+    char value[8192], array[8192], object[512], key[128], member[256];
+    char outputs[16][64];
+    int ordinals[16], count = 0, found = 0;
+    int named_in_document;
+    const char *cursor = document, *items, *end;
+    if (document == NULL || document[0] == '\0') return 1;
+    named_in_document = strstr(document, "\"auxiliary_displays\"") != NULL;
+    while (*cursor && *cursor != '{') ++cursor;
+    if (*cursor++ != '{') return 0;
+    while ((cursor = json_next_member(cursor, key, sizeof(key), value,
+                                      sizeof(value))) != NULL) {
+        if (strcmp(key, "auxiliary_displays") != 0) continue;
+        if (found++ || value[0] != '[' || strlen(value) >= sizeof(array))
+            return 0;
+        snprintf(array, sizeof(array), "%s", value);
+    }
+    if (!found) return !named_in_document;
+    items = array + 1;
+    while (*items == ' ' || *items == '\t' || *items == '\n' || *items == '\r') ++items;
+    if (*items == ']') return items[1] == '\0';
+    for (;;) {
+        char output[64] = "";
+        long ordinal = 0;
+        unsigned seen = 0;
+        size_t output_length = 0;
+        int j;
+        if (*items != '{' || count >= 16 ||
+            !json_object_slice(items, object, sizeof(object))) return 0;
+        end = items + strlen(object);
+        cursor = object + 1;
+        while ((cursor = json_next_member(cursor, key, sizeof(key), member,
+                                          sizeof(member))) != NULL) {
+            if (strcmp(key, "output") == 0) {
+                const char *decoded;
+                size_t i;
+                if ((seen & 1u) || member[0] != '"') return 0;
+                decoded = json_unescape(member + 1, output, sizeof(output),
+                                        &output_length);
+                if (decoded == NULL || *decoded != '\0' || output_length == 0 ||
+                    output_length > 63) return 0;
+                for (i = 0; i < output_length; ++i) {
+                    unsigned char c = (unsigned char)output[i];
+                    if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                          (c >= '0' && c <= '9') || c == '-' || c == '_' ||
+                          c == '.' || c == ':')) return 0;
+                }
+                seen |= 1u;
+            } else if (strcmp(key, "pane_ordinal") == 0) {
+                char *number_end;
+                size_t number_length;
+                if (seen & 2u) return 0;
+                number_length = strlen(member);
+                while (number_length > 0 &&
+                       (member[number_length - 1] == ' ' ||
+                        member[number_length - 1] == '\t' ||
+                        member[number_length - 1] == '\n' ||
+                        member[number_length - 1] == '\r'))
+                    member[--number_length] = '\0';
+                errno = 0;
+                if (member[0] < '0' || member[0] > '9') return 0;
+                if (member[0] == '0' && member[1] != '\0') return 0;
+                {
+                    size_t k;
+                    for (k = 0; k < number_length; ++k)
+                        if (member[k] < '0' || member[k] > '9') return 0;
+                }
+                ordinal = strtol(member, &number_end, 10);
+                if (errno || number_end == member || *number_end != '\0' ||
+                    ordinal < 1 || ordinal > 4) return 0;
+                seen |= 2u;
+            } else return 0;
+        }
+        if (seen != 3u) return 0;
+        for (j = 0; j < count; ++j)
+            if (ordinals[j] == ordinal && strcmp(outputs[j], output) == 0)
+                return 0;
+        snprintf(outputs[count], sizeof(outputs[count]), "%s", output);
+        ordinals[count++] = (int)ordinal;
+        items = end;
+        while (*items == ' ' || *items == '\t' || *items == '\n' || *items == '\r') ++items;
+        if (*items == ']') return items[1] == '\0';
+        if (*items++ != ',') return 0;
+        while (*items == ' ' || *items == '\t' || *items == '\n' || *items == '\r') ++items;
+    }
+}
+
 static void login_policy_json(const BlitLoginPolicy *policy, char *out,
                               size_t capacity)
 {
@@ -20728,6 +20820,11 @@ static void handle_request(int fd, BlitRuntime *runtime,
             if (!settings_login_policy(runtime, document, &login_policy)) {
                 send_problem(fd, 400, "Bad Request", "invalid_settings_login",
                              "login accepts enabled (boolean), preferred_pane_id (pane ID or null), and fallback (first_available or wait).");
+                return;
+            }
+            if (!settings_auxiliary_policy_valid(document)) {
+                send_problem(fd, 400, "Bad Request", "invalid_settings_auxiliary_displays",
+                             "auxiliary_displays must contain at most 16 unique {output, pane_ordinal} bindings; output names use stable connector characters and pane_ordinal is 1 through 4.");
                 return;
             }
             if (!requested_layout) {
@@ -27937,6 +28034,10 @@ int main(int argc, char **argv)
         runtime.shutdown_key_modifiers = (1u << BLIT_MODIFIER_CTRL) |
             (1u << BLIT_MODIFIER_ALT);
         settings_load(&runtime);
+        if (!settings_auxiliary_policy_valid(runtime.settings_document))
+            diagnostic_log(&runtime, "warning",
+                           "invalid_settings_auxiliary_displays",
+                           "Stored auxiliary display bindings are invalid; they remain dormant until corrected through the settings API.");
         settings_apply_font(&runtime);
         settings_apply_server(&runtime);
         settings_apply_login_at_boot(&runtime);
