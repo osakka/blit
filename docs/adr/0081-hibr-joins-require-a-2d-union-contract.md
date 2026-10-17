@@ -59,3 +59,13 @@ layout:
 
 Until all five hold, the release ledger must call the result blocked rather
 than “working” or “accepted”.
+
+## Dependency update, 2026-10-17
+
+Hibr #238/#240 are closed; the live Hibr 0.99.232 ABI16 supports the native
+2-D hold contract. Thus the missing-Hibr-capability block above is historical,
+not a current explanation for rendering issues. [ADR 0122](0122-native-hibr-join-orchestration.md)
+records a verified live vertical union of the existing authenticated desktop
+and a native join. The five product acceptance criteria remain; residual
+pixels, API role association and lifecycle acceptance are not declared solved
+by successful native attachment.

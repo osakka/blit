@@ -120,8 +120,9 @@ schema directly with `execve(2)`. Hibr therefore remains the executable and
 the owner of desktop/session behavior; the repository's shell probes are
 limited to QEMU staging, build, and regression-test orchestration.
 
-Create the primary desktop through the API using the packaged entrypoint and
-authoritative display geometry:
+For an explicitly API-owned desktop (not an already authenticated login
+manager), create the primary using the packaged entrypoint and authoritative
+display geometry:
 
 ```sh
 curl --fail --request POST \
@@ -142,33 +143,47 @@ joined pane is delivered to the primary owner. Direct cell mutation of a
 joined surface is rejected with `hibr_join_surface_read_only`
 ([ADR 0079](adr/0079-hibr-desktop-uses-the-native-pty-boundary.md)).
 
-For a Blit topology, the entrypoint currently receives a deterministic logical
-column for each pane. The primary remains Hibr's logical slot zero and each
-join attaches in the next horizontal Hibr slot, while Blit presents those
-local PTY viewports in their authoritative physical panes. This is a
-compatibility projection only. It keeps Hibr's primary bar/window placement on
-the physical primary for a 1x2 stack (primary below, join above), but it does
-not make the physical stack a correct 2-D Hibr desktop and does not provide
-complete joined wallpaper/window content. Direct Hibr invocations without
-Blit's topology environment retain Hibr's documented default placement
-([ADR 0080](adr/0080-map-blit-panes-to-hibr-hold-union-coordinates.md)).
+The recognized packaged-entrypoint path still implements the historical
+horizontal projection of [ADR 0080](adr/0080-map-blit-panes-to-hibr-hold-union-coordinates.md),
+including forwarding join input to its registered primary. It is not the
+current native vertical-join flow below. Do not apply its additional transform
+to a native Hibr hold client which already rewrites its own local input.
 
-Blit translates pointer motion, buttons, and wheel coordinates from the
-joined pane's local cells into that projected Hibr union column before routing
-the event to the primary PTY. The same logical coordinates are exposed in the
-diagnostic trace. This closes a Blit-side coordinate defect, but full physical
-vertical-join acceptance remains blocked on Hibr's 2-D union/layout contract
-in [Hibr #240](https://git.home.arpa/itdlabs/hibr/issues/240). Spanning
-Kitty/Sixel propagation remains tracked in
-[Hibr #238](https://git.home.arpa/itdlabs/hibr/issues/238).
+Hibr #238 (viewport pictures) and #240 (true 2-D desktop layout) are now closed.
+The live host has Hibr 0.99.232 ABI16, whose native hold contract supports
+both row and column placement/input. Their old dependency-blocked status is
+historical. This capability does not establish Blit's full joined-image or
+interactive acceptance; actual captures and protocol/input evidence remain
+required. Blit does not patch Hibr source.
 
-Picture propagation is a separate Hibr capability. Hibr's current hold
-contract does not emit a spanning Kitty/Sixel bitmap to a client whose
-viewport contains only part of that bitmap, so Blit cannot claim joined
-wallpaper completeness from cell/PTY evidence alone. The required Hibr-side
-viewport clipping/re-emission is tracked in
-[Hibr #238](https://git.home.arpa/itdlabs/hibr/issues/238); Blit does not patch
-Hibr source to work around it.
+### Joining an already authenticated login desktop
+
+The live 2026-10-17 operation keeps the user's existing held `desktop` owner,
+rather than starting another primary. Discover pane IDs from `/v1/topology`,
+verify successful authentication and the owning account/held session, then
+move the existing terminal with `POST /v1/login` targeting the bottom pane.
+Create an ordinary terminal on the upper pane as that same account:
+
+```json
+{"command":"/usr/bin/hibr","user":"osakka","arguments":["-c","exec /usr/bin/desktop --join --session desktop --name blit-upper"],"pane_id":"pane-display-1-1","surface_mode":"terminal"}
+```
+
+Hibr's native desktop join initially attaches beside the primary. Its supported
+`hold move desktop blit-upper -67 0`, invoked as the owning user through the
+terminal API, moves this 67-row join above and normalizes the union. The
+verified result is primary `(67,0,67,240)`, join `(0,0,67,240)`, same held
+owner PID, two distinct PTYs. These numbers are this host's discovered grid,
+not defaults to copy to another topology. Input reaches each client's own
+PTY; Hibr performs its one canonical coordinate rewrite.
+
+Blit currently reports role `none` for the authenticated login wrapper and
+this ordinary native join invocation. [Issue #96](https://git.home.arpa/itdlabs/blit/issues/96)
+tracks explicit API association/observation and unification of obsolete join
+special-casing. Verify the relationship with native `hold clients` and owner
+identity; do not claim that API role reporting is solved. This operation is
+live, not boot-before-authentication automation. The captured lower pane has
+unclassified residual rectangles after relayout, so complete visual/input
+acceptance remains pending. See [ADR 0122](adr/0122-native-hibr-join-orchestration.md).
 
 The package also installs `blit-runtime-console.hibr`, and the entrypoint sets
 `HIBR_RC` to it when the caller has not supplied an explicit fixture or

@@ -3,6 +3,30 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-17: live native bottom-primary/top-join orchestration
+
+Same 0.1.535 SDL GL package, no binary deployment. The existing login PTY5
+moved to the lower pane; one ordinary Hibr terminal9 runs native
+`desktop --join --session desktop --name blit-upper` as osakka above it.
+Native `hold move` places the join above in Hibr's union. Before: primary
+client-4 `(0,0,67,240)`, join `(0,240,67,240)`. After: primary
+`(67,0,67,240)`, join `(0,0,67,240)`. Held owner remains PID239437; union
+134x240. This proves attachment/geometry/single-owner continuity, not all
+visual or interactive behavior. Upper click trace reports target9/input9,
+leaving native coordinate rewriting to Hibr's own client.
+
+The lower menu bar and separate upper applications are visible. Initial and
+settled captures also show dark lower-pane residual rectangles; their cause
+is not yet established. Concurrent physical input occurred during injected
+context-menu attempts, so no context-menu UI-pass claim is made. The user is
+validating the arrangement. Artifacts: `diagnostics/join-20261017/`.
+
+Hibr is now0.99.232 ABI16 on this host. Dependencies #238/#240 are closed.
+No Hibr source edits or SSH. API role metadata remains none for the login
+wrapper and native join; [issue #96](https://git.home.arpa/itdlabs/blit/issues/96)
+tracks proper association and removal of obsolete projection special-casing.
+No boot/logout/reconnect acceptance is claimed.
+
 ## 2026-10-17: requested live SDL GL switch, package unchanged
 
 The same reproducible 0.1.535 package now runs SDL3/KMSDRM/OpenGLES2 with

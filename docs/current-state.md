@@ -7,6 +7,32 @@ work actually stopped.
 
 ## Status at the last review
 
+### 2026-10-17 requested bottom-primary/top-join live setup
+
+SDL GL and package 0.1.535 are unchanged. The existing authenticated login
+PTY id5/surface-5 is now in `pane-display-1-2` (bottom). One native
+`desktop --join` terminal id9/surface-9 runs as osakka in the upper pane,
+named `blit-upper` in Hibr. Hibr's held desktop owner remains PID239437:
+primary client-4 at `(67,0,67,240)`, join at `(0,0,67,240)`, union134x240.
+This is a real vertical join, not a mirror or a second primary desktop.
+
+[ADR 0122](adr/0122-native-hibr-join-orchestration.md) records the native
+per-client PTY/input boundary and [issue #96](https://git.home.arpa/itdlabs/blit/issues/96)
+tracks the API role/association gap: both sessions currently report role
+none, because the login wrapper is not registered as a desktop primary.
+Do not mistake those flags for evidence that Hibr has two desktop owners.
+Hibr on this host is now0.99.232 ABI16; #238/#240 are closed and its native
+2-D hold contract was inspected. Blit/Hibr binaries and Hibr source were not
+modified for this operation. Temporary diagnostic terminals were removed.
+
+Evidence: ignored `diagnostics/join-20261017/`, including before/after
+topology/sessions, native hold placement/unchanged owner, screenshots and
+context-attempt cell captures. Upper input trace reports target/input id9.
+Dark residual rectangles remain visible in the lower pane after relayout;
+the cause and interactive acceptance are not established. The user has been
+asked to validate both panes; no more injected input is being sent during
+their test. Restart/login-before-join automation is not implemented here.
+
 ### 2026-10-17 operating-mode change: SDL GL, same 0.1.535 package
 
 After tagging the direct-KMS working checkpoint, the user requested SDL GL.
