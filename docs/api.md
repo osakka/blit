@@ -215,8 +215,12 @@ argument. It is not a saved pane name or another desktop instance.
 `waiting` when the native owner/client is absent; `ready` when the exact client,
 grid, live owner UID and process start-time identity are verified; `error` when
 the query fails or its result is invalid. Ready results contain `owner` (PID,
-UID, starttime_ticks, union rows/columns) and `client` (name, row/column,
-rows/columns, current native primary flag). Otherwise both are null.
+UID, starttime_ticks, union rows/columns), `client` (the exact login client),
+and `clients` (all named clients reported by that same native owner, including
+signed row/column origins and primary flags). The collection is empty unless
+the owner and exact login-client association have both been verified. It is
+read-only native state, not a second layout database. Otherwise `owner` and
+`client` are null.
 `observed_monotonic_us` is the last successful query's time; results expire
 after three seconds. `query_in_flight` distinguishes background work from
 a current observation.

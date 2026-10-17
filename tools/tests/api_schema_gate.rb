@@ -35,6 +35,9 @@ raise 'native desktop association missing' unless login['required'].include?('de
 desktop = schema.fetch('components').fetch('schemas').fetch('LoginDesktopAssociation')
 raise 'native desktop association states changed' unless
   desktop.dig('properties','state','enum') == %w[inactive waiting ready error]
+raise 'native client collection missing' unless desktop['required'].include?('clients') &&
+  desktop.dig('properties','clients','maxItems') == 16 &&
+  desktop.dig('properties','clients','items','properties','row','minimum') == -32767
 
 observation_path = paths.fetch('/v1/diagnostics/observation')
 observation_get = observation_path.fetch('get')

@@ -67,6 +67,7 @@ extern char **environ;
 #define BLIT_MAX_DISPLAYS 16
 #define BLIT_MAX_PANES 64
 #define BLIT_MAX_SESSIONS 16
+#define BLIT_MAX_NATIVE_CLIENTS 16
 #define BLIT_MAX_STREAMS 16
 #define BLIT_MAX_HTTP_CLIENTS 32
 #define BLIT_REQUEST_SIZE 8192
@@ -766,6 +767,11 @@ typedef struct {
 } BlitEffectState;
 
 typedef struct {
+    char name[64];
+    int row, column, rows, columns, primary;
+} BlitNativeDesktopClient;
+
+typedef struct {
     int used;
     unsigned long long id;
     unsigned long long revision;
@@ -832,6 +838,8 @@ typedef struct {
     pid_t login_desktop_pid;
     unsigned long long login_desktop_start_ticks;
     int login_desktop_geometry[7]; /* union rows/cols, row/col/rows/cols, primary */
+    int login_desktop_client_count;
+    BlitNativeDesktopClient login_desktop_clients[BLIT_MAX_NATIVE_CLIENTS];
     /* Cell requests the owner has had accepted for this session's surface,
        and when it registered. A desktop whose owner registered and then never
        painted is the blank-but-healthy state of issue #32, and these are what
@@ -1070,7 +1078,7 @@ typedef struct {
     uint64_t login_observer_deadline_us;
     uint64_t login_observer_due_us;
     int login_observer_cancelled;
-    char login_observer_output[512];
+    char login_observer_output[4096];
     size_t login_observer_length;
     char hibr_runtime_version[64];
     int hibr_runtime_probe_ok;
@@ -15246,7 +15254,10 @@ static void native_observation_result(BlitRuntime *runtime, BlitSession *session
     unsigned long long ticks = 0;
     BlitSurface *surface = find_surface_id(runtime, session->id);
     char *output = runtime->login_observer_output;
+    BlitNativeDesktopClient clients[BLIT_MAX_NATIVE_CLIENTS];
+    int client_count = 0;
     output[runtime->login_observer_length] = '\0';
+    session->login_desktop_client_count = 0;
     if (runtime->login_observer_length >= sizeof(runtime->login_observer_output)-1) {
         session->login_desktop_state = 2;
         snprintf(session->login_desktop_reason, sizeof(session->login_desktop_reason), "native_output_limit");
@@ -15271,7 +15282,58 @@ static void native_observation_result(BlitRuntime *runtime, BlitSession *session
             if (i == 0) pid = number; else g[i-1] = (int)number;
             cursor = end+1;
         }
-        if (*cursor != '\0') valid = 0;
+        if (valid && strncmp(cursor, "clients ", 8) == 0) {
+            long count;
+            count = strtol(cursor + 8, &end, 10);
+            if (end == cursor + 8 || count < 1 ||
+                count > BLIT_MAX_NATIVE_CLIENTS || *end != '\n') {
+                valid = 0;
+            } else {
+                client_count = (int)count;
+                cursor = end + 1;
+                for (i = 0; i < client_count; ++i) {
+                    char client_name[64];
+                    int row, column, rows, columns, primary, consumed = 0;
+                    int j;
+                    if (sscanf(cursor,
+                               "client %63s %d %d %d %d %d%n",
+                               client_name, &row, &column, &rows, &columns,
+                               &primary, &consumed) != 6 || consumed <= 0 ||
+                        cursor[consumed] != '\n') {
+                        valid = 0;
+                        break;
+                    }
+                    for (j = 0; client_name[j] != '\0'; ++j) {
+                        unsigned char c = (unsigned char)client_name[j];
+                        if (!((c >= 'a' && c <= 'z') ||
+                              (c >= 'A' && c <= 'Z') ||
+                              (c >= '0' && c <= '9') || c == '_' ||
+                              c == '.' || c == '-'))
+                            valid = 0;
+                    }
+                    if (row < -32767 || row > 32767 ||
+                        column < -32767 || column > 32767 ||
+                        rows < 1 || rows > 32767 ||
+                        columns < 1 || columns > 32767 ||
+                        (primary != 0 && primary != 1))
+                        valid = 0;
+                    for (j = 0; j < i; ++j)
+                        if (strcmp(clients[j].name, client_name) == 0)
+                            valid = 0;
+                    snprintf(clients[i].name, sizeof(clients[i].name),
+                             "%s", client_name);
+                    clients[i].row = row;
+                    clients[i].column = column;
+                    clients[i].rows = rows;
+                    clients[i].columns = columns;
+                    clients[i].primary = primary;
+                    cursor += consumed + 1;
+                }
+                if (*cursor != '\0') valid = 0;
+            }
+        } else {
+            valid = 0;
+        }
     }
     session->login_desktop_state = 2;
     if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
@@ -15294,11 +15356,33 @@ static void native_observation_result(BlitRuntime *runtime, BlitSession *session
         else if (surface == NULL || surface->height != g[4] || surface->width != g[5])
             reason = "client_geometry_mismatch";
         else {
+            int i;
+            int named_client_found = 0;
+            for (i = 0; i < client_count; ++i) {
+                if (strcmp(clients[i].name, session->login_client_name) != 0)
+                    continue;
+                if (clients[i].row != g[2] || clients[i].column != g[3] ||
+                    clients[i].rows != g[4] ||
+                    clients[i].columns != g[5] ||
+                    clients[i].primary != g[6])
+                    break;
+                named_client_found = 1;
+            }
+            if (!named_client_found) {
+                reason = "native_client_list_mismatch";
+                session->login_desktop_state = 2;
+                snprintf(session->login_desktop_reason,
+                         sizeof(session->login_desktop_reason), "%s", reason);
+                return;
+            }
             session->login_desktop_state = 1;
             reason = "native_client_verified";
             session->login_desktop_pid = (pid_t)pid;
             session->login_desktop_start_ticks = ticks;
             memcpy(session->login_desktop_geometry, g, sizeof(g));
+            session->login_desktop_client_count = client_count;
+            memcpy(session->login_desktop_clients, clients,
+                   (size_t)client_count * sizeof(clients[0]));
             session->login_desktop_observed_us = now;
         }
     }
@@ -15434,6 +15518,7 @@ static void login_desktop_json(BlitRuntime *runtime, BlitSession *session,
 {
     const char *state = "inactive", *reason = "authentication_required";
     char owner[256] = "null", client[384] = "null", name[80] = "null";
+    char clients[6144] = "[]";
     int active = session != NULL && !session->child_exited;
     uint64_t observed = active ? session->login_desktop_observed_us : 0;
     if (active && session->login_client_name[0])
@@ -15449,19 +15534,41 @@ static void login_desktop_json(BlitRuntime *runtime, BlitSession *session,
             }
             if (strcmp(state, "ready") == 0) {
                 int *g = session->login_desktop_geometry;
+                size_t used = 0;
+                int i;
                 snprintf(owner, sizeof(owner), "{\"pid\":%ld,\"uid\":%lu,\"starttime_ticks\":%llu,\"rows\":%d,\"columns\":%d}",
                     (long)session->login_desktop_pid, (unsigned long)session->login_identity_uid,
                     session->login_desktop_start_ticks, g[0], g[1]);
                 snprintf(client, sizeof(client), "{\"name\":%s,\"row\":%d,\"column\":%d,\"rows\":%d,\"columns\":%d,\"primary\":%s}",
                     name, g[2], g[3], g[4], g[5], g[6] ? "true" : "false");
+                clients[0] = '[';
+                clients[1] = '\0';
+                used = 1;
+                for (i = 0; i < session->login_desktop_client_count; ++i) {
+                    BlitNativeDesktopClient *native = &session->login_desktop_clients[i];
+                    int written = snprintf(clients + used, sizeof(clients) - used,
+                        "%s{\"name\":\"%s\",\"row\":%d,\"column\":%d,\"rows\":%d,\"columns\":%d,\"primary\":%s}",
+                        i ? "," : "", native->name, native->row, native->column,
+                        native->rows, native->columns, native->primary ? "true" : "false");
+                    if (written < 0 || (size_t)written >= sizeof(clients) - used) {
+                        snprintf(clients, sizeof(clients), "[]");
+                        used = 0;
+                        break;
+                    }
+                    used += (size_t)written;
+                }
+                if (used > 0 && used < sizeof(clients) - 1) {
+                    clients[used++] = ']';
+                    clients[used] = '\0';
+                }
             }
         }
     }
     snprintf(body, capacity, "{\"state\":\"%s\",\"reason\":\"%s\",\"session_name\":\"desktop\",\"client_name\":%s,"
-        "\"query_in_flight\":%s,\"observed_monotonic_us\":%llu,\"owner\":%s,\"client\":%s}",
+        "\"query_in_flight\":%s,\"observed_monotonic_us\":%llu,\"owner\":%s,\"client\":%s,\"clients\":%s}",
         state, reason, name, active && runtime->login_observer_pid > 0 &&
         !runtime->login_observer_cancelled && runtime->login_observer_session == session->id ? "true" : "false",
-        (unsigned long long)observed, owner, client);
+        (unsigned long long)observed, owner, client, clients);
 }
 
 static int login_observer_wait_ms(BlitRuntime *runtime, uint64_t now)
@@ -15534,7 +15641,7 @@ static void login_manager_json(BlitRuntime *runtime, char *body,
     char preferred[256];
     char preferred_value[300];
     char identity_body[512];
-    char desktop_body[1024];
+    char desktop_body[8192];
 
     json_escape(runtime->login_command, escaped_command,
                 sizeof(escaped_command));

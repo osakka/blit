@@ -64,6 +64,14 @@ API attachment for physical validation, not boot/login provisioning. No
 Hibr-core edit, SSH or renderer change. The validation history below describes
 the pre-deployment checkpoints, including the old preserved0.1.539 desktop.
 
+The 0.1.541 implementation slice extends the existing read-only native
+association: `GET /v1/login.desktop` now returns the complete bounded named
+client list from the same `hold clients` query, including signed origins. This
+is evidence for later one-shot standby placement, not placement automation or
+a second layout store. TCC build, synthetic association lifecycle fixtures,
+and the installed-Hibr CLI gate pass locally. It is not deployed to 10.54;
+the desktop/control-panel lifecycle and saved auxiliary policy remain next.
+
 The next policy boundary is now pinned in ADR0124 after reviewing Hibr's
 documented `desktop --standby` lifecycle: it waits, can autojoin, remains alive
 when Hibr deliberately lets it go, and waits for explicit reattachment instead

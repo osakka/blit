@@ -25,6 +25,14 @@ save/restart persistence and unchanged geometry/backend/font verified.
 Joins, live failover,
 arbitrary layouts, and catalogue UI acceptance remain separate deliverables.
 
+The current implementation extends native association to expose all named
+clients and their signed native rectangles from that same read-only query.
+This prerequisite is locally built and gated, but not deployed. Next: persist
+auxiliary intent in the existing settings resource, then implement bounded
+standby lifecycle and one-time initial placement using these observed clients.
+Do not start the catalogue panel until those API semantics have a validated
+contract; the panel remains in `hibr-apps` issue #1.
+
 Version 0.1.538 adds a private post-authentication identity handoff (ADR 0125),
 not automatic joins. The deployed installed hook reports verified UID/GID 1000
 after login. The next boundary is native per-user held-owner readiness before

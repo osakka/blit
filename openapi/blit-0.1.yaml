@@ -3553,7 +3553,7 @@ components:
       type: object
       readOnly: true
       required: [state, reason, session_name, client_name, query_in_flight,
-                 observed_monotonic_us, owner, client]
+                 observed_monotonic_us, owner, client, clients]
       description: >-
         Native hold observation of the exact named login client. This is not
         another desktop owner, an automatic join, or legacy role registration.
@@ -3583,13 +3583,32 @@ components:
               required: [name, row, column, rows, columns, primary]
               properties:
                 name: {type: string}
-                row: {type: integer, minimum: 0}
-                column: {type: integer, minimum: 0}
+                row: {type: integer, minimum: -32767, maximum: 32767}
+                column: {type: integer, minimum: -32767, maximum: 32767}
                 rows: {type: integer, minimum: 1}
                 columns: {type: integer, minimum: 1}
                 primary: {type: boolean}
               additionalProperties: false
             - {type: 'null'}
+        clients:
+          type: array
+          readOnly: true
+          maxItems: 16
+          description: >-
+            All named clients in the same native hold owner, with observed
+            signed row/column origins. Empty unless the owner and exact login
+            client association have both been verified.
+          items:
+            type: object
+            required: [name, row, column, rows, columns, primary]
+            properties:
+              name: {type: string, minLength: 1, maxLength: 63}
+              row: {type: integer, minimum: -32767, maximum: 32767}
+              column: {type: integer, minimum: -32767, maximum: 32767}
+              rows: {type: integer, minimum: 1, maximum: 32767}
+              columns: {type: integer, minimum: 1, maximum: 32767}
+              primary: {type: boolean}
+            additionalProperties: false
       additionalProperties: false
     CreateTerminalSession:
       type: object

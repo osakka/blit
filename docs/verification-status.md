@@ -3,6 +3,19 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-17: native association client inventory (local candidate)
+
+TCC 0.9.27 builds the server at version 0.1.541. The installed-Hibr native
+CLI gate verifies the exact login client and, using `hold attach -m`, a second
+simultaneous named client in one owner; both native rectangles are reported.
+The synthetic login observer gate passes its ready/secondary/waiting/error,
+owner replacement, freshness-expiry, cancellation and logout cases with the
+new bounded `clients` collection. The OpenAPI schema gate passes. These are
+local acceptance results only: this candidate has not been packaged, deployed,
+or physically inspected on 10.54. It adds observability only; persisted
+auxiliary policy, standby launch, one-time positioning and the Hibr Control
+Panel are not implemented.
+
 ## 2026-10-17: deployed 0.1.540 native join PTY boundary
 
 ### Physical deployment checkpoint

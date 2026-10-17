@@ -56,19 +56,19 @@ Dir.mktmpdir('blit-login-observe') do |root|
     [result,owner_file,count,startup].each{|p|File.write(p,'');File.chmod(0666,p)}
     observer=File.join(root,'observer.hibr')
     action=case mode
-      when 'ready' then 'printf "ready %s 24 128 0 0 24 128 1\\n" "$owner"'
-      when 'secondary' then 'printf "ready %s 96 128 48 0 48 128 0\\n" "$owner"'
+      when 'ready' then 'printf "ready %s 24 128 0 0 24 128 1\\nclients 2\\nclient %s 0 0 24 128 1\\nclient auxiliary -24 -8 12 64 0\\n" "$owner" "$2"'
+      when 'secondary' then 'printf "ready %s 96 128 48 0 48 128 0\\nclients 1\\nclient %s 48 0 48 128 0\\n" "$owner" "$2"'
       when 'missing' then 'printf "waiting client_missing\\n"'
       when 'owner_missing' then 'printf "waiting owner_missing\\n"'
-      when 'geometry' then 'printf "ready %s 48 128 0 0 47 128 1\\n" "$owner"'
-      when 'wrong_uid' then "printf 'ready #{Process.pid} 48 128 0 0 48 128 1\\n'"
-      when 'overflow' then "printf 'ready 9999999999999999999999 48 128 0 0 48 128 1\\n'"
-      when 'nul' then 'printf "ready %s 48 128 0 0 48 128 1\\n\\0extra" "$owner"'
-      when 'oversized' then '/usr/bin/head -c 2048 /dev/zero'
+      when 'geometry' then 'printf "ready %s 48 128 0 0 47 128 1\\nclients 1\\nclient %s 0 0 47 128 1\\n" "$owner" "$2"'
+      when 'wrong_uid' then "printf 'ready #{Process.pid} 48 128 0 0 48 128 1\\nclients 1\\nclient %s 0 0 48 128 1\\n' \"$2\""
+      when 'overflow' then "printf 'ready 9999999999999999999999 48 128 0 0 48 128 1\\nclients 1\\nclient %s 0 0 48 128 1\\n' \"$2\""
+      when 'nul' then 'printf "ready %s 48 128 0 0 48 128 1\\nclients 1\\nclient %s 0 0 48 128 1\\n\\0extra" "$owner" "$2"'
+      when 'oversized' then '/usr/bin/head -c 8192 /dev/zero'
       when 'timeout' then 'exec /bin/sleep 30'
       when 'exit_failure' then 'exit 7'
-      when 'expires' then "if [ -s '#{count}' ]; then exec /bin/sleep 30; fi; printf x > '#{count}'; printf 'ready %s 48 128 0 0 48 128 1\\n' \"$owner\""
-      else 'printf "ready %s 48 128 0 0 48 128 1\\n" "$owner"'
+      when 'expires' then "if [ -s '#{count}' ]; then exec /bin/sleep 30; fi; printf x > '#{count}'; printf 'ready %s 48 128 0 0 48 128 1\\nclients 1\\nclient %s 0 0 48 128 1\\n' \"$owner\" \"$2\""
+      else 'printf "ready %s 48 128 0 0 48 128 1\\nclients 1\\nclient %s 0 0 48 128 1\\n" "$owner" "$2"'
     end
     source=<<~HIBR
       strict
@@ -122,6 +122,13 @@ Dir.mktmpdir('blit-login-observe') do |root|
       check(d.dig('owner','pid')==File.read(owner_file).to_i,'wrong native owner bound')
       check(d.dig('client','name')==d['client_name'],'named-client mismatch')
       check(d.dig('client','primary')==(mode!='secondary'),'observer forced primary selection')
+      expected_clients=mode=='ready' ? 2 : 1
+      check(d['clients'].length==expected_clients && d.dig('clients',0,'name')==d['client_name'],
+        'native named-client collection missing exact login client or peer')
+      check(d.dig('clients',0,'row')==(mode=='secondary' ? 48 : 0),
+        'native named-client collection lost signed native geometry')
+      check(d.dig('clients',1,'row')==-24 && d.dig('clients',1,'column')==-8,
+        'native named-client collection lost a negative origin') if mode=='ready'
     elsif expected!='inactive'
       reasons={'missing'=>'client_missing','owner_missing'=>'owner_missing','geometry'=>'client_geometry_mismatch',
         'wrong_uid'=>'owner_identity_mismatch','overflow'=>'invalid_native_observation','nul'=>'invalid_native_observation',
