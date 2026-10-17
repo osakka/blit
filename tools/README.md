@@ -23,6 +23,15 @@ launcher for Hibr.
 The optional `hibr/console-blit.so` provider is a C module for Hibr programs
 that explicitly load the provider. It is separate from desktop orchestration.
 
+`host_login_policy.rb` verifies API-owned login startup configuration on the
+physical host. It requires `BLIT_AUTH_TOKEN` and explicit `BLIT_LOGIN_PANE`;
+`BLIT_LIVE` selects the API URL. It saves through revision-checked settings,
+and only restarts when `BLIT_ALLOW_RESTART=1` is explicitly provided. That
+restart is disruptive: use a disposable/login-screen state, not an active
+desktop. The probe verifies a new login child, clean saved policy, unchanged
+geometry/backend/font and one login terminal; it does not authenticate or
+start joins. `BLIT_EVIDENCE_DIR` selects its credential-free JSON evidence.
+
 - `wake-and-capture.sh` is the bounded live login-manager diagnostic. It
   records before/after state and screenshots, injects one one-pixel pointer
   motion by default or one complete pointer click when explicitly passed

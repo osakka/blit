@@ -7,26 +7,45 @@ work actually stopped.
 
 ## Status at the last review
 
-### 2026-10-17 candidate 0.1.537: persistent desktop policy foundation
+### 2026-10-17 deployed 0.1.537: persistent desktop policy foundation
 
 The user approved a general API-owned lifecycle/configuration system and a
 native Hibr Control Panel distributed via `itdlabs/hibr-apps`. Issue #99 and
-ADR 0124 record the staged contract. The physical host remains 0.1.536; this
-cycle does not change its renderer, login or pane arrangement.
+ADR 0124 record the staged contract. The physical host now runs 0.1.537;
+renderer, font and pane geometry are unchanged.
 
-Candidate source adds startup-applied `document.login`, explicit preferred
+The source adds startup-applied `document.login`, explicit preferred
 versus assigned pane, missing-target wait/first-available policies and
 effective/restart reporting. The shared settings store now exposes save
 status and returns 503 on forced-save failure, preserving the old file until
 atomic replacement instead of unlinking it first. The old staged binary
 fails the actual disk-error regression; corrected focused tests pass including
-root login selection. Broad-suite/package/physical acceptance are pending.
+root login selection. The all-suite execution has 85 passing tests and three
+explicit hardware/QEMU skips; its one failure was the package gate comparing
+documentation against newer HEAD instead of its recorded commit. The corrected
+package gate subsequently passes, including a reproducible rebuild with the
+same archive hash. See the verification ledger for the exact chronology.
+
+The updater verified 0.1.537. `host_login_policy.rb` then saved through the API
+and restarted it once: a new login child appears on the lower pane, preference
+and assignment both `pane-display-1-2`, clean saved revision 38, no pending
+login-policy restart. SDL `kmsdrm`/`opengles2`/`sdl-vsync`, 930 font glyphs at
+8x16 scale 1, a 1920x2160 output and two 240x67 panes remain unchanged. The
+physical pixel oracle again passes 21 cells/2688 pixels. Only one focused lower login terminal remains;
+the temporary probe is deleted and the upper pane is empty. Evidence:
+`diagnostics/policy-537/`. The host reports Hibr 0.99.235, ABI 16 compatible;
+no Hibr update or source edit was performed by this cycle.
 
 This is not automatic joins or failover. Hibr's existing `desktop --standby`
 distinguishes waiting from deliberately released clients; reuse its supported
 contract after verified authentication/owner association (#96). The local
 hibr-apps repo is clean and points to itdlabs/hibr-apps; its cp_pane framework,
 catalogue generators and async job patterns have been inspected, not modified.
+The panel is tracked in hibr-apps #1 and is not published. A user decision is
+pending: whether move/primary/detach actions in Hibr's existing Displays pane
+remain session-only until explicitly saved to Blit (recommended), or
+automatically update Blit's persistent policy. Do not implement competing
+placement controllers or silently choose automatic persistence while waiting.
 
 ### 2026-10-17 deployed 0.1.536: edge fit and complete glyphs
 

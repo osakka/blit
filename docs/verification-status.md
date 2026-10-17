@@ -3,7 +3,7 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
-## 2026-10-17: candidate 0.1.537 policy/persistence foundation
+## 2026-10-17: deployed 0.1.537 policy/persistence foundation
 
 The old staged binary fails `login_policy_gate.rb`: a real settings `.new`
 directory prevents the atomic write, but PUT reports success. Corrected source
@@ -43,6 +43,23 @@ plus the corrected package-gate pass. The three skipped checks are QEMU,
 physical multi-output and live screenshot backpressure. Physical acceptance
 for the new configuration contract remains pending, not covered by those
 local runtime results.
+
+Subsequent physical acceptance passes on 192.168.10.54: the authorized updater
+verified 0.1.537; the new opt-in `host_login_policy.rb` saved through revisioned
+settings and performed one API restart. The login child PID changes, policy
+restores at saved revision 38 with clean storage, and preferred/assigned pane
+both equal `pane-display-1-2`. Effective policy needs no restart. Exact topology
+geometry, SDL backend/renderer/vsync and loaded font identity remain unchanged.
+The physical edge/font oracle also passes 21 cells/2688 pixels after restart.
+Temporary upper test terminal removed; exactly one focused lower login
+terminal remains. Host Hibr is 0.99.235 ABI 16, compatible with pinned ABI 16;
+this cycle did not update or edit Hibr. Evidence: `diagnostics/policy-537/`.
+
+These are configuration and bounded pixel assertions, not authentication,
+native join recovery, physical-output failover, full Control Panel acceptance
+or a physical refresh-rate claim. No hibr-apps bundle is published yet. The
+user's persistence/ownership choice for Hibr's existing Displays pane is
+pending; issue #99 and hibr-apps #1 stay open.
 
 ## 2026-10-17: deployed 0.1.536 edge/font regressions
 

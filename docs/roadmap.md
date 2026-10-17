@@ -5,7 +5,7 @@ second, parallel implementation of an earlier one.
 
 ## Current position — persistent desktop policy and catalogue control panel
 
-The physical host runs 0.1.536 SDL GL. The edge/font correction has bounded
+The physical host runs 0.1.537 SDL GL. The edge/font correction has bounded
 physical pixel acceptance; the user previously accepted the 0.1.535 movement
 checkpoint. These are not universal renderer or refresh-rate guarantees.
 See current-state.md and verification-status.md for exact evidence.
@@ -17,7 +17,9 @@ Panel distributed through `itdlabs/hibr-apps`. No Hibr-core modifications.
 The panel must not own a second configuration store or controller. Existing
 Hibr standby deliberate-release semantics must not be silently overridden.
 
-Candidate 0.1.537 implements the first foundation only. Joins, live failover,
+Version 0.1.537 implements the first foundation only, with physical API
+save/restart persistence and unchanged geometry/backend/font verified.
+Joins, live failover,
 arbitrary layouts, and catalogue UI acceptance remain separate deliverables.
 
 ## Historical position — 0.1.507 live visual-acceptance blocker
