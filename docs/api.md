@@ -1001,6 +1001,14 @@ PCM, which it does not do.
 
 ### Pointer and gamepad settings
 
+For direct-KMS pointer stalls, inspect
+`GET /v1/diagnostics/runtime` → `snapshot.render.outputs[].kms_phases`.
+`draw_ms`, `copy_ms` and `submit_ms` separate the last frame's CPU scene work,
+scene-to-scanout copy and kernel submission. `drawn_cells` counts requested
+terminal damage across views (overlaps may be counted twice), not pointer
+pixels. SDL reports zeros. These are last-frame values, not latency quantiles;
+sample repeatedly and correlate with CPU, loop gaps and physical input counts.
+
 | property | what it is |
 |---|---|
 | `sensitivity_percent` | the linear multiplier, unchanged by anything below |

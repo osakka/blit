@@ -2526,6 +2526,16 @@ components:
                   target_interval_ms: {type: number, minimum: 0}
                   missed_deadlines: {type: integer, minimum: 0}
                   last_present_ms: {type: number, minimum: 0}
+                  kms_phases:
+                    type: object
+                    description: Last composed KMS frame phases in milliseconds; zero on SDL. Drawn cells count requested view damage, not pointer pixels. Not an input-latency measurement.
+                    required: [draw_ms, copy_ms, submit_ms, drawn_cells]
+                    additionalProperties: false
+                    properties:
+                      draw_ms: {type: number, minimum: 0}
+                      copy_ms: {type: number, minimum: 0}
+                      submit_ms: {type: number, minimum: 0}
+                      drawn_cells: {type: integer, minimum: 0}
                   max_present_ms: {type: number, minimum: 0}
                   present_calls: {type: integer, minimum: 0}
                   render_width: {type: integer, minimum: 0}

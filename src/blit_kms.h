@@ -88,6 +88,10 @@ typedef struct {
     int presentation_state;
     double last_present_ms;
     double max_present_ms;
+    double draw_ms;
+    double copy_ms;
+    double submit_ms;
+    unsigned long long drawn_cells;
     unsigned long long present_calls;
     unsigned long long flip_completions;
     uint32_t vblank_sequence;

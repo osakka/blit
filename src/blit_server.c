@@ -3167,6 +3167,8 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
             "\"target_interval_us\":%llu,\"target_interval_ms\":%.3f,"
             "\"missed_deadlines\":%lu,\"last_present_ms\":%.3f,"
             "\"max_present_ms\":%.3f,\"present_calls\":%llu,"
+            "\"kms_phases\":{\"draw_ms\":%.3f,\"copy_ms\":%.3f,"
+            "\"submit_ms\":%.3f,\"drawn_cells\":%llu},"
             "\"render_width\":%d,\"render_height\":%d,"
             "\"viewport_width\":%d,\"viewport_height\":%d,"
             "\"scale_x\":%.3f,\"scale_y\":%.3f}",
@@ -3187,6 +3189,10 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
                 runtime->diagnostic_max_sdl_present_ms,
             have_kms_info ? kms_info.present_calls :
                 runtime->diagnostic_present_calls,
+            have_kms_info ? kms_info.draw_ms : 0.0,
+            have_kms_info ? kms_info.copy_ms : 0.0,
+            have_kms_info ? kms_info.submit_ms : 0.0,
+            have_kms_info ? kms_info.drawn_cells : 0ULL,
             runtime->direct_kms ?
                 runtime->displays[display_index].bounds.w :
                 runtime->outputs[i].render_width,

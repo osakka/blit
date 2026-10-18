@@ -162,6 +162,12 @@ static void pointer_terminal_present_gate(void)
     blit_kms_present(&kms, &view, 1, 48, 32, 1, 1, NULL, 0,
                      0, 0, 0, 0, &submitted, &deferred);
     shown = target->front.map;
+    if (target->info.draw_ms < 0 || target->info.copy_ms < 0 ||
+        target->info.submit_ms < 0 || target->info.drawn_cells != 14 * 6) {
+        fprintf(stderr, "KMS_PHASE_FAIL damage_cells=%llu expected=84\n",
+                target->info.drawn_cells);
+        exit(1);
+    }
     if (shown[CH * W + 2 * CW] != 0x102030 ||
         shown[6 * CH * W + 15 * CW] != RED) {
         fprintf(stderr, "KMS_POINTER_TERMINAL_FAIL old=%06x new=%06x expected=102030,ff0000\n",

@@ -3,6 +3,19 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-18:0.1.547 KMS phase instrumentation checkpoint
+
+The user still reports jerky pointer motion on546. The physical host now has
+DP-1 and HDMI-A-1, three occupied desktop panes. A bounded read-only runtime
+sample (9.155s) records Blit34.18% of one CPU core, render calls20–42ms and
+loop gaps31–59ms without new physical mouse-motion events. This establishes
+a frame-budget problem, not its cause.547 adds per-output draw/copy/submit
+timing and requested-cell counts to the existing observer; do not change
+renderer/layout or replace authenticated desktops to investigate it.
+Evidence: ignored `diagnostics/mouse-547/`. Build/gates/deployment are pending
+at this source checkpoint. High-quality shared cursor styles and a native
+Blit Mouse panel are the next requested implementation boundary.
+
 ## 2026-10-18:0.1.546 deployed; final local and bounded host checks
 
 The frozen full collection with the exact package completes **97pass/3skip/

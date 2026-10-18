@@ -1731,8 +1731,8 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
            the pointer moved; terminal damage can otherwise preserve a
            pointer-shaped hole in the scene cache. */
         prepare_repaint_buffer(output, full_redraw, render_scene);
-        if (trace_phases)
-            draw_started = kms_now_us();
+        draw_started = kms_now_us();
+        output->info.drawn_cells = 0;
         for (view_index = 0; view_index < view_count; ++view_index)
             if (views[view_index].display_id == output->info.id) {
                 BlitKmsSurfaceView draw = views[view_index];
@@ -1848,6 +1848,9 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                 }
                 if (full_redraw)
                     draw.damage_valid = 0;
+                output->info.drawn_cells += draw.damage_valid ?
+                    (unsigned long long)draw.damage_width * draw.damage_height :
+                    (unsigned long long)draw.columns * draw.rows;
                 draw_view(output, kms != NULL ? kms->font : NULL,
                           kms != NULL ? kms->wide_font : NULL, &draw);
             }
@@ -1864,12 +1867,13 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         } else {
             output->pointer_background_valid = 0;
         }
-        if (trace_phases)
-            flip_started = kms_now_us();
+        flip_started = kms_now_us();
+        output->info.draw_ms = (double)(flip_started - draw_started) / 1000.0;
         if (render_scene) {
             output->back.map = scanout_map;
             copy_scene_to_back(output);
         }
+        output->info.copy_ms = (double)(kms_now_us() - flip_started) / 1000.0;
         /* Capture the frame composed by this present call.  Capturing before
            the scene-buffer copy reads the previous scanout buffer and makes
            diagnostics disagree with the authoritative surface state. */
@@ -1880,11 +1884,13 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         {
             unsigned int flags = DRM_MODE_PAGE_FLIP_EVENT;
             int flip_result;
+            long long submit_started = kms_now_us();
             if (modeset_frame) {
                 flip_result = drmModeSetCrtc(kms->fd, output->crtc,
                                              output->back.fb, 0, 0,
                                              &output->connector, 1,
                                              &output->mode);
+                output->info.submit_ms = (double)(kms_now_us() - submit_started) / 1000.0;
                 if (flip_result < 0) {
                     output->info.presentation_state =
                         BLIT_KMS_PRESENTATION_FAILED;
@@ -1936,6 +1942,7 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                                               output->back.fb,
                                               DRM_MODE_PAGE_FLIP_EVENT,
                                               cookie);
+            output->info.submit_ms = (double)(kms_now_us() - submit_started) / 1000.0;
             if (flip_result < 0) {
                 cookie->used = 0;
                 output->info.presentation_state =
