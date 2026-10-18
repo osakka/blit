@@ -56,6 +56,10 @@ Dir.mktmpdir('blit-kms-hotplug') do |root|
     primary_grid=before['panes'].find{|p|p['id']=='pane-display-93-2'}['cell_grid']
     write.call([95,93,94])
     await('new second/third outputs'){ids.call.sort==%w[display-93 display-94 display-95]}
+    discovered_panes=req('GET','/v1/topology')['panes']
+    check(discovered_panes.count{|p|p['display_id']=='display-94'}==1 &&
+          discovered_panes.count{|p|p['display_id']=='display-95'}==1,
+          'new outputs inherited another monitor split instead of defaulting to 1x1')
     check(req('GET',"/v1/terminal-sessions/#{primary['id']}")['process_id']==primary['process_id'],'primary replaced')
     check(req('GET','/v1/topology')['revision']>before['revision'],'topology revision unchanged')
     check(req('GET','/v1/displays')['revision']>device_revision,'display inventory revision unchanged')

@@ -36,6 +36,7 @@
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/resource.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/un.h>
@@ -1474,6 +1475,8 @@ static SDL_Texture *create_sdl_glyph_atlas(SDL_Renderer *renderer,
 static const char *pane_surface_id(const BlitRuntime *runtime,
                                    const BlitPane *pane);
 static void discover_panes(BlitRuntime *runtime);
+static void display_layout_resolve(const BlitRuntime *runtime, const char *document,
+                                   const BlitDisplay *display, int *columns, int *rows);
 static BlitPane *find_pane_id(BlitRuntime *runtime, const char *pane_id);
 
 /* Authentication and native association are separate gates. Reuse this
@@ -2773,6 +2776,32 @@ static void record_surface_commit(BlitRuntime *runtime)
     }
 }
 
+/* Read a known native owner only, with PID-reuse protection. CPU counters
+   are cumulative milliseconds, not a misleading instantaneous percentage. */
+static double diagnostic_owner_cpu_ms(pid_t pid, unsigned long long expected_start)
+{
+    char path[64], data[4096], *cursor, *save, *field;
+    unsigned long long user = 0, system = 0, start = 0;
+    int fd, number = 3;
+    ssize_t length;
+    long ticks = sysconf(_SC_CLK_TCK);
+    if (pid <= 1 || !expected_start || ticks <= 0) return -1;
+    snprintf(path, sizeof(path), "/proc/%ld/stat", (long)pid);
+    fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return -1;
+    length = read(fd, data, sizeof(data)-1); close(fd);
+    if (length <= 0) return -1;
+    data[length] = 0; cursor = strrchr(data, ')');
+    if (cursor == NULL) return -1;
+    for (field = strtok_r(cursor + 1, " ", &save); field;
+         field = strtok_r(NULL, " ", &save), ++number) {
+        if (number == 14) user = strtoull(field, NULL, 10);
+        if (number == 15) system = strtoull(field, NULL, 10);
+        if (number == 22) { start = strtoull(field, NULL, 10); break; }
+    }
+    return start == expected_start ? (double)(user + system) * 1000.0 / ticks : -1;
+}
+
 static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
                                      size_t capacity)
 {
@@ -2786,6 +2815,22 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
     double surface_commit_hz = runtime->diagnostic_surface_commit_hz;
     unsigned long long frame_rate_age_ms = 0;
     unsigned long long surface_commit_age_ms = 0;
+    struct rusage process_usage;
+    double process_cpu_ms = 0, desktop_cpu_ms = -1, system_load = 0;
+    char desktop_cpu[64] = "null";
+    memset(&process_usage, 0, sizeof(process_usage));
+    if (!getrusage(RUSAGE_SELF, &process_usage))
+        process_cpu_ms = (process_usage.ru_utime.tv_sec + process_usage.ru_stime.tv_sec) * 1000.0 +
+            (process_usage.ru_utime.tv_usec + process_usage.ru_stime.tv_usec) / 1000.0;
+    for (index = 0; index < BLIT_MAX_SESSIONS; ++index) {
+        BlitSession *session = &runtime->sessions[index];
+        if (session->used && session->login_manager && session->login_identity_state == 2) {
+            desktop_cpu_ms = diagnostic_owner_cpu_ms(session->login_desktop_pid, session->login_desktop_start_ticks);
+            break;
+        }
+    }
+    if (desktop_cpu_ms >= 0) snprintf(desktop_cpu, sizeof(desktop_cpu), "%.3f", desktop_cpu_ms);
+    getloadavg(&system_load, 1);
 
     if (runtime->diagnostic_frame_rate_last_us > 0 &&
         now >= runtime->diagnostic_frame_rate_last_us)
@@ -2808,7 +2853,7 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"pinned_version\":\"%s\",\"runtime_version\":\"%s\","
         "\"pinned_abi\":%d,\"runtime_abi\":%d,"
         "\"probe\":\"%s\",\"compatible\":%s},"
-        "\"performance\":{\"uptime_ms\":%llu,"
+        "\"performance\":{\"process_cpu_ms\":%.3f,\"desktop_cpu_ms\":%s,\"system_load_1m\":%.3f,\"uptime_ms\":%llu,"
         "\"frames\":%llu,\"last_frame_gap_ms\":%.3f,"
         "\"max_frame_gap_ms\":%.3f,\"last_render_ms\":%.3f,"
         "\"max_render_ms\":%.3f,\"missed_deadlines\":%llu,"
@@ -2893,6 +2938,7 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         runtime->hibr_runtime_probe_ok ?
             (runtime->hibr_runtime_abi == BLIT_HIBR_ABI ?
                 "true" : "false") : "null",
+        process_cpu_ms, desktop_cpu, system_load,
         runtime->started_us > 0 && now >= runtime->started_us ?
             (unsigned long long)((now - runtime->started_us) / 1000ULL) : 0,
         runtime->diagnostic_frames, runtime->diagnostic_last_frame_gap_ms,
@@ -3842,13 +3888,16 @@ static void topology_json(const BlitRuntime *runtime, char *body, size_t capacit
     }
     for (i = 0; i < runtime->display_count && used < capacity; ++i) {
         BlitCellGeometry geometry;
+        int pane_columns, pane_rows;
+        display_layout_resolve(runtime, runtime->settings_document,
+                               &runtime->displays[i], &pane_columns, &pane_rows);
         runtime_display_cell_geometry(runtime, &runtime->displays[i],
                                       &geometry);
         used += (size_t)snprintf(
             body + used, capacity - used,
             "%s{\"display_id\":\"display-%llu\",\"bounds\":{"
             "\"x\":%d,\"y\":%d,\"width\":%d,\"height\":%d},"
-            "\"rotation\":%d,\"scale\":1,\"cell_grid\":{"
+            "\"rotation\":%d,\"scale\":1,\"layout\":{\"columns\":%d,\"rows\":%d},\"cell_grid\":{"
             "\"columns\":%d,\"rows\":%d,\"cell_width\":%d,"
             "\"cell_height\":%d,\"pixel_width\":%d,"
             "\"pixel_height\":%d,\"origin_x\":%d,\"origin_y\":%d,"
@@ -3856,7 +3905,7 @@ static void topology_json(const BlitRuntime *runtime, char *body, size_t capacit
             i == 0 ? "" : ",", runtime->displays[i].id,
             runtime->displays[i].bounds.x, runtime->displays[i].bounds.y,
             runtime->displays[i].bounds.w, runtime->displays[i].bounds.h,
-            runtime->displays[i].rotation, geometry.columns, geometry.rows,
+            runtime->displays[i].rotation, pane_columns, pane_rows, geometry.columns, geometry.rows,
             geometry.cell_width, geometry.cell_height, geometry.pixel_width,
             geometry.pixel_height, geometry.origin_x, geometry.origin_y,
             geometry.remainder_x, geometry.remainder_y);
@@ -15916,6 +15965,21 @@ static int apply_font_configuration(BlitRuntime *runtime, const char *path,
         blit_font_free(&candidate);
         return 0;
     }
+    /* Do not install a font that makes a configured partition smaller than
+       one complete cell. Validate before replacing the active font. */
+    for (i = 0; i < runtime->display_count; ++i) {
+        int columns, rows;
+        const BlitFont *font = candidate.data != NULL ? &candidate : &runtime->font;
+        int cell_width = scale_dimension(blit_font_width(font), scale_tenths);
+        int cell_height = scale_dimension(blit_font_height(font), scale_tenths);
+        display_layout_resolve(runtime, runtime->settings_document,
+                               &runtime->displays[i], &columns, &rows);
+        if (runtime->displays[i].bounds.w / columns < cell_width ||
+            runtime->displays[i].bounds.h / rows < cell_height) {
+            blit_font_free(&candidate);
+            return 0;
+        }
+    }
     if (candidate.data != NULL) {
         blit_font_free(&runtime->font);
         runtime->font = candidate;
@@ -18952,7 +19016,7 @@ static int settings_auxiliary_policy_parse(const char *document,
                 }
                 ordinal = strtol(member, &number_end, 10);
                 if (errno || number_end == member || *number_end != '\0' ||
-                    ordinal < 1 || ordinal > 4) return 0;
+                    ordinal < 1 || ordinal > BLIT_MAX_PANES) return 0;
                 seen |= 2u;
             } else return 0;
             while (*cursor == ' ' || *cursor == '\t' || *cursor == '\n' || *cursor == '\r') ++cursor;
@@ -18985,6 +19049,7 @@ static int settings_auxiliary_policy_valid(const char *document)
     return settings_auxiliary_policy_parse(document, NULL, NULL);
 }
 
+#include "blit_display_layout.h"
 #include "blit_auxiliary_controller.h"
 
 static void login_policy_json(const BlitLoginPolicy *policy, char *out,
@@ -19567,9 +19632,30 @@ static void settings_apply_pane_layout(BlitRuntime *runtime, int old_columns,
 {
     int i;
 
-    if (old_columns == runtime->pane_columns && old_rows == runtime->pane_rows)
-        return;
+    (void)old_columns;
+    (void)old_rows;
     discover_panes(runtime);
+    for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
+        BlitSession *session = &runtime->sessions[i];
+        BlitPane *pane;
+        BlitSurface *surface;
+        if (!session->used) continue;
+        pane = find_pane_id(runtime, session->pane_id);
+        surface = find_surface_id(runtime, session->id);
+        if (pane == NULL || surface == NULL ||
+            (surface->width == pane->width && surface->height == pane->height)) continue;
+        if (!resize_session_surface(session, surface, pane->width, pane->height)) {
+            diagnostic_log(runtime, "error", "layout_surface_resize_failed", session->pane_id);
+            continue;
+        }
+        if (session->hibr_process) {
+            session->attach_reassert_pending = 1;
+            session->attach_reassert_due_us = monotonic_us();
+            session->attach_reassert_attempts = 0;
+            session->attach_reassert_max_attempts = 32;
+        }
+        ++session->revision;
+    }
     for (i = 0; i < runtime->output_count; ++i)
         runtime->outputs[i].initialized = 0;
     runtime->render_pending = 1;
@@ -20892,6 +20978,18 @@ static void handle_request(int fd, BlitRuntime *runtime,
         if (!if_match_revision(fd, request, runtime->settings_revision))
             return;
         if (strcmp(method, "DELETE") == 0) {
+            int display_index;
+            for (display_index = 0; display_index < runtime->display_count; ++display_index) {
+                int columns, rows;
+                display_layout_resolve(runtime, runtime->settings_document,
+                    &runtime->displays[display_index], &columns, &rows);
+                if ((columns != runtime->boot_pane_columns || rows != runtime->boot_pane_rows) &&
+                    runtime_has_attached_panes(runtime)) {
+                    send_problem(fd, 409, "Conflict", "topology_in_use",
+                        "Detach occupied panes before resetting their display layouts.");
+                    return;
+                }
+            }
             if (runtime->pane_columns != runtime->boot_pane_columns ||
                 runtime->pane_rows != runtime->boot_pane_rows) {
                 if (runtime_has_attached_panes(runtime)) {
@@ -20930,6 +21028,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
             int old_columns;
             int old_rows;
             BlitLoginPolicy login_policy;
+            int layout_problem;
 
             if (document_cursor == NULL ||
                 !json_object_slice(document_cursor, document,
@@ -20944,6 +21043,14 @@ static void handle_request(int fd, BlitRuntime *runtime,
                              "server.pane_layout must be one of 1x1, 1x2, 2x1, or 2x2.");
                 return;
             }
+            layout_problem = display_layouts_preflight(runtime, document);
+            if (layout_problem) {
+                send_problem(fd, layout_problem, layout_problem == 409 ? "Conflict" : "Bad Request",
+                    layout_problem == 409 ? "topology_in_use" : "invalid_display_layouts",
+                    layout_problem == 409 ? "The proposed grid removes an occupied pane; detach it explicitly first." :
+                    "display_layouts requires unique output selectors and integer columns/rows from 1 through 8, at most 16 entries and 64 live panes, with a complete cell per partition.");
+                return;
+            }
             if (!settings_login_policy(runtime, document, &login_policy)) {
                 send_problem(fd, 400, "Bad Request", "invalid_settings_login",
                              "login accepts enabled (boolean), preferred_pane_id (pane ID or null), and fallback (first_available or wait).");
@@ -20951,7 +21058,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
             }
             if (!settings_auxiliary_policy_valid(document)) {
                 send_problem(fd, 400, "Bad Request", "invalid_settings_auxiliary_displays",
-                             "auxiliary_displays must contain at most 16 unique {output, pane_ordinal} bindings; output names use stable connector characters and pane_ordinal is 1 through 4.");
+                             "auxiliary_displays must contain at most 16 unique {output, pane_ordinal} bindings; output names use stable connector characters and pane_ordinal is 1 through 64.");
                 return;
             }
             if (!requested_layout) {
@@ -20962,6 +21069,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
             old_rows = runtime->pane_rows;
             if ((requested_columns != old_columns ||
                  requested_rows != old_rows) &&
+                json_key_cursor(document, "display_layouts") == NULL &&
                 runtime_has_attached_panes(runtime)) {
                 send_problem(fd, 409, "Conflict", "topology_in_use",
                              "The settings document cannot change the pane layout while a pane is attached.");
@@ -20976,6 +21084,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
                      sizeof(runtime->settings_document), "%s", document);
             settings_apply_font(runtime);
             settings_apply_server(runtime);
+            display_layouts_materialize(runtime, 0);
             settings_apply_pane_layout(runtime, old_columns, old_rows);
             reset_render_schedule(runtime, monotonic_us());
             if (runtime->kms_async_pageflip)
@@ -21123,6 +21232,12 @@ static void handle_request(int fd, BlitRuntime *runtime,
         }
         layout_changed = columns != runtime->pane_columns ||
             rows != runtime->pane_rows;
+        for (i = 0; i < runtime->display_count; ++i) {
+            int current_columns, current_rows;
+            display_layout_resolve(runtime, runtime->settings_document,
+                &runtime->displays[i], &current_columns, &current_rows);
+            if (columns != current_columns || rows != current_rows) layout_changed = 1;
+        }
         for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
             if (layout_changed && runtime->sessions[i].used &&
                 runtime->sessions[i].pane_id[0]) {
@@ -21130,6 +21245,11 @@ static void handle_request(int fd, BlitRuntime *runtime,
                              "The topology cannot change while a pane is attached.");
                 return;
             }
+        }
+        if (layout_changed && !display_layouts_bulk_fits(runtime)) {
+            send_problem(fd, 400, "Bad Request", "display_layout_capacity_exceeded",
+                "The bulk layout would exceed 16 saved output entries; explicitly remove unused offline entries first.");
+            return;
         }
         runtime->pane_columns = columns;
         runtime->pane_rows = rows;
@@ -21140,6 +21260,8 @@ static void handle_request(int fd, BlitRuntime *runtime,
         runtime->pane_layout_configured =
             columns != runtime->boot_pane_columns ||
             rows != runtime->boot_pane_rows;
+        if (layout_changed)
+            display_layouts_materialize(runtime, 1);
         if (layout_changed)
             discover_panes(runtime);
         if (placements_present)
@@ -22089,6 +22211,13 @@ static void discover_panes(BlitRuntime *runtime)
         int cell_height = runtime_terminal_cell_height(runtime);
         int row;
         int column;
+
+        display_layout_resolve(runtime, runtime->settings_document, display, &columns, &rows);
+        if (runtime->pane_count + columns * rows > BLIT_MAX_PANES ||
+            display->bounds.w / columns < cell_width || display->bounds.h / rows < cell_height) {
+            diagnostic_log(runtime, "error", "display_layout_capacity_exceeded", display_selector(display));
+            continue;
+        }
 
         for (row = 0; row < rows; ++row) {
             for (column = 0; column < columns; ++column) {
@@ -28275,6 +28404,7 @@ int main(int argc, char **argv)
     signal(SIGTERM, stop_server);
     signal(SIGPIPE, SIG_IGN);
     discover_displays(&runtime);
+    display_layouts_materialize(&runtime, 0);
     apply_test_refresh_override(&runtime);
     /* Issue #69. After enumeration, because the attribution rule counts
        displays, and before the stored document is applied, because a stored

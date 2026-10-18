@@ -220,7 +220,7 @@ Dir.mktmpdir('blit-settings') do |root|
 
     invalid_sets = [
       [{'output' => 'DP-1', 'pane_ordinal' => 1}, {'output' => 'DP-1', 'pane_ordinal' => 1}],
-      [{'output' => 'DP-1', 'pane_ordinal' => 5}],
+      [{'output' => 'DP-1', 'pane_ordinal' => 65}],
       [{'output' => '../DP-1', 'pane_ordinal' => 1}],
       [{'output' => 'DP-1', 'pane_ordinal' => 1, 'row' => 3}],
       Array.new(17) {|i| {'output' => "DP-#{i}", 'pane_ordinal' => 1}}

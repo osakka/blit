@@ -531,6 +531,31 @@ reports physical outputs; `/v1/topology` reports logical placement.
 
 ## Displays, topology, and fonts
 
+Since0.1.545, configure independent splits through `PUT /v1/settings`.
+Read the full document, edit `display_layouts`, then replace it with its
+current `If-Match` revision. For example:
+
+```json
+"display_layouts": {
+  "DP-1": {"columns": 1, "rows": 2},
+  "HDMI-A-1": {"columns": 1, "rows": 1}
+}
+```
+
+Each dimension is1–8; columns precede rows, so1x2 is stacked and2x1 is
+side-by-side. A missing connector entry means1x1. Disconnected entries remain
+saved. Limits are16 configured outputs,64 live panes and16 simultaneous
+terminal sessions; these are different resources. Invalid or physically
+sub-cell grids return400; removing an occupied pane returns409
+`topology_in_use` without changing settings. Detach it explicitly first.
+Surviving terminal IDs/processes retain their pane ordinal and receive PTY
+resize. Hibr Displays still owns native desktop arrangement.
+
+`GET /v1/topology.outputs[].layout` reports each actual grid. Its top-level
+`layout` and `server.pane_layout` are legacy bulk controls, not the per-output
+answer. Legacy startup settings migrate for the currently connected outputs
+only; a later new monitor does not inherit another output's split.
+
 `PUT /v1/fonts` applies the selected profile and scale to pixels, not only to
 metadata. The reported `cell_pixels` dimensions are the physical cell metrics
 used by the renderer, PTY resize, pane/display geometry, pointer hit-testing,
@@ -685,9 +710,10 @@ when the document is silent. A stored renderer request is applied at the next
 start; `effective.renderer_requested` and `effective.renderer_active` make
 that distinction explicit.
 
-Pane layout is owned live by `PUT /v1/topology`; its selected `1x1`, `1x2`,
-`2x1`, or `2x2` layout is persisted in the settings document so it survives a
-restart. Changing an occupied layout is refused with `topology_in_use`.
+Per-output pane layout is owned by `document.display_layouts`, applied live by
+settings replacement. Legacy `PUT /v1/topology` applies one1x1/1x2/2x1/2x2
+grid to the connected outputs in bulk and refuses occupied layout changes.
+Prefer explicit connector-keyed layouts for independent monitors.
 
 Replace the complete document with `If-Match` (omitted only for an initial
 write):
@@ -750,8 +776,9 @@ creation/retirement and publishes changed display inventory and topology
 revisions. Unchanged output resources and primary PTYs are retained. When
 the last output disappears, the API remains available and PTYs keep their
 pane intent; primary migration is not automatic. Unknown outputs are not
-automatically added to auxiliary policy. The current global pane layout/font
-applies to newly created panes.
+automatically added to auxiliary policy. Since0.1.545, new outputs use their
+connector-keyed layout or1x1 when unconfigured. Font selection/scale remain
+global. The0.1.544 global-split inheritance is superseded by ADR0131.
 
 `diagnostics.render.hotplug` (also in runtime/observation snapshots) reports
 `supported`, `observer` (`uevent+periodic`, `periodic`, `unavailable`),

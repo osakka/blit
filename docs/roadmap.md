@@ -17,8 +17,14 @@ topology reconciliation, stable page-flip lifetimes, explicit failure status
 and zero-output recovery. Frozen suite93/4skips/0fail, separate64-cycle stress,
 reproducible package validation and real-host framebuffer/observer checks pass.
 Actual second/third monitor unplug/replug acceptance remains open in#100.
-Existing selected-device/global-layout limits apply;
-this is not multi-GPU support or automatic primary migration.
+The0.1.545 candidate removes global-layout inheritance through independent
+connector-keyed grids (ADRs0131/0132), adds native panel sliders and private
+token persistence, and bounds fractional-image damage work. Final package/live
+acceptance is recorded in current-state and verification-status, not implied
+by this implementation milestone. The reported physical slowdown is tracked
+in[Blit#101](https://git.home.arpa/itdlabs/blit/issues/101).
+Selected-device limits remain; this is not multi-GPU support or automatic
+primary migration. Font/profile scale remains global.
 
 ## 0.1.543 policy and catalogue checkpoint
 

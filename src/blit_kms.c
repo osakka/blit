@@ -725,20 +725,32 @@ static void draw_graphic(KmsOutput *output, const BlitGraphicsDraw *draw,
         return;
     }
 
-    for (destination_y = 0; destination_y < height; ++destination_y) {
+    /* Bound iteration itself to the intersection. Testing the clip inside
+       a full-image loop made a tiny pointer repaint scan millions of pixels
+       on fractionally scaled wallpapers (ADR0132). Keep source coordinates
+       relative to the original placement so clipping cannot change sampling. */
+    {
+    int left = origin_x + draw->x;
+    int top = origin_y + draw->y;
+    int first_x = clip_x0 > left ? clip_x0 : left;
+    int first_y = clip_y0 > top ? clip_y0 : top;
+    int last_x = clip_x1 < left + width ? clip_x1 : left + width;
+    int last_y = clip_y1 < top + height ? clip_y1 : top + height;
+    if (first_x < 0) first_x = 0;
+    if (first_y < 0) first_y = 0;
+    if (last_x > output->mode.hdisplay) last_x = output->mode.hdisplay;
+    if (last_y > output->mode.vdisplay) last_y = output->mode.vdisplay;
+    if (first_x >= last_x || first_y >= last_y) return;
+    for (destination_y = first_y - top; destination_y < last_y - top; ++destination_y) {
         int py = origin_y + draw->y + destination_y;
         int source_y = draw->src_y + destination_y * draw->src_h / height;
         int destination_x;
-        if (py < 0 || py >= output->mode.vdisplay) continue;
-        for (destination_x = 0; destination_x < width; ++destination_x) {
+        for (destination_x = first_x - left; destination_x < last_x - left; ++destination_x) {
             int px = origin_x + draw->x + destination_x;
             int source_x = draw->src_x + destination_x * draw->src_w / width;
             const unsigned char *source;
             uint32_t *destination;
             unsigned int alpha;
-            if (px < 0 || px >= output->mode.hdisplay ||
-                px < clip_x0 || px >= clip_x1 ||
-                py < clip_y0 || py >= clip_y1) continue;
             source = image->pixels +
                 ((size_t)source_y * (size_t)image->width + (size_t)source_x) *
                 (size_t)bytes_per_pixel;
@@ -762,6 +774,7 @@ static void draw_graphic(KmsOutput *output, const BlitGraphicsDraw *draw,
                      255U);
             }
         }
+    }
     }
 }
 

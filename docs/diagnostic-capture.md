@@ -1,5 +1,20 @@
 # Live diagnostic capture
 
+`GET /v1/diagnostics/runtime.performance` now exposes cumulative
+`process_cpu_ms` (Blit including its threads), `desktop_cpu_ms` (verified
+native desktop owner only, not its children; null when unavailable), and
+`system_load_1m` (host load, not CPU percent). CPU-ms delta divided by elapsed
+wall-ms measures consumed cores. Check PID/start-time identity across samples;
+never subtract across a service or desktop restart.
+
+`BLIT_AUTH_TOKEN=... ruby tools/probes/host_pointer_cadence.rb` applies360
+bounded one-pixel pointer motions, with no clicks/keys/session/settings changes,
+then restores the original pointer location. Set `BLIT_EVIDENCE_DIR` to retain
+the measurements. Its HTTP latency limits request cadence; it is not a60Hz
+stress oracle or evidence of a monitor-wide performance guarantee. Combine
+CPU deltas, render/loop timings and actual physical-input activity. An idle
+0Hz presentation counter is not proof of a slow renderer.
+
 Direct KMS exposes clock evidence at
 `GET /v1/diagnostics/trace?kind=kms_vblank&limit=16`. Events report the display,
 completed flips, DRM sequence/timestamp, accumulated vblank count/time, observed

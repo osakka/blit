@@ -3,6 +3,46 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-18:0.1.545 local candidate, physical slowdown still open
+
+ADRs0131/0132 and public schema cover independent per-output grids and bounded
+fractional image work. Against archived0.1.544, the new layout gate fails
+`legacy grid not migrated`; old pane0.1.2 fails the native-slider assertion.
+Current focused tests pass the1–8 grid matrix, saved/offline capacity,
+occupied-pane409/no mutation, same-PTY resize, centred complete-cell bounds
+and restart persistence. Hotplug's second/third outputs default to1x1 while
+the primary grid and settings stay unchanged (mocked DRM, not physical).
+
+The scaler regression is red before the fix (469154µs full/178884µs clipped
+for20 draws), green after (447398µs/183µs), with exact RGB/RGBA/source-crop/
+negative-origin/outside-damage pixels. The128-frame compositor oracle passes.
+This demonstrates computational waste and its local removal, not a measured
+physical-host speedup. Runtime adds cumulative process/native-owner CPU and
+host load; native-owner PID/start-time protects against reuse.
+
+Actual Hibr0.99.244 callback/API, isolated catalogue lifecycle and native UI
+pointer-drag tests pass. Scale coalesces to the final requested2.3; actual UI
+drag reaches1.2 and reflows. URL is written through native desktop settings;
+API token survives a new process in a private data-only file, with origin
+isolation, permission rejection, masking and export exclusion.
+
+Initial broad checking exposed a missing required-schema declaration for CPU
+fields; corrected network/auth retest passes. A subsequent broad run was
+deliberately stopped for a legacy bulk/offline-capacity edge. No successful
+complete-suite claim is made for either preliminary candidate. The final
+frozen binary is SHA256
+`6fbdbaa3e667c1e7783f0dfd2e73200350c4febdd7481242b71d6c054d3d01b4`;
+its complete suite is running, with output retained in
+`diagnostics/per-display-545/gates-final.log`. Package/release and real-host
+deployment remain pending at this source checkpoint.
+
+Live0.1.544 evidence currently has one connectedDP-1, scale1.5, two160x45
+panes. Baseline pointer-only workload:360 motions,492 presents in23.96s;
+request latency limits that workload, so it proves neither60Hz capability nor
+the reported multi-output slowdown's cause. Blit#101 remains open until a
+reconnected physical output and actual activity are measured. No Hibr-core
+changes, backend substitution or SSH.
+
 ## 2026-10-18: deployed direct-KMS hotplug implementation (0.1.544)
 
 The user-selected backend switch is observed on10.54 at0.1.543: direct KMS,

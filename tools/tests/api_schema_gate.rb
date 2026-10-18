@@ -31,7 +31,11 @@ raise 'saved auxiliary binding schema missing' unless auxiliary &&
   auxiliary.dig('items','$ref') == '#/components/schemas/AuxiliaryDisplayBinding'
 binding = schema.fetch('components').fetch('schemas').fetch('AuxiliaryDisplayBinding')
 raise 'auxiliary binding shape changed' unless binding['required'] == %w[output pane_ordinal] &&
-  binding.dig('properties','pane_ordinal','maximum') == 4
+  binding.dig('properties','pane_ordinal','maximum') == 64
+layouts = settings.dig('properties','document','properties','display_layouts')
+raise 'per-display layout bounds missing' unless layouts && layouts['maxProperties'] == 16 &&
+  layouts.dig('additionalProperties','properties','columns','maximum') == 8 &&
+  layouts.dig('additionalProperties','properties','rows','maximum') == 8
 raise 'live auxiliary apply schema missing' unless
   paths.dig('/v1/auxiliary-displays/apply','post','responses','202','content','application/json','schema','$ref') ==
     '#/components/schemas/AuxiliaryDisplays'

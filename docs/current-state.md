@@ -7,6 +7,47 @@ work actually stopped.
 
 ## Status at the last review
 
+### 2026-10-18 candidate0.1.545: independent grids and bounded image repaint
+
+Implementation is complete locally; final frozen-suite/package/deployment
+checks are in progress, not yet physical acceptance. New `display_layouts`
+settings entries are connector-keyed1–8 columns/rows, with64 live panes and16
+configured-output/session limits. Startup migrates the legacy split for present
+outputs only; newly hotplugged monitors default to1x1. Same-ordinal terminals
+resize without process replacement; removing an occupied pane returns409.
+Legacy bulk layout refuses exceeding saved capacity, including offline entries.
+
+The fractional direct-KMS image scaler walked a full destination image even
+for tiny damage. The production-scaler regression fails the old loop at38.1%
+of full-render cost and passes the clipped-loop fix at0.041% (20 tiny repaints
+183µs versus447398µs full). RGB/RGBA, source crop, negative origin and
+outside-damage pixels agree. Existing128-frame full-reference composition
+passes. This is a demonstrated local bottleneck/improvement, not a claim that
+the real host slowdown is fixed. See ADR0132 and Blit#101.
+
+The real host remains pure KMS0.1.544 during this candidate validation. Read-only
+samples see onlyDP-1 at1920x2160/59.997Hz, scale1.5, two160x45 panes,
+authenticated primary below and joined auxiliary above. Settings revision51
+also requests HDMI-A-1/pane1, currently absent. Worker scans are2–3ms. A
+bounded360-motion API workload produced492 presents over23.96s; its HTTP
+latency limits injection, so it does not establish60Hz capacity or the cause
+of the reported slowdown. Additional monitor reconnection was requested.
+New runtime CPU counters separate Blit, verified native owner and host load.
+
+Canonical catalogue pane0.1.3 adds native Hibr font/grid sliders, latest-value
+font coalescing and private URL-bound token persistence. Actual Hibr pointer
+drags reach columns8/rows3/scale1.2; URL survives `dt_keep`/`cp_save`; token
+survives a new process, is masked/export-excluded and insecure files are
+refused. The URL is normal desktop settings; token JSON is0600 inside0700
+`$XDG_CONFIG_HOME/hibr/blit`, never the privileged updater token. Hibr core,
+SDL sources and the host backend remain untouched. The pane requires
+Hibr0.99.244 and exposes a clear server-upgrade notice on older Blit.
+
+Mandatory next checkpoint: finish frozen suite, commit/package/verify/reproduce,
+deploy through the API preserving font/lower-primary policy, verify the migrated
+DP-1 grid and obtain actual multi-output CPU/cadence evidence. No SSH.
+Ignored evidence lives in `diagnostics/per-display-545/`.
+
 ### 2026-10-18 deployed0.1.544: direct-KMS live output reconciliation
 
 The user explicitly selected pure KMS/DRM and direct-backend hotplug, not an

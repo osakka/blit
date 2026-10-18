@@ -105,15 +105,22 @@ catalogue install control-panel/blit
 ```
 
 Open **Control Panel → Hardware → Blit**. Set the server URL and
-API bearer token in the pane; the token is masked, held only in memory and
-excluded from configuration exports. The privileged updater token is separate
-and is never requested by the pane. Blit0.1.543 or newer supplies the auxiliary
-Apply contract. Catalogue availability also depends on the configured mirror.
+API bearer token in the pane. Pane0.1.3 remembers the URL through Hibr's
+normal settings and the token in a private0600 JSON file under
+`$XDG_CONFIG_HOME/hibr/blit` (default `~/.config/hibr/blit`). The token is
+URL-bound, masked and excluded from exports; this is filesystem-protected
+plaintext, not encryption. The privileged updater token is separate and
+never requested. Independent grids require Blit0.1.545; the pane requires
+Hibr0.99.244. Catalogue availability depends on the configured mirror.
 
 Stage auxiliary pane selections, use **Apply auxiliaries now** for the running
 policy, and **Save as Default** for restart-persistent intent. Login placement
 preferences are startup-applied. Font controls use the live font API; Hibr's
 Displays pane owns arrangement after an auxiliary's first confirmed join.
+Native horizontal sliders select font scale and each monitor's independent
+columns/rows (1–8 each). **Save as Default** applies/saves the grid; new
+unconfigured monitors start1x1. Blit refuses removing occupied panes instead
+of killing their terminals. See [the API layout contract](docs/api.md#displays-topology-and-fonts).
 The [pane guide](https://git.home.arpa/itdlabs/hibr-apps/src/branch/main/docs/blit.md)
 documents connection, conflict handling, import/export and diagnostics. The
 canonical pane lives only in hibr-apps, not in Hibr core or this package.

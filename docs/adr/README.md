@@ -146,6 +146,10 @@ security policy, or compatibility rule requires a new ADR.
 - [0126 — Native login desktop association](0126-native-login-desktop-association.md)
 - [0127 — Native client PTYs and login-owned joins](0127-native-client-pty-input-and-login-owned-joins.md)
 - [0128 — Live auxiliary-display Apply contract](0128-live-auxiliary-apply-contract.md)
+- [0129 — SDL KMSDRM hotplug dependency boundary (proposed alternative)](0129-sdl-kmsdrm-hotplug-dependency-boundary.md)
+- [0130 — Direct-KMS live output reconciliation](0130-direct-kms-live-output-reconciliation.md)
+- [0131 — Independent output pane grids](0131-per-output-pane-grids.md)
+- [0132 — Clipping bounds image work](0132-clipping-bounds-image-work.md)
 
 ## Adding an ADR
 

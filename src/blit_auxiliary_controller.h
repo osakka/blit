@@ -45,10 +45,6 @@ static BlitPane *auxiliary_resolve(BlitRuntime *runtime, BlitAuxiliaryBinding *b
                         matches ? "ambiguous_output" : "output_unavailable");
         return NULL;
     }
-    if (b->pane_ordinal > runtime->pane_columns * runtime->pane_rows) {
-        auxiliary_state(b, "waiting_pane", "pane_ordinal_unavailable");
-        return NULL;
-    }
     snprintf(pane_id, sizeof(pane_id), "pane-display-%llu-%d",
              runtime->displays[selected].id, b->pane_ordinal);
     pane = find_pane_id(runtime, pane_id);
