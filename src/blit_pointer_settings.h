@@ -7,7 +7,7 @@ static int pointer_member_key_decode(char *key, size_t capacity)
     int n = snprintf(quoted,sizeof(quoted),"\"%s\"",key);
     if (n < 0 || (size_t)n >= sizeof(quoted)) return 0;
     end = json_unescape(quoted+1,key,capacity,&length);
-    return end && !*end && length > 0;
+    return end && !*end && length > 0 && strlen(key)==length;
 }
 
 static int pointer_config_parse(const char *document, BlitPointerConfig *config)
@@ -51,7 +51,7 @@ static int pointer_config_parse(const char *document, BlitPointerConfig *config)
             bit = count == 3 ? 1 : 2;
             if (value[0] != '"') return 0;
             end = json_unescape(value+1, text, sizeof(text), &length);
-            if (end == NULL || length == 0 || *end) return 0;
+            if (end == NULL || length == 0 || *end || strlen(text)!=length) return 0;
             for (i = 0; i < count && strcmp(text,names[i]); ++i) {}
             if (i == count) return 0;
             if (count == 3) config->shape = i; else config->palette = i;

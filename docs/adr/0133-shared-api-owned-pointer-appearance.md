@@ -14,7 +14,8 @@ Select only the top-level member through the canonical member iterator;
 opaque extension objects may contain their own `pointer` keys. Duplicate
 top-level appearance members are rejected before mutation. The549 release
 review caught both cases in the earlier generic key-scanner implementation;
-550 replaces that scanner, with a red/green API regression.549 was not deployed.
+550 replaces that scanner, with red/green API regressions for nesting,
+duplicates, escaped names and embedded-NUL key/enum aliases.549 was not deployed.
 
 One bounded code-native vector rasterizer produces cached antialiased RGBA
 stamps for both SDL and direct KMS. Rasterize only on appearance changes, not

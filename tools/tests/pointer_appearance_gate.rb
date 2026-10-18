@@ -50,7 +50,8 @@ Dir.mktmpdir('blit-pointer-appearance') do |root|
     abort('POINTER_APPEARANCE_FAIL reset escaped appearance') unless code==200
     initial=request('GET','/v1/settings')[1]
     invalid=[{'size_px'=>23},{'size_px'=>65},{'size_px'=>32.5},{'size_px'=>'32'},
-             {'shape'=>'nope'},{'palette'=>'nope'},{'shadow'=>1},{'unknown'=>true},nil,[]]
+             {'shape'=>'nope'},{'palette'=>'nope'},{'shadow'=>1},{'unknown'=>true},
+             {'shape'=>"arrow\0suffix"},{'palette'=>"pearl\0suffix"},{"shape\0suffix"=>'arrow'},nil,[]]
     invalid.each do |bad|
       doc=initial['document'].merge('pointer'=>bad)
       code,reply=request('PUT','/v1/settings',{'document'=>doc},initial['revision'])
