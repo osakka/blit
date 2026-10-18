@@ -1,5 +1,17 @@
 # Live diagnostic capture
 
+`BLIT_AUTH_TOKEN=... ruby tools/probes/host_pointer_art.rb` is a read-only
+direct-KMS pointer framebuffer oracle for unrotated native-size outputs.
+It compiles the canonical shared art source, brackets a cached screenshot
+with observations, and checks every visible opaque cursor pixel and hotspot
+against that stamp. It changes no pointer position, settings, sessions or
+input. A moving pointer, unavailable appearance, unsupported geometry or
+insufficient visible pixels reports an explicit skip, not a pass. Set
+`BLIT_EVIDENCE_DIR` to retain the BMP and verdict. This checks API framebuffer
+pixels, not glass, antialiased-background blending or input-to-photon latency;
+production KMS full-frame and SDL rotation tests cover those pixel boundaries
+locally. Physical performance acceptance remains separate.
+
 `GET /v1/diagnostics/runtime.performance` now exposes cumulative
 `process_cpu_ms` (Blit including its threads), `desktop_cpu_ms` (verified
 native desktop owner only, not its children; null when unavailable), and
