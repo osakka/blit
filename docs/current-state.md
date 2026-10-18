@@ -7,6 +7,37 @@ work actually stopped.
 
 ## Status at the last review
 
+### 2026-10-18 candidate0.1.546: make legacy migration durable
+
+The0.1.545 binary completes96 gates with four explicit skips and zero failures
+(120-second soak:11156 snapshots/1014 resizes), but an added startup-only
+regression subsequently proves its migrated split was not written without
+another settings mutation. It is **not deployed or tagged**. Its package
+identity remains immutable in `releases/0.1.545.yaml`; do not install that
+superseded candidate as the handoff.
+
+0.1.546 adds the missing dirty transition to the existing settings writer for
+non-default legacy grids. Default1x1 does not need an eager write. The added
+test is red against the archived545 binary and green against546: the map is
+present on disk before any API settings mutation. Hotplug tests wait for the
+startup save to settle before asserting that hotplug itself does not write
+settings. No additional persistence owner/controller is introduced.
+
+The frozen546 binary is SHA256
+`24596e3cfd2fde4eae443759609aefebc547599973288e3e7382bd8e7c755d2f`.
+Its complete suite is running from the canonical binary; every gate's default
+path therefore selects this same artifact. Logs are in
+`diagnostics/per-display-546/`. Commit/package/deployment checks remain pending
+at this source checkpoint. The panel implementation remains0.1.3 at
+`hibr-apps:535cace`, with its signed catalogue and native-slider/token tests.
+
+**Preserve fresh host state, not the earlier baseline:** latest read-only
+pre-deployment observation still reports pure KMS0.1.544 and onlyDP-1, but
+the user has changed scale back to1.0 (240x67 panes, originY4/1084), settings
+revision58, with the same lower preferred primary and saved upper/HDMI-A-1
+auxiliary intent. Re-read immediately before deployment; do not restore1.5
+from the earlier diagnostic capture. The physical slowdown remains#101.
+
 ### 2026-10-18 candidate0.1.545: independent grids and bounded image repaint
 
 Implementation is complete locally; final frozen-suite/package/deployment

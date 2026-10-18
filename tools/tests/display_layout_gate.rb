@@ -43,6 +43,15 @@ Dir.mktmpdir('blit-layout') do |root|
     start.call
     settings=get('/v1/settings')
     check(settings.dig('document','display_layouts','DP-1')=={'columns'=>1,'rows'=>2},'legacy grid not migrated')
+    Timeout.timeout(3,RuntimeError,'legacy startup migration was not persisted') do
+      loop do
+        settings=get('/v1/settings')
+        path=File.join(root,'settings.json')
+        break if settings.dig('storage','state')=='clean' && File.exist?(path) &&
+          JSON.parse(File.read(path)).dig('display_layouts','DP-1')=={'columns'=>1,'rows'=>2}
+        sleep 0.05
+      end
+    end
     code,session=req('POST','/v1/terminal-sessions',{command:'/bin/cat',pane_id:'pane-display-93-2'})
     check(code==201,'primary fixture failed')
     doc=settings['document'];doc['display_layouts']={'DP-1'=>{'columns'=>1,'rows'=>2},'DP-2'=>{'columns'=>2,'rows'=>3}}

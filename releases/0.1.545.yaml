@@ -8,3 +8,6 @@ update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f
 hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
 hibr_version: 0.99.225
 hibr_abi: 16
+acceptance: superseded_local_candidate_not_deployed
+superseded_by: 0.1.546
+reason: legacy_startup_migration_not_persisted_without_later_mutation

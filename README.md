@@ -110,7 +110,8 @@ normal settings and the token in a private0600 JSON file under
 `$XDG_CONFIG_HOME/hibr/blit` (default `~/.config/hibr/blit`). The token is
 URL-bound, masked and excluded from exports; this is filesystem-protected
 plaintext, not encryption. The privileged updater token is separate and
-never requested. Independent grids require Blit0.1.545; the pane requires
+never requested. Use Blit0.1.546 or newer (independent grids were introduced
+in0.1.545;0.1.546 makes legacy migration durable). The pane requires
 Hibr0.99.244. Catalogue availability depends on the configured mirror.
 
 Stage auxiliary pane selections, use **Apply auxiliaries now** for the running

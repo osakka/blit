@@ -533,7 +533,12 @@ reports physical outputs; `/v1/topology` reports logical placement.
 
 Since0.1.545, configure independent splits through `PUT /v1/settings`.
 Read the full document, edit `display_layouts`, then replace it with its
-current `If-Match` revision. For example:
+current `If-Match` revision.
+
+Use0.1.546 or newer: it durably saves non-default legacy migration at startup;
+the unreleased0.1.545 candidate required a later settings mutation to save it.
+
+For example:
 
 ```json
 "display_layouts": {

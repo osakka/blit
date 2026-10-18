@@ -47,6 +47,7 @@ Dir.mktmpdir('blit-kms-hotplug') do |root|
   log=File.join(root,'server.log');pid=spawn(env,BINARY,PORT.to_s,out:log,err:[:child,:out])
   begin
     await('startup'){req('GET','/v1/version')}
+    await('startup migration durable'){req('GET','/v1/settings').dig('storage','state')=='clean'}
     check(ids.call==['display-93'],'initial inventory wrong')
     primary=req('POST','/v1/terminal-sessions',{command:'/bin/cat',pane_id:'pane-display-93-2'})
     policy=req('POST','/v1/auxiliary-displays/apply',{bindings:[{output:'DP-2',pane_ordinal:1}]})

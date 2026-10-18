@@ -14,6 +14,10 @@ At startup, a legacy global grid is translated to explicit entries for the
 outputs present at that startup. Existing installations retain their layout;
 subsequent hotplug does not inherit it. The old global API remains a legacy
 bulk operation, never a second per-output configuration store.
+Non-default migration schedules the existing durable writer before another
+boot can reinterpret a newly connected output.0.1.546 corrects a missing
+dirty transition in the unreleased0.1.545 candidate. Default1x1 requires no
+eager write. The storage receipt exposes pending/clean/error as usual.
 
 One resolver supplies discovery, topology reporting and auxiliary lookup.
 Partitions remain pixel-first, independently centred complete-cell grids.

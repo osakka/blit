@@ -148,6 +148,11 @@ static void display_layouts_materialize(BlitRuntime *runtime, int force)
     }
     json_appendf(next, sizeof(next), &used, "}}");
     snprintf(runtime->settings_document, sizeof(runtime->settings_document), "%s", next);
+    /* Non-default legacy grids must be durable before a future boot can
+       enumerate additional outputs. Otherwise that boot re-inherits the
+       old global split. Default1x1 needs no eager disk write. */
+    if (runtime->pane_columns != 1 || runtime->pane_rows != 1)
+        settings_mark_dirty(runtime);
 }
 
 /* Returns 400 for malformed/over-capacity intent, 409 if a live pane would

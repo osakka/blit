@@ -3,6 +3,30 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-18:0.1.546 durability correction;0.1.545 not deployed
+
+The frozen0.1.545 suite completes96passed/4skipped/0failed, including the120s
+soak with11156 snapshots/1014 resizes. Its manifest/artifact checks and
+reproducible package/server rebuild pass. However, a new startup-only test
+then fails against that exact archived binary: its in-memory migrated map
+never reaches disk without a later settings mutation. A green broad suite
+did not cover that invariant. The candidate is not deployed/tagged and its
+immutable package identity is retained as superseded, not silently replaced.
+
+0.1.546 schedules non-default legacy migration through the existing settings
+writer. The new red/green test verifies the disk map before any API settings
+write. The full independent-grid matrix, conflict/no mutation, same-PTY resize,
+legacy capacity and restart tests pass against546. Its frozen server SHA256
+is `24596e3cfd2fde4eae443759609aefebc547599973288e3e7382bd8e7c755d2f`;
+the complete suite is running from that canonical artifact. Package and live
+acceptance remain pending at this checkpoint.
+
+Fresh10.54 observation shows the user changed scale to1.0/settings revision58
+and restarted the desktop since the earlier1.5 baseline. Keep the latest
+saved document and240x67 lower-primary/upper-auxiliary geometry during update.
+OnlyDP-1 is connected. No host speedup or physical multi-output acceptance is
+inferred from different workloads or font sizes.
+
 ## 2026-10-18:0.1.545 local candidate, physical slowdown still open
 
 ADRs0131/0132 and public schema cover independent per-output grids and bounded
