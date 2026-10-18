@@ -102,7 +102,11 @@ Dir.mktmpdir('blit-auxiliary') do |root|
     display = request('GET','/v1/displays')['displays'].first
     output = display.dig('state','connector') || display['name']
     binding = {'output'=>output,'pane_ordinal'=>1}
-    saved = request('GET','/v1/settings')
+    # Startup migration is a separate durable operation, not an auxiliary
+    # controller write. Establish the baseline after that receipt settles.
+    saved = await('startup migration durable') do
+      q=request('GET','/v1/settings'); q if q.dig('storage','state')=='clean'
+    end
     applied = request('POST','/v1/auxiliary-displays/apply',{'bindings'=>[binding]})
     check(applied.dig('bindings',0,'state') == 'waiting_authentication','unauthed auxiliary launched')
     check(request('GET','/v1/settings') == saved,'Apply changed settings')

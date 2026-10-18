@@ -5,6 +5,26 @@ an evidence record, not a claim that the complete product is released.
 
 ## 2026-10-18:0.1.546 durability correction;0.1.545 not deployed
 
+The first546 full run reports95pass/4skip/1failure. The failed controller
+fixture sampled settings before the startup migration save settled; its
+`join progress wrote settings` diagnosis was incorrect. The fixture now waits
+for the canonical clean receipt before testing Apply/join independence, and
+the targeted gate passes. The production hash is unchanged. A fresh full run
+including the package gate is in progress. Both earlier output and the final
+run are retained in `diagnostics/per-display-546/`.
+
+The546 package SHA256 is
+`c0d6e1c26970e4fef476b56b2f8ff6f6d6ac1dd1ec91347c20163b60f2a5223f`;
+source/documentation commit `d7515efd48988ed46e1bb266bb860c41bb4891a1`.
+Manifest/artifact checks, byte-identical TCC server rebuild, and reproducible
+package rebuild pass before deployment.
+
+The stronger native-order credential test fails pane0.1.3: cp_panes loads it
+before dt_open/dt_load restores the saved network URL. Pane0.1.4 defers loading
+until first use and retries on origin changes/explicit Reload. Its actual
+callback/API, native UI drag and catalogue gates are being repeated; do not
+claim the earlier new-process test covered this startup order.
+
 The frozen0.1.545 suite completes96passed/4skipped/0failed, including the120s
 soak with11156 snapshots/1014 resizes. Its manifest/artifact checks and
 reproducible package/server rebuild pass. However, a new startup-only test

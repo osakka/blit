@@ -9,6 +9,24 @@ work actually stopped.
 
 ### 2026-10-18 candidate0.1.546: make legacy migration durable
 
+Latest validation progress: package `blit_0.1.546-1_amd64.deb` is built from
+`d7515efd48988ed46e1bb266bb860c41bb4891a1`, SHA256
+`c0d6e1c26970e4fef476b56b2f8ff6f6d6ac1dd1ec91347c20163b60f2a5223f`.
+Manifest and reproducible package/server rebuild checks pass. The first546
+collection reports95pass/4skip/1fixture failure: auxiliary policy sampled its
+baseline before the newly durable startup save. Waiting for the existing
+clean receipt fixes that attribution and the targeted controller gate passes.
+No production binary change. A fresh full collection with package validation
+enabled is running; do not deploy before its final result.
+
+The catalogue pane is being advanced to0.1.4 for an actual native load-order
+gap: Hibr sources CP panes before loading saved desktop preferences. Loading
+the token at source time therefore used the default rather than the saved
+network URL. A native-order regression fails0.1.3.0.1.4 loads on first use,
+after URL restore, reloads on origin changes and explicit Reload, and preserves
+the same private data format. No Hibr-core edits. Follow the latest
+`hibr-apps` commit/evidence, not the earlier0.1.3 checkpoint below.
+
 The0.1.545 binary completes96 gates with four explicit skips and zero failures
 (120-second soak:11156 snapshots/1014 resizes), but an added startup-only
 regression subsequently proves its migrated split was not written without
