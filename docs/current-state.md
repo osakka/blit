@@ -7,6 +7,27 @@ work actually stopped.
 
 ## Status at the last review
 
+### 2026-10-18 quiet Control Panel and issue100 dependency finding
+
+Panel0.1.2 is published at `hibr-apps:cd417d0`. A regression fails against
+0.1.1 because an ordinary draw starts a request after four idle seconds. It
+passes after replacing three-second polling/permanent one-second wakes with
+quiet15-second refresh deadlines,250ms pending-job checks and15/30/60-second
+failure backoff. Scratch search rows no longer start I/O. Callback/API,
+catalogue lifecycle and actual installed Hibr UI gates pass; the generated
+catalogue signature verifies. Existing installs can use `catalogue refresh`
+and `catalogue update control-panel/blit`. No server restart is needed.
+
+Issue100 requires more than Blit display event handling. Bundled SDL's
+`KMSDRM_PumpEvents()` only polls input; connector enumeration/internal display
+creation occurs in startup `KMSDRM_InitDisplays()`. There is no runtime
+connector-to-SDL-display reconciliation to consume. Direction has been
+requested for a documented version-pinned local SDL extension, considering
+the vendored contribution guidance; no SDL edits have been made. See proposed
+[ADR0129](adr/0129-sdl-kmsdrm-hotplug-dependency-boundary.md). Issue100 remains
+unimplemented; do not claim that changing panel polling implements hotplug.
+The accepted live0.1.543 desktop, renderer and native clients are untouched.
+
 ### 2026-10-18 authenticated acceptance and Control Panel rename
 
 The user reports the joined setup looks perfect. A read-only live observation

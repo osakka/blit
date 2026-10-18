@@ -3,6 +3,27 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-18: quiet pane0.1.2 and hotplug dependency diagnosis
+
+The actual callback regression fails against pane0.1.1 with
+`idle redraw launched early refresh`: it starts I/O after four seconds despite
+a later refresh deadline. It passes with pane0.1.2 at `hibr-apps:cd417d0`:
+quiet15-second refresh, deadline-sized desktop wakes,250ms completion checks,
+15/30/60-second read-error backoff, no repeated invalid-URL starts per draw,
+and no scratch-search I/O. Existing auth/offline/timeout/save/conflict/draft/
+font/secret checks remain green. Installed catalogue lifecycle and actual
+Hibr UI/keyboard gates pass; generated index signature verifies. Local UI
+captures: `diagnostics/control-panel-012/`. No physical performance guarantee
+or absence of every Hibr repaint is inferred from these tests.
+
+Source inspection for#100 finds both startup-only Blit discovery and missing
+runtime connector discovery in the bundled SDL KMSDRM backend. Its event pump
+handles input only, while `KMSDRM_InitDisplays()` enumerates/adds displays at
+initialization. Thus a Blit-only handler cannot establish real hotplug.
+ADR0129 records the proposed dependency boundary and pending local SDL patch
+decision. No dependency patch, Blit hotplug implementation, service restart,
+renderer change or physical unplug/replug test occurred in this cycle.
+
 ## 2026-10-18: authenticated split acceptance and pane0.1.1
 
 The user reports the live joined setup looks perfect. Read-only API evidence
