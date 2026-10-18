@@ -273,6 +273,8 @@ suite_renderer() {
 }
 
 suite_hibr() {
+    run_gate auxiliary_native_gate.rb ruby tools/tests/auxiliary_native_gate.rb
+    run_gate auxiliary_desktop_gate.rb env BLIT_NATIVE_AUXILIARY_DESKTOP=1 BLIT_NATIVE_AUXILIARY_RESIZE=1 ruby tools/tests/auxiliary_native_gate.rb
     run_gate native_hold_observer_gate.rb ruby tools/tests/native_hold_observer_gate.rb
     run_gate native_join_pty_gate.rb ruby tools/tests/native_join_pty_gate.rb
     run_gate hibr_singleton_gate.rb ruby tools/tests/hibr_singleton_gate.rb
@@ -294,6 +296,7 @@ suite_hibr() {
 }
 
 suite_lifecycle() {
+    run_gate auxiliary_policy_gate.rb ruby tools/tests/auxiliary_policy_gate.rb
     run_gate login_desktop_observer_gate.rb ruby tools/tests/login_desktop_observer_gate.rb
     run_gate login_identity_gate.rb ruby tools/tests/login_identity_gate.rb
     run_gate login_manager_gate.sh "$ROOT"/tools/tests/login_manager_gate.sh

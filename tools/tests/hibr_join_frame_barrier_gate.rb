@@ -8,12 +8,13 @@ require 'json'
 require 'net/http'
 require 'fileutils'
 require 'uri'
+require 'tmpdir'
 
 PORT = Integer(ENV.fetch('BLIT_GATE_PORT', '18999'))
 ROOT = File.expand_path('../..', __dir__)
 FAKE_DESKTOP = File.expand_path('../../build/blit/desktop', __dir__)
 FAKE_DESKTOP_IMPL = File.expand_path('../../build/blit/desktop-frame-barrier-gate.sh', __dir__)
-SERVER = File.join(ROOT, 'build/blit/blit-server')
+SERVER = ENV.fetch('BLIT_GATE_BINARY', File.join(ROOT, 'build/blit/blit-server'))
 
 FileUtils.mkdir_p(File.dirname(FAKE_DESKTOP))
 FileUtils.rm_f(FAKE_DESKTOP)
@@ -28,6 +29,8 @@ FileUtils.ln_s(FAKE_DESKTOP_IMPL, FAKE_DESKTOP)
 env = {
   'SDL_VIDEODRIVER' => 'dummy',
   'SDL_RENDERER' => 'software',
+  'BLIT_PSF_FONT' => ENV.fetch('BLIT_GATE_FONT', File.join(ROOT, 'assets/fonts/Blit-Hibr-Terminus16.psf')),
+  'BLIT_SETTINGS' => 'ignore',
   'LD_LIBRARY_PATH' => File.join(ROOT, 'build/sdl3-kms'),
   'BLIT_COMMAND_ALLOWLIST' => FAKE_DESKTOP
 }
@@ -92,10 +95,20 @@ create = lambda do |arguments, pane_id|
 end
 
 begin
-  primary = create.call(['-c', "printf '\033[2J\033[HPRIMARY'; sleep 30",
+  # Synchronize producers after both clients exist: the old fixture could
+  # present the primary before its peer existed, then correctly time out.
+  work = Dir.mktmpdir('blit-barrier')
+  p_fifo = File.join(work, 'primary')
+  j_fifo = File.join(work, 'joined')
+  raise 'cannot create synchronization FIFOs' unless system('mkfifo', p_fifo, j_fifo)
+  primary = create.call(['-c', "read -r start < '#{p_fifo}'; printf '\033[2J\033[HPRIMARY'; sleep 30",
                          '--session', 'blit'], bottom_pane)
-  join = create.call(['-c', "sleep 0.004; printf '\033[2J\033[HJOINED'; sleep 30",
+  join = create.call(['-c', "read -r start < '#{j_fifo}'; sleep 0.004; printf '\033[2J\033[HJOINED'; sleep 30",
                       '--session', 'blit', '--join'], top_pane)
+  p_writer = File.open(p_fifo, 'w')
+  j_writer = File.open(j_fifo, 'w')
+  p_writer.puts('go'); p_writer.close
+  j_writer.puts('go'); j_writer.close
 
   trace = wait_for(base) do
     code, body = request(base, 'GET',
@@ -141,4 +154,5 @@ ensure
   Process.wait(pid) rescue nil
   FileUtils.rm_f(FAKE_DESKTOP)
   FileUtils.rm_f(FAKE_DESKTOP_IMPL)
+  FileUtils.remove_entry(work) if work && File.directory?(work)
 end

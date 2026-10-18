@@ -35,7 +35,7 @@ and closes such descriptors and rejects the message. Other session execs do
 not inherit the receiving capability. The hook's sender is closed before
 desktop/shell exec so applications and detached desktop owners do not retain it.
 
-`GET /v1/login.identity` reports waiting/verified/rejected/unavailable with
+The `identity` object in `GET /v1/login` reports waiting/verified/rejected/unavailable with
 kernel UID/GID/PID and selected kind only after verification. No active login
 means unavailable. The identity belongs to the current supervised login
 terminal and is discarded when it is destroyed/replaced. It is explicitly

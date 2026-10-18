@@ -33,7 +33,7 @@ and login destruction cancel the worker without signalling the held desktop.
 The main select deadline includes query scheduling, cancellation reaping and
 the hard timeout even on an otherwise completely idle server.
 
-`GET /v1/login.desktop` is a read-only association projection, not a second
+The `desktop` object in `GET /v1/login` is a read-only association projection, not a second
 desktop state owner. It exposes inactive/waiting/ready/error, reason, query
 activity, timestamp, native owner identity and the named client's rectangle
 and primary flag. Missing authentication and shell selection are inactive.

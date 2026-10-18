@@ -942,6 +942,25 @@ enum {
     BLIT_SURFACE_MIRROR = 2
 };
 
+/* ADR 0128: live intent is volatile; settings remain the durable default. */
+typedef struct {
+    char output[64];
+    int pane_ordinal;
+    char pane_id[128];
+    char client_name[64];
+    unsigned long long session_id;
+    unsigned long long login_id;
+    pid_t owner_pid;
+    unsigned long long owner_ticks;
+    int attempted;
+    int placement; /* 0 pending, 1 worker, 2 confirming, 3 confirmed, -1 failed */
+    int row_offset;
+    int column_offset;
+    uint64_t placement_observed_after_us;
+    const char *state;
+    const char *reason;
+} BlitAuxiliaryBinding;
+
 typedef struct {
     int display_count;
     BlitDisplay displays[BLIT_MAX_DISPLAYS];
@@ -1323,6 +1342,14 @@ typedef struct {
     unsigned long long settings_revision;
     unsigned long long settings_saved_revision;
     char settings_document[BLIT_SETTINGS_CAPACITY];
+    BlitAuxiliaryBinding auxiliary_bindings[16];
+    int auxiliary_count;
+    unsigned long long auxiliary_revision;
+    unsigned long long auxiliary_operation;
+    int auxiliary_explicit;
+    pid_t auxiliary_worker_pid;
+    int auxiliary_worker_binding;
+    uint64_t auxiliary_worker_deadline_us;
 } BlitRuntime;
 
 static unsigned long long blit_graphics_generation;
@@ -1489,6 +1516,7 @@ static BlitSurface *find_surface_id(BlitRuntime *runtime,
 static BlitSession *find_session_id(BlitRuntime *runtime,
                                     unsigned long long session_id);
 static void destroy_session(BlitRuntime *runtime, BlitSession *session);
+static void cancel_auxiliary_worker(BlitRuntime *runtime);
 static int hibr_frame_barrier_active(const BlitRuntime *runtime,
                                      uint64_t now);
 static void arm_hibr_frame_barrier(BlitRuntime *runtime,
@@ -3010,6 +3038,7 @@ static void server_json(const BlitRuntime *runtime, char *body, size_t capacity)
              "\"input_devices\":\"/v1/input/devices\","
              "\"input_routes\":\"/v1/input/routes\",\"topology\":\"/v1/topology\","
              "\"fonts\":\"/v1/fonts\",\"login\":\"/v1/login\","
+             "\"auxiliary_displays\":\"/v1/auxiliary-displays\","
              "\"settings\":\"/v1/settings\","
              "\"diagnostics\":\"/v1/diagnostics\","
              "\"runtime_diagnostics\":\"/v1/diagnostics/runtime\","
@@ -15992,6 +16021,7 @@ static void stop_sessions(BlitRuntime *runtime)
 {
     int i;
     cancel_login_observer(runtime);
+    cancel_auxiliary_worker(runtime);
 
     for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
         BlitSession *session = &runtime->sessions[i];
@@ -18831,13 +18861,16 @@ static int settings_login_policy(const BlitRuntime *runtime,
    name and one-based pane ordinal survive enumeration changes; transient
    display/pane IDs and native placement are derived when the session starts.
    This validator does not enact intent or read/write another configuration. */
-static int settings_auxiliary_policy_valid(const char *document)
+static int settings_auxiliary_policy_parse(const char *document,
+                                           BlitAuxiliaryBinding *bindings,
+                                           int *binding_count)
 {
     char value[8192], array[8192], object[512], key[128], member[256];
     char outputs[16][64];
     int ordinals[16], count = 0, found = 0;
     int named_in_document;
     const char *cursor = document, *items, *end;
+    if (binding_count != NULL) *binding_count = 0;
     if (document == NULL || document[0] == '\0') return 1;
     named_in_document = strstr(document, "\"auxiliary_displays\"") != NULL;
     while (*cursor && *cursor != '{') ++cursor;
@@ -18863,8 +18896,12 @@ static int settings_auxiliary_policy_valid(const char *document)
             !json_object_slice(items, object, sizeof(object))) return 0;
         end = items + strlen(object);
         cursor = object + 1;
-        while ((cursor = json_next_member(cursor, key, sizeof(key), member,
-                                          sizeof(member))) != NULL) {
+        for (;;) {
+            const char *next;
+            while (*cursor == ' ' || *cursor == '\t' || *cursor == '\n' || *cursor == '\r') ++cursor;
+            if (*cursor != '"' || (next = json_next_member(cursor, key, sizeof(key), member,
+                                                          sizeof(member))) == NULL) return 0;
+            cursor = next;
             if (strcmp(key, "output") == 0) {
                 const char *decoded;
                 size_t i;
@@ -18904,13 +18941,23 @@ static int settings_auxiliary_policy_valid(const char *document)
                     ordinal < 1 || ordinal > 4) return 0;
                 seen |= 2u;
             } else return 0;
+            while (*cursor == ' ' || *cursor == '\t' || *cursor == '\n' || *cursor == '\r') ++cursor;
+            if (*cursor == '}') break;
+            if (*cursor++ != ',') return 0;
         }
         if (seen != 3u) return 0;
         for (j = 0; j < count; ++j)
             if (ordinals[j] == ordinal && strcmp(outputs[j], output) == 0)
                 return 0;
         snprintf(outputs[count], sizeof(outputs[count]), "%s", output);
-        ordinals[count++] = (int)ordinal;
+        ordinals[count] = (int)ordinal;
+        if (bindings != NULL) {
+            memset(&bindings[count], 0, sizeof(bindings[count]));
+            snprintf(bindings[count].output, sizeof(bindings[count].output), "%s", output);
+            bindings[count].pane_ordinal = (int)ordinal;
+        }
+        ++count;
+        if (binding_count != NULL) *binding_count = count;
         items = end;
         while (*items == ' ' || *items == '\t' || *items == '\n' || *items == '\r') ++items;
         if (*items == ']') return items[1] == '\0';
@@ -18918,6 +18965,13 @@ static int settings_auxiliary_policy_valid(const char *document)
         while (*items == ' ' || *items == '\t' || *items == '\n' || *items == '\r') ++items;
     }
 }
+
+static int settings_auxiliary_policy_valid(const char *document)
+{
+    return settings_auxiliary_policy_parse(document, NULL, NULL);
+}
+
+#include "blit_auxiliary_controller.h"
 
 static void login_policy_json(const BlitLoginPolicy *policy, char *out,
                               size_t capacity)
@@ -19762,6 +19816,65 @@ static void handle_request(int fd, BlitRuntime *runtime,
                          "The bearer token is not valid.");
             return;
         }
+    }
+
+    if (strcmp(path, "/v1/auxiliary-displays") == 0 && strcmp(method, "GET") == 0) {
+        auxiliary_json(runtime, body, sizeof(body));
+        send_http(fd, 200, "OK", "application/json", body);
+        return;
+    }
+    if (strcmp(path, "/v1/auxiliary-displays/apply") == 0 && strcmp(method, "POST") == 0) {
+        BlitAuxiliaryBinding bindings[16];
+        char key[128], value[8192], document[BLIT_SETTINGS_CAPACITY];
+        const char *cursor = payload;
+        unsigned seen = 0;
+        int count = 0, retry = 0, valid = 1;
+        if (idempotency_replay(runtime, fd, request, method, path, payload)) return;
+        if (!if_match_revision(fd, request, runtime->auxiliary_revision)) return;
+        while (*cursor == ' ' || *cursor == '\n' || *cursor == '\t' || *cursor == '\r') ++cursor;
+        if (*cursor != '{') valid = 0;
+        else ++cursor;
+        document[0] = '\0';
+        while (valid) {
+            const char *next;
+            size_t length;
+            while (*cursor == ' ' || *cursor == '\n' || *cursor == '\t' || *cursor == '\r') ++cursor;
+            if (*cursor != '"' || (next = json_next_member(cursor, key, sizeof(key), value, sizeof(value))) == NULL) {
+                valid = 0;
+                break;
+            }
+            cursor = next;
+            length = strlen(value);
+            while (length && (value[length-1] == ' ' || value[length-1] == '\n' ||
+                   value[length-1] == '\t' || value[length-1] == '\r')) value[--length] = '\0';
+            if (strcmp(key, "bindings") == 0 && !(seen & 1u)) {
+                seen |= 1u;
+                snprintf(document, sizeof(document), "{\"auxiliary_displays\":%s}", value);
+            } else if (strcmp(key, "retry_stopped") == 0 && !(seen & 2u)) {
+                seen |= 2u;
+                if (strcmp(value, "true") == 0) retry = 1;
+                else if (strcmp(value, "false") != 0) valid = 0;
+            } else valid = 0;
+            while (*cursor == ' ' || *cursor == '\n' || *cursor == '\t' || *cursor == '\r') ++cursor;
+            if (*cursor == '}') {
+                ++cursor;
+                while (*cursor == ' ' || *cursor == '\n' || *cursor == '\t' || *cursor == '\r') ++cursor;
+                if (*cursor) valid = 0;
+                break;
+            }
+            if (*cursor != ',') { valid = 0; break; }
+            ++cursor;
+        }
+        if (!valid || !(seen & 1u) || !settings_auxiliary_policy_parse(document, bindings, &count)) {
+            send_problem(fd, 400, "Bad Request", "invalid_auxiliary_policy",
+                         "Expected bindings (at most 16 unique output/pane_ordinal targets) and optional retry_stopped boolean.");
+            return;
+        }
+        auxiliary_replace(runtime, bindings, count, 1, retry);
+        auxiliary_json(runtime, body, sizeof(body));
+        send_http(fd, 202, "Accepted", "application/json", body);
+        idempotency_store(runtime, request, method, path, payload, 202, "Accepted", "application/json", body);
+        return;
     }
 
     if (strcmp(path, "/v1/control/shutdown-key") == 0 &&
@@ -28086,6 +28199,17 @@ int main(int argc, char **argv)
     settings_apply_displays(&runtime);
     discover_panes(&runtime);
     {
+        BlitAuxiliaryBinding bindings[16];
+        int count = 0;
+        runtime.auxiliary_revision = 1;
+        runtime.auxiliary_operation = 1;
+        runtime.auxiliary_worker_binding = -1;
+        if (settings_auxiliary_policy_parse(runtime.settings_document, bindings, &count)) {
+            memcpy(runtime.auxiliary_bindings, bindings, (size_t)count * sizeof(*bindings));
+            runtime.auxiliary_count = count;
+        }
+    }
+    {
         /* One scan for all three kinds, the same one a hotplug runs.  Boot
            used to call three separate per-kind scans, each opening all 32
            paths; issue #16 is that cost landing on the event loop. */
@@ -28237,6 +28361,7 @@ int main(int argc, char **argv)
         service_login_manager(&runtime, monotonic_us());
         service_login_desktop(&runtime, monotonic_us());
         service_native_join_lifetimes(&runtime, monotonic_us());
+        service_auxiliary_displays(&runtime, monotonic_us());
 
         pending_before_events = runtime.render_pending;
         sdl_events_started_us = monotonic_us();

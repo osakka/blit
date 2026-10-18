@@ -456,6 +456,58 @@ paths:
               schema: {$ref: '#/components/schemas/AudioCard'}
         default:
           $ref: '#/components/responses/Problem'
+  /v1/auxiliary-displays:
+    get:
+      tags: [settings]
+      operationId: getAuxiliaryDisplays
+      summary: Observe live auxiliary intent and native join progress
+      responses:
+        '200':
+          description: Current volatile policy and per-binding effective state
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AuxiliaryDisplays'}
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/auxiliary-displays/apply:
+    post:
+      tags: [settings]
+      operationId: applyAuxiliaryDisplays
+      summary: Replace live auxiliary intent without saving defaults
+      description: >-
+        Starts managed native Hibr standby clients after fresh authenticated
+        owner association. Initial position is derived from pane geometry
+        relative to the login client and confirmed through native inventory.
+        Later Hibr Displays moves are preserved. Missing targets wait and
+        occupied panes conflict. Identical intent is a no-op; retry_stopped
+        explicitly retries stopped/failed bindings. Removed bindings retire
+        only their managed clients. Never writes settings. Completion is
+        observed through GET /v1/auxiliary-displays, not inferred from 202.
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bindings]
+              properties:
+                bindings:
+                  type: array
+                  maxItems: 16
+                  items: {$ref: '#/components/schemas/AuxiliaryDisplayBinding'}
+                retry_stopped: {type: boolean, default: false}
+              additionalProperties: false
+      responses:
+        '202':
+          description: Accepted policy; inspect each binding for progress or conflict
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AuxiliaryDisplays'}
+        default:
+          $ref: '#/components/responses/Problem'
   /v1/settings:
     get:
       tags: [settings]
@@ -1809,6 +1861,8 @@ components:
             input_routes: {type: string}
             topology: {type: string}
             fonts: {type: string}
+            login: {type: string}
+            auxiliary_displays: {type: string}
             audio_cards: {type: string}
             settings: {type: string}
             diagnostics: {type: string}
@@ -2337,17 +2391,7 @@ components:
                 This field records intent only: writing settings does not
                 start a Hibr standby, move an attached client, or persist a
                 current-session Hibr Displays arrangement.
-              items:
-                type: object
-                required: [output, pane_ordinal]
-                properties:
-                  output:
-                    type: string
-                    minLength: 1
-                    maxLength: 63
-                    pattern: '^[A-Za-z0-9_.:-]+$'
-                  pane_ordinal: {type: integer, minimum: 1, maximum: 4}
-                additionalProperties: false
+              items: {$ref: '#/components/schemas/AuxiliaryDisplayBinding'}
             server:
               type: object
               description: >-
@@ -3570,6 +3614,53 @@ components:
         gid: {type: [integer, 'null'], minimum: 0}
         sender_pid: {type: [integer, 'null'], minimum: 1}
         session_kind: {type: [string, 'null'], enum: [desktop, shell, null]}
+      additionalProperties: false
+    AuxiliaryDisplayBinding:
+      type: object
+      required: [output, pane_ordinal]
+      properties:
+        output:
+          type: string
+          minLength: 1
+          maxLength: 63
+          pattern: '^[A-Za-z0-9_.:-]+$'
+        pane_ordinal: {type: integer, minimum: 1, maximum: 4}
+      additionalProperties: false
+    AuxiliaryDisplays:
+      type: object
+      required: [revision, operation_id, source, bindings]
+      properties:
+        revision:
+          type: integer
+          minimum: 1
+          description: Live policy revision, independent of settings and progress observations.
+        operation_id: {type: string}
+        source: {type: string, enum: [startup, apply]}
+        bindings:
+          type: array
+          maxItems: 16
+          items:
+            type: object
+            required: [output, pane_ordinal, pane_id, session_id, client_name, state, reason, initial_placement]
+            properties:
+              output: {$ref: '#/components/schemas/AuxiliaryDisplayBinding/properties/output'}
+              pane_ordinal: {$ref: '#/components/schemas/AuxiliaryDisplayBinding/properties/pane_ordinal'}
+              pane_id: {type: [string, 'null']}
+              session_id: {type: [string, 'null']}
+              client_name: {type: [string, 'null']}
+              state:
+                type: string
+                enum: [waiting_authentication, waiting_desktop, waiting_output, waiting_pane, starting, waiting_join, joined, stopped, conflict]
+              reason: {type: string}
+              initial_placement:
+                type: object
+                required: [row_offset, column_offset, confirmed]
+                properties:
+                  row_offset: {type: integer, minimum: -32767, maximum: 32767}
+                  column_offset: {type: integer, minimum: -32767, maximum: 32767}
+                  confirmed: {type: boolean}
+                additionalProperties: false
+            additionalProperties: false
       additionalProperties: false
     LoginDesktopAssociation:
       type: object

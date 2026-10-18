@@ -15,8 +15,8 @@ sender_inode = File.readlink("/proc/self/fd/#{handoff}")
 child = fork do
   unless mode == 'root'
     Process.groups = []
-    Process::GID.change_privilege(65534)
-    Process::UID.change_privilege(65534)
+    Process::GID.change_privilege(Integer(ENV.fetch('BLIT_GATE_GID', '65534')))
+    Process::UID.change_privilege(Integer(ENV.fetch('BLIT_GATE_UID', '65534')))
   end
   if mode == 'foreign'
     fork do

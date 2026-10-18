@@ -1,6 +1,6 @@
 # ADR 0128: live auxiliary-display Apply contract
 
-- Status: accepted; API/controller implementation pending
+- Status: accepted; API/controller implemented in 0.1.543, physical acceptance pending
 - Date: 2026-10-17
 - Related: [ADR 0124](0124-api-owned-desktop-policy-and-control-panel.md),
   [ADR 0126](0126-native-login-desktop-association.md),
@@ -29,13 +29,17 @@ The POST is asynchronous and returns an operation identifier plus per-binding
 desired/effective state. The GET reports the current operation and its
 per-binding state. States distinguish at least: `waiting_authentication`,
 `waiting_desktop`, `waiting_output`, `waiting_pane`, `starting`, `waiting_join`,
-`joined`, `released`, `stopped`, and `conflict`. Every state includes a stable
+`joined`, `stopped`, and `conflict`. Every state includes a stable
 reason code; unavailable hardware is never silently redirected to the primary
 pane. The service reports `joined` only after the exact named client appears
 in a fresh native client inventory and the one-time requested placement is
 confirmed by a subsequent native observation.
 
-Apply is idempotent for an identical request and generation. Replacing the
+Apply is idempotent for an identical request and generation. Optional
+`retry_stopped: true` explicitly retries exited or failed bindings; an
+Idempotency-Key protects that action against transport retries. Optional
+If-Match checks the live policy revision, independent of settings and status
+observations. Replacing the
 live policy cancels only Blit-owned standby clients for bindings removed from
 the request; it never terminates the authenticated desktop owner. Stale or
 failed native queries do not prove logout or absence. A user move after the
@@ -46,7 +50,9 @@ quit. A new explicit Apply or verified desktop generation may provision it
 again. Deliberate Hibr release remains Hibr-owned and is reported as
 `released` only when the supported interface proves that state. If it cannot
 distinguish release from absence, Blit reports waiting/unknown rather than
-inventing that distinction.
+inventing that distinction. The current native interface cannot prove release;
+0.1.543 reports `waiting_join/native_client_absent_release_unknown` after an
+observed attached client disappears while its standby process remains alive.
 
 Each binding resolves its stable connector selector against current output
 inventory and its one-based row-major pane ordinal against current pane
@@ -72,6 +78,23 @@ second settings store, shell-script controller, or SSH.
 
 ## Consequences
 
-The current implementation does not yet expose these routes or state model.
-This ADR is a contract for the next implementation increment, not a claim that
-live Apply or automatic joins work today.
+0.1.543 implements the controller and loads saved auxiliary defaults at boot.
+An explicit live override lasts until service restart, including later login
+generations; settings writes affect the next boot only. Output selectors use
+native connector names where reported, otherwise the backend's display name;
+ambiguous names conflict. Initial offsets use complete-cell pane geometry
+relative to the login client and the outputs' current logical positions.
+Pending placement follows current complete-cell geometry, including a font
+change during startup. Once confirmed, subsequent user placement is preserved.
+An explicit API reassignment of the managed PTY to another Blit pane reports
+`conflict/managed_pane_assignment_changed` and is not silently undone.
+
+`auxiliary_policy_gate.rb` tests the controller with synthetic native inventory
+and real authenticated credential dropping. `auxiliary_native_gate.rb` uses
+installed Hibr standby/hold and both API endpoints in an isolated namespace;
+its held workload is sleep, so Enter supplies Hibr's documented join action.
+With `BLIT_NATIVE_AUXILIARY_DESKTOP=1`, the same gate instead runs the installed
+desktop and proves its automatic invitation without injected Enter. Both modes
+cover native movement, drop, quit and cleanup. The native observer gate also
+tests the placement helper and stale-owner rejection. Physical multi-output
+acceptance remains a separate delivery boundary.

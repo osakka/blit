@@ -13,7 +13,7 @@ schema = YAML.load_file(schema_path)
 raise 'schema is not OpenAPI 3.1' unless schema.fetch('openapi') == '3.1.0'
 
 paths = schema.fetch('paths')
-raise "unexpected path count #{paths.length}" unless paths.length == 43
+raise "unexpected path count #{paths.length}" unless paths.length == 45
 
 settings = schema.fetch('components').fetch('schemas').fetch('Settings')
 raise 'settings durability receipt missing' unless settings['required'].include?('storage')
@@ -28,8 +28,13 @@ settings = schema.fetch('components').fetch('schemas').fetch('Settings')
 auxiliary = settings.dig('properties','document','properties','auxiliary_displays')
 raise 'saved auxiliary binding schema missing' unless auxiliary &&
   auxiliary['maxItems'] == 16 &&
-  auxiliary.dig('items','required') == %w[output pane_ordinal] &&
-  auxiliary.dig('items','properties','pane_ordinal','maximum') == 4
+  auxiliary.dig('items','$ref') == '#/components/schemas/AuxiliaryDisplayBinding'
+binding = schema.fetch('components').fetch('schemas').fetch('AuxiliaryDisplayBinding')
+raise 'auxiliary binding shape changed' unless binding['required'] == %w[output pane_ordinal] &&
+  binding.dig('properties','pane_ordinal','maximum') == 4
+raise 'live auxiliary apply schema missing' unless
+  paths.dig('/v1/auxiliary-displays/apply','post','responses','202','content','application/json','schema','$ref') ==
+    '#/components/schemas/AuxiliaryDisplays'
 login = schema.fetch('components').fetch('schemas').fetch('LoginManager')
 raise 'login identity observation missing' unless login['required'].include?('identity') &&
   login.dig('properties','identity','$ref') == '#/components/schemas/LoginIdentity'

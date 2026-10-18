@@ -180,7 +180,7 @@ supervised boundary from an ordinary PTY session.
 
 ### Authenticated identity (0.1.538)
 
-`GET /v1/login.identity` distinguishes the login process from the user selected
+The `identity` object in `GET /v1/login` distinguishes the login process from the user selected
 by its post-authentication hook. Before authentication it reports
 `state: waiting`, reason `awaiting_authenticated_hook`, with null UID/GID/PID
 and session kind. The default Blit-owned hook uses a private inherited channel;
@@ -194,8 +194,9 @@ or any public registration endpoint. A verified example is:
 
 The PID identifies the handoff sender, **not** the live held desktop owner.
 Verification is not desktop readiness: the selected session can also be
-`shell`. Native owner association and automatic standby joins are not yet
-implemented. Destroying/replacing the supervised login discards this identity.
+`shell`. Native owner association is exposed separately by `login.desktop`;
+0.1.543 auxiliary reconciliation requires that fresh association before launch.
+Destroying/replacing the supervised login discards this identity.
 No active login reports `unavailable/no_active_login`; custom session commands
 are unchanged and report `unavailable/custom_session_command`. Setup failures
 report `unavailable/handoff_setup_failed`. Rejected messages expose null
@@ -206,7 +207,7 @@ startup; it prevents trusting that login for future automation. See ADR 0125.
 
 ### Native desktop association (0.1.539)
 
-`GET /v1/login.desktop` observes the exact named login client using Hibr's
+The `desktop` object in `GET /v1/login` observes the exact named login client using Hibr's
 native `hold list` and `hold clients`, as the verified user. A transient unique
 client name is passed through the packaged hook's existing desktop `--name`
 argument. It is not a saved pane name or another desktop instance.
@@ -483,7 +484,7 @@ Hibr owner at a time rather than accidentally spawning competing desktops.
 
 The API does not rewrite Hibr configuration or patch Hibr source. A client
 should keep the returned session IDs. From0.1.540, a login-owned join requires
-fresh `/v1/login.desktop` readiness, not authentication alone. The associated
+fresh `GET /v1/login` desktop readiness, not authentication alone. The associated
 login projects ownership role `primary`; Hibr's primary-display choice remains
 the separate native `login.desktop.client.primary` flag. Omitting `user`
 derives the authenticated account in the child, without the service's API
@@ -736,9 +737,43 @@ pane grid. Missing outputs are valid dormant intent. Saving this field does
 not move or reconnect a current desktop client. Blit's later standby
 reconciler applies initial placement once; Hibr Displays owns subsequent
 session moves. The control panel must keep live Apply separate from durable
-Save as default. As of 0.1.542, neither live Apply nor its effective-state
-resource is implemented. ADR 0128 defines the pending
-`/v1/auxiliary-displays` contract; do not infer active joins from saved intent.
+Save as default. Since 0.1.543, saved auxiliaries are loaded as the live policy
+at boot. Later settings replacements affect the next boot, while the current
+policy is controlled by the separate Apply operation below.
+
+#### Live auxiliary displays (0.1.543)
+
+`GET /v1/auxiliary-displays` returns the live policy revision, operation ID,
+source (`startup` or `apply`), and per-binding progress. Each binding reports
+its output selector, pane ordinal, resolved pane ID, managed session ID,
+native client name, state/reason, and initial relative row/column offsets with
+a `confirmed` flag. Connector names come from display inventory; a backend
+without connectors uses its display name. An ambiguous name conflicts.
+
+`POST /v1/auxiliary-displays/apply` replaces live intent without saving it:
+
+```json
+{"bindings":[{"output":"DP-1","pane_ordinal":1}],"retry_stopped":false}
+```
+
+The POST returns 202 with that same resource, not a completed-join promise.
+Poll GET for `joined`. Optional If-Match checks the live policy revision;
+Idempotency-Key protects transport retries. Identical intent is a no-op.
+`retry_stopped: true` explicitly retries failed/exited clients. An empty
+bindings array retires only the managed auxiliaries, preserving the desktop
+owner and any independently created client.
+
+The controller waits for authentication, fresh native desktop association,
+available outputs and panes; occupied panes conflict. It starts a named Hibr
+`--standby` as the authenticated user, waits for native attachment, then applies
+and confirms initial placement once. Later user moves stay authoritative. A
+standby exit reports stopped until explicit retry or a new desktop generation.
+Logout/verified owner replacement retires its generation's managed clients.
+Unverified or expired queries never prove logout. After a previously joined
+client disappears while its process lives, `waiting_join` with reason
+`native_client_absent_release_unknown` reports the observation; the supported
+native interface does not establish whether it was deliberately released.
+Hibr's standby owns reattachment. See ADR 0128 for limits and acceptance.
 
 #### Save acknowledgement and failure
 

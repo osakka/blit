@@ -49,6 +49,15 @@ Dir.mktmpdir('blit-native-hold') do |root|
     end
     check(out.include?('client auxiliary ') && out.include?('client login 0 0 67 240 1'),
       'all native clients or their geometries were not observed')
+    ticks=File.read("/proc/#{owner}/stat").split(') ',2).last.split[19]
+    place=File.join(ROOT,'hibr/blit-desktop-place.hibr')
+    _,err,status=Open3.capture3(env,'/usr/bin/hibr',place,name,'login','auxiliary',owner,ticks,'-24','0')
+    check(status.success?,"guarded native placement failed:#{err}")
+    placed=observe.call.lines.grep(/^client /).to_h { |l| f=l.split; [f[1],f[2,2].map(&:to_i)] }
+    check(placed['auxiliary'][0]-placed['login'][0]==-24 && placed['auxiliary'][1]==placed['login'][1],
+      'native helper did not preserve relative pane placement across union normalization')
+    _,_,status=Open3.capture3(env,'/usr/bin/hibr',place,name,'login','auxiliary',owner,'1','11','7')
+    check(!status.success?,'stale owner lifetime was allowed to move a native client')
     # A move changes native geometry, not the association's client identity.
     _,err,status=Open3.capture3(env,'/usr/bin/hibr','-c',"#{LOAD}hold move #{name} login 7 9")
     check(status.success?,"native fixture move failed:#{err}")

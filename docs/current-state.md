@@ -7,6 +7,21 @@ work actually stopped.
 
 ## Status at the last review
 
+### 2026-10-17 local 0.1.543: live Apply and catalogue pane delivery
+
+The source now implements saved-default boot activation and volatile live
+Apply with per-binding state, authenticated native standby launch, one-time
+placement confirmation, user-move preservation and explicit stopped-client
+retry. Synthetic controller and installed-Hibr standby gates pass locally.
+The catalogue pane is implemented in `itdlabs/hibr-apps`; its callback/API,
+catalogue lifecycle and actual Hibr UI/keyboard gates pass locally.
+Physical host remains0.1.540; its history below must not be read as a543
+deployment. Package publication and physical acceptance are the remaining steps.
+
+API route correction: `identity` and `desktop` are objects returned by
+`GET /v1/login`, not separate dotted URL paths. OpenAPI and the implementation
+have one login resource; documentation now uses that canonical resource.
+
 ### 2026-10-17 deployed 0.1.540: correct the native join boundary
 
 After the user's explicit deployment request and a preflight confirming they
@@ -73,13 +88,14 @@ cases), and OpenAPI schema gate pass locally. These are prerequisites, not
 placement automation or a second layout store. Neither candidate is newly
 deployed to 10.54. Standby lifecycle and the control panel remain outstanding.
 
-ADR 0128 pins the next contract: volatile API Apply separate from saved
-defaults, per-binding reconciliation status, and confirmation of native join
-plus one-time placement before claiming success. This is not implemented yet;
-no Apply route or standby reconciler exists. The next coding increment is that
-API/controller boundary, with tests for target absence, owner changes,
-user-movement preservation, and safe process-exit behavior. Do not build the
-Hibr Control Panel against an endpoint that is only aspirational.
+0.1.543 now implements ADR 0128: volatile API Apply separate from saved
+defaults, per-binding reconciliation status, bounded asynchronous native
+standby startup, and one-time placement confirmed through native inventory.
+The local synthetic controller and actual installed-Hibr standby gates pass,
+including user-move preservation, native release, explicit retry, logout
+cleanup, and saved defaults at restart. These are local results, not a 10.54
+deployment or desktop auto-invite acceptance. The next delivery is the native
+catalogue Control Panel plus package/broad validation and physical acceptance.
 
 The next policy boundary is now pinned in ADR0124 after reviewing Hibr's
 documented `desktop --standby` lifecycle: it waits, can autojoin, remains alive
@@ -171,7 +187,7 @@ implemented. No join was started, no Hibr core was edited, and no SSH was used.
 The paragraphs below retain candidate validation history; references to the
 old host state and pending physical checks are historical.
 
-ADR 0126 adds `/v1/login.desktop`: a read-only native hold observation,
+ADR 0126 adds the `desktop` object in `GET /v1/login`: a read-only native hold observation,
 separate from the historical handoff sender PID. The packaged hook now names
 its desktop client uniquely. One bounded, credential-dropped helper uses
 supported Hibr CLI queries outside the presentation loop. It verifies the
@@ -228,7 +244,7 @@ semantic change (#96), without competing placement controllers (#99).
 
 ### 2026-10-17 deployed 0.1.538: authenticated identity boundary
 
-ADR 0125 and the schema add `/v1/login.identity`. Only Blit's default login
+ADR 0125 and the schema add `identity` in `GET /v1/login`. Only Blit's default login
 hook participates: a private inherited datagram capability crosses Hibr's
 environment-clearing authentication boundary, then kernel sender credentials
 and login ancestry are verified. The capability is closed before desktop or
@@ -257,7 +273,7 @@ and scale, both 240x67 pane grids and the complete saved settings document
 (clean revision 38). A single focused lower login terminal initially reports
 identity waiting with null credentials. The physical edge/font oracle passes
 21 cells/2688 pixels again; its temporary upper terminal is removed and lower
-focus restored. After login, `/v1/login.identity` reports verified UID/GID
+focus restored. After login, the `/v1/login` identity reports verified UID/GID
 1000, sender PID 247917, session kind desktop. This sender PID is historical
 handoff identity, not the held desktop owner. The final observation has one
 login terminal (id1), zero diagnostic errors/warnings, and the capture shows

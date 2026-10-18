@@ -33,9 +33,11 @@ Both are locally gated, but not packaged or deployed. Next: implement bounded
 ADR 0128 now pins the live Apply contract separately from durable settings:
 volatile current-session policy, asynchronous per-binding effective state,
 exact native join and one-time placement proof, and conservative no-respawn
-after a standby exits. Next: implement and gate that API/controller contract.
-Do not start the catalogue panel until the packaged API implements it; the
-panel remains in `hibr-apps` issue #1.
+after a standby exits. 0.1.543 implements this API/controller and its local
+synthetic, installed-Hibr desktop auto-invite/standby and pending-font-resize
+gates pass. The catalogue pane in `hibr-apps` issue #1 has callback/API,
+catalogue and actual Hibr UI/keyboard acceptance. Next: package validation,
+catalogue publication and physical acceptance.
 
 Version 0.1.538 adds a private post-authentication identity handoff (ADR 0125),
 not automatic joins. The deployed installed hook reports verified UID/GID 1000

@@ -61,8 +61,9 @@ test -x "$stage/usr/share/blit/hibr/blit-session.hibr"
 test -x "$stage/usr/share/blit/hibr/blit-login.hibr"
 test -x "$stage/usr/share/blit/hibr/blit-login-session.hibr"
 test -x "$stage/usr/share/blit/hibr/blit-desktop-observe.hibr"
+test -x "$stage/usr/share/blit/hibr/blit-desktop-place.hibr"
 source_commit=$(sed -n 's/^source_commit: //p' "$manifest")
-for entrypoint in blit-session.hibr blit-login-session.hibr blit-desktop-observe.hibr; do
+for entrypoint in blit-session.hibr blit-login-session.hibr blit-desktop-observe.hibr blit-desktop-place.hibr; do
     cmp -s <(git -C "$root" show "$source_commit:hibr/$entrypoint") \
         "$stage/usr/share/blit/hibr/$entrypoint" || {
         echo "PACKAGE_ARTIFACT_FAIL Hibr entrypoint differs from recorded source: $entrypoint" >&2
@@ -91,6 +92,11 @@ cmp -s "$root/openapi/blit-0.1.yaml" "$stage/usr/lib/blit/openapi/blit-0.1.yaml"
 documentation_commit=$(sed -n 's/^package_documentation_commit: //p' "$manifest")
 git -C "$root" rev-parse --verify "$documentation_commit^{commit}" >/dev/null || {
     echo "PACKAGE_ARTIFACT_FAIL recorded documentation commit unavailable" >&2
+    exit 1
+}
+cmp -s <(git -C "$root" show "$documentation_commit:README.md") \
+    "$stage/usr/share/doc/blit/README.md" || {
+    echo "PACKAGE_ARTIFACT_FAIL root README differs from recorded documentation" >&2
     exit 1
 }
 for document in README.md roadmap.md verification-status.md diagnostic-capture.md; do

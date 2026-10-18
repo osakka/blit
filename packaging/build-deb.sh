@@ -118,6 +118,8 @@ cp -a "$HIBR_LOGIN_ENTRYPOINT" \
 cp -a "$HIBR_RUNTIME_RC" "$stage/usr/share/blit/hibr/blit-runtime-console.hibr"
 cp -a "$ROOT/hibr/blit-desktop-observe.hibr" "$stage/usr/share/blit/hibr/blit-desktop-observe.hibr"
 chmod 0755 "$stage/usr/share/blit/hibr/blit-desktop-observe.hibr"
+cp -a "$ROOT/hibr/blit-desktop-place.hibr" "$stage/usr/share/blit/hibr/blit-desktop-place.hibr"
+chmod 0755 "$stage/usr/share/blit/hibr/blit-desktop-place.hibr"
 cp -a "$ROOT/hibr/blit-live-image-probe.hibr" \
     "$stage/usr/share/blit/probes/blit-live-image-probe.hibr"
 chmod 0755 "$stage/usr/share/blit/hibr/blit-session.hibr"
@@ -154,13 +156,15 @@ if [ -d "$ROOT/openapi" ]; then
 	cp -a "$ROOT/openapi" "$stage/usr/lib/blit/openapi"
 fi
 ln -s /usr/lib/blit/bin/blit-server "$stage/usr/bin/blit"
-cp -a "$BUNDLE/README.md" "$stage/usr/share/doc/blit/"
+cp -a "$ROOT/README.md" "$stage/usr/share/doc/blit/"
 cp -a "$VERSION_FILE" "$stage/usr/share/doc/blit/VERSION"
 cp -a "$HIBR_VERSION_FILE" "$stage/usr/share/doc/blit/HIBR_VERSION"
 cp -a "$HIBR_ABI_FILE" "$stage/usr/share/doc/blit/HIBR_ABI"
 if [ -n "${BLIT_PACKAGE_DOCUMENTATION_COMMIT:-}" ]; then
     documentation_commit=$(git -C "$ROOT" rev-parse --verify \
         "$BLIT_PACKAGE_DOCUMENTATION_COMMIT^{commit}")
+    git -C "$ROOT" archive "$documentation_commit" README.md | \
+        tar -x -C "$stage/usr/share/doc/blit"
     git -C "$ROOT" archive "$documentation_commit" docs | \
         tar -x -C "$stage/usr/share/doc/blit"
 elif [ -d "$ROOT/docs" ]; then

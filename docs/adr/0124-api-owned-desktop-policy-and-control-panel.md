@@ -63,12 +63,12 @@ the desired set. Invalid replacements are rejected before current or durable
 settings change. This is still a staged delivery, not completion of the
 standby lifecycle below.
 
-## Remaining stages
+## Delivery stages
 
 1. Verified authenticated desktop association and native standby integration,
    using Hibr's supported per-user interface, never screen/process-name guesses.
    The 0.1.540 join path supplies the association and per-client lifetime
-   boundary; 0.1.542 adds persisted auxiliary intent. The next implementation
+   boundary; 0.1.542 adds persisted auxiliary intent. Version0.1.543
    starts a named `desktop --standby` client only after that association is
    fresh. The standby runs as the authenticated desktop user and occupies its
    configured Blit pane.
@@ -82,7 +82,7 @@ standby lifecycle below.
    or force a released display back into the desktop. A new authenticated
    desktop generation may provision its configured standby again.
 3. Report desired and effective state separately, including waiting for
-   authentication, waiting for a pane, starting, joined, released, stopped,
+   authentication, waiting for a pane, starting, joined, stopped,
    and conflicts. Missing output/pane targets wait or report a conflict; they
    never fall back onto the primary pane. Apply and Save as default remain
    distinct API operations so a live Hibr Displays change is not persisted
@@ -90,6 +90,14 @@ standby lifecycle below.
 4. Build the Hibr-native Blit pane in `itdlabs/hibr-apps`, with bounded
    asynchronous requests, revision conflicts, configuration export/import,
    and validation/apply UX; then run catalogue lifecycle tests.
+
+Version0.1.543 implements stages1–3 under ADR0128. The native interface does
+not prove intentional release, so a missing attached client with a live
+standby reports waiting/unknown instead. Both the synthetic controller and
+installed-Hibr desktop auto-invite/standby tests pass locally. The catalogue
+pane now has actual callback/API, UI rendering/keyboard and install/update/
+remove tests in `hibr-apps`; packaging and physical acceptance are tracked
+separately in the verification ledger.
 
 Hibr's documented standby registry distinguishes waiting from deliberate
 release while the standby process lives. Blit integrates that behavior through

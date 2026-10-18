@@ -3,6 +3,56 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-17: live auxiliary controller (0.1.543 local candidate)
+
+TCC builds the server. `auxiliary_policy_gate.rb` passes authentication
+waiting, exact native-inventory placement confirmation, one-time move,
+user-move preservation, unknown release reporting, explicit stop/retry,
+missing connector/pane, occupied primary protection, invalid request and
+revision rejection, Apply/Save independence and boot restoration of defaults.
+`auxiliary_native_gate.rb` passes with installed Hibr 0.99.241 ABI16 standby
+and native hold in an isolated namespace: API startup, documented Enter join,
+confirmed upper/lower placement, native user move, native drop with the
+standby alive, q exit without respawn and logout cleanup. Its held workload is
+sleep; the real desktop auto-invite loop is not tested by that fixture.
+The additional installed-desktop mode (`BLIT_NATIVE_AUXILIARY_DESKTOP=1`)
+passes automatic invitation and placement, native move/drop/quit and cleanup,
+without injected Enter. A cleanup race found on its first run was corrected
+by waiting for the scoped native owner/descendant lifetimes to end.
+`native_hold_observer_gate.rb` also verifies the actual placement helper and
+rejects a stale owner lifetime. OpenAPI schema gate passes with45 paths.
+Package, broad suite, Control Panel and physical-host acceptance are pending.
+
+The broad local run passes88 checks with seven explicit skips (package,
+QEMU, physical-host gates and the three adapter checks whose default pinned
+directory was absent), including a120-second four-session soak. The three
+adapter checks then pass separately against the exact pinned0.99.225 headers.
+Two original split fixtures failed first: one loaded a stale installed font,
+and the barrier fixture could present one producer before creating its peer.
+Pinning the canonical font and synchronizing both producers makes their
+original assertions pass; no renderer code changed.
+
+A final native regression changes font scale to1.1 while the join is pending.
+It fails before the geometry guard:21-row panes retain the old24-row offset,
+leaving a three-row gap. The controller now refreshes initial offsets until
+confirmation, and reports an explicit Blit API pane reassignment as a conflict
+instead of falsely claiming the configured pane is effective. Final focused
+controller/native/schema gates pass after this scoped correction; the
+broad result above predates that guard and is not represented as an identical
+final-binary run. Package and physical-host acceptance remain pending.
+
+The canonical Control Panel source in `hibr-apps` passes actual Hibr callback
+tests against Blit: Apply/Save separation, staged import/export, stale revision
+and503 save failure preserving the draft,401 authentication, offline/timeout,
+nonblocking callbacks during the timeout, scale1.1, token masking and exports
+without connection secrets. The installed catalogue client passes install of
+an older fixture, update to the canonical0.1.0 hash, and clean removal in an
+isolated scope. Actual installed Hibr desktop UI libraries render the pane
+through SDL software; API-delivered keyboard input opens/closes connection
+and token dialogs, and terminal cells and screenshots show a masked token.
+Screenshots: `diagnostics/control-panel-543/{panel,connection,token-masked}.png`.
+This is local UI acceptance, not a physical monitor capture.
+
 ## 2026-10-17: saved auxiliary intent (0.1.542 source candidate)
 
 TCC 0.9.27 builds the 0.1.542 server. The existing settings persistence gate

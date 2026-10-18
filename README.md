@@ -123,6 +123,11 @@ package is an alternate source of behavior.
   `desktop --join` ownership rules.
 - API-selectable font profiles and logical scale, Kitty-first graphics, and a
   bounded Sixel capability.
+- Saved auxiliary defaults and a live Apply API with authenticated Hibr
+  standby startup, native placement confirmation and observable progress.
+- A catalogue **Blit Displays** Control Panel in
+  [hibr-apps](https://git.home.arpa/itdlabs/hibr-apps), with separate Apply/Save,
+  fonts, login preferences, configuration import/export and diagnostics.
 - TCC builds, QEMU/VKMS fixtures, terminal conformance, package gates, and
   live-host diagnostic gates.
 
