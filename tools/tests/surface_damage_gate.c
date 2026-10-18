@@ -210,6 +210,31 @@ static void expect_bounds(const char *name, int x, int y, int w, int h)
     }
 }
 
+static void nonvisual_terminal_bytes_gate(void)
+{
+    const unsigned char controls[] = "\033[31m\033[?1002h\033[?1006h\033[12;19H\033]2;title-only\007";
+    const unsigned char upload[] = "\033_Ga=T,f=24,s=1,v=1,i=123,m=1;AAAA";
+    int i;
+    memset(&subject,0,sizeof(subject));memset(&owner,0,sizeof(owner));
+    subject.width=80;subject.height=40;subject.scroll_bottom=39;
+    subject.cursor_visible=0;
+    if (terminal_consume_output(NULL,&owner,&subject,controls,sizeof(controls)-1) ||
+        subject.damage_valid || subject.cursor_x!=18 || subject.cursor_y!=11 ||
+        owner.terminal_mouse_mode!=1002 || strcmp(owner.terminal_title,"title-only")) {
+        fprintf(stderr,"NONVISUAL_PTY_FAIL control-only bytes scheduled a visual revision\n");
+        ++failures;
+    }
+    /* A fragmented APC upload is not an image until its final chunk. */
+    if (terminal_consume_output(NULL,&owner,&subject,
+        upload,sizeof(upload)-1) || subject.damage_valid) {
+        fprintf(stderr,"NONVISUAL_PTY_FAIL incomplete image scheduled a repaint\n");++failures;
+    }
+    owner.terminal_escape=0; owner.terminal_string_length=0;
+    if (!terminal_consume_output(NULL,&owner,&subject,(const unsigned char *)"X",1) ||
+        !subject.damage_valid) { fprintf(stderr,"NONVISUAL_PTY_FAIL printable damage lost\n");++failures; }
+    for (i=0;i<BLIT_GRAPHICS_MAX_IMAGES;++i) graphics_image_release(&owner.graphics[i]);
+}
+
 int main(void)
 {
     BlitRectangle rectangle;
@@ -252,6 +277,7 @@ int main(void)
     kms_retry_deadline_gate();
     utf8_large_pty_read_gate();
     utf8_fragmentation_gate();
+    nonvisual_terminal_bytes_gate();
     if (failures) return 1;
     puts("SURFACE_DAMAGE_PASS union=both-orders DEC=union scroll=union quiet=bounded join=bounded wait=nonspinning UTF8=large-PTY+10-fragmentations");
     return 0;

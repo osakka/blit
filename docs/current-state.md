@@ -7,6 +7,32 @@ work actually stopped.
 
 ## Status at the last review
 
+### 2026-10-18 pointer latency investigation:547 deployed,548 correction
+
+The user still reports jerky pointer motion. The real host now has DP-1 and
+HDMI-A-1, with three occupied native desktop panes.547 instrumentation is
+API-deployed after58 focused schema/renderer checks and package/manifest checks;
+its complete frozen collection is finishing separately. Preserve backend/font/
+layout; no SSH or Hibr-core changes.547 is diagnostic, not a performance fix.
+
+Live `kms_phases` separates draw (up to20.883ms in this collection), scanout
+copy (about1.152ms) and submission (about0.032ms). Traces include changed
+revisions with `damage_valid=0`, hidden cursor and full-view paint counts.
+The common PTY parser unconditionally reported every consumed chunk as a
+visual change.548 corrects that return to the canonical damage flag; parsing,
+protocol replies and raw byte streams continue. Production regression is red
+before correction for nonvisual controls/partial APC and green after, with
+printable damage and fragmented UTF-8 preserved. ADR0134; Blit#101 stays open
+until physical acceptance.548 package/deployment validation is pending here.
+
+User also requests high-quality cursor appearance/native Mouse controls,
+tracked in Blit#102/ADR0133 (working implementation). Its work is deliberately
+isolated from the shared PTY correction in our named stash
+`0428727a8127ab805481cfd35d984343112bfb19`; restore it after548 validation.
+The hibr-apps worktree contains our unpublished pane0.1.5 Mouse changes and
+tests. Do not discard those or claim they are deployed. Preview/evidence and
+live phase samples are ignored under `diagnostics/mouse-547/`.
+
 ### 2026-10-18 deployed0.1.546 and catalogue pane0.1.4
 
 The authorized API updater installed and verified **0.1.546** on192.168.10.54.

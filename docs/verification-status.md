@@ -3,6 +3,17 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-18:548 nonvisual PTY correction, physical acceptance pending
+
+Production parser test fails twice before the correction (hidden-cursor
+controls and partial APC schedule visual work) and passes after. It checks
+mode/title/cursor state still changes, printable cells still cause damage,
+and retains the existing large-PTY/ten-fragmentation tests. The return value,
+not parsing or backend selection, is corrected. Broader548 tests/package/live
+measurements remain pending. ADR0134 and Blit#101 track this separately from
+cursor appearance#102.547 is already API-deployed for phase measurements;
+copy/submission are much cheaper than the measured expensive drawing frames.
+
 ## 2026-10-18:0.1.547 KMS phase instrumentation checkpoint
 
 The user still reports jerky pointer motion on546. The physical host now has

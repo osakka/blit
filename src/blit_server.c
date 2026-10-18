@@ -13025,7 +13025,11 @@ static int terminal_consume_chunk(BlitRuntime *runtime, BlitSession *session,
             ++offset;
         }
     }
-    return 1;
+    /* Consumed bytes are not necessarily visible changes. Hidden cursor
+       motion, SGR/mouse modes, protocol queries and partial string/UTF-8
+       payloads must not advance the painted surface revision. The actual
+       cell, visible-cursor and completed graphics paths mark damage. */
+    return surface->damage_valid;
 }
 
 static int terminal_consume_output(BlitRuntime *runtime, BlitSession *session,
