@@ -49,6 +49,26 @@ static void vblank_clock_gate(void)
     puts("KMS_VBLANK_PASS timestamps=measured skipped-sequences=independent wrap=correct");
 }
 
+static void late_flip_generation_gate(void)
+{
+    BlitKms kms;
+    KmsOutput *target;
+    KmsFlipCookie *old, *current;
+    int i;
+    memset(&kms, 0, sizeof(kms));
+    target = &kms.outputs[0]; target->generation = 1;
+    old = kms_flip_cookie(&kms, target);
+    target->generation = 2; target->flip_pending = 1;
+    current = kms_flip_cookie(&kms, target);
+    kms_flip_event(-1, 10, 1, 0, old);
+    if (!target->flip_pending || target->info.flip_completions || old->used) exit(1);
+    kms_flip_event(-1, 11, 1, 1000, current);
+    if (target->flip_pending || target->info.flip_completions != 1 || current->used) exit(1);
+    for (i = 0; i < KMS_MAX_FLIP_COOKIES; ++i) kms.flip_cookies[i].used = 1;
+    if (kms_flip_cookie(&kms, target) != NULL || !strstr(kms.hotplug_error, "capacity")) exit(1);
+    puts("KMS_FLIP_GENERATION_PASS late=ignored current=completed cookie_capacity=bounded");
+}
+
 static void mode_refresh_gate(void)
 {
     drmModeModeInfo mode;
@@ -77,6 +97,7 @@ static void output_ready_mask_gate(void)
     BlitKms kms;
     memset(&kms, 0, sizeof(kms));
     kms.output_count = 3;
+    kms.slots[1] = 1; kms.slots[2] = 2;
     kms.outputs[0].flip_pending = 1;
     kms.outputs[1].info.presentation_state = BLIT_KMS_PRESENTATION_PRESENTING;
     kms.outputs[2].info.presentation_state = BLIT_KMS_PRESENTATION_FAILED;
@@ -510,6 +531,7 @@ int main(void)
 
     buffer_coherence_gate();
     vblank_clock_gate();
+    late_flip_generation_gate();
     mode_refresh_gate();
     output_ready_mask_gate();
     scene_copy_gate();

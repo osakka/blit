@@ -1,9 +1,13 @@
+#define _GNU_SOURCE
 #include "blit_kms.h"
 #include "blit_font.h"
 #include "blit_damage.h"
 
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
+#include <pthread.h>
+#include <linux/netlink.h>
 #include <libdrm/drm.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -12,6 +16,7 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/select.h>
+#include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
 #include <xf86drm.h>
@@ -40,6 +45,8 @@ typedef struct {
 
 typedef struct {
     BlitKmsDisplayInfo info;
+    unsigned long long generation;
+    int allocated;
     uint32_t connector;
     uint32_t crtc;
     drmModeModeInfo mode;
@@ -81,10 +88,50 @@ typedef struct {
     BlitFont *font;
 } KmsOutput;
 
+typedef struct {
+    uint32_t id;
+    char name[64];
+    int mode_count;
+    drmModeModeInfo modes[KMS_MAX_MODES];
+    int crtc_count;
+    uint32_t crtcs[KMS_MAX_OUTPUTS];
+} KmsConnector;
+
+typedef struct {
+    int valid;
+    int count;
+    int unknown_count;
+    uint32_t unknown[KMS_MAX_OUTPUTS];
+    KmsConnector connectors[KMS_MAX_OUTPUTS];
+} KmsSnapshot;
+
+typedef struct {
+    KmsOutput *output;
+    unsigned long long generation;
+    int used;
+} KmsFlipCookie;
+
+#define KMS_MAX_FLIP_COOKIES 256
+
 struct BlitKms {
     int fd;
     int output_count;
     KmsOutput outputs[KMS_MAX_OUTPUTS];
+    int slots[KMS_MAX_OUTPUTS];
+    unsigned long long generation;
+    unsigned long long inventory_revision;
+    KmsFlipCookie flip_cookies[KMS_MAX_FLIP_COOKIES];
+    pthread_t monitor_thread;
+    pthread_mutex_t monitor_lock;
+    int monitor_started;
+    int monitor_stop[2];
+    int monitor_socket;
+    KmsSnapshot snapshot;
+    unsigned long long snapshot_revision;
+    unsigned long long applied_snapshot_revision;
+    unsigned long long monitor_scans;
+    double monitor_last_scan_ms;
+    char hotplug_error[128];
     BlitFont *font;
     /* ADR 0062: the 16x16 font for wide cells. */
     BlitFont *wide_font;
@@ -98,6 +145,11 @@ struct BlitKms {
     float previous_pointer_y;
     int previous_pointer_visible;
 };
+
+static KmsOutput *kms_output(const BlitKms *kms, int index)
+{
+    return (KmsOutput *)&kms->outputs[kms->slots[index]];
+}
 
 static long long kms_now_us(void)
 {
@@ -147,42 +199,38 @@ static void kms_flip_handler(int fd, unsigned int frame, unsigned int sec,
     }
 }
 
+static void kms_flip_event(int fd, unsigned int frame, unsigned int sec,
+                            unsigned int usec, void *data)
+{
+    KmsFlipCookie *cookie = data;
+    if (cookie == NULL || !cookie->used) return;
+    if (cookie->output->generation == cookie->generation)
+        kms_flip_handler(fd, frame, sec, usec, cookie->output);
+    cookie->used = 0;
+}
+
+static KmsFlipCookie *kms_flip_cookie(BlitKms *kms, KmsOutput *output)
+{
+    int i;
+    for (i = 0; i < KMS_MAX_FLIP_COOKIES; ++i) {
+        KmsFlipCookie *cookie = &kms->flip_cookies[i];
+        if (cookie->used) continue;
+        cookie->used = 1;
+        cookie->output = output;
+        cookie->generation = output->generation;
+        return cookie;
+    }
+    snprintf(kms->hotplug_error, sizeof(kms->hotplug_error),
+             "page_flip_cookie_capacity_exhausted");
+    return NULL;
+}
+
 static void set_error(char *error, size_t capacity, const char *message)
 {
     if (error != NULL && capacity > 0)
         snprintf(error, capacity, "%s", message);
 }
 
-static int choose_crtc(int fd, drmModeRes *resources,
-                       drmModeConnector *connector, uint32_t *used,
-                       int used_count, uint32_t *result)
-{
-    int e;
-    for (e = -1; e < connector->count_encoders; ++e) {
-        uint32_t encoder_id = e < 0 ? connector->encoder_id :
-            connector->encoders[e];
-        drmModeEncoder *encoder;
-        int i;
-        if (encoder_id == 0) continue;
-        encoder = drmModeGetEncoder(fd, encoder_id);
-        if (encoder == NULL) continue;
-        for (i = 0; i < resources->count_crtcs; ++i) {
-            uint32_t crtc = resources->crtcs[i];
-            int used_here = 0;
-            int j;
-            if (!(encoder->possible_crtcs & (1U << i))) continue;
-            for (j = 0; j < used_count; ++j)
-                if (used[j] == crtc) used_here = 1;
-            if (!used_here) {
-                *result = crtc;
-                drmModeFreeEncoder(encoder);
-                return 0;
-            }
-        }
-        drmModeFreeEncoder(encoder);
-    }
-    return -1;
-}
 
 static double mode_refresh_hz(const drmModeModeInfo *mode)
 {
@@ -954,7 +1002,7 @@ static int wait_flip(BlitKms *kms, KmsOutput *output)
     if (!output->flip_pending) return 0;
     memset(&context, 0, sizeof(context));
     context.version = DRM_EVENT_CONTEXT_VERSION;
-    context.page_flip_handler = kms_flip_handler;
+    context.page_flip_handler = kms_flip_event;
     output->flip_done = 0;
     deadline = kms_now_us() + (long long)timeout_ms * 1000LL;
     while (!output->flip_done) {
@@ -1381,7 +1429,7 @@ static int all_outputs_have_content(const BlitKms *kms,
         int found = 0;
         for (view_index = 0; view_index < view_count; ++view_index) {
             if (views[view_index].display_id !=
-                kms->outputs[output_index].info.id)
+                kms_output(kms, output_index)->info.id)
                 continue;
             if (view_has_content(&views[view_index])) {
                 found = 1;
@@ -1393,118 +1441,63 @@ static int all_outputs_have_content(const BlitKms *kms,
     return 1;
 }
 
+#include "blit_kms_hotplug.h"
+
 BlitKms *blit_kms_new(BlitFont *font, BlitFont *wide_font)
 {
     BlitKms *kms = (BlitKms *)calloc(1, sizeof(BlitKms));
     if (kms != NULL) { kms->fd = -1; kms->font = font;
+    kms->monitor_socket = kms->monitor_stop[0] = kms->monitor_stop[1] = -1;
+    pthread_mutex_init(&kms->monitor_lock, NULL);
     kms->wide_font = wide_font; }
     return kms;
 }
 
 int blit_kms_open(BlitKms *kms, char *error, size_t error_capacity)
 {
-    drmModeRes *resources;
-    uint32_t used[KMS_MAX_OUTPUTS];
-    int used_count = 0;
-    int i;
+    KmsSnapshot snapshot;
+    const char *configured;
     if (kms == NULL) return -1;
-    /* Page-flip submission belongs to the gateway's event loop.  A blocking
-       DRM descriptor lets a slow driver or virtual vblank stall every other
-       output, PTY, and input device while drmModePageFlip waits in the ioctl.
-       Keep submission and event draining nonblocking; readiness and the
-       bounded per-output timeout remain the only sources of waiting. */
     kms->fd = open(getenv("BLIT_DRM_DEVICE") ? getenv("BLIT_DRM_DEVICE") :
                    "/dev/dri/card0", O_RDWR | O_CLOEXEC | O_NONBLOCK);
     if (kms->fd < 0) { set_error(error, error_capacity, strerror(errno)); return -1; }
-    {
-        const char *screenshot_dir = getenv("BLIT_KMS_SCREENSHOT_DIR");
-        const char *screenshot_after = getenv("BLIT_KMS_SCREENSHOT_AFTER");
-        if (screenshot_dir != NULL)
-            snprintf(kms->screenshot_dir, sizeof(kms->screenshot_dir), "%s",
-                     screenshot_dir);
-        kms->screenshot_after = screenshot_after != NULL ?
-            (unsigned long)strtoul(screenshot_after, NULL, 10) : 30;
+    configured = getenv("BLIT_KMS_SCREENSHOT_DIR");
+    if (configured != NULL) snprintf(kms->screenshot_dir, sizeof(kms->screenshot_dir), "%s", configured);
+    configured = getenv("BLIT_KMS_SCREENSHOT_AFTER");
+    kms->screenshot_after = configured ? strtoul(configured, NULL, 10) : 30;
+    configured = getenv("BLIT_KMS_CELL_WIDTH");
+    if (configured != NULL) kms->cell_width_override = atoi(configured);
+    if (kms->cell_width_override < 5 || kms->cell_width_override > 32) kms->cell_width_override = 0;
+    if (kms_read_snapshot(kms, &snapshot) < 0) {
+        set_error(error, error_capacity, "DRM connector snapshot unavailable"); return -1;
     }
-    {
-        const char *configured = getenv("BLIT_KMS_CELL_WIDTH");
-        if (configured != NULL && configured[0] != '\0')
-            kms->cell_width_override = atoi(configured);
-        if (kms->cell_width_override < 5 || kms->cell_width_override > 32)
-            kms->cell_width_override = 0;
+    if (kms_start_monitor(kms) < 0) {
+        set_error(error, error_capacity, "DRM connector monitor unavailable"); return -1;
     }
-    resources = drmModeGetResources(kms->fd);
-    if (resources == NULL) { set_error(error, error_capacity, "DRM resources unavailable"); return -1; }
-    for (i = 0; i < resources->count_connectors && kms->output_count < KMS_MAX_OUTPUTS; ++i) {
-        drmModeConnector *connector = drmModeGetConnector(kms->fd, resources->connectors[i]);
-        KmsOutput *output;
-        int mode_index;
-        int inventory_index;
-        if (connector == NULL || connector->connection != DRM_MODE_CONNECTED || connector->count_modes == 0) {
-            if (connector) drmModeFreeConnector(connector);
-            continue;
-        }
-        output = &kms->outputs[kms->output_count];
-        memset(output, 0, sizeof(*output));
-        output->connector = connector->connector_id;
-        mode_index = choose_mode(connector);
-        output->mode = connector->modes[mode_index];
-        output->mode_count = connector->count_modes < KMS_MAX_MODES ?
-            connector->count_modes : KMS_MAX_MODES;
-        output->active_mode = 0;
-        for (inventory_index = 0; inventory_index < output->mode_count;
-             ++inventory_index) {
-            drmModeModeInfo *mode = &connector->modes[inventory_index];
-            output->modes[inventory_index].width = mode->hdisplay;
-            output->modes[inventory_index].height = mode->vdisplay;
-            output->modes[inventory_index].refresh_hz = mode_refresh_hz(mode);
-            output->modes[inventory_index].preferred =
-                (mode->type & DRM_MODE_TYPE_PREFERRED) != 0;
-            if (inventory_index == mode_index)
-                output->active_mode = inventory_index;
-        }
-        if (choose_crtc(kms->fd, resources, connector, used, used_count,
-                        &output->crtc) < 0) { drmModeFreeConnector(connector); continue; }
-        output->old_crtc = drmModeGetCrtc(kms->fd, output->crtc);
-        output->info.id = output->connector;
-        snprintf(output->info.name, sizeof(output->info.name), "KMS connector %u", output->connector);
-        output->info.x = 0; output->info.y = 0;
-        {
-            int previous;
-            for (previous = 0; previous < kms->output_count; ++previous)
-                output->info.x += kms->outputs[previous].info.width;
-        }
-        output->info.width = output->mode.hdisplay; output->info.height = output->mode.vdisplay;
-        output->info.refresh_hz = mode_refresh_hz(&output->mode);
-        output->info.mode_count = output->mode_count;
-        output->info.active_mode = output->active_mode;
-        memcpy(output->info.modes, output->modes,
-               sizeof(output->info.modes));
-        output->info.presentation_state = BLIT_KMS_PRESENTATION_PRESENTING;
-    if (make_buffer(kms->fd, output, &output->front) < 0 ||
-        make_buffer(kms->fd, output, &output->back) < 0) {
-        drmModeFreeConnector(connector); drmModeFreeResources(resources); return -1;
-    }
-    fprintf(stderr,
-            "blit: KMS output connector=%u mode=%dx%d pitch=%u/%u size=%llu/%llu\n",
-            output->connector, output->mode.hdisplay, output->mode.vdisplay,
-            output->front.pitch, output->back.pitch,
-            (unsigned long long)output->front.size,
-            (unsigned long long)output->back.size);
-    if (drmModeSetCrtc(kms->fd, output->crtc, output->front.fb, 0, 0,
-                           &output->connector, 1, &output->mode) < 0) {
-            free_buffer(kms->fd, &output->front); free_buffer(kms->fd, &output->back);
-            drmModeFreeConnector(connector); drmModeFreeResources(resources); return -1;
-        }
-        used[used_count++] = output->crtc;
-        ++kms->output_count;
-        drmModeFreeConnector(connector);
-    }
-    drmModeFreeResources(resources);
-    if (kms->output_count == 0) { set_error(error, error_capacity, "no connected DRM/KMS outputs"); return -1; }
+    kms_reconcile_snapshot(kms, &snapshot);
     return 0;
 }
 
 int blit_kms_display_count(const BlitKms *kms) { return kms ? kms->output_count : 0; }
+
+unsigned long long blit_kms_inventory_revision(const BlitKms *kms)
+{
+    return kms ? kms->inventory_revision : 0;
+}
+
+void blit_kms_hotplug_info(BlitKms *kms, BlitKmsHotplugInfo *info)
+{
+    memset(info, 0, sizeof(*info));
+    if (kms == NULL) return;
+    info->inventory_revision = kms->inventory_revision;
+    info->observer = kms->monitor_started;
+    snprintf(info->error, sizeof(info->error), "%s", kms->hotplug_error);
+    pthread_mutex_lock(&kms->monitor_lock);
+    info->uevents = kms->monitor_socket >= 0;
+    info->scans = kms->monitor_scans;
+    info->last_scan_ms = kms->monitor_last_scan_ms;
+    pthread_mutex_unlock(&kms->monitor_lock);
+}
 
 int blit_kms_fd(const BlitKms *kms)
 {
@@ -1523,39 +1516,28 @@ int blit_kms_service(BlitKms *kms, int readable)
     if (readable) {
         memset(&context, 0, sizeof(context));
         context.version = DRM_EVENT_CONTEXT_VERSION;
-        context.page_flip_handler = kms_flip_handler;
+        context.page_flip_handler = kms_flip_event;
         if (drmHandleEvent(kms->fd, &context) < 0) return -1;
         for (i = 0; i < kms->output_count; ++i)
-            if (!kms->outputs[i].flip_pending)
+            if (!kms_output(kms, i)->flip_pending)
                 changed = 1;
     }
-    /* DRM hotplug changes are not page-flip events. Poll the bounded
-       connector set so a disconnected output becomes visible to the API even
-       when the driver accepts no subsequent page flip. */
-    for (i = 0; i < kms->output_count; ++i) {
-        KmsOutput *output = &kms->outputs[i];
-        drmModeConnector *connector = drmModeGetConnector(kms->fd,
-                                                            output->connector);
-        int connected = connector != NULL &&
-            connector->connection == DRM_MODE_CONNECTED;
-        if (connector != NULL)
-            drmModeFreeConnector(connector);
-        if (!connected && output->info.presentation_state !=
-                            BLIT_KMS_PRESENTATION_FAILED) {
-            output->flip_pending = 0;
-            output->flip_started_us = 0;
-            output->modeset_fallback = 0;
-            output->info.presentation_state = BLIT_KMS_PRESENTATION_FAILED;
-            fprintf(stderr,
-                    "blit: KMS connector=%u disconnected; marking output failed\n",
-                    output->connector);
-            changed = 1;
+    if (kms->monitor_started) {
+        KmsSnapshot snapshot;
+        int available = 0;
+        pthread_mutex_lock(&kms->monitor_lock);
+        if (kms->snapshot_revision != kms->applied_snapshot_revision) {
+            snapshot = kms->snapshot;
+            kms->applied_snapshot_revision = kms->snapshot_revision;
+            available = 1;
         }
+        pthread_mutex_unlock(&kms->monitor_lock);
+        if (available && kms_reconcile_snapshot(kms, &snapshot)) changed = 1;
     }
     now = kms_now_us();
     timeout_us = (long long)kms_flip_timeout_ms() * 1000LL;
     for (i = 0; i < kms->output_count; ++i) {
-        KmsOutput *output = &kms->outputs[i];
+        KmsOutput *output = kms_output(kms, i);
         if (output->info.presentation_state == BLIT_KMS_PRESENTATION_FAILED)
             continue;
         if (!output->flip_pending || output->flip_started_us <= 0 ||
@@ -1576,7 +1558,7 @@ int blit_kms_service(BlitKms *kms, int readable)
 int blit_kms_display_info(const BlitKms *kms, int index, BlitKmsDisplayInfo *info)
 {
     if (kms == NULL || info == NULL || index < 0 || index >= kms->output_count) return -1;
-    *info = kms->outputs[index].info;
+    *info = kms_output(kms, index)->info;
     return 0;
 }
 
@@ -1586,8 +1568,8 @@ uint32_t blit_kms_ready_output_mask(const BlitKms *kms)
     int i;
     if (kms == NULL) return 0;
     for (i = 0; i < kms->output_count; ++i)
-        if (!kms->outputs[i].flip_pending &&
-            kms->outputs[i].info.presentation_state != BLIT_KMS_PRESENTATION_FAILED)
+        if (!kms_output(kms, i)->flip_pending &&
+            kms_output(kms, i)->info.presentation_state != BLIT_KMS_PRESENTATION_FAILED)
             mask |= 1U << i;
     return mask;
 }
@@ -1595,8 +1577,8 @@ uint32_t blit_kms_ready_output_mask(const BlitKms *kms)
 int blit_kms_set_display_position(BlitKms *kms, int index, int x, int y)
 {
     if (kms == NULL || index < 0 || index >= kms->output_count) return -1;
-    kms->outputs[index].info.x = x;
-    kms->outputs[index].info.y = y;
+    kms_output(kms, index)->info.x = x;
+    kms_output(kms, index)->info.y = y;
     return 0;
 }
 
@@ -1648,7 +1630,7 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
     if (capture) {
         for (i = 0; i < kms->output_count; ++i)
             if ((output_mask & (1U << i)) &&
-                kms->outputs[i].info.presentation_state !=
+                kms_output(kms, i)->info.presentation_state !=
                     BLIT_KMS_PRESENTATION_FAILED)
                 ++expected_captures;
     }
@@ -1657,7 +1639,7 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         kms->previous_pointer_y != pointer_y ||
         kms->previous_pointer_visible != pointer_visible;
     for (i = 0; i < kms->output_count; ++i) {
-        KmsOutput *output = &kms->outputs[i];
+        KmsOutput *output = kms_output(kms, i);
         int view_index;
         int output_view_count = 0;
         long long output_started = 0;
@@ -1904,6 +1886,7 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                     output->info.presentation_state =
                         BLIT_KMS_PRESENTATION_PRESENTING;
                 }
+                output->generation = ++kms->generation;
                 output->flip_pending = 0;
                 output->flip_started_us = 0;
                 swap_buffers(output);
@@ -1926,15 +1909,22 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
             }
             if (getenv("BLIT_KMS_ASYNC_PAGEFLIP") != NULL)
                 flags |= DRM_MODE_PAGE_FLIP_ASYNC;
+            KmsFlipCookie *cookie = kms_flip_cookie(kms, output);
+            if (cookie == NULL) {
+                output->info.presentation_state = BLIT_KMS_PRESENTATION_FAILED;
+                failed = 1;
+                continue;
+            }
             output->flip_done = 0;
             flip_result = drmModePageFlip(kms->fd, output->crtc,
-                                          output->back.fb, flags, output);
+                                          output->back.fb, flags, cookie);
             if (flip_result < 0 && (flags & DRM_MODE_PAGE_FLIP_ASYNC))
                 flip_result = drmModePageFlip(kms->fd, output->crtc,
                                               output->back.fb,
                                               DRM_MODE_PAGE_FLIP_EVENT,
-                                              output);
+                                              cookie);
             if (flip_result < 0) {
+                cookie->used = 0;
                 output->info.presentation_state =
                     BLIT_KMS_PRESENTATION_FAILED;
                 failed = 1;
@@ -2028,7 +2018,7 @@ int blit_kms_screenshot(BlitKms *kms, int index,
     *length = 0;
     if (kms == NULL || index < 0 || index >= kms->output_count)
         return -1;
-    output = &kms->outputs[index];
+    output = kms_output(kms, index);
     if (output->front.map == NULL || !output->initialized)
         return 0;
     if (output->mode.hdisplay <= 0 || output->mode.vdisplay <= 0)
@@ -2059,22 +2049,27 @@ void blit_kms_close(BlitKms *kms)
 {
     int i;
     if (kms == NULL) return;
-    for (i = 0; i < kms->output_count; ++i) {
+    if (kms->monitor_started) {
+        write(kms->monitor_stop[1], "x", 1);
+        pthread_join(kms->monitor_thread, NULL);
+    }
+    if (kms->monitor_stop[0] >= 0) close(kms->monitor_stop[0]);
+    if (kms->monitor_stop[1] >= 0) close(kms->monitor_stop[1]);
+    if (kms->monitor_socket >= 0) close(kms->monitor_socket);
+    for (i = 0; i < KMS_MAX_OUTPUTS; ++i) {
         KmsOutput *output = &kms->outputs[i];
+        if (!output->allocated) continue;
         wait_flip(kms, output);
-        if (output->old_crtc != NULL) {
-            drmModeSetCrtc(kms->fd, output->old_crtc->crtc_id,
-                           output->old_crtc->buffer_id, output->old_crtc->x,
-                           output->old_crtc->y, &output->connector, 1,
-                           &output->old_crtc->mode);
-            drmModeFreeCrtc(output->old_crtc);
+        if (kms_release_output(kms, output, 1) < 0) {
+            /* Close the DRM file before unmapping a failed teardown's buffers. */
+            if (kms->fd >= 0) close(kms->fd);
+            kms->fd = -1;
+            free_buffer(-1, &output->front); free_buffer(-1, &output->back);
+            free(output->scene);
+            if (output->old_crtc) drmModeFreeCrtc(output->old_crtc);
         }
-        free_buffer(kms->fd, &output->front);
-        free_buffer(kms->fd, &output->back);
-        free(output->scene);
-        output->scene = NULL;
-        output->scene_size = 0;
     }
     if (kms->fd >= 0) close(kms->fd);
+    pthread_mutex_destroy(&kms->monitor_lock);
     free(kms);
 }

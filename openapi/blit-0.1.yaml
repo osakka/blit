@@ -2517,6 +2517,18 @@ components:
             presentation_sync:
               type: string
               enum: [drm-page-flip, drm-page-flip-async, sdl-vsync, scheduler-only]
+            hotplug:
+              type: object
+              description: Direct-KMS connector observer and reconciliation status; SDL reports unavailable.
+              required: [supported, observer, inventory_revision, scans, last_scan_ms, error]
+              properties:
+                supported: {type: boolean}
+                observer: {type: string, enum: [unavailable, periodic, 'uevent+periodic']}
+                inventory_revision: {type: integer, minimum: 0}
+                scans: {type: integer, minimum: 0}
+                last_scan_ms: {type: number, minimum: 0}
+                error: {type: string}
+              additionalProperties: false
             pointer:
               type: object
               description: >-

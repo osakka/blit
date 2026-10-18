@@ -76,6 +76,7 @@ typedef struct {
 typedef struct {
     unsigned long long id;
     char name[128];
+    char connector[64];
     int x;
     int y;
     int width;
@@ -96,6 +97,15 @@ typedef struct {
     double observed_refresh_hz;
 } BlitKmsDisplayInfo;
 
+typedef struct {
+    unsigned long long inventory_revision;
+    unsigned long long scans;
+    double last_scan_ms;
+    int observer;
+    int uevents;
+    char error[128];
+} BlitKmsHotplugInfo;
+
 #define BLIT_KMS_PRESENTATION_AVAILABLE 0
 #define BLIT_KMS_PRESENTATION_UNAVAILABLE 1
 #define BLIT_KMS_PRESENTATION_PRESENTING 2
@@ -110,6 +120,8 @@ int blit_kms_display_info(const BlitKms *kms, int index,
 int blit_kms_set_display_position(BlitKms *kms, int index, int x, int y);
 int blit_kms_fd(const BlitKms *kms);
 int blit_kms_service(BlitKms *kms, int readable);
+unsigned long long blit_kms_inventory_revision(const BlitKms *kms);
+void blit_kms_hotplug_info(BlitKms *kms, BlitKmsHotplugInfo *info);
 uint32_t blit_kms_ready_output_mask(const BlitKms *kms);
 int blit_kms_cell_width(const BlitKms *kms);
 int blit_kms_cell_height(const BlitKms *kms);

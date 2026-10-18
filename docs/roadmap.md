@@ -3,9 +3,24 @@
 The roadmap is ordered by dependency. A later milestone must not become a
 second, parallel implementation of an earlier one.
 
-## Current position — persistent desktop policy and catalogue control panel
+## Current position — direct-KMS live monitor discovery
 
-The physical host runs 0.1.543 SDL GL. The edge/font correction has bounded
+The user requested pure KMS/DRM and implementation of Blit#100 in that backend.
+The physical host has been switched to pure KMS0.1.543 through the API, keeping
+the lower primary and upper auxiliary policy. Its authenticated native split
+is observed and ready. SDL is not patched. ADR0130 defines the direct-backend
+lifecycle; ADR0129 records the deferred SDL alternative.
+
+Source0.1.544 adds background connector snapshots and main-thread output/
+topology reconciliation, stable page-flip lifetimes, explicit failure status
+and zero-output recovery. Local frozen-artifact validation is in progress;
+package/deployment and real second/third monitor unplug/replug acceptance
+remain separate steps. Existing selected-device/global-layout limits apply;
+this is not multi-GPU support or automatic primary migration.
+
+## 0.1.543 policy and catalogue checkpoint
+
+Before the requested direct-KMS switch, the host ran0.1.543 SDL GL. The edge/font correction has bounded
 physical pixel acceptance; the user previously accepted the 0.1.535 movement
 checkpoint. These are not universal renderer or refresh-rate guarantees.
 See current-state.md and verification-status.md for exact evidence.

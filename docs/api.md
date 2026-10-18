@@ -743,6 +743,34 @@ policy is controlled by the separate Apply operation below.
 
 #### Live auxiliary displays (0.1.543)
 
+Direct KMS0.1.544 reconciles connected outputs without restarting the service.
+A read-only worker observes DRM uevents, coalesces bursts for100ms and probes
+periodically every five seconds as a fallback. The main thread owns output
+creation/retirement and publishes changed display inventory and topology
+revisions. Unchanged output resources and primary PTYs are retained. When
+the last output disappears, the API remains available and PTYs keep their
+pane intent; primary migration is not automatic. Unknown outputs are not
+automatically added to auxiliary policy. The current global pane layout/font
+applies to newly created panes.
+
+`diagnostics.render.hotplug` (also in runtime/observation snapshots) reports
+`supported`, `observer` (`uevent+periodic`, `periodic`, `unavailable`),
+`inventory_revision`, worker `scans`, `last_scan_ms`, and `error`. A failed
+probe preserves the last inventory; a failed activation/teardown is reported
+without destroying unrelated outputs. Failed teardown quarantines resources
+until a subsequent retry can disable scanout. Unknown connector status also
+retains its last-known output instead of inventing a disconnection; inspect
+`hotplug.error` before treating retained inventory as freshly verified presence.
+New connections may remain
+unavailable if output slots or compatible CRTCs are exhausted. Support targets
+the selected DRM device, not arbitrary multi-GPU ownership.
+
+The existing auxiliary controller resolves saved/live connector bindings
+against this inventory. A removed managed auxiliary is retired; on return a
+new standby can be provisioned after fresh authenticated native readiness.
+Its initial placement is verified once. Surviving clients' user placement is
+not reasserted. Unmanaged/primary PTYs are not terminated by output loss.
+
 Display discovery in the current SDL implementation occurs at server startup.
 It does not handle live SDL display-added/removed events by rebuilding output
 resources and topology. Consequently an auxiliary waiting for a connector

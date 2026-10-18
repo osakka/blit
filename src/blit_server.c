@@ -963,6 +963,7 @@ typedef struct {
 
 typedef struct {
     int display_count;
+    unsigned long long kms_inventory_revision;
     BlitDisplay displays[BLIT_MAX_DISPLAYS];
     int pane_count;
     BlitPane panes[BLIT_MAX_PANES];
@@ -3163,6 +3164,9 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
     char errors[192];
     char escaped_error[256];
     char scheduler[4096];
+    char hotplug[512];
+    char hotplug_error[256];
+    BlitKmsHotplugInfo hotplug_info;
     const char *backend = runtime->direct_kms ? "drm-kms" :
         (runtime->sdl_ready ? "sdl3" : "unavailable");
     int sessions = 0;
@@ -3189,6 +3193,14 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
     for (i = 0; i < BLIT_MAX_INPUT_DEVICES; ++i)
         if (runtime->input_devices[i].used) ++input_devices;
     render_scheduler_json(runtime, scheduler, sizeof(scheduler));
+    blit_kms_hotplug_info(runtime->direct_kms ? runtime->kms : NULL, &hotplug_info);
+    json_escape(hotplug_info.error, hotplug_error, sizeof(hotplug_error));
+    snprintf(hotplug, sizeof(hotplug),
+        "{\"supported\":%s,\"observer\":\"%s\",\"inventory_revision\":%llu,"
+        "\"scans\":%llu,\"last_scan_ms\":%.3f,\"error\":\"%s\"}",
+        hotplug_info.observer ? "true" : "false",
+        !hotplug_info.observer ? "unavailable" : hotplug_info.uevents ? "uevent+periodic" : "periodic",
+        hotplug_info.inventory_revision, hotplug_info.scans, hotplug_info.last_scan_ms, hotplug_error);
     json_escape(runtime->sdl_error, escaped_error, sizeof(escaped_error));
     json_escape(runtime->sdl_renderer_name, escaped_renderer,
                 sizeof(escaped_renderer));
@@ -3350,6 +3362,7 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              "\"renderer\":\"%s\","
              "\"glyph_path\":\"%s\","
              "\"presentation_sync\":\"%s\","
+             "\"hotplug\":%s,"
              "\"pointer\":{\"valid\":%s,\"x\":%.1f,\"y\":%.1f,"
              "\"output\":%d,\"previous_x\":%.1f,\"previous_y\":%.1f,"
              "\"previous_output\":%d,\"dirty\":%s}},"
@@ -3386,6 +3399,7 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
                   runtime->outputs[0].glyph_geometry_enabled ?
                       "geometry-batch" : "immediate-texture"),
              presentation_sync,
+             hotplug,
              runtime->pointer_valid ? "true" : "false",
              runtime->pointer_x, runtime->pointer_y, runtime->pointer_output,
              runtime->previous_pointer_x, runtime->previous_pointer_y,
@@ -21951,6 +21965,7 @@ static void discover_displays(BlitRuntime *runtime)
             if (blit_kms_display_info(runtime->kms, i, &info) < 0)
                 continue;
             runtime->displays[i].id = info.id;
+            snprintf(runtime->displays[i].connector, sizeof(runtime->displays[i].connector), "%s", info.connector);
             snprintf(runtime->displays[i].name,
                      sizeof(runtime->displays[i].name), "%s", info.name);
             set_display_geometry(&runtime->displays[i], info.x, info.y,
@@ -22332,6 +22347,89 @@ static void destroy_outputs(BlitRuntime *runtime)
         SDL_DestroyWindow(runtime->outputs[i].window);
     }
     runtime->output_count = 0;
+}
+
+/* Consume the backend's authoritative connected inventory. Existing PTYs
+   keep their pane IDs while absent; hotplug is not primary migration. */
+static void reconcile_kms_topology(BlitRuntime *runtime)
+{
+    BlitDisplay previous[BLIT_MAX_DISPLAYS];
+    int count, old_count = runtime->display_count, i, j;
+    unsigned long long revision = blit_kms_inventory_revision(runtime->kms);
+    unsigned long long pending[BLIT_MAX_DISPLAYS];
+    unsigned long missed[BLIT_MAX_DISPLAYS];
+    if (!runtime->direct_kms || revision == runtime->kms_inventory_revision) return;
+    memcpy(previous, runtime->displays, sizeof(previous));
+    memcpy(pending, runtime->pixel_frames_pending, sizeof(pending));
+    memcpy(missed, runtime->render_missed_deadlines, sizeof(missed));
+    count = blit_kms_display_count(runtime->kms);
+    memset(runtime->displays, 0, sizeof(runtime->displays));
+    memset(runtime->outputs, 0, sizeof(runtime->outputs));
+    memset(runtime->pixel_frames_pending, 0, sizeof(runtime->pixel_frames_pending));
+    memset(runtime->render_missed_deadlines, 0, sizeof(runtime->render_missed_deadlines));
+    runtime->display_count = runtime->output_count = count;
+    for (i = 0; i < count; ++i) {
+        BlitKmsDisplayInfo info;
+        int prior = -1;
+        blit_kms_display_info(runtime->kms, i, &info);
+        for (j = 0; j < old_count; ++j) if (previous[j].id == info.id) prior = j;
+        if (prior >= 0) {
+            runtime->displays[i] = previous[prior];
+            runtime->pixel_frames_pending[i] = pending[prior];
+            runtime->render_missed_deadlines[i] = missed[prior];
+        }
+        runtime->displays[i].id = info.id;
+        snprintf(runtime->displays[i].name, sizeof(runtime->displays[i].name), "%s", info.name);
+        snprintf(runtime->displays[i].connector, sizeof(runtime->displays[i].connector), "%s", info.connector);
+        set_display_geometry(&runtime->displays[i], prior >= 0 ? previous[prior].bounds.x : info.x,
+            prior >= 0 ? previous[prior].bounds.y : info.y, info.width, info.height);
+        runtime->displays[i].refresh_hz = info.refresh_hz;
+        runtime->displays[i].mode_count = info.mode_count;
+        runtime->displays[i].active_mode = info.active_mode;
+        memcpy(runtime->displays[i].modes, info.modes, sizeof(info.modes));
+        runtime->outputs[i].display_id = info.id;
+        if (prior < 0) {
+            char configuration[128]; BlitConfigProblem problem;
+            if (settings_member(runtime->settings_document, "displays", info.name, configuration, sizeof(configuration))) {
+                memset(&problem, 0, sizeof(problem));
+                apply_display_configuration(runtime, i, configuration, &problem);
+            }
+        }
+        blit_kms_set_display_position(runtime->kms, i, runtime->displays[i].bounds.x, runtime->displays[i].bounds.y);
+    }
+    discover_panes(runtime);
+    for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
+        BlitSession *session = &runtime->sessions[i];
+        BlitPane *pane;
+        BlitSurface *surface;
+        if (!session->used) continue;
+        pane = find_pane_id(runtime, session->pane_id);
+        surface = find_surface_id(runtime, session->id);
+        if (pane != NULL && surface != NULL &&
+            (surface->width != pane->width || surface->height != pane->height))
+            if (!resize_session_surface(session, surface, pane->width, pane->height))
+                diagnostic_log(runtime, "error", "hotplug_surface_resize_failed", session->pane_id);
+    }
+    runtime->kms_inventory_revision = revision;
+    ++runtime->displays_revision;
+    ++runtime->topology_revision;
+    runtime->display_power_checked_us = 0;
+    memset(runtime->render_next_us, 0, sizeof(runtime->render_next_us));
+    memset(runtime->kms_vblank_traced, 0, sizeof(runtime->kms_vblank_traced));
+    runtime->kms_retry_outputs = 0;
+    runtime->pointer_output = output_index_for_display_index(runtime,
+        display_index_at(runtime, runtime->pointer_x, runtime->pointer_y));
+    if (count && runtime->pointer_output < 0) {
+        runtime->pointer_x = runtime->displays[0].bounds.x;
+        runtime->pointer_y = runtime->displays[0].bounds.y;
+        runtime->pointer_output = 0;
+    }
+    runtime->pointer_valid = count > 0;
+    runtime->pointer_dirty_outputs = all_output_mask(runtime);
+    runtime->pointer_dirty = runtime->pointer_dirty_outputs != 0;
+    runtime->render_pending = 1;
+    runtime->login_restart_due_us = 0;
+    diagnostic_log(runtime, "info", "kms_topology_changed", "connected output inventory reconciled without restarting sessions");
 }
 
 static int activate_direct_kms_fallback(BlitRuntime *runtime)
@@ -28182,11 +28280,7 @@ int main(int argc, char **argv)
        displays, and before the stored document is applied, because a stored
        brightness is refused on a display that has no backlight. */
     discover_backlights(&runtime);
-    if (runtime.direct_kms && runtime.display_count == 0) {
-        fprintf(stderr, "blit: direct KMS backend did not find a usable display\n");
-        if (runtime.kms != NULL) blit_kms_close(runtime.kms);
-        return 1;
-    }
+    runtime.kms_inventory_revision = blit_kms_inventory_revision(runtime.kms);
     if (runtime.sdl_ready || runtime.direct_kms)
         initialize_outputs(&runtime);
     /* Issue #69. After the outputs exist, because a rotation drops the
@@ -28583,6 +28677,7 @@ int main(int argc, char **argv)
             if (serviced < 0)
                 fprintf(stderr, "blit: KMS event service failed\n");
             else if (serviced > 0) {
+                reconcile_kms_topology(&runtime);
                 trace_kms_vblank(&runtime);
                 runtime.render_pending = 1;
                 retry_ready_kms_outputs(&runtime,

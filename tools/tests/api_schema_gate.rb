@@ -72,6 +72,12 @@ raise 'server resource link for observation is missing' unless
     .dig('properties', 'resources', 'properties', 'observation')
 
 session_path = paths.fetch('/v1/terminal-sessions/{session_id}')
+hotplug = schema.fetch('components').fetch('schemas').fetch('Diagnostics')
+  .dig('properties', 'render', 'properties', 'hotplug')
+raise 'hotplug diagnostics contract missing' unless hotplug &&
+  hotplug['required'].sort == %w[supported observer inventory_revision scans last_scan_ms error].sort &&
+  hotplug.dig('properties','observer','enum').sort == ['unavailable','periodic','uevent+periodic'].sort &&
+  hotplug['additionalProperties'] == false
 raise 'session path must not accept terminal input directly' if session_path.key?('post')
 raise 'session path lost GET' unless session_path.key?('get')
 raise 'session path lost PATCH' unless session_path.key?('patch')

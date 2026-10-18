@@ -3,6 +3,42 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-18: direct-KMS hotplug implementation (0.1.544 candidate)
+
+The user-selected backend switch is observed on10.54 at0.1.543: direct KMS,
+ready, lower preferred pane translated to DRM connector93, unchanged240x67
+grids and saved `DP-1` upper auxiliary. After authentication, three read-only
+samples verify owner296618/starttime67930595 and the exact lower-primary/
+upper-auxiliary134x240 native union. This is association evidence, not a new
+visual or physical multi-monitor acceptance claim.
+
+TCC0.9.27 builds the frozen0.1.544 runtime, SHA256
+`fc53615cceb68a341ba3033f97da30374cfdfa5f9e730347f444b4017cea680b`.
+The actual gateway/direct backend runs against a test-only libdrm substitute:
+second/third output discovery, removal/reconnect, unchanged primary/grid,
+stable enumeration order, display/topology revisions, Apply/Save separation,
+activation and teardown failure, quarantined recovery, failed/unknown probe
+retention, zero-output startup/loss/return, mode-change PTY resize and orderly
+direct-KMS restart pass. Thirty version requests overlap a300ms worker probe;
+each remains below the gate's200ms bound. This is mock-boundary evidence,
+not real-driver API latency or a frame-rate guarantee.
+
+Red controls are recorded:0.1.543 times out waiting for new outputs; an earlier
+0.1.544 candidate discovers them but fails `display inventory revision
+unchanged`. The shared display-resource revision now advances with topology.
+The separate64-cycle production lifecycle/cookie gate passes with primary
+buffers unchanged, late events ignored, current events accepted and386/386
+scanout buffers released. Compositor reference/pixel and generation/cookie
+capacity gates pass. The frozen complete suite has reached its final soak;
+package publication/deployment remains gated on its completion and artifact
+identity/reproducibility checks.
+
+Control Panel callback/API and installed Hibr UI/keyboard gates also pass
+against that frozen binary with Hibr0.99.244 ABI16. Its canonical bundle stays
+0.1.2; hibr-apps documentation/UI-version-fixture updates are pushed through
+commit106373d. Neither SDL nor Hibr source is modified. Physical second/third
+monitor plug/unplug on the selected DRM device remains unverified.
+
 ## 2026-10-18: quiet pane0.1.2 and hotplug dependency diagnosis
 
 The actual callback regression fails against pane0.1.1 with

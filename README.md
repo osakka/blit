@@ -141,6 +141,10 @@ canonical pane lives only in hibr-apps, not in Hibr core or this package.
   per-user desktop or shell children.
 - Direct KMS and SDL3 presentation paths, refresh-aware scheduling, and
   diagnostics for frames, render time, missed deadlines, input, and streams.
+- Direct-KMS live output reconciliation with a background connector observer,
+  stable output lifetimes, API-visible hotplug errors and zero-output recovery.
+  SDL's KMSDRM path still requires startup-connected monitors; see the
+  [API's backend-specific hotplug contract](docs/api.md#live-auxiliary-displays-01543).
 - Logical multi-display topology and pane layouts, including Hibr primary plus
   `desktop --join` ownership rules.
 - API-selectable font profiles and logical scale, Kitty-first graphics, and a

@@ -7,6 +7,41 @@ work actually stopped.
 
 ## Status at the last review
 
+### 2026-10-18 direct-KMS switch and 0.1.544 hotplug candidate
+
+The user explicitly selected pure KMS/DRM and direct-backend hotplug, not an
+SDL patch. The API created a scoped root operator process to back up
+`/etc/blit/blit.env` as `blit.env.pre-kms-20261018` and change only
+`BLIT_DISPLAY_BACKEND=kms`, followed by a supervised service restart. Fresh
+sysfs connector observation identifies `DP-1` as DRM connector93; the saved
+primary preference was deliberately translated to `pane-display-93-2` before
+restart. Other saved policy, font and pane geometry remain unchanged.
+
+The host currently reports0.1.543, backend `drm-kms`, `direct_kms:true`,
+video driver `direct-kms`, ready, lower login and both240x67 pane grids.
+After the user authenticated, three read-only association samples pass:
+verified UID/GID1000, native owner296618/starttime67930595, lower primary
+`(67,0,67,240)`, upper managed auxiliary `(0,0,67,240)`, union134x240,
+confirmed initial relative offset(-67,0). An earlier waiting-state probe was
+invalidated by that authentication; it was not a backend defect or a reason
+to restart another desktop. Evidence: `diagnostics/kms-hotplug-544/live/`.
+
+The0.1.544 source implements ADR0130 in Blit only: one startup/hotplug output
+lifecycle, read-only background DRM observer, stable slots and immutable
+generation-tagged flip cookies, connected inventory/topology reconciliation,
+zero-output recovery, and API hotplug diagnostics. Failed or unknown probes
+retain last-known output state. Failed teardown quarantines its resources;
+failed additions do not reset unrelated outputs. The current policy controller
+handles saved auxiliary disappearance/return. Primary PTYs retain their pane
+intent rather than silently migrating. SDL and Hibr sources are unchanged.
+
+The regression against0.1.543 fails waiting for second/third outputs. A frozen
+release binary is undergoing the complete local suite, including compositor
+pixels, late events, add/remove/reorder, failures, slow probing, headless
+startup/recovery and orderly direct-KMS restart. Package construction and API
+deployment follow those checks. Physical second/third monitor hotplug is not
+yet accepted; do not infer it from the mocked DRM tests or the one-output host.
+
 ### 2026-10-18 quiet Control Panel and issue100 dependency finding
 
 Panel0.1.2 is published at `hibr-apps:cd417d0`. A regression fails against

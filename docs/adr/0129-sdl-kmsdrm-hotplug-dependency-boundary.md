@@ -1,6 +1,6 @@
 # ADR 0129: SDL KMSDRM hotplug crosses the dependency boundary
 
-- Status: proposed; local SDL extension decision pending
+- Status: deferred; user selected direct KMS for this delivery (ADR0130)
 - Date: 2026-10-18
 - Issue: [Blit#100](https://git.home.arpa/itdlabs/blit/issues/100)
 - Related: ADRs0124,0128; hibr-apps ADR0002
@@ -53,6 +53,7 @@ service restart. Dummy events or API inventory alone do not accept scanout.
 
 ## Current result
 
-Issue100 is diagnosed, not implemented or physically accepted. The working
-0.1.543 service remains unchanged. Panel0.1.2 fixes its own aggressive polling
-independently; it does not add hardware hotplug.
+This records the SDL alternative, not the selected implementation. The user
+subsequently requested a pure-KMS switch and direct-backend hotplug. ADR0130
+governs that delivery. SDL remains unmodified and its runtime discovery gap
+remains; direct-KMS acceptance must not be represented as SDL acceptance.
