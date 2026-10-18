@@ -6,16 +6,18 @@ second, parallel implementation of an earlier one.
 ## Current position — direct-KMS live monitor discovery
 
 The user requested pure KMS/DRM and implementation of Blit#100 in that backend.
-The physical host has been switched to pure KMS0.1.543 through the API, keeping
-the lower primary and upper auxiliary policy. Its authenticated native split
-is observed and ready. SDL is not patched. ADR0130 defines the direct-backend
+The physical host was switched to pure KMS0.1.543, then API-updated to0.1.544,
+keeping the lower primary and upper auxiliary policy. The authenticated split
+was observed before the package restart; the current login waits below and
+its saved upper auxiliary waits for authentication. SDL is not patched. ADR0130 defines the direct-backend
 lifecycle; ADR0129 records the deferred SDL alternative.
 
-Source0.1.544 adds background connector snapshots and main-thread output/
+Deployed0.1.544 adds background connector snapshots and main-thread output/
 topology reconciliation, stable page-flip lifetimes, explicit failure status
-and zero-output recovery. Local frozen-artifact validation is in progress;
-package/deployment and real second/third monitor unplug/replug acceptance
-remain separate steps. Existing selected-device/global-layout limits apply;
+and zero-output recovery. Frozen suite93/4skips/0fail, separate64-cycle stress,
+reproducible package validation and real-host framebuffer/observer checks pass.
+Actual second/third monitor unplug/replug acceptance remains open in#100.
+Existing selected-device/global-layout limits apply;
 this is not multi-GPU support or automatic primary migration.
 
 ## 0.1.543 policy and catalogue checkpoint

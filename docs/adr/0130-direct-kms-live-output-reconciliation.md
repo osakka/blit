@@ -1,6 +1,6 @@
 # ADR 0130: direct-KMS live output reconciliation
 
-- Status: accepted; implementation/physical acceptance tracked separately
+- Status: implemented/deployed0.1.544; physical multi-output acceptance pending
 - Date: 2026-10-18
 - Issue: Blit#100
 - Supersedes: ADR0129's proposed SDL extension for this delivery

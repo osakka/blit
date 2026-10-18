@@ -3,7 +3,7 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
-## 2026-10-18: direct-KMS hotplug implementation (0.1.544 candidate)
+## 2026-10-18: deployed direct-KMS hotplug implementation (0.1.544)
 
 The user-selected backend switch is observed on10.54 at0.1.543: direct KMS,
 ready, lower preferred pane translated to DRM connector93, unchanged240x67
@@ -29,15 +29,37 @@ unchanged`. The shared display-resource revision now advances with topology.
 The separate64-cycle production lifecycle/cookie gate passes with primary
 buffers unchanged, late events ignored, current events accepted and386/386
 scanout buffers released. Compositor reference/pixel and generation/cookie
-capacity gates pass. The frozen complete suite has reached its final soak;
-package publication/deployment remains gated on its completion and artifact
-identity/reproducibility checks.
+capacity gates pass. The frozen complete run finishes93 passed/four explicit
+skips/zero failures, including120seconds of four-PTY soak:11,672 snapshots and
+1,062 resizes. The64-cycle gate is additional to those93 and is now registered
+in the renderer suite. Skips were package, QEMU, physical multi-output and
+live screenshot backpressure; package validation passes separately below.
 
 Control Panel callback/API and installed Hibr UI/keyboard gates also pass
 against that frozen binary with Hibr0.99.244 ABI16. Its canonical bundle stays
 0.1.2; hibr-apps documentation/UI-version-fixture updates are pushed through
 commit106373d. Neither SDL nor Hibr source is modified. Physical second/third
 monitor plug/unplug on the selected DRM device remains unverified.
+
+Package `blit_0.1.544-1_amd64.deb`, SHA256
+`bd9521943e054efb6ed25088b9c8f2b7d53fdd1c8ede4dc5b3046343082b5771`, is built
+from source/documentation commit `8f45ccc45d37407d3e207e32e629013dfb552b17`.
+Manifest/artifact gates and reproducible rebuild pass against pinned
+Hibr0.99.225/ABI16. The API updater verifies live0.1.544 on10.54. The complete
+saved document (clean revision44), active font and both pane grids are
+identical across deployment. Pure KMS is ready, observer `uevent+periodic`,
+with empty errors/warnings. Three observations show background scans20/21/22,
+stable inventory revision1 and2.811/2.218/2.196ms scan duration: no unexplained
+output recreation on the unchanged connected monitor.
+
+The real-host framebuffer oracle passes21cells/2688pixels, including the
+complete right-edge bold diamond. The temporary upper PTY is deleted and lower
+login focus restored. Final inventory has one physical output, one lower login
+and upper saved binding waiting for authentication. No post-update authenticated
+desktop acceptance, second/third physical connection/removal, real-driver
+failure injection or high-refresh workload is claimed. Evidence is retained in
+ignored `diagnostics/kms-hotplug-544/`; source/package identity is in
+`releases/0.1.544.yaml`.
 
 ## 2026-10-18: quiet pane0.1.2 and hotplug dependency diagnosis
 

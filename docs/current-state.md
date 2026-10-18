@@ -7,7 +7,7 @@ work actually stopped.
 
 ## Status at the last review
 
-### 2026-10-18 direct-KMS switch and 0.1.544 hotplug candidate
+### 2026-10-18 deployed0.1.544: direct-KMS live output reconciliation
 
 The user explicitly selected pure KMS/DRM and direct-backend hotplug, not an
 SDL patch. The API created a scoped root operator process to back up
@@ -17,7 +17,7 @@ sysfs connector observation identifies `DP-1` as DRM connector93; the saved
 primary preference was deliberately translated to `pane-display-93-2` before
 restart. Other saved policy, font and pane geometry remain unchanged.
 
-The host currently reports0.1.543, backend `drm-kms`, `direct_kms:true`,
+The backend-switch checkpoint reported0.1.543, backend `drm-kms`, `direct_kms:true`,
 video driver `direct-kms`, ready, lower login and both240x67 pane grids.
 After the user authenticated, three read-only association samples pass:
 verified UID/GID1000, native owner296618/starttime67930595, lower primary
@@ -35,12 +35,35 @@ failed additions do not reset unrelated outputs. The current policy controller
 handles saved auxiliary disappearance/return. Primary PTYs retain their pane
 intent rather than silently migrating. SDL and Hibr sources are unchanged.
 
-The regression against0.1.543 fails waiting for second/third outputs. A frozen
-release binary is undergoing the complete local suite, including compositor
-pixels, late events, add/remove/reorder, failures, slow probing, headless
-startup/recovery and orderly direct-KMS restart. Package construction and API
-deployment follow those checks. Physical second/third monitor hotplug is not
-yet accepted; do not infer it from the mocked DRM tests or the one-output host.
+The regression against0.1.543 fails waiting for second/third outputs. The
+frozen release binary passes93 suite checks with four explicit skips and zero
+failures, including the120-second four-PTY soak (11,672 snapshots/1,062 resizes).
+A separate64-cycle lifecycle/cookie stress gate passes386/386 buffer releases
+with primary buffers unchanged and late events ignored. That additional gate
+is now registered in the renderer suite; it is not part of this run's93 count.
+Package artifact/manifest checks and reproducible rebuild pass against pinned
+Hibr0.99.225/ABI16. Installed integration tests use Hibr0.99.244/ABI16.
+
+The authorized updater installs/verifies exact0.1.544 on10.54, package SHA256
+`bd9521943e054efb6ed25088b9c8f2b7d53fdd1c8ede4dc5b3046343082b5771`, built
+from source/documentation commit `8f45ccc45d37407d3e207e32e629013dfb552b17`.
+Before/after checks preserve the full saved document (clean revision44), active
+font and both pane grids. The backend is ready `drm-kms`, `direct_kms:true`,
+observer `uevent+periodic`, no diagnostic errors/warnings. Three background
+samples show scans20/21/22, inventory revision1 unchanged, scan durations
+2.811/2.218/2.196ms. The live framebuffer oracle passes21cells/2688pixels,
+including the complete bold diamond at the right edge; its temporary upper
+terminal is removed and lower focus restored. One lower login remains; the
+saved upper `DP-1` pane1 binding waits for authentication. No manual join.
+
+Evidence: `diagnostics/kms-hotplug-544/`, manifest `releases/0.1.544.yaml`.
+Next: normal login, then connect an additional physical monitor without
+restarting Blit. It should enter API inventory and the panel's next quiet
+refresh. Select its auxiliary panes, Apply, and Save if desired. New outputs
+inherit the current global split/font settings. Validate secondary removal/
+return and a third physical output before closing#100. Physical multi-output
+hotplug, multi-GPU support and automatic primary migration are not accepted
+by this one-output checkpoint. SDL and Hibr source remain untouched; no SSH.
 
 ### 2026-10-18 quiet Control Panel and issue100 dependency finding
 
