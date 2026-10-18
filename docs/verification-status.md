@@ -5,6 +5,22 @@ an evidence record, not a claim that the complete product is released.
 
 ## 2026-10-18:548 nonvisual PTY correction, physical acceptance pending
 
+547's final frozen collection completes97pass/3explicit skips/0fail;120s
+four-PTY soak10996 snapshots/1000 resizes. The corrected diagnostic package
+identity is `releases/0.1.547.yaml`, source96a9425. It remains a diagnostic
+checkpoint, not a fix for jerky input.
+
+The revised pointer probe offers eight bounded asynchronous request workers
+to avoid serializing60Hz injection behind the measured network RTT (one ping
+54.6ms). The547 baseline enqueues360 motions with no late slots or skips,
+completes in6.105s, records117 submissions on pointer outputDP-1 (53 on the
+other output), and Blit27.99% of one core. Request p50/p95 are35.85/62.84ms.
+This proves actual injection intent/counters, not physical input-to-photon
+latency. Same-coordinate alternating motion can coalesce; submitted frames
+are not necessarily completed scanout. Earlier serial HTTP results were
+network-limited and cannot establish the renderer's ceiling. Evidence:
+`diagnostics/mouse-547/async60-final/pointer-cadence.json`.
+
 Production parser test fails twice before the correction (hidden-cursor
 controls and partial APC schedule visual work) and passes after. It checks
 mode/title/cursor state still changes, printable cells still cause damage,
