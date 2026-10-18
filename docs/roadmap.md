@@ -3,7 +3,23 @@
 The roadmap is ordered by dependency. A later milestone must not become a
 second, parallel implementation of an earlier one.
 
-## Current position — independent grids and bounded direct-KMS repaint
+## Current position — Mouse549 and stable native identity
+
+549 source adds API-owned antialiased pointer shapes/palettes/size/shadow
+shared by SDL and direct KMS (ADR0133), plus stable connector/pane native
+names for Hibr per-display preferences (ADR0135, #103). The canonical
+catalogue bundle0.1.5 includes Blit Mouse, sharing the existing settings draft,
+worker and credential with Blit. Focused native/UI/pixel tests pass; final
+package/deployment acceptance is tracked in the verification ledger.
+
+548 is currently deployed on10.54 with two physical outputs, pure KMS and
+saved layout/font intact. Nonvisual PTY bytes no longer request full repaint
+(ADR0134). The newest bounded pointer workload records211 pointer-output
+submissions/6.067s and Blit9.81% of one CPU core; this does not establish60Hz
+physical latency or resolve #101. Wallpaper persistence after restart needs
+authenticated desktop acceptance; no Hibr-core modifications are permitted.
+
+## Previous position — independent grids and bounded direct-KMS repaint
 
 Deployed0.1.546 retains pure KMS and adds connector-keyed1–8 column/row grids,
 new-output1x1 defaults, durable legacy migration and validated occupied-pane

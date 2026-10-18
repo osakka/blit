@@ -3725,7 +3725,9 @@ components:
               pane_ordinal: {$ref: '#/components/schemas/AuxiliaryDisplayBinding/properties/pane_ordinal'}
               pane_id: {type: [string, 'null']}
               session_id: {type: [string, 'null']}
-              client_name: {type: [string, 'null']}
+              client_name:
+                type: [string, 'null']
+                description: Native client name; from0.1.549 stable output selector plus row-major pane ordinal (ADR0135).
               state:
                 type: string
                 enum: [waiting_authentication, waiting_desktop, waiting_output, waiting_pane, starting, waiting_join, joined, stopped, conflict]
@@ -3753,7 +3755,9 @@ components:
         state: {type: string, enum: [inactive, waiting, ready, error]}
         reason: {type: string}
         session_name: {type: string, const: desktop}
-        client_name: {type: [string, 'null']}
+        client_name:
+          type: [string, 'null']
+          description: Native client name; from0.1.549 stable output selector plus row-major pane ordinal (ADR0135).
         query_in_flight: {type: boolean}
         observed_monotonic_us: {type: integer, minimum: 0}
         owner:

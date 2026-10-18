@@ -213,12 +213,21 @@ static void service_auxiliary_displays(BlitRuntime *runtime, uint64_t now)
                 continue;
             }
             if (started) { auxiliary_state(b, "starting", "start_queued"); continue; }
+            if (!native_client_name_for_target(runtime, pane->id, pane->display_id,
+                                               b->client_name, sizeof(b->client_name))) {
+                auxiliary_state(b, "conflict", "stable_client_name_unavailable");
+                continue;
+            }
+            for (j = 0; j < login->login_desktop_client_count; ++j)
+                if (!strcmp(login->login_desktop_clients[j].name, b->client_name)) break;
+            if (j < login->login_desktop_client_count) {
+                auxiliary_state(b, "conflict", "native_client_name_in_use");
+                continue;
+            }
             b->login_id = login->id;
             b->owner_pid = login->login_desktop_pid;
             b->owner_ticks = login->login_desktop_start_ticks;
             b->attempted = 1;
-            snprintf(b->client_name, sizeof(b->client_name), "blit-aux-%llx-%llu",
-                     (unsigned long long)runtime->started_us, runtime->next_session_id);
             json_escape(override && *override ? override : "/usr/share/blit/hibr/blit-session.hibr", launcher, sizeof(launcher));
             snprintf(request, sizeof(request),
                      "{\"command\":\"/usr/bin/hibr\",\"arguments\":[\"%s\",\"--session\",\"desktop\","

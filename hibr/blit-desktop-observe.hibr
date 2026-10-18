@@ -5,7 +5,7 @@ base=${1-}
 wanted=${2-}
 for name in "$base" "$wanted"; do
     case "$name" in
-    ''|.*|*[!a-zA-Z0-9_.-]*) exit 2 ;;
+    ''|.*|*[!a-zA-Z0-9_.:-]*) exit 2 ;;
     esac
     [ "${#name}" -le 63 ] || exit 2
 done
@@ -33,14 +33,20 @@ client_count=0
 while IFS=' ' read -r name row col rows cols primary extra; do
     [ -n "$name" ] || continue
     [ -z "$extra" ] || exit 2
-    case "$name" in ''|.*|*[!a-zA-Z0-9_.-]*) exit 2 ;; esac
+    # Native versions may suffix or repeat duplicate names. Never associate
+    # the base client when this launch may own its duplicate neighbour.
+    case "$name" in "$wanted"\#*) printf 'waiting client_name_in_use\n'; exit 0 ;; esac
+    case "$name" in ''|.*|*[!a-zA-Z0-9_.:#-]*) exit 2 ;; esac
     [ "${#name}" -le 63 ] || exit 2
     client_lines="$client_lines
 client $name $row $col $rows $cols $primary"
     client_count=$((client_count + 1))
     [ "$client_count" -le 16 ] || exit 2
     [ "$name" = "$wanted" ] || continue
-    [ -z "$match" ] || exit 2
+    if [ -n "$match" ]; then
+        printf 'waiting client_name_in_use\n'
+        exit 0
+    fi
     match="$row $col $rows $cols $primary"
 done <<< "$clients"
 if [ -z "$match" ]; then

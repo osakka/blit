@@ -208,9 +208,16 @@ startup; it prevents trusting that login for future automation. See ADR 0125.
 ### Native desktop association (0.1.539)
 
 The `desktop` object in `GET /v1/login` observes the exact named login client using Hibr's
-native `hold list` and `hold clients`, as the verified user. A transient unique
-client name is passed through the packaged hook's existing desktop `--name`
-argument. It is not a saved pane name or another desktop instance.
+native `hold list` and `hold clients`, as the verified user. Since0.1.549,
+the packaged hook's existing desktop `--name` argument is stable: connector
+(otherwise SDL display name) plus one-based row-major pane ordinal, such as
+`blit-DP-1-p2`. Auxiliary clients use the same rule, not their role or boot-time
+IDs. Long/unsafe selectors receive a bounded readable prefix plus a hash of
+the whole selector; duplicate inventory or occupied managed identities refuse
+launch. Native duplicate names/suffixes report `native_client_name_in_use`,
+never guessed ownership. See ADR0135. A live pane reassignment retains the
+client's birth name until its next launch. This is not another desktop instance
+or a new settings resource; Hibr owns preferences under the native name.
 
 `state` is `inactive` before verified authentication or for shell selection;
 `waiting` when the native owner/client is absent; `ready` when the exact client,

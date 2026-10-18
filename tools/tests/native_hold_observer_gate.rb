@@ -12,7 +12,7 @@ def check(ok, message) = (raise(message) unless ok)
 Dir.mktmpdir('blit-native-hold') do |root|
   env={'TMPDIR'=>root}
   name="blit-gate-#{Process.pid}"
-  reader=writer=pid=aux_reader=aux_writer=aux_pid=nil
+  reader=writer=pid=aux_reader=aux_writer=aux_pid=duplicate_reader=duplicate_writer=duplicate_pid=nil
   begin
     out,err,status=Open3.capture3(env,'/usr/bin/hibr',HELPER,name,'login')
     check(status.success? && out=="waiting owner_missing\n",'absent owner inferred ready')
@@ -65,13 +65,38 @@ Dir.mktmpdir('blit-native-hold') do |root|
     # Another name is never guessed from a lone primary client.
     out,_,status=Open3.capture3(env,'/usr/bin/hibr',HELPER,name,'other')
     check(status.success? && out=="waiting client_missing\n",'wrong client matched a primary')
+    duplicate_reader,duplicate_writer,duplicate_pid=PTY.spawn(env,'/usr/bin/hibr','-c',"#{LOAD}hold attach -m -n login #{name}")
+    Timeout.timeout(5) do
+      loop do
+        break if observe.call=="waiting client_name_in_use\n"
+        sleep 0.03
+      end
+    end
+    Process.kill('TERM',duplicate_pid); Process.wait(duplicate_pid); duplicate_pid=nil
+    Timeout.timeout(5) do
+      sleep 0.03 until observe.call.start_with?('ready ')
+    end
+    # Same accepted grammar as generated native names, including colon/dot.
+    named='blit-card:DP.1-p2'
+    duplicate_reader&.close; duplicate_writer&.close
+    duplicate_reader,duplicate_writer,duplicate_pid=PTY.spawn(env,'/usr/bin/hibr','-c',"#{LOAD}hold attach -m -n #{named} #{name}")
+    Timeout.timeout(5) do
+      loop do
+        out,_,status=Open3.capture3(env,'/usr/bin/hibr',HELPER,name,named)
+        break if status.success? && out.start_with?('ready ')
+        sleep 0.03
+      end
+    end
     puts 'NATIVE_HOLD_OBSERVER_PASS cli=installed owner=actual client=exact geometry=67x240 owner_continuity=yes'
   ensure
     Open3.capture3(env,'/usr/bin/hibr','-c',"#{LOAD}hold kill #{name}")
+    Process.kill('TERM',duplicate_pid) rescue nil
+    Process.wait(duplicate_pid) rescue nil
     Process.kill('TERM',aux_pid) rescue nil
     Process.wait(aux_pid) rescue nil
     Process.kill('TERM',pid) rescue nil
     Process.wait(pid) rescue nil
     reader&.close;writer&.close
+    duplicate_reader&.close;duplicate_writer&.close;aux_reader&.close;aux_writer&.close
   end
 end

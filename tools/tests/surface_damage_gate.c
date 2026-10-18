@@ -235,6 +235,49 @@ static void nonvisual_terminal_bytes_gate(void)
     for (i=0;i<BLIT_GRAPHICS_MAX_IMAGES;++i) graphics_image_release(&owner.graphics[i]);
 }
 
+static void stable_client_names_gate(void)
+{
+    BlitRuntime *r = calloc(1, sizeof(*r));
+    char a[64], b[64], long_name[128];
+    int i;
+    if (!r) exit(2);
+#define NAME_CHECK(test) do { if (!(test)) { fprintf(stderr,"CLIENT_NAME_FAIL line=%d\n",__LINE__); ++failures; } } while (0)
+    NAME_CHECK(blit_client_name_make("DP-1", 2, a, sizeof(a)) && !strcmp(a,"blit-DP-1-p2"));
+    NAME_CHECK(blit_client_name_make("card:DP.1", 64, a, sizeof(a)) && !strcmp(a,"blit-card:DP.1-p64"));
+    memset(long_name, 'a', sizeof(long_name)-1); long_name[127]=0;
+    NAME_CHECK(blit_client_name_make(long_name, 64, a, sizeof(a)) && strlen(a)<=63);
+    long_name[126]='b';
+    NAME_CHECK(blit_client_name_make(long_name, 64, b, sizeof(b)) && strcmp(a,b));
+    NAME_CHECK(blit_client_name_make("Display # 1", 1, a, sizeof(a)));
+    for(i=0;a[i];++i) NAME_CHECK(blit_client_name_char(a[i]));
+    NAME_CHECK(!blit_client_name_make("",1,a,sizeof(a)));
+    NAME_CHECK(!blit_client_name_make("DP-1",0,a,sizeof(a)));
+    NAME_CHECK(!blit_client_name_make("DP-1",65,a,sizeof(a)));
+    NAME_CHECK(!blit_client_name_make("DP-1",1,a,4) && !a[0]);
+    r->display_count=1; r->displays[0].id=93;
+    snprintf(r->displays[0].connector,sizeof(r->displays[0].connector),"DP-1");
+    r->pane_count=2;
+    for(i=0;i<2;++i) {
+        r->panes[i].used=1;
+        snprintf(r->panes[i].id,sizeof(r->panes[i].id),"arbitrary-%d",i);
+        snprintf(r->panes[i].display_id,sizeof(r->panes[i].display_id),"display-93");
+    }
+    NAME_CHECK(native_client_name_for_target(r,"arbitrary-1",NULL,a,sizeof(a)) && !strcmp(a,"blit-DP-1-p2"));
+    r->displays[0].id=127; r->started_us=123; r->next_session_id=999;
+    for(i=0;i<2;++i) snprintf(r->panes[i].display_id,sizeof(r->panes[i].display_id),"display-127");
+    NAME_CHECK(native_client_name_for_target(r,"arbitrary-1",NULL,b,sizeof(b)) && !strcmp(a,b));
+    r->display_count=2; r->displays[1]=r->displays[0]; r->displays[1].id=200;
+    NAME_CHECK(!native_client_name_for_target(r,"arbitrary-1",NULL,b,sizeof(b)));
+    r->display_count=1; r->sessions[0].used=1;
+    snprintf(r->sessions[0].login_client_name,sizeof(r->sessions[0].login_client_name),"%s",a);
+    NAME_CHECK(!native_client_name_for_target(r,"arbitrary-1",NULL,b,sizeof(b)));
+    r->sessions[0].child_exited=1;
+    NAME_CHECK(native_client_name_for_target(r,"arbitrary-1",NULL,b,sizeof(b)) && !strcmp(a,b));
+    NAME_CHECK(native_client_name_for_target(r,"arbitrary-0",NULL,b,sizeof(b)) && !strcmp(b,"blit-DP-1-p1"));
+    free(r);
+#undef NAME_CHECK
+}
+
 int main(void)
 {
     BlitRectangle rectangle;
@@ -278,7 +321,8 @@ int main(void)
     utf8_large_pty_read_gate();
     utf8_fragmentation_gate();
     nonvisual_terminal_bytes_gate();
+    stable_client_names_gate();
     if (failures) return 1;
-    puts("SURFACE_DAMAGE_PASS union=both-orders DEC=union scroll=union quiet=bounded join=bounded wait=nonspinning UTF8=large-PTY+10-fragmentations");
+    puts("SURFACE_DAMAGE_PASS union=both-orders DEC=union scroll=union quiet=bounded join=bounded wait=nonspinning UTF8=large-PTY+10-fragmentations stable_client_names=verified");
     return 0;
 }

@@ -58,7 +58,12 @@ Dir.mktmpdir('blit-native-auxiliary') do |root|
     name=
     for arg in "$@"; do case "$arg" in --name=*) name=${arg#--name=} ;; esac; done
     [ -n "$name" ] || exit 2
-    hold new -d desktop /bin/sleep 90 || exit 1
+    present=0
+    sessions := hold list || exit 1
+    while read -r base status pid size extra; do
+      [ "$base" != desktop ] || present=1
+    done <<< "$sessions"
+    [ "$present" = 1 ] || hold new -d desktop /bin/sleep 90 || exit 1
     hold attach -n "$name" desktop
   HIBR
   if ACTUAL_DESKTOP
@@ -100,6 +105,7 @@ Dir.mktmpdir('blit-native-auxiliary') do |root|
     pid=spawn('sudo','-n','env',*server_env.map{|k,v|"#{k}=#{v}"},BINARY,PORT.to_s,out:log,err:[:child,:out])
     login=await('actual native login association'){q=request('GET','/v1/login');q if q.dig('desktop','state')=='ready'}
     output=request('GET','/v1/displays')['displays'].first['name']
+    check(login.dig('desktop','client_name')=="blit-#{output}-p2",'primary native name is not stable output/ordinal identity')
     request('POST','/v1/auxiliary-displays/apply',{'bindings'=>[{'output'=>output,'pane_ordinal'=>1}]})
     b=await('actual standby started'){q=request('GET','/v1/auxiliary-displays')['bindings'][0];q if q['session_id']}
     request('PUT','/v1/fonts',{'scale'=>1.1}) if ENV['BLIT_NATIVE_AUXILIARY_RESIZE']=='1'
@@ -110,10 +116,33 @@ Dir.mktmpdir('blit-native-auxiliary') do |root|
       request('POST',"/v1/terminal-sessions/#{b['session_id']}/input",{'data'=>"\r"})
     end
     joined=await('actual standby join and native placement'){q=request('GET','/v1/auxiliary-displays')['bindings'][0];q if q['state']=='joined'}
+    check(joined['client_name']=="blit-#{output}-p1",'auxiliary native name is not stable output/ordinal identity')
     native=request('GET','/v1/login')['desktop']
     a=native['clients'].find{|c|c['name']==joined['client_name']}
     check(a && a['row']-native['client']['row']==-a['rows'],'actual native placement differs from upper/lower pane grid')
     check(native['owner']['pid']==login['desktop']['owner']['pid'],'Apply replaced desktop owner')
+    # Restart Blit itself, retaining the isolated held owner. Both fresh PTY
+    # clients must reuse their names, not create #2 aliases or new preferences.
+    unless ACTUAL_DESKTOP
+      request('POST','/v1/control/restart')
+      sleep 0.5
+      login_after=await('native owner association after server restart') do
+        q=request('GET','/v1/login')
+        q if q.dig('desktop','state')=='ready' &&
+          q.dig('session','process_id')!=login.dig('session','process_id') &&
+          q.dig('desktop','client_name')==login.dig('desktop','client_name')
+      end
+      check(login_after.dig('desktop','owner','pid')==native['owner']['pid'],'restart replaced held owner')
+      request('POST','/v1/auxiliary-displays/apply',{'bindings'=>[{'output'=>output,'pane_ordinal'=>1}]})
+      b=await('standby after restart'){q=request('GET','/v1/auxiliary-displays')['bindings'][0];q if q['session_id']}
+      sleep 0.5
+      request('POST',"/v1/terminal-sessions/#{b['session_id']}/input",{'data'=>"\r"})
+      after=await('stable native rejoin'){q=request('GET','/v1/auxiliary-displays')['bindings'][0];q if q['state']=='joined'}
+      check(after['client_name']==joined['client_name'],'restart changed auxiliary identity')
+      names=request('GET','/v1/login').fetch('desktop').fetch('clients').map{|c|c['name']}
+      check(names.sort==[login.dig('desktop','client_name'),joined['client_name']].sort,'restart accumulated duplicate native names')
+      joined=after
+    end
     request('PATCH',"/v1/terminal-sessions/#{b['session_id']}",{'pane_id'=>'pane-display-1-2'})
     await('explicit Blit pane reassignment conflict'){request('GET','/v1/auxiliary-displays')['bindings'][0]['reason']=='managed_pane_assignment_changed'}
     request('PATCH',"/v1/terminal-sessions/#{b['session_id']}",{'pane_id'=>'pane-display-1-1'})
@@ -129,7 +158,7 @@ Dir.mktmpdir('blit-native-auxiliary') do |root|
     await('standby quit without respawn'){request('GET','/v1/auxiliary-displays')['bindings'][0]['state']=='stopped'}
     request('DELETE','/v1/login')
     await('owner lifecycle cleanup'){request('GET','/v1/terminal-sessions')['sessions'].none?{|s|s['id']==b['session_id']}}
-    puts "AUXILIARY_NATIVE_PASS standby=installed_hibr desktop=#{ACTUAL_DESKTOP ? 'installed' : 'sleep_fixture'} invitation=#{ACTUAL_DESKTOP ? 'automatic' : 'enter'} placement=confirmed user_move=preserved release=alive quit=stopped logout=cleaned"
+    puts "AUXILIARY_NATIVE_PASS standby=installed_hibr desktop=#{ACTUAL_DESKTOP ? 'installed' : 'sleep_fixture'} invitation=#{ACTUAL_DESKTOP ? 'automatic' : 'enter'} placement=confirmed stable_names=yes restart=#{ACTUAL_DESKTOP ? 'separate' : 'same_owner_no_aliases'} user_move=preserved release=alive quit=stopped logout=cleaned"
   rescue Exception
     warn JSON.pretty_generate(request('GET','/v1/auxiliary-displays')) rescue nil
     warn JSON.pretty_generate(request('GET','/v1/login')) rescue nil

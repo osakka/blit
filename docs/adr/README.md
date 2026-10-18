@@ -152,6 +152,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0132 — Clipping bounds image work](0132-clipping-bounds-image-work.md)
 - [0133 — Shared API-owned pointer appearance](0133-shared-api-owned-pointer-appearance.md)
 - [0134 — Nonvisual PTY bytes do not paint](0134-nonvisual-pty-bytes-do-not-paint.md)
+- [0135 — Stable native client names](0135-stable-native-client-names.md)
 
 ## Adding an ADR
 

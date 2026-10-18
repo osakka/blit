@@ -5,6 +5,15 @@ an evidence record, not a claim that the complete product is released.
 
 ## 2026-10-18:549 mouse local checkpoint, not yet deployed
 
+Stable-name addition (ADR0135/Blit#103): the actual native regression fails
+the preceding timestamp-name binary, passes549, and verifies both names
+across a server restart with the same held owner and no aliases. Installed
+Hibr0.99.250 ABI16 duplicate-name and colon/dot grammar tests pass. TCC tests
+cover numeric-ID churn, name bounds, unsafe selectors and managed/inventory
+collisions. Existing login-generation test now expects a stable name while
+still requiring a new session generation and newly verified owner lifetime.
+Final frozen package and physical wallpaper persistence remain separate.
+
 Initial full collection98pass/4skips/0fail,120s soak10364 snapshots/942 resizes.
 No package was supplied; the other skips are QEMU, physical multi-display and
 live screenshot backpressure. Shared art tests cover3shapes/4palettes/41sizes;

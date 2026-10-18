@@ -7,6 +7,32 @@ work actually stopped.
 
 ## Status at the last review
 
+### 2026-10-18 stable identity and Mouse549 release preparation
+
+Blit#103 now uses one helper for both launch paths: connector (otherwise SDL
+name) plus row-major pane ordinal, e.g. DP-1 lower primary `blit-DP-1-p2`,
+upper auxiliary `blit-DP-1-p1`. TCC unit checks cover changed runtime IDs,
+long/unsafe selectors, bounded grammar, ambiguous outputs and occupied names.
+Actual installed Hibr0.99.250/ABI16 joins, survives a Blit restart with the
+same held owner and exact two names, then cleans up without aliases. The old
+binary fails the new primary-name assertion. Duplicate exact native names
+(observed in this Hibr release) and suffixed aliases fail closed. No Hibr-core,
+backend, font or pane geometry change. ADR0135 documents live-reassignment
+identity and one-time migration from timestamp names.
+
+Catalogue0.1.5 is already published, with docs current at hibr-apps:ce8a5bc.
+Actual Mouse callbacks, native drag/save, quiet15s shared polling/private
+credential restoration and isolated install/update/remove pass with Hibr250
+against549. Artwork source is08bddc9. Final frozen package/full run and live
+deployment remain pending at this checkpoint; do not claim549 is installed.
+
+The user has authenticated on548. A new bounded asynchronous60Hz-intent
+probe applies360 motions/6.067s,0late/0skipped; pointer output211 submissions,
+other output67, Blit9.81% of one CPU core. Last pointer-output draw0.101ms,
+copy1.163ms, submit0.030ms,4requested cells. This is submission/counter evidence,
+not completed scanout or physical input-to-photon/60Hz acceptance. Evidence:
+`diagnostics/mouse-549/before548/pointer-cadence.json`. #101 stays open.
+
 ### 2026-10-18 mouse549 local checkpoint; stable names#103 next
 
 548 is API-deployed on10.54, with complete settings/font and pure-KMS backend

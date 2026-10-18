@@ -15009,6 +15009,8 @@ static int create_session(BlitRuntime *runtime, const char *json,
 /* Blit owns the login-manager lifecycle, while Hibr owns authentication and
    the per-user session.  Keep the login command construction here rather than
    teaching the generic session API about a second command vocabulary. */
+static int native_client_name_for_target(BlitRuntime *, const char *, const char *, char *, size_t);
+
 static int create_login_session(BlitRuntime *runtime, BlitSession **created)
 {
     char command[512];
@@ -15079,6 +15081,12 @@ static int create_login_session(BlitRuntime *runtime, BlitSession **created)
     if (strcmp(session_command, BLIT_DEFAULT_LOGIN_SESSION_COMMAND) == 0) {
         int yes = 1;
         struct timeval receive_timeout = {5, 0};
+        if (!native_client_name_for_target(runtime, pane_id, runtime->login_display_id,
+                                           client_name, sizeof(client_name))) {
+            diagnostic_log(runtime, "error", "stable_client_name_unavailable",
+                           "Login target has ambiguous or occupied native client identity.");
+            return -4;
+        }
         if (socketpair(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0, handoff) == 0 &&
             handoff[0] < FD_SETSIZE && handoff[1] < FD_SETSIZE &&
             setsockopt(handoff[0], SOL_SOCKET, SO_PASSCRED, &yes, sizeof(yes)) == 0 &&
@@ -15086,8 +15094,6 @@ static int create_login_session(BlitRuntime *runtime, BlitSession **created)
             setsockopt(handoff[1], SOL_SOCKET, SO_RCVTIMEO,
                        &receive_timeout, sizeof(receive_timeout)) == 0) {
             identity_available = 1;
-            snprintf(client_name, sizeof(client_name), "blit-login-%llu-%llu",
-                     (unsigned long long)runtime->started_us, runtime->next_session_id);
             snprintf(session_command, sizeof(session_command),
                      "%s --blit-handoff-fd %d --blit-client-name %s",
                      BLIT_DEFAULT_LOGIN_SESSION_COMMAND, handoff[1], client_name);
@@ -15396,7 +15402,7 @@ static void native_observation_result(BlitRuntime *runtime, BlitSession *session
                         if (!((c >= 'a' && c <= 'z') ||
                               (c >= 'A' && c <= 'Z') ||
                               (c >= '0' && c <= '9') || c == '_' ||
-                              c == '.' || c == '-'))
+                              c == '.' || c == ':' || c == '#' || c == '-'))
                             valid = 0;
                     }
                     if (row < -32767 || row > 32767 ||
@@ -15426,6 +15432,9 @@ static void native_observation_result(BlitRuntime *runtime, BlitSession *session
     session->login_desktop_state = 2;
     if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
         reason = "native_query_failed";
+    } else if (strcmp(output, "waiting client_name_in_use\n") == 0) {
+        reason = "native_client_name_in_use";
+        session->login_desktop_observed_us = now;
     } else if (strcmp(output, "waiting owner_missing\n") == 0 ||
                strcmp(output, "waiting client_missing\n") == 0 ||
                strcmp(output, "waiting owner_changed\n") == 0) {
@@ -19046,6 +19055,7 @@ static int settings_auxiliary_policy_valid(const char *document)
 }
 
 #include "blit_display_layout.h"
+#include "blit_client_name.h"
 #include "blit_auxiliary_controller.h"
 
 static void login_policy_json(const BlitLoginPolicy *policy, char *out,

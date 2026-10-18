@@ -51,7 +51,7 @@ Dir.mktmpdir('blit-login-observe') do |root|
   FileUtils.cp(File.join(ROOT,'hibr/blit-login-session.hibr'),hook)
   FileUtils.cp(File.join(ROOT,'tools/tests/fixtures/login_identity_target.hibr'),target)
   File.chmod(0755,target)
-  %w[ready secondary missing owner_missing geometry wrong_uid overflow nul oversized timeout exit_failure expires shell waiting].each do |mode|
+  %w[ready secondary missing owner_missing collision geometry wrong_uid overflow nul oversized timeout exit_failure expires shell waiting].each do |mode|
     result=File.join(root,"#{mode}.result");owner_file=result+'.pid';count=result+'.count';startup=result+'.startup'
     [result,owner_file,count,startup].each{|p|File.write(p,'');File.chmod(0666,p)}
     observer=File.join(root,'observer.hibr')
@@ -60,6 +60,7 @@ Dir.mktmpdir('blit-login-observe') do |root|
       when 'secondary' then 'printf "ready %s 96 128 48 0 48 128 0\\nclients 1\\nclient %s 48 0 48 128 0\\n" "$owner" "$2"'
       when 'missing' then 'printf "waiting client_missing\\n"'
       when 'owner_missing' then 'printf "waiting owner_missing\\n"'
+      when 'collision' then 'printf "waiting client_name_in_use\\n"'
       when 'geometry' then 'printf "ready %s 48 128 0 0 47 128 1\\nclients 1\\nclient %s 0 0 47 128 1\\n" "$owner" "$2"'
       when 'wrong_uid' then "printf 'ready #{Process.pid} 48 128 0 0 48 128 1\\nclients 1\\nclient %s 0 0 48 128 1\\n' \"$2\""
       when 'overflow' then "printf 'ready 9999999999999999999999 48 128 0 0 48 128 1\\nclients 1\\nclient %s 0 0 48 128 1\\n' \"$2\""
@@ -75,7 +76,7 @@ Dir.mktmpdir('blit-login-observe') do |root|
       [ "$EUID" = 65534 ] || exit 3
       [ "${BLIT_API_TOKEN-absent}" = absent ] || exit 4
       [ "$1" = desktop ] || exit 5
-      case "$2" in blit-login-*) ;; *) exit 6 ;; esac
+      case "$2" in blit-*-p1|blit-*-p2) ;; *) exit 6 ;; esac
       for path in /proc/self/fd/*; do
         link=$(/usr/bin/readlink "$path") || continue
         case "$link" in socket:*|/dev/input/*|/dev/dri/*|/dev/pts/*) exit 8 ;; esac
@@ -130,7 +131,7 @@ Dir.mktmpdir('blit-login-observe') do |root|
       check(d.dig('clients',1,'row')==-24 && d.dig('clients',1,'column')==-8,
         'native named-client collection lost a negative origin') if mode=='ready'
     elsif expected!='inactive'
-      reasons={'missing'=>'client_missing','owner_missing'=>'owner_missing','geometry'=>'client_geometry_mismatch',
+      reasons={'missing'=>'client_missing','owner_missing'=>'owner_missing','collision'=>'native_client_name_in_use','geometry'=>'client_geometry_mismatch',
         'wrong_uid'=>'owner_identity_mismatch','overflow'=>'invalid_native_observation','nul'=>'invalid_native_observation',
         'oversized'=>'native_output_limit','timeout'=>'native_query_timeout','exit_failure'=>'native_query_failed'}
       check(d['reason']==reasons.fetch(mode),"wrong reason #{mode}:#{d}")
@@ -228,7 +229,7 @@ Dir.mktmpdir('blit-login-observe') do |root|
         q=request('GET','/v1/login');q if q.dig('desktop','state')=='ready'
       end
       check(fresh.dig('session','id')!=login.dig('session','id'),'login generation reused')
-      check(fresh.dig('desktop','client_name')!=d['client_name'],'native client name reused')
+      check(fresh.dig('desktop','client_name')==d['client_name'],'stable native client name changed across login generations')
       check(fresh.dig('desktop','owner','pid')!=d.dig('owner','pid'),'cancelled old query rebound a new login')
       request('DELETE','/v1/login')
     end

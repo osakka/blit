@@ -55,6 +55,13 @@ Keep these evidence boundaries separate:
 The [verification ledger](docs/verification-status.md) is the single place
 where these claims are separated.
 
+Pointer appearance is API-owned through the settings document: three shared
+antialiased shapes, four palettes,24–64px size and shadow, independent of font
+scale. The catalogue's **Blit Mouse** pane exposes appearance and per-device
+controls alongside **Blit**, using one connection and settings draft. See the
+[API guide](docs/api.md) and [ADR0133](docs/adr/0133-shared-api-owned-pointer-appearance.md)
+for the0.1.549 contract and the verification ledger for deployment status.
+
 Acceptance is bounded to the recorded tests and host observations. Read the
 [current state and restart point](docs/current-state.md) before resuming work:
 it records the user's accepted one-output split, native attachment evidence,
