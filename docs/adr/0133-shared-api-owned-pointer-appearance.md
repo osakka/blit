@@ -1,6 +1,6 @@
 # ADR 0133: shared API-owned pointer appearance
 
-- Status: implemented locally; physical acceptance in progress
+- Status: implemented and API-deployed in550; physical latency acceptance remains #101
 - Date: 2026-10-18
 - Issues: Blit#102 (appearance), #101 (jerk/performance)
 

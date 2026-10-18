@@ -8,3 +8,12 @@ update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f
 hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
 hibr_version: 0.99.225
 hibr_abi: 16
+verification:
+  frozen_full: '99 pass, 3 explicit skips, 0 fail'
+  soak: '120 seconds, four PTYs, 11272 snapshots, 1025 resizes'
+  separate_sdl_cursor: '25472 pixels, 3 shapes, 2 sizes, 4 rotations'
+  rebuilds: 'byte-identical TCC server and reproducible Debian package'
+  live: '10.54 API updater verified550; settings72/font/backend/geometry preserved'
+  native: 'one authenticated owner, stable DP-1 p2 primary plus DP-1 p1 and HDMI-A-1 p1 joins'
+  cursor: '142 opaque pixels/hotspot matched on each physical output through read-only framebuffer oracle'
+limits: 'No universal performance/rendering guarantee; #101 and #103 wallpaper restart acceptance remain open. Catalogue publication is not user installation.'

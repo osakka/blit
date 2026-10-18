@@ -76,6 +76,15 @@ Dir.mktmpdir('blit-native-hold') do |root|
     Timeout.timeout(5) do
       sleep 0.03 until observe.call.start_with?('ready ')
     end
+    duplicate_reader&.close; duplicate_writer&.close
+    duplicate_reader,duplicate_writer,duplicate_pid=PTY.spawn(env,'/usr/bin/hibr','-c',"#{LOAD}hold attach -m -n 'login#2' #{name}")
+    Timeout.timeout(5) do
+      sleep 0.03 until observe.call=="waiting client_name_in_use\n"
+    end
+    Process.kill('TERM',duplicate_pid); Process.wait(duplicate_pid); duplicate_pid=nil
+    Timeout.timeout(5) do
+      sleep 0.03 until observe.call.start_with?('ready ')
+    end
     # Same accepted grammar as generated native names, including colon/dot.
     named='blit-card:DP.1-p2'
     duplicate_reader&.close; duplicate_writer&.close

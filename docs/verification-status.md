@@ -3,6 +3,38 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-18:550 deployed; stable native names and cursor framebuffer verified
+
+Runtime/documentation source a1ce53d, TCC0.9.27; package and binary identities
+are fixed by `releases/0.1.550.yaml`. Byte-identical server and reproducible
+package rebuilds pass. Frozen all-suite: **99pass,3skip,0fail**.120s four-PTY
+soak:11272 snapshots/1025 resizes. Skips explicitly remain QEMU, physical
+multi-display gate and live screenshot backpressure. Separate actual SDL
+pointer gate verifies25472 pixels/3shapes/2sizes/4rotations. It was registered
+in the runner after the loaded full run; its pass is not in the99 count.
+The extended actual native CLI gate also passes literal `name#2` rejection.
+
+API updater verifies550 on10.54. Complete settings document and revision72,
+font1.0, `drm-kms`, both physical output geometries and lower primary are
+preserved. Three quiet authenticated observations verify one UID1000 owner
+and primary `blit-DP-1-p2`, upper join `blit-DP-1-p1`, HDMI join
+`blit-HDMI-A-1-p1`; both managed joins are confirmed. Local native restart
+retains exact client names and held owner without aliases. Real per-display
+wallpaper persistence across another restart remains #103 acceptance.
+
+Read-only host canonical-art checks match142 opaque cursor pixels/hotspot on
+each physical output, default arrow/pearl24/shadow. The initial DP capture is
+pre-desktop first paint, not a desktop rendering acceptance. Later cached
+DP/HDMI captures show wallpaper and application windows. No universal
+rendering or physical-latency claim follows. Two bounded asynchronous550
+pointer probes:110 submissions/6.039s and115/6.125s on DP-1, CPU6.62/6.08% of
+one core. Workload/location differs from548; #101 stays open. Files:
+`diagnostics/mouse-550/`. Catalogue0.1.5 remains the single Blit/Blit Mouse
+bundle; user catalogue installation is separate from its published/tested state.
+Final550/a1ce53d retest with installed Hibr0.99.250 ABI16 passes Mouse callback,
+shared polling/private-credential restoration, native Blit grid/font and Mouse
+size64/save interactions, plus signed isolated catalogue install/update/remove.
+
 ## 2026-10-18:549 mouse local checkpoint, not yet deployed
 
 Superseded by550 before deployment. The later549 final collection was stopped

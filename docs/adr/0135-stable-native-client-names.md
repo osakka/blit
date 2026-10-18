@@ -1,6 +1,6 @@
 # ADR 0135: stable native desktop client names
 
-- Status: implemented; local native verification passed, physical acceptance pending
+- Status: implemented/API-deployed550; native names verified, wallpaper restart acceptance pending
 - Date: 2026-10-18
 - Issue: Blit#103 (Hibr#284)
 

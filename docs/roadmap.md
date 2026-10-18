@@ -5,19 +5,22 @@ second, parallel implementation of an earlier one.
 
 ## Current position — Mouse550 and stable native identity
 
-550 source adds API-owned antialiased pointer shapes/palettes/size/shadow
+API-deployed550 adds antialiased pointer shapes/palettes/size/shadow
 shared by SDL and direct KMS (ADR0133), plus stable connector/pane native
 names for Hibr per-display preferences (ADR0135, #103). The canonical
 catalogue bundle0.1.5 includes Blit Mouse, sharing the existing settings draft,
 worker and credential with Blit. Focused native/UI/pixel tests pass; final
-package/deployment acceptance is tracked in the verification ledger.
+package/deployment acceptance is tracked in the verification ledger. The
+frozen full run is99pass/3explicit skips/0fail, plus the separate25472-pixel
+SDL pointer check. Host cursor pixels and all three stable native names are
+verified. Per-display wallpaper restart acceptance and #101 performance remain.
 549 was superseded before deployment: release review found unscoped pointer
 key lookup;550 adds a red/green scoped/duplicate/escaped-key regression.
 
-548 is currently deployed on10.54 with two physical outputs, pure KMS and
+550 is currently deployed on10.54 with two physical outputs, pure KMS and
 saved layout/font intact. Nonvisual PTY bytes no longer request full repaint
-(ADR0134). The newest bounded pointer workload records211 pointer-output
-submissions/6.067s and Blit9.81% of one CPU core; this does not establish60Hz
+(ADR0134). The newest bounded pointer workload records115 pointer-output
+submissions/6.125s and Blit6.08% of one CPU core; this does not establish60Hz
 physical latency or resolve #101. Wallpaper persistence after restart needs
 authenticated desktop acceptance; no Hibr-core modifications are permitted.
 

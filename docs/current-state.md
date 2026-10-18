@@ -7,6 +7,45 @@ work actually stopped.
 
 ## Status at the last review
 
+### 2026-10-18 release550 API-deployed and native joins verified
+
+The authorized updater verified0.1.550 on192.168.10.54. Runtime source and
+packaged documentation are pinned to a1ce53d in `releases/0.1.550.yaml`;
+package SHA256 is52f469477d386592420fd26018d956d9bf940df261ba60b30060bd68281be53e.
+TCC0.9.27 server rebuild is byte-identical and package rebuild reproducible.
+Full frozen collection:99pass/3skip/0fail;120s four-PTY soak11272 snapshots,
+1025 resizes. Skips: QEMU, physical multi-display gate and live screenshot
+backpressure gate. Actual SDL pointer check separately passes25472 pixels;
+its runner registration was added after that loaded collection, not counted
+retroactively. Actual native duplicate/suffix/colon checks pass separately too.
+
+Complete settings document/revision72, font scale1.0, pure `drm-kms`, both
+physical output geometries and lower preferred primary are unchanged. After
+authentication, three quiet samples verify UID1000 and one held desktop owner,
+with primary `blit-DP-1-p2` at(67,0), upper `blit-DP-1-p1` at(0,0), and
+`blit-HDMI-A-1-p1` at(0,240). Both saved auxiliaries are joined. Native names
+are now stable; per-display wallpaper persistence after another restart remains
+the final physical acceptance for #103, not inferred from these observations.
+
+Default arrow/pearl24px/shadow is active. Read-only canonical-art framebuffer
+oracles match142 opaque pixels on DP-1 and142 on HDMI-A-1 with exact hotspots.
+The first DP capture precedes desktop first paint (black except pointer);
+later `desktop-dp.png`/`desktop-hdmi.png` show wallpaper and application windows.
+These are framebuffer samples, not proof of every application pixel or glass.
+Mouse artwork/controls are delivered; #101 performance is NOT resolved.
+Two550 asynchronous60Hz-intent probes record110/6.039s and115/6.125s pointer
+output submissions, Blit6.62/6.08% of one CPU core. Different pointer locations,
+desktop state and coalescing preclude a normalized548 comparison or a physical
+60Hz/input-to-photon claim. Evidence is ignored under `diagnostics/mouse-550/`.
+
+Published catalogue bundle0.1.5 includes Blit Mouse; docs at hibr-apps:f9e1ce9.
+Against final550 source a1ce53d, installed Hibr0.99.250 ABI16 passes actual
+Mouse callbacks, shared credentials/quiet polling, both native panes' slider/
+save interactions and signed isolated catalogue install/update/remove.
+Publishing/testing its isolated installation is not updating the user's live
+catalogue app. Use catalogue refresh/update if the Mouse pane is missing.
+No Hibr-core changes, SSH, renderer switch, login-policy edit or second owner.
+
 ### 2026-10-18 release-review correction:550 replaces unpublished549
 
 The final549 collection was stopped deliberately, not reported as a completed

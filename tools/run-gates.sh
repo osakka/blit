@@ -268,6 +268,7 @@ suite_renderer() {
     run_gate kms_compose_gate.sh "$ROOT"/tools/tests/kms_compose_gate.sh
     run_gate pointer_art_gate.sh sh "$ROOT/tools/tests/pointer_art_gate.sh"
     run_gate pointer_appearance_gate.rb ruby "$ROOT/tools/tests/pointer_appearance_gate.rb"
+    run_gate pointer_pixel_gate.rb ruby "$ROOT/tools/tests/pointer_pixel_gate.rb"
     run_gate kms_graphics_clip_gate.sh sh "$ROOT/tools/tests/kms_graphics_clip_gate.sh"
     run_gate kms_hotplug_gate.rb ruby "$ROOT"/tools/tests/kms_hotplug_gate.rb
     run_gate kms_hotplug_cycles.rb ruby "$ROOT"/tools/tests/kms_hotplug_cycles.rb
