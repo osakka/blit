@@ -7,6 +7,34 @@ work actually stopped.
 
 ## Status at the last review
 
+### 2026-10-18 mouse549 local checkpoint; stable names#103 next
+
+548 is API-deployed on10.54, with complete settings/font and pure-KMS backend
+preserved. Its focused terminal/renderer collection passes56/0skip/0fail;
+package/manifest checks pass. Authentication was waiting at the last capture,
+so no authenticated speedup claim follows.547 completed97/3skips/0fail.
+
+Mouse549 adds shared antialiased arrow/hand/precision artwork, four palettes,
+24–64px nominal size/shadow and shape-specific hotspots, independent of font.
+Existing settings own appearance. Invalid objects are refused before mutation.
+The initial local full run completes98pass/4skip/0fail (no package); new SDL
+pixel test separately passes25472 pixels across3shapes/2sizes/4rotations.
+Production KMS tests cover48 complete frames, edges, hiding and size/shadow
+changes. A final frozen collection/package/deployment is still required.
+
+The earlier stash0428727 has already been applied; do not apply it again.
+Catalogue pane0.1.5 and our Mouse tests were committed/published by concurrent
+hibr-apps work; current bundle/index checksum agrees at hibr-apps:962da97.
+Preserve unrelated application updates. Retest both native panes, actual
+Mouse sliders/save and signed catalogue before final delivery. Old docs
+below describe the earlier unpublished checkpoint, not current publication.
+
+The user now authorizes Blit#103: one shared stable native client name derived
+from connector plus row-major pane ordinal, not startup time/runtime IDs.
+Keep owner PID/start-time verification and fail closed on duplicate client
+names. No Hibr-core changes, new API or geometry changes. Lower DP-1 primary
+is p2, upper auxiliary p1. Implement/verify this before final549 packaging.
+
 ### 2026-10-18 pointer latency investigation:547 deployed,548 correction
 
 The user still reports jerky pointer motion. The real host now has DP-1 and

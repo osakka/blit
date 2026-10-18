@@ -1,0 +1,57 @@
+#!/usr/bin/env ruby
+require 'json'
+require 'net/http'
+require 'tmpdir'
+require 'timeout'
+require_relative 'gate_port'
+ROOT=File.expand_path('../..',__dir__)
+PORT=gate_port(Integer(ENV.fetch('BLIT_GATE_PORT','19521')))
+BASE=URI("http://127.0.0.1:#{PORT}")
+def request(method,path,body=nil,revision=nil)
+  q={'GET'=>Net::HTTP::Get,'PUT'=>Net::HTTP::Put,'POST'=>Net::HTTP::Post}.fetch(method).new(BASE+path)
+  q['Content-Type']='application/json';q.body=JSON.generate(body) if body
+  q['If-Match']=revision.to_s if revision
+  r=Net::HTTP.start(BASE.host,BASE.port,read_timeout:5){|h|h.request(q)}
+  [r.code.to_i,JSON.parse(r.body)]
+end
+Dir.mktmpdir('blit-pointer-appearance') do |root|
+  pid=nil
+  begin
+    start=-> do
+      env={'SDL_VIDEODRIVER'=>'dummy','BLIT_RENDERER'=>'software','BLIT_LOGIN_AUTOSTART'=>'0',
+           'BLIT_SETTINGS_PATH'=>File.join(root,'settings.json'),'BLIT_INPUT_ROOT'=>root,
+           'BLIT_PSF_FONT'=>File.join(ROOT,'assets/fonts/Blit-Hibr-Terminus16.psf'),
+           'LD_LIBRARY_PATH'=>File.join(ROOT,'build/sdl3-kms')}
+      pid=spawn(env,ENV.fetch('BLIT_GATE_BINARY',File.join(ROOT,'build/blit/blit-server')),PORT.to_s,out:File.join(root,'server.log'),err:[:child,:out])
+      Timeout.timeout(10){loop{begin;break if request('GET','/v1/version')[0]==200;rescue Errno::ECONNREFUSED;end;sleep 0.02}}
+    end
+    start.call
+    initial=request('GET','/v1/settings')[1]
+    expected={'shape'=>'arrow','palette'=>'pearl','size_px'=>24,'shadow'=>true}
+    abort('POINTER_APPEARANCE_FAIL missing canonical defaults') unless initial.dig('effective','pointer')==expected
+    invalid=[{'size_px'=>23},{'size_px'=>65},{'size_px'=>32.5},{'size_px'=>'32'},
+             {'shape'=>'nope'},{'palette'=>'nope'},{'shadow'=>1},{'unknown'=>true},nil,[]]
+    invalid.each do |bad|
+      doc=initial['document'].merge('pointer'=>bad)
+      code,reply=request('PUT','/v1/settings',{'document'=>doc},initial['revision'])
+      abort("POINTER_APPEARANCE_FAIL invalid accepted:#{bad.inspect}:#{code}") unless code==400 && reply['code']=='invalid_settings_pointer'
+      abort('POINTER_APPEARANCE_FAIL invalid mutated settings') unless request('GET','/v1/settings')[1]==initial
+    end
+    custom={'shape'=>'hand','palette'=>'neon','size_px'=>48,'shadow'=>false}
+    code,saved=request('PUT','/v1/settings',{'document'=>initial['document'].merge('pointer'=>custom)},initial['revision'])
+    abort("POINTER_APPEARANCE_FAIL save:#{code}:#{saved}") unless code==200 && saved.dig('effective','pointer')==custom && saved.dig('storage','state')=='clean'
+    stale,_=request('PUT','/v1/settings',{'document'=>initial['document']},initial['revision'])
+    abort('POINTER_APPEARANCE_FAIL stale overwrite') unless stale==409
+    font=request('GET','/v1/fonts')[1]
+    request('PUT','/v1/fonts',{'scale'=>2.0})
+    abort('POINTER_APPEARANCE_FAIL pointer follows font') unless request('GET','/v1/settings')[1].dig('effective','pointer')==custom
+    Process.kill('TERM',pid);Process.wait(pid);pid=nil
+    start.call
+    restored=request('GET','/v1/settings')[1]
+    abort('POINTER_APPEARANCE_FAIL restart lost pointer') unless restored.dig('document','pointer')==custom && restored.dig('effective','pointer')==custom
+    puts 'POINTER_APPEARANCE_PASS invalid=no_mutation stale=409 live=applied restart=durable font=independent'
+  ensure
+    Process.kill('TERM',pid) rescue nil
+    Process.wait(pid) rescue nil
+  end
+end

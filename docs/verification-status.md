@@ -3,6 +3,19 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-18:549 mouse local checkpoint, not yet deployed
+
+Initial full collection98pass/4skips/0fail,120s soak10364 snapshots/942 resizes.
+No package was supplied; the other skips are QEMU, physical multi-display and
+live screenshot backpressure. Shared art tests cover3shapes/4palettes/41sizes;
+appearance API rejects invalid changes without mutation, persists across
+restart and is independent of font. Production KMS verifies48 full frames
+including edges/hide/size/shadow changes; actual SDL pixel test separately
+verifies25472pixels across3shapes/2sizes/4rotations. Native Mouse callback and
+UI drag-to64/save pass locally. Pending: final source/package freeze, catalogue
+retests against the current Hibr, #103 stable-name integration and real host
+deployment/acceptance. Evidence remains `diagnostics/mouse-547/`.
+
 ## 2026-10-18:548 nonvisual PTY correction, physical acceptance pending
 
 547's final frozen collection completes97pass/3explicit skips/0fail;120s

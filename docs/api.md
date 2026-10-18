@@ -1001,6 +1001,33 @@ PCM, which it does not do.
 
 ### Pointer and gamepad settings
 
+#### Pointer appearance (Blit0.1.549+)
+
+Read `GET /v1/settings` → `effective.pointer` for active, default-filled
+appearance. Edit `document.pointer` and submit the **complete** settings
+document using `PUT /v1/settings`, `{"document": ...}`, with the settings
+revision in `If-Match`. This applies live and saves through the existing atomic
+writer. Inspect its storage receipt; stale writes return409 and invalid pointer
+objects return400 `invalid_settings_pointer` before mutation.
+
+```json
+{"shape":"arrow","palette":"pearl","size_px":32,"shadow":true}
+```
+
+Shapes: `arrow`, `hand`, `precision`. Palettes: `pearl`, `obsidian`, `neon`,
+`amber`. Nominal size24–64 integer physical pixels; up to six additional pixels
+hold antialiasing/shadow. Defaults are arrow/pearl/24/shadow-on. Missing fields
+use defaults; remove the object to reset. Shape-specific hotspots preserve
+pointer hit-testing. The same cached vector source drives SDL and direct KMS;
+size is independent of font scale. Motion does not rerasterize the artwork.
+SDL rotates the shape with its output; direct KMS's existing rotation
+capability/refusal contract is unchanged.
+
+Catalogue `control-panel/blit`0.1.5 registers **Blit Mouse** alongside Blit.
+Appearance and stable-ID device controls share its staged settings draft and
+revision-checked Save. Hibr's separate Mouse pane still owns window behaviour.
+Selecting a different pointer is not a performance or input-latency guarantee.
+
 For direct-KMS pointer stalls, inspect
 `GET /v1/diagnostics/runtime` → `snapshot.render.outputs[].kms_phases`.
 `draw_ms`, `copy_ms` and `submit_ms` separate the last frame's CPU scene work,

@@ -150,6 +150,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0130 — Direct-KMS live output reconciliation](0130-direct-kms-live-output-reconciliation.md)
 - [0131 — Independent output pane grids](0131-per-output-pane-grids.md)
 - [0132 — Clipping bounds image work](0132-clipping-bounds-image-work.md)
+- [0133 — Shared API-owned pointer appearance](0133-shared-api-owned-pointer-appearance.md)
 - [0134 — Nonvisual PTY bytes do not paint](0134-nonvisual-pty-bytes-do-not-paint.md)
 
 ## Adding an ADR

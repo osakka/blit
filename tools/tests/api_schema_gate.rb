@@ -16,6 +16,14 @@ paths = schema.fetch('paths')
 raise "unexpected path count #{paths.length}" unless paths.length == 45
 
 settings = schema.fetch('components').fetch('schemas').fetch('Settings')
+appearance = schema.fetch('components').fetch('schemas').fetch('PointerAppearance')
+raise 'pointer appearance contract changed' unless
+  appearance.dig('properties','shape','enum') == %w[arrow hand precision] &&
+  appearance.dig('properties','palette','enum') == %w[pearl obsidian neon amber] &&
+  appearance.dig('properties','size_px','minimum') == 24 &&
+  appearance.dig('properties','size_px','maximum') == 64 &&
+  appearance['additionalProperties'] == false &&
+  settings.dig('properties','effective','required').include?('pointer')
 raise 'settings durability receipt missing' unless settings['required'].include?('storage')
 raise 'login policy schema missing' unless
   settings.dig('properties','document','properties','login','$ref') == '#/components/schemas/LoginPolicy'

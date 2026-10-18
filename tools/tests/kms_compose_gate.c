@@ -529,6 +529,52 @@ static void graphics_bounds_gate(void)
              5010602L);
 }
 
+static void pointer_art_present_gate(void)
+{
+    BlitKms kms;
+    BlitKmsSurfaceView view;
+    BlitPointerArt art;
+    BlitPointerConfig config=blit_pointer_default();
+    KmsOutput *target;
+    uint32_t submitted,deferred;
+    int step,x,y;
+    memset(&kms,0,sizeof(kms));memset(&view,0,sizeof(view));memset(&art,0,sizeof(art));
+    memset(codepoints,0,sizeof(codepoints));memset(background,0,sizeof(background));
+    memset(foreground,0,sizeof(foreground));memset(attributes,0,sizeof(attributes));
+    kms.output_count=1; target=&kms.outputs[0];target->info.id=93;
+    target->info.width=W;target->info.height=H;target->mode.hdisplay=W;target->mode.vdisplay=H;
+    target->front.map=front_pixels;target->back.map=back_pixels;
+    target->front.pitch=target->back.pitch=W*4;
+    target->front.size=target->back.size=sizeof(front_pixels);
+    view.surface_id=1;view.display_id=93;view.surface_revision=1;
+    view.columns=COLS;view.rows=ROWS;view.stride=COLS;
+    view.cell_width=CW;view.cell_height=CH;view.codepoints=codepoints;
+    view.background=background;view.foreground=foreground;view.attributes=attributes;
+    view.default_background=0x102030;
+    for (step=0;step<48;++step) {
+        int px=(step*37%(W+80))-40, py=(step*19%(H+80))-40;
+        int visible=step%7!=0;
+        if (step%8==0) {
+            config.shape=(step/8)%3;config.palette=(step/8)%4;
+            config.size=step%16 ? 64 : 24;config.shadow=step%16!=0;
+            blit_pointer_build(&art,config);blit_kms_set_pointer_art(&kms,&art);
+        }
+        target->flip_pending=0;
+        blit_kms_present(&kms,&view,1,px,py,visible,1,NULL,0,0,0,0,0,&submitted,&deferred);
+        for (y=0;y<H;++y) for (x=0;x<W;++x) {
+            uint32_t expected=0x102030;
+            int ax=x-px+art.hotspot_x,ay=y-py+art.hotspot_y;
+            if (visible && ax>=0 && ay>=0 && ax<art.width && ay<art.height)
+                expected=blit_pointer_blend(expected,art.rgba+(ay*art.width+ax)*4);
+            if (((uint32_t *)target->front.map)[y*W+x]!=expected) {
+                fprintf(stderr,"KMS_POINTER_ART_FAIL step=%d x=%d y=%d\n",step,x,y);exit(1);
+            }
+        }
+    }
+    free(target->scene);
+    puts("KMS_POINTER_ART_PASS frames=48 every_pixel=exact size_changes=clean shadow=clean edges=clipped hotspot=exact");
+}
+
 int main(void)
 {
     long full;
@@ -542,6 +588,7 @@ int main(void)
     output_ready_mask_gate();
     scene_copy_gate();
     pointer_terminal_present_gate();
+    pointer_art_present_gate();
     incremental_matches_full_gate();
     graphics_bounds_gate();
 

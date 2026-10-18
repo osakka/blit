@@ -2297,6 +2297,20 @@ components:
               additionalProperties: {type: integer}
         revision: {$ref: '#/components/schemas/Revision'}
       additionalProperties: false
+    PointerAppearance:
+      type: object
+      additionalProperties: false
+      description: >-
+        Software pointer appearance shared by SDL and direct KMS, independent
+        of terminal cursor/font scale. Edits to settings apply live and persist.
+        Missing fields use these defaults; removing the object resets appearance.
+        Pixel size is nominal; up to six extra pixels contain antialiasing/shadow.
+        Explicit shape-specific hotspots preserve hit-test coordinates.
+      properties:
+        shape: {type: string, enum: [arrow, hand, precision], default: arrow}
+        palette: {type: string, enum: [pearl, obsidian, neon, amber], default: pearl}
+        size_px: {type: integer, minimum: 24, maximum: 64, default: 24}
+        shadow: {type: boolean, default: true}
     Settings:
       type: object
       required: [revision, path, persisted, storage, document, effective]
@@ -2378,6 +2392,7 @@ components:
               properties:
                 font_id: {type: string}
                 scale: {type: number, minimum: 1.0, maximum: 3.0}
+            pointer: {$ref: '#/components/schemas/PointerAppearance'}
             display_layouts:
               type: object
               maxProperties: 16
@@ -2436,7 +2451,7 @@ components:
           type: object
           required: [render_interval_ms, pane_layout, renderer_requested,
                      renderer_active, kms_async_pageflip, expect_desktop,
-                     login, login_restart_required]
+                     login, login_restart_required, pointer]
           properties:
             render_interval_ms: {type: integer, minimum: 1, maximum: 100}
             pane_layout: {type: string}
@@ -2446,6 +2461,7 @@ components:
             expect_desktop: {type: boolean}
             login: {$ref: '#/components/schemas/LoginPolicy'}
             login_restart_required: {type: boolean}
+            pointer: {$ref: '#/components/schemas/PointerAppearance'}
           additionalProperties: false
     LoginPolicy:
       type: object

@@ -676,6 +676,8 @@ typedef struct {
     SDL_Renderer *renderer;
     SDL_Texture *scene_texture;
     SDL_Texture *scene_work_texture;
+    SDL_Texture *pointer_texture;
+    unsigned long long pointer_art_revision;
     SDL_Texture *glyph_atlas;
     /* ADR 0062: wide glyphs come from a 16x16 font with fifty thousand
        bitmaps, which will not fit an atlas built up front. This one is a
@@ -1018,6 +1020,7 @@ typedef struct {
     int motion_report_row;
     int font_scale_tenths;
     int pointer_valid;
+    BlitPointerArt pointer_art;
     int pointer_output;
     float pointer_x;
     float pointer_y;
@@ -1503,6 +1506,8 @@ static void destroy_sdl_graphics_cache(BlitOutput *output);
 static uint64_t monotonic_us(void);
 static void diagnostic_trace(BlitRuntime *runtime, const char *kind,
                              const char *detail);
+static void diagnostic_log(BlitRuntime *runtime, const char *level,
+                            const char *code, const char *detail);
 static void diagnostics_json(const BlitRuntime *runtime, char *body,
                              size_t capacity);
 static void terminal_sessions_json(BlitRuntime *runtime, char *body,
@@ -1643,67 +1648,48 @@ static void overlays_json(const BlitRuntime *runtime, char *body,
 
 static void render_pointer(BlitRuntime *runtime, int output_index)
 {
-    SDL_Renderer *renderer;
+    BlitOutput *output = &runtime->outputs[output_index];
+    const BlitPointerArt *art = &runtime->pointer_art;
+    SDL_Vertex vertices[4];
+    static const int indices[6] = {0,1,2,0,2,3};
+    static const float corners[4][2] = {{0,0},{1,0},{1,1},{0,1}};
     int display_index;
-    float x;
-    float y;
+    int i;
+    float x, y;
 
     if (!runtime->pointer_valid || runtime->pointer_output != output_index)
         return;
     display_index = display_index_for_output(runtime, output_index);
     if (display_index < 0)
         return;
-    renderer = runtime->outputs[output_index].renderer;
-    x = runtime->pointer_x - runtime->displays[display_index].bounds.x;
-    y = runtime->pointer_y - runtime->displays[display_index].bounds.y;
-    /* KMSDRM does not reliably provide a hardware cursor.  Draw a small
-       high-contrast software cursor so pointer visibility is independent of
-       the compositor, desktop shell, or terminal mouse-reporting mode.
-
-       Issue #69. The cursor is drawn *after* the scene has been presented, so
-       it is in panel coordinates while the pointer's position -- and the cell
-       grid it is hit-testing against -- is logical. Both the hotspot and the
-       arrow's own shape go through the transform: rotating the hotspot alone
-       would leave an arrow pointing the wrong way on a rotated panel, and the
-       shape is where that shows. The position is physical output space and
-       the arrow dimensions follow the active font scale. */
-    {
-        static const float arrow[6][4] = {
-            { 0.0f, 0.0f, 0.0f, 15.0f },
-            { 0.0f, 0.0f, 11.0f, 11.0f },
-            { 4.0f, 10.0f, 7.0f, 17.0f },
-            { 1.0f, 1.0f, 1.0f, 12.0f },
-            { 1.0f, 1.0f, 9.0f, 9.0f },
-            { 4.0f, 10.0f, 6.0f, 15.0f }
-        };
-        int rotation = runtime->displays[display_index].rotation;
-        float scale = (float)font_scale_value(runtime);
-        float panel_width = (float)runtime->displays[display_index]
-            .physical_width;
-        float panel_height = (float)runtime->displays[display_index]
-            .physical_height;
-        int line;
-
-        for (line = 0; line < 6; ++line) {
-            float from_x;
-            float from_y;
-            float to_x;
-            float to_y;
-
-            if (line == 0)
-                SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-            else if (line == 3)
-                SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-            blit_rotate_point(rotation, (int)panel_width, (int)panel_height,
-                              x + arrow[line][0] * scale,
-                              y + arrow[line][1] * scale,
-                              &from_x, &from_y);
-            blit_rotate_point(rotation, (int)panel_width, (int)panel_height,
-                              x + arrow[line][2] * scale,
-                              y + arrow[line][3] * scale, &to_x, &to_y);
-            SDL_RenderLine(renderer, from_x, from_y, to_x, to_y);
+    if (output->pointer_art_revision != art->revision) {
+        if (output->pointer_texture) SDL_DestroyTexture(output->pointer_texture);
+        output->pointer_texture=SDL_CreateTexture(output->renderer,
+            SDL_PIXELFORMAT_RGBA32,SDL_TEXTUREACCESS_STATIC,art->width,art->height);
+        output->pointer_art_revision=art->revision;
+        if (!output->pointer_texture) {
+            diagnostic_log(runtime,"error","pointer_texture_failed",SDL_GetError());return;
         }
+        if (!SDL_UpdateTexture(output->pointer_texture,NULL,art->rgba,art->width*4) ||
+            !SDL_SetTextureBlendMode(output->pointer_texture,SDL_BLENDMODE_BLEND)) {
+            SDL_DestroyTexture(output->pointer_texture);output->pointer_texture=NULL;
+            diagnostic_log(runtime,"error","pointer_texture_failed",SDL_GetError());return;
+        }
+        SDL_SetTextureScaleMode(output->pointer_texture,SDL_SCALEMODE_NEAREST);
     }
+    if (!output->pointer_texture) return;
+    x=runtime->pointer_x-runtime->displays[display_index].bounds.x-art->hotspot_x;
+    y=runtime->pointer_y-runtime->displays[display_index].bounds.y-art->hotspot_y;
+    for (i=0;i<4;++i) {
+        blit_rotate_point(runtime->displays[display_index].rotation,
+            runtime->displays[display_index].physical_width,
+            runtime->displays[display_index].physical_height,
+            x+corners[i][0]*art->width,y+corners[i][1]*art->height,
+            &vertices[i].position.x,&vertices[i].position.y);
+        vertices[i].tex_coord.x=corners[i][0];vertices[i].tex_coord.y=corners[i][1];
+        vertices[i].color.r=vertices[i].color.g=vertices[i].color.b=vertices[i].color.a=1.0f;
+    }
+    SDL_RenderGeometry(output->renderer,output->pointer_texture,vertices,4,indices,6);
 }
 
 static int refresh_period_ms(double refresh_hz)
@@ -19694,6 +19680,8 @@ static void settings_apply_displays(BlitRuntime *runtime)
     }
 }
 
+#include "blit_pointer_settings.h"
+
 static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
 {
     static char document[BLIT_SETTINGS_CAPACITY];
@@ -19723,7 +19711,9 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
                  "\"render_interval_ms\":%d,\"pane_layout\":\"%dx%d\","
                  "\"renderer_requested\":\"%s\",\"renderer_active\":\"%s\","
                  "\"kms_async_pageflip\":%s,\"expect_desktop\":%s,"
-                 "\"login\":%s,\"login_restart_required\":%s}}",
+                 "\"login\":%s,\"login_restart_required\":%s,"
+                 "\"pointer\":{\"shape\":\"%s\",\"palette\":\"%s\","
+                 "\"size_px\":%d,\"shadow\":%s}}}",
                  runtime->settings_revision, runtime->settings_path,
                  runtime->settings_enabled ? "true" : "false",
                  !runtime->settings_enabled ? "disabled" :
@@ -19739,7 +19729,11 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
                          runtime->sdl_renderer_name : "unavailable"),
                  runtime->kms_async_pageflip ? "true" : "false",
                  runtime->expect_desktop ? "true" : "false", login,
-                 restart_required ? "true" : "false");
+                 restart_required ? "true" : "false",
+                 blit_pointer_shapes[runtime->pointer_art.config.shape],
+                 blit_pointer_palettes[runtime->pointer_art.config.palette],
+                 runtime->pointer_art.config.size,
+                 runtime->pointer_art.config.shadow ? "true" : "false");
 }
 
 /* A read-only, point-in-event-loop-turn state dump for operators and
@@ -19889,6 +19883,7 @@ static int settings_reset(BlitRuntime *runtime, int remove_file)
     ++runtime->audio_devices_revision;
     runtime->settings_dirty = 0;
     ++runtime->settings_revision;
+    settings_apply_pointer(runtime);
     if (remove_file) {
         runtime->settings_saved_revision = runtime->settings_revision;
         runtime->settings_write_reported = 0;
@@ -21039,12 +21034,18 @@ static void handle_request(int fd, BlitRuntime *runtime,
             int old_rows;
             BlitLoginPolicy login_policy;
             int layout_problem;
+            BlitPointerConfig proposed_pointer;
 
             if (document_cursor == NULL ||
                 !json_object_slice(document_cursor, document,
                                    sizeof(document))) {
                 send_problem(fd, 400, "Bad Request", "invalid_settings",
                              "A settings write carries the whole document under \"document\", as a JSON object.");
+                return;
+            }
+            if (!pointer_config_parse(document,&proposed_pointer)) {
+                send_problem(fd,400,"Bad Request","invalid_settings_pointer",
+                             "Pointer shape, palette, size_px (24..64 integer) and shadow must match the appearance schema.");
                 return;
             }
             if (!settings_server_layout(document, &requested_columns,
@@ -21094,6 +21095,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
                      sizeof(runtime->settings_document), "%s", document);
             settings_apply_font(runtime);
             settings_apply_server(runtime);
+            settings_apply_pointer(runtime);
             display_layouts_materialize(runtime, 0);
             settings_apply_pane_layout(runtime, old_columns, old_rows);
             reset_render_schedule(runtime, monotonic_us());
@@ -22082,6 +22084,7 @@ static void discover_displays(BlitRuntime *runtime)
         error[0] = '\0';
         runtime->direct_kms = 1;
         runtime->kms = blit_kms_new(&runtime->font, &runtime->wide_font);
+        blit_kms_set_pointer_art(runtime->kms,&runtime->pointer_art);
         if (runtime->kms == NULL || blit_kms_open(runtime->kms, error,
                                                    sizeof(error)) < 0) {
             snprintf(runtime->sdl_error, sizeof(runtime->sdl_error),
@@ -22455,6 +22458,9 @@ static void destroy_outputs(BlitRuntime *runtime)
             SDL_DestroyTexture(runtime->outputs[i].scene_work_texture);
         runtime->outputs[i].scene_texture = NULL;
         runtime->outputs[i].scene_work_texture = NULL;
+        if (runtime->outputs[i].pointer_texture) SDL_DestroyTexture(runtime->outputs[i].pointer_texture);
+        runtime->outputs[i].pointer_texture=NULL;
+        runtime->outputs[i].pointer_art_revision=0;
         if (runtime->outputs[i].glyph_atlas != NULL)
             SDL_DestroyTexture(runtime->outputs[i].glyph_atlas);
         if (runtime->outputs[i].wide_atlas != NULL)
@@ -22581,6 +22587,7 @@ static int activate_direct_kms_fallback(BlitRuntime *runtime)
     destroy_outputs(runtime);
     error[0] = '\0';
     runtime->kms = blit_kms_new(&runtime->font, &runtime->wide_font);
+    blit_kms_set_pointer_art(runtime->kms,&runtime->pointer_art);
     if (runtime->kms == NULL || blit_kms_open(runtime->kms, error,
                                                sizeof(error)) < 0) {
         if (runtime->kms != NULL) {
@@ -28390,6 +28397,7 @@ int main(int argc, char **argv)
                            "Stored auxiliary display bindings are invalid; they remain dormant until corrected through the settings API.");
         settings_apply_font(&runtime);
         settings_apply_server(&runtime);
+        settings_apply_pointer(&runtime);
         settings_apply_login_at_boot(&runtime);
         if (runtime.kms_async_pageflip)
             setenv("BLIT_KMS_ASYNC_PAGEFLIP", "1", 1);

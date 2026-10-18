@@ -6,6 +6,7 @@
 
 #include "blit_font.h"
 #include "blit_graphics.h"
+#include "blit_pointer_art.h"
 
 typedef struct BlitKms BlitKms;
 
@@ -129,6 +130,7 @@ void blit_kms_hotplug_info(BlitKms *kms, BlitKmsHotplugInfo *info);
 uint32_t blit_kms_ready_output_mask(const BlitKms *kms);
 int blit_kms_cell_width(const BlitKms *kms);
 int blit_kms_cell_height(const BlitKms *kms);
+void blit_kms_set_pointer_art(BlitKms *kms, const BlitPointerArt *art);
 int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views,
                      int view_count, float pointer_x, float pointer_y,
                      int pointer_visible, uint32_t output_mask,

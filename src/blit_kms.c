@@ -27,8 +27,8 @@
 #define KMS_MAX_MODES BLIT_KMS_MAX_MODES
 #define KMS_FONT_W 8
 #define KMS_FONT_H 8
-#define KMS_POINTER_W 12
-#define KMS_POINTER_H 18
+#define KMS_POINTER_W BLIT_POINTER_MAX
+#define KMS_POINTER_H BLIT_POINTER_MAX
 #define KMS_WHITE 0xbed2beU
 #define KMS_ATTR_WIDE 16
 #define KMS_ATTR_CONTINUATION 32
@@ -85,6 +85,8 @@ typedef struct {
     int pointer_background_y;
     int pointer_background_width;
     int pointer_background_height;
+    int pointer_width;
+    int pointer_height;
     BlitFont *font;
 } KmsOutput;
 
@@ -133,6 +135,8 @@ struct BlitKms {
     double monitor_last_scan_ms;
     char hotplug_error[128];
     BlitFont *font;
+    const BlitPointerArt *pointer_art;
+    unsigned long long pointer_art_revision;
     /* ADR 0062: the 16x16 font for wide cells. */
     BlitFont *wide_font;
     int cell_width_override;
@@ -1288,8 +1292,10 @@ static int pointer_intersects_output(const KmsOutput *output,
     if (!visible) return 0;
     local_x = (int)x - output->info.x;
     local_y = (int)y - output->info.y;
-    return local_x < output->mode.hdisplay && local_x + 12 > 0 &&
-        local_y < output->mode.vdisplay && local_y + 18 > 0;
+    return local_x < output->mode.hdisplay &&
+        local_x + (output->pointer_width ? output->pointer_width : 12) > 0 &&
+        local_y < output->mode.vdisplay &&
+        local_y + (output->pointer_height ? output->pointer_height : 18) > 0;
 }
 
 static void restore_pointer_background(KmsOutput *output)
@@ -1334,8 +1340,8 @@ static void save_pointer_background(KmsOutput *output, float x, float y)
 {
     int left = (int)x - output->info.x;
     int top = (int)y - output->info.y;
-    int right = left + KMS_POINTER_W;
-    int bottom = top + KMS_POINTER_H;
+    int right = left + (output->pointer_width ? output->pointer_width : 12);
+    int bottom = top + (output->pointer_height ? output->pointer_height : 18);
     int row;
 
     if (left < 0) left = 0;
@@ -1387,10 +1393,10 @@ static void include_pointer_damage(const KmsOutput *output,
     ch = view->cell_height > 0 ? view->cell_height : KMS_FONT_H;
     left = local_x > view->origin_x ? local_x : view->origin_x;
     top = local_y > view->origin_y ? local_y : view->origin_y;
-    right = local_x + 12 < view->origin_x + view->columns * cw ?
-        local_x + 12 : view->origin_x + view->columns * cw;
-    bottom = local_y + 18 < view->origin_y + view->rows * ch ?
-        local_y + 18 : view->origin_y + view->rows * ch;
+    right = local_x + (output->pointer_width ? output->pointer_width : 12);
+    if (right > view->origin_x + view->columns*cw) right=view->origin_x+view->columns*cw;
+    bottom = local_y + (output->pointer_height ? output->pointer_height : 18);
+    if (bottom > view->origin_y + view->rows*ch) bottom=view->origin_y+view->rows*ch;
     if (left >= right || top >= bottom) return;
     first_column = (left - view->origin_x) / cw;
     first_row = (top - view->origin_y) / ch;
@@ -1607,6 +1613,19 @@ int blit_kms_cell_height(const BlitKms *kms)
     return kms != NULL ? blit_font_height(kms->font) : KMS_FONT_H;
 }
 
+void blit_kms_set_pointer_art(BlitKms *kms, const BlitPointerArt *art)
+{
+    int i;
+    if (kms == NULL || art == NULL || !art->revision) return;
+    kms->pointer_art = art;
+    if (kms->pointer_art_revision == art->revision) return;
+    kms->pointer_art_revision = art->revision;
+    kms->pointer_state_valid = 0;
+    /* Appearance changes can shrink the footprint; invalidate once so no
+       pixels of the previous, larger shape survive. Motion is incremental. */
+    for (i = 0; i < kms->output_count; ++i) kms_output(kms,i)->initialized = 0;
+}
+
 int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_count,
                      float pointer_x, float pointer_y, int pointer_visible,
                      uint32_t output_mask, const BlitKmsOverlay *overlays,
@@ -1627,6 +1646,12 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
     long long started = 0;
     const char *screenshot_ready_file = getenv("BLIT_KMS_SCREENSHOT_READY_FILE");
     if (kms == NULL) return -1;
+    /* The canonical state/hit-testing coordinates stay at the hotspot.
+       Only the compositing coordinates are translated to the stamp origin. */
+    if (kms->pointer_art) {
+        pointer_x -= kms->pointer_art->hotspot_x;
+        pointer_y -= kms->pointer_art->hotspot_y;
+    }
     if (submitted_output_mask != NULL) *submitted_output_mask = 0;
     if (deferred_output_mask != NULL) *deferred_output_mask = 0;
     for (i = 0; i < view_count; ++i)
@@ -1660,6 +1685,8 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         long long flip_started = 0;
         int modeset_frame;
         int trace_phases = getenv("BLIT_KMS_TRACE_PHASES") != NULL;
+        output->pointer_width = kms->pointer_art ? kms->pointer_art->width : 12;
+        output->pointer_height = kms->pointer_art ? kms->pointer_art->height : 18;
         if (output->info.presentation_state == BLIT_KMS_PRESENTATION_FAILED)
             continue;
         if (!(output_mask & (1U << i)))
@@ -1856,14 +1883,27 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
             }
         draw_kms_effects(output, effect_enabled, effect_intensity);
         draw_kms_overlays(output, overlays, overlay_count);
-        if (pointer_visible && pointer_x >= output->info.x &&
-            pointer_x < output->info.x + output->info.width &&
-            pointer_y >= output->info.y && pointer_y < output->info.y + output->info.height) {
+        if (pointer_intersects_output(output, pointer_x, pointer_y, pointer_visible)) {
             int x = (int)pointer_x - output->info.x;
             int y = (int)pointer_y - output->info.y;
             save_pointer_background(output, pointer_x, pointer_y);
-            fill_rect(output, x, y, 2, 18, 0xffffffU);
-            fill_rect(output, x, y, 12, 2, 0xffffffU);
+            if (kms->pointer_art) {
+                const BlitPointerArt *art = kms->pointer_art;
+                int px, py;
+                for (py=0; py<art->height; ++py) for (px=0; px<art->width; ++px) {
+                    int dx=x+px, dy=y+py;
+                    uint32_t *pixel;
+                    const unsigned char *rgba;
+                    if (dx<0 || dy<0 || dx>=output->mode.hdisplay || dy>=output->mode.vdisplay) continue;
+                    rgba=art->rgba+(py*art->width+px)*4;
+                    if (!rgba[3]) continue;
+                    pixel=(uint32_t *)((unsigned char *)output->back.map+(size_t)dy*output->back.pitch)+dx;
+                    *pixel=blit_pointer_blend(*pixel,rgba);
+                }
+            } else {
+                fill_rect(output, x, y, 2, 18, 0xffffffU);
+                fill_rect(output, x, y, 12, 2, 0xffffffU);
+            }
         } else {
             output->pointer_background_valid = 0;
         }
