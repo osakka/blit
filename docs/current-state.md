@@ -7,7 +7,69 @@ work actually stopped.
 
 ## Status at the last review
 
-### 2026-10-18 candidate0.1.546: make legacy migration durable
+### 2026-10-18 deployed0.1.546 and catalogue pane0.1.4
+
+The authorized API updater installed and verified **0.1.546** on192.168.10.54.
+Pure `drm-kms`, font scale1.0, lower preferred primary, saved auxiliary intent
+and both240x67 pane grids were preserved. Settings revision59 is clean. The
+legacy DP-1 split is now durably stored as `display_layouts.DP-1={columns:1,
+rows:2}`; a further API restart preserved the entire settings response and
+revision. No SSH or Hibr-core changes were used.
+
+The final frozen collection reports **97 pass,3 skip,0 fail**, including package
+validation and a120-second four-PTY soak with11288 snapshots/1026 resizes.
+The explicit skips are QEMU oracle, physical multi-display and live screenshot
+backpressure. A separate byte-identical TCC server rebuild and reproducible
+package rebuild pass. Source/package identity is pinned in
+`releases/0.1.546.yaml`; the later fixture-only correction is commit7e4cd56.
+The superseded545 was never deployed or tagged; its generated package was
+moved into the ignored545 diagnostics archive rather than left as a handoff.
+
+Canonical catalogue pane **0.1.4**, `hibr-apps:e309874`, is published with a
+signed index. Actual callback/API, native slider-drag, private-token/native
+preference-load-order and isolated catalogue install/update/remove tests pass
+against frozen546. Update through `catalogue refresh` then
+`catalogue update control-panel/blit`; reopen the pane. This publication does
+not mean the user's installed catalogue app was updated by us. Font scale is
+still global; independent per-pane font profiles are not delivered here.
+
+Real-host bounded framebuffer validation passes21 cells/2688 pixels, including
+right-edge cells and a bold diamond. Its temporary free-pane PTY was removed.
+No additional process-CPU report was produced. The upper pane is now occupied
+by the authenticated join and is not available for free-pane probes. Do not
+delete session3: it is the policy-created join, not a leftover probe.
+
+The user has now authenticated. A fresh native observation verifies one
+desktop owner, lower primary at(row67,column0), upper joined client at(0,0),
+and134x240 union. Session1 is focused; session3 is the join. Only DP-1 is
+physically connected. The API screenshot shows the retro-car pixel wallpaper
+on both panes and an About window below. This is visual evidence, not a
+pixel oracle or general movement acceptance. The observation also reports
+`input_device_missing`: open keyboards2/pointers2 are below this process's
+peaks5/4. The source intentionally warns on that reduction, not just absent
+inventory entries. Retain the observation; it does not prove current physical
+input failure or successful KVM reattachment.
+
+Two360-motion API probes are deliberately not60Hz stress tests. The login
+screen run submitted711 output frames over24.83s at6.84% of one Blit CPU core.
+After authentication, the same bounded pointer-only workload submitted369
+frames over26.47s at3.55% of one Blit CPU core; sampled submission rates were
+11.14–17.67Hz, native-owner CPU delta0, hotplug scan1.66ms/no worker error.
+The pointer was near the pane boundary and no window drag/click was injected;
+this does not establish Hibr drag performance or a maximum sustainable rate.
+HTTP latency limits injection and the runs have different desktop workloads.
+No physical multi-output speedup or display-refresh guarantee is claimed.
+
+Next: finish physical second/third-output unplug/replug and authenticated
+wallpaper/window-drag CPU/cadence acceptance in Blit#100/#101. Leave the
+additional monitor connected for that measurement. The production fractional
+image clipping bottleneck is fixed and locally proven (ADR0132); the user's
+reported whole-machine slowdown remains open until that workload is measured.
+Evidence: ignored `diagnostics/per-display-546/`, including `preservation.json`,
+`final-live.json`, `authenticated-desktop.png`, `live-grid/`, `desktop-pointer/`
+and `gates-final.log`.
+
+### Historical pre-deployment checkpoint: candidate0.1.546
 
 Latest validation progress: package `blit_0.1.546-1_amd64.deb` is built from
 `d7515efd48988ed46e1bb266bb860c41bb4891a1`, SHA256

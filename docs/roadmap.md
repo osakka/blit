@@ -3,7 +3,28 @@
 The roadmap is ordered by dependency. A later milestone must not become a
 second, parallel implementation of an earlier one.
 
-## Current position — direct-KMS live monitor discovery
+## Current position — independent grids and bounded direct-KMS repaint
+
+Deployed0.1.546 retains pure KMS and adds connector-keyed1–8 column/row grids,
+new-output1x1 defaults, durable legacy migration and validated occupied-pane
+conflicts. The canonical settings document remains the sole desired-state
+store. It also bounds fractional-image work to the actual damaged intersection
+(ADRs0131/0132) and exposes process/native-owner CPU plus host load. The final
+frozen suite is97pass/3explicit skips/0fail; reproducible package/server builds
+and physical framebuffer grid/font samples pass. See the verification ledger
+for limits and exact identities.
+
+Published catalogue pane0.1.4 adds native horizontal font/grid sliders and
+private URL-bound token persistence, including correct native preference load
+ordering. Scale is still global. The user has logged in on546: native inventory
+verifies lower primary plus upper join belonging to one desktop owner.
+Only DP-1 is physically connected; bounded pointer/CPU measurements are not
+window-drag or display-refresh-capacity acceptance. Blit#100 remains open for
+physical second/third-output hotplug, #101 for the reported whole-machine
+slowdown with authenticated wallpaper/drag and extra monitors. No universal
+performance claim, multi-GPU support or automatic primary migration is added.
+
+## Previous position — direct-KMS live monitor discovery
 
 The user requested pure KMS/DRM and implementation of Blit#100 in that backend.
 The physical host was switched to pure KMS0.1.543, then API-updated to0.1.544,

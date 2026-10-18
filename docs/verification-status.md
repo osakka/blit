@@ -3,7 +3,47 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
-## 2026-10-18:0.1.546 durability correction;0.1.545 not deployed
+## 2026-10-18:0.1.546 deployed; final local and bounded host checks
+
+The frozen full collection with the exact package completes **97pass/3skip/
+0fail**. The120s four-PTY soak records11288 snapshots/1026 resizes. Skips are
+explicit: QEMU oracle, physical multi-display, live screenshot backpressure.
+Manifest/artifact checks, byte-identical TCC server rebuild and reproducible
+package rebuild pass. `releases/0.1.546.yaml` fixes the source/documentation,
+package and runtime hashes. Commit7e4cd56 corrects only the auxiliary-policy
+fixture's startup-save receipt ordering; the production artifact is unchanged.
+
+The API updater verifies546 on192.168.10.54. Fresh scale1.0, pure `drm-kms`,
+lower-primary policy, auxiliary intent and both240x67 grids are preserved.
+Migration adds only the DP-1 output map plus revision59; the entire settings
+response is unchanged across a subsequent API restart. The actual framebuffer
+font/grid oracle passes21cells/2688pixels and removes its temporary PTY.
+
+Catalogue pane0.1.4 (`hibr-apps:e309874`) passes actual callback/API, native UI
+drag and signed catalogue lifecycle gates against546. Its native-order test
+specifically restores URL preferences after sourcing the pane and before first
+use: red0.1.3, green0.1.4. Publishing is not installing the app on the host.
+
+After the user's authentication, API/native inventory verifies one owner,
+primary lower/session1 and joined upper/session3,134x240 union. The captured
+framebuffer shows pixel wallpaper on both and an About window below. A second
+bounded360-motion API probe records369 output submissions/26.47s, Blit CPU
+3.55% of one core, native-owner CPU delta0 and sampled submission rates
+11.14–17.67Hz. It injects no clicks/drags; its pointer is near the pane boundary
+and HTTP limits cadence. The earlier login-screen result was711 submissions/
+24.83s/6.84% CPU. Neither establishes60Hz capacity, physical input latency,
+authenticated drag correctness, or a multi-monitor speedup. Only DP-1 is
+connected. An `input_device_missing` diagnostic warning also remains visible:
+open keyboards2/pointers2 are below per-process peaks5/4. Source intentionally
+warns on that reduction, not only absent inventory entries. Do not silently
+turn it into either a healthy-input claim or proof of current input failure.
+
+Blit#100/#101 remain open for actual second/third-output hotplug and the
+reported desktop slowdown. Local clipping/scaler speedup is not their physical
+acceptance. Evidence: `diagnostics/per-display-546/`; see current-state for the
+resume point. Superseded545 remains explicitly not deployed/tagged.
+
+## Historical pre-deployment checkpoint:0.1.546 durability correction
 
 The first546 full run reports95pass/4skip/1failure. The failed controller
 fixture sampled settings before the startup migration save settled; its
