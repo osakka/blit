@@ -3,6 +3,32 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-18: authenticated split acceptance and pane0.1.1
+
+The user reports the live joined setup looks perfect. Read-only API evidence
+shows one verified native owner293391/starttime67784223, lower primary at
+`(67,0,67,240)`, upper managed auxiliary at `(0,0,67,240)`, union134x240.
+The auxiliary reports `joined/native_client_verified` with confirmed
+offset(-67,0). No diagnostic join, movement, input injection or restart was
+performed. Evidence: `diagnostics/auxiliary-543/deploy/user-accepted-login.json`
+and `joined-policy.json`. Three read-only native association samples also
+pass, including background freshness and unchanged owner lifetime across
+the observation TTL (`deploy/authenticated/`). This is acceptance of this physical one-output
+split, not general monitor hotplug, every protocol or high-refresh workloads.
+
+The catalogue pane is renamed **Blit**, version0.1.1, commit
+`hibr-apps:2b2608e`. Actual Hibr registration asserts the exact new title;
+callback/API, installed Hibr UI/keyboard and installed catalogue lifecycle
+gates pass. Generated catalogue metadata/checksums and signature verify.
+Screenshots: `diagnostics/control-panel-011/` (local SDL software, not a
+physical capture). The server binary and live renderer/settings are unchanged.
+
+Source inspection identifies a specific remaining gap: SDL display discovery
+is startup-only, and its event handler does not reconcile display additions/
+removals. The panel's observation refresh cannot compensate for that. Blit#100
+tracks implementation and physical validation; the guides now state this
+limitation explicitly.
+
 ## 2026-10-18: 0.1.543 package, catalogue publication and API deployment
 
 The manifest gate and package artifact gate pass for

@@ -743,6 +743,15 @@ policy is controlled by the separate Apply operation below.
 
 #### Live auxiliary displays (0.1.543)
 
+Display discovery in the current SDL implementation occurs at server startup.
+It does not handle live SDL display-added/removed events by rebuilding output
+resources and topology. Consequently an auxiliary waiting for a connector
+does not prove that plugging in a monitor will make that connector discoverable
+without restarting the service. API and Control Panel refreshes report the
+server inventory; they are not hardware rescans. Startup-detected monitors can
+be selected explicitly through Apply and saved as defaults. New monitors are
+not automatically added to the requested auxiliary set.
+
 `GET /v1/auxiliary-displays` returns the live policy revision, operation ID,
 source (`startup` or `apply`), and per-binding progress. Each binding reports
 its output selector, pane ordinal, resolved pane ID, managed session ID,

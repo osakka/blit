@@ -7,6 +7,32 @@ work actually stopped.
 
 ## Status at the last review
 
+### 2026-10-18 authenticated acceptance and Control Panel rename
+
+The user reports the joined setup looks perfect. A read-only live observation
+corroborates the automatic attachment: verified UID/GID1000, native owner
+293391/starttime67784223, lower named login client at `(67,0,67,240)` primary,
+upper managed client `blit-aux-9cc7bc41f5-4` at `(0,0,67,240)` non-primary,
+one134x240 native union. `/v1/auxiliary-displays` reports `joined` with
+confirmed relative offset `(-67,0)`. No manual join or diagnostic movement
+was needed for this checkpoint. This accepts the observed one-output split,
+not arbitrary physical monitor counts or hotplug.
+
+The Control Panel is now named **Blit**, published as pane0.1.1 in
+`hibr-apps:2b2608e`. Callback/API, actual Hibr UI and catalogue lifecycle gates
+pass; generated metadata/checksums and catalogue signature are updated.
+Use `catalogue refresh` then `catalogue update control-panel/blit` for an
+existing install. The catalogue identifier remains `control-panel/blit`.
+No Blit server package change or live restart is needed for the rename.
+
+Newly attached monitors are not yet reconciled live by the SDL server:
+`discover_displays()` is startup-only and `service_sdl_events()` has no display
+add/remove handling. Startup-detected outputs appear as selectable panes;
+unknown outputs do not automatically become requested auxiliaries. Explicit
+Apply/Save authorizes them. Issue[Blit#100](https://git.home.arpa/itdlabs/blit/issues/100)
+tracks the missing live output/topology reconciliation and physical unplug/
+replug acceptance. The existing working desktop was left untouched.
+
 ### 2026-10-18 deployed 0.1.543: automatic auxiliary policy and published panel
 
 The authorized API updater installed and verified `0.1.543` on

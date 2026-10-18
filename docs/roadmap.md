@@ -19,7 +19,8 @@ standby's deliberate-release and explicit-reattach behavior now has a
 documented Blit integration rule: provision only for a fresh authenticated
 owner, apply initial placement once, and leave later Hibr Displays choices
 alone. This rule is implemented in0.1.543 under ADRs0124/0128; authenticated
-physical auto-join acceptance remains pending.
+physical one-output split auto-join is now corroborated by native inventory
+and the user's visual acceptance. General physical hotplug remains open.
 
 Version 0.1.537 implements the first foundation only, with physical API
 save/restart persistence and unchanged geometry/backend/font verified.
@@ -38,12 +39,14 @@ after a standby exits. 0.1.543 implements this API/controller and its local
 synthetic, installed-Hibr desktop auto-invite/standby and pending-font-resize
 gates pass. The catalogue pane in `hibr-apps` issue #1 has callback/API,
 catalogue and actual Hibr UI/keyboard acceptance. Reproducible package
-validation and catalogue publication are complete. The host has saved upper
-`DP-1` pane1 auxiliary intent and the live policy waits for authentication;
-lower pane2 remains the primary login. Next: observe the automatic join after
-normal login, confirm placement on10.54, and validate the catalogue pane in
-that authenticated desktop. General multi-output/hotplug and active-primary
-failover are not delivered by this checkpoint.
+validation and catalogue publication are complete. After normal login the
+host reports its saved upper `DP-1` pane1 auxiliary joined with confirmed
+offset(-67,0), lower pane2 primary, and a134x240 native union; the user reports
+the setup looks perfect. Pane0.1.1 is named **Blit**. General multi-output/
+hotplug and active-primary failover are not delivered by this checkpoint.
+Blit#100 tracks startup-only SDL discovery becoming live output/topology
+reconciliation; do not promise that a newly plugged monitor appears merely
+because the Control Panel refreshes API observations.
 
 Version 0.1.538 adds a private post-authentication identity handoff (ADR 0125),
 not automatic joins. The deployed installed hook reports verified UID/GID 1000

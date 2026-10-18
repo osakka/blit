@@ -55,11 +55,11 @@ Keep these evidence boundaries separate:
 The [verification ledger](docs/verification-status.md) is the single place
 where these claims are separated.
 
-The current release is not visually accepted. Read the
+Acceptance is bounded to the recorded tests and host observations. Read the
 [current state and restart point](docs/current-state.md) before resuming work:
-it records the latest live screenshot, the stale-primary/join failure mode,
-the missing physical-input evidence, and the exact next investigation. Do not
-infer a correct UI from healthy timing counters or a successful API response.
+it records the user's accepted one-output split, native attachment evidence,
+remaining hardware coverage, and current implementation gaps. Do not infer a
+correct UI from healthy timing counters or a successful API response.
 
 ## Five-minute operator path
 
@@ -104,7 +104,7 @@ The catalogue pane is published separately from the Blit Debian package:
 catalogue install control-panel/blit
 ```
 
-Open **Control Panel → Hardware → Blit Displays**. Set the server URL and
+Open **Control Panel → Hardware → Blit**. Set the server URL and
 API bearer token in the pane; the token is masked, held only in memory and
 excluded from configuration exports. The privileged updater token is separate
 and is never requested by the pane. Blit0.1.543 or newer supplies the auxiliary
@@ -147,7 +147,7 @@ canonical pane lives only in hibr-apps, not in Hibr core or this package.
   bounded Sixel capability.
 - Saved auxiliary defaults and a live Apply API with authenticated Hibr
   standby startup, native placement confirmation and observable progress.
-- A catalogue **Blit Displays** Control Panel in
+- A catalogue **Blit** Control Panel in
   [hibr-apps](https://git.home.arpa/itdlabs/hibr-apps), with separate Apply/Save,
   fonts, login preferences, configuration import/export and diagnostics.
 - TCC builds, QEMU/VKMS fixtures, terminal conformance, package gates, and
