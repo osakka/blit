@@ -734,7 +734,7 @@ hotplug failover, or automatic primary migration; see ADR 0124 and issue #99.
 unique `{output, pane_ordinal}` bindings. `output` is the stable connector
 name; `pane_ordinal` is one-based row-major within that output's configured
 pane grid. Missing outputs are valid dormant intent. Saving this field does
-not move or reconnect a current desktop client. Blit's later standby
+not move or reconnect a current desktop client. Blit's standby
 reconciler applies initial placement once; Hibr Displays owns subsequent
 session moves. The control panel must keep live Apply separate from durable
 Save as default. Since 0.1.543, saved auxiliaries are loaded as the live policy

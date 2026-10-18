@@ -96,6 +96,28 @@ runtime. ADRs explain durable decisions. Tests and the verification ledger are
 the evidence for claims. No generated client, shell wrapper, screenshot, or
 package is an alternate source of behavior.
 
+## Hibr Control Panel
+
+The catalogue pane is published separately from the Blit Debian package:
+
+```sh
+catalogue install control-panel/blit
+```
+
+Open **Control Panel → Hardware → Blit Displays**. Set the server URL and
+API bearer token in the pane; the token is masked, held only in memory and
+excluded from configuration exports. The privileged updater token is separate
+and is never requested by the pane. Blit0.1.543 or newer supplies the auxiliary
+Apply contract. Catalogue availability also depends on the configured mirror.
+
+Stage auxiliary pane selections, use **Apply auxiliaries now** for the running
+policy, and **Save as Default** for restart-persistent intent. Login placement
+preferences are startup-applied. Font controls use the live font API; Hibr's
+Displays pane owns arrangement after an auxiliary's first confirmed join.
+The [pane guide](https://git.home.arpa/itdlabs/hibr-apps/src/branch/main/docs/blit.md)
+documents connection, conflict handling, import/export and diagnostics. The
+canonical pane lives only in hibr-apps, not in Hibr core or this package.
+
 ## Who should read what
 
 - **API client author:** start with [`docs/api.md`](docs/api.md), then use the

@@ -7,6 +7,47 @@ work actually stopped.
 
 ## Status at the last review
 
+### 2026-10-18 deployed 0.1.543: automatic auxiliary policy and published panel
+
+The authorized API updater installed and verified `0.1.543` on
+`192.168.10.54`. Package SHA256 is
+`c77a52a0ce12a71cf054fb9286cb3246647cd06edeca93bf4b6601e4ed4de96d`;
+source/documentation commit is `61d4db1bfa90c67786a8890f100d3a500aa38c1b`.
+Manifest and package artifact gates pass, including reproducible rebuild
+against pinned Hibr0.99.225/ABI16. The host runs Hibr0.99.241/ABI16 and reports
+ABI compatibility. Before/after observations preserve the complete saved
+document, SDL `kmsdrm`/`opengles2`/`sdl-vsync`, font identity/scale and both
+240x67 pane grids. No diagnostic errors or warnings were reported.
+
+After that preservation check, a revision-protected settings replacement
+adds the intended `{output:"DP-1",pane_ordinal:1}` auxiliary, preserving all
+other settings. The durable receipt is clean at revision40. A separate live
+Apply returns policy revision2 and `waiting_authentication/authentication_required`.
+The single login terminal is focused on lower `pane-display-1-2`; the upper
+pane is empty until authentication. A cached screenshot shows the login
+manager's screensaver in the lower pane, not an authenticated desktop.
+
+The canonical Blit Displays pane0.1.0 is published in `itdlabs/hibr-apps`
+commit `2844df1`, with a generated, verified signed catalogue index. Install
+using `catalogue install control-panel/blit`, then select Hardware → Blit
+Displays in Control Panel. Its connection defaults to localhost; set the API
+token in its masked editor. It never requests the privileged updater token.
+Actual Hibr callback/API, catalogue install/update/remove, and UI/keyboard
+gates pass against the final server binary. Local UI screenshots are in
+`diagnostics/control-panel-543/`; deployment observations and screenshot are
+in `diagnostics/auxiliary-543/deploy/` (ignored generated evidence).
+
+**Resume here:** after normal user authentication, inspect `/v1/login` and
+`/v1/auxiliary-displays` for exact native owner/client identity, automatic
+upper attachment and confirmed one-time placement. Do not launch another
+primary or a manual join to make this test pass. Physical post-login
+acceptance, catalogue mirror availability, and general multi-output/hotplug
+acceptance remain unverified. Blit#99 and hibr-apps#1 retain that distinction.
+No SSH, Hibr-core changes, renderer change or credential bypass was used.
+
+The entries below are dated historical checkpoints, not instructions to
+repeat their older manual-join procedures or remaining implementation work.
+
 ### 2026-10-17 local 0.1.543: live Apply and catalogue pane delivery
 
 The source now implements saved-default boot activation and volatile live

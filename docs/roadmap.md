@@ -5,7 +5,7 @@ second, parallel implementation of an earlier one.
 
 ## Current position — persistent desktop policy and catalogue control panel
 
-The physical host runs 0.1.540 SDL GL. The edge/font correction has bounded
+The physical host runs 0.1.543 SDL GL. The edge/font correction has bounded
 physical pixel acceptance; the user previously accepted the 0.1.535 movement
 checkpoint. These are not universal renderer or refresh-rate guarantees.
 See current-state.md and verification-status.md for exact evidence.
@@ -18,7 +18,8 @@ The panel must not own a second configuration store or controller. Hibr
 standby's deliberate-release and explicit-reattach behavior now has a
 documented Blit integration rule: provision only for a fresh authenticated
 owner, apply initial placement once, and leave later Hibr Displays choices
-alone. This rule is documented in ADR 0124; policy automation is still pending.
+alone. This rule is implemented in0.1.543 under ADRs0124/0128; authenticated
+physical auto-join acceptance remains pending.
 
 Version 0.1.537 implements the first foundation only, with physical API
 save/restart persistence and unchanged geometry/backend/font verified.
@@ -29,15 +30,20 @@ The current implementation extends native association to expose all named
 clients and their signed native rectangles from that same read-only query,
 and adds validated, restart-persistent auxiliary bindings to the existing
 settings document (`auxiliary_displays` stable output plus pane ordinal).
-Both are locally gated, but not packaged or deployed. Next: implement bounded
-ADR 0128 now pins the live Apply contract separately from durable settings:
+Both are locally gated, packaged and deployed. ADR0128 pins the live Apply
+contract separately from durable settings:
 volatile current-session policy, asynchronous per-binding effective state,
 exact native join and one-time placement proof, and conservative no-respawn
 after a standby exits. 0.1.543 implements this API/controller and its local
 synthetic, installed-Hibr desktop auto-invite/standby and pending-font-resize
 gates pass. The catalogue pane in `hibr-apps` issue #1 has callback/API,
-catalogue and actual Hibr UI/keyboard acceptance. Next: package validation,
-catalogue publication and physical acceptance.
+catalogue and actual Hibr UI/keyboard acceptance. Reproducible package
+validation and catalogue publication are complete. The host has saved upper
+`DP-1` pane1 auxiliary intent and the live policy waits for authentication;
+lower pane2 remains the primary login. Next: observe the automatic join after
+normal login, confirm placement on10.54, and validate the catalogue pane in
+that authenticated desktop. General multi-output/hotplug and active-primary
+failover are not delivered by this checkpoint.
 
 Version 0.1.538 adds a private post-authentication identity handoff (ADR 0125),
 not automatic joins. The deployed installed hook reports verified UID/GID 1000

@@ -17,9 +17,10 @@ status. An unavailable resource does not erase the user's preference.
 The user confirmed explicit persistence on 2026-10-17: actions in Hibr's
 existing Displays pane change the current session only. They do not silently
 rewrite Blit's saved startup intent, and Blit must not continually undo them.
-The proposed control panel distinguishes Apply (live state) from Save as
-default (persistent intent). These are UX semantics, not additional endpoints
-already implemented. Automatic remembering may be added later as a reversible
+The control panel distinguishes Apply (live state) from Save as
+default (persistent intent). Version0.1.543 implements the live auxiliary
+contract in ADR0128 alongside the existing settings resource.
+Automatic remembering may be added later as a reversible
 policy through this same store/controller, not a parallel implementation.
 Reverting configuration does not promise to resurrect terminated processes.
 
@@ -44,7 +45,7 @@ Auxiliary startup intent is stored in the same document as
 row-major within that output's configured 1x1–2x2 pane grid. A configured but
 currently absent output remains saved and dormant. This document field is
 intent only: saving it does not move the current Hibr desktop. Hibr Displays
-remains the live session owner; Blit's eventual standby reconciler may apply
+remains the live session owner; Blit's standby reconciler applies
 the configured initial placement once when a new standby first joins, but
 never undo later user moves. Current-session Apply and durable Save remain
 separate actions.
@@ -96,8 +97,10 @@ not prove intentional release, so a missing attached client with a live
 standby reports waiting/unknown instead. Both the synthetic controller and
 installed-Hibr desktop auto-invite/standby tests pass locally. The catalogue
 pane now has actual callback/API, UI rendering/keyboard and install/update/
-remove tests in `hibr-apps`; packaging and physical acceptance are tracked
-separately in the verification ledger.
+remove tests in `hibr-apps`. On2026-10-18 it was published as pane0.1.0,
+and the reproducibly gated server package was deployed to10.54. Authenticated
+physical auto-join and general hotplug acceptance remain separate boundaries
+in the verification ledger, not consequences of catalogue publication.
 
 Hibr's documented standby registry distinguishes waiting from deliberate
 release while the standby process lives. Blit integrates that behavior through

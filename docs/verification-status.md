@@ -3,6 +3,40 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-18: 0.1.543 package, catalogue publication and API deployment
+
+The manifest gate and package artifact gate pass for
+`blit_0.1.543-1_amd64.deb`, SHA256
+`c77a52a0ce12a71cf054fb9286cb3246647cd06edeca93bf4b6601e4ed4de96d`, built
+from source/documentation commit `61d4db1bfa90c67786a8890f100d3a500aa38c1b`.
+The artifact gate verifies a reproducible rebuild and canonical packaged
+README, schema and native placement helper. Adapter headers are the pinned
+Hibr0.99.225, ABI16, not the newer installed runtime.
+
+All three hibr-apps gates pass again against the final binary: callback/API
+errors and bounded asynchronous behavior, actual installed catalogue
+install/update/remove, and installed Hibr UI rendering/keyboard/token
+masking. Pane0.1.0 is committed/pushed at `hibr-apps:2844df1`. Its generated
+index signature verifies. An unrelated local Task Manager edit is preserved
+and excluded; index generation used an isolated tree with its committed bytes.
+
+The authorized updater verifies live0.1.543 on10.54. Independent before/after
+checks preserve the complete settings document, active font, pane geometry,
+SDL video driver/renderer/synchronization and report no diagnostic errors or
+warnings. Afterwards, explicit Save adds upper `DP-1` pane1 auxiliary intent
+with clean revision40; separate Apply reports waiting for authentication.
+Only the lower login terminal exists, focused. The cached screenshot shows
+its screensaver in the lower half and an empty upper half.
+The read-only native association probe passes three pre-authentication samples;
+a separate settings comparison confirms the auxiliary is the only saved
+configuration change (apart from the server-owned revision).
+
+Evidence: `diagnostics/auxiliary-543/deploy/` and
+`diagnostics/control-panel-543/`. No authenticated physical automatic join,
+catalogue mirror fetch, general multi-output/hotplug, high-refresh workload
+or universal rendering acceptance is claimed by this deployment checkpoint.
+Those boundaries require their own observations, not a successful updater.
+
 ## 2026-10-17: live auxiliary controller (0.1.543 local candidate)
 
 TCC builds the server. `auxiliary_policy_gate.rb` passes authentication
