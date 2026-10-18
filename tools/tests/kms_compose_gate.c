@@ -122,6 +122,102 @@ int drmModePageFlip(int fd, uint32_t crtc, uint32_t fb,
     return 0;
 }
 
+int drmModeSetCrtc(int fd, uint32_t crtc, uint32_t fb, uint32_t x,
+                   uint32_t y, uint32_t *connectors, int count,
+                   drmModeModeInfoPtr mode)
+{
+    (void)fd; (void)crtc; (void)fb; (void)x; (void)y;
+    (void)connectors; (void)count; (void)mode;
+    return 0;
+}
+
+/* Hold mutable cells, image placement, geometry and visual state back while
+   exercising the real cursor compositor. Every pixel must remain the last
+   complete scene plus exactly the current cursor, without consuming damage. */
+static void held_scene_pointer_gate(void)
+{
+    BlitKms kms;
+    BlitKmsSurfaceView view;
+    BlitKmsOverlay overlay;
+    BlitPointerArt art;
+    BlitPointerConfig config = blit_pointer_default();
+    uint32_t baseline[W * H], submitted, deferred;
+    KmsOutput *target;
+    int consumed = 0, mode, step, x, y;
+    for (mode = 0; mode < 2; ++mode) {
+        memset(&kms, 0, sizeof(kms)); memset(&view, 0, sizeof(view));
+        memset(&overlay, 0, sizeof(overlay)); memset(&art, 0, sizeof(art));
+        memset(codepoints, 0, sizeof(codepoints));
+        memset(background, 0, sizeof(background));
+        memset(foreground, 0, sizeof(foreground));
+        memset(attributes, 0, sizeof(attributes));
+        kms.output_count = 1; target = &kms.outputs[0];
+        target->info.id = 93;
+        target->info.width = W; target->info.height = H;
+        target->mode.hdisplay = W; target->mode.vdisplay = H;
+        target->front.map = front_pixels; target->back.map = back_pixels;
+        target->front.pitch = target->back.pitch = W * 4;
+        target->front.size = target->back.size = sizeof(front_pixels);
+        view.surface_id = 1; view.display_id = 93; view.surface_revision = 1;
+        view.columns = COLS; view.rows = ROWS; view.stride = COLS;
+        view.cell_width = CW; view.cell_height = CH;
+        view.codepoints = codepoints; view.background = background;
+        view.foreground = foreground; view.attributes = attributes;
+        view.default_background = 0x607080; view.damage_consumed = &consumed;
+        overlay.display_id = 93; overlay.x = 20; overlay.y = 15;
+        overlay.width = 40; overlay.height = 30;
+        overlay.color = 0x304050; overlay.opacity = 50;
+        config.size = 64; config.shadow = 1;
+        blit_pointer_build(&art, config); blit_kms_set_pointer_art(&kms, &art);
+        if (mode) setenv("BLIT_KMS_MODESET", "1", 1);
+        else unsetenv("BLIT_KMS_MODESET");
+        /* No committed scene yet: do not expose the pending cells. */
+        blit_kms_present(&kms, &view, 1, 20, 20, 1, 1, &overlay, 1,
+                         1, 1, 40, 1, 0, &submitted, &deferred);
+        if (submitted || consumed || target->initialized) exit(1);
+        blit_kms_present(&kms, &view, 1, 0, 0, 0, 1, &overlay, 1,
+                         1, 1, 40, 0, 0, &submitted, &deferred);
+        if (submitted != 1 || !consumed) exit(1);
+        memcpy(baseline, target->front.map, sizeof(baseline));
+        view.surface_revision = 2; view.graphics_signature = 2;
+        view.origin_x = 8; view.synchronized = 1;
+        view.damage_valid = 1; view.damage_width = COLS; view.damage_height = ROWS;
+        view.default_background = RED;
+        overlay.color = RED;
+        for (step = 0; step < 32; ++step) {
+            int px = (step * 37 % (W + 80)) - 40;
+            int py = (step * 19 % (H + 80)) - 40;
+            int visible = step % 7 != 0;
+            target->flip_pending = 0;
+            blit_kms_present(&kms, &view, step == 31 ? 0 : 1,
+                             px, py, visible, 1, &overlay, 1,
+                             2, 1, 80, 1, 0, &submitted, &deferred);
+            if (consumed || target->last_surface_revisions[0] != 1 ||
+                target->last_visual_revision != 1 || target->last_view_count != 1 ||
+                target->info.drawn_cells != 0) exit(1);
+            for (y = 0; y < H; ++y) for (x = 0; x < W; ++x) {
+                uint32_t expected = baseline[y * W + x];
+                int ax = x - px + art.hotspot_x, ay = y - py + art.hotspot_y;
+                if (visible && ax >= 0 && ay >= 0 && ax < art.width && ay < art.height)
+                    expected = blit_pointer_blend(expected, art.rgba + (ay * art.width + ax) * 4);
+                if (((uint32_t *)target->front.map)[y * W + x] != expected) {
+                    fprintf(stderr, "KMS_HELD_POINTER_FAIL mode=%d step=%d pixel=%d,%d\n", mode, step, x, y);
+                    exit(1);
+                }
+            }
+        }
+        target->flip_pending = 0; view.synchronized = 0;
+        blit_kms_present(&kms, &view, 1, 0, 0, 0, 1, NULL, 0,
+                         2, 0, 0, 0, 0, &submitted, &deferred);
+        if (submitted != 1 || !consumed || target->last_surface_revisions[0] != 2 ||
+            target->last_visual_revision != 2 ||
+            ((uint32_t *)target->front.map)[CH * W + 2 * CW] != RED) exit(1);
+        free(target->scene);
+    }
+    unsetenv("BLIT_KMS_MODESET");
+    puts("KMS_HELD_POINTER_PASS frames=64 every-pixel=exact effects=held damage=retained release=committed modes=flip+modeset");
+}
+
 static void pointer_terminal_present_gate(void)
 {
     BlitKms kms;
@@ -152,7 +248,7 @@ static void pointer_terminal_present_gate(void)
     view.default_background = 0x102030;
     background[COLS + 2] = RED + 1;
     blit_kms_present(&kms, &view, 1, 40, 32, 1, 1, NULL, 0,
-                     0, 0, 0, 0, &submitted, &deferred);
+                     0, 0, 0, 0, 0, &submitted, &deferred);
     target->flip_pending = 0; /* completion of the fake kernel flip */
     background[COLS + 2] = 0;
     background[6 * COLS + 15] = RED + 1;
@@ -160,7 +256,7 @@ static void pointer_terminal_present_gate(void)
     view.damage_valid = 1; view.damage_x = 2; view.damage_y = 1;
     view.damage_width = 14; view.damage_height = 6;
     blit_kms_present(&kms, &view, 1, 48, 32, 1, 1, NULL, 0,
-                     0, 0, 0, 0, &submitted, &deferred);
+                     0, 0, 0, 0, 0, &submitted, &deferred);
     shown = target->front.map;
     if (target->info.draw_ms < 0 || target->info.copy_ms < 0 ||
         target->info.submit_ms < 0 || target->info.drawn_cells != 14 * 6) {
@@ -241,7 +337,7 @@ static void incremental_matches_full_gate(void)
         }
         target->flip_pending = 0;
         blit_kms_present(&kms, &view, 1, px, py, 1, 1, NULL, 0,
-                         0, 0, 0, 0, &submitted, &deferred);
+                         0, 0, 0, 0, 0, &submitted, &deferred);
         memset(pixels, 0, sizeof(pixels));
         reference_view = view;
         reference_view.damage_valid = 0;
@@ -560,7 +656,7 @@ static void pointer_art_present_gate(void)
             blit_pointer_build(&art,config);blit_kms_set_pointer_art(&kms,&art);
         }
         target->flip_pending=0;
-        blit_kms_present(&kms,&view,1,px,py,visible,1,NULL,0,0,0,0,0,&submitted,&deferred);
+        blit_kms_present(&kms,&view,1,px,py,visible,1,NULL,0,0,0,0,0,0,&submitted,&deferred);
         for (y=0;y<H;++y) for (x=0;x<W;++x) {
             uint32_t expected=0x102030;
             int ax=x-px+art.hotspot_x,ay=y-py+art.hotspot_y;
@@ -589,6 +685,7 @@ int main(void)
     scene_copy_gate();
     pointer_terminal_present_gate();
     pointer_art_present_gate();
+    held_scene_pointer_gate();
     incremental_matches_full_gate();
     graphics_bounds_gate();
 

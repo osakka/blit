@@ -7,6 +7,67 @@ static int failures;
 static BlitSurface subject;
 static BlitSession owner;
 
+static void sdl_held_scene_pointer_gate(void)
+{
+    BlitRuntime *r = calloc(1, sizeof(*r));
+    SDL_Window *window;
+    SDL_Renderer *renderer;
+    int step, x, y;
+    if (!r) exit(2);
+    SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+    if (!SDL_Init(SDL_INIT_VIDEO)) exit(2);
+    window = SDL_CreateWindow("held-scene-gate", 160, 128, 0);
+    renderer = SDL_CreateRenderer(window, "software");
+    if (!window || !renderer) exit(2);
+    r->output_count = r->display_count = 1;
+    r->outputs[0].window = window; r->outputs[0].renderer = renderer;
+    r->outputs[0].display_id = r->displays[0].id = 1;
+    set_display_geometry(&r->displays[0], 0, 0, 160, 128);
+    r->outputs[0].render_width = 160; r->outputs[0].render_height = 128;
+    r->overlays[0].used = 1; r->overlays[0].id = 1;
+    strcpy(r->overlays[0].display_id, "display-1");
+    r->overlays[0].width = 160; r->overlays[0].height = 128;
+    r->overlays[0].color = 0x203040; r->overlays[0].opacity = 100;
+    blit_pointer_build(&r->pointer_art, blit_pointer_default());
+    r->screenshot_requested_mask = 1;
+    render_current_surfaces(r, 1, 0);
+    r->overlays[0].color = 0xff0000;
+    ++r->topology_revision; r->pixel_frames_pending[0] = 1;
+    for (step = 0; step < 12; ++step) {
+        SDL_Surface *shot;
+        r->pointer_x = 10 + step * 11; r->pointer_y = 20 + step * 5;
+        r->pointer_valid = r->pointer_dirty = 1; r->pointer_dirty_outputs = 1;
+        render_current_surfaces(r, 1, 1);
+        shot = r->outputs[0].screenshot_surface;
+        if (!shot || r->outputs[0].last_topology_revision != 0 ||
+            r->pixel_frames_pending[0] != 1 || r->pointer_dirty) exit(1);
+        for (y = 0; y < 128; ++y) for (x = 0; x < 160; ++x) {
+            Uint8 red, green, blue, alpha;
+            uint32_t want = 0x203040;
+            int ax = x - (int)r->pointer_x + r->pointer_art.hotspot_x;
+            int ay = y - (int)r->pointer_y + r->pointer_art.hotspot_y;
+            if (ax >= 0 && ay >= 0 && ax < r->pointer_art.width && ay < r->pointer_art.height)
+                want = blit_pointer_blend(want, r->pointer_art.rgba +
+                    (ay * r->pointer_art.width + ax) * 4);
+            if (!SDL_ReadSurfacePixel(shot, x, y, &red, &green, &blue, &alpha) ||
+                abs((int)red - (int)(want >> 16 & 255)) > 1 ||
+                abs((int)green - (int)(want >> 8 & 255)) > 1 ||
+                abs((int)blue - (int)(want & 255)) > 1) {
+                fprintf(stderr, "SDL_HELD_POINTER_FAIL step=%d pixel=%d,%d\n", step, x, y);
+                exit(1);
+            }
+        }
+    }
+    render_current_surfaces(r, 1, 0);
+    {
+        Uint8 red, green, blue, alpha;
+        SDL_ReadSurfacePixel(r->outputs[0].screenshot_surface, 0, 0, &red, &green, &blue, &alpha);
+        if (red != 255 || green || blue || r->outputs[0].last_topology_revision != 1) exit(1);
+    }
+    destroy_outputs(r); SDL_Quit(); free(r);
+    puts("SDL_HELD_POINTER_PASS frames=12 every-pixel=exact pending-visuals=held release=committed");
+}
+
 static void utf8_fragmentation_gate(void)
 {
     static const size_t sizes[] = {1, 2, 3, 4, 127, 767, 768, 769, 4095, 65535};
@@ -173,6 +234,19 @@ static void expired_batch_deadline_gate(void)
                 render_wait_ms(runtime, 10000));
         ++failures;
     }
+    runtime->pointer_dirty = 1;
+    runtime->pointer_dirty_outputs = 1;
+    if (render_wait_ms(runtime, 10000) != 0) {
+        fprintf(stderr, "POINTER_FENCE_FAIL pointer deadline blocked by terminal batch\n");
+        ++failures;
+    }
+    runtime->render_next_us[0] = 13000;
+    if (render_wait_ms(runtime, 10000) != 3) {
+        fprintf(stderr, "POINTER_FENCE_FAIL pointer did not retain output pacing\n");
+        ++failures;
+    }
+    runtime->pointer_dirty = 0;
+    runtime->pointer_dirty_outputs = 0;
     {
         BlitSurface *other = calloc(1, sizeof(*other));
         BlitSession *join = &runtime->sessions[1];
@@ -322,6 +396,7 @@ int main(void)
     utf8_fragmentation_gate();
     nonvisual_terminal_bytes_gate();
     stable_client_names_gate();
+    sdl_held_scene_pointer_gate();
     if (failures) return 1;
     puts("SURFACE_DAMAGE_PASS union=both-orders DEC=union scroll=union quiet=bounded join=bounded wait=nonspinning UTF8=large-PTY+10-fragmentations stable_client_names=verified");
     return 0;

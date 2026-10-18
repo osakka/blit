@@ -1,5 +1,35 @@
 # Current state and restart point
 
+## 2026-10-19 candidate551: cursor updates no longer wait behind scene fences
+
+Investigation on550 found that pointer dirtiness was scheduled behind both
+the terminal-output quiet interval and the Hibr joined-PTY scene barrier.
+The barriers correctly protect complete terminal/image scenes, but also
+delayed an independent software cursor. Candidate551 presents only the cursor
+over the last committed KMS buffer or SDL scene texture at the output's normal
+refresh deadline. Pending cells, graphics, effects and overlays remain held;
+their damage and presented revision remain unchanged until the normal atomic
+scene commit. Outputs without a committed cache defer the cursor safely.
+
+Red/green evidence: the pointer-fence scheduler assertion failed on550, then
+passed after the change. Production KMS tests compare every pixel across64
+held-cursor frames in page-flip and modeset paths, including 64px shadow,
+clipping, changed scene metadata, overlays and damage retention. The SDL
+software-renderer test compares every pixel across12 held frames and verifies
+the pending overlay appears only on release. Focused KMS and SDL tests pass.
+This proves compositor behavior under the tested synthetic frames, not physical
+input-to-photon cadence or Hibr window-drag performance. Run the host pointer
+sweep after deployment and leave#101 open until measured evidence supports
+closure.
+
+Wallpaper work remains at the native-settings acceptance stage. Stable names
+are deployed; current global wallpaper is `retro_car.png`, mode `zoom`, picture
+`follow` (rendered as `pixels`). No per-display record has yet been confirmed
+saved or restored. Use Hibr's existing `dt_walldisp` settings through its
+Wallpaper panel; do not claim persistence from a Blit restart that reattaches
+the same held Hibr owner. Blit#103 stays open pending a verified named-display
+preference save and a restart that reloads it.
+
 This is the handoff document for resuming Blit work after a session change. It
 is intentionally evidence-led and does not replace the OpenAPI contract,
 source, ADRs, or the verification ledger. It tells the next engineer where the

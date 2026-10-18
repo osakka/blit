@@ -3,7 +3,24 @@
 The roadmap is ordered by dependency. A later milestone must not become a
 second, parallel implementation of an earlier one.
 
-## Current position — Mouse550 and stable native identity
+## Current position — held-scene pointer presentation and stable identity
+
+The0.1.551 candidate lets software cursor updates reach the next output
+refresh while a terminal quiet window or Hibr multi-PTY frame barrier holds
+scene changes. The frame remains pixel-identical to the last complete scene
+under the pointer; terminal/image/effect/overlay damage stays pending for the
+normal atomic commit (ADR0136). Production KMS and SDL pixel gates pass. This
+removes a source-level cursor delay; physical cursor and window-drag cadence
+on10.54 still need measurement before #101 can close.
+
+Wallpaper persistence uses Hibr's existing per-client `dt_walldisp` records,
+keyed by the stable connector/pane names from ADR0135. A successful API
+restart retaining the same Hibr process is not enough: acceptance must select
+the intended named pane in Hibr's native Wallpaper panel, save a distinct
+setting, restart Blit, and observe that setting on that pane. #103 remains
+open until this native preference round trip is evidenced.
+
+## Previous position — Mouse550 and stable native identity
 
 API-deployed550 adds antialiased pointer shapes/palettes/size/shadow
 shared by SDL and direct KMS (ADR0133), plus stable connector/pane native
@@ -507,6 +524,6 @@ physical host, then validate physical pointer/button/wheel routing and refresh
 cadence. The remaining hardware gates are a real two-monitor
 primary/`--join` arrangement with independent connector discovery and
 presentation, physical pointer/button/wheel activity, and physical 120/240 Hz
-refresh validation. The current host exposes only one connector. The update
-API requires its configured update token; no unauthenticated bypass is
-acceptable.
+refresh validation. The current evidence checkpoint has two physical outputs
+on10.54; 120/240 Hz physical validation still needs matching hardware. The
+update API accepts only its configured update token.

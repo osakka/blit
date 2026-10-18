@@ -5990,3 +5990,26 @@ implementation and local-gate results only. Package reproducibility,
 deployment, F10 activation, visible button/wheel interaction, immediate
 terminal output, and stable physical rendering remain pending and must be
 recorded before #72, #76, #77, or #78 is closed.
+## 2026-10-19 candidate551 pointer fence regression
+
+The new scheduler assertion failed against550 because an active terminal quiet
+deadline held a due pointer output (`POINTER_FENCE_FAIL`). With551's scheduler,
+the pointer uses its existing per-output refresh deadline while the scene
+deadline remains intact. KMS's production compositor gate checks64 frames for
+each of page-flip and modeset paths (128 total), every framebuffer pixel,
+pending scene revision/geometry/graphics/overlay, damage preservation,
+64px pointer art and complete commit after release. It passes. SDL's production
+software-renderer gate checks12 cursor frames pixel-by-pixel over the committed
+scene and confirms a pending overlay appears after release. It passes. The
+standalone gates `kms_compose_gate.sh` and `surface_damage_gate.sh` pass.
+
+Physical deployment and the bounded host sweep are pending at this checkpoint.
+These gates establish that the old complete scene is preserved while the
+cursor moves; they do not claim a measured physical refresh rate, physical
+input-to-photon latency, or smooth Hibr window dragging. #101 remains open.
+
+Wallpaper panel inspection on10.54 confirms only the global `retro_car.png`,
+`zoom`, `follow`/actual `pixels` settings. No per-display preference has been
+changed or falsely reported as persisted. Stable native names already exist;
+the native `dt_walldisp` save/restart/load acceptance remains outstanding in
+#103.

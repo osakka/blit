@@ -1471,7 +1471,7 @@ static volatile sig_atomic_t blit_update_exit_requested = 0;
 static char blit_version[64] = BLIT_BUILD_VERSION;
 
 static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
-                           uint32_t output_mask);
+                           uint32_t output_mask, int hold_scene);
 static SDL_Texture *create_sdl_glyph_atlas(SDL_Renderer *renderer,
                                            const BlitFont *font,
                                            int *columns_out);
@@ -1994,7 +1994,10 @@ static int render_wait_ms(const BlitRuntime *runtime, uint64_t now)
     for (i = 0; i < runtime->output_count; ++i) {
         uint64_t delta;
         uint64_t due = runtime->render_next_us[i];
-        if (due < not_before) due = not_before;
+        /* Scene fences hold terminal pixels, not the software cursor over
+           the last committed scene. Retain each output's refresh deadline. */
+        if (!(runtime->pointer_dirty_outputs & (1U << i)) && due < not_before)
+            due = not_before;
         if (due <= now)
             return 0;
         delta = due - now;
@@ -2033,7 +2036,7 @@ static void expire_pixel_frame_pending(BlitRuntime *runtime, uint64_t now)
 }
 
 static void render_current_surfaces(BlitRuntime *runtime,
-                                    uint32_t output_mask)
+                                    uint32_t output_mask, int hold_scene)
 {
     BlitFramePlan plan;
     int i;
@@ -2054,7 +2057,7 @@ static void render_current_surfaces(BlitRuntime *runtime,
         plan.surfaces[plan.surface_count].damage_height = surface->damage_height;
         ++plan.surface_count;
     }
-    render_outputs(runtime, &plan, output_mask);
+    render_outputs(runtime, &plan, output_mask, hold_scene);
 }
 
 static void stop_server(int signal_number)
@@ -20668,7 +20671,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
         ++runtime->next_frame_id;
         ++runtime->diagnostic_frame_commits;
         frame_receipt_json(runtime, body, sizeof(body));
-        render_outputs(runtime, &plan, all_output_mask(runtime));
+        render_outputs(runtime, &plan, all_output_mask(runtime), 0);
         send_http(fd, 202, "Accepted", "application/json", body);
         idempotency_store(runtime, request, method, path, payload, 202,
                           "Accepted", "application/json", body);
@@ -24752,7 +24755,7 @@ static void record_kms_frame_submission(BlitRuntime *runtime,
 }
 
 static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
-                           uint32_t output_mask)
+                           uint32_t output_mask, int hold_scene)
 {
     int output_index;
     int plan_index;
@@ -24927,6 +24930,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                              runtime->effect.enabled &&
                                  strcmp(runtime->effect.preset, "scanlines") == 0,
                              runtime->effect.intensity,
+                             hold_scene,
                              runtime->screenshot_requested_mask,
                              &kms_submitted_output_mask,
                              &kms_deferred_output_mask) < 0)
@@ -24949,12 +24953,12 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                                "backend=kms path=direct-kms output_mask=0x%x "
                                "submitted_mask=0x%x deferred_mask=0x%x "
                                "views=%d overlays=%d present_ms=%.3f "
-                               "pointer=%.1f,%.1f valid=%d",
+                               "pointer=%.1f,%.1f valid=%d hold_scene=%d",
                                output_mask, kms_submitted_output_mask,
                                kms_deferred_output_mask, view_count,
                                kms_overlay_count, kms_present_ms,
                                runtime->pointer_x, runtime->pointer_y,
-                               runtime->pointer_valid);
+                               runtime->pointer_valid, hold_scene);
             if (written > 0)
                 detail_used = (size_t)written < sizeof(detail) ?
                     (size_t)written : sizeof(detail) - 1;
@@ -24996,7 +25000,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             }
         for (surface_index = 0; surface_index < runtime->output_count;
              ++surface_index)
-            if ((kms_submitted_output_mask & (1U << surface_index)) &&
+            if (!hold_scene && (kms_submitted_output_mask & (1U << surface_index)) &&
                 runtime->pixel_frames_pending[surface_index] > 0)
                 --runtime->pixel_frames_pending[surface_index];
         /* Retain pointer damage for outputs whose refresh deadline has not
@@ -25025,6 +25029,15 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
 
         if (!(output_mask & (1U << output_index)))
             continue;
+
+        /* Never rebuild a held terminal scene, even when geometry, graphics
+           or damage changed. An uninitialized cache has no committed frame
+           to show; leave its pointer damage pending until a normal commit. */
+        if (hold_scene && (!runtime->outputs[output_index].initialized ||
+                          runtime->outputs[output_index].scene_texture == NULL)) {
+            output_mask &= ~(1U << output_index);
+            continue;
+        }
 
         for (plan_index = 0; plan_index < plan->surface_count;
              ++plan_index) {
@@ -25070,14 +25083,14 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
         pointer_only = pointer_dirty_for_output(runtime, output_index) &&
             runtime->outputs[output_index].initialized &&
             runtime->outputs[output_index].scene_texture != NULL &&
-            !target_changed;
+            (hold_scene || !target_changed);
         if (pointer_only) {
             ++runtime->diagnostic_pointer_cache_hits;
             {
                 char detail[160];
                 snprintf(detail, sizeof(detail),
-                         "output=%d path=pointer-cache target_changed=%d",
-                         output_index, target_changed);
+                         "output=%d path=pointer-cache target_changed=%d hold_scene=%d",
+                         output_index, target_changed, hold_scene);
                 diagnostic_trace(runtime, "render_path", detail);
             }
             present_sdl_scene(runtime, output_index);
@@ -28939,15 +28952,20 @@ int main(int argc, char **argv)
             runtime.hibr_frame_barrier_until_us = 0;
         }
         if (runtime.render_pending &&
-            now >= runtime.terminal_frame_quiet_until_us &&
-            !hibr_frame_barrier_active(&runtime, now) &&
             (output_mask = due_output_mask(&runtime, now)) != 0) {
-            render_current_surfaces(&runtime, output_mask);
-            runtime.terminal_frame_quiet_until_us = 0;
-            advance_render_schedule(&runtime, now, output_mask);
-            expire_pixel_frame_pending(&runtime, monotonic_us());
-            runtime.render_pending = render_work_remains(&runtime);
-            runtime.render_last_us = now;
+            int hold_scene = now < runtime.terminal_frame_quiet_until_us ||
+                hibr_frame_barrier_active(&runtime, now);
+            if (hold_scene)
+                output_mask &= runtime.pointer_dirty_outputs;
+            if (output_mask != 0) {
+                render_current_surfaces(&runtime, output_mask, hold_scene);
+                if (!hold_scene)
+                    runtime.terminal_frame_quiet_until_us = 0;
+                advance_render_schedule(&runtime, now, output_mask);
+                expire_pixel_frame_pending(&runtime, monotonic_us());
+                runtime.render_pending = render_work_remains(&runtime);
+                runtime.render_last_us = now;
+            }
         }
         for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i) {
             BlitHttpClient *client = &runtime.http_clients[i];

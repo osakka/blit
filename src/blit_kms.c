@@ -1631,6 +1631,7 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                      uint32_t output_mask, const BlitKmsOverlay *overlays,
                      int overlay_count, unsigned long long visual_revision,
                      int effect_enabled, int effect_intensity,
+                     int hold_scene,
                      uint32_t screenshot_output_mask,
                      uint32_t *submitted_output_mask,
                      uint32_t *deferred_output_mask)
@@ -1691,6 +1692,12 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
             continue;
         if (!(output_mask & (1U << i)))
             continue;
+        /* A scene fence permits only cursor composition over an already
+           committed buffer. No first frame or invalidated cache is safe. */
+        if (hold_scene && !output->initialized) {
+            deferred = 1;
+            continue;
+        }
         output_started = kms_now_us();
         int output_changed;
         full_redraw = !output->initialized ||
@@ -1710,7 +1717,7 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                                          pointer_visible)));
         /* Inspect scene changes even when pointer/capture work has already
            scheduled this output. Relocation must clear the old bounds. */
-        for (view_index = 0; view_index < view_count; ++view_index) {
+        for (view_index = 0; !hold_scene && view_index < view_count; ++view_index) {
             if (views[view_index].display_id != output->info.id ||
                 views[view_index].synchronized)
                 continue;
@@ -1737,6 +1744,8 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
            a CPU and event slot on every display. */
         if (!output_changed)
             continue;
+        if (hold_scene)
+            full_redraw = 0;
         /* A timeout requests one recovery modeset.  It must not turn the
            normal frame path into a modeset-per-frame loop: that produces
            visible blanking and can make a slow KMS driver appear frozen. */
@@ -1760,7 +1769,7 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         prepare_repaint_buffer(output, full_redraw, render_scene);
         draw_started = kms_now_us();
         output->info.drawn_cells = 0;
-        for (view_index = 0; view_index < view_count; ++view_index)
+        for (view_index = 0; !hold_scene && view_index < view_count; ++view_index)
             if (views[view_index].display_id == output->info.id) {
                 BlitKmsSurfaceView draw = views[view_index];
                 int pointer_damage = 0;
@@ -1881,8 +1890,10 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                 draw_view(output, kms != NULL ? kms->font : NULL,
                           kms != NULL ? kms->wide_font : NULL, &draw);
             }
-        draw_kms_effects(output, effect_enabled, effect_intensity);
-        draw_kms_overlays(output, overlays, overlay_count);
+        if (!hold_scene) {
+            draw_kms_effects(output, effect_enabled, effect_intensity);
+            draw_kms_overlays(output, overlays, overlay_count);
+        }
         if (pointer_intersects_output(output, pointer_x, pointer_y, pointer_visible)) {
             int x = (int)pointer_x - output->info.x;
             int y = (int)pointer_y - output->info.y;
@@ -1949,14 +1960,16 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                 output->flip_pending = 0;
                 output->flip_started_us = 0;
                 swap_buffers(output);
-                for (view_index = 0; view_index < view_count; ++view_index)
+                for (view_index = 0; !hold_scene && view_index < view_count; ++view_index)
                     if (views[view_index].display_id == output->info.id &&
                         views[view_index].damage_consumed != NULL)
                         *views[view_index].damage_consumed = 1;
                 output->initialized = 1;
-                output->last_visual_revision = visual_revision;
-                remember_output_views(output, views, view_count,
-                                      output_view_count);
+                if (!hold_scene) {
+                    output->last_visual_revision = visual_revision;
+                    remember_output_views(output, views, view_count,
+                                          output_view_count);
+                }
                 output->info.last_present_ms =
                     (double)(kms_now_us() - output_started) / 1000.0;
                 if (output->info.last_present_ms > output->info.max_present_ms)
@@ -1996,12 +2009,13 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         if (submitted_output_mask != NULL)
             *submitted_output_mask |= 1U << i;
         swap_buffers(output);
-        for (view_index = 0; view_index < view_count; ++view_index)
+        for (view_index = 0; !hold_scene && view_index < view_count; ++view_index)
             if (views[view_index].display_id == output->info.id &&
                 views[view_index].damage_consumed != NULL)
                 *views[view_index].damage_consumed = 1;
         output->initialized = 1;
-        output->last_visual_revision = visual_revision;
+        if (!hold_scene)
+            output->last_visual_revision = visual_revision;
         if (trace_phases)
             fprintf(stderr,
                     "blit: KMS phase connector=%u draw_us=%lld flip_us=%lld total_us=%lld\n",
@@ -2013,7 +2027,8 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         if (output->info.last_present_ms > output->info.max_present_ms)
             output->info.max_present_ms = output->info.last_present_ms;
         ++output->info.present_calls;
-        remember_output_views(output, views, view_count, output_view_count);
+        if (!hold_scene)
+            remember_output_views(output, views, view_count, output_view_count);
         }
     }
     if (!deferred) {

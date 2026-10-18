@@ -25,6 +25,16 @@ before = request.call('/v1/diagnostics/observation')
 pointer = before.dig('diagnostics','render','pointer')
 abort 'no valid pointer; no workload applied' unless pointer['valid']
 x = pointer['x'].to_i; y = pointer['y'].to_i
+pattern = ENV.fetch('BLIT_POINTER_PATTERN','alternate')
+abort 'BLIT_POINTER_PATTERN must be alternate or sweep' unless %w[alternate sweep].include?(pattern)
+display = before.dig('displays','displays').find do |d|
+  d['id']==before.dig('diagnostics','render','outputs',pointer['output'],'display_id')
+end
+abort 'pointer output is absent' unless display
+left=display.dig('bounds','x');right=left+display.dig('bounds','width')-1
+start_x=[[x-180,left].max,right-360].min
+abort 'sweep requires at least361 output pixels' if pattern=='sweep' && start_x<left
+target_x=->(i){pattern=='sweep' ? start_x+i : x+i%2}
 samples = []; count = 0; request_ms = []; late_slots = 0
 queue = SizedQueue.new(16); workers = []; errors = Queue.new; skipped = 0
 if async
@@ -33,7 +43,7 @@ if async
       while (i = queue.pop)
         t = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         begin
-          request.call('/v1/input/inject',{kind:'pointer_motion',x:x+i%2,y:y})
+          request.call('/v1/input/inject',{kind:'pointer_motion',x:target_x.call(i),y:y})
           request_ms << 1000*(Process.clock_gettime(Process::CLOCK_MONOTONIC)-t)
         rescue => e
           errors << e
@@ -53,7 +63,7 @@ begin
       begin; queue.push(i,true); count += 1; rescue ThreadError; skipped += 1; end
     else
       request_started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      request.call('/v1/input/inject', {kind:'pointer_motion',x:x+i%2,y:y})
+      request.call('/v1/input/inject', {kind:'pointer_motion',x:target_x.call(i),y:y})
       request_ms << 1000.0*(Process.clock_gettime(Process::CLOCK_MONOTONIC)-request_started)
       count += 1
       samples << request.call('/v1/diagnostics/runtime') if i % 60 == 59
@@ -68,12 +78,16 @@ elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
 after = request.call('/v1/diagnostics/observation')
 first = before.dig('runtime','performance'); last = after.dig('runtime','performance')
 verdict = {version:before['version'], displays:before.dig('displays','count'),
+  pattern:pattern, original_pointer:{x:x,y:y},
   requested_motion_hz:rate, http_connection:'close', late_slots:late_slots,
   asynchronous:async, workers:workers.length, skipped_injections:skipped,
   request_p50_ms:request_ms.sort[request_ms.length/2],
   request_p95_ms:request_ms.sort[(request_ms.length*0.95).floor],
   duration_s:elapsed, motions:count, present_delta:last['present_calls']-first['present_calls'],
   loop_delta:last['loop_iterations']-first['loop_iterations'],
+  input_delta:last['input_events']-first['input_events'],
+  physical_mouse_events_delta:last['evdev_mouse_events']-first['evdev_mouse_events'],
+  terminal_bytes_delta:last['terminal_bytes']-first['terminal_bytes'],
   render_samples:samples.map{|s|s['performance'].slice('last_render_ms','frame_rate_hz','loop_gap_window_max_ms','last_kms_present_ms')},
   pointer_output_id:before.dig('diagnostics','render','outputs',pointer['output'],'display_id'),
   output_submissions:after.dig('diagnostics','render','outputs').map do |output|

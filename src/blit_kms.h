@@ -137,6 +137,7 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views,
                      const BlitKmsOverlay *overlays, int overlay_count,
                      unsigned long long visual_revision,
                      int effect_enabled, int effect_intensity,
+                     int hold_scene,
                      uint32_t screenshot_output_mask,
                      uint32_t *submitted_output_mask,
                      uint32_t *deferred_output_mask);
