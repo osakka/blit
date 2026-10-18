@@ -3,14 +3,16 @@
 The roadmap is ordered by dependency. A later milestone must not become a
 second, parallel implementation of an earlier one.
 
-## Current position — Mouse549 and stable native identity
+## Current position — Mouse550 and stable native identity
 
-549 source adds API-owned antialiased pointer shapes/palettes/size/shadow
+550 source adds API-owned antialiased pointer shapes/palettes/size/shadow
 shared by SDL and direct KMS (ADR0133), plus stable connector/pane native
 names for Hibr per-display preferences (ADR0135, #103). The canonical
 catalogue bundle0.1.5 includes Blit Mouse, sharing the existing settings draft,
 worker and credential with Blit. Focused native/UI/pixel tests pass; final
 package/deployment acceptance is tracked in the verification ledger.
+549 was superseded before deployment: release review found unscoped pointer
+key lookup;550 adds a red/green scoped/duplicate/escaped-key regression.
 
 548 is currently deployed on10.54 with two physical outputs, pure KMS and
 saved layout/font intact. Nonvisual PTY bytes no longer request full repaint

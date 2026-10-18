@@ -8,3 +8,6 @@ update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f
 hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
 hibr_version: 0.99.225
 hibr_abi: 16
+deployment: superseded_not_deployed
+superseded_by: 0.1.550
+notes: Release review found unscoped appearance lookup; final collection stopped, regression added and corrected in550. Never tagged.

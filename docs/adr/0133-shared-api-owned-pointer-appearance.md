@@ -10,6 +10,11 @@ shape (`arrow`, `hand`, `precision`), palette (`pearl`, `obsidian`, `neon`,
 `amber`), integer pixel size24–64 and shadow boolean. Missing fields use documented
 defaults. Validate before any live/settings mutation; the settings revision and
 durable receipt remain authoritative. No cursor-specific second settings file.
+Select only the top-level member through the canonical member iterator;
+opaque extension objects may contain their own `pointer` keys. Duplicate
+top-level appearance members are rejected before mutation. The549 release
+review caught both cases in the earlier generic key-scanner implementation;
+550 replaces that scanner, with a red/green API regression.549 was not deployed.
 
 One bounded code-native vector rasterizer produces cached antialiased RGBA
 stamps for both SDL and direct KMS. Rasterize only on appearance changes, not

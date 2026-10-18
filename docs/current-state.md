@@ -7,6 +7,22 @@ work actually stopped.
 
 ## Status at the last review
 
+### 2026-10-18 release-review correction:550 replaces unpublished549
+
+The final549 collection was stopped deliberately, not reported as a completed
+pass. Release review found the new pointer parser used an unscoped key search:
+an opaque extension's nested `pointer` could be mistaken for appearance, and
+duplicate top-level members could be accepted. The added API regression fails
+549 (nested extension rejected400) and passes550. The canonical member iterator
+now selects only the top-level object, rejects duplicates (including escaped
+equivalent names), and decodes member names with the existing JSON decoder.
+Unknown extension values are preserved and rejected writes do not mutate state.
+
+549 remains an archived candidate with reproducible artifact identity, never
+deployed/tagged.548 remains running on10.54.550 retains all stable-name and
+Mouse changes; its final source/package freeze, full collection and deployment
+are the next required steps. No Hibr-core modifications or renderer changes.
+
 ### 2026-10-18 stable identity and Mouse549 release preparation
 
 Blit#103 now uses one helper for both launch paths: connector (otherwise SDL

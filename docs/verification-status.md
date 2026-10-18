@@ -5,6 +5,15 @@ an evidence record, not a claim that the complete product is released.
 
 ## 2026-10-18:549 mouse local checkpoint, not yet deployed
 
+Superseded by550 before deployment. The later549 final collection was stopped
+after release review, not counted as complete. New pointer API scope regression
+is red on549 and green on550: opaque nested extension preserved, canonical and
+escaped duplicate top-level keys rejected, escaped appearance/member names
+decoded, invalid requests leave state unchanged.550 also passes live apply,
+stale409, font independence and durable restart in that focused gate. Final
+full/package/live validation is pending here.549's byte-identical TCC and
+reproducible package checks passed, but are not a550 release claim.
+
 Stable-name addition (ADR0135/Blit#103): the actual native regression fails
 the preceding timestamp-name binary, passes549, and verifies both names
 across a server restart with the same held owner and no aliases. Installed

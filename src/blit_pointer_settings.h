@@ -1,18 +1,36 @@
 /* Included after the canonical JSON/settings helpers. No storage of its own. */
+static int pointer_member_key_decode(char *key, size_t capacity)
+{
+    char quoted[260];
+    const char *end;
+    size_t length;
+    int n = snprintf(quoted,sizeof(quoted),"\"%s\"",key);
+    if (n < 0 || (size_t)n >= sizeof(quoted)) return 0;
+    end = json_unescape(quoted+1,key,capacity,&length);
+    return end && !*end && length > 0;
+}
+
 static int pointer_config_parse(const char *document, BlitPointerConfig *config)
 {
-    const char *cursor = json_key_cursor(document, "pointer");
+    const char *cursor = document, *next;
+    static char member[BLIT_SETTINGS_CAPACITY];
+    char member_key[128];
     char object[512], key[64], value[128], text[64];
     unsigned int seen = 0, bit;
-    int i;
+    int i, present = 0;
     *config = blit_pointer_default();
-    if (cursor == NULL) return 1;
-    cursor += strlen("pointer") + 2;
     while (*cursor==' ' || *cursor=='\n' || *cursor=='\r' || *cursor=='\t') ++cursor;
-    if (*cursor++ != ':') return 0;
+    if (*cursor++ != '{') return 0;
+    while ((next = json_next_member(cursor,member_key,sizeof(member_key),member,sizeof(member)))) {
+        cursor = next;
+        if (!pointer_member_key_decode(member_key,sizeof(member_key))) return 0;
+        if (strcmp(member_key,"pointer")) continue;
+        if (present++ || member[0]!='{' || strlen(member)>=sizeof(object)) return 0;
+        memcpy(object,member,strlen(member)+1);
+    }
     while (*cursor==' ' || *cursor=='\n' || *cursor=='\r' || *cursor=='\t') ++cursor;
-    if (*cursor != '{') return 0;
-    if (!json_object_slice(cursor, object, sizeof(object))) return 0;
+    if (*cursor!='}') return 0;
+    if (!present) return 1;
     cursor = object + 1;
     for (;;) {
         size_t length;
@@ -21,6 +39,7 @@ static int pointer_config_parse(const char *document, BlitPointerConfig *config)
         if (*cursor!='"') return 0;
         cursor = json_next_member(cursor,key,sizeof(key),value,sizeof(value));
         if (!cursor) return 0;
+        if (!pointer_member_key_decode(key,sizeof(key))) return 0;
         length=strlen(value);
         while (length && (value[length-1]==' ' || value[length-1]=='\n' ||
                value[length-1]=='\r' || value[length-1]=='\t')) value[--length]='\0';
