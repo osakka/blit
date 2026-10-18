@@ -5,13 +5,14 @@ second, parallel implementation of an earlier one.
 
 ## Current position — held-scene pointer presentation and stable identity
 
-The0.1.551 candidate lets software cursor updates reach the next output
+Release0.1.551 lets software cursor updates reach the next output
 refresh while a terminal quiet window or Hibr multi-PTY frame barrier holds
 scene changes. The frame remains pixel-identical to the last complete scene
 under the pointer; terminal/image/effect/overlay damage stays pending for the
-normal atomic commit (ADR0136). Production KMS and SDL pixel gates pass. This
-removes a source-level cursor delay; physical cursor and window-drag cadence
-on10.54 still need measurement before #101 can close.
+normal atomic commit (ADR0136). Production KMS and SDL pixel gates pass. The
+frozen suite is100pass/3explicit skips/0fail, including a120-second four-PTY
+soak (11,216 snapshots/1,020 resizes). Physical cursor and window-drag cadence
+on10.54 still need measurement before#101 can close.
 
 Wallpaper persistence uses Hibr's existing per-client `dt_walldisp` records,
 keyed by the stable connector/pane names from ADR0135. A successful API

@@ -1,6 +1,6 @@
 # Current state and restart point
 
-## 2026-10-19 candidate551: cursor updates no longer wait behind scene fences
+## 2026-10-19 release551: cursor updates no longer wait behind scene fences
 
 Investigation on550 found that pointer dirtiness was scheduled behind both
 the terminal-output quiet interval and the Hibr joined-PTY scene barrier.
@@ -20,7 +20,10 @@ the pending overlay appears only on release. Focused KMS and SDL tests pass.
 This proves compositor behavior under the tested synthetic frames, not physical
 input-to-photon cadence or Hibr window-drag performance. Run the host pointer
 sweep after deployment and leave#101 open until measured evidence supports
-closure.
+closure. Frozen full suite:100pass/3explicit skips/0fail. The120-second
+four-PTY soak completed11,216 snapshots and1,020 resizes. Explicit skips are
+the standalone QEMU oracle, physical multi-display gate and live screenshot
+backpressure gate.
 
 Wallpaper work remains at the native-settings acceptance stage. Stable names
 are deployed; current global wallpaper is `retro_car.png`, mode `zoom`, picture

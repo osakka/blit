@@ -6003,7 +6003,12 @@ software-renderer gate checks12 cursor frames pixel-by-pixel over the committed
 scene and confirms a pending overlay appears after release. It passes. The
 standalone gates `kms_compose_gate.sh` and `surface_damage_gate.sh` pass.
 
-Physical deployment and the bounded host sweep are pending at this checkpoint.
+The final frozen run passes100 gates, skips3 explicit hardware/live gates, and
+has0 failures. The120-second four-PTY soak completes11,216 snapshots and1,020
+resizes. The skips are the standalone QEMU oracle, physical multi-display
+acceptance, and live screenshot backpressure acceptance.
+
+At package build time, physical deployment and the bounded host sweep remain
 These gates establish that the old complete scene is preserved while the
 cursor moves; they do not claim a measured physical refresh rate, physical
 input-to-photon latency, or smooth Hibr window dragging. #101 remains open.
