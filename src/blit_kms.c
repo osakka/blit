@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #include "blit_kms.h"
 #include "blit_font.h"
+#include "blit_raster.h"
 #include "blit_damage.h"
 
 #include <errno.h>
@@ -522,6 +523,26 @@ static void draw_glyph(KmsOutput *output, const BlitFont *font,
     size_t glyph;
     int font_width = font != NULL && font->data ? font->width : 5;
     int font_height = font != NULL && font->data ? font->height : 7;
+    if (font && font->raster_get && font->raster_blend) {
+        BlitRasterGlyph raster;
+        int columns = cw > font->raster_cell_width ? 2 : 1;
+        if (font->raster_get(font->raster_state, codepoint, columns, &raster)) {
+            if (trim > 0 && raster.format == BLIT_RASTER_RGBA_PREMULTIPLIED) return;
+            for (glyph_row = 0; glyph_row < ch && glyph_row < raster.height; ++glyph_row) {
+                int py = y + glyph_row;
+                uint32_t *pixels;
+                if (py < 0 || py >= output->mode.vdisplay) continue;
+                pixels = (uint32_t *)((unsigned char *)output->back.map + py * output->back.pitch);
+                for (glyph_column = 0; glyph_column < cw - trim && glyph_column < raster.width; ++glyph_column) {
+                    int px = x + glyph_column + glyph_row_lean(lean, glyph_row, ch);
+                    if (px >= 0 && px < output->mode.hdisplay)
+                        pixels[px] = font->raster_blend(&raster, glyph_column, glyph_row,
+                                                      color, pixels[px]);
+                }
+            }
+            return;
+        }
+    }
     glyph = blit_font_glyph_index(font, codepoint);
     if (trim > 0) {
         if (trim >= cw) return;

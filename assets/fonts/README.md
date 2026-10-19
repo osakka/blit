@@ -25,7 +25,29 @@ BLIT_SPLEEN_SOURCE=/path/to/spleen-8x16.bdf python3 tools/tests/retro_font_gate.
 
 Pixel size changes use `PUT /v1/fonts` with `size_px`; this bitmap face does
 not become an outline font or intrinsic-colour font by resizing it. The
-modern antialiased/colour profile is separate, still pending work.
+modern antialiased/colour profile is separate.
+
+## Modern: Hack with Noto colour emoji
+
+Profile `blit-modern` uses unmodified `Hack-Regular.ttf`3.003 for native-size
+antialiased monospaced text and `NotoColorEmoji.ttf`2.042 for supported colour
+scalars absent from the outline face. Font size8–64px means exact cell height;
+the font's em size is fitted inside that cell, not stretched after rendering.
+The default font is not changed by installation. Select this profile through
+the same API/Control Panel as the others. The modern face scales smoothly;
+Spleen/Terminus retain intentional bitmap pixels.
+
+`modern-fonts.source.json` pins source package versions, font SHA256s and
+license SHA256s. `Hack-LICENSE.txt` contains the Expat/Bitstream Vera terms;
+`NotoColorEmoji-LICENSE.txt` contains the font's OFL1.1 terms. No source font
+was renamed or modified. Source origins are Debian fonts-hack3.003-3 and
+fonts-noto-color-emoji2.042-0+deb12u1.
+
+Protected box/block geometry and missing scalars use the existing PSF
+fallback; those fallback characters remain pixel-art. Wide BMP characters
+retain the separate wide PSF. This is not universal Unicode, script shaping,
+ligature or emoji-sequence support. Explicit variation-selector/ZWJ shaping
+is not added by these font files. See ADR0147 for the renderer boundary.
 
 ## Default: Blit Hibr Terminus16
 

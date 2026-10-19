@@ -1,7 +1,7 @@
 # ADR0147: shared coverage and colour cell rasterization
 
 - Date: 2026-10-19
-- Status: shared module implemented/tested; production adapters not integrated
+- Status: production adapters integrated; release/physical acceptance pending
 - Tracking: [Blit#107](https://git.home.arpa/itdlabs/blit/issues/107)
 
 ## Context
@@ -50,12 +50,32 @@ and white, bounds, cache reuse/pressure and failed-load survival. Valgrind
 checks memory errors/leaks. Inputs are explicit reviewed Hack/Noto assets;
 provenance is in `docs/font-evolution-plan.md`.
 
-The module is not linked into the server yet; no runtime dependency/default,
-public profile or live configuration changes in this checkpoint. Next wire
-canonical profile ownership and size changes, then native KMS and both SDL
-adapters, including atlas alpha representation. Compare pixels, style/Unicode
-fixtures, resize/hit geometry and caches before packaging and physical review.
-Module success is not presentation acceptance.
+The server now links FreeType and exposes `blit-modern` (unmodified pinned
+Hack3.003 plus Noto Colour Emoji2.042). Terminus remains default; Spleen remains
+the deliberate pixel-art retro option. Debian depends on libfreetype6>=2.12.1.
+Glyph metadata reports rasterization, colour availability and cache bytes/
+render count; legacy glyph/mapping counts describe the PSF fallback, not the
+outline/colour faces' total repertoires.
+
+Native KMS consumes the common integer compositor. Both SDL renderers use a
+1024-square premultiplied atlas with128 direct-mapped slots, padded cells,
+foreground modulation only for coverage, and batch flush before slot reuse.
+The explicit unbatched setting uses this same upload/quad implementation,
+flushing immediately, rather than a second rasterization path. Intrinsic
+colour is not artificially emboldened. Font/size changes prepare every new
+SDL atlas before replacing active state, then reset slot identities. Output
+recreation also clears those identities. The PSF loader retains independent
+standalone gates through optional raster callbacks, not another text engine.
+
+`font_backend_raster_gate.sh` checks production native KMS and SDL atlas/
+upload/queue/flush at all57 heights,399 glyph samples per backend. Native
+pixels/guard regions are exact; SDL allows at most2 channel levels for blend
+rounding. SDL fixtures force atlas hash collisions before readback.
+`modern_font_api_gate.rb` tests all sizes, profile policy preservation, missing
+colour-file rollback and saved restart restoration. Asset/license hashes are
+checked. The actual installed Hibr Control Panel was driven with the modern
+font through slider and one-pixel keyboard actions; no Hibr code changed.
+Final full regression, package identity and physical review remain separate.
 
 ## Primary references
 

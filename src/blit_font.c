@@ -52,6 +52,8 @@ static size_t glyph_hash(uint32_t codepoint)
 void blit_font_free(BlitFont *font)
 {
     if (font == NULL) return;
+    if (font->raster_free && font->raster_state)
+        font->raster_free(font->raster_state);
     free(font->codepoints);
     free(font->row_cache);
     free(font->unicode_map);
@@ -241,6 +243,7 @@ typedef struct {
 static const BlitFontProfile blit_font_profiles[] = {
     {"blit-hibr-terminus16", "/usr/lib/blit/fonts/Blit-Hibr-Terminus16.psf"},
     {"blit-hibr-spleen16", "/usr/lib/blit/fonts/Blit-Hibr-Spleen16.psf"},
+    {"blit-modern", "/usr/lib/blit/fonts/Hack-Regular.ttf"},
     {"uni2-terminus16", "/usr/lib/blit/fonts/Uni2-Terminus16.psf"},
     {"lat15-terminus16", "/usr/lib/blit/fonts/Lat15-Terminus16.psf"},
     {"uni2-console", "/usr/share/consolefonts/Uni2-Terminus16.psf"},
@@ -290,7 +293,15 @@ const char *blit_font_profile_id(int index)
 
 const char *blit_font_profile_path(int index)
 {
+    static char paths[16][512];
+    const char *root = getenv("BLIT_FONT_ROOT");
     if (index < 0 || index >= blit_font_profile_count()) return NULL;
+    if (root && *root && strncmp(blit_font_profiles[index].path, "/usr/lib/blit/fonts/",
+                               sizeof("/usr/lib/blit/fonts/") - 1) == 0) {
+        snprintf(paths[index], sizeof(paths[index]), "%s/%s", root,
+                 strrchr(blit_font_profiles[index].path, '/') + 1);
+        return paths[index];
+    }
     return blit_font_profiles[index].path;
 }
 
@@ -299,16 +310,43 @@ const char *blit_font_profile_for_path(const char *path)
     int i;
     if (path == NULL) return "custom";
     for (i = 0; i < blit_font_profile_count(); ++i)
-        if (strcmp(path, blit_font_profiles[i].path) == 0)
+        if (strcmp(path, blit_font_profile_path(i)) == 0)
             return blit_font_profiles[i].id;
     return "custom";
 }
 
+int blit_font_profile_available(int index)
+{
+    const char *path = blit_font_profile_path(index);
+    char sibling[512];
+    const char *slash;
+    if (!path || access(path, R_OK) != 0) return 0;
+    if (!strstr(path, ".ttf")) return 1;
+    slash = strrchr(path, '/');
+    snprintf(sibling, sizeof(sibling), "%.*sNotoColorEmoji.ttf",
+             slash ? (int)(slash - path + 1) : 0, path);
+    if (access(sibling, R_OK) != 0) return 0;
+    snprintf(sibling, sizeof(sibling), "%.*sBlit-Hibr-Terminus16.psf",
+             slash ? (int)(slash - path + 1) : 0, path);
+    return access(sibling, R_OK) == 0;
+}
+
 int blit_font_load_path(BlitFont *font, const char *path)
 {
+    char fallback[512];
+    const char *source = path;
+    size_t length;
     if (font == NULL || path == NULL || path[0] == '\0') return -1;
     blit_font_free(font);
-    if (font_load_file(font, path) != 0) return -1;
+    length = strlen(path);
+    if (length > 4 && strcmp(path + length - 4, ".ttf") == 0) {
+        const char *slash = strrchr(path, '/');
+        if (access(path, R_OK) != 0) return -1;
+        snprintf(fallback, sizeof(fallback), "%.*sBlit-Hibr-Terminus16.psf",
+                 slash ? (int)(slash - path + 1) : 0, path);
+        source = fallback;
+    }
+    if (font_load_file(font, source) != 0) return -1;
     snprintf(font->path, sizeof(font->path), "%s", path);
     fprintf(stderr, "blit: font=%s size=%dx%d glyphs=%lu mappings=%lu\n",
             path, font->width, font->height,

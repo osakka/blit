@@ -1,5 +1,26 @@
 # Current state and restart point
 
+## 2026-10-19:562 modern/retro production integration; release gate running
+
+`blit-modern` now uses the shared native-size FreeType coverage/colour module
+on native KMS, SDL software and SDL/OpenGLES2. Both new profiles are integrated;
+Spleen is deliberate pixel-art, modern Hack/Noto is antialiased plus scalar
+colour, and existing Terminus remains default. API metadata exposes renderer
+policy/cache counters; the canonical size/profile settings still own saving.
+Atlas replacement is prepared transactionally; SDL cache collisions flush
+pending geometry before texel replacement. Build/runtime FreeType dependency
+and pinned licensed assets are declared. No Hibr core edits.
+
+Production KMS pixels/guards match exactly and both SDL paths match within2
+channel levels across all57 heights8..64 and399 glyph samples each. SDL slot
+collision checks and API profile/size/save/restart/missing-colour rollback pass.
+The actual installed Hibr Control Panel passes slider/+1/-1 with modern font;
+captured sample inspected at `build/font-modern-panel-evidence/`. Native KMS
+Valgrind:7,364 allocations/frees, zero errors/leaks. This is not physical KMS
+or universal Unicode approval. Full regression/reproducible package/API deploy
+and physical capture remain pending; live host remains561, existing layout
+and font unchanged. The earlier module-only checkpoint below is historical.
+
 ## 2026-10-19: smooth/colour raster foundation; not deployed
 
 The user's jagged-size report exposes unfinished native-size rasterization,

@@ -215,12 +215,13 @@ suite_font() {
     run_gate hibr_font_manifest_gate.py python3 tools/tests/hibr_font_manifest_gate.py
     run_gate font_fit_gate.py python3 tools/tests/font_fit_gate.py
     run_gate retro_font_gate.py python3 tools/tests/retro_font_gate.py
-    if [ -n "${BLIT_GATE_OUTLINE:-}" ] && [ -n "${BLIT_GATE_COLOUR:-}" ]; then
-        run_gate font_raster_gate.sh sh tools/tests/font_raster_gate.sh \
-            "$FONT" "$BLIT_GATE_OUTLINE" "$BLIT_GATE_COLOUR"
-    else
-        skip_gate font_raster_gate.sh "set BLIT_GATE_OUTLINE/BLIT_GATE_COLOUR and FreeType paths; module only, not presentation"
-    fi
+    run_gate modern_font_assets_gate.rb ruby tools/tests/modern_font_assets_gate.rb
+    run_gate font_raster_gate.sh sh tools/tests/font_raster_gate.sh \
+        "$FONT" "${BLIT_GATE_OUTLINE:-$ROOT/assets/fonts/Hack-Regular.ttf}" \
+        "${BLIT_GATE_COLOUR:-$ROOT/assets/fonts/NotoColorEmoji.ttf}"
+    run_gate font_kms_raster sh tools/tests/font_backend_raster_gate.sh kms
+    run_gate font_software_raster sh tools/tests/font_backend_raster_gate.sh software
+    run_gate modern_font_api_gate.rb ruby tools/tests/modern_font_api_gate.rb
     if [ -d "$ROOT/vendor/SDL3/include" ]; then
         run_gate sdl_glyph_filter_gate.sh "$ROOT"/tools/tests/sdl_glyph_filter_gate.sh
     else
@@ -291,6 +292,7 @@ suite_renderer() {
 }
 
 suite_gles() {
+    run_gate font_gles_raster sh tools/tests/font_backend_raster_gate.sh opengles2
     run_gate sdl_gles_sixel_composition env \
         BLIT_GATE_BINARY="$BINARY" BLIT_GATE_FONT="$FONT" BLIT_GATE_LIBS="$LIBS" \
         BLIT_TEST_VIDEO_DRIVER=offscreen BLIT_TEST_RENDERER=opengles2 \

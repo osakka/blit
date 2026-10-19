@@ -1,0 +1,20 @@
+{
+  "profile": "blit-modern",
+  "outline": {
+    "file": "Hack-Regular.ttf",
+    "source": "Debian fonts-hack 3.003-3",
+    "upstream": "https://github.com/source-foundry/Hack",
+    "sha256": "9f67c8a8cd28498525639437d6fac588c452e8572945c790db7641cc7907a69b",
+    "license_file": "Hack-LICENSE.txt",
+    "license_sha256": "bae0d90ef8f2ef47a7182277d7f0ce3175256f04dd63c68a21c4706c966cddac"
+  },
+  "colour": {
+    "file": "NotoColorEmoji.ttf",
+    "source": "Debian fonts-noto-color-emoji 2.042-0+deb12u1",
+    "upstream": "https://github.com/googlefonts/noto-emoji",
+    "sha256": "e5899ed38b8ed83e08bd3ac5de09791e9d19d288333a796de1d35ad17396f1ec",
+    "license_file": "NotoColorEmoji-LICENSE.txt",
+    "license_sha256": "3720722d2046accb40e1696f096b57c658b0b47d74031b3d114cf7545b840b3c"
+  },
+  "policy": "Unmodified licensed source fonts. Native-size grayscale text; fixed-strike premultiplied colour emoji. Protected terminal geometry and missing scalars use canonical PSF fallback. No universal Unicode or shaped emoji-sequence claim."
+}

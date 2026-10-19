@@ -125,7 +125,10 @@ Stage auxiliary pane selections, use **Apply auxiliaries now** for the running
 policy, and **Save as Default** for restart-persistent intent. Login placement
 preferences are startup-applied. Font controls use the live font API; Hibr's
 Displays pane owns arrangement after an auxiliary's first confirmed join.
-Native horizontal sliders select font scale and each monitor's independent
+Control Panel0.1.6 selects font cell height8–64px, with one-pixel keyboard
+steps. The Font selector offers existing Terminus, pixel-art Spleen retro,
+and native antialiased `blit-modern` with colour emoji in0.1.562. Font changes
+save through Blit's API. Native horizontal sliders also select each monitor's independent
 columns/rows (1–8 each). **Save as Default** applies/saves the grid; new
 unconfigured monitors start1x1. Blit refuses removing occupied panes instead
 of killing their terminals. See [the API layout contract](docs/api.md#displays-topology-and-fonts).
@@ -199,6 +202,14 @@ When authentication is configured, add `Authorization: Bearer TOKEN` to API
 requests. Never put credentials in source, logs, screenshots, or commits.
 
 ## Build and verify
+
+The server requires FreeType headers and libfreetype6>=2.12.1. Install your
+distribution's `libfreetype-dev` or stage the reviewed Debian development
+package headers at `build/deps/prefix/include/freetype2`. Set
+`BLIT_FREETYPE_INCLUDE=/usr/include/freetype2` when using system headers;
+`BLIT_FREETYPE_LIBRARY` can override the default amd64 soname library path.
+This links the distro runtime library; no private FreeType runtime is bundled.
+Pinned font assets and their licenses are checked in under `assets/fonts`.
 
 ```sh
 tools/build-tcc.sh build/blit/blit-server server

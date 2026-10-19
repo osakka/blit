@@ -1789,6 +1789,7 @@ components:
         id: {$ref: '#/components/schemas/ResourceId'}
         path: {type: string}
         available: {type: boolean}
+        rasterization: {type: string, enum: [bitmap-nearest, native-antialiased]}
       additionalProperties: false
     FontConfiguration:
       type: object
@@ -1821,6 +1822,15 @@ components:
               description: Resolved size relative to the source font; not a second mutable size setting.
             size_px: {type: integer, minimum: 1}
             sizing: {type: string, enum: [scale, pixels]}
+            rasterization: {type: string, enum: [bitmap-nearest, native-antialiased]}
+            colour_glyphs: {type: boolean}
+            raster_cache:
+              type: object
+              required: [bytes, renders]
+              properties:
+                bytes: {type: integer, minimum: 0}
+                renders: {type: integer, minimum: 0}
+              additionalProperties: false
             cell_pixels:
               type: object
               required: [width, height]

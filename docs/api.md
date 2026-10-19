@@ -710,7 +710,24 @@ the active size policy. `active.sizing` identifies `scale` or `pixels`;
 scale under pixel mode is derived and need not be a valid legacy scale write.
 For example, `{"size_px":23}` selects12x23 cells for the8x16 font. This is
 font/cell sizing, not a display mode change. Existing bitmap profiles are
-sampled at this size; outline rasterization and colour fonts are separate work.
+sampled at this size. Since0.1.562, `blit-modern` rasterizes Hack outline text
+at a fitted native size, with antialiased coverage and Noto intrinsic-colour
+emoji. `blit-hibr-spleen16` is the additional pixel-art retro profile; both
+remain selectable alongside Terminus. Select smooth text, for example, with
+`{"font_id":"blit-modern","size_px":23}`. Pixel-art fallback characters are
+still pixel-art: adding these profiles does not implement universal Unicode,
+complex-script/ligature shaping or ZWJ/variation-selector emoji sequences.
+
+`active.rasterization` is `bitmap-nearest` or `native-antialiased`;
+`active.colour_glyphs` reports the colour face, and `active.raster_cache`
+reports bounded cached bytes and render count. `glyphs` and `mappings` retain
+their PSF identity meaning (the canonical fallback for the modern profile),
+not a total Unicode coverage claim for the outline/emoji faces. Profiles
+report their rasterization and availability. Installation keeps Terminus as
+default. Profile/size changes validate the rasterizer and replacement SDL
+atlases before retiring active state. Native KMS and both SDL renderers share
+the same coverage/colour source, fallback policy and cell sizing.
+
 Integer JSON values such as `2` remain valid and mean `2.0`. Blit recalculates
 pane geometry and resizes attached PTYs. Because a framebuffer cell cannot be
 fractional, the physical width and height use one shared nearest-pixel rule;
@@ -727,7 +744,9 @@ curl --fail-with-body -X PUT "$BLIT_URL/v1/fonts" \
 
 Read back `active.scale` and `active.cell_pixels`: rounded cell dimensions,
 not fractional physical pixels, determine the grid. An8x16 source becomes
-10x19 at1.2. To retain the change across restart, read `GET /v1/settings`,
+10x19 at1.2. The live font API queues automatic saving; poll settings storage
+for a clean receipt. To edit font sizing as part of a complete configuration,
+read `GET /v1/settings`,
 update its complete `document.font` with the desired profile/scale and
 `PUT /v1/settings` using the returned revision in `If-Match`. Preserve the
 other document sections and require `storage.state == "clean"`. A successful
@@ -822,7 +841,7 @@ revisions. Unchanged output resources and primary PTYs are retained. When
 the last output disappears, the API remains available and PTYs keep their
 pane intent; primary migration is not automatic. Unknown outputs are not
 automatically added to auxiliary policy. Since0.1.545, new outputs use their
-connector-keyed layout or1x1 when unconfigured. Font selection/scale remain
+connector-keyed layout or1x1 when unconfigured. Font selection/size remain
 global. The0.1.544 global-split inheritance is superseded by ADR0131.
 
 `diagnostics.render.hotplug` (also in runtime/observation snapshots) reports

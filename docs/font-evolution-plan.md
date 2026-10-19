@@ -2,6 +2,34 @@
 
 Tracking: [Blit#107](https://git.home.arpa/itdlabs/blit/issues/107).
 
+## Current implementation: candidate0.1.562
+
+Both new profiles are integrated: Spleen retro (`blit-hibr-spleen16`) and
+smooth Hack/Noto colour (`blit-modern`). Original Terminus remains default.
+The shared FreeType rasterizer is linked into the server and consumed by
+native KMS, SDL software and SDL/OpenGLES2. Exact cell sizing, per-context
+bounded caching, premultiplied-alpha handling and transactional profile/size
+replacement are implemented. Production adapters pass399 glyph samples each
+across all57 sizes8..64; native KMS is exact, SDL allows2 levels per channel.
+SDL atlas-collision tests pass. API tests pass all sizes, size-policy retention,
+canonical save/restart and missing-font rollback. Actual installed Hibr native
+Control Panel slider/+1/-1 tests pass with modern rasterization selected;
+captures live in `build/font-modern-panel-evidence/`. No Hibr changes.
+
+FreeType is now a production dependency (Debian libfreetype6>=2.12.1).
+Pinned source fonts and complete license notices are checked in; asset gates
+validate their hashes. Build headers are explicit, not downloaded silently.
+`BLIT_FONT_ROOT` relocates only bundled profile paths for isolated tests;
+normal installations use `/usr/lib/blit/fonts`.
+
+The release gate remains full frozen regression, reproducible package/identity,
+API deployment, physical capture/metrics and operator aesthetic review. Live
+is still561 until that gate completes. Neither a module test nor a local
+offscreen GL test is physical scanout approval. Protected box/block geometry,
+missing symbols and wide BMP fallback remain bitmap. Scalar colour support
+is implemented; ZWJ/variation-sequence shaping, ligatures and complex-script
+shaping are not. No universal glyph or smooth-fallback claim is made.
+
 ## Confirmed requirements and current boundary
 
 Deliver two additional selectable looks: retro and polished modern with
@@ -15,10 +43,10 @@ glyphs. It resizes PTYs and uses the same geometry for input, but does not
 rasterize an outline face at a requested pixel size. Size is currently global.
 Control Panel0.1.6 exposes pixel size; it does not itself change rasterization.
 
-`BlitFont` and SDL's atlas currently expose one-bit coverage; terminal styles
-colour those masks. Another PSF alone cannot add antialiasing or intrinsic
-multicolour glyphs. Current BMP wide coverage is not universal Unicode or
-emoji-sequence support.
+Bitmap `BlitFont` masks remain supported; the modern profile adds shared
+coverage/colour rasters instead of stretching those masks. Another PSF alone
+cannot add antialiasing or intrinsic multicolour glyphs. Current BMP wide
+coverage is not universal Unicode or emoji-sequence support.
 
 ## Implementation sequence
 
@@ -32,7 +60,7 @@ emoji-sequence support.
    adapters consume the same glyph data rather than implement text engines.
 3. Add both profiles using pinned, licensed assets with explicit repertoires
    and reproducible generation. Review real samples before default changes.
-   FreeType is a candidate, not yet a production dependency. Evaluate colour
+   FreeType is the selected production rasterizer (ADR0147). Evaluate colour
    format and shaping requirements before selecting emoji assets.
 4. Normalize alpha once. Compare exact colour/alpha results over black,
    white and nonuniform backgrounds on native KMS and both SDL paths.
@@ -66,11 +94,11 @@ emoji-sequence support.
 Release561 implements explicit cell pixel height and legacy-policy
 compatibility (ADR0144), with full regression and bounded physical SDL/GLES2
 sizing/capture checks passing. Candidate562 adds the optional Spleen retro
-profile (ADR0145), with focused asset/pixel tests passing and full verification
-running. Native outline rasterization and the modern colour profile remain
-unimplemented in the server. No new production font dependency is linked yet.
+profile (ADR0145), plus integrated native outline/colour rendering (ADR0147).
+Full release verification is running; production dependency and assets are
+declared, but no562 deployment has been accepted yet.
 
-## Shared raster module checkpoint (2026-10-19)
+## Historical shared-module checkpoint (superseded by integration above)
 
 ADR0147 and `src/blit_raster.c` now implement the common cell-raster contract:
 native-size FreeType grayscale coverage, premultiplied colour RGBA, explicit
@@ -94,7 +122,7 @@ Enable the module gate using `BLIT_GATE_OUTLINE`, `BLIT_GATE_COLOUR`,
 `sh tools/run-gates.sh font`. Missing candidate inputs are an explicit skip,
 not a pass. Direct invocation accepts PSF/outline/colour paths as three args.
 
-Remaining work, in order: pin/package production FreeType and source assets;
+At that checkpoint, remaining work was: pin/package production FreeType and source assets;
 attach raster ownership/invalidation to canonical font profiles and pixel
 sizing; connect native KMS plus SDL immediate/batched/atlas rendering to the
 same coverage/colour data; cover styles, combining/variation/sequence policy,

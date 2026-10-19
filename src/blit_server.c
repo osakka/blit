@@ -4,6 +4,7 @@
 #include <dirent.h>
 #include "blit_kms.h"
 #include "blit_font.h"
+#include "blit_raster.h"
 #include "blit_graphics.h"
 #include "blit_input_pointer.h"
 #include "blit_unicode_width.h"
@@ -682,6 +683,8 @@ typedef struct {
     SDL_Texture *pointer_texture;
     unsigned long long pointer_art_revision;
     SDL_Texture *glyph_atlas;
+    uint32_t raster_scalars[128];
+    unsigned char raster_spans[128];
     /* ADR 0062: wide glyphs come from a 16x16 font with fifty thousand
        bitmaps, which will not fit an atlas built up front. This one is a
        fixed size and is filled a glyph at a time on first use, with a
@@ -15944,7 +15947,9 @@ static void fonts_json(const BlitRuntime *runtime, char *body, size_t capacity)
            run picked up a different artifact under the same name, which is
            exactly how a stale 540-glyph copy in the build tree rendered
            characters as '?' while the released package drew them. */
-        "\"glyphs\":%lu,\"mappings\":%lu},"
+        "\"glyphs\":%lu,\"mappings\":%lu,"
+        "\"rasterization\":\"%s\",\"colour_glyphs\":%s,"
+        "\"raster_cache\":{\"bytes\":%lu,\"renders\":%lu}},"
         "\"profiles\":[",
         active_id, escaped_path, font_scale_value(runtime),
         runtime_terminal_cell_height(runtime),
@@ -15952,13 +15957,20 @@ static void fonts_json(const BlitRuntime *runtime, char *body, size_t capacity)
         runtime_terminal_cell_width(runtime),
         runtime_terminal_cell_height(runtime),
         (unsigned long)runtime->font.glyph_count,
-        (unsigned long)runtime->font.unicode_count);
+        (unsigned long)runtime->font.unicode_count,
+        runtime->font.raster_get ? "native-antialiased" : "bitmap-nearest",
+        runtime->font.raster_get ? "true" : "false",
+        (unsigned long)blit_raster_cached_bytes(runtime->font.raster_state),
+        blit_raster_render_count(runtime->font.raster_state));
     for (i = 0; i < blit_font_profile_count() && used + 128 < capacity; ++i) {
         const char *id = blit_font_profile_id(i);
         const char *path = blit_font_profile_path(i);
+        char profile_path[1024];
+        json_escape(path, profile_path, sizeof(profile_path));
         used += (size_t)snprintf(body + used, capacity - used,
-            "%s{\"id\":\"%s\",\"path\":\"%s\",\"available\":%s}",
-            first ? "" : ",", id, path, access(path, R_OK) == 0 ? "true" : "false");
+            "%s{\"id\":\"%s\",\"path\":\"%s\",\"available\":%s,\"rasterization\":\"%s\"}",
+            first ? "" : ",", id, profile_path, blit_font_profile_available(i) ? "true" : "false",
+            strstr(path, ".ttf") ? "native-antialiased" : "bitmap-nearest");
         first = 0;
     }
     snprintf(body + used, capacity - used, "]}");
@@ -16013,10 +16025,31 @@ static int font_sizing_parse(const char *configuration, int *scale, int *pixels)
     return 1;
 }
 
+static int prepare_font_raster(BlitFont *font, const char *path,
+                                int scale, int pixels, BlitRaster **result)
+{
+    size_t length = strlen(path);
+    *result = NULL;
+    if (length > 4 && strcmp(path + length - 4, ".ttf") == 0) {
+        char colour[512];
+        const char *slash = strrchr(path, '/');
+        snprintf(colour, sizeof(colour), "%.*sNotoColorEmoji.ttf",
+                 slash ? (int)(slash - path + 1) : 0, path);
+        *result = blit_raster_open(font, path, colour,
+            font_cell_dimension(font, 1, scale, pixels),
+            font_cell_dimension(font, 0, scale, pixels));
+        if (!*result) return 0;
+    }
+    return 1;
+}
+
 static int apply_font_configuration(BlitRuntime *runtime, const char *path,
                                     int scale_tenths, int size_px)
 {
     BlitFont candidate;
+    BlitRaster *raster = NULL;
+    SDL_Texture *atlases[BLIT_MAX_DISPLAYS] = {0};
+    int atlas_columns[BLIT_MAX_DISPLAYS], atlas_widths[BLIT_MAX_DISPLAYS], atlas_heights[BLIT_MAX_DISPLAYS];
     int i;
 
     if (runtime == NULL || path == NULL || path[0] == '\0' ||
@@ -16031,6 +16064,10 @@ static int apply_font_configuration(BlitRuntime *runtime, const char *path,
         blit_font_free(&candidate);
         return 0;
     }
+    if (!prepare_font_raster(candidate.data ? &candidate : &runtime->font,
+                             path, scale_tenths, size_px, &raster)) {
+        blit_font_free(&candidate); return 0;
+    }
     /* Do not install a font that makes a configured partition smaller than
        one complete cell. Validate before replacing the active font. */
     for (i = 0; i < runtime->display_count; ++i) {
@@ -16043,24 +16080,42 @@ static int apply_font_configuration(BlitRuntime *runtime, const char *path,
         if (runtime->displays[i].bounds.w / columns < cell_width ||
             runtime->displays[i].bounds.h / rows < cell_height) {
             blit_font_free(&candidate);
+            blit_raster_close(raster);
             return 0;
+        }
+    }
+    if (!runtime->direct_kms) {
+        BlitFont view = candidate.data ? candidate : runtime->font;
+        view.raster_state = NULL; view.raster_free = NULL;
+        blit_raster_attach(&view, raster);
+        for (i = 0; i < runtime->output_count; ++i) {
+            atlases[i] = create_sdl_glyph_atlas(runtime->outputs[i].renderer, &view,
+                &atlas_columns[i], &atlas_widths[i], &atlas_heights[i]);
+            if (!atlases[i]) {
+                int j;
+                for (j = 0; j < i; ++j) SDL_DestroyTexture(atlases[j]);
+                blit_raster_close(raster); blit_font_free(&candidate);
+                return 0;
+            }
         }
     }
     if (candidate.data != NULL) {
         blit_font_free(&runtime->font);
         runtime->font = candidate;
     }
+    blit_raster_attach(&runtime->font, raster);
     runtime->font_scale_tenths = scale_tenths;
     runtime->font_size_px = size_px;
     if (!runtime->direct_kms) {
         for (i = 0; i < runtime->output_count; ++i) {
             BlitOutput *output = &runtime->outputs[i];
+            memset(output->raster_spans, 0, sizeof(output->raster_spans));
             if (output->glyph_atlas != NULL)
                 SDL_DestroyTexture(output->glyph_atlas);
-            output->glyph_atlas = create_sdl_glyph_atlas(
-                output->renderer, &runtime->font,
-                &output->glyph_atlas_columns, &output->glyph_atlas_width,
-                &output->glyph_atlas_height);
+            output->glyph_atlas = atlases[i];
+            output->glyph_atlas_columns = atlas_columns[i];
+            output->glyph_atlas_width = atlas_widths[i];
+            output->glyph_atlas_height = atlas_heights[i];
             SDL_SetRenderScale(output->renderer, 1.0f, 1.0f);
             output->initialized = 0;
         }
@@ -22561,6 +22616,8 @@ static void initialize_outputs(BlitRuntime *runtime)
                                    &runtime->outputs[runtime->output_count].glyph_atlas_columns,
                                    &runtime->outputs[runtime->output_count].glyph_atlas_width,
                                    &runtime->outputs[runtime->output_count].glyph_atlas_height);
+        memset(runtime->outputs[runtime->output_count].raster_spans, 0,
+               sizeof(runtime->outputs[runtime->output_count].raster_spans));
         runtime->outputs[runtime->output_count].display_id = display->id;
         ++runtime->output_count;
     }
@@ -23683,6 +23740,23 @@ static SDL_Texture *create_sdl_glyph_atlas(SDL_Renderer *renderer,
     int row;
     int column;
 
+    if (renderer && font && font->raster_get) {
+        SDL_Texture *result = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32,
+            SDL_TEXTUREACCESS_STATIC, 1024, 1024);
+        unsigned char *empty = calloc(1024U * 1024U, 4);
+        if (!result || !empty ||
+            !SDL_UpdateTexture(result, NULL, empty, 4096) ||
+            !SDL_SetTextureBlendMode(result, SDL_BLENDMODE_BLEND_PREMULTIPLIED) ||
+            !SDL_SetTextureScaleMode(result, SDL_SCALEMODE_NEAREST)) {
+            if (result) SDL_DestroyTexture(result);
+            free(empty);
+            return NULL;
+        }
+        free(empty);
+        *columns_out = 1024 / (font->raster_cell_width * 2 + 2);
+        *width_out = *height_out = 1024;
+        return result;
+    }
     if (renderer == NULL || font == NULL || font->glyph_count == 0 ||
         font->width < 1 || font->height < 1 || font->width > 32 ||
         font->height > 64 ||
@@ -23949,9 +24023,49 @@ static int queue_sdl_glyph(BlitOutput *output, const BlitFont *font,
         output->glyph_atlas == NULL || output->glyph_atlas_columns < 1 ||
         output->glyph_atlas_width < 1 || output->glyph_atlas_height < 1)
         return 0;
+    if (!ensure_sdl_glyph_batch(output, 1)) return 0;
+    if (font->raster_get) {
+        BlitRasterGlyph raster;
+        int span = cell_width > font->raster_cell_width ? 2 : 1;
+        unsigned slot = (codepoint * 2654435761U + (unsigned)span) % 128U;
+        int tile_width = font->raster_cell_width * 2 + 2;
+        int tile_height = font->raster_cell_height + 2;
+        SDL_Rect rect;
+        if (!font->raster_get(font->raster_state, codepoint, span, &raster)) return 0;
+        if (trim > 0 && raster.format == BLIT_RASTER_RGBA_PREMULTIPLIED) return 1;
+        rect.x = (slot % output->glyph_atlas_columns) * tile_width;
+        rect.y = (slot / output->glyph_atlas_columns) * tile_height;
+        rect.w = tile_width; rect.h = tile_height;
+        if (output->raster_spans[slot] != span || output->raster_scalars[slot] != codepoint) {
+            unsigned char *pixels = calloc((size_t)tile_width * tile_height, 4);
+            int row, column;
+            if (!pixels) return 0;
+            for (row = 0; row < raster.height; ++row)
+                for (column = 0; column < raster.width; ++column) {
+                    unsigned char *out = pixels + ((row + 1) * tile_width + column + 1) * 4;
+                    const unsigned char *in = raster.pixels + row * raster.stride +
+                        column * (int)raster.format;
+                    if (raster.format == BLIT_RASTER_COVERAGE)
+                        out[0] = out[1] = out[2] = out[3] = in[0];
+                    else memcpy(out, in, 4);
+                }
+            /* A collision may replace texels referenced by pending vertices. */
+            flush_sdl_glyph_batch(output);
+            if (!SDL_UpdateTexture(output->glyph_atlas, &rect, pixels, tile_width * 4)) {
+                free(pixels); return 0;
+            }
+            free(pixels);
+            output->raster_scalars[slot] = codepoint;
+            output->raster_spans[slot] = (unsigned char)span;
+        }
+        source_x = (rect.x + 1) / 1024.0f;
+        source_y = (rect.y + 1) / 1024.0f;
+        source_w = raster.width / 1024.0f;
+        source_h = raster.height / 1024.0f;
+        if (raster.format == BLIT_RASTER_RGBA_PREMULTIPLIED) colour = 0xffffff;
+    } else {
     glyph = blit_font_glyph_index(font, codepoint);
-    if (glyph >= font->glyph_count || !ensure_sdl_glyph_batch(output, 1))
-        return 0;
+    if (glyph >= font->glyph_count) return 0;
     columns = output->glyph_atlas_columns;
     atlas_width = output->glyph_atlas_width;
     atlas_height = output->glyph_atlas_height;
@@ -23961,6 +24075,7 @@ static int queue_sdl_glyph(BlitOutput *output, const BlitFont *font,
         (float)atlas_height;
     source_w = (float)font->width / (float)atlas_width;
     source_h = (float)font->height / (float)atlas_height;
+    }
     /* Dropping the same fraction from the source and the destination keeps
        the glyph at its own scale and simply does not draw its rightmost
        column, which is what stops bold's overstrike from writing into the
@@ -24323,6 +24438,15 @@ static void render_or_queue_sdl_glyph(BlitOutput *output,
                                       float cell_width, float cell_height,
                                       float lean, float trim)
 {
+    if (font && font->raster_get) {
+        if (queue_sdl_glyph(output, font, colour, codepoint, x, y,
+                           cell_width, cell_height, lean, trim)) {
+            if (!output->glyph_geometry_enabled) flush_sdl_glyph_batch(output);
+            return;
+        }
+        /* Do not accidentally interpret the modern atlas as a PSF atlas. */
+        return;
+    }
     if (output != NULL && !output->glyph_geometry_enabled) {
         render_sdl_glyph(output->renderer, font, output->glyph_atlas,
                          output->glyph_atlas_columns, colour, codepoint, x, y,
@@ -28453,6 +28577,16 @@ int main(int argc, char **argv)
     snprintf(runtime.boot_font_path, sizeof(runtime.boot_font_path), "%s",
              runtime.font.path);
     runtime.boot_font_scale_tenths = runtime.font_scale_tenths;
+    {
+        BlitRaster *raster;
+        if (!prepare_font_raster(&runtime.font, runtime.font.path,
+                                 runtime.font_scale_tenths, 0, &raster)) {
+            fprintf(stderr, "blit: requested native font could not be initialized\n");
+            blit_font_free(&runtime.font); blit_font_free(&runtime.wide_font);
+            return 1;
+        }
+        blit_raster_attach(&runtime.font, raster);
+    }
     {
         int input_index;
         for (input_index = 0; input_index < BLIT_MAX_INPUT_DEVICES;

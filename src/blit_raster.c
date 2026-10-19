@@ -15,7 +15,7 @@ typedef struct {
 } RasterEntry;
 
 struct BlitRaster {
-    const BlitFont *fallback;
+    BlitFont fallback;
     FT_Library library;
     FT_Face outline, colour;
     int width, height, em, baseline;
@@ -46,7 +46,9 @@ BlitRaster *blit_raster_open(const BlitFont *fallback,
         height < 8 || height > 64) return NULL;
     raster = calloc(1, sizeof(*raster));
     if (!raster) return NULL;
-    raster->fallback = fallback;
+    /* Shallow immutable PSF view survives a transactional BlitFont move.
+       Its backing allocations remain owned by the attached BlitFont. */
+    raster->fallback = *fallback;
     raster->width = width;
     raster->height = height;
     raster->baseline = height;
@@ -201,7 +203,7 @@ int blit_raster_get(BlitRaster *raster, uint32_t scalar, int columns,
     else if (!protected_geometry(scalar)) result = draw_outline(raster, scalar, &next);
     if (result < 0) { free(next.pixels); return 0; }
     if (!result) {
-        const BlitFont *font = raster->fallback;
+        const BlitFont *font = &raster->fallback;
         size_t index = blit_font_glyph_index(font, scalar);
         next.glyph.fallback = 1;
         for (y = 0; y < next.glyph.height; ++y)
@@ -224,6 +226,23 @@ size_t blit_raster_cached_bytes(const BlitRaster *raster)
 { return raster ? raster->bytes : 0; }
 unsigned long blit_raster_render_count(const BlitRaster *raster)
 { return raster ? raster->renders : 0; }
+
+static int attached_get(void *state, uint32_t scalar, int columns,
+                         BlitRasterGlyph *glyph)
+{ return blit_raster_get((BlitRaster *)state, scalar, columns, glyph); }
+static void attached_free(void *state)
+{ blit_raster_close((BlitRaster *)state); }
+void blit_raster_attach(BlitFont *font, BlitRaster *raster)
+{
+    if (font->raster_state && font->raster_free)
+        font->raster_free(font->raster_state);
+    font->raster_state = raster;
+    font->raster_get = raster ? attached_get : NULL;
+    font->raster_free = raster ? attached_free : NULL;
+    font->raster_blend = raster ? blit_raster_blend : NULL;
+    font->raster_cell_width = raster ? raster->width : 0;
+    font->raster_cell_height = raster ? raster->height : 0;
+}
 
 uint32_t blit_raster_blend(const BlitRasterGlyph *glyph, int x, int y,
                          uint32_t foreground, uint32_t background)

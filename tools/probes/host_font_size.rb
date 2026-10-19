@@ -24,6 +24,7 @@ get = ->(path) { JSON.parse(request.call('GET',path).body) }
 put = ->(payload) { JSON.parse(request.call('PUT','/v1/fonts',payload).body) }
 baseline = get.call('/v1/diagnostics/observation')
 font = baseline.fetch('fonts').fetch('active')
+identity = ->(active) { active.reject { |key,_| key == 'raster_cache' } }
 raise 'pixel font API not installed' unless font.key?('sizing') && font.key?('size_px')
 backend = baseline.dig('diagnostics','health','backend')
 renderer = baseline.dig('diagnostics','render','renderer')
@@ -58,9 +59,9 @@ begin
 ensure
   if last
     current = get.call('/v1/fonts').fetch('active')
-    raise 'font changed concurrently; refusing to overwrite operator choice' unless current==last
+    raise 'font changed concurrently; refusing to overwrite operator choice' unless identity.call(current)==identity.call(last)
     restored = put.call(restore).fetch('active')
-    raise 'font restoration mismatch' unless restored==font
+    raise 'font restoration mismatch' unless identity.call(restored)==identity.call(font)
     File.write(File.join(out,'restored.json'),JSON.pretty_generate(restored))
     puts "FONT_SIZE_BASELINE_RESTORED evidence=#{out}"
   end

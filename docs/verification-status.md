@@ -3,6 +3,22 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-19 candidate562: production smooth/colour profile integration
+
+Shared raster module is now linked into native KMS and both SDL drawing paths.
+All57 cell heights8..64,399 glyph samples per backend: native KMS exact with
+guard pixels; SDL software/GLES2 within2 channel levels for blend rounding.
+Queued SDL hash-collision replacement is exercised. Profile/size API covers
+all sizes, profile-only policy preservation, canonical save/restart and
+missing colour-file rollback. Actual Hibr Control Panel slider/+1/-1 with
+modern font passes; inspected PNG under `build/font-modern-panel-evidence/`.
+Valgrind on actual native KMS raster draw:7,364 allocations/frees, zero
+errors/leaks. Explicit GLES suite7pass/0skip/0fail. Full regression is running;
+first exploratory run was not a frozen binary and is not release acceptance.
+Final exact-binary regression, packaging and physical approval remain pending.
+Live561 unchanged. These entries supersede the older "modern not integrated"
+status below, not its historical evidence.
+
 ## 2026-10-19 candidate562: retro profile and exact SDL UV sampling
 
 New optional Spleen/Hibr profile:1,575 scalar mappings, all1,181 unique
