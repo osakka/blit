@@ -14,7 +14,7 @@
     "upstream": "https://github.com/googlefonts/noto-emoji",
     "sha256": "e5899ed38b8ed83e08bd3ac5de09791e9d19d288333a796de1d35ad17396f1ec",
     "license_file": "NotoColorEmoji-LICENSE.txt",
-    "license_sha256": "3720722d2046accb40e1696f096b57c658b0b47d74031b3d114cf7545b840b3c"
+    "license_sha256": "140c8aab8b15e212617b74476ae1c1547f868e523301a190398ea9c71e62af64"
   },
   "policy": "Unmodified licensed source fonts. Native-size grayscale text; fixed-strike premultiplied colour emoji. Protected terminal geometry and missing scalars use canonical PSF fallback. No universal Unicode or shaped emoji-sequence claim."
 }
