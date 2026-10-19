@@ -1,0 +1,17 @@
+release: 0.1.558
+package: blit_0.1.558-1_amd64.deb
+package_sha256: 299075721ddf7409d64d401594df2cea7b278b6042698f7314ebeab927a36532
+source_commit: c411650e2a2de15dec4c9ea7fb8e86a7ecdac51d
+package_documentation_commit: c411650e2a2de15dec4c9ea7fb8e86a7ecdac51d
+server_binary_sha256: 952b4249ecdb73028059ca39d3bfb904aba25f08153d55ad2ee98184d865481c
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.225
+hibr_abi: 16
+verification:
+  regression: '106 pass, 7 explicit skips, 0 fail; includes 6 offscreen GLES2 gates'
+  adapters: '3 gates pass separately against pinned Hibr 0.99.225/ABI16 headers'
+  soak: '120 seconds, four PTYs, 11416 snapshots, 1038 resizes'
+  scheduler: 'production-code red/green; idle deadline preserved, pointer work retained, timeout recovery requested'
+  package: 'artifact/provenance gate passes; independent second package is byte-identical'
+  physical: 'deployment and cadence revalidation pending'
