@@ -103,7 +103,7 @@ begin
     directory = File.join(OUT, name)
     FileUtils.mkdir_p(directory)
     File.write(File.join(directory, 'before.json'), JSON.pretty_generate(observation))
-    %w[host_motion_agreement.rb host_kitty_composition.rb host_grid_font_edges.rb].each do |probe|
+    %w[host_motion_agreement.rb host_kitty_composition.rb host_grid_font_edges.rb host_sixel.rb].each do |probe|
       output, error, status = Open3.capture3({'BLIT_AUTH_TOKEN'=>TOKEN, 'BLIT_LIVE'=>BASE.to_s, 'BLIT_EVIDENCE_DIR'=>directory},
         'ruby', File.join(ROOT, 'tools/probes', probe), BASE.authority)
       File.write(File.join(directory, probe + '.log'), output + error)

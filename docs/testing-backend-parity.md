@@ -30,6 +30,21 @@ glyphs against the canonical8x16 font raster, including the bold diamond;
 this comparison profile requires that font at scale1. Auth tokens are supplied through the environment and are
 not written into evidence.
 
+The same comparison also runs `host_sixel.rb`. Its decoder scenarios retain
+their independent surfaces; its pixel scenario explicitly selects a free
+pane and samples relative to that pane's actual cell-grid origin. Captures
+must match the surface revision and presentation state. Palette, HLS, filled
+background, cursor modes and 4096-pixel decoder-bound assertions remain
+shared between local and physical runs. Evidence includes the pixel capture
+and revision/geometry metadata. `BLIT_SIXEL_PANE_ID` optionally selects a
+specific free pane. An occupied pane is never overwritten.
+
+`sixel_composition_gate.rb` starts an isolated SDL profile, splits the output
+1x2, occupies the upper pane and runs that same operator probe on the lower
+pane. This checks a nonzero vertical origin on software and offscreen GLES2;
+it does not establish physical hotplug or performance. No new runtime or
+second sixel implementation is introduced.
+
 An `ensure` restores only the backend, renderer and login-enabled settings
 changed by the comparison, preserving other settings, then restarts and
 verifies the original backend. `BACKEND_BASELINE_RESTORED` confirms that

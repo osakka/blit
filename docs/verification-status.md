@@ -3,6 +3,30 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-19: physical sixel checks and split-origin fixture
+
+The operator's existing sixel assertions pass on live 0.1.557 through direct
+KMS, SDL/KMSDRM software and SDL/KMSDRM OpenGLES2. The same run repeats all
+previous motion (12/12 per backend), Kitty composition/deletion and 2,688
+font/grid-pixel checks successfully. Evidence directory:
+`/tmp/blit-backend-parity-557-sixel-20261019/`. The native baseline/login
+policy and pointer pose are restored after comparison.
+
+The probe now explicitly attaches its pixel scenario to a free pane, verifies
+that attachment, samples relative to its actual grid origin, reads real BMP
+offset/depth/orientation and requires capture revision/presentation agreement.
+Its decoder assertions retain independent surfaces. Software and offscreen
+GLES2 also pass the local lower-pane fixture at origin 0,384, with the upper
+pane occupied. Original un-split fixture passes are not claimed as evidence
+that its former fixed-origin probe correctly tested split panes.
+
+This adds bounded protocol evidence, not universal sixel conformance or
+performance acceptance. The comparison failure-restoration gate still passes.
+No runtime or Hibr implementation was modified.
+The complete renderer plus GLES suites pass 63 gates, with zero skips and
+zero failures. This includes the lower-pane sixel fixture and six actual
+offscreen GLES cases. The failure-restoration gate passes separately.
+
 ## 2026-10-19: 557 physical comparison passes bounded cases on all three paths
 
 The updater installs and version-verifies 0.1.557. Package/artifact provenance

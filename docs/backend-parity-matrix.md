@@ -33,6 +33,13 @@ for all three backends. Every row is pending full parity acceptance.
 
 ## First executable increment
 
+Live 0.1.557 passes the same motion, Kitty, font/grid and sixel probes on
+direct KMS, SDL/KMSDRM software and SDL/KMSDRM OpenGLES2. Evidence is retained
+under `/tmp/blit-backend-parity-557-sixel-20261019/`; native/login restoration
+passes. The connected DP canvas is split 1x2. These bounded cases do not close
+the rows requiring multi-connector, hotplug, physical-input, broader effects
+or sustained cadence/latency evidence.
+
 Candidate0.1.556 adds API-owned startup backend selection (ADR0138) so physical
 comparison can use saved settings and supervised restart. The expanded
 `gles` suite passes5 gates on verified offscreen/OpenGLES2: glyph geometry,

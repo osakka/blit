@@ -1,5 +1,23 @@
 # Current state and restart point
 
+## 2026-10-19: split-aware sixel acceptance on all three presentation paths
+
+The existing operator sixel probe now selects a discovered free pane, uses
+its actual cell-grid origin and framebuffer metadata, and requires a
+revision-correlated presented capture. Decoder-bound, palette/HLS, fill and
+cursor-mode assertions are unchanged. The local wrapper occupies the upper
+pane and checks pixels in the lower pane (origin 0,384), through both SDL
+software and offscreen GLES2. No runtime or Hibr code changed in this cycle.
+
+On live 0.1.557, direct KMS, SDL/KMSDRM software and SDL/KMSDRM OpenGLES2 all
+pass the sixel probe, plus the previous motion, Kitty and grid/font checks.
+Physical pixel origin is 0,4 on the free upper pane. Captures and metadata:
+`/tmp/blit-backend-parity-557-sixel-20261019/`. The original native backend,
+login policy and pointer pose are restored. Comparison failure cleanup also
+passes locally. Broader renderer/GLES regression passes 63 gates with no
+skips or failures, including six GLES cases. Cadence/latency,
+multi-connector hotplug, physical-input parity and broader effects remain open.
+
 ## 2026-10-19: 0.1.557 physical graphics comparison passes all three backends
 
 Package 0.1.557 is deployed and version-verified on 10.54. Its two independent

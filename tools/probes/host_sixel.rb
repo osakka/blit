@@ -10,6 +10,7 @@
 require 'json'
 require 'net/http'
 require 'uri'
+require 'fileutils'
 
 BASE = URI(ENV.fetch('BLIT_LIVE', 'http://192.168.10.54:8080'))
 TOKEN = ENV.fetch('BLIT_AUTH_TOKEN')
@@ -30,15 +31,6 @@ def call(method, path, body = nil)
   [res.code.to_i, (res.body.to_s.empty? ? nil : (JSON.parse(res.body) rescue res.body))]
 end
 
-def raw(path)
-  uri = BASE + path
-  req = Net::HTTP::Get.new(uri)
-  req['Authorization'] = "Bearer #{TOKEN}"
-  res = Net::HTTP.start(uri.hostname, uri.port, read_timeout: 120) { |h| h.request(req) }
-  abort "#{path} -> #{res.code}" unless res.code == '200'
-  res.body
-end
-
 $failures = []
 def check(condition, message)
   return if condition
@@ -47,8 +39,8 @@ def check(condition, message)
   warn "live sixel: FAIL #{message}"
 end
 
-# One session per scenario, on display-1 so the pixels are on the physical
-# output rather than in a surface nothing presents.
+# Decoder scenarios use independent surfaces. The pixel scenario explicitly
+# attaches to a discovered free pane, including nonzero split-pane origins.
 #
 # The escapes arrive as positional parameters rather than inside the script:
 # create_session caps one argument at 256 bytes, and a scenario that sends
@@ -65,21 +57,26 @@ def scenario(chunks, images:, columns: 60, rows: 12, display: nil,
                        'arguments' => ['-c', body, 'sh', *parameters],
                        'surface_mode' => 'terminal',
                        'surface' => { 'width' => columns, 'height' => rows },
-                       **(display ? { 'display_id' => display } : {}))
+                       **(display ? { 'pane_id' => PIXEL_PANE.fetch('id') } : {}))
   abort "session -> #{code} #{created.inspect}" unless code == 201
   session = created.fetch('id')
   surface = created.fetch('surface_id')
-  deadline = Time.now + 30
-  loop do
-    _, state = call('GET', "/v1/terminal-sessions/#{session}")
-    break if state['graphics'].to_a.length >= images || Time.now > deadline
-
-    sleep 0.2
-  end
-  sleep 1.5
-  _, state = call('GET', "/v1/terminal-sessions/#{session}")
-  _, summary = call('GET', "/v1/surfaces/#{surface}/summary")
   begin
+    raise 'pixel scenario attached to the wrong pane' if
+      display && created['pane_id'] != PIXEL_PANE.fetch('id')
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 30
+    loop do
+      _, state = call('GET', "/v1/terminal-sessions/#{session}")
+      break if state['graphics'].to_a.length >= images
+      raise 'sixel images did not arrive before deadline' if
+        Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+
+      sleep 0.2
+    end
+    sleep 1.5
+    _, state = call('GET', "/v1/terminal-sessions/#{session}")
+    _, summary = call('GET', "/v1/surfaces/#{surface}/summary")
+    summary['probe_surface_id'] = surface
     yield state, summary
   ensure
     call('DELETE', "/v1/terminal-sessions/#{session}")
@@ -91,7 +88,11 @@ def pixel(bmp, width, height, x, y)
   bytes = bits / 8
   raise "unsupported BMP depth #{bits}" unless [3, 4].include?(bytes)
   stride = (width * bytes + 3) & ~3
-  offset = 54 + (height - 1 - y) * stride + x * bytes
+  stored_width, stored_height = bmp.byteslice(18, 8).unpack('l<2')
+  raise 'capture geometry mismatch' unless stored_width == width && stored_height.abs == height
+  raise 'sample outside framebuffer' unless x.between?(0,width-1) && y.between?(0,height-1)
+  row = stored_height.positive? ? height - 1 - y : y
+  offset = bmp.byteslice(10,4).unpack1('V') + row * stride + x * bytes
   [bmp.getbyte(offset + 2), bmp.getbyte(offset + 1), bmp.getbyte(offset)]
 end
 
@@ -106,11 +107,21 @@ if graphics
         graphics['max_bytes'],
         'a full-size sixel canvas is exactly the byte budget')
 end
-output = diagnostics.fetch('render').fetch('outputs').fetch(0)
-display_id = call('GET', '/v1/topology').last.fetch('outputs').first.fetch('display_id')
+topology = call('GET', '/v1/topology').last
+PIXEL_PANE = topology.fetch('panes').find do |pane|
+  pane['surface_id'].nil? && (!ENV['BLIT_SIXEL_PANE_ID'] || pane['id'] == ENV['BLIT_SIXEL_PANE_ID'])
+end
+raise 'requires a free pane; never overwrites the desktop' unless PIXEL_PANE
+grid = PIXEL_PANE.fetch('cell_grid')
+raise 'sixel probe requires canonical 8x16 cells' unless
+  grid['cell_width'] == CELL_W && grid['cell_height'] == CELL_H
+display_id = PIXEL_PANE.fetch('display_id')
+output = diagnostics.fetch('render').fetch('outputs').find { |o| o['display_id'] == display_id }
 inset = diagnostics.fetch('render').fetch('surface_inset_px')
 fb_w = output.fetch('render_width')
 fb_h = output.fetch('render_height')
+origin_x = grid.fetch('origin_x') + inset
+origin_y = grid.fetch('origin_y') + inset
 puts "output #{fb_w}x#{fb_h} inset=#{inset}"
 
 HIDE = '\\033[?25l'
@@ -195,12 +206,36 @@ scenario([HIDE + "\\033[1;1H\\033Pq#1#{solid}\\033\\\\",
           "\\033[3;3H\\033Pq#0;1;0;50;100#{solid}\\033\\\\",
           "\\033[3;5H\\033Pq#0;1;240;50;100#{solid}\\033\\\\",
           "\\033[48;2;0;0;255m\\033[5;1H\\033Pq#1;2;100;0;0~?~\\033\\\\"],
-         images: 7, display: display_id) do |state, _summary|
+         images: 7, display: display_id) do |state, summary|
   check(state['graphics'].to_a.length == 7,
         "all seven images decode, got #{state['graphics'].to_a.length} " \
         "#{state['graphics_diagnostics'].inspect}")
-  bmp = raw("/v1/diagnostics/screenshots/#{display_id}")
-  at = ->(x, y) { pixel(bmp, fb_w, fb_h, inset + x, inset + y) }
+  shot = nil
+  captured = {}
+  coherent = false
+  12.times do
+    uri = BASE + "/v1/diagnostics/screenshots/#{display_id}"
+    request = Net::HTTP::Get.new(uri)
+    request['Authorization'] = "Bearer #{TOKEN}"
+    shot = Net::HTTP.start(uri.hostname, uri.port, open_timeout:3, read_timeout:40) { |http| http.request(request) }
+    raise "capture HTTP #{shot.code}" unless shot.code == '200'
+    captured = (shot['X-Blit-Capture-Revisions'] || '').split(',').to_h { |pair| pair.split('=') }
+    coherent = captured[summary.fetch('probe_surface_id')].to_i == summary.fetch('revision') &&
+      (shot['X-Blit-Capture-Presented'] == 'true' ||
+       (diagnostics.dig('render','direct_kms') && shot['X-Blit-Capture-Presented'].nil?))
+    break if coherent
+    sleep 0.02
+  end
+  raise 'sixel capture was not coherent and presented' unless coherent
+  bmp = shot.body
+  if (directory = ENV['BLIT_EVIDENCE_DIR'])
+    FileUtils.mkdir_p(directory)
+    File.binwrite(File.join(directory,'sixel-composition.bmp'),bmp)
+    File.write(File.join(directory,'sixel-composition.json'),JSON.pretty_generate(
+      {display_id:display_id,pane_id:PIXEL_PANE['id'],origin:[origin_x,origin_y],
+       surface:summary,capture_revisions:captured,frame:shot['X-Blit-Capture-Frame']}))
+  end
+  at = ->(x, y) { pixel(bmp, fb_w, fb_h, origin_x + x, origin_y + y) }
   samples = {
     'VT340 #1 (blue)' => [at.call(0, 0), [51, 51, 204]],
     'VT340 #2 (red)' => [at.call(16, 0), [204, 33, 33]],
@@ -218,7 +253,7 @@ scenario([HIDE + "\\033[1;1H\\033Pq#1#{solid}\\033\\\\",
 end
 
 if $failures.empty?
-  puts 'LIVE_SIXEL_PASS bound=4096_square clip=1920_to_480 last_band=4096 ' \
+  puts "LIVE_SIXEL_PASS pane=#{PIXEL_PANE.fetch('id')} origin=#{origin_x},#{origin_y} bound=4096_square clip=1920_to_480 last_band=4096 " \
        'palette=vt340 hls=dec_hue_origin p2=filled cursor=advances ' \
        'decsdm=homes 8452=right_of_graphic'
 else

@@ -251,6 +251,7 @@ suite_renderer() {
     run_gate kitty_placement_gate.rb ruby tools/tests/kitty_placement_gate.rb
     run_gate graphics_reset_gate.rb ruby tools/tests/graphics_reset_gate.rb
     run_gate sixel_decoder_gate.rb ruby tools/tests/sixel_decoder_gate.rb
+    run_gate sixel_composition_gate.rb ruby tools/tests/sixel_composition_gate.rb
     run_gate graphics_trace_gate.rb ruby tools/tests/graphics_trace_gate.rb
     run_gate sync_output_gate.rb ruby tools/tests/sync_output_gate.rb
     run_gate cell_paint_gate.rb ruby tools/tests/cell_paint_gate.rb
@@ -281,6 +282,10 @@ suite_renderer() {
 }
 
 suite_gles() {
+    run_gate sdl_gles_sixel_composition env \
+        BLIT_GATE_BINARY="$BINARY" BLIT_GATE_FONT="$FONT" BLIT_GATE_LIBS="$LIBS" \
+        BLIT_TEST_VIDEO_DRIVER=offscreen BLIT_TEST_RENDERER=opengles2 \
+        LIBGL_ALWAYS_SOFTWARE=1 ruby tools/tests/sixel_composition_gate.rb
     run_gate sdl_gles_glyphs env \
         BLIT_GATE_BINARY="$BINARY" BLIT_GATE_FONT="$FONT" BLIT_GATE_LIBS="$LIBS" \
         BLIT_TEST_VIDEO_DRIVER=offscreen BLIT_TEST_RENDERER=opengles2 \
