@@ -713,6 +713,8 @@ typedef struct {
     unsigned long long last_topology_revision;
     int last_target_count;
     int glyph_atlas_columns;
+    int glyph_atlas_width;
+    int glyph_atlas_height;
     /* Selectable because the live GLES2 geometry path has shown atlas
        corruption; diagnostics must identify the active glyph path. */
     int glyph_geometry_enabled;
@@ -1496,7 +1498,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                            uint32_t output_mask, int hold_scene);
 static SDL_Texture *create_sdl_glyph_atlas(SDL_Renderer *renderer,
                                            const BlitFont *font,
-                                           int *columns_out);
+                                           int *columns_out,
+                                           int *width_out, int *height_out);
 static const char *pane_surface_id(const BlitRuntime *runtime,
                                    const BlitPane *pane);
 static void discover_panes(BlitRuntime *runtime);
@@ -16056,7 +16059,8 @@ static int apply_font_configuration(BlitRuntime *runtime, const char *path,
                 SDL_DestroyTexture(output->glyph_atlas);
             output->glyph_atlas = create_sdl_glyph_atlas(
                 output->renderer, &runtime->font,
-                &output->glyph_atlas_columns);
+                &output->glyph_atlas_columns, &output->glyph_atlas_width,
+                &output->glyph_atlas_height);
             SDL_SetRenderScale(output->renderer, 1.0f, 1.0f);
             output->initialized = 0;
         }
@@ -22554,7 +22558,9 @@ static void initialize_outputs(BlitRuntime *runtime)
                     glyph_batch_mode);
         runtime->outputs[runtime->output_count].glyph_atlas =
             create_sdl_glyph_atlas(renderer, &runtime->font,
-                                   &runtime->outputs[runtime->output_count].glyph_atlas_columns);
+                                   &runtime->outputs[runtime->output_count].glyph_atlas_columns,
+                                   &runtime->outputs[runtime->output_count].glyph_atlas_width,
+                                   &runtime->outputs[runtime->output_count].glyph_atlas_height);
         runtime->outputs[runtime->output_count].display_id = display->id;
         ++runtime->output_count;
     }
@@ -22599,6 +22605,8 @@ static void destroy_outputs(BlitRuntime *runtime)
         runtime->outputs[i].wide_indices = NULL;
         runtime->outputs[i].glyph_atlas = NULL;
         runtime->outputs[i].glyph_atlas_columns = 0;
+        runtime->outputs[i].glyph_atlas_width = 0;
+        runtime->outputs[i].glyph_atlas_height = 0;
         free(runtime->outputs[i].glyph_vertices);
         free(runtime->outputs[i].glyph_indices);
         free(runtime->outputs[i].background_vertices);
@@ -23647,9 +23655,20 @@ static int active_output_surface_count(const BlitRuntime *runtime,
     return count;
 }
 
+/* Power-of-two extents make integer texel boundaries exactly representable
+   as binary UV coordinates. SDL software geometry truncates UV*extent. */
+static int glyph_atlas_extent(int minimum)
+{
+    int extent = 1;
+    if (minimum < 1 || minimum > 8192) return 0;
+    while (extent < minimum) extent *= 2;
+    return extent;
+}
+
 static SDL_Texture *create_sdl_glyph_atlas(SDL_Renderer *renderer,
                                            const BlitFont *font,
-                                           int *columns_out)
+                                           int *columns_out,
+                                           int *width_out, int *height_out)
 {
     SDL_Texture *texture;
     unsigned char *pixels;
@@ -23666,7 +23685,8 @@ static SDL_Texture *create_sdl_glyph_atlas(SDL_Renderer *renderer,
 
     if (renderer == NULL || font == NULL || font->glyph_count == 0 ||
         font->width < 1 || font->height < 1 || font->width > 32 ||
-        font->height > 64)
+        font->height > 64 ||
+        font->glyph_count > 32U * (8192U / (unsigned)(font->height + 2)))
         return NULL;
     /* Keep the atlas compact while leaving room for the bundled Hibr font and
        future PSF2 additions. Every cell is a white alpha mask; the renderer
@@ -23680,8 +23700,9 @@ static SDL_Texture *create_sdl_glyph_atlas(SDL_Renderer *renderer,
     tile_height = font->height + 2;
     rows = (int)((font->glyph_count + (size_t)columns - 1) /
                  (size_t)columns);
-    width = columns * tile_width;
-    height = rows * tile_height;
+    width = glyph_atlas_extent(columns * tile_width);
+    height = glyph_atlas_extent(rows * tile_height);
+    if (!width || !height) return NULL;
     pixel_bytes = (size_t)width * (size_t)height * 4U;
     pixels = (unsigned char *)calloc(1, pixel_bytes);
     if (pixels == NULL)
@@ -23749,6 +23770,8 @@ static SDL_Texture *create_sdl_glyph_atlas(SDL_Renderer *renderer,
     }
     if (columns_out != NULL)
         *columns_out = columns;
+    if (width_out != NULL) *width_out = width;
+    if (height_out != NULL) *height_out = height;
     return texture;
 }
 
@@ -23910,7 +23933,6 @@ static int queue_sdl_glyph(BlitOutput *output, const BlitFont *font,
     int *indices;
     size_t glyph;
     int columns;
-    int rows;
     int atlas_width;
     int atlas_height;
     float source_x;
@@ -23924,15 +23946,15 @@ static int queue_sdl_glyph(BlitOutput *output, const BlitFont *font,
     int index;
 
     if (output == NULL || font == NULL || font->data == NULL ||
-        output->glyph_atlas == NULL || output->glyph_atlas_columns < 1)
+        output->glyph_atlas == NULL || output->glyph_atlas_columns < 1 ||
+        output->glyph_atlas_width < 1 || output->glyph_atlas_height < 1)
         return 0;
     glyph = blit_font_glyph_index(font, codepoint);
     if (glyph >= font->glyph_count || !ensure_sdl_glyph_batch(output, 1))
         return 0;
     columns = output->glyph_atlas_columns;
-    rows = ((int)font->glyph_count + columns - 1) / columns;
-    atlas_width = columns * (font->width + 2);
-    atlas_height = rows * (font->height + 2);
+    atlas_width = output->glyph_atlas_width;
+    atlas_height = output->glyph_atlas_height;
     source_x = (float)((int)(glyph % (size_t)columns) * (font->width + 2) + 1) /
         (float)atlas_width;
     source_y = (float)((int)(glyph / (size_t)columns) * (font->height + 2) + 1) /

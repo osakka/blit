@@ -1,5 +1,34 @@
 # Current state and restart point
 
+## 2026-10-19 candidate562: selectable retro font and exact SDL atlas boundaries
+
+ADR0145 adds optional `blit-hibr-spleen16`: pinned Spleen2.2.0 plus the exact
+checked-in Hibr fallback.1,575 scalar mappings retain1,181 unique fallback
+mappings;92 printable ASCII masks differ. Protected box/block, combining and
+control-diamond geometry is unchanged. Regeneration is byte-identical and
+notices/provenance are bundled. Terminus remains default.
+
+The new asset exposes a software-only missing U+2581 row. Asset masks match
+the default, GLES2 passes, and software repeatedly fails. SDL's integer UV
+truncation with900px atlas height is the identified boundary. ADR0146 uses
+power-of-two extents plus cached actual dimensions; the same fixture passes
+afterward on both SDL paths. No SDL/Hibr code changed. Production damage/
+UV round-trip tests pass on software/GLES2. Expanded local grid oracle checks
+115 cells/14,720 exact pixels on both paths, including ASCII. Its request
+batching is bounded to16cells to stay inside the existing HTTP envelope.
+Full regression is running. Live remains561 SDL/GLES2 with original font
+restored. No562 package, physical or new-font aesthetic approval yet. The
+modern antialiased/colour profile remains pending.
+
+The candidate's full run reports108pass/7skip/0fail, with a120-second
+four-PTY soak of10,996 snapshots/1,000 resizes. However its final dependency
+fingerprint guard fails: installed Hibr changed0.99.257 to0.99.258/ABI16
+during the run. This is a mixed-dependency run, not frozen acceptance; do
+not package/deploy562 on that claim. Live remains561. Operator was asked to
+pause Hibr upgrades at258 for a fresh verification. No Hibr changes were made
+by this work. Source and focused pixel evidence can be committed as a
+checkpoint; full frozen verification/package/physical approval remain open.
+
 ## 2026-10-19:561 pixel-size API deployed; next is the rich glyph pipeline
 
 Source `65e785d`, identity `3c5371b`, package SHA256

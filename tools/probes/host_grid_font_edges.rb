@@ -33,8 +33,10 @@ raise 'grid overflows its physical region' unless
   oy + grid['pixel_height'] <= region['y'] + region['height']
 raise 'requires 8x16 font at scale1' unless grid['cell_width'] == 8 && grid['cell_height'] == 16
 active = get('/v1/fonts').fetch('active')
-raise 'requires the canonical Blit Hibr font' unless File.basename(active.fetch('path')) == 'Blit-Hibr-Terminus16.psf'
-font = File.binread(File.expand_path('../../assets/fonts/Blit-Hibr-Terminus16.psf', __dir__))
+font_name = File.basename(active.fetch('path'))
+raise 'requires a checked-in Blit Hibr font' unless
+  %w[Blit-Hibr-Terminus16.psf Blit-Hibr-Spleen16.psf].include?(font_name)
+font = File.binread(File.expand_path("../../assets/fonts/#{font_name}", __dir__))
 magic, _version, header, _flags, count, size, height, width = font[0,32].unpack('L<8')
 raise 'font identity/geometry mismatch' unless magic == 0x864ab572 && count == active['glyphs'] && width == 8 && height == 16
 mapping = {}
@@ -55,9 +57,19 @@ begin
   '◆◷▦⌨◎☺ⓘ◐⎘▤▣◈⇅◉◌⌘⚙▭'.each_char.with_index do |ch, i|
     cells << {x:i+1,y:4,text:ch,style:{background:'#123456',foreground:'#abcdef'}}
   end
+  (33..126).each_with_index do |cp,i|
+    columns = grid['columns'] - 2
+    x = 1 + i % columns; y = 6 + i / columns
+    raise 'requires enough rows for the ASCII specimen' unless y < grid['rows']
+    cells << {x:x,y:y,text:cp.chr,style:{background:'#123456',foreground:'#abcdef'}}
+  end
   surface = session.fetch('surface_id')
   rev = get("/v1/surfaces/#{surface}/summary").fetch('revision')
-  receipt = change('PUT', "/v1/surfaces/#{surface}/cells", {base_revision:rev,cells:cells})
+  receipt = nil
+  cells.each_slice(16) do |chunk|
+    receipt = change('PUT', "/v1/surfaces/#{surface}/cells", {base_revision:rev,cells:chunk})
+    rev = receipt.fetch('revision')
+  end
   shot = nil; captured = {}
   30.times do
     shot = req('GET', "/v1/diagnostics/screenshots/#{pane['display_id']}")

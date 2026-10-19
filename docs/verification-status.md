@@ -3,6 +3,34 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-19 candidate562: retro profile and exact SDL UV sampling
+
+New optional Spleen/Hibr profile:1,575 scalar mappings, all1,181 unique
+fallback mappings retained;92 different printable ASCII masks. Protected
+geometry/nonblank tests and pinned-source regeneration pass exactly.
+Output SHA256 `13e0c44d6254d3de6b2eb1fac87fb8412bb3361ecd566517c8daabc9cc5cce37`.
+New asset initially fails software U+2581 with only its last row painted;
+GLES2 passes. Read-only SDL source plus repeated red test identifies integer
+UV truncation with900px atlas extent. Power-of-two atlas allocation and
+cached actual dimensions make the same software test green. No SDL changes.
+
+Expanded oracle115cells/14,720exact pixels passes on software and offscreen
+GLES2 for both Spleen and the original Terminus. Retro legacy scale and exact
+8..64px glyph/reflow tests pass on both paths. UV round-trip, production damage,
+held-scene pointer and two-renderer metrics fixtures pass on both. Default
+font remains Terminus. Full regression is running; package/physical/aesthetic
+acceptance remains pending. Modern colour/outline rendering is not delivered.
+
+Full runner reports108pass/7skip/0fail;120-second four-PTY soak10,996
+snapshots/1,000 resizes. The enclosing fingerprint guard exits1 because
+Hibr changes257->258 (ABI16) during testing. Therefore this is NOT a
+frozen-baseline full pass. Package/deployment is held pending a repeat on
+an unchanged dependency baseline. Installed258 fingerprint after the run:
+`a17716c1a56eb4ca9f0e691b4323dbd4cef300526f6a0b99ffaadda084a3ceeb`.
+Three pinned-header adapter gates pass separately. Updated font fixture
+passes retro software/GLES2 and default software separately; no weakening
+of the glyph oracle is made to address the UV failure.
+
 ## 2026-10-19:561 deployed and physical font sizing exercised
 
 Package source `65e785d`, identity `3c5371b`, SHA256

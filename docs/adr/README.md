@@ -162,6 +162,8 @@ security policy, or compatibility rule requires a new ADR.
 - [0142 — Service ready input at HTTP admission](0142-service-ready-input-at-http-admission.md)
 - [0143 — Native placement uses primary-relative coordinates](0143-native-placement-uses-primary-relative-coordinates.md)
 - [0144 — Explicit font cell pixel size](0144-explicit-font-cell-pixel-size.md)
+- [0145 — Retro Spleen profile with canonical fallback](0145-retro-spleen-profile-with-canonical-fallback.md)
+- [0146 — Exact integer glyph atlas UV boundaries](0146-exact-integer-glyph-atlas-uv-boundaries.md)
 
 ## Adding an ADR
 

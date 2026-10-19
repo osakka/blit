@@ -263,6 +263,26 @@ static void utf8_large_pty_read_gate(void)
     close(fds[0]); close(fds[1]); free(runtime);
 }
 
+static void glyph_atlas_uv_gate(void)
+{
+    int extents[] = {320, 540, 900, 1088, 4097};
+    int index;
+    for (index = 0; index < 5; ++index) {
+        int extent = glyph_atlas_extent(extents[index]);
+        int pixel;
+        if (extent < extents[index] || (extent & (extent - 1))) {
+            fprintf(stderr, "atlas extent is not a sufficient power of two\n"); exit(2);
+        }
+        for (pixel = 0; pixel <= extent; ++pixel) {
+            float uv = (float)pixel / (float)extent;
+            if ((int)(uv * (float)extent) != pixel) {
+                fprintf(stderr, "atlas UV lost texel %d of %d\n", pixel, extent); exit(2);
+            }
+        }
+    }
+    if (glyph_atlas_extent(0) || glyph_atlas_extent(8193)) exit(2);
+}
+
 static void http_accept_budget_gate(void)
 {
     BlitRuntime *runtime = calloc(1, sizeof(*runtime));
@@ -629,6 +649,7 @@ int main(void)
     expect_bounds("full damage never shrinks", 0, 0, 80, 40);
     expired_batch_deadline_gate();
     http_accept_budget_gate();
+    glyph_atlas_uv_gate();
     kms_idle_completion_gate();
     kms_retry_deadline_gate();
     utf8_large_pty_read_gate();

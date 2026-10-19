@@ -96,7 +96,7 @@ raise 'heavy horizontal topology mismatch' unless
 raise 'double horizontal topology mismatch' unless
   row_count.call(3, 5) == 8 && row_count.call(3, 10) == 8
 raise 'full block topology mismatch' unless (0...16).all? { |row| row_count.call(4, row) == 8 }
-raise 'lower block topology mismatch' unless
+raise "lower block topology mismatch rows=#{(0...16).map { |row| row_count.call(5,row) }}" unless
   row_count.call(5, 14) == 8 && row_count.call(5, 15) == 8 &&
   row_count.call(5, 13) == 0
 raise 'wide glyph did not paint both cells' unless

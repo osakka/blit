@@ -62,10 +62,12 @@ emoji-sequence support.
 - [Noto Emoji sources and font licenses](https://github.com/googlefonts/noto-emoji):
   candidate colour assets; pin exact format/version/license before shipping.
 
-Candidate561 implements explicit cell pixel height and legacy-policy
-compatibility (ADR0144), with focused tests passing; full/live verification
-is pending. Native outline rasterization, colour glyphs and both new font
-profiles remain unimplemented. No new dependency or asset is selected here.
+Release561 implements explicit cell pixel height and legacy-policy
+compatibility (ADR0144), with full regression and bounded physical SDL/GLES2
+sizing/capture checks passing. Candidate562 adds the optional Spleen retro
+profile (ADR0145), with focused asset/pixel tests passing and full verification
+running. Native outline rasterization and the modern colour profile remain
+unimplemented. No new production font dependency is linked yet.
 
 ## Source/rasterizer feasibility evidence (2026-10-19)
 

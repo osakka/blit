@@ -212,6 +212,7 @@ suite_font() {
     run_gate sdl_glyph_render_gate.rb ruby tools/tests/sdl_glyph_render_gate.rb
     run_gate hibr_font_manifest_gate.py python3 tools/tests/hibr_font_manifest_gate.py
     run_gate font_fit_gate.py python3 tools/tests/font_fit_gate.py
+    run_gate retro_font_gate.py python3 tools/tests/retro_font_gate.py
     if [ -d "$ROOT/vendor/SDL3/include" ]; then
         run_gate sdl_glyph_filter_gate.sh "$ROOT"/tools/tests/sdl_glyph_filter_gate.sh
     else

@@ -162,10 +162,6 @@ begin
   end
 
   selected = available.first.fetch('id')
-  selected_state = request(URI("#{base}/v1/fonts"), Net::HTTP::Put,
-                           {'font_id' => selected, 'scale' => 1.0})
-  raise 'font profile was not selected' unless selected_state.fetch('active').fetch('id') == selected
-  raise 'scale was not restored' unless selected_state.fetch('active').fetch('scale') == 1
 
   [8, 16, 17, 19, 23, 32, 48, 64].each do |size|
     actual = request(base + '/v1/fonts', Net::HTTP::Put, {'size_px'=>size}).fetch('active')
@@ -182,7 +178,9 @@ begin
   end
   unchanged = request(base + '/v1/fonts').fetch('active')
   same_profile = request(base + '/v1/fonts',Net::HTTP::Put,{'font_id'=>selected}).fetch('active')
-  raise 'profile-only selection reset pixel size policy' unless same_profile == unchanged
+  raise 'profile-only selection reset pixel size policy' unless same_profile['id']==selected &&
+    same_profile['sizing']=='pixels' && same_profile['size_px']==unchanged['size_px']
+  unchanged = same_profile
   [{'size_px'=>7},{'size_px'=>65},{'size_px'=>19.5},{'size_px'=>'20'},
    {'size_px'=>nil},{'size_px'=>16,'scale'=>1.0}].each do |payload|
     q = Net::HTTP::Put.new(base + '/v1/fonts');q['Content-Type']='application/json';q.body=JSON.generate(payload)

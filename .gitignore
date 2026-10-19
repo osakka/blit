@@ -17,5 +17,6 @@ diagnostics/
 test-artifacts/
 tools/__pycache__/
 tools/diagnostics/__pycache__/
+tools/fonts/__pycache__/
 server
 build-tcc-ignore

@@ -57,12 +57,26 @@ manifest_hash_matches hibr_adapter_sha256 \
 
 test -x "$stage/usr/lib/blit/bin/blit-server"
 test -f "$stage/usr/lib/blit/hibr/console-blit.so"
+test -f "$stage/usr/lib/blit/fonts/Blit-Hibr-Spleen16.psf"
+test -f "$stage/usr/lib/blit/fonts/licenses/Spleen-LICENSE.txt"
+test -f "$stage/usr/lib/blit/fonts/licenses/Terminus-OFL.txt"
+test -f "$stage/usr/lib/blit/fonts/licenses/DejaVu-notice.txt"
+test -f "$stage/usr/lib/blit/fonts/licenses/Noto-notice.txt"
+test -f "$stage/usr/lib/blit/fonts/licenses/Droid-notice.txt"
+test -f "$stage/usr/lib/blit/fonts/licenses/Apache-2.0.txt"
 test -x "$stage/usr/share/blit/hibr/blit-session.hibr"
 test -x "$stage/usr/share/blit/hibr/blit-login.hibr"
 test -x "$stage/usr/share/blit/hibr/blit-login-session.hibr"
 test -x "$stage/usr/share/blit/hibr/blit-desktop-observe.hibr"
 test -x "$stage/usr/share/blit/hibr/blit-desktop-place.hibr"
 source_commit=$(sed -n 's/^source_commit: //p' "$manifest")
+for font_asset in Blit-Hibr-Spleen16.psf Blit-Hibr-Spleen16.source.json licenses/Spleen-LICENSE.txt; do
+    cmp -s <(git -C "$root" show "$source_commit:assets/fonts/$font_asset") \
+        "$stage/usr/lib/blit/fonts/$font_asset" || {
+        echo "PACKAGE_ARTIFACT_FAIL font differs from recorded source: $font_asset" >&2
+        exit 1
+    }
+done
 for entrypoint in blit-session.hibr blit-login-session.hibr blit-desktop-observe.hibr blit-desktop-place.hibr; do
     cmp -s <(git -C "$root" show "$source_commit:hibr/$entrypoint") \
         "$stage/usr/share/blit/hibr/$entrypoint" || {

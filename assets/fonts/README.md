@@ -1,6 +1,35 @@
-# Blit terminal font
+# Blit terminal fonts
 
-`Blit-Hibr-Terminus16.psf` is the runtime font. It preserves the bundled
+## Retro: Blit Hibr Spleen16
+
+`Blit-Hibr-Spleen16.psf` is an optional8x16 retro face based on Spleen2.2.0
+(profile `blit-hibr-spleen16`). Default Terminus is unchanged. It provides
+1,575 scalar mappings, retaining all1,181 unique scalar mappings from the
+existing Hibr font, with92 visibly different printable ASCII masks.
+Box/block geometry, combining marks and the fitted control diamond retain
+their canonical bitmaps. Other absent symbols use the checked-in Hibr font
+as build-time fallback; no extra runtime renderer is added.
+
+Upstream Spleen is BSD2-clause. The combined font contains OFL-covered
+fallback material and is distributed under OFL1.1 with the upstream and
+fallback notices retained in `licenses/` (Terminus, DejaVu, Noto and Droid).
+The respective notices remain authoritative. Build provenance, exact source
+commit and hashes are in `Blit-Hibr-Spleen16.source.json`. Regenerate using
+the pinned upstream BDF, not arbitrary host fonts:
+
+```sh
+python3 tools/fonts/build-retro-font.py /path/to/spleen-8x16.bdf \
+  assets/fonts/Blit-Hibr-Spleen16.psf
+BLIT_SPLEEN_SOURCE=/path/to/spleen-8x16.bdf python3 tools/tests/retro_font_gate.py
+```
+
+Pixel size changes use `PUT /v1/fonts` with `size_px`; this bitmap face does
+not become an outline font or intrinsic-colour font by resizing it. The
+modern antialiased/colour profile is separate, still pending work.
+
+## Default: Blit Hibr Terminus16
+
+`Blit-Hibr-Terminus16.psf` is the default runtime font. It preserves the bundled
 Terminus 8×16 glyphs and adds the missing Hibr Unicode desktop glyphs at the
 same cell size. The added glyphs are rasterized from DejaVu Sans Mono, which is
 licensed under the permissive DejaVu font license; see the system font package
