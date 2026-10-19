@@ -59,6 +59,28 @@ the opt-in QEMU oracle, package-artifact validation (run separately), and the
 two live-host screenshot/multi-display gates (not enabled in the local suite).
 This is local evidence only; it does not establish physical behavior for0.1.553.
 
+After deploying0.1.553, an approximately8s physical-motion interval recorded
+2,303 raw mouse events (1,489 motion axes, 810 sync reports, and2 button
+events). DP canvas `display-93` submitted114 frames, including100 pointer
+frames (130 pointer-intersecting attempts,30 deferred); HDMI `display-102`
+submitted57 frames, including54 pointer frames (66 attempts,12 deferred).
+Both outputs completed approximately as many flips as they submitted. This
+shows real pointer-bearing frames reach both KMS outputs, but does not establish
+60Hz cursor presentation or explain the user's perceived pauses. The interval
+also contained two button events despite the no-click instruction, so it is
+not a clean mouse-only sample.
+
+A separate bounded synthetic sweep stayed on the DP canvas, restored the
+original pointer, and sent360 API-injected positions at a requested60Hz. The
+HTTP request median/p95 were19.99/23.01ms; all but6 request slots were late,
+and the run took7.43s. Blit submitted224 DP frames (30.16Hz), with2 missed
+deadlines,0 physical mouse events, and8.88% measured process CPU. The last
+frame reported1.314ms draw,1.183ms copy,0.037ms submit, and396 damaged cells.
+This is network-paced synthetic evidence, not a physical-mouse benchmark.
+The next instrumentation step is to count actual pointer-state changes between
+raw evdev reports and per-output KMS requests, so those stages can be compared
+without conflating them.
+
 ## 2026-10-19 live follow-up: synthetic cadence improved, wallpaper test interrupted
 
 Blit0.1.551 is live on10.54. The authenticated desktop currently has two Hibr

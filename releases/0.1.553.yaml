@@ -14,5 +14,6 @@ verification:
   frozen_full: '96 pass, 7 environment-dependent skips, 0 fail'
   soak: '120 seconds, four PTYs, 11748 snapshots, 1068 resizes'
   package: 'provenance gate passes; independent rebuild byte-identical'
-  live: 'not deployed; physical pointer-to-frame correlation pending'
-  limits: 'local mock evidence only; no physical performance or rendering claim'
+  live: 'deployed and version-verified on 10.54; 8s physical sample: DP 114 frames/100 pointer, HDMI 57/54; 30/12 deferred attempts'
+  synthetic: '360 API pointer positions requested at 60Hz took 7.43s; 224 DP submissions (30.16Hz), HTTP p50/p95 19.99/23.01ms'
+  limits: 'diagnostic release, not a rendering fix; visual 60Hz acceptance and exact input-to-pointer-state correlation remain open'

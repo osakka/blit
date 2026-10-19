@@ -3,7 +3,7 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
-## 2026-10-19:553 pointer-presentation telemetry candidate, not deployed
+## 2026-10-19:553 pointer-presentation telemetry deployed; cadence still low
 
 TCC0.9.27 builds version0.1.553. The candidate adds per-output KMS counters
 for pointer-intersecting present attempts, attempts deferred by output/flip
@@ -16,9 +16,18 @@ The full local `tools/run-gates.sh all` run passes **96, skips 7, fails 0**;
 the 120-second soak reports four sessions, 11,748 snapshots and 1,068 resizes.
 The seven skips are the three Hibr adapter gates, opt-in QEMU oracle,
 package-artifact gate (run separately), and two live-host gates. This remains
-mock/local evidence only; 10.54 remains0.1.552. Physical pointer-to-frame
-correlation and package/live acceptance are pending. No Hibr source or live
-server state was changed in this cycle.
+mock/local evidence only. The reproducible package hash is
+`e5909075c0a38e1cfdaed21c3d68f19659716e9976caca7df82bfe36956cb010`; it is
+deployed and version-verified on10.54. In an approximately8s physical-motion
+sample, the DP canvas submitted114 frames (100 pointer-bearing) and HDMI
+submitted57 (54 pointer-bearing); respectively30 and12 pointer attempts were
+deferred. Raw mouse motion was received, but the sample includes two button
+events and is not mouse-only. A separate360-event synthetic API sweep took
+7.43s at a requested60Hz and produced224 DP submissions (30.16Hz); HTTP
+request p50/p95 were19.99/23.01ms, so this does not isolate renderer cadence
+from API transport. No Hibr source or live settings were changed. Physical
+visual acceptance and exact input-to-pointer-state correlation remain open;
+this release adds diagnostics, not a fix claim.
 
 ## 2026-10-19:552 scanout telemetry deployed; physical motion remains slow
 

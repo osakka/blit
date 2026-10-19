@@ -14,9 +14,16 @@ zero HDMI submissions; input counters advanced and20 pointer-position trace
 events occurred. The global composition-rate metric was5.907Hz. This proves
 monitor scanout clocks remain at mode rate, but does not yet identify which
 pointer updates reached a framebuffer. Twenty-two multi-PTY barrier timeouts
-occurred in the same window; causality is unestablished. Candidate0.1.553 adds
-per-output pointer-request, deferral and frame-submission counters. Correlate
-those with physical device-event deltas before changing render/barrier behavior.
+occurred in the same window; causality is unestablished. Release0.1.553 adds
+per-output pointer-request, deferral and frame-submission counters and is
+deployed on10.54. During an approximately8s physical-motion sample the DP
+canvas submitted114 frames (100 pointer-bearing) and HDMI submitted57 (54
+pointer-bearing), with30 and12 deferred pointer attempts. The synthetic60Hz
+API sweep was transport-limited (19.99ms median HTTP request) and achieved
+30.16 DP submissions/s. Neither measurement proves a compositor defect or
+validates60Hz pointer presentation. Add an exact pointer-state-change counter
+and compare it with evdev reports and KMS submissions before changing
+render/barrier behavior.
 
 ## Current position — held-scene pointer presentation and stable identity
 
