@@ -12,9 +12,13 @@ pending font work and is NOT the maintenance deployment artifact.
 
 The live fallback line was normalized from `kmsdrm` to `kms`, preserving
 `/etc/blit/blit.env.before-108` and all credentials. Saved API settings remain
-authoritative; the environment will reload at the deployment service restart.
-Package563 is reproducible and manifest-verified; full regression/deployment
-are pending. SDL multi-output startup issues100/104 remain open.
+authoritative; the deployment service restart reloaded the validkms fallback.
+Package563 is deployed/version-verified. Full regression104pass/5skip/0fail,
+GLES6pass/0skip/0fail; skipped package/update-restart checks pass separately.
+Native health is ready; both outputs present, bottom-primary login retained.
+Saved document checksum and clean revision213 are unchanged. Panel0.1.7 is
+installed with catalogue checksum verified. See verification-status.md for
+scope/skips. SDL multi-output startup issues100/104 remain open.
 
 
 ## 2026-10-19 priority: restore native KMS; font release held
