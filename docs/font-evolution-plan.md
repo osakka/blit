@@ -2,6 +2,42 @@
 
 Tracking: [Blit#107](https://git.home.arpa/itdlabs/blit/issues/107).
 
+## Next bounded phase: Modern icon coverage and visual metrics
+
+Operator accepted565 physical mouse motion ("It's perfect!"). Sequence is
+now Modern glyph/size work, then SDL104; retain the native backend and current
+layout while validating fonts. Do not reinterpret font size as screen scale.
+
+Read-only inspection of installed Hibr confirms its unicode/ascii/nerd
+glyph selector in wm/glyphs.hibr. Notification styles are separate:
+wm/bar.hibr's dt_bellglyph maps bell directly to U+1F514. Selecting Nerd does
+not itself replace this bell. Modern currently bundles Hack plus Noto colour
+emoji, not a complete Nerd outline repertoire.
+
+The shared draw_colour path fits each colour bitmap to the available cell
+rectangle; outline text instead uses fitted font ascent/descent and baseline.
+This is a verified policy difference, not yet a measured diagnosis of the
+operator's oversized bell. Distinguish ink bounds/optical size from terminal
+advance: text remains fixed-grid, some Unicode symbols legitimately use two
+cells, and visually different widths are not themselves a defect.
+
+1. Extract Hibr's emitted glyph repertoire read-only; measure actual bell,
+   menu pen, notification/restart and Nerd symbols at current22px and adjacent
+   odd/even sizes. Record source face, fallback, columns and ink bounds.
+2. Add pinned/licensed single-cell Nerd icon coverage to Modern, keeping Hack
+   text, colour emoji and canonical block geometry. Upstream Nerd Font Mono
+   is the single-cell variant; avoid proportional/overhanging icon assets.
+3. Introduce failing tests for demonstrated clipping, incorrect advance or
+   inconsistent visual metrics before changing the shared raster policy.
+   Verify native/SDL software/GLES consume identical resolved glyph metrics.
+4. Preview on10.54 through the API, preserving/restoring size and layout;
+   obtain visual approval, commit/package/deploy verified changes, then SDL104.
+
+Nerd icons are normally foreground-coloured masks, not multicolour emoji.
+Do not promise universal Unicode coverage, suppress legitimate wide cells,
+or impose even-only sizes based on the unconfirmed wallpaper observation.
+Reference: https://github.com/ryanoasis/nerd-fonts (Mono variant and licensing).
+
 ## 2026-10-19 release564 deployed
 
 Native KMS recovery/configuration issue108 is resolved and operator-confirmed.

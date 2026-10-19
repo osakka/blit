@@ -1,5 +1,13 @@
 # Current state and restart point
 
+## 2026-10-19 operator accepts565 mouse motion; Modern fonts next
+
+Operator reports "It's perfect!" for physical movement after565. Next priority
+is Modern visual sizing/width and Nerd coverage under107, then SDL104. Native
+KMS/layout stay unchanged. See font-evolution-plan.md for the bounded sequence
+and confirmed distinction between Hibr's glyph-set and notification selectors.
+The reported oversized bell has not yet been measured; do not claim a fix.
+
 ## 2026-10-19 pointer565 fix: idle output consumed another output's motion
 
 Clean three-second API60Hz sweep on564:180 injections,73 confirmed DP flips
