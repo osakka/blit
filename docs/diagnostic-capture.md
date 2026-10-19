@@ -33,6 +33,19 @@ topology/workload. Combine these results with physical-input capture and
 render/loop timings. An idle0Hz presentation counter is not proof of a slow
 renderer.
 
+`BLIT_POINTER_SECONDS` optionally bounds the offered workload to 0.25..120
+seconds; otherwise it retains the original 360-request workload. Rates use
+the server's two observation timestamps, not a client interval that excludes
+part of the counter sample. `submission_hz` counts presentation calls;
+`confirmed_flip_hz` counts direct-KMS completion events and is `null` on SDL.
+The JSON records actual backend identity, offered rate, request latency,
+concurrent request ordering, and the included final pointer-restoration motion.
+Evidence retains both raw observations. Restart, changed output inventory or
+refresh, and invalid observation intervals invalidate the measurement.
+Concurrent HTTP injections are not a deterministic physical-device producer;
+these samples diagnose the API/presentation path, not input-to-photon latency
+or sustained-refresh acceptance.
+
 Direct KMS exposes clock evidence at
 `GET /v1/diagnostics/trace?kind=kms_vblank&limit=16`. Events report the display,
 completed flips, DRM sequence/timestamp, accumulated vblank count/time, observed

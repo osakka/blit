@@ -9,6 +9,9 @@ abort 'BLIT_POINTER_HZ must be 1..240' unless rate.between?(1,240)
 step_px = Integer(ENV.fetch('BLIT_POINTER_STEP_PX','1'), 10)
 abort 'BLIT_POINTER_STEP_PX must be 1..40' unless step_px.between?(1,40)
 async = ENV['BLIT_POINTER_ASYNC'] == '1'
+seconds = Float(ENV.fetch('BLIT_POINTER_SECONDS', (360.0 / rate).to_s))
+abort 'BLIT_POINTER_SECONDS must be 0.25..120' unless seconds.between?(0.25,120)
+steps = (seconds * rate).ceil
 base = URI(ENV.fetch('BLIT_LIVE', 'http://192.168.10.54:8080'))
 token = ENV.fetch('BLIT_AUTH_TOKEN')
 request = lambda do |path, payload = nil|
@@ -69,7 +72,7 @@ if async
 end
 started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 begin
-  360.times do |i|
+  steps.times do |i|
     deadline = started + i / rate
     delay = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
     sleep delay if delay > 0
@@ -91,15 +94,28 @@ end
 raise errors.pop unless errors.empty?
 elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
 after = request.call('/v1/diagnostics/observation')
+raise 'server restarted during pointer measurement' unless
+  before['version'] == after['version'] &&
+  ((after.fetch('captured_monotonic_us') - after.dig('runtime','performance','uptime_ms') * 1000) -
+   (before.fetch('captured_monotonic_us') - before.dig('runtime','performance','uptime_ms') * 1000)).abs <= 10_000
+raise 'output inventory changed during pointer measurement' unless
+  before.dig('diagnostics','render','outputs').map{|o|o['display_id']}.sort ==
+  after.dig('diagnostics','render','outputs').map{|o|o['display_id']}.sort
+window_s = (after.fetch('captured_monotonic_us') - before.fetch('captured_monotonic_us')) / 1_000_000.0
+raise 'invalid server observation interval' unless window_s.positive?
 first = before.dig('runtime','performance'); last = after.dig('runtime','performance')
 verdict = {version:before['version'], displays:before.dig('displays','count'),
+  identity:before.fetch('diagnostics').fetch('render').slice('direct_kms','video_driver','renderer','presentation_sync'),
   pattern:pattern, original_pointer:{x:x,y:y},
   requested_motion_hz:rate, step_px:step_px,
   http_connection:'close', late_slots:late_slots,
   asynchronous:async, workers:workers.length, skipped_injections:skipped,
   request_p50_ms:request_ms.sort[request_ms.length/2],
   request_p95_ms:request_ms.sort[(request_ms.length*0.95).floor],
-  duration_s:elapsed, motions:count, present_delta:last['present_calls']-first['present_calls'],
+  duration_s:elapsed, requested_duration_s:seconds, server_observation_window_s:window_s,
+  offered_motion_hz:count / elapsed, restoration_motion_included:true,
+  motion_order:async ? 'concurrent HTTP requests; arrival order is not guaranteed' : 'serial HTTP requests',
+  motions:count, present_delta:last['present_calls']-first['present_calls'],
   loop_delta:last['loop_iterations']-first['loop_iterations'],
   input_delta:last['input_events']-first['input_events'],
   physical_mouse_events_delta:last['evdev_mouse_events']-first['evdev_mouse_events'],
@@ -108,10 +124,18 @@ verdict = {version:before['version'], displays:before.dig('displays','count'),
   pointer_output_id:before.dig('diagnostics','render','outputs',pointer['output'],'display_id'),
   output_submissions:after.dig('diagnostics','render','outputs').map do |output|
     old=before.dig('diagnostics','render','outputs').find{|v|v['display_id']==output['display_id']}
+    raise 'output topology or refresh changed during measurement' unless
+      old && old['refresh_hz'] == output['refresh_hz']
     delta = old ? output['present_calls']-old['present_calls'] : nil
+    scanout = output.fetch('kms_scanout')
+    completions = scanout['available'] && old.dig('kms_scanout','available') ?
+      scanout.fetch('flip_completions') - old.dig('kms_scanout','flip_completions') : nil
     {display_id:output['display_id'], refresh_hz:output['refresh_hz'],
      target_interval_us:output['target_interval_us'],
-     delta:delta, presentation_hz:elapsed > 0 ? delta / elapsed : nil,
+     delta:delta, submission_hz:delta / window_s,
+     confirmed_flip_completions:completions,
+     confirmed_flip_hz:completions.nil? ? nil : completions / window_s,
+     last_present_ms:output['last_present_ms'], max_present_ms:output['max_present_ms'],
      missed_deadlines_delta:old ? output['missed_deadlines']-old['missed_deadlines'] : nil,
      last_phases:output['kms_phases']}
   end,
@@ -127,6 +151,8 @@ end
 verdict[:system_load_1m] = last['system_load_1m'] if last['system_load_1m']
 if (directory = ENV['BLIT_EVIDENCE_DIR'])
   require 'fileutils'; FileUtils.mkdir_p(directory)
+  File.write(File.join(directory,'pointer-cadence-before.json'),JSON.pretty_generate(before))
+  File.write(File.join(directory,'pointer-cadence-after.json'),JSON.pretty_generate(after))
   File.write(File.join(directory,'pointer-cadence.json'),JSON.pretty_generate(verdict))
 end
 puts JSON.pretty_generate(verdict)

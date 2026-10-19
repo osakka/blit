@@ -1,5 +1,31 @@
 # Current state and restart point
 
+## 2026-10-19: cadence measurement corrected; refresh acceptance still fails
+
+The operator pointer probe now uses the server observation interval for its
+counter rates, separates submissions from confirmed native flip completions,
+retains raw observations, and rejects restart/topology/refresh/clock-invalid
+samples. Its regression fails against the previous probe and passes the
+corrected measurement, including four invalid-sample cases. Timing suite:
+3 pass, 2 explicit physical-host skips, 0 fail; the 120-second four-PTY soak
+completes 11,876 snapshots and 1,080 resizes.
+
+An exploratory 10-second API pointer sweep on each backend offers approximately
+59 requests/s. Native KMS reports 38.72 confirmed flips/s; SDL/software reports
+54.44 submissions/s; SDL/GLES2 reports 50.78 submissions/s. SDL completion
+timing is unavailable. All motion/Kitty/font/sixel correctness checks still
+pass; native/login/pointer are restored. Evidence:
+`/tmp/blit-backend-cadence-557-20261019/`.
+
+Native receives 601 pointer changes and reports 409 submissions/completions
+with no physical mouse events or PTY bytes in its observation window. It
+records 147 pointer-affecting deferred attempts. These counters do not yet
+identify the cause or prove physical-input latency. The reference backend
+is not an accepted refresh-performance baseline. Next work is scheduling
+diagnosis with correlated input/deadline/submission/completion evidence,
+followed by the sustained acceptance workloads. SDL dependency changes await
+explicit direction; additional-connector tests await HDMI availability.
+
 ## 2026-10-19: split-aware sixel acceptance on all three presentation paths
 
 The existing operator sixel probe now selects a discovered free pane, uses

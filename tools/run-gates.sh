@@ -355,6 +355,7 @@ suite_packaging() {
 }
 
 suite_timing() {
+    run_gate pointer_cadence_observation_gate.rb ruby tools/tests/pointer_cadence_observation_gate.rb
     run_gate frame_rate_gate.rb ruby tools/tests/frame_rate_gate.rb
     if start_server; then
         run_gate terminal_soak_gate.rb env \

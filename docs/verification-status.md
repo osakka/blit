@@ -3,6 +3,38 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-19: bounded cadence diagnosis, not performance acceptance
+
+The measurement regression fails against the previous pointer probe because
+it lacks the server observation interval. The corrected probe passes exact
+server-window rate arithmetic, separate native completion/SDL-unavailable
+semantics, and rejection of restart, output removal, refresh change and zero
+observation interval. Failure-restoration coverage passes separately.
+Timing suite passes 3 gates with 2 explicit physical-host skips and no failures;
+the 120-second four-PTY soak completes 11,876 snapshots and 1,080 resizes.
+
+Live 0.1.557 exploratory API-injected sweeps produce:
+
+| Backend | Offered requests/s | Output submissions/s | Confirmed flips/s |
+| --- | --- | --- | --- |
+| native KMS | 58.78 | 38.72 | 38.72 |
+| SDL/kmsdrm/software | 59.31 | 54.44 | unavailable |
+| SDL/kmsdrm/opengles2 | 59.27 | 50.78 | unavailable |
+
+Evidence: `/tmp/blit-backend-cadence-557-20261019/`, including both raw server
+observations and all pixel-probe results per backend. Workload: 10-second,
+12-pixel pointer sweep with concurrent HTTP requests at advertised refresh;
+final restoration motion is included and explicitly labelled. Native receives
+601 position changes/input events, no physical mouse events and no PTY bytes;
+409 submitted flips complete and 147 pointer-affecting attempts defer. The
+server observation interval includes HTTP boundary overhead. Arrival ordering
+is not deterministic and this is not physical input-to-photon measurement.
+
+All three still pass motion, Kitty, font/grid and sixel correctness assertions;
+native/login/pointer restoration succeeds. These rates do not accept the
+refresh target or establish the cause of the cadence gap. Issue101 remains
+open. Longer acceptance workloads and multiple connectors remain untested.
+
 ## 2026-10-19: physical sixel checks and split-origin fixture
 
 The operator's existing sixel assertions pass on live 0.1.557 through direct

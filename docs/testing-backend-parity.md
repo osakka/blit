@@ -59,6 +59,16 @@ performance, physical button/keyboard delivery, hotplug or the complete parity
 matrix. The next measurement stage must use the common workload and per-output
 cadence/latency requirements in the [parity plan](backend-parity-plan.md).
 
+For exploratory pointer cadence, set `BLIT_COMPARISON_POINTER_CADENCE=1`.
+After each profile's pixel probes, the existing pointer workload offers
+10 seconds of 12-pixel sweeps at that output's advertised refresh, using
+concurrent HTTP requests; `BLIT_POINTER_SECONDS` changes the bounded duration.
+The tool retains raw observations and per-output submission rates separately
+from available native flip completions. This is diagnostic output, not a
+cadence pass/fail gate: request timing/order, the final restoration motion
+and unavailable SDL completion evidence remain explicit. It neither claims
+physical-input delivery nor replaces the longer acceptance workloads.
+
 ## Dependency boundaries checked
 
 The bundled SDL3.4.16 event pump handles input but does not reconcile runtime

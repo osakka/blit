@@ -111,6 +111,19 @@ begin
       puts "#{name}: #{output.lines.last.to_s.strip}"
       $stdout.flush
     end
+    if ENV['BLIT_COMPARISON_POINTER_CADENCE'] == '1'
+      output, error, status = Open3.capture3(
+        {'BLIT_AUTH_TOKEN'=>TOKEN, 'BLIT_LIVE'=>BASE.to_s, 'BLIT_EVIDENCE_DIR'=>directory,
+         'BLIT_POINTER_ASYNC'=>'1','BLIT_POINTER_PATTERN'=>'sweep','BLIT_POINTER_STEP_PX'=>'12',
+         'BLIT_POINTER_SECONDS'=>ENV.fetch('BLIT_POINTER_SECONDS','10'),
+         'BLIT_POINTER_HZ'=>observation.dig('diagnostics','render','outputs').first.fetch('refresh_hz').to_s},
+        'ruby',File.join(ROOT,'tools/probes/host_pointer_cadence.rb'))
+      File.write(File.join(directory,'host_pointer_cadence.rb.log'),output + error)
+      raise "#{name}: pointer measurement failed; see #{directory}" unless status.success?
+      result = JSON.parse(output)
+      puts "#{name}: POINTER_MEASURED offered_hz=#{result['offered_motion_hz']} outputs=#{JSON.generate(result['output_submissions'])}"
+      $stdout.flush
+    end
     File.write(File.join(directory, 'after.json'), JSON.pretty_generate(request('GET', '/v1/diagnostics/observation')))
   end
 ensure
