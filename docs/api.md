@@ -150,9 +150,7 @@ Clients should discover before mutating:
 Do not infer capabilities from a screenshot or from a device filename. A
 resource is usable only when its API state and capability fields say it is.
 
-## Hibr login manager
-
-### Presentation configuration ownership
+## Presentation configuration ownership
 
 `GET /v1/settings` is authoritative for saved presentation intent.
 `document.server.display_backend` accepts `kms` (native DRM/KMS, no SDL
@@ -174,6 +172,8 @@ that invalid values such as `kmsdrm` or `ksmdrm` are accepted.
 Pane IDs are backend-scoped. On a deliberate backend switch, resolve the same
 connector/ordinal and update the saved primary reference, rather than leaving
 a stale SDL pane ID to fall back to the first native pane. See ADR0138.
+
+## Hibr login manager
 
 `/v1/login` is the single Blit-owned login boundary. It is separate from
 ordinary terminal-session creation so there cannot be two login screens or an
