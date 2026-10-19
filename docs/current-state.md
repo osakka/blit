@@ -1,5 +1,44 @@
 # Current state and restart point
 
+## 2026-10-19 priority: restore native KMS; font release held
+
+The operator reported second-monitor startup trouble and environment/UI
+backend disagreement, and explicitly requested returning to native KMS.
+No562 package was deployed. Live remains0.1.561. API confirmed SDL3 video
+driver `kmsdrm`, renderer `opengles2`, one exposed DP-1 while sysfs reported
+both DP-1 and HDMI-A-1 connected. The service/process environment contains
+`BLIT_DISPLAY_BACKEND=kmsdrm`, which is invalid for Blit's own backend enum;
+only exact `kms` selects native KMS. Saved document.server.display_backend
+was `sdl`, which takes precedence under ADR0138. The UI's single backend row
+did not explain driver, renderer or configuration source. Issue108 tracks
+explicit source/layer reporting and invalid-environment handling. SDL's
+second-output startup cause is not established; #100/#104 remain open.
+
+Using only the existing API, saved `server.display_backend=kms` and requested
+supervised restart. Native health is ready, both physical outputs present:
+DP-1/display-93 at1920x2160 and HDMI-A-1/display-102 at2560x1440. Native hotplug
+is `uevent+periodic`. DP retains1x2 and HDMI defaults1x1. Backend-scoped pane
+IDs changed; the old SDL `pane-display-1-2` login preference was explicitly
+remapped to native DP bottom `pane-display-93-2`, saved and restarted again.
+Login and preference now agree; storage clean revision213, no restart pending.
+The saved SDL renderer preference remains inactive while native KMS is active.
+No environment edits, SSH, Hibr changes, font selection or size changes.
+Operator must visually test/login before treating this as desktop acceptance.
+
+Font candidate562 identity is recorded in `releases/0.1.562.yaml`, source
+`b63d7f4`, package SHA256
+`d9836e635b625d722a5d93267498c4629d78c84f1e55d6d4db13a27eade4543b`.
+Reproducible package and GLES7/0/0 pass. Exact-binary full run reports
+110pass/3skip/1fail (pointer-composition fixture). The failure was reproduced
+by batching create/defer/commit before initial presentation: a correct first
+full redraw cannot satisfy an incremental-redraw assertion. The fixture now
+seeds/commits a baseline and waits for its captured revision before testing
+incremental updates; assertions are retained and binary override is honoured.
+Ten candidate repeats, released561 and conservative full-rebuild mode pass.
+A complete rerun with that fixture correction and physical font review remain
+pending. Do not deploy/tag562 as accepted or resume fonts before the operator's
+native KMS priority is resolved. The entries below are prior checkpoints.
+
 ## 2026-10-19:562 modern/retro production integration; release gate running
 
 `blit-modern` now uses the shared native-size FreeType coverage/colour module

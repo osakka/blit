@@ -3,6 +3,29 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-19 native KMS recovery and held font release
+
+Operator priority interrupts font rollout. Existing live561 switched via
+canonical settings and supervised API restart from SDL to native KMS. Sysfs
+had DP-1 and HDMI-A-1 connected but the running SDL inventory exposed DP only.
+Native reports both physical outputs presenting, ready DRM/KMS and active
+uevent+periodic hotplug. DP1x2/HDMI1x1 retained; bottom-primary login preference
+remapped to `pane-display-93-2`, clean saved revision213. No SDL renderer,
+font package, SSH or Hibr modifications were made during recovery. This is
+API/presentation-state evidence, not operator visual/interaction acceptance.
+Configuration-source/invalid-env ambiguity is tracked by Blit108.
+
+Candidate562 source b63d7f4/package d9836e635b625d722a5d93267498c4629d78c84f1e55d6d4db13a27eade4543b
+is not deployed. Reproducibility yes; GLES7pass/0skip/0fail. Full exact-binary
+run110pass/3skip/1fail, unchanged Hibr259 and extracted binary during run.
+Pointer fixture incorrectly demanded incremental damage on a first scene;
+batched requests reproduce `initialized=0 graphics_changed=1 path=full-redraw`
+followed by pointer-cache frames. Revised fixture commits a seed frame and
+waits for capture revision before content mutation, preserving all assertions.
+Ten candidate repeats plus released561 and full-rebuild mode pass. Final
+full-suite rerun and physical font approval remain pending. Do not turn the
+dependency-fingerprint success into a claim that the failed suite passed.
+
 ## 2026-10-19 candidate562: production smooth/colour profile integration
 
 Shared raster module is now linked into native KMS and both SDL drawing paths.

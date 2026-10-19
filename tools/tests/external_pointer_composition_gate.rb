@@ -17,16 +17,15 @@ require 'net/http'
 require 'timeout'
 require 'uri'
 require_relative 'gate_port'
+require_relative 'sdl_test_profile'
 
 port = gate_port(Integer(ENV.fetch('BLIT_EXTERNAL_POINTER_PORT', '19252')))
 base = URI("http://127.0.0.1:#{port}")
 log = "/tmp/blit-external-pointer-#{Process.pid}.log"
 incremental_content = ENV.fetch('BLIT_TEST_SCENE_CACHE', '1') != '0'
-pid = Process.spawn({'SDL_VIDEODRIVER' => 'dummy',
-                     'BLIT_RENDERER' => 'software',
-                     'BLIT_SDL_SCENE_CACHE' => incremental_content ? '1' : '0',
-                     'LD_LIBRARY_PATH' => 'build/sdl3-kms'},
-                    'build/blit/blit-server', port.to_s,
+pid = Process.spawn(SdlTestProfile.environment.merge(
+                     'BLIT_SDL_SCENE_CACHE' => incremental_content ? '1' : '0'),
+                    SdlTestProfile.binary, port.to_s,
                     out: log, err: [:child, :out])
 
 def request(base, method, path, body = nil)
@@ -66,18 +65,41 @@ begin
 
   session = request(base, :post, '/v1/terminal-sessions',
                     'command' => '/bin/sh',
-                    'arguments' => ['-c', 'sleep 3'],
+                    'arguments' => ['-c', 'sleep 30'],
                     'surface_mode' => 'external',
                     'surface' => {'width' => 80, 'height' => 24})
   id = session.fetch('id')
   path = "/v1/surfaces/surface-#{id}/cells"
-  request(base, :put, path,
-          'base_revision' => 1,
+  seed = request(base, :put, path, 'base_revision' => 1,
+                 'presentation' => 'defer',
+                 'cells' => [{'x' => 0, 'y' => 1, 'text' => ' ',
+                              'style' => {'background' => '#010203'}}])
+  seed = request(base, :put, path, 'base_revision' => seed.fetch('revision'),
+                 'presentation' => 'commit',
+                 'cells' => [{'x' => 1, 'y' => 1, 'text' => ' ',
+                              'style' => {'background' => '#010203'}}])
+  # A first scene necessarily redraws in full. If create/defer/commit are
+  # serviced together before its first presentation, that is correct, not a
+  # failed incremental update. Establish the presented baseline before asking
+  # the existing scene to take the incremental path. No timing-based sleep.
+  Timeout.timeout(8) do
+    loop do
+      capture = Net::HTTP.start(base.hostname, base.port, read_timeout: 5) do |http|
+        http.get('/v1/diagnostics/screenshots/display-1')
+      end
+      raise "initial scene capture failed: HTTP #{capture.code}" unless capture.code == '200'
+      captured = capture['X-Blit-Capture-Revisions'].to_s.split(',').to_h { |pair| pair.split('=', 2) }
+      break if captured[session.fetch('surface_id')].to_i == seed.fetch('revision')
+      sleep 0.01
+    end
+  end
+  deferred = request(base, :put, path,
+          'base_revision' => seed.fetch('revision'),
           'presentation' => 'defer',
           'cells' => [{'x' => 0, 'y' => 0, 'text' => 'A',
                        'style' => {'background' => '#102030'}}])
   request(base, :put, path,
-          'base_revision' => 2,
+          'base_revision' => deferred.fetch('revision'),
           'presentation' => 'commit',
           'cells' => [{'x' => 1, 'y' => 0, 'text' => 'B',
                        'style' => {'background' => '#405060'}}])
@@ -100,7 +122,7 @@ begin
     pointer_hits >= 5
   expected_content_path = incremental_content ? 'path=incremental-damage' :
                                                 'path=full-redraw'
-  raise "external cell damage did not use #{expected_content_path}" unless
+  raise "external cell damage did not use #{expected_content_path}: #{details.inspect}" unless
     details.any? { |detail| detail.include?('external_changed=1') &&
       detail.include?('graphics_changed=0') &&
       detail.include?(expected_content_path) }

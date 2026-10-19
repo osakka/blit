@@ -152,6 +152,29 @@ resource is usable only when its API state and capability fields say it is.
 
 ## Hibr login manager
 
+### Presentation configuration ownership
+
+`GET /v1/settings` is authoritative for saved presentation intent.
+`document.server.display_backend` accepts `kms` (native DRM/KMS, no SDL
+rendering) or `sdl`. Saved values override environment startup defaults;
+changing `/etc/blit/blit.env` does not erase an existing saved choice.
+`BLIT_DISPLAY_BACKEND` uses that same `kms`/`sdl` vocabulary. The different
+variable `SDL_VIDEODRIVER=kmsdrm` selects SDL's console driver and does not
+select Blit's native backend. `server.renderer` applies only to SDL.
+
+Read `effective.display_backend_requested`, `display_backend_active`,
+`renderer_active` and `presentation_restart_required`, and runtime
+`render.direct_kms`, `video_driver`, `renderer`. Save via the revisioned
+settings API, then request `/v1/control/restart` to apply presentation changes.
+Do not maintain competing writable backend preferences in a control panel.
+Current561 silently mishandles invalid environment backend names and the UI
+does not show source/layers clearly; issue108 tracks correction, not a promise
+that invalid values such as `kmsdrm` or `ksmdrm` are accepted.
+
+Pane IDs are backend-scoped. On a deliberate backend switch, resolve the same
+connector/ordinal and update the saved primary reference, rather than leaving
+a stale SDL pane ID to fall back to the first native pane. See ADR0138.
+
 `/v1/login` is the single Blit-owned login boundary. It is separate from
 ordinary terminal-session creation so there cannot be two login screens or an
 ambiguous restart owner.
