@@ -91,6 +91,11 @@ require 'fileutils'
     raise 'completion availability/rate fabricated' unless measured['confirmed_flip_hz'] == expected
     raise 'ambiguous presentation label survived' if measured.key?('presentation_hz')
     raise 'restoration contamination not labelled' unless result['restoration_motion_included'] == true
+    raise 'transport phases omit measured motions' unless result['transport_phase_samples'] == result['motions']
+    %w[connection_setup_p50_ms connection_setup_p95_ms post_connect_exchange_p50_ms post_connect_exchange_p95_ms].each do |field|
+      value = result.fetch(field)
+      raise "invalid transport interval #{field}" unless value.is_a?(Numeric) && value.finite? && value >= 0
+    end
     %w[before after pointer_motion-tail render_path-tail].each do |artifact|
       raise "missing observation/trace artifact #{artifact}" unless
         File.file?(File.join(evidence,"pointer-cadence-#{artifact}.json"))

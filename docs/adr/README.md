@@ -159,6 +159,8 @@ security policy, or compatibility rule requires a new ADR.
 - [0139 — Terminal graphics sampling matches native pixels](0139-terminal-graphics-sampling-matches-native-pixels.md)
 - [0140 — KMS completion does not create render work](0140-kms-completion-does-not-create-render-work.md)
 - [0141 — Bounded HTTP admission between presents](0141-bounded-http-admission-between-presents.md)
+- [0142 — Service ready input at HTTP admission](0142-service-ready-input-at-http-admission.md)
+- [0143 — Native placement uses primary-relative coordinates](0143-native-placement-uses-primary-relative-coordinates.md)
 
 ## Adding an ADR
 

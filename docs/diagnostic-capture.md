@@ -47,6 +47,13 @@ When evidence retention is enabled, the probe also saves the bounded
 These are the newest events still in the shared 128-entry critical ring,
 not a complete event history. Their post-window requests are not included
 in the counter-rate denominator.
+Pointer requests also report separate client-side connection-setup and
+post-connect HTTP-exchange p50/p95 intervals and their sample count. The
+exchange still includes transport and response delivery; it is not a
+server-only processing or input-to-photon timer. Final restoration is excluded
+from these per-request phase samples and remains labelled in the counter
+window. This helps distinguish transport setup variation from a server-side
+turn delay without pretending that either interval alone identifies a cause.
 Concurrent HTTP injections are not a deterministic physical-device producer;
 these samples diagnose the API/presentation path, not input-to-photon latency
 or sustained-refresh acceptance.

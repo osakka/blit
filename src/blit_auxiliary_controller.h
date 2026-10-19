@@ -148,6 +148,11 @@ static void service_auxiliary_displays(BlitRuntime *runtime, uint64_t now)
             b = NULL;
         }
         if (b != NULL && now >= runtime->auxiliary_worker_deadline_us) {
+            char detail[256];
+            snprintf(detail,sizeof(detail),"client=%s worker_pid=%ld owner_pid=%ld deadline_us=%llu now_us=%llu",
+                b->client_name,(long)runtime->auxiliary_worker_pid,(long)b->owner_pid,
+                (unsigned long long)runtime->auxiliary_worker_deadline_us,(unsigned long long)now);
+            diagnostic_log(runtime,"error","auxiliary_placement_timeout",detail);
             cancel_auxiliary_worker(runtime);
             b->placement = -1;
             auxiliary_state(b, "conflict", "placement_timeout");
@@ -158,6 +163,15 @@ static void service_auxiliary_displays(BlitRuntime *runtime, uint64_t now)
             runtime->auxiliary_worker_pid = 0;
             if (b != NULL) {
                 b->placement = result > 0 && WIFEXITED(status) && WEXITSTATUS(status) == 0 ? 2 : -1;
+                if (b->placement < 0) {
+                    char detail[256];
+                    snprintf(detail,sizeof(detail),"client=%s waitpid=%ld raw_status=%d exit_code=%d signal=%d owner_pid=%ld owner_ticks=%llu",
+                        b->client_name,(long)result,status,
+                        result > 0 && WIFEXITED(status) ? WEXITSTATUS(status) : -1,
+                        result > 0 && WIFSIGNALED(status) ? WTERMSIG(status) : 0,
+                        (long)b->owner_pid,b->owner_ticks);
+                    diagnostic_log(runtime,"error","auxiliary_placement_failed",detail);
+                }
                 b->placement_observed_after_us = now;
                 auxiliary_state(b, b->placement == 2 ? "waiting_join" : "conflict",
                                 b->placement == 2 ? "initial_placement_confirming" : "placement_failed");
@@ -271,6 +285,12 @@ static void service_auxiliary_displays(BlitRuntime *runtime, uint64_t now)
             b->placement = 3;
             auxiliary_state(b, "joined", "initial_placement_verified");
         } else if (b->placement == 2) {
+            char detail[256];
+            snprintf(detail,sizeof(detail),"client=%s expected_offset=%d,%d observed_offset=%d,%d owner_pid=%ld",
+                b->client_name,b->row_offset,b->column_offset,
+                native->row-login->login_desktop_geometry[2],
+                native->column-login->login_desktop_geometry[3],(long)b->owner_pid);
+            diagnostic_log(runtime,"error","auxiliary_placement_unconfirmed",detail);
             b->placement = -1;
             auxiliary_state(b, "conflict", "initial_placement_unconfirmed");
         } else auxiliary_start_placement(runtime, i, login);

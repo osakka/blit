@@ -27704,13 +27704,16 @@ static int add_http_client(BlitRuntime *runtime, int fd)
     return -1;
 }
 
-/* Drain only a bounded admission turn from the nonblocking listener. The
-   existing readiness loop retains request, input and presentation ownership. */
+static void service_http_client(BlitRuntime *runtime, int index);
+
+/* Admit a bounded burst and give new clients one nonblocking request slice.
+   Incomplete requests retain their ordinary readiness-loop ownership. */
 static int accept_http_clients(BlitRuntime *runtime, int server_fd)
 {
     int attempt;
     for (attempt = 0; attempt < BLIT_HTTP_ACCEPT_BUDGET; ++attempt) {
         int fd = accept(server_fd, NULL, NULL);
+        int index;
         if (fd < 0) {
             if (errno == EINTR)
                 continue;
@@ -27719,14 +27722,20 @@ static int accept_http_clients(BlitRuntime *runtime, int server_fd)
             perror("accept");
             return 0;
         }
-        if (fcntl(fd, F_SETFD, FD_CLOEXEC) < 0) {
+        if (fcntl(fd, F_SETFD, FD_CLOEXEC) < 0 ||
+            fcntl(fd, F_SETFL, O_NONBLOCK) < 0) {
             close(fd);
             continue;
         }
-        if (add_http_client(runtime, fd) < 0) {
+        index = add_http_client(runtime, fd);
+        if (index < 0) {
             send_problem(fd, 503, "Service Unavailable", "http_capacity",
                          "The HTTP connection limit has been reached.");
             close(fd);
+        } else {
+            /* New descriptors were not in this turn's select snapshot.
+               Try one nonblocking slice before another present can wait. */
+            service_http_client(runtime, index);
         }
     }
     return 1;

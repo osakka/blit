@@ -37,11 +37,17 @@ done <<< "$list"
 clients := hold clients "$base" || exit 1
 found_anchor=0
 found_client=0
+primary_count=0
 while read -r name row col rows cols primary extra; do
     [ "$name" = "$anchor" ] && { ar=$row; ac=$col; found_anchor=1; }
     [ "$name" = "$client" ] && found_client=1
+    if [ "$primary" = 1 ]; then
+        pr=$row; pc=$col
+        primary_count=$((primary_count + 1))
+    fi
 done <<< "$clients"
-[ "$found_anchor" = 1 ] && [ "$found_client" = 1 ] || exit 1
+[ "$found_anchor" = 1 ] && [ "$found_client" = 1 ] && [ "$primary_count" = 1 ] || exit 1
 # Native union normalization can change absolute origins. Anchor the initial
-# placement to the verified login client; parent confirms the relative offset.
-hold move "$base" "$client" "$((ar + dr))" "$((ac + dc))"
+# placement to the verified login client, then translate to hold move's frame
+# relative to the independently selected native primary. Do not promote it.
+hold move "$base" "$client" "$((ar + dr - pr))" "$((ac + dc - pc))"

@@ -306,9 +306,14 @@ static void http_accept_budget_gate(void)
         if (!accept_http_clients(runtime, listener)) exit(2);
     for (used = i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i)
         if (runtime->http_clients[i].used) {
+            int descriptor_flags = fcntl(runtime->http_clients[i].fd,F_GETFD);
+            int status_flags = fcntl(runtime->http_clients[i].fd,F_GETFL);
             ++used;
-            if (!(fcntl(runtime->http_clients[i].fd,F_GETFD) & FD_CLOEXEC)) {
+            if (descriptor_flags < 0 || !(descriptor_flags & FD_CLOEXEC)) {
                 fprintf(stderr,"HTTP_ACCEPT_LIMIT_FAIL descriptor inheritance\n"); ++failures;
+            }
+            if (status_flags < 0 || !(status_flags & O_NONBLOCK)) {
+                fprintf(stderr,"HTTP_ACCEPT_LIMIT_FAIL accepted descriptor can block\n"); ++failures;
             }
         }
     if (used != BLIT_MAX_HTTP_CLIENTS) { fprintf(stderr,"HTTP_ACCEPT_LIMIT_FAIL capacity=%d\n",used); ++failures; }
@@ -324,6 +329,26 @@ static void http_accept_budget_gate(void)
     }
     for (i = 0; i < BLIT_MAX_HTTP_CLIENTS + 5; ++i) close(clients[i]);
     for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i) remove_http_client(runtime,i);
+    {
+        static const char request[] = "GET /v1/version HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
+        char response[256];
+        struct timeval timeout = {0,100000};
+        fd_set readable;
+        int client = socket(AF_INET,SOCK_STREAM,0);
+        int ready;
+        if (client < 0 || connect(client,(struct sockaddr *)&address,length) < 0 ||
+            send(client,request,sizeof(request)-1,MSG_NOSIGNAL) != sizeof(request)-1 ||
+            !accept_http_clients(runtime,listener)) exit(2);
+        FD_ZERO(&readable); FD_SET(client,&readable);
+        ready = select(client+1,&readable,NULL,NULL,&timeout);
+        if (ready <= 0 || recv(client,response,sizeof(response),MSG_DONTWAIT) < 12 ||
+            strncmp(response,"HTTP/1.1 200",12) != 0) {
+            fprintf(stderr,"HTTP_INITIAL_READ_FAIL ready request was admitted but not serviced in its bounded turn\n");
+            ++failures;
+        }
+        close(client);
+        for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i) remove_http_client(runtime,i);
+    }
     close(listener);
     free(runtime);
 }

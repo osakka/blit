@@ -2,6 +2,7 @@
 # Schema/API regression gate for runtime font selection and logical scaling.
 require 'json'
 require 'net/http'
+require 'timeout'
 
 port = 18_995
 env = {
@@ -81,7 +82,7 @@ raise 'no available font profile' if available.empty?
 
 session_request = {
   'command' => '/bin/sh',
-  'arguments' => ['-c', 'printf ready; sleep 10'],
+  'arguments' => ['-c', 'printf ready; sleep 60'],
   'display_id' => 'display-1',
   'surface' => { 'width' => 128, 'height' => 48 }
 }
@@ -90,6 +91,18 @@ session = request(URI("#{base}/v1/terminal-sessions"), Net::HTTP::Post,
 session_id = session.fetch('id')
 begin
   surface_id = session.fetch('surface_id')
+  # Wait for the child's actual output, not a timing delay. This both parks
+  # its cursor away from the glyph oracle and ends the competing PTY write
+  # before the revisioned API update below.
+  Timeout.timeout(8) do
+    loop do
+      snapshot = request(URI("#{base}/v1/surfaces/#{surface_id}/cells"))
+      marker = snapshot.fetch('cells').select { |cell| cell['y'] == 0 && cell['x'] < 5 }
+                       .sort_by { |cell| cell['x'] }.map { |cell| cell['text'] }.join
+      break if marker == 'ready'
+      sleep 0.01
+    end
+  end
   before = request(URI("#{base}/v1/surfaces/#{surface_id}/summary"))
   cells = {
     'base_revision' => before.fetch('revision'),

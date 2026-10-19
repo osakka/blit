@@ -14,7 +14,8 @@ abort 'BLIT_POINTER_SECONDS must be 0.25..120' unless seconds.between?(0.25,120)
 steps = (seconds * rate).ceil
 base = URI(ENV.fetch('BLIT_LIVE', 'http://192.168.10.54:8080'))
 token = ENV.fetch('BLIT_AUTH_TOKEN')
-request = lambda do |path, payload = nil|
+connection_ms = []; exchange_ms = []
+request = lambda do |path, payload = nil, measure = false|
   q = (payload ? Net::HTTP::Post : Net::HTTP::Get).new(base + path)
   q['Authorization'] = "Bearer #{token}"
   # Every operation has a fresh connection. A requested rate is not an
@@ -23,7 +24,14 @@ request = lambda do |path, payload = nil|
   if payload
     q['Content-Type'] = 'application/json'; q.body = JSON.generate(payload)
   end
-  r = Net::HTTP.start(base.host, base.port, open_timeout:3,read_timeout:8){|h|h.request(q)}
+  connect_started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+  r = Net::HTTP.start(base.host, base.port, open_timeout:3,read_timeout:8) do |http|
+    exchange_started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    connection_ms << 1000*(exchange_started-connect_started) if measure
+    response = http.request(q)
+    exchange_ms << 1000*(Process.clock_gettime(Process::CLOCK_MONOTONIC)-exchange_started) if measure
+    response
+  end
   raise "#{path}: #{r.code}" unless r.code.start_with?('2')
   JSON.parse(r.body)
 end
@@ -61,7 +69,7 @@ if async
       while (i = queue.pop)
         t = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         begin
-          request.call('/v1/input/inject',{kind:'pointer_motion',x:target_x.call(i),y:y})
+          request.call('/v1/input/inject',{kind:'pointer_motion',x:target_x.call(i),y:y},true)
           request_ms << 1000*(Process.clock_gettime(Process::CLOCK_MONOTONIC)-t)
         rescue => e
           errors << e
@@ -81,7 +89,7 @@ begin
       begin; queue.push(i,true); count += 1; rescue ThreadError; skipped += 1; end
     else
       request_started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      request.call('/v1/input/inject', {kind:'pointer_motion',x:target_x.call(i),y:y})
+      request.call('/v1/input/inject', {kind:'pointer_motion',x:target_x.call(i),y:y},true)
       request_ms << 1000.0*(Process.clock_gettime(Process::CLOCK_MONOTONIC)-request_started)
       count += 1
       samples << request.call('/v1/diagnostics/runtime') if i % 60 == 59
@@ -112,6 +120,11 @@ verdict = {version:before['version'], displays:before.dig('displays','count'),
   asynchronous:async, workers:workers.length, skipped_injections:skipped,
   request_p50_ms:request_ms.sort[request_ms.length/2],
   request_p95_ms:request_ms.sort[(request_ms.length*0.95).floor],
+  connection_setup_p50_ms:connection_ms.sort[connection_ms.length/2],
+  connection_setup_p95_ms:connection_ms.sort[(connection_ms.length*0.95).floor],
+  post_connect_exchange_p50_ms:exchange_ms.sort[exchange_ms.length/2],
+  post_connect_exchange_p95_ms:exchange_ms.sort[(exchange_ms.length*0.95).floor],
+  transport_phase_samples:exchange_ms.length,
   duration_s:elapsed, requested_duration_s:seconds, server_observation_window_s:window_s,
   offered_motion_hz:count / elapsed, restoration_motion_included:true,
   motion_order:async ? 'concurrent HTTP requests; arrival order is not guaranteed' : 'serial HTTP requests',

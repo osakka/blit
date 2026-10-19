@@ -1,5 +1,46 @@
 # Current state and restart point
 
+## 2026-10-19 candidate560: one nonblocking initial read per admitted client
+
+Issue105/ADR0142 continue from559's remaining client-pressure result. A
+production socket regression sends a complete request before admission and
+fails because the ready request receives no service in that turn. Accepted
+clients now explicitly use `O_NONBLOCK` and get one call to the existing
+request-service function inside the existing eight-admission limit. Partial
+and empty clients retain the normal readiness loop. No second parser, SDL
+thread or renderer policy is introduced.
+
+The new assertion passes after the change, as do socket capacity/descriptor/
+budget checks, the software/GLES2 production fixture and the delayed-present
+burst test. TCC build succeeds. Full regression, packaging and physical
+revalidation are pending; live remains559 with native/login restored.
+The initial full run exposed a font-test race: its `ready` PTY marker can
+arrive between revision GET and cell PUT, correctly causing409. The fixture
+now waits for the actual marker before taking the revision; this also parks
+its cursor outside the glyph oracle. The focused font gate passes. Product
+font/cursor/revision code is unchanged; the interrupted run is not a pass.
+Transport spot checks also fluctuate (connect102–949ms, ICMP43ms); they are
+not a stable baseline or proof of a server defect. Keep network RTT and
+server-stage latency distinct. SDL patch direction and HDMI remain pending.
+
+A subsequent full run completed106pass/7skip/1fail, exposing initial join
+placement against a nonzero native-primary origin. This is a Blit helper
+coordinate error (ADR0143), not evidence of a Hibr defect: supported native
+movement is primary-relative, whereas our helper passed an absolute target.
+The helper now subtracts the native primary origin from the login-relative
+target without changing the selected primary. Focused nonzero-primary and
+actual-desktop/resize restart/rejoin tests pass. Full regression is being
+repeated; neither earlier run is release acceptance. The operator has
+confirmed keeping local Hibr0.99.256/ABI16 unchanged for this verification;
+check its binary fingerprint before and after the run.
+
+Fresh frozen-baseline run completes107pass/7skip/0fail, including six
+offscreen GLES2 gates. The120-second four-PTY soak records11,504 snapshots
+and1,046 resizes. All three pinned-header adapter gates pass separately.
+Hibr0.99.256/ABI16 fingerprint remains
+`1dd031259b4d16ccbfc3c0ffe6335d28fdaaa6be4d2cfe0f6187b6d1680a73b9`.
+Packaging and physical revalidation remain pending; live is still559.
+
 ## 2026-10-19: 0.1.559 deployed; physical SDL admission throughput triples
 
 Package559 is installed/version-verified; builds match byte-for-byte. Source

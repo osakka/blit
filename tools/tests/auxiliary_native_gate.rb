@@ -90,7 +90,9 @@ Dir.mktmpdir('blit-native-auxiliary') do |root|
   HIBR
   observer=File.join(root,'observer.hibr');placer=File.join(root,'placer.hibr')
   {observer=>'blit-desktop-observe.hibr',placer=>'blit-desktop-place.hibr'}.each do |file,script|
-    File.write(file,"strict\nexport TMPDIR='#{root}'\nexec \"$HIBR\" '#{ROOT}/hibr/#{script}' \"$@\"\n")
+    trace = script == 'blit-desktop-place.hibr' ? ' -x' : ''
+    redirect = trace.empty? ? '' : " >>'#{root}/placement.log' 2>&1"
+    File.write(file,"strict\nexport TMPDIR='#{root}'\nexec \"$HIBR\"#{trace} '#{ROOT}/hibr/#{script}' \"$@\"#{redirect}\n")
   end
   server_env={'SDL_VIDEODRIVER'=>'dummy','BLIT_RENDERER'=>'software','LD_LIBRARY_PATH'=>File.join(ROOT,'build/sdl3-kms'),
     'BLIT_PSF_FONT'=>File.join(ROOT,'assets/fonts/Blit-Hibr-Terminus16.psf'),'BLIT_INPUT_ROOT'=>File.join(root,'input'),
@@ -121,6 +123,32 @@ Dir.mktmpdir('blit-native-auxiliary') do |root|
     a=native['clients'].find{|c|c['name']==joined['client_name']}
     check(a && a['row']-native['client']['row']==-a['rows'],'actual native placement differs from upper/lower pane grid')
     check(native['owner']['pid']==login['desktop']['owner']['pid'],'Apply replaced desktop owner')
+    unless ACTUAL_DESKTOP
+      # The associated login and Hibr's independently selected primary need
+      # not be the same client. Force a nonzero primary origin explicitly.
+      _,err,st=Open3.capture3(env,'/usr/bin/hibr','-c',"#{LOAD}hold primary desktop #{joined['client_name']}")
+      check(st.success?,"native primary selection failed:#{err}")
+      _,err,st=Open3.capture3(env,'/usr/bin/hibr','-c',"#{LOAD}hold move desktop #{joined['client_name']} 0 7")
+      check(st.success?,"native primary offset failed:#{err}")
+      await('nonzero primary origin') do
+        q=request('GET','/v1/login')['desktop']
+        client=q['clients'].find{|c|c['name']==joined['client_name']}
+        q if client && client['primary'] && client['column']-q['client']['column']==7
+      end
+      offset=joined.fetch('initial_placement')
+      _,err,st=Open3.capture3(env,'/usr/bin/hibr',File.join(ROOT,'hibr/blit-desktop-place.hibr'),
+        'desktop',login.dig('desktop','client_name'),joined['client_name'],
+        native.dig('owner','pid').to_s,native.dig('owner','starttime_ticks').to_s,
+        offset.fetch('row_offset').to_s,offset.fetch('column_offset').to_s)
+      check(st.success?,"guarded native placement failed:#{err}")
+      native=await('primary-relative placement without promotion') do
+        q=request('GET','/v1/login')['desktop']
+        client=q['clients'].find{|c|c['name']==joined['client_name']}
+        q if client && client['primary'] &&
+          client['row']-q['client']['row']==offset['row_offset'] &&
+          client['column']-q['client']['column']==offset['column_offset']
+      end
+    end
     # Restart Blit itself, retaining the isolated held owner. Both fresh PTY
     # clients must reuse their names, not create #2 aliases or new preferences.
     unless ACTUAL_DESKTOP
@@ -160,8 +188,12 @@ Dir.mktmpdir('blit-native-auxiliary') do |root|
     await('owner lifecycle cleanup'){request('GET','/v1/terminal-sessions')['sessions'].none?{|s|s['id']==b['session_id']}}
     puts "AUXILIARY_NATIVE_PASS standby=installed_hibr desktop=#{ACTUAL_DESKTOP ? 'installed' : 'sleep_fixture'} invitation=#{ACTUAL_DESKTOP ? 'automatic' : 'enter'} placement=confirmed stable_names=yes restart=#{ACTUAL_DESKTOP ? 'separate' : 'same_owner_no_aliases'} user_move=preserved release=alive quit=stopped logout=cleaned"
   rescue Exception
+    version, = Open3.capture3('/usr/bin/hibr','-v')
+    warn "INSTALLED_HIBR #{version.strip}"
     warn JSON.pretty_generate(request('GET','/v1/auxiliary-displays')) rescue nil
     warn JSON.pretty_generate(request('GET','/v1/login')) rescue nil
+    warn JSON.pretty_generate(request('GET','/v1/diagnostics/runtime')['logs']) rescue nil
+    warn File.read(File.join(root,'placement.log')) if File.exist?(File.join(root,'placement.log'))
     warn File.read(log) if File.exist?(log)
     warn File.read(File.join(root,'desktop.log')) if File.exist?(File.join(root,'desktop.log'))
     raise

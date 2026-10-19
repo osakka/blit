@@ -3,6 +3,48 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-19 candidate560: ready request is serviced at bounded admission
+
+The actual admission helper fails a new socket regression before the change:
+a complete request is queued before accept, but no response is produced by
+the bounded turn. Accepted sockets now explicitly use `O_NONBLOCK`, with
+one call to the existing request-service function per admission. The socket
+regression passes afterward. Empty clients, capacity and descriptor flags
+remain checked; software and offscreen GLES2 production fixtures and the
+delayed-present burst pass. TCC build succeeds.
+
+Full regression and physical revalidation remain pending. No560 live result
+is claimed. Idle network spot checks independently show curl connect times
+around102ms then949ms, with2.6ms from connect to first response on the latter,
+and one ICMP sample43ms. These are transient point observations, not a stable
+transport baseline. They reinforce separating request RTT from server-stage
+latency rather than attributing every observed delay to Blit. ADR0142 records
+the bounded change;105 remains open until physical revalidation.
+The first full run exposes a font-fixture race: the child writes `ready`
+between revision GET and cell PUT, producing a legitimate409 conflict.
+A silent-child attempt exposes the fixture's cursor-at-origin dependency
+instead. The final test-only correction retains the marker and waits for
+its actual cell contents before reading the revision; it both removes the
+competing write and parks the cursor away from the glyph oracle. The focused
+font gate then passes. No production font/cursor/revision change is made;
+the interrupted full run is not a pass.
+
+A later full run finishes106pass/7skip/1fail at native restart/rejoin.
+ADR0143 identifies a Blit placement-helper coordinate translation error:
+`hold move` is native-primary-relative, not absolute. The corrected helper
+passes the explicit nonzero-primary regression and the installed-desktop
+variant with resize, preserving the selected primary and user placement.
+A fresh full run uses operator-frozen Hibr0.99.256/ABI16, with installed
+binary fingerprint checked before and after. It is still in progress here.
+The three separately invoked pinned-header adapter gates pass.
+
+Fresh complete run:107pass/7explicit skips/0fail, including six offscreen
+GLES2 gates. Four-PTY soak:120seconds,11,504 snapshots,1,046 resizes.
+Installed Hibr fingerprint is unchanged before/after:
+`1dd031259b4d16ccbfc3c0ffe6335d28fdaaa6be4d2cfe0f6187b6d1680a73b9`.
+This supersedes the failed candidate runs for local regression only;
+package reproducibility and physical comparison are not yet accepted.
+
 ## 2026-10-19:559 physical admission improvement, residual pressure remains
 
 Package559 is deployed/version-verified; independent builds match. Package
