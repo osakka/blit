@@ -1,0 +1,17 @@
+release: 0.1.556
+package: blit_0.1.556-1_amd64.deb
+package_sha256: 8c5f803f813787b40cb10230403b2713f8fde50e145cc456d3b6c6cd0860ce39
+source_commit: 653b3e3ba2da215bb1fc9314667af90ef8ba5ea8
+package_documentation_commit: 653b3e3ba2da215bb1fc9314667af90ef8ba5ea8
+server_binary_sha256: 5c6f8b8abf52602014204c4884ace58c2ec9e3a5512c2967d3adc512070b088f
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.225
+hibr_abi: 16
+verification:
+  focused: 'backend selection red/green; schema/lifecycle 17 pass; comparison failure cleanup passes'
+  full: '99 pass, 7 explicit skips, 0 fail; run includes the two GLES fixtures present at launch'
+  final_gles: 'expanded suite 5 pass, 0 skip, 0 fail through offscreen/OpenGLES2 software GL'
+  soak: '120 seconds, four PTYs, 10744 snapshots, 977 resizes'
+  package: 'artifact/provenance gate passes; independent second build is byte-identical'
+  physical: 'pending deployment and bounded physical backend comparison'
