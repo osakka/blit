@@ -709,6 +709,26 @@ fractional, the physical width and height use one shared nearest-pixel rule;
 for example, an 8x16 font at scale 1.1 is a 9x18 cell. This is a display
 geometry operation; it does not change Hibr source or terminal protocol state.
 
+For example, apply a modest size increase without restarting the server:
+
+```sh
+curl --fail-with-body -X PUT "$BLIT_URL/v1/fonts" \
+  -H "Authorization: Bearer $BLIT_AUTH_TOKEN" \
+  -H 'Content-Type: application/json' --data '{"scale":1.2}'
+```
+
+Read back `active.scale` and `active.cell_pixels`: rounded cell dimensions,
+not fractional physical pixels, determine the grid. An8x16 source becomes
+10x19 at1.2. To retain the change across restart, read `GET /v1/settings`,
+update its complete `document.font` with the desired profile/scale and
+`PUT /v1/settings` using the returned revision in `If-Match`. Preserve the
+other document sections and require `storage.state == "clean"`. A successful
+live font response alone is not confirmation of a durable settings save.
+
+Text foreground/background colours are terminal styles, independent of font
+selection. The current monochrome PSF pipeline does not provide multicolour
+emoji merely by selecting a profile with more Unicode mappings.
+
 ### API-owned server settings
 
 `GET /v1/settings` is the authoritative view of persisted presentation

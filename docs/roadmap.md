@@ -3,6 +3,32 @@
 The roadmap is ordered by dependency. A later milestone must not become a
 second, parallel implementation of an earlier one.
 
+## Current requested sequence — font sizing, new font, then performance
+
+New font tracking: [Blit#107](https://git.home.arpa/itdlabs/blit/issues/107).
+
+1. Use the existing canonical `GET/PUT /v1/fonts` contract for live size
+   changes (1.0–3.0 in0.1 steps), then save the complete settings document
+   with its current revision for persistence. Do not add another font-size
+   endpoint or restart the desktop merely to resize text.
+2. Add an optional visually refined font profile while retaining the current
+   Hibr-capable Terminus profile. Select the appearance with the operator;
+   record source/license and reproducible generation. Define the supported
+   Unicode repertoire rather than claim every Unicode glyph. Preserve box
+   drawing, blocks, combining marks and wide-cell geometry; test right edges,
+   bold symbols, split panes and resize. Existing PSF glyphs are monochrome
+   masks coloured by terminal styles: multicolour emoji need an explicit
+   glyph-format/rendering decision, not merely a new PSF artifact. Reuse the
+   common font/compositor contract across native KMS and both SDL renderers.
+3. Resume measured authenticated desktop dragging, wallpaper redraw and
+   mixed terminal/graphics performance. Separate input/PTY processing,
+   composition, texture upload and presentation waits. Maintain correctness
+   oracles and compare identical workloads against the native baseline.
+
+On2026-10-19 live0.1.560 SDL/GLES2 accepts and durably saves scale1.2,
+reporting10x19 cells. The DP1x2 layout and bottom login pane remain intact.
+This verifies API state/application, not visual approval of a new font.
+
 ## In progress — exact presentation backend parity
 
 The [backend parity plan](backend-parity-plan.md) defines the ordered delivery

@@ -1,5 +1,17 @@
 # Current state and restart point
 
+## 2026-10-19 operator configuration: SDL/GLES2 and scale1.2
+
+Operator requested SDL/GL and then prioritised font sizing, a new selectable
+font, and performance in that order. API verifies SDL3/KMSDRM/OpenGLES2 on
+0.1.560. The old native preferred pane ID did not resolve under SDL; it was
+corrected durably to `pane-display-1-2`, with login running on the bottom.
+Live font API accepts scale1.2 and reports10x19 cells; complete settings
+replacement confirms clean storage at revision157. DP1x2 layout is preserved.
+No Hibr changes. New-font appearance selection and glyph-format decision are
+pending; see the ordered roadmap. Existing font remains available. These
+configuration checks do not claim new visual/font or performance acceptance.
+
 ## 2026-10-19:560 deployed; initial-read delay reduced on physical SDL paths
 
 Source `71d55cf`, package identity `4c7a629`; package SHA256
