@@ -3156,6 +3156,11 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
             "\"target_interval_us\":%llu,\"target_interval_ms\":%.3f,"
             "\"missed_deadlines\":%lu,\"last_present_ms\":%.3f,"
             "\"max_present_ms\":%.3f,\"present_calls\":%llu,"
+            "\"kms_scanout\":{\"available\":%s,"
+            "\"flip_completions\":%llu,\"vblank_sequence\":%u,"
+            "\"last_vblank_timestamp_us\":%llu,"
+            "\"vblank_span_count\":%llu,\"vblank_span_us\":%llu,"
+            "\"observed_refresh_hz\":%.6f},"
             "\"kms_phases\":{\"draw_ms\":%.3f,\"copy_ms\":%.3f,"
             "\"submit_ms\":%.3f,\"drawn_cells\":%llu},"
             "\"render_width\":%d,\"render_height\":%d,"
@@ -3178,6 +3183,13 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
                 runtime->diagnostic_max_sdl_present_ms,
             have_kms_info ? kms_info.present_calls :
                 runtime->diagnostic_present_calls,
+            have_kms_info ? "true" : "false",
+            have_kms_info ? kms_info.flip_completions : 0ULL,
+            have_kms_info ? kms_info.vblank_sequence : 0U,
+            have_kms_info ? kms_info.vblank_timestamp_us : 0ULL,
+            have_kms_info ? kms_info.vblank_span_count : 0ULL,
+            have_kms_info ? kms_info.vblank_span_us : 0ULL,
+            have_kms_info ? kms_info.observed_refresh_hz : 0.0,
             have_kms_info ? kms_info.draw_ms : 0.0,
             have_kms_info ? kms_info.copy_ms : 0.0,
             have_kms_info ? kms_info.submit_ms : 0.0,

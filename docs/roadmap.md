@@ -3,6 +3,17 @@
 The roadmap is ordered by dependency. A later milestone must not become a
 second, parallel implementation of an earlier one.
 
+## In progress — per-output scanout evidence for physical motion diagnosis
+
+Candidate0.1.552 exposes each direct-KMS output's page-flip completions and
+vblank sequence/timing alongside existing frame-submission counters. Focused
+direct-KMS mock, API schema, SDL observation, and schema-suite gates pass.
+This is instrumentation only; it makes no renderer or scheduler behavior
+claim. Next acceptance is to deploy the exact candidate through the authorized
+API updater and compare per-output submission/completion/vblank deltas during
+physical mouse movement across all three screens. A physical sample is still
+needed before diagnosing or changing the motion/render scheduling path.
+
 ## Current position — held-scene pointer presentation and stable identity
 
 Release0.1.551 lets software cursor updates reach the next output

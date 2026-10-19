@@ -2532,7 +2532,7 @@ components:
               type: array
               items:
                 type: object
-                required: [display_id, refresh_hz, refresh_source, effective_interval_ms, target_interval_us, target_interval_ms, missed_deadlines, last_present_ms, max_present_ms, present_calls, render_width, render_height]
+                required: [display_id, refresh_hz, refresh_source, effective_interval_ms, target_interval_us, target_interval_ms, missed_deadlines, last_present_ms, max_present_ms, present_calls, kms_scanout, render_width, render_height]
                 properties:
                   display_id: {type: string}
                   refresh_hz: {type: number, minimum: 1}
@@ -2554,6 +2554,25 @@ components:
                       drawn_cells: {type: integer, minimum: 0}
                   max_present_ms: {type: number, minimum: 0}
                   present_calls: {type: integer, minimum: 0}
+                  kms_scanout:
+                    type: object
+                    description: >-
+                      DRM/KMS page-flip completion and kernel vblank observations.
+                      `present_calls` counts submitted frames; `flip_completions`
+                      counts completion events. `observed_refresh_hz` describes
+                      the output vblank sequence over `vblank_span_us`, not the
+                      rate at which changed content was submitted. Unavailable
+                      for non-direct-KMS renderers.
+                    required: [available, flip_completions, vblank_sequence, last_vblank_timestamp_us, vblank_span_count, vblank_span_us, observed_refresh_hz]
+                    additionalProperties: false
+                    properties:
+                      available: {type: boolean}
+                      flip_completions: {type: integer, minimum: 0}
+                      vblank_sequence: {type: integer, minimum: 0, maximum: 4294967295}
+                      last_vblank_timestamp_us: {type: integer, minimum: 0}
+                      vblank_span_count: {type: integer, minimum: 0}
+                      vblank_span_us: {type: integer, minimum: 0}
+                      observed_refresh_hz: {type: number, minimum: 0}
                   render_width: {type: integer, minimum: 0}
                   render_height: {type: integer, minimum: 0}
                 additionalProperties: false

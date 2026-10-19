@@ -1,5 +1,33 @@
 # Current state and restart point
 
+## 2026-10-19 live motion sample: physical input arrives; scanout still unproven
+
+Correction to the prior investigation: the operator confirms three active
+physical screens—two DP panes and one HDMI screen. Blit represents the two DP
+panes as one `DP-1` KMS connector/canvas (`display-93`, 1920x2160, split 1x2)
+and the HDMI screen as a second connector (`display-102`, 2560x1440). The
+observation API's two KMS outputs are therefore not a count of physical
+screens. A cached screenshot for `display-102` looked black but contradicted
+the live screen; it is withdrawn as evidence of the actual HDMI image.
+
+During a roughly4.1s operator-driven physical mouse movement, evdev counters
+increased by1,541 total events and1,024 motion events. The pointer moved from
+the DP canvas onto HDMI and back; last physical-event age stayed at1–9ms.
+Input dispatch is not shown pausing in this capture. Global
+`runtime.performance.frame_rate_hz` readings fluctuated from19.858 to60.349;
+that is a server composition metric, not completed scanout per display. Per-
+output `present_calls` increased129 on DP and41 on HDMI during the interval,
+but the pointer crossed outputs and submissions are not flip completions.
+
+The bounded KMS retry trace includes output-ready intervals near16.7ms and
+33.4ms. This is a lead for refresh misses, not a direct scanout-rate measurement
+or a proven cause. Candidate0.1.552 adds existing KMS flip-completion counters
+and vblank timing to each output's diagnostics. The mocked direct-KMS gate
+verifies these values advance from page-flip callbacks; SDL reports them
+unavailable. This does not establish the physical screens' scanout rate and
+has not been deployed. No live settings, sessions, or service state were
+changed during this test.
+
 ## 2026-10-19 live follow-up: synthetic cadence improved, wallpaper test interrupted
 
 Blit0.1.551 is live on10.54. The authenticated desktop currently has two Hibr

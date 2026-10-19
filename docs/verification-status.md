@@ -3,6 +3,17 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-19:552 scanout-observability candidate, not deployed
+
+TCC0.9.27 builds the candidate with server version0.1.552. The direct-KMS
+hotplug/lifecycle gate verifies `kms_scanout` reports a completed page flip,
+nonzero vblank sequence/timestamp, and a measured vblank span from mock DRM
+callbacks. API schema, SDL observation semantics, and the full schema suite
+pass (**5pass,0skip,0fail**). This establishes API-contract and mocked callback
+plumbing only, not physical scanout correctness. The 10.54 server remains
+0.1.551; no live settings or service state changed. Physical three-screen
+movement remeasurement and deployment acceptance remain pending.
+
 ## 2026-10-19:551 live cadence probe; wallpaper/UI acceptance not complete
 
 API-deployed Blit0.1.551 remains active. On the current single DP output

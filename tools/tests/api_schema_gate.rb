@@ -70,6 +70,14 @@ raise 'observation schema changed' unless
   observation_get.dig('responses', '200', 'content', 'application/json',
                        'schema', '$ref') == '#/components/schemas/Observation'
 observation = schema.fetch('components').fetch('schemas').fetch('Observation')
+render_output = schema.fetch('components').fetch('schemas').fetch('Diagnostics')
+  .dig('properties', 'render', 'properties', 'outputs', 'items')
+scanout = render_output&.dig('properties', 'kms_scanout')
+raise 'per-output KMS scanout telemetry contract missing' unless scanout &&
+  scanout['required'].sort == %w[available flip_completions vblank_sequence
+                                  last_vblank_timestamp_us vblank_span_count
+                                  vblank_span_us observed_refresh_hz].sort &&
+  scanout['additionalProperties'] == false
 required_observation_fields = %w[observation_version captured_monotonic_us
                                   consistency version server diagnostics runtime
                                   graphics displays audio audio_cards input_devices

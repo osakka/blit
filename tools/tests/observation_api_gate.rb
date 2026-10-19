@@ -130,5 +130,18 @@ raise 'observation runtime is missing performance' unless
 raise 'observation render is missing the exact video driver' unless
   observation['diagnostics']['render']['video_driver'].is_a?(String) &&
   !observation['diagnostics']['render']['video_driver'].empty?
+render_outputs = observation.dig('diagnostics', 'render', 'outputs')
+raise 'observation render outputs are missing' unless
+  render_outputs.is_a?(Array) && !render_outputs.empty?
+render_outputs.each do |output|
+  scanout = output['kms_scanout']
+  raise 'per-output KMS scanout telemetry is missing' unless
+    scanout.is_a?(Hash) && scanout.keys.sort == %w[available
+      flip_completions last_vblank_timestamp_us observed_refresh_hz
+      vblank_sequence vblank_span_count vblank_span_us].sort
+  raise 'SDL dummy output falsely claims DRM/KMS telemetry' unless
+    scanout['available'] == false && scanout['flip_completions'].zero? &&
+    scanout['observed_refresh_hz'].zero?
+end
 
 puts "OBSERVATION_API_PASS fields=#{required.length} sessions=#{observation['sessions']['count']} displays=#{observation['displays']['count']}"

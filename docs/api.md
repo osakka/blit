@@ -1220,6 +1220,17 @@ Compare `present_calls`, `frame_rate_hz`, `surface_commit_hz`, frame/render inte
 pressure, and input dispatch counters. Do not report a frame rate from a
 screenshot timestamp or HTTP request latency.
 
+Each `diagnostics.render.outputs[]` entry includes `kms_scanout`. On direct
+KMS, `present_calls` counts submitted frames while
+`kms_scanout.flip_completions` counts completed page-flip events. The
+`vblank_sequence`, `last_vblank_timestamp_us`, `vblank_span_count`, and
+`vblank_span_us` fields expose the kernel's output timing; its
+`observed_refresh_hz` is the vblank rate, not the rate of changed content.
+`available` is false and the KMS-only counters are zero for SDL renderers.
+The top-level `frame_rate_hz` remains an overall Blit composition rate; it is
+not a per-display scanout measurement. Use deltas of per-output completion
+counters over a measured interval to evaluate delivered frames per display.
+
 For a reproducible performance report, include the exact `server_version`,
 display mode/refresh, workload duration, `present_calls`, measured frame or
 render interval, missed deadlines, input dispatch counters, terminal bytes,

@@ -50,6 +50,24 @@ Dir.mktmpdir('blit-kms-hotplug') do |root|
     await('startup migration durable'){req('GET','/v1/settings').dig('storage','state')=='clean'}
     check(ids.call==['display-93'],'initial inventory wrong')
     primary=req('POST','/v1/terminal-sessions',{command:'/bin/cat',pane_id:'pane-display-93-2'})
+    scanout_for_primary=-> do
+      req('GET','/v1/diagnostics')['render']['outputs'].find do |output|
+        output['display_id']=='display-93'
+      end&.fetch('kms_scanout',nil)
+    end
+    await('direct-KMS scanout completion is observable') do
+      scanout=scanout_for_primary.call
+      scanout if scanout && scanout['available'] && scanout['flip_completions']>0
+    end
+    first_scanout=scanout_for_primary.call
+    check(first_scanout['last_vblank_timestamp_us']>0 &&
+          first_scanout['vblank_sequence']>0,
+          'first completed flip omitted its vblank identity')
+    await('direct-KMS vblank rate sample is observable') do
+      scanout=scanout_for_primary.call
+      scanout if scanout && scanout['vblank_span_count']>0 &&
+        scanout['vblank_span_us']>0 && scanout['observed_refresh_hz']>0
+    end
     policy=req('POST','/v1/auxiliary-displays/apply',{bindings:[{output:'DP-2',pane_ordinal:1}]})
     check(policy.dig('bindings',0,'state')=='waiting_output','absent binding not waiting')
     before=req('GET','/v1/topology');settings=req('GET','/v1/settings')

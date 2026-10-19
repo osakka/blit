@@ -27,6 +27,9 @@ contents and framebuffer bytes remain separate bounded evidence resources.
 - Adding a state resource requires updating its focused serializer and this
   aggregate contract together; the API schema gate and observation gate catch
   drift.
+- Per-output KMS diagnostics distinguish submitted frames from completed
+  page flips and report kernel vblank timing. The global composition-rate
+  counter is not a substitute for per-output scanout evidence.
 - The response is bounded by Blit's fixed HTTP/resource capacities. Large
   terminal cell or image evidence must use the dedicated surface/screenshot
   endpoints.
@@ -40,3 +43,13 @@ contents and framebuffer bytes remain separate bounded evidence resources.
 - A client-side collection of every endpoint was rejected as the canonical
   mechanism because its members would be captured at different times and it
   would be difficult to reproduce exactly during a fault.
+
+## Per-output presentation evidence
+
+Each render output exposes a `kms_scanout` object. `present_calls` counts
+submissions, `flip_completions` counts DRM page-flip completion events, and
+the vblank sequence/timestamp span reports the output's kernel timing. The
+observed vblank rate is not a claim that Blit submitted changed content at
+that rate. Non-KMS renderers report `available: false` and zero KMS counters.
+This extends the existing observation contract rather than adding another
+endpoint, preserving its single-event-loop capture semantics.
