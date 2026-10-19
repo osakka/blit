@@ -2491,6 +2491,22 @@ components:
             renderer_active: {type: string}
             display_backend_requested: {type: string, enum: [kms, sdl]}
             display_backend_active: {type: string, enum: [drm-kms, sdl3, unavailable]}
+            presentation_configuration:
+              type: object
+              description: Read-only provenance; saved API settings own intent, environment supplies startup defaults only.
+              required: [backend_source, backend_environment, backend_environment_valid, backend_environment_overridden, configuration_valid, renderer_source, renderer_applicable, video_driver_active]
+              properties:
+                backend_source: {type: string, enum: [saved-settings, environment, default]}
+                backend_environment: {type: [string, 'null']}
+                backend_environment_valid: {type: boolean}
+                backend_environment_overridden: {type: boolean}
+                configuration_valid: {type: boolean}
+                renderer_source: {type: string, enum: [saved-settings, environment, default]}
+                renderer_applicable:
+                  type: boolean
+                  description: Whether the active presentation path uses the SDL renderer; false on native KMS.
+                video_driver_active: {type: string}
+              additionalProperties: false
             presentation_restart_required:
               type: boolean
               description: Requested backend or explicit SDL renderer differs from the active presentation path. Saving does not change live output ownership.

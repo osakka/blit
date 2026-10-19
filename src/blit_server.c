@@ -19833,6 +19833,17 @@ static void settings_apply_displays(BlitRuntime *runtime)
 
 #include "blit_pointer_settings.h"
 
+static int backend_environment_valid(void)
+{
+    const char *value = getenv("BLIT_DISPLAY_BACKEND");
+    return value == NULL || strcmp(value, "kms") == 0 || strcmp(value, "sdl") == 0;
+}
+
+static int presentation_configuration_valid(const BlitRuntime *runtime)
+{
+    return runtime->display_backend_configured || backend_environment_valid();
+}
+
 static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
 {
     static char document[BLIT_SETTINGS_CAPACITY];
@@ -19840,8 +19851,16 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
     BlitLoginPolicy desired;
     BlitLoginPolicy effective;
     char login[512];
+    char environment_value[512];
+    const char *backend_env = getenv("BLIT_DISPLAY_BACKEND");
+    const char *video_driver = SDL_GetCurrentVideoDriver();
     int restart_required;
 
+    if (backend_env) {
+        char escaped[500];
+        json_escape(backend_env, escaped, sizeof(escaped));
+        snprintf(environment_value, sizeof(environment_value), "\"%s\"", escaped);
+    } else snprintf(environment_value, sizeof(environment_value), "null");
     settings_login_policy(runtime, runtime->settings_document, &desired);
     memset(&effective, 0, sizeof(effective));
     effective.enabled = runtime->login_enabled;
@@ -19862,6 +19881,11 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
                  "\"render_interval_ms\":%d,\"pane_layout\":\"%dx%d\","
                  "\"renderer_requested\":\"%s\",\"renderer_active\":\"%s\","
                  "\"display_backend_requested\":\"%s\",\"display_backend_active\":\"%s\","
+                 "\"presentation_configuration\":{\"backend_source\":\"%s\","
+                 "\"backend_environment\":%s,\"backend_environment_valid\":%s,"
+                 "\"backend_environment_overridden\":%s,\"configuration_valid\":%s,"
+                 "\"renderer_source\":\"%s\",\"renderer_applicable\":%s,"
+                 "\"video_driver_active\":\"%s\"},"
                  "\"presentation_restart_required\":%s,"
                  "\"kms_async_pageflip\":%s,\"expect_desktop\":%s,"
                  "\"login\":%s,\"login_restart_required\":%s,"
@@ -19883,7 +19907,18 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
                  runtime->display_backend_kms ? "kms" : "sdl",
                  runtime->direct_kms ? "drm-kms" :
                      (runtime->sdl_ready ? "sdl3" : "unavailable"),
-                 (runtime->display_backend_kms != runtime->direct_kms ||
+                 runtime->display_backend_configured ? "saved-settings" :
+                     (backend_env ? "environment" : "default"),
+                 environment_value, backend_environment_valid() ? "true" : "false",
+                 runtime->display_backend_configured && backend_env ? "true" : "false",
+                 presentation_configuration_valid(runtime) ? "true" : "false",
+                 runtime->renderer_configured ? "saved-settings" :
+                     (getenv("BLIT_RENDERER") ? "environment" : "default"),
+                 runtime->direct_kms ? "false" : "true",
+                 runtime->direct_kms ? "not-applicable" :
+                     (video_driver ? video_driver : "unavailable"),
+                 (!presentation_configuration_valid(runtime) ||
+                  runtime->display_backend_kms != runtime->direct_kms ||
                   (!runtime->display_backend_kms &&
                    (!runtime->sdl_ready || (runtime->renderer_request[0] != '\0' &&
                     strcmp(runtime->renderer_request, runtime->sdl_renderer_name) != 0)))) ?
@@ -22263,6 +22298,17 @@ static void discover_displays(BlitRuntime *runtime)
     int count = 0;
     int i;
 
+    if (!backend_environment_valid()) {
+        const char *detail = "BLIT_DISPLAY_BACKEND accepts only kms or sdl; kmsdrm is an SDL video driver. Saved API settings override startup defaults.";
+        fprintf(stderr, "blit: %s\n", detail);
+        diagnostic_log(runtime, runtime->display_backend_configured ? "warning" : "error",
+                       "invalid_environment_backend", detail);
+        if (!presentation_configuration_valid(runtime)) {
+            snprintf(runtime->sdl_error, sizeof(runtime->sdl_error),
+                     "Invalid BLIT_DISPLAY_BACKEND; use kms or sdl, or save a valid backend through /v1/settings and restart.");
+            return;
+        }
+    }
     if (runtime->display_backend_kms) {
         char error[256];
         error[0] = '\0';

@@ -1,5 +1,26 @@
 # Blit API guide
 
+## Presentation configuration ownership (0.1.563)
+
+Saved `/v1/settings` is the canonical configuration. Its
+`document.server.display_backend` takes precedence over the startup fallback
+`BLIT_DISPLAY_BACKEND`. Valid backend values are `kms` (native DRM/KMS) and
+`sdl`. `kmsdrm` belongs to `SDL_VIDEODRIVER`, not to Blit's backend selector.
+
+Read `effective.presentation_configuration` to distinguish the backend source,
+environment validity/override, renderer source and actual SDL video driver.
+These fields are derived observations, never a second writable configuration.
+The existing effective requested/active fields and restart-required flag tell
+clients whether the saved choice has been activated. Native KMS reports the
+SDL driver as `not-applicable`; retaining an SDL renderer preference does not
+activate SDL. Invalid defaults without a saved backend block display startup,
+log `invalid_environment_backend`, and leave the API available for repair.
+
+Change intent through the settings API, save it using the storage API, and
+restart presentation. Editing an environment file requires a service restart
+to reload it; an in-process restart inherits the original environment.
+
+
 This is the human-facing guide to the API. The normative contract is always
 [`openapi/blit-0.1.yaml`](../openapi/blit-0.1.yaml); this guide explains the
 resource model and safe ordering of calls without duplicating every schema.

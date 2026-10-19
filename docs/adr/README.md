@@ -165,6 +165,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0145 — Retro Spleen profile with canonical fallback](0145-retro-spleen-profile-with-canonical-fallback.md)
 - [0146 — Exact integer glyph atlas UV boundaries](0146-exact-integer-glyph-atlas-uv-boundaries.md)
 - [0147 — Shared coverage and colour cell rasterization](0147-shared-coverage-and-colour-cell-rasterizer.md)
+- [0148 — Explicit presentation configuration source](0148-explicit-presentation-configuration-source.md)
 
 ## Adding an ADR
 

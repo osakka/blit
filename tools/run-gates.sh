@@ -344,6 +344,7 @@ suite_hibr() {
 suite_lifecycle() {
     run_gate http_accept_budget_gate.rb ruby tools/tests/http_accept_budget_gate.rb
     run_gate backend_selection_gate.rb ruby tools/tests/backend_selection_gate.rb
+    run_gate presentation_provenance_gate.rb ruby tools/tests/presentation_provenance_gate.rb
     run_gate backend_comparison_cleanup_gate.rb ruby tools/tests/backend_comparison_cleanup_gate.rb
     run_gate auxiliary_policy_gate.rb ruby tools/tests/auxiliary_policy_gate.rb
     run_gate login_desktop_observer_gate.rb ruby tools/tests/login_desktop_observer_gate.rb
