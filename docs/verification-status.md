@@ -21,9 +21,18 @@ TCC server/helper builds, byte-identical package rebuild and artifact/manifest
 checks pass. This is NOT a rerun of564's full112 checks.
 565 source3bac488, package
 f2e732b3d63e7df4c757fae1fb5b5e5b1bab7fc47acf35f7816a53c28877e89e
-is API-deployed/version-verified; native KMS and Modern22px retained. Waiting
-for user login/hands-off for comparable desktop after-run; physical motion
-acceptance remains pending. Baseline evidence build/mouse101-564-clean60/.
+is API-deployed/version-verified; native KMS and Modern22px retained.
+After verified desktop login, requested60Hz/3s:170 confirmed DP flips in
+3.099802s (~54.84Hz),180 injections, zero physical mouse events. Before:
+73 flips in3.090041s (~23.62Hz). Absolute position/desktop scene differed;
+network arrival/order remains a confound, not physical input latency.
+Requested120Hz/2s capacity:122 submissions/121 confirmed completions in
+2.079841s (~58.18 confirmed Hz),240 injections, zero physical mouse events,
+zero terminal bytes. Nominal DP refresh59.997Hz; one flip outstanding at
+snapshot. No full-refresh or physical-mouse guarantee follows. Pointer restored,
+saved settings revision230 clean and unchanged; issue101 awaits operator feel.
+Evidence: build/mouse101-564-clean60/, build/mouse101-565-clean60/ and
+build/mouse101-565-capacity120/. SDL104 remains separate and unmodified.
 
 ## 2026-10-19 fonts564 deployed: measured native antialiasing
 

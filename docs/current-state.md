@@ -21,10 +21,18 @@ pixels. Existing native composition/art/clipping and64 hotplug cycles pass.
 reproducible package/artifact checks. Source3bac488/package SHA256
 f2e732b3d63e7df4c757fae1fb5b5e5b1bab7fc47acf35f7816a53c28877e89e
 is API-deployed/version-verified. Native KMS, Modern22px and layout retained.
-Login is running on bottom primary; operator asked to log in and leave input
-still before comparable desktop timing. Do not compare the new login screen
-against the old desktop and call that measured recovery. Physical feel and
-after-run remain pending. No font, Hibr, schema or SDL changes. This was
+After verified desktop login, the same requested60Hz/3s sweep produced170
+confirmed DP flips in3.100s (~54.8Hz), versus73/~23.6Hz before. Both clean
+runs had zero physical mouse events; absolute pointer position and desktop
+scene were not identical. A requested120Hz/2s capacity check produced122
+submissions/121 confirmed completions in2.080s (~58.2 confirmed Hz) on the
+59.997Hz output. Network arrival/order remains part of these API workloads;
+they are not physical input-to-photon measurements or universal60Hz acceptance.
+Evidence: build/mouse101-565-clean60/ and build/mouse101-565-capacity120/.
+Pointer restored; saved revision230 remains clean, Modern22px/native KMS and
+bottom-primary policy unchanged. Physical feel still needs operator acceptance;
+keep101 open. Next is SDL104, without silently switching the working backend.
+No font, Hibr, schema or SDL changes. This was
 targeted565 verification, not a new full112-gate run (that belongs to564).
 
 ## 2026-10-19 revised priority: mouse101, then SDL104

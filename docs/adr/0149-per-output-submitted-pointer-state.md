@@ -1,7 +1,7 @@
 # ADR0149: submitted pointer state belongs to each output
 
 - Date: 2026-10-19
-- Status: implemented; physical validation pending
+- Status: deployed; bounded API cadence verified, physical-mouse acceptance pending
 - Tracking: Blit101; related ADR0136, ADR0137
 
 Native KMS had one global previous-pointer state, updated whenever a present
@@ -26,3 +26,10 @@ crossings in both orders, hide, pending-flip/latest-position retention,
 modeset and exact cursor/no-trail pixels. Existing native composition, pointer
 art/geometry and hotplug gates remain required. Compare the same bounded live
 workload before/after; retain native backend, layout and current font.
+
+On10.54, the clean requested60Hz API workload improved from23.62 to54.84
+confirmed DP flips/sec; a120Hz offered workload reached58.18 confirmed/sec
+on the59.997Hz output. Zero physical mouse events in these windows. Absolute
+position/scene differed across versions; deterministic regression isolates the
+defect, while API measurements show bounded recovery, not universal physical
+latency acceptance. See verification-status.md and issue101.
