@@ -3,6 +3,31 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-19: KMS checkpoint and first parity fixture
+
+The authenticated live API returned0.1.553. Annotated tag `v0.1.553` was
+pushed at source86d28b2, matching the release manifest's source and package
+identity. The annotation retains issue101's open physical-motion performance
+acceptance. Neither the live renderer nor sessions were changed.
+
+The existing SDL wallpaper-damage gate now accepts explicit driver/renderer
+inputs, checks ready/backend/driver/renderer identity before pixel assertions,
+discovers a display and attaches its fixture explicitly. The default
+dummy/software run passes all original wallpaper damage/deletion assertions.
+On this host, requesting `opengles2` with the dummy driver fails the new
+identity assertion. Running the pre-change fixture with that identical
+requested renderer incorrectly reports a pass, proving that the added check
+detects a real coverage gap. This environment has no `/dev/dri`; actual SDL
+KMSDRM/GLES2 and physical multi-output acceptance remain pending.
+
+`tools/run-gates.sh renderer` passes56 gates, skips0, fails0 against the
+existing0.1.554 local binary. Only test tooling/documentation changed; no
+new runtime binary or Debian package was produced by this increment.
+
+The [parity matrix](backend-parity-matrix.md) inventories recent direct-KMS
+work and common feature requirements under issue104. It records pending
+acceptance rather than extrapolating local software results to hardware.
+
 ## 2026-10-19:554 pointer-state transition counter candidate; local gates pass
 
 Candidate0.1.554 adds `performance.pointer_position_changes`, incremented

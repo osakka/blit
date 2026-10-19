@@ -13,12 +13,22 @@ require_relative 'gate_port'
 port = gate_port(Integer(ENV.fetch('BLIT_WALLPAPER_DAMAGE_PORT', '19212')))
 base = URI("http://127.0.0.1:#{port}")
 log = "/tmp/blit-wallpaper-damage-#{Process.pid}.log"
+video_driver = ENV.fetch('BLIT_TEST_VIDEO_DRIVER', 'dummy')
+renderer = ENV.fetch('BLIT_TEST_RENDERER', 'software')
+binary = ENV.fetch('BLIT_GATE_BINARY', 'build/blit/blit-server')
 env = {
-  'SDL_VIDEODRIVER' => 'dummy',
-  'SDL_RENDERER' => 'software',
-  'LD_LIBRARY_PATH' => 'build/sdl3-kms'
+  'SDL_VIDEODRIVER' => video_driver,
+  'BLIT_RENDERER' => renderer,
+  'SDL_RENDERER' => renderer,
+  'BLIT_DISPLAY_BACKEND' => 'sdl',
+  'BLIT_BIND_ADDRESS' => '127.0.0.1',
+  'BLIT_AUTH_TOKEN' => '',
+  'BLIT_LOGIN_AUTOSTART' => '0',
+  'BLIT_EXPECT_DESKTOP' => '0',
+  'BLIT_PSF_FONT' => ENV.fetch('BLIT_GATE_FONT', 'assets/fonts/Blit-Hibr-Terminus16.psf'),
+  'LD_LIBRARY_PATH' => ENV.fetch('BLIT_GATE_LIBS', 'build/sdl3-kms')
 }
-pid = Process.spawn(env, 'build/blit/blit-server', port.to_s,
+pid = Process.spawn(env, binary, port.to_s,
                     out: log, err: [:child, :out])
 
 at_exit do
@@ -44,8 +54,8 @@ def request(base, method, path, body = nil)
   response.body.nil? || response.body.empty? ? nil : JSON.parse(response.body)
 end
 
-def screenshot(base)
-  response = Net::HTTP.get_response(base + '/v1/diagnostics/screenshots/display-1')
+def screenshot(base, display_id)
+  response = Net::HTTP.get_response(base + "/v1/diagnostics/screenshots/#{display_id}")
   raise "screenshot HTTP #{response.code}" unless response.is_a?(Net::HTTPSuccess)
   response.body
 end
@@ -74,6 +84,19 @@ Timeout.timeout(8) do
   end
 end
 
+diagnostics = request(base, :get, '/v1/diagnostics')
+identity = diagnostics.fetch('render')
+raise "unexpected presentation path: #{identity.slice('direct_kms', 'video_driver', 'renderer')}" unless
+  diagnostics.fetch('health').fetch('ready') &&
+  diagnostics.fetch('health').fetch('backend') == 'sdl3' &&
+  identity.fetch('direct_kms') == false &&
+  identity.fetch('video_driver') == video_driver &&
+  identity.fetch('renderer') == renderer
+displays = request(base, :get, '/v1/displays').fetch('displays')
+display_id = ENV.fetch('BLIT_TEST_DISPLAY_ID') { displays.fetch(0).fetch('id') }
+raise "requested display #{display_id} is unavailable" unless
+  displays.any? { |display| display.fetch('id') == display_id }
+
 id = nil
 begin
   # 4x8 opaque red RGB image, placed over the first two-by-two cells and
@@ -88,6 +111,7 @@ begin
   # metadata after exit cannot prove that the live scene was cleared.
   command = "printf '%b' \"$1\"; sleep 2; printf '%b' \"$2\"; printf 'DELETED\\n'; sleep 20"
   created = request(base, :post, '/v1/terminal-sessions',
+                    'display_id' => display_id,
                     'command' => '/bin/sh',
                     'arguments' => ['-c', command, 'sh', kitty, delete],
                     'surface' => {'width' => 20, 'height' => 8})
@@ -103,7 +127,7 @@ begin
     end
   end
   sleep 0.15
-  before = screenshot(base)
+  before = screenshot(base, display_id)
   inset = request(base, :get, '/v1/diagnostics').fetch('render').fetch('surface_inset_px')
   before_pixel = pixel(before, inset + 15, inset + 31)
   raise "wallpaper was not red before damage: #{before_pixel.inspect}" unless
@@ -118,7 +142,7 @@ begin
           'base_revision' => deferred.fetch('revision'),
           'presentation' => 'commit', 'cells' => [update])
   sleep 0.15
-  after_pixel = pixel(screenshot(base), inset + 15, inset + 31)
+  after_pixel = pixel(screenshot(base, display_id), inset + 15, inset + 31)
   raise "wallpaper was lost after incremental damage: #{after_pixel.inspect}" unless
     after_pixel[0, 3] == [0, 0, 255]
   deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 10
@@ -134,10 +158,11 @@ begin
     sleep 0.05
   end
   sleep 0.15
-  deleted_pixel = pixel(screenshot(base), inset + 15, inset + 31)
+  deleted_pixel = pixel(screenshot(base, display_id), inset + 15, inset + 31)
   raise "wallpaper remained after image delete: #{deleted_pixel.inspect}" unless
     deleted_pixel[0, 3] == [0, 0, 0]
-  puts "SDL_WALLPAPER_DAMAGE_PASS before=#{before_pixel[0, 3].join(',')} " \
+  puts "SDL_WALLPAPER_DAMAGE_PASS driver=#{video_driver} renderer=#{renderer} display=#{display_id} " \
+       "before=#{before_pixel[0, 3].join(',')} " \
        "after=#{after_pixel[0, 3].join(',')} " \
        "deleted=#{deleted_pixel[0, 3].join(',')}"
 ensure

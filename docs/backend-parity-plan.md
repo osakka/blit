@@ -4,6 +4,7 @@ Status: planned, 2026-10-19. Implementation and physical acceptance remain open.
 
 Tracking: [Blit #104](https://git.home.arpa/itdlabs/blit/issues/104).
 Decision: [ADR0137](adr/0137-presentation-backend-feature-and-performance-parity.md).
+Acceptance inventory: [backend parity matrix](backend-parity-matrix.md).
 
 ## Contract and baseline
 

@@ -1,5 +1,22 @@
 # Current state and restart point
 
+## 2026-10-19 backend parity implementation starts
+
+The operator requested a release checkpoint before parity implementation.
+Annotated tag `v0.1.553` points to the live package's source `86d28b2`;
+the API version was verified as0.1.553 before tagging. The annotation preserves
+issue#101's unresolved physical-motion performance boundary. Candidate0.1.554
+remains undeployed, and its existing generated manifest remains untracked.
+
+[Issue104](https://git.home.arpa/itdlabs/blit/issues/104), ADR0137 and the
+[parity matrix](backend-parity-matrix.md) govern the next delivery. The first
+test increment makes the SDL wallpaper-damage fixture selectable by video
+driver/renderer, asserts actual runtime identity, discovers the target display
+and explicitly attaches the session. Local software pixel checks pass; a dummy
+driver with GLES2 requested fails identity validation, as required. Actual
+KMSDRM/software and KMSDRM/GLES2 physical runs remain pending. No live backend,
+session or Hibr code was changed in this cycle.
+
 ## 2026-10-19 live motion sample: input arrives; pointer/frame path is slow
 
 Correction to the prior investigation: the operator confirms three active
