@@ -754,13 +754,16 @@ the active size policy. `active.sizing` identifies `scale` or `pixels`;
 scale under pixel mode is derived and need not be a valid legacy scale write.
 For example, `{"size_px":23}` selects12x23 cells for the8x16 font. This is
 font/cell sizing, not a display mode change. Existing bitmap profiles are
-sampled at this size. Since0.1.562, `blit-modern` rasterizes Hack outline text
+sampled at this size. Font release0.1.564 adds `blit-modern`, rasterizing Hack outline text
 at a fitted native size, with antialiased coverage and Noto intrinsic-colour
 emoji. `blit-hibr-spleen16` is the additional pixel-art retro profile; both
 remain selectable alongside Terminus. Select smooth text, for example, with
 `{"font_id":"blit-modern","size_px":23}`. Pixel-art fallback characters are
 still pixel-art: adding these profiles does not implement universal Unicode,
 complex-script/ligature shaping or ZWJ/variation-selector emoji sequences.
+Candidate0.1.562 contained this work but was not deployed; config-only
+maintenance0.1.563 intentionally excludes it. Discover available profiles
+through `GET /v1/fonts`, not a version-number comparison alone.
 
 `active.rasterization` is `bitmap-nearest` or `native-antialiased`;
 `active.colour_glyphs` reports the colour face, and `active.raster_cache`

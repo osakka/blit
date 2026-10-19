@@ -4,6 +4,11 @@
 - Status: production adapters integrated; release/physical acceptance pending
 - Tracking: [Blit#107](https://git.home.arpa/itdlabs/blit/issues/107)
 
+Release boundary: candidate562 was held; maintenance563 excludes this work.
+The first production font rollout targets564. Discover profiles/capabilities
+from the API rather than assuming every numerically later maintenance build
+has candidate-only features.
+
 ## Context
 
 Pixel size controls are implemented, but the deployed bitmap renderer still
