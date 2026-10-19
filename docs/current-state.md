@@ -7,14 +7,19 @@ inconsistent; foreground YouTube appears to reduce choppiness. Recorded on101,
 not diagnosed. User prioritises finishing antialiasing/new fonts before mouse
 performance. Native backend/layout/login must remain unchanged; never edit Hibr.
 
-Candidate564/source7db553e includes the existing Spleen retro and smooth
-Hack/Noto modern profiles plus108 config ownership fix. Reproducible package
-SHA2564479ffb0b7d16aaf103b7538bbeba9d041099832af4dbedc06c5796eea791376;
+Candidate564 includes the existing Spleen retro and smooth Hack/Noto modern
+profiles plus108 config ownership fix. The archive was recut at sourceda7e32d
+to clarify the first-production version boundary in the packaged API guide;
+no server/input/rendering code changed from7db553e. Final reproducible package
+SHA256712b0b72897d9db244ecb2a702bf1ccd0a9026491697a3e75ce9d5f812d60556;
 server SHA25655fa017d190add2dd4777487e19d4f79bc7bc8b4642941dc8b850c1e432efec6.
 GLES7pass/0skip/0fail; full regression is running, live remains563. Original
 Terminus16 is retained until deployment and an announced font preview.
 The actual live probe now accepts a profile and safely restores original
 profile/size; its isolated actual-server gate passes both profiles/refusal.
+The actual Hibr Control Panel passes19px drag and+1/-1 with modern selected;
+captures under build/font564-panel-evidence were inspected. The live host has
+libfreetype6 installed at2.13.3+dfsg-1+deb13u1 (API diagnostic, no SSH).
 See font-evolution-plan.md. Older held-font entries below are historical.
 
 ## 2026-10-19 configuration ownership fix (#108)

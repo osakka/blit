@@ -6,8 +6,10 @@ Tracking: [Blit#107](https://git.home.arpa/itdlabs/blit/issues/107).
 
 Native KMS recovery/configuration issue108 is resolved and operator-confirmed.
 Candidate564 combines the existing shared raster/font work with that config
-fix; it does not switch the working native backend. The archive is built from
-7db553e and is reproducible. Full exact-binary regression is running; seven
+fix; it does not switch the working native backend. Final archive source is
+da7e32d (packaged guide clarifies564 versus config-only563); server binary is
+unchanged from7db553e and reproducibility passes. Full exact-binary regression
+is running; seven
 offscreen GLES checks pass. Live remains563 until regression/deployment.
 
 The bounded live probe supports `BLIT_FONT_ID=blit-modern` or
