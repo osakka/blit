@@ -1,0 +1,16 @@
+release: 0.1.552
+package: blit_0.1.552-1_amd64.deb
+package_sha256: 9fa2f27c2c232fd2fdb740c05e8783884e808c8ad64e1e2e4f67d09cc1557f26
+source_commit: 54fa37adb24e407c3fbc42bf8382dd5b54369d4a
+package_documentation_commit: 54fa37adb24e407c3fbc42bf8382dd5b54369d4a
+server_binary_sha256: fe71cddad6c4e88d526ac6f78125f180ab23444442836f7b87fe204f8d94fd7b
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.225
+hibr_abi: 16
+verification:
+  build: 'TCC 0.9.27; candidate version endpoint and API schema match 0.1.552'
+  direct_kms: 'mocked libdrm lifecycle verifies flip and vblank diagnostics; no physical claim'
+  schema_suite: '5 pass, 0 skip, 0 fail'
+  package: 'artifact/provenance gate passes; independent rebuild is byte-identical'
+  live: 'not yet deployed; physical three-screen motion sample pending'
