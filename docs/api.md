@@ -1191,6 +1191,21 @@ performance totals remain aggregate counters. SDL call completion does not
 prove physical scanout; direct-KMS flip/vblank evidence remains in
 `kms_scanout`.
 
+To select a presentation path, read `GET /v1/settings`, preserve its complete
+`document`, set `document.server.display_backend` to `kms` or `sdl`, and save
+it with `PUT /v1/settings` and the current revision in `If-Match`. For SDL,
+`document.server.renderer` selects `software` or `opengles2` on the supported
+bare-console paths. The saved backend overrides the service's boot default.
+The response reports `effective.display_backend_requested`,
+`effective.display_backend_active` and `effective.presentation_restart_required`.
+Saving leaves current displays/sessions running. Confirm storage is `clean`
+before `POST /v1/control/restart`; verify `/v1/version` and the observation's
+backend/video-driver/renderer identity afterward. Restart recreates sessions
+through the existing login/auxiliary policy. A missing KMS device leaves the
+API reachable for recovery and reports not-ready rather than claiming an
+output exists. Resetting settings restores the boot preference and likewise
+requires restart when it differs from the active path.
+
 ```sh
 curl --fail --header "Authorization: Bearer $BLIT_AUTH_TOKEN" \
   http://HOST:8080/v1/diagnostics/observation > observation.json

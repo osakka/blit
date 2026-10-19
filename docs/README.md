@@ -95,6 +95,8 @@ panes, input routing, and diagnostics.
   this workspace.
 - [Backend parity plan](backend-parity-plan.md) — shared feature contract,
   refresh-rate acceptance, SDL hotplug and physical comparison sequence.
+- [Physical backend comparison](testing-backend-parity.md) — bounded API-only
+  comparison, evidence capture and baseline restoration.
 - [Roadmap](roadmap.md) — the ordered implementation milestones and exit
   criteria.
 - [Implementation and verification contract](implementation-and-verification.md)

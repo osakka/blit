@@ -15,16 +15,13 @@ require 'json'
 require 'net/http'
 require 'timeout'
 require_relative 'gate_port'
+require_relative 'sdl_test_profile'
 
 port = gate_port(Integer(ENV.fetch('BLIT_BAND_GATE_PORT', '19231')))
 base = URI("http://127.0.0.1:#{port}")
 binary = ENV.fetch('BLIT_GATE_BINARY', 'build/blit/blit-server')
 log = "/tmp/blit-band-gate-#{Process.pid}.log"
-env = {
-  'SDL_VIDEODRIVER' => 'dummy',
-  'SDL_RENDERER' => 'software',
-  'LD_LIBRARY_PATH' => ENV.fetch('BLIT_GATE_LIBS', 'build/sdl3-kms')
-}
+env = SdlTestProfile.environment
 pid = Process.spawn(env, binary, port.to_s, out: log, err: [:child, :out])
 
 at_exit do
@@ -51,7 +48,7 @@ def request(base, method, path, body = nil)
 end
 
 def screenshot(base)
-  response = Net::HTTP.get_response(base + '/v1/diagnostics/screenshots/display-1')
+  response = Net::HTTP.get_response(base + "/v1/diagnostics/screenshots/#{DISPLAY_ID}")
   raise "screenshot HTTP #{response.code}" unless response.is_a?(Net::HTTPSuccess)
   response.body
 end
@@ -85,6 +82,8 @@ Timeout.timeout(8) do
 end
 
 RED = [255, 0, 0].freeze
+SdlTestProfile.verify!(request(base, :get, '/v1/diagnostics'))
+DISPLAY_ID = SdlTestProfile.display_id!(request(base, :get, '/v1/displays'))
 BLUE = [0, 0, 255].freeze
 FACE = [0x10, 0x18, 0x20].freeze
 ESC = '\\033'
@@ -100,6 +99,7 @@ end
 def scenario(base, setup:, image:, id:, after: '')
   command = "printf '%b' \"$1\"; printf '%b' \"$2\"; printf '%b' \"$3\"; sleep 30"
   created = request(base, :post, '/v1/terminal-sessions',
+                    'display_id' => DISPLAY_ID,
                     'command' => '/bin/sh',
                     'arguments' => ['-c', command, 'sh', setup, image, after],
                     'surface' => { 'width' => 20, 'height' => 8 })

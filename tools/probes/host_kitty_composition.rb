@@ -17,7 +17,7 @@ require 'securerandom'
 require 'uri'
 
 host = ARGV.fetch(0, '192.168.10.54:8080')
-token = ARGV.fetch(1, 'hellomonkeyboy')
+token = ENV.fetch('BLIT_AUTH_TOKEN') { ARGV.fetch(1, 'hellomonkeyboy') }
 base = URI("http://#{host}")
 image_id = Integer(ENV.fetch('BLIT_KITTY_IMAGE_ID', '9001'), 10)
 
@@ -71,7 +71,10 @@ def pixel(bmp, width, height, x, y)
   bytes = bits / 8
   raise "unsupported BMP depth #{bits}" unless [3, 4].include?(bytes)
   stride = (width * bytes + 3) & ~3
-  offset = 54 + (height - 1 - y) * stride + x * bytes
+  stored_width, stored_height = bmp.byteslice(18, 8).unpack('l<2')
+  raise 'capture geometry mismatch' unless stored_width == width && stored_height.abs == height
+  row = stored_height > 0 ? height - 1 - y : y
+  offset = bmp.byteslice(10, 4).unpack1('V') + row * stride + x * bytes
   [bmp.getbyte(offset + 2), bmp.getbyte(offset + 1), bmp.getbyte(offset)]
 end
 
@@ -164,6 +167,12 @@ begin
     image['placement_width'] == cell_w && image['placement_height'] == cell_h
 
   shot, state = coherent_capture(base, token, display_id, surface, direct_kms)
+  if (directory = ENV['BLIT_EVIDENCE_DIR'])
+    require 'fileutils'
+    FileUtils.mkdir_p(directory)
+    File.binwrite(File.join(directory, 'kitty-visible.bmp'), shot[:body])
+    File.write(File.join(directory, 'kitty-visible.json'), JSON.pretty_generate({capture: shot.reject { |key, _| key == :body }, surface: state}))
+  end
   ix = surface_origin_x + image.fetch('x')
   iy = surface_origin_y + image.fetch('y')
   samples = {
@@ -188,6 +197,7 @@ begin
     sleep 0.1
   end
   shot, = coherent_capture(base, token, display_id, surface, direct_kms)
+  File.binwrite(File.join(directory, 'kitty-deleted.bmp'), shot[:body]) if directory
   restored = pixel(shot[:body], width, height,
                    ix + cell_w / 2, iy + cell_h / 2)
   abort "deleted image left pixels behind: #{restored.inspect}" unless restored == background

@@ -9,17 +9,12 @@ require 'json'
 require 'net/http'
 require 'timeout'
 require_relative 'gate_port'
+require_relative 'sdl_test_profile'
 
 port = gate_port(Integer(ENV.fetch('BLIT_GLYPH_RENDER_PORT', '19264')))
 base = URI("http://127.0.0.1:#{port}")
 log = "/tmp/blit-glyph-render-#{Process.pid}.log"
-env = {
-  'BLIT_PSF_FONT' => 'assets/fonts/Blit-Hibr-Terminus16.psf',
-  'SDL_VIDEODRIVER' => 'dummy',
-  'SDL_RENDERER' => 'software',
-  'LD_LIBRARY_PATH' => 'build/sdl3-kms'
-}
-pid = Process.spawn(env, 'build/blit/blit-server', port.to_s,
+pid = Process.spawn(SdlTestProfile.environment, SdlTestProfile.binary, port.to_s,
                     out: log, err: [:child, :out])
 
 at_exit do
@@ -58,13 +53,16 @@ end
 # U+2500, U+2502, U+2501, U+2550, U+2588, U+2581, A+combining acute,
 # followed by a wide CJK glyph. The first six have deterministic geometry.
 glyphs = "─│━═█▁Á界"
+SdlTestProfile.verify!(request(base, 'GET', '/v1/diagnostics'))
+display_id = SdlTestProfile.display_id!(request(base, 'GET', '/v1/displays'))
 session = request(base, 'POST', '/v1/terminal-sessions',
+                  'display_id' => display_id,
                   'command' => '/bin/sh',
                   'arguments' => ['-c', "printf '#{glyphs}'; sleep 1"],
                   'surface' => { 'width' => 16, 'height' => 2 })
 id = session.fetch('id')
 sleep 0.6
-bmp = Net::HTTP.get(base + '/v1/diagnostics/screenshots/display-1')
+bmp = Net::HTTP.get(base + "/v1/diagnostics/screenshots/#{display_id}")
 
 raise 'not a BMP screenshot' unless bmp.byteslice(0, 2) == 'BM'
 offset = bmp.byteslice(10, 4).unpack1('V')

@@ -281,6 +281,18 @@ suite_renderer() {
 }
 
 suite_gles() {
+    run_gate sdl_gles_glyphs env \
+        BLIT_GATE_BINARY="$BINARY" BLIT_GATE_FONT="$FONT" BLIT_GATE_LIBS="$LIBS" \
+        BLIT_TEST_VIDEO_DRIVER=offscreen BLIT_TEST_RENDERER=opengles2 \
+        LIBGL_ALWAYS_SOFTWARE=1 ruby tools/tests/sdl_glyph_render_gate.rb
+    run_gate sdl_gles_graphics_bands env \
+        BLIT_GATE_BINARY="$BINARY" BLIT_GATE_FONT="$FONT" BLIT_GATE_LIBS="$LIBS" \
+        BLIT_TEST_VIDEO_DRIVER=offscreen BLIT_TEST_RENDERER=opengles2 \
+        LIBGL_ALWAYS_SOFTWARE=1 ruby tools/tests/sdl_graphics_band_gate.rb
+    run_gate sdl_gles_motion_trails env \
+        BLIT_GATE_BINARY="$BINARY" BLIT_GATE_FONT="$FONT" BLIT_GATE_LIBS="$LIBS" \
+        BLIT_TEST_VIDEO_DRIVER=offscreen BLIT_TEST_RENDERER=opengles2 \
+        LIBGL_ALWAYS_SOFTWARE=1 ruby tools/tests/motion_trail_gate.rb
     run_gate sdl_gles_wallpaper_damage env \
         BLIT_GATE_BINARY="$BINARY" BLIT_GATE_FONT="$FONT" BLIT_GATE_LIBS="$LIBS" \
         BLIT_TEST_VIDEO_DRIVER=offscreen BLIT_TEST_RENDERER=opengles2 \
@@ -314,6 +326,8 @@ suite_hibr() {
 }
 
 suite_lifecycle() {
+    run_gate backend_selection_gate.rb ruby tools/tests/backend_selection_gate.rb
+    run_gate backend_comparison_cleanup_gate.rb ruby tools/tests/backend_comparison_cleanup_gate.rb
     run_gate auxiliary_policy_gate.rb ruby tools/tests/auxiliary_policy_gate.rb
     run_gate login_desktop_observer_gate.rb ruby tools/tests/login_desktop_observer_gate.rb
     run_gate login_identity_gate.rb ruby tools/tests/login_identity_gate.rb

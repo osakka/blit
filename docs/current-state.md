@@ -1,5 +1,33 @@
 # Current state and restart point
 
+## 2026-10-19 candidate0.1.556: API-owned backend comparison and shared GL fixtures
+
+ADR0138 adds saved `server.display_backend` (`kms` or `sdl`) to the existing
+settings resource. Saving preserves the active backend and terminal process;
+effective settings report requested/active backend and presentation restart
+requirement. The existing supervised restart applies the choice. Stored
+settings override boot defaults; reset and `BLIT_SETTINGS=ignore` retain their
+existing recovery semantics. A missing KMS device leaves the API available.
+
+The focused backend gate was observed failing before implementation and now
+passes deferred apply, durable save, eight invalid inputs, failed-save recovery,
+precedence in both directions, renderer restart flag, reset and ignore recovery.
+Schema/lifecycle suites pass17/0/0. The expanded GLES suite passes5/0/0:
+glyph/half-block geometry, Kitty z bands/default-background transparency,
+motion-trail pixel agreement, wallpaper damage/deletion, held-scene pointer
+and independent two-renderer metrics. One shared SDL profile verifies identity
+and selects the output; software and GLES use the same assertions.
+
+The full regression run passes99 gates,7 explicit skips,0 failures (including
+the two GLES gates present when that run began). Its120-second four-PTY soak
+completed10,744 snapshots and977 resizes. The final expanded GLES suite
+separately passes5/0/0; the new comparison-cleanup gate passes separately.
+The [physical comparison tool](testing-backend-parity.md) restores the original
+backend/login choices after either success or failure and retains captures.
+Candidate0.1.556 is not yet packaged
+or deployed. Live10.54 remains direct KMS0.1.553, with one DP canvas observed.
+Physical comparison and HDMI reconnection acceptance remain pending.
+
 ## 2026-10-19 candidate0.1.555: SDL output diagnostics are independent
 
 Parity implementation found SDL output diagnostics publishing global

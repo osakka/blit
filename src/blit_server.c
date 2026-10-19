@@ -990,6 +990,9 @@ typedef struct {
     char boot_renderer_request[64];
     char renderer_request[64];
     int renderer_configured;
+    int boot_display_backend_kms;
+    int display_backend_kms;
+    int display_backend_configured;
     int render_interval_configured;
     int pane_layout_configured;
     int kms_async_pageflip;
@@ -19245,6 +19248,11 @@ static size_t settings_build(BlitRuntime *runtime, char *out, size_t capacity,
                      first ? "" : ",", runtime->renderer_request);
         first = 0;
     }
+    if (runtime->display_backend_configured) {
+        json_appendf(out, capacity, &used, "%s\"display_backend\":\"%s\"",
+                     first ? "" : ",", runtime->display_backend_kms ? "kms" : "sdl");
+        first = 0;
+    }
     if (runtime->kms_async_configured) {
         json_appendf(out, capacity, &used,
                      "%s\"kms_async_pageflip\":%s", first ? "" : ",",
@@ -19535,6 +19543,8 @@ static void settings_apply_server(BlitRuntime *runtime)
     runtime->render_interval_configured = 0;
     runtime->pane_layout_configured = 0;
     runtime->renderer_configured = 0;
+    runtime->display_backend_configured = 0;
+    runtime->display_backend_kms = runtime->boot_display_backend_kms;
     runtime->kms_async_configured = 0;
     runtime->expect_desktop_configured = 0;
     runtime->renderer_request[0] = '\0';
@@ -19560,6 +19570,11 @@ static void settings_apply_server(BlitRuntime *runtime)
         if (json_string(server, "renderer", runtime->renderer_request,
                         sizeof(runtime->renderer_request)))
             runtime->renderer_configured = 1;
+        if (json_string(server, "display_backend", chord, sizeof(chord)) &&
+            (strcmp(chord, "kms") == 0 || strcmp(chord, "sdl") == 0)) {
+            runtime->display_backend_kms = strcmp(chord, "kms") == 0;
+            runtime->display_backend_configured = 1;
+        }
         if (json_bool(server, "kms_async_pageflip", &value)) {
             runtime->kms_async_pageflip = value;
             runtime->kms_async_configured = 1;
@@ -19619,6 +19634,17 @@ static void settings_apply_server(BlitRuntime *runtime)
             }
         }
     }
+}
+
+static int settings_server_backend_valid(const char *document)
+{
+    const char *cursor = json_key_cursor(document, "server");
+    char server[2048], backend[64];
+    if (cursor == NULL) return 1;
+    if (!json_object_slice(cursor, server, sizeof(server))) return 0;
+    if (json_key_cursor(server, "display_backend") == NULL) return 1;
+    return json_string(server, "display_backend", backend, sizeof(backend)) &&
+        (strcmp(backend, "kms") == 0 || strcmp(backend, "sdl") == 0);
 }
 
 static int settings_server_layout(const char *document, int *columns,
@@ -19747,6 +19773,8 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
                  "\"error\":\"%s\"},\"document\":%s,\"effective\":{"
                  "\"render_interval_ms\":%d,\"pane_layout\":\"%dx%d\","
                  "\"renderer_requested\":\"%s\",\"renderer_active\":\"%s\","
+                 "\"display_backend_requested\":\"%s\",\"display_backend_active\":\"%s\","
+                 "\"presentation_restart_required\":%s,"
                  "\"kms_async_pageflip\":%s,\"expect_desktop\":%s,"
                  "\"login\":%s,\"login_restart_required\":%s,"
                  "\"pointer\":{\"shape\":\"%s\",\"palette\":\"%s\","
@@ -19764,6 +19792,14 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
                  runtime->direct_kms ? "drm-kms" :
                      (runtime->sdl_renderer_name[0] != '\0' ?
                          runtime->sdl_renderer_name : "unavailable"),
+                 runtime->display_backend_kms ? "kms" : "sdl",
+                 runtime->direct_kms ? "drm-kms" :
+                     (runtime->sdl_ready ? "sdl3" : "unavailable"),
+                 (runtime->display_backend_kms != runtime->direct_kms ||
+                  (!runtime->display_backend_kms &&
+                   (!runtime->sdl_ready || (runtime->renderer_request[0] != '\0' &&
+                    strcmp(runtime->renderer_request, runtime->sdl_renderer_name) != 0)))) ?
+                     "true" : "false",
                  runtime->kms_async_pageflip ? "true" : "false",
                  runtime->expect_desktop ? "true" : "false", login,
                  restart_required ? "true" : "false",
@@ -19864,6 +19900,8 @@ static int settings_reset(BlitRuntime *runtime, int remove_file)
     runtime->render_interval_configured = 0;
     runtime->pane_layout_configured = 0;
     runtime->renderer_configured = 0;
+    runtime->display_backend_configured = 0;
+    runtime->display_backend_kms = runtime->boot_display_backend_kms;
     runtime->kms_async_pageflip = runtime->boot_kms_async_pageflip;
     runtime->kms_async_configured = 0;
     runtime->expect_desktop = runtime->boot_expect_desktop;
@@ -21085,6 +21123,11 @@ static void handle_request(int fd, BlitRuntime *runtime,
                              "Pointer shape, palette, size_px (24..64 integer) and shadow must match the appearance schema.");
                 return;
             }
+            if (!settings_server_backend_valid(document)) {
+                send_problem(fd, 400, "Bad Request", "invalid_settings_server",
+                             "server.display_backend must be kms or sdl.");
+                return;
+            }
             if (!settings_server_layout(document, &requested_columns,
                                         &requested_rows, &requested_layout)) {
                 send_problem(fd, 400, "Bad Request", "invalid_settings_server",
@@ -22115,8 +22158,7 @@ static void discover_displays(BlitRuntime *runtime)
     int count = 0;
     int i;
 
-    if (getenv("BLIT_DISPLAY_BACKEND") != NULL &&
-        strcmp(getenv("BLIT_DISPLAY_BACKEND"), "kms") == 0) {
+    if (runtime->display_backend_kms) {
         char error[256];
         error[0] = '\0';
         runtime->direct_kms = 1;
@@ -28256,6 +28298,9 @@ int main(int argc, char **argv)
             runtime.render_interval_ms = 16;
     }
     runtime.boot_render_interval_ms = runtime.render_interval_ms;
+    runtime.boot_display_backend_kms = getenv("BLIT_DISPLAY_BACKEND") != NULL &&
+        strcmp(getenv("BLIT_DISPLAY_BACKEND"), "kms") == 0;
+    runtime.display_backend_kms = runtime.boot_display_backend_kms;
     runtime.boot_kms_async_pageflip = runtime.kms_async_pageflip;
     snprintf(runtime.boot_renderer_request, sizeof(runtime.boot_renderer_request),
              "%s", runtime.renderer_request);

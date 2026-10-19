@@ -3,6 +3,32 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-19 candidate0.1.556: backend selection API and expanded GLES checks
+
+`backend_selection_gate.rb` was red before the new backend setting existed,
+and now passes deferred apply with the same terminal process, durable save,
+eight invalid-value/type rejections without mutation, failed writer preserving
+the last durable selection, precedence in both directions, renderer restart
+flag, reset, ignore recovery and API availability when KMS initialization fails.
+TCC build and schema/lifecycle suites pass17/0/0. The full run passes99 gates,
+7 explicit skips,0 failures, including the two GLES gates present at its start.
+Its120-second four-PTY soak completed10,744 snapshots and977 resizes. The final
+expanded GLES suite passes5/0/0 separately; the added comparison-cleanup gate
+passes separately, injecting a readiness failure and verifying baseline
+restoration while preserving unrelated settings. These focused runs cover
+the test additions made after the full runner started.
+
+The explicit GLES suite passes5/0/0 using verified offscreen/OpenGLES2 and
+software GL. The shared fixtures cover geometric/wide glyphs and half blocks,
+Kitty z bands/default-background transparency,12-step motion trails with799
+blank cells checked, wallpaper survival/deletion, held-scene pointer pixels
+and two-renderer timing/counter isolation. The motion fixture reads actual BMP
+stride/depth/orientation rather than assuming a24-bit framebuffer. No new
+pixel oracle or production renderer was introduced.
+
+The live host has not been updated in this cycle yet; physical SDL/KMSDRM
+and multi-output timing acceptance remain open.
+
 ## 2026-10-19 candidate0.1.555: independent SDL output presentation metrics
 
 The production SDL finish path now counts/times each output independently.

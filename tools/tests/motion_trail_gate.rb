@@ -20,6 +20,7 @@ require 'net/http'
 require 'timeout'
 require 'uri'
 require_relative 'gate_port'
+require_relative 'sdl_test_profile'
 
 ROOT = File.expand_path('../..', __dir__)
 PORT = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', '19255'), 10))
@@ -59,7 +60,7 @@ def json(method, path, body = nil)
 end
 
 def capture
-  response = request('GET', '/v1/diagnostics/screenshots/display-1')
+  response = request('GET', "/v1/diagnostics/screenshots/#{DISPLAY_ID}")
   raise "capture failed: #{response.code}" unless response.code == '200'
 
   revisions = {}
@@ -72,13 +73,18 @@ def capture
 end
 
 def pixel(bmp, x, y)
-  stride = (FB_WIDTH * 3 + 3) & ~3
-  offset = 54 + (FB_HEIGHT - 1 - y) * stride + x * 3
+  raise 'capture is not BMP' unless bmp.byteslice(0, 2) == 'BM'
+  width, height = bmp.byteslice(18, 8).unpack('l<2')
+  bits = bmp.byteslice(28, 2).unpack1('v')
+  raise 'unexpected capture geometry/depth' unless width == FB_WIDTH && height.abs == FB_HEIGHT && [24, 32].include?(bits)
+  bytes = bits / 8
+  stride = (width * bytes + 3) & ~3
+  row = height > 0 ? height - 1 - y : y
+  offset = bmp.byteslice(10, 4).unpack1('V') + row * stride + x * bytes
   [bmp.getbyte(offset + 2), bmp.getbyte(offset + 1), bmp.getbyte(offset)]
 end
 
-server = spawn({ 'SDL_VIDEODRIVER' => 'dummy', 'BLIT_PSF_FONT' => FONT,
-                 'LD_LIBRARY_PATH' => File.join(ROOT, 'build/sdl3-kms') },
+server = spawn(SdlTestProfile.environment.merge('BLIT_PSF_FONT' => FONT),
                BINARY, PORT.to_s, out: '/dev/null',
                err: ENV.fetch('BLIT_GATE_SERVER_LOG', '/dev/null'))
 at_exit do
@@ -97,12 +103,15 @@ Timeout.timeout(15) do
   end
 end
 
-inset = json('GET', '/v1/diagnostics').fetch('render').fetch('surface_inset_px')
+diagnostics = json('GET', '/v1/diagnostics')
+SdlTestProfile.verify!(diagnostics)
+DISPLAY_ID = SdlTestProfile.display_id!(json('GET', '/v1/displays'))
+inset = diagnostics.fetch('render').fetch('surface_inset_px')
 
 # An owner-authored surface, so the motion is driven one committed frame at a
 # time rather than through a shell's buffering.
 created = json('POST', '/v1/terminal-sessions',
-               'command' => '/bin/cat', 'display_id' => 'display-1',
+               'command' => '/bin/cat', 'display_id' => DISPLAY_ID,
                'surface' => { 'width' => COLUMNS, 'height' => ROWS })
 surface = created.fetch('surface_id')
 

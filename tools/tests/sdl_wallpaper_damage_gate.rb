@@ -9,26 +9,14 @@ require 'json'
 require 'net/http'
 require 'timeout'
 require_relative 'gate_port'
+require_relative 'sdl_test_profile'
 
 port = gate_port(Integer(ENV.fetch('BLIT_WALLPAPER_DAMAGE_PORT', '19212')))
 base = URI("http://127.0.0.1:#{port}")
 log = "/tmp/blit-wallpaper-damage-#{Process.pid}.log"
-video_driver = ENV.fetch('BLIT_TEST_VIDEO_DRIVER', 'dummy')
-renderer = ENV.fetch('BLIT_TEST_RENDERER', 'software')
-binary = ENV.fetch('BLIT_GATE_BINARY', 'build/blit/blit-server')
-env = {
-  'SDL_VIDEODRIVER' => video_driver,
-  'BLIT_RENDERER' => renderer,
-  'SDL_RENDERER' => renderer,
-  'BLIT_DISPLAY_BACKEND' => 'sdl',
-  'BLIT_BIND_ADDRESS' => '127.0.0.1',
-  'BLIT_AUTH_TOKEN' => '',
-  'BLIT_LOGIN_AUTOSTART' => '0',
-  'BLIT_EXPECT_DESKTOP' => '0',
-  'BLIT_PSF_FONT' => ENV.fetch('BLIT_GATE_FONT', 'assets/fonts/Blit-Hibr-Terminus16.psf'),
-  'LD_LIBRARY_PATH' => ENV.fetch('BLIT_GATE_LIBS', 'build/sdl3-kms')
-}
-pid = Process.spawn(env, binary, port.to_s,
+video_driver = SdlTestProfile.driver
+renderer = SdlTestProfile.renderer
+pid = Process.spawn(SdlTestProfile.environment, SdlTestProfile.binary, port.to_s,
                     out: log, err: [:child, :out])
 
 at_exit do
@@ -84,18 +72,8 @@ Timeout.timeout(8) do
   end
 end
 
-diagnostics = request(base, :get, '/v1/diagnostics')
-identity = diagnostics.fetch('render')
-raise "unexpected presentation path: #{identity.slice('direct_kms', 'video_driver', 'renderer')}" unless
-  diagnostics.fetch('health').fetch('ready') &&
-  diagnostics.fetch('health').fetch('backend') == 'sdl3' &&
-  identity.fetch('direct_kms') == false &&
-  identity.fetch('video_driver') == video_driver &&
-  identity.fetch('renderer') == renderer
-displays = request(base, :get, '/v1/displays').fetch('displays')
-display_id = ENV.fetch('BLIT_TEST_DISPLAY_ID') { displays.fetch(0).fetch('id') }
-raise "requested display #{display_id} is unavailable" unless
-  displays.any? { |display| display.fetch('id') == display_id }
+SdlTestProfile.verify!(request(base, :get, '/v1/diagnostics'))
+display_id = SdlTestProfile.display_id!(request(base, :get, '/v1/displays'))
 
 id = nil
 begin

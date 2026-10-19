@@ -153,8 +153,9 @@ security policy, or compatibility rule requires a new ADR.
 - [0133 — Shared API-owned pointer appearance](0133-shared-api-owned-pointer-appearance.md)
 - [0134 — Nonvisual PTY bytes do not paint](0134-nonvisual-pty-bytes-do-not-paint.md)
 - [0135 — Stable native client names](0135-stable-native-client-names.md)
-
+- [0136 — Present pointer motion over the last committed scene](0136-pointer-presents-over-held-scene.md)
 - [0137 — One feature contract across presentation backends](0137-presentation-backend-feature-and-performance-parity.md)
+- [0138 — API-owned presentation backend selection](0138-api-owned-presentation-backend-selection.md)
 
 ## Adding an ADR
 

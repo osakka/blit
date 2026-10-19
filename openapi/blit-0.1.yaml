@@ -2442,6 +2442,10 @@ components:
                   type: string
                   pattern: '^[12]x[12]$'
                 renderer: {type: string, maxLength: 63}
+                display_backend:
+                  type: string
+                  enum: [kms, sdl]
+                  description: Saved startup backend selection; takes effect on the next supervised restart. Missing values use the boot environment default.
                 kms_async_pageflip: {type: boolean}
                 expect_desktop: {type: boolean}
                 shutdown_key:
@@ -2450,13 +2454,18 @@ components:
         effective:
           type: object
           required: [render_interval_ms, pane_layout, renderer_requested,
-                     renderer_active, kms_async_pageflip, expect_desktop,
+                     renderer_active, display_backend_requested, display_backend_active, presentation_restart_required, kms_async_pageflip, expect_desktop,
                      login, login_restart_required, pointer]
           properties:
             render_interval_ms: {type: integer, minimum: 1, maximum: 100}
             pane_layout: {type: string}
             renderer_requested: {type: string}
             renderer_active: {type: string}
+            display_backend_requested: {type: string, enum: [kms, sdl]}
+            display_backend_active: {type: string, enum: [drm-kms, sdl3, unavailable]}
+            presentation_restart_required:
+              type: boolean
+              description: Requested backend or explicit SDL renderer differs from the active presentation path. Saving does not change live output ownership.
             kms_async_pageflip: {type: boolean}
             expect_desktop: {type: boolean}
             login: {$ref: '#/components/schemas/LoginPolicy'}

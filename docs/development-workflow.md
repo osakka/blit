@@ -85,8 +85,8 @@ BLIT_GATE_LIVE=http://HOST:8080 tools/run-gates.sh timing
 
 Prefer it over invoking a gate directly.
 
-The explicit `gles` suite runs the shared wallpaper-damage fixture and the
-held-scene pointer and two-renderer output-metrics fixtures through SDL
+The explicit `gles` suite runs shared glyph, Kitty layering, motion-trail,
+wallpaper-damage, held-scene pointer and two-renderer output-metrics fixtures through SDL
 offscreen/OpenGLES2 using software GL. It requires working
 EGL/GLES libraries and fails if actual renderer identity differs. It is
 separate from `all`, which remains runnable without EGL/GLES. Record its
@@ -122,7 +122,7 @@ while the physical SDL path used `opengles2`. An optimisation that assumed
 render-target persistence produced a visible screensaver trail that survived
 two "fixed" claims. Five reproductions passed because all five ran on
 `software`. See ADRs0070/0099 and issue79. The explicit `gles` suite now covers
-wallpaper damage/deletion, held-scene pointer pixels and independent output
+glyphs, Kitty layering, motion trails, wallpaper damage/deletion, held-scene pointer pixels and independent output
 metrics through offscreen/OpenGLES2 using software GL. The remaining fixtures
 and physical KMSDRM/GPU timing still require matching-backend acceptance.
 

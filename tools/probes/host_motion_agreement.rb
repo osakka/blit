@@ -15,7 +15,7 @@ require 'securerandom'
 require 'uri'
 
 host = ARGV.fetch(0, '192.168.10.54:8080')
-token = ARGV.fetch(1, 'hellomonkeyboy')
+token = ENV.fetch('BLIT_AUTH_TOKEN') { ARGV.fetch(1, 'hellomonkeyboy') }
 steps = Integer(ARGV.fetch(2, '12'), 10)
 attempts = Integer(ENV.fetch('BLIT_LIVE_MOTION_ATTEMPTS', '8'), 10)
 base = URI("http://#{host}")
@@ -68,7 +68,10 @@ def pixel(bmp, width, height, x, y)
   bytes = bits / 8
   raise "unsupported BMP depth #{bits}" unless [3, 4].include?(bytes)
   stride = (width * bytes + 3) & ~3
-  offset = 54 + (height - 1 - y) * stride + x * bytes
+  stored_width, stored_height = bmp.byteslice(18, 8).unpack('l<2')
+  raise 'capture geometry mismatch' unless stored_width == width && stored_height.abs == height
+  row = stored_height > 0 ? height - 1 - y : y
+  offset = bmp.byteslice(10, 4).unpack1('V') + row * stride + x * bytes
   [bmp.getbyte(offset + 2), bmp.getbyte(offset + 1), bmp.getbyte(offset)]
 end
 
@@ -204,6 +207,13 @@ begin
       failures << {step: step, reason: 'no coherent capture', attempts: attempts}
     else
       shot, state, revision = used
+      if (directory = ENV['BLIT_EVIDENCE_DIR']) && (step == 0 || step == steps - 1)
+        require 'fileutils'
+        FileUtils.mkdir_p(directory)
+        name = File.join(directory, format('motion-%02d', step))
+        File.binwrite(name + '.bmp', shot[:body])
+        File.write(name + '.json', JSON.pretty_generate({capture: shot.reject { |key, _| key == :body }, surface: state}))
+      end
       mismatches = check_blank_pixels(shot, state, origin_x, origin_y, cell_w,
                                       cell_h, width, height, background, rows,
                                       columns)

@@ -33,6 +33,13 @@ for all three backends. Every row is pending full parity acceptance.
 
 ## First executable increment
 
+Candidate0.1.556 adds API-owned startup backend selection (ADR0138) so physical
+comparison can use saved settings and supervised restart. The expanded
+`gles` suite passes5 gates on verified offscreen/OpenGLES2: glyph geometry,
+Kitty layering/transparency, motion trails, wallpaper damage/deletion and
+held-scene/two-renderer metrics. These reuse the software fixtures through
+`sdl_test_profile.rb`; no physical acceptance row is closed by these results.
+
 Candidate0.1.555 corrects each SDL output's presentation counters and durations
 to use that output's state instead of copying global values. The production
 `surface_damage_gate.c` fixture exercises two independent software renderers:
