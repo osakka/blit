@@ -20,12 +20,18 @@ wall-ms measures consumed cores. Check PID/start-time identity across samples;
 never subtract across a service or desktop restart.
 
 `BLIT_AUTH_TOKEN=... ruby tools/probes/host_pointer_cadence.rb` applies360
-bounded one-pixel pointer motions, with no clicks/keys/session/settings changes,
-then restores the original pointer location. Set `BLIT_EVIDENCE_DIR` to retain
-the measurements. Its HTTP latency limits request cadence; it is not a60Hz
-stress oracle or evidence of a monitor-wide performance guarantee. Combine
-CPU deltas, render/loop timings and actual physical-input activity. An idle
-0Hz presentation counter is not proof of a slow renderer.
+bounded pointer motions, with no clicks/keys/session/settings changes, then
+restores the original pointer location. `BLIT_POINTER_PATTERN=sweep` follows a
+bounded bounce path; `BLIT_POINTER_STEP_PX` selects1..40 pixels per input
+event (default1), and `BLIT_POINTER_HZ` selects1..240 requests/s (default60).
+The result reports requested input rate, actual per-output submission rate,
+refresh target, missed-deadline delta, physical evdev events and CPU delta.
+Set `BLIT_EVIDENCE_DIR` to retain the measurements. This is an API-injected
+input-path test, not physical-device evidence or a window-drag test. HTTP
+latency and output count affect the result; compare only runs with matching
+topology/workload. Combine these results with physical-input capture and
+render/loop timings. An idle0Hz presentation counter is not proof of a slow
+renderer.
 
 Direct KMS exposes clock evidence at
 `GET /v1/diagnostics/trace?kind=kms_vblank&limit=16`. Events report the display,

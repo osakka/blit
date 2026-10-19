@@ -12,14 +12,23 @@ under the pointer; terminal/image/effect/overlay damage stays pending for the
 normal atomic commit (ADR0136). Production KMS and SDL pixel gates pass. The
 frozen suite is100pass/3explicit skips/0fail, including a120-second four-PTY
 soak (11,216 snapshots/1,020 resizes). Physical cursor and window-drag cadence
-on10.54 still need measurement before#101 can close.
+on10.54 still need measurement before#101 can close. The 2026-10-19 API
+pointer sweep measured50.62–59.10 submissions/s on one 59.997Hz physical
+output, but had zero physical mouse events and no pressed-button drag. A prior
+two-output run was20.42 submissions/s under a different state; investigate
+without treating it as a normalized comparison. The host snapshot also shows
+eight high-CPU `desktop [sess…]` processes; their ownership/relationship is
+unverified and none were killed.
 
 Wallpaper persistence uses Hibr's existing per-client `dt_walldisp` records,
 keyed by the stable connector/pane names from ADR0135. A successful API
 restart retaining the same Hibr process is not enough: acceptance must select
 the intended named pane in Hibr's native Wallpaper panel, save a distinct
-setting, restart Blit, and observe that setting on that pane. #103 remains
-open until this native preference round trip is evidenced.
+setting, restart Blit, and observe that setting on that pane. The latest
+native-panel attempt did not produce a valid acceptance: the live Hibr surface
+now reports All Displays/pattern/no image, and a terminal editor was visible
+when input stopped. Treat the persisted wallpaper/editor state as uncertain;
+do not send more UI input until it can be inspected safely. #103 remains open.
 
 ## Previous position — Mouse550 and stable native identity
 

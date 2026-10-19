@@ -1,5 +1,41 @@
 # Current state and restart point
 
+## 2026-10-19 live follow-up: synthetic cadence improved, wallpaper test interrupted
+
+Blit0.1.551 is live on10.54. The authenticated desktop currently has two Hibr
+pane clients (`blit-DP-1-p2` primary and `blit-DP-1-p1` join) on one physical
+DP output at59.997Hz. HDMI-A-1 was present in an earlier observation and absent
+in a later one; no Blit topology-setting write was issued, and the reason for
+the inventory change is unknown.
+
+The expanded `tools/probes/host_pointer_cadence.rb` accepts
+`BLIT_POINTER_STEP_PX=1..40`, follows a bounded bounce path, and reports actual
+output submissions/s and missed-deadline deltas. On the current one-output
+desktop, API-injected 60Hz pointer sweeps submitted305 frames/6.025s (50.62Hz)
+at1px/event and356/6.024s (59.10Hz) at8px/event; both reported zero missed
+scheduler deadlines and zero physical mouse events. These prove neither
+physical-device behavior nor window dragging. A separate earlier two-output
+run submitted123 frames/6.023s (20.42Hz); topology and desktop state differed,
+so this is a lead, not a causal comparison. #101 remains open.
+
+The live framebuffer also showed a Hibr `htop` window listing eight processes
+named `desktop [sess…]` at12.4–19.8% CPU each. This is an observation, not proof
+that they are duplicate desktop owners. They were not killed or otherwise
+changed. Blit's API verified one native desktop owner and its pane clients;
+that does not inventory unrelated host processes.
+
+Wallpaper acceptance is **not complete**. During an attempted native-panel
+round trip, API-injected keys/clicks navigated the Hibr wallpaper UI
+incorrectly. A later surface snapshot showed `All Displays`, a pattern glyph
+and no image, while an earlier panel capture showed `retro_car.png` for
+`blit-DP-1-p2`. The exact persisted state is therefore uncertain and the
+original appearance is not verified restored. The last screenshot also showed
+a live Terminal/editor; injected keys may have reached it, and whether its
+unsaved buffer changed cannot be determined. I am not sending further UI input
+until the active editor state and target are unambiguous; do not save/close it
+or alter Hibr state as a cleanup assumption. Blit#103 remains open. No Hibr
+source or settings files were edited directly.
+
 ## 2026-10-19 release551: cursor updates no longer wait behind scene fences
 
 Investigation on550 found that pointer dirtiness was scheduled behind both
@@ -25,13 +61,12 @@ four-PTY soak completed11,216 snapshots and1,020 resizes. Explicit skips are
 the standalone QEMU oracle, physical multi-display gate and live screenshot
 backpressure gate.
 
-Wallpaper work remains at the native-settings acceptance stage. Stable names
-are deployed; current global wallpaper is `retro_car.png`, mode `zoom`, picture
-`follow` (rendered as `pixels`). No per-display record has yet been confirmed
-saved or restored. Use Hibr's existing `dt_walldisp` settings through its
-Wallpaper panel; do not claim persistence from a Blit restart that reattaches
-the same held Hibr owner. Blit#103 stays open pending a verified named-display
-preference save and a restart that reloads it.
+Stable names are deployed and were observed in the live native client list.
+Do not describe the current wallpaper as `retro_car.png`: the latest surface
+snapshot instead reports All Displays / pattern / empty image, and no
+post-restart persistence round trip is verified. Restore and verify through
+Hibr's native Wallpaper UI before continuing#103; do not edit Hibr settings
+files or infer a saved value from Blit's stable client names.
 
 This is the handoff document for resuming Blit work after a session change. It
 is intentionally evidence-led and does not replace the OpenAPI contract,

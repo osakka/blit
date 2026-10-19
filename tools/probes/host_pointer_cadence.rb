@@ -1,10 +1,13 @@
 #!/usr/bin/env ruby
-# Bounded normal-path pointer workload. No clicks, keys, sessions or settings.
+# Bounded API pointer workload. No clicks, keys, sessions or settings.
+# Sweep pixels/event and delivered output frames are measured separately.
 require 'json'
 require 'net/http'
 require 'uri'
 rate = Float(ENV.fetch('BLIT_POINTER_HZ','60'))
 abort 'BLIT_POINTER_HZ must be 1..240' unless rate.between?(1,240)
+step_px = Integer(ENV.fetch('BLIT_POINTER_STEP_PX','1'), 10)
+abort 'BLIT_POINTER_STEP_PX must be 1..40' unless step_px.between?(1,40)
 async = ENV['BLIT_POINTER_ASYNC'] == '1'
 base = URI(ENV.fetch('BLIT_LIVE', 'http://192.168.10.54:8080'))
 token = ENV.fetch('BLIT_AUTH_TOKEN')
@@ -32,9 +35,21 @@ display = before.dig('displays','displays').find do |d|
 end
 abort 'pointer output is absent' unless display
 left=display.dig('bounds','x');right=left+display.dig('bounds','width')-1
-start_x=[[x-180,left].max,right-360].min
-abort 'sweep requires at least361 output pixels' if pattern=='sweep' && start_x<left
-target_x=->(i){pattern=='sweep' ? start_x+i : x+i%2}
+margin = [step_px * 2, 32].max
+span = [right - left + 1 - margin * 2, 1].max
+abort 'sweep requires at least three pointer margins of output width' if
+  pattern == 'sweep' && span <= step_px
+minimum_x = left + margin
+start_x = [[x - 180, minimum_x].max, right - margin].min
+target_x=lambda do |i|
+  if pattern == 'sweep'
+    distance = (start_x - minimum_x + i * step_px) % (span * 2)
+    offset = distance <= span ? distance : span * 2 - distance
+    minimum_x + offset
+  else
+    x + i % 2
+  end
+end
 samples = []; count = 0; request_ms = []; late_slots = 0
 queue = SizedQueue.new(16); workers = []; errors = Queue.new; skipped = 0
 if async
@@ -79,7 +94,8 @@ after = request.call('/v1/diagnostics/observation')
 first = before.dig('runtime','performance'); last = after.dig('runtime','performance')
 verdict = {version:before['version'], displays:before.dig('displays','count'),
   pattern:pattern, original_pointer:{x:x,y:y},
-  requested_motion_hz:rate, http_connection:'close', late_slots:late_slots,
+  requested_motion_hz:rate, step_px:step_px,
+  http_connection:'close', late_slots:late_slots,
   asynchronous:async, workers:workers.length, skipped_injections:skipped,
   request_p50_ms:request_ms.sort[request_ms.length/2],
   request_p95_ms:request_ms.sort[(request_ms.length*0.95).floor],
@@ -92,7 +108,11 @@ verdict = {version:before['version'], displays:before.dig('displays','count'),
   pointer_output_id:before.dig('diagnostics','render','outputs',pointer['output'],'display_id'),
   output_submissions:after.dig('diagnostics','render','outputs').map do |output|
     old=before.dig('diagnostics','render','outputs').find{|v|v['display_id']==output['display_id']}
-    {display_id:output['display_id'], delta:old ? output['present_calls']-old['present_calls'] : nil,
+    delta = old ? output['present_calls']-old['present_calls'] : nil
+    {display_id:output['display_id'], refresh_hz:output['refresh_hz'],
+     target_interval_us:output['target_interval_us'],
+     delta:delta, presentation_hz:elapsed > 0 ? delta / elapsed : nil,
+     missed_deadlines_delta:old ? output['missed_deadlines']-old['missed_deadlines'] : nil,
      last_phases:output['kms_phases']}
   end,
   hotplug:after.dig('diagnostics','render','hotplug')}

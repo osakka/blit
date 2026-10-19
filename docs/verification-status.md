@@ -3,6 +3,34 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-19:551 live cadence probe; wallpaper/UI acceptance not complete
+
+API-deployed Blit0.1.551 remains active. On the current single DP output
+(1920×2160,59.997Hz) with two Hibr pane clients, the bounded API-injected
+60Hz sweep submitted305 frames/6.025s (50.62Hz) at1px/event and356/6.024s
+(59.10Hz) at8px/event. Both had zero scheduler missed deadlines and zero
+physical mouse events. Blit CPU was9.49% and10.41% of one core respectively;
+these measurements do not cover the physical mouse or a button-held window
+drag. Earlier, with two outputs inventoried, a separate1px/event run submitted
+123 frames/6.023s (20.42Hz); state/topology differ, so no causal conclusion.
+The host later reported only the DP output; the cause is unknown. #101 stays
+open. Evidence: `diagnostics/persistence-motion-551/` (ignored local captures).
+
+The API screenshot of the desktop's Hibr `htop` lists eight
+`desktop [sess…]` process rows at12.4–19.8% CPU. This points to host workload
+worth investigating, but does not prove they are duplicate desktop owners.
+No process was killed. The authenticated Blit view verifies the managed Hibr
+owner/clients only, not unrelated process ownership.
+
+Wallpaper acceptance is **not verified**. Native UI navigation during the
+test was incorrect; an earlier Hibr panel capture showed `retro_car.png` for
+`blit-DP-1-p2`, while a later live surface snapshot showed All Displays with a
+pattern and no image. A live Terminal/editor is visible in the last capture;
+the effect of injected keystrokes on its unsaved buffer is unknown. Do not
+continue UI input or assert the original wallpaper is restored until that
+state is inspected safely. No Hibr code/settings file was edited. #103 stays
+open; the deployed stable names alone do not pass its wallpaper round trip.
+
 ## 2026-10-18:550 deployed; stable native names and cursor framebuffer verified
 
 Runtime/documentation source a1ce53d, TCC0.9.27; package and binary identities
