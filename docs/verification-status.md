@@ -3,6 +3,26 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-19: 558 deployment and bounded physical revalidation
+
+Package 0.1.558 is installed/version-verified. Its independent builds match;
+SHA256 `299075721ddf7409d64d401594df2cea7b278b6042698f7314ebeab927a36532`.
+Source `c411650`; package identity commit `71a7c45`.
+
+All three physical backends pass motion (12/12), Kitty composition/deletion,
+2,688 grid/font pixels and sixel assertions. The native 10-second diagnostic
+sweep records 51.26 confirmed flips/s with 59.20 offered input requests/s.
+The prior 557 runs recorded 38.72 and 40.85 confirmed flips/s. Retained render
+tails show 0 no-op attempts in 63 events on558, versus14 in64 on557. The
+tails are bounded and not whole-run counts. This supports the targeted fix,
+not general 60Hz or latency acceptance. SDL/software and GLES2 measure52.83
+and52.24 submissions/s; confirmed completion timing is unavailable.
+
+Evidence: `/tmp/blit-backend-cadence-558-20261019/`. Native/login/pointer
+restoration succeeds. Sustained and multi-connector acceptance remains open.
+Issue105 separately tracks the controlled one-refresh-per-HTTP-connection
+failure (eight queued responses at17.57..139.39ms with a16ms present delay).
+
 ## 2026-10-19 candidate 558: completion no longer fabricates visual work
 
 The actual KMS service path is extracted into one production helper, then

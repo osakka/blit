@@ -1,6 +1,6 @@
 # ADR 0140: KMS completion does not create new render work
 
-- Status: implemented; full regression passes, physical revalidation pending
+- Status: implemented; targeted physical revalidation passes, full performance acceptance open
 - Date: 2026-10-19
 - Issues: Blit #101, #104
 - Related: ADRs 0118, 0136, 0137
@@ -51,3 +51,9 @@ The fixture additionally supplies cached adapter metadata and verifies that
 timeout recovery still requests rendering. The first full run was deliberately
 stopped during review to add this case; that interrupted run is not a pass.
 The fresh full run passes 106 gates, with 7 explicit skips and no failures.
+Physical package558 revalidation removes the no-op attempts from the retained
+native trace tail (14 before, 0 after) and measures51.26 confirmed flips/s
+versus38.72–40.85 in prior557 samples. All bounded pixel/protocol probes still
+pass on all three paths. Evidence:
+`/tmp/blit-backend-cadence-558-20261019/`. This is not sustained refresh or
+latency acceptance; issue101 remains open.

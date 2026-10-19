@@ -14,4 +14,4 @@ verification:
   soak: '120 seconds, four PTYs, 11416 snapshots, 1038 resizes'
   scheduler: 'production-code red/green; idle deadline preserved, pointer work retained, timeout recovery requested'
   package: 'artifact/provenance gate passes; independent second package is byte-identical'
-  physical: 'deployment and cadence revalidation pending'
+  physical: 'deployed/version verified; all three paths pass bounded motion/Kitty/font/sixel checks; native idle no-op tail 14->0 and flips ~39-41->51.26/s; full performance target remains open; native/login/pointer restored'

@@ -1,5 +1,27 @@
 # Current state and restart point
 
+## 2026-10-19: 0.1.558 deployed; idle completion defect verified fixed
+
+Package 0.1.558 is installed and version-verified on 10.54. Its two builds
+are byte-identical; source `c411650`, identity in `releases/0.1.558.yaml`.
+All three actual backends again pass motion 12/12, Kitty composition/deletion,
+2,688 font/grid pixels and the sixel protocol/pixel checks. Original native
+backend, login policy and pointer pose are restored. Evidence:
+`/tmp/blit-backend-cadence-558-20261019/`.
+
+Native confirmed flips measure 51.26/s with 59.20 offered motions/s, versus
+38.72 and 40.85/s in the earlier 557 runs. Its retained trace has 0 no-op
+render attempts (63 render-tail events), versus 14 in the prior 557 tail
+(64 events). This validates removal of the targeted idle-completion defect,
+not the entire performance goal. SDL/software and GLES2 submissions measure
+52.83/s and 52.24/s; completion timing remains unavailable for SDL.
+
+Next: issue105's independently reproduced API admission latency under a
+16ms SDL present. Eight queued requests return one refresh apart, taking
+approximately 139ms for the last response. The next fix must be a bounded
+nonblocking accept turn, without changing renderer/terminal policy. Sustained
+cadence/latency, multi-connector behavior and SDL hotplug remain open.
+
 ## 2026-10-19 candidate 0.1.558: idle KMS completion preserves visual deadlines
 
 ADR0140 isolates the completion-induced no-op from the physical trace. A
