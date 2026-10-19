@@ -1,5 +1,25 @@
 # Current state and restart point
 
+## 2026-10-19 pointer565 fix: idle output consumed another output's motion
+
+Clean three-second API60Hz sweep on564:180 injections,73 confirmed DP flips
+over3.090s (~23.6Hz), zero physical mouse events. Last native present1.52ms,
+Blit CPU10.8%; network-arrival jitter remains part of this workload, not a
+physical-input latency measurement. Evidence build/mouse101-564-clean60/.
+
+Confirmed code defect: KMS updated a global previous-pointer snapshot even
+when only the idle HDMI output was serviced and no pixels were submitted.
+The DP output later saw an unchanged pointer and skipped presentation. Content
+redraw can mask this, consistent with the YouTube clue. ADR0149 replaces the
+global snapshot with per-output state updated only on successful submission.
+
+New production-compositor/mock-DRM gate fails before the fix at "idle output
+consumed active pointer motion"; passes afterward for120 idle-first motions,
+both crossing orders, hide, pending flips/latest motion, modeset and no-trail
+pixels. Existing native composition/art/clipping and64 hotplug cycles pass.
+565 builds with TCC; focused API geometry/pixel checks and packaging/live
+before-after comparison are pending. No font, Hibr, schema or SDL changes.
+
 ## 2026-10-19 revised priority: mouse101, then SDL104
 
 Operator prioritises choppy/inconsistent mouse motion and SDL multi-output

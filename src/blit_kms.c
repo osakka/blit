@@ -68,6 +68,12 @@ typedef struct {
     long long flip_started_us;
     int modeset_fallback;
     int initialized;
+    /* Last submitted cursor state belongs to this scanout, not the server.
+       An unrelated output's deadline must never consume its pending motion. */
+    int pointer_state_valid;
+    float previous_pointer_x;
+    float previous_pointer_y;
+    int previous_pointer_visible;
     int last_view_count;
     unsigned long long last_visual_revision;
     unsigned long long last_surface_ids[KMS_MAX_VIEWS];
@@ -145,10 +151,6 @@ struct BlitKms {
     unsigned long screenshot_frame;
     unsigned long screenshot_after;
     int screenshot_written;
-    int pointer_state_valid;
-    float previous_pointer_x;
-    float previous_pointer_y;
-    int previous_pointer_visible;
 };
 
 static KmsOutput *kms_output(const BlitKms *kms, int index)
@@ -1641,10 +1643,12 @@ void blit_kms_set_pointer_art(BlitKms *kms, const BlitPointerArt *art)
     kms->pointer_art = art;
     if (kms->pointer_art_revision == art->revision) return;
     kms->pointer_art_revision = art->revision;
-    kms->pointer_state_valid = 0;
     /* Appearance changes can shrink the footprint; invalidate once so no
        pixels of the previous, larger shape survive. Motion is incremental. */
-    for (i = 0; i < kms->output_count; ++i) kms_output(kms,i)->initialized = 0;
+    for (i = 0; i < kms->output_count; ++i) {
+        kms_output(kms,i)->initialized = 0;
+        kms_output(kms,i)->pointer_state_valid = 0;
+    }
 }
 
 int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_count,
@@ -1661,7 +1665,6 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
     int capture;
     int pointer_changed;
     int full_redraw;
-    int deferred = 0;
     int failed = 0;
     int expected_captures = 0;
     int completed_captures = 0;
@@ -1694,10 +1697,6 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                     BLIT_KMS_PRESENTATION_FAILED)
                 ++expected_captures;
     }
-    pointer_changed = !kms->pointer_state_valid ||
-        kms->previous_pointer_x != pointer_x ||
-        kms->previous_pointer_y != pointer_y ||
-        kms->previous_pointer_visible != pointer_visible;
     for (i = 0; i < kms->output_count; ++i) {
         KmsOutput *output = kms_output(kms, i);
         int view_index;
@@ -1714,10 +1713,14 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
             continue;
         if (!(output_mask & (1U << i)))
             continue;
+        pointer_changed = !output->pointer_state_valid ||
+            output->previous_pointer_x != pointer_x ||
+            output->previous_pointer_y != pointer_y ||
+            output->previous_pointer_visible != pointer_visible;
         pointer_affects_output = pointer_changed &&
-            (pointer_intersects_output(output, kms->previous_pointer_x,
-                                       kms->previous_pointer_y,
-                                       kms->previous_pointer_visible) ||
+            (pointer_intersects_output(output, output->previous_pointer_x,
+                                       output->previous_pointer_y,
+                                       output->previous_pointer_visible) ||
              pointer_intersects_output(output, pointer_x, pointer_y,
                                        pointer_visible));
         if (pointer_affects_output)
@@ -1725,7 +1728,6 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         /* A scene fence permits only cursor composition over an already
            committed buffer. No first frame or invalidated cache is safe. */
         if (hold_scene && !output->initialized) {
-            deferred = 1;
             if (pointer_affects_output)
                 ++output->info.pointer_frame_deferred;
             continue;
@@ -1759,7 +1761,6 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
            and retry it after the main loop services the DRM event. */
         if (output->flip_pending && getenv("BLIT_KMS_MODESET") == NULL &&
             !output->modeset_fallback) {
-            deferred = 1;
             if (pointer_affects_output)
                 ++output->info.pointer_frame_deferred;
             if (deferred_output_mask != NULL)
@@ -1815,9 +1816,9 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                     int pointer_x0 = 0, pointer_y0 = 0;
                     int pointer_width = 0, pointer_height = 0;
                     include_pointer_damage(output, &views[view_index],
-                                           kms->previous_pointer_x,
-                                           kms->previous_pointer_y,
-                                           kms->previous_pointer_visible,
+                                           output->previous_pointer_x,
+                                           output->previous_pointer_y,
+                                           output->previous_pointer_visible,
                                            &pointer_damage, &pointer_x0,
                                            &pointer_y0, &pointer_width,
                                            &pointer_height);
@@ -2004,6 +2005,10 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                 if (output->info.last_present_ms > output->info.max_present_ms)
                     output->info.max_present_ms = output->info.last_present_ms;
                 ++output->info.present_calls;
+                output->pointer_state_valid = 1;
+                output->previous_pointer_x = pointer_x;
+                output->previous_pointer_y = pointer_y;
+                output->previous_pointer_visible = pointer_visible;
                 if (pointer_affects_output)
                     ++output->info.pointer_frame_submissions;
                 if (submitted_output_mask != NULL)
@@ -2058,17 +2063,15 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         if (output->info.last_present_ms > output->info.max_present_ms)
             output->info.max_present_ms = output->info.last_present_ms;
         ++output->info.present_calls;
+        output->pointer_state_valid = 1;
+        output->previous_pointer_x = pointer_x;
+        output->previous_pointer_y = pointer_y;
+        output->previous_pointer_visible = pointer_visible;
         if (pointer_affects_output)
             ++output->info.pointer_frame_submissions;
         if (!hold_scene)
             remember_output_views(output, views, view_count, output_view_count);
         }
-    }
-    if (!deferred) {
-        kms->pointer_state_valid = 1;
-        kms->previous_pointer_x = pointer_x;
-        kms->previous_pointer_y = pointer_y;
-        kms->previous_pointer_visible = pointer_visible;
     }
     ++kms->screenshot_frame;
     if (capture && completed_captures >= expected_captures)

@@ -285,6 +285,7 @@ suite_renderer() {
     run_gate kms_graphics_clip_gate.sh sh "$ROOT/tools/tests/kms_graphics_clip_gate.sh"
     run_gate kms_hotplug_gate.rb ruby "$ROOT"/tools/tests/kms_hotplug_gate.rb
     run_gate kms_hotplug_cycles.rb ruby "$ROOT"/tools/tests/kms_hotplug_cycles.rb
+    run_gate kms_pointer_phase_gate.rb ruby "$ROOT"/tools/tests/kms_pointer_phase_gate.rb
     run_gate surface_damage_gate.sh sh "$ROOT"/tools/tests/surface_damage_gate.sh
     run_gate screenshot_overlay_gate.sh "$ROOT"/tools/tests/screenshot_overlay_gate.sh
     run_gate render_state_agreement_gate.rb ruby tools/tests/render_state_agreement_gate.rb

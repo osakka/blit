@@ -166,6 +166,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0146 — Exact integer glyph atlas UV boundaries](0146-exact-integer-glyph-atlas-uv-boundaries.md)
 - [0147 — Shared coverage and colour cell rasterization](0147-shared-coverage-and-colour-cell-rasterizer.md)
 - [0148 — Explicit presentation configuration source](0148-explicit-presentation-configuration-source.md)
+- [0149 — Per-output submitted pointer state](0149-per-output-submitted-pointer-state.md)
 
 ## Adding an ADR
 
