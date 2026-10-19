@@ -76,7 +76,9 @@ scanout = render_output&.dig('properties', 'kms_scanout')
 raise 'per-output KMS scanout telemetry contract missing' unless scanout &&
   scanout['required'].sort == %w[available flip_completions vblank_sequence
                                   last_vblank_timestamp_us vblank_span_count
-                                  vblank_span_us observed_refresh_hz].sort &&
+                                  vblank_span_us observed_refresh_hz
+                                  pointer_change_requests pointer_frame_deferred
+                                  pointer_frame_submissions].sort &&
   scanout['additionalProperties'] == false
 required_observation_fields = %w[observation_version captured_monotonic_us
                                   consistency version server diagnostics runtime

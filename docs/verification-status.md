@@ -3,16 +3,41 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
-## 2026-10-19:552 scanout-observability candidate, not deployed
+## 2026-10-19:553 pointer-presentation telemetry candidate, not deployed
+
+TCC0.9.27 builds version0.1.553. The candidate adds per-output KMS counters
+for pointer-intersecting present attempts, attempts deferred by output/flip
+state, and successfully submitted pointer-bearing frames. The direct-KMS
+mock lifecycle injects a pointer move and requires its output request and
+submission counters to advance. SDL observation verifies all KMS-only and
+pointer counters remain unavailable/zero. Schema/API suite passes **5/5, no
+skips**, and direct-KMS lifecycle passes with allocation/free balance20/20.
+The full local `tools/run-gates.sh all` run passes **96, skips 7, fails 0**;
+the 120-second soak reports four sessions, 11,748 snapshots and 1,068 resizes.
+The seven skips are the three Hibr adapter gates, opt-in QEMU oracle,
+package-artifact gate (run separately), and two live-host gates. This remains
+mock/local evidence only; 10.54 remains0.1.552. Physical pointer-to-frame
+correlation and package/live acceptance are pending. No Hibr source or live
+server state was changed in this cycle.
+
+## 2026-10-19:552 scanout telemetry deployed; physical motion remains slow
 
 TCC0.9.27 builds the candidate with server version0.1.552. The direct-KMS
 hotplug/lifecycle gate verifies `kms_scanout` reports a completed page flip,
 nonzero vblank sequence/timestamp, and a measured vblank span from mock DRM
 callbacks. API schema, SDL observation semantics, and the full schema suite
-pass (**5pass,0skip,0fail**). This establishes API-contract and mocked callback
-plumbing only, not physical scanout correctness. The 10.54 server remains
-0.1.551; no live settings or service state changed. Physical three-screen
-movement remeasurement and deployment acceptance remain pending.
+pass (**5pass,0skip,0fail**). The Debian artifact is byte-identical across two
+independent builds and passes package provenance validation; it was deployed
+and verified on10.54 via the supervised updater. A4.19s physical-motion
+sample measured59.909/59.999Hz vblank on DP/HDMI,84 DP frame submissions,zero
+HDMI submissions,212 relative mouse events,117 sync reports and20 pointer
+position traces. Global composition reported5.907Hz and the maximum loop-gap
+window was10.327ms. Twenty-two Hibr frame-barrier timeouts overlapped the
+sample, but no causal pointer/frame association existed yet. This establishes
+that monitor scanout clocks are normal and Blit's changed-frame cadence is
+low; it does not isolate the responsible Blit scheduling/damage path.
+Candidate0.1.553 adds per-output pointer request/defer/submission counters. No
+settings, sessions or Hibr state were modified during the sample.
 
 ## 2026-10-19:551 live cadence probe; wallpaper/UI acceptance not complete
 

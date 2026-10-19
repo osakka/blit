@@ -13,4 +13,4 @@ verification:
   direct_kms: 'mocked libdrm lifecycle verifies flip and vblank diagnostics; no physical claim'
   schema_suite: '5 pass, 0 skip, 0 fail'
   package: 'artifact/provenance gate passes; independent rebuild is byte-identical'
-  live: 'not yet deployed; physical three-screen motion sample pending'
+  live: 'deployed and verified on 10.54 through supervised API update; 4.19s physical-motion evidence recorded in docs/current-state.md'

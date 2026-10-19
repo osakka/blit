@@ -1230,6 +1230,14 @@ KMS, `present_calls` counts submitted frames while
 The top-level `frame_rate_hz` remains an overall Blit composition rate; it is
 not a per-display scanout measurement. Use deltas of per-output completion
 counters over a measured interval to evaluate delivered frames per display.
+For pointer diagnosis, `pointer_change_requests` counts KMS present attempts
+where the old or new pointer footprint intersects that output;
+`pointer_frame_deferred` counts such attempts deferred for an uninitialized
+output or pending prior flip; and `pointer_frame_submissions` counts submitted
+frames containing a changed pointer position. A request may be counted again
+while another output's flip is pending, so compare these counters with their
+matching deferral/submission deltas instead of treating requests as unique
+physical input events.
 
 For a reproducible performance report, include the exact `server_version`,
 display mode/refresh, workload duration, `present_calls`, measured frame or

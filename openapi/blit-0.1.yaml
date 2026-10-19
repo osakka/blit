@@ -2563,7 +2563,7 @@ components:
                       the output vblank sequence over `vblank_span_us`, not the
                       rate at which changed content was submitted. Unavailable
                       for non-direct-KMS renderers.
-                    required: [available, flip_completions, vblank_sequence, last_vblank_timestamp_us, vblank_span_count, vblank_span_us, observed_refresh_hz]
+                    required: [available, flip_completions, vblank_sequence, last_vblank_timestamp_us, vblank_span_count, vblank_span_us, observed_refresh_hz, pointer_change_requests, pointer_frame_deferred, pointer_frame_submissions]
                     additionalProperties: false
                     properties:
                       available: {type: boolean}
@@ -2573,6 +2573,9 @@ components:
                       vblank_span_count: {type: integer, minimum: 0}
                       vblank_span_us: {type: integer, minimum: 0}
                       observed_refresh_hz: {type: number, minimum: 0}
+                      pointer_change_requests: {type: integer, minimum: 0, description: Per-output KMS present attempts for which the pointer's old or new footprint intersects this output. A request may recur while another output's flip is pending.}
+                      pointer_frame_deferred: {type: integer, minimum: 0, description: Pointer-affecting output attempts deferred because this output was not initialized or its prior page flip was pending.}
+                      pointer_frame_submissions: {type: integer, minimum: 0, description: Submitted output frames that include a changed pointer position.}
                   render_width: {type: integer, minimum: 0}
                   render_height: {type: integer, minimum: 0}
                 additionalProperties: false

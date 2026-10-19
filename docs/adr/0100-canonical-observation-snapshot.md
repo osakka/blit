@@ -30,6 +30,9 @@ contents and framebuffer bytes remain separate bounded evidence resources.
 - Per-output KMS diagnostics distinguish submitted frames from completed
   page flips and report kernel vblank timing. The global composition-rate
   counter is not a substitute for per-output scanout evidence.
+- Per-output pointer diagnostics distinguish pointer-intersecting attempts,
+  page-flip deferrals, and submitted pointer frames. They describe the
+  presentation path, not raw input-event counts.
 - The response is bounded by Blit's fixed HTTP/resource capacities. Large
   terminal cell or image evidence must use the dedicated surface/screenshot
   endpoints.

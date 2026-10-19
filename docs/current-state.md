@@ -1,6 +1,6 @@
 # Current state and restart point
 
-## 2026-10-19 live motion sample: physical input arrives; scanout still unproven
+## 2026-10-19 live motion sample: input arrives; pointer/frame path is slow
 
 Correction to the prior investigation: the operator confirms three active
 physical screens—two DP panes and one HDMI screen. Blit represents the two DP
@@ -19,14 +19,45 @@ that is a server composition metric, not completed scanout per display. Per-
 output `present_calls` increased129 on DP and41 on HDMI during the interval,
 but the pointer crossed outputs and submissions are not flip completions.
 
-The bounded KMS retry trace includes output-ready intervals near16.7ms and
-33.4ms. This is a lead for refresh misses, not a direct scanout-rate measurement
-or a proven cause. Candidate0.1.552 adds existing KMS flip-completion counters
-and vblank timing to each output's diagnostics. The mocked direct-KMS gate
-verifies these values advance from page-flip callbacks; SDL reports them
-unavailable. This does not establish the physical screens' scanout rate and
-has not been deployed. No live settings, sessions, or service state were
-changed during this test.
+Blit0.1.552 was built from commit54fa37a, packaged against the exact pinned
+Hibr0.99.225/ABI16 archive, and deployed through the authenticated update API.
+The package's two independent builds were byte-identical; hash and provenance
+are recorded in `releases/0.1.552.yaml`. The modified sibling Hibr checkout was
+not changed.
+
+During a4.19s read-only sample while the operator moved the mouse, the live
+API recorded124 dispatched input events,341 evdev mouse events and220 relative
+axis events. The MOSART mouse device recorded329 pointer events,117 report
+syncs and212 motion-axis events; Blit's pointer-position trace added20 changes.
+The server's rolling composition metric was5.907Hz. DP canvas `display-93`
+recorded84 submitted frames and85 completed flips; HDMI `display-102` recorded
+zero changed-frame submissions during this interval. Their independently
+measured vblank rates were59.909Hz and59.999Hz. The pointer ended on DP output
+0 at(564,1762). The loop-gap window maximum was10.327ms. These are not
+equivalent measures: stable vblank confirms monitor scanout cadence, while
+flip counters count framebuffer changes; the sample does not establish whether
+the pointer crossed onto HDMI or whether HDMI should have changed. It does show
+that the display clocks are not running at5.9Hz while the server's visible
+content updates are much less frequent than60Hz.
+
+The same window contained22 Hibr frame-barrier timeout traces, but the current
+telemetry cannot associate a pointer change with a specific submitted flip or
+prove that those timeouts delayed pointer composition. Candidate0.1.553 adds
+per-output pointer-change attempts,
+pending-flip deferrals and pointer-bearing frame submissions. The direct-KMS
+gate injects a pointer move and asserts that request and submitted-frame
+counters advance. This gives the next physical run a way to distinguish
+input-to-damage from damage-to-page-flip. Do not change renderer scheduling
+based on the barrier count alone. No live settings, sessions, or Hibr state
+were changed during the sample.
+
+The complete local `tools/run-gates.sh all` run passed **96 gates, skipped 7,
+failed 0**. Its 120-second terminal soak completed with four sessions,
+11,748 snapshots, 1,068 resizes, and no reported leak or stalled renderer.
+Skips were the three Hibr adapter gates (no pinned adapter checkout supplied),
+the opt-in QEMU oracle, package-artifact validation (run separately), and the
+two live-host screenshot/multi-display gates (not enabled in the local suite).
+This is local evidence only; it does not establish physical behavior for0.1.553.
 
 ## 2026-10-19 live follow-up: synthetic cadence improved, wallpaper test interrupted
 

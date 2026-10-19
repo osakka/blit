@@ -3160,7 +3160,10 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
             "\"flip_completions\":%llu,\"vblank_sequence\":%u,"
             "\"last_vblank_timestamp_us\":%llu,"
             "\"vblank_span_count\":%llu,\"vblank_span_us\":%llu,"
-            "\"observed_refresh_hz\":%.6f},"
+            "\"observed_refresh_hz\":%.6f,"
+            "\"pointer_change_requests\":%llu,"
+            "\"pointer_frame_deferred\":%llu,"
+            "\"pointer_frame_submissions\":%llu},"
             "\"kms_phases\":{\"draw_ms\":%.3f,\"copy_ms\":%.3f,"
             "\"submit_ms\":%.3f,\"drawn_cells\":%llu},"
             "\"render_width\":%d,\"render_height\":%d,"
@@ -3190,6 +3193,9 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
             have_kms_info ? kms_info.vblank_span_count : 0ULL,
             have_kms_info ? kms_info.vblank_span_us : 0ULL,
             have_kms_info ? kms_info.observed_refresh_hz : 0.0,
+            have_kms_info ? kms_info.pointer_change_requests : 0ULL,
+            have_kms_info ? kms_info.pointer_frame_deferred : 0ULL,
+            have_kms_info ? kms_info.pointer_frame_submissions : 0ULL,
             have_kms_info ? kms_info.draw_ms : 0.0,
             have_kms_info ? kms_info.copy_ms : 0.0,
             have_kms_info ? kms_info.submit_ms : 0.0,

@@ -138,10 +138,15 @@ render_outputs.each do |output|
   raise 'per-output KMS scanout telemetry is missing' unless
     scanout.is_a?(Hash) && scanout.keys.sort == %w[available
       flip_completions last_vblank_timestamp_us observed_refresh_hz
-      vblank_sequence vblank_span_count vblank_span_us].sort
+      pointer_change_requests pointer_frame_deferred
+      pointer_frame_submissions vblank_sequence vblank_span_count
+      vblank_span_us].sort
   raise 'SDL dummy output falsely claims DRM/KMS telemetry' unless
     scanout['available'] == false && scanout['flip_completions'].zero? &&
-    scanout['observed_refresh_hz'].zero?
+    scanout['observed_refresh_hz'].zero? &&
+    scanout['pointer_change_requests'].zero? &&
+    scanout['pointer_frame_deferred'].zero? &&
+    scanout['pointer_frame_submissions'].zero?
 end
 
 puts "OBSERVATION_API_PASS fields=#{required.length} sessions=#{observation['sessions']['count']} displays=#{observation['displays']['count']}"

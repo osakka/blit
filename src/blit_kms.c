@@ -1684,6 +1684,7 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         long long output_started = 0;
         long long draw_started = 0;
         long long flip_started = 0;
+        int pointer_affects_output;
         int modeset_frame;
         int trace_phases = getenv("BLIT_KMS_TRACE_PHASES") != NULL;
         output->pointer_width = kms->pointer_art ? kms->pointer_art->width : 12;
@@ -1692,10 +1693,20 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
             continue;
         if (!(output_mask & (1U << i)))
             continue;
+        pointer_affects_output = pointer_changed &&
+            (pointer_intersects_output(output, kms->previous_pointer_x,
+                                       kms->previous_pointer_y,
+                                       kms->previous_pointer_visible) ||
+             pointer_intersects_output(output, pointer_x, pointer_y,
+                                       pointer_visible));
+        if (pointer_affects_output)
+            ++output->info.pointer_change_requests;
         /* A scene fence permits only cursor composition over an already
            committed buffer. No first frame or invalidated cache is safe. */
         if (hold_scene && !output->initialized) {
             deferred = 1;
+            if (pointer_affects_output)
+                ++output->info.pointer_frame_deferred;
             continue;
         }
         output_started = kms_now_us();
@@ -1709,12 +1720,7 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
             full_redraw = 1;
         output_changed = full_redraw || capture ||
             (screenshot_output_mask & (1U << i)) != 0 ||
-            (pointer_changed &&
-             (pointer_intersects_output(output, kms->previous_pointer_x,
-                                        kms->previous_pointer_y,
-                                        kms->previous_pointer_visible) ||
-              pointer_intersects_output(output, pointer_x, pointer_y,
-                                         pointer_visible)));
+            pointer_affects_output;
         /* Inspect scene changes even when pointer/capture work has already
            scheduled this output. Relocation must clear the old bounds. */
         for (view_index = 0; !hold_scene && view_index < view_count; ++view_index) {
@@ -1733,6 +1739,8 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         if (output->flip_pending && getenv("BLIT_KMS_MODESET") == NULL &&
             !output->modeset_fallback) {
             deferred = 1;
+            if (pointer_affects_output)
+                ++output->info.pointer_frame_deferred;
             if (deferred_output_mask != NULL)
                 *deferred_output_mask |= 1U << i;
             continue;
@@ -1975,6 +1983,8 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                 if (output->info.last_present_ms > output->info.max_present_ms)
                     output->info.max_present_ms = output->info.last_present_ms;
                 ++output->info.present_calls;
+                if (pointer_affects_output)
+                    ++output->info.pointer_frame_submissions;
                 if (submitted_output_mask != NULL)
                     *submitted_output_mask |= 1U << i;
                 continue;
@@ -2027,6 +2037,8 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         if (output->info.last_present_ms > output->info.max_present_ms)
             output->info.max_present_ms = output->info.last_present_ms;
         ++output->info.present_calls;
+        if (pointer_affects_output)
+            ++output->info.pointer_frame_submissions;
         if (!hold_scene)
             remember_output_views(output, views, view_count, output_view_count);
         }

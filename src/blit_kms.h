@@ -95,6 +95,9 @@ typedef struct {
     unsigned long long drawn_cells;
     unsigned long long present_calls;
     unsigned long long flip_completions;
+    unsigned long long pointer_change_requests;
+    unsigned long long pointer_frame_deferred;
+    unsigned long long pointer_frame_submissions;
     uint32_t vblank_sequence;
     unsigned long long vblank_timestamp_us;
     unsigned long long vblank_span_count;

@@ -5,14 +5,18 @@ second, parallel implementation of an earlier one.
 
 ## In progress — per-output scanout evidence for physical motion diagnosis
 
-Candidate0.1.552 exposes each direct-KMS output's page-flip completions and
+Release0.1.552 exposes each direct-KMS output's page-flip completions and
 vblank sequence/timing alongside existing frame-submission counters. Focused
-direct-KMS mock, API schema, SDL observation, and schema-suite gates pass.
-This is instrumentation only; it makes no renderer or scheduler behavior
-claim. Next acceptance is to deploy the exact candidate through the authorized
-API updater and compare per-output submission/completion/vblank deltas during
-physical mouse movement across all three screens. A physical sample is still
-needed before diagnosing or changing the motion/render scheduling path.
+direct-KMS mock, API schema, SDL observation, schema-suite, package identity
+and reproducibility gates pass; it is live on10.54. A4.19s physical-motion
+sample measured59.909/59.999Hz vblank on DP/HDMI,84 DP frame submissions and
+zero HDMI submissions; input counters advanced and20 pointer-position trace
+events occurred. The global composition-rate metric was5.907Hz. This proves
+monitor scanout clocks remain at mode rate, but does not yet identify which
+pointer updates reached a framebuffer. Twenty-two multi-PTY barrier timeouts
+occurred in the same window; causality is unestablished. Candidate0.1.553 adds
+per-output pointer-request, deferral and frame-submission counters. Correlate
+those with physical device-event deltas before changing render/barrier behavior.
 
 ## Current position — held-scene pointer presentation and stable identity
 
