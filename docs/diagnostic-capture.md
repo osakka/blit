@@ -1,5 +1,16 @@
 # Live diagnostic capture
 
+`BLIT_AUTH_TOKEN=... ruby tools/probes/host_font_size.rb` requires the
+pixel-size API (candidate561). It changes global font cell heights through
+17,19,23px, saves observations/BMP captures, checks unchanged renderer and
+physical pane regions plus complete grid bounds, then restores the original
+size policy. Override the bounded list with `BLIT_FONT_SIZES` (at most eight
+values8..64). It never kills applications, injects input or switches renderer.
+It refuses to overwrite a concurrently changed font on restoration. This
+probe visibly resizes active applications; run it only during an agreed test
+window. Geometry/capture success does not prove desktop pixel correctness,
+font aesthetic quality, new glyph coverage or input-to-photon performance.
+
 `BLIT_AUTH_TOKEN=... ruby tools/probes/host_pointer_art.rb` is a read-only
 direct-KMS pointer framebuffer oracle for unrotated native-size outputs.
 It compiles the canonical shared art source, brackets a cached screenshot

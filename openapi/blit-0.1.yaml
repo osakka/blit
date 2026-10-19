@@ -127,7 +127,10 @@ paths:
       summary: Select a font profile and/or logical font scale
       description: >-
         Blit recomputes pane geometry and resizes attached PTYs. Hibr is not
-        modified. Scale is bounded to 1.0 through 3.0 in 0.1 increments.
+        modified. Use size_px for an explicit cell height of 8 through 64
+        device pixels, or legacy scale (1.0 through 3.0 in 0.1 increments),
+        never both. Bitmap profiles are sampled at the resolved cell size;
+        this does not imply outline rasterization or change display mode.
       requestBody:
         required: true
         content:
@@ -1790,9 +1793,16 @@ components:
     FontConfiguration:
       type: object
       minProperties: 1
+      not:
+        required: [scale, size_px]
       properties:
         font_id: {$ref: '#/components/schemas/ResourceId'}
         scale: {type: number, minimum: 1.0, maximum: 3.0, multipleOf: 0.1}
+        size_px:
+          type: integer
+          minimum: 8
+          maximum: 64
+          description: Exact terminal cell height; width follows the font aspect ratio rounded to the nearest pixel.
       additionalProperties: false
     FontProfiles:
       type: object
@@ -1801,11 +1811,16 @@ components:
         revision: {$ref: '#/components/schemas/Revision'}
         active:
           type: object
-          required: [id, path, scale, cell_pixels, glyphs, mappings]
+          required: [id, path, scale, size_px, sizing, cell_pixels, glyphs, mappings]
           properties:
             id: {$ref: '#/components/schemas/ResourceId'}
             path: {type: string}
-            scale: {type: number, minimum: 1.0, maximum: 3.0, multipleOf: 0.1}
+            scale:
+              type: number
+              exclusiveMinimum: 0
+              description: Resolved size relative to the source font; not a second mutable size setting.
+            size_px: {type: integer, minimum: 1}
+            sizing: {type: string, enum: [scale, pixels]}
             cell_pixels:
               type: object
               required: [width, height]
@@ -2389,9 +2404,12 @@ components:
             font:
               type: object
               additionalProperties: false
+              not:
+                required: [scale, size_px]
               properties:
                 font_id: {type: string}
                 scale: {type: number, minimum: 1.0, maximum: 3.0}
+                size_px: {type: integer, minimum: 8, maximum: 64}
             pointer: {$ref: '#/components/schemas/PointerAppearance'}
             display_layouts:
               type: object
@@ -2588,7 +2606,7 @@ components:
                   render_width: {type: integer, minimum: 0}
                   render_height: {type: integer, minimum: 0}
                 additionalProperties: false
-            font_scale: {type: number, minimum: 1.0, maximum: 3.0, multipleOf: 0.1}
+            font_scale: {type: number, exclusiveMinimum: 0}
             direct_kms: {type: boolean}
             video_driver: {type: string}
             renderer: {type: string}

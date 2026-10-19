@@ -702,7 +702,15 @@ Two limits are worth knowing rather than discovering:
   is a stated consequence rather than a tested one.
 
 `GET /v1/fonts` lists profiles and the active cell size. `PUT /v1/fonts` can
-select `font_id`, `scale` from 1.0 through 3.0 in 0.1 increments, or both.
+select `font_id`, legacy `scale` from 1.0 through 3.0 in 0.1 increments,
+or `size_px` (integer8..64, exact cell height). Select a profile together with
+either size control, never both size controls. Profile-only selection retains
+the active size policy. `active.sizing` identifies `scale` or `pixels`;
+`active.size_px` and `active.cell_pixels` report the actual result. Returned
+scale under pixel mode is derived and need not be a valid legacy scale write.
+For example, `{"size_px":23}` selects12x23 cells for the8x16 font. This is
+font/cell sizing, not a display mode change. Existing bitmap profiles are
+sampled at this size; outline rasterization and colour fonts are separate work.
 Integer JSON values such as `2` remain valid and mean `2.0`. Blit recalculates
 pane geometry and resizes attached PTYs. Because a framebuffer cell cannot be
 fractional, the physical width and height use one shared nearest-pixel rule;
@@ -714,7 +722,7 @@ For example, apply a modest size increase without restarting the server:
 ```sh
 curl --fail-with-body -X PUT "$BLIT_URL/v1/fonts" \
   -H "Authorization: Bearer $BLIT_AUTH_TOKEN" \
-  -H 'Content-Type: application/json' --data '{"scale":1.2}'
+  -H 'Content-Type: application/json' --data '{"size_px":23}'
 ```
 
 Read back `active.scale` and `active.cell_pixels`: rounded cell dimensions,
@@ -724,6 +732,11 @@ update its complete `document.font` with the desired profile/scale and
 `PUT /v1/settings` using the returned revision in `If-Match`. Preserve the
 other document sections and require `storage.state == "clean"`. A successful
 live font response alone is not confirmation of a durable settings save.
+
+When saving pixel sizing, set `document.font` to `{"font_id":"…","size_px":23}`
+and remove the legacy `scale` key. Saving both returns400 and preserves the
+previous durable configuration. A legacy scale write likewise replaces pixel
+mode rather than multiplying it. See ADR0144.
 
 Text foreground/background colours are terminal styles, independent of font
 selection. The current monochrome PSF pipeline does not provide multicolour

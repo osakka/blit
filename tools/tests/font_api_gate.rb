@@ -3,15 +3,12 @@
 require 'json'
 require 'net/http'
 require 'timeout'
+require_relative 'gate_port'
+require_relative 'sdl_test_profile'
 
-port = 18_995
-env = {
-  'SDL_VIDEODRIVER' => 'dummy',
-  'SDL_RENDERER' => 'software',
-  'LD_LIBRARY_PATH' => 'build/sdl3-kms',
-  'BLIT_PSF_FONT' => 'assets/fonts/Blit-Hibr-Terminus16.psf'
-}
-pid = Process.spawn(env, 'build/blit/blit-server', port.to_s,
+port = gate_port(Integer(ENV.fetch('BLIT_FONT_API_PORT','18995')))
+env = SdlTestProfile.environment
+pid = Process.spawn(env, SdlTestProfile.binary, port.to_s,
                     out: '/tmp/blit-font-api-gate.log', err: [:child, :out])
 at_exit do
   Process.kill('TERM', pid) rescue nil
@@ -71,6 +68,7 @@ end
 end
 
 topology = request(URI("#{base}/v1/topology"))
+SdlTestProfile.verify!(request(base + '/v1/diagnostics'))
 pane = topology.fetch('panes').first
 raise 'no test pane discovered' unless pane
 
@@ -168,9 +166,41 @@ begin
                            {'font_id' => selected, 'scale' => 1.0})
   raise 'font profile was not selected' unless selected_state.fetch('active').fetch('id') == selected
   raise 'scale was not restored' unless selected_state.fetch('active').fetch('scale') == 1
+
+  [8, 16, 17, 19, 23, 32, 48, 64].each do |size|
+    actual = request(base + '/v1/fonts', Net::HTTP::Put, {'size_px'=>size}).fetch('active')
+    width = (8 * size + 8) / 16
+    raise "pixel height #{size} not applied" unless actual['size_px'] == size &&
+      actual['sizing'] == 'pixels' && actual['cell_pixels'] == {'width'=>width,'height'=>size}
+    grid = request(base + '/v1/topology').fetch('outputs').first.fetch('cell_grid')
+    current = request(base + "/v1/surfaces/#{surface_id}/summary")
+    request(base + "/v1/surfaces/#{surface_id}/cells", Net::HTTP::Put,
+      {'base_revision'=>current.fetch('revision'),'cells'=>[{'x'=>0,'y'=>0,'text'=>'█',
+      'style'=>{'foreground'=>'#ffffff','background'=>'#000000'}}]})
+    raise "pixel size #{size} glyph not rendered" unless wait_solid(base,
+      grid.fetch('origin_x')+inset,grid.fetch('origin_y')+inset,width,size,[255,255,255])
+  end
+  unchanged = request(base + '/v1/fonts').fetch('active')
+  same_profile = request(base + '/v1/fonts',Net::HTTP::Put,{'font_id'=>selected}).fetch('active')
+  raise 'profile-only selection reset pixel size policy' unless same_profile == unchanged
+  [{'size_px'=>7},{'size_px'=>65},{'size_px'=>19.5},{'size_px'=>'20'},
+   {'size_px'=>nil},{'size_px'=>16,'scale'=>1.0}].each do |payload|
+    q = Net::HTTP::Put.new(base + '/v1/fonts');q['Content-Type']='application/json';q.body=JSON.generate(payload)
+    result = Net::HTTP.start(base.hostname,base.port) { |http| http.request(q) }
+    raise "bad pixel size accepted: #{payload}" unless result.code == '400'
+    raise 'rejection changed font state' unless request(base + '/v1/fonts').fetch('active') == unchanged
+  end
+  ['{"size_px":19,"size_px":20}', '{"scale":1.0,"scale":2.0}'].each do |body|
+    q=Net::HTTP::Put.new(base+'/v1/fonts');q['Content-Type']='application/json';q.body=body
+    response=Net::HTTP.start(base.hostname,base.port){|http|http.request(q)}
+    raise 'duplicate size control accepted' unless response.code=='400'
+    raise 'duplicate changed font state' unless request(base+'/v1/fonts').fetch('active')==unchanged
+  end
+  restored = request(base + '/v1/fonts',Net::HTTP::Put,{'scale'=>1.0}).fetch('active')
+  raise 'legacy scale did not replace pixel policy' unless restored['sizing']=='scale' && restored['size_px']==16
 ensure
   delete = Net::HTTP::Delete.new(URI("#{base}/v1/terminal-sessions/#{session_id}"))
   Net::HTTP.start(base.hostname, base.port) { |http| http.request(delete) }
 end
 
-puts 'font API gate: PASS (profiles, tenth-step scales 1.0..3.0, rounded pixels, reflow, rejection, restore)'
+puts 'font API gate: PASS (profiles, legacy scales, pixel heights 8..64, rendered pixels, reflow, rejection, restore)'

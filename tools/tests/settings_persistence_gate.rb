@@ -584,6 +584,34 @@ Dir.mktmpdir('blit-settings') do |root|
     check(settings.dig('document', 'font', 'scale') == 1.1,
           "font scale survives a restart (font_id=#{font_id.inspect})")
 
+    code, fonts = request('PUT', '/v1/fonts', {'size_px'=>23})
+    check(code == 200 && fonts.dig('active','size_px') == 23 &&
+          fonts.dig('active','sizing') == 'pixels', 'pixel font height applies live')
+    # Saving is owned by the canonical settings document, not a second font file.
+    _, settings = request('GET','/v1/settings')
+    replacement = settings.fetch('document')
+    replacement['font'] = {'font_id'=>font_id,'size_px'=>23}
+    code, settings = request('PUT','/v1/settings',{'document'=>replacement},
+                            {'If-Match'=>settings.fetch('revision').to_s})
+    check(code == 200 && settings.dig('storage','state') == 'clean' &&
+          !settings.dig('document','font').key?('scale'), 'only pixel size policy is saved')
+    stop
+    start(env.merge(boot))
+    _, fonts = request('GET','/v1/fonts')
+    check(fonts.dig('active','size_px') == 23 && fonts.dig('active','sizing') == 'pixels' &&
+          fonts.dig('active','cell_pixels') == {'width'=>12,'height'=>23},
+          'exact pixel font height survives restart')
+    _, settings = request('GET','/v1/settings')
+    invalid_document = Marshal.load(Marshal.dump(settings.fetch('document')))
+    invalid_document['font']['scale'] = 1.0
+    code, = request('PUT','/v1/settings',{'document'=>invalid_document},
+                    {'If-Match'=>settings.fetch('revision').to_s})
+    check(code == 400,'competing persisted font size controls are rejected')
+    _, retained = request('GET','/v1/settings')
+    check(retained['revision'] == settings['revision'] &&
+          retained['document']['font'] == settings['document']['font'],
+          'refused font settings leave durable revision and policy unchanged')
+
     code, = request('DELETE', '/v1/settings')
     check(code == 200, "DELETE server settings -> #{code}")
     _, settings = request('GET', '/v1/settings')

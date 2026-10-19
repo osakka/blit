@@ -1,5 +1,33 @@
 # Current state and restart point
 
+## 2026-10-19 candidate561: explicit font pixel height, new profiles still pending
+
+Blit#107/ADR0144 extend the canonical font API with integer `size_px`8..64,
+exclusive with legacy scale. One shared size-policy parser/dimension function
+serves live requests, saved settings and all renderer geometry. GET reports
+sizing policy and resolved pixel metrics; settings store only one control.
+This is exact cell sizing for current bitmap fonts, not native outline or
+colour-glyph rendering. Both requested new profiles remain unimplemented.
+
+The new font API assertion is red before implementation and green afterward.
+Actual glyph pixels at8,16,17,19,23,32,48,64px, legacy compatibility,
+profile-only retention, malformed/duplicate/competing controls,23px persistence
+and unchanged saved revision on refusal pass. TCC, schema, split/pointer
+geometry and production damage fixtures pass. Full regression is running.
+Installed local Hibr is now0.99.257/ABI16; no Hibr changes were made by this
+work. Its binary fingerprint is checked before/after. Live remains560 SDL/GL
+at saved scale1.2; no candidate deployment or new-font visual acceptance yet.
+
+Full run completes107pass/7skip/0fail; four-PTY120-second soak records11,816
+snapshots/1,074 resizes. Installed0.99.257/ABI16 fingerprint is unchanged:
+`572f88f60eac0656bf6bd86b9a89a9a939de05caf03c5bd1175e87dce8dd4735`.
+Updated font fixture passes separately on software and offscreen GLES2;
+updated schema assertions and three pinned-header adapter gates pass.
+`host_font_size.rb` passes locally on two panes, captures17/19/23px and
+restores its starting policy. Packaging/live validation are next. A read-only
+live topology check now reports8x16 cells; preserve the actual current font
+choice rather than assuming the earlier1.2 configuration is still active.
+
 ## 2026-10-19 operator configuration: SDL/GLES2 and scale1.2
 
 Operator requested SDL/GL and then prioritised font sizing, a new selectable

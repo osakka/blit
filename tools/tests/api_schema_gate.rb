@@ -13,6 +13,16 @@ schema = YAML.load_file(schema_path)
 raise 'schema is not OpenAPI 3.1' unless schema.fetch('openapi') == '3.1.0'
 
 paths = schema.fetch('paths')
+font_configuration = schema.dig('components','schemas','FontConfiguration')
+raise 'font size controls must be exclusive' unless
+  font_configuration.dig('not','required') == %w[scale size_px]
+pixel_size = font_configuration.dig('properties','size_px')
+raise 'pixel font size must be an integer 8..64' unless
+  pixel_size['type'] == 'integer' && pixel_size['minimum'] == 8 && pixel_size['maximum'] == 64
+font_active = schema.dig('components','schemas','FontProfiles','properties','active')
+raise 'font size policy observation missing' unless
+  %w[sizing size_px cell_pixels].all? { |key| font_active.fetch('required').include?(key) } &&
+  font_active.dig('properties','sizing','enum') == %w[scale pixels]
 raise "unexpected path count #{paths.length}" unless paths.length == 45
 
 settings = schema.fetch('components').fetch('schemas').fetch('Settings')

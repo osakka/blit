@@ -21,7 +21,7 @@ emoji-sequence support.
 
 ## Implementation sequence
 
-1. Specify native pixel-size selection through the canonical font API.
+1. Specify explicit pixel-size selection through the canonical font API.
    Preserve legacy scale callers; reject requests with competing size
    controls. Store one size policy and return resolved cell/glyph metrics.
    Publish schema fields only with implementing handlers and tests.
@@ -62,4 +62,54 @@ emoji-sequence support.
 - [Noto Emoji sources and font licenses](https://github.com/googlefonts/noto-emoji):
   candidate colour assets; pin exact format/version/license before shipping.
 
-No new font dependency, asset or API field is delivered by this design note.
+Candidate561 implements explicit cell pixel height and legacy-policy
+compatibility (ADR0144), with focused tests passing; full/live verification
+is pending. Native outline rasterization, colour glyphs and both new font
+profiles remain unimplemented. No new dependency or asset is selected here.
+
+## Source/rasterizer feasibility evidence (2026-10-19)
+
+`tools/probes/font_source_capabilities.c` is an isolated TCC/FreeType source
+probe, not an alternate terminal renderer. It verifies grayscale partial
+coverage for Hack's A at17/23/32em pixels, and a genuinely coloured U+1F600
+bitmap from Noto, including the premultiplied-BGRA channel invariant.
+FreeType2.12.1 passes. This does not test font fallback, full sequences,
+Blit blending/atlas/cache behavior or presentation.
+
+Important measured distinction: requested em23 gives line height27,
+ascender22 and descender-6 for this Hack build. The font layer must fit
+ascent/descent/bearings to the exact requested terminal-cell size. Naively
+using requested em pixels as cell height would recreate clipping. Noto's
+selected bitmap strike is136x128, with10,279 intrinsically coloured pixels;
+it needs deliberate cell fitting, not an assumed requested-size strike.
+
+Candidate sources reviewed without system installation or redistribution:
+
+| Input | Pinned identity | SHA256 |
+| --- | --- | --- |
+| Spleen8x16 |2.2.0, commit0493c34e22791824767c618fed42c434b477662c | `4a3d97ee61a8c86a7525d8c723cb8a14081f395cd2feb4227ba5e3baf0629bae` |
+| Hack-Regular.ttf | Debian fonts-hack3.003-3 | `9f67c8a8cd28498525639437d6fac588c452e8572945c790db7641cc7907a69b` |
+| NotoColorEmoji.ttf | Debian fonts-noto-color-emoji2.042-0+deb12u1 | `e5899ed38b8ed83e08bd3ac5de09791e9d19d288333a796de1d35ad17396f1ec` |
+
+Licenses read: Spleen BSD2-clause; Hack Expat/Bitstream Vera; Noto font OFL1.1
+(other project files have other licensing). Include actual license notices
+with eventual distributed assets; no universal coverage claim follows.
+Downloaded source inputs are currently under `/tmp/blit-font-sources.kyJ1xr/`.
+
+Reproduce the capability check against those extracted headers/assets:
+
+```sh
+BLIT_FONT_SOURCE_ROOT=/tmp/blit-font-sources.kyJ1xr
+tcc -std=c99 \
+  -I"$BLIT_FONT_SOURCE_ROOT/extracted/usr/include/freetype2" \
+  tools/probes/font_source_capabilities.c \
+  /lib/x86_64-linux-gnu/libfreetype.so.6 \
+  -o "$BLIT_FONT_SOURCE_ROOT/font-source-capabilities"
+"$BLIT_FONT_SOURCE_ROOT/font-source-capabilities" \
+  "$BLIT_FONT_SOURCE_ROOT/extracted/usr/share/fonts/truetype/hack/Hack-Regular.ttf" \
+  "$BLIT_FONT_SOURCE_ROOT/extracted/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf"
+```
+
+This probe is not linked into production; no font dependency/default changes
+are made by running it. Choosing the shared glyph interface, fitting and
+shaping contract remains the next implementation step after pixel sizing.

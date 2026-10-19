@@ -3,6 +3,35 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-19 candidate561: exact font pixel-height policy
+
+New font API regression fails before implementation, then passes for exact
+8,16,17,19,23,32,48,64 heights with actual solid-glyph pixel checks. Legacy
+scale, profile-only policy retention, invalid/duplicate/competing controls
+and restoration pass. The shared fixture separately verifies actual offscreen
+GLES2 identity and passes the same assertions. Updated schema assertions pass.
+23px settings survive restart; only the selected policy is saved; a rejected
+ambiguous settings write leaves the durable document/revision unchanged.
+TCC, split/pointer geometry, production damage and three pinned-header adapter
+gates pass. Full regression is running against installed0.99.257/ABI16,
+checking installed binary identity before/after. No live561 result claimed.
+
+Separate source-only feasibility probe `font_source_capabilities.c` compiles
+with TCC and FreeType2.12.1. Hack provides partial grayscale coverage at
+17/23/32em pixels; Noto provides a136x128 U+1F600 bitmap with10,279 coloured
+pixels satisfying premultiplied-BGRA invariants. This is not Blit glyph
+rendering or sequence acceptance. New retro/modern profiles, shared rich-glyph
+data and native-size rasterization remain pending. Source identities and
+licensing review are recorded in `font-evolution-plan.md`.
+
+Completed full run:107pass/7explicit skips/0fail;120-second four-PTY soak
+11,816 snapshots/1,074 resizes. Hibr0.99.257/ABI16 binary fingerprint remains
+`572f88f60eac0656bf6bd86b9a89a9a939de05caf03c5bd1175e87dce8dd4735`.
+Updated shared font fixture separately passes on software and offscreen GLES2,
+and updated schema assertions pass. The new bounded host font-size probe
+passes locally with a real two-pane software server, capture and restoration.
+Package/live verification remains pending here.
+
 ## 2026-10-19:560 physical comparison and package verified
 
 Source `71d55cf`, manifest identity `4c7a629`. Independent builds are
