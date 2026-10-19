@@ -1,0 +1,18 @@
+release: 0.1.553
+package: blit_0.1.553-1_amd64.deb
+package_sha256: e5909075c0a38e1cfdaed21c3d68f19659716e9976caca7df82bfe36956cb010
+source_commit: 86d28b2ff845bbc621e44b3096a3e72a4bd3e2ad
+package_documentation_commit: 86d28b2ff845bbc621e44b3096a3e72a4bd3e2ad
+server_binary_sha256: 430a328849ac6610dde6d33d248b5f6d611dabe51a914be007e7dd32fe8e2c70
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.225
+hibr_abi: 16
+verification:
+  build: 'TCC 0.9.27; server/API/OpenAPI version 0.1.553'
+  focused: 'schema 5/5; direct-KMS pointer request/submission and balanced lifecycle pass'
+  frozen_full: '96 pass, 7 environment-dependent skips, 0 fail'
+  soak: '120 seconds, four PTYs, 11748 snapshots, 1068 resizes'
+  package: 'provenance gate passes; independent rebuild byte-identical'
+  live: 'not deployed; physical pointer-to-frame correlation pending'
+  limits: 'local mock evidence only; no physical performance or rendering claim'
