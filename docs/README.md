@@ -93,6 +93,8 @@ panes, input routing, and diagnostics.
   generated-artifact rules, claim vocabulary, and handoff discipline.
 - [Toolchain baseline](toolchain.md) — the compiler and dependency gates for
   this workspace.
+- [Backend parity plan](backend-parity-plan.md) — shared feature contract,
+  refresh-rate acceptance, SDL hotplug and physical comparison sequence.
 - [Roadmap](roadmap.md) — the ordered implementation milestones and exit
   criteria.
 - [Implementation and verification contract](implementation-and-verification.md)

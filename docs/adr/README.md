@@ -154,6 +154,8 @@ security policy, or compatibility rule requires a new ADR.
 - [0134 — Nonvisual PTY bytes do not paint](0134-nonvisual-pty-bytes-do-not-paint.md)
 - [0135 — Stable native client names](0135-stable-native-client-names.md)
 
+- [0137 — One feature contract across presentation backends](0137-presentation-backend-feature-and-performance-parity.md)
+
 ## Adding an ADR
 
 Use [the template](TEMPLATE.md). Add the record to this index in the same

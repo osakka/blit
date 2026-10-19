@@ -3,6 +3,15 @@
 The roadmap is ordered by dependency. A later milestone must not become a
 second, parallel implementation of an earlier one.
 
+## Next — exact presentation backend parity
+
+The [backend parity plan](backend-parity-plan.md) defines the ordered delivery
+for direct DRM/KMS, SDL/KMSDRM software and SDL/KMSDRM OpenGLES2. Resolve the
+current physical-motion diagnosis first, then establish a common feature
+matrix, comparable diagnostics, composition/scheduling parity, SDL hotplug,
+and identical physical acceptance workloads. All three retain one terminal,
+input and configuration contract. Parity is planned, not yet accepted.
+
 ## In progress — per-output scanout evidence for physical motion diagnosis
 
 Release0.1.552 exposes each direct-KMS output's page-flip completions and
