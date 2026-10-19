@@ -17,8 +17,15 @@ New production-compositor/mock-DRM gate fails before the fix at "idle output
 consumed active pointer motion"; passes afterward for120 idle-first motions,
 both crossing orders, hide, pending flips/latest motion, modeset and no-trail
 pixels. Existing native composition/art/clipping and64 hotplug cycles pass.
-565 builds with TCC; focused API geometry/pixel checks and packaging/live
-before-after comparison are pending. No font, Hibr, schema or SDL changes.
+565 builds with TCC; focused API pointer geometry/pixel checks pass, as do
+reproducible package/artifact checks. Source3bac488/package SHA256
+f2e732b3d63e7df4c757fae1fb5b5e5b1bab7fc47acf35f7816a53c28877e89e
+is API-deployed/version-verified. Native KMS, Modern22px and layout retained.
+Login is running on bottom primary; operator asked to log in and leave input
+still before comparable desktop timing. Do not compare the new login screen
+against the old desktop and call that measured recovery. Physical feel and
+after-run remain pending. No font, Hibr, schema or SDL changes. This was
+targeted565 verification, not a new full112-gate run (that belongs to564).
 
 ## 2026-10-19 revised priority: mouse101, then SDL104
 

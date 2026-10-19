@@ -8,3 +8,8 @@ update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f
 hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
 hibr_version: 0.99.225
 hibr_abi: 16
+verification:
+  focused: 'Production KMS pointer phase gate red before/green after;120 idle-first motions, crossings/hide/deferred/latest/modeset/no-trail pixels; composition/art/graphics clip/hotplug64/API pointer geometry and25472 pixel checks pass'
+  package: 'TCC; byte-identical rebuild; artifact/manifest pass'
+  physical: 'API-deployed/version565; native KMS and Modern22px retained; desktop after-run awaits login/hands-off'
+  limitations: 'Targeted verification only, not a new full564 suite; physical recovery not yet claimed; no SDL fix'

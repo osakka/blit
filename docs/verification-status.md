@@ -3,6 +3,28 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-19 pointer565: independent output phase regression
+
+Clean564 API sweep:180 motions requested60Hz over3s,73 confirmed DP flips
+in3.090s (~23.6Hz), zero physical mouse events. Network arrival jitter is
+included. Source inspection found global previous-pointer consumption by an
+idle, differently phased output. Production-compositor/mock-DRM regression
+fails before the fix at idle-output consumption and passes afterward.
+ADR0149 makes submitted cursor state per-output; no scheduler/input/font/SDL
+changes. The same gate covers120 idle-first motions on both outputs, crossing
+orders, hide, pending flips/latest position, modeset and exact no-trail pixels.
+
+Targeted565 checks pass: native composition (including48 art and64 held-scene
+frames plus128 full-reference frames), pointer art, clipped RGB/RGBA graphics,
+64 output hotplug cycles, pointer geometry and25,472 pointer RGBA pixels.
+TCC server/helper builds, byte-identical package rebuild and artifact/manifest
+checks pass. This is NOT a rerun of564's full112 checks.
+565 source3bac488, package
+f2e732b3d63e7df4c757fae1fb5b5e5b1bab7fc47acf35f7816a53c28877e89e
+is API-deployed/version-verified; native KMS and Modern22px retained. Waiting
+for user login/hands-off for comparable desktop after-run; physical motion
+acceptance remains pending. Baseline evidence build/mouse101-564-clean60/.
+
 ## 2026-10-19 fonts564 deployed: measured native antialiasing
 
 Final archive sourceda7e32d, SHA256
