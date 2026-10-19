@@ -162,6 +162,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0142 — Service ready input at HTTP admission](0142-service-ready-input-at-http-admission.md)
 - [0143 — Native placement uses primary-relative coordinates](0143-native-placement-uses-primary-relative-coordinates.md)
 - [0144 — Explicit font cell pixel size](0144-explicit-font-cell-pixel-size.md)
+- [0148 — Explicit presentation configuration source](0148-explicit-presentation-configuration-source.md)
 
 ## Adding an ADR
 

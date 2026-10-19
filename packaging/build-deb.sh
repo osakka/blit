@@ -202,9 +202,10 @@ if [ ! -f /etc/blit/blit.env ]; then
     umask 077
     cat > /etc/blit/blit.env <<'CONFIG'
 BLIT_BIND_ADDRESS=0.0.0.0
-# The validated physical-motion test profile is direct DRM/KMS.  Keep this
-# explicit at the service boundary; otherwise a restart silently selects the
-# SDL/KMSDRM path and invalidates renderer comparisons.
+# Startup fallback only: saved /v1/settings document.server.display_backend
+# takes precedence. Use the API to change/save the desired backend, then
+# restart. kms=native DRM/KMS; sdl=SDL. kmsdrm is an SDL_VIDEODRIVER value,
+# never a BLIT_DISPLAY_BACKEND value. Invalid defaults are diagnosed.
 BLIT_DISPLAY_BACKEND=kms
 BLIT_UPDATE_TOKEN_FILE=/etc/blit/update.token
 # Issue #55. This package exists to present a desktop, so an output with

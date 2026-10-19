@@ -26,6 +26,13 @@ raise 'font size policy observation missing' unless
 raise "unexpected path count #{paths.length}" unless paths.length == 45
 
 settings = schema.fetch('components').fetch('schemas').fetch('Settings')
+provenance = settings.dig('properties','effective','properties','presentation_configuration')
+raise 'presentation provenance contract missing' unless provenance &&
+  provenance['additionalProperties'] == false &&
+  provenance['required'].sort == %w[backend_source backend_environment
+    backend_environment_valid backend_environment_overridden configuration_valid
+    renderer_source renderer_applicable video_driver_active].sort &&
+  provenance.dig('properties','backend_source','enum') == %w[saved-settings environment default]
 appearance = schema.fetch('components').fetch('schemas').fetch('PointerAppearance')
 raise 'pointer appearance contract changed' unless
   appearance.dig('properties','shape','enum') == %w[arrow hand precision] &&

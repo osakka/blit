@@ -1,5 +1,21 @@
 # Current state and restart point
 
+## 2026-10-19 config-only maintenance563 (Blit108)
+
+The user confirms all monitors work after restoring native KMS on10.54;
+the panel reports the correct backend. Saved API settings own this choice.
+The invalid environment fallback `kmsdrm` was corrected to `kms`, with a
+root-owned backup at `/etc/blit/blit.env.before-108`; credentials were preserved.
+The service must reload its environment at the next service restart.
+
+This maintenance branch is based on deployed561, not the unfinished new-font
+candidate562. It adds explicit API provenance, invalid-default diagnostics and
+API-accessible recovery; it does not change rendering, input or font engines.
+The eleven-case provenance gate passes; packaging/full regression and live
+deployment are pending. See ADR0148 and Blit108. Historical entries below
+describe earlier candidates, not current live state.
+
+
 ## 2026-10-19 candidate561: explicit font pixel height, new profiles still pending
 
 Blit#107/ADR0144 extend the canonical font API with integer `size_px`8..64,
