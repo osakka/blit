@@ -9,7 +9,7 @@ smooth Hack/Noto colour (`blit-modern`). Original Terminus remains default.
 The shared FreeType rasterizer is linked into the server and consumed by
 native KMS, SDL software and SDL/OpenGLES2. Exact cell sizing, per-context
 bounded caching, premultiplied-alpha handling and transactional profile/size
-replacement are implemented. Production adapters pass399 glyph samples each
+replacement are implemented. Production adapters pass513 glyph samples each
 across all57 sizes8..64; native KMS is exact, SDL allows2 levels per channel.
 SDL atlas-collision tests pass. API tests pass all sizes, size-policy retention,
 canonical save/restart and missing-font rollback. Actual installed Hibr native

@@ -53,6 +53,11 @@ Dir.mktmpdir('blit-modern-api') do |work|
       raise "incorrect #{size}px metrics" unless active['size_px'] == size && active.dig('cell_pixels','height') == size && active['id'] == 'blit-modern'
     end
     request.call('PUT', '/v1/fonts', {size_px:23})
+    [1.1, 1.7, 2.3, 3.0].each do |scale|
+      active = request.call('PUT', '/v1/fonts', {scale:scale}).fetch('active')
+      raise 'modern legacy scale policy failed' unless active['sizing'] == 'scale' && active['scale'] == scale && active['rasterization'] == 'native-antialiased'
+    end
+    request.call('PUT', '/v1/fonts', {size_px:23})
     active = request.call('PUT', '/v1/fonts', {font_id:'blit-hibr-spleen16'}).fetch('active')
     raise 'retro policy changed' unless active['size_px'] == 23 && active['rasterization'] == 'bitmap-nearest'
     active = request.call('PUT', '/v1/fonts', {font_id:'blit-modern'}).fetch('active')

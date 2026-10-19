@@ -14,7 +14,7 @@ int main(int argc, char **argv)
     output.mode.hdisplay = 160; output.mode.vdisplay = 96;
     output.back.map = pixels; output.back.pitch = 160 * 4;
     for (size = 8; size <= 64; ++size) {
-        uint32_t scalars[] = {'A', 'g', 0x2588, 0x2500, 0x1f600, '9', 0x25c6};
+        uint32_t scalars[] = {'A', 'g', 0x2588, 0x2500, 0x1f600, '9', 0x25c6, 0xfe0f, 0x200d};
         unsigned index;
         BlitRaster *raster = blit_raster_open(&font, argv[2], argv[3], (size + 1) / 2, size);
         CHECK(raster); blit_raster_attach(&font, raster);

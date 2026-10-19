@@ -68,7 +68,7 @@ recreation also clears those identities. The PSF loader retains independent
 standalone gates through optional raster callbacks, not another text engine.
 
 `font_backend_raster_gate.sh` checks production native KMS and SDL atlas/
-upload/queue/flush at all57 heights,399 glyph samples per backend. Native
+upload/queue/flush at all57 heights,513 glyph samples per backend. Native
 pixels/guard regions are exact; SDL allows at most2 channel levels for blend
 rounding. SDL fixtures force atlas hash collisions before readback.
 `modern_font_api_gate.rb` tests all sizes, profile policy preservation, missing
@@ -76,6 +76,13 @@ colour-file rollback and saved restart restoration. Asset/license hashes are
 checked. The actual installed Hibr Control Panel was driven with the modern
 font through slider and one-pixel keyboard actions; no Hibr code changed.
 Final full regression, package identity and physical review remain separate.
+
+The final scalar review identified variation selectors/joiners falling through
+to a visible missing-glyph marker. The shared rasterizer now emits transparent
+coverage for ZWNJ/ZWJ and both variation-selector ranges. All57-size module
+tests check zero ink; KMS and both SDL tests include invisible controls. This
+does not implement sequence shaping or force an emoji presentation. Modern
+API tests also exercise legacy scales1.1/1.7/2.3/3.0, then restore pixel mode.
 
 ## Primary references
 

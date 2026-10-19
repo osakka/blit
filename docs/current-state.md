@@ -12,7 +12,7 @@ pending geometry before texel replacement. Build/runtime FreeType dependency
 and pinned licensed assets are declared. No Hibr core edits.
 
 Production KMS pixels/guards match exactly and both SDL paths match within2
-channel levels across all57 heights8..64 and399 glyph samples each. SDL slot
+channel levels across all57 heights8..64 and513 glyph samples each. SDL slot
 collision checks and API profile/size/save/restart/missing-colour rollback pass.
 The actual installed Hibr Control Panel passes slider/+1/-1 with modern font;
 captured sample inspected at `build/font-modern-panel-evidence/`. Native KMS
@@ -20,6 +20,10 @@ Valgrind:7,364 allocations/frees, zero errors/leaks. This is not physical KMS
 or universal Unicode approval. Full regression/reproducible package/API deploy
 and physical capture remain pending; live host remains561, existing layout
 and font unchanged. The earlier module-only checkpoint below is historical.
+Final scalar review fixed invisible selectors/joiners previously falling
+through to a visible missing-glyph marker; module and all three adapter gates
+now cover them. Modern legacy scale writes1.1/1.7/2.3/3.0 pass too. The earlier
+exploratory full run reports107pass/7skip/0fail, but is not frozen acceptance.
 
 ## 2026-10-19: smooth/colour raster foundation; not deployed
 

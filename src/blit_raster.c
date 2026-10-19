@@ -94,6 +94,13 @@ static int protected_geometry(uint32_t scalar)
     return scalar >= 0x2500 && scalar <= 0x259f;
 }
 
+static int invisible_format(uint32_t scalar)
+{
+    return scalar == 0x200c || scalar == 0x200d ||
+        (scalar >= 0xfe00 && scalar <= 0xfe0f) ||
+        (scalar >= 0xe0100 && scalar <= 0xe01ef);
+}
+
 static int draw_outline(BlitRaster *raster, uint32_t scalar, RasterEntry *entry)
 {
     FT_Face face = raster->outline;
@@ -188,6 +195,7 @@ int blit_raster_get(BlitRaster *raster, uint32_t scalar, int columns,
     next.glyph.height = raster->height;
     next.glyph.baseline = raster->baseline;
     next.glyph.format = raster->colour && !protected_geometry(scalar) &&
+        !invisible_format(scalar) &&
         (!raster->outline || !FT_Get_Char_Index(raster->outline, scalar)) &&
         FT_Get_Char_Index(raster->colour, scalar) ?
         BLIT_RASTER_RGBA_PREMULTIPLIED : BLIT_RASTER_COVERAGE;
@@ -198,7 +206,8 @@ int blit_raster_get(BlitRaster *raster, uint32_t scalar, int columns,
     next.pixels = calloc(1, bytes);
     if (!next.pixels) return 0;
     next.glyph.pixels = next.pixels;
-    if (next.glyph.format == BLIT_RASTER_RGBA_PREMULTIPLIED)
+    if (invisible_format(scalar)) result = 1;
+    else if (next.glyph.format == BLIT_RASTER_RGBA_PREMULTIPLIED)
         result = draw_colour(raster, scalar, &next);
     else if (!protected_geometry(scalar)) result = draw_outline(raster, scalar, &next);
     if (result < 0) { free(next.pixels); return 0; }

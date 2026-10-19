@@ -61,6 +61,16 @@ int main(int argc, char **argv)
                 if (p[0] != p[1] || p[1] != p[2]) ++coloured;
             }
         CHECK(coloured > 0);
+        {
+            uint32_t invisible[] = {0x200c, 0x200d, 0xfe0e, 0xfe0f, 0xe0100};
+            int mark, byte;
+            for (mark = 0; mark < 5; ++mark) {
+                CHECK(blit_raster_get(raster, invisible[mark], 1, &again));
+                CHECK(again.format == BLIT_RASTER_COVERAGE && !again.fallback);
+                for (byte = 0; byte < again.stride * again.height; ++byte)
+                    CHECK(again.pixels[byte] == 0);
+            }
+        }
         CHECK(!blit_raster_get(raster, 0xd800, 1, &again));
         CHECK(!blit_raster_get(raster, 0x110000, 1, &again));
         CHECK(!blit_raster_get(raster, 'A', 3, &again));
