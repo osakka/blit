@@ -7,18 +7,85 @@ static int failures;
 static BlitSurface subject;
 static BlitSession owner;
 
+static void sdl_output_presentation_gate(void)
+{
+    BlitRuntime *r = calloc(1, sizeof(*r));
+    const char *driver = getenv("BLIT_TEST_VIDEO_DRIVER");
+    const char *renderer = getenv("BLIT_TEST_RENDERER");
+    char json[16384];
+    int i, step;
+    if (!driver) driver = "dummy";
+    if (!renderer) renderer = "software";
+    SDL_SetHint(SDL_HINT_VIDEO_DRIVER, driver);
+    if (!r || !SDL_Init(SDL_INIT_VIDEO)) exit(2);
+    if (strcmp(SDL_GetCurrentVideoDriver(), driver) != 0) exit(2);
+    r->display_count = r->output_count = 2;
+    r->render_interval_ms = 1000;
+    for (i = 0; i < 2; ++i) {
+        r->outputs[i].window = SDL_CreateWindow("output-counter-gate", 64, 64, 0);
+        r->outputs[i].renderer = SDL_CreateRenderer(r->outputs[i].window, renderer);
+        if (!r->outputs[i].window || !r->outputs[i].renderer) exit(2);
+        if (strcmp(SDL_GetRendererName(r->outputs[i].renderer), renderer) != 0) exit(2);
+        r->outputs[i].display_id = r->displays[i].id = i + 1;
+        r->displays[i].refresh_hz = i == 0 ? 60.0 : 120.0;
+        set_display_geometry(&r->displays[i], i * 64, 0, 64, 64);
+    }
+    for (step = 0; step < 3; ++step) {
+        int output = step == 2 ? 1 : 0;
+        char expected[64];
+        char *second, *calls;
+        SDL_SetRenderDrawColor(r->outputs[output].renderer, 20, 30, 40, 255);
+        SDL_RenderClear(r->outputs[output].renderer);
+        finish_sdl_output(r, output, 0);
+        render_scheduler_json(r, json, sizeof(json));
+        second = strstr(json, "\"display_id\":\"display-2\"");
+        calls = second ? strstr(second, "\"present_calls\":") : NULL;
+        snprintf(expected, sizeof(expected), "\"present_calls\":%d,", step == 2 ? 1 : 0);
+        if (!calls || strncmp(calls, expected, strlen(expected)) != 0) {
+            fprintf(stderr, "SDL_OUTPUT_COUNTER_FAIL step=%d expected=%s json=%s\n", step, expected, json);
+            exit(1);
+        }
+        calls = strstr(json, "\"present_calls\":");
+        snprintf(expected, sizeof(expected), "\"present_calls\":%d,", step == 0 ? 1 : 2);
+        if (!calls || strncmp(calls, expected, strlen(expected)) != 0 ||
+            r->diagnostic_present_calls != (unsigned long long)step + 1) exit(1);
+    }
+    /* Global timing is deliberately poisoned: output JSON must use its own
+       measured durations, including when another renderer presented last. */
+    r->diagnostic_last_sdl_present_ms = 123456.0;
+    r->diagnostic_max_sdl_present_ms = 123456.0;
+    render_scheduler_json(r, json, sizeof(json));
+    if (strstr(json, "123456.000")) exit(1);
+    if (!strstr(json, "\"target_interval_us\":16666,") ||
+        !strstr(json, "\"target_interval_us\":8333,")) exit(1);
+    destroy_outputs(r);
+    for (i = 0; i < 2; ++i) {
+        if (r->outputs[i].present_calls || r->outputs[i].last_present_ms ||
+            r->outputs[i].max_present_ms) exit(1);
+    }
+    free(r);
+    SDL_Quit();
+    printf("SDL_OUTPUT_COUNTER_PASS driver=%s renderer=%s outputs=2 idle=unchanged counts=2,1 aggregate=3 timing=independent modes=60,120 teardown=reset\n", driver, renderer);
+}
+
 static void sdl_held_scene_pointer_gate(void)
 {
     BlitRuntime *r = calloc(1, sizeof(*r));
+    const char *driver = getenv("BLIT_TEST_VIDEO_DRIVER");
+    const char *renderer_name = getenv("BLIT_TEST_RENDERER");
     SDL_Window *window;
     SDL_Renderer *renderer;
     int step, x, y;
     if (!r) exit(2);
-    SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+    if (!driver) driver = "dummy";
+    if (!renderer_name) renderer_name = "software";
+    SDL_SetHint(SDL_HINT_VIDEO_DRIVER, driver);
     if (!SDL_Init(SDL_INIT_VIDEO)) exit(2);
+    if (strcmp(SDL_GetCurrentVideoDriver(), driver) != 0) exit(2);
     window = SDL_CreateWindow("held-scene-gate", 160, 128, 0);
-    renderer = SDL_CreateRenderer(window, "software");
+    renderer = SDL_CreateRenderer(window, renderer_name);
     if (!window || !renderer) exit(2);
+    if (strcmp(SDL_GetRendererName(renderer), renderer_name) != 0) exit(2);
     r->output_count = r->display_count = 1;
     r->outputs[0].window = window; r->outputs[0].renderer = renderer;
     r->outputs[0].display_id = r->displays[0].id = 1;
@@ -397,6 +464,7 @@ int main(void)
     nonvisual_terminal_bytes_gate();
     stable_client_names_gate();
     sdl_held_scene_pointer_gate();
+    sdl_output_presentation_gate();
     if (failures) return 1;
     puts("SURFACE_DAMAGE_PASS union=both-orders DEC=union scroll=union quiet=bounded join=bounded wait=nonspinning UTF8=large-PTY+10-fragmentations stable_client_names=verified");
     return 0;

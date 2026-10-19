@@ -1,5 +1,36 @@
 # Current state and restart point
 
+## 2026-10-19 candidate0.1.555: SDL output diagnostics are independent
+
+Parity implementation found SDL output diagnostics publishing global
+presentation counts/timings for every output. Candidate0.1.555 stores those
+values on each output, updates only the presented output, and resets them
+when its resources are destroyed. Aggregate runtime metrics remain aggregate.
+The existing OpenAPI fields now document their exact semantics. No SDL
+present-return measurement is described as physical scanout latency.
+
+A production-code fixture creates two independent SDL software windows and
+renderers. Presenting only the first previously caused the idle second to
+report one present: the new regression was observed failing before the fix.
+It now verifies counts2/1 with aggregate3, independent timing, distinct60/120Hz
+scheduling periods and teardown reset. These are local software and scheduler
+results, not physical multi-monitor acceptance. Schema suite passes5/0/0;
+the full suite passes96 gates with7 explicit skips and0 failures. Its120-second
+four-PTY soak completed11,252 snapshots and1,023 resizes. Live10.54 remains on
+the tagged0.1.553 checkpoint.
+
+The shared wallpaper-damage fixture also passes with actual SDL
+`video_driver=offscreen`, `renderer=opengles2` and software GL. This is now
+repeatable as `tools/run-gates.sh gles`, an explicit suite requiring EGL/GLES.
+That suite also passes the two-renderer counter/timing-isolation fixture with
+both renderers verified as OpenGLES2. It proves these GL paths, not physical
+KMSDRM scanout. The live read-only observation still reports direct KMS0.1.553
+and currently one DP canvas at59.997Hz.
+
+The existing held-scene pointer fixture now uses the selected renderer too;
+its12 positions pass every-pixel comparison on both software and GLES2,
+while preserving pending visual damage until the scene release.
+
 ## 2026-10-19 backend parity implementation starts
 
 The operator requested a release checkpoint before parity implementation.

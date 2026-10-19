@@ -735,6 +735,9 @@ typedef struct {
     unsigned long long display_id;
     int initialized;
     int vsync_enabled;
+    unsigned long long present_calls;
+    double last_present_ms;
+    double max_present_ms;
     int render_width;
     int render_height;
     int viewport_width;
@@ -3182,13 +3185,13 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
             runtime->direct_kms ?
                 (have_kms_info ? kms_info.last_present_ms :
                     runtime->diagnostic_last_kms_present_ms) :
-                runtime->diagnostic_last_sdl_present_ms,
+                runtime->outputs[i].last_present_ms,
             runtime->direct_kms ?
                 (have_kms_info ? kms_info.max_present_ms :
                     runtime->diagnostic_max_kms_present_ms) :
-                runtime->diagnostic_max_sdl_present_ms,
+                runtime->outputs[i].max_present_ms,
             have_kms_info ? kms_info.present_calls :
-                runtime->diagnostic_present_calls,
+                (runtime->direct_kms ? 0ULL : runtime->outputs[i].present_calls),
             have_kms_info ? "true" : "false",
             have_kms_info ? kms_info.flip_completions : 0ULL,
             have_kms_info ? kms_info.vblank_sequence : 0U,
@@ -22524,6 +22527,9 @@ static void destroy_outputs(BlitRuntime *runtime)
         runtime->outputs[i].background_capacity = 0;
         SDL_DestroyRenderer(runtime->outputs[i].renderer);
         SDL_DestroyWindow(runtime->outputs[i].window);
+        runtime->outputs[i].present_calls = 0;
+        runtime->outputs[i].last_present_ms = 0.0;
+        runtime->outputs[i].max_present_ms = 0.0;
     }
     runtime->output_count = 0;
 }
@@ -24715,6 +24721,10 @@ static void finish_sdl_output(BlitRuntime *runtime, int output_index,
     if (captured)
         runtime->outputs[output_index].screenshot_presented = 1;
     present_ms = (double)(monotonic_us() - present_started_us) / 1000.0;
+    runtime->outputs[output_index].last_present_ms = present_ms;
+    if (present_ms > runtime->outputs[output_index].max_present_ms)
+        runtime->outputs[output_index].max_present_ms = present_ms;
+    ++runtime->outputs[output_index].present_calls;
     runtime->diagnostic_last_sdl_present_ms = present_ms;
     if (present_ms > runtime->diagnostic_max_sdl_present_ms)
         runtime->diagnostic_max_sdl_present_ms = present_ms;

@@ -33,6 +33,19 @@ for all three backends. Every row is pending full parity acceptance.
 
 ## First executable increment
 
+Candidate0.1.555 corrects each SDL output's presentation counters and durations
+to use that output's state instead of copying global values. The production
+`surface_damage_gate.c` fixture exercises two independent software renderers:
+counts2/1, aggregate3, idle-output isolation, independent timing,60/120Hz
+scheduler periods and teardown reset. It failed before the fix because the
+idle second output inherited the first output's count. Hardware completion
+and multi-connector behavior still require their own physical evidence.
+
+`tools/run-gates.sh gles` passes the shared wallpaper-damage fixture through
+SDL offscreen/OpenGLES2 using software GL. Identity and pixels are checked;
+the two-renderer output counter fixture also passes on verified GLES2.
+The physical KMSDRM and hardware timing rows remain pending.
+
 `tools/tests/sdl_wallpaper_damage_gate.rb` now takes explicit test driver and
 renderer parameters. It verifies ready/backend/video-driver/renderer identity
 before accepting pixel evidence, resolves a real display ID from the API,

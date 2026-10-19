@@ -3,6 +3,39 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-19 candidate0.1.555: independent SDL output presentation metrics
+
+The production SDL finish path now counts/times each output independently.
+The existing per-output API fields retain their shape and gain explicit
+OpenAPI semantics; runtime aggregate counters remain unchanged. Output
+resource teardown resets the new counters. The TCC build succeeds.
+
+Red/green evidence: before the fix, a production-code two-renderer fixture
+presented output1 once and observed the idle output2 incorrectly reporting
+`present_calls:1`. After the fix, the same fixture passes output counts2/1,
+aggregate3, global-timing isolation,60/120Hz scheduling periods and reset at
+resource teardown. The held-scene pointer pixel fixture also passes. The
+schema/API suite passes5 gates with0 skips and0 failures. Full suite passes96
+gates with7 explicit skips and0 failures. Its120-second four-PTY soak completed
+11,252 snapshots and1,023 resizes. Skips are the three adapter gates without
+the pinned checkout, explicit QEMU oracle, package validation without a new
+package, and the two physical-host gates. Candidate0.1.555 has not been packaged or deployed; live10.54
+remains0.1.553. No physical SDL scanout or cadence claim follows from this test.
+
+`tools/run-gates.sh gles` passes2/0/0. It runs the same wallpaper-damage and
+image-deletion assertions through SDL offscreen/OpenGLES2 with software GL,
+checking the actual renderer identity before accepting pixels. The second
+gate runs the production output-metrics fixture with two verified GLES2
+renderers, checking independent counters/timing and teardown reset. This is real
+GLES2 coverage for these fixtures; GPU/KMSDRM/multi-output scanout
+acceptance remains open. The suite is explicit because standard `all` also
+runs on environments without EGL/GLES.
+
+The same held-scene pointer fixture now selects the requested driver/renderer
+and verifies their identity. Its12 positions and complete pixel comparisons
+pass on software and GLES2, preserving pending visuals until release. This
+extends the existing fixture rather than creating a separate GL oracle.
+
 ## 2026-10-19: KMS checkpoint and first parity fixture
 
 The authenticated live API returned0.1.553. Annotated tag `v0.1.553` was

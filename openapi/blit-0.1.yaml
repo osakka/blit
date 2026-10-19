@@ -2541,7 +2541,7 @@ components:
                   target_interval_us: {type: integer, minimum: 1}
                   target_interval_ms: {type: number, minimum: 0}
                   missed_deadlines: {type: integer, minimum: 0}
-                  last_present_ms: {type: number, minimum: 0}
+                  last_present_ms: {type: number, minimum: 0, description: Duration of this output's last presentation call. SDL measures SDL_RenderPresent return time; this is not confirmed scanout latency.}
                   kms_phases:
                     type: object
                     description: Last composed KMS frame phases in milliseconds; zero on SDL. Drawn cells count requested view damage, not pointer pixels. Not an input-latency measurement.
@@ -2552,8 +2552,8 @@ components:
                       copy_ms: {type: number, minimum: 0}
                       submit_ms: {type: number, minimum: 0}
                       drawn_cells: {type: integer, minimum: 0}
-                  max_present_ms: {type: number, minimum: 0}
-                  present_calls: {type: integer, minimum: 0}
+                  max_present_ms: {type: number, minimum: 0, description: Maximum presentation-call duration for this output over its current resource lifetime.}
+                  present_calls: {type: integer, minimum: 0, description: Presentation calls for this output over its current resource lifetime. SDL counts SDL_RenderPresent calls; direct KMS counts submitted frames. Neither is a physical refresh-rate measurement.}
                   kms_scanout:
                     type: object
                     description: >-

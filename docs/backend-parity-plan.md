@@ -1,6 +1,6 @@
 # Presentation backend parity plan
 
-Status: planned, 2026-10-19. Implementation and physical acceptance remain open.
+Status: implementation in progress, 2026-10-19. Physical acceptance remains open.
 
 Tracking: [Blit #104](https://git.home.arpa/itdlabs/blit/issues/104).
 Decision: [ADR0137](adr/0137-presentation-backend-feature-and-performance-parity.md).

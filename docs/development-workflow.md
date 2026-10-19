@@ -78,11 +78,23 @@ categories above, so the narrowest run is one suite and the pre-handoff run is
 ```sh
 tools/run-gates.sh terminal          # the narrowest gate for a terminal change
 tools/run-gates.sh all               # before handoff
+tools/run-gates.sh gles              # explicit offscreen GLES2 composition check
 BLIT_GATE_PACKAGE=blit_X.Y.Z-1_amd64.deb tools/run-gates.sh packaging
 BLIT_GATE_LIVE=http://HOST:8080 tools/run-gates.sh timing
 ```
 
-Prefer it over invoking a gate directly. The gates do not share one calling
+Prefer it over invoking a gate directly.
+
+The explicit `gles` suite runs the shared wallpaper-damage fixture and the
+held-scene pointer and two-renderer output-metrics fixtures through SDL
+offscreen/OpenGLES2 using software GL. It requires working
+EGL/GLES libraries and fails if actual renderer identity differs. It is
+separate from `all`, which remains runnable without EGL/GLES. Record its
+result alongside `all` for SDL changes; inability to run it is an open
+coverage boundary. This proves GL composition on software GL, not GPU/KMSDRM
+scanout or physical refresh-rate performance.
+
+The gates do not share one calling
 convention: some take `BLIT_TEST_SERVER`, some `BLIT_GATE_SERVER`, some
 `BLIT_GATE_PORT`, some a positional argument; `terminal_conformance.rb` and
 `terminal_soak_gate.rb` assert against a server the caller must start; and
@@ -104,13 +116,15 @@ is correct. It is not a statement about the behaviour it cannot reach, and the
 distance between those two has cost this project multiple releases. The known
 blind spots, so that a green run is read for what it is:
 
-**The renderer under test is not the renderer that ships.** Every renderer
-gate runs against SDL's `software` backend in a container with no GPU; the
-physical host presents through `opengles2`. The two disagree on whether a
-render target keeps its contents between passes, and an optimisation that
-assumed it did produced a visible screensaver trail that survived two
-"fixed" claims. Five reproductions were written for that defect and all five
-passed, because all five ran on `software`. See ADR 0070 and issue #79.
+**Renderer coverage depends on the selected suite.** Historically the SDL
+renderer gates ran only against `software` in a container without a GPU,
+while the physical SDL path used `opengles2`. An optimisation that assumed
+render-target persistence produced a visible screensaver trail that survived
+two "fixed" claims. Five reproductions passed because all five ran on
+`software`. See ADRs0070/0099 and issue79. The explicit `gles` suite now covers
+wallpaper damage/deletion, held-scene pointer pixels and independent output
+metrics through offscreen/OpenGLES2 using software GL. The remaining fixtures
+and physical KMSDRM/GPU timing still require matching-backend acceptance.
 
 **A gate that cannot fail is not evidence.** Every gate should be run once
 against the reverted change and observed to fail; a gate added alongside a fix

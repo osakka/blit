@@ -1183,6 +1183,14 @@ driver selected at startup (for example `kmsdrm`); `direct_kms` is `true` only
 for Blit's separate direct DRM/KMS backend. `renderer` is the SDL renderer
 (for example `opengles2`), not the video driver.
 
+Each `render.outputs[]` entry's `present_calls`, `last_present_ms` and
+`max_present_ms` belongs to that output's resource lifetime. SDL values count
+and time `SDL_RenderPresent` calls; direct KMS counts submitted frames.
+An idle output does not inherit another output's counts or timing. Runtime
+performance totals remain aggregate counters. SDL call completion does not
+prove physical scanout; direct-KMS flip/vblank evidence remains in
+`kms_scanout`.
+
 ```sh
 curl --fail --header "Authorization: Bearer $BLIT_AUTH_TOKEN" \
   http://HOST:8080/v1/diagnostics/observation > observation.json

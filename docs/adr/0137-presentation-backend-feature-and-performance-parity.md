@@ -1,6 +1,6 @@
 # ADR 0137: One feature contract across presentation backends
 
-- Status: planned; implementation and acceptance pending
+- Status: implementation in progress; parity acceptance pending
 - Date: 2026-10-19
 - Issue: [Blit #104](https://git.home.arpa/itdlabs/blit/issues/104)
 - Related: ADRs0004,0006,0044,0099,0129,0130,0136
@@ -38,7 +38,7 @@ are release gates, not a lower configured cadence or a universal guarantee.
 - Seamless SDL hotplug requires verified SDL-owned connector lifecycle;
   follow ADR0129's dependency boundary rather than a parallel DRM inventory.
 
-No runtime or API compatibility change occurs in this documentation cycle.
+The initial decision introduced no runtime or API compatibility change.
 Future schema additions are additive and implemented schema-first. Existing
 selection/settings remain valid; any fallback is observable in runtime identity.
 

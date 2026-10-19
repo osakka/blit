@@ -28,10 +28,11 @@ Suites (from docs/development-workflow.md "Required gates"):
   terminal    TCC terminal conformance, session lifecycle, write/resize
   font        glyph coverage, UTF-8 snapshots, font API, atlas filter
   renderer    dummy-backend pixel, damage, pointer, graphics cache
+  gles        explicit offscreen OpenGLES2 composition (requires working EGL/GLES)
   hibr        singleton ownership and resume fail-closed behaviour
   lifecycle   restart, shutdown, supervised update handling
   timing      measured presentation cadence and the bounded PTY soak
-  all         every suite above (the pre-handoff run)
+  all         standard suites above; run gles separately where EGL/GLES is available
 
 Environment:
   BLIT_GATE_BINARY   server under test  (default build/blit/blit-server)
@@ -279,6 +280,16 @@ suite_renderer() {
     run_gate display_layout_gate.rb ruby tools/tests/display_layout_gate.rb
 }
 
+suite_gles() {
+    run_gate sdl_gles_wallpaper_damage env \
+        BLIT_GATE_BINARY="$BINARY" BLIT_GATE_FONT="$FONT" BLIT_GATE_LIBS="$LIBS" \
+        BLIT_TEST_VIDEO_DRIVER=offscreen BLIT_TEST_RENDERER=opengles2 \
+        LIBGL_ALWAYS_SOFTWARE=1 ruby tools/tests/sdl_wallpaper_damage_gate.rb
+    run_gate sdl_gles_scene_and_metrics env \
+        BLIT_TEST_VIDEO_DRIVER=offscreen BLIT_TEST_RENDERER=opengles2 \
+        LIBGL_ALWAYS_SOFTWARE=1 sh tools/tests/surface_damage_gate.sh
+}
+
 suite_hibr() {
     run_gate auxiliary_native_gate.rb ruby tools/tests/auxiliary_native_gate.rb
     run_gate auxiliary_desktop_gate.rb env BLIT_NATIVE_AUXILIARY_DESKTOP=1 BLIT_NATIVE_AUXILIARY_RESIZE=1 ruby tools/tests/auxiliary_native_gate.rb
@@ -352,7 +363,7 @@ suite_timing() {
 for argument in "$@"; do
     case "$argument" in
         -h|--help) usage ;;
-        schema|terminal|font|renderer|hibr|lifecycle|packaging|timing|all) ;;
+        schema|terminal|font|renderer|gles|hibr|lifecycle|packaging|timing|all) ;;
         *) echo "run-gates: unknown suite '$argument'" >&2; usage ;;
     esac
 done
