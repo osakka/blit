@@ -8,3 +8,11 @@ update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f
 hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
 hibr_version: 0.99.225
 hibr_abi: 16
+verification:
+  regression: '104 pass, 5 explicit skips, 0 fail; GLES 6 pass, 0 skip, 0 fail'
+  focused: '11 provenance/recovery cases; schema; main integration build; panel callbacks on 561 and 563, UI, Mouse and catalogue lifecycle'
+  soak: '120 seconds, four PTYs, 11512 snapshots, 1046 resizes'
+  package: 'Byte-identical rebuild; manifest and package artifact checks; skipped update-restart gate passes separately with this archive'
+  physical: 'API-deployed 563 on10.54; ready native KMS; DP-1 and HDMI-A-1 presenting; three panes and bottom-primary login retained; clean revision213 and saved document checksum unchanged'
+  configuration: 'Saved API settings authoritative; valid kms environment fallback reloaded; SDL preference inactive; panel0.1.7 installed and checksum verified'
+  limitations: 'No new visual acceptance; QEMU and dedicated live fixtures not run; SDL multi-output startup and unfinished font candidate not fixed or deployed'

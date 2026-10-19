@@ -3,6 +3,37 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-19 config-only563 deployed (Blit108 / ADR0148)
+
+Maintenance artifact source2fb6f7f is based on released561, not font candidate562.
+TCC build and eleven provenance/invalid-default/API-repair cases pass. Full
+regression:104pass/5skip/0fail; GLES:6pass/0skip/0fail. The skipped package
+artifact and update-restart checks pass separately with the actual563 archive;
+rebuild is byte-identical and manifest checks pass. Remaining skipped boundaries
+are QEMU and the two explicit live fixtures, not claimed as passes.
+The120-second four-PTY soak completes11,512 snapshots and1,046 resizes.
+Installed Hibr during final integration/end checks is0.99.262/ABI16,
+SHA2562277b8f5557d972a34eaa3b3f7ee3b82512dd7e76574993cf9a45670fba040da;
+do not infer a frozen earlier runtime from that observation. The adapter uses
+the pinned0.99.225/ABI16 headers recorded in the manifest.
+
+API deployment on10.54 verifies563, ready native DRM/KMS, both DP-1 and
+HDMI-A-1 presenting, three retained panes, bottom-primary login running,
+clean revision213 and no pending presentation restart. The saved document
+SHA256 is unchanged before/after:
+`90cd4aaaf1b692b4950b72bef3b8c04be617681b434142578f85bd9021a2f198`.
+Provenance reports saved-settings ownership, valid environment fallbackkms,
+SDL renderer not applicable and video driver not-applicable. Service restart
+reloaded the corrected environment line; original file backup remains.
+SDL library hash matches561. No renderer/input/font engine or Hibr-core change.
+
+Catalogue panel0.1.7/source2cd8f7c passes actual callbacks against563 and561,
+UI, Mouse and signed catalogue lifecycle tests. Installed live bundle hash
+matches the catalogue. Logs and bounded before/after facts are under ignored
+`build/config108-evidence/`. These are configuration/API checks, not a new
+visual acceptance of every desktop mode. SDL multi-output issues100/104 and
+the unfinished font release remain open.
+
 ## 2026-10-19 candidate561: exact font pixel-height policy
 
 New font API regression fails before implementation, then passes for exact
