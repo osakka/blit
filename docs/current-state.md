@@ -1,5 +1,24 @@
 # Current state and restart point
 
+## 2026-10-19 candidate 0.1.559: bounded API admission between presents
+
+Issue105/ADR0141 address the independently reproduced SDL request-admission
+delay. The listener is nonblocking and each turn accepts at most eight
+connections, preserving existing request/auth/capacity handling and normal
+input/PTY/output servicing. No SDL dependency or terminal policy changes.
+
+The controlled actual-renderer fixture fails before the change (eight
+responses one refresh apart, last139.39ms), then passes after it (all within
+17.83–18.29ms). The production socket fixture also verifies the accept bound,
+finite draining, untouched render deadlines, close-on-exec,32-client capacity
+and five overflow503 replies. TCC build succeeds. Full regression passes
+107 gates with7 explicit skips and0 failures; its120-second four-PTY soak
+completes11,320 snapshots and1,030 resizes. Three pinned-header adapter gates
+pass separately, as does the focused GLES admission red/green test.
+Package construction and physical SDL throughput revalidation are pending. Live
+10.54 remains0.1.558, direct KMS with login restored. No performance acceptance
+claim follows from the simulated-present fixture.
+
 ## 2026-10-19: 0.1.558 deployed; idle completion defect verified fixed
 
 Package 0.1.558 is installed and version-verified on 10.54. Its two builds
@@ -59,7 +78,7 @@ topology reconciliation and deferred-output retry already mark their own work.
 This is a candidate scheduling defect to isolate with a production-code
 regression; it is not yet a demonstrated fix or the sole cause of low cadence.
 
-## 2026-10-19: cadence measurement corrected; refresh acceptance still fails
+## 2026-10-19: cadence measurement corrected; refresh acceptance remains open
 
 The operator pointer probe now uses the server observation interval for its
 counter rates, separates submissions from confirmed native flip completions,

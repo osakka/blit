@@ -75,6 +75,16 @@ physical-input delivery nor replaces the longer acceptance workloads.
 
 ## Dependency boundaries checked
 
+Issue105's admission regression is
+`tools/tests/http_accept_budget_gate.rb`. It uses the actual server/selected
+SDL profile and injects a16ms delay only at public `SDL_RenderPresent`.
+Eight complete requests are queued while present is held, then released;
+the test distinguishes bounded admission from one-refresh-per-connection
+waiting and checks a subsequent under-filled turn. Software and offscreen
+GLES2 use the same assertions. This is an event-loop regression, not a
+physical refresh or GPU latency measurement. The production-code socket
+fixture separately checks the accept limit, capacity and descriptor lifetime.
+
 The bundled SDL3.4.16 event pump handles input but does not reconcile runtime
 connector changes. The inspected [upstream event pump](https://github.com/libsdl-org/SDL/blob/main/src/video/kmsdrm/SDL_kmsdrmevents.c)
 also only polls input; upgrading alone is not established as a hotplug fix.

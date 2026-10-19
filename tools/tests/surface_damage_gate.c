@@ -263,6 +263,71 @@ static void utf8_large_pty_read_gate(void)
     close(fds[0]); close(fds[1]); free(runtime);
 }
 
+static void http_accept_budget_gate(void)
+{
+    BlitRuntime *runtime = calloc(1, sizeof(*runtime));
+    struct sockaddr_in address;
+    socklen_t length = sizeof(address);
+    int listener, clients[BLIT_MAX_HTTP_CLIENTS + 5];
+    int i, used, first_wave = BLIT_HTTP_ACCEPT_BUDGET + 3;
+    if (!runtime) exit(2);
+    listener = socket(AF_INET, SOCK_STREAM, 0);
+    memset(&address, 0, sizeof(address));
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if (listener < 0 || fcntl(listener, F_SETFL, O_NONBLOCK) < 0 ||
+        bind(listener, (struct sockaddr *)&address, sizeof(address)) < 0 ||
+        listen(listener, BLIT_MAX_HTTP_CLIENTS) < 0 ||
+        getsockname(listener, (struct sockaddr *)&address, &length) < 0) exit(2);
+    runtime->render_pending = 1;
+    runtime->render_next_us[0] = 12345;
+    for (i = 0; i < first_wave; ++i) {
+        clients[i] = socket(AF_INET, SOCK_STREAM, 0);
+        if (clients[i] < 0 || connect(clients[i], (struct sockaddr *)&address, length) < 0) exit(2);
+    }
+    if (!accept_http_clients(runtime, listener)) exit(2);
+    for (used = i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i)
+        if (runtime->http_clients[i].used) ++used;
+    if (used != BLIT_HTTP_ACCEPT_BUDGET || !runtime->render_pending ||
+        runtime->render_next_us[0] != 12345) {
+        fprintf(stderr, "HTTP_ACCEPT_LIMIT_FAIL first_turn=%d budget=%d render_deadline=%llu\n",
+            used, BLIT_HTTP_ACCEPT_BUDGET, (unsigned long long)runtime->render_next_us[0]);
+        ++failures;
+    }
+    if (!accept_http_clients(runtime, listener) || !accept_http_clients(runtime, listener)) exit(2);
+    for (used = i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i)
+        if (runtime->http_clients[i].used) ++used;
+    if (used != first_wave) { fprintf(stderr,"HTTP_ACCEPT_LIMIT_FAIL finite drain\n"); ++failures; }
+    for (i = first_wave; i < BLIT_MAX_HTTP_CLIENTS + 5; ++i) {
+        clients[i] = socket(AF_INET, SOCK_STREAM, 0);
+        if (clients[i] < 0 || connect(clients[i], (struct sockaddr *)&address, length) < 0) exit(2);
+    }
+    for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i)
+        if (!accept_http_clients(runtime, listener)) exit(2);
+    for (used = i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i)
+        if (runtime->http_clients[i].used) {
+            ++used;
+            if (!(fcntl(runtime->http_clients[i].fd,F_GETFD) & FD_CLOEXEC)) {
+                fprintf(stderr,"HTTP_ACCEPT_LIMIT_FAIL descriptor inheritance\n"); ++failures;
+            }
+        }
+    if (used != BLIT_MAX_HTTP_CLIENTS) { fprintf(stderr,"HTTP_ACCEPT_LIMIT_FAIL capacity=%d\n",used); ++failures; }
+    for (i = BLIT_MAX_HTTP_CLIENTS; i < BLIT_MAX_HTTP_CLIENTS + 5; ++i) {
+        char response[256];
+        struct timeval timeout = {1,0};
+        ssize_t received;
+        setsockopt(clients[i],SOL_SOCKET,SO_RCVTIMEO,&timeout,sizeof(timeout));
+        received = recv(clients[i],response,sizeof(response),0);
+        if (received < 12 || strncmp(response,"HTTP/1.1 503",12) != 0) {
+            fprintf(stderr,"HTTP_ACCEPT_LIMIT_FAIL overflow not rejected\n"); ++failures;
+        }
+    }
+    for (i = 0; i < BLIT_MAX_HTTP_CLIENTS + 5; ++i) close(clients[i]);
+    for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i) remove_http_client(runtime,i);
+    close(listener);
+    free(runtime);
+}
+
 static void kms_idle_completion_gate(void)
 {
     BlitRuntime *runtime = calloc(1, sizeof(*runtime));
@@ -538,6 +603,7 @@ int main(void)
     mark_surface_damage(&subject, 2, 1);
     expect_bounds("full damage never shrinks", 0, 0, 80, 40);
     expired_batch_deadline_gate();
+    http_accept_budget_gate();
     kms_idle_completion_gate();
     kms_retry_deadline_gate();
     utf8_large_pty_read_gate();

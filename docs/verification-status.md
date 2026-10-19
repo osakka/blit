@@ -3,6 +3,32 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-19 candidate559: bound HTTP admission rather than one per refresh
+
+`http_accept_budget_gate.rb` uses the actual gateway/SDL renderer with a
+test-only16ms public-present delay. Eight queued requests finish at
+17.57..139.39ms before the change, exceeding its80ms regression budget.
+The bounded nonblocking admission change makes all eight finish within
+17.83–18.29ms in focused runs. A subsequent single request completes too.
+
+The production-code socket fixture checks the eight-admission bound,
+under-filled draining, existing render work/deadline retention, descriptor
+inheritance,32-client capacity and five503 overflow rejections. TCC build
+and focused fixtures pass. Full regression passes107 gates with7 explicit
+skips and0 failures, including six offscreen GLES cases. Its120-second
+four-PTY soak completes11,320 snapshots and1,030 resizes. No559 deployment or
+physical throughput improvement is claimed. This gate does not change the
+physical latency/performance acceptance thresholds. ADR0141 and issue105
+record the decision and required live revalidation.
+The same fixture also fails on actual offscreen GLES2 with the manifest-
+matched0.1.558 staging binary (last response142.53ms), then passes against
+canonical0.1.559 (18.21ms). This is a separate focused GL run, not a claim
+of physical GPU scanout timing. Three pinned-header adapter gates pass.
+Terminology correction: the earlier short, HTTP-paced cadence samples do
+not by themselves establish a pass or failure of the sustained physical
+refresh acceptance plan. Its status remains open; the measured rates and
+producer/boundary limitations remain recorded unchanged.
+
 ## 2026-10-19: 558 deployment and bounded physical revalidation
 
 Package 0.1.558 is installed/version-verified. Its independent builds match;

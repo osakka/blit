@@ -71,6 +71,7 @@ extern char **environ;
 #define BLIT_MAX_NATIVE_CLIENTS 16
 #define BLIT_MAX_STREAMS 16
 #define BLIT_MAX_HTTP_CLIENTS 32
+#define BLIT_HTTP_ACCEPT_BUDGET 8
 #define BLIT_REQUEST_SIZE 8192
 #define BLIT_MAX_CELL_COLS 512
 #define BLIT_MAX_CELL_ROWS 160
@@ -27703,6 +27704,34 @@ static int add_http_client(BlitRuntime *runtime, int fd)
     return -1;
 }
 
+/* Drain only a bounded admission turn from the nonblocking listener. The
+   existing readiness loop retains request, input and presentation ownership. */
+static int accept_http_clients(BlitRuntime *runtime, int server_fd)
+{
+    int attempt;
+    for (attempt = 0; attempt < BLIT_HTTP_ACCEPT_BUDGET; ++attempt) {
+        int fd = accept(server_fd, NULL, NULL);
+        if (fd < 0) {
+            if (errno == EINTR)
+                continue;
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+                return 1;
+            perror("accept");
+            return 0;
+        }
+        if (fcntl(fd, F_SETFD, FD_CLOEXEC) < 0) {
+            close(fd);
+            continue;
+        }
+        if (add_http_client(runtime, fd) < 0) {
+            send_problem(fd, 503, "Service Unavailable", "http_capacity",
+                         "The HTTP connection limit has been reached.");
+            close(fd);
+        }
+    }
+    return 1;
+}
+
 /* Return 1 when a complete HTTP request is buffered, 0 when more bytes are
    needed, and -1 when the declared body cannot fit in the bounded request. */
 static int http_request_complete(const BlitHttpClient *client,
@@ -28642,6 +28671,11 @@ int main(int argc, char **argv)
         return 1;
     }
     fcntl(server_fd, F_SETFD, FD_CLOEXEC);
+    if (fcntl(server_fd, F_SETFL, O_NONBLOCK) < 0) {
+        perror("nonblocking listener");
+        close(server_fd);
+        return 1;
+    }
     {
         int reuse = 1;
         setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
@@ -28665,7 +28699,6 @@ int main(int argc, char **argv)
     fflush(stdout);
 
     while (blit_running) {
-        int client_fd;
         int max_fd = server_fd;
         int ready;
         int mouse_ready = 0;
@@ -28965,18 +28998,8 @@ int main(int argc, char **argv)
         service_evdev_opener(&runtime, 1);
         settings_flush(&runtime, 0);
         if (ready > 0 && FD_ISSET(server_fd, &readable)) {
-            client_fd = accept(server_fd, NULL, NULL);
-            if (client_fd < 0) {
-                if (errno == EINTR) continue;
+            if (!accept_http_clients(&runtime, server_fd))
                 break;
-            }
-            fcntl(client_fd, F_SETFD, FD_CLOEXEC);
-            if (add_http_client(&runtime, client_fd) < 0) {
-                send_problem(client_fd, 503, "Service Unavailable",
-                             "http_capacity",
-                             "The HTTP connection limit has been reached.");
-                close(client_fd);
-            }
         }
         if (ready > 0) {
             for (i = 0; i < runtime.evdev_mouse_count; ++i)
