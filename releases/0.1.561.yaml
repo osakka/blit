@@ -1,0 +1,19 @@
+release: 0.1.561
+package: blit_0.1.561-1_amd64.deb
+package_sha256: 728dc380db96faf5fd3859ed820eabaa4fd0ef5bbd3f10bb4108b8cda4a1d147
+source_commit: 65e785d4bf41b040b0d2479cb9fbb5cdbb7b3908
+package_documentation_commit: 65e785d4bf41b040b0d2479cb9fbb5cdbb7b3908
+server_binary_sha256: 05006465a2ed6d7fc33959c2b0da2f6ecb0934bf09d8a8154666b4328e125697
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.225
+hibr_abi: 16
+verification:
+  regression: '107 pass, 7 explicit skips, 0 fail; six offscreen GLES2 gates'
+  focused: 'Updated font API fixture separately passes software and offscreen GLES2; exact 8..64 heights, glyph pixels, persistence and invalid-policy refusal'
+  adapters: 'Three gates pass separately against pinned Hibr 0.99.225/ABI16 headers'
+  installed_hibr: '0.99.257/ABI16 unchanged during full run; SHA256 572f88f60eac0656bf6bd86b9a89a9a939de05caf03c5bd1175e87dce8dd4735'
+  soak: '120 seconds, four PTYs, 11816 snapshots, 1074 resizes'
+  package: 'Independent builds byte-identical; artifact/provenance gate passes'
+  physical: 'Pending at package recording; live remains 0.1.560'
+  limitations: 'Current bitmap fonts only; new retro/modern profiles and native outline/colour glyph rendering are not delivered'
