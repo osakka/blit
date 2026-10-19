@@ -37,6 +37,8 @@ Suites (from docs/development-workflow.md "Required gates"):
 Environment:
   BLIT_GATE_BINARY   server under test  (default build/blit/blit-server)
   BLIT_GATE_FONT     PSF font           (default the bundled Hibr font)
+  BLIT_GATE_OUTLINE  outline font; with BLIT_GATE_COLOUR enables raster module gate
+  BLIT_GATE_COLOUR   colour bitmap font; requires FreeType headers/library
   BLIT_GATE_LIBS     LD_LIBRARY_PATH    (default build/sdl3-kms)
   BLIT_GATE_PACKAGE  .deb path; enables the packaging artifact gate
   BLIT_GATE_LIVE     live base URL; enables the live-host-only gates
@@ -213,6 +215,12 @@ suite_font() {
     run_gate hibr_font_manifest_gate.py python3 tools/tests/hibr_font_manifest_gate.py
     run_gate font_fit_gate.py python3 tools/tests/font_fit_gate.py
     run_gate retro_font_gate.py python3 tools/tests/retro_font_gate.py
+    if [ -n "${BLIT_GATE_OUTLINE:-}" ] && [ -n "${BLIT_GATE_COLOUR:-}" ]; then
+        run_gate font_raster_gate.sh sh tools/tests/font_raster_gate.sh \
+            "$FONT" "$BLIT_GATE_OUTLINE" "$BLIT_GATE_COLOUR"
+    else
+        skip_gate font_raster_gate.sh "set BLIT_GATE_OUTLINE/BLIT_GATE_COLOUR and FreeType paths; module only, not presentation"
+    fi
     if [ -d "$ROOT/vendor/SDL3/include" ]; then
         run_gate sdl_glyph_filter_gate.sh "$ROOT"/tools/tests/sdl_glyph_filter_gate.sh
     else

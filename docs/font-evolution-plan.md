@@ -9,10 +9,11 @@ multicolour glyph support. Retain the current font. Prioritise font sizing,
 then these profiles, then measured performance. Never modify Hibr.
 
 Font size is not physical display resolution or desktop zoom. Existing
-`PUT /v1/fonts` enlarges bitmap glyphs and terminal cells with scale1.0–3.0
-in0.1 steps. It resizes PTYs and uses the same geometry for input. Saved
-live scale1.2 reports10x19 cells from an8x16 font. It does not rasterize an
-outline face at a requested pixel size. Size is currently global.
+`PUT /v1/fonts` supports explicit cell height `size_px`8..64 or legacy
+scale1.0–3.0 in0.1 steps. The current deployed renderer still resamples bitmap
+glyphs. It resizes PTYs and uses the same geometry for input, but does not
+rasterize an outline face at a requested pixel size. Size is currently global.
+Control Panel0.1.6 exposes pixel size; it does not itself change rasterization.
 
 `BlitFont` and SDL's atlas currently expose one-bit coverage; terminal styles
 colour those masks. Another PSF alone cannot add antialiasing or intrinsic
@@ -67,7 +68,40 @@ compatibility (ADR0144), with full regression and bounded physical SDL/GLES2
 sizing/capture checks passing. Candidate562 adds the optional Spleen retro
 profile (ADR0145), with focused asset/pixel tests passing and full verification
 running. Native outline rasterization and the modern colour profile remain
-unimplemented. No new production font dependency is linked yet.
+unimplemented in the server. No new production font dependency is linked yet.
+
+## Shared raster module checkpoint (2026-10-19)
+
+ADR0147 and `src/blit_raster.c` now implement the common cell-raster contract:
+native-size FreeType grayscale coverage, premultiplied colour RGBA, explicit
+PSF fallback/protected box/block geometry, exact cell-height fitting and a
+bounded128-entry/4MiB cache. A shared RGB source-over helper separates mask
+tinting from intrinsic colour. Context replacement is transactional.
+
+`tools/tests/font_raster_gate.sh` checks every integer size8..64 with reviewed
+Hack/Noto inputs, including partial alpha, full-block coverage, colour/alpha,
+blend vectors, invalid input, cache pressure/reuse and failed-load survival.
+The complete local font suite passes9/0skip/0fail with that gate enabled.
+Valgrind reports zero errors and no leaks across all57 sizes. The module does
+not invoke Hibr. Installed Hibr changed0.99.258 to0.99.259/ABI16 during this
+work, so these local checks are not a frozen full-release acceptance run.
+This is module verification, not backend/desktop acceptance. The server does
+not call or link this module yet; there is no new deployed smooth profile.
+
+Enable the module gate using `BLIT_GATE_OUTLINE`, `BLIT_GATE_COLOUR`,
+`BLIT_FREETYPE_INCLUDE` (directory containing `ft2build.h`) and optional
+`BLIT_FREETYPE_LIBRARY` (default Linux amd64 system soname path), then run
+`sh tools/run-gates.sh font`. Missing candidate inputs are an explicit skip,
+not a pass. Direct invocation accepts PSF/outline/colour paths as three args.
+
+Remaining work, in order: pin/package production FreeType and source assets;
+attach raster ownership/invalidation to canonical font profiles and pixel
+sizing; connect native KMS plus SDL immediate/batched/atlas rendering to the
+same coverage/colour data; cover styles, combining/variation/sequence policy,
+alpha and metrics with cross-backend pixel oracles; run frozen full gates;
+package and physically review10.54 without changing its layout/backend by
+surprise. Neither profile quality nor performance is accepted from a module
+test alone. Existing production rendering is unchanged by this checkpoint.
 
 ## Source/rasterizer feasibility evidence (2026-10-19)
 

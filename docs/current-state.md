@@ -1,5 +1,20 @@
 # Current state and restart point
 
+## 2026-10-19: smooth/colour raster foundation; not deployed
+
+The user's jagged-size report exposes unfinished native-size rasterization,
+not a Control Panel setting defect. ADR0147 adds `src/blit_raster.c/.h` as the
+shared FreeType-backed coverage/colour cell module, with PSF fallback, fitted
+baseline/advance, bounded cache and common premultiplied blend semantics.
+TCC checks every cell height8..64. Font suite with explicit reviewed inputs:
+9pass/0skip/0fail. The server does not yet link/call it. No new font package,
+live change or claim of smooth desktop rendering. Follow the remaining work
+in `docs/font-evolution-plan.md`; do not mistake component tests for backend
+integration or physical approval. Hibr is untouched.
+Valgrind reports zero errors/leaks across all57 sizes. Installed Hibr changed
+258 to259 during this work (not by this agent); full frozen acceptance is not
+established. The isolated raster module does not depend on Hibr.
+
 ## 2026-10-19: Control Panel0.1.6 exposes font size in pixels
 
 Canonical catalogue bundle in `itdlabs/hibr-apps` commit `33be7b3` replaces
