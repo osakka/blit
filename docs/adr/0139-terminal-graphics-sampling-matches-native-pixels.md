@@ -1,6 +1,6 @@
 # ADR 0139: Terminal graphics use nearest-neighbor sampling on every backend
 
-- Status: implemented; physical revalidation pending
+- Status: implemented; bounded physical comparison passes on all three backends
 - Date: 2026-10-19
 - Issue: Blit104
 
@@ -33,3 +33,7 @@ the explicit GLES suite. Re-run the physical comparison on 10.54, retain exact
 captures, and report each backend's result separately. The first native trial's
 pointer-overlap failure remains recorded; the comparison now parks the pointer
 outside the sampled area and verifies its state without masking failed pixels.
+
+Physical revalidation on 10.54 with package 0.1.557 passes exact Kitty
+quadrants and deletion on direct KMS, SDL/KMSDRM software and SDL/KMSDRM
+OpenGLES2. Evidence: `/tmp/blit-backend-parity-557-20261019/`.

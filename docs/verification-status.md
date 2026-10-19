@@ -3,6 +3,27 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-19: 557 physical comparison passes bounded cases on all three paths
+
+The updater installs and version-verifies 0.1.557. Package/artifact provenance
+passes and a second independently built package is byte-identical. Source:
+`7dfc512`; package manifest: `releases/0.1.557.yaml`.
+
+On 10.54, each actual presentation identity passes the same assertions:
+
+| Identity | Motion captures | Kitty composition/deletion | Font/grid pixels |
+| --- | --- | --- | --- |
+| direct KMS | 12/12, no discarded samples | exact | 2,688 exact |
+| SDL3 / kmsdrm / software | 12/12, no discarded samples | exact | 2,688 exact |
+| SDL3 / kmsdrm / opengles2 | 12/12, no discarded samples | exact | 2,688 exact |
+
+Evidence directory: `/tmp/blit-backend-parity-557-20261019/`. Baseline
+restoration verifies direct KMS and the original login policy after the
+comparison; the original pointer position is restored. Hardware under test
+has one connected 1920x2160 DP canvas split 1x2. This is not multi-connector,
+high-refresh, physical-input or full protocol acceptance. Sixel, hotplug,
+broader effects and sustained cadence/latency require additional evidence.
+
 ## 2026-10-19:556 physical evidence and557 graphics-sampling regression
 
 Two independently built0.1.556 packages are byte-identical; artifact and

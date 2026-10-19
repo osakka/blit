@@ -14,4 +14,4 @@ verification:
   soak: '120 seconds, four PTYs, 11560 snapshots, 1051 resizes'
   sampling: 'production-path red/green; all 256 enlarged-image pixels exact on software and GLES2'
   package: 'artifact/provenance gate passes; independent second package is byte-identical'
-  physical: 'deployment and real KMSDRM revalidation pending'
+  physical: 'deployed/version verified; native, SDL/kmsdrm/software and SDL/kmsdrm/opengles2 each pass motion 12/12, exact Kitty composition/deletion and 2688 font/grid pixels; native/login restored'

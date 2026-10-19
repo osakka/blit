@@ -1,5 +1,21 @@
 # Current state and restart point
 
+## 2026-10-19: 0.1.557 physical graphics comparison passes all three backends
+
+Package 0.1.557 is deployed and version-verified on 10.54. Its two independent
+builds are byte-identical; identity is recorded in `releases/0.1.557.yaml`.
+Actual direct KMS, SDL/KMSDRM software and SDL/KMSDRM OpenGLES2 each pass
+12/12 revision-correlated motion captures, exact Kitty quadrant composition
+and deletion, and 2,688 font/grid-edge pixels including a bold diamond.
+The prior SDL/software colour-filtering failure is no longer reproduced.
+
+Evidence: `/tmp/blit-backend-parity-557-20261019/`. Every profile retains
+identity observations, motion/Kitty/grid captures and probe verdicts. The
+original direct-KMS backend, login policy and pointer position are restored.
+This validates these bounded cases on the currently connected DP canvas
+(1920x2160, split 1x2), not the full parity matrix. HDMI hotplug, multiple
+connectors, sustained refresh/latency, sixel and broader effects remain open.
+
 ## 2026-10-19 candidate0.1.557: physical comparison exposes graphics filtering mismatch
 
 Reproducible0.1.556 is installed and version-verified on10.54. Its package
