@@ -1,5 +1,24 @@
 # Current state and restart point
 
+## 2026-10-19: 0.1.559 deployed; physical SDL admission throughput triples
+
+Package559 is installed/version-verified; builds match byte-for-byte. Source
+`f87def0`, manifest `releases/0.1.559.yaml`. All three actual paths pass motion
+12/12, exact Kitty composition/deletion,2,688 grid/font pixels and sixel
+assertions. Native/login/pointer restoration succeeds. Evidence:
+`/tmp/blit-backend-cadence-559-240hz-20261019/`.
+
+At240 requested slots/s, native delivers all2,400 injections and records59.15
+confirmed flips/s over the server observation window. SDL/software delivers
+2,229 (220.71/s), skipping171 at the client queue; SDL/GLES2 delivers2,246
+(223.46/s), skipping154. Their request p95 values are51.76 and51.45ms, versus
+about135ms before559. SDL submission rates are58.30 and58.65/s; completion
+rates remain unavailable. This is substantial throughput improvement, not
+full physical performance acceptance. Issue105 stays open for the remaining
+read/admission-turn latency and client skipping; next reproduce initial
+request-read deferral before further changes. Multi-connector/SDL hotplug
+acceptance still requires HDMI availability and the SDL dependency decision.
+
 ## 2026-10-19 candidate 0.1.559: bounded API admission between presents
 
 Issue105/ADR0141 address the independently reproduced SDL request-admission

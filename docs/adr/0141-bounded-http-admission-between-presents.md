@@ -1,6 +1,6 @@
 # ADR 0141: Admit bounded HTTP bursts between presentation turns
 
-- Status: implemented; full regression passes, physical revalidation pending
+- Status: implemented; bounded physical improvement verified, residual pressure remains
 - Date: 2026-10-19
 - Issues: [Blit #105](https://git.home.arpa/itdlabs/blit/issues/105), #104
 
@@ -51,3 +51,7 @@ manifest-matched0.1.558 staging binary (142.53ms), and green on the0.1.559
 canonical binary (18.21ms). This preserves one oracle across SDL profiles.
 The full run passes107 gates, with7 explicit skips and no failures; the
 three pinned-header adapter gates pass separately.
+Physical559 revalidation delivers approximately221–223 SDL requests/s versus
+67–71 before, and p95 improves from135ms to51–52ms. All bounded pixel/protocol
+checks pass and native/login/pointer restore. Client queue skipping remains
+at240 requested slots/s, so issue105 and full latency acceptance stay open.

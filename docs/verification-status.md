@@ -3,6 +3,30 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-19:559 physical admission improvement, residual pressure remains
+
+Package559 is deployed/version-verified; independent builds match. Package
+SHA256 `a683956a73b6aff17eb820b045977247aa8c050f2bdd89be60c36a98177089b6`,
+source `f87def0`, identity commit `9c1b80f`.
+
+All three actual backends pass motion12/12, Kitty composition/deletion,
+2,688 grid/font pixels and sixel checks. Native/login/pointer restoration
+passes. Evidence: `/tmp/blit-backend-cadence-559-240hz-20261019/`.
+
+| Backend | Delivered motions | Client queue skips | Delivered requests/s | Request p95 ms | Submissions/s |
+| --- | --- | --- | --- | --- | --- |
+| native KMS | 2,400 | 0 | 238.72 | 27.94 | 59.15 |
+| SDL/software | 2,229 | 171 | 220.71 | 51.76 | 58.30 |
+| SDL/GLES2 | 2,246 | 154 | 223.46 | 51.45 | 58.65 |
+
+Native confirmed flips match its submission delta. SDL completion rates are
+unavailable. Workload is10 seconds with240 requested pointer slots/s; final
+restoration motion and server observation boundary overhead are labelled.
+No physical mouse events occur. These short samples do not accept the full
+performance contract. The SDL delivered rate is over3x its prior67–71/s and
+p95 improves from approximately135ms, but client skipping remains. Keep105
+open and reproduce the remaining first-read turn delay before changing it.
+
 ## 2026-10-19 candidate559: bound HTTP admission rather than one per refresh
 
 `http_accept_budget_gate.rb` uses the actual gateway/SDL renderer with a

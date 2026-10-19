@@ -14,4 +14,4 @@ verification:
   soak: '120 seconds, four PTYs, 11320 snapshots, 1030 resizes'
   admission: 'software and GLES2 actual-server red/green; burst8 last response ~139-143ms before, ~18ms after; production socket budget/capacity/descriptor checks pass'
   package: 'artifact/provenance gate passes; independent second package is byte-identical'
-  physical: 'deployment and actual SDL throughput revalidation pending'
+  physical: 'deployed/version verified; all three paths pass bounded motion/Kitty/font/sixel; SDL delivered throughput ~67-71->221-223/s and p95 ~135->51-52ms; residual client skipping remains; native/login/pointer restored'
