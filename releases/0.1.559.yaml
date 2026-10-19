@@ -1,0 +1,17 @@
+release: 0.1.559
+package: blit_0.1.559-1_amd64.deb
+package_sha256: a683956a73b6aff17eb820b045977247aa8c050f2bdd89be60c36a98177089b6
+source_commit: f87def0c87e0705a45d36775d3db73a5e338429d
+package_documentation_commit: f87def0c87e0705a45d36775d3db73a5e338429d
+server_binary_sha256: dd90fb1110cba819957278710c9bc845c9aaf56e2ea37fc389fb413b753174a6
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.225
+hibr_abi: 16
+verification:
+  regression: '107 pass, 7 explicit skips, 0 fail; includes 6 offscreen GLES2 gates'
+  adapters: '3 gates pass separately against pinned Hibr 0.99.225/ABI16 headers'
+  soak: '120 seconds, four PTYs, 11320 snapshots, 1030 resizes'
+  admission: 'software and GLES2 actual-server red/green; burst8 last response ~139-143ms before, ~18ms after; production socket budget/capacity/descriptor checks pass'
+  package: 'artifact/provenance gate passes; independent second package is byte-identical'
+  physical: 'deployment and actual SDL throughput revalidation pending'
