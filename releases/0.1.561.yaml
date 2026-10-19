@@ -15,5 +15,5 @@ verification:
   installed_hibr: '0.99.257/ABI16 unchanged during full run; SHA256 572f88f60eac0656bf6bd86b9a89a9a939de05caf03c5bd1175e87dce8dd4735'
   soak: '120 seconds, four PTYs, 11816 snapshots, 1074 resizes'
   package: 'Independent builds byte-identical; artifact/provenance gate passes'
-  physical: 'Pending at package recording; live remains 0.1.560'
+  physical: 'API deployed/version verified; SDL/GLES2 17/19/23px geometry/capture probe passes; two physical pane regions unchanged; original scale1.0/16px restored, bottom login retained, storage clean; not desktop/font-aesthetic acceptance'
   limitations: 'Current bitmap fonts only; new retro/modern profiles and native outline/colour glyph rendering are not delivered'

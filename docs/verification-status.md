@@ -3,6 +3,19 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-19:561 deployed and physical font sizing exercised
+
+Package source `65e785d`, identity `3c5371b`, SHA256
+`728dc380db96faf5fd3859ed820eabaa4fd0ef5bbd3f10bb4108b8cda4a1d147`.
+Independent packages match byte-for-byte; artifact/provenance gate and
+API installation/version verification pass. Physical SDL/GLES2 bounded
+font-size probe passes17/19/23px, unchanged two-pane physical regions,
+grid bounds and BMP capture; restores scale1.0/16px, backend and bottom login
+unchanged, clean storage revision162. Evidence:
+`/tmp/blit-font-size-561-20261019/`. Captured scene is a screensaver, not a
+desktop glyph specimen. This does not accept aesthetic quality, all Unicode,
+new retro/modern fonts, colour glyphs, desktop pixels or performance.
+
 ## 2026-10-19 candidate561: exact font pixel-height policy
 
 New font API regression fails before implementation, then passes for exact

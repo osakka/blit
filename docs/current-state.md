@@ -1,5 +1,24 @@
 # Current state and restart point
 
+## 2026-10-19:561 pixel-size API deployed; next is the rich glyph pipeline
+
+Source `65e785d`, identity `3c5371b`, package SHA256
+`728dc380db96faf5fd3859ed820eabaa4fd0ef5bbd3f10bb4108b8cda4a1d147`.
+Independent builds are byte-identical; artifact/provenance test passes;
+API updater verifies561 on10.54. Physical SDL/GLES2 probe exercises17/19/23px,
+checks unchanged physical regions for both panes and complete grid bounds,
+captures BMPs and restores original font policy. Evidence:
+`/tmp/blit-font-size-561-20261019/`. Verified after restoration: SDL/GLES2,
+bottom login, scale1.0/16px/8x16 cells, clean storage revision162. The23px
+capture shows a screensaver rather than a desktop glyph specimen; no font
+aesthetic/coverage or desktop pixel-perfect claim is made from it.
+
+Both new profiles remain pending. Next implement shared grayscale/colour
+glyph data, baseline fitting and bounded caching before wiring modern fonts
+into either rendering adapter; retain PSF support and current default.
+TCC/FreeType source feasibility, candidate source hashes/licenses and the
+23em-versus27px-line-height finding are in `font-evolution-plan.md`.
+
 ## 2026-10-19 candidate561: explicit font pixel height, new profiles still pending
 
 Blit#107/ADR0144 extend the canonical font API with integer `size_px`8..64,

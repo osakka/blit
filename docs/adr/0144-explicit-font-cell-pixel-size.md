@@ -1,6 +1,6 @@
 # ADR 0144: Explicit pixel font size with one canonical sizing policy
 
-- Status: implemented; focused and full regression pass, physical validation pending
+- Status: implemented; focused/full regression and bounded physical sizing checks pass
 - Date: 2026-10-19
 - Scope: font API, cell geometry and settings; Blit#107
 
@@ -65,3 +65,9 @@ font fixture also passes separately on software and actual offscreen GLES2;
 three pinned-header adapter gates pass. The bounded host font-size probe
 passes locally on a two-pane software fixture and restores the baseline.
 Physical validation remains pending.
+
+Package561 is reproducible and API-deployed. On10.54 SDL/GLES2,
+`host_font_size.rb` checks17/19/23px with unchanged two-pane physical regions,
+valid grid bounds and captures, then restores baseline scale1.0/16px. Backend,
+bottom login and clean settings are verified. The captured screensaver is
+not a font-aesthetic or desktop pixel oracle; those claims remain out of scope.
