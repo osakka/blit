@@ -1,5 +1,28 @@
 # Current state and restart point
 
+## 2026-10-19:560 deployed; initial-read delay reduced on physical SDL paths
+
+Source `71d55cf`, package identity `4c7a629`; package SHA256
+`8cdaa78a852484e25e58535f781e0e8320be5bb4fe9c3aae01ccfa1ec9b0a22a`.
+Independent packages match byte-for-byte and the artifact/provenance gate
+passes. API updater verifies installed0.1.560. All three actual backends
+pass bounded motion12/12, exact Kitty composition/deletion,2,688 font/grid
+pixels and sixel assertions. Native/login/pointer baseline is restored.
+Evidence: `/tmp/blit-backend-cadence-560-240hz-20261019/`.
+
+Ten-second240-slot/s sweep: native2400delivered/0client skips, request
+p95=19.78ms, confirmed flips59.39/s; SDL/software2400/0,p95=32.88ms,
+submissions59.82/s; SDL/GLES22394/6,p95=33.92ms,submissions59.32/s.
+Previous559 SDL client skips171/154 and p95=51.76/51.45ms respectively.
+Connection-setup p95=11.66/11.92/12.80ms; post-connect exchange
+p95=11.84/26.14/25.52ms for native/software/GLES2. Those exchange values
+include transport and response handling, not server-only or input-to-photon
+latency. All samples report0missed deadlines; SDL confirmed completion
+timestamps remain unavailable. This is one DP canvas at approximately60Hz,
+API-injected motion only, not multi-connector/high-refresh or sustained
+full performance acceptance. Keep105 open for residual pressure; SDL
+hotplug dependency decision and HDMI availability remain pending.
+
 ## 2026-10-19 candidate560: one nonblocking initial read per admitted client
 
 Issue105/ADR0142 continue from559's remaining client-pressure result. A

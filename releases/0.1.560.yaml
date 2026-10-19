@@ -16,4 +16,4 @@ verification:
   placement: 'Explicit nonzero native primary and actual-desktop resize/restart/rejoin pass; selected primary preserved'
   admission: 'Ready request regression red before and green after; bounded capacity/nonblocking descriptors verified'
   package: 'Independent builds byte-identical; artifact/provenance gate passes'
-  physical: 'Pending; live remains 0.1.559 at manifest creation'
+  physical: 'Deployed/version verified; all three paths pass bounded motion/Kitty/font/sixel; native/login/pointer restored; 240-slot/s sweep SDL skips 0 software and 6 GLES2, request p95 32.88/33.92ms; sustained multi-connector acceptance remains open'

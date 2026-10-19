@@ -1,6 +1,6 @@
 # ADR 0142: Give admitted HTTP clients one nonblocking read slice
 
-- Status: implemented; full regression passed, physical revalidation pending
+- Status: implemented; full regression and bounded physical comparison passed
 - Date: 2026-10-19
 - Issues: Blit #105, #104
 - Related: ADR0141
@@ -49,3 +49,12 @@ and the delayed-present burst still passes. Idle path spot checks also show
 variable transport setup (curl connect approximately102ms and949ms, ICMP43ms);
 those are isolated observations, not a stable network baseline. Do not
 attribute all remote request RTT to Blit's event loop.
+
+Physical560 repeats the same ten-second240-slot/s workload on all three
+backends. SDL/software delivers2400with0client skips, p95=32.88ms;
+SDL/GLES2 delivers2394with6skips,p95=33.92ms, versus559's171/154skips
+and51.76/51.45ms respectively. All bounded pixel/protocol checks pass and
+native/login/pointer restore. Transport phases are now recorded separately;
+post-connect exchange still includes network/response time. This is not
+sustained multi-output acceptance or proof that all latency comes from
+this change. Evidence: `/tmp/blit-backend-cadence-560-240hz-20261019/`.

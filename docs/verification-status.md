@@ -3,6 +3,31 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-19:560 physical comparison and package verified
+
+Source `71d55cf`, manifest identity `4c7a629`. Independent builds are
+byte-identical; artifact/provenance gate passes. API installation/version
+verification passes. All three actual paths pass bounded motion12/12,
+Kitty composition/deletion,2,688 font/grid pixels and sixel assertions.
+Native/login/pointer baseline restoration passes. Evidence:
+`/tmp/blit-backend-cadence-560-240hz-20261019/`.
+
+| Backend | Delivered motions | Client queue skips | Request p95 ms | Submissions/s | Confirmed flips/s |
+| --- | --- | --- | --- | --- | --- |
+| native KMS | 2,400 | 0 | 19.78 | 59.39 | 59.39 |
+| SDL/software | 2,400 | 0 | 32.88 | 59.82 | unavailable |
+| SDL/GLES2 | 2,394 | 6 | 33.92 | 59.32 | unavailable |
+
+Ten-second240-slot/s sweep, with restoration motion included in server
+counters. Setup-time p95=11.66/11.92/12.80ms and post-connect exchange
+p95=11.84/26.14/25.52ms respectively. Neither is server-only processing or
+input-to-photon latency. SDL559 previously skips171/154 and p95=51.76/
+51.45ms: this sample improves but does not establish sole causality for
+every RTT difference. One approximately60Hz DP canvas, no physical mouse
+events, no terminal-output workload. All report0missed deadlines in this
+sample. Longer repeated acceptance and physical multi-connector/hotplug/
+high-refresh testing remain open;105 stays open for residual pressure.
+
 ## 2026-10-19 candidate560: ready request is serviced at bounded admission
 
 The actual admission helper fails a new socket regression before the change:
