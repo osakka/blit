@@ -1,0 +1,17 @@
+release: 0.1.557
+package: blit_0.1.557-1_amd64.deb
+package_sha256: 1d82753af1771880236278c154366c0e6a8ff44b6ac017c47d96910c602bca51
+source_commit: 7dfc512768f314c3f019a1f5324409009ffbe6a8
+package_documentation_commit: 7dfc512768f314c3f019a1f5324409009ffbe6a8
+server_binary_sha256: e99c8f1efeb1a343aaad6a957fef855c15d9cd925fd67cc26436b58c6860d94a
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.225
+hibr_abi: 16
+verification:
+  regression: '103 pass, 7 explicit skips, 0 fail; includes 5 offscreen GLES2 gates'
+  adapters: '3 gates pass separately against pinned Hibr 0.99.225/ABI16 headers'
+  soak: '120 seconds, four PTYs, 11560 snapshots, 1051 resizes'
+  sampling: 'production-path red/green; all 256 enlarged-image pixels exact on software and GLES2'
+  package: 'artifact/provenance gate passes; independent second package is byte-identical'
+  physical: 'deployment and real KMSDRM revalidation pending'
