@@ -14,6 +14,13 @@ desktop/session commands, but never edits the Hibr source tree.
 
 ## The short version
 
+Presentation configuration has one owner: saved API settings. The environment
+supplies startup fallbacks, not silent overrides. Read
+`/v1/settings` → `effective.presentation_configuration` to see the source,
+validity and actual backend/driver. Use `kms` for native DRM/KMS or `sdl`
+for SDL; `kmsdrm` is an SDL video-driver value, not a Blit backend selector.
+See [the configuration ownership guide](docs/api.md#presentation-configuration-ownership-01563).
+
 Blit is a server, not a terminal launcher script and not a replacement for
 Hibr. A client connects to Blit's TCP API, discovers hardware, creates or
 observes terminal sessions, assigns surfaces to logical panes, and receives
