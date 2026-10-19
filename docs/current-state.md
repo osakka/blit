@@ -1,5 +1,22 @@
 # Current state and restart point
 
+## 2026-10-19 font release564 resumed; pointer observation recorded
+
+The operator confirms563 looks correct on native KMS but pointer motion remains
+inconsistent; foreground YouTube appears to reduce choppiness. Recorded on101,
+not diagnosed. User prioritises finishing antialiasing/new fonts before mouse
+performance. Native backend/layout/login must remain unchanged; never edit Hibr.
+
+Candidate564/source7db553e includes the existing Spleen retro and smooth
+Hack/Noto modern profiles plus108 config ownership fix. Reproducible package
+SHA2564479ffb0b7d16aaf103b7538bbeba9d041099832af4dbedc06c5796eea791376;
+server SHA25655fa017d190add2dd4777487e19d4f79bc7bc8b4642941dc8b850c1e432efec6.
+GLES7pass/0skip/0fail; full regression is running, live remains563. Original
+Terminus16 is retained until deployment and an announced font preview.
+The actual live probe now accepts a profile and safely restores original
+profile/size; its isolated actual-server gate passes both profiles/refusal.
+See font-evolution-plan.md. Older held-font entries below are historical.
+
 ## 2026-10-19 configuration ownership fix (#108)
 
 The operator confirms native KMS restores all monitors and the panel's mode is

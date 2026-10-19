@@ -2,6 +2,27 @@
 
 Tracking: [Blit#107](https://git.home.arpa/itdlabs/blit/issues/107).
 
+## 2026-10-19 release564 verification resumed
+
+Native KMS recovery/configuration issue108 is resolved and operator-confirmed.
+Candidate564 combines the existing shared raster/font work with that config
+fix; it does not switch the working native backend. The archive is built from
+7db553e and is reproducible. Full exact-binary regression is running; seven
+offscreen GLES checks pass. Live remains563 until regression/deployment.
+
+The bounded live probe supports `BLIT_FONT_ID=blit-modern` or
+`BLIT_FONT_ID=blit-hibr-spleen16` with `BLIT_FONT_SIZES=17,19,23` and existing
+`BLIT_LIVE`, `BLIT_AUTH_TOKEN`, `BLIT_EVIDENCE_DIR` controls. It captures every
+output, checks complete-cell grids and unchanged backend/physical pane regions,
+then restores the original profile AND size policy. It refuses to overwrite a
+concurrent font change. `host_font_probe_gate.rb` runs this actual probe against
+an isolated server for both profiles, restoration and unavailable-profile
+refusal. Captures/geometry are not universal glyph or desktop acceptance.
+
+After font rollout, return to pointer issue101: the operator reports less
+choppiness when YouTube is foreground. This is a recorded clue, not a timing
+measurement or root-cause finding. Keep font and pointer changes separable.
+
 ## Current implementation: candidate0.1.562
 
 Both new profiles are integrated: Spleen retro (`blit-hibr-spleen16`) and

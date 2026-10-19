@@ -222,6 +222,7 @@ suite_font() {
     run_gate font_kms_raster sh tools/tests/font_backend_raster_gate.sh kms
     run_gate font_software_raster sh tools/tests/font_backend_raster_gate.sh software
     run_gate modern_font_api_gate.rb ruby tools/tests/modern_font_api_gate.rb
+    run_gate host_font_probe_gate.rb ruby tools/tests/host_font_probe_gate.rb
     if [ -d "$ROOT/vendor/SDL3/include" ]; then
         run_gate sdl_glyph_filter_gate.sh "$ROOT"/tools/tests/sdl_glyph_filter_gate.sh
     else

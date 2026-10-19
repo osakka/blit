@@ -9,6 +9,7 @@ require 'fileutils'
 base = URI(ENV.fetch('BLIT_LIVE','http://192.168.10.54:8080'))
 token = ENV.fetch('BLIT_AUTH_TOKEN')
 sizes = ENV.fetch('BLIT_FONT_SIZES','17,19,23').split(',').map { |s| Integer(s,10) }
+profile = ENV['BLIT_FONT_ID']
 raise 'one to eight sizes, each 8..64 required' unless sizes.size.between?(1,8) && sizes.all? { |s| s.between?(8,64) }
 out = ENV.fetch('BLIT_EVIDENCE_DIR') { Dir.mktmpdir('blit-font-size-') }
 FileUtils.mkdir_p(out)
@@ -24,17 +25,28 @@ get = ->(path) { JSON.parse(request.call('GET',path).body) }
 put = ->(payload) { JSON.parse(request.call('PUT','/v1/fonts',payload).body) }
 baseline = get.call('/v1/diagnostics/observation')
 font = baseline.fetch('fonts').fetch('active')
+if profile
+  raise 'requested font profile is unavailable' unless
+    baseline.fetch('fonts').fetch('profiles').any? { |p| p['id']==profile && p['available'] }
+end
 identity = ->(active) { active.reject { |key,_| key == 'raster_cache' } }
 raise 'pixel font API not installed' unless font.key?('sizing') && font.key?('size_px')
 backend = baseline.dig('diagnostics','health','backend')
 renderer = baseline.dig('diagnostics','render','renderer')
 regions = baseline.fetch('topology').fetch('panes').to_h { |p| [p['id'],p.fetch('pixel_region')] }
 restore = font['sizing']=='pixels' ? {'size_px'=>font['size_px']} : {'scale'=>font['scale']}
+restore['font_id'] = font.fetch('id')
 last = nil
 begin
+  last = put.call({'font_id'=>profile}).fetch('active') if profile
   sizes.each do |size|
+    if last
+      current = get.call('/v1/fonts').fetch('active')
+      raise 'font changed concurrently; refusing another size write' unless identity.call(current)==identity.call(last)
+    end
     applied = put.call({'size_px'=>size}).fetch('active');last=applied
     raise 'exact pixel height not applied' unless applied['sizing']=='pixels' && applied['size_px']==size
+    raise 'requested profile not retained' if profile && applied['id']!=profile
     observation = get.call('/v1/diagnostics/observation')
     raise 'presentation identity changed' unless observation.dig('diagnostics','health','backend')==backend &&
       observation.dig('diagnostics','render','renderer')==renderer
@@ -53,7 +65,7 @@ begin
       File.binwrite(File.join(out,"size-#{size}-#{display.fetch('id')}.bmp"),capture.body)
     end
     File.write(File.join(out,"size-#{size}.json"),JSON.pretty_generate(observation))
-    puts "FONT_SIZE_GEOMETRY_PASS size_px=#{size} cells=#{applied['cell_pixels']} panes=#{regions.size} renderer=#{renderer}"
+    puts "FONT_SIZE_GEOMETRY_PASS font=#{applied['id']} raster=#{applied['rasterization']} size_px=#{size} cells=#{applied['cell_pixels']} panes=#{regions.size} renderer=#{renderer}"
     $stdout.flush
   end
 ensure
