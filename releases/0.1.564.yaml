@@ -8,3 +8,12 @@ update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f
 hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
 hibr_version: 0.99.225
 hibr_abi: 16
+verification:
+  regression: '112 pass, 3 explicit skips, 0 fail; GLES7 pass, 0 skip, 0 fail; immutable server binary'
+  raster: 'All57 heights8..64, 513 samples/backend; native KMS exact/guards, SDL software/GLES within2 channel levels; native draw Valgrind7478 allocations/frees, zero errors/leaks'
+  soak: '120 seconds, four PTYs, 11564 snapshots, 1052 resizes'
+  package: 'Byte-identical rebuild; manifest/generator; actual package artifact and update-restart gates pass'
+  panel: 'Actual Hibr Control Panel modern19px slider drag and keyboard+1/-1; hibr-apps8006a7c; original profile/size restoration probe passes separately'
+  physical: 'API-deployed564 on10.54/native KMS; two outputs, three panes, backend/login/non-font settings preserved; both profiles17/19/23px capture/geometry; Modern menu F19px has11 intermediate coverage levels versus Retro0'
+  current_selection: 'Modern selected at19px, subsequent external22px change preserved; clean revision230 observed'
+  limitations: 'QEMU/dedicated live fixtures skipped; no universal Unicode/shaping or whole-desktop resize/aesthetic approval; user confirmed Hibr restart during previews; pointer issue101 remains open'

@@ -1,7 +1,7 @@
 # ADR0147: shared coverage and colour cell rasterization
 
 - Date: 2026-10-19
-- Status: production adapters integrated; release/physical acceptance pending
+- Status: implemented and deployed564; operator aesthetic/resize review separate
 - Tracking: [Blit#107](https://git.home.arpa/itdlabs/blit/issues/107)
 
 Release boundary: candidate562 was held; maintenance563 excludes this work.

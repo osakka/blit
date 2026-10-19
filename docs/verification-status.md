@@ -3,6 +3,47 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-19 fonts564 deployed: measured native antialiasing
+
+Final archive sourceda7e32d, SHA256
+712b0b72897d9db244ecb2a702bf1ccd0a9026491697a3e75ce9d5f812d60556.
+Server55fa017d190add2dd4777487e19d4f79bc7bc8b4642941dc8b850c1e432efec6
+is unchanged throughout full112pass/3skip/0fail; GLES7pass/0skip/0fail.
+The three explicit skips are QEMU and the two dedicated live fixtures.
+Actual package artifact/update-restart gates pass within this full run;
+byte-identical rebuild and manifest generator/check pass separately.
+Four-PTY120-second soak:11,564 snapshots/1,052 resizes. Reversible host-font
+probe gate passes separately (both profiles, original profile/policy restore,
+unavailable-profile refusal). Production adapter glyph/alpha checks pass all
+57 heights8..64 and513 samples/backend: native KMS exact with guards, SDL
+software/GLES within2 channel levels. Native draw Valgrind has7,478 allocations
+and frees, zero errors/leaks. Hibr0.99.262/ABI16 fingerprint remains
+2277b8f5557d972a34eaa3b3f7ee3b82512dd7e76574993cf9a45670fba040da.
+
+API deployment/version564 verified on10.54; FreeType2.13.3+dfsg-1+deb13u1
+was confirmed installed first. Upgrade preserved the complete saved document
+before previews. Both physical outputs present, native KMS ready, all three
+pane pixel regions and non-font saved settings unchanged afterward; non-font
+document SHA256fd5a258342527af096ebd48f56bb0f484fa9d6dca66ca0a757a6d4cb75a81c7a.
+Retro/Modern17/19/23px native geometry/capture previews restore the original
+profile and size policy. Modern19px was selected afterward; another client
+changed it to22px, observed clean revision230 and not overwritten.
+
+Actual primary-menu F at19px, pixel rectangle x50..59/y1088..1106: declared
+foreground#2de2e6, background#1a0533. Retro capture has2 distinct RGB colours,
+zero intermediate levels. Modern has13 colours,11 intermediate levels; every
+intermediate matches integer foreground-over-background coverage within1 level.
+Native BMPs/cropped PNGs and before/after facts are in build/font564-evidence/.
+The actual Hibr control-panel UI also passes modern19px drag and+1/-1 with
+inspected captures under build/font564-panel-evidence/ (hibr-apps8006a7c).
+
+These are raster/geometry/persistence observations, not universal Unicode,
+shaping, desktop-image or mouse-performance acceptance. Initial preview
+captures contain in-flight incomplete application redraws. Sessions1–3 became
+4–6; the operator confirmed restarting Hibr, so that is not evidence of a
+Blit-caused restart. Pointer101 and operator aesthetic/resize review remain
+open. No Hibr-core edits, SSH or backend switch.
+
 ## 2026-10-19 config-only563 deployed (Blit108 / ADR0148)
 
 Maintenance artifact source2fb6f7f is based on released561, not font candidate562.

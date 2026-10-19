@@ -132,9 +132,10 @@ Stage auxiliary pane selections, use **Apply auxiliaries now** for the running
 policy, and **Save as Default** for restart-persistent intent. Login placement
 preferences are startup-applied. Font controls use the live font API; Hibr's
 Displays pane owns arrangement after an auxiliary's first confirmed join.
-Control Panel0.1.6 selects font cell height8–64px, with one-pixel keyboard
+Control Panel0.1.7 selects font cell height8–64px, with one-pixel keyboard
 steps. The Font selector offers existing Terminus, pixel-art Spleen retro,
-and native antialiased `blit-modern` with colour emoji in0.1.562. Font changes
+and native antialiased `blit-modern` with colour emoji in0.1.564. Candidate562
+was held; config-only563 does not include the new profiles. Font changes
 save through Blit's API. Native horizontal sliders also select each monitor's independent
 columns/rows (1–8 each). **Save as Default** applies/saves the grid; new
 unconfigured monitors start1x1. Blit refuses removing occupied panes instead

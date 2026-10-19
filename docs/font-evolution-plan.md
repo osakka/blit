@@ -2,15 +2,21 @@
 
 Tracking: [Blit#107](https://git.home.arpa/itdlabs/blit/issues/107).
 
-## 2026-10-19 release564 verification resumed
+## 2026-10-19 release564 deployed
 
 Native KMS recovery/configuration issue108 is resolved and operator-confirmed.
 Candidate564 combines the existing shared raster/font work with that config
 fix; it does not switch the working native backend. Final archive source is
 da7e32d (packaged guide clarifies564 versus config-only563); server binary is
 unchanged from7db553e and reproducibility passes. Full exact-binary regression
-is running; seven
-offscreen GLES checks pass. Live remains563 until regression/deployment.
+112pass/3skip/0fail and seven offscreen GLES checks pass. API deployment on10.54
+is verified; native KMS and physical layout/non-font settings are unchanged.
+Both profiles pass live17/19/23px geometry/capture checks. Real native menu
+glyph F shows11 intermediate coverage levels on Modern versus none on Retro.
+Modern is selected; a later external size change to22px was preserved.
+User confirmed restarting Hibr during previews; do not attribute observed
+session replacement to Blit. Operator aesthetic/whole-desktop resize review
+and the separate pointer-performance phase remain open.
 
 The bounded live probe supports `BLIT_FONT_ID=blit-modern` or
 `BLIT_FONT_ID=blit-hibr-spleen16` with `BLIT_FONT_SIZES=17,19,23` and existing
@@ -25,7 +31,7 @@ After font rollout, return to pointer issue101: the operator reports less
 choppiness when YouTube is foreground. This is a recorded clue, not a timing
 measurement or root-cause finding. Keep font and pointer changes separable.
 
-## Current implementation: candidate0.1.562
+## Current implementation: release0.1.564 (initial candidate562)
 
 Both new profiles are integrated: Spleen retro (`blit-hibr-spleen16`) and
 smooth Hack/Noto colour (`blit-modern`). Original Terminus remains default.
@@ -45,10 +51,11 @@ validate their hashes. Build headers are explicit, not downloaded silently.
 `BLIT_FONT_ROOT` relocates only bundled profile paths for isolated tests;
 normal installations use `/usr/lib/blit/fonts`.
 
-The release gate remains full frozen regression, reproducible package/identity,
-API deployment, physical capture/metrics and operator aesthetic review. Live
-is still561 until that gate completes. Neither a module test nor a local
-offscreen GL test is physical scanout approval. Protected box/block geometry,
+Full frozen regression, reproducible package/identity, API deployment and
+representative physical capture/metrics pass for564 as recorded above.
+Operator aesthetic/whole-desktop resize review remains separate. Neither a
+module test nor a local offscreen GL test is physical scanout approval.
+Protected box/block geometry,
 missing symbols and wide BMP fallback remain bitmap. Scalar colour support
 is implemented; ZWJ/variation-sequence shaping, ligatures and complex-script
 shaping are not. No universal glyph or smooth-fallback claim is made.
@@ -61,10 +68,11 @@ then these profiles, then measured performance. Never modify Hibr.
 
 Font size is not physical display resolution or desktop zoom. Existing
 `PUT /v1/fonts` supports explicit cell height `size_px`8..64 or legacy
-scale1.0–3.0 in0.1 steps. The current deployed renderer still resamples bitmap
-glyphs. It resizes PTYs and uses the same geometry for input, but does not
-rasterize an outline face at a requested pixel size. Size is currently global.
-Control Panel0.1.6 exposes pixel size; it does not itself change rasterization.
+scale1.0–3.0 in0.1 steps. Bitmap profiles resample their one-bit masks;
+Modern instead rasterizes an outline at the fitted native size. PTY sizing
+and input use the same resolved cell geometry. Size is currently global.
+Control Panel0.1.7 exposes font/profile and pixel size through this same API;
+the selected profile, not a second panel preference, determines rasterization.
 
 Bitmap `BlitFont` masks remain supported; the modern profile adds shared
 coverage/colour rasters instead of stretching those masks. Another PSF alone
@@ -118,8 +126,9 @@ Release561 implements explicit cell pixel height and legacy-policy
 compatibility (ADR0144), with full regression and bounded physical SDL/GLES2
 sizing/capture checks passing. Candidate562 adds the optional Spleen retro
 profile (ADR0145), plus integrated native outline/colour rendering (ADR0147).
-Full release verification is running; production dependency and assets are
-declared, but no562 deployment has been accepted yet.
+Candidate562 itself was not deployed;564 is the first production font rollout.
+Production dependency and licensed assets are declared; do not interpret the
+config-only563 maintenance release as carrying the new font profiles.
 
 ## Historical shared-module checkpoint (superseded by integration above)
 
@@ -154,7 +163,7 @@ package and physically review10.54 without changing its layout/backend by
 surprise. Neither profile quality nor performance is accepted from a module
 test alone. Existing production rendering is unchanged by this checkpoint.
 
-## Source/rasterizer feasibility evidence (2026-10-19)
+## Historical source/rasterizer feasibility evidence (2026-10-19)
 
 `tools/probes/font_source_capabilities.c` is an isolated TCC/FreeType source
 probe, not an alternate terminal renderer. It verifies grayscale partial
@@ -170,7 +179,7 @@ using requested em pixels as cell height would recreate clipping. Noto's
 selected bitmap strike is136x128, with10,279 intrinsically coloured pixels;
 it needs deliberate cell fitting, not an assumed requested-size strike.
 
-Candidate sources reviewed without system installation or redistribution:
+At initial feasibility, sources were reviewed without system installation:
 
 | Input | Pinned identity | SHA256 |
 | --- | --- | --- |
@@ -179,24 +188,23 @@ Candidate sources reviewed without system installation or redistribution:
 | NotoColorEmoji.ttf | Debian fonts-noto-color-emoji2.042-0+deb12u1 | `e5899ed38b8ed83e08bd3ac5de09791e9d19d288333a796de1d35ad17396f1ec` |
 
 Licenses read: Spleen BSD2-clause; Hack Expat/Bitstream Vera; Noto font OFL1.1
-(other project files have other licensing). Include actual license notices
-with eventual distributed assets; no universal coverage claim follows.
-Downloaded source inputs are currently under `/tmp/blit-font-sources.kyJ1xr/`.
+(other project files have other licensing). Actual license notices now ship
+with the canonical assets in assets/fonts; no universal coverage claim follows.
+The original temporary download directory is not a release/build input.
 
-Reproduce the capability check against those extracted headers/assets:
+Reproduce the isolated capability check using canonical headers/assets:
 
 ```sh
-BLIT_FONT_SOURCE_ROOT=/tmp/blit-font-sources.kyJ1xr
+mkdir -p build/tests
 tcc -std=c99 \
-  -I"$BLIT_FONT_SOURCE_ROOT/extracted/usr/include/freetype2" \
+  -Ibuild/deps/prefix/include/freetype2 \
   tools/probes/font_source_capabilities.c \
   /lib/x86_64-linux-gnu/libfreetype.so.6 \
-  -o "$BLIT_FONT_SOURCE_ROOT/font-source-capabilities"
-"$BLIT_FONT_SOURCE_ROOT/font-source-capabilities" \
-  "$BLIT_FONT_SOURCE_ROOT/extracted/usr/share/fonts/truetype/hack/Hack-Regular.ttf" \
-  "$BLIT_FONT_SOURCE_ROOT/extracted/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf"
+  -o build/tests/font-source-capabilities
+build/tests/font-source-capabilities \
+  assets/fonts/Hack-Regular.ttf assets/fonts/NotoColorEmoji.ttf
 ```
 
 This probe is not linked into production; no font dependency/default changes
-are made by running it. Choosing the shared glyph interface, fitting and
-shaping contract remains the next implementation step after pixel sizing.
+are made by running it. Shared glyph fitting/rasterization is now implemented
+under ADR0147; complex shaping remains outside the delivered scalar contract.

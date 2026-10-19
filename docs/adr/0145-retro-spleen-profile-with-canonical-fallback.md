@@ -1,6 +1,6 @@
 # ADR 0145: Selectable retro face with canonical Hibr glyph fallback
 
-- Status: implemented; focused evidence passed, full/package/physical checks pending
+- Status: implemented and deployed564; operator aesthetic review separate
 - Date: 2026-10-19
 - Scope: font assets and profile inventory; Blit#107
 

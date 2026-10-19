@@ -1,5 +1,37 @@
 # Current state and restart point
 
+## 2026-10-19 font release564 deployed; native antialiasing measured
+
+Live10.54 is564, native KMS unchanged, both physical outputs presenting and
+all three physical pane regions retained. Non-font saved settings checksum is
+unchanged; bottom-primary login preference remains pane-display-93-2.
+Both new profiles are installed/available. API previews of Retro and Modern
+at17/19/23px pass three-pane geometry/capture checks and restore the original
+profile/policy. Agent then selected Modern19px; another client changed it to
+22px, which was preserved (clean saved revision230 at observation).
+
+Actual native-KMS menu glyph F at19px: Retro2 colours/0 intermediate coverage
+levels; Modern13 colours/11 intermediate levels, all matching foreground-over-
+background coverage. This is real captured pixel evidence, not an API-only
+claim, and not universal glyph acceptance. Evidence: build/font564-evidence/.
+
+Full exact-binary regression112pass/3skip/0fail; GLES7pass/0skip/0fail;
+new reversible-host-probe gate passes separately. Reproducible final archive
+source da7e32d/SHA256712b0b72897d9db244ecb2a702bf1ccd0a9026491697a3e75ce9d5f812d60556.
+Native font draw Valgrind:7,478 allocations/frees, zero errors/leaks.
+Hibr0.99.262/ABI16 executable unchanged during checks; no core edits or SSH.
+Installed panel0.1.7 discovers both profiles; actual modern-font UI drag19px
+and keyboard+1/-1 passed in hibr-apps8006a7c. See verification-status.md.
+
+Preview images include intermediate/incomplete application redraws; they are
+not accepted whole-desktop reference images. Sessions1–3 were replaced by4–6;
+the operator explicitly confirmed restarting Hibr during testing. Do not infer
+a Blit-caused desktop failure from those replacements. Aesthetic/whole-desktop
+resize review remains operator-facing; do not claim it passed from geometry.
+Pointer choppiness remains open on101; foreground YouTube observation is a
+reproduction clue, not a diagnosis. Next phase is measured pointer cadence,
+preserving native KMS. The following resumed/held-font entries are historical.
+
 ## 2026-10-19 font release564 resumed; pointer observation recorded
 
 The operator confirms563 looks correct on native KMS but pointer motion remains
