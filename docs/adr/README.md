@@ -167,6 +167,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0147 — Shared coverage and colour cell rasterization](0147-shared-coverage-and-colour-cell-rasterizer.md)
 - [0148 — Explicit presentation configuration source](0148-explicit-presentation-configuration-source.md)
 - [0149 — Per-output submitted pointer state](0149-per-output-submitted-pointer-state.md)
+- [0150 — Modern Hibr Nerd icons and menu pencil](0150-modern-hibr-nerd-icons.md)
 
 ## Adding an ADR
 

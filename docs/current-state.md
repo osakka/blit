@@ -1,5 +1,25 @@
 # Current state and restart point
 
+## 2026-10-19 candidate566: Modern Hibr Nerd icons and menu pencil
+
+Native565 mouse is operator-accepted. Candidate566 changes only Modern's
+outline asset/profile path and verification/documentation, not mouse code,
+backend, settings schema or Hibr. BlitModernNerd-Regular.ttf is a renamed
+derivative of pinned Nerd Fonts3.4.0 Hack Mono, retaining Hack Unicode plus
+1475 Font Awesome mappings; other Nerd icon families are excluded.
+Hibr's existing U+270E menu character uses the same complete outline as
+nf-fa-pencil. All icons are aspect-fitted inside fixed advance/cap-height;
+this corrects measured negative-sidebearing rejection at small sizes.
+
+The new production-raster gate fails on old Hack and passes1140 samples
+(Hibr's18 distinct Nerd PUA symbols plus two pencil mappings,57 sizes8..64).
+Native and SDL software/GLES pixel gates pass969 samples each, native exact
+including guard pixels, SDL tolerance2. Full font suite15pass/0skip/0fail;
+font generation byte-reproducible, asset/license identities pass. This is
+not an all-suite rerun. TCC server/helper566 build. Packaging/live preview
+pending; live remains565 until supervised deployment. Colour bell sizing
+is unchanged/unresolved. See ADR0150 and font-evolution-plan.md.
+
 ## 2026-10-19 operator accepts565 mouse motion; Modern fonts next
 
 Operator reports "It's perfect!" for physical movement after565. Next priority

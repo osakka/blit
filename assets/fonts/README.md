@@ -27,9 +27,10 @@ Pixel size changes use `PUT /v1/fonts` with `size_px`; this bitmap face does
 not become an outline font or intrinsic-colour font by resizing it. The
 modern antialiased/colour profile is separate.
 
-## Modern: Hack with Noto colour emoji
+## Modern: Hack text, Hibr Nerd icons and Noto colour emoji
 
-Profile `blit-modern` uses unmodified `Hack-Regular.ttf`3.003 for native-size
+Profile `blit-modern` uses `BlitModernNerd-Regular.ttf`, a renamed, reproducibly
+generated derivative of Nerd Fonts3.4.0 Hack Mono, for native-size
 antialiased monospaced text and `NotoColorEmoji.ttf`2.042 for supported colour
 scalars absent from the outline face. Font size8–64px means exact cell height;
 the font's em size is fitted inside that cell, not stretched after rendering.
@@ -38,10 +39,22 @@ the same API/Control Panel as the others. The modern face scales smoothly;
 Spleen/Terminus retain intentional bitmap pixels.
 
 `modern-fonts.source.json` pins source package versions, font SHA256s and
-license SHA256s. `Hack-LICENSE.txt` contains the Expat/Bitstream Vera terms;
-`NotoColorEmoji-LICENSE.txt` contains the font's OFL1.1 terms. No source font
-was renamed or modified. Source origins are Debian fonts-hack3.003-3 and
-fonts-noto-color-emoji2.042-0+deb12u1.
+license SHA256s. `licenses/HackNerd-LICENSE.txt`, `licenses/NerdFonts-LICENSE.txt`
+and `licenses/FontAwesome-LICENSE.txt` preserve the upstream notices, including
+Fonticons attribution and Font Awesome licensing. The original Hack face stays
+as a build input, not a second Modern runtime implementation. Noto remains
+unmodified, from Debian fonts-noto-color-emoji2.042-0+deb12u1.
+
+The outline repertoire retains Hack Unicode plus1475 Font Awesome Nerd-codepoint
+mappings, including all18 distinct PUA symbols emitted by Hibr's Nerd glyph
+set. Other Nerd icon families are deliberately excluded; this is not the entire
+Nerd Fonts collection. U+270E (`✎`), Hibr's existing menu character, uses the
+Font Awesome pencil outline without changing Hibr or terminal codepoints.
+Complete icon outlines are fitted with5% side insets and the text cap-height
+bound; no cropping or proportional advance. Icons take the terminal foreground
+colour; colour emoji remain a separate mechanism. Generate with
+`PYTHONPATH=<fontTools4.60.1> python3 tools/fonts/build-modern-nerd.py SOURCE.ttf OUTPUT.ttf`.
+The generator checks the pinned source hash and never downloads implicitly.
 
 Protected box/block geometry and missing scalars use the existing PSF
 fallback; those fallback characters remain pixel-art. Wide BMP characters

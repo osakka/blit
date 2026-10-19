@@ -3,6 +3,19 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-19 candidate566: Modern Nerd repertoire and U+270E pencil
+
+Old Hack fails new raster regression at U+270E8px; upstream Nerd Mono also
+fails because the complete pencil has negative sidebearing. Build-time
+whole-outline fitting (no cropping) and semantic pencil mapping pass1140
+samples across8..64px, no fallback and exact single-cell dimensions.
+Derived TTF byte-identical rebuild; source and license hashes pinned.
+Font suite15pass/0skip/0fail; native969 sample pixels/guards exact; SDL
+software and offscreen GLES each969 samples within2 levels/channel.
+TCC server/helper566 build; no full all-suite rerun. Live/package acceptance
+pending. Scope: Hibr Nerd set/Font Awesome, not all Nerd families; colour
+bell unchanged. No Hibr edits, backend switch or settings changes.
+
 ## 2026-10-19 pointer565: independent output phase regression
 
 Clean564 API sweep:180 motions requested60Hz over3s,73 confirmed DP flips

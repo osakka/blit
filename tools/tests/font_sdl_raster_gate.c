@@ -23,7 +23,8 @@ int main(int argc, char **argv)
     memset(&font, 0, sizeof(font));
     CHECK(blit_font_load_path(&font, argv[1]) == 0);
     for (size = 8; size <= 64; ++size) {
-        uint32_t scalars[] = {'A', 'g', 0x2588, 0x2500, 0x1f600, '9', 0x25c6, 0xfe0f, 0x200d};
+        uint32_t scalars[] = {'A', 'g', 0x2588, 0x2500, 0x1f600, '9', 0x25c6, 0xfe0f, 0x200d,
+            0x270e, 0xf040, 0xf015, 0xf07b, 0xf014, 0xf021, 0xf00c, 0xf071};
         unsigned index;
         BlitRaster *raster = blit_raster_open(&font, argv[2], argv[3], (size + 1) / 2, size);
         CHECK(raster);

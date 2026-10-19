@@ -23,4 +23,4 @@ case "$mode" in
  opengles2) export SDL_VIDEODRIVER=offscreen BLIT_TEST_RENDERER=opengles2 LIBGL_ALWAYS_SOFTWARE=1 ;;
 esac
 "$root/build/tests/font-raster-$mode" "$root/assets/fonts/Blit-Hibr-Terminus16.psf" \
- "$root/assets/fonts/Hack-Regular.ttf" "$root/assets/fonts/NotoColorEmoji.ttf"
+ "$root/assets/fonts/BlitModernNerd-Regular.ttf" "$root/assets/fonts/NotoColorEmoji.ttf"

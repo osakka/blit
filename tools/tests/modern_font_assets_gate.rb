@@ -10,4 +10,7 @@ manifest = JSON.parse(File.read(File.join(root,'modern-fonts.source.json')))
     raise "asset identity mismatch: #{path}" unless Digest::SHA256.file(path).hexdigest == entry.fetch(hash_key)
   end
 end
-puts 'MODERN_FONT_ASSETS_PASS outline=Hack3.003 colour=Noto2.042 source_hashes=exact licenses=included'
+manifest.fetch('icon_licenses').each do |entry|
+  raise 'icon license identity mismatch' unless Digest::SHA256.file(File.join(root, entry.fetch('file'))).hexdigest == entry.fetch('sha256')
+end
+puts 'MODERN_FONT_ASSETS_PASS outline=BlitModernNerd colour=Noto2.042 source_hashes=exact licenses=included'

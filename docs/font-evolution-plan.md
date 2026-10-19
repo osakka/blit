@@ -2,6 +2,17 @@
 
 Tracking: [Blit#107](https://git.home.arpa/itdlabs/blit/issues/107).
 
+## Candidate566: Hibr Nerd coverage and readable start-menu pencil
+
+Implemented ADR0150's font-only approach. Modern retains Hack Unicode and
+1475 Font Awesome mappings from pinned Nerd Fonts3.4.0 Hack Mono. This
+explicitly covers Hibr's Nerd glyph set, not every Nerd family. Its existing
+menu pencil U+270E uses the nf-fa-pencil outline, so no Hibr edits are needed.
+Complete icons fit within fixed advance and cap-height without clipping;
+production gate1140 samples and all15 font-suite checks pass, plus969 pixel
+samples on each native/SDL software/GLES adapter. Package/live aesthetic
+approval pending. Colour bell sizing has not changed in this candidate.
+
 ## Next bounded phase: Modern icon coverage and visual metrics
 
 Operator accepted565 physical mouse motion ("It's perfect!"). Sequence is

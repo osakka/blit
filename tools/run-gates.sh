@@ -216,8 +216,9 @@ suite_font() {
     run_gate font_fit_gate.py python3 tools/tests/font_fit_gate.py
     run_gate retro_font_gate.py python3 tools/tests/retro_font_gate.py
     run_gate modern_font_assets_gate.rb ruby tools/tests/modern_font_assets_gate.rb
+    run_gate modern_nerd_gate.sh sh tools/tests/modern_nerd_gate.sh
     run_gate font_raster_gate.sh sh tools/tests/font_raster_gate.sh \
-        "$FONT" "${BLIT_GATE_OUTLINE:-$ROOT/assets/fonts/Hack-Regular.ttf}" \
+        "$FONT" "${BLIT_GATE_OUTLINE:-$ROOT/assets/fonts/BlitModernNerd-Regular.ttf}" \
         "${BLIT_GATE_COLOUR:-$ROOT/assets/fonts/NotoColorEmoji.ttf}"
     run_gate font_kms_raster sh tools/tests/font_backend_raster_gate.sh kms
     run_gate font_software_raster sh tools/tests/font_backend_raster_gate.sh software

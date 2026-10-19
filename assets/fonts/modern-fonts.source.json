@@ -1,12 +1,13 @@
 {
   "profile": "blit-modern",
   "outline": {
-    "file": "Hack-Regular.ttf",
-    "source": "Debian fonts-hack 3.003-3",
-    "upstream": "https://github.com/source-foundry/Hack",
-    "sha256": "9f67c8a8cd28498525639437d6fac588c452e8572945c790db7641cc7907a69b",
-    "license_file": "Hack-LICENSE.txt",
-    "license_sha256": "bae0d90ef8f2ef47a7182277d7f0ce3175256f04dd63c68a21c4706c966cddac"
+    "file": "BlitModernNerd-Regular.ttf",
+    "source": "Renamed derivative of Nerd Fonts v3.4.0 HackNerdFontMono-Regular.ttf; Hack Unicode plus Font Awesome glyphs only",
+    "upstream": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/v3.4.0/patched-fonts/Hack/Regular/HackNerdFontMono-Regular.ttf",
+    "upstream_sha256": "03e60d3c1a9f8bef4e1f78836f80aacb9ec005260a6b094f5bfc10043bb115ab",
+    "sha256": "b7d7f21fa7e3ca609d697df933e11567076d681f1a6b6503c9a1fb90a042ea72",
+    "license_file": "licenses/HackNerd-LICENSE.txt",
+    "license_sha256": "1f61bb7c790c59b4b0ecdf304628b94e42ae4c8020094a8c3da73381ab212623"
   },
   "colour": {
     "file": "NotoColorEmoji.ttf",
@@ -16,5 +17,9 @@
     "license_file": "NotoColorEmoji-LICENSE.txt",
     "license_sha256": "140c8aab8b15e212617b74476ae1c1547f868e523301a190398ea9c71e62af64"
   },
-  "policy": "Unmodified licensed source fonts. Native-size grayscale text; fixed-strike premultiplied colour emoji. Protected terminal geometry and missing scalars use canonical PSF fallback. No universal Unicode or shaped emoji-sequence claim."
+  "icon_licenses": [
+    {"file": "licenses/NerdFonts-LICENSE.txt", "sha256": "1f6ad4edae6479aaace3112ede5279a23284ae54b2a34db66357aef5f64df160"},
+    {"file": "licenses/FontAwesome-LICENSE.txt", "sha256": "de784a808496d49f5f80dd9d1d6e9a51cff712cfbc339e7c25155631ae3cdb5d"}
+  ],
+  "policy": "tools/fonts/build-modern-nerd.py with fontTools4.60.1: retain Hack Unicode and Font Awesome Nerd icons; fit complete icon outlines with 5 percent side insets and text cap height; U+270E uses nf-fa-pencil. Renamed derivative, notices retained. Native-size grayscale text; unchanged fixed-strike colour emoji. Protected geometry/missing scalars retain PSF fallback. Not all Nerd families, universal Unicode or shaped emoji sequences."
 }

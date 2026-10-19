@@ -20,7 +20,7 @@ request = lambda do |method, path, body = nil, status = 200|
 end
 Dir.mktmpdir('blit-modern-api') do |work|
   fonts = File.join(work, 'fonts'); Dir.mkdir(fonts)
-  %w[Blit-Hibr-Terminus16.psf Blit-Hibr-Spleen16.psf Hack-Regular.ttf NotoColorEmoji.ttf].each do |asset|
+  %w[Blit-Hibr-Terminus16.psf Blit-Hibr-Spleen16.psf BlitModernNerd-Regular.ttf NotoColorEmoji.ttf].each do |asset|
     FileUtils.copy_file(File.join(root, 'assets/fonts', asset), File.join(fonts, asset))
   end
   env = SdlTestProfile.environment.merge('BLIT_SETTINGS'=>'load',
