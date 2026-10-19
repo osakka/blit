@@ -1,0 +1,19 @@
+release: 0.1.560
+package: blit_0.1.560-1_amd64.deb
+package_sha256: 8cdaa78a852484e25e58535f781e0e8320be5bb4fe9c3aae01ccfa1ec9b0a22a
+source_commit: 71d55cff5fe4d3ec3147e77f3c2f15a7fca49f93
+package_documentation_commit: 71d55cff5fe4d3ec3147e77f3c2f15a7fca49f93
+server_binary_sha256: 01b4b479a5cdf46ec8d4dc5932da79542a81c52e2d5277c27f30ddf0ad766de1
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.225
+hibr_abi: 16
+verification:
+  regression: '107 pass, 7 explicit skips, 0 fail; includes six offscreen GLES2 gates'
+  adapters: 'Three gates pass separately against pinned Hibr 0.99.225/ABI16 headers'
+  installed_hibr: '0.99.256/ABI16 unchanged before/after full regression; SHA256 1dd031259b4d16ccbfc3c0ffe6335d28fdaaa6be4d2cfe0f6187b6d1680a73b9'
+  soak: '120 seconds, four PTYs, 11504 snapshots, 1046 resizes'
+  placement: 'Explicit nonzero native primary and actual-desktop resize/restart/rejoin pass; selected primary preserved'
+  admission: 'Ready request regression red before and green after; bounded capacity/nonblocking descriptors verified'
+  package: 'Independent builds byte-identical; artifact/provenance gate passes'
+  physical: 'Pending; live remains 0.1.559 at manifest creation'
