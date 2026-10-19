@@ -22659,6 +22659,24 @@ static void reconcile_kms_topology(BlitRuntime *runtime)
     diagnostic_log(runtime, "info", "kms_topology_changed", "connected output inventory reconciled without restarting sessions");
 }
 
+static void service_kms_presentation_change(BlitRuntime *runtime, uint64_t now)
+{
+    int i;
+    reconcile_kms_topology(runtime);
+    trace_kms_vblank(runtime);
+    /* Completion alone is not a visual mutation. Topology reconciliation
+       and ready retries mark their own work; retain any existing request
+       without spending an idle output's next deadline on a no-op. */
+    for (i = 0; i < runtime->output_count; ++i) {
+        BlitKmsDisplayInfo info;
+        if (blit_kms_display_info(runtime->kms, i, &info) == 0 &&
+            info.presentation_state == BLIT_KMS_PRESENTATION_RECOVERING)
+            runtime->render_pending = 1;
+    }
+    retry_ready_kms_outputs(runtime,
+        blit_kms_ready_output_mask(runtime->kms), now);
+}
+
 static int activate_direct_kms_fallback(BlitRuntime *runtime)
 {
     char error[256];
@@ -28932,11 +28950,7 @@ int main(int argc, char **argv)
             if (serviced < 0)
                 fprintf(stderr, "blit: KMS event service failed\n");
             else if (serviced > 0) {
-                reconcile_kms_topology(&runtime);
-                trace_kms_vblank(&runtime);
-                runtime.render_pending = 1;
-                retry_ready_kms_outputs(&runtime,
-                    blit_kms_ready_output_mask(runtime.kms), monotonic_us());
+                service_kms_presentation_change(&runtime, monotonic_us());
             }
         }
         if (runtime.evdev_watch_fd >= 0 && ready > 0 &&

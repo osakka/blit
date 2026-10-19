@@ -1,5 +1,27 @@
 # Current state and restart point
 
+## 2026-10-19 candidate 0.1.558: idle KMS completion preserves visual deadlines
+
+ADR0140 isolates the completion-induced no-op from the physical trace. A
+production-code regression fails before the fix: completion fabricates
+`render_pending=1` and advances deadline 16000 to 32666 without new work.
+The event-service helper now retains existing pending work but leaves topology
+and deferred retries responsible for requesting their own renders. No damage,
+scene boundary, refresh target or SDL scheduler change is introduced.
+
+The focused regression passes on software and offscreen GLES2, including
+retained pointer work, existing ready-retry and held-scene checks. TCC build
+succeeds. Cached-adapter metadata also verifies that timeout recovery still
+requests rendering; the helper explicitly preserves this separate case.
+The first full run was stopped during review to add that guard and is not
+counted as a pass. The fresh full run passes 106 gates, with 7 explicit skips
+and no failures. Its 120-second four-PTY soak completes 11,416 snapshots and
+1,038 resizes; all three pinned-header adapter gates pass separately.
+Package construction, deployment and physical cadence revalidation are
+pending. Live remains 0.1.557 with native/login
+restored after the trace comparison. Candidate558 is not claimed to solve
+the entire performance gap; HTTP arrival bunching is separately observable.
+
 ## 2026-10-19: retain pointer/render trace tails for scheduling diagnosis
 
 The pointer probe now retains existing API `pointer_motion` and `render_path`

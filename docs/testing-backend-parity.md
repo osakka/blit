@@ -63,6 +63,10 @@ For exploratory pointer cadence, set `BLIT_COMPARISON_POINTER_CADENCE=1`.
 After each profile's pixel probes, the existing pointer workload offers
 10 seconds of 12-pixel sweeps at that output's advertised refresh, using
 concurrent HTTP requests; `BLIT_POINTER_SECONDS` changes the bounded duration.
+`BLIT_POINTER_HZ` explicitly overrides the offered rate (1..240 requests/s),
+allowing an above-refresh producer to distinguish sparse/bunched input from
+the output's ability to service continuously pending pointer work. This never
+changes the display mode or Blit's configured presentation target.
 The tool retains raw observations and per-output submission rates separately
 from available native flip completions. This is diagnostic output, not a
 cadence pass/fail gate: request timing/order, the final restoration motion

@@ -3,6 +3,41 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-19 candidate 558: completion no longer fabricates visual work
+
+The actual KMS service path is extracted into one production helper, then
+tested with cached adapter metadata. Before the fix, an idle completion
+creates a render request and moves the deadline from 16000 to 32666; the
+regression reports that failure. Removing the unconditional request preserves
+both idle deadlines and existing pointer work. Recovery metadata still
+requests rendering explicitly. Existing ready-output retry checks also pass.
+
+The production-code fixture passes on software and offscreen GLES2 alongside
+held-scene pointer, graphics sampling and independent-output metrics. TCC
+build succeeds. The first full run was intentionally stopped to add the
+timeout-recovery guard; its partial results are not a full pass. A fresh full
+run passes 106 gates, with 7 explicit skips and 0 failures, including six
+offscreen GLES cases. Its 120-second four-PTY soak completes 11,416 snapshots
+and 1,038 resizes. The three adapter gates pass separately against the pinned
+Hibr 0.99.225/ABI16 headers. Candidate 0.1.558 is not packaged/deployed yet, and no
+physical performance improvement is claimed before revalidation. ADR0140
+records the decision and the captured timeline.
+
+The unchanged live 0.1.557 baseline was also sampled with 240 requested
+pointer slots/s for 10 seconds. Native delivers all 2,400 injections (237.26/s
+over client elapsed time), with request p95 29.66ms and 56.15 confirmed flips/s.
+SDL/software delivers 745 (70.88/s), skips 1,655 at the client's bounded queue,
+and has p95 135.13ms; SDL/GLES2 delivers 706 (67.26/s), skips 1,694 at that
+queue, and has p95 135.43ms. SDL submission rates are 57.62/s and 57.49/s;
+completion rates remain unavailable. These are client-side skipped offers,
+not demonstrated server-side input loss. They invalidate any claim of an
+identical continuously pending accepted-input workload across these runs.
+
+Evidence: `/tmp/blit-backend-cadence-557-240hz-20261019/`. All pixel/protocol
+checks still pass and native/login/pointer restoration succeeds. The API
+throughput/latency gap requires its own reproduction; the event loop accepts
+one connection per turn, but causal attribution needs a controlled test.
+
 ## 2026-10-19: bounded cadence diagnosis, not performance acceptance
 
 The measurement regression fails against the previous pointer probe because

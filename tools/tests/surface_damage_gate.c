@@ -1,7 +1,21 @@
 /* Exercise the actual terminal state's damage accumulators, not a copy. */
 #define main blit_server_entry_for_damage_gate
+/* Supply cached adapter metadata for completion/recovery classification.
+   Rendering and event-service policy remain the actual production code. */
+#define blit_kms_display_info fixture_kms_display_info
 #include "../../src/blit_server.c"
 #undef main
+#undef blit_kms_display_info
+
+static int fixture_kms_info_enabled;
+static BlitKmsDisplayInfo fixture_kms_info;
+int fixture_kms_display_info(const BlitKms *kms, int index, BlitKmsDisplayInfo *info)
+{
+    (void)kms;
+    if (!fixture_kms_info_enabled || index != 0) return -1;
+    *info = fixture_kms_info;
+    return 0;
+}
 
 static int failures;
 static BlitSurface subject;
@@ -249,6 +263,48 @@ static void utf8_large_pty_read_gate(void)
     close(fds[0]); close(fds[1]); free(runtime);
 }
 
+static void kms_idle_completion_gate(void)
+{
+    BlitRuntime *runtime = calloc(1, sizeof(*runtime));
+    if (!runtime) exit(2);
+    runtime->direct_kms = 1;
+    runtime->display_count = runtime->output_count = 1;
+    runtime->outputs[0].display_id = runtime->displays[0].id = 93;
+    runtime->displays[0].refresh_hz = 60.0;
+    runtime->render_interval_ms = 1000;
+    runtime->render_next_us[0] = 16000;
+    fixture_kms_info_enabled = 1;
+    memset(&fixture_kms_info, 0, sizeof(fixture_kms_info));
+    fixture_kms_info.presentation_state = BLIT_KMS_PRESENTATION_PRESENTING;
+    /* No DRM device is needed: inventory is unchanged, no retry is pending,
+       and completion bookkeeping must not fabricate a visual mutation. */
+    service_kms_presentation_change(runtime, 16667);
+    if (runtime->render_pending)
+        advance_render_schedule(runtime, 16667, due_output_mask(runtime, 16667));
+    if (runtime->render_pending || runtime->render_next_us[0] != 16000) {
+        fprintf(stderr, "KMS_IDLE_COMPLETION_FAIL pending=%d deadline=%llu expected=16000\n",
+            runtime->render_pending, (unsigned long long)runtime->render_next_us[0]);
+        ++failures;
+    }
+    runtime->render_pending = runtime->pointer_dirty = 1;
+    runtime->pointer_dirty_outputs = 1;
+    service_kms_presentation_change(runtime, 17000);
+    if (!runtime->render_pending || !runtime->pointer_dirty || runtime->pointer_dirty_outputs != 1) {
+        fprintf(stderr, "KMS_IDLE_COMPLETION_FAIL existing pointer work was lost\n");
+        ++failures;
+    }
+    runtime->render_pending = runtime->pointer_dirty = 0;
+    runtime->pointer_dirty_outputs = 0;
+    fixture_kms_info.presentation_state = BLIT_KMS_PRESENTATION_RECOVERING;
+    service_kms_presentation_change(runtime, 18000);
+    if (!runtime->render_pending) {
+        fprintf(stderr, "KMS_IDLE_COMPLETION_FAIL timeout recovery request was suppressed\n");
+        ++failures;
+    }
+    fixture_kms_info_enabled = 0;
+    free(runtime);
+}
+
 static void kms_retry_deadline_gate(void)
 {
     BlitRuntime *runtime = calloc(1, sizeof(*runtime));
@@ -482,6 +538,7 @@ int main(void)
     mark_surface_damage(&subject, 2, 1);
     expect_bounds("full damage never shrinks", 0, 0, 80, 40);
     expired_batch_deadline_gate();
+    kms_idle_completion_gate();
     kms_retry_deadline_gate();
     utf8_large_pty_read_gate();
     utf8_fragmentation_gate();
