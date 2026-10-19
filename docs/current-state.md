@@ -1,5 +1,29 @@
 # Current state and restart point
 
+## 2026-10-19: Control Panel0.1.6 exposes font size in pixels
+
+Canonical catalogue bundle in `itdlabs/hibr-apps` commit `33be7b3` replaces
+the old scale slider with **Font size**,8–64px via existing `PUT /v1/fonts`
+`size_px`. Keyboard arrows select every1px; the native11-position drag track
+samples5–6px steps. Font profile selection remains independent. Blit owns
+automatic persistence; no second preferences store or Hibr core changes.
+Successful font replies replace only the draft's font policy, preserving
+unrelated edits and the original revision guard. Unsupported servers show an
+upgrade notice. See hibr-apps ADR0005 and Blit ADR0144; issues Blit#107 and
+hibr-apps#1.
+
+Actual callbacks, limits, queued keyboard/drag coalescing, staged-edit
+preservation and older-server capability handling pass against the extracted
+released0.1.561 binary. Native installed Hibr UI pointer drag19px and keyboard
+20/19px pass; shared Mouse callbacks/UI and catalogue install/update/remove
+pass. Hibr0.99.258/ABI16 binary fingerprint stayed
+`a17716c1a56eb4ca9f0e691b4323dbd4cef300526f6a0b99ffaadda084a3ceeb`.
+Generated catalogue checksum and detached signature verify. Publication is not
+proof the app is installed on10.54: update via `catalogue refresh` then
+`catalogue update control-panel/blit`; no new Blit Debian package is needed.
+Live display/settings were not changed during these isolated tests.
+Candidate562's separate frozen full-regression gate below remains pending.
+
 ## 2026-10-19 candidate562: selectable retro font and exact SDL atlas boundaries
 
 ADR0145 adds optional `blit-hibr-spleen16`: pinned Spleen2.2.0 plus the exact
