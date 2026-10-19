@@ -22,6 +22,12 @@ static void sdl_output_presentation_gate(void)
     r->display_count = r->output_count = 2;
     r->render_interval_ms = 1000;
     for (i = 0; i < 2; ++i) {
+        BlitGraphicsImage image;
+        unsigned char rgb[12] = {255,0,0, 0,255,0, 0,0,255, 255,255,0};
+        SDL_Texture *texture;
+        SDL_Surface *pixels;
+        SDL_FRect destination = {0,0,8,16};
+        int x, y;
         r->outputs[i].window = SDL_CreateWindow("output-counter-gate", 64, 64, 0);
         r->outputs[i].renderer = SDL_CreateRenderer(r->outputs[i].window, renderer);
         if (!r->outputs[i].window || !r->outputs[i].renderer) exit(2);
@@ -29,6 +35,24 @@ static void sdl_output_presentation_gate(void)
         r->outputs[i].display_id = r->displays[i].id = i + 1;
         r->displays[i].refresh_hz = i == 0 ? 60.0 : 120.0;
         set_display_geometry(&r->displays[i], i * 64, 0, 64, 64);
+        memset(&image, 0, sizeof(image));
+        image.width = image.height = 2; image.format = 24;
+        image.pixels = rgb; image.generation = 1;
+        texture = sdl_graphics_texture(&r->outputs[i], &image);
+        if (!texture || !SDL_RenderTexture(r->outputs[i].renderer, texture, NULL, &destination)) exit(2);
+        pixels = SDL_RenderReadPixels(r->outputs[i].renderer, NULL);
+        if (!pixels) exit(2);
+        for (y = 0; y < 16; ++y) for (x = 0; x < 8; ++x) {
+            Uint8 red, green, blue, alpha;
+            unsigned char *want = rgb + ((y / 8) * 2 + x / 4) * 3;
+            if (!SDL_ReadSurfacePixel(pixels, x, y, &red, &green, &blue, &alpha) ||
+                red != want[0] || green != want[1] || blue != want[2]) {
+                fprintf(stderr, "SDL_GRAPHICS_SAMPLING_FAIL renderer=%s output=%d pixel=%d,%d got=%u,%u,%u expected=%u,%u,%u\n",
+                    renderer, i, x, y, red, green, blue, want[0], want[1], want[2]);
+                exit(1);
+            }
+        }
+        SDL_DestroySurface(pixels);
     }
     for (step = 0; step < 3; ++step) {
         int output = step == 2 ? 1 : 0;
@@ -65,7 +89,7 @@ static void sdl_output_presentation_gate(void)
     }
     free(r);
     SDL_Quit();
-    printf("SDL_OUTPUT_COUNTER_PASS driver=%s renderer=%s outputs=2 idle=unchanged counts=2,1 aggregate=3 timing=independent modes=60,120 teardown=reset\n", driver, renderer);
+    printf("SDL_OUTPUT_COUNTER_PASS driver=%s renderer=%s outputs=2 sampling=256_exact_pixels idle=unchanged counts=2,1 aggregate=3 timing=independent modes=60,120 teardown=reset\n", driver, renderer);
 }
 
 static void sdl_held_scene_pointer_gate(void)

@@ -1,5 +1,32 @@
 # Current state and restart point
 
+## 2026-10-19 candidate0.1.557: physical comparison exposes graphics filtering mismatch
+
+Reproducible0.1.556 is installed and version-verified on10.54. Its package
+SHA256 is recorded in `releases/0.1.556.yaml`. API-owned backend selection and
+restoration worked on the actual host. The first native trial included a
+visible software pointer in the sampled cells; that failed fixture result is
+not evidence of native rendering debris. The comparison now parks the pointer
+outside the tested region and checks its state without masking pixels.
+
+The second trial passed12/12 coherent motion captures on direct KMS and
+SDL/KMSDRM software. Native Kitty composition/deletion passed. SDL/software
+Kitty returned blended colours instead of exact source quadrants. KMS and
+the original login policy were restored automatically. Evidence is retained
+under `/tmp/blit-backend-parity-556-20261019-b/`.
+
+Candidate0.1.557 sets terminal graphics texture sampling to nearest-neighbor,
+matching native source-pixel lookup (ADR0139). The production-code regression
+failed before the fix at software pixel2,0 (223,31,0 instead of255,0,0), then
+passed all256 enlarged-image pixels across two renderers on software and GLES2.
+The expanded GLES suite passes5/0/0. The three adapter gates also pass
+separately against the pinned Hibr0.99.225/ABI16 archive, without editing
+Hibr. Full regression passes 103 gates with 7 explicit skips and 0 failures;
+the 120-second four-PTY soak completes 11,560 snapshots and 1,051 resizes.
+The skips are the three adapter checks (passed separately with the pinned
+headers), QEMU, package validation and two physical-host gates. Packaging,
+deployment and physical revalidation of 557 remain pending.
+
 ## 2026-10-19 candidate0.1.556: API-owned backend comparison and shared GL fixtures
 
 ADR0138 adds saved `server.display_backend` (`kms` or `sdl`) to the existing

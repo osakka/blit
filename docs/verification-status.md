@@ -3,6 +3,34 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-19:556 physical evidence and557 graphics-sampling regression
+
+Two independently built0.1.556 packages are byte-identical; artifact and
+provenance checks pass. Package SHA256:
+`8c5f803f813787b40cb10230403b2713f8fde50e145cc456d3b6c6cd0860ce39`.
+The supervised updater installed it on10.54 and verified its version.
+
+The first native motion trial had11/12 matching frames; the failed capture
+contains a software pointer in the checked region. Inspection of the saved
+capture identifies that footprint. The probe now parks the pointer outside
+the fixture and checks its reported state. No failed pixels are masked.
+The rerun passes12/12 coherent captures on both native and SDL/software;
+native Kitty quadrants/deletion pass. SDL/software Kitty samples include
+red211,31,13 instead of255,0,0 and blue31,31,223 instead of0,0,255.
+The actual identities were `drm-kms/direct-kms` and
+`sdl3/kmsdrm/software`. Automatic restoration to native and enabled login
+was verified after failure. Evidence: `/tmp/blit-backend-parity-556-20261019-b/`.
+
+The0.1.557 regression exercises the production graphics-texture path and
+fails before the fix at pixel2,0 (223,31,0 vs255,0,0). Explicit nearest-neighbor
+sampling makes all256 tested image pixels exact on two software renderers
+and two OpenGLES2 renderers. GLES suite passes 5/0/0. Full regression passes
+103 gates, with 7 explicit skips and 0 failures. The 120-second four-PTY soak
+completes 11,560 snapshots and 1,051 resizes. The three adapter gates pass
+separately against the pinned Hibr 0.99.225/ABI16 headers; no Hibr source is
+modified. Physical revalidation remains pending; the filtering mismatch is not yet
+claimed fixed on the physical host.
+
 ## 2026-10-19 candidate0.1.556: backend selection API and expanded GLES checks
 
 `backend_selection_gate.rb` was red before the new backend setting existed,

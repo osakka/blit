@@ -156,6 +156,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0136 — Present pointer motion over the last committed scene](0136-pointer-presents-over-held-scene.md)
 - [0137 — One feature contract across presentation backends](0137-presentation-backend-feature-and-performance-parity.md)
 - [0138 — API-owned presentation backend selection](0138-api-owned-presentation-backend-selection.md)
+- [0139 — Terminal graphics sampling matches native pixels](0139-terminal-graphics-sampling-matches-native-pixels.md)
 
 ## Adding an ADR
 

@@ -40,6 +40,21 @@ def start_time(observation)
   observation.fetch('captured_monotonic_us') - observation.dig('runtime', 'performance', 'uptime_ms') * 1000
 end
 
+def park_pointer(observation)
+  bounds = observation.fetch('displays').fetch('displays').first.fetch('bounds')
+  x = bounds.fetch('x') + bounds.fetch('width') - 64
+  y = bounds.fetch('y') + bounds.fetch('height') - 64
+  request('POST', '/v1/input/inject', {kind: 'pointer_motion', x: x, y: y})
+  deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 3
+  loop do
+    current = request('GET', '/v1/diagnostics/observation')
+    pointer = current.dig('diagnostics', 'render', 'pointer')
+    return current if pointer['valid'] && pointer['x'] == x && pointer['y'] == y && !pointer['dirty']
+    raise 'pointer did not settle outside the pixel fixture' if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+    sleep 0.02
+  end
+end
+
 def restart_and_await(backend, renderer = nil)
   previous = request('GET', '/v1/diagnostics/observation')
   begin
@@ -84,11 +99,12 @@ begin
     save(doc, state.fetch('revision'))
     observation = restart_and_await(backend == 'kms' ? 'drm-kms' : 'sdl3', renderer)
     raise 'login was not disabled for isolated fixtures' unless observation.dig('login', 'enabled') == false
+    observation = park_pointer(observation)
     directory = File.join(OUT, name)
     FileUtils.mkdir_p(directory)
     File.write(File.join(directory, 'before.json'), JSON.pretty_generate(observation))
-    %w[host_motion_agreement.rb host_kitty_composition.rb].each do |probe|
-      output, error, status = Open3.capture3({'BLIT_AUTH_TOKEN'=>TOKEN, 'BLIT_EVIDENCE_DIR'=>directory},
+    %w[host_motion_agreement.rb host_kitty_composition.rb host_grid_font_edges.rb].each do |probe|
+      output, error, status = Open3.capture3({'BLIT_AUTH_TOKEN'=>TOKEN, 'BLIT_LIVE'=>BASE.to_s, 'BLIT_EVIDENCE_DIR'=>directory},
         'ruby', File.join(ROOT, 'tools/probes', probe), BASE.authority)
       File.write(File.join(directory, probe + '.log'), output + error)
       raise "#{name}: #{probe} failed; see #{directory}" unless status.success?
@@ -110,6 +126,11 @@ ensure
     save(doc, state.fetch('revision'))
     actual = baseline.fetch('diagnostics')
     restored = restart_and_await(actual.dig('health', 'backend'), actual.dig('render', 'direct_kms') ? nil : actual.dig('render', 'renderer'))
+    pointer = baseline.dig('diagnostics', 'render', 'pointer')
+    if pointer && pointer['valid']
+      request('POST', '/v1/input/inject', {kind: 'pointer_motion', x: pointer['x'], y: pointer['y']})
+      restored = request('GET', '/v1/diagnostics/observation')
+    end
     File.write(File.join(OUT, 'restored-observation.json'), JSON.pretty_generate(restored))
     puts "BACKEND_BASELINE_RESTORED evidence=#{OUT}"
   end

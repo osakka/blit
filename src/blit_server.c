@@ -24345,7 +24345,14 @@ static SDL_Texture *sdl_graphics_texture(BlitOutput *output,
             free(rgba);
             return NULL;
         }
-        SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+        if (!SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST) ||
+            !SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND)) {
+            fprintf(stderr, "blit: SDL graphics texture policy failed: %s\n",
+                    SDL_GetError());
+            SDL_DestroyTexture(texture);
+            free(rgba);
+            return NULL;
+        }
     }
     if (!SDL_UpdateTexture(texture, NULL, rgba, image->width * 4)) {
         fprintf(stderr, "blit: SDL graphics texture upload failed: %s\n",

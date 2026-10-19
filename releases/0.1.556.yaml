@@ -14,4 +14,4 @@ verification:
   final_gles: 'expanded suite 5 pass, 0 skip, 0 fail through offscreen/OpenGLES2 software GL'
   soak: '120 seconds, four PTYs, 10744 snapshots, 977 resizes'
   package: 'artifact/provenance gate passes; independent second build is byte-identical'
-  physical: 'pending deployment and bounded physical backend comparison'
+  physical: 'deployed/version verified; native and SDL/software motion 12/12; native Kitty exact; SDL/software Kitty filtering mismatch; native baseline restored'

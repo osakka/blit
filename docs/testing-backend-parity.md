@@ -18,10 +18,16 @@ startup login, and selects direct KMS, SDL/KMSDRM software and SDL/KMSDRM
 OpenGLES2 through the saved settings API. It waits for a new process-start
 signature, readiness and exact backend/video-driver/renderer identity before
 running the existing revision-correlated motion and Kitty composition probes.
+Before each profile's probes it parks the pointer outside the checked image
+region and verifies its position/dirty state. The original pointer position
+is restored with the original configuration at the end. Pixel checks are not
+masked to accept an overlapping cursor.
 Motion captures check blank cells for debris; Kitty captures check quadrants,
 untouched background and deletion. The probes use actual BMP offset, stride,
 depth and orientation. First/last motion and Kitty captures are retained with
-revision metadata. Auth tokens are supplied through the environment and are
+revision metadata. A third probe checks complete edge cells and geometric
+glyphs against the canonical8x16 font raster, including the bold diamond;
+this comparison profile requires that font at scale1. Auth tokens are supplied through the environment and are
 not written into evidence.
 
 An `ensure` restores only the backend, renderer and login-enabled settings
