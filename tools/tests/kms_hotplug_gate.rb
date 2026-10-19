@@ -69,14 +69,20 @@ Dir.mktmpdir('blit-kms-hotplug') do |root|
         scanout['vblank_span_us']>0 && scanout['observed_refresh_hz']>0
     end
     pointer_before=scanout_for_primary.call
+    position_changes_before=req('GET','/v1/diagnostics/runtime')
+      .dig('performance','pointer_position_changes')
     req('POST','/v1/input/inject',{kind:'pointer_motion',x:100,y:100})
-    pointer_after=await('KMS output submits pointer damage') do
+    pointer_after=await('pointer position reaches KMS output submission') do
       scanout=scanout_for_primary.call
-      scanout if scanout &&
+      position_changes=req('GET','/v1/diagnostics/runtime')
+        .dig('performance','pointer_position_changes')
+      if scanout && position_changes>position_changes_before &&
         scanout['pointer_change_requests']>pointer_before['pointer_change_requests'] &&
         scanout['pointer_frame_submissions']>pointer_before['pointer_frame_submissions']
+        {scanout:scanout,position_changes:position_changes}
+      end
     end
-    check(pointer_after['pointer_frame_deferred']>=
+    check(pointer_after[:scanout]['pointer_frame_deferred']>=
           pointer_before['pointer_frame_deferred'],
           'pointer deferral counter moved backwards')
     policy=req('POST','/v1/auxiliary-displays/apply',{bindings:[{output:'DP-2',pane_ordinal:1}]})

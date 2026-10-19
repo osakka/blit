@@ -77,9 +77,17 @@ and the run took7.43s. Blit submitted224 DP frames (30.16Hz), with2 missed
 deadlines,0 physical mouse events, and8.88% measured process CPU. The last
 frame reported1.314ms draw,1.183ms copy,0.037ms submit, and396 damaged cells.
 This is network-paced synthetic evidence, not a physical-mouse benchmark.
-The next instrumentation step is to count actual pointer-state changes between
-raw evdev reports and per-output KMS requests, so those stages can be compared
-without conflating them.
+The next instrumentation step (candidate0.1.554) adds a count of accepted
+pointer-state changes between raw evdev reports and per-output KMS requests,
+so those stages can be compared without conflating them.
+
+Candidate0.1.554 now builds with TCC0.9.27 and passes the full local suite:
+**96 pass, 7 skip, 0 fail**. The120-second four-PTY soak completed with
+11,364 snapshots and1,034 resizes. The API schema and observation checks
+require the new counter; the mocked direct-KMS gate injects one changed
+position and waits for the position, output request, and output submission
+counters to advance. This validates the telemetry chain under the mock only.
+Package and physical acceptance remain pending; the live host is0.1.553.
 
 ## 2026-10-19 live follow-up: synthetic cadence improved, wallpaper test interrupted
 

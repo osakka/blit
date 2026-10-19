@@ -33,6 +33,9 @@ contents and framebuffer bytes remain separate bounded evidence resources.
 - Per-output pointer diagnostics distinguish pointer-intersecting attempts,
   page-flip deferrals, and submitted pointer frames. They describe the
   presentation path, not raw input-event counts.
+- `pointer_position_changes` counts accepted logical position/output changes
+  after input processing. It bridges raw input-event counters to per-output
+  presentation counters; it is neither an input event count nor a frame count.
 - The response is bounded by Blit's fixed HTTP/resource capacities. Large
   terminal cell or image evidence must use the dedicated surface/screenshot
   endpoints.

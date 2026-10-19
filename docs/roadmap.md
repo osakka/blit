@@ -21,9 +21,11 @@ canvas submitted114 frames (100 pointer-bearing) and HDMI submitted57 (54
 pointer-bearing), with30 and12 deferred pointer attempts. The synthetic60Hz
 API sweep was transport-limited (19.99ms median HTTP request) and achieved
 30.16 DP submissions/s. Neither measurement proves a compositor defect or
-validates60Hz pointer presentation. Add an exact pointer-state-change counter
-and compare it with evdev reports and KMS submissions before changing
-render/barrier behavior.
+validates60Hz pointer presentation. Candidate0.1.554 adds an exact logical
+pointer-state-change counter. The full local suite passes96/7/0, including the
+mock direct-KMS API-injection assertion that position, request and submission
+counters advance. Next, deploy and compare this counter's physical delta with
+evdev reports and KMS submissions before changing render/barrier behavior.
 
 ## Current position — held-scene pointer presentation and stable identity
 

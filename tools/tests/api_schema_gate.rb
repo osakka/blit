@@ -80,6 +80,11 @@ raise 'per-output KMS scanout telemetry contract missing' unless scanout &&
                                   pointer_change_requests pointer_frame_deferred
                                   pointer_frame_submissions].sort &&
   scanout['additionalProperties'] == false
+performance = schema.fetch('components').fetch('schemas')
+  .fetch('RuntimeDiagnostics').dig('properties', 'performance')
+raise 'pointer-position transition counter contract missing' unless
+  performance && performance['required'].include?('pointer_position_changes') &&
+  performance.dig('properties', 'pointer_position_changes', 'type') == 'integer'
 required_observation_fields = %w[observation_version captured_monotonic_us
                                   consistency version server diagnostics runtime
                                   graphics displays audio audio_cards input_devices

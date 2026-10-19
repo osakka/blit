@@ -127,6 +127,8 @@ raise 'observation diagnostics is missing health' unless
   observation['diagnostics']['health'].is_a?(Hash)
 raise 'observation runtime is missing performance' unless
   observation['runtime']['performance'].is_a?(Hash)
+raise 'pointer-position transition counter is missing' unless
+  observation.dig('runtime', 'performance', 'pointer_position_changes').is_a?(Integer)
 raise 'observation render is missing the exact video driver' unless
   observation['diagnostics']['render']['video_driver'].is_a?(String) &&
   !observation['diagnostics']['render']['video_driver'].empty?

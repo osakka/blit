@@ -3,6 +3,21 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-19:554 pointer-state transition counter candidate; local gates pass
+
+Candidate0.1.554 adds `performance.pointer_position_changes`, incremented
+only when Blit accepts a new pointer coordinate or output after processing
+physical or API-injected input. The direct-KMS lifecycle gate injects one
+position and requires this counter and the per-output pointer request and
+submission counters to advance. TCC0.9.27 build and API schema/observation
+checks pass. The complete local run passes **96, skips 7, fails 0**; the
+120-second soak completed with four sessions, 11,364 snapshots and 1,034
+resizes. Skips: three Hibr adapter gates, opt-in QEMU oracle, package-artifact
+gate (run separately), and two live-host gates. This bridges raw evdev report
+counts to frame submission in the API contract, without changing input,
+render scheduling, or pixels. Package and live validation are pending; no
+claim that this fixes observed pointer cadence is made.
+
 ## 2026-10-19:553 pointer-presentation telemetry deployed; cadence still low
 
 TCC0.9.27 builds version0.1.553. The candidate adds per-output KMS counters

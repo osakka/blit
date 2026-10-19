@@ -1238,6 +1238,11 @@ frames containing a changed pointer position. A request may be counted again
 while another output's flip is pending, so compare these counters with their
 matching deferral/submission deltas instead of treating requests as unique
 physical input events.
+`GET /v1/diagnostics/runtime` also exposes
+`performance.pointer_position_changes`: the count of accepted pointer-state
+transitions after physical or injected input processing. Compare its delta with
+raw `evdev_mouse_motion_events`, then with each output's pointer request,
+deferral and submission deltas to isolate input processing from presentation.
 
 For a reproducible performance report, include the exact `server_version`,
 display mode/refresh, workload duration, `present_calls`, measured frame or

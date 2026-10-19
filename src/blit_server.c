@@ -1254,6 +1254,7 @@ typedef struct {
     unsigned long long diagnostic_pointer_cache_hits;
     unsigned long long diagnostic_pointer_cache_misses;
     unsigned long long diagnostic_input_events;
+    unsigned long long diagnostic_pointer_position_changes;
     double diagnostic_last_input_dispatch_ms;
     double diagnostic_max_input_dispatch_ms;
     unsigned long long diagnostic_evdev_mouse_events;
@@ -2852,7 +2853,8 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"last_terminal_ms\":%.3f,\"max_terminal_ms\":%.3f,"
         "\"terminal_bytes\":%llu,\"pointer_cache_hits\":%llu,"
         "\"pointer_cache_misses\":%llu,\"frame_rate_hz\":%.3f,"
-        "\"input_events\":%llu,\"last_input_dispatch_ms\":%.3f,"
+        "\"input_events\":%llu,\"pointer_position_changes\":%llu,"
+        "\"last_input_dispatch_ms\":%.3f,"
         "\"max_input_dispatch_ms\":%.3f,"
         "\"evdev_mouse_events\":%llu,"
         "\"evdev_mouse_syncs\":%llu,"
@@ -2945,6 +2947,7 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         runtime->diagnostic_pointer_cache_misses,
         frame_rate_hz,
         runtime->diagnostic_input_events,
+        runtime->diagnostic_pointer_position_changes,
         runtime->diagnostic_last_input_dispatch_ms,
         runtime->diagnostic_max_input_dispatch_ms,
         runtime->diagnostic_evdev_mouse_events,
@@ -26160,6 +26163,7 @@ static void update_pointer_position(BlitRuntime *runtime,
         old_y != runtime->pointer_y || old_output != runtime->pointer_output;
     if (!changed)
         return;
+    ++runtime->diagnostic_pointer_position_changes;
     mark_pointer_dirty_outputs(runtime, runtime->previous_pointer_output,
                                runtime->pointer_output);
     runtime->render_pending = 1;
