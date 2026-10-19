@@ -6,6 +6,8 @@
 require 'json'
 require 'socket'
 require 'open3'
+require 'tmpdir'
+require 'fileutils'
 
 [[true,:normal],[false,:normal],[true,:restart],[true,:removed],[true,:refresh],[true,:zero_window]].each do |native,scenario|
   server = TCPServer.new('127.0.0.1',0)
@@ -46,6 +48,9 @@ require 'open3'
         elsif method == 'POST' && path == '/v1/input/inject'
           raise 'not pointer motion' unless JSON.parse(payload)['kind'] == 'pointer_motion'
           body = {'accepted'=>true}
+        elsif method == 'GET' && ['/v1/diagnostics/trace?kind=pointer_motion&limit=128',
+                                 '/v1/diagnostics/trace?kind=render_path&limit=128'].include?(path)
+          body = {'revision'=>1,'events'=>[]}
         else
           raise "unexpected request #{method} #{path}"
         end
@@ -58,6 +63,7 @@ require 'open3'
       end
     end
   end
+  evidence = Dir.mktmpdir('blit-cadence-observation-')
   begin
     command = ['ruby',File.expand_path('../probes/host_pointer_cadence.rb',__dir__)]
     if ENV['BLIT_CADENCE_GATE_BASELINE'] == '1'
@@ -68,7 +74,7 @@ require 'open3'
     output,error,status = Open3.capture3(
       {'BLIT_LIVE'=>"http://127.0.0.1:#{port}",'BLIT_AUTH_TOKEN'=>'fixture',
        'BLIT_POINTER_HZ'=>'240','BLIT_POINTER_SECONDS'=>'0.25','BLIT_POINTER_ASYNC'=>'1',
-       'BLIT_EVIDENCE_DIR'=>nil},*command)
+       'BLIT_EVIDENCE_DIR'=>evidence},*command)
     raise errors.pop unless errors.empty?
     if scenario != :normal
       expected = {restart:'server restarted',removed:'output inventory changed',
@@ -85,10 +91,15 @@ require 'open3'
     raise 'completion availability/rate fabricated' unless measured['confirmed_flip_hz'] == expected
     raise 'ambiguous presentation label survived' if measured.key?('presentation_hz')
     raise 'restoration contamination not labelled' unless result['restoration_motion_included'] == true
+    %w[before after pointer_motion-tail render_path-tail].each do |artifact|
+      raise "missing observation/trace artifact #{artifact}" unless
+        File.file?(File.join(evidence,"pointer-cadence-#{artifact}.json"))
+    end
   ensure
     worker.kill
     worker.join
     server.close
+    FileUtils.remove_entry(evidence)
   end
 end
 puts 'POINTER_CADENCE_OBSERVATION_PASS server_interval=exact submissions=separate native_completions=45 SDL_completions=unavailable invalid_samples=4_rejected'

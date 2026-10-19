@@ -1,5 +1,20 @@
 # Current state and restart point
 
+## 2026-10-19: retain pointer/render trace tails for scheduling diagnosis
+
+The pointer probe now retains existing API `pointer_motion` and `render_path`
+trace tails alongside raw observations. The measurement regression verifies
+these artifacts and still passes all six scenarios. No runtime change.
+The new native trace under
+`/tmp/blit-backend-cadence-trace-557-20261019/native/` shows completed flips
+followed by no-op render attempts; input arriving just afterward waits for
+the next advanced deadline. Example relative timestamps: submit at 362.611ms,
+no-op at 377.867ms, input at 379.436ms, submit at 395.784ms. Source inspection
+finds completion service unconditionally sets `render_pending`, even though
+topology reconciliation and deferred-output retry already mark their own work.
+This is a candidate scheduling defect to isolate with a production-code
+regression; it is not yet a demonstrated fix or the sole cause of low cadence.
+
 ## 2026-10-19: cadence measurement corrected; refresh acceptance still fails
 
 The operator pointer probe now uses the server observation interval for its

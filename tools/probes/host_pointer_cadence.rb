@@ -153,6 +153,10 @@ if (directory = ENV['BLIT_EVIDENCE_DIR'])
   require 'fileutils'; FileUtils.mkdir_p(directory)
   File.write(File.join(directory,'pointer-cadence-before.json'),JSON.pretty_generate(before))
   File.write(File.join(directory,'pointer-cadence-after.json'),JSON.pretty_generate(after))
+  %w[pointer_motion render_path].each do |kind|
+    tail = request.call("/v1/diagnostics/trace?kind=#{kind}&limit=128")
+    File.write(File.join(directory,"pointer-cadence-#{kind}-tail.json"),JSON.pretty_generate(tail))
+  end
   File.write(File.join(directory,'pointer-cadence.json'),JSON.pretty_generate(verdict))
 end
 puts JSON.pretty_generate(verdict)

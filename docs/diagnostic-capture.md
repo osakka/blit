@@ -42,6 +42,11 @@ The JSON records actual backend identity, offered rate, request latency,
 concurrent request ordering, and the included final pointer-restoration motion.
 Evidence retains both raw observations. Restart, changed output inventory or
 refresh, and invalid observation intervals invalidate the measurement.
+When evidence retention is enabled, the probe also saves the bounded
+`pointer_motion` and `render_path` trace tails after the counter window.
+These are the newest events still in the shared 128-entry critical ring,
+not a complete event history. Their post-window requests are not included
+in the counter-rate denominator.
 Concurrent HTTP injections are not a deterministic physical-device producer;
 these samples diagnose the API/presentation path, not input-to-photon latency
 or sustained-refresh acceptance.
