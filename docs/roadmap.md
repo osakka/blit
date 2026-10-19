@@ -6,13 +6,16 @@ second, parallel implementation of an earlier one.
 ## Current requested sequence — font sizing, new font, then performance
 
 New font tracking: [Blit#107](https://git.home.arpa/itdlabs/blit/issues/107).
+Operator confirmed both retro and polished modern multicolour profiles.
+See the [font evolution plan](font-evolution-plan.md) for native-size
+semantics, the shared glyph pipeline and acceptance gates.
 
 1. Use the existing canonical `GET/PUT /v1/fonts` contract for live size
    changes (1.0–3.0 in0.1 steps), then save the complete settings document
    with its current revision for persistence. Do not add another font-size
    endpoint or restart the desktop merely to resize text.
 2. Add an optional visually refined font profile while retaining the current
-   Hibr-capable Terminus profile. Select the appearance with the operator;
+   Hibr-capable Terminus profile. Deliver both requested appearances;
    record source/license and reproducible generation. Define the supported
    Unicode repertoire rather than claim every Unicode glyph. Preserve box
    drawing, blocks, combining marks and wide-cell geometry; test right edges,
