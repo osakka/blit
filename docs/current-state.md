@@ -1,5 +1,22 @@
 # Current state and restart point
 
+## 2026-10-19 configuration ownership fix (#108)
+
+The operator confirms native KMS restores all monitors and the panel's mode is
+correct. Config-only maintenance563/source2fb6f7f is based on deployed561,
+excluding the unfinished font candidate. It adds provenance and invalid-default
+recovery under ADR0148. Signed catalogue panel0.1.7/source2cd8f7c displays this
+metadata and has passed callbacks, old-server fallback, UI, Mouse and catalogue
+lifecycle checks. The identical server patch is merged here; main564 retains
+pending font work and is NOT the maintenance deployment artifact.
+
+The live fallback line was normalized from `kmsdrm` to `kms`, preserving
+`/etc/blit/blit.env.before-108` and all credentials. Saved API settings remain
+authoritative; the environment will reload at the deployment service restart.
+Package563 is reproducible and manifest-verified; full regression/deployment
+are pending. SDL multi-output startup issues100/104 remain open.
+
+
 ## 2026-10-19 priority: restore native KMS; font release held
 
 The operator reported second-monitor startup trouble and environment/UI
@@ -22,8 +39,9 @@ IDs changed; the old SDL `pane-display-1-2` login preference was explicitly
 remapped to native DP bottom `pane-display-93-2`, saved and restarted again.
 Login and preference now agree; storage clean revision213, no restart pending.
 The saved SDL renderer preference remains inactive while native KMS is active.
-No environment edits, SSH, Hibr changes, font selection or size changes.
-Operator must visually test/login before treating this as desktop acceptance.
+At that recovery stage no environment edits, SSH, Hibr changes, font selection
+or size changes were made. The user subsequently confirmed all monitors work;
+the later environment correction is recorded above.
 
 Font candidate562 identity is recorded in `releases/0.1.562.yaml`, source
 `b63d7f4`, package SHA256
