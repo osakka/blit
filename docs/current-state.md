@@ -1,5 +1,25 @@
 # Current state and restart point
 
+## 2026-10-19 revised priority: mouse101, then SDL104
+
+Operator prioritises choppy/inconsistent mouse motion and SDL multi-output
+over further font polish, explicitly requesting bounded effort. Keep working
+native KMS, two physical outputs, three panes and current Modern font choice.
+The menu pen, notification and restart glyph refinements are deferred on107.
+Odd font sizes may corrupt wallpaper while even sizes appear better: this is
+an unconfirmed user observation, not an established cause or even-only policy.
+
+One three-second API60Hz sweep used the existing host_pointer_cadence probe;
+position restored, no clicks/keys/sessions/settings changes. It delivered180
+injections and122 confirmed DP flips over3.160s (~38.6Hz). However461 raw
+physical mouse events also arrived; fresh-connection network timing varied,
+and async request arrival order is not guaranteed. This is NOT an isolated
+input-versus-presentation diagnosis. Evidence: build/mouse101-564-api60/.
+Asked operator briefly to leave input untouched for a clean baseline. Do not
+repeat expensive broad suites for read-only measurements or change backend to
+make timing look better. Start with bounded workload/phase evidence; introduce
+a focused failing regression before implementing a demonstrated defect.
+
 ## 2026-10-19 font release564 deployed; native antialiasing measured
 
 Live10.54 is564, native KMS unchanged, both physical outputs presenting and
