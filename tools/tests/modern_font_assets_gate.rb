@@ -17,4 +17,4 @@ raise 'catalogue count mismatch' unless scalars.size == catalogue.fetch('unique_
 manifest.fetch('icon_licenses').each do |entry|
   raise 'icon license identity mismatch' unless Digest::SHA256.file(File.join(root, entry.fetch('file'))).hexdigest == entry.fetch('sha256')
 end
-puts 'MODERN_FONT_ASSETS_PASS outlines=Modern+Retro nerd_codepoints=10386 colour=Noto2.042 source_hashes=exact licenses=included'
+puts "MODERN_FONT_ASSETS_PASS outlines=Modern+Retro nerd_codepoints=10386 colour=Noto#{manifest.fetch('colour').fetch('version')} source_hashes=exact licenses=included"

@@ -174,6 +174,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0154 — TCC runtime fault traces](0154-tcc-runtime-fault-traces.md)
 - [0155 — Pinned SDL KMS compatibility](0155-pinned-sdl-kms-compatibility.md)
 - [0156 — Shared full-Nerd outline profiles](0156-shared-full-nerd-outline-profiles.md)
+- [0157 — Versioned emoji acceptance corpus](0157-versioned-emoji-acceptance-corpus.md)
 
 ## Adding an ADR
 

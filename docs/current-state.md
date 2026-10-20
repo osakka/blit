@@ -1,5 +1,32 @@
 # Current state and restart point
 
+## 2026-10-20 agreed queue and emoji baseline — candidate574, not deployed
+
+Canonical execution order is docs/roadmap.md: font107/emoji110 FIRST, browser
+image-sizing111 next, SDL104 with recovery109/latency105 after that; then
+performance101/95/21, correctness/API/hardware22/64/20 and release112/27.
+Do not work on browser/SDL ahead of the active font acceptance. Browser111
+records the read-only adapter contract discrepancy; do not infer the entire
+reported browser symptom from it, alter Chrome zoom or modify Hibr.
+
+ADR0157 pins official Unicode Emoji18.0 corpus/licence. Independent HarfBuzz
+6.0.0 audit: old Noto2.042 misses/splits174 RGI and10 minimally-qualified
+entries; unmodified pinned Noto2D2.057 shapes all5,244 entries to one nonzero
+glyph. The candidate replaces the ONE shared colour asset and provenance,
+not the renderer. Existing shared-raster tests for both faces pass all57 sizes.
+Current BlitRaster remains scalar-only. Next: bounded shared cluster/width
+contract, production shaping/build decision, real colour-cluster raster tests,
+PTY/API ingress, cache, all compositors and end-to-end conformance. Font
+shaping is NOT renderer acceptance. Full completion criteria are in the font
+evolution plan; no claim that font107/110 is complete.
+
+No live write/deploy, SSH, browser restart or Hibr changes. Last read-only
+host font query was572/Modern16px/8x16/pixel-size mode, not the older22px
+historical setting. One monitor is temporarily away. Preserve user untracked
+releases/0.1.554.yaml. Candidate574 has no new Debian package yet.
+Verification covers55 distinct gates (font21, schema/lifecycle25, GLES9),
+zero failures/skips. See verification-status.md for exact run scope/identities.
+
 ## 2026-10-20 offline font candidate573 — live host unchanged
 
 Operator requests display-independent font work while one monitor is away.

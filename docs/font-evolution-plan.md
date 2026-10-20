@@ -2,6 +2,50 @@
 
 Tracking: [Blit#107](https://git.home.arpa/itdlabs/blit/issues/107).
 
+## Active completion contract —107/110 before browser or SDL work
+
+The execution queue lives only in [roadmap.md](roadmap.md): finish fonts,
+then browser111, SDL104, measured performance and release acceptance. Do not
+equate a font-file upgrade with complete emoji rendering.
+
+Candidate574 pins Unicode Emoji18.0's official test corpus and updates the
+single colour face to Noto2D2.057 (CBDT/CBLC). RGI comprises3,963 fully-qualified
+entries plus9 components;1,272 additional qualification variants are also
+tested. With audited HarfBuzz6.0.0, all5,244 shape to one nonzero glyph.
+Old Noto2.042 fails174 RGI entries and10 minimally-qualified variants.
+These are font-shaping measurements, not production terminal acceptance.
+See ADR0157 and the canonical asset manifests for identities/provenance.
+
+Completion checkpoints, in dependency order:
+
+1. Pin repertoire, licences and font; verify source identity, one-glyph shaping
+   and real colour raster coverage. Corpus and shaping audits are implemented;
+   complete sequence colour-raster coverage remains pending.
+2. Define one shared bounded cluster and width/continuation contract for PTY
+   output and API-owned cells. Preserve fragmented input across reads; do not
+   silently change the Hibr Unicode-width ABI. Choose/pin the production
+   shaping dependency explicitly; the offline audit adds no runtime dependency.
+3. Integrate cluster-aware cache and composition once, covering VS15/text,
+   VS16/colour, keycaps, skin tones, ZWJ families/professions, regional/tag
+   flags and qualification variants. Regress resize, wrap, erase, overwrite,
+   scrollback, alternate screens, splits and font switches. No per-backend
+   shapers or Hibr modifications.
+4. Preserve beautiful Retro/Modern text, Nerd coverage and geometry; establish
+   seamless Powerline separators as a separate tested geometry case rather
+   than assuming optical icon fitting proves them. Verify odd/even sizes,
+   bold and right edges, colour premultiplication and bounded cache cost.
+5. Verify API/Control Panel selection and persistence, all backend adapters,
+   and complete-corpus end-to-end output. Stage a reversible live visual
+   review only after local gates pass; record exactly what hardware was used.
+   Only then close107/110 and proceed to browser111.
+
+Run `ruby tools/tests/emoji_corpus_gate.rb` for data identity and
+`ruby tools/tests/emoji_font_audit_gate.rb` for independent font shaping plus
+a negative ordinary-text-font fixture. Audit JSON explicitly labels its
+limited scope. Nothing in these checks certifies the existing scalar-only
+renderer as cluster-capable. `audit-emoji.py --require-complete` exits nonzero
+for missing/split entries; no selective sample can stand in for the corpus.
+
 ## Current offline candidate573: smooth Retro and full Nerd catalogue
 
 ADR0156 adds `blit-retro` (3270 Mono derivative) and expands Modern (Hack Mono)

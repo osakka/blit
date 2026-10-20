@@ -1,0 +1,21 @@
+{
+  "unicode_emoji_version": "18.0",
+  "test_data": {
+    "file": "emoji-test.txt",
+    "upstream": "https://www.unicode.org/Public/18.0.0/emoji/emoji-test.txt",
+    "sha256": "8f3735cda1f92a779d78af67cf86066bb1f07143dc22f2ac29394d9bc57ab21a"
+  },
+  "license": {
+    "file": "LICENSE.txt",
+    "upstream": "https://www.unicode.org/license.txt",
+    "sha256": "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
+  },
+  "entries": {
+    "fully-qualified": 3963,
+    "component": 9,
+    "minimally-qualified": 1029,
+    "unqualified": 243
+  },
+  "max_sequence_scalars": 10,
+  "scope": "RGI is the union of fully-qualified and component entries. Other qualification variants remain compatibility cases, not additional RGI emoji. Corpus identity is not renderer conformance."
+}

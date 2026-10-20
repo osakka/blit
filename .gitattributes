@@ -1,4 +1,6 @@
 # Pinned upstream notices/catalogue must retain their audited byte identity,
 # including original CRLF and whitespace. Do not normalize or reformat them.
 assets/fonts/licenses/nerd-v3.4.0/*.txt -text -whitespace
+assets/fonts/NotoColorEmoji-LICENSE.txt -text -whitespace
 assets/fonts/nerd-glyphnames-v3.4.0.json -text
+assets/unicode/emoji-18.0/*.txt -text -whitespace

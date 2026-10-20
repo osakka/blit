@@ -3,6 +3,33 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-20 candidate574: complete emoji font-shaping baseline, NOT terminal completion
+
+ADR0157 pins Unicode Emoji18.0 corpus/licence and the single unmodified Noto
+Emoji2D2.057 colour asset. HarfBuzz6.0.0 SHA
+1b55afd639cdf32fef66721032a29ee02b9c5af5527845cf53d185bc5413df1a
+shapes every5,244 corpus entries to one nonzero glyph (3,972 RGI,1,272
+qualification variants). The old Noto2.042 has174 RGI failures and10
+minimally-qualified failures. New font SHA
+15671215ab769fdc7162a045d56fd7d7e477c51b04e6b3c761d914d8fdd6cc44.
+Manifest records exact upstream release and OFL hash. Audit output records
+scope and identities; --require-complete rejects an ordinary text-font
+negative fixture. No HarfBuzz runtime link/dependency was added.
+
+TCC574 build; combined font/schema/lifecycle/GLES54/0/0 before adding the
+font-audit runner entry, then final font suite21/0/0 including that audit.
+This covers55 distinct gates: font21, schema/lifecycle25, offscreen-GLES9.
+The full Nerd catalogue gate still checks1,184,004 glyph/size cases. Shared
+colour raster, both native/SDL font adapters, API rollback/persistence and
+the regenerated/inspected actual-raster specimen pass with Noto2.057.
+Logs: `/tmp/blit-fontcraft.IHU9AK/574-{verification,font-final}.log` and
+`574-emoji-audit.json`; re-run through tools/run-gates.sh and the font guide.
+
+These are font-shaping and existing scalar-renderer regressions. Full corpus
+colour-cluster raster/terminal acceptance is NOT implemented;107/110 stay
+open. No physical acceptance, live deployment, package, browser changes,
+Hibr edits or SSH. Execution queue and ticket closure criteria: roadmap.md.
+
 ## 2026-10-20 candidate573: offline smooth Retro / full Nerd profiles
 
 ADR0156, tracking107. TCC build573; font/schema/lifecycle44pass/0skip/0fail,

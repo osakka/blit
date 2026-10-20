@@ -152,6 +152,13 @@ specimen without a display using `ruby tools/fonts/preview.rb`. See the
 colour emoji scalars are supported, but full emoji-sequence shaping remains
 [issue110](https://git.home.arpa/itdlabs/blit/issues/110). Not yet deployed.
 
+Candidate574 pins the Unicode Emoji18.0 corpus and upgrades the shared colour
+asset to Noto2D2.057. Independent font-shaping coverage passes all5,244 corpus
+entries; Blit's cluster renderer is still pending. The active queue is
+[fonts → browser sizing → SDL parity → performance/correctness → release](docs/roadmap.md).
+See [the font completion contract](docs/font-evolution-plan.md) for remaining
+work; shaping coverage alone does not mean complete terminal emoji support.
+
 ## Who should read what
 
 - **API client author:** start with [`docs/api.md`](docs/api.md), then use the

@@ -771,6 +771,10 @@ Select with `{"font_id":"blit-retro","size_px":24}`; use the same existing
 settings save/load contract for persistence. The font inventory is canonical
 for availability. Neither a font change nor `colour_glyphs:true` implies full
 emoji-sequence shaping; see issue110 and [font scope](../assets/fonts/README.md).
+Candidate0.1.574 upgrades the one shared colour asset to Noto2D2.057 and pins
+the Emoji18.0 acceptance corpus. The API still reports colour-face availability,
+not complete emoji-cluster conformance; the scalar-only renderer is not changed
+by that asset update. No additional sizing or browser-zoom API is introduced.
 
 `active.rasterization` is `bitmap-nearest` or `native-antialiased`;
 `active.colour_glyphs` reports the colour face, and `active.raster_cache`

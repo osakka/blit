@@ -3,40 +3,37 @@
 The roadmap is ordered by dependency. A later milestone must not become a
 second, parallel implementation of an earlier one.
 
-## Current requested sequence — font sizing, new font, then performance
+## Agreed execution order — fonts, browser, SDL, then release readiness
 
-Offline candidate573 adds smooth `blit-retro` and full pinned Nerd coverage
-to both outline faces; see ADR0156 and the font evolution plan. Existing
-8..64px API sizing is reused. Operator visual review and physical acceptance
-are separate from offline checks. Complete emoji-cluster rendering remains
-[Blit110](https://git.home.arpa/itdlabs/blit/issues/110), not a font-file claim.
+This is the active queue. Do not switch stages merely because a local gate is
+green. Finish its stated acceptance, record remaining limitations, and keep
+the live desktop unchanged until a gated/reversible deployment is warranted.
+No Hibr core edits or SSH. Use the existing API and one shared implementation.
 
-New font tracking: [Blit#107](https://git.home.arpa/itdlabs/blit/issues/107).
-Operator confirmed both retro and polished modern multicolour profiles.
-See the [font evolution plan](font-evolution-plan.md) for native-size
-semantics, the shared glyph pipeline and acceptance gates.
+| Order | Work / canonical tickets | Exit criteria |
+| --- | --- | --- |
+| 1 — active | Fonts [107](https://git.home.arpa/itdlabs/blit/issues/107), emoji [110](https://git.home.arpa/itdlabs/blit/issues/110) | Beautiful selectable Retro/Modern; complete pinned Nerd repertoire; every Unicode Emoji18.0 RGI entry and qualification variant; text/emoji selectors, cluster widths, overwrite/erase/scroll/split resize; native/SDL raster parity; API/Control Panel persistence; reviewed live appearance. Font shaping alone is not terminal acceptance. |
+| 2 — queued | Browser image sizing [111](https://git.home.arpa/itdlabs/blit/issues/111) | Isolated source-image vs destination-cell rectangle regression; correct bounds, clipping, pointer coordinates and font-size transitions. Preserve Chrome zoom/browser state; no Hibr edits or silent CSS compensation. Reproduce the reported browser failure before assigning its entire cause. |
+| 3 — queued | SDL parity [104](https://git.home.arpa/itdlabs/blit/issues/104), startup recovery [109](https://git.home.arpa/itdlabs/blit/issues/109), HTTP latency [105](https://git.home.arpa/itdlabs/blit/issues/105) | Reachable/recoverable startup first, then native/software/GLES feature parity, hotplug, splits/joins, input, images and comparable frame timings. Physical multi-output acceptance only once the borrowed monitor returns; one-output evidence is not multi-output evidence. |
+| 4 — queued | Performance [101](https://git.home.arpa/itdlabs/blit/issues/101), stalls [95](https://git.home.arpa/itdlabs/blit/issues/95), high refresh [21](https://git.home.arpa/itdlabs/blit/issues/21) | Identical wallpaper/drag/browser/game workloads; per-output composition/submission/completion, latency and missed-deadline evidence at available display modes. Preserve correctness; monitor scanout rate is not application frame throughput. |
+| 5 — queued | Terminal/graphics matrix [22](https://git.home.arpa/itdlabs/blit/issues/22), API/config [64](https://git.home.arpa/itdlabs/blit/issues/64), multi-output [20](https://git.home.arpa/itdlabs/blit/issues/20) | Audit remaining protocol and hardware gaps one at a time; revalidate persistent topology/joins, input, hotplug and Control Panels. Resolve stale tickets with evidence, not assumptions from old implementation work. |
+| 6 — queued | Release acceptance [112](https://git.home.arpa/itdlabs/blit/issues/112), reproducible gates/package [27](https://git.home.arpa/itdlabs/blit/issues/27) | Revalidate auth, privilege/update-token separation, install/rollback/shutdown recovery, package/source identity and documentation. Freeze/tag the accepted artifact only after required hardware/operator acceptance; list explicit skips and approved LAN exceptions. |
 
-1. Use the existing canonical `GET/PUT /v1/fonts` contract for live size
-   changes (1.0–3.0 in0.1 steps), then save the complete settings document
-   with its current revision for persistence. Do not add another font-size
-   endpoint or restart the desktop merely to resize text.
-2. Add an optional visually refined font profile while retaining the current
-   Hibr-capable Terminus profile. Deliver both requested appearances;
-   record source/license and reproducible generation. Define the supported
-   Unicode repertoire rather than claim every Unicode glyph. Preserve box
-   drawing, blocks, combining marks and wide-cell geometry; test right edges,
-   bold symbols, split panes and resize. Existing PSF glyphs are monochrome
-   masks coloured by terminal styles: multicolour emoji need an explicit
-   glyph-format/rendering decision, not merely a new PSF artifact. Reuse the
-   common font/compositor contract across native KMS and both SDL renderers.
-3. Resume measured authenticated desktop dragging, wallpaper redraw and
-   mixed terminal/graphics performance. Separate input/PTY processing,
-   composition, texture upload and presentation waits. Maintain correctness
-   oracles and compare identical workloads against the native baseline.
+Font status: optional smooth Retro and expanded Modern are implemented in
+source candidate573. Emoji18.0 corpus is now pinned; the old Noto2.042 font
+misses174 RGI entries in the independent shaping audit. Candidate Noto2.057
+shapes all5,244 corpus entries to one nonzero glyph. This proves font-shaping
+coverage only, not colour raster quality or Blit cluster handling. Shared
+parser/raster/cache/backend cluster integration remains the active next step.
 
-On2026-10-19 live0.1.560 SDL/GLES2 accepts and durably saves scale1.2,
-reporting10x19 cells. The DP1x2 layout and bottom login pane remain intact.
-This verifies API state/application, not visual approval of a new font.
+Size remains the existing canonical 8..64px **cell-height** setting; legacy
+scale is an alternative API sizing policy, not separate browser/desktop zoom.
+The Control Panel intentionally offers one size control. See the
+[font plan](font-evolution-plan.md) and [ADR0144](adr/0144-explicit-font-cell-pixel-size.md).
+
+The remaining sections are historical milestone records, not a second
+execution queue. Current runtime state is in current-state.md and evidence
+in verification-status.md.
 
 ## In progress — exact presentation backend parity
 

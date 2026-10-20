@@ -39,6 +39,7 @@ Environment:
   BLIT_GATE_FONT     PSF font           (default the bundled Hibr font)
   BLIT_GATE_OUTLINE  outline font; with BLIT_GATE_COLOUR enables raster module gate
   BLIT_GATE_COLOUR   colour bitmap font; requires FreeType headers/library
+  BLIT_GATE_HARFBUZZ shared library for offline emoji font audit (not a server dependency)
   BLIT_GATE_LIBS     LD_LIBRARY_PATH    (default build/sdl3-kms)
   BLIT_GATE_PACKAGE  .deb path; enables the packaging artifact gate
   BLIT_GATE_LIVE     live base URL; enables the live-host-only gates
@@ -217,6 +218,12 @@ suite_font() {
     run_gate retro_font_gate.py python3 tools/tests/retro_font_gate.py
     run_gate modern_font_assets_gate.rb ruby tools/tests/modern_font_assets_gate.rb
     run_gate outline_catalogue_gate.rb ruby tools/tests/outline_catalogue_gate.rb
+    run_gate emoji_corpus_gate.rb ruby tools/tests/emoji_corpus_gate.rb
+    if [ -f "${BLIT_GATE_HARFBUZZ:-/lib/x86_64-linux-gnu/libharfbuzz.so.0}" ]; then
+        run_gate emoji_font_audit_gate.rb ruby tools/tests/emoji_font_audit_gate.rb
+    else
+        skip_gate emoji_font_audit_gate.rb "needs explicit HarfBuzz shared library for offline font audit"
+    fi
     run_gate modern_nerd_gate.sh sh tools/tests/modern_nerd_gate.sh
     run_gate font_raster_gate.sh sh tools/tests/font_raster_gate.sh \
         "$FONT" "${BLIT_GATE_OUTLINE:-$ROOT/assets/fonts/BlitModernNerd-Regular.ttf}" \

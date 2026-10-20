@@ -3,6 +3,7 @@
 - Date: 2026-10-20
 - Status: implemented locally; not deployed or physically accepted
 - Tracking: [107](https://git.home.arpa/itdlabs/blit/issues/107), emoji clusters [110](https://git.home.arpa/itdlabs/blit/issues/110)
+- Colour-asset pin superseded by ADR0157 in candidate574; profile and shared-raster decisions unchanged.
 - Supersedes ADR0150's Font-Awesome-only repertoire restriction, not its shared rendering boundary.
 
 ## Decision

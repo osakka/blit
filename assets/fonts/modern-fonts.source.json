@@ -15,11 +15,12 @@
   },
   "colour": {
     "file": "NotoColorEmoji.ttf",
-    "source": "Debian fonts-noto-color-emoji 2.042-0+deb12u1",
-    "upstream": "https://github.com/googlefonts/noto-emoji",
-    "sha256": "e5899ed38b8ed83e08bd3ac5de09791e9d19d288333a796de1d35ad17396f1ec",
+    "version": "2.057",
+    "source": "Unmodified Noto Emoji 2D v2.057, release v2026-09-24-unicode18_0; CBDT/CBLC bitmap colour strikes",
+    "upstream": "https://raw.githubusercontent.com/googlefonts/noto-emoji/v2026-09-24-unicode18_0/2D/fonts/NotoColorEmoji.ttf",
+    "sha256": "15671215ab769fdc7162a045d56fd7d7e477c51b04e6b3c761d914d8fdd6cc44",
     "license_file": "NotoColorEmoji-LICENSE.txt",
-    "license_sha256": "140c8aab8b15e212617b74476ae1c1547f868e523301a190398ea9c71e62af64"
+    "license_sha256": "500bb1ccf43df7bbb522112f9133a52b16e1c35e809632f5d8609b179152de5b"
   },
   "icon_licenses": [
     {
@@ -83,7 +84,7 @@
       "sha256": "69cdedc8a4f57a30d68e4f045af8b9cce0ec3b1a6e7eec1ad41737c894f26790"
     }
   ],
-  "policy": "tools/fonts/build-outline-nerd.py --profile modern|retro with fontTools 4.60.1. Retain full source Unicode and all 10386 pinned Nerd catalogue codepoints. Fit complete icons with 5 percent side insets and each face's cap height; U+270E uses nf-fa-pencil. Renamed derivatives; upstream notices retained. Shared native grayscale raster and unchanged Noto 2.042 colour fallback. Protected geometry and missing scalars retain PSF fallback. No universal Unicode or emoji-sequence shaping claim. Nerd separators use optical icon fitting, not a guaranteed seamless Powerline geometry contract.",
+  "policy": "tools/fonts/build-outline-nerd.py --profile modern|retro with fontTools 4.60.1. Retain full source Unicode and all 10386 pinned Nerd catalogue codepoints. Fit complete icons with 5 percent side insets and each face's cap height; U+270E uses nf-fa-pencil. Renamed derivatives; upstream notices retained. Shared native grayscale raster and shared Noto 2.057 colour fallback; emoji corpus/shaping audit does not establish Blit cluster support. Protected geometry and missing scalars retain PSF fallback. No universal Unicode or emoji-sequence shaping claim. Nerd separators use optical icon fitting, not a guaranteed seamless Powerline geometry contract.",
   "retro": {
     "profile": "blit-retro",
     "file": "BlitRetroNerd-Regular.ttf",

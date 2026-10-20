@@ -9,9 +9,9 @@ Both retain the complete pinned Nerd catalogue: **10,386 distinct codepoints**,
 plus their source Unicode repertoires. Native grayscale antialiasing is used
 at each requested size; neither profile enlarges a one-bit bitmap for text.
 Nerd icons take terminal colours; supported emoji scalars use the shared,
-unchanged Noto Colour Emoji2.042 face for intrinsic multicolour artwork.
+shared Noto Colour Emoji2.057 face for intrinsic multicolour artwork.
 
-![Actual shared-raster specimen: Blit Retro and Modern](../../docs/images/blit-fonts-573.png)
+![Actual shared-raster specimen: Blit Retro and Modern](../../docs/images/blit-fonts.png)
 
 Select with `PUT /v1/fonts`, for example
 `{"font_id":"blit-retro","size_px":24}`. The existing font inventory and
@@ -77,7 +77,7 @@ modern antialiased/colour profile is separate.
 
 Profile `blit-modern` uses `BlitModernNerd-Regular.ttf`, a renamed, reproducibly
 generated derivative of Nerd Fonts3.4.0 Hack Mono, for native-size
-antialiased monospaced text and `NotoColorEmoji.ttf`2.042 for supported colour
+antialiased monospaced text and `NotoColorEmoji.ttf`2.057 for supported colour
 scalars absent from the outline face. Font size8–64px means exact cell height;
 the font's em size is fitted inside that cell, not stretched after rendering.
 The default font is not changed by installation. Select this profile through
@@ -88,9 +88,26 @@ Spleen/Terminus retain intentional bitmap pixels.
 license SHA256s. `licenses/HackNerd-LICENSE.txt`, `licenses/NerdFonts-LICENSE.txt`
 and `licenses/FontAwesome-LICENSE.txt` preserve the upstream notices, including
 Fonticons attribution and Font Awesome licensing. The original Hack face stays
-as a legacy provenance reference, not a second Modern runtime profile or
+as a legacy provenance reference/negative emoji-audit fixture, not a second Modern runtime profile or
 an input to the full-Nerd generator. Noto remains
-unmodified, from Debian fonts-noto-color-emoji2.042-0+deb12u1.
+unmodified, from upstream release `v2026-09-24-unicode18_0`, its2D CBDT/CBLC
+font rather than an unsupported COLRv1 face. This replaces the older Debian
+Noto2.042 asset in candidate574; it is not deployed to the host.
+
+The complete Unicode Emoji18.0 test corpus and licence are pinned in
+`assets/unicode/emoji-18.0`. The independent offline font-shaping audit is:
+
+```sh
+ruby tools/tests/emoji_corpus_gate.rb
+python3 tools/fonts/audit-emoji.py --require-complete > build/emoji-font-audit.json
+```
+
+The audit reports its HarfBuzz library version/hash and exact font hash.
+All5,244 entries shape to one nonzero glyph in Noto2.057 with HarfBuzz6.0.0;
+Noto2.042 fails174 RGI entries and10 minimally-qualified variants. These are
+**font-shaping** results, not a production renderer implementation, colour
+bitmap validation or permission to claim complete emoji support. The audit
+does not install HarfBuzz or add it to the production binary. See ADR0157.
 
 Before ADR0156, Modern retained only1475 Font Awesome mappings; that restriction
 is superseded by the complete pinned Nerd catalogue above.
