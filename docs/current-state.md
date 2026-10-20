@@ -1,5 +1,25 @@
 # Current state and restart point
 
+## 2026-10-20 candidate579 — explicit streaming PTY emoji policy
+
+ADR0162 adds creation-time text_layout=emoji to terminal sessions, using the
+same trie/grid as positioned updates. Default scalar compatibility remains;
+GET reports the policy and PATCH rejects changes with immutable_text_layout.
+No DEC2027 claim: this is pinned emoji grouping, not full grapheme handling.
+Late members survive byte reads; widening, whole-value wrap, REP and buffer
+copies preserve owned scalars. Controls/API writes end extension eligibility.
+One-column geometry now bounds wide scalar writes too; RIS clears the repeat
+glyph while retaining the configured layout policy. Width data is unchanged.
+
+All5244 entries pass both PTY policies, contiguous and byte-fragmented, plus
+focused wrap/scroll/margins/ASCII-insert/REP/erase/alternate/control tests.
+Real local PTYs pass42 representative cases and14 fresh-capture comparisons
+against positioned API rendering. Terminal/schema8/0/0 plus three emoji gates
+pass; Valgrind0 errors/lost bytes, reachable allocations explicitly recorded.
+Fresh TCC rebuild byte-identical. Next: VS15/default presentation and remaining
+font/geometry/end-to-end acceptance.107/110 remain open. No live writes,
+SSH, Hibr changes or package. Preserve releases/0.1.554.yaml.
+
 ## 2026-10-20 candidate578 — explicit API emoji grouping
 
 ADR0161 adds schema-first CellUpdate.text_layout: scalar (unchanged default)

@@ -179,6 +179,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0159 — HarfBuzz colour-cluster raster](0159-harfbuzz-colour-cluster-raster.md)
 - [0160 — Shared cluster consumption](0160-shared-cluster-consumption.md)
 - [0161 — Explicit API emoji layout](0161-explicit-api-emoji-layout.md)
+- [0162 — Explicit PTY emoji layout](0162-explicit-pty-emoji-layout.md)
 
 ## Adding an ADR
 

@@ -144,7 +144,7 @@ The [pane guide](https://git.home.arpa/itdlabs/hibr-apps/src/branch/main/docs/bl
 documents connection, conflict handling, import/export and diagnostics. The
 canonical pane lives only in hibr-apps, not in Hibr core or this package.
 
-Offline candidate0.1.578 includes smooth `blit-retro`, full pinned Nerd
+Offline candidate0.1.579 includes smooth `blit-retro`, full pinned Nerd
 coverage in both outline profiles (10,386 codepoints) and Noto2D2.057 colour
 emoji. Existing bitmap profiles stay selectable. Generate an actual-raster
 specimen without a display using `ruby tools/fonts/preview.rb`.
@@ -156,7 +156,9 @@ end-to-end conformance remain [issue110](https://git.home.arpa/itdlabs/blit/issu
 Owned clusters now reach native KMS and both SDL compositors, with full-key
 atlas caching and representative pixel checks. API updates can explicitly
 request `text_layout:"emoji"`; the scalar default is unchanged for existing
-providers. Streaming PTY grouping remains pending.
+providers. New PTY sessions can also select `text_layout:"emoji"` explicitly;
+the full corpus passes contiguous/byte-fragmented parser tests. Complete
+text/default presentation and remaining end-to-end acceptance are still open.
 HarfBuzz>=6.0.0 is an explicit runtime dependency, not a second renderer.
 Native KMS now reads the canonical sixteen-slot attachment layout correctly
 ([113](https://git.home.arpa/itdlabs/blit/issues/113)). Not deployed. The active queue is

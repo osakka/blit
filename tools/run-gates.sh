@@ -223,6 +223,7 @@ suite_font() {
     run_gate cell_cluster_gate.rb ruby tools/tests/cell_cluster_gate.rb
     run_gate emoji_layout_gate.rb ruby tools/tests/emoji_layout_gate.rb
     run_gate emoji_layout_api_gate.rb ruby tools/tests/emoji_layout_api_gate.rb
+    run_gate emoji_pty_api_gate.rb ruby tools/tests/emoji_pty_api_gate.rb
     run_gate harfbuzz_identity_gate.rb ruby tools/tests/harfbuzz_identity_gate.rb
     run_gate emoji_cluster_raster_gate.rb ruby tools/tests/emoji_cluster_raster_gate.rb
     if [ -f "${BLIT_GATE_HARFBUZZ:-/lib/x86_64-linux-gnu/libharfbuzz.so.0}" ]; then

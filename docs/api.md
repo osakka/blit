@@ -762,7 +762,19 @@ anchor. Overwriting either half clears the previous wide ownership. A wide
 cluster that cannot fit the right edge is clipped whole, following existing
 API clipping semantics (the request can still be acknowledged). Invalid
 layout types/values return400 `invalid_text_layout` before cell mutation.
-This does not change PTY grouping or complete VS15/default presentation.
+This cell-update policy does not alter the owning session's PTY policy.
+
+Offline candidate579 also accepts `text_layout` on
+`POST /v1/terminal-sessions`, for example
+`{"command":"/bin/cat","text_layout":"emoji"}`. It is fixed for the lifetime
+of that session and returned by session observations; PATCH returns400
+`immutable_text_layout`. Default/omitted `scalar` preserves existing Hibr
+widths. `emoji` uses the same pinned sequence trie across PTY reads, supports
+late widening and whole-cluster REP/wrap. With autowrap disabled or a single
+available column, allocation stays one column rather than spilling outside
+the viewport. Controls and successful positioned updates terminate an active
+extension; incomplete UTF-8 bytes do not. This is not DEC2027/general Unicode
+grapheme support; VS15/default-presentation completion remains pending.
 
 `GET /v1/fonts` lists profiles and the active cell size. `PUT /v1/fonts` can
 select `font_id`, legacy `scale` from 1.0 through 3.0 in 0.1 increments,

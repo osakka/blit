@@ -3969,6 +3969,9 @@ components:
       required: [command]
       properties:
         command: {type: string, minLength: 1}
+        text_layout:
+          $ref: '#/components/schemas/TextLayout'
+          description: Creation-time PTY layout policy; fixed for this session. Omitting it preserves scalar-width compatibility.
         user:
           type: string
           minLength: 1
@@ -4076,7 +4079,7 @@ components:
     TerminalSession:
       type: object
       required: [id, revision, surface_revision, state, surface_id, title,
-        terminal_capabilities, terminal_defaults, hibr_attachment, hibr_desktop]
+        terminal_capabilities, terminal_defaults, hibr_attachment, hibr_desktop, text_layout]
       properties:
         id: {$ref: '#/components/schemas/ResourceId'}
         revision: {$ref: '#/components/schemas/Revision'}
@@ -4085,6 +4088,7 @@ components:
           type: string
           enum: [starting, running, stopped, failed]
         surface_id: {$ref: '#/components/schemas/ResourceId'}
+        text_layout: {$ref: '#/components/schemas/TextLayout'}
         title:
           type: string
           description: >-
@@ -4397,15 +4401,23 @@ components:
           type: string
           pattern: '^#[0-9a-fA-F]{6}$'
       additionalProperties: false
+    TextLayout:
+      type: string
+      enum: [scalar, emoji]
+      default: scalar
+      description: >-
+        scalar preserves Unicode15.1 per-scalar widths and zero-width
+        attachments. emoji additionally groups pinned Emoji18.0 sequences;
+        completed multi-scalar sequences occupy two columns where space
+        permits. Singleton and ordinary text widths are unchanged. This
+        does not claim general Unicode grapheme or DEC2027 support.
     CellUpdate:
       type: object
       required: [base_revision, cells]
       properties:
         base_revision: {$ref: '#/components/schemas/Revision'}
         text_layout:
-          type: string
-          enum: [scalar, emoji]
-          default: scalar
+          $ref: '#/components/schemas/TextLayout'
           description: >-
             scalar preserves existing Unicode15.1 per-scalar widths and
             zero-width attachments. emoji groups pinned Emoji18.0 sequences

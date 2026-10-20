@@ -3,6 +3,38 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-20 candidate579: negotiated PTY emoji grouping
+
+ADR0162. Frozen TCC server SHA
+f2b0df8462cd988a9b3de78aacc4a93529049116f747df8e7f701b21ccafa313;
+fresh rebuild byte-identical. Final terminal/schema8pass/0skip/0fail
+(`579-regression-final.log`); expanded emoji_layout, emoji_layout_api and
+emoji_pty_api gates also pass:11 distinct focused gates, not the full matrix.
+Logs are under `/tmp/blit-fontcraft.IHU9AK/579-*`.
+
+Parser gate checks all5244 corpus entries in scalar/emoji policies with
+contiguous and one-byte feeds, exact scalar preservation and cursor advance.
+Focused cases: late widening, last-column wrap, bottom scroll, disabled-wrap
+and one-column allocation, horizontal margins, insertion before ASCII text,
+full-cluster REP, continuation overwrite, erase, alternate restoration, RIS
+and control barriers. These are specific tests, not exhaustive VT conformance.
+
+Real HTTP-created local PTYs exercise seven families across omitted/scalar/
+emoji policies and contiguous/bytewise emitter writes:42 cases. OS read
+boundaries need not match emitter writes; the module gate separately forces
+one-byte parser feeds. Fourteen fresh BMP captures match positioned API
+rendering byte-for-byte on SDL software/Modern16px. This is fresh-capture
+parity, not proof of incremental-damage performance or physical scanout.
+Invalid creation policies fail before registration; PATCH policy changes
+return400; nested environment keys cannot override the root policy. Existing
+positioned API tests remain green after sharing the policy validator.
+
+Full parser/edge fixture under Valgrind3.19.0:0 errors and0 definitely/
+indirectly/possibly lost bytes (`579-parser-valgrind.log`).18,804 bytes in9
+blocks remain reachable; do not claim all heap blocks freed. No live writes,
+Hibr edits, SSH, package or deployment.107/110 remain open for VS15/default
+presentation and remaining full backend/terminal/font acceptance.
+
 ## 2026-10-20 candidate578: schema-first API grouping, scalar compatibility
 
 ADR0161. TCC server SHA

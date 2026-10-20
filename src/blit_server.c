@@ -896,6 +896,10 @@ typedef struct {
     int terminal_charset_g0_pending;
     uint32_t terminal_last_codepoint;
     int terminal_last_width;
+    int terminal_emoji_layout;
+    int terminal_cluster_active;
+    int terminal_cluster_x, terminal_cluster_y;
+    BlitCellCluster terminal_last_cluster;
     uint32_t terminal_foreground;
     uint32_t terminal_background;
     /* The sixel colour registers, which belong to the session rather than to
@@ -7210,7 +7214,8 @@ static int json_object_slice(const char *cursor, char *out, size_t capacity)
  * object was not enough: the boundary has to be the object's own level. The
  * route gate caught exactly this, by injecting through a device that a
  * route-only PATCH had silently disabled. */
-static int json_object_scalars(const char *object, char *out, size_t capacity)
+static int json_object_scalars_with_nested(const char *object, char *out,
+                                            size_t capacity, int placeholders)
 {
     const char *cursor = object;
     size_t used = 0;
@@ -7304,8 +7309,11 @@ static int json_object_scalars(const char *object, char *out, size_t capacity)
                     value[value_length - 1] == '\n'))
                 --value_length;
         }
-        if (nested)
-            continue;
+        if (nested) {
+            if (!placeholders) continue;
+            value = "null";
+            value_length = 4;
+        }
         if (used + name_length + value_length + 6 >= capacity)
             return 0;
         if (!first)
@@ -7325,6 +7333,9 @@ static int json_object_scalars(const char *object, char *out, size_t capacity)
     out[used] = '\0';
     return 1;
 }
+
+static int json_object_scalars(const char *object, char *out, size_t capacity)
+{ return json_object_scalars_with_nested(object, out, capacity, 0); }
 
 /* The name of the first property in `object` that is not in `writable`, or
    NULL when every one of them is.
@@ -7852,6 +7863,19 @@ static int parse_input_modifiers(const char *modifiers,
     return 1;
 }
 
+static int text_layout_from_json(const char *json, int *emoji_layout)
+{
+    char scalars[1024], layout[16];
+    *emoji_layout = 0;
+    if (!json_key_cursor(json, "text_layout")) return 1;
+    if (!json_object_scalars_with_nested(json, scalars, sizeof(scalars), 1)) return 0;
+    if (!json_key_cursor(scalars, "text_layout")) return 1;
+    if (!json_string(scalars, "text_layout", layout, sizeof(layout))) return 0;
+    if (!strcmp(layout, "emoji")) *emoji_layout = 1;
+    else if (strcmp(layout, "scalar")) return 0;
+    return 1;
+}
+
 static int apply_cell_update(BlitSurface *surface, const char *json,
                              const char **rejected)
 {
@@ -7859,16 +7883,10 @@ static int apply_cell_update(BlitSurface *surface, const char *json,
     const char *cursor_state = strstr(json, "\"cursor\"");
     int updated = 0;
     int emoji_layout = 0;
-    char scalars[1024], layout[16];
 
     if (rejected != NULL)
         *rejected = NULL;
-    if (json_key_cursor(json, "text_layout")) {
-        if (!json_object_scalars(json, scalars, sizeof(scalars)) ||
-            !json_string(scalars, "text_layout", layout, sizeof(layout))) return -2;
-        if (!strcmp(layout, "emoji")) emoji_layout = 1;
-        else if (strcmp(layout, "scalar")) return -2;
-    }
+    if (!text_layout_from_json(json, &emoji_layout)) return -2;
     if (cursor == NULL)
         return 0;
     cursor = json_key_cursor(cursor, "x");
@@ -11280,6 +11298,8 @@ static void terminal_apply_string(BlitRuntime *runtime, BlitSession *session,
 
 static void terminal_put_codepoint(BlitSession *session, BlitSurface *surface,
                                    uint32_t codepoint, int cell_width);
+static void terminal_put_cluster(BlitSession *session, BlitSurface *surface,
+                                  const BlitCellCluster *cluster);
 
 static void terminal_apply_sgr(BlitSession *session, const char *sequence)
 {
@@ -12076,11 +12096,14 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
     } else if (!private_mode && command == 'b') {
         int count = has_first && first > 0 ? first : 1;
         if (count > BLIT_MAX_CELL_COLS) count = BLIT_MAX_CELL_COLS;
-        while (count-- > 0 && session->terminal_last_codepoint != 0)
-            terminal_put_codepoint(session, surface,
+        while (count-- > 0 && session->terminal_last_codepoint != 0) {
+            if (session->terminal_emoji_layout && session->terminal_last_cluster.length > 1)
+                terminal_put_cluster(session, surface, &session->terminal_last_cluster);
+            else terminal_put_codepoint(session, surface,
                                    session->terminal_last_codepoint,
                                    session->terminal_last_width > 0 ?
                                    session->terminal_last_width : 1);
+        }
     } else if (!private_mode && intermediate == 0 && command == 'X') {
         int count = has_first && first > 0 ? first : 1;
         int x;
@@ -12557,6 +12580,11 @@ static void terminal_add_combining(BlitSession *session, BlitSurface *surface,
     if (count >= BLIT_MAX_COMBINING) return;
     surface->combining[y][x][count] = codepoint;
     surface->combining_count[y][x] = count + 1;
+    if (session->terminal_emoji_layout && session->terminal_cluster_active &&
+        session->terminal_cluster_x == x && session->terminal_cluster_y == y)
+        blit_cell_cluster_init(&session->terminal_last_cluster,
+            surface->codepoints[y][x], surface->combining[y][x], count + 1,
+            (surface->attributes[y][x] & BLIT_ATTR_WIDE) ? 2 : 1);
     mark_surface_damage(surface, x, y);
 }
 
@@ -12572,7 +12600,9 @@ static void terminal_put_codepoint(BlitSession *session, BlitSurface *surface,
     int line_left = surface_line_start(surface);
     int line_right = surface_line_end(surface);
 
+    session->terminal_cluster_active = 0;
     session->terminal_last_codepoint = codepoint;
+    if (cell_width == 2 && line_right <= line_left) cell_width = 1;
     if (session->terminal_wrap_pending && session->terminal_autowrap) {
         surface->cursor_x = line_left;
         terminal_index(session, surface);
@@ -12601,6 +12631,12 @@ static void terminal_put_codepoint(BlitSession *session, BlitSurface *surface,
         }
     }
     session->terminal_last_width = cell_width;
+    if (session->terminal_emoji_layout) {
+        session->terminal_cluster_x = surface->cursor_x;
+        session->terminal_cluster_y = surface->cursor_y;
+        blit_cell_cluster_init(&session->terminal_last_cluster, codepoint, NULL, 0, cell_width);
+        session->terminal_cluster_active = blit_emoji_child(0, codepoint) != 0;
+    }
     if (!session->terminal_insert_mode)
         unchanged = terminal_cell_matches(session, surface,
                                           surface->cursor_x,
@@ -12662,6 +12698,76 @@ advance_cursor:
 
 enum { BLIT_TERMINAL_PARSE_CHUNK_BYTES = 768 };
 
+static void terminal_put_cluster(BlitSession *session, BlitSurface *surface,
+                                  const BlitCellCluster *cluster)
+{
+    BlitCellCluster key = *cluster; /* May alias session->terminal_last_cluster. */
+    int x, y;
+    terminal_put_codepoint(session, surface, key.scalars[0], key.columns);
+    x = session->terminal_cluster_x; y = session->terminal_cluster_y;
+    memcpy(surface->combining[y][x], key.scalars + 1, (key.length - 1) * sizeof(uint32_t));
+    surface->combining_count[y][x] = (unsigned char)(key.length - 1);
+    key.columns = session->terminal_last_width;
+    session->terminal_last_cluster = key;
+    session->terminal_cluster_active = 1;
+    mark_surface_damage_width(surface, x, y, key.columns);
+}
+
+static int terminal_extend_emoji(BlitSession *session, BlitSurface *surface,
+                                  uint32_t codepoint)
+{
+    BlitCellCluster key, observed;
+    unsigned node;
+    int x, y, width, left, right, i;
+    if (!session->terminal_emoji_layout || !session->terminal_cluster_active) return 0;
+    key = session->terminal_last_cluster;
+    x = session->terminal_cluster_x; y = session->terminal_cluster_y;
+    left = surface_line_start(surface); right = surface_line_end(surface);
+    if (x < left || x > right || y < 0 || y >= surface->height ||
+        surface->cursor_y != y || surface->cursor_x !=
+            (x + key.columns > right ? right : x + key.columns) ||
+        !blit_cell_cluster_init(&observed, surface->codepoints[y][x],
+            surface->combining[y][x], surface->combining_count[y][x],
+            (surface->attributes[y][x] & BLIT_ATTR_WIDE) ? 2 : 1) ||
+        !blit_cell_cluster_equal(&key, &observed)) return 0;
+    node = blit_emoji_extend(key.scalars[0], key.scalars + 1, key.length - 1, codepoint);
+    if (!node) return 0;
+    key.scalars[key.length++] = codepoint;
+    width = blit_emoji_nodes[node].terminal ? 2 : key.columns;
+    if (width > key.columns) {
+        if (right <= left || (x == right && !session->terminal_autowrap)) width = 1;
+        else if (x == right) {
+            terminal_clear_cell(surface, x, y);
+            mark_surface_damage(surface, x, y);
+            surface->cursor_x = left;
+            session->terminal_wrap_pending = 0;
+            terminal_index(session, surface);
+            key.columns = 2;
+            terminal_put_cluster(session, surface, &key);
+            return 1;
+        } else {
+            if (session->terminal_insert_mode) {
+                for (i = right; i > x + 1; --i) terminal_copy_cell(surface, i, i - 1, y);
+                mark_surface_damage_width(surface, x, y, right - x + 1);
+            } else terminal_clear_wide_overlap(surface, x + 1, y);
+            terminal_clear_cell(surface, x + 1, y);
+            surface->attributes[y][x] |= BLIT_ATTR_WIDE;
+            surface->attributes[y][x + 1] = BLIT_ATTR_CONTINUATION;
+            surface->links[y][x + 1] = surface->links[y][x];
+            if (session->terminal_insert_mode) terminal_normalize_wide_row(surface, y);
+            surface->cursor_x = x + 2 > right ? right : x + 2;
+            session->terminal_wrap_pending = x + 2 > right && session->terminal_autowrap;
+        }
+    }
+    key.columns = width;
+    memcpy(surface->combining[y][x], key.scalars + 1, (key.length - 1) * sizeof(uint32_t));
+    surface->combining_count[y][x] = (unsigned char)(key.length - 1);
+    session->terminal_last_cluster = key;
+    session->terminal_last_width = width;
+    mark_surface_damage_width(surface, x, y, width);
+    return 1;
+}
+
 static int terminal_consume_chunk(BlitRuntime *runtime, BlitSession *session,
                                    BlitSurface *surface,
                                    const unsigned char *data, size_t length)
@@ -12690,6 +12796,8 @@ static int terminal_consume_chunk(BlitRuntime *runtime, BlitSession *session,
 
     while (offset < length) {
         unsigned char byte = data[offset];
+        if (byte < 0x20 || byte == 0x7f || (byte >= 0x80 && byte < 0xa0))
+            session->terminal_cluster_active = 0;
         if (session->terminal_escape == 1) {
             session->terminal_wrap_pending = 0;
             if (byte == '[') {
@@ -12766,6 +12874,8 @@ static int terminal_consume_chunk(BlitRuntime *runtime, BlitSession *session,
                 session->terminal_application_keypad = 0;
                 session->terminal_wrap_pending = 0;
                 session->terminal_focus_reporting = 0;
+                session->terminal_last_codepoint = 0;
+                session->terminal_last_cluster.length = 0;
                 session->terminal_bracketed_paste = 0;
                 session->terminal_mouse_mode = 0;
                 session->terminal_mouse_sgr = 0;
@@ -13010,6 +13120,7 @@ static int terminal_consume_chunk(BlitRuntime *runtime, BlitSession *session,
                    inventing an ASCII question mark. */
                 codepoint = 0xfffdU;
             } else if (codepoint == 0x009bU) {
+                session->terminal_cluster_active = 0;
                 /* UTF-8 encodes the C1 CSI control as C2 9B.  Hibr emits
                    controls through the UTF-8 PTY contract, so recognize the
                    decoded form before treating it as a printable cell. */
@@ -13020,6 +13131,7 @@ static int terminal_consume_chunk(BlitRuntime *runtime, BlitSession *session,
             } else if (codepoint == 0x009dU || codepoint == 0x0090U ||
                        codepoint == 0x0098U || codepoint == 0x009eU ||
                        codepoint == 0x009fU) {
+                session->terminal_cluster_active = 0;
                 /* Likewise recognize UTF-8 encoded string-control introducers
                    (OSC, DCS, SOS, PM, and APC) at the parser boundary. */
                 session->terminal_escape = 3;
@@ -13030,6 +13142,7 @@ static int terminal_consume_chunk(BlitRuntime *runtime, BlitSession *session,
                 continue;
             } else if (codepoint == 0x0084U || codepoint == 0x0085U ||
                        codepoint == 0x0088U || codepoint == 0x008dU) {
+                session->terminal_cluster_active = 0;
                 /* The non-string C1 motion controls have the same semantics
                    whether received as a raw byte or UTF-8 encoded scalar. */
                 if (codepoint == 0x0084U)
@@ -13047,6 +13160,9 @@ static int terminal_consume_chunk(BlitRuntime *runtime, BlitSession *session,
                     terminal_reverse_index(session, surface);
                 }
                 session->terminal_wrap_pending = 0;
+                offset += consumed;
+                continue;
+            } else if (terminal_extend_emoji(session, surface, codepoint)) {
                 offset += consumed;
                 continue;
             } else if (unicode_cell_width(codepoint) == 0) {
@@ -14031,6 +14147,9 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
                              ",\"login_manager\":%s",
                              session->login_manager ? "true" : "false");
     used += (size_t)snprintf(body + used, capacity - used,
+                             ",\"text_layout\":\"%s\"",
+                             session->terminal_emoji_layout ? "emoji" : "scalar");
+    used += (size_t)snprintf(body + used, capacity - used,
                              ",\"title\":\"%s\"", escaped_title);
     if (session->terminal_clipboard[0] != '\0')
         used += (size_t)snprintf(body + used, capacity - used,
@@ -14646,9 +14765,11 @@ static int create_session(BlitRuntime *runtime, const char *json,
     BlitSession *hibr_owner = NULL;
     int join_position_present = 0;
     int join_position[2] = {0, 0};
+    int emoji_layout;
     const char *command_name;
     int i;
 
+    if (!text_layout_from_json(json, &emoji_layout)) return -7;
     memset(argument_storage, 0, sizeof(argument_storage));
     if (!json_string(json, "command", command, sizeof(command)))
         return 0;
@@ -14961,6 +15082,7 @@ static int create_session(BlitRuntime *runtime, const char *json,
                          sizeof(session->hibr_desktop_session), "%s",
                          hibr_desktop_session);
             session->terminal_autowrap = 1;
+            session->terminal_emoji_layout = emoji_layout;
             session->terminal_cell_width = runtime_terminal_cell_width(runtime);
             session->terminal_cell_height = runtime_terminal_cell_height(runtime);
             snprintf(session->terminal_term, sizeof(session->terminal_term),
@@ -20602,6 +20724,11 @@ static void handle_request(int fd, BlitRuntime *runtime,
             return;
         }
         create_result = create_session(runtime, payload, &session, -1);
+        if (create_result == -7) {
+            send_problem(fd, 400, "Bad Request", "invalid_text_layout",
+                         "text_layout must be scalar or emoji at the request root.");
+            return;
+        }
         if (create_result == -2) {
             send_problem(fd, 409, "Conflict", "hibr_desktop_exists",
                          "The named Hibr desktop already has a primary owner; use --resume or --join.");
@@ -20794,6 +20921,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
             }
         }
         if (surface_session != NULL) {
+            surface_session->terminal_cluster_active = 0;
             if (terminal_default_foreground_present &&
                 strcmp(surface_session->terminal_default_foreground,
                        terminal_default_foreground) != 0) {
@@ -21101,6 +21229,11 @@ static void handle_request(int fd, BlitRuntime *runtime,
                 return;
             if (!if_match_revision(fd, request, session->revision))
                 return;
+            if (json_key_cursor(payload, "text_layout")) {
+                send_problem(fd, 400, "Bad Request", "immutable_text_layout",
+                             "text_layout is fixed at terminal-session creation.");
+                return;
+            }
             int display_requested = json_string(payload, "display_id",
                                                 display_id, sizeof(display_id));
             int pane_requested = json_string(payload, "pane_id", pane_id,

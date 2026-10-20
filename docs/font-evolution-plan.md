@@ -4,6 +4,12 @@ Tracking: [Blit#107](https://git.home.arpa/itdlabs/blit/issues/107).
 
 ## Active completion contract —107/110 before browser or SDL work
 
+Candidate579 adds explicit PTY creation-time text_layout=emoji. Full corpus
+parser checks cover both policies and one-byte/contiguous feeds;42 real-PTY
+cases and14 fresh-capture API/PTY comparisons pass. Scalar remains default,
+no Hibr changes or DEC2027 claim. Next: text/default presentation and remaining
+font/geometry/full end-to-end acceptance; see ADR0162 and the evidence ledger.
+
 Candidate578 adds explicit API text_layout=emoji with full-corpus decoder
 checks and representative HTTP ownership/overwrite tests. Scalar remains
 the default for positioned providers; PTY grouping is unchanged. ADR0161
