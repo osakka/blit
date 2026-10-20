@@ -1,5 +1,17 @@
 # Verification status
 
+## 2026-10-20 candidate583 service boundary115
+
+Real local systemd socket round-trip passes with shared tmp; private-tmp
+negative control hides the socket. Shipped retry values stop a failing
+transient unit after3 starts. `systemd-analyze verify` passes. API-created
+Hibr probes verify unique0700 session-user-owned log directories and explicit
+DT_LOG preservation. Hibr320 tracks stopped login children; no fix claimed
+for those. Live582 read-only observation: Modern16, one native UID1000 owner,
+three clients. No physical namespace migration/restart acceptance yet.
+Candidate583 also passes terminal suite3/0/0, real credential-drop/login
+identity rejection/lifecycle tests, and the updated GLES2 pixel-frame gate.
+
 ## 2026-10-20 candidate583 destination placement (not deployed)
 
 Production adapter metadata gate passes four cell metrics with independent

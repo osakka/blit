@@ -26,6 +26,7 @@ stage=$(mktemp -d /tmp/blit-package-gate.XXXXXX)
 cleanup() { rm -rf "$stage"; }
 trap cleanup EXIT HUP INT TERM
 dpkg-deb -x "$package" "$stage"
+ruby "$root/tools/tests/service_boundary_gate.rb" --static "$stage/lib/systemd/system/blit.service"
 
 # Every hash the manifest records must be the hash of what is inside this
 # package.  0.1.432's manifest named a server binary that was never released:

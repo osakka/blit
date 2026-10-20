@@ -14966,13 +14966,6 @@ static int create_session(BlitRuntime *runtime, const char *json,
         snprintf(session_text, sizeof(session_text), "%llu", session_id);
         snprintf(surface_text, sizeof(surface_text), "surface-%llu", session_id);
         snprintf(port_text, sizeof(port_text), "%d", runtime->listen_port);
-        /* Hibr writes its startup/restart diagnostics to DT_LOG.  An
-           API-launched child has no login HOME, so Hibr's relative default
-           can fail and stderr then becomes terminal content.  Supply a
-           per-session default; an explicit API environment entry still
-           overrides it below. */
-        snprintf(hibr_log_path, sizeof(hibr_log_path),
-                 "/tmp/blit-hibr-%llu.log", session_id);
         if (setenv("BLIT_SESSION_ID", session_text, 1) != 0 ||
             setenv("BLIT_SESSION_TOKEN", session_token, 1) != 0 ||
             setenv("BLIT_SURFACE_ID", surface_text, 1) != 0 ||
@@ -14985,8 +14978,7 @@ static int create_session(BlitRuntime *runtime, const char *json,
                graphics. API environment entries below can override either
                integration default explicitly. */
             setenv("DT_BIDI", "on", 1) != 0 ||
-            setenv("HIBR_GFX", "kitty", 1) != 0 ||
-            setenv("DT_LOG", hibr_log_path, 0) != 0)
+            setenv("HIBR_GFX", "kitty", 1) != 0)
                 _exit(126);
         /* Authentication is checked before route dispatch, so a configured
            token also protects the owner handshake and the stream upgrade
@@ -15051,6 +15043,17 @@ static int create_session(BlitRuntime *runtime, const char *json,
             if (setenv(environment_keys[environment_index],
                        environment_values[environment_index], 1) != 0)
                 _exit(126);
+        /* Shared /tmp is required for ordinary user hold/control clients.
+           Never replace its old namespace isolation with a predictable
+           privileged log filename. Allocate as the final session user,
+           after credential drop and explicit environment overrides. */
+        if (hibr_process && getenv("DT_LOG") == NULL) {
+            char log_directory[] = "/tmp/blit-hibr-XXXXXX";
+            if (mkdtemp(log_directory) == NULL) _exit(126);
+            snprintf(hibr_log_path, sizeof(hibr_log_path), "%s/desktop.log",
+                     log_directory);
+            if (setenv("DT_LOG", hibr_log_path, 0) != 0) _exit(126);
+        }
         execve(command, arguments, environ);
         _exit(127);
     }

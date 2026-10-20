@@ -252,3 +252,12 @@ fix or instrument that boundary before the next cycle.
 - [ ] Documentation and verification ledger match the evidence.
 - [ ] Only intended files are committed.
 - [ ] Commit is pushed and branch status is reported.
+
+## Service-boundary regression
+
+`ruby tools/tests/service_boundary_gate.rb --static` verifies the shipped
+unit policy. Without `--static`, it needs local systemd/passwordless sudo and
+uses isolated transient units: real socket visibility and restart limiting.
+`session_log_gate.rb` verifies private default log directories through API
+sessions; both belong to the lifecycle suite. Neither test changes the live
+display host or edits Hibr. See ADR0167.

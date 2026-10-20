@@ -2,6 +2,8 @@
 Description=Blit API-driven SDL3/KMS display server
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=60s
+StartLimitBurst=3
 
 [Service]
 Type=simple
@@ -23,13 +25,16 @@ StateDirectory=blit
 Environment=LD_LIBRARY_PATH=/usr/lib/blit/lib
 ExecStart=/usr/bin/blit 8080
 Restart=on-failure
-RestartSec=2s
+RestartSec=10s
 # The gateway must be able to drop an API-created terminal child to its
 # requested desktop user. The child is permanently reduced before exec; the
 # gateway itself owns KMS/input and is protected by the API authentication and
 # command policy configured for the deployment.
 NoNewPrivileges=false
-PrivateTmp=true
+# User desktops must share their per-UID hold/control sockets with ordinary
+# logins. Authentication and socket permissions remain the access boundary.
+# Update packages still use /var/lib/blit/updates, not temporary paths.
+PrivateTmp=false
 
 [Install]
 WantedBy=multi-user.target

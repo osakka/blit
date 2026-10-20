@@ -377,6 +377,8 @@ suite_hibr() {
 }
 
 suite_lifecycle() {
+    run_gate service_boundary_gate.rb ruby tools/tests/service_boundary_gate.rb
+    run_gate session_log_gate.rb ruby tools/tests/session_log_gate.rb
     run_gate tcc_fault_trace_gate.rb ruby tools/tests/tcc_fault_trace_gate.rb
     run_gate startup_diagnostics_gate.rb ruby tools/tests/startup_diagnostics_gate.rb
     run_gate sdl_kms_policy_gate.rb ruby tools/tests/sdl_kms_policy_gate.rb

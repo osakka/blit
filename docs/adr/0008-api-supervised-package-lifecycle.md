@@ -8,6 +8,10 @@ install script can terminate the helper before it reports the result.
 
 ## Decision
 
+Current namespace policy is ADR0167: the display service shares `/tmp` so
+ordinary user shells can discover Hibr session sockets. The update staging
+decision below remains unchanged and does not depend on tmp isolation.
+
 The Debian post-install script may create configuration and enable the Blit
 units, but it must not start or restart either service. The API owns the
 post-install restart boundary. The helper captures bounded, sanitized `dpkg`

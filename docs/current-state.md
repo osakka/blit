@@ -1,5 +1,26 @@
 # Current state and restart point
 
+## 2026-10-20: new backlog115 service-boundary fix, candidate583
+
+Latest backlog contains115 (new),114 (known odd-height wallpaper) and closed113.
+115 claims root is an override; current unit/ADR0065 deliberately run root.
+Confirmed local systemd namespace fault: private tmp hides a same-UID user
+socket. Candidate583 disables private tmp, retains shared update staging and
+adds10s restart delay/3-start60s limit. Real transient-unit tests pass socket
+positive/negative controls and actual failed state after3 starts. The initial
+test wrongly expected Result=start-limit-hit; systemd252 retains exit-code,
+so the corrected assertion checks ActiveState/SubState/NRestarts instead.
+Default Hibr log paths now use unique session-user-owned0700 directories
+after credential drop; explicit DT_LOG preserved. Local API test passes.
+See ADR0167. Hibr320 requests support for undiagnosed stopped root children;
+no Hibr edits or guessed SIGCONT/kill fix.115 remains open for that subproblem
+and physical-host verification.
+
+Read-only live API582 confirms one UID1000 primary with DP upper/HDMI joins;
+operator has selected Modern16 (8x16), superseding the earlier Retro16
+checkpoint. Preserve this current selection/configuration at rollout. No live
+restart, renderer switch or configuration write for this triage yet.
+
 ## 2026-10-20: candidate583 image placement; Hibr319; pane0.1.8 published
 
 User requests browser/font sizing work now. Hibr319 tracks the browser's
