@@ -2,13 +2,20 @@
 
 ## 2026-10-20 rollout582 — installed; operator acceptance pending
 
+Latest follow-up: authenticated native desktop is now ready. Observation shows
+exactly one primary on DP lower pane and two joins: DP upper pane and newly
+present HDMI-A-1. One native owner, three clients, no manual joins created by
+this rollout. This supersedes the waiting-for-login/one-output checkpoint
+below. Physical visual/input confirmation and new-font testing remain pending.
+Evidence: rollout-authenticated.json in the same scratch directory.
+
 Authenticated API update on192.168.10.54 completed; `/v1/version` reports582,
 update status is ready/idle and native DRM/KMS health is ready. Active Spleen
 16px, saved settings document and both physical-pane/cell-grid geometries
 match the immediately-before snapshot. Retro/Modern are available, not
 selected. One1920x2160 output remains split1x2 with lower login preference.
-The login manager is running below and requires authentication; no join is
-started before an authenticated primary. User has been asked to sign in and
+At the first post-install check, login below required authentication; no join was
+started before an authenticated primary. User was asked to sign in and
 confirm desktop/input before changing font or size.
 
 Fresh startup probes Hibr0.99.270/ABI16, compatible with the pinned ABI16

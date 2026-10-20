@@ -38,6 +38,14 @@ rollout-update.log. Network waits in the operator updater are now bounded.
 API rollback still depends on a responding management plane; independent
 automatic package rollback was not implemented or tested here.
 
+Subsequent rollout-authenticated.json shows a ready native desktop with one
+owner and exactly one primary (DP lower pane), plus DP upper and HDMI-A-1
+join clients. HDMI appeared after the initial one-output comparison, yielding
+two physical outputs/three panes. No manual join was created for this rollout.
+This verifies observed ownership/reconciliation, not physical rendering,
+mouse/keyboard behavior or measured multi-output performance. Human
+visual/input and new-font appearance acceptance still await confirmation.
+
 ## 2026-10-20 candidate582: whole-owner resize and PTY transitions
 
 ADR0165. Frozen TCC server SHA

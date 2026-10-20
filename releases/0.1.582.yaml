@@ -16,7 +16,10 @@ deployment:
   saved_configuration_preserved: true
   active_font: blit-hibr-spleen16
   active_font_size_px: 16
-  connected_outputs: 1
+  connected_outputs_at_install: 1
+  connected_outputs_last_observed: 2
+  native_primary_count_last_observed: 1
+  native_join_count_last_observed: 2
   pane_layout: 1x2
   runtime_hibr_version: 0.99.270
   runtime_hibr_abi: 16
