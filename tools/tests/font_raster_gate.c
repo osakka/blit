@@ -67,6 +67,23 @@ int main(int argc, char **argv)
         count = blit_raster_render_count(raster);
         CHECK(blit_raster_get(raster, 'A', 1, &again));
         CHECK(a.pixels == again.pixels && blit_raster_render_count(raster) == count);
+        {
+            unsigned char saved[64 * 64];
+            BlitCellCluster first, colliding;
+            CHECK(blit_cell_cluster_init(&first, 'A', NULL, 0, 1));
+            CHECK(blit_cell_cluster_init(&colliding, 'A' + 128, NULL, 0, 1));
+            CHECK(blit_cell_cluster_hash(&first) % 128 == blit_cell_cluster_hash(&colliding) % 128);
+            memcpy(saved, a.pixels, a.stride * a.height);
+            CHECK(blit_raster_get(raster, 'A' + 128, 1, &again));
+            CHECK(blit_raster_render_count(raster) == count + 1);
+            CHECK(blit_raster_get(raster, 'A', 1, &again));
+            CHECK(blit_raster_render_count(raster) == count + 2);
+            CHECK(!memcmp(saved, again.pixels, again.stride * again.height));
+            CHECK(blit_raster_get(raster, 'A', 2, &again));
+            CHECK(again.width == width * 2);
+            CHECK(blit_raster_get(raster, 'A', 1, &again));
+            CHECK(again.width == width && !memcmp(saved, again.pixels, again.stride * again.height));
+        }
         CHECK(blit_raster_get(raster, 0x2588, 1, &block));
         CHECK(block.fallback && block.format == BLIT_RASTER_COVERAGE);
         for (y = 0; y < size; ++y)

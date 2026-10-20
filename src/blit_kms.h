@@ -32,6 +32,8 @@ typedef struct {
     int columns;
     int rows;
     const uint32_t *codepoints;
+    /* BLIT_MAX_COMBINING slots per cell, with the same grid stride as
+       codepoints. Never infer this storage pitch from current mark count. */
     const uint32_t *combining;
     const unsigned char *combining_count;
     const uint32_t *foreground;

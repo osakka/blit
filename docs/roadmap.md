@@ -19,8 +19,10 @@ No Hibr core edits or SSH. Use the existing API and one shared implementation.
 | 5 — queued | Terminal/graphics matrix [22](https://git.home.arpa/itdlabs/blit/issues/22), API/config [64](https://git.home.arpa/itdlabs/blit/issues/64), multi-output [20](https://git.home.arpa/itdlabs/blit/issues/20) | Audit remaining protocol and hardware gaps one at a time; revalidate persistent topology/joins, input, hotplug and Control Panels. Resolve stale tickets with evidence, not assumptions from old implementation work. |
 | 6 — queued | Release acceptance [112](https://git.home.arpa/itdlabs/blit/issues/112), reproducible gates/package [27](https://git.home.arpa/itdlabs/blit/issues/27) | Revalidate auth, privilege/update-token separation, install/rollback/shutdown recovery, package/source identity and documentation. Freeze/tag the accepted artifact only after required hardware/operator acceptance; list explicit skips and approved LAN exceptions. |
 
-Font status: optional smooth Retro and expanded Modern are implemented in
-source candidate573. Emoji18.0 corpus is now pinned; the old Noto2.042 font
+Font status: optional smooth Retro and expanded Modern are implemented;
+candidate575 centralizes the bounded cluster/cache key and fixes the native
+KMS sixteen-versus-four-slot attachment reader (113). This is not grouping
+or shaping support. Emoji18.0 corpus is pinned; the old Noto2.042 font
 misses174 RGI entries in the independent shaping audit. Candidate Noto2.057
 shapes all5,244 corpus entries to one nonzero glyph. This proves font-shaping
 coverage only, not colour raster quality or Blit cluster handling. Shared

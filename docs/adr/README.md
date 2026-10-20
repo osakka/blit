@@ -175,6 +175,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0155 — Pinned SDL KMS compatibility](0155-pinned-sdl-kms-compatibility.md)
 - [0156 — Shared full-Nerd outline profiles](0156-shared-full-nerd-outline-profiles.md)
 - [0157 — Versioned emoji acceptance corpus](0157-versioned-emoji-acceptance-corpus.md)
+- [0158 — Shared cell-cluster storage and cache key](0158-shared-cell-cluster-storage-and-cache-key.md)
 
 ## Adding an ADR
 

@@ -4,6 +4,14 @@ Tracking: [Blit#107](https://git.home.arpa/itdlabs/blit/issues/107).
 
 ## Active completion contract —107/110 before browser or SDL work
 
+Candidate575 implements ADR0158's first shared value layer. The existing
+sixteen-slot cell layout now has one definition, including native KMS (which
+previously indexed four slots). The shared raster cache uses a full bounded
+cluster key, while its public renderer still accepts individual scalars.
+The TCC value gate preserves all5,244 corpus entries at both owner-supplied
+cell spans; it does not test segmentation or shaping. Native attachment-layout
+pixel regression is red before/green after; no live deployment occurred.
+
 The execution queue lives only in [roadmap.md](roadmap.md): finish fonts,
 then browser111, SDL104, measured performance and release acceptance. Do not
 equate a font-file upgrade with complete emoji rendering.
@@ -25,6 +33,9 @@ Completion checkpoints, in dependency order:
    output and API-owned cells. Preserve fragmented input across reads; do not
    silently change the Hibr Unicode-width ABI. Choose/pin the production
    shaping dependency explicitly; the offline audit adds no runtime dependency.
+   The bounded owned value/cache identity and canonical attachment storage
+   bound are implemented in575. PTY/API grouping and width/continuation
+   integration remain pending; existing width behaviour is unchanged.
 3. Integrate cluster-aware cache and composition once, covering VS15/text,
    VS16/colour, keycaps, skin tones, ZWJ families/professions, regional/tag
    flags and qualification variants. Regress resize, wrap, erase, overwrite,

@@ -166,7 +166,6 @@ extern char **environ;
    draws differently because of it, so it is deliberately not part of the
    cell style the API reports or accepts. */
 #define BLIT_ATTR_PROTECTED 1024
-#define BLIT_MAX_COMBINING 16
 
 #define BLIT_SDL_GRAPHICS_CACHE 32
 

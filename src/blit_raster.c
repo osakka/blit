@@ -8,8 +8,8 @@
 #define RASTER_MAX_BYTES (4U * 1024U * 1024U)
 
 typedef struct {
-    uint32_t scalar;
-    int columns, valid;
+    BlitCellCluster key;
+    int valid;
     unsigned char *pixels;
     BlitRasterGlyph glyph;
 } RasterEntry;
@@ -182,20 +182,19 @@ int blit_raster_get(BlitRaster *raster, uint32_t scalar, int columns,
                     BlitRasterGlyph *glyph)
 {
     RasterEntry next, *entry;
+    BlitCellCluster key;
     size_t bytes, old_bytes;
     unsigned slot;
     int result = 0, x, y;
-    if (!raster || !glyph || (columns != 1 && columns != 2) ||
-        scalar > 0x10ffff || (scalar >= 0xd800 && scalar <= 0xdfff)) return 0;
-    slot = (unsigned)((scalar * 2654435761U + (unsigned)columns) % RASTER_SLOTS);
+    if (!raster || !glyph || !blit_cell_cluster_init(&key, scalar, NULL, 0, columns)) return 0;
+    slot = (unsigned)(blit_cell_cluster_hash(&key) % RASTER_SLOTS);
     entry = &raster->cache[slot];
-    if (entry->valid && entry->scalar == scalar && entry->columns == columns) {
+    if (entry->valid && blit_cell_cluster_equal(&entry->key, &key)) {
         *glyph = entry->glyph;
         return 1;
     }
     memset(&next, 0, sizeof(next));
-    next.scalar = scalar;
-    next.columns = columns;
+    next.key = key;
     next.glyph.width = raster->width * columns;
     next.glyph.height = raster->height;
     next.glyph.baseline = raster->baseline;

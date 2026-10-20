@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "blit_cell_cluster.h"
 
 struct BlitRasterGlyph;
 typedef struct BlitFont {

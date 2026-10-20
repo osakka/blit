@@ -219,6 +219,7 @@ suite_font() {
     run_gate modern_font_assets_gate.rb ruby tools/tests/modern_font_assets_gate.rb
     run_gate outline_catalogue_gate.rb ruby tools/tests/outline_catalogue_gate.rb
     run_gate emoji_corpus_gate.rb ruby tools/tests/emoji_corpus_gate.rb
+    run_gate cell_cluster_gate.rb ruby tools/tests/cell_cluster_gate.rb
     if [ -f "${BLIT_GATE_HARFBUZZ:-/lib/x86_64-linux-gnu/libharfbuzz.so.0}" ]; then
         run_gate emoji_font_audit_gate.rb ruby tools/tests/emoji_font_audit_gate.rb
     else

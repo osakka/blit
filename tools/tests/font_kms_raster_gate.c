@@ -2,6 +2,48 @@
 #include "../../src/blit_raster.h"
 
 #define CHECK(test) do { if (!(test)) { fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #test); return 1; } } while (0)
+
+static int attachment_layout_gate(BlitFont *font, KmsOutput *output,
+                                  uint32_t *pixels, int size)
+{
+    /* Match the actual server's sixteen-slot cell layout. Visible ASCII
+       sentinels deliberately test indexing, not Unicode combining policy. */
+    uint32_t cp[12] = {0}, fg[12] = {0}, bg[12] = {0};
+    uint16_t attr[12] = {0};
+    uint32_t marks[12 * 16], expected[160 * 96];
+    unsigned char counts[12] = {0};
+    int cases[] = {0, 1, 5, 16};
+    int scenario, row, col, mark, i, width = (size + 1) / 2;
+    BlitKmsSurfaceView view;
+    KmsOutput reference = *output;
+    memset(&view, 0, sizeof(view));
+    view.columns = 4; view.rows = 2; view.stride = 6;
+    view.origin_x = 8; view.origin_y = 8;
+    view.cell_width = width; view.cell_height = size;
+    view.codepoints = cp; view.foreground = fg; view.background = bg;
+    view.attributes = attr; view.combining = marks;
+    view.combining_count = counts;
+    view.default_foreground = 0xabcdef;
+    view.default_background = 0x123456;
+    reference.back.map = expected;
+    for (i = 0; i < 12 * 16; ++i) marks[i] = '!' + (i * 17 % 80);
+    for (scenario = 0; scenario < 4; ++scenario) {
+        for (i = 0; i < 12; ++i) counts[i] = cases[scenario];
+        for (i = 0; i < 160 * 96; ++i) pixels[i] = expected[i] = 0x123456;
+        draw_view(output, font, NULL, &view);
+        for (row = 0; row < 2; ++row)
+            for (col = 0; col < 4; ++col)
+                for (mark = 0; mark < counts[row * 6 + col]; ++mark)
+                    draw_glyph(&reference, font, marks[(row * 6 + col) * 16 + mark],
+                        8 + col * width, 8 + row * size, width, size, 0xabcdef, 0, 0);
+        if (memcmp(pixels, expected, sizeof(expected))) {
+            fprintf(stderr, "KMS_ATTACHMENT_LAYOUT_FAIL size=%d count=%d stride=16\n",
+                size, cases[scenario]);
+            return 0;
+        }
+    }
+    return 1;
+}
 int main(int argc, char **argv)
 {
     BlitFont font;
@@ -19,6 +61,7 @@ int main(int argc, char **argv)
         unsigned index;
         BlitRaster *raster = blit_raster_open(&font, argv[2], argv[3], (size + 1) / 2, size);
         CHECK(raster); blit_raster_attach(&font, raster);
+        CHECK(attachment_layout_gate(&font, &output, pixels, size));
         for (index = 0; index < sizeof(scalars) / sizeof(scalars[0]); ++index) {
             BlitRasterGlyph glyph;
             int columns = scalars[index] == 0x1f600 || scalars[index] == 0x1f514 ? 2 : 1;
@@ -37,6 +80,6 @@ int main(int argc, char **argv)
         }
     }
     blit_font_free(&font);
-    printf("FONT_KMS_RASTER_PASS sizes=57 glyph_samples=%d tolerance=0 guard_pixels=exact\n", samples);
+    printf("FONT_KMS_RASTER_PASS sizes=57 glyph_samples=%d attachment_layout_cases=228 tolerance=0 guard_pixels=exact\n", samples);
     return 0;
 }

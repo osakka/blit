@@ -144,17 +144,16 @@ The [pane guide](https://git.home.arpa/itdlabs/hibr-apps/src/branch/main/docs/bl
 documents connection, conflict handling, import/export and diagnostics. The
 canonical pane lives only in hibr-apps, not in Hibr core or this package.
 
-Offline candidate0.1.573 adds smooth, rounded `blit-retro` and expands both
-outline profiles to the complete pinned Nerd Fonts3.4.0 catalogue (10,386
-codepoints). Existing bitmap profiles stay selectable. Generate a real-raster
-specimen without a display using `ruby tools/fonts/preview.rb`. See the
-[font guide](assets/fonts/README.md) for API selection, provenance and limits:
-colour emoji scalars are supported, but full emoji-sequence shaping remains
-[issue110](https://git.home.arpa/itdlabs/blit/issues/110). Not yet deployed.
-
-Candidate574 pins the Unicode Emoji18.0 corpus and upgrades the shared colour
-asset to Noto2D2.057. Independent font-shaping coverage passes all5,244 corpus
-entries; Blit's cluster renderer is still pending. The active queue is
+Offline candidate0.1.575 includes smooth `blit-retro`, full pinned Nerd
+coverage in both outline profiles (10,386 codepoints) and Noto2D2.057 colour
+emoji. Existing bitmap profiles stay selectable. Generate an actual-raster
+specimen without a display using `ruby tools/fonts/preview.rb`.
+The [font guide](assets/fonts/README.md) records API selection, provenance and
+limits. Independent font shaping passes all5,244 pinned Emoji18.0 entries;
+the shared bounded cluster value/cache key is implemented, but production
+cluster shaping and segmentation remain [issue110](https://git.home.arpa/itdlabs/blit/issues/110).
+Native KMS now reads the canonical sixteen-slot attachment layout correctly
+([113](https://git.home.arpa/itdlabs/blit/issues/113)). Not deployed. The active queue is
 [fonts → browser sizing → SDL parity → performance/correctness → release](docs/roadmap.md).
 See [the font completion contract](docs/font-evolution-plan.md) for remaining
 work; shaping coverage alone does not mean complete terminal emoji support.

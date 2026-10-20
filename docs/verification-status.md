@@ -3,6 +3,31 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-20 candidate575: shared cluster value and native attachment layout
+
+ADR0158 / font107, emoji110, regression113. Frozen TCC server SHA
+dac8e240a03dd3a96dba6d038abe7cec50ca0707ae036ece9787fd4622db6132.
+Font/terminal/renderer/schema/lifecycle/offscreen-GLES118pass/0skip/0fail;
+logs `/tmp/blit-fontcraft.IHU9AK/575-final-verification.log`. Earlier broad
+run also118/0/0; final run includes hardened invalid-key checks and explicit
+raster-cache collision/column-span regression. No timing/hardware suite or
+physical acceptance claim is implied by these selected suites.
+
+New native draw_view fixture fails before the fix at8px/count1: server arrays
+have16 attachment slots, reader uses4. One shared bound fixes indexing and
+iteration.0/1/5/16 attachments, padded rows/nonzero origins and all57 sizes
+compare exact pixels:228 layout cases per Modern/Retro profile. Existing
+1026 glyph samples per backend/profile remain green. TCC owned-value gate
+round-trips all5244 corpus entries at both owner spans, validates bounds and
+atomic rejection, and distinguishes colliding hash keys. It tests storage,
+NOT emoji segmentation or shaping. Cache still has128 slots/4MiB pixel limit.
+
+Modern and Retro shared-raster tests under Valgrind3.19.0 report0 errors and
+all heap blocks freed, including collision/eviction cases and all57 sizes.
+Logs `575-{modern,retro}-valgrind.log` in the same scratch directory.
+Full emoji shaping/PTY/API/backend integration remains110. No new shaper
+dependency, font-width change, Hibr edit, SSH, live write, package or deploy.
+
 ## 2026-10-20 candidate574: complete emoji font-shaping baseline, NOT terminal completion
 
 ADR0157 pins Unicode Emoji18.0 corpus/licence and the single unmodified Noto

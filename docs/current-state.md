@@ -1,5 +1,31 @@
 # Current state and restart point
 
+## 2026-10-20 candidate575 — shared cluster value and proven KMS attachment bug
+
+Font107/emoji110 remain active. ADR0158 defines one existing16-slot attachment
+bound and an owned base+attachments+column-span cache key. Native KMS previously
+indexed16-slot server arrays as groups of4. New real draw_view pixel fixture
+fails before the fix at8px/count1, passes after with0/1/5/16 attachments across
+all57 sizes for both Modern/Retro. This is a demonstrated internal layout bug,
+not evidence explaining every previously reported display symptom.
+
+The shared raster cache now compares complete bounded values (length, span,
+scalars) after hashing. Its public calls remain scalar-only. TCC contract
+gate round-trips all5,244 Emoji18.0 entries at both spans, checks ownership,
+invalid input/atomic rejection and hash collisions. Raster collision tests
+verify eviction/re-render bytes and1/2-column separation. No new shaper/link
+dependency, grouping, width ABI or Hibr change. Emoji sequences still do not
+render as joined glyphs; do not advertise otherwise or close107/110.
+
+Next boundary is the production shaping/colour-cluster API plus its build
+decision, then shared PTY/API segmentation and complete backend consumption.
+Do not change parser grouping before all renderers can consume the result.
+No live writes, browser/desktop restart, SSH, package or deployment. Host
+remains last verified572. Preserve user untracked releases/0.1.554.yaml.
+Final frozen run118/0/0; server SHA
+dac8e240a03dd3a96dba6d038abe7cec50ca0707ae036ece9787fd4622db6132.
+Both outline raster memory checks have0 errors/leaks. Details in verification-status.md.
+
 ## 2026-10-20 agreed queue and emoji baseline — candidate574, not deployed
 
 Canonical execution order is docs/roadmap.md: font107/emoji110 FIRST, browser

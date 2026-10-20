@@ -963,8 +963,8 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
                 int combining_index;
                 for (combining_index = 0;
                      combining_index < view->combining_count[index] &&
-                     combining_index < 4; ++combining_index) {
-                    uint32_t mark = view->combining[index * 4 + combining_index];
+                     combining_index < BLIT_MAX_COMBINING; ++combining_index) {
+                    uint32_t mark = view->combining[index * BLIT_MAX_COMBINING + combining_index];
                     draw_glyph(output, font, mark, x, y, glyph_width, ch, fg,
                                lean, 0);
                 }
