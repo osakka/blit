@@ -1,5 +1,17 @@
 # Verification status
 
+## 2026-10-20 live583 rollout
+
+Reproducible artifact4baf7253764f55cd94b707dea422d2acd321edab3bf7c223d2361e41d74ee96a
+installed through API;583 identity and ready DRM/KMS read back. Canonical saved
+settings unchanged, Modern16 retained, one primary/two joins verified. Actual
+service tmp/retry properties read back through a removed unbound API probe.
+Independent systemd User=osakka process lists the same three hold clients,
+proving outside-service socket discoverability. Root stopped children persist
+and are reported in Hibr320, not fixed. Schema5/0/0, terminal3/0/0, identity,
+shutdown/restart and reproducible package gates pass. Browser visual/zoom
+acceptance remains pending. No SSH, backend switch or Hibr modifications.
+
 ## 2026-10-20 candidate583 service boundary115
 
 Real local systemd socket round-trip passes with shared tmp; private-tmp

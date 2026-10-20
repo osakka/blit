@@ -1,5 +1,27 @@
 # Current state and restart point
 
+## 2026-10-20:583 deployed;115 socket visibility verified, stopped children persist
+
+Authenticated API rollout succeeds; version583, health ready native DRM/KMS.
+Saved settings document equals preflight; Modern16 retained. One native
+primary on DP lower, DP upper and HDMI joins verified. No backend/layout/font
+write or manual desktop/join spawn. Live service readback: User=root,
+PrivateTmp=no,RestartUSec10s,StartLimitIntervalUSec1min,StartLimitBurst3.
+Separate transient systemd User=osakka process (outside Blit's unit) runs
+`hold clients desktop` successfully and lists exactly these three clients.
+Diagnostics use short-lived unbound1x1 API terminals, removed afterward;
+no SSH or Hibr edits. Evidence /tmp/blit-rollout583.1Il4gP before/after/final
+observations and update.log. Package manifest records exact identity.
+
+Stopped root descendants still occur after shared-tmp rollout: live login
+session leader140029, root children140058/140060 stateT, PGID140058,
+foreground PGID140029. Added to Hibr320;115 stays open, no guessed signal fix.
+Desktop owner/login IDs changed between after/final observations; no manual
+restart was requested by these probes and cause is not assigned. Final
+observation remains native-ready with one owner and three clients. Browser
+visual/font-size acceptance111 and operator review still pending. The browser
+policy request is Hibr319; pixel placement alone is not a browser zoom fix.
+
 ## 2026-10-20: new backlog115 service-boundary fix, candidate583
 
 Artifact583 is built from e605bd8; package gate passes with a byte-identical
