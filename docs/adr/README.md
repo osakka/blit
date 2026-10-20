@@ -172,6 +172,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0152 — SDL creation-time display binding](0152-sdl-creation-time-display-binding.md)
 - [0153 — Independent bounded presentation trials](0153-independent-bounded-presentation-trials.md)
 - [0154 — TCC runtime fault traces](0154-tcc-runtime-fault-traces.md)
+- [0155 — Pinned SDL KMS compatibility](0155-pinned-sdl-kms-compatibility.md)
 
 ## Adding an ADR
 

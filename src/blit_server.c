@@ -47,6 +47,7 @@
 #include <pthread.h>
 #include <pty.h>
 #include "blit_startup_diagnostics.h"
+#include "blit_sdl_kms_policy.h"
 /* ADR 0056: DEFLATE for PNG (f=100) and Kitty o=z payloads. */
 #include <xf86drmMode.h>
 #include <zlib.h>
@@ -3451,6 +3452,7 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              "\"font_scale\":%.4f,\"surface_inset_px\":%d,"
              "\"direct_kms\":%s,"
              "\"video_driver\":\"%s\","
+             "\"sdl_kms_mode\":%s,"
              "\"renderer\":\"%s\","
              "\"glyph_path\":\"%s\","
              "\"presentation_sync\":\"%s\","
@@ -3485,6 +3487,7 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              font_scale_value(runtime),
              BLIT_SURFACE_INSET_PX,
              runtime->direct_kms ? "true" : "false", escaped_video_driver,
+             blit_sdl_kms_mode_json(video_driver),
              escaped_renderer,
              runtime->direct_kms ? "kms" :
                  (runtime->output_count > 0 &&
@@ -22370,11 +22373,29 @@ static void discover_displays(BlitRuntime *runtime)
         if (evdev_devices != NULL && evdev_devices[0] != '\0')
             SDL_SetHint("SDL_EVDEV_DEVICES", evdev_devices);
     }
+    blit_sdl_kms_policy_prepare();
     runtime->sdl_ready = SDL_Init(SDL_INIT_VIDEO) ? 1 : 0;
     if (!runtime->sdl_ready) {
         snprintf(runtime->sdl_error, sizeof(runtime->sdl_error), "%s",
                  SDL_GetError());
         return;
+    }
+    {
+        const char *policy_error=blit_sdl_kms_policy_error();
+        const char *driver=SDL_GetCurrentVideoDriver();
+        if (policy_error) {
+            snprintf(runtime->sdl_error,sizeof(runtime->sdl_error),"%s",policy_error);
+            diagnostic_log(runtime,"error","sdl_kms_atomic_unsupported",policy_error);
+            fprintf(stderr,"blit: %s\n",policy_error);
+            SDL_QuitSubSystem(SDL_INIT_VIDEO);
+            runtime->sdl_ready=0;
+            return;
+        }
+        if (blit_sdl_kms_policy_affected() && driver && !strcmp(driver,"kmsdrm")) {
+            const char *detail="Pinned SDL3.4.16 uses legacy KMS presentation to avoid uninitialized secondary atomic display-plane state; rendering/cadence parity requires verification.";
+            diagnostic_log(runtime,"warning","sdl_kms_legacy_compatibility",detail);
+            fprintf(stderr,"blit: %s\n",detail);
+        }
     }
     ids = SDL_GetDisplays(&count);
     if (ids == NULL) {

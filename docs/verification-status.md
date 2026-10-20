@@ -3,6 +3,23 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-20 deployed571 / candidate572: symbolized second-output fault
+
+571 byte-reproducible package SHA256
+2ff7d37e40cdce7d1f54a19ba6ce2e62b432a73af13f2d41ac026bedb704b866;
+artifact/manifest/API install checks pass. Physical GLES still fails but expiry
+restores exact native237. Last stage second-output present.begin. Executable
+map/file offset and matching remote/local SDL hash resolve RIP to ELF151bc1,
+add_plane_property(), pinned SDL_kmsdrmvideo.c:248. Source shows global GBM
+guard skips secondary per-display plane setup. No vendor/Hibr modification.
+
+Evidence build/trial571-gles/, build/trial571-journal.txt,
+build/trial571-library-sha.txt. ADR0155 chooses the documented legacy hint for
+exact pinned SDL; candidate572 real-hint/mocked-identity policy gate passes,
+including explicit conflict refusal and other-driver/version scope.
+Schema+lifecycle25pass/0skip/0fail; GLES startup-boundary and actual helper
+protocol/dispatcher gates pass. Physical acceptance remains pending.
+
 ## 2026-10-20 deployed570 / candidate571: fault trace needs executable maps
 
 570 package byte-reproducible, SHA256

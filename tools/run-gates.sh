@@ -349,6 +349,7 @@ suite_hibr() {
 suite_lifecycle() {
     run_gate tcc_fault_trace_gate.rb ruby tools/tests/tcc_fault_trace_gate.rb
     run_gate startup_diagnostics_gate.rb ruby tools/tests/startup_diagnostics_gate.rb
+    run_gate sdl_kms_policy_gate.rb ruby tools/tests/sdl_kms_policy_gate.rb
     run_gate presentation_trial_gate.sh sh tools/tests/presentation_trial_gate.sh
     run_gate presentation_trial_helper_gate.rb ruby tools/tests/presentation_trial_helper_gate.rb
     run_gate http_accept_budget_gate.rb ruby tools/tests/http_accept_budget_gate.rb

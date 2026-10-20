@@ -1,5 +1,22 @@
 # Current state and restart point
 
+## 2026-10-20 candidate572: exact SDL fault and supported compatibility path
+
+571 timed GLES trial restored native/settings237 again. Fault at second
+initial SDL_RenderPresent, maps+remote/library SHA verified. ELF151bc1 resolves
+to add_plane_property(), pinned SDL_kmsdrmvideo.c:248. Per-display plane setup
+is guarded by global GBM initialization, leaving the second atomic plane unset.
+This is not a Hibr/font cause. Read ADR0155 before changing the dependency.
+
+572 selects SDL's public legacy-KMS hint before init for exact version3.4.16;
+native untouched, no vendor edits. Explicit conflicting atomic=1 is refused
+for kmsdrm; other drivers/versions untouched by refusal. API render.sdl_kms_mode
+reports the effective path. Actual-hint/mocked-identity gate passes. Full
+regression passes schema+lifecycle25pass/0skip/0fail; GLES startup-boundary
+and actual helper protocol/dispatcher gates also pass. Timed physical trial
+remains pending at this source checkpoint;
+do not call SDL functional/parity achieved until the corresponding evidence.
+
 ## 2026-10-20 candidate571: locate the library fault
 
 570 deployed natively with exact saved revision237. Protected GLES trial

@@ -1394,6 +1394,13 @@ the limiting boundary.
 
 ### Bounded presentation trials (0.1.569)
 
+From572, `/v1/diagnostics` and observation `diagnostics.render.sdl_kms_mode`
+report `legacy`/`atomic` for SDL KMS, or null for native/other drivers.
+Pinned SDL3.4.16 defaults to its documented legacy-KMS path because secondary
+atomic plane initialization is missing (ADR0155). Explicit environment
+atomic=1 is refused with a backend diagnostic, not silently overridden. This
+does not claim SDL timing, pixels, connector mode selection or hotplug parity.
+
 `GET /v1/control/presentation-trial` reads the privileged helper's trial state.
 `POST` accepts only `{"renderer":"opengles2","timeout_seconds":60}` (or
 `software`, integer timeout30..120). It requires normal API authentication,

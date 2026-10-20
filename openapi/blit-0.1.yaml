@@ -2707,6 +2707,10 @@ components:
             font_scale: {type: number, exclusiveMinimum: 0}
             direct_kms: {type: boolean}
             video_driver: {type: string}
+            sdl_kms_mode:
+              type: [string, 'null']
+              enum: [atomic, legacy, null]
+              description: SDL KMS presentation path selected by its effective public hint; null for native KMS and other video drivers. Pinned SDL3.4.16 uses the documented legacy path because its atomic secondary-display plane is not initialized.
             renderer: {type: string}
             presentation_sync:
               type: string
