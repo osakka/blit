@@ -1,4 +1,5 @@
 #include "../../src/blit_raster.h"
+#include "../../src/blit_emoji_presentation.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,6 +17,9 @@ static void check_glyph(BlitRaster *raster, const BlitCellCluster *key, int forc
     CHECK(blit_raster_get_cluster(raster, key, &glyph));
     CHECK(!glyph.fallback && glyph.width == ((size + 1) / 2) * span && glyph.height == size);
     if (force_colour) CHECK(glyph.format == BLIT_RASTER_RGBA_PREMULTIPLIED);
+    else if (key->length == 1 && blit_emoji_variation(key->scalars[0]) &&
+             !blit_emoji_default(key->scalars[0]))
+        CHECK(glyph.format == BLIT_RASTER_COVERAGE);
     CHECK(glyph.stride == glyph.width * (int)glyph.format);
     for (y = 0; y < glyph.height; ++y) for (x = 0; x < glyph.width; ++x) {
         const unsigned char *p = glyph.pixels + y * glyph.stride + x * (int)glyph.format;
@@ -88,12 +92,13 @@ int main(int argc, char **argv)
         CHECK(!memcmp(saved, glyph.pixels, glyph.stride * glyph.height));
     }
     blit_raster_close(raster);
-    /* With no text outline, singleton policy also exercises every colour
-       glyph in the corpus rather than accidentally relying on text ink. */
+    /* No selected outline: standardized text-default singletons must use
+       the shared monochrome fallback, not silently become colour. */
     raster = blit_raster_open(&fallback, NULL, argv[3], 8, size); CHECK(raster);
     for (row = 0; row < total; ++row) {
         span = 2; keys[row].columns = span;
-        check_glyph(raster, &keys[row], 1);
+        check_glyph(raster, &keys[row], keys[row].length > 1 ||
+            blit_emoji_default(keys[row].scalars[0]));
     }
     blit_raster_close(raster);
     for (size = 8; size <= 64; ++size) {
@@ -104,7 +109,7 @@ int main(int argc, char **argv)
             check_glyph(raster, &key, 1);
         }
         {
-            const uint32_t invalid[][2] = {{'A', 'B'}, {0x2764, 0xfe0e}, {0x1f469, 'A'}};
+            const uint32_t invalid[][2] = {{'A', 'B'}, {'A', 0xfe0e}, {0x1f469, 'A'}};
             BlitCellCluster key;
             BlitRasterGlyph glyph, before;
             unsigned long renders = blit_raster_render_count(raster);

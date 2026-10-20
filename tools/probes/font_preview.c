@@ -83,12 +83,25 @@ int main(int argc, char **argv)
                     !blit_raster_get_cluster(r, &key, &g)) return 1;
                 paint(&g, x, top + 430, 0xffffff);
             }
+            for (i = 0; i < 3; ++i) {
+                uint32_t bases[] = {0x2764, 0x1f41f, 0x2600};
+                int selector;
+                for (selector = 0; selector < 2; ++selector) {
+                    uint32_t mark = selector ? 0xfe0f : 0xfe0e;
+                    BlitCellCluster key;
+                    BlitRasterGlyph g;
+                    if (!blit_cell_cluster_init(&key, bases[i], &mark, 1, 2) ||
+                        !blit_raster_get_cluster(r, &key, &g)) return 1;
+                    paint(&g, 650 + i * 144 + selector * 52, top + 430, foreground);
+                }
+            }
             blit_raster_close(r);
         }
         label = blit_raster_open(&fallback, argv[profile + 2], argv[4], 10, 20);
         if (!label) return 1;
         text(label, 20, "10,386 Nerd codepoints / scalar + shaped colour emoji", 34, top + 506, 0x8ca2b4);
-        text(label, 20, "Raster specimen only / terminal cluster integration pending", 34, top + 534, 0x8ca2b4);
+        text(label, 20, "VS15 / VS16", 650, top + 380, 0x8ca2b4);
+        text(label, 20, "Offline raster specimen / not a physical display capture", 34, top + 534, 0x8ca2b4);
         blit_raster_close(label);
     }
     output = fopen(argv[5], "wb");

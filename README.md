@@ -158,7 +158,8 @@ atlas caching and representative pixel checks. API updates can explicitly
 request `text_layout:"emoji"`; the scalar default is unchanged for existing
 providers. New PTY sessions can also select `text_layout:"emoji"` explicitly;
 the full corpus passes contiguous/byte-fragmented parser tests. Complete
-text/default presentation and remaining end-to-end acceptance are still open.
+Unicode18.0 text/default presentation is implemented in the shared raster;
+remaining geometry and end-to-end acceptance are still open.
 HarfBuzz>=6.0.0 is an explicit runtime dependency, not a second renderer.
 Native KMS now reads the canonical sixteen-slot attachment layout correctly
 ([113](https://git.home.arpa/itdlabs/blit/issues/113)). Not deployed. The active queue is

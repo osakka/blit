@@ -3,7 +3,7 @@ require 'json'
 require 'digest'
 root = File.expand_path('../../assets/unicode/emoji-18.0', __dir__)
 manifest = JSON.parse(File.read(File.join(root, 'source.json')))
-%w[test_data license].each do |key|
+%w[test_data license properties variations].each do |key|
   entry = manifest.fetch(key)
   raise "#{key} identity mismatch" unless Digest::SHA256.file(File.join(root, entry.fetch('file'))).hexdigest == entry.fetch('sha256')
 end

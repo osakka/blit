@@ -1,5 +1,17 @@
 {
   "unicode_emoji_version": "18.0",
+  "properties": {
+    "file": "emoji-data.txt",
+    "upstream": "https://www.unicode.org/Public/18.0.0/ucd/emoji/emoji-data.txt",
+    "sha256": "80d00f8e616a0ef27fd6b8de3b758c06383b5d917e2977709578e68baf733bf1",
+    "default_emoji_scalars": 1228
+  },
+  "variations": {
+    "file": "emoji-variation-sequences.txt",
+    "upstream": "https://www.unicode.org/Public/18.0.0/ucd/emoji/emoji-variation-sequences.txt",
+    "sha256": "ff1707564aa1f1b2fcf4ec92d609d4cb26940bc0d4dcf07f5328ad6879e84da3",
+    "bases": 371
+  },
   "test_data": {
     "file": "emoji-test.txt",
     "upstream": "https://www.unicode.org/Public/18.0.0/emoji/emoji-test.txt",

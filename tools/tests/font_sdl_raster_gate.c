@@ -69,7 +69,7 @@ int main(int argc, char **argv)
             SDL_DestroySurface(image);
             ++samples;
         }
-        for (index = 0; index < 7; ++index) {
+        for (index = 0; index < EMOJI_SAMPLE_COUNT; ++index) {
             int span, cursor;
             for (span = 1; span <= 2; ++span) for (cursor = 0; cursor <= 1; ++cursor) {
                 BlitCellCluster key;
@@ -88,11 +88,23 @@ int main(int argc, char **argv)
                 image = SDL_RenderReadPixels(renderer, NULL); CHECK(image);
                 for (y = -1; y <= glyph.height; ++y) for (x = -1; x <= glyph.width; ++x) {
                     Uint8 r, g, b, a;
+                    int outside = x < 0 || x >= glyph.width || y < 0 || y >= glyph.height;
+                    /* SDL's8-bit premultiplied modulation/blend can differ by
+                       two levels per pass. Text bold adds a second pass;
+                       colour skips that pass. Guard pixels remain exact. */
+                    int tolerance = outside ? 0 : glyph.format == BLIT_RASTER_COVERAGE ? 4 : 2;
                     uint32_t want = blit_raster_blend(&glyph, x, y, 0xabcdef, bg);
+                    if (glyph.format == BLIT_RASTER_COVERAGE && x > 0 && x < glyph.width &&
+                        y >= 0 && y < glyph.height)
+                        want = blit_raster_blend(&glyph, x - 1, y, 0xabcdef, want);
                     CHECK(SDL_ReadSurfacePixel(image, x + 8, y + 8, &r, &g, &b, &a));
-                    CHECK(abs((int)r - (int)(want >> 16 & 255)) <= 2);
-                    CHECK(abs((int)g - (int)(want >> 8 & 255)) <= 2);
-                    CHECK(abs((int)b - (int)(want & 255)) <= 2);
+                    if (abs((int)r - (int)(want >> 16 & 255)) > tolerance ||
+                        abs((int)g - (int)(want >> 8 & 255)) > tolerance ||
+                        abs((int)b - (int)(want & 255)) > tolerance)
+                        fprintf(stderr, "CLUSTER_PIXEL size=%d sample=%u span=%d cursor=%d xy=%d,%d actual=%02x%02x%02x expected=%06x\n", size, index, span, cursor, x, y, r, g, b, want);
+                    CHECK(abs((int)r - (int)(want >> 16 & 255)) <= tolerance);
+                    CHECK(abs((int)g - (int)(want >> 8 & 255)) <= tolerance);
+                    CHECK(abs((int)b - (int)(want & 255)) <= tolerance);
                 }
                 SDL_DestroySurface(image);
             }
@@ -140,7 +152,7 @@ int main(int argc, char **argv)
     }
     blit_font_free(&font);
     SDL_DestroyRenderer(renderer); SDL_DestroyWindow(window); SDL_Quit();
-    printf("FONT_SDL_RASTER_PASS renderer=%s sizes=57 glyph_samples=%d cluster_cases=1596 tolerance=2\n",
-           name ? name : "software", samples);
+    printf("FONT_SDL_RASTER_PASS renderer=%s sizes=57 glyph_samples=%d cluster_cases=%u tolerance=2_per_pass bold_coverage=4 guard_pixels=exact\n",
+           name ? name : "software", samples, (unsigned)EMOJI_SAMPLE_COUNT * 57 * 4);
     return 0;
 }

@@ -20,7 +20,7 @@ request = lambda do |method, path, body = nil, status = 200|
 end
 Dir.mktmpdir('blit-modern-api') do |work|
   fonts = File.join(work, 'fonts'); Dir.mkdir(fonts)
-  %w[Blit-Hibr-Terminus16.psf Blit-Hibr-Spleen16.psf BlitModernNerd-Regular.ttf BlitRetroNerd-Regular.ttf NotoColorEmoji.ttf].each do |asset|
+  %w[Blit-Hibr-Terminus16.psf Blit-Hibr-Spleen16.psf BlitModernNerd-Regular.ttf BlitRetroNerd-Regular.ttf NotoColorEmoji.ttf NotoEmojiText.ttf].each do |asset|
     FileUtils.copy_file(File.join(root, 'assets/fonts', asset), File.join(fonts, asset))
   end
   env = SdlTestProfile.environment.merge('BLIT_SETTINGS'=>'load',
@@ -65,16 +65,18 @@ Dir.mktmpdir('blit-modern-api') do |work|
     raise 'retro policy changed' unless active['size_px'] == 23 && active['rasterization'] == 'bitmap-nearest'
     active = request.call('PUT', '/v1/fonts', {font_id:'blit-modern'}).fetch('active')
     raise 'modern policy changed' unless active['size_px'] == 23 && active['rasterization'] == 'native-antialiased'
-    colour = File.join(fonts, 'NotoColorEmoji.ttf')
     %w[blit-modern blit-retro].each do |profile|
       request.call('PUT', '/v1/fonts', {font_id:profile})
-      File.rename(colour, colour + '.missing')
-      begin
-        request.call('PUT', '/v1/fonts', {size_px:24}, 422)
-        active = request.call('GET', '/v1/fonts').fetch('active')
-        raise 'failed change destroyed active font' unless active['size_px'] == 23 && active['id'] == profile
-      ensure
-        File.rename(colour + '.missing', colour)
+      %w[NotoColorEmoji.ttf NotoEmojiText.ttf].each do |asset|
+        path = File.join(fonts, asset)
+        File.rename(path, path + '.missing')
+        begin
+          request.call('PUT', '/v1/fonts', {size_px:24}, 422)
+          active = request.call('GET', '/v1/fonts').fetch('active')
+          raise 'failed change destroyed active font' unless active['size_px'] == 23 && active['id'] == profile
+        ensure
+          File.rename(path + '.missing', path)
+        end
       end
       Timeout.timeout(5) do
         loop do
@@ -89,7 +91,7 @@ Dir.mktmpdir('blit-modern-api') do |work|
       active = request.call('GET', '/v1/fonts').fetch('active')
       raise 'restart lost native font' unless active['id'] == profile && active['size_px'] == 23 && active['rasterization'] == 'native-antialiased'
     end
-    puts 'MODERN_FONT_API_PASS sizes=57_each profiles=bitmap+modern+smooth_retro sizing=preserved save_restore=canonical missing_colour=rollback'
+    puts 'MODERN_FONT_API_PASS sizes=57_each profiles=bitmap+modern+smooth_retro sizing=preserved save_restore=canonical missing_colour_or_text=rollback'
   rescue Exception
     warn File.read(File.join(work,'server.log'))
     raise

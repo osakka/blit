@@ -75,7 +75,7 @@ test -x "$stage/usr/share/blit/hibr/blit-login-session.hibr"
 test -x "$stage/usr/share/blit/hibr/blit-desktop-observe.hibr"
 test -x "$stage/usr/share/blit/hibr/blit-desktop-place.hibr"
 source_commit=$(sed -n 's/^source_commit: //p' "$manifest")
-for font_asset in Blit-Hibr-Spleen16.psf Blit-Hibr-Spleen16.source.json licenses/Spleen-LICENSE.txt Hack-Regular.ttf BlitModernNerd-Regular.ttf NotoColorEmoji.ttf Hack-LICENSE.txt licenses/HackNerd-LICENSE.txt licenses/NerdFonts-LICENSE.txt licenses/FontAwesome-LICENSE.txt NotoColorEmoji-LICENSE.txt modern-fonts.source.json; do
+for font_asset in Blit-Hibr-Spleen16.psf Blit-Hibr-Spleen16.source.json licenses/Spleen-LICENSE.txt Hack-Regular.ttf BlitModernNerd-Regular.ttf NotoColorEmoji.ttf NotoEmojiText.ttf NotoEmojiText-LICENSE.txt Hack-LICENSE.txt licenses/HackNerd-LICENSE.txt licenses/NerdFonts-LICENSE.txt licenses/FontAwesome-LICENSE.txt NotoColorEmoji-LICENSE.txt modern-fonts.source.json; do
     cmp -s <(git -C "$root" show "$source_commit:assets/fonts/$font_asset") \
         "$stage/usr/lib/blit/fonts/$font_asset" || {
         echo "PACKAGE_ARTIFACT_FAIL font differs from recorded source: $font_asset" >&2

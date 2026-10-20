@@ -327,6 +327,9 @@ int blit_font_profile_available(int index)
     snprintf(sibling, sizeof(sibling), "%.*sNotoColorEmoji.ttf",
              slash ? (int)(slash - path + 1) : 0, path);
     if (access(sibling, R_OK) != 0) return 0;
+    snprintf(sibling, sizeof(sibling), "%.*sNotoEmojiText.ttf",
+             slash ? (int)(slash - path + 1) : 0, path);
+    if (access(sibling, R_OK) != 0) return 0;
     snprintf(sibling, sizeof(sibling), "%.*sBlit-Hibr-Terminus16.psf",
              slash ? (int)(slash - path + 1) : 0, path);
     return access(sibling, R_OK) == 0;

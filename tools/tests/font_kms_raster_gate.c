@@ -48,7 +48,7 @@ static int attachment_layout_gate(BlitFont *font, KmsOutput *output,
 static int cluster_view_gate(BlitFont *font, KmsOutput *output, uint32_t *pixels, int size)
 {
     int sample, span, cursor, x, y;
-    for (sample = 0; sample < 7; ++sample) for (span = 1; span <= 2; ++span)
+    for (sample = 0; sample < (int)EMOJI_SAMPLE_COUNT; ++sample) for (span = 1; span <= 2; ++span)
         for (cursor = 0; cursor <= 1; ++cursor) {
             uint32_t cp[2] = {emoji_samples[sample][0], 0};
             uint32_t marks[2 * BLIT_MAX_COMBINING] = {0}, colours[2] = {0};
@@ -73,9 +73,13 @@ static int cluster_view_gate(BlitFont *font, KmsOutput *output, uint32_t *pixels
             draw_view(output, font, NULL, &view);
             for (y = 0; y < 96; ++y) for (x = 0; x < 160; ++x) {
                 uint32_t expected = 0x123456;
-                if (x >= 8 && x < 8 + glyph.width && y >= 8 && y < 8 + glyph.height)
+                if (x >= 8 && x < 8 + glyph.width && y >= 8 && y < 8 + glyph.height) {
                     expected = blit_raster_blend(&glyph, x - 8, y - 8,
                         cursor ? 0x123456 : 0xabcdef, cursor ? KMS_WHITE : 0x123456);
+                    if (glyph.format == BLIT_RASTER_COVERAGE && x > 8)
+                        expected = blit_raster_blend(&glyph, x - 9, y - 8,
+                            cursor ? 0x123456 : 0xabcdef, expected);
+                }
                 CHECK(pixels[y * 160 + x] == expected);
             }
         }
@@ -119,6 +123,6 @@ int main(int argc, char **argv)
         }
     }
     blit_font_free(&font);
-    printf("FONT_KMS_RASTER_PASS sizes=57 glyph_samples=%d attachment_layout_cases=228 cluster_cases=1596 cursor=covered tolerance=0 guard_pixels=exact\n", samples);
+    printf("FONT_KMS_RASTER_PASS sizes=57 glyph_samples=%d attachment_layout_cases=228 cluster_cases=%u cursor=covered tolerance=0 guard_pixels=exact\n", samples, (unsigned)EMOJI_SAMPLE_COUNT * 57 * 4);
     return 0;
 }

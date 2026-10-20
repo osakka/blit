@@ -3,6 +3,60 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-20 candidate580: Unicode presentation and monochrome emoji
+
+ADR0163. Frozen TCC server SHA
+012fa57ca66df1ca5e85a5e405cdc614022517dc9c2fdad6a5e573bbd71c405f;
+fresh rebuild byte-identical. Logs: `/tmp/blit-fontcraft.IHU9AK/580-*`.
+Pinned official Unicode18.0 properties/standardized variations generate the
+lookup header. Shared monochrome Noto Emoji3.002 uses the existing FreeType
+coverage/cache/compositor; it is not a silhouette of the colour bitmap.
+
+The presentation fixture passes all371 standard VS15/VS16 pairs and1228
+default-emoji scalars at every8..64px height, both owner-supplied spans and
+both Modern/Retro profiles. Checks include real ink, no PSF fallback,
+premultiplied colour, exact cell bounds, distinct selector cache entries and
+the existing4MiB cache bound (`580-presentation.log`). This is raster scope,
+not all terminal/graphics/damage or physical-output combinations.
+
+The initial16px fixture caught U+1F41F's hinted one-pixel ink overhang at a
+one-column allocation despite a fitting advance. A smaller em is rasterized
+until all ink fits; no silent clipping. Both profiles pass the16px presentation
+fixture under Valgrind:0 errors,0 definitely/indirectly/possibly lost bytes;
+18,804 bytes in9 blocks remain reachable per process. Do not claim all heap
+allocations freed.
+
+The catalogue initially failed because its old assertion required U+26A1
+(a default-emoji scalar) to remain monochrome. Its format/ink checks now honor
+the generated presentation property rather than reading RGBA as coverage.
+The corrected catalogue passes592,002 glyph-size samples per profile,
+1,184,004 combined, with no fallback/missing ink except intentional cod-blank.
+This expectation update does not waive the independent selector tests.
+
+Final font/terminal/schema/GLES run:41pass/0skip/4fail; all four failures were
+the extended native/software cluster references omitting text bold's second
+overstrike (colour glyphs intentionally skip it). The references now model
+that second pass; all six backend/profile fixtures pass isolated reruns
+(`580-{native,software,gles,retro-native,retro-software,retro-gles}-final.log`).
+Thus45 distinct selected gates have passing final evidence, not a claimed
+single uninterrupted45/0/0 run. The earlier long suite was interrupted after
+its HarfBuzz gate; it is not counted as a completed suite.
+
+Backend fixtures cover2052 cluster/span/size/cursor-background cases per
+profile/path, now including VS15 heart/fish. Native comparison and guards are
+exact; SDL retains2-level per-channel single-pass tolerance, with4 for the
+two-pass text bold overstrike and exact guard pixels. This explicitly records
+SDL8-bit blend quantization rather than claiming bit-identical composition.
+Creation/restore and missing colour OR monochrome asset rollback pass for
+both profiles.54 real local PTY cases and18 fresh SDL-software BMP comparisons
+pass, including VS15's one-/two-column ownership. The suite's presentation
+fixture uses16px; its separate full8..64px matrix passed as recorded above.
+
+The regenerated production specimen includes VS15/VS16 pairs and is explicitly
+an offline raster image, not physical scanout. No live writes, SSH, Hibr edits,
+package creation or deployment.107/110 remain open for full geometry,
+terminal/graphics integration and live appearance acceptance.
+
 ## 2026-10-20 candidate579: negotiated PTY emoji grouping
 
 ADR0162. Frozen TCC server SHA

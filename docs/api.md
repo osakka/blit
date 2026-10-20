@@ -774,7 +774,15 @@ late widening and whole-cluster REP/wrap. With autowrap disabled or a single
 available column, allocation stays one column rather than spilling outside
 the viewport. Controls and successful positioned updates terminate an active
 extension; incomplete UTF-8 bytes do not. This is not DEC2027/general Unicode
-grapheme support; VS15/default-presentation completion remains pending.
+grapheme support.
+
+Offline candidate580 uses pinned Unicode18.0 presentation data: default-emoji
+scalars and standardized VS16 pairs select colour; standardized VS15 pairs
+select monochrome outlines. Modern/Retro share a real monochrome Noto Emoji
+fallback when their selected outline lacks a text glyph. Presentation never
+changes the owner's allocated columns. These are shared-raster semantics,
+not a claim of complete terminal or physical-display acceptance. Existing
+scalar layout remains the default; grouping still requires explicit opt-in.
 
 `GET /v1/fonts` lists profiles and the active cell size. `PUT /v1/fonts` can
 select `font_id`, legacy `scale` from 1.0 through 3.0 in 0.1 increments,

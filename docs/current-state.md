@@ -1,5 +1,24 @@
 # Current state and restart point
 
+## 2026-10-20 candidate580 — Unicode emoji presentation
+
+ADR0163 adds generated Unicode18.0 default-presentation/variation data and
+the pinned Noto Emoji3.002 monochrome fallback through existing FreeType.
+Standard VS15 requests text coverage; VS16/default-emoji requests colour.
+Caller-owned columns and scalar-layout compatibility remain unchanged.
+Actual ink overhang is fitted by reducing em, never clipping the glyph.
+The production specimen includes side-by-side text/colour selectors.
+Full presentation matrix passes371 selector bases and1228 default-colour
+scalars at all57 sizes, both spans/profiles. Selected45 gates have passing
+final evidence across the suite and corrected compositor-reference reruns;
+do not describe this as an uninterrupted clean suite. Real PTY/capture tests
+include VS15; font changes roll back if either shared emoji asset is missing.
+
+This is offline work; no host writes, SSH, Hibr changes or package deployment.
+See the verification ledger for completed tests and remaining acceptance.
+107/110 remain open for geometry and full end-to-end/live review before
+browser111, then SDL104. Preserve the user's releases/0.1.554.yaml.
+
 ## 2026-10-20 candidate579 — explicit streaming PTY emoji policy
 
 ADR0162 adds creation-time text_layout=emoji to terminal sessions, using the

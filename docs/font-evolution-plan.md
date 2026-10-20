@@ -4,6 +4,13 @@ Tracking: [Blit#107](https://git.home.arpa/itdlabs/blit/issues/107).
 
 ## Active completion contract —107/110 before browser or SDL work
 
+Candidate580 implements ADR0163: Unicode18.0 default/VS15/VS16 presentation,
+with pinned Noto Emoji3.002 real monochrome outlines as a shared fallback.
+The existing FreeType/cache/compositor remains authoritative; owner columns
+are not changed. Hinting overhang is fitted by re-rasterizing, not clipping.
+The production preview includes text/colour pairs. See the evidence ledger
+for test scope; full font geometry and end-to-end/live acceptance remain.
+
 Candidate579 adds explicit PTY creation-time text_layout=emoji. Full corpus
 parser checks cover both policies and one-byte/contiguous feeds;42 real-PTY
 cases and14 fresh-capture API/PTY comparisons pass. Scalar remains default,

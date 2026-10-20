@@ -32,8 +32,9 @@ tests. Terminal segmentation, presentation policy and full end-to-end coverage
 remain active; module tests do not prove complete terminal emoji support.
 Candidate578 adds opt-in API emoji layout, preserving the scalar default.
 Candidate579 adds explicit PTY emoji layout with full-corpus parser and
-representative real-PTY/capture checks. Complete VS15/default presentation,
-font geometry and remaining end-to-end acceptance remain open.
+representative real-PTY/capture checks. Candidate580 implements Unicode18.0
+default/VS15/VS16 presentation and a shared monochrome outline fallback.
+Font geometry and remaining end-to-end/live acceptance remain open.
 
 Size remains the existing canonical 8..64px **cell-height** setting; legacy
 scale is an alternative API sizing policy, not separate browser/desktop zoom.

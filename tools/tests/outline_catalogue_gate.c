@@ -1,5 +1,6 @@
 /* Actual production raster coverage, not cmap presence alone. */
 #include "../../src/blit_raster.h"
+#include "../../src/blit_emoji_presentation.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -29,9 +30,11 @@ int main(int argc, char **argv)
             if (ok) {
                 for (y = 0; y < glyph.height; ++y)
                     for (x = 0; x < glyph.width; ++x)
-                        ink += glyph.pixels[y * glyph.stride + x] != 0;
+                        ink += glyph.pixels[y * glyph.stride +
+                            x * (int)glyph.format + (glyph.format == BLIT_RASTER_RGBA_PREMULTIPLIED ? 3 : 0)] != 0;
             }
-            if (!ok || glyph.fallback || glyph.format != BLIT_RASTER_COVERAGE ||
+            if (!ok || glyph.fallback || glyph.format != (blit_emoji_default(scalars[i]) ?
+                    BLIT_RASTER_RGBA_PREMULTIPLIED : BLIT_RASTER_COVERAGE) ||
                 glyph.width != width || glyph.height != size ||
                 /* Nerd's cod-blank is intentionally empty, not missing. */
                 (scalars[i] == 0xec03 ? ink != 0 : ink == 0)) {

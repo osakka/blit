@@ -1,5 +1,14 @@
 {
   "profile": "blit-modern",
+  "text_emoji": {
+    "file": "NotoEmojiText.ttf",
+    "version": "3.002",
+    "source": "Unmodified Noto Emoji variable monochrome outlines, default weight400; shared text-presentation fallback",
+    "upstream": "https://raw.githubusercontent.com/google/fonts/8b0a1d0f5983c89bc2b93f1b5fb55f9e252744b5/ofl/notoemoji/NotoEmoji%5Bwght%5D.ttf",
+    "sha256": "de6c18832938afc99caf132b39d6a30a19bac7f2e812e28db2535b4608d27551",
+    "license_file": "NotoEmojiText-LICENSE.txt",
+    "license_sha256": "500bb1ccf43df7bbb522112f9133a52b16e1c35e809632f5d8609b179152de5b"
+  },
   "build": {
     "generator": "tools/fonts/build-outline-nerd.py",
     "fonttools_version": "4.60.1"

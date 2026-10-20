@@ -37,7 +37,7 @@ Dir.mktmpdir('blit-emoji-pty') do |work|
       raise 'capture failed' unless r.code == '200' && r.body.start_with?('BM')
       r.body
     end
-    samples = ["❤️", "1️⃣", "🇬🇧", "👍🏽", "👩‍💻", "👨‍👩‍👧‍👦", "🏴\u{e0067 e0062 e0065 e006e e0067 e007f}"]
+    samples = ["❤️", "1️⃣", "🇬🇧", "👍🏽", "👩‍💻", "👨‍👩‍👧‍👦", "🏴\u{e0067 e0062 e0065 e006e e0067 e007f}", "\u2764\ufe0e", "\u{1f41f}\ufe0e"]
     # Independent scalar oracle from the canonical width data, not a second
     # production width engine. Byte writes need not equal OS read boundaries.
     ranges = File.read(File.join(SdlTestProfile::ROOT,'src/blit_unicode_width.h'))
@@ -63,12 +63,13 @@ Dir.mktmpdir('blit-emoji-pty') do |work|
               end
             end
             cells = snapshot.fetch('cells').select { |c| c['y'] == 0 }.to_h { |c| [c['x'],c] }
-            expected_x = policy == 'emoji' ? 2 : sequence.codepoints.sum { |cp| scalar_width.call(cp) }
+            scalar_columns = sequence.codepoints.sum { |cp| scalar_width.call(cp) }
+            expected_x = policy == 'emoji' && !sequence.end_with?("\ufe0e") ? 2 : scalar_columns
             raise 'PTY cursor/advance wrong' unless cells.fetch(expected_x)['text'] == 'X' && snapshot.dig('cursor','x') == expected_x + 1
             observed = cells.select { |x,c| x <= expected_x && c['width'] != 0 }.sort.map { |_,c| c['text'] }.join
             raise "PTY lost/reordered scalars policy=#{policy.inspect} text=#{observed.inspect}" unless observed == sequence + 'X'
             if policy == 'emoji'
-              raise 'PTY split cluster ownership' unless cells[0]['text'] == sequence && cells[0]['width'] == 2 && cells[1]['width'] == 0
+              raise 'PTY split cluster ownership' unless cells[0]['text'] == sequence && cells[0]['width'] == expected_x && (expected_x == 1 || cells[1]['width'] == 0)
               pty_pixels = capture.call
               surface_path = "/v1/surfaces/#{session.fetch('surface_id')}/cells"
               current = request.call('GET',surface_path)
@@ -90,7 +91,7 @@ Dir.mktmpdir('blit-emoji-pty') do |work|
       error = request.call('POST','/v1/terminal-sessions',{command:'/bin/cat',text_layout:policy},400)
       raise 'invalid policy not diagnosed before creation' unless error['code'] == 'invalid_text_layout' && request.call('GET','/v1/terminal-sessions') == before
     end
-    puts 'EMOJI_PTY_API_PASS sequences=7 policies=default+scalar+emoji writes=contiguous+bytewise cases=42 ownership=exact fresh_capture_parity=14 immutable=400 invalid_create=atomic scope=real_local_PTY_not_physical'
+    puts "EMOJI_PTY_API_PASS sequences=#{samples.size} policies=default+scalar+emoji writes=contiguous+bytewise cases=#{samples.size * 6} ownership=exact fresh_capture_parity=#{samples.size * 2} immutable=400 invalid_create=atomic scope=real_local_PTY_not_physical"
   ensure
     Process.kill('TERM',pid) rescue nil
     Timeout.timeout(8) { Process.wait(pid) }

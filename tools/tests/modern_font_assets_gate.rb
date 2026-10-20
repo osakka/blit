@@ -3,7 +3,7 @@ require 'json'
 require 'digest'
 root = ENV.fetch('BLIT_GATE_FONT_ROOT', File.expand_path('../../assets/fonts', __dir__))
 manifest = JSON.parse(File.read(File.join(root,'modern-fonts.source.json')))
-%w[outline retro colour].each do |kind|
+%w[outline retro colour text_emoji].each do |kind|
   entry = manifest.fetch(kind)
   {'file'=>'sha256', 'license_file'=>'license_sha256'}.each do |file_key, hash_key|
     path = File.join(root, entry.fetch(file_key))
@@ -17,4 +17,4 @@ raise 'catalogue count mismatch' unless scalars.size == catalogue.fetch('unique_
 manifest.fetch('icon_licenses').each do |entry|
   raise 'icon license identity mismatch' unless Digest::SHA256.file(File.join(root, entry.fetch('file'))).hexdigest == entry.fetch('sha256')
 end
-puts "MODERN_FONT_ASSETS_PASS outlines=Modern+Retro nerd_codepoints=10386 colour=Noto#{manifest.fetch('colour').fetch('version')} source_hashes=exact licenses=included"
+puts "MODERN_FONT_ASSETS_PASS outlines=Modern+Retro nerd_codepoints=10386 colour=Noto#{manifest.fetch('colour').fetch('version')} text=Noto#{manifest.fetch('text_emoji').fetch('version')} source_hashes=exact licenses=included"
