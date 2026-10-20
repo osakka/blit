@@ -56,13 +56,15 @@ if [ ! -f "$desktop" ]; then
 	lg HIBR_LERR "blit-session: desktop session not found: $desktop"
 	exit 1
 fi
-# Hibr's held desktop creates interactive children that read HIBR_RC.  Supply
-# the installed Blit RC when the caller did not provide one; QEMU and other
-# controlled fixtures retain their explicit RC and therefore keep their own
-# staged module paths.
+# Native terminal children use Hibr's ordinary startup/provider discovery.
+# Supply the adapter RC only for explicit API-provider sessions. Preserve an
+# operator's HIBR_RC or explicitly selected fixture runtime RC.
+export BLIT_HIBR_PROVIDER=$provider
 runtime_rc=${BLIT_HIBR_RUNTIME_RC:-$launcher_dir/blit-runtime-console.hibr}
 if [ -z "${HIBR_RC:-}" ] && [ -f "$runtime_rc" ]; then
-	export HIBR_RC=$runtime_rc
+    if [ "$provider" = api ] || [ -n "${BLIT_HIBR_RUNTIME_RC:-}" ]; then
+        export HIBR_RC=$runtime_rc
+    fi
 fi
 # Hibr's root login boundary intentionally starts the authenticated command
 # with a clean environment. Reassert the Blit terminal contract here, after

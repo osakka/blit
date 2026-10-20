@@ -1,12 +1,13 @@
-# Production Hibr startup file for Blit-owned desktop children.
+# Startup file for explicitly API-provider Hibr children only.
 #
 # Hibr reads HIBR_RC in interactive child shells.  The QEMU fixtures provide
 # their own fixture-specific RC; this file is the installed equivalent.
-# The parent Blit entrypoint already loads Hibr's native support modules, so
-# this child RC must load only the Blit adapter and must not duplicate them.
+# A native terminal child must select Hibr's own console, even if an older
+# desktop still exports this RC path. Only explicit API-provider children
+# load the adapter. Never infer provider intent from inherited surface IDs.
 # It does not modify Hibr or replace Hibr's desktop/session files.
 
-adapter=${BLIT_HIBR_ADAPTER:-/usr/lib/blit/hibr/console-blit.so}
-moddir=${BLIT_HIBR_MODPATH:-/usr/lib/hibr}
-
-mod load "$adapter" || exit 1
+if [ "${BLIT_HIBR_PROVIDER:-terminal}" = api ]; then
+    adapter=${BLIT_HIBR_ADAPTER:-/usr/lib/blit/hibr/console-blit.so}
+    mod load "$adapter" || exit 1
+fi

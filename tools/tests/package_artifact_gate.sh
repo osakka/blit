@@ -94,6 +94,12 @@ test -f "$stage/usr/share/blit/hibr/blit-runtime-console.hibr"
 grep -q 'mod load sys' "$stage/usr/share/blit/hibr/blit-login.hibr"
 grep -q 'source "\$login"' "$stage/usr/share/blit/hibr/blit-login.hibr"
 grep -q 'BLIT_HIBR_ADAPTER' "$stage/usr/share/blit/hibr/blit-runtime-console.hibr"
+test ! -e "$stage/usr/lib/hibr/console-blit.so"
+if command -v hibr >/dev/null 2>&1; then
+    BLIT_GATE_RUNTIME_RC="$stage/usr/share/blit/hibr/blit-runtime-console.hibr" \
+    BLIT_GATE_ADAPTER="$stage/usr/lib/blit/hibr/console-blit.so" \
+        ruby "$root/tools/tests/native_child_provider_gate.rb"
+fi
 grep -q '^BLIT_DISPLAY_BACKEND=kms$' "$root/packaging/build-deb.sh"
 grep -q 'console open' "$stage/usr/share/blit/hibr/blit-session.hibr"
 grep -q 'export DT_BIDI=' "$stage/usr/share/blit/hibr/blit-session.hibr"

@@ -1,5 +1,21 @@
 # Verification status
 
+## 2026-10-20:320 isolated reproduction and321 candidate584
+
+320: installed Hibr270/ABI16 stock lg_as helper, console open, isolated root
+PTY, no Blit. strace confirms watchdog SIGTERM -> inherited terminal TCSETS
+-> kernel SIGTTOU/group stop. Live syscall corroboration recorded; all fixture
+processes owned/cleaned by isolated transient unit. No Hibr changes or signals
+to live stopped children. Upstream fix pending in Hibr320.
+
+321: live583 module inventory has native console sole discoverable provider,
+adapter only under Blit-owned directory. Native interactive shell with old
+Blit RC reproduces exact missing surface-ID error. Candidate584 RC/provider
+gate passes default/native, stale-RC, explicit API and caller-RC tests;
+old packaged583 RC fails the same regression. Diagnostic report transport
+gate preserves1000 Unicode characters,150 stderr characters, exit7 and removes
+its temporary terminal. This is not physical application acceptance yet.
+
 ## 2026-10-20 live583 rollout
 
 Reproducible artifact4baf7253764f55cd94b707dea422d2acd321edab3bf7c223d2361e41d74ee96a

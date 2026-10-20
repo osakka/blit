@@ -1,5 +1,25 @@
 # Current state and restart point
 
+## 2026-10-20: Hibr320 diagnosed, Blit-owned321 fix candidate584
+
+320 reproduced without Blit in an isolated root PTY using installed Hibr270:
+stock lg_as cancels watchdog with SIGTERM; inherited cn_onfatal issues TCSETS
+from the background PGID, causing kernel SIGTTOU/group stop. strace confirms
+the sequence; live stopped leader syscall corroborates it. Hibr320 has full
+repro/actionable ownership guidance. No Hibr changes/live signals; upstream
+fix pending. See docs/diagnostics-login-and-provider.md.
+
+321 is our RC injection, not a current module-directory collision. Live583
+only has adapter under /usr/lib/blit/hibr, native console sole discovered
+display provider. But launcher exported adapter RC into native interactive
+children. Explicit reproduction emits missing BLIT_SURFACE_ID. Candidate584
+limits automatic RC injection to explicit API mode; guards RC adapter load
+likewise, preserving caller RC and protecting old inherited RC paths. Actual
+native/stale-RC/API/user-RC test passes; packaged583 RC is the negative test.
+API-only diagnostic report probe adds lossless chunking/cleanup rather than
+silently truncating large evidence. Live583 unchanged during investigation;
+candidate584 package/deployment pending. ADR0168 records the boundary.
+
 ## 2026-10-20:583 deployed;115 socket visibility verified, stopped children persist
 
 Authenticated API rollout succeeds; version583, health ready native DRM/KMS.
