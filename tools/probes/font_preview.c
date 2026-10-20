@@ -59,6 +59,7 @@ int main(int argc, char **argv)
         text(label, 24, profile ? "BLIT MODERN / smooth, crisp, colourful" :
             "BLIT RETRO / rounded mainframe soul", 34, top + 22, foreground);
         text(label, 24, "Native cell heights: 16 / 22 / 30 / 42 px", 34, top + 58, 0x8ca2b4);
+        text(label, 24, "POWERLINE", 800, top + 58, 0x8ca2b4);
         blit_raster_close(label);
         y = top + 106;
         for (i = 0; i < 4; ++i) {
@@ -66,6 +67,11 @@ int main(int argc, char **argv)
             BlitRaster *r = blit_raster_open(&fallback, argv[profile + 2], argv[4], (size + 1) / 2, size);
             if (!r) return 1;
             text(r, size, "The quick brown fox / 0O 1Il / {} [] <> @#&", 34, y, foreground);
+            if (i < 3) {
+                int k;
+                for (k = 0; k < 4; ++k)
+                    glyph(r, 0xe0b0 + k, 1, 800 + k * ((size + 1) / 2), y, foreground);
+            }
             y += size + 14;
             blit_raster_close(r);
         }

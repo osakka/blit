@@ -130,7 +130,28 @@ fail:
 static int protected_geometry(uint32_t scalar)
 {
     /* Keep exact terminal geometry; outline fonts often leave seams here. */
-    return scalar >= 0x2500 && scalar <= 0x259f;
+    return (scalar >= 0x2500 && scalar <= 0x259f) ||
+        (scalar >= 0xe0b0 && scalar <= 0xe0b3);
+}
+
+/* Core Powerline separators are cell geometry, not cap-height icons.
+   One coverage mask feeds the existing cache and all compositors. */
+static void draw_powerline(uint32_t scalar, RasterEntry *entry)
+{
+    int x,y,sx,sy,w=entry->glyph.width,h=entry->glyph.height;
+    int thin=scalar&1,mirror=scalar>=0xe0b2,stroke=(h+15)/16;
+    for(y=0;y<h;++y) for(x=0;x<w;++x) {
+        int covered=0,px=mirror?w-1-x:x;
+        for(sy=0;sy<8;++sy) for(sx=0;sx<8;++sx) {
+            int sample_y=16*y+2*sy+1;
+            int distance=abs(2*sample_y-16*h);
+            int inside=w*(16*h-distance)-(16*px+2*sx+1)*h;
+            covered+=inside>=0&&(!thin||inside<stroke*16*h);
+        }
+        /* Fully cover the solid base: no background seam at its join. */
+        entry->pixels[y*entry->glyph.stride+x]=!thin&&px==0?255:
+            (unsigned char)((covered*255+32)/64);
+    }
 }
 
 static int invisible_format(uint32_t scalar)
@@ -299,7 +320,9 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *key,
     next.pixels = calloc(1, bytes);
     if (!next.pixels) return 0;
     next.glyph.pixels = next.pixels;
-    if (key->length == 1 && invisible_format(scalar)) result = 1;
+    if (key->length == 1 && scalar >= 0xe0b0 && scalar <= 0xe0b3) {
+        draw_powerline(scalar,&next); result=1;
+    } else if (key->length == 1 && invisible_format(scalar)) result = 1;
     else if (next.glyph.format == BLIT_RASTER_RGBA_PREMULTIPLIED)
         result = draw_colour_glyph(raster, colour_index, &next);
     else if (!protected_geometry(scalar)) {

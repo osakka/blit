@@ -218,6 +218,7 @@ suite_font() {
     run_gate font_fit_gate.py python3 tools/tests/font_fit_gate.py
     run_gate retro_font_gate.py python3 tools/tests/retro_font_gate.py
     run_gate modern_font_assets_gate.rb ruby tools/tests/modern_font_assets_gate.rb
+    run_gate powerline_geometry_gate.rb ruby tools/tests/powerline_geometry_gate.rb
     run_gate outline_catalogue_gate.rb ruby tools/tests/outline_catalogue_gate.rb
     run_gate emoji_corpus_gate.rb ruby tools/tests/emoji_corpus_gate.rb
     run_gate emoji_presentation_gate.rb ruby tools/tests/emoji_presentation_gate.rb

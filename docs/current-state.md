@@ -1,5 +1,21 @@
 # Current state and restart point
 
+## 2026-10-20 candidate581 — core Powerline cell geometry
+
+ADR0164 corrects a demonstrated blank-row/base-seam failure in core Powerline
+U+E0B0..U+E0B3. One shared-raster coverage implementation fits the allocated
+cell, with exact reflected/symmetric geometry and antialiased slopes. Solid
+base columns are fully opaque; font files, global metrics, other Nerd icons
+and legacy bitmap-only profiles are unchanged. Regression fixtures cover all
+57 sizes and both spans/profiles, plus backend bold/right-edge guards.
+Selected46 gates have passing evidence:45 passes before an interrupted long
+run, plus a fresh complete9/0/0 GLES run. The ledger records exact scope and
+Valgrind evidence; no claim of one clean full-suite run. This is not all Powerline
+Extras/italic or full font acceptance.107/110 remain open; next is remaining
+terminal/graphics integration and reviewed appearance before browser111/SDL104.
+No live writes, SSH, Hibr edits or package/deployment. Preserve
+the user's untracked releases/0.1.554.yaml.
+
 ## 2026-10-20 candidate580 — Unicode emoji presentation
 
 ADR0163 adds generated Unicode18.0 default-presentation/variation data and

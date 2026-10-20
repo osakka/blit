@@ -35,6 +35,9 @@ Candidate579 adds explicit PTY emoji layout with full-corpus parser and
 representative real-PTY/capture checks. Candidate580 implements Unicode18.0
 default/VS15/VS16 presentation and a shared monochrome outline fallback.
 Font geometry and remaining end-to-end/live acceptance remain open.
+Candidate581 corrects core Powerline U+E0B0..U+E0B3 using one cell-fitted
+shared-raster coverage primitive; all other Extras and full geometry are not
+thereby certified. Font tickets remain open for the remaining acceptance.
 
 Size remains the existing canonical 8..64px **cell-height** setting; legacy
 scale is an alternative API sizing policy, not separate browser/desktop zoom.

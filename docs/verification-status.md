@@ -3,6 +3,45 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-20 candidate581: core Powerline geometry
+
+ADR0164. Frozen TCC server SHA
+444b79525a1dc49b2e9817d5d33b3dcc1cfbaa5aa0524e947e5af3bf5d8d276a;
+fresh rebuild byte-identical. Logs: `/tmp/blit-fontcraft.IHU9AK/581-*`.
+The new geometry fixture fails before the production change at8px/U+E0B0:
+an entire separator row has no ink (`581-powerline-before.log`). The same
+fixture passes after:456 scalar/size/span cases per Modern/Retro profile,
+912 combined, checking solid-base opacity, thin endpoints, exact reflection
+and vertical symmetry, antialiasing, cache reuse and the4MiB bound.
+
+Core U+E0B0..U+E0B3 coverage is generated once in the shared raster, using
+the allocated cell rather than outline cap-height fitting. Font assets,
+global metrics, other Nerd outlines and bitmap-only profiles are unchanged.
+Backend fixtures include228 additional Powerline bold-overstrike cases per
+profile/path at all57 sizes, with exact outside-cell guards. Native compares
+exactly; existing SDL2-level per-pass/4-level double-pass tolerance is retained.
+No tolerance was raised in this cycle. The general SDL scalar fixture now
+checks a one-pixel outside-cell ring as well as the interior.
+
+The selected font/terminal/schema/GLES run reports45 passes, no failures or
+skips, then exits143 before the final GLES scene gate; do not claim a
+completed full-suite run. A fresh dedicated GLES suite completes9/0/0,
+including that last scene gate (`581-gles-final.log`).46 distinct selected
+gates therefore have passing evidence across the two runs. The presentation
+regression in this cycle uses16px; the full8..64px presentation matrix was
+last verified in580, not rerun here. Powerline and backend size tests cover
+all57 sizes in this cycle.
+
+The final geometry fixture passes Valgrind3.19.0 for both profiles:0 errors,
+0 definitely/indirectly/possibly lost bytes;18,804 bytes/9 blocks remain
+reachable per process (`581-memory-final.log`). The production preview was
+regenerated and inspected, including separator samples at16/22/30px. It is
+an offline raster specimen, not a physical display capture.
+
+This does not certify Powerline Extras, italic overhang, every terminal/
+graphics transition or live appearance.107/110 remain open. No SSH, Hibr
+edits, package creation, live writes or deployment.
+
 ## 2026-10-20 candidate580: Unicode presentation and monochrome emoji
 
 ADR0163. Frozen TCC server SHA

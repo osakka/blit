@@ -20,7 +20,7 @@ not an em height or whole-display scale. Default Terminus and the selectable
 pixel-art Spleen remain unchanged. This source change has not been deployed.
 
 `modern-fonts.source.json` is the single provenance manifest for **both**
-outline profiles, their shared colour fallback, catalogue and licence files.
+outline profiles, shared colour/monochrome emoji fallbacks, catalogue and licences.
 See `licenses/nerd-v3.4.0/README.md` for icon-family attribution and sources.
 Generate both with the same tool and hash-checked upstream inputs:
 
@@ -35,8 +35,10 @@ ruby tools/tests/outline_catalogue_gate.rb
 
 The preview is `build/font-preview/blit-fonts.png`, generated with Blit's real
 production raster and compositor without SDL, Hibr or a connected display.
-Complete icons fit within cap height and90% advance; Powerline separators
-currently use optical fitting, not a guaranteed seamless-edge geometry policy.
+Complete icons fit within cap height and90% advance. The shared raster overrides
+core Powerline U+E0B0..U+E0B3 with cell-fitted antialiased geometry (ADR0164),
+including an opaque full-height solid base. Powerline Extras are not covered
+by that guarantee; bitmap-only profiles remain unchanged.
 Every catalogue codepoint is raster-tested at all57 integer heights for both
 profiles; `cod-blank` intentionally has no ink. See ADR0156.
 
@@ -47,8 +49,11 @@ Candidate576 adds an internal HarfBuzz/FreeType colour-cluster raster, tested
 against all5,244 pinned Emoji18.0 entries at16px and representative families
 at8..64px. The specimen includes its output, not a claim of terminal support.
 Candidate577 adds compositor consumption, tested with representative sequence
-families in native KMS and both SDL paths. Terminal grouping and text/default
-presentation remain pending. Reproduce the complete-corpus raster test with
+families in native KMS and both SDL paths. Candidates578/579 add explicit
+API/PTY emoji grouping while preserving default scalar layout. Candidate580
+adds Unicode18.0 default/VS15/VS16 presentation and pinned Noto Emoji3.002
+monochrome outlines; full end-to-end/live acceptance remains open.
+Reproduce the complete-corpus raster test with
 `ruby tools/tests/emoji_cluster_raster_gate.rb`;
 `BLIT_FONT_VALGRIND=1` additionally checks that fixture under Valgrind.
 Missing scalars and protected box/block geometry retain pixel-art PSF fallback;

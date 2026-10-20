@@ -25,7 +25,8 @@ int main(int argc, char **argv)
     CHECK(blit_font_load_path(&font, argv[1]) == 0);
     for (size = 8; size <= 64; ++size) {
         uint32_t scalars[] = {'A', 'g', 0x2588, 0x2500, 0x1f600, '9', 0x25c6, 0xfe0f, 0x200d,
-            0x270e, 0xf040, 0xf015, 0xf07b, 0xf014, 0xf021, 0xf00c, 0xf071, 0x1f514};
+            0x270e, 0xf040, 0xf015, 0xf07b, 0xf014, 0xf021, 0xf00c, 0xf071, 0x1f514,
+            0xe0b0, 0xe0b1, 0xe0b2, 0xe0b3};
         unsigned index;
         BlitRaster *raster = blit_raster_open(&font, argv[2], argv[3], (size + 1) / 2, size);
         CHECK(raster);
@@ -38,6 +39,7 @@ int main(int argc, char **argv)
         CHECK(output.glyph_atlas);
         for (index = 0; index < sizeof(scalars) / sizeof(scalars[0]); ++index) {
             int columns = scalars[index] == 0x1f600 || scalars[index] == 0x1f514 ? 2 : 1;
+            int powerline = scalars[index] >= 0xe0b0 && scalars[index] <= 0xe0b3;
             int x, y, channel;
             BlitRasterGlyph glyph;
             SDL_Surface *image;
@@ -46,20 +48,26 @@ int main(int argc, char **argv)
             CHECK(SDL_RenderClear(renderer));
             render_or_queue_sdl_glyph(&output, &font, 0xabcdef, scalars[index],
                 8, 8, (float)glyph.width, (float)glyph.height, 0, 0);
+            if (powerline) render_or_queue_sdl_glyph(&output, &font, 0xabcdef, scalars[index],
+                9, 8, (float)glyph.width, (float)glyph.height, 0, 1);
             flush_sdl_glyph_batch(&output);
             image = SDL_RenderReadPixels(renderer, NULL);
             CHECK(image);
-            for (y = 0; y < glyph.height; ++y)
-                for (x = 0; x < glyph.width; ++x) {
+            for (y = -1; y <= glyph.height; ++y)
+                for (x = -1; x <= glyph.width; ++x) {
                     Uint8 r, g, b, a;
                     uint32_t expected = blit_raster_blend(&glyph, x, y, 0xabcdef, 0x123456);
+                    int outside = x < 0 || x >= glyph.width || y < 0 || y >= glyph.height;
+                    int tolerance = outside ? 0 : powerline ? 4 : 2;
+                    if (powerline && !outside && x > 0)
+                        expected = blit_raster_blend(&glyph, x - 1, y, 0xabcdef, expected);
                     int actual[3], want[3];
                     CHECK(SDL_ReadSurfacePixel(image, 8 + x, 8 + y, &r, &g, &b, &a));
                     actual[0] = r; actual[1] = g; actual[2] = b;
                     want[0] = (expected >> 16) & 255; want[1] = (expected >> 8) & 255; want[2] = expected & 255;
                     for (channel = 0; channel < 3; ++channel) {
                         int delta = actual[channel] - want[channel];
-                        if (delta < -2 || delta > 2) {
+                        if (delta < -tolerance || delta > tolerance) {
                             fprintf(stderr, "PIXEL size=%d scalar=%x xy=%d,%d actual=%02x%02x%02x expected=%06x\n",
                                 size, scalars[index], x, y, r, g, b, expected);
                             return 1;

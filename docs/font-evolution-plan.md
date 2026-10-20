@@ -4,6 +4,12 @@ Tracking: [Blit#107](https://git.home.arpa/itdlabs/blit/issues/107).
 
 ## Active completion contract —107/110 before browser or SDL work
 
+Candidate581 implements ADR0164's core Powerline U+E0B0..U+E0B3 cell geometry.
+The new fixture demonstrates blank rows before the fix; shared coverage now
+preserves solid joins, antialiased slopes, symmetry and caller-owned spans.
+Other icons/fonts/global metrics are unchanged. This closes that bounded
+geometry gap, not all Powerline Extras or full font acceptance. See ledger.
+
 Candidate580 implements ADR0163: Unicode18.0 default/VS15/VS16 presentation,
 with pinned Noto Emoji3.002 real monochrome outlines as a shared fallback.
 The existing FreeType/cache/compositor remains authoritative; owner columns
