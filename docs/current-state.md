@@ -1,8 +1,8 @@
 # Current state and restart point
 
-## 2026-10-20 candidate567: measured colour bell proportions
+## 2026-10-20 deployed567: colour proportions; SDL startup next
 
-Live566 is ready/native KMS, Modern22px, login awaits authentication. No live
+Live567 is ready/native KMS, Modern22px, login awaits authentication. No live
 desktop visual approval is inferred. Production-raster metrics at22px show
 H9x13 ink, pencil11x11, bell20x20 in its22x22 two-cell allocation. At19/23px
 the bell similarly fills almost the cell height. This is optical sizing,
@@ -12,8 +12,18 @@ ADR0151 bounds colour artwork to the fitted text em, keeping cell size,
 two-cell advance, text/Nerd glyphs, settings and backend unchanged. New
 22px bell optical-bound regression fails before/passes after. Its resulting
 ink is17x18, allocation still22x22. The read-only source metrics probe is
-tools/probes/font_glyph_metrics.c. Package/deployment and visual approval
-pending; do not confuse source raster measurements with live screenshots.
+tools/probes/font_glyph_metrics.c. Font suite15pass/0skip/0fail; expanded
+native/software/GLES1026 samples each pass (native exact, SDL tolerance2).
+Package rebuild byte-identical; artifact/manifest gates pass; supervised API
+deployment/version567 verified, saved settings237 clean/unchanged. Visual
+approval remains pending; source raster metrics are not live screenshots.
+
+Next: SDL104 connected-monitor startup first, then connector hotplug. These
+are separate boundaries: SDL's known missing hotplug observer is not proof
+of the reported already-connected second-monitor startup cause. Preserve
+native567 as rollback, capture complete startup identity/errors on both
+outputs, and establish a failing regression before editing the adapter or
+dependency. No live backend switch occurred during this font cycle.
 
 ## 2026-10-20 deployed566: Modern Hibr Nerd icons and menu pencil
 

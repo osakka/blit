@@ -3,14 +3,19 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
-## 2026-10-20 candidate567: measured bell optical bound
+## 2026-10-20 deployed567: measured bell optical bound
 
 Production-raster probe reports Modern22px H9x13/pencil11x11/bell20x20 ink,
 the latter inside22x22(two cells). Shared colour artwork now uses fitted em
 instead of cell height; output bell ink17x18, same allocation. New22px
-optical/advance regression fails before and passes after. Initial font suite
-15pass/0skip/0fail. Expanded per-backend bell checks, packaging/deployment
-and operator aesthetic approval pending. Live566 remains native KMS/login.
+optical/advance regression fails before and passes after. Font suite
+15pass/0skip/0fail. Expanded per-backend bell checks1026 samples each pass:
+native exact incl guards, SDL software/offscreen GLES tolerance2.
+Package rebuild byte-identical; SHA256
+9fb04177c04cb7af210cc89321d47d474228c51a0e4d98f4c0dc60df279bd468.
+Artifact/manifest gates pass; API-deployed/version567 verified. Modern22px,
+native KMS ready, settings237 clean/unchanged. Login awaits authentication;
+operator aesthetic approval remains pending, not inferred from API state.
 
 ## 2026-10-20 deployed566: Modern Nerd repertoire and U+270E pencil
 

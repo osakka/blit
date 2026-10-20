@@ -1,7 +1,7 @@
 # ADR0151: colour glyph artwork uses the fitted text em
 
 - Date:2026-10-20
-- Status: implemented; package/live visual approval pending
+- Status: deployed in567; operator visual approval pending
 - Tracking: Blit107; follows ADR0147/0150
 
 Modern previously scaled colour artwork to fill the entire allocated cell

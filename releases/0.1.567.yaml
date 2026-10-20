@@ -11,4 +11,5 @@ hibr_abi: 16
 verification:
   font: '15 checks pass; optical-bound regression red before/green after; native/software/GLES1026 samples each; unchanged Nerd1140 samples'
   scope: 'Colour artwork uses fitted text em;22px bell ink20x20 to17x18 with unchanged22x22 allocation; global size/layout/backend unchanged'
-  physical: 'Package/deployment pending; live566 native KMS/login awaiting authentication; aesthetic acceptance remains open'
+  package: 'Byte-identical rebuild; artifact/manifest gates pass'
+  physical: 'API-deployed/version567 verified; native KMS ready, Modern22px and settings237 unchanged; login awaits authentication, aesthetic acceptance remains open'

@@ -2,13 +2,16 @@
 
 Tracking: [Blit#107](https://git.home.arpa/itdlabs/blit/issues/107).
 
-## Candidate567: colour artwork proportions
+## Deployed567: colour artwork proportions
 
 ADR0151 follows the measured bell report:20px-tall ink in a22px cell versus
 13px-tall H. The shared colour raster now fits within the text em, not line
 spacing. Bell ink becomes18px tall while keeping two-cell advance and22px
 global size. No text/Nerd/backend change. Source-raster optical-bound gate
 is red before/green after; physical visual approval is not yet obtained.
+Font suite15/0/0 and expanded1026-sample backend pixel gates pass; package
+rebuild byte-identical and API deployment/version567 verified. Native KMS,
+Modern22px and saved settings237 unchanged; login awaits authentication.
 
 ## Deployed566: Hibr Nerd coverage and readable start-menu pencil
 
