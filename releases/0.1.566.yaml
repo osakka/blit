@@ -1,0 +1,14 @@
+release: 0.1.566
+package: blit_0.1.566-1_amd64.deb
+package_sha256: 5eb77e95475cbd3e644b288566d8e13ce6b97002cf9af5bcdc4ebcd62e6fead4
+source_commit: 25dfa9d560cf5cf0158a66cc3c52e976e29bfc3d
+package_documentation_commit: 25dfa9d560cf5cf0158a66cc3c52e976e29bfc3d
+server_binary_sha256: 1c9a81712122d3922165e5f9f706dae8c906ad84f80b081dc4e36501a0485315
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.225
+hibr_abi: 16
+verification:
+  font: '15 checks pass, no skips/failures; Hibr Nerd/pencil1140 samples; native/software/GLES969 pixel samples each; font generation byte-identical'
+  scope: 'Hibr Nerd glyph set and Font Awesome mappings, not all Nerd families; U+270E uses nf-fa-pencil; colour bell unchanged'
+  physical: 'Package/live preview pending; native565 configuration retained until supervised update'
