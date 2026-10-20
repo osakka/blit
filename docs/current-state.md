@@ -1,6 +1,15 @@
 # Current state and restart point
 
-## 2026-10-19 candidate566: Modern Hibr Nerd icons and menu pencil
+## 2026-10-20 deployed566: Modern Hibr Nerd icons and menu pencil
+
+Supervised API install/version verification succeeded on10.54. Active font is
+BlitModernNerd-Regular.ttf at22px/11x22 cells; native drm-kms ready. Saved
+revision237 remains clean and unchanged across installation, with both outputs,
+DP1x2/HDMI1x1 regions and lower-primary preference retained. Login manager is
+waiting for authentication on pane-display-93-2. Operator visual approval of
+the new menu pencil and Nerd symbols awaits login. Package rebuild SHA256 is
+5eb77e95475cbd3e644b288566d8e13ce6b97002cf9af5bcdc4ebcd62e6fead4,
+byte-identical to the first build; artifact/manifest gates pass. No SDL switch.
 
 Native565 mouse is operator-accepted. Candidate566 changes only Modern's
 outline asset/profile path and verification/documentation, not mouse code,
@@ -16,8 +25,8 @@ The new production-raster gate fails on old Hack and passes1140 samples
 Native and SDL software/GLES pixel gates pass969 samples each, native exact
 including guard pixels, SDL tolerance2. Full font suite15pass/0skip/0fail;
 font generation byte-reproducible, asset/license identities pass. This is
-not an all-suite rerun. TCC server/helper566 build. Packaging/live preview
-pending; live remains565 until supervised deployment. Colour bell sizing
+not an all-suite rerun. TCC server/helper566 build. Packaging and API deployment
+are verified as above; aesthetic approval remains pending. Colour bell sizing
 is unchanged/unresolved. See ADR0150 and font-evolution-plan.md.
 
 ## 2026-10-19 operator accepts565 mouse motion; Modern fonts next

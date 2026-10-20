@@ -11,4 +11,5 @@ hibr_abi: 16
 verification:
   font: '15 checks pass, no skips/failures; Hibr Nerd/pencil1140 samples; native/software/GLES969 pixel samples each; font generation byte-identical'
   scope: 'Hibr Nerd glyph set and Font Awesome mappings, not all Nerd families; U+270E uses nf-fa-pencil; colour bell unchanged'
-  physical: 'Package/live preview pending; native565 configuration retained until supervised update'
+  package: 'Byte-identical rebuild; artifact and release manifest gates pass'
+  physical: 'API-deployed/version566 verified; new Modern outline active22px; native KMS ready; saved settings237 clean/unchanged; login on lower primary awaits authentication and visual approval'

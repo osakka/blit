@@ -1,7 +1,7 @@
 # ADR0150: Modern Hibr Nerd coverage belongs in the font asset
 
 - Date:2026-10-19
-- Status: implemented; package/live visual approval pending
+- Status: deployed in566; operator visual approval pending
 - Tracking: Blit107; follows ADR0147
 
 Hibr emits18 distinct Font Awesome private-use scalars for its Nerd glyph set,
