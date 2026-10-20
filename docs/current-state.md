@@ -1,5 +1,23 @@
 # Current state and restart point
 
+## 2026-10-20 candidate568: SDL output creation binding
+
+Found and corrected a concrete Blit adapter defect: SDL_CreateWindow used
+default-display allocation followed by an unchecked move, but pinned KMSDRM
+rejects moves and allocates its GBM/EGL resources during creation. Bind the
+display in SDL_CreateWindowWithProperties, verify actual binding, and retain
+fullscreen/renderer policy. Existing runtime logs now retain distinct window,
+binding, fullscreen and renderer errors with display IDs. ADR0152.
+
+Production initialize_outputs gate is red before (moves2/bindings0), green
+after (distinct IDs11/57, moves0). Real software/offscreen GLES renderers,
+mocked display identity; four injected failure paths validate logs and window
+cleanup without opening DRM. Not physical multi-output proof. Earlier SDL
+inventory exposed only DP despite two connected native outputs: enumeration
+is separate and NOT claimed fixed. Native567 stays live, Modern22px, clean
+settings237 and bottom login awaiting authentication. No vendor/Hibr edits.
+Broader local regression is in progress; package/physical validation pending.
+
 ## 2026-10-20 deployed567: colour proportions; SDL startup next
 
 Live567 is ready/native KMS, Modern22px, login awaits authentication. No live

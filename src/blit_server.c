@@ -22555,27 +22555,49 @@ static void initialize_outputs(BlitRuntime *runtime)
         renderer_name = NULL;
 
     for (i = 0; i < runtime->display_count; ++i) {
-        SDL_Window *window;
+        SDL_Window *window = NULL;
         SDL_Renderer *renderer;
         BlitDisplay *display = &runtime->displays[i];
+        SDL_PropertiesID properties = SDL_CreateProperties();
 
-        window = SDL_CreateWindow("blit", display->bounds.w, display->bounds.h,
-                                 SDL_WINDOW_BORDERLESS);
+        /* KMSDRM chooses its display resources during window creation and
+           rejects subsequent moves. Bind before allocation, not by moving a
+           default-display window after its GBM surfaces already exist. */
+        if (properties != 0) {
+            if (SDL_SetStringProperty(properties, SDL_PROP_WINDOW_CREATE_TITLE_STRING, "blit") &&
+                SDL_SetNumberProperty(properties, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, display->bounds.w) &&
+                SDL_SetNumberProperty(properties, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, display->bounds.h) &&
+                SDL_SetBooleanProperty(properties, SDL_PROP_WINDOW_CREATE_BORDERLESS_BOOLEAN, true) &&
+                SDL_SetNumberProperty(properties, SDL_PROP_WINDOW_CREATE_X_NUMBER,
+                    SDL_WINDOWPOS_CENTERED_DISPLAY((SDL_DisplayID)display->id)) &&
+                SDL_SetNumberProperty(properties, SDL_PROP_WINDOW_CREATE_Y_NUMBER,
+                    SDL_WINDOWPOS_CENTERED_DISPLAY((SDL_DisplayID)display->id)))
+                window = SDL_CreateWindowWithProperties(properties);
+            SDL_DestroyProperties(properties);
+        }
         if (window == NULL) {
             snprintf(runtime->sdl_error, sizeof(runtime->sdl_error),
                      "display %llu window: %s", display->id, SDL_GetError());
+            diagnostic_log(runtime, "error", "sdl_output_window_failed", runtime->sdl_error);
             continue;
         }
-        SDL_SetWindowPosition(window, display->bounds.x, display->bounds.y);
+        if (SDL_GetDisplayForWindow(window) != (SDL_DisplayID)display->id) {
+            snprintf(runtime->sdl_error, sizeof(runtime->sdl_error),
+                     "display %llu window bound to unexpected display %u",
+                     display->id, (unsigned)SDL_GetDisplayForWindow(window));
+            diagnostic_log(runtime, "error", "sdl_output_binding_failed", runtime->sdl_error);
+            SDL_DestroyWindow(window);
+            continue;
+        }
         /* A borderless window is not sufficient on KMSDRM: the backend can
            retain its default mode-sized GBM surface even when the requested
            window dimensions match the display.  Enter exclusive fullscreen
            after positioning so each output owns its complete scanout mode,
            including portrait/tall modes such as 1920x2160. */
         if (!SDL_SetWindowFullscreen(window, true)) {
-            fprintf(stderr,
-                    "blit: SDL fullscreen display=%llu failed: %s\n",
-                    display->id, SDL_GetError());
+            snprintf(runtime->sdl_error, sizeof(runtime->sdl_error),
+                     "display %llu fullscreen: %s", display->id, SDL_GetError());
+            diagnostic_log(runtime, "error", "sdl_output_fullscreen_failed", runtime->sdl_error);
             SDL_DestroyWindow(window);
             continue;
         }
@@ -22583,6 +22605,7 @@ static void initialize_outputs(BlitRuntime *runtime)
         if (renderer == NULL) {
             snprintf(runtime->sdl_error, sizeof(runtime->sdl_error),
                      "display %llu renderer: %s", display->id, SDL_GetError());
+            diagnostic_log(runtime, "error", "sdl_output_renderer_failed", runtime->sdl_error);
             SDL_DestroyWindow(window);
             continue;
         }

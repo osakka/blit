@@ -232,6 +232,7 @@ suite_font() {
 }
 
 suite_renderer() {
+    run_gate sdl_output_startup sh tools/tests/sdl_output_startup_gate.sh
     run_gate pixel_frame_gate.rb ruby tools/tests/pixel_frame_gate.rb
     run_gate hidden_cursor_damage_gate.rb ruby tools/tests/hidden_cursor_damage_gate.rb
     run_gate pointer_damage_atomic_gate.rb ruby tools/tests/pointer_damage_atomic_gate.rb
@@ -295,6 +296,7 @@ suite_renderer() {
 }
 
 suite_gles() {
+    run_gate sdl_gles_output_startup sh tools/tests/sdl_output_startup_gate.sh opengles2
     run_gate font_gles_raster sh tools/tests/font_backend_raster_gate.sh opengles2
     run_gate sdl_gles_sixel_composition env \
         BLIT_GATE_BINARY="$BINARY" BLIT_GATE_FONT="$FONT" BLIT_GATE_LIBS="$LIBS" \

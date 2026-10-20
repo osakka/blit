@@ -169,6 +169,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0149 — Per-output submitted pointer state](0149-per-output-submitted-pointer-state.md)
 - [0150 — Modern Hibr Nerd icons and menu pencil](0150-modern-hibr-nerd-icons.md)
 - [0151 — Colour glyph artwork uses the fitted text em](0151-colour-glyphs-use-fitted-text-em.md)
+- [0152 — SDL creation-time display binding](0152-sdl-creation-time-display-binding.md)
 
 ## Adding an ADR
 

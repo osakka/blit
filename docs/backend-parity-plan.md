@@ -6,6 +6,26 @@ Tracking: [Blit #104](https://git.home.arpa/itdlabs/blit/issues/104).
 Decision: [ADR0137](adr/0137-presentation-backend-feature-and-performance-parity.md).
 Acceptance inventory: [backend parity matrix](backend-parity-matrix.md).
 
+## 2026-10-20 execution checkpoint
+
+Native565 physical pointer movement is operator-accepted; live567 retains
+that fix and adds Modern/Nerd/colour sizing (visual approval still separate).
+Candidate568 corrects SDL creation-time output binding (ADR0152), with a
+red/green production initializer gate on mocked display IDs and real software/
+offscreen GLES renderers. This does not establish connector enumeration or
+scanout on10.54. Diagnose the earlier single-exposed-display symptom separately
+from initialization of displays SDL actually returns; neither implies hotplug.
+Keep native567 live during local work. A physical comparison must record all
+SDL display identities and per-output initialization errors, and verify rollback
+before accepting the switch. Unsupported post-creation moves are not a solution.
+
+Startup recovery precondition: discover_displays/initialize_outputs precede
+creation of the API listener in the current main process. A blocked SDL call
+therefore prevents API-only rollback. Do not run a potentially blocking physical
+SDL startup trial relying solely on the comparison tool's API ensure. Establish
+an independently executing, bounded native rollback before that trial; preserve
+the same canonical saved settings rather than introduce a second runtime config.
+
 ## Contract and baseline
 
 Keep three first-class presentation paths: direct DRM/KMS; SDL3 using the
