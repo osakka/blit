@@ -1,7 +1,7 @@
 # ADR0168: native child shells must not inherit the optional API provider
 
 - Date: 2026-10-20
-- Status: implemented in candidate0.1.584; live acceptance pending
+- Status: implemented and target-host startup verified in0.1.584
 - Tracking: [Hibr321](https://git.home.arpa/itdlabs/hibr/issues/321)
 
 The current package already keeps `console-blit.so` outside Hibr's module
@@ -25,3 +25,8 @@ the adapter only in its Blit-owned path. Hibr core and installed Hibr modules
 remain untouched. Existing interactive shells may already have the adapter
 loaded; changing an RC file does not unload it. Reopen such shells after
 rollout rather than pretending their running provider changed.
+
+Live584 on10.54: inherited-RC/no-surface-ID native console discovery succeeds;
+most and hvi render /etc/os-release in isolated80x24 PTYs and exit0 without
+the reported error. Package rebuild is byte-identical. This verifies startup
+and provider isolation, not every application rendering/interaction path.

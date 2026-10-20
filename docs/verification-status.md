@@ -1,5 +1,18 @@
 # Verification status
 
+## 2026-10-20:584 target-host provider verification
+
+Package SHA2565df55078bc6eeba2ed6c3da3e1b75d75ddad2077a69258a4ba654527a10d2e7b
+byte-identical rebuild and packaged native/API/stale-RC selection pass.
+584 API rollout healthy native KMS; settings document unchanged, Retro22
+retained from operator preflight. Native login awaiting authentication.
+Most and hvi render PRETTY_NAME content from /etc/os-release in isolated80x24
+PTYs on10.54 and exit0 (q / :q!), no missing-surface error and empty stderr.
+Native console selected despite inherited old RC path; no surface ID needed.
+This resolves321 startup/provider failure, not every application's rendering
+or performance acceptance. Hibr320 remains upstream-fix pending after traced
+SIGTERM->TCSETS->SIGTTOU reproduction without Blit. No Hibr modifications.
+
 ## 2026-10-20:320 isolated reproduction and321 candidate584
 
 320: installed Hibr270/ABI16 stock lg_as helper, console open, isolated root

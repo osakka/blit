@@ -1,5 +1,28 @@
 # Current state and restart point
 
+## 2026-10-20:584 deployed,321 verified;320 upstream fix pending
+
+Package584 from9c18b25 passes checksum/provenance, byte-identical rebuild and
+actual packaged provider tests. Authenticated update on10.54 succeeds. Ready
+native DRM/KMS; saved settings document unchanged. The user-selected font
+at this preflight/readback is Retro22, not the previous Modern16 checkpoint;
+no font/configuration change was made by this rollout. Login reports
+authentication_required after restart; do not manually create another owner.
+
+Live isolated PTYs with inherited installed Blit RC, explicit terminal mode
+and missing surface/session IDs: most /etc/os-release renders expected content
+and exits0 (2430 output bytes); hvi renders it and exits0 via :q! (2878 bytes).
+Both have empty stderr and no missing-surface error. Interactive provider
+readback lists console, not console-blit.321 resolved for reproduced cause;
+already-open shells may retain the old loaded adapter and should be reopened.
+No Hibr edits, user-file edits, SSH, backend switch or visual desktop claim.
+Evidence /tmp/blit-rollout584.GPERT2 before/after observations/update.log.
+
+320 root cause reproduced without Blit and posted upstream; no core fix here.
+Console signal cleanup in forked watchdogs needs Hibr-owner implementation;
+ticket stays open. Local test transient unit cleaned all its children. See
+docs/diagnostics-login-and-provider.md and Hibr320 for actionable evidence.
+
 ## 2026-10-20: Hibr320 diagnosed, Blit-owned321 fix candidate584
 
 320 reproduced without Blit in an isolated root PTY using installed Hibr270:
