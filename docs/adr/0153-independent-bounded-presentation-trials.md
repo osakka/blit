@@ -1,7 +1,7 @@
 # ADR0153: independent bounded presentation trials
 
 - Date:2026-10-20
-- Status: implementation in progress; not deployed
+- Status: implemented/deployed569; physical expiry recovery verified
 - Tracking: Blit109/104
 
 SDL initialization runs before Blit's listener. Recovery must therefore not
@@ -38,3 +38,12 @@ be guaranteed recoverable by userspace; preserve explicit failed status.
 
 References: systemd-run(1) timer service ownership; systemd.exec(5)
 EnvironmentFile ordering. No SSH, Hibr modifications or SDL vendor changes.
+
+Physical evidence: both software and opengles2 thirty-second trials failed
+before the listener (journal reports SIGSEGV after both SDL windows exist).
+Independent expiry restored ready native KMS, two outputs, revision237 and
+the identical saved document in both cases. This verifies recovery from those
+observed crashing startup attempts, not an injected physical blocked call or
+kernel hang. The blocked-userspace fixture remains a mocked-systemd test.
+API-only oracle: tools/probes/host_presentation_trial.rb. SDL acceptance failed;
+recovery success must not be reported as SDL startup/rendering success.

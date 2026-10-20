@@ -1392,7 +1392,7 @@ the limiting boundary.
 
 ## Effects, overlays, and control
 
-### Bounded presentation trials (candidate 0.1.569)
+### Bounded presentation trials (0.1.569)
 
 `GET /v1/control/presentation-trial` reads the privileged helper's trial state.
 `POST` accepts only `{"renderer":"opengles2","timeout_seconds":60}` (or
@@ -1417,9 +1417,13 @@ output inventory and settings before calling the baseline restored. Updates
 are refused while recovery remains active. Failures stay explicit; this is
 not a guarantee of recovery from kernel/GPU D-state or system-manager failure.
 
-Candidate scope: local helper/dispatcher fault tests use mocked systemd. Actual
-systemd scheduling and physical-host recovery must be verified before using
-this endpoint to accept an SDL multi-output startup trial. See ADR0153.
+Verification scope: local helper/dispatcher fault tests use mocked systemd.
+On10.54, actual timer expiry restored the identical saved native configuration
+after both software and GLES startup crashes. This proves recovery from those
+observed failures, not recovery from every kernel/GPU hang or SDL correctness.
+The API-only startup/recovery oracle is
+`tools/probes/host_presentation_trial.rb`; it records recovery and SDL startup
+as separate verdicts. See ADR0153.
 
 `GET/PUT /v1/effects` manages bounded named effects such as `scanlines`.
 `POST/DELETE /v1/overlays` manages explicit graphic overlays. Effects and

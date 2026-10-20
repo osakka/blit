@@ -3,6 +3,30 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-20 deployed569: physical expiry restores native after SDL crash
+
+Source76ddc7f, release manifest7d00015. Rebuilt package byte-identical SHA256
+78f7db0c7b46d9675353a8cef9a7b58483c4df75003d11d4482e0041c888b5c0;
+artifact/manifest gates and supervised API install/version check pass.
+Final schema+lifecycle22pass/0skip/0fail; renderer+GLES67pass/0skip/0fail.
+These focused suites do not erase568's earlier timing miss or replace all-suite
+physical pixel/cadence validation.
+
+Physical software and opengles2 trials each arm a30s independent lease, lose
+API availability, and automatically return ready native KMS with two outputs
+and the exact saved document/revision237. Journal shows both SDL windows
+created, then SIGSEGV before listener startup (repeated service retries).
+This is crash recovery evidence, NOT a successful SDL multi-output result or
+proof of the faulting instruction. Local blocked-userspace tests still mock
+systemd. Actual kernel/GPU hang recovery is not claimed.
+
+Evidence: build/trial569-software/ and build/trial569-gles/ contain baseline,
+lease, timestamped unavailable/restored observations, exact restored settings,
+and separate recovery_pass:true / sdl_connected_output_startup_pass:false.
+Service journal: build/trial569-startup-journal.txt. API-only oracle:
+tools/probes/host_presentation_trial.rb. Live stays native569, bottom primary,
+Modern22px. Next isolate SIGSEGV with a pre-listener fault trace, not guesses.
+
 ## 2026-10-20 candidate569: presentation recovery fault tests
 
 TCC server/helper build. Actual helper Unix protocol and standalone recovery

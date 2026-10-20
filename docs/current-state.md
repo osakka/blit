@@ -1,5 +1,31 @@
 # Current state and restart point
 
+## 2026-10-20 deployed569: recovery works; SDL startup SIGSEGV reproduced
+
+API-installed/version569 verified; source76ddc7f, release7d00015. Package
+rebuild byte-identical (SHA78f7db0c7b46d9675353a8cef9a7b58483c4df75003d11d4482e0041c888b5c0);
+artifact/manifest checks pass. Schema+lifecycle22pass; renderer+GLES67pass;
+all zero skips/failures. Not a new whole-all/timing run;568 timing miss remains.
+
+Actual API-only30s software and GLES trials both failed before listener startup.
+Independent systemd expiry restored ready native KMS, both outputs and identical
+saved revision237 in both cases. Software poll window31.25s. No terminal/SSH
+intervention, canonical writes or Hibr modifications. Root helper reports
+restored/inactive; bottom primary login awaits authentication. Native remains
+the working live backend. Do not call either SDL trial a pass.
+
+Journal evidence: SDL creates display1 at1920x2160 and display2 at1920x1080,
+then process exits status11/SEGV, followed by service failure retries until
+expiry. No claim that the faulting function is known: obtain a pre-listener
+fault trace before choosing a patch. No coredumpctl/gdb found on host; core
+pattern is `core`, no `/core` observed. Avoid guessing at font/GPU causation.
+SDL second-output mode also differs from native HDMI2560x1440; track separately.
+
+Evidence: build/trial569-software/, build/trial569-gles/,
+build/trial569-startup-journal.txt. API-only reproducible startup/recovery
+oracle: tools/probes/host_presentation_trial.rb. Startup and recovery verdicts
+are deliberately distinct. Issues109/104 retain remaining coverage/SDL work.
+
 ## 2026-10-20 candidate569: independent presentation recovery
 
 Implements Blit109 / ADR0153: authenticated bounded presentation-trial API,
