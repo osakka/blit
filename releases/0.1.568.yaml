@@ -1,0 +1,15 @@
+release: 0.1.568
+package: blit_0.1.568-1_amd64.deb
+package_sha256: 23459bf85da2c702344f86ac16e7f5370d2c1d840caa4f8750f02eeaf2a69402
+source_commit: 5ee47fa8d8d284d469373883b918fa2cdddf333d
+package_documentation_commit: 5ee47fa8d8d284d469373883b918fa2cdddf333d
+server_binary_sha256: 14080bbb6994059a01690f7c670f73fa2b1ab1c2f6785d71c4133009268c9b39
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.225
+hibr_abi: 16
+verification:
+  focused: 'Production SDL initializer red before/green after; two mocked display identities with real software/offscreen GLES renderers; four failure paths and exact window cleanup'
+  broad: 'Combined all+GLES122pass/4skip/1fail: max render21.754ms exceeds20ms cap. Fixed three baseline567/candidate568 timing pairs all pass afterward; original failure unresolved, no clean broad acceptance'
+  package: 'Byte-identical rebuild; artifact and manifest gates pass'
+  physical: 'Not deployed; native567 remains live. Connector enumeration/hotplug/scanout not accepted by mock-display tests. Independent startup recovery tracked109 before disruptive trial.'

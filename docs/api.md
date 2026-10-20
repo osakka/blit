@@ -1282,6 +1282,22 @@ driver selected at startup (for example `kmsdrm`); `direct_kms` is `true` only
 for Blit's separate direct DRM/KMS backend. `renderer` is the SDL renderer
 (for example `opengles2`), not the video driver.
 
+From candidate568, SDL output initialization records these codes in the
+existing bounded runtime log; details identify the requested display:
+
+| Code | Failed boundary |
+| --- | --- |
+| `sdl_output_window_failed` | Window properties/allocation |
+| `sdl_output_binding_failed` | Actual window display differs from requested display |
+| `sdl_output_fullscreen_failed` | Fullscreen activation |
+| `sdl_output_renderer_failed` | Renderer creation |
+
+An explicit `sdl_kms_fallback` means native KMS took over, not that SDL
+succeeded. Read the actual backend and inventory independently. If startup
+blocks before the listener exists, these API endpoints cannot service recovery;
+independent startup rollback is tracked in Blit109. Candidate568's mocked-
+display tests do not establish physical connector discovery or scanout.
+
 Each `render.outputs[]` entry's `present_calls`, `last_present_ms` and
 `max_present_ms` belongs to that output's resource lifetime. SDL values count
 and time `SDL_RenderPresent` calls; direct KMS counts submitted frames.

@@ -19,7 +19,8 @@ Keep native567 live during local work. A physical comparison must record all
 SDL display identities and per-output initialization errors, and verify rollback
 before accepting the switch. Unsupported post-creation moves are not a solution.
 
-Startup recovery precondition: discover_displays/initialize_outputs precede
+Startup recovery precondition ([Blit109](https://git.home.arpa/itdlabs/blit/issues/109)):
+discover_displays/initialize_outputs precede
 creation of the API listener in the current main process. A blocked SDL call
 therefore prevents API-only rollback. Do not run a potentially blocking physical
 SDL startup trial relying solely on the comparison tool's API ensure. Establish

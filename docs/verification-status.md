@@ -3,6 +3,40 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-20 candidate568: SDL creation binding, physical trial held
+
+Source5ee47fa corrects default-display allocation followed by unsupported
+KMSDRM window movement. Production initializer test red before (moves2,
+bindings0), green after: mocked IDs11/57 correctly requested at creation,
+actual software/offscreen GLES renderer identities and dimensions checked,
+four injected failure paths preserve diagnostic codes and exact window cleanup.
+No vendor/Hibr changes. Mock display identity is NOT physical scanout evidence.
+
+Combined all+GLES suite:122pass/4skip/1fail. Skips: QEMU oracle, unsupplied
+package for that run, physical multi-display and physical screenshot gate.
+The package/artifact and manifest gates pass separately. Failure retained:
+frame_rate_gate maximum render21.754ms >20ms. Do not call the broad run clean.
+The120s/four-PTY soak passes12080 snapshots/1098 resizes. Native composition,
+pointer phase/hotplug, input, Hibr attachment and all eight GLES checks pass.
+
+Fixed-count local comparison subsequently runs three alternating pairs using
+packaged567 and exact candidate568 binaries, dummy/software, Terminus scale1,
+80x24 workload, unchanged30Hz minimum and20ms render cap. All six pass:
+59.998..60.006Hz and zero missed window deadlines. Baseline max-render values
+16.442/17.898/16.456ms; candidate16.604/16.446/16.457ms. Retain every result,
+not a retry-until-green. No demonstrated regression follows from these pairs,
+but the initial timing miss is unresolved, not invalidated or fixed.
+Evidence: build/sdl568-timing-comparison/results.json, per-run logs and copied
+full-suite-frame-rate-failure.log. Tool: tools/probes/local_frame_rate_comparison.rb.
+
+Package rebuild byte-identical SHA256
+23459bf85da2c702344f86ac16e7f5370d2c1d840caa4f8750f02eeaf2a69402;
+TCC server/helper, artifact and manifest checks pass. NOT deployed/tagged stable.
+Live10.54 stays ready native567, Modern22px, clean settings237, lower primary.
+SDL connector enumeration/hotplug/physical timing remain open under104.
+Blit109 tracks the required independent rollback: initialization precedes
+the API listener, so a blocked startup cannot be recovered via that API alone.
+
 ## 2026-10-20 deployed567: measured bell optical bound
 
 Production-raster probe reports Modern22px H9x13/pencil11x11/bell20x20 ink,

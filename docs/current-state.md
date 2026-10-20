@@ -16,7 +16,20 @@ cleanup without opening DRM. Not physical multi-output proof. Earlier SDL
 inventory exposed only DP despite two connected native outputs: enumeration
 is separate and NOT claimed fixed. Native567 stays live, Modern22px, clean
 settings237 and bottom login awaiting authentication. No vendor/Hibr edits.
-Broader local regression is in progress; package/physical validation pending.
+Source5ee47fa, candidate568 built/packaged byte-reproducibly; artifact and
+manifest checks pass. Combined all+GLES regression:122pass/4skip/1fail.
+The failure is frame_rate_gate:21.754ms maximum render vs20ms bound; no
+limit relaxed. Fixed three baseline567/candidate568 pairs subsequently all
+pass at59.998..60.006Hz on local dummy/software, candidate maximum render
+16.446..16.604ms. The original miss remains unresolved, not erased by those
+results; no clean whole-suite or physical cadence acceptance is claimed.
+Evidence: build/sdl568-timing-comparison/. The120s/four-PTY soak passes
+12080 snapshots/1098 resizes. Package is held, NOT deployed or tagged stable.
+Live remains native567; font22px/settings237 unchanged. See verification ledger.
+Before physical startup trials, address Blit109: presentation initialization
+precedes the API listener, so API-only rollback cannot recover a blocked
+initialization call. An independent bounded recovery must protect the native
+baseline. Do not silently switch the host or equate a timeout with recovery.
 
 ## 2026-10-20 deployed567: colour proportions; SDL startup next
 

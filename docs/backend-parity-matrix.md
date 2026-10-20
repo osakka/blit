@@ -1,6 +1,15 @@
 # Backend parity acceptance matrix
 
 Tracking: [#104](https://git.home.arpa/itdlabs/blit/issues/104).
+
+Latest local increment568 (2026-10-20): creation-time display binding is fixed
+and tested at the mocked display boundary with real software/offscreen GLES
+renderers, including four startup failure paths. Physical enumeration/scanout
+is NOT accepted. All+GLES122pass/4skip/1timing-fail (21.754ms vs20ms cap);
+three fixed baseline/candidate timing pairs later pass but do not erase the
+failure. Live stays native567. Blit109 requires independent startup recovery
+before disruptive trials. See ADR0152 and verification-status.md.
+
 Checkpoint: annotated tag `v0.1.553`, source `86d28b2`, live identity verified
 on10.54 on2026-10-19. The package manifest is `releases/0.1.553.yaml`.
 The tag preserves the operator's current KMS checkpoint; issue#101's motion
