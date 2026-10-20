@@ -23,7 +23,7 @@ esac
 mkdir -p "$(dirname -- "$output")"
 case "$target" in
     server)
-        tcc -O2 -std=c99 \
+        tcc -O2 -g -bt8 -std=c99 \
             "-DBLIT_BUILD_VERSION=\"$version\"" \
             "-DBLIT_HIBR_VERSION=\"$hibr_version\"" \
             "-DBLIT_HIBR_ABI=$hibr_abi" \

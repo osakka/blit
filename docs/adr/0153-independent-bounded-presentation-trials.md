@@ -20,6 +20,9 @@ service cgroup. Expiry or explicit restore removes only the matching owned
 drop-in, reloads systemd, terminates the trial process and starts the original
 service. No second API listener, renderer or persistent configuration system.
 Reboot clears the runtime override; helper restart restores an outstanding trial.
+From570, the temporary override also sets Restart=no: each trial attempts
+startup once rather than repeatedly initializing the GPU after a crash. Normal
+service restart policy returns when that override is removed. See ADR0154.
 
 The existing authenticated API offers GET/POST/DELETE on
 /v1/control/presentation-trial. POST selects only software or opengles2 and a

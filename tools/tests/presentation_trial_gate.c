@@ -45,6 +45,10 @@ int main(void)
     snprintf(first_id,sizeof(first_id),"%s",state.id);
     CHECK(state.active && blit_trial_id_valid(first_id));
     CHECK(lstat(TRIAL_DROPIN,&st) == 0 && S_ISREG(st.st_mode) && !(st.st_mode & 0022));
+    fd = open(TRIAL_DROPIN,O_RDONLY); CHECK(fd >= 0);
+    count = read(fd,saved,sizeof(saved)-1); close(fd); CHECK(count > 0);
+    saved[count] = 0;
+    CHECK(strstr(saved,"Restart=no\n") != NULL);
     CHECK(!trial_prepare(document,strlen(document),"opengles2",60,&observed,detail,sizeof(detail)));
     CHECK(trial_activate(first_id,detail,sizeof(detail)) && restarts == 1);
     CHECK(trial_state_read(&observed) && !strcmp(observed.phase,"running"));

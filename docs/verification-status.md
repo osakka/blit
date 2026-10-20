@@ -3,6 +3,17 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-20 candidate570: fault trace diagnostics
+
+TCC server/helper build. Actual compiler fault gate proves normal exit and
+source/function/caller diagnostics for a deliberate subprocess fault; no
+bounds instrumentation. Schema+lifecycle23pass/0skip/0fail on the canonical
+trace-enabled binary, including restart/shutdown. Override gate verifies
+Restart=no during trials; ordinary service policy remains untouched.
+API-only journal/scrollback collector works against native569. Physical
+fault capture/deployment remains pending at this source checkpoint. No SDL
+correctness or unchanged-performance claim follows from debug flags.
+
 ## 2026-10-20 deployed569: physical expiry restores native after SDL crash
 
 Source76ddc7f, release manifest7d00015. Rebuilt package byte-identical SHA256

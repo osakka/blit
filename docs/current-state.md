@@ -1,5 +1,18 @@
 # Current state and restart point
 
+## 2026-10-20 candidate570: obtain the fault trace before patching SDL
+
+Canonical server build adds installed TCC `-g -bt8` diagnostics, not `-b`
+bounds instrumentation. Deliberate subprocess gate verifies source/function/
+caller reporting and unchanged normal exit. Presentation trials temporarily
+set Restart=no to avoid the repeated startup crashes seen on569. Existing
+native configuration/service ownership remains unchanged. ADR0154.
+Physical trace is pending: this is observability, not an SDL correctness fix.
+Schema+lifecycle23pass/0skip/0fail, including real TCC fault reporting and
+restart/shutdown. API-only host_presentation_journal.rb reads the service
+journal via a temporary free-pane PTY, combines scrollback/visible cells and
+cleans up; default is the bounded current-boot tail, not a wall-clock window.
+
 ## 2026-10-20 deployed569: recovery works; SDL startup SIGSEGV reproduced
 
 API-installed/version569 verified; source76ddc7f, release7d00015. Package

@@ -233,7 +233,7 @@ static int trial_prepare(const char *document, size_t length, const char *render
         interval, BLIT_TRIAL_HELPER, "--recover-trial", state->id, NULL}, detail, capacity, 5)) goto failed;
     armed = 1;
     snprintf(override, sizeof(override), "# blit-presentation-trial:%s\n[Service]\n"
-        "EnvironmentFile=" BLIT_TRIAL_ROOT "/%s.env\nTimeoutStopSec=5s\n", state->id, state->id);
+        "EnvironmentFile=" BLIT_TRIAL_ROOT "/%s.env\nTimeoutStopSec=5s\nRestart=no\n", state->id, state->id);
     if (!trial_override_create(override) ||
         !trial_manager("daemon-reload", NULL, detail, capacity)) goto failed;
     snprintf(state->detail, sizeof(state->detail), "independent recovery armed; canonical settings untouched");
