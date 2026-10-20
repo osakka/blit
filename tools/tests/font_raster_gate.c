@@ -29,6 +29,23 @@ int main(int argc, char **argv)
     }
     memset(&fallback, 0, sizeof(fallback));
     CHECK(blit_font_load_path(&fallback, argv[1]) == 0);
+    {
+        /* At22px the fitted Modern text em is18px, not the22px cell.
+           Emoji must use that typographic bound without changing advance. */
+        BlitRaster *raster = blit_raster_open(&fallback, argv[2], argv[3], 11, 22);
+        BlitRasterGlyph bell;
+        int x, y, top = 22, bottom = -1;
+        CHECK(raster && blit_raster_get(raster, 0x1f514, 2, &bell));
+        CHECK(bell.width == 22 && bell.height == 22 && !bell.fallback);
+        for (y = 0; y < bell.height; ++y)
+            for (x = 0; x < bell.width; ++x)
+                if (bell.pixels[y * bell.stride + x * 4 + 3]) {
+                    if (y < top) top = y;
+                    if (y > bottom) bottom = y;
+                }
+        CHECK(bottom >= top && bottom - top + 1 <= 18);
+        blit_raster_close(raster);
+    }
     for (i = 8; i <= 64; ++i) {
         int size = i, width = (size + 1) / 2;
         BlitRaster *raster = blit_raster_open(&fallback, argv[2], argv[3], width, size);

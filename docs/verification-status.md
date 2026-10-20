@@ -3,6 +3,15 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-20 candidate567: measured bell optical bound
+
+Production-raster probe reports Modern22px H9x13/pencil11x11/bell20x20 ink,
+the latter inside22x22(two cells). Shared colour artwork now uses fitted em
+instead of cell height; output bell ink17x18, same allocation. New22px
+optical/advance regression fails before and passes after. Initial font suite
+15pass/0skip/0fail. Expanded per-backend bell checks, packaging/deployment
+and operator aesthetic approval pending. Live566 remains native KMS/login.
+
 ## 2026-10-20 deployed566: Modern Nerd repertoire and U+270E pencil
 
 Old Hack fails new raster regression at U+270E8px; upstream Nerd Mono also

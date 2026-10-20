@@ -1,5 +1,20 @@
 # Current state and restart point
 
+## 2026-10-20 candidate567: measured colour bell proportions
+
+Live566 is ready/native KMS, Modern22px, login awaits authentication. No live
+desktop visual approval is inferred. Production-raster metrics at22px show
+H9x13 ink, pencil11x11, bell20x20 in its22x22 two-cell allocation. At19/23px
+the bell similarly fills almost the cell height. This is optical sizing,
+not an observed overflow or proof of the odd-size wallpaper report.
+
+ADR0151 bounds colour artwork to the fitted text em, keeping cell size,
+two-cell advance, text/Nerd glyphs, settings and backend unchanged. New
+22px bell optical-bound regression fails before/passes after. Its resulting
+ink is17x18, allocation still22x22. The read-only source metrics probe is
+tools/probes/font_glyph_metrics.c. Package/deployment and visual approval
+pending; do not confuse source raster measurements with live screenshots.
+
 ## 2026-10-20 deployed566: Modern Hibr Nerd icons and menu pencil
 
 Supervised API install/version verification succeeded on10.54. Active font is

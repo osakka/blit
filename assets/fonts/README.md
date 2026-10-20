@@ -56,6 +56,11 @@ colour; colour emoji remain a separate mechanism. Generate with
 `PYTHONPATH=<fontTools4.60.1> python3 tools/fonts/build-modern-nerd.py SOURCE.ttf OUTPUT.ttf`.
 The generator checks the pinned source hash and never downloads implicitly.
 
+From567, colour artwork is bounded by Modern's fitted text em rather than
+the full cell height (which includes line spacing). Its aspect ratio and
+one/two-cell allocation remain unchanged. This is a shared raster policy,
+not a bell-specific substitution or another font-size setting; see ADR0151.
+
 Protected box/block geometry and missing scalars use the existing PSF
 fallback; those fallback characters remain pixel-art. Wide BMP characters
 retain the separate wide PSF. This is not universal Unicode, script shaping,

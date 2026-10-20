@@ -129,7 +129,7 @@ static int draw_colour(BlitRaster *raster, uint32_t scalar, RasterEntry *entry)
 {
     FT_Bitmap *bitmap;
     FT_Face face = raster->colour;
-    int width, height, x, y, x0, y0;
+    int width, height, limit_height, x, y, x0, y0;
     if (!face || !FT_Get_Char_Index(face, scalar)) return 0;
     if (FT_Load_Char(face, scalar, FT_LOAD_COLOR | FT_LOAD_RENDER)) return -1;
     bitmap = &face->glyph->bitmap;
@@ -137,8 +137,13 @@ static int draw_colour(BlitRaster *raster, uint32_t scalar, RasterEntry *entry)
         !bitmap->width || !bitmap->rows) return -1;
     width = entry->glyph.width;
     height = (int)(bitmap->rows * width / bitmap->width);
-    if (height > entry->glyph.height) {
-        height = entry->glyph.height;
+    /* Cell height includes line spacing. Match the fitted outline em rather
+       than inflating emoji into that spacing. Preserve the original cell
+       allocation/advance and aspect ratio; colour-only contexts retain their
+       existing cell-height bound. All adapters consume this same raster. */
+    limit_height = raster->em > 0 ? raster->em : entry->glyph.height;
+    if (height > limit_height) {
+        height = limit_height;
         width = (int)(bitmap->width * height / bitmap->rows);
     }
     if (width < 1 || height < 1) return -1;

@@ -24,7 +24,7 @@ int main(int argc, char **argv)
     CHECK(blit_font_load_path(&font, argv[1]) == 0);
     for (size = 8; size <= 64; ++size) {
         uint32_t scalars[] = {'A', 'g', 0x2588, 0x2500, 0x1f600, '9', 0x25c6, 0xfe0f, 0x200d,
-            0x270e, 0xf040, 0xf015, 0xf07b, 0xf014, 0xf021, 0xf00c, 0xf071};
+            0x270e, 0xf040, 0xf015, 0xf07b, 0xf014, 0xf021, 0xf00c, 0xf071, 0x1f514};
         unsigned index;
         BlitRaster *raster = blit_raster_open(&font, argv[2], argv[3], (size + 1) / 2, size);
         CHECK(raster);
@@ -36,7 +36,7 @@ int main(int argc, char **argv)
             &output.glyph_atlas_columns, &output.glyph_atlas_width, &output.glyph_atlas_height);
         CHECK(output.glyph_atlas);
         for (index = 0; index < sizeof(scalars) / sizeof(scalars[0]); ++index) {
-            int columns = scalars[index] == 0x1f600 ? 2 : 1;
+            int columns = scalars[index] == 0x1f600 || scalars[index] == 0x1f514 ? 2 : 1;
             int x, y, channel;
             BlitRasterGlyph glyph;
             SDL_Surface *image;
