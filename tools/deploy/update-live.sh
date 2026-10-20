@@ -58,13 +58,13 @@ trap 'rm -rf "$tmpdir"' EXIT HUP INT TERM
 
 curl_auth() {
     if [ "$api_token" != "" ]; then
-        curl --silent --show-error "$@" -H "Authorization: Bearer $api_token"
+        curl --silent --show-error --connect-timeout 3 --max-time 120 "$@" -H "Authorization: Bearer $api_token"
     else
-        curl --silent --show-error "$@"
+        curl --silent --show-error --connect-timeout 3 --max-time 120 "$@"
     fi
 }
 
-status=$(curl_auth --fail "$base_url/v1/control/update/status") || {
+status=$(curl_auth --max-time 8 --fail "$base_url/v1/control/update/status") || {
     echo "update refused: could not read update status from $base_url" >&2
     exit 1
 }
@@ -111,7 +111,7 @@ echo "polling for supervised installation"
 i=0
 while [ "$i" -lt 60 ]; do
     sleep 1
-    if ! status=$(curl_auth --fail "$base_url/v1/control/update/status"); then
+    if ! status=$(curl_auth --max-time 8 --fail "$base_url/v1/control/update/status"); then
         # The supervised service is expected to close the listening socket
         # briefly while dpkg and systemd restart it.  Keep polling instead of
         # reporting a failed deployment during that bounded transition.
@@ -120,7 +120,7 @@ while [ "$i" -lt 60 ]; do
     fi
     if echo "$status" | grep -q '"state":"ready"' &&
        echo "$status" | grep -q '"active":false'; then
-        if live_version=$(curl_auth --fail "$base_url/v1/version"); then
+        if live_version=$(curl_auth --max-time 8 --fail "$base_url/v1/version"); then
             echo "$live_version" | grep -q "\"server_version\":\"$version\"" && {
                 echo "update verified: Blit $version"
                 exit 0

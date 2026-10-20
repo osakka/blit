@@ -1,5 +1,23 @@
 # Current state and restart point
 
+## 2026-10-20 rollout582 — package verified, installation next
+
+Host192.168.10.54 reports572, healthy native DRM/KMS, Spleen16px, one1920x2160
+output split1x2 with primary below/join above. Runtime Hibr0.99.265/ABI16
+matches the adapter ABI16 (build provenance remains0.99.225). A short-lived,
+read-only external diagnostic PTY confirms required FreeType/HarfBuzz minimum
+versions; it was deleted, with no additional Hibr desktop spawned.
+
+Built582 from0d6cc98; package artifact/reproducibility gate passes. Generated
+identity: releases/0.1.582.yaml. Package SHA
+01e4346c5f8b73344f68937ad89c4223b1f2aec22a481c6e83afa466f4eaef7f.
+Retained572 package matches its recorded SHA. Snapshot and logs are in
+/tmp/blit-fontcraft.IHU9AK/rollout-*.json and rollout-*.log (not Git).
+No installation yet at this checkpoint. Deploy through the authenticated API;
+keep saved renderer/topology/font/login intent unchanged. The API updater now
+has bounded connection/request waits. API rollback requires a responding
+management plane; this is not independent automatic package rollback.
+
 ## 2026-10-20 candidate582 — whole-cell resize and transition oracle
 
 ADR0165 fixes a reproduced shared resize defect: shrinking through a wide
