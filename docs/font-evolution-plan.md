@@ -6,10 +6,11 @@ Tracking: [Blit#107](https://git.home.arpa/itdlabs/blit/issues/107).
 
 Live582 review: operator accepts the baseline desktop/input and Modern16
 and Retro16 appearance on native KMS, two outputs/three panes. Both16px
-activations retain8x16 cells and all pane geometry. Retro17 is now visible
-for odd-size review; its9x17 whole/centered cell grids match unchanged physical
-regions, but human review is pending. This does not replace remaining
-repertoire/protocol/size tests.
+activations retain8x16 cells and all pane geometry. Retro17 has correct text/
+grid but loses wallpaper;19 also loses retained images while16/18/20 have
+them. Blit114 tracks the unassigned size/protocol boundary. Live font restored
+to Retro16, wallpaper returned. Odd-size acceptance is not complete; do not
+round sizes or blame Hibr without a demonstrated boundary.
 
 Candidate582 adds revision-matched real PTY transition captures and fixes a
 demonstrated wide-owner clipping defect during resize, including the saved

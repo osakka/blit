@@ -27,8 +27,40 @@ the mutation was not retried. An authoritative subsequent GET verifies
 Retro17,9x17 cells/native antialiasing, native KMS ready, same physical pane
 regions and exactly one primary. Every pane's whole-cell counts and centered
 integer remainders match its physical region. Observation saved as
-font-live-retro17-observation.json.17px visual/wallpaper/input acceptance is
-pending; no screenshot or physical correctness is inferred from API geometry.
+font-live-retro17-observation.json. Operator then reports wallpaper absent on
+all panes despite correct text/grid.17px wallpaper acceptance fails; correct
+API geometry is not proof of correct desktop output.
+
+## 2026-10-20 wallpaper parity114 — fault owner unassigned
+
+Same live582 native KMS, Retro, two outputs/three clients.17px retained-image
+counts are0/0/0; pre-change16px counts were1/1/1. Trace includes explicit Kitty
+a=d,d=I image deletions followed by capability probes. No rejected payloads.
+Restoring16px returns1/1/1; operator confirms wallpaper back on all panes.
+
+A controlled six-second observation at each18/19/20px gives:
+
+| Size | Cell pixels | Final image counts, sessions7/8/9 | Rejections |
+| --- | --- | --- | --- |
+| 18 | 9x18 | 1/1/1 | 0 |
+| 19 | 10x19 | 0/0/0 | 0 |
+| 20 | 10x20 | 1/1/1 | 0 |
+
+Returned to16px afterward; final GET confirms1/1/1 again. This separates
+height parity from odd width in the tested cases; it is not proof for every
+odd/even size. Explicit deletes and absent retained objects point before
+final composition, but do not establish Hibr fault: Blit size/query replies
+and upstream negotiation remain possible causes. Read-only source inspection
+uses Hibr v0.99.270 (local main271 is not the running-version reference).
+No Hibr edits, restart, renderer switch or manual joins. Blit114 owns the
+investigation until a failing boundary is demonstrated. No even-only font
+restriction or silent rounding workaround was introduced.
+
+Evidence: /tmp/blit-fontcraft.IHU9AK/wallpaper-parity.log, wallpaper-17.json,
+wallpaper-{17,18,19,20}-trace.json, wallpaper-{18,19,20}-settled.json and
+wallpaper-restored16-final.json. A native-KMS17px BMP was captured as
+wallpaper-17-display93.bmp; it has not been visually reviewed here (the image
+viewer rejects BMP). Do not claim screenshot inspection from that capture.
 
 ## 2026-10-20 rollout582: authenticated installation on192.168.10.54
 

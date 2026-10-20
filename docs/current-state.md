@@ -1,6 +1,6 @@
 # Current state and restart point
 
-## 2026-10-20 live font review — both16 accepted; Retro17 visible
+## 2026-10-20 live font review — both16 accepted; odd-height wallpaper114
 
 Operator confirms the582 desktop, mouse and keyboard work correctly across
 the current setup. Baseline Spleen16 rollout acceptance is recorded. Modern
@@ -10,23 +10,33 @@ unchanged. Operator reports that all look perfect in that Modern16 review.
 This is representative desktop appearance/input acceptance, not every glyph
 or every terminal/graphics protocol combination.
 
-Operator also reports Retro16 is perfect. Current checkpoint: Retro17 is
-selected through the same API,9x17 cells/native antialiasing, native KMS ready
-and physical pane regions unchanged, exactly one primary. Readback verifies
-whole-cell counts and centered remainders in every pane. Leave it visible
-for the operator's odd-size review;17px acceptance is pending.
+Operator also reports Retro16 is perfect. At17px, text/grid looked correct
+but wallpaper disappeared on all panes;17px is NOT fully accepted. Controlled
+six-second observations show wallpaper image counts1/1/1 at16/18/20 and0/0/0
+at17/19, with zero payload rejections.18px shares9px cell width with17px and
+works, isolating a tested height-parity correlation rather than odd width.
+Trace shows explicit Kitty image deletions and subsequent capability probes
+at failing sizes, not an existing retained image merely drawn black.
+
+Current live font restored to Retro16; image counts return1/1/1 and operator
+confirms wallpaper is back. Track first failing boundary in Blit114; fault
+ownership remains unassigned (Hibr behavior may depend on Blit replies).
+Next: isolate PTY size/protocol negotiation and minimal pixel producer before
+claiming a Hibr fault. Hibr source was read only at matching tag v0.99.270.
+Evidence: /tmp/blit-fontcraft.IHU9AK/wallpaper-*.json, wallpaper-parity.log and
+wallpaper-17-display93.bmp. No restart or renderer/topology switch occurred.
 Font API changes use the canonical persisted settings, not
 another screen-scale control. Baseline and profile responses/observations:
 /tmp/blit-fontcraft.IHU9AK/font-live-*.json. No Hibr edits, SSH, renderer switch,
 manual joins or service restart for these font comparisons.
 
-## 2026-10-20 rollout582 — installed; operator acceptance pending
+## 2026-10-20 rollout582 — installation record
 
 Latest follow-up: authenticated native desktop is now ready. Observation shows
 exactly one primary on DP lower pane and two joins: DP upper pane and newly
 present HDMI-A-1. One native owner, three clients, no manual joins created by
 this rollout. This supersedes the waiting-for-login/one-output checkpoint
-below. Physical visual/input confirmation and new-font testing remain pending.
+below. Subsequent operator/font reviews are recorded above.
 Evidence: rollout-authenticated.json in the same scratch directory.
 
 Authenticated API update on192.168.10.54 completed; `/v1/version` reports582,

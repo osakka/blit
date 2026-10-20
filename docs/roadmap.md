@@ -41,6 +41,9 @@ thereby certified. Font tickets remain open for the remaining acceptance.
 Candidate582 fixes whole-owner resize clipping and adds real PTY transition
 captures for nine sequence families, both fonts,15/16px and software/GLES.
 Full-corpus end-to-end/graphics placement and live review remain open.
+Live582 review accepts both16px fonts but reveals wallpaper loss at17/19px
+versus recovery at16/18/20px. Investigation114 is active under the font work;
+root ownership is not assigned. Keep the working Retro16 selection meanwhile.
 
 Size remains the existing canonical 8..64px **cell-height** setting; legacy
 scale is an alternative API sizing policy, not separate browser/desktop zoom.
