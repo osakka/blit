@@ -13,6 +13,10 @@ schema = YAML.load_file(schema_path)
 raise 'schema is not OpenAPI 3.1' unless schema.fetch('openapi') == '3.1.0'
 
 paths = schema.fetch('paths')
+keyboard=schema.dig('components','schemas','TerminalCapabilities','properties','keyboard')
+raise 'Kitty keyboard capability contract drift' unless keyboard &&
+  keyboard.dig('properties','supported_flags','const')==11 &&
+  keyboard.dig('properties','stack_depth','maximum')==16
 pixel_begin=schema.dig('components','schemas','StreamPixelFrameBegin')
 %w[placement_width placement_height].each do |key|
   prop=pixel_begin.fetch('properties').fetch(key)

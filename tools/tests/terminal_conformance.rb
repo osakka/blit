@@ -1205,9 +1205,9 @@ assert_equal('', screen_text(snapshot).strip,
              'keyboard-flag sequences leave no text behind')
 puts 'PASS kitty-keyboard-flags-do-not-move-the-cursor'
 
-# The query answers what is in effect, which is nothing -- before and after a
-# push. Reporting back a flag that is not honoured would be the invisible
-# failure ADR 0059 rejects.
+# The query reports current supported enhancements; unsupported bits are
+# masked rather than advertised. 5 requests disambiguation plus unsupported
+# alternate-key reporting, so only bit1 is active.
 snapshot = run_case(base, 'kitty-keyboard-query',
                     "stty -icanon -echo min 0 time 5; printf '\\033[?u'; " \
                     'dd if=/dev/tty bs=1 count=5 2>/dev/null | od -An -tx1 | tr -d \' \\n\'',
@@ -1218,7 +1218,7 @@ snapshot = run_case(base, 'kitty-keyboard-query-after-push',
                     "stty -icanon -echo min 0 time 5; printf '\\033[>5u'; printf '\\033[?u'; " \
                     'dd if=/dev/tty bs=1 count=5 2>/dev/null | od -An -tx1 | tr -d \' \\n\'',
                     width: 80)
-assert_equal('1b5b3f3075', row_text(snapshot),
+assert_equal('1b5b3f3175', row_text(snapshot),
              'CSI ? u reports what is honoured, not what was requested')
 puts 'PASS kitty-keyboard-query'
 

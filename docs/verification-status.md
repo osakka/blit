@@ -1,5 +1,20 @@
 # Verification status
 
+## 2026-10-20 candidate585 /116 negotiated keyboard events
+
+Raw-child PTY exact-byte gate passes32 cases: actual query/push/pop/set,
+unsupported-bit masking, main/alternate independence, bounded stack, RIS,
+lone left/right Super, chords, repeat/releases, lock bits, shifted/control
+identity, keypad navigation/numeric distinction, per-keyboard isolation,
+Meta remapping, disabled keys, and legacy printable-modifier silence. The
+same gate is red on584 (query remains0 after push). WebSocket gate confirms
+Super edges and existing UTF-8/AltGr text. Terminal suite4/0/0 (including the
+new keyboard gate) and existing keyboard-settings gate pass; OpenAPI gate
+passes the supported-mask/stack observation contract. TCC candidate built.
+No physical Super or Hibr326 hold/console end-to-end acceptance; no live
+deployment. Only flags1/2/8 are supported, not complete Kitty keyboard
+protocol coverage. Live584 is preserved. ADR0169 records scope and dependency.
+
 ## 2026-10-20:584 target-host provider verification
 
 Package SHA2565df55078bc6eeba2ed6c3da3e1b75d75ddad2077a69258a4ba654527a10d2e7b

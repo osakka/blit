@@ -1065,6 +1065,30 @@ before a disconnect.
 
 ## Input
 
+### Negotiated keyboard reporting (candidate0.1.585)
+
+`GET /v1/terminal-sessions/{id}` exposes
+`terminal_capabilities.keyboard`: `protocol: kitty`, `supported_flags:11`,
+current `active_flags` and saved `stack_depth` (0..16). These are observations,
+not a second API setting: the program owns negotiation through its PTY.
+`CSI ? u` queries; `CSI > flags u` pushes; `CSI < count u` pops;
+`CSI = flags ; mode u` replaces/sets/clears bits with modes1/2/3.
+Main/alternate buffers and sessions keep independent state. Unsupported
+flags4/16 are masked out; only1/2/8 are implemented.
+
+API key injection already uses the physical keyboard dispatch. For example,
+send `{"kind":"key","code":125,"value":1}` then value0 for left Super;
+right Super is126. A program requesting all-key reporting receives its
+canonical key event, not literal text. Super chords require press-Super,
+press-key,release-key,release-Super. Repeat/release encoding additionally
+requires flag2. Without negotiated all-key reporting, a lone modifier remains
+silent. Input stream events include logical `super` after remapping; the
+existing input-device modifier role `meta` means the evdev Super role here.
+An external browser that cannot capture an OS-reserved key may offer this
+explicit action; the server cannot intercept that client's operating system.
+Do not confuse terminal raw-byte support with Hibr326's pending console/hold
+integration. See ADR0169 for supported scope and acceptance limits.
+
 Physical keyboards, pointers, and gamepads are discovered through
 `/v1/input/devices`. Bind a source to a session with
 `PUT /v1/input/routes/{route_id}`. `POST /v1/input/inject` is deliberately

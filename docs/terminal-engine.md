@@ -56,8 +56,10 @@ shell conformance path is stable.
    including CAN/SUB sequence cancellation. `CSI > u`, `CSI < u`,
    `CSI = ... u` and `CSI ? u` are the Kitty keyboard protocol's flag
    sequences, not cursor save/restore: they move no cursor, and `CSI ? u`
-   answers `CSI ? 0 u` because no keyboard enhancement flag is honoured
-   ([ADR 0059](adr/0059-kitty-keyboard-flags-own-their-sequences.md)). SGR conceal (`8`/`28`) is retained in the canonical cell
+   reports active flags. Candidate585 implements flags1/2/8 with separate
+   bounded main/alternate stacks and exact evdev key encoding; flags4/16 are
+   not advertised ([ADR0169](adr/0169-kitty-keyboard-super-events.md)).
+   SGR conceal (`8`/`28`) is retained in the canonical cell
    style and suppressed by both renderers while preserving the cell background.
    Synchronized output (`CSI ? 2026 h/l`) gates presentation of that session's
    output until the application releases the update batch; unrelated displays

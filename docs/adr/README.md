@@ -186,6 +186,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0166 — Independent pixel-frame placement](0166-independent-pixel-frame-placement.md)
 - [0167 — User-session service boundary](0167-user-session-service-boundary.md)
 - [0168 — Native child provider isolation](0168-native-child-provider-isolation.md)
+- [0169 — Kitty keyboard Super events](0169-kitty-keyboard-super-events.md)
 
 ## Adding an ADR
 

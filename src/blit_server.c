@@ -929,6 +929,11 @@ typedef struct {
     int terminal_dec_cursor_saved_y;
     int terminal_application_cursor;
     int terminal_application_keypad;
+    /* Kitty keyboard flags: disambiguation, event types, all-key reporting.
+       Main/alternate screens have independent bounded prior-state stacks. */
+    unsigned terminal_keyboard_flags[2];
+    unsigned terminal_keyboard_stack[2][16];
+    unsigned terminal_keyboard_depth[2];
     int terminal_wrap_pending;
     int terminal_origin_mode;
     int terminal_autowrap;
@@ -1611,7 +1616,7 @@ static int run_capture_command(const char *command, const char *argument,
 static int probe_hibr_version(const char *command, char *version,
                               size_t capacity);
 static int session_surface_is_owner_authored(const BlitSession *session);
-static int send_evdev_key(BlitRuntime *runtime, unsigned short code);
+static int send_evdev_key(BlitRuntime *runtime, unsigned short code, int value);
 static void evdev_sync_modifiers(BlitRuntime *runtime);
 static void dispatch_evdev_key_event(BlitRuntime *runtime,
                                      const struct input_event *event,
@@ -11826,15 +11831,32 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
             terminal_number(&cursor, &ignored);
         }
     }
-    /* ADR 0059: these are the Kitty keyboard protocol's flag sequences, not
-       cursor save/restore. Blit honours no keyboard enhancement flag, so a
-       push, a pop and a set are accepted and consumed without storing
-       anything -- a stack nothing can act on would report a flag back to the
-       client and then not honour it, which is a worse failure than the cursor
-       jump this replaces because it is invisible. Cursor save/restore keeps
-       SCOSC/SCORC and DECSC/DECRC. */
-    if ((prefix == '>' || prefix == '<' || prefix == '=') && command == 'u')
+    if ((prefix == '>' || prefix == '<' || prefix == '=') &&
+        intermediate == 0 && command == 'u') {
+        unsigned screen = session->terminal_alternate ? 1 : 0;
+        unsigned *flags = &session->terminal_keyboard_flags[screen];
+        unsigned *depth = &session->terminal_keyboard_depth[screen];
+        unsigned *stack = session->terminal_keyboard_stack[screen];
+        unsigned requested = (unsigned)first & 11u;
+        if (prefix == '>') {
+            if (*depth == 16) {
+                memmove(stack, stack + 1, 15 * sizeof(*stack));
+                --*depth;
+            }
+            stack[(*depth)++] = *flags;
+            *flags = requested;
+        } else if (prefix == '<') {
+            unsigned count = !has_first || first == 0 ? 1u : (unsigned)first;
+            if (count > *depth) { *depth = 0; *flags = 0; }
+            else { *depth -= count; *flags = stack[*depth]; }
+        } else {
+            int mode = !has_second || second == 0 ? 1 : second;
+            if (mode == 1) *flags = requested;
+            else if (mode == 2) *flags |= requested;
+            else if (mode == 3) *flags &= ~requested;
+        }
         return;
+    }
     if (prefix == '>' && command == 'c' && (!has_first || first == 0)) {
         terminal_write_reply(session, "\033[>1;10;0c");
         return;
@@ -12029,18 +12051,13 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         return;
     }
     if (private_mode && command == 'u') {
-        /* ADR 0059: the Kitty keyboard protocol's query. Report what is in
-           effect, which is nothing: answering zero is the protocol's feedback
-           loop working, and it lets a client fall back at once instead of
-           waiting for a reply that never came.
-
-           Only the parameterless form is the query. The reply is CSI ? 0 u,
-           which carries a parameter, and that distinction is load-bearing
-           rather than pedantic: with the tty echoing, a reply written to the
-           PTY comes straight back as input, so answering a parameterised
-           CSI ? Ps u would answer the echo of its own answer, forever. */
-        if (!has_first)
-            terminal_write_reply(session, "\033[?0u");
+        /* Never answer a parameterised reply echoed by the PTY. */
+        if (!has_first && intermediate == 0) {
+            char reply[32];
+            snprintf(reply, sizeof(reply), "\033[?%uu",
+                     session->terminal_keyboard_flags[session->terminal_alternate ? 1 : 0]);
+            terminal_write_reply(session, reply);
+        }
         return;
     }
     if (!private_mode && command == 'p' && has_first &&
@@ -12846,6 +12863,8 @@ static int terminal_consume_chunk(BlitRuntime *runtime, BlitSession *session,
                 terminal_index(session, surface);
                 session->terminal_escape = 0;
             } else if (byte == 'c') {
+                memset(session->terminal_keyboard_flags, 0, sizeof(session->terminal_keyboard_flags));
+                memset(session->terminal_keyboard_depth, 0, sizeof(session->terminal_keyboard_depth));
                 if (session->terminal_alternate)
                     terminal_leave_alternate(session, surface);
                 terminal_clear_active_screen(surface);
@@ -14209,9 +14228,13 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
         body + used, capacity - used,
         ",\"terminal_capabilities\":{\"term\":\"%s\","
         "\"cell_pixels\":{\"width\":%d,\"height\":%d},"
-        "\"graphics\":[\"kitty\",\"sixel\"]}",
+        "\"graphics\":[\"kitty\",\"sixel\"],"
+        "\"keyboard\":{\"protocol\":\"kitty\",\"supported_flags\":11,"
+        "\"active_flags\":%u,\"stack_depth\":%u}}",
         escaped_terminal_term, session->terminal_cell_width,
-        session->terminal_cell_height);
+        session->terminal_cell_height,
+        session->terminal_keyboard_flags[session->terminal_alternate ? 1 : 0],
+        session->terminal_keyboard_depth[session->terminal_alternate ? 1 : 0]);
     used += (size_t)snprintf(
         body + used, capacity - used,
         ",\"terminal_defaults\":{"
@@ -27614,9 +27637,152 @@ static int evdev_key_character(const BlitInputDevice *device,
     return 1;
 }
 
+static int evdev_super_held(const BlitInputDevice *keyboard)
+{
+    return (input_device_modifier_role(keyboard, KEY_LEFTMETA) == BLIT_MODIFIER_UNMAPPED &&
+            evdev_key_is_held(keyboard, KEY_LEFTMETA)) ||
+           (input_device_modifier_role(keyboard, KEY_RIGHTMETA) == BLIT_MODIFIER_UNMAPPED &&
+            evdev_key_is_held(keyboard, KEY_RIGHTMETA)) ||
+           evdev_role_is_held(keyboard, BLIT_MODIFIER_META);
+}
+
+/* -1: preserve legacy encoding; 0: no bytes for this event; positive: length.
+   Only advertise enhancements this physical-key path actually implements. */
+static int encode_kitty_key(const BlitSession *session,
+                             const BlitInputDevice *keyboard,
+                             unsigned short code, int value,
+                             char *out, size_t capacity)
+{
+    unsigned flags = session->terminal_keyboard_flags[session->terminal_alternate ? 1 : 0];
+    unsigned key = 0, modifiers;
+    int role = input_device_modifier_role(keyboard, code);
+    int modifier_key = 0, number = 0, i;
+    char final = 'u';
+    size_t consumed;
+    uint32_t scalar;
+    int super = evdev_super_held(keyboard);
+    if (!flags) return value ? -1 : 0;
+    if (!value && !(flags & 2)) return 0;
+    if (role != BLIT_MODIFIER_UNMAPPED) {
+        switch (role) {
+        case BLIT_MODIFIER_NONE: return 0;
+        case BLIT_MODIFIER_SHIFT: key = 57441; break;
+        case BLIT_MODIFIER_CTRL: key = 57442; break;
+        case BLIT_MODIFIER_ALT: key = 57443; break;
+        case BLIT_MODIFIER_META: key = 57444; break;
+        case BLIT_MODIFIER_ALTGR: key = 57453; break;
+        case BLIT_MODIFIER_CAPS_LOCK: key = 57358; break;
+        case BLIT_MODIFIER_NUM_LOCK: key = 57360; break;
+        }
+        modifier_key = 1;
+    } else switch (code) {
+    case KEY_LEFTSHIFT: key = 57441; modifier_key = 1; break;
+    case KEY_RIGHTSHIFT: key = 57447; modifier_key = 1; break;
+    case KEY_LEFTCTRL: key = 57442; modifier_key = 1; break;
+    case KEY_RIGHTCTRL: key = 57448; modifier_key = 1; break;
+    case KEY_LEFTALT: key = 57443; modifier_key = 1; break;
+    case KEY_RIGHTALT: key = 57453; modifier_key = 1; break;
+    case KEY_LEFTMETA: key = 57444; modifier_key = 1; break;
+    case KEY_RIGHTMETA: key = 57450; modifier_key = 1; break;
+    case KEY_CAPSLOCK: key = 57358; modifier_key = 1; break;
+    case KEY_NUMLOCK: key = 57360; modifier_key = 1; break;
+    case KEY_SCROLLLOCK: key = 57359; break;
+    case KEY_SYSRQ: key = 57361; break;
+    case KEY_PAUSE: key = 57362; break;
+    case KEY_MENU: case KEY_COMPOSE: key = 57363; break;
+    case KEY_ESC: key = 27; break;
+    case KEY_ENTER: key = 13; break;
+    case KEY_TAB: key = 9; break;
+    case KEY_BACKSPACE: key = 127; break;
+    case KEY_LEFT: number = 1; final = 'D'; break;
+    case KEY_RIGHT: number = 1; final = 'C'; break;
+    case KEY_UP: number = 1; final = 'A'; break;
+    case KEY_DOWN: number = 1; final = 'B'; break;
+    case KEY_HOME: number = 1; final = 'H'; break;
+    case KEY_END: number = 1; final = 'F'; break;
+    case KEY_INSERT: number = 2; final = '~'; break;
+    case KEY_DELETE: number = 3; final = '~'; break;
+    case KEY_PAGEUP: number = 5; final = '~'; break;
+    case KEY_PAGEDOWN: number = 6; final = '~'; break;
+    case KEY_F1: number = 1; final = 'P'; break;
+    case KEY_F2: number = 1; final = 'Q'; break;
+    case KEY_F3: number = 13; final = '~'; break;
+    case KEY_F4: number = 1; final = 'S'; break;
+    case KEY_F5: number = 15; final = '~'; break;
+    case KEY_F6: number = 17; final = '~'; break;
+    case KEY_F7: number = 18; final = '~'; break;
+    case KEY_F8: number = 19; final = '~'; break;
+    case KEY_F9: number = 20; final = '~'; break;
+    case KEY_F10: number = 21; final = '~'; break;
+    case KEY_F11: number = 23; final = '~'; break;
+    case KEY_F12: number = 24; final = '~'; break;
+    case KEY_KP0: key = 57399; break;
+    case KEY_KP1: key = 57400; break;
+    case KEY_KP2: key = 57401; break;
+    case KEY_KP3: key = 57402; break;
+    case KEY_KP4: key = 57403; break;
+    case KEY_KP5: key = 57404; break;
+    case KEY_KP6: key = 57405; break;
+    case KEY_KP7: key = 57406; break;
+    case KEY_KP8: key = 57407; break;
+    case KEY_KP9: key = 57408; break;
+    case KEY_KPDOT: key = 57409; break;
+    case KEY_KPSLASH: key = 57410; break;
+    case KEY_KPASTERISK: key = 57411; break;
+    case KEY_KPMINUS: key = 57412; break;
+    case KEY_KPPLUS: key = 57413; break;
+    case KEY_KPENTER: key = 57414; break;
+    case KEY_KPEQUAL: key = 57415; break;
+    default:
+        if (code >= KEY_F13 && code <= KEY_F24) key = 57376 + code - KEY_F13;
+        else {
+            const char *plain = NULL;
+            for (i = 0; i < keyboard->keymap_count; ++i)
+                if (keyboard->keymap_codes[i] == code) { plain = keyboard->keymap_levels[i][0]; break; }
+            if (plain && utf8_decode((const unsigned char *)plain, strlen(plain), &consumed, &scalar)) key = scalar;
+            else if (code == KEY_SPACE) key = 32;
+            else if (code >= BLIT_KEY_TABLE_FIRST && code <= BLIT_KEY_TABLE_LAST)
+                key = (unsigned char)evdev_us_unshifted[code - BLIT_KEY_TABLE_FIRST];
+        }
+        break;
+    }
+    if (!keyboard->num_lock) {
+        switch (code) {
+        case KEY_KP0: key = 57425; break;
+        case KEY_KP1: key = 57424; break;
+        case KEY_KP2: key = 57420; break;
+        case KEY_KP3: key = 57422; break;
+        case KEY_KP4: key = 57417; break;
+        case KEY_KP5: key = 0; number = 1; final = 'E'; break;
+        case KEY_KP6: key = 57418; break;
+        case KEY_KP7: key = 57423; break;
+        case KEY_KP8: key = 57419; break;
+        case KEY_KP9: key = 57421; break;
+        case KEY_KPDOT: key = 57426; break;
+        default: break;
+        }
+    }
+    if (modifier_key && !(flags & 8)) return 0;
+    /* Preserve the three recovery keys without all-key reporting. */
+    if (!(flags & 8) && (code == KEY_ENTER || code == KEY_TAB || code == KEY_BACKSPACE))
+        return value ? -1 : 0;
+    if (key == 0 && number == 0) return 0;
+    /* Event-type reporting does not turn plain text into CSI on its own. */
+    if (!(flags & 8) && key >= 32 && key < 57344 &&
+        !keyboard->ctrl && !keyboard->alt && !super) return value ? -1 : 0;
+    if (!(flags & (1|8)) && !super && !((flags & 2) && value != 1)) return value ? -1 : 0;
+    modifiers = 1u + (keyboard->shift ? 1u : 0u) +
+        (keyboard->alt ? 2u : 0u) + (keyboard->ctrl ? 4u : 0u) + (super ? 8u : 0u);
+    if (flags & 8) modifiers += (keyboard->caps_lock ? 64u : 0u) + (keyboard->num_lock ? 128u : 0u);
+    if ((flags & 2) && value != 1)
+        return snprintf(out, capacity, "\033[%u;%u:%d%c", key ? key : (unsigned)number,
+                        modifiers, value == 2 ? 2 : 3, final);
+    return snprintf(out, capacity, "\033[%u;%u%c", key ? key : (unsigned)number, modifiers, final);
+}
+
 /* Returns 1 when the key was written to a session PTY and 0 when it was
    not, so the caller can count delivered against undelivered presses. */
-static int send_evdev_key(BlitRuntime *runtime, unsigned short code)
+static int send_evdev_key(BlitRuntime *runtime, unsigned short code, int value)
 {
     BlitSession *session = keyboard_target(runtime);
     BlitInputDevice *keyboard = keyboard_state(runtime);
@@ -27641,6 +27807,14 @@ static int send_evdev_key(BlitRuntime *runtime, unsigned short code)
        with terminal history. The caller broadcasts the stream event after
        this returns, so the key is not lost. */
     if (session_surface_is_owner_authored(session)) return 0;
+    length = encode_kitty_key(session, keyboard, code, value, sequence, sizeof(sequence));
+    if (length >= 0) {
+        if (!length || length >= (int)sizeof(sequence)) return 0;
+        terminal_scrollback_show_live(find_surface_id(runtime, session->id));
+        return write_input_bytes(session, sequence, (size_t)length,
+                                 &runtime->diagnostic_input_keys_dropped);
+    }
+    if (!value) return 0;
     character_length = evdev_key_character(keyboard, code, character,
                                            sizeof(character));
     if (keyboard->ctrl && evdev_control_byte(code, &control_byte)) {
@@ -27947,14 +28121,14 @@ static void dispatch_evdev_key_event(BlitRuntime *runtime,
     if (event->value != 0) {
         char detail[160];
         snprintf(detail, sizeof(detail),
-                 "code=%u value=%d shift=%d ctrl=%d alt=%d device=%s",
+                 "code=%u value=%d shift=%d ctrl=%d alt=%d super=%d device=%s",
                  (unsigned int)event->code, event->value,
-                 keyboard->shift, keyboard->ctrl, keyboard->alt,
+                 keyboard->shift, keyboard->ctrl, keyboard->alt, evdev_super_held(keyboard),
                  device_id != NULL ? device_id : "evdev-keyboard");
         diagnostic_trace(runtime, "keyboard_key", detail);
         if (getenv("BLIT_TRACE_KEYS") != NULL)
             fprintf(stderr, "blit: key %s\n", detail);
-        /* A modifier press is not a key for counting purposes: it produces no
+        /* A legacy modifier press is not a key for counting purposes: it produces no
            bytes, so calling it undelivered made the counter that distinguishes
            a dead input path from an owned surface (ADR 0057) tick on every
            Shift press of an ordinary terminal. */
@@ -27964,10 +28138,24 @@ static void dispatch_evdev_key_event(BlitRuntime *runtime,
                surface takes its input from the stream instead (ADR 0057), so
                undelivered is the expected state for a desktop and a fault for
                an ordinary terminal. */
-            if (send_evdev_key(runtime, event->code))
+            if (send_evdev_key(runtime, event->code, event->value))
                 ++runtime->diagnostic_evdev_keyboard_keys_delivered;
             else
                 ++runtime->diagnostic_evdev_keyboard_keys_undelivered;
+        }
+    }
+    if (event->value == 0)
+        send_evdev_key(runtime, event->code, event->value);
+    else if (modifier_only) {
+        /* Negotiated all-key mode is the exception: a logical modifier now
+           produces bytes. Never pass a remapped printable modifier to the
+           legacy text encoder. */
+        BlitSession *target = keyboard_target(runtime);
+        if (target &&
+            (target->terminal_keyboard_flags[target->terminal_alternate ? 1 : 0] & 8) &&
+            send_evdev_key(runtime, event->code, event->value)) {
+            ++runtime->diagnostic_evdev_keyboard_key_presses;
+            ++runtime->diagnostic_evdev_keyboard_keys_delivered;
         }
     }
     {
@@ -27990,7 +28178,7 @@ static void dispatch_evdev_key_event(BlitRuntime *runtime,
                  "{\"type\":\"input\",\"session_id\":\"session-%llu\","
                  "\"device_id\":\"%s\",\"event\":{"
                  "\"kind\":\"key\",\"time_us\":%llu,\"code\":%u,\"pressed\":%s,"
-                 "\"repeat\":%s,\"shift\":%s,\"ctrl\":%s,\"alt\":%s%s}}",
+                 "\"repeat\":%s,\"shift\":%s,\"ctrl\":%s,\"alt\":%s,\"super\":%s%s}}",
                  target != NULL ? target->id : 0ULL,
                  device_id != NULL ? device_id : "evdev-keyboard",
                  (unsigned long long)monotonic_us(),
@@ -27998,7 +28186,8 @@ static void dispatch_evdev_key_event(BlitRuntime *runtime,
                  event->value == 2 ? "true" : "false",
                  keyboard->shift ? "true" : "false",
                  keyboard->ctrl ? "true" : "false",
-                 keyboard->alt ? "true" : "false", text_field);
+                 keyboard->alt ? "true" : "false",
+                 evdev_super_held(keyboard) ? "true" : "false", text_field);
         broadcast_stream(runtime, input_event, BLIT_STREAM_INPUT);
     }
 }

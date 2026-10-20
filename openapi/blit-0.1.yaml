@@ -4187,8 +4187,17 @@ components:
       additionalProperties: false
     TerminalCapabilities:
       type: object
-      required: [term, cell_pixels, graphics]
+      required: [term, cell_pixels, graphics, keyboard]
       properties:
+        keyboard:
+          type: object
+          required: [protocol, supported_flags, active_flags, stack_depth]
+          properties:
+            protocol: {type: string, const: kitty}
+            supported_flags: {type: integer, const: 11}
+            active_flags: {type: integer, enum: [0, 1, 2, 3, 8, 9, 10, 11]}
+            stack_depth: {type: integer, minimum: 0, maximum: 16}
+          additionalProperties: false
         term:
           type: string
           description: >-
@@ -4612,6 +4621,9 @@ components:
             shift: {type: boolean}
             ctrl: {type: boolean}
             alt: {type: boolean}
+            super:
+              type: boolean
+              description: Logical Super modifier on the originating keyboard, after remapping.
             text:
               type: string
               maxLength: 8

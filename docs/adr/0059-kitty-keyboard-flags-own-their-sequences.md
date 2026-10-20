@@ -1,10 +1,14 @@
 # ADR 0059: `CSI > u`, `CSI < u` and `CSI ? u` belong to the Kitty keyboard protocol
 
-- Status: accepted
+- Status: cursor isolation accepted; zero-enhancement policy superseded by ADR0169
 - Date: 2026-10-10
 - Scope: terminal sequence semantics, advertised terminal identity
 
 ## Context
+
+Current implementation: ADR0169 adds negotiated flags1/2/8 and real key
+encoding. The zero-flag discussion below records the historical decision,
+not the current candidate's supported capabilities.
 
 `POST /v1/terminal-sessions` returns `"terminal_capabilities": {"term":
 "xterm-kitty", ...}`. A client that believes that performs the Kitty keyboard

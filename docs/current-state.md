@@ -1,5 +1,24 @@
 # Current state and restart point
 
+## 2026-10-20:116 active, candidate585 negotiated keyboard support
+
+584 live desktop left unchanged.116 requests lone Super/chords. Candidate585
+implements Kitty query/set/push/pop, independent bounded main/alternate stacks,
+flags1/2/8 only (supported mask11;4/16 explicitly unimplemented), real
+press/repeat/release encoding via existing evdev/API dispatch, per-keyboard
+Super/remaps, capability readback and input-stream super. ADR0169 supersedes
+ADR0059's zero-enhancement policy. Raw-PTY exact-byte regression is red on584
+and green for the tested585 scenarios; normal terminal suite3/0/0 and existing
+keyboard settings/remap tests pass. Expanded32-case fixture/remap and WebSocket
+Super-edge checks pass, including a legacy printable-remap regression guarding
+against routing disabled/remapped letters through the old text encoder.
+Terminal suite4/0/0 includes the new gate. Package verification follows.
+No Hibr changes or live deployment.
+Hibr326 must negotiate/decode/relay through hold; do not claim desktop Start
+menu works from terminal tests. No browser frontend exists here, and OS-reserved
+Meta cannot be guaranteed by the server; existing API injection permits an
+explicit Send Super client control.116 stays open for integration acceptance.
+
 ## 2026-10-20:584 deployed,321 verified;320 upstream fix pending
 
 Package584 from9c18b25 passes checksum/provenance, byte-identical rebuild and

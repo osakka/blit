@@ -157,7 +157,14 @@ Dir.mktmpdir('blit-stream-text') do |input_root|
     inject(device, 100, 0)
     next_key(stream, 100, false)
 
+    inject(device, 125, 1)
+    super_down = next_key(stream, 125, true)
+    inject(device, 125, 0)
+    super_up = next_key(stream, 125, false)
+
     failures = []
+    failures << 'Super stream edges lack resolved modifier state' unless
+      super_down['super'] == true && super_up['super'] == false
     failures << "plain text=#{plain['text'].inspect}, wanted z" unless
       plain['text'] == 'z'
     failures << "shift text=#{shifted['text'].inspect}, wanted Z" unless

@@ -197,6 +197,7 @@ suite_schema() {
 }
 
 suite_terminal() {
+    run_gate kitty_keyboard_gate.rb ruby tools/tests/kitty_keyboard_gate.rb
     if start_server; then
         run_gate terminal_conformance.rb env \
             BLIT_TEST_SERVER="http://127.0.0.1:$PORT" \
