@@ -4,6 +4,12 @@ Tracking: [Blit#107](https://git.home.arpa/itdlabs/blit/issues/107).
 
 ## Active completion contract —107/110 before browser or SDL work
 
+Candidate578 adds explicit API text_layout=emoji with full-corpus decoder
+checks and representative HTTP ownership/overwrite tests. Scalar remains
+the default for positioned providers; PTY grouping is unchanged. ADR0161
+records this compatibility boundary; complete presentation/ingress acceptance
+is still pending. This does not silently update Hibr's width contract.
+
 Candidate577 wires owned clusters into native KMS and both SDL renderers,
 including block-cursor code and full-key SDL atlas identity/reset. All six
 backend/profile gates pass representative sequence/size/span cases; API/PTY

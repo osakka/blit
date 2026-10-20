@@ -1,5 +1,21 @@
 # Current state and restart point
 
+## 2026-10-20 candidate578 — explicit API emoji grouping
+
+ADR0161 adds schema-first CellUpdate.text_layout: scalar (unchanged default)
+or emoji. One decoder uses a generated6157-node trie from the pinned5244
+Emoji18.0 corpus entries. Complete multi-scalar matches own two columns;
+singleton/ordinary widths and positioned Hibr providers remain unchanged.
+No joining across cells/requests; no PTY changes. Invalid layout values/types
+return400 invalid_text_layout before mutation. All5244 sequences pass both
+decoder policies/exact scalar preservation and adjacent-text checks. Real API
+tests cover seven families, continuations/overwrite, whole-edge clipping,
+default compatibility and atomic rejection. Terminal/schema suite8/0/0;
+two new focused gates also pass. Trie/server rebuild byte-identically.
+Next: streaming PTY grouping with explicit width negotiation, VS15/default
+presentation, full end-to-end coverage.107/110 remain open. No live writes,
+SSH, Hibr edits or package. Preserve releases/0.1.554.yaml.
+
 ## 2026-10-20 candidate577 — shared clusters reach all compositors
 
 ADR0160 wires the existing raster's cluster callback through BlitFont into

@@ -745,6 +745,25 @@ Two limits are worth knowing rather than discovering:
   rotation. Both machines this was measured on have a single output, so that
   is a stated consequence rather than a tested one.
 
+### Explicit emoji cell layout (offline candidate578)
+
+`PUT /v1/surfaces/{id}/cells` accepts optional `text_layout`:
+
+- `scalar` (default): existing Unicode15.1 scalar widths and zero-width
+  attachments. Existing positioned Hibr providers are unchanged.
+- `emoji`: group pinned Emoji18.0 sequences within each cell's `text` value.
+  Completed multi-scalar sequences occupy two columns; singletons/ordinary
+  text keep existing widths. Never join across positioned cells or requests.
+
+For example, `{"base_revision":7,"text_layout":"emoji","cells":[{"x":0,"y":0,"text":"👩‍💻X"}]}`
+places the emoji at0, its continuation at1 and X at2. Use Modern/Retro for the
+shared colour-cluster raster. Snapshots return the complete sequence on its
+anchor. Overwriting either half clears the previous wide ownership. A wide
+cluster that cannot fit the right edge is clipped whole, following existing
+API clipping semantics (the request can still be acknowledged). Invalid
+layout types/values return400 `invalid_text_layout` before cell mutation.
+This does not change PTY grouping or complete VS15/default presentation.
+
 `GET /v1/fonts` lists profiles and the active cell size. `PUT /v1/fonts` can
 select `font_id`, legacy `scale` from 1.0 through 3.0 in 0.1 increments,
 or `size_px` (integer8..64, exact cell height). Select a profile together with

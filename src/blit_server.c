@@ -8,6 +8,7 @@
 #include "blit_graphics.h"
 #include "blit_input_pointer.h"
 #include "blit_unicode_width.h"
+#include "blit_emoji_sequences.h"
 #include "blit_input_identity.h"
 #include "blit_audio_control.h"
 #include "blit_display_geometry.h"
@@ -6522,7 +6523,8 @@ static int unicode_cell_width(uint32_t codepoint)
 
 static int decode_text_cells(const char *text, uint32_t *codepoints,
                              unsigned char *widths, uint32_t *combining,
-                             unsigned char *combining_counts, size_t *count)
+                             unsigned char *combining_counts, size_t *count,
+                             int emoji_layout)
 {
     size_t offset = 0;
     size_t length = strlen(text);
@@ -6540,6 +6542,17 @@ static int decode_text_cells(const char *text, uint32_t *codepoints,
             return 0;
         {
             int width = unicode_cell_width(codepoint);
+            if (emoji_layout && *count) {
+                size_t last = *count - 1;
+                unsigned node = blit_emoji_extend(codepoints[last],
+                    &combining[last * BLIT_MAX_COMBINING], combining_counts[last], codepoint);
+                if (node) {
+                    combining[last * BLIT_MAX_COMBINING + combining_counts[last]++] = codepoint;
+                    if (blit_emoji_nodes[node].terminal) widths[last] = 2;
+                    offset += consumed;
+                    continue;
+                }
+            }
             if (width == 0) {
                 if (*count == 0 ||
                     combining_counts[*count - 1] >= BLIT_MAX_COMBINING)
@@ -7845,9 +7858,17 @@ static int apply_cell_update(BlitSurface *surface, const char *json,
     const char *cursor = strstr(json, "\"cells\"");
     const char *cursor_state = strstr(json, "\"cursor\"");
     int updated = 0;
+    int emoji_layout = 0;
+    char scalars[1024], layout[16];
 
     if (rejected != NULL)
         *rejected = NULL;
+    if (json_key_cursor(json, "text_layout")) {
+        if (!json_object_scalars(json, scalars, sizeof(scalars)) ||
+            !json_string(scalars, "text_layout", layout, sizeof(layout))) return -2;
+        if (!strcmp(layout, "emoji")) emoji_layout = 1;
+        else if (strcmp(layout, "scalar")) return -2;
+    }
     if (cursor == NULL)
         return 0;
     cursor = json_key_cursor(cursor, "x");
@@ -7939,7 +7960,7 @@ static int apply_cell_update(BlitSurface *surface, const char *json,
         memset(decoded_combining, 0, sizeof(decoded_combining));
         if (!decode_text_cells(text, decoded, decoded_widths,
                                decoded_combining, decoded_combining_counts,
-                               &decoded_count))
+                               &decoded_count, emoji_layout))
             break;
         if (x >= 0 && y >= 0 && x < BLIT_MAX_CELL_COLS &&
             y < BLIT_MAX_CELL_ROWS) {
@@ -20746,6 +20767,11 @@ static void handle_request(int fd, BlitRuntime *runtime,
         {
             const char *misplaced = NULL;
             int cell_update = apply_cell_update(surface, payload, &misplaced);
+            if (cell_update == -2) {
+                send_problem(fd, 400, "Bad Request", "invalid_text_layout",
+                             "text_layout must be scalar or emoji at the update root.");
+                return;
+            }
             if (cell_update <= 0 &&
                 !(cell_update == 0 &&
                   (terminal_default_foreground_present ||

@@ -4402,6 +4402,16 @@ components:
       required: [base_revision, cells]
       properties:
         base_revision: {$ref: '#/components/schemas/Revision'}
+        text_layout:
+          type: string
+          enum: [scalar, emoji]
+          default: scalar
+          description: >-
+            scalar preserves existing Unicode15.1 per-scalar widths and
+            zero-width attachments. emoji groups pinned Emoji18.0 sequences
+            within each text value; completed multi-scalar sequences occupy
+            two columns. Singleton and ordinary text widths are unchanged.
+            Positioned updates are never joined across cells or requests.
         cells:
           type: array
           items:

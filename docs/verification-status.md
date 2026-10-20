@@ -3,6 +3,26 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-20 candidate578: schema-first API grouping, scalar compatibility
+
+ADR0161. TCC server SHA
+519e6d4d8677b12c86bc0cb99f125af547bfd1b04991fdb5b4d35f2fea07cb8d;
+fresh rebuild byte-identical. Terminal/schema selected suites8pass/0skip/0fail
+(`578-ingress-regression.log`); emoji_layout and emoji_layout_api also pass:
+ten distinct focused gates. Not a rerun of576's120-gate matrix.
+
+Corpus-derived6157-node trie regenerates byte-identically. C gate checks all
+5244 entries in scalar/emoji policy, every scalar preserved in order, grouped
+anchor/span and adjacent X placement. Real isolated HTTP gate selects Modern
+and tests seven families, width2/continuation ownership, overwrite repair,
+default-vs-explicit scalar equivalence and invalid types/values before mutation.
+Right-edge wide clusters clip whole; accepted clipped writes may still advance
+revision under existing API semantics. No partial-glyph or rejection claim.
+
+This is opt-in API grouping, not PTY grouping, complete presentation policy,
+Hibr-provider negotiation, full-corpus backend or physical-display acceptance.
+107/110 remain open. No live writes, Hibr changes, SSH or package/deployment.
+
 ## 2026-10-20 candidate577: compositor consumption
 
 ADR0160. TCC server SHA

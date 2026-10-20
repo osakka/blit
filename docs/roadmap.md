@@ -30,6 +30,8 @@ all entries pass16px raster checks; seven families cover every8..64px size.
 Candidate577 wires clusters into all compositors with representative pixel
 tests. Terminal segmentation, presentation policy and full end-to-end coverage
 remain active; module tests do not prove complete terminal emoji support.
+Candidate578 adds opt-in API emoji layout, preserving the scalar default.
+Streaming PTY integration and complete presentation policy remain open.
 
 Size remains the existing canonical 8..64px **cell-height** setting; legacy
 scale is an alternative API sizing policy, not separate browser/desktop zoom.
