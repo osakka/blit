@@ -14,12 +14,21 @@ These are explicit human reports and API invariants, not independent pixel
 comparisons or full repertoire/protocol/performance acceptance.
 
 Next selected Retro16 through PUT /v1/fonts: same8x16 cells, native
-antialiasing/colour and unchanged backend/panes/primary count. It is left
-visible awaiting operator review. No size/scale change, Hibr edit, SSH,
-manual join or server restart. Evidence under /tmp/blit-fontcraft.IHU9AK/:
+antialiasing/colour and unchanged backend/panes/primary count. Operator also
+reports it is perfect. No size/scale change in these16px comparisons, Hibr
+edit, SSH, manual join or server restart. Evidence under /tmp/blit-fontcraft.IHU9AK/:
 font-live-baseline.json, font-live-modern-{response,observation}.json and
 font-live-retro-{response,observation}.json.107/110 remain open for remaining
-coverage; Retro and other live sizes have not yet been accepted.
+coverage; both16px profiles have representative operator acceptance, not
+complete glyph/protocol certification.
+
+Next selected Retro17. The local PUT-response formatter had a syntax error;
+the mutation was not retried. An authoritative subsequent GET verifies
+Retro17,9x17 cells/native antialiasing, native KMS ready, same physical pane
+regions and exactly one primary. Every pane's whole-cell counts and centered
+integer remainders match its physical region. Observation saved as
+font-live-retro17-observation.json.17px visual/wallpaper/input acceptance is
+pending; no screenshot or physical correctness is inferred from API geometry.
 
 ## 2026-10-20 rollout582: authenticated installation on192.168.10.54
 
