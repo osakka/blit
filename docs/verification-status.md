@@ -2,6 +2,15 @@
 
 ## 2026-10-21 candidate586 /117 native VT isolation
 
+Source44e3597/package586 artifact gate and byte-identical rebuild pass.
+Package SHA2568cbdce7f5442d832f8dc624b70b14a5ed235a9d6c2802c11af07d7af0cca66d8;
+exact extracted server3e05a50e2e5b600342f3ca6588f005c827bd0bbae2e9bb74ccdff621fff1475a
+passes the complete real-kernel/full-server VM gate again, including install
+lease and queued-away input. Evidence /tmp/blit-vt-kernel.yWCkCY/serial.log.
+An initial wrong invocation followed the extracted absolute /usr/bin/blit
+symlink into the host's old230 binary and failed; it is not acceptance evidence.
+The gate now rejects symlink inputs and prints the actual payload checksum.
+
 TCC build and actual Linux6.1.190/QEMU module plus full native server pass.
 Module: observed unmuted console leak is the negative control; two keyboards
 including hotplug are muted at the VT while still delivering evdev events;

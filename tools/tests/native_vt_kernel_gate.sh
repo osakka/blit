@@ -23,6 +23,13 @@ cp "$modules/kernel/drivers/input/misc/uinput.ko" "$work/root/uinput.ko"
 executables="$work/root/vt-kernel-gate"
 if [ "${BLIT_VT_SERVER_TEST:-0}" = 1 ]; then
     binary=${BLIT_GATE_BINARY:-$root/build/blit/blit-server}
+    # An extracted package's /usr/bin/blit is an absolute symlink. Following
+    # it here would test the HOST's installed binary, not the archive payload.
+    if [ -L "$binary" ]; then
+        echo 'VT_KERNEL_FAIL select the real server payload, not a symlink' >&2
+        exit 1
+    fi
+    sha256sum "$binary"
     tcc -std=c99 -O2 "$root/tools/tests/native_vt_server_gate.c" \
         "$root/src/blit_vt.c" -o "$work/root/vt-server-gate"
     cp "$binary" "$work/root/blit-server"

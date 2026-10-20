@@ -2,6 +2,15 @@
 
 ## 2026-10-21:117 native keyboard isolation, candidate586
 
+Source44e3597 committed/pushed. Package586 SHA256
+8cbdce7f5442d832f8dc624b70b14a5ed235a9d6c2802c11af07d7af0cca66d8
+passes artifact/provenance checks and byte-identical rebuild. Exact extracted
+server payload also passes the full native VM gate; evidence
+/tmp/blit-vt-kernel.yWCkCY/serial.log. Guard added to reject symlink inputs:
+the archive's absolute /usr/bin/blit link otherwise resolves to the developer
+host's installed binary. That mistaken invocation was discarded, not a pass.
+No live deployment at this checkpoint; physical acceptance remains pending.
+
 Native KMS now owns its active text/automatic Linux VT, uses K_OFF to stop
 kernel console key delivery, and handles VT release/acquisition with DRM
 master handover and full repaint. Physical Ctrl+Alt+F1..F12 switches VTs.
