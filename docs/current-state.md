@@ -2,6 +2,13 @@
 
 ## 2026-10-20: new backlog115 service-boundary fix, candidate583
 
+Artifact583 is built from e605bd8; package gate passes with a byte-identical
+rebuild. SHA2564baf7253764f55cd94b707dea422d2acd321edab3bf7c223d2361e41d74ee96a.
+Schema suite5/0/0, terminal suite3/0/0, credential-drop identity,
+shutdown/restart, socket/retry/log and GLES2 placement gates pass. Live
+preflight582/update idle captured in /tmp/blit-rollout583.1Il4gP. Rollout and
+operator acceptance pending; no full browser sizing claim from these gates.
+
 Latest backlog contains115 (new),114 (known odd-height wallpaper) and closed113.
 115 claims root is an override; current unit/ADR0065 deliberately run root.
 Confirmed local systemd namespace fault: private tmp hides a same-UID user
