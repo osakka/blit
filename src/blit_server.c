@@ -13,6 +13,7 @@
 #include "blit_display_geometry.h"
 #include "blit_cell_geometry.h"
 #include "blit_damage.h"
+#include "blit_trial_protocol.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -3094,7 +3095,7 @@ static void server_json(const BlitRuntime *runtime, char *body, size_t capacity)
              "\"settings-persistence\","
              "\"login-manager\",\"network-terminal-input\",\"diagnostics\","
              "\"runtime-diagnostics\",\"observation-snapshot\","
-             "\"lifecycle-control\","
+             "\"lifecycle-control\",\"bounded-presentation-trials\","
              "\"effects\",\"overlays\",\"font-selection\"],\"display_count\":%d,"
              "\"display_backend\":{\"name\":\"%s\",\"ready\":%s,"
              "\"error\":\"%s\"},\"resources\":{"
@@ -3109,6 +3110,7 @@ static void server_json(const BlitRuntime *runtime, char *body, size_t capacity)
              "\"diagnostics\":\"/v1/diagnostics\","
              "\"runtime_diagnostics\":\"/v1/diagnostics/runtime\","
              "\"observation\":\"/v1/diagnostics/observation\","
+             "\"presentation_trial\":\"/v1/control/presentation-trial\","
              "\"effects\":\"/v1/effects\","
              "\"overlays\":\"/v1/overlays\"},"
              /* ADR 0065: the posture the server actually came up with, so an
@@ -19450,6 +19452,7 @@ static void settings_flush(BlitRuntime *runtime, int force)
     static char document[BLIT_SETTINGS_CAPACITY];
     size_t length;
 
+    if (blit_trial_id_valid(getenv("BLIT_PRESENTATION_TRIAL_ID"))) return;
     if (runtime == NULL || !runtime->settings_enabled || !runtime->settings_dirty)
         return;
     if (!force &&
@@ -19892,10 +19895,11 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
                  "\"pointer\":{\"shape\":\"%s\",\"palette\":\"%s\","
                  "\"size_px\":%d,\"shadow\":%s}}}",
                  runtime->settings_revision, runtime->settings_path,
-                 runtime->settings_enabled ? "true" : "false",
+                 runtime->settings_enabled && !blit_trial_id_valid(getenv("BLIT_PRESENTATION_TRIAL_ID")) ? "true" : "false",
                  !runtime->settings_enabled ? "disabled" :
+                    (blit_trial_id_valid(getenv("BLIT_PRESENTATION_TRIAL_ID")) ? "trial-read-only" :
                     (runtime->settings_write_reported ? "error" :
-                     (runtime->settings_dirty ? "pending" : "clean")),
+                     (runtime->settings_dirty ? "pending" : "clean"))),
                  runtime->settings_saved_revision,
                  runtime->settings_write_reported ? "settings_write_failed" : "",
                  document[0] != '\0' ? document : "{}",
@@ -19907,11 +19911,13 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
                  runtime->display_backend_kms ? "kms" : "sdl",
                  runtime->direct_kms ? "drm-kms" :
                      (runtime->sdl_ready ? "sdl3" : "unavailable"),
+                 blit_trial_id_valid(getenv("BLIT_PRESENTATION_TRIAL_ID")) ? "trial-snapshot" :
                  runtime->display_backend_configured ? "saved-settings" :
                      (backend_env ? "environment" : "default"),
                  environment_value, backend_environment_valid() ? "true" : "false",
                  runtime->display_backend_configured && backend_env ? "true" : "false",
                  presentation_configuration_valid(runtime) ? "true" : "false",
+                 blit_trial_id_valid(getenv("BLIT_PRESENTATION_TRIAL_ID")) ? "trial-snapshot" :
                  runtime->renderer_configured ? "saved-settings" :
                      (getenv("BLIT_RENDERER") ? "environment" : "default"),
                  runtime->direct_kms ? "false" : "true",
@@ -20089,6 +20095,8 @@ static int settings_reset(BlitRuntime *runtime, int remove_file)
     return 1;
 }
 
+#include "blit_trial_api.h"
+
 static void handle_request(int fd, BlitRuntime *runtime,
                            BlitHttpClient *client, const char *request)
 {
@@ -20121,6 +20129,17 @@ static void handle_request(int fd, BlitRuntime *runtime,
         }
     }
 
+    if (blit_trial_id_valid(getenv("BLIT_PRESENTATION_TRIAL_ID")) && strcmp(method,"GET") &&
+        !(strcmp(path,BLIT_TRIAL_API_PATH)==0 && strcmp(method,"DELETE")==0) &&
+        strncmp(path,"/v1/surfaces",12) && strncmp(path,"/v1/terminal-sessions",21) &&
+        strcmp(path,"/v1/input/inject")) {
+        send_problem(fd,409,"Conflict","trial_configuration_read_only",
+            "This is a temporary presentation trial. Configuration is read-only; DELETE the current trial or await expiry to return to the normal service.");
+        return;
+    }
+    if (strcmp(path,BLIT_TRIAL_API_PATH)==0) {
+        presentation_trial_request(fd,runtime,method,request,payload); return;
+    }
     if (strcmp(path, "/v1/auxiliary-displays") == 0 && strcmp(method, "GET") == 0) {
         auxiliary_json(runtime, body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);

@@ -1392,6 +1392,35 @@ the limiting boundary.
 
 ## Effects, overlays, and control
 
+### Bounded presentation trials (candidate 0.1.569)
+
+`GET /v1/control/presentation-trial` reads the privileged helper's trial state.
+`POST` accepts only `{"renderer":"opengles2","timeout_seconds":60}` (or
+`software`, integer timeout30..120). It requires normal API authentication,
+a clean native-KMS baseline, no authenticated desktop or other active non-login
+terminal session, and the current settings revision in `If-Match`. The response
+is202 with an opaque trial ID; startup happens asynchronously.
+
+Before startup, the helper arms an independent systemd recovery timer. The
+same service temporarily reads a frozen settings snapshot, with login disabled;
+the normal saved document is never overwritten. During the trial, configuration
+mutations are refused and `/v1/settings` explicitly reports `persisted:false`,
+storage `trial-read-only`, and provenance `trial-snapshot`. Diagnostic surface,
+terminal-session and input-injection fixtures remain available.
+
+`DELETE /v1/control/presentation-trial` with `{"id":"<current32hexid>"}`
+requests early restoration. Its202 body is the last observed state, not proof
+of completion. Stale IDs receive409. Expiry also restores the normal service
+without requiring the Blit listener or event loop. A `restored` helper state
+means the normal restart was queued: verify `/v1/version`, actual backend,
+output inventory and settings before calling the baseline restored. Updates
+are refused while recovery remains active. Failures stay explicit; this is
+not a guarantee of recovery from kernel/GPU D-state or system-manager failure.
+
+Candidate scope: local helper/dispatcher fault tests use mocked systemd. Actual
+systemd scheduling and physical-host recovery must be verified before using
+this endpoint to accept an SDL multi-output startup trial. See ADR0153.
+
 `GET/PUT /v1/effects` manages bounded named effects such as `scanlines`.
 `POST/DELETE /v1/overlays` manages explicit graphic overlays. Effects and
 overlays are downstream of terminal state and cannot silently replace it.

@@ -3,6 +3,31 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-20 candidate569: presentation recovery fault tests
+
+TCC server/helper build. Actual helper Unix protocol and standalone recovery
+entrypoint pass local tests with mocked systemd: unavailable/blocked frontend
+is killed, normal restart queued, helper restart restores outstanding trial,
+stale IDs do nothing, active recovery excludes updates. Bounded real userspace
+command timeout kills/reaps its child. Actual frontend dispatcher passes401
+authentication, six400 malformed requests,409 occupied desktop, canonical
+snapshot preservation, three read-only mutation refusals, explicit provenance
+and suppressed persistence. Root-module gate also covers timer-before-override,
+scheduling failure, active conflict, foreign file/symlink preservation and
+kill/restart failures retained as active failed state. Schema gate passes46paths.
+
+Schema+lifecycle suite22pass/0skip/0fail. Software startup binding gate passes.
+API-only real-host timer canary passes: separate systemd timer/service executes
+and cleans up without a Blit restart/config write. Initial operator probe
+attempts failed due to the255-byte argument bound and incorrect exited-state
+name; fixed to use bounded arguments and actual stopped/failed states.
+Canary is scheduling proof, not Blit rollback or physical DRM acceptance.
+
+The fault tests above are not physical systemd/DRM tests. Live567 remains native KMS, bottom
+primary login awaiting authentication on the last read-only API check. No
+live trial, deployment or physical recovery acceptance is claimed here. Blit109
+and104 remain open. Prior568 timing miss below is unchanged/unresolved.
+
 ## 2026-10-20 candidate568: SDL creation binding, physical trial held
 
 Source5ee47fa corrects default-display allocation followed by unsupported

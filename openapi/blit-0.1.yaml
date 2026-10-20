@@ -930,6 +930,78 @@ paths:
                   detail: {type: string}
         default:
           $ref: '#/components/responses/Problem'
+  /v1/control/presentation-trial:
+    get:
+      tags: [control]
+      operationId: getPresentationTrial
+      summary: Inspect the independent presentation trial and recovery state
+      responses:
+        '200':
+          description: Helper-owned state; idle when no trial has been prepared
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PresentationTrial'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      tags: [control]
+      operationId: beginPresentationTrial
+      summary: Start a temporary SDL trial protected by an independent recovery timer
+      description: >-
+        Requires a clean native-KMS baseline without an authenticated desktop
+        or another active non-login terminal session, and the current settings
+        revision in If-Match.
+        The privileged helper arms recovery before activating a temporary runtime
+        snapshot for the same service. Canonical settings are unchanged. Login is
+        disabled and configuration mutations are refused during the trial.
+        A restart may interrupt the acknowledgement; poll this endpoint afterward.
+        Expiry requests return to the normal service, not a permanent SDL commit.
+        Restored means restart queued; API readiness must be verified separately.
+        Kernel/GPU hangs or system-manager failure are not guaranteed recoverable.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [renderer, timeout_seconds]
+              properties:
+                renderer: {type: string, enum: [software, opengles2]}
+                timeout_seconds: {type: integer, minimum: 30, maximum: 120}
+      responses:
+        '202':
+          description: Recovery armed and trial activation requested
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PresentationTrial'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      tags: [control]
+      operationId: restorePresentationTrial
+      summary: Request early return to the normal service for the matching trial
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [id]
+              properties:
+                id: {type: string, pattern: '^[0-9a-f]{32}$'}
+      responses:
+        '202':
+          description: Independent restoration requested; inspect state after restart
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PresentationTrial'
+        default:
+          $ref: '#/components/responses/Problem'
   /v1/control/restart:
     post:
       tags: [control]
@@ -2350,14 +2422,14 @@ components:
         persisted:
           type: boolean
           description: >-
-            false when the server was started with `BLIT_SETTINGS=ignore`,
+            false during a marked read-only presentation trial, or when the server was started with `BLIT_SETTINGS=ignore`,
             which starts from the defaults and leaves the document untouched.
             This is an enablement flag, not proof of a completed save; inspect storage.
         storage:
           type: object
           required: [state, saved_revision, error]
           properties:
-            state: {type: string, enum: [clean, pending, error, disabled]}
+            state: {type: string, enum: [clean, pending, error, disabled, trial-read-only]}
             saved_revision: {type: integer, minimum: 0}
             error: {type: string, enum: ['', settings_write_failed]}
           additionalProperties: false
@@ -2496,12 +2568,12 @@ components:
               description: Read-only provenance; saved API settings own intent, environment supplies startup defaults only.
               required: [backend_source, backend_environment, backend_environment_valid, backend_environment_overridden, configuration_valid, renderer_source, renderer_applicable, video_driver_active]
               properties:
-                backend_source: {type: string, enum: [saved-settings, environment, default]}
+                backend_source: {type: string, enum: [saved-settings, environment, default, trial-snapshot]}
                 backend_environment: {type: [string, 'null']}
                 backend_environment_valid: {type: boolean}
                 backend_environment_overridden: {type: boolean}
                 configuration_valid: {type: boolean}
-                renderer_source: {type: string, enum: [saved-settings, environment, default]}
+                renderer_source: {type: string, enum: [saved-settings, environment, default, trial-snapshot]}
                 renderer_applicable:
                   type: boolean
                   description: Whether the active presentation path uses the SDL renderer; false on native KMS.
@@ -4412,6 +4484,18 @@ components:
           type: array
           items: {type: string}
       additionalProperties: true
+    PresentationTrial:
+      type: object
+      additionalProperties: false
+      required: [id, state, active, renderer, timeout_seconds, expires_unix_seconds, detail]
+      properties:
+        id: {type: [string, 'null'], pattern: '^[0-9a-f]{32}$'}
+        state: {type: string, enum: [idle, armed, running, restoring, restored, failed]}
+        active: {type: boolean}
+        renderer: {type: [string, 'null'], enum: [software, opengles2, null]}
+        timeout_seconds: {type: integer, minimum: 0, maximum: 120}
+        expires_unix_seconds: {type: integer, minimum: 0}
+        detail: {type: string, maxLength: 384}
     StreamSubscribe:
       type: object
       required: [type, subscriptions]

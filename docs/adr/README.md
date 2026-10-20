@@ -170,6 +170,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0150 — Modern Hibr Nerd icons and menu pencil](0150-modern-hibr-nerd-icons.md)
 - [0151 — Colour glyph artwork uses the fitted text em](0151-colour-glyphs-use-fitted-text-em.md)
 - [0152 — SDL creation-time display binding](0152-sdl-creation-time-display-binding.md)
+- [0153 — Independent bounded presentation trials](0153-independent-bounded-presentation-trials.md)
 
 ## Adding an ADR
 

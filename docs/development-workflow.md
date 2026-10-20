@@ -68,6 +68,9 @@ handoff:
   `--join`, routing, and cleanup;
 - packaging changes: allowlist, embedded version identity, install/service
   checks, and checksum;
+- presentation startup/recovery changes: lifecycle suite including
+  `presentation_trial_gate.sh` and `presentation_trial_helper_gate.rb`; record
+  their mocked-systemd boundary separately from real timer/service recovery;
 - performance/timing changes: diagnostics, measured intervals, CPU/RSS, and a
   bounded workload rather than a subjective “feels faster” claim.
 

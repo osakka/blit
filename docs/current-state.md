@@ -1,5 +1,29 @@
 # Current state and restart point
 
+## 2026-10-20 candidate569: independent presentation recovery
+
+Implements Blit109 / ADR0153: authenticated bounded presentation-trial API,
+existing root helper, independent systemd timer and owned runtime override.
+Normal settings are never overwritten. Trial settings are explicitly read-only;
+login is disabled; stale recovery IDs cannot affect newer trials. Failed kill
+or restart commands retain active failed state rather than claiming recovery.
+Helper `restored` means restart queued, not native readiness confirmed.
+
+TCC helper/server compile. Focused actual-helper Unix protocol, separate-process
+recovery CLI, blocked frontend, helper restart, command timeout/reaping, real
+API dispatcher, canonical snapshot preservation and schema checks pass locally.
+Root systemd commands/native API runtime are mocked in those fault tests.
+New gates are wired into the lifecycle suite: schema+lifecycle22pass/0skip/0fail.
+The API-only `host_presentation_timer.rb` canary confirms a real independent
+systemd timer/service executes on10.54 without restarting Blit or changing its
+configuration. The first probe attempts exposed operator-tool mistakes (argument
+length and stopped-state naming); corrected probe passes. This is scheduling
+evidence, not actual Blit rollback. Physical recovery remains pending; no live
+SDL startup has been attempted or claimed safe yet.
+Live API rechecked567, bottom DP login awaiting authentication. Preserve that
+native baseline until independent recovery has physical evidence. Candidate568's
+earlier21.754ms timing failure remains recorded below; this work does not erase it.
+
 ## 2026-10-20 candidate568: SDL output creation binding
 
 Found and corrected a concrete Blit adapter defect: SDL_CreateWindow used

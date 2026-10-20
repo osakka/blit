@@ -347,6 +347,8 @@ suite_hibr() {
 }
 
 suite_lifecycle() {
+    run_gate presentation_trial_gate.sh sh tools/tests/presentation_trial_gate.sh
+    run_gate presentation_trial_helper_gate.rb ruby tools/tests/presentation_trial_helper_gate.rb
     run_gate http_accept_budget_gate.rb ruby tools/tests/http_accept_budget_gate.rb
     run_gate backend_selection_gate.rb ruby tools/tests/backend_selection_gate.rb
     run_gate presentation_provenance_gate.rb ruby tools/tests/presentation_provenance_gate.rb
