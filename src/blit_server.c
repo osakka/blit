@@ -46,6 +46,7 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <pty.h>
+#include "blit_startup_diagnostics.h"
 /* ADR 0056: DEFLATE for PNG (f=100) and Kitty o=z payloads. */
 #include <xf86drmMode.h>
 #include <zlib.h>
@@ -22668,6 +22669,8 @@ static void initialize_outputs(BlitRuntime *runtime)
                 runtime->outputs[runtime->output_count].viewport_height,
                 runtime->outputs[runtime->output_count].scale_x,
                 runtime->outputs[runtime->output_count].scale_y);
+        if (i+1 == runtime->display_count) blit_startup_modules();
+        blit_startup_stage("vsync.begin",display->id);
         if (SDL_SetRenderVSync(renderer, 1)) {
             int vsync = 0;
             if (SDL_GetRenderVSync(renderer, &vsync) && vsync > 0)
@@ -22680,13 +22683,17 @@ static void initialize_outputs(BlitRuntime *runtime)
                     "blit: SDL renderer display=%llu cannot enable vsync: %s\n",
                     display->id, SDL_GetError());
         }
+        blit_startup_stage("vsync.end",display->id);
         /* Render targets and cached scenes are physical-sized textures.
            Font scale is carried by the shared cell metrics, never by a
            renderer transform. */
         SDL_SetRenderScale(renderer, 1.0f, 1.0f);
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+        blit_startup_stage("clear.begin",display->id);
         SDL_RenderClear(renderer);
+        blit_startup_stage("present.begin",display->id);
         SDL_RenderPresent(renderer);
+        blit_startup_stage("present.end",display->id);
         runtime->outputs[runtime->output_count].window = window;
         runtime->outputs[runtime->output_count].renderer = renderer;
         /* Geometry batching is the normal path for every SDL renderer. The
@@ -22699,11 +22706,13 @@ static void initialize_outputs(BlitRuntime *runtime)
             fprintf(stderr,
                     "blit: invalid BLIT_SDL_GLYPH_BATCH=%s (use on/off)\n",
                     glyph_batch_mode);
+        blit_startup_stage("atlas.begin",display->id);
         runtime->outputs[runtime->output_count].glyph_atlas =
             create_sdl_glyph_atlas(renderer, &runtime->font,
                                    &runtime->outputs[runtime->output_count].glyph_atlas_columns,
                                    &runtime->outputs[runtime->output_count].glyph_atlas_width,
                                    &runtime->outputs[runtime->output_count].glyph_atlas_height);
+        blit_startup_stage("atlas.end",display->id);
         memset(runtime->outputs[runtime->output_count].raster_spans, 0,
                sizeof(runtime->outputs[runtime->output_count].raster_spans));
         runtime->outputs[runtime->output_count].display_id = display->id;
@@ -28883,6 +28892,7 @@ int main(int argc, char **argv)
     runtime.kms_inventory_revision = blit_kms_inventory_revision(runtime.kms);
     if (runtime.sdl_ready || runtime.direct_kms)
         initialize_outputs(&runtime);
+    blit_startup_stage("outputs.complete",0);
     /* Issue #69. After the outputs exist, because a rotation drops the
        output's cached scene texture, and before the first frame, because that
        texture is sized from the display's logical rectangle. The document was
@@ -28890,8 +28900,11 @@ int main(int argc, char **argv)
        a device enters the table and the boot scan is below -- so displays are
        the one stored section whose subjects do not exist yet when it loads.
        Stage 1 made this same mistake in the other direction. */
+    blit_startup_stage("settings.displays.begin",0);
     settings_apply_displays(&runtime);
+    blit_startup_stage("panes.begin",0);
     discover_panes(&runtime);
+    blit_startup_stage("panes.end",0);
     {
         BlitAuxiliaryBinding bindings[16];
         int count = 0;

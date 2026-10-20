@@ -1,5 +1,23 @@
 # Current state and restart point
 
+## 2026-10-20 candidate571: locate the library fault
+
+570 deployed natively with exact saved revision237. Protected GLES trial
+still fails; independent recovery restores native. Journal now has one
+startup attempt and `RUNTIME ERROR: invalid memory access` at an unsymbolized
+shared-library address, no reliable caller. Do not infer stack corruption or
+faulting function from the failed unwind. Evidence build/trial570-gles/ and
+build/trial570-journal.txt. Trace-enabled local frame gate passes60.371Hz,
+16.501ms maximum render, zero window missed deadlines; not physical timing.
+
+571 adds startup-only executable maps and before/after stage markers, gated by
+the validated trial ID. Normal startup is silent. Map/source gate passes and
+actual two-renderer startup boundary runs with protected logging enabled.
+No rendering behavior fix yet. Exact bundled/local SDL SHA256 both
+d91f2936576a0fee7bf5cb231f8528be65ffa44e2ed7cbea480d599a0bbd08c2;
+library contains debug_info for offline symbolization. ADR0154 extended.
+Schema+lifecycle24pass/0skip/0fail; physical mapping/trace is still pending.
+
 ## 2026-10-20 candidate570: obtain the fault trace before patching SDL
 
 Canonical server build adds installed TCC `-g -bt8` diagnostics, not `-b`

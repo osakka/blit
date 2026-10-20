@@ -1,7 +1,7 @@
 # ADR0154: retain TCC runtime fault traces
 
 - Date:2026-10-20
-- Status: implemented; candidate570, physical trace pending
+- Status: implemented570; trial map/stage extension candidate571
 - Tracking: Blit104/109
 
 Two physical SDL multi-output startup trials create their windows then exit
@@ -28,6 +28,16 @@ exists. A single observed failure must not trigger repeated GPU initialization;
 the independent timer still restores the ordinary service/restart policy.
 The override fault gate verifies this property. No canonical settings writes,
 Hibr changes, dependency patches or SSH.
+
+Physical570 confirms one failed attempt and independent native restoration.
+TCC captures an instruction address but no useful symbol/caller for the library
+fault. From571, protected startup logs bounded stage markers and executable
+/proc/self/maps entries before the final output's first presentation. Keep raw
+mapping addresses/file offsets; symbolize against the exact packaged ELF, not
+an assumed load address. No map collection or allocation inside the signal
+handler. Normal/invalid trial markers stay silent. The installed TCC cannot
+parse this glibc's link.h audit __int128 types; use Linux's proc map interface,
+not invented loader ABI structures. startup_diagnostics_gate.rb verifies scope.
 
 Primary reference: installed TCC manual, Debugger options (`-g`, `-btN`, `-b`),
 /usr/share/doc/tcc/tcc-doc.html. Physical crash trace and its resulting defect

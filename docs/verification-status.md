@@ -3,6 +3,22 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-20 deployed570 / candidate571: fault trace needs executable maps
+
+570 package byte-reproducible, SHA256
+ac379c6ce91a37e19f0d9d0a1ae300bf439389a3aec713d2ff8d9b58c4198d05;
+artifact/manifest and supervised API install/version checks pass.
+GLES physical trial fails once, reports runtime invalid-memory instruction
+address, and automatically restores exact native settings237. No reliable
+symbol/caller: not proof of any proposed source-level cause. Evidence
+build/trial570-gles/ and build/trial570-journal.txt. Frame-rate local gate
+passes60.371Hz, max-render16.501ms, zero window missed deadlines; not physical.
+
+571 gated startup stage/executable-map fixture passes (normal/invalid silent,
+trial enabled), software and GLES two-output startup boundary gates pass;
+GLES also exercised with trial diagnostics enabled. Schema+lifecycle
+24pass/0skip/0fail. Physical address symbolization remains pending.
+
 ## 2026-10-20 candidate570: fault trace diagnostics
 
 TCC server/helper build. Actual compiler fault gate proves normal exit and

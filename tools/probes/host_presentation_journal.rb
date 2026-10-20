@@ -26,7 +26,7 @@ begin
   session=api.call('POST','/v1/terminal-sessions',
     {command:'/usr/bin/journalctl',arguments:['--no-pager','--quiet','-o','cat',
       *(since ? ['--since',since] : ['--boot']),
-      '-u','blit.service','-u','blit-update-helper.service','-n','150'],
+      '-u','blit.service','-u','blit-update-helper.service','-n','300'],
       pane_id:pane.fetch('id')})
   api.call('PATCH',"/v1/terminal-sessions/#{original['id']}",{focused:true}) if original
   Timeout.timeout(10) do
