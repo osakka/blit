@@ -74,6 +74,10 @@ startup_ok=startup && startup.dig('diagnostics','health','backend')=='sdl3' &&
   startup.dig('diagnostics','render','renderer')==renderer &&
   startup.dig('server','display_count')==baseline.dig('server','display_count')
 result={recovery_pass:!!restored, sdl_connected_output_startup_pass:!!startup_ok,
+  baseline_output_count:baseline.dig('server','display_count'),
+  trial_output_count:startup&.dig('server','display_count'),
+  topology_scope:baseline.dig('server','display_count').to_i>1 ? 'multi-output' : 'single-output',
+  sdl_kms_mode:startup&.dig('diagnostics','render','sdl_kms_mode'),
   requested_renderer:renderer, evidence:out, acceptance:'startup_and_recovery_only_not_pixels_or_cadence'}
 save.call('result',result)
 puts JSON.generate(result)

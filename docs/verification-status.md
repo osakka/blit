@@ -3,6 +3,26 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-20 deployed572: single-output evidence, operator topology change
+
+Byte-identical package SHA256
+8b692eee6896c954516822be499d58e77832b2250f8a0e1894d0f20ca2037371;
+artifact/manifest and supervised API install/version checks pass. Timed GLES
+trial starts from ONE native output, reaches ready SDL/kmsdrm/opengles2/legacy
+with ONE output, and restores ready native ONE output with exact saved237.
+The operator states the additional display is being used elsewhere for hours.
+Do not turn this result into multi-output proof or an enumeration regression.
+Read the actual count in all three saved observations, not just startup_pass.
+
+Evidence build/trial572-gles/. Native572 remains live, unchanged saved layout,
+Modern22px/bottom primary. Physical two-output validation of ADR0155 remains
+pending hardware return. Prior571 two-output fault evidence is unchanged.
+Future trial verdicts include explicit topology scope/counts and KMS path.
+Schema+lifecycle25pass/0skip/0fail; renderer+GLES67pass/0skip/0fail. Additional
+actual-discovery fixture passes default, explicit conflict and other-driver
+cases with real SDL hints/mock video identity, verifying before-init ordering
+and refusal before enumeration without opening DRM. Not physical parity.
+
 ## 2026-10-20 deployed571 / candidate572: symbolized second-output fault
 
 571 byte-reproducible package SHA256

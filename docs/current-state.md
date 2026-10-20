@@ -1,5 +1,31 @@
 # Current state and restart point
 
+## 2026-10-20 deployed572: one display temporarily removed by operator
+
+Operator needs the additional monitor elsewhere for a few hours. Do not infer
+an SDL enumeration defect from that physical topology change. Pause physical
+multi-output acceptance until it returns; local/mock multi-output work can
+continue. Do not change saved output/pane bindings to fit the temporary setup.
+
+572 installed via API, package byte-identical SHA256
+8b692eee6896c954516822be499d58e77832b2250f8a0e1894d0f20ca2037371;
+sourcee1558b6, release93c6d96. Artifact/manifest checks pass. Latest trial's
+baseline ALREADY has one native DP output, not two. SDL/GLES reaches ready API
+with one DP output and sdl_kms_mode=legacy; timer restores native with one
+output, exact saved settings237, Modern22px and original split/bottom primary.
+This is SINGLE-OUTPUT startup/recovery proof only. No new two-output acceptance,
+pixel, performance or hotplug claim. Earlier571 two-output crash evidence stands.
+
+Evidence: build/trial572-gles/{baseline,trial,restored}-observation.json.
+Future oracle verdicts now explicitly carry baseline/trial output counts and
+single-/multi-output scope to prevent count-matching from implying two monitors.
+Schema+lifecycle25/0/0 and renderer+GLES67/0/0. Additional actual-discovery
+fixture verifies compatibility selection precedes SDL_Init, explicit conflict
+is refused before enumeration, and another driver is not rejected; no DRM
+opened in that fixture. These local results are not multi-output acceptance.
+No Hibr/SDL edits or SSH; no further physical backend trials while operator
+is changing topology. Native572 is the working live backend.
+
 ## 2026-10-20 candidate572: exact SDL fault and supported compatibility path
 
 571 timed GLES trial restored native/settings237 again. Fault at second

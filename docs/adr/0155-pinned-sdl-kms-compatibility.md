@@ -1,7 +1,7 @@
 # ADR0155: pinned SDL KMS compatibility boundary
 
 - Date:2026-10-20
-- Status: candidate572; physical validation pending
+- Status: deployed572; single-output startup verified, multi-output pending
 - Tracking: Blit104
 
 Physical571 fault: second output first SDL_RenderPresent, before its completion
@@ -39,6 +39,11 @@ separate processes for cached environment cases; pinned default, explicit
 conflict, other driver/version and native reporting. Schema/lifecycle and
 software/GLES startup boundary tests precede timed physical trials. Startup
 success alone is not pixel, performance or hotplug parity. No Hibr/SDL edits.
+An additional actual-discovery fixture verifies hint selection before SDL_Init
+and explicit conflict refusal before enumeration, with no DRM opened.
+572 physical trial baseline/trial/restoration all had ONE output after the
+operator's temporary monitor removal; this is not validation of this policy
+with two outputs. Retain that acceptance gap until the hardware returns.
 
 References:
 
