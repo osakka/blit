@@ -4,6 +4,12 @@ Tracking: [Blit#107](https://git.home.arpa/itdlabs/blit/issues/107).
 
 ## Active completion contract —107/110 before browser or SDL work
 
+Candidate582 adds revision-matched real PTY transition captures and fixes a
+demonstrated wide-owner clipping defect during resize, including the saved
+alternate buffer and clipped links. ADR0165 and the ledger distinguish the
+independent grid oracle from the shared-renderer pixel reference. Nine sample
+families at15/16px in both fonts/SDL paths are not full-corpus/hardware proof.
+
 Candidate581 implements ADR0164's core Powerline U+E0B0..U+E0B3 cell geometry.
 The new fixture demonstrates blank rows before the fix; shared coverage now
 preserves solid joins, antialiased slopes, symmetry and caller-owned spans.

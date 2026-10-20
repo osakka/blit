@@ -182,6 +182,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0162 — Explicit PTY emoji layout](0162-explicit-pty-emoji-layout.md)
 - [0163 — Unicode emoji presentation](0163-unicode-emoji-presentation.md)
 - [0164 — Cell-fitted Powerline geometry](0164-cell-fitted-powerline-geometry.md)
+- [0165 — Whole-cell resize normalization](0165-whole-cell-resize-normalization.md)
 
 ## Adding an ADR
 

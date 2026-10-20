@@ -58,6 +58,37 @@ static int pty_edges(BlitRuntime *runtime, BlitSession *session, BlitSurface *su
     CHECK(!surface->codepoints[0][0] && !surface->combining_count[0][0]);
     feed(runtime, session, surface, "\033c\033[b");
     CHECK(!session->terminal_last_codepoint && !surface->codepoints[0][0] && session->terminal_emoji_layout);
+    reset_pty(session, surface, 1);
+    feed(runtime, session, surface, "\033[1;4H\xf0\x9f\x91\xa9\xe2\x80\x8d\xf0\x9f\x92\xbb\033[?1049h\033[1;4H\xf0\x9f\x91\xa9\xe2\x80\x8d\xf0\x9f\x92\xbb");
+    surface->links[0][3] = surface->alternate_links[0][3] = 1;
+    surface->links[0][5] = surface->alternate_links[0][5] = 1;
+    surface->foreground[0][3] = surface->alternate_foreground[0][3] = 0x123456;
+    surface->background[0][3] = surface->alternate_background[0][3] = 0xabcdef;
+    surface->underline_color[0][3] = surface->alternate_underline_color[0][3] = 0x654321;
+    CHECK(resize_session_surface(session, surface, 4, 4));
+    CHECK(!session->terminal_cluster_active && !surface->codepoints[0][3] &&
+        !surface->combining_count[0][3] && !surface->attributes[0][3] && !surface->links[0][3]);
+    CHECK(!surface->alternate_codepoints[0][3] && !surface->alternate_combining_count[0][3] &&
+        !surface->alternate_attributes[0][3] && !surface->alternate_links[0][3]);
+    CHECK(!surface->links[0][5] && !surface->alternate_links[0][5]);
+    CHECK(!surface->foreground[0][3] && !surface->alternate_foreground[0][3] &&
+        !surface->background[0][3] && !surface->alternate_background[0][3] &&
+        !surface->underline_color[0][3] && !surface->alternate_underline_color[0][3]);
+    CHECK(resize_session_surface(session, surface, 16, 4));
+    feed(runtime, session, surface, "\033[?1049l");
+    CHECK(!surface->codepoints[0][3] && !surface->combining_count[0][3] && !surface->attributes[0][3]);
+    reset_pty(session, surface, 1);
+    feed(runtime, session, surface, "\033[1;4HA\033[?1049h\033[1;4H\xf0\x9f\x91\xa9\xe2\x80\x8d\xf0\x9f\x92\xbb");
+    CHECK(resize_session_surface(session, surface, 4, 4));
+    CHECK(!surface->codepoints[0][3] && surface->alternate_codepoints[0][3] == 'A');
+    feed(runtime, session, surface, "\033[?1049l");
+    CHECK(surface->codepoints[0][3] == 'A');
+    reset_pty(session, surface, 1);
+    feed(runtime, session, surface, "\033[1;4H\xf0\x9f\x91\xa9\xe2\x80\x8d\xf0\x9f\x92\xbb\033[?1049h\033[1;4HA");
+    CHECK(resize_session_surface(session, surface, 4, 4));
+    CHECK(surface->codepoints[0][3] == 'A' && !surface->alternate_codepoints[0][3]);
+    feed(runtime, session, surface, "\033[?1049l");
+    CHECK(!surface->codepoints[0][3]);
     terminal_scrollback_release(surface);
     return 0;
 }
@@ -140,6 +171,6 @@ int main(int argc, char **argv)
         }
         free(surface);
     }
-    printf("EMOJI_LAYOUT_PASS corpus=%u policies=scalar+emoji PTY=contiguous+byte_fragmented exact_scalars=all edges=wrap+scroll+margins+insert+REP+erase+alternate+barriers invalid_policy=atomic scope=parser_not_physical\n", row);
+    printf("EMOJI_LAYOUT_PASS corpus=%u policies=scalar+emoji PTY=contiguous+byte_fragmented exact_scalars=all edges=wrap+scroll+margins+insert+REP+erase+alternate+barriers+resize_both_buffers invalid_policy=atomic scope=parser_not_physical\n", row);
     return 0;
 }

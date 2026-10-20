@@ -38,6 +38,9 @@ Font geometry and remaining end-to-end/live acceptance remain open.
 Candidate581 corrects core Powerline U+E0B0..U+E0B3 using one cell-fitted
 shared-raster coverage primitive; all other Extras and full geometry are not
 thereby certified. Font tickets remain open for the remaining acceptance.
+Candidate582 fixes whole-owner resize clipping and adds real PTY transition
+captures for nine sequence families, both fonts,15/16px and software/GLES.
+Full-corpus end-to-end/graphics placement and live review remain open.
 
 Size remains the existing canonical 8..64px **cell-height** setting; legacy
 scale is an alternative API sizing policy, not separate browser/desktop zoom.

@@ -3,6 +3,52 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-20 candidate582: whole-owner resize and PTY transitions
+
+ADR0165. Frozen TCC server SHA
+ddb1525c457b83e61a3ceb18903f64da21e31ad5e96279c50497f8fe8c693d26;
+fresh rebuild byte-identical. Logs: `/tmp/blit-fontcraft.IHU9AK/582-*`.
+The new real local PTY fixture fails on581 at the first resize-cut: a heart
+anchor at column3 still claims2 columns after shrinking16 to4. This is a
+cell-state defect, not inferred from a photograph (`582-before.log`).
+
+The shared resize function now removes wide anchors whose continuation is
+clipped, independently in live/saved alternate buffers. It also clears live
+link IDs outside the new grid (previously omitted) and invalidates streaming
+cluster extension while preserving the last printable REP value. Whole
+overlapping narrow/wide owners survive; no terminal reset/reflow is added.
+
+Real PTY tests use a raw-mode controlled child, independent expected anchor
+grids, out-of-band OSC-title completion acknowledgements and exact presented
+surface-revision matching. Each resulting BMP equals a positioned-API redraw
+of the expected grid, byte-for-byte. Software and GLES each pass324 checks:
+two fonts,15/16px, nine sequence families, seven update operations plus shrink
+and grow. The old image is captured before each operation. This is PTY/API
+pixel parity on presented frames, not an independent raster implementation,
+all5244 sequences end to end, Kitty/sixel placement or physical acceptance.
+
+Expanded parser fixture retains all5244 corpus entries under both policies
+and contiguous/one-byte feeds; a focused both-buffer resize case additionally
+checks attachments/styles/link IDs and non-resurrection after grow/restore.
+Valgrind3.19.0:0 errors,0 definitely/indirectly/possibly lost bytes;
+18,804 bytes/9 blocks remain reachable (`582-parser-memory-final.log`).
+The focused case also uses different narrow/wide occupants in the two
+buffers, proving a clipped saved owner does not erase a valid live one or
+vice versa. Nonzero foreground/background/underline/link fields are cleared.
+
+Final transition logs: `582-software-ownership-final.log` and
+`582-gles-ownership-final.log`; both additionally reject orphan continuations
+and owners lacking their second cell. Terminal/schema suite completes8/0/0
+(`582-regression.log`). Existing graphics reset and unchanged-image cache
+gates pass (`582-graphics-reset.log`, `582-graphics-cache.log`); these are
+specific lifecycle/cache checks, not full graphics-placement conformance.
+This cycle does not rerun the complete font/renderer/hardware matrix.
+
+The new gate lives in font and explicit GLES suites. Optional
+`BLIT_TRANSITION_ARTIFACT_DIR` saves actual/reference BMPs and state JSON on
+pixel mismatch; captures are not source assets. No Hibr edits, SSH, package,
+live writes or deployment.107/110 remain open for the remaining acceptance.
+
 ## 2026-10-20 candidate581: core Powerline geometry
 
 ADR0164. Frozen TCC server SHA

@@ -226,6 +226,7 @@ suite_font() {
     run_gate emoji_layout_gate.rb ruby tools/tests/emoji_layout_gate.rb
     run_gate emoji_layout_api_gate.rb ruby tools/tests/emoji_layout_api_gate.rb
     run_gate emoji_pty_api_gate.rb ruby tools/tests/emoji_pty_api_gate.rb
+    run_gate emoji_transition_gate.rb ruby tools/tests/emoji_transition_gate.rb
     run_gate harfbuzz_identity_gate.rb ruby tools/tests/harfbuzz_identity_gate.rb
     run_gate emoji_cluster_raster_gate.rb ruby tools/tests/emoji_cluster_raster_gate.rb
     if [ -f "${BLIT_GATE_HARFBUZZ:-/lib/x86_64-linux-gnu/libharfbuzz.so.0}" ]; then
@@ -320,6 +321,9 @@ suite_renderer() {
 }
 
 suite_gles() {
+    run_gate sdl_gles_emoji_transitions env \
+        BLIT_TEST_VIDEO_DRIVER=offscreen BLIT_TEST_RENDERER=opengles2 \
+        LIBGL_ALWAYS_SOFTWARE=1 ruby tools/tests/emoji_transition_gate.rb
     run_gate sdl_gles_output_startup sh tools/tests/sdl_output_startup_gate.sh opengles2
     run_gate font_gles_raster sh tools/tests/font_backend_raster_gate.sh opengles2
     run_gate retro_outline_gles env BLIT_GATE_OUTLINE="$ROOT/assets/fonts/BlitRetroNerd-Regular.ttf" \

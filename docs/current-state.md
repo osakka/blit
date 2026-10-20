@@ -1,5 +1,24 @@
 # Current state and restart point
 
+## 2026-10-20 candidate582 — whole-cell resize and transition oracle
+
+ADR0165 fixes a reproduced shared resize defect: shrinking through a wide
+emoji retained its anchor past the right edge. Resize now clips that owner
+whole in active/saved alternate buffers, clears clipped link metadata, and
+ends in-flight emoji-extension eligibility without resetting terminal/REP.
+One-column VS15 owners wholly inside the grid survive shrink/grow.
+
+New real local PTY transition tests use independent expected grids, OSC-title
+completion barriers and revision-matched presented BMP comparisons against
+positioned API references. Software/GLES cover both fonts at15/16px, nine
+representative sequences and move/overwrite/erase/scroll/alternate/clear/
+shrink/grow. This is not an independent raster oracle, all5244 entries end
+to end, Kitty/sixel image-placement conformance or physical scanout proof.
+See verification-status.md for exact evidence.107/110 stay open for remaining
+terminal/graphics/full-corpus/live acceptance before browser111/SDL104.
+No Hibr edits, SSH, package, live writes or deployment. Preserve the user's
+untracked releases/0.1.554.yaml.
+
 ## 2026-10-20 candidate581 — core Powerline cell geometry
 
 ADR0164 corrects a demonstrated blank-row/base-seam failure in core Powerline

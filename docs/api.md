@@ -776,6 +776,13 @@ the viewport. Controls and successful positioned updates terminate an active
 extension; incomplete UTF-8 bytes do not. This is not DEC2027/general Unicode
 grapheme support.
 
+Candidate582 fixes resize ownership: overlapping whole cells survive; a wide
+cell cut by the new right edge is removed whole, including its retained
+anchor. Both active and saved alternate buffers are normalized. Growing the
+grid cannot resurrect clipped attachments or link IDs. A resize terminates
+streaming emoji-extension eligibility, without resetting the terminal or its
+last printable REP value. This is grid clipping, not paragraph reflow.
+
 Offline candidate580 uses pinned Unicode18.0 presentation data: default-emoji
 scalars and standardized VS16 pairs select colour; standardized VS15 pairs
 select monochrome outlines. Modern/Retro share a real monochrome Noto Emoji
