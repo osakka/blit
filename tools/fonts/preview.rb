@@ -11,7 +11,8 @@ Dir.chdir(root) do
     headers = ENV.fetch('BLIT_FREETYPE_INCLUDE', "#{root}/build/deps/prefix/include/freetype2")
     library = ENV.fetch('BLIT_FREETYPE_LIBRARY', '/lib/x86_64-linux-gnu/libfreetype.so.6')
     raise 'compile failed' unless system('tcc', '-O2', '-std=c99', '-Wall', "-I#{headers}",
-      'tools/probes/font_preview.c', 'src/blit_font.c', 'src/blit_raster.c', library, '-o', binary)
+      'tools/probes/font_preview.c', 'src/blit_font.c', 'src/blit_raster.c', library,
+      ENV.fetch('BLIT_HARFBUZZ_LIBRARY', '/lib/x86_64-linux-gnu/libharfbuzz.so.0'), '-o', binary)
     ppm = File.join(work, 'specimen.ppm')
     raise 'raster failed' unless system(binary, 'assets/fonts/Blit-Hibr-Terminus16.psf',
       'assets/fonts/BlitRetroNerd-Regular.ttf', 'assets/fonts/BlitModernNerd-Regular.ttf',

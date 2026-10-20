@@ -14,6 +14,7 @@ tcc -O2 -std=c99 -I"$root/vendor/SDL3/include" \
  -I"$root/build/deps/prefix/include" -I"$root/build/deps/prefix/include/libdrm" \
  -I"$headers" "$root/tools/tests/$source" "$root/src/blit_font.c" \
  "$root/src/blit_raster.c" $server_sources "$library" \
+ "${BLIT_HARFBUZZ_LIBRARY:-/lib/x86_64-linux-gnu/libharfbuzz.so.0}" \
  -L"$root/build/sdl3-kms" -lSDL3 \
  -L"$root/build/deps/prefix/lib/x86_64-linux-gnu" -ldrm -lutil -lz \
  -o "$root/build/tests/font-raster-$mode"

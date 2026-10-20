@@ -176,6 +176,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0156 — Shared full-Nerd outline profiles](0156-shared-full-nerd-outline-profiles.md)
 - [0157 — Versioned emoji acceptance corpus](0157-versioned-emoji-acceptance-corpus.md)
 - [0158 — Shared cell-cluster storage and cache key](0158-shared-cell-cluster-storage-and-cache-key.md)
+- [0159 — HarfBuzz colour-cluster raster](0159-harfbuzz-colour-cluster-raster.md)
 
 ## Adding an ADR
 

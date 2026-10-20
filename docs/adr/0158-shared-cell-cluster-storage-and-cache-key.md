@@ -1,7 +1,7 @@
 # ADR0158: one bounded cell-cluster layout and cache identity
 
 - Date: 2026-10-20
-- Status: first shared layer implemented locally; shaping/segmentation pending
+- Status: implemented locally; shaping follows in ADR0159, terminal integration pending
 - Tracking: Blit107/110; layout regression [113](https://git.home.arpa/itdlabs/blit/issues/113); follows ADR0157
 
 ## Findings
@@ -50,8 +50,9 @@ gate evicts colliding A/U+00C1 keys, rechecks exact glyph bytes and distinguishe
 one/two-cell cache entries. Existing scalar/font/backend and terminal gates
 remain required. Live hardware acceptance and deployment are separate.
 
-Next implement the production shaping/colour-cluster API and its dependency
-decision, then shared PTY/API cluster segmentation and renderer consumption.
+ADR0159/candidate576 implements the production shaping/colour-cluster API
+and its dependency decision. Next: shared PTY/API cluster segmentation and
+renderer consumption.
 Width coordination must be demonstrated, not inferred: read-only inspection
 of local Hibr0527d3c mods/uni/uni.c shows `uni width` sums un_cw per scalar.
 That is not proof about every producer/rendering path or the live version.

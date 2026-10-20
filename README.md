@@ -144,14 +144,16 @@ The [pane guide](https://git.home.arpa/itdlabs/hibr-apps/src/branch/main/docs/bl
 documents connection, conflict handling, import/export and diagnostics. The
 canonical pane lives only in hibr-apps, not in Hibr core or this package.
 
-Offline candidate0.1.575 includes smooth `blit-retro`, full pinned Nerd
+Offline candidate0.1.576 includes smooth `blit-retro`, full pinned Nerd
 coverage in both outline profiles (10,386 codepoints) and Noto2D2.057 colour
 emoji. Existing bitmap profiles stay selectable. Generate an actual-raster
 specimen without a display using `ruby tools/fonts/preview.rb`.
 The [font guide](assets/fonts/README.md) records API selection, provenance and
 limits. Independent font shaping passes all5,244 pinned Emoji18.0 entries;
-the shared bounded cluster value/cache key is implemented, but production
-cluster shaping and segmentation remain [issue110](https://git.home.arpa/itdlabs/blit/issues/110).
+the shared bounded cluster raster now shapes and draws the full corpus in
+offline16px module tests. Terminal segmentation, presentation policy and
+backend integration remain [issue110](https://git.home.arpa/itdlabs/blit/issues/110).
+HarfBuzz>=6.0.0 is an explicit runtime dependency, not a second renderer.
 Native KMS now reads the canonical sixteen-slot attachment layout correctly
 ([113](https://git.home.arpa/itdlabs/blit/issues/113)). Not deployed. The active queue is
 [fonts → browser sizing → SDL parity → performance/correctness → release](docs/roadmap.md).
@@ -225,7 +227,9 @@ requests. Never put credentials in source, logs, screenshots, or commits.
 
 ## Build and verify
 
-The server requires FreeType headers and libfreetype6>=2.12.1. Install your
+The server requires FreeType headers, libfreetype6>=2.12.1 and the
+OS-maintained libharfbuzz.so.0>=6.0.0. HarfBuzz public headers are pinned in
+`vendor/harfbuzz`; no private runtime is bundled. Install your
 distribution's `libfreetype-dev` or stage the reviewed Debian development
 package headers at `build/deps/prefix/include/freetype2`. Set
 `BLIT_FREETYPE_INCLUDE=/usr/include/freetype2` when using system headers;

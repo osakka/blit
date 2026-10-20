@@ -24,9 +24,11 @@ candidate575 centralizes the bounded cluster/cache key and fixes the native
 KMS sixteen-versus-four-slot attachment reader (113). This is not grouping
 or shaping support. Emoji18.0 corpus is pinned; the old Noto2.042 font
 misses174 RGI entries in the independent shaping audit. Candidate Noto2.057
-shapes all5,244 corpus entries to one nonzero glyph. This proves font-shaping
-coverage only, not colour raster quality or Blit cluster handling. Shared
-parser/raster/cache/backend cluster integration remains the active next step.
+shapes all5,244 corpus entries to one nonzero glyph. Candidate576 adds the
+production shared colour-cluster raster with explicit HarfBuzz dependency:
+all entries pass16px raster checks; seven families cover every8..64px size.
+Terminal segmentation, presentation policy and backend cluster consumption
+remain active; module tests do not prove complete terminal emoji support.
 
 Size remains the existing canonical 8..64px **cell-height** setting; legacy
 scale is an alternative API sizing policy, not separate browser/desktop zoom.

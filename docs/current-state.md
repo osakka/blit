@@ -1,5 +1,34 @@
 # Current state and restart point
 
+## 2026-10-20 candidate576 — production colour-cluster raster, not deployed
+
+ADR0159 adds HarfBuzz through its public C API to the existing shared
+FreeType raster. Unmodified6.0.0 headers are pinned with per-file hashes;
+the OS-maintained runtime>=6.0.0 is an explicit build/package dependency.
+No second terminal engine, backend-specific shaper or Hibr changes.
+
+The internal cluster entry point shapes bounded ordered values to one colour
+glyph, then uses the same premultiplied downsampler/cache/compositor as scalar
+emoji. It rejects explicit VS15/text and unsupported multi-glyph forms rather
+than dropping visible characters. Existing scalar selection is unchanged.
+All5,244 pinned corpus entries pass actual raster tests at16px with both
+owner spans for each profile; a colour-only context also checks every entry.
+Seven sequence families pass both spans at every8..64px size per profile.
+The regenerated production specimen includes joined emoji. These are module
+tests, not proof of terminal integration or physical-display acceptance.
+
+Next: shared renderer consumption and PTY/API segmentation/width contract,
+text-presentation/default-emoji policy, then overwrite/wrap/erase/resize and
+backend end-to-end conformance.107/110 remain open. Do not advertise complete
+emoji support or activate parser grouping before all renderers support it.
+No SSH, live write, package/deploy or browser/Hibr change; host stays last
+verified572. Preserve user untracked releases/0.1.554.yaml.
+Selected regression run120pass/0skip/0fail. Server and two fresh rebuilds are
+byte-identical; exact identity and test scope are in verification-status.md.
+Final font rerun24/0/0; full-corpus raster Valgrind checks pass for both
+profiles with0 errors/lost bytes. GLib's reachable initializer allocations
+are explicitly recorded, not omitted from the memory evidence.
+
 ## 2026-10-20 candidate575 — shared cluster value and proven KMS attachment bug
 
 Font107/emoji110 remain active. ADR0158 defines one existing16-slot attachment

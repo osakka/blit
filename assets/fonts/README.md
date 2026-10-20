@@ -8,8 +8,8 @@ Both are Blit-tailored renamed derivatives, not original typeface designs.
 Both retain the complete pinned Nerd catalogue: **10,386 distinct codepoints**,
 plus their source Unicode repertoires. Native grayscale antialiasing is used
 at each requested size; neither profile enlarges a one-bit bitmap for text.
-Nerd icons take terminal colours; supported emoji scalars use the shared,
-shared Noto Colour Emoji2.057 face for intrinsic multicolour artwork.
+Nerd icons take terminal colours; supported emoji scalars use the shared
+Noto Colour Emoji2.057 face for intrinsic multicolour artwork.
 
 ![Actual shared-raster specimen: Blit Retro and Modern](../../docs/images/blit-fonts.png)
 
@@ -43,6 +43,12 @@ profiles; `cod-blank` intentionally has no ink. See ADR0156.
 Scope matters: this is **not all Unicode or all emoji sequences**. Font files
 alone do not shape flags, skin tones, ZWJ families or VS16 presentation; that
 shared-renderer work is [issue110](https://git.home.arpa/itdlabs/blit/issues/110).
+Candidate576 adds an internal HarfBuzz/FreeType colour-cluster raster, tested
+against all5,244 pinned Emoji18.0 entries at16px and representative families
+at8..64px. The specimen includes its output, not a claim of terminal support.
+Terminal grouping, text/default presentation and backend consumption remain
+pending. Reproduce with `ruby tools/tests/emoji_cluster_raster_gate.rb`;
+`BLIT_FONT_VALGRIND=1` additionally checks that fixture under Valgrind.
 Missing scalars and protected box/block geometry retain pixel-art PSF fallback;
 wide BMP characters retain the separate wide PSF. No Hibr code is changed.
 

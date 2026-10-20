@@ -3,6 +3,50 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-20 candidate576: shared production colour-cluster raster
+
+ADR0159 /107/110. Frozen TCC server and two fresh rebuilds are byte-identical:
+SHA c6599df751a0e0054d60db1f69eb9a3d724ccb067d249fbe8da5148d4333cb17.
+Selected font/terminal/renderer/schema/lifecycle/offscreen-GLES run:
+120pass/0skip/0fail, `/tmp/blit-fontcraft.IHU9AK/576-verification.log`.
+No timing/hardware suite or physical refresh/visual acceptance is implied.
+The macro-based header baseline rebuild is byte-identical to the tested server.
+Final font-suite rerun24pass/0skip/0fail (`576-font-final.log`) includes the
+hardened full-key collision/eviction byte comparison, fresh buffer recovery
+after rejected sequences, and injected old-runtime/package-baseline checks.
+
+Internal `blit_raster_get_cluster` shares the existing cache, FreeType colour
+face/downsampler and premultiplied compositor. HarfBuzz6.0.0 public headers
+are pinned (40 headers plus licence); OS runtime>=6.0.0 is now an explicit
+link/package dependency. Tested runtime SHA
+1b55afd639cdf32fef66721032a29ee02b9c5af5527845cf53d185bc5413df1a.
+An injected old-version-query fixture rejects new colour contexts while
+existing bitmap/outline contexts remain usable; it is not an actual old-runtime
+loader test. Header hashes and package minimum-version consistency are checked.
+
+Each outline profile passes actual raster tests for all5,244 pinned Emoji18.0
+entries at16px with both1/2-column allocations. A colour-only context also
+requires every entry to yield a real colour glyph. Seven sequence families
+(VS16, keycap, regional flag, skin tone, profession, family, tag flag) pass both
+spans at every8..64px height per profile. Tests check ink, dimensions, no
+fallback, premultiplied channels and bounded caching. Existing scalar policy
+is retained; this does not prove default-emoji/text-selector policy complete.
+
+Both profiles' full corpus/size-family fixtures pass Valgrind3.19.0 with
+0 errors and0 definitely/indirectly/possibly lost bytes
+(`576-cluster-valgrind.log`). Each retains18,804 reachable bytes in9 blocks.
+A separate production-preview run with all reachable stacks enabled traces
+all9 to GLib dynamic-library initialization, not Blit raster contexts
+(`576-preview-valgrind.log`); do not describe this as all heap blocks freed.
+
+Updated specimen `docs/images/blit-fonts.png` is generated from the production
+module, visually inspected and byte-identical to a second generation:
+SHA fc443aa14db4572d15685d8c13b7217e16f9c7b0cd7d607a855fad59a646ab45.
+It is NOT a live-display screenshot or evidence of terminal cluster support.
+PTY/API segmentation, width ownership, renderer consumption and complete
+presentation/overwrite/erase/wrap/resize conformance remain pending.107/110
+stay open. No Hibr edits, SSH, live writes, Debian artifact or deployment.
+
 ## 2026-10-20 candidate575: shared cluster value and native attachment layout
 
 ADR0158 / font107, emoji110, regression113. Frozen TCC server SHA
@@ -25,6 +69,9 @@ NOT emoji segmentation or shaping. Cache still has128 slots/4MiB pixel limit.
 Modern and Retro shared-raster tests under Valgrind3.19.0 report0 errors and
 all heap blocks freed, including collision/eviction cases and all57 sizes.
 Logs `575-{modern,retro}-valgrind.log` in the same scratch directory.
+Additional native-KMS font fixture memory run (`575-kms-valgrind.log`) also
+reports0 errors and all heap blocks freed. A fresh575 build and regenerated
+specimen were byte-identical to the frozen server and checked-in image.
 Full emoji shaping/PTY/API/backend integration remains110. No new shaper
 dependency, font-width change, Hibr edit, SSH, live write, package or deploy.
 

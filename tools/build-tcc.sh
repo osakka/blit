@@ -34,6 +34,7 @@ case "$target" in
             "$ROOT/src/blit_server.c" "$ROOT/src/blit_kms.c" \
             "$ROOT/src/blit_font.c" "$ROOT/src/blit_raster.c" \
             "${BLIT_FREETYPE_LIBRARY:-/lib/x86_64-linux-gnu/libfreetype.so.6}" \
+            "${BLIT_HARFBUZZ_LIBRARY:-/lib/x86_64-linux-gnu/libharfbuzz.so.0}" \
             -L"$ROOT/build/sdl3-kms" -lSDL3 \
             -L"$ROOT/build/deps/prefix/lib/x86_64-linux-gnu" -ldrm -lutil -lz \
             -o "$output"

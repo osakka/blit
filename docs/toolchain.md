@@ -1,5 +1,16 @@
 # Toolchain baseline
 
+## Current font dependency (candidate576)
+
+TCC compiles the shared raster with FreeType and HarfBuzz's public C API.
+`vendor/harfbuzz/source.json` pins unmodified6.0.0 headers/licence, not a
+runtime binary. Use OS-maintained `libharfbuzz.so.0`>=6.0.0 (Debian package
+`libharfbuzz0b`); the package declares this dependency. A requested colour
+context fails if the runtime is too old; no silent replacement shaper.
+`BLIT_HARFBUZZ_LIBRARY` selects the explicit build link path, defaulting to
+`/lib/x86_64-linux-gnu/libharfbuzz.so.0`. Header identity, corpus/raster and
+existing font/backend gates run in the font suite. See ADR0159.
+
 ## Current workspace
 
 | Component | Status |

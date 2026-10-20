@@ -284,7 +284,7 @@ Section: misc
 Priority: optional
 Architecture: amd64
 Maintainer: ITD Labs <itdlabs@localhost>
-Depends: libc6, libdrm2, zlib1g, libfreetype6 (>= 2.12.1)
+Depends: libc6, libdrm2, zlib1g, libfreetype6 (>= 2.12.1), libharfbuzz0b (>= 6.0.0)
 Suggests: hibr
 Description: API-driven SDL3/KMS text display server
  Blit provides a text-first display server with one terminal surface per

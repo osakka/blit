@@ -1,6 +1,8 @@
 #include "blit_raster.h"
 #include <ft2build.h>
 #include FT_FREETYPE_H
+#include "../vendor/harfbuzz/hb.h"
+#include "../vendor/harfbuzz/hb-ft.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -18,6 +20,8 @@ struct BlitRaster {
     BlitFont fallback;
     FT_Library library;
     FT_Face outline, colour;
+    hb_font_t *colour_font;
+    hb_buffer_t *shape_buffer;
     int width, height, em, baseline;
     size_t bytes;
     unsigned long renders;
@@ -31,6 +35,8 @@ void blit_raster_close(BlitRaster *raster)
     int i;
     if (!raster) return;
     for (i = 0; i < RASTER_SLOTS; ++i) free(raster->cache[i].pixels);
+    if (raster->shape_buffer) hb_buffer_destroy(raster->shape_buffer);
+    if (raster->colour_font) hb_font_destroy(raster->colour_font);
     if (raster->outline) FT_Done_Face(raster->outline);
     if (raster->colour) FT_Done_Face(raster->colour);
     if (raster->library) FT_Done_FreeType(raster->library);
@@ -77,10 +83,16 @@ BlitRaster *blit_raster_open(const BlitFont *fallback,
         if (!raster->em) goto fail;
     }
     if (colour_path) {
+        if (!hb_version_atleast(HB_VERSION_MAJOR, HB_VERSION_MINOR, HB_VERSION_MICRO)) goto fail;
         if (FT_New_Face(raster->library, colour_path, 0, &raster->colour) ||
             !FT_HAS_COLOR(raster->colour) || raster->colour->num_fixed_sizes < 1 ||
             FT_Select_Charmap(raster->colour, FT_ENCODING_UNICODE) ||
             FT_Select_Size(raster->colour, 0)) goto fail;
+        raster->colour_font = hb_ft_font_create_referenced(raster->colour);
+        raster->shape_buffer = hb_buffer_create();
+        if (raster->colour_font == hb_font_get_empty() ||
+            !hb_buffer_pre_allocate(raster->shape_buffer, BLIT_CLUSTER_MAX_SCALARS)) goto fail;
+        hb_ft_font_set_load_flags(raster->colour_font, FT_LOAD_COLOR);
     }
     return raster;
 fail:
@@ -125,13 +137,13 @@ static int draw_outline(BlitRaster *raster, uint32_t scalar, RasterEntry *entry)
     return 1;
 }
 
-static int draw_colour(BlitRaster *raster, uint32_t scalar, RasterEntry *entry)
+static int draw_colour_glyph(BlitRaster *raster, unsigned glyph_index, RasterEntry *entry)
 {
     FT_Bitmap *bitmap;
     FT_Face face = raster->colour;
     int width, height, limit_height, x, y, x0, y0;
-    if (!face || !FT_Get_Char_Index(face, scalar)) return 0;
-    if (FT_Load_Char(face, scalar, FT_LOAD_COLOR | FT_LOAD_RENDER)) return -1;
+    if (!face || !glyph_index || glyph_index >= (unsigned)face->num_glyphs) return 0;
+    if (FT_Load_Glyph(face, glyph_index, FT_LOAD_COLOR | FT_LOAD_RENDER)) return -1;
     bitmap = &face->glyph->bitmap;
     if (bitmap->pixel_mode != FT_PIXEL_MODE_BGRA || bitmap->pitch < 0 ||
         !bitmap->width || !bitmap->rows) return -1;
@@ -178,23 +190,41 @@ static int draw_colour(BlitRaster *raster, uint32_t scalar, RasterEntry *entry)
     return 1;
 }
 
-int blit_raster_get(BlitRaster *raster, uint32_t scalar, int columns,
-                    BlitRasterGlyph *glyph)
+static unsigned colour_cluster_glyph(BlitRaster *raster, const BlitCellCluster *key)
+{
+    hb_glyph_info_t *info;
+    unsigned count, i;
+    if (!raster->colour_font || !raster->shape_buffer) return 0;
+    /* VS15 is an explicit text request, not an emoji ligature request. */
+    for (i = 0; i < key->length; ++i)
+        if (key->scalars[i] == 0xfe0e) return 0;
+    hb_buffer_clear_contents(raster->shape_buffer);
+    hb_buffer_set_flags(raster->shape_buffer, HB_BUFFER_FLAG_REMOVE_DEFAULT_IGNORABLES);
+    hb_buffer_add_utf32(raster->shape_buffer, key->scalars, (int)key->length, 0, (int)key->length);
+    hb_buffer_guess_segment_properties(raster->shape_buffer);
+    hb_shape(raster->colour_font, raster->shape_buffer, NULL, 0);
+    if (!hb_buffer_allocation_successful(raster->shape_buffer)) return 0;
+    info = hb_buffer_get_glyph_infos(raster->shape_buffer, &count);
+    return count == 1 && info ? info[0].codepoint : 0;
+}
+
+static int raster_get_key(BlitRaster *raster, const BlitCellCluster *key,
+                          BlitRasterGlyph *glyph)
 {
     RasterEntry next, *entry;
-    BlitCellCluster key;
     size_t bytes, old_bytes;
-    unsigned slot;
+    unsigned slot, colour_index = 0;
+    uint32_t scalar = key->scalars[0];
+    int columns = key->columns;
     int result = 0, x, y;
-    if (!raster || !glyph || !blit_cell_cluster_init(&key, scalar, NULL, 0, columns)) return 0;
-    slot = (unsigned)(blit_cell_cluster_hash(&key) % RASTER_SLOTS);
+    slot = (unsigned)(blit_cell_cluster_hash(key) % RASTER_SLOTS);
     entry = &raster->cache[slot];
-    if (entry->valid && blit_cell_cluster_equal(&entry->key, &key)) {
+    if (entry->valid && blit_cell_cluster_equal(&entry->key, key)) {
         *glyph = entry->glyph;
         return 1;
     }
     memset(&next, 0, sizeof(next));
-    next.key = key;
+    next.key = *key;
     next.glyph.width = raster->width * columns;
     next.glyph.height = raster->height;
     next.glyph.baseline = raster->baseline;
@@ -203,6 +233,12 @@ int blit_raster_get(BlitRaster *raster, uint32_t scalar, int columns,
         (!raster->outline || !FT_Get_Char_Index(raster->outline, scalar)) &&
         FT_Get_Char_Index(raster->colour, scalar) ?
         BLIT_RASTER_RGBA_PREMULTIPLIED : BLIT_RASTER_COVERAGE;
+    if (key->length > 1) {
+        colour_index = colour_cluster_glyph(raster, key);
+        if (!colour_index) return 0;
+        next.glyph.format = BLIT_RASTER_RGBA_PREMULTIPLIED;
+    } else if (next.glyph.format == BLIT_RASTER_RGBA_PREMULTIPLIED)
+        colour_index = FT_Get_Char_Index(raster->colour, scalar);
     next.glyph.stride = next.glyph.width * (int)next.glyph.format;
     bytes = (size_t)next.glyph.stride * next.glyph.height;
     old_bytes = entry->valid ? (size_t)entry->glyph.stride * entry->glyph.height : 0;
@@ -210,11 +246,12 @@ int blit_raster_get(BlitRaster *raster, uint32_t scalar, int columns,
     next.pixels = calloc(1, bytes);
     if (!next.pixels) return 0;
     next.glyph.pixels = next.pixels;
-    if (invisible_format(scalar)) result = 1;
+    if (key->length == 1 && invisible_format(scalar)) result = 1;
     else if (next.glyph.format == BLIT_RASTER_RGBA_PREMULTIPLIED)
-        result = draw_colour(raster, scalar, &next);
+        result = draw_colour_glyph(raster, colour_index, &next);
     else if (!protected_geometry(scalar)) result = draw_outline(raster, scalar, &next);
     if (result < 0) { free(next.pixels); return 0; }
+    if (!result && key->length > 1) { free(next.pixels); return 0; }
     if (!result) {
         const BlitFont *font = &raster->fallback;
         size_t index = blit_font_glyph_index(font, scalar);
@@ -233,6 +270,25 @@ int blit_raster_get(BlitRaster *raster, uint32_t scalar, int columns,
     ++raster->renders;
     *glyph = entry->glyph;
     return 1;
+}
+
+int blit_raster_get_cluster(BlitRaster *raster, const BlitCellCluster *cluster,
+                            BlitRasterGlyph *glyph)
+{
+    BlitCellCluster key;
+    if (!raster || !glyph || !cluster || !cluster->length ||
+        cluster->length > BLIT_CLUSTER_MAX_SCALARS ||
+        !blit_cell_cluster_init(&key, cluster->scalars[0], cluster->scalars + 1,
+                                cluster->length - 1, cluster->columns)) return 0;
+    return raster_get_key(raster, &key, glyph);
+}
+
+int blit_raster_get(BlitRaster *raster, uint32_t scalar, int columns,
+                    BlitRasterGlyph *glyph)
+{
+    BlitCellCluster key;
+    if (!raster || !glyph || !blit_cell_cluster_init(&key, scalar, NULL, 0, columns)) return 0;
+    return raster_get_key(raster, &key, glyph);
 }
 
 size_t blit_raster_cached_bytes(const BlitRaster *raster)

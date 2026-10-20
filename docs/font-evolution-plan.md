@@ -4,6 +4,16 @@ Tracking: [Blit#107](https://git.home.arpa/itdlabs/blit/issues/107).
 
 ## Active completion contract —107/110 before browser or SDL work
 
+Candidate576 implements ADR0159's internal colour-cluster raster atop the
+existing FreeType/compositor path. The public HarfBuzz C API is an explicit
+runtime dependency, with pinned headers and OS-maintained runtime>=6.0.0.
+Actual raster gates cover every5,244 corpus entries at16px, both spans and
+both outline profiles; a colour-only context covers singleton colour glyphs.
+Seven sequence families additionally cover every8..64px size and both spans.
+Unsupported forms/explicit text selectors fail without changing the caller's
+output or cache render count. The production specimen now includes clusters.
+This does NOT enable terminal grouping or complete presentation policy.
+
 Candidate575 implements ADR0158's first shared value layer. The existing
 sixteen-slot cell layout now has one definition, including native KMS (which
 previously indexed four slots). The shared raster cache uses a full bounded
@@ -28,11 +38,12 @@ Completion checkpoints, in dependency order:
 
 1. Pin repertoire, licences and font; verify source identity, one-glyph shaping
    and real colour raster coverage. Corpus and shaping audits are implemented;
-   complete sequence colour-raster coverage remains pending.
+   full-corpus16px colour-raster coverage is implemented in576. Other sizes
+   have representative sequence-family coverage, not a full-corpus claim.
 2. Define one shared bounded cluster and width/continuation contract for PTY
    output and API-owned cells. Preserve fragmented input across reads; do not
    silently change the Hibr Unicode-width ABI. Choose/pin the production
-   shaping dependency explicitly; the offline audit adds no runtime dependency.
+   shaping dependency explicitly;576 adds HarfBuzz through the public C API.
    The bounded owned value/cache identity and canonical attachment storage
    bound are implemented in575. PTY/API grouping and width/continuation
    integration remain pending; existing width behaviour is unchanged.
@@ -53,8 +64,9 @@ Completion checkpoints, in dependency order:
 Run `ruby tools/tests/emoji_corpus_gate.rb` for data identity and
 `ruby tools/tests/emoji_font_audit_gate.rb` for independent font shaping plus
 a negative ordinary-text-font fixture. Audit JSON explicitly labels its
-limited scope. Nothing in these checks certifies the existing scalar-only
-renderer as cluster-capable. `audit-emoji.py --require-complete` exits nonzero
+limited scope. `ruby tools/tests/emoji_cluster_raster_gate.rb` exercises the
+production cluster raster; it does not certify terminal/backend consumption.
+`audit-emoji.py --require-complete` exits nonzero
 for missing/split entries; no selective sample can stand in for the corpus.
 
 ## Current offline candidate573: smooth Retro and full Nerd catalogue

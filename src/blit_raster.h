@@ -31,6 +31,11 @@ BlitRaster *blit_raster_open(const BlitFont *fallback,
 void blit_raster_close(BlitRaster *raster);
 int blit_raster_get(BlitRaster *raster, uint32_t scalar, int columns,
                     BlitRasterGlyph *glyph);
+/* Internal bounded colour-cluster path. Unsupported multi-scalar forms fail
+   without replacing cache entries or the caller's output. Does not segment
+   terminal input or choose a cluster's column allocation. */
+int blit_raster_get_cluster(BlitRaster *raster, const BlitCellCluster *cluster,
+                            BlitRasterGlyph *glyph);
 size_t blit_raster_cached_bytes(const BlitRaster *raster);
 unsigned long blit_raster_render_count(const BlitRaster *raster);
 /* Install an already validated context on the canonical loaded font. */

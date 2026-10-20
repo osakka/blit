@@ -16,5 +16,6 @@ work=$(mktemp -d /tmp/blit-raster-gate.XXXXXX)
 # Only these validated, uniquely created temporary files are removed.
 trap 'rm -f "$work/gate"; rmdir "$work"' EXIT HUP INT TERM
 tcc -std=c99 -Wall -I"$headers" "$root/tools/tests/font_raster_gate.c" \
-    "$root/src/blit_raster.c" "$root/src/blit_font.c" "$library" -o "$work/gate"
+    "$root/src/blit_raster.c" "$root/src/blit_font.c" "$library" \
+    "${BLIT_HARFBUZZ_LIBRARY:-/lib/x86_64-linux-gnu/libharfbuzz.so.0}" -o "$work/gate"
 "$work/gate" "$@"
