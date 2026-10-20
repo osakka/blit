@@ -1,5 +1,41 @@
 # Verification status
 
+## 2026-10-21 candidate586 /117 native VT isolation
+
+TCC build and actual Linux6.1.190/QEMU module plus full native server pass.
+Module: observed unmuted console leak is the negative control; two keyboards
+including hotplug are muted at the VT while still delivering evdev events;
+VT release/acquire, normal and SIGKILL restoration, stopped-owner10s watchdog,
+inherited recovery descriptors and competing-owner refusal pass. Expanding the
+test exposed an inherited-flock restart lockout; explicit unlock is now covered.
+
+Full production server on QEMU Bochs DRM1280x800: physical evdev key reaches
+the PTY but not the Linux console; real Ctrl+Alt+Fn leaves/reacquires DRM;
+an away key reaches only the other console and is not replayed after queuing
+across SIGSTOP/SIGCONT; scanout bytes before/after handover match; API shutdown
+restores the keyboard. No ioctl/mock stand-in for this VM result. Evidence:
+/tmp/blit-vt-kernel.FHvism/serial.log. Final VM also holds the bounded120s
+installation lease longer than10s, then independently verifies the normal
+stopped-owner watchdog. Test VM shuts down and exits0.
+
+Broad suite140pass/5skip/0fail (10-second soak, not the120-second default).
+It began before the final install-lease addition; the final TCC binary then
+passed the real module/full-server VM gate and update_restart_gate explicitly.
+Targeted schema/terminal/lifecycle32pass/1skip/0fail; its skip lacked pinned
+Hibr headers, while the broad run supplied them and passed provider isolation.
+SDL startup cleanup/refusal and console endpoint authentication/readback pass.
+
+Reproduce with tools/tests/native_vt_kernel_gate.sh and BLIT_VT_SERVER_TEST=1,
+BLIT_QEMU_KERNEL, static BLIT_QEMU_BUSYBOX and matching BLIT_QEMU_MODULES.
+The regular renderer suite skips explicitly when these inputs are absent.
+Default kernel path is not assumed to exist. The test executable refuses to
+touch a console without the disposable VM's blit_vt_test=1 boot marker.
+
+This is not SDL daemon, physical GPU/multi-monitor VT, gpm isolation, whole
+cgroup SIGKILL or kernel/GPU hang acceptance. No live deployment yet; API-only
+readback confirms584 on10.54, unmuted VTtty2 and no mirrored desktop files.
+117 remains open for the remaining boundaries. ADR0170 records the decision.
+
 ## 2026-10-20 candidate585 /116 negotiated keyboard events
 
 Frozen source1206741 passes combined terminal/schema9/0/0. Package585

@@ -34,7 +34,13 @@ font_active = schema.dig('components','schemas','FontProfiles','properties','act
 raise 'font size policy observation missing' unless
   %w[sizing size_px cell_pixels].all? { |key| font_active.fetch('required').include?(key) } &&
   font_active.dig('properties','sizing','enum') == %w[scale pixels]
-raise "unexpected path count #{paths.length}" unless paths.length == 46
+raise "unexpected path count #{paths.length}" unless paths.length == 47
+console=schema.dig('components','schemas','ConsoleDiagnostics')
+raise 'native console observation contract missing' unless
+  paths.dig('/v1/diagnostics/console','get','operationId') == 'getConsoleDiagnostics' &&
+  console['additionalProperties'] == false &&
+  console.dig('properties','evdev_exclusive','enum') == [false] &&
+  console.dig('properties','owner','enum') == %w[native unmanaged]
 
 settings = schema.fetch('components').fetch('schemas').fetch('Settings')
 provenance = settings.dig('properties','effective','properties','presentation_configuration')

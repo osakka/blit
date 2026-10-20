@@ -616,6 +616,24 @@ paths:
                 $ref: '#/components/schemas/Diagnostics'
         default:
           $ref: '#/components/responses/Problem'
+  /v1/diagnostics/console:
+    get:
+      tags: [diagnostics]
+      operationId: getConsoleDiagnostics
+      summary: Inspect native Linux VT keyboard ownership and recovery
+      description: >-
+        Native KMS ownership only. Unmanaged means Blit has not established
+        native VT isolation; it does not assert that SDL or another owner is
+        unsafe. Keyboard muting is not exclusive evdev pointer/gamepad access.
+      responses:
+        '200':
+          description: Current native console owner and actual keyboard mode
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleDiagnostics'
+        default:
+          $ref: '#/components/responses/Problem'
   /v1/diagnostics/runtime:
     get:
       tags: [diagnostics]
@@ -2603,6 +2621,28 @@ components:
             - {type: string, minLength: 1, maxLength: 127, pattern: '^[A-Za-z0-9_.:-]+$'}
             - {type: 'null'}
         fallback: {type: string, enum: [first_available, wait]}
+      additionalProperties: false
+    ConsoleDiagnostics:
+      type: object
+      required: [owner, vt_number, active, keyboard_muted, keyboard_mode, recovery_process, watchdog_timeout_ms, evdev_exclusive]
+      properties:
+        owner: {type: string, enum: [native, unmanaged]}
+        vt_number: {type: integer, minimum: 0, maximum: 63}
+        active: {type: boolean}
+        keyboard_muted: {type: boolean}
+        keyboard_mode:
+          type: integer
+          minimum: -1
+          maximum: 4
+          description: Linux KDGKBMODE value, or -1 when unavailable.
+        recovery_process:
+          type: boolean
+          description: Recovery child registered; not a responsiveness/heartbeat check.
+        evdev_exclusive: {type: boolean, enum: [false]}
+        watchdog_timeout_ms:
+          type: integer
+          enum: [10000, 120000]
+          description: Normal main-loop timeout, or bounded privileged package-install lease.
       additionalProperties: false
     Diagnostics:
       type: object

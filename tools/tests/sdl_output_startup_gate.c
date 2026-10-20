@@ -120,7 +120,8 @@ int main(int argc, char **argv)
             for (i = 0; i < runtime->diagnostic_log_count; ++i)
                 if (strstr(runtime->diagnostic_logs[i], codes[mode]) &&
                     strstr(runtime->diagnostic_logs[i], "display 57")) found = 1;
-            if (!found || runtime->output_count || fallbacks != 1 || destroyed != created || moves) {
+            if (!found || runtime->output_count || fallbacks != 0 || destroyed != created || moves ||
+                !strstr(runtime->sdl_error, "requires VT ownership")) {
                 fprintf(stderr, "SDL_STARTUP_FAILURE_PATH_FAIL mode=%d logs=%d windows=%d/%d\n",
                     mode, found, destroyed, created);
                 return 1;

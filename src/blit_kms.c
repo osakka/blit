@@ -124,6 +124,7 @@ typedef struct {
 
 struct BlitKms {
     int fd;
+    int suspended;
     int output_count;
     KmsOutput outputs[KMS_MAX_OUTPUTS];
     int slots[KMS_MAX_OUTPUTS];
@@ -1534,6 +1535,44 @@ int blit_kms_open(BlitKms *kms, char *error, size_t error_capacity)
     return 0;
 }
 
+int blit_kms_suspend(BlitKms *kms)
+{
+    int i;
+    if (kms == NULL) return -1;
+    if (kms->suspended) return 0;
+    for (i = 0; i < kms->output_count; ++i) {
+        KmsOutput *output = kms_output(kms, i);
+        if (wait_flip(kms, output) < 0) return -1;
+        if (output->old_crtc && output->old_crtc->mode_valid &&
+            drmModeSetCrtc(kms->fd, output->old_crtc->crtc_id,
+                output->old_crtc->buffer_id, output->old_crtc->x,
+                output->old_crtc->y, &output->connector, 1,
+                &output->old_crtc->mode) < 0) return -1;
+    }
+    if (drmDropMaster(kms->fd) < 0) return -1;
+    kms->suspended = 1;
+    return 0;
+}
+
+int blit_kms_resume(BlitKms *kms)
+{
+    int i;
+    if (kms == NULL) return -1;
+    if (!kms->suspended) return 0;
+    if (drmSetMaster(kms->fd) < 0) return -1;
+    for (i = 0; i < kms->output_count; ++i) {
+        KmsOutput *output = kms_output(kms, i);
+        /* Existing buffers remain allocated. Repaint and modeset once;
+           damage accumulated while another VT owned scanout is not enough. */
+        output->last_view_count = -1;
+        output->modeset_fallback = 1;
+        output->pointer_state_valid = 0;
+        output->pointer_background_valid = 0;
+    }
+    kms->suspended = 0;
+    return 0;
+}
+
 int blit_kms_display_count(const BlitKms *kms) { return kms ? kms->output_count : 0; }
 
 unsigned long long blit_kms_inventory_revision(const BlitKms *kms)
@@ -1569,6 +1608,7 @@ int blit_kms_service(BlitKms *kms, int readable)
     long long timeout_us;
 
     if (kms == NULL) return -1;
+    if (kms->suspended) return 0;
     if (readable) {
         memset(&context, 0, sizeof(context));
         context.version = DRM_EVENT_CONTEXT_VERSION;
@@ -1685,6 +1725,7 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
     long long started = 0;
     const char *screenshot_ready_file = getenv("BLIT_KMS_SCREENSHOT_READY_FILE");
     if (kms == NULL) return -1;
+    if (kms->suspended) return 0;
     /* The canonical state/hit-testing coordinates stay at the hotspot.
        Only the compositing coordinates are translated to the stamp origin. */
     if (kms->pointer_art) {
@@ -2185,7 +2226,7 @@ void blit_kms_close(BlitKms *kms)
         KmsOutput *output = &kms->outputs[i];
         if (!output->allocated) continue;
         wait_flip(kms, output);
-        if (kms_release_output(kms, output, 1) < 0) {
+        if (kms->suspended || kms_release_output(kms, output, 1) < 0) {
             /* Close the DRM file before unmapping a failed teardown's buffers. */
             if (kms->fd >= 0) close(kms->fd);
             kms->fd = -1;

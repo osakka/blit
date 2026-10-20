@@ -7,7 +7,7 @@ library=${BLIT_FREETYPE_LIBRARY:-/lib/x86_64-linux-gnu/libfreetype.so.6}
 mode=${1:-software}
 case "$mode" in
  kms) source=font_kms_raster_gate.c; server_sources= ;;
- software|opengles2) source=font_sdl_raster_gate.c; server_sources="$root/src/blit_kms.c" ;;
+ software|opengles2) source=font_sdl_raster_gate.c; server_sources="$root/src/blit_kms.c $root/src/blit_vt.c" ;;
  *) exit 2 ;;
 esac
 tcc -O2 -std=c99 -I"$root/vendor/SDL3/include" \

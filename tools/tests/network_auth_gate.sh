@@ -18,6 +18,7 @@ UNAUTH=$(mktemp /tmp/blit-network-unauth.XXXXXX)
 AUTH=$(mktemp /tmp/blit-network-auth.XXXXXX)
 DIAGNOSTICS=$(mktemp /tmp/blit-network-diagnostics.XXXXXX)
 RUNTIME_DIAGNOSTICS=$(mktemp /tmp/blit-network-runtime-diagnostics.XXXXXX)
+CONSOLE_DIAGNOSTICS=$(mktemp /tmp/blit-network-console-diagnostics.XXXXXX)
 GRAPHICS=$(mktemp /tmp/blit-network-graphics.XXXXXX)
 AUDIO=$(mktemp /tmp/blit-network-audio.XXXXXX)
 DISPLAYS=$(mktemp /tmp/blit-network-displays.XXXXXX)
@@ -27,7 +28,7 @@ server_pid=
 cleanup() {
     if [ -n "$server_pid" ]; then kill "$server_pid" 2>/dev/null || true; fi
     rm -f "$LOG" "$UNAUTH" "$AUTH" "$DIAGNOSTICS" "$RUNTIME_DIAGNOSTICS" "$GRAPHICS" "$AUDIO" \
-        "$DISPLAYS" "$COMMAND_DENIED" "$COMMAND_ALLOWED"
+        "$DISPLAYS" "$COMMAND_DENIED" "$COMMAND_ALLOWED" "$CONSOLE_DIAGNOSTICS"
 }
 trap cleanup EXIT HUP INT TERM
 
@@ -72,6 +73,21 @@ diagnostics=$(curl -sS -o "$DIAGNOSTICS" -w '%{http_code}' \
 runtime_diagnostics=$(curl -sS -o "$RUNTIME_DIAGNOSTICS" -w '%{http_code}' \
     -H "Authorization: Bearer $TOKEN" \
     "http://127.0.0.1:$PORT/v1/diagnostics/runtime")
+console_unauth=$(curl -sS -o /dev/null -w '%{http_code}' \
+    "http://127.0.0.1:$PORT/v1/diagnostics/console")
+console_diagnostics=$(curl -sS -o "$CONSOLE_DIAGNOSTICS" -w '%{http_code}' \
+    -H "Authorization: Bearer $TOKEN" \
+    "http://127.0.0.1:$PORT/v1/diagnostics/console")
+test "$console_unauth" = 401
+test "$console_diagnostics" = 200
+ruby -rjson -e '
+  j=JSON.parse(File.read(ARGV.fetch(0)))
+  abort "console diagnostic ownership drift" unless j.fetch("owner")=="unmanaged" &&
+    j.fetch("vt_number")==0 && j.fetch("active")==false &&
+    j.fetch("keyboard_muted")==false && j.fetch("keyboard_mode")==-1 &&
+    j.fetch("recovery_process")==false && j.fetch("watchdog_timeout_ms")==10000 &&
+    j.fetch("evdev_exclusive")==false
+' "$CONSOLE_DIAGNOSTICS"
 graphics=$(curl -sS -o "$GRAPHICS" -w '%{http_code}' \
     -H "Authorization: Bearer $TOKEN" \
     "http://127.0.0.1:$PORT/v1/graphics")

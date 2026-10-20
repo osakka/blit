@@ -3,6 +3,7 @@
 #include <linux/input.h>
 #include <dirent.h>
 #include "blit_kms.h"
+#include "blit_vt.h"
 #include "blit_font.h"
 #include "blit_raster.h"
 #include "blit_graphics.h"
@@ -562,6 +563,7 @@ typedef struct {
     unsigned long long pointer_wheel;
     unsigned long long pointer_buttons;
     unsigned char key_held[(KEY_MAX + 8) / 8];
+    unsigned short console_switch_key;
     int shift;
     int ctrl;
     int alt;
@@ -1384,6 +1386,7 @@ typedef struct {
     pid_t auxiliary_worker_pid;
     int auxiliary_worker_binding;
     uint64_t auxiliary_worker_deadline_us;
+    uint64_t console_input_since_us;
 } BlitRuntime;
 
 static unsigned long long blit_graphics_generation;
@@ -22412,6 +22415,9 @@ static void handle_request(int fd, BlitRuntime *runtime,
     } else if (strcmp(path, "/v1/diagnostics/runtime") == 0) {
         runtime_diagnostics_json(runtime, body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
+    } else if (strcmp(path, "/v1/diagnostics/console") == 0) {
+        blit_vt_json(body, sizeof(body));
+        send_http(fd, 200, "OK", "application/json", body);
     } else if (strcmp(path, "/v1/diagnostics/observation") == 0) {
         observation_json(runtime, body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
@@ -22557,12 +22563,27 @@ static void discover_displays(BlitRuntime *runtime)
     }
     if (runtime->display_backend_kms) {
         char error[256];
+        struct stat drm_node;
+        const char *drm_path = getenv("BLIT_DRM_DEVICE");
         error[0] = '\0';
         runtime->direct_kms = 1;
+        /* Before either device-I/O thread exists. A missing DRM device still
+           takes the normal degraded/API-only startup path without touching
+           a console. A real native presentation must have a recoverable VT. */
+        if (stat(drm_path ? drm_path : "/dev/dri/card0", &drm_node) == 0 &&
+            S_ISCHR(drm_node.st_mode) && !blit_vt_owned()) {
+            if (blit_vt_open(error, sizeof(error)) < 0) {
+                snprintf(runtime->sdl_error, sizeof(runtime->sdl_error), "%s", error);
+                diagnostic_log(runtime, "error", "console_ownership_failed", error);
+                return;
+            }
+            atexit(blit_vt_close);
+        }
         runtime->kms = blit_kms_new(&runtime->font, &runtime->wide_font);
         blit_kms_set_pointer_art(runtime->kms,&runtime->pointer_art);
         if (runtime->kms == NULL || blit_kms_open(runtime->kms, error,
                                                    sizeof(error)) < 0) {
+            blit_vt_close();
             snprintf(runtime->sdl_error, sizeof(runtime->sdl_error),
                      "direct KMS: %s", error[0] ? error : "initialization failed");
             fprintf(stderr, "blit: %s\n", runtime->sdl_error);
@@ -23136,6 +23157,13 @@ static int activate_direct_kms_fallback(BlitRuntime *runtime)
 
     if (runtime->direct_kms || runtime->display_count == 0)
         return 0;
+    if (!blit_vt_owned()) {
+        destroy_outputs(runtime);
+        snprintf(runtime->sdl_error, sizeof(runtime->sdl_error),
+                 "Native KMS fallback requires VT ownership; select kms explicitly and restart.");
+        diagnostic_log(runtime, "error", "console_ownership_required", runtime->sdl_error);
+        return 0;
+    }
     destroy_outputs(runtime);
     error[0] = '\0';
     runtime->kms = blit_kms_new(&runtime->font, &runtime->wide_font);
@@ -23262,7 +23290,30 @@ static int evdev_open_node(const char *path)
 
     if (delay_us > 0)
         usleep((useconds_t)delay_us);
-    return open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+    {
+        int fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+        int clock_id = CLOCK_MONOTONIC;
+        if (fd >= 0 && ioctl(fd, EVIOCSCLOCKID, &clock_id) < 0 &&
+            blit_vt_owned()) {
+            /* Native VT handover relies on event timestamps to discard
+               queued input typed on another VT. Fail closed, not silently
+               interpret a realtime timestamp as monotonic. */
+            close(fd);
+            return -1;
+        }
+        return fd;
+    }
+}
+
+static int native_console_accepts_event(const BlitRuntime *runtime,
+                                       const struct input_event *event)
+{
+    uint64_t timestamp;
+    if (!runtime->direct_kms) return 1;
+    if (!blit_vt_owned() || !blit_vt_active()) return 0;
+    timestamp = (uint64_t)event->time.tv_sec * 1000000ULL +
+        (uint64_t)event->time.tv_usec;
+    return timestamp >= runtime->console_input_since_us;
 }
 
 /* The opener thread. It does the device I/O and nothing else. */
@@ -27147,6 +27198,7 @@ static void service_evdev_gamepad(BlitRuntime *runtime)
                                 &event, sizeof(event))) ==
                (ssize_t)sizeof(event)) {
             ++serviced;
+            if (!native_console_accepts_event(runtime, &event)) continue;
             uint64_t input_started_us = monotonic_us();
             if (!runtime->evdev_gamepad_reported[device_index]) {
                 fprintf(stderr, "blit: evdev gamepad events received from %s\n",
@@ -27244,6 +27296,7 @@ static void service_evdev_mouse(BlitRuntime *runtime)
                                 &event, sizeof(event))) ==
                (ssize_t)sizeof(event)) {
             ++serviced;
+            if (!native_console_accepts_event(runtime, &event)) continue;
             uint64_t input_started_us = monotonic_us();
             ++runtime->diagnostic_evdev_mouse_events;
             if (configuration != NULL) ++configuration->events;
@@ -28056,6 +28109,27 @@ static void dispatch_evdev_key_event(BlitRuntime *runtime,
     /* Autorepeat does not change what is held. */
     if (event->value != 2)
         evdev_key_set_held(keyboard, event->code, event->value != 0);
+    /* K_OFF leaves VT switching to the owner. Recovery uses physical key
+       identities on THIS keyboard, not application remaps or API injection. */
+    if (blit_vt_owned() && device_id &&
+        strcmp(device_id, "evdev-keyboard") == 0) {
+        int number = event->code >= KEY_F1 && event->code <= KEY_F10 ?
+            event->code - KEY_F1 + 1 :
+            event->code == KEY_F11 ? 11 : event->code == KEY_F12 ? 12 : 0;
+        if (keyboard->console_switch_key == event->code) {
+            if (event->value == 0) keyboard->console_switch_key = 0;
+            return;
+        }
+        if (number && event->value == 1 &&
+            (evdev_key_is_held(keyboard, KEY_LEFTCTRL) ||
+             evdev_key_is_held(keyboard, KEY_RIGHTCTRL)) &&
+            evdev_key_is_held(keyboard, KEY_LEFTALT)) {
+            keyboard->console_switch_key = event->code;
+            if (blit_vt_switch(number) < 0)
+                diagnostic_log(runtime, "error", "console_switch_failed", strerror(errno));
+            return;
+        }
+    }
     /* Before anything else does something with this key. On press only: a
        chord that also fired on release would stop the server twice, and on
        autorepeat it would fire for as long as the operator held it. */
@@ -28209,6 +28283,7 @@ static void service_evdev_keyboard(BlitRuntime *runtime)
                                 &event, sizeof(event))) ==
                (ssize_t)sizeof(event)) {
             ++serviced;
+            if (!native_console_accepts_event(runtime, &event)) continue;
             uint64_t input_started_us = monotonic_us();
             ++runtime->diagnostic_evdev_keyboard_events;
             if (runtime->input_source != NULL)
@@ -28258,6 +28333,60 @@ static void service_evdev_keyboard(BlitRuntime *runtime)
             evdev_sync_modifiers(runtime);
         }
         runtime->input_source = NULL;
+    }
+}
+
+static void service_native_console(BlitRuntime *runtime)
+{
+    int request = blit_vt_pending();
+    int i, button;
+    if (!request) return;
+    if (request < 0) {
+        diagnostic_log(runtime, "error", "console_recovery_lost",
+                       "Recovery process exited; stopping native presentation.");
+        blit_running = 0;
+        return;
+    }
+    if (request == 1) {
+        for (i = 0; i < runtime->evdev_keyboard_count; ++i) {
+            int code;
+            BlitInputDevice *keyboard = input_device_for_slot(runtime,
+                runtime->evdev_keyboard_paths, i);
+            if (!keyboard) continue;
+            runtime->input_source = keyboard;
+            for (code = 1; code <= KEY_MAX; ++code) {
+                struct input_event released;
+                if (!evdev_key_is_held(keyboard, code)) continue;
+                memset(&released, 0, sizeof(released));
+                released.type = EV_KEY;
+                released.code = code;
+                dispatch_evdev_key_event(runtime, &released, "evdev-keyboard");
+            }
+        }
+        runtime->input_source = NULL;
+        for (i = 0; i < runtime->evdev_mouse_count; ++i)
+            for (button = 0; button < 3; ++button)
+                if (runtime->evdev_mouse_buttons[i] & (1U << button))
+                    dispatch_evdev_mouse_button(runtime, i, button, 0);
+        if (blit_kms_suspend(runtime->kms) < 0 ||
+            blit_vt_acknowledge(0) < 0) {
+            diagnostic_log(runtime, "error", "console_release_failed", strerror(errno));
+            blit_running = 0;
+            return;
+        }
+        diagnostic_log(runtime, "info", "console_released", "DRM and physical input suspended.");
+    } else {
+        if (blit_kms_resume(runtime->kms) < 0 ||
+            blit_vt_acknowledge(1) < 0) {
+            diagnostic_log(runtime, "error", "console_acquire_failed", strerror(errno));
+            blit_running = 0;
+            return;
+        }
+        runtime->console_input_since_us = monotonic_us();
+        evdev_sync_modifiers(runtime);
+        runtime->render_pending = 1;
+        reset_render_schedule(runtime, monotonic_us());
+        diagnostic_log(runtime, "info", "console_acquired", "DRM reacquired; full repaint requested.");
     }
 }
 
@@ -28863,15 +28992,21 @@ static void finish_update_upload(BlitRuntime *runtime, BlitHttpClient *client)
         return;
     }
     snprintf(runtime->update_state, sizeof(runtime->update_state), "installing");
-    if (!run_update_helper(client->update_path, client->update_sha256,
-                           output, sizeof(output))) {
-        snprintf(runtime->update_state, sizeof(runtime->update_state), "failed");
-        snprintf(runtime->update_detail, sizeof(runtime->update_detail),
-                 "privileged update failed: %s", output);
-        unlink(client->update_path);
-        send_problem(client->fd, 500, "Internal Server Error", "update_install_failed",
-                     runtime->update_detail);
-        return;
+    snprintf(output, sizeof(output), "console recovery lease unavailable");
+    {
+        int installed = blit_vt_update_lease(1) == 0 &&
+            run_update_helper(client->update_path, client->update_sha256,
+                              output, sizeof(output));
+        blit_vt_update_lease(0);
+        if (!installed) {
+            snprintf(runtime->update_state, sizeof(runtime->update_state), "failed");
+            snprintf(runtime->update_detail, sizeof(runtime->update_detail),
+                     "privileged update failed: %s", output);
+            unlink(client->update_path);
+            send_problem(client->fd, 500, "Internal Server Error", "update_install_failed",
+                         runtime->update_detail);
+            return;
+        }
     }
     snprintf(runtime->update_state, sizeof(runtime->update_state), "restarting");
     snprintf(runtime->update_detail, sizeof(runtime->update_detail),
@@ -29471,6 +29606,7 @@ int main(int argc, char **argv)
     printf("blit gateway listening on %s TCP port %d (%d display(s))\n",
            bind_address, port, runtime.display_count);
     fflush(stdout);
+    runtime.console_input_since_us = monotonic_us();
 
     while (blit_running) {
         int max_fd = server_fd;
@@ -29491,6 +29627,9 @@ int main(int argc, char **argv)
         uint64_t select_started_us;
         uint64_t sdl_events_started_us;
         uint64_t loop_started_us;
+
+        service_native_console(&runtime);
+        if (!blit_running) break;
 
         ++runtime.diagnostic_loop_iterations;
         loop_started_us = monotonic_us();
@@ -29679,7 +29818,7 @@ int main(int argc, char **argv)
                 runtime.outputs_idle_since_us = now;
         }
         service_middle_button_deadlines(&runtime, now);
-        wait_ms = render_wait_ms(&runtime, now);
+        wait_ms = blit_vt_active() ? render_wait_ms(&runtime, now) : 100;
         {
             int observer_wait = login_observer_wait_ms(&runtime, now);
             if (observer_wait >= 0 && observer_wait < wait_ms)
@@ -29743,6 +29882,8 @@ int main(int argc, char **argv)
         timeout.tv_usec = (wait_ms % 1000) * 1000;
         select_started_us = monotonic_us();
         ready = select(max_fd + 1, &readable, &writable, NULL, &timeout);
+        service_native_console(&runtime);
+        if (!blit_running) break;
         runtime.diagnostic_last_select_ms =
             (double)(monotonic_us() - select_started_us) / 1000.0;
         if (runtime.diagnostic_last_select_ms >
@@ -29846,7 +29987,7 @@ int main(int argc, char **argv)
                              "deadline_expired_bounded_release");
             runtime.hibr_frame_barrier_until_us = 0;
         }
-        if (runtime.render_pending &&
+        if (blit_vt_active() && runtime.render_pending &&
             (output_mask = due_output_mask(&runtime, now)) != 0) {
             int hold_scene = now < runtime.terminal_frame_quiet_until_us ||
                 hibr_frame_barrier_active(&runtime, now);
@@ -29935,6 +30076,7 @@ int main(int argc, char **argv)
     blit_font_free(&runtime.font);
     if (runtime.sdl_ready)
         SDL_Quit();
+    blit_vt_close();
     if (blit_restart_requested) {
         restart_server_process(&runtime);
         fprintf(stderr, "blit: restart failed: %s\n", strerror(errno));

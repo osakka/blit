@@ -1,5 +1,41 @@
 # Current state and restart point
 
+## 2026-10-21:117 native keyboard isolation, candidate586
+
+Native KMS now owns its active text/automatic Linux VT, uses K_OFF to stop
+kernel console key delivery, and handles VT release/acquisition with DRM
+master handover and full repaint. Physical Ctrl+Alt+F1..F12 switches VTs.
+While away, physical events are discarded, including old queued events on
+return (monotonic evdev timestamps); API injection remains independent.
+A pre-thread recovery child uses pidfd death notification and a10s main-loop
+watchdog. Explicit recovery-channel shutdown and flock unlock prevent inherited
+pre-exec descriptors from blocking cleanup/restart. SDL cannot silently fall
+back to native KMS without acquiring VT ownership before I/O threads start.
+See ADR0170 and GET /v1/diagnostics/console; this is NOT evdev pointer exclusivity.
+
+Actual Linux6.1.190/QEMU, TCC-built module and complete native server pass:
+baseline console leak observed; two keyboards including hotplug muted while
+evdev delivery continues; release/acquire; normal/SIGKILL/stopped-owner
+watchdog recovery; inherited descriptor handling; competing owner refused.
+Full server on Bochs DRM1280x800: physical key reaches PTY, not console;
+physical Ctrl+Alt+Fn handover works; away key reaches only the other console;
+queued input while SIGSTOPped is not replayed after SIGCONT/acquisition;
+scanout before/after is byte-identical; API shutdown restores keyboard.
+Final evidence /tmp/blit-vt-kernel.FHvism/serial.log includes the bounded120s
+install lease held beyond the normal10s timeout, followed by a separately
+expired ordinary watchdog. VM powers off after each run. Broad suite140pass,
+5explicit skips,0fail; final update-restart gate passes after the lease change.
+Targeted schema/terminal/lifecycle32pass,1skip (pinned headers not supplied),0fail.
+
+Read-only10.54 API inspection: live584, VTtty2, K_UNICODE3, KD_TEXT0,
+VT_AUTO0. No TTYPath, null stdin. Old mirrored Blit desktop/wm files absent;
+installed /usr/share/hibr/desktop/session.hibr belongs to Hibr. No Hibr edits,
+SSH, live restart, font/layout mutation or second desktop. Physical rollout,
+SDL daemon isolation and pointer/gpm exclusivity remain unverified;117 stays
+open. Fresh preflight settings select Modern22, native KMS and the existing
+DP lower primary/upper and HDMI auxiliary policy; preserve these, not older
+font checkpoints. Package/physical rollout remains pending at this entry.
+
 ## 2026-10-20:116 active, candidate585 negotiated keyboard support
 
 Final source1206741 canonical build passes combined terminal/schema9/0/0;

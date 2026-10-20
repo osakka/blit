@@ -1,5 +1,35 @@
 # Blit API guide
 
+## Native console ownership (candidate0.1.586)
+
+`GET /v1/diagnostics/console` reports Blit's native VT ownership, VT number,
+active state, actual Linux keyboard mode, keyboard muting, registered recovery
+process and main-loop watchdog timeout (normally10s, bounded120s during the
+privileged package-install exchange). `owner: unmanaged` is not
+evidence of SDL isolation; it means this native owner is not managing a VT.
+The endpoint is read-only and uses the normal API authentication policy.
+
+Native KMS takes a text/automatic VT only, mutes its kernel keyboard handler
+while presenting, and restores it when releasing the VT or stopping. Physical
+Ctrl+Alt+F1..F12 switches VTs; API-injected chords do not switch the host.
+While away, physical events are discarded, not replayed on return; API input
+and PTY/session work remain available. Acquisition requires DRM master and
+requests a full repaint. Failure leaves diagnostics available or stops the
+server rather than claiming usable presentation.
+
+The recovery process handles main-process death and an expired heartbeat.
+It does not cover a kernel/GPU hang or killing the whole recovery group.
+`evdev_exclusive: false` is deliberate: keyboard muting covers all keyboards
+without grabbing one of a combined device's separate evdev clients. It does
+not prevent a separately running gpm from reading pointer events. SDL daemon
+ownership and pointer exclusivity remain117 acceptance work, not implied by
+native tests. See [ADR0170](adr/0170-native-console-keyboard-ownership.md).
+
+An SDL startup failure cannot silently enter native KMS without VT ownership;
+select the native backend explicitly and restart to acquire it safely before
+device-I/O threads start. This does not change a successfully running SDL
+renderer or give SDL a competing VT owner.
+
 ## Presentation configuration ownership (0.1.563)
 
 Saved `/v1/settings` is the canonical configuration. Its

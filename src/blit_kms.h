@@ -130,6 +130,8 @@ int blit_kms_display_info(const BlitKms *kms, int index,
 int blit_kms_set_display_position(BlitKms *kms, int index, int x, int y);
 int blit_kms_fd(const BlitKms *kms);
 int blit_kms_service(BlitKms *kms, int readable);
+int blit_kms_suspend(BlitKms *kms);
+int blit_kms_resume(BlitKms *kms);
 unsigned long long blit_kms_inventory_revision(const BlitKms *kms);
 void blit_kms_hotplug_info(BlitKms *kms, BlitKmsHotplugInfo *info);
 uint32_t blit_kms_ready_output_mask(const BlitKms *kms);

@@ -25,7 +25,7 @@ Dir.chdir(root) do
     raise 'compile failed' unless system('tcc', '-O2', '-std=c99',
       '-Ivendor/SDL3/include', '-Ibuild/deps/prefix/include', '-Ibuild/deps/prefix/include/libdrm',
       "-I#{ENV.fetch('BLIT_FREETYPE_INCLUDE', "#{root}/build/deps/prefix/include/freetype2")}",
-      'tools/tests/emoji_layout_gate.c', 'src/blit_kms.c', 'src/blit_font.c', 'src/blit_raster.c',
+      'tools/tests/emoji_layout_gate.c', 'src/blit_kms.c', 'src/blit_vt.c', 'src/blit_font.c', 'src/blit_raster.c',
       ENV.fetch('BLIT_FREETYPE_LIBRARY', '/lib/x86_64-linux-gnu/libfreetype.so.6'),
       ENV.fetch('BLIT_HARFBUZZ_LIBRARY', '/lib/x86_64-linux-gnu/libharfbuzz.so.0'),
       '-Lbuild/sdl3-kms', '-lSDL3', '-Lbuild/deps/prefix/lib/x86_64-linux-gnu', '-ldrm', '-lutil', '-lz', '-o', binary)

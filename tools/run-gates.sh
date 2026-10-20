@@ -269,6 +269,7 @@ suite_renderer() {
     run_gate audio_control_gate.sh "$ROOT"/tools/tests/audio_control_gate.sh
     run_gate display_geometry_gate.sh "$ROOT"/tools/tests/display_geometry_gate.sh
     run_gate evdev_char_gate.sh "$ROOT"/tools/tests/evdev_char_gate.sh
+    run_gate native_vt_kernel_gate.sh sh tools/tests/native_vt_kernel_gate.sh
     run_gate input_device_api_gate.rb ruby tools/tests/input_device_api_gate.rb
     run_gate input_device_config_gate.rb ruby tools/tests/input_device_config_gate.rb
     run_gate settings_persistence_gate.rb ruby tools/tests/settings_persistence_gate.rb
