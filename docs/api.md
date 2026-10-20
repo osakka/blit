@@ -765,6 +765,13 @@ Candidate0.1.562 contained this work but was not deployed; config-only
 maintenance0.1.563 intentionally excludes it. Discover available profiles
 through `GET /v1/fonts`, not a version-number comparison alone.
 
+Candidate0.1.573 adds `blit-retro`, an antialiased 3270 Mono derivative, and
+expands both outline profiles to the full pinned Nerd Fonts3.4.0 catalogue.
+Select with `{"font_id":"blit-retro","size_px":24}`; use the same existing
+settings save/load contract for persistence. The font inventory is canonical
+for availability. Neither a font change nor `colour_glyphs:true` implies full
+emoji-sequence shaping; see issue110 and [font scope](../assets/fonts/README.md).
+
 `active.rasterization` is `bitmap-nearest` or `native-antialiased`;
 `active.colour_glyphs` reports the colour face, and `active.raster_cache`
 reports bounded cached bytes and render count. `glyphs` and `mappings` retain

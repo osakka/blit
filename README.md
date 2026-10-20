@@ -144,6 +144,14 @@ The [pane guide](https://git.home.arpa/itdlabs/hibr-apps/src/branch/main/docs/bl
 documents connection, conflict handling, import/export and diagnostics. The
 canonical pane lives only in hibr-apps, not in Hibr core or this package.
 
+Offline candidate0.1.573 adds smooth, rounded `blit-retro` and expands both
+outline profiles to the complete pinned Nerd Fonts3.4.0 catalogue (10,386
+codepoints). Existing bitmap profiles stay selectable. Generate a real-raster
+specimen without a display using `ruby tools/fonts/preview.rb`. See the
+[font guide](assets/fonts/README.md) for API selection, provenance and limits:
+colour emoji scalars are supported, but full emoji-sequence shaping remains
+[issue110](https://git.home.arpa/itdlabs/blit/issues/110). Not yet deployed.
+
 ## Who should read what
 
 - **API client author:** start with [`docs/api.md`](docs/api.md), then use the

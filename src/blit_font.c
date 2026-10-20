@@ -244,6 +244,7 @@ static const BlitFontProfile blit_font_profiles[] = {
     {"blit-hibr-terminus16", "/usr/lib/blit/fonts/Blit-Hibr-Terminus16.psf"},
     {"blit-hibr-spleen16", "/usr/lib/blit/fonts/Blit-Hibr-Spleen16.psf"},
     {"blit-modern", "/usr/lib/blit/fonts/BlitModernNerd-Regular.ttf"},
+    {"blit-retro", "/usr/lib/blit/fonts/BlitRetroNerd-Regular.ttf"},
     {"uni2-terminus16", "/usr/lib/blit/fonts/Uni2-Terminus16.psf"},
     {"lat15-terminus16", "/usr/lib/blit/fonts/Lat15-Terminus16.psf"},
     {"uni2-console", "/usr/share/consolefonts/Uni2-Terminus16.psf"},

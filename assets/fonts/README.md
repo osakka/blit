@@ -1,5 +1,51 @@
 # Blit terminal fonts
 
+## Smooth Blit Retro and Blit Modern
+
+`blit-retro` is the new smooth, rounded mainframe-inspired profile, based on
+pinned Nerd Fonts3.4.0 3270 Mono. `blit-modern` is the clean Hack Mono companion.
+Both are Blit-tailored renamed derivatives, not original typeface designs.
+Both retain the complete pinned Nerd catalogue: **10,386 distinct codepoints**,
+plus their source Unicode repertoires. Native grayscale antialiasing is used
+at each requested size; neither profile enlarges a one-bit bitmap for text.
+Nerd icons take terminal colours; supported emoji scalars use the shared,
+unchanged Noto Colour Emoji2.042 face for intrinsic multicolour artwork.
+
+![Actual shared-raster specimen: Blit Retro and Modern](../../docs/images/blit-fonts-573.png)
+
+Select with `PUT /v1/fonts`, for example
+`{"font_id":"blit-retro","size_px":24}`. The existing font inventory and
+Control Panel use the same profiles. Sizes8..64px specify exact cell height,
+not an em height or whole-display scale. Default Terminus and the selectable
+pixel-art Spleen remain unchanged. This source change has not been deployed.
+
+`modern-fonts.source.json` is the single provenance manifest for **both**
+outline profiles, their shared colour fallback, catalogue and licence files.
+See `licenses/nerd-v3.4.0/README.md` for icon-family attribution and sources.
+Generate both with the same tool and hash-checked upstream inputs:
+
+```sh
+PYTHONPATH=<fontTools4.60.1> python3 tools/fonts/build-outline-nerd.py \
+  --profile retro /path/to/3270NerdFontMono-Regular.ttf assets/fonts/BlitRetroNerd-Regular.ttf
+PYTHONPATH=<fontTools4.60.1> python3 tools/fonts/build-outline-nerd.py \
+  --profile modern /path/to/HackNerdFontMono-Regular.ttf assets/fonts/BlitModernNerd-Regular.ttf
+ruby tools/fonts/preview.rb
+ruby tools/tests/outline_catalogue_gate.rb
+```
+
+The preview is `build/font-preview/blit-fonts.png`, generated with Blit's real
+production raster and compositor without SDL, Hibr or a connected display.
+Complete icons fit within cap height and90% advance; Powerline separators
+currently use optical fitting, not a guaranteed seamless-edge geometry policy.
+Every catalogue codepoint is raster-tested at all57 integer heights for both
+profiles; `cod-blank` intentionally has no ink. See ADR0156.
+
+Scope matters: this is **not all Unicode or all emoji sequences**. Font files
+alone do not shape flags, skin tones, ZWJ families or VS16 presentation; that
+shared-renderer work is [issue110](https://git.home.arpa/itdlabs/blit/issues/110).
+Missing scalars and protected box/block geometry retain pixel-art PSF fallback;
+wide BMP characters retain the separate wide PSF. No Hibr code is changed.
+
 ## Retro: Blit Hibr Spleen16
 
 `Blit-Hibr-Spleen16.psf` is an optional8x16 retro face based on Spleen2.2.0
@@ -27,7 +73,7 @@ Pixel size changes use `PUT /v1/fonts` with `size_px`; this bitmap face does
 not become an outline font or intrinsic-colour font by resizing it. The
 modern antialiased/colour profile is separate.
 
-## Modern: Hack text, Hibr Nerd icons and Noto colour emoji
+## Shared outline and colour rendering policy
 
 Profile `blit-modern` uses `BlitModernNerd-Regular.ttf`, a renamed, reproducibly
 generated derivative of Nerd Fonts3.4.0 Hack Mono, for native-size
@@ -42,18 +88,18 @@ Spleen/Terminus retain intentional bitmap pixels.
 license SHA256s. `licenses/HackNerd-LICENSE.txt`, `licenses/NerdFonts-LICENSE.txt`
 and `licenses/FontAwesome-LICENSE.txt` preserve the upstream notices, including
 Fonticons attribution and Font Awesome licensing. The original Hack face stays
-as a build input, not a second Modern runtime implementation. Noto remains
+as a legacy provenance reference, not a second Modern runtime profile or
+an input to the full-Nerd generator. Noto remains
 unmodified, from Debian fonts-noto-color-emoji2.042-0+deb12u1.
 
-The outline repertoire retains Hack Unicode plus1475 Font Awesome Nerd-codepoint
-mappings, including all18 distinct PUA symbols emitted by Hibr's Nerd glyph
-set. Other Nerd icon families are deliberately excluded; this is not the entire
-Nerd Fonts collection. U+270E (`✎`), Hibr's existing menu character, uses the
+Before ADR0156, Modern retained only1475 Font Awesome mappings; that restriction
+is superseded by the complete pinned Nerd catalogue above.
+U+270E (`✎`), Hibr's existing menu character, uses the
 Font Awesome pencil outline without changing Hibr or terminal codepoints.
 Complete icon outlines are fitted with5% side insets and the text cap-height
 bound; no cropping or proportional advance. Icons take the terminal foreground
 colour; colour emoji remain a separate mechanism. Generate with
-`PYTHONPATH=<fontTools4.60.1> python3 tools/fonts/build-modern-nerd.py SOURCE.ttf OUTPUT.ttf`.
+the single `tools/fonts/build-outline-nerd.py` generator shown above.
 The generator checks the pinned source hash and never downloads implicitly.
 
 From567, colour artwork is bounded by Modern's fitted text em rather than

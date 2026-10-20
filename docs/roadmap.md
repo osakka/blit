@@ -5,6 +5,12 @@ second, parallel implementation of an earlier one.
 
 ## Current requested sequence — font sizing, new font, then performance
 
+Offline candidate573 adds smooth `blit-retro` and full pinned Nerd coverage
+to both outline faces; see ADR0156 and the font evolution plan. Existing
+8..64px API sizing is reused. Operator visual review and physical acceptance
+are separate from offline checks. Complete emoji-cluster rendering remains
+[Blit110](https://git.home.arpa/itdlabs/blit/issues/110), not a font-file claim.
+
 New font tracking: [Blit#107](https://git.home.arpa/itdlabs/blit/issues/107).
 Operator confirmed both retro and polished modern multicolour profiles.
 See the [font evolution plan](font-evolution-plan.md) for native-size

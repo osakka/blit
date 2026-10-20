@@ -1,11 +1,15 @@
 {
   "profile": "blit-modern",
+  "build": {
+    "generator": "tools/fonts/build-outline-nerd.py",
+    "fonttools_version": "4.60.1"
+  },
   "outline": {
     "file": "BlitModernNerd-Regular.ttf",
-    "source": "Renamed derivative of Nerd Fonts v3.4.0 HackNerdFontMono-Regular.ttf; Hack Unicode plus Font Awesome glyphs only",
+    "source": "Renamed derivative of Nerd Fonts v3.4.0 Hack Mono; full source Unicode and full pinned Nerd catalogue",
     "upstream": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/v3.4.0/patched-fonts/Hack/Regular/HackNerdFontMono-Regular.ttf",
     "upstream_sha256": "03e60d3c1a9f8bef4e1f78836f80aacb9ec005260a6b094f5bfc10043bb115ab",
-    "sha256": "b7d7f21fa7e3ca609d697df933e11567076d681f1a6b6503c9a1fb90a042ea72",
+    "sha256": "42457a8ca5eb79fdd888b58bda459d539028cba8bfa84786fa52d68313482cf8",
     "license_file": "licenses/HackNerd-LICENSE.txt",
     "license_sha256": "1f61bb7c790c59b4b0ecdf304628b94e42ae4c8020094a8c3da73381ab212623"
   },
@@ -18,8 +22,83 @@
     "license_sha256": "140c8aab8b15e212617b74476ae1c1547f868e523301a190398ea9c71e62af64"
   },
   "icon_licenses": [
-    {"file": "licenses/NerdFonts-LICENSE.txt", "sha256": "1f6ad4edae6479aaace3112ede5279a23284ae54b2a34db66357aef5f64df160"},
-    {"file": "licenses/FontAwesome-LICENSE.txt", "sha256": "de784a808496d49f5f80dd9d1d6e9a51cff712cfbc339e7c25155631ae3cdb5d"}
+    {
+      "file": "licenses/Apache-2.0.txt",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "file": "licenses/NerdFonts-LICENSE.txt",
+      "sha256": "1f6ad4edae6479aaace3112ede5279a23284ae54b2a34db66357aef5f64df160"
+    },
+    {
+      "file": "licenses/FontAwesome-LICENSE.txt",
+      "sha256": "de784a808496d49f5f80dd9d1d6e9a51cff712cfbc339e7c25155631ae3cdb5d"
+    },
+    {
+      "file": "licenses/nerd-v3.4.0/Codicons.txt",
+      "sha256": "d6239afa918961b465b07bf7411cbe34ff6685854f58553db7966f4881a0211f"
+    },
+    {
+      "file": "licenses/nerd-v3.4.0/Devicons.txt",
+      "sha256": "508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1"
+    },
+    {
+      "file": "licenses/nerd-v3.4.0/FontAwesomeExtension.txt",
+      "sha256": "b47b15d771c4507a75ff65beca3a78168d6af4cca9b45177a1aa817139c64ba5"
+    },
+    {
+      "file": "licenses/nerd-v3.4.0/FontLogos.txt",
+      "sha256": "88d9b4eb60579c191ec391ca04c16130572d7eedc4a86daa58bf28c6e14c9bcd"
+    },
+    {
+      "file": "licenses/nerd-v3.4.0/IECPower.txt",
+      "sha256": "11aef1cdf2d58d822e6857e2574870ccc59d4900052bf5c098e319d750e7ac3d"
+    },
+    {
+      "file": "licenses/nerd-v3.4.0/MaterialDesign.txt",
+      "sha256": "3bae6305bcaa6d10219b999f65c342034c2d40b1c0e8567fa08605e73ccba829"
+    },
+    {
+      "file": "licenses/nerd-v3.4.0/Octicons.txt",
+      "sha256": "4f886642f9e8d99eeadd484acdac011c3fde8a338faf52f5ca1408c13b9a9b63"
+    },
+    {
+      "file": "licenses/nerd-v3.4.0/Pomicons.txt",
+      "sha256": "cb4797a9745683f287c28833db596e9d68ec43082d59359b3a49c504f0f610ce"
+    },
+    {
+      "file": "licenses/nerd-v3.4.0/PowerlineExtra.txt",
+      "sha256": "544307a58e6826c24145b2af1c3578b53e2e21ae0e6c67ab4c6abd544304d26a"
+    },
+    {
+      "file": "licenses/nerd-v3.4.0/PowerlineSymbols.txt",
+      "sha256": "46d5355e4734468135d8e4a30d0916292cc4df2b3ec30aa68c866f82497933be"
+    },
+    {
+      "file": "licenses/nerd-v3.4.0/SetiUI.txt",
+      "sha256": "d4d2d888c6a0a220a7b0e2d6013cf37539b0e05ef937002b3b33bdb364575b88"
+    },
+    {
+      "file": "licenses/nerd-v3.4.0/WeatherIcons.txt",
+      "sha256": "69cdedc8a4f57a30d68e4f045af8b9cce0ec3b1a6e7eec1ad41737c894f26790"
+    }
   ],
-  "policy": "tools/fonts/build-modern-nerd.py with fontTools4.60.1: retain Hack Unicode and Font Awesome Nerd icons; fit complete icon outlines with 5 percent side insets and text cap height; U+270E uses nf-fa-pencil. Renamed derivative, notices retained. Native-size grayscale text; unchanged fixed-strike colour emoji. Protected geometry/missing scalars retain PSF fallback. Not all Nerd families, universal Unicode or shaped emoji sequences."
+  "policy": "tools/fonts/build-outline-nerd.py --profile modern|retro with fontTools 4.60.1. Retain full source Unicode and all 10386 pinned Nerd catalogue codepoints. Fit complete icons with 5 percent side insets and each face's cap height; U+270E uses nf-fa-pencil. Renamed derivatives; upstream notices retained. Shared native grayscale raster and unchanged Noto 2.042 colour fallback. Protected geometry and missing scalars retain PSF fallback. No universal Unicode or emoji-sequence shaping claim. Nerd separators use optical icon fitting, not a guaranteed seamless Powerline geometry contract.",
+  "retro": {
+    "profile": "blit-retro",
+    "file": "BlitRetroNerd-Regular.ttf",
+    "source": "Renamed derivative of Nerd Fonts v3.4.0 3270 Mono; full source Unicode and full pinned Nerd catalogue",
+    "upstream": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/v3.4.0/patched-fonts/3270/Regular/3270NerdFontMono-Regular.ttf",
+    "upstream_sha256": "3a6f45e14cafdf09bc888529d037f7da2d0c8256f23afbf64b81eb5e3f6deca3",
+    "sha256": "e7ca66583c2c694be10c8dc9ef85edf12e4598d67b01dac1295151ddfa43b99a",
+    "license_file": "licenses/3270-LICENSE.txt",
+    "license_sha256": "ef855fadca28e91a4123f7299bd79dcd78a7e19dfc364039790bb75bdedd515a"
+  },
+  "catalogue": {
+    "file": "nerd-glyphnames-v3.4.0.json",
+    "upstream": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/v3.4.0/glyphnames.json",
+    "sha256": "e2d10d23f5bff0bd6f0676e9b01d9789fcdc656de7b498a2955c27716ea4439c",
+    "unique_codepoints": 10386,
+    "intentionally_blank": "U+EC03 cod-blank"
+  }
 }

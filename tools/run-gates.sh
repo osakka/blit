@@ -216,12 +216,20 @@ suite_font() {
     run_gate font_fit_gate.py python3 tools/tests/font_fit_gate.py
     run_gate retro_font_gate.py python3 tools/tests/retro_font_gate.py
     run_gate modern_font_assets_gate.rb ruby tools/tests/modern_font_assets_gate.rb
+    run_gate outline_catalogue_gate.rb ruby tools/tests/outline_catalogue_gate.rb
     run_gate modern_nerd_gate.sh sh tools/tests/modern_nerd_gate.sh
     run_gate font_raster_gate.sh sh tools/tests/font_raster_gate.sh \
         "$FONT" "${BLIT_GATE_OUTLINE:-$ROOT/assets/fonts/BlitModernNerd-Regular.ttf}" \
         "${BLIT_GATE_COLOUR:-$ROOT/assets/fonts/NotoColorEmoji.ttf}"
     run_gate font_kms_raster sh tools/tests/font_backend_raster_gate.sh kms
     run_gate font_software_raster sh tools/tests/font_backend_raster_gate.sh software
+    run_gate retro_outline_raster sh tools/tests/font_raster_gate.sh \
+        "$FONT" "$ROOT/assets/fonts/BlitRetroNerd-Regular.ttf" \
+        "$ROOT/assets/fonts/NotoColorEmoji.ttf" 20
+    run_gate retro_outline_kms env BLIT_GATE_OUTLINE="$ROOT/assets/fonts/BlitRetroNerd-Regular.ttf" \
+        sh tools/tests/font_backend_raster_gate.sh kms
+    run_gate retro_outline_software env BLIT_GATE_OUTLINE="$ROOT/assets/fonts/BlitRetroNerd-Regular.ttf" \
+        sh tools/tests/font_backend_raster_gate.sh software
     run_gate modern_font_api_gate.rb ruby tools/tests/modern_font_api_gate.rb
     run_gate host_font_probe_gate.rb ruby tools/tests/host_font_probe_gate.rb
     if [ -d "$ROOT/vendor/SDL3/include" ]; then
@@ -298,6 +306,8 @@ suite_renderer() {
 suite_gles() {
     run_gate sdl_gles_output_startup sh tools/tests/sdl_output_startup_gate.sh opengles2
     run_gate font_gles_raster sh tools/tests/font_backend_raster_gate.sh opengles2
+    run_gate retro_outline_gles env BLIT_GATE_OUTLINE="$ROOT/assets/fonts/BlitRetroNerd-Regular.ttf" \
+        sh tools/tests/font_backend_raster_gate.sh opengles2
     run_gate sdl_gles_sixel_composition env \
         BLIT_GATE_BINARY="$BINARY" BLIT_GATE_FONT="$FONT" BLIT_GATE_LIBS="$LIBS" \
         BLIT_TEST_VIDEO_DRIVER=offscreen BLIT_TEST_RENDERER=opengles2 \

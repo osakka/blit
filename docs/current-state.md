@@ -1,5 +1,30 @@
 # Current state and restart point
 
+## 2026-10-20 offline font candidate573 — live host unchanged
+
+Operator requests display-independent font work while one monitor is away.
+Add smooth rounded `blit-retro` (renamed Nerd Fonts3.4.0 3270 Mono), expand
+Modern to the complete pinned10,386-codepoint Nerd catalogue. One generator,
+one provenance manifest, same FreeType/cache/compositor and unchanged Noto
+Colour Emoji2.042. Existing bitmap/default fonts remain unchanged. ADR0156;
+tracking107. No Hibr edits, SSH, deployment or live configuration change.
+
+`ruby tools/fonts/preview.rb` creates `build/font-preview/blit-fonts.png`
+from actual production rasters, without a display. Every Nerd codepoint is
+tested at each of57 sizes per face (1,184,004 cases total); both fonts rebuild
+byte-identically. The intentionally empty `cod-blank` is checked as empty.
+API tests cover both profiles at all sizes and saved Retro23px process restart.
+Native-KMS/mock, SDL-software and offscreen-GLES raster checks pass for Retro.
+These are offline tests, not physical-display approval or performance claims.
+Font/schema/lifecycle44/0/0 and offscreen-GLES9/0/0; expanded API rerun also
+verifies BOTH Modern/Retro restart persistence and missing-colour rollback.
+
+Full emoji clusters are NOT complete: issue110 tracks flags, ZWJ, skin tones,
+keycaps and VS15/16. Powerline seamless-edge joins are not guaranteed by the
+optically fitted Nerd repertoire. Do not call this universal Unicode/emoji.
+Host remains572/native KMS/settings237; no new package or deployment is implied.
+Preserve operator's untracked releases/0.1.554.yaml.
+
 ## 2026-10-20 config-source-108 reconciled into canonical main
 
 Merge13551e4 includes the complete maintenance tip456f354 as its second parent.

@@ -1,6 +1,7 @@
 #include "../../src/blit_raster.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 #define CHECK(test) do { if (!(test)) { fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #test); return 1; } } while (0)
 
@@ -8,7 +9,7 @@ int main(int argc, char **argv)
 {
     BlitFont fallback;
     int i;
-    CHECK(argc == 4);
+    CHECK(argc == 4 || argc == 5);
     {
         unsigned char alpha[] = {0, 128, 255};
         unsigned char colour[] = {64, 32, 16, 128};
@@ -43,7 +44,9 @@ int main(int argc, char **argv)
                     if (y < top) top = y;
                     if (y > bottom) bottom = y;
                 }
-        CHECK(bottom >= top && bottom - top + 1 <= 18);
+        /* Modern's resolved em is18; Retro's different metrics resolve20.
+           Caller supplies an explicit bound for another reviewed profile. */
+        CHECK(bottom >= top && bottom - top + 1 <= (argc == 5 ? atoi(argv[4]) : 18));
         blit_raster_close(raster);
     }
     for (i = 8; i <= 64; ++i) {

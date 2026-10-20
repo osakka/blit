@@ -58,6 +58,11 @@ manifest_hash_matches hibr_adapter_sha256 \
 test -x "$stage/usr/lib/blit/bin/blit-server"
 test -f "$stage/usr/lib/blit/hibr/console-blit.so"
 test -f "$stage/usr/lib/blit/fonts/Blit-Hibr-Spleen16.psf"
+test -f "$stage/usr/lib/blit/fonts/BlitRetroNerd-Regular.ttf"
+test -f "$stage/usr/lib/blit/fonts/nerd-glyphnames-v3.4.0.json"
+test -f "$stage/usr/lib/blit/fonts/licenses/3270-LICENSE.txt"
+BLIT_GATE_FONT_ROOT="$stage/usr/lib/blit/fonts" \
+    ruby "$root/tools/tests/modern_font_assets_gate.rb"
 test -f "$stage/usr/lib/blit/fonts/licenses/Spleen-LICENSE.txt"
 test -f "$stage/usr/lib/blit/fonts/licenses/Terminus-OFL.txt"
 test -f "$stage/usr/lib/blit/fonts/licenses/DejaVu-notice.txt"

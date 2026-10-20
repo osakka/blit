@@ -3,6 +3,34 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-20 candidate573: offline smooth Retro / full Nerd profiles
+
+ADR0156, tracking107. TCC build573; font/schema/lifecycle44pass/0skip/0fail,
+offscreen-GLES9pass/0skip/0fail. Catalogue gate covers10,386 scalars at57
+integer sizes for each profile:1,184,004 cases, no fallback or clipped allocation;
+all have ink except verified intentionally empty U+EC03 `cod-blank`.
+Modern and Retro both independently rebuild byte-identically with pinned
+fontTools4.60.1 and source/catalogue hashes from the single provenance manifest.
+Modern SHA42457a8ca5eb79fdd888b58bda459d539028cba8bfa84786fa52d68313482cf8;
+Retro SHAe7ca66583c2c694be10c8dc9ef85edf12e4598d67b01dac1295151ddfa43b99a.
+
+Both native-KMS/mock, SDL-software and offscreen-GLES composition adapters
+check1026 glyph samples per profile/backend at all57 sizes. Exact native
+comparison, SDL tolerance2, guard pixels unchanged. Shared module checks
+partial alpha, colour/premultiplication, optical bell bound, cache and failures.
+Expanded API gate additionally rechecks BOTH Modern/Retro save/restart and
+missing-colour rollback, preserving earlier Modern regression coverage.
+
+`ruby tools/fonts/preview.rb` generated and visually inspected an actual-raster
+1200x1030 PNG specimen at16/22/30/42px, with48px Nerd and colour-emoji rows.
+Logs: `/tmp/blit-fontcraft.IHU9AK/{verification,gles-gates}.log` (scratch,
+not durable acceptance artifacts). Re-run commands from the font guide/gate
+runner; specimen output is `build/font-preview/blit-fonts.png`.
+
+No live write, SSH, Hibr change, package or deployment. Host remains572.
+Not physical-display, hotplug, performance or universal-Unicode acceptance.
+Emoji sequences remain issue110; seamless Powerline geometry is not proven.
+
 ## 2026-10-20 configuration branch reconciliation: unchanged runtime
 
 Merge13551e4 includes full config-source-108 tip456f354, whose implementation2fb6f7f already

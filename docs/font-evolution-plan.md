@@ -2,6 +2,28 @@
 
 Tracking: [Blit#107](https://git.home.arpa/itdlabs/blit/issues/107).
 
+## Current offline candidate573: smooth Retro and full Nerd catalogue
+
+ADR0156 adds `blit-retro` (3270 Mono derivative) and expands Modern (Hack Mono)
+to all10,386 distinct codepoints in the pinned Nerd Fonts3.4.0 catalogue.
+Both use the same existing antialiased FreeType renderer and colour-scalar
+fallback, one generator and one provenance manifest. Default/bitmap profiles
+are unchanged. No display, live configuration or Hibr change is required.
+
+Run `ruby tools/fonts/preview.rb` for the actual production-raster specimen.
+The catalogue gate checks592,002 glyph/size cases per face, including deliberate
+empty `cod-blank`; partial-alpha, colour, API/restart and backend composition
+tests remain separate. See [font assets](../assets/fonts/README.md) for exact
+sources, licences, reproducible commands and scope. These are local checks,
+not a claim of physical visual acceptance. The host remains572.
+
+"All emoji" is not completed: scalar fonts do not add sequence shaping.
+Flags, ZWJ, skin tones, keycaps and presentation selectors are issue110.
+Powerline seamless-edge geometry is also not proved by icon coverage.
+
+The dated rollout sections below are historical evidence, not current
+repertoire restrictions or instructions to redeploy an earlier release.
+
 ## Deployed567: colour artwork proportions
 
 ADR0151 follows the measured bell report:20px-tall ink in a22px cell versus
@@ -26,7 +48,7 @@ API deployment/version566 verified on10.54; Modern22px/native KMS/settings237
 retained. Login awaits authentication and operator aesthetic approval.
 Colour bell sizing has not changed in this release.
 
-## Next bounded phase: Modern icon coverage and visual metrics
+## Historical566 planning: Modern icon coverage and visual metrics
 
 Operator accepted565 physical mouse motion ("It's perfect!"). Sequence is
 now Modern glyph/size work, then SDL104; retain the native backend and current
