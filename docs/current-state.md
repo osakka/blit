@@ -2,6 +2,14 @@
 
 ## 2026-10-20:116 active, candidate585 negotiated keyboard support
 
+Final source1206741 canonical build passes combined terminal/schema9/0/0;
+32-case raw-PTY gate, existing keyboard settings and Super stream checks pass.
+Package585 SHA25612d6746d57ae9bbc4b7f7e976575f19af3bcfe16d85d4a8912788a099954ed6d
+passes artifact/provenance gate and byte-identical rebuild. Manifest recorded;
+not deployed. Live version584 verified through API after candidate build.
+Hibr326 received exact integration details;116 remains open for physical and
+native hold/desktop acceptance. Do not force Hibr flags or claim Start works.
+
 584 live desktop left unchanged.116 requests lone Super/chords. Candidate585
 implements Kitty query/set/push/pop, independent bounded main/alternate stacks,
 flags1/2/8 only (supported mask11;4/16 explicitly unimplemented), real
@@ -12,7 +20,7 @@ and green for the tested585 scenarios; normal terminal suite3/0/0 and existing
 keyboard settings/remap tests pass. Expanded32-case fixture/remap and WebSocket
 Super-edge checks pass, including a legacy printable-remap regression guarding
 against routing disabled/remapped letters through the old text encoder.
-Terminal suite4/0/0 includes the new gate. Package verification follows.
+Terminal suite4/0/0 includes the new gate. Final package verification is above.
 No Hibr changes or live deployment.
 Hibr326 must negotiate/decode/relay through hold; do not claim desktop Start
 menu works from terminal tests. No browser frontend exists here, and OS-reserved

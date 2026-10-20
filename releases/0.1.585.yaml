@@ -1,0 +1,24 @@
+release: 0.1.585
+package: blit_0.1.585-1_amd64.deb
+package_sha256: 12d6746d57ae9bbc4b7f7e976575f19af3bcfe16d85d4a8912788a099954ed6d
+source_commit: 120674159c68c99dad47ebf03d9c5223722816f7
+package_documentation_commit: 120674159c68c99dad47ebf03d9c5223722816f7
+server_binary_sha256: 377fe8acd4b88e7e31fa838d9499e984bbd0c054b59d96475f7ec9bd80842d82
+update_helper_sha256: b0736e2aceb7c77916470e279e7e9219c2219d565a6b6d77a2348f27d6034cf1
+hibr_adapter_sha256: 75a98efa001e86856c3ac2d261e2584fe241d050b8d368426e6c795daa2076ea
+hibr_version: 0.99.225
+hibr_abi: 16
+verification:
+  raw_pty_keyboard_cases: 32
+  terminal_and_schema_gates_passed: 9
+  terminal_and_schema_gates_skipped: 0
+  terminal_and_schema_gates_failed: 0
+  legacy_keyboard_settings: passed
+  input_stream_super_edges: passed
+  byte_identical_package_rebuild: passed
+  supported_kitty_keyboard_flags: 11
+  physical_super_acceptance: pending
+  hibr326_native_hold_integration: pending
+deployment:
+  status: not_deployed
+  live_host_version_last_verified: 0.1.584

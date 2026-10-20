@@ -2,6 +2,11 @@
 
 ## 2026-10-20 candidate585 /116 negotiated keyboard events
 
+Frozen source1206741 passes combined terminal/schema9/0/0. Package585
+12d6746d57ae9bbc4b7f7e976575f19af3bcfe16d85d4a8912788a099954ed6d passes
+artifact/provenance checks and a byte-identical rebuild. Not deployed;
+live API still reports584. Physical and Hibr326 integration remain pending.
+
 Raw-child PTY exact-byte gate passes32 cases: actual query/push/pop/set,
 unsupported-bit masking, main/alternate independence, bounded stack, RIS,
 lone left/right Super, chords, repeat/releases, lock bits, shifted/control
