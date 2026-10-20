@@ -162,6 +162,25 @@ static int text_at(int row, int col, const char *text)
 	return cell != NULL && strcmp(cell->text, text) == 0;
 }
 
+/* Decode the actual masked production WebSocket frame, not a parallel
+   serializer. The fixture's images are tiny enough to fit the socket. */
+static int read_text_frame(int fd, char *out, size_t capacity)
+{
+	unsigned char header[2], mask[4], extended[2];
+	size_t n, i;
+	if (read(fd, header, 2) != 2) return 0;
+	n = header[1] & 127;
+	if (n == 126) {
+		if (read(fd, extended, 2) != 2) return 0;
+		n = ((size_t)extended[0] << 8) | extended[1];
+	}
+	if (n >= capacity || !(header[1] & 128) ||
+	    read(fd, mask, 4) != 4 || read(fd, out, n) != (ssize_t)n) return 0;
+	for (i = 0; i < n; ++i) out[i] ^= mask[i % 4];
+	out[n] = 0;
+	return (header[0] & 15) == 1;
+}
+
 int main(void)
 {
 	cb_pane *pane;
@@ -243,6 +262,27 @@ int main(void)
 		      "a shadow darkens the same unchanged cell only once");
 	}
 
+	reset_state(2, 8);
+	{
+		int sizes[][2] = {{8,16}, {9,17}, {12,23}, {16,32}};
+		int i;
+		unsigned char rgb[12] = {0};
+		char message[512], expected[96];
+		for (i = 0; i < 4; ++i) {
+			reset_state(8, 16);
+			check(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == 0, "image transport fixture opens");
+			cb.ws_fd = sockets[1];
+			cb.cell_width = sizes[i][0]; cb.cell_height = sizes[i][1];
+			check(cb_image(NULL, NULL, 1, 2, 3, 4, rgb, 2, 2, 0), "image callback submits");
+			check(read_text_frame(sockets[0], message, sizeof(message)), "image metadata decodes");
+			snprintf(expected, sizeof(expected), "\"placement_width\":%d,\"placement_height\":%d", 4*sizes[i][0], 3*sizes[i][1]);
+			check(strstr(message, expected) != NULL, "destination cells survive independently of source pixels");
+			snprintf(expected, sizeof(expected), "\"x\":%d,\"y\":%d", 2*sizes[i][0], sizes[i][1]);
+			check(strstr(message, expected) != NULL, "origin uses the same cell metrics as the destination");
+			check(strstr(message, "\"width\":2,\"height\":2") != NULL, "source dimensions remain unchanged");
+			close(sockets[0]);
+		}
+	}
 	reset_state(2, 8);
 	check(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == 0,
 	      "the input stream fixture opens");

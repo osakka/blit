@@ -14,6 +14,7 @@ require 'tmpdir'
 require 'timeout'
 require 'uri'
 require_relative 'gate_port'
+require_relative 'sdl_test_profile'
 
 external_base = ENV['BLIT_TEST_SERVER']
 port = Integer(ENV.fetch('BLIT_GATE_PORT', '19208'))
@@ -24,9 +25,8 @@ base = external_base ? URI(external_base) : URI("http://127.0.0.1:#{port}")
 log = File.join(Dir.tmpdir, "blit-pixel-frame-#{Process.pid}.log")
 pid = nil
 unless external_base
-  pid = Process.spawn({'SDL_VIDEODRIVER' => 'dummy',
-                       'LD_LIBRARY_PATH' => 'build/sdl3-kms'},
-                      'build/blit/blit-server', port.to_s,
+  pid = Process.spawn(SdlTestProfile.environment,
+                      ENV.fetch('BLIT_GATE_BINARY','build/blit/blit-server'), port.to_s,
                       out: log, err: [:child, :out])
 end
 
@@ -64,10 +64,12 @@ Timeout.timeout(8) do
   end
 end
 
+SdlTestProfile.verify!(http_json(base,:get,'/v1/diagnostics')) unless external_base
 session = http_json(base, :post, '/v1/terminal-sessions',
                     'command' => '/bin/sh',
                     'surface_mode' => 'external',
                     'surface' => {'width' => 80, 'height' => 24})
+display_id = http_json(base,:get,'/v1/displays').fetch('displays').first.fetch('id')
 session_id = session.fetch('id')
 socket = nil
 at_exit do
@@ -194,10 +196,74 @@ raise 'pixel image missing from session snapshot' unless image
 raise "pixel frame backlog was not drained: #{image.inspect}" unless image.fetch('revision') >= frame_count + 1
 raise 'pixel image is incomplete' unless image.fetch('complete') && image.fetch('visible')
 raise 'pixel image dimensions are wrong' unless image.values_at('width', 'height', 'format') == [8, 4, 32]
+raise 'legacy placement is not source-sized' unless image.values_at('placement_width','placement_height') == [8,4]
 
+# The same source buffer must fit the requested destination, including odd
+# cell heights and same-source reuse. Source bytes must never be rescaled by
+# changing the metadata that controls payload length.
+colours=[[255,0,0],[0,255,0],[0,0,255],[255,255,0]]
+checker=(0...4).flat_map{|y|(0...8).flat_map{|x| colours[(y/2)*2+x/4]+[255]}}.pack('C*')
+[[8,16],[9,17],[12,23],[16,32],[8,16]].each do |cw,ch|
+  websocket_send(socket, 1, JSON.generate(
+    type:'pixel_frame_begin',session_id:session_id,image_id:77,
+    width:8,height:4,format:32,x:3,y:5,
+    placement_width:4*cw,placement_height:3*ch))
+  Timeout.timeout(3) { loop { break if websocket_read_text(socket).include?('pixel_frame_ready') } }
+  websocket_send(socket,2,checker)
+  Timeout.timeout(3) do
+    loop do
+      placed=http_json(base,:get,"/v1/terminal-sessions/#{session_id}").fetch('graphics').find{|g|g['id']==77}
+      break if placed && placed['complete'] && placed.values_at('placement_width','placement_height')==[4*cw,3*ch]
+      sleep 0.02
+    end
+  end
+  # Independently inspect presented quadrant colours, not just API metadata.
+  Timeout.timeout(3) do
+    loop do
+      capture=Net::HTTP.get_response(base+"/v1/diagnostics/screenshots/#{display_id}")
+      if capture.code=='409'
+        sleep 0.02
+        next
+      end
+      bmp=capture.body
+      raise "not a BMP capture: #{capture.code}: #{bmp[0,400]}" unless bmp.start_with?('BM')
+      offset=bmp.byteslice(10,4).unpack1('V')
+      width=bmp.byteslice(18,4).unpack1('l<')
+      height=bmp.byteslice(22,4).unpack1('l<')
+      bytes=bmp.byteslice(28,2).unpack1('v')/8
+      stride=((width*bytes+3)/4)*4
+      samples=colours.each_index.map do |i|
+        x=3+cw+(i%2)*2*cw; y=5+(3*ch)/4+(i/2)*(3*ch)/2
+        row=height>0 ? height-1-y : y
+        bmp.byteslice(offset+row*stride+x*bytes,3).bytes.reverse
+      end
+      outside=[[3+4*cw+1,5+ch],[3+cw,5+3*ch+1]].map do |x,y|
+        row=height>0 ? height-1-y : y
+        bmp.byteslice(offset+row*stride+x*bytes,3).bytes.reverse
+      end
+      break if samples==colours && outside==[[0,0,0],[0,0,0]]
+      sleep 0.02
+    end
+  end
+end
+
+# Reject malformed/new partial geometry before disturbing the visible image.
+[{placement_width:32}, {placement_width:0,placement_height:48},
+ {placement_width:32.5,placement_height:48},
+ {placement_width:65536,placement_height:48},
+ {placement_width:'32',placement_height:48}].each do |invalid|
+  websocket_send(socket,1,JSON.generate({type:'pixel_frame_begin',session_id:session_id,
+    image_id:77,width:8,height:4,format:32}.merge(invalid)))
+  reply=Timeout.timeout(3){loop{v=websocket_read_text(socket);break v if v.include?('pixel_frame_error')}}
+  raise "invalid geometry accepted: #{reply}" unless reply.include?('invalid_begin')
+end
+
+unchanged=http_json(base,:get,"/v1/terminal-sessions/#{session_id}").fetch('graphics').find{|g|g['id']==77}
+raise 'invalid geometry changed the retained placement' unless unchanged && unchanged['visible'] &&
+  unchanged.values_at('x','y','placement_width','placement_height')==[3,5,32,48]
 socket.close
 socket = nil
-puts format('PIXEL_FRAME_PASS frames=%d ingest_hz=%.3f accepted=%d rendered=%d render_ms=%.3f fragmented_rgba=32bytes reuse=true',
+puts format('PIXEL_FRAME_PASS frames=%d ingest_hz=%.3f accepted=%d rendered=%d render_ms=%.3f fragmented_rgba=32bytes reuse=true placement=source_independent_odd_even_pixels shrink=erased invalid=rejected',
             frame_count, frame_count / elapsed, runtime.fetch('pixel_frames_accepted'),
             rendered,
             runtime.fetch('last_render_ms'))

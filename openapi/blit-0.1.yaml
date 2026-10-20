@@ -4536,12 +4536,25 @@ components:
     StreamPixelFrameBegin:
       type: object
       required: [type, session_id, image_id, width, height, format]
+      dependentRequired:
+        placement_width: [placement_height]
+        placement_height: [placement_width]
       properties:
         type: {type: string, const: pixel_frame_begin}
         session_id: {$ref: '#/components/schemas/ResourceId'}
         image_id: {type: integer, minimum: 1}
         width: {type: integer, minimum: 1, maximum: 4096}
         height: {type: integer, minimum: 1, maximum: 4096}
+        placement_width:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          description: Destination width in terminal pixels; paired with placement_height. Omit both for source-sized placement.
+        placement_height:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          description: Destination height in terminal pixels; independent of source height and payload length.
         format: {type: integer, enum: [24, 32]}
         x: {type: integer, default: 0}
         y: {type: integer, default: 0}

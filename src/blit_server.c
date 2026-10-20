@@ -17,6 +17,7 @@
 #include "blit_trial_protocol.h"
 
 #include <arpa/inet.h>
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -17020,6 +17021,27 @@ static void pixel_frame_reset(BlitRuntime *runtime, BlitStream *stream,
     stream->pixel_frame_chunked = 0;
 }
 
+static int pixel_placement_dimension(const char *message, const char *key,
+                                     int *value)
+{
+    const char *cursor = json_key_cursor(message, key);
+    char *end;
+    long parsed;
+    if (cursor == NULL) return 0;
+    cursor += strlen(key) + 2;
+    while (isspace((unsigned char)*cursor)) ++cursor;
+    if (*cursor++ != ':') return 0;
+    while (isspace((unsigned char)*cursor)) ++cursor;
+    if (*cursor < '0' || *cursor > '9') return 0;
+    errno = 0;
+    parsed = strtol(cursor, &end, 10);
+    if (errno || parsed < 1 || parsed > 65535) return 0;
+    while (isspace((unsigned char)*end)) ++end;
+    if (*end != ',' && *end != '}') return 0;
+    *value = (int)parsed;
+    return 1;
+}
+
 static int pixel_frame_begin(BlitRuntime *runtime, BlitStream *stream,
                              const char *message)
 {
@@ -17028,6 +17050,8 @@ static int pixel_frame_begin(BlitRuntime *runtime, BlitStream *stream,
     int image_id;
     int width;
     int height;
+    int placement_width;
+    int placement_height;
     int format;
     int x = 0;
     int y = 0;
@@ -17056,6 +17080,14 @@ static int pixel_frame_begin(BlitRuntime *runtime, BlitStream *stream,
         width > BLIT_GRAPHICS_MAX_WIDTH || height < 1 ||
         height > BLIT_GRAPHICS_MAX_HEIGHT)
         return 0;
+    placement_width = width;
+    placement_height = height;
+    if (json_key_cursor(message, "placement_width") != NULL ||
+        json_key_cursor(message, "placement_height") != NULL) {
+        if (!pixel_placement_dimension(message, "placement_width", &placement_width) ||
+            !pixel_placement_dimension(message, "placement_height", &placement_height))
+            return 0;
+    }
     bytes = (size_t)width * (size_t)height * (size_t)(format == 24 ? 3 : 4);
     if (bytes > BLIT_GRAPHICS_MAX_BYTES)
         return 0;
@@ -17123,8 +17155,8 @@ static int pixel_frame_begin(BlitRuntime *runtime, BlitStream *stream,
     image->y = y;
     image->z = z;
     image->opaque = 1;
-    image->placement_width = width;
-    image->placement_height = height;
+    image->placement_width = placement_width;
+    image->placement_height = placement_height;
     image->revision = 1;
     image->generation = next_graphics_generation();
     stream->pixel_frame_session_id = session_number;

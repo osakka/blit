@@ -13,6 +13,13 @@ schema = YAML.load_file(schema_path)
 raise 'schema is not OpenAPI 3.1' unless schema.fetch('openapi') == '3.1.0'
 
 paths = schema.fetch('paths')
+pixel_begin=schema.dig('components','schemas','StreamPixelFrameBegin')
+%w[placement_width placement_height].each do |key|
+  prop=pixel_begin.fetch('properties').fetch(key)
+  raise 'pixel destination range drift' unless prop.values_at('type','minimum','maximum')==['integer',1,65535]
+  other=key=='placement_width' ? 'placement_height' : 'placement_width'
+  raise 'pixel destination dimensions must be paired' unless pixel_begin.dig('dependentRequired',key)==[other]
+end
 font_configuration = schema.dig('components','schemas','FontConfiguration')
 raise 'font size controls must be exclusive' unless
   font_configuration.dig('not','required') == %w[scale size_px]

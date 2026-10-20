@@ -1,5 +1,18 @@
 # Verification status
 
+## 2026-10-20 candidate583 destination placement (not deployed)
+
+Production adapter metadata gate passes four cell metrics with independent
+2x2 source. Pixel-frame gate is red on582 and green on583: source/destination
+independence, quadrant screenshot pixels, odd/even sizes, reuse/grow/shrink,
+old-extent erasure, legacy placement and malformed destination rejection.
+SDL software and offscreen GLES2 identities checked. Desktop OpenGL failed
+initialization here, not verified. Native KMS clipping oracle passes; graphics
+reset and OpenAPI contract gates pass. TCC builds server and pinned ABI16
+adapter. No live deployment/browser change or end-user acceptance claimed.
+Hibr319 owns the requested viewport-sizing policy; Blit111 remains open for
+integration/live acceptance. See ADR0166.
+
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 

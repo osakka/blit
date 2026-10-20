@@ -1895,12 +1895,15 @@ static int cb_image(sh *s, const char *pane, int row, int col, int h, int w,
 {
 	char begin[512];
 	int pane_row = 0, pane_col = 0, pane_height = 0, pane_width = 0;
-	int x, y, length;
+	int x, y, length, cw, ch;
 	size_t total, offset, chunk;
 	(void)s;
 	CB_TRACE("console-blit: image request pane=%s row=%d col=%d cells=%dx%d pixels=%dx%d",
 		pane ? pane : "(none)", row, col, h, w, iw, ih);
-	if (!cb.opened || !rgb || iw < 1 || ih < 1) {
+	cw = cb.cell_width > 0 ? cb.cell_width : CB_CELL_WIDTH;
+	ch = cb.cell_height > 0 ? cb.cell_height : CB_CELL_HEIGHT;
+	if (!cb.opened || !rgb || iw < 1 || ih < 1 ||
+	    w < 1 || h < 1 || w > 65535 / cw || h > 65535 / ch) {
 		CB_TRACE("console-blit: image rejected before transport");
 		return 0;
 	}
@@ -1915,13 +1918,14 @@ static int cb_image(sh *s, const char *pane, int row, int col, int h, int w,
 		return 0;
 	}
 	if (!cb.image_id) cb.image_id = 1;
-	x = col * (cb.cell_width > 0 ? cb.cell_width : CB_CELL_WIDTH);
-	y = row * (cb.cell_height > 0 ? cb.cell_height : CB_CELL_HEIGHT);
+	x = col * cw;
+	y = row * ch;
 	length = snprintf(begin, sizeof(begin),
 		"{\"type\":\"pixel_frame_begin\",\"session_id\":\"%s\","
 		"\"image_id\":%u,\"width\":%d,\"height\":%d,"
+		"\"placement_width\":%d,\"placement_height\":%d,"
 		"\"format\":24,\"x\":%d,\"y\":%d,\"z\":%d,\"chunked\":true}",
-		cb.session, cb.image_id, iw, ih, x, y,
+		cb.session, cb.image_id, iw, ih, w * cw, h * ch, x, y,
 		(flags & CB_IMAGE_UNDER) ? -1 : 0);
 	total = (size_t)iw * (size_t)ih * 3U;
 	if (length < 0 || (size_t)length >= sizeof(begin) ||

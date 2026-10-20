@@ -1046,6 +1046,17 @@ bounded pixel frames. Pixel frames use `pixel_frame_begin` metadata followed by
 binary data and a final completion message. Back-pressure and dropped-event
 counters are visible in runtime diagnostics.
 
+Since0.1.583, `pixel_frame_begin` accepts paired `placement_width` and
+`placement_height` (integer1..65535) in terminal pixels. `width`/`height`
+remain source dimensions and alone determine RGB/RGBA payload length. The
+destination starts at `x`,`y`; it is not a Chrome zoom setting. Omitting both
+placement fields preserves source-sized placement for older producers. A
+partial pair, non-integer, zero or out-of-range size is rejected as
+`pixel_frame_error`/`invalid_begin` before changing the current image.
+Blit's display adapter converts the callback's requested destination cells
+using the current cell metrics and sends this pair. Ship the matching server
+and adapter together; older servers do not implement these placement fields.
+
 The HTTP surface state and the stream are complementary. HTTP GETs are the
 repair path; the stream is the low-latency observation path. A client must
 resync after a sequence gap, unknown resource ID, reconnect, or rejected frame

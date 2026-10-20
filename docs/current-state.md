@@ -1,5 +1,26 @@
 # Current state and restart point
 
+## 2026-10-20: candidate583 image placement; Hibr319; pane0.1.8 published
+
+User requests browser/font sizing work now. Hibr319 tracks the browser's
+fixed8x16 CSS-pixels/cell viewport policy and pixel-native sizing/hit-testing
+request. No Hibr source or installed files edited. Blit111's adapter defect
+is fixed in candidate583: preserve destination dimensions separately from
+source dimensions in pixel_frame_begin. See ADR0166 and API contract.
+Production adapter metadata, black-box software/GLES2 presented quadrants,
+odd/even sizes, source-buffer reuse, shrink erasure, malformed destination
+rejection and legacy no-placement behavior pass. Old582 fails the new
+destination regression. Desktop OpenGL did not initialize on this offscreen
+driver; do not report it as verified. Native clipping unit gate passes,
+not physical browser acceptance. No package/deployment/live font changes yet;
+live582/Retro16 remains the last recorded host state. Browser policy remains
+separate from the corrected Blit contract;111 and319 remain open.
+
+Blit Control Panel0.1.8 published in hibr-apps6b458b3, signed catalogue;
+hibr-apps#2 tracks missing native dropdown hooks. Both actual UI gates,
+callback gates and isolated catalogue lifecycle pass. Live pane installation
+and operator acceptance pending. Hibr core unchanged.
+
 ## 2026-10-20 live font review — both16 accepted; odd-height wallpaper114
 
 Operator confirms the582 desktop, mouse and keyboard work correctly across
