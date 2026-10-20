@@ -1,0 +1,14 @@
+release: 0.1.567
+package: blit_0.1.567-1_amd64.deb
+package_sha256: 9fb04177c04cb7af210cc89321d47d474228c51a0e4d98f4c0dc60df279bd468
+source_commit: a5390d8772fdcef4dd13f7ac1cb4c1b16c4312a8
+package_documentation_commit: a5390d8772fdcef4dd13f7ac1cb4c1b16c4312a8
+server_binary_sha256: 22b5c9943ec6f9dea3d86edc0bbb358ac63b6d66f0386434e6bade22ee4bf641
+update_helper_sha256: cff624c8da3a24c3867e7230407b9dcf49cfae5597e74cb1974d63ea6f21dcad
+hibr_adapter_sha256: e739a1f182a104449e1c9291fac9c4396491aa320c3553f40adc41c842acbbdb
+hibr_version: 0.99.225
+hibr_abi: 16
+verification:
+  font: '15 checks pass; optical-bound regression red before/green after; native/software/GLES1026 samples each; unchanged Nerd1140 samples'
+  scope: 'Colour artwork uses fitted text em;22px bell ink20x20 to17x18 with unchanged22x22 allocation; global size/layout/backend unchanged'
+  physical: 'Package/deployment pending; live566 native KMS/login awaiting authentication; aesthetic acceptance remains open'
