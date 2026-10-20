@@ -4,6 +4,11 @@ Tracking: [Blit#107](https://git.home.arpa/itdlabs/blit/issues/107).
 
 ## Active completion contract —107/110 before browser or SDL work
 
+Live582 review: operator accepts the baseline desktop/input and Modern16
+appearance on native KMS, two outputs/three panes. Retro16 is now visible for
+comparison; its review is pending. Both activations retain8x16 cells and all
+pane geometry. This does not replace remaining repertoire/protocol/size tests.
+
 Candidate582 adds revision-matched real PTY transition captures and fixes a
 demonstrated wide-owner clipping defect during resize, including the saved
 alternate buffer and clipped links. ADR0165 and the ledger distinguish the

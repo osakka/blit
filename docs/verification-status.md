@@ -3,6 +3,24 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-20 live font reviews on582 — operator reports
+
+Operator confirms the deployed Spleen16 desktop/input setup is working, then
+reports that all look perfect after selecting Modern16. API observations
+verify actual Modern profile/native-antialiased/colour support,8x16 cells,
+unchanged native DRM/KMS ready health, every existing pane pixel/cell geometry
+and exactly one native primary. Two physical outputs/three panes were present.
+These are explicit human reports and API invariants, not independent pixel
+comparisons or full repertoire/protocol/performance acceptance.
+
+Next selected Retro16 through PUT /v1/fonts: same8x16 cells, native
+antialiasing/colour and unchanged backend/panes/primary count. It is left
+visible awaiting operator review. No size/scale change, Hibr edit, SSH,
+manual join or server restart. Evidence under /tmp/blit-fontcraft.IHU9AK/:
+font-live-baseline.json, font-live-modern-{response,observation}.json and
+font-live-retro-{response,observation}.json.107/110 remain open for remaining
+coverage; Retro and other live sizes have not yet been accepted.
+
 ## 2026-10-20 rollout582: authenticated installation on192.168.10.54
 
 Package/source/documentation identity is releases/0.1.582.yaml (source0d6cc98).

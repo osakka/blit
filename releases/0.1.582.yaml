@@ -14,8 +14,8 @@ deployment:
   backend: drm-kms
   health_ready: true
   saved_configuration_preserved: true
-  active_font: blit-hibr-spleen16
-  active_font_size_px: 16
+  active_font_at_install: blit-hibr-spleen16
+  active_font_size_px_at_install: 16
   connected_outputs_at_install: 1
   connected_outputs_last_observed: 2
   native_primary_count_last_observed: 1
@@ -23,6 +23,13 @@ deployment:
   pane_layout: 1x2
   runtime_hibr_version: 0.99.270
   runtime_hibr_abi: 16
-  operator_visual_input_acceptance: pending
-  new_font_live_acceptance: pending
+  operator_visual_input_acceptance: confirmed_by_operator
+  new_font_live_acceptance: partial_modern16_confirmed_retro16_pending
   independent_automatic_package_rollback: untested
+font_reviews:
+  modern_16px: confirmed_by_operator
+  retro_16px: pending
+  live_font_at_checkpoint: blit-retro
+  live_size_px_at_checkpoint: 16
+  backend_unchanged: true
+  pane_geometry_unchanged: true

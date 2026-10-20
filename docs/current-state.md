@@ -1,5 +1,23 @@
 # Current state and restart point
 
+## 2026-10-20 live font review — Modern16 accepted; Retro16 visible
+
+Operator confirms the582 desktop, mouse and keyboard work correctly across
+the current setup. Baseline Spleen16 rollout acceptance is recorded. Modern
+was then selected through PUT /v1/fonts at16px: native antialiasing/colour
+support active, same8x16 cells, native KMS health and all pane geometries
+unchanged. Operator reports that all look perfect in that Modern16 review.
+This is representative desktop appearance/input acceptance, not every glyph
+or every terminal/graphics protocol combination.
+
+Current checkpoint: Retro16 is now selected through the same API, also8x16
+cells/native antialiasing/colour, same native KMS and pane geometry, exactly
+one primary. Leave it visible for the operator's comparison; Retro acceptance
+is still pending. Font API changes use the canonical persisted settings, not
+another screen-scale control. Baseline and profile responses/observations:
+/tmp/blit-fontcraft.IHU9AK/font-live-*.json. No Hibr edits, SSH, renderer switch,
+manual joins or service restart for these font comparisons.
+
 ## 2026-10-20 rollout582 — installed; operator acceptance pending
 
 Latest follow-up: authenticated native desktop is now ready. Observation shows
