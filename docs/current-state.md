@@ -1,6 +1,27 @@
 # Current state and restart point
 
-## 2026-10-20 rollout582 — package verified, installation next
+## 2026-10-20 rollout582 — installed; operator acceptance pending
+
+Authenticated API update on192.168.10.54 completed; `/v1/version` reports582,
+update status is ready/idle and native DRM/KMS health is ready. Active Spleen
+16px, saved settings document and both physical-pane/cell-grid geometries
+match the immediately-before snapshot. Retro/Modern are available, not
+selected. One1920x2160 output remains split1x2 with lower login preference.
+The login manager is running below and requires authentication; no join is
+started before an authenticated primary. User has been asked to sign in and
+confirm desktop/input before changing font or size.
+
+Fresh startup probes Hibr0.99.270/ABI16, compatible with the pinned ABI16
+adapter. Before restart572 had cached0.99.265; that is not evidence of when
+Hibr changed. This Blit package did not install or edit Hibr. No SSH used.
+Package/source identities are in releases/0.1.582.yaml; baseline/after/API
+update logs are under /tmp/blit-fontcraft.IHU9AK/rollout-*.
+No physical pixel, new-font live appearance, multimonitor or high-refresh
+acceptance is claimed. Retained572 package is rollback material, not an
+independently tested automatic startup rollback. Operator-only update polling
+is now connection/request bounded; that tool is not installed in the package.
+
+## 2026-10-20 rollout582 preparation — historical pre-install checkpoint
 
 Host192.168.10.54 reports572, healthy native DRM/KMS, Spleen16px, one1920x2160
 output split1x2 with primary below/join above. Runtime Hibr0.99.265/ABI16

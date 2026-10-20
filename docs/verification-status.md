@@ -3,6 +3,41 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-20 rollout582: authenticated installation on192.168.10.54
+
+Package/source/documentation identity is releases/0.1.582.yaml (source0d6cc98).
+Artifact gate passes with a byte-identical full package rebuild:
+SHA01e4346c5f8b73344f68937ad89c4223b1f2aec22a481c6e83afa466f4eaef7f.
+The582 server matches the previously frozen TCC binary. Helper/adapter hashes
+are unchanged from572. The retained572 package matches its release checksum.
+No installed Hibr files were changed; adapter built from pinned225/ABI16.
+
+Before installation, the API reported572, native DRM/KMS ready and cached
+runtime Hibr265/ABI16 compatible. A bounded read-only diagnostic PTY checked
+installed FreeType>=2.12.1 and HarfBuzz>=6.0.0, exited0 and was deleted; it
+was not another Hibr desktop. An earlier oversized diagnostic request failed
+400 before creation and was corrected to fit the documented argument bound.
+
+Authenticated update accepted the hash-verified package and completed with
+`/v1/version`=0.1.582 and update ready/idle. After observation confirms ready
+native KMS, unchanged saved settings document, Spleen16px and both pane pixel
+regions/cell grids. Retro/Modern inventory entries are available, not selected.
+One1920x2160 physical output,1x2 split; this is not two-monitor acceptance.
+
+Fresh startup reports runtime Hibr270/ABI16 compatible.572's old cached265
+probe does not establish when Hibr changed. Later observation shows the lower
+login manager awaiting authentication, with no authenticated primary/join;
+this is the expected post-restart login boundary. User visual/input acceptance
+has been requested, not received at this checkpoint. No live font/size changes,
+SSH or manual Hibr joins were performed. No pixel-correctness/FPS claim.
+
+Evidence: /tmp/blit-fontcraft.IHU9AK/rollout-before.json,
+rollout-immediately-before.json, rollout-after.json, rollout-final.json,
+rollout-host-dependency-preflight.json, rollout-package-gate.log and
+rollout-update.log. Network waits in the operator updater are now bounded.
+API rollback still depends on a responding management plane; independent
+automatic package rollback was not implemented or tested here.
+
 ## 2026-10-20 candidate582: whole-owner resize and PTY transitions
 
 ADR0165. Frozen TCC server SHA
