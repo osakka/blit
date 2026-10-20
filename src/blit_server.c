@@ -28342,7 +28342,8 @@ static void service_native_console(BlitRuntime *runtime)
     int i, button;
     if (!request) return;
     if (request < 0) {
-        diagnostic_log(runtime, "error", "console_recovery_lost",
+        diagnostic_log(runtime, "error", "console_ownership_lost",
+                       request == -2 ? "VT descriptor or keyboard isolation lost; stopping native presentation." :
                        "Recovery process exited; stopping native presentation.");
         blit_running = 0;
         return;

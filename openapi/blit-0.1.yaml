@@ -2624,10 +2624,15 @@ components:
       additionalProperties: false
     ConsoleDiagnostics:
       type: object
-      required: [owner, vt_number, active, keyboard_muted, keyboard_mode, recovery_process, watchdog_timeout_ms, evdev_exclusive]
+      required: [owner, vt_number, previous_vt_number, active, keyboard_muted, keyboard_mode, keyboard_read_errno, recovery_process, watchdog_timeout_ms, evdev_exclusive]
       properties:
         owner: {type: string, enum: [native, unmanaged]}
         vt_number: {type: integer, minimum: 0, maximum: 63}
+        previous_vt_number: {type: integer, minimum: 0, maximum: 63}
+        keyboard_read_errno:
+          type: integer
+          minimum: 0
+          description: Zero on successful inspection or when unmanaged; otherwise Linux errno.
         active: {type: boolean}
         keyboard_muted: {type: boolean}
         keyboard_mode:

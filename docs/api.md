@@ -1,21 +1,27 @@
 # Blit API guide
 
-## Native console ownership (candidate0.1.586)
+## Native console ownership (candidate0.1.587)
 
 `GET /v1/diagnostics/console` reports Blit's native VT ownership, VT number,
-active state, actual Linux keyboard mode, keyboard muting, registered recovery
+active state, previous VT, actual Linux keyboard mode/read errno, keyboard
+muting, registered recovery
 process and main-loop watchdog timeout (normally10s, bounded120s during the
 privileged package-install exchange). `owner: unmanaged` is not
 evidence of SDL isolation; it means this native owner is not managing a VT.
 The endpoint is read-only and uses the normal API authentication policy.
 
-Native KMS takes a text/automatic VT only, mutes its kernel keyboard handler
+Native KMS reserves its own unused text/automatic VT, never the active login
+VT, and mutes its kernel keyboard handler
 while presenting, and restores it when releasing the VT or stopping. Physical
 Ctrl+Alt+F1..F12 switches VTs; API-injected chords do not switch the host.
 While away, physical events are discarded, not replayed on return; API input
 and PTY/session work remain available. Acquisition requires DRM master and
 requests a full repaint. Failure leaves diagnostics available or stops the
 server rather than claiming usable presentation.
+On exit it returns to the previous VT if its own is still active. Console
+descriptor/mute loss stops presentation rather than reporting stale ownership.
+This requires privileged Linux VT access; a profile lacking it must remain
+API-only with a startup error, not silently share a console keyboard.
 
 The recovery process handles main-process death and an expired heartbeat.
 It does not cover a kernel/GPU hang or killing the whole recovery group.

@@ -1,5 +1,26 @@
 # Verification status
 
+## 2026-10-21 candidate587 /117 getty coexistence correction
+
+586 failed physical acceptance despite the prior getty-free VM pass. Actual
+owner fd duplication returns EIO while a new tty2 descriptor reads K_UNICODE;
+getty@tty2 restarted after startup. This is recorded in the586 manifest,
+current-state and117, not treated as successful isolation. No Hibr changes.
+
+587 reserves a dedicated VT using VT_OPENQRY, global single-owner flock,
+bounded activation, previous-VT return and real descriptor/muting health.
+Cleanup reopens only the reserved VT if hangup invalidates inherited files.
+Final candidate module/full-server VM passes original-login-console
+TIOCVHANGUP plus Unicode/text reset without losing own muting, and own-VT
+hangup with safe detection/restoration. Existing real key delivery, hotplug,
+VT chords, queued-away input rejection, byte-identical scanout, SIGKILL,
+stopped-owner watchdog, inherited descriptors and install lease still pass.
+Evidence /tmp/blit-vt-kernel.kAxkrF/serial.log. Package/live acceptance pending.
+The same expanded fixture is red on the exact586 package payload, after
+TIOCVHANGUP and keyboard/display reset of its borrowed console: native owner
+still claims active but reports unreadable/unmuted keyboard, matching10.54.
+Negative evidence /tmp/blit-vt-kernel.ptvwkj/serial.log.
+
 ## 2026-10-21 candidate586 /117 native VT isolation
 
 Source44e3597/package586 artifact gate and byte-identical rebuild pass.

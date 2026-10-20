@@ -11,6 +11,7 @@
 #include <sys/file.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -19,6 +20,8 @@
 static struct {
     int fd;
     int number;
+    int previous_number;
+    int lock_fd;
     int keyboard_mode;
     int display_mode;
     struct vt_mode mode;
@@ -30,7 +33,7 @@ static struct {
     pid_t recovery;
     long long heartbeat_ms;
     int watchdog_timeout_ms;
-} vt = { .fd = -1, .stop = -1, .watchdog_timeout_ms = 10000 };
+} vt = { .fd = -1, .lock_fd = -1, .stop = -1, .watchdog_timeout_ms = 10000 };
 static volatile sig_atomic_t release_pending, acquire_pending;
 
 static long long vt_now_ms(void)
@@ -49,9 +52,28 @@ static void vt_signal(int signal_number)
 static int restore_vt(void)
 {
     int failed = 0;
-    if (ioctl(vt.fd, KDSKBMODE, vt.keyboard_mode) < 0) failed = 1;
-    if (ioctl(vt.fd, KDSETMODE, vt.display_mode) < 0) failed = 1;
-    if (ioctl(vt.fd, VT_SETMODE, &vt.mode) < 0) failed = 1;
+    int fd = vt.fd, fresh = -1, keyboard_mode;
+    struct vt_stat state;
+    char path[32];
+    int return_to_previous;
+    /* TIOCVHANGUP invalidates existing open files, including the recovery
+       child's copy. Recovery may reopen ONLY our reserved VT, not tty0/the
+       currently active console, and must not rely on that stale descriptor. */
+    if (ioctl(fd, KDGKBMODE, &keyboard_mode) < 0 ||
+        ioctl(fd, VT_GETSTATE, &state) < 0) {
+        snprintf(path, sizeof(path), "/dev/tty%d", vt.number);
+        fresh = open(path, O_RDWR | O_NOCTTY | O_CLOEXEC);
+        if (fresh < 0) return -1;
+        fd = fresh;
+    }
+    return_to_previous = ioctl(fd, VT_GETSTATE, &state) == 0 &&
+        state.v_active == vt.number;
+    if (ioctl(fd, KDSKBMODE, vt.keyboard_mode) < 0) failed = 1;
+    if (ioctl(fd, KDSETMODE, vt.display_mode) < 0) failed = 1;
+    if (ioctl(fd, VT_SETMODE, &vt.mode) < 0) failed = 1;
+    if (return_to_previous &&
+        ioctl(fd, VT_ACTIVATE, vt.previous_number) < 0) failed = 1;
+    if (fresh >= 0) close(fresh);
     return failed ? -1 : 0;
 }
 
@@ -95,7 +117,8 @@ static void recover_vt(int death, int command)
     /* Forked descendants can retain the shared open file description until
        exec. Closing just our reference would leave their flock blocking the
        next server even though keyboard recovery already completed. */
-    flock(vt.fd, LOCK_UN);
+    flock(vt.lock_fd, LOCK_UN);
+    close(vt.lock_fd);
     close(vt.fd);
     _exit(result < 0 ? 1 : 0);
 }
@@ -108,6 +131,8 @@ int blit_vt_open(char *error, unsigned capacity)
     struct vt_mode mode;
     struct sigaction action;
     char path[32];
+    int number;
+    long long deadline;
     if (vt.fd >= 0) {
         snprintf(error, capacity, "Linux VT ownership: already owned");
         errno = EALREADY;
@@ -115,12 +140,18 @@ int blit_vt_open(char *error, unsigned capacity)
     }
     console = open("/dev/tty0", O_RDWR | O_NOCTTY | O_CLOEXEC);
     if (console < 0 || ioctl(console, VT_GETSTATE, &state) < 0) goto fail;
-    snprintf(path, sizeof(path), "/dev/tty%u", state.v_active);
-    vt.number = state.v_active;
+    vt.previous_number = state.v_active;
+    if (mkdir("/run/blit", 0750) < 0 && errno != EEXIST) goto fail;
+    vt.lock_fd = open("/run/blit/console.lock",
+                     O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0600);
+    if (vt.lock_fd < 0 || flock(vt.lock_fd, LOCK_EX | LOCK_NB) < 0) goto fail;
+    if (ioctl(console, VT_OPENQRY, &number) < 0 || number < 1 || number > 63) goto fail;
+    snprintf(path, sizeof(path), "/dev/tty%d", number);
+    vt.number = number;
     close(console);
     console = -1;
     vt.fd = open(path, O_RDWR | O_NOCTTY | O_CLOEXEC);
-    if (vt.fd < 0 || flock(vt.fd, LOCK_EX | LOCK_NB) < 0 ||
+    if (vt.fd < 0 ||
         ioctl(vt.fd, VT_GETMODE, &vt.mode) < 0 ||
         ioctl(vt.fd, KDGKBMODE, &vt.keyboard_mode) < 0 ||
         ioctl(vt.fd, KDGETMODE, &vt.display_mode) < 0) goto fail;
@@ -132,7 +163,7 @@ int blit_vt_open(char *error, unsigned capacity)
         goto fail;
     }
     if (ioctl(vt.fd, VT_GETSTATE, &state) < 0) goto fail;
-    if (state.v_active != vt.number) { errno = EAGAIN; goto fail; }
+    if (state.v_active != vt.previous_number) { errno = EAGAIN; goto fail; }
     /* Linux >=5.3: refusing unsupported recovery is safer than muting a VT
        whose keyboard a SIGKILL could leave disabled. */
     death = (int)syscall(SYS_pidfd_open, getpid(), 0);
@@ -163,6 +194,19 @@ int blit_vt_open(char *error, unsigned capacity)
     if (ioctl(vt.fd, VT_SETMODE, &mode) < 0 ||
         ioctl(vt.fd, KDSKBMODE, K_OFF) < 0 ||
         ioctl(vt.fd, KDSETMODE, KD_GRAPHICS) < 0) goto fail_owned;
+    /* Never borrow a login VT: getty/vhangup can invalidate an existing open
+       file and restore its keyboard underneath us. Reserve an unused VT
+       before activation, keeping it busy so logind does not spawn a getty. */
+    if (ioctl(vt.fd, VT_ACTIVATE, vt.number) < 0) goto fail_owned;
+    deadline = vt_now_ms() + 2000;
+    for (;;) {
+        if (ioctl(vt.fd, VT_GETSTATE, &state) < 0) goto fail_owned;
+        if (state.v_active == vt.number) break;
+        if (vt_now_ms() >= deadline) { errno = ETIMEDOUT; goto fail_owned; }
+        usleep(10000);
+    }
+    if (ioctl(vt.fd, VT_RELDISP, VT_ACKACQ) < 0) goto fail_owned;
+    acquire_pending = 0;
     vt.active = 1;
     vt.heartbeat_ms = 0;
     vt.watchdog_timeout_ms = 10000;
@@ -178,7 +222,9 @@ fail:
     if (channel[0] >= 0) close(channel[0]);
     if (channel[1] >= 0) close(channel[1]);
     if (vt.fd >= 0) close(vt.fd);
+    if (vt.lock_fd >= 0) close(vt.lock_fd);
     vt.fd = -1;
+    vt.lock_fd = -1;
     snprintf(error, capacity, "Linux VT ownership: %s", strerror(saved_errno));
     errno = saved_errno;
     return -1;
@@ -203,7 +249,9 @@ void blit_vt_close(void)
         while (waitpid(vt.recovery, &status, 0) < 0 && errno == EINTR) {}
         vt.recovery = 0;
     }
-    flock(vt.fd, LOCK_UN);
+    flock(vt.lock_fd, LOCK_UN);
+    close(vt.lock_fd);
+    vt.lock_fd = -1;
     close(vt.fd);
     vt.fd = -1;
     vt.active = 0;
@@ -226,6 +274,9 @@ int blit_vt_pending(void)
     pid_t reaped;
     if (vt.fd < 0) return 0;
     if (vt_now_ms() - vt.heartbeat_ms >= 1000) {
+        int mode;
+        if (ioctl(vt.fd, KDGKBMODE, &mode) < 0 ||
+            (vt.active && mode != K_OFF)) return -2;
         if (send(vt.stop, "h", 1, MSG_NOSIGNAL | MSG_DONTWAIT) == 1)
             vt.heartbeat_ms = vt_now_ms();
     }
@@ -276,14 +327,17 @@ int blit_vt_update_lease(int enabled)
 void blit_vt_json(char *body, unsigned capacity)
 {
     int keyboard_mode = -1;
-    if (vt.fd >= 0) ioctl(vt.fd, KDGKBMODE, &keyboard_mode);
+    int read_error = 0;
+    if (vt.fd >= 0 && ioctl(vt.fd, KDGKBMODE, &keyboard_mode) < 0) read_error = errno;
     snprintf(body, capacity,
         "{\"owner\":\"%s\",\"vt_number\":%d,\"active\":%s,"
         "\"keyboard_muted\":%s,\"keyboard_mode\":%d,"
+        "\"keyboard_read_errno\":%d,\"previous_vt_number\":%d,"
         "\"recovery_process\":%s,\"watchdog_timeout_ms\":%d,"
         "\"evdev_exclusive\":false}",
         vt.fd >= 0 ? "native" : "unmanaged", blit_vt_number(),
         vt.fd >= 0 && vt.active ? "true" : "false",
         keyboard_mode == K_OFF ? "true" : "false", keyboard_mode,
+        read_error, vt.fd >= 0 ? vt.previous_number : 0,
         vt.recovery > 0 ? "true" : "false", vt.watchdog_timeout_ms);
 }

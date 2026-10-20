@@ -1,13 +1,26 @@
 # ADR0170: native KMS owns its Linux VT keyboard
 
 - Date: 2026-10-21
-- Status: implemented in candidate0.1.586; native Linux/QEMU acceptance passed,
-  physical deployment and SDL daemon acceptance pending
+- Status: candidate0.1.587 corrects586's failed physical-host acceptance;
+  dedicated-VT validation in progress
 - Tracking: [Blit117](https://git.home.arpa/itdlabs/blit/issues/117)
 
 Native KMS reads evdev without disabling the kernel VT keyboard handler.
 The packaged service has null stdin and no controlling terminal; SDL's
 `/dev/tty` keyboard muting cannot repair native KMS, or a daemon with no VT.
+
+Reserve an unused VT with VT_OPENQRY, keep it open, register VT_PROCESS and
+activate it with a bounded wait before native presentation. Remember the
+previous VT and return there on exit only when Blit's VT is still active.
+Never borrow the active login VT:586 passed a getty-free VM but failed on
+10.54 when getty restarted, invalidating the old descriptor (EIO) and restoring
+K_UNICODE. The dedicated VT must survive a hangup of the original login VT.
+A single /run/blit/console.lock prevents competing Blit VT owners. Native
+input health periodically checks the actual descriptor/mode and stops on
+lost isolation; a registered owner is not proof of a usable descriptor.
+If the reserved VT itself is hung up, restoration must reopen that same VT;
+both the owner's and recovery child's inherited descriptors can be invalid.
+The recovery path must never substitute the currently active console.
 
 Use Linux KDSKBMODE/K_OFF on the owned VT, not EVIOCGRAB on the existing
 per-role evdev descriptors. K_OFF covers all keyboards, including hotplug,

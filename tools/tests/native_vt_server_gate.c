@@ -65,7 +65,8 @@ static void active(int number, int wanted)
         struct vt_stat state;
         CHECK(ioctl(tty, VT_GETSTATE, &state) == 0);
         if (body && state.v_active == number &&
-            strstr(body, wanted ? "\"active\":true" : "\"active\":false")) return;
+            strstr(body, wanted ? "\"active\":true" : "\"active\":false") &&
+            (!wanted || strstr(body, "\"keyboard_muted\":true"))) return;
         usleep(10000);
     }
     CHECK(0);
@@ -83,7 +84,8 @@ int main(void)
     CHECK(fd >= 0 && read(fd, cmdline, sizeof(cmdline) - 1) > 0);
     close(fd);
     CHECK(strstr(cmdline, " blit_vt_test=1 ") != NULL);
-    tty = open("/dev/tty1", O_RDWR | O_NONBLOCK | O_NOCTTY);
+    tty = open("/dev/tty1", O_RDWR | O_NONBLOCK | O_NOCTTY | O_CLOEXEC);
+    baseline_tty = tty;
     CHECK(tty >= 0 && tcgetattr(tty, &saved) == 0);
     raw = saved; cfmakeraw(&raw);
     CHECK(tcsetattr(tty, TCSANOW, &raw) == 0);
@@ -106,7 +108,28 @@ int main(void)
     CHECK(i < 500);
     body = http("GET", "/v1/diagnostics", NULL);
     CHECK(body && strstr(body, "\"ready\":true") && strstr(body, "\"backend\":\"drm-kms\""));
-    active(1, 1);
+    body = http("GET", "/v1/diagnostics/console", NULL);
+    CHECK(body && strstr(body, "\"vt_number\":"));
+    owner_number = atoi(strstr(body, "\"vt_number\":") + 12);
+    CHECK(owner_number > 0 && owner_number <= 12);
+    {
+        char path[32];
+        snprintf(path, sizeof(path), "/dev/tty%u", owner_number);
+        tty = open(path, O_RDWR | O_NONBLOCK | O_NOCTTY | O_CLOEXEC);
+        CHECK(tty >= 0);
+    }
+    active(owner_number, 1);
+    /* Real getty/login restart mechanism: hang up the original console.
+       Blit's dedicated VT descriptor and keyboard isolation must survive. */
+    CHECK(ioctl(baseline_tty, TIOCVHANGUP, 0) == 0);
+    close(baseline_tty);
+    baseline_tty = open("/dev/tty1", O_RDWR | O_NONBLOCK | O_NOCTTY | O_CLOEXEC);
+    CHECK(baseline_tty >= 0 && tcsetattr(baseline_tty, TCSANOW, &raw) == 0);
+    CHECK(ioctl(baseline_tty, KDSKBMODE, K_UNICODE) == 0);
+    CHECK(ioctl(baseline_tty, KDSETMODE, KD_TEXT) == 0);
+    body = http("GET", "/v1/diagnostics/console", NULL);
+    printf("VT_SERVER_AFTER_CONSOLE_HANGUP %s\n", body ? body : "unreachable");
+    CHECK(body && strstr(body, "\"keyboard_muted\":true"));
     body = http("GET", "/v1/displays", NULL);
     CHECK(body);
     {
@@ -135,12 +158,12 @@ int main(void)
         before_length = response_length - (body - response);
         before = malloc(before_length);
         CHECK(before); memcpy(before, body, before_length);
-        chord(device, KEY_F2);
-        active(2, 0);
+        chord(device, KEY_F1);
+        active(1, 0);
         body = http("GET", "/v1/diagnostics/console", NULL);
         CHECK(body && strstr(body, "\"keyboard_muted\":false"));
         {
-            int other = open("/dev/tty2", O_RDWR | O_NONBLOCK | O_NOCTTY);
+            int other = open("/dev/tty1", O_RDWR | O_NONBLOCK | O_NOCTTY);
             struct termios old_other, raw_other;
             struct pollfd input;
             char typed;
@@ -155,12 +178,13 @@ int main(void)
             input.fd = other; input.events = POLLIN;
             CHECK(poll(&input, 1, 1000) == 1 && read(other, &typed, 1) == 1 && typed == 'a');
             expect_console(0);
-            chord(device, KEY_F1);
+            chord(device, owner_number <= 10 ? KEY_F1 + owner_number - 1 :
+                          owner_number == 11 ? KEY_F11 : KEY_F12);
             CHECK(kill(server, SIGCONT) == 0);
             tcsetattr(other, TCSANOW, &old_other);
             close(other);
         }
-        active(1, 1);
+        active(owner_number, 1);
         usleep(200000);
         body = http("GET", "/v1/terminal-sessions/1", NULL);
         CHECK(body && strstr(body, "\"cursor\":{\"x\":1"));
@@ -176,6 +200,6 @@ int main(void)
     key(device); expect_console(1);
     tcsetattr(tty, TCSANOW, &saved);
     ioctl(device, UI_DEV_DESTROY); close(device); close(tty);
-    puts("VT_SERVER_PASS native_kms=ready physical_evdev_pty=pass console_leak=none physical_vt_chords=pass away_keys=console_only queued_replay=none scanout_restored=byte_identical api_shutdown=pass keyboard_restored=pass");
+    puts("VT_SERVER_PASS native_kms=ready dedicated_vt=pass original_console_vhangup=isolated physical_evdev_pty=pass console_leak=none physical_vt_chords=pass away_keys=console_only queued_replay=none scanout_restored=byte_identical api_shutdown=pass keyboard_restored=pass");
     return 0;
 }

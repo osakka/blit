@@ -85,6 +85,7 @@ ruby -rjson -e '
   abort "console diagnostic ownership drift" unless j.fetch("owner")=="unmanaged" &&
     j.fetch("vt_number")==0 && j.fetch("active")==false &&
     j.fetch("keyboard_muted")==false && j.fetch("keyboard_mode")==-1 &&
+    j.fetch("keyboard_read_errno")==0 && j.fetch("previous_vt_number")==0 &&
     j.fetch("recovery_process")==false && j.fetch("watchdog_timeout_ms")==10000 &&
     j.fetch("evdev_exclusive")==false
 ' "$CONSOLE_DIAGNOSTICS"

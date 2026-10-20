@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/file.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <termios.h>
@@ -23,6 +24,8 @@
 
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "VT_KERNEL_FAIL line=%d errno=%d\n", __LINE__, errno); exit(1); } } while (0)
 static int tty;
+static int baseline_tty;
+static unsigned char owner_number;
 static int event_fds[2], event_count;
 static void key(int device)
 {
@@ -119,8 +122,17 @@ static pid_t owner(int channel[2])
         CHECK(holder >= 0);
         if (holder == 0) { sleep(4); _exit(0); }
         CHECK(write(channel[1], "S", 1) == 1);
+        {
+            unsigned char number = blit_vt_number();
+            CHECK(write(channel[1], &number, 1) == 1);
+        }
         for (;;) {
             int pending = blit_vt_pending();
+            if (pending == -2) {
+                blit_vt_close();
+                kill(holder, SIGKILL); waitpid(holder, NULL, 0);
+                _exit(42);
+            }
             CHECK(pending >= 0);
             if (pending) {
                 CHECK(blit_vt_acknowledge(pending == 2) == 0);
@@ -147,6 +159,15 @@ static pid_t owner(int channel[2])
     }
     close(channel[1]);
     token(channel[0], 'S');
+    {
+        struct pollfd poller = {.fd = channel[0], .events = POLLIN};
+        char path[32];
+        CHECK(poll(&poller, 1, 2000) == 1 && read(channel[0], &owner_number, 1) == 1);
+        CHECK(owner_number != 1 && owner_number > 0 && owner_number <= 63);
+        snprintf(path, sizeof(path), "/dev/tty%u", owner_number);
+        tty = open(path, O_RDWR | O_NONBLOCK | O_NOCTTY | O_CLOEXEC);
+        CHECK(tty >= 0);
+    }
     return child;
 }
 static void modes_restored(void)
@@ -157,7 +178,19 @@ static void modes_restored(void)
         CHECK(ioctl(tty, KDGKBMODE, &keyboard_mode) == 0);
         CHECK(ioctl(tty, KDGETMODE, &display_mode) == 0);
         CHECK(ioctl(tty, VT_GETMODE, &mode) == 0);
-        if (keyboard_mode == K_UNICODE && display_mode == KD_TEXT && mode.mode == VT_AUTO) return;
+        if (keyboard_mode == K_UNICODE && display_mode == KD_TEXT && mode.mode == VT_AUTO) {
+            struct vt_stat state;
+            int lock = open("/run/blit/console.lock", O_RDWR | O_CLOEXEC);
+            CHECK(lock >= 0);
+            if (flock(lock, LOCK_EX | LOCK_NB) < 0) {
+                close(lock); usleep(10000); continue;
+            }
+            flock(lock, LOCK_UN); close(lock);
+            CHECK(ioctl(tty, VT_GETSTATE, &state) == 0 && state.v_active == 1);
+            close(tty);
+            tty = baseline_tty;
+            return;
+        }
         usleep(10000);
     }
     CHECK(0);
@@ -174,6 +207,7 @@ int main(void)
     close(fd);
     CHECK(strstr(cmdline, " blit_vt_test=1 ") != NULL);
     tty = open("/dev/tty1", O_RDWR | O_NONBLOCK | O_NOCTTY);
+    baseline_tty = tty;
     CHECK(tty >= 0);
     CHECK(ioctl(tty, VT_ACTIVATE, 1) == 0);
     CHECK(tcgetattr(tty, &saved) == 0);
@@ -190,10 +224,10 @@ int main(void)
     /* A competing owner must not change an already muted VT. */
     CHECK(blit_vt_open(error, sizeof(error)) < 0);
     CHECK(ioctl(tty, KDGKBMODE, &mode) == 0 && mode == K_OFF);
-    CHECK(ioctl(tty, VT_ACTIVATE, 2) == 0);
+    CHECK(ioctl(tty, VT_ACTIVATE, 1) == 0);
     token(channel[0], 'R');
     CHECK(ioctl(tty, KDGKBMODE, &mode) == 0 && mode == K_UNICODE);
-    CHECK(ioctl(tty, VT_ACTIVATE, 1) == 0);
+    CHECK(ioctl(tty, VT_ACTIVATE, owner_number) == 0);
     token(channel[0], 'A');
     key(devices[1]); expect_console(0);
     CHECK(write(channel[0], "q", 1) == 1);
@@ -203,6 +237,18 @@ int main(void)
     child = owner(channel);
     CHECK(kill(child, SIGKILL) == 0);
     CHECK(waitpid(child, &status, 0) == child && WIFSIGNALED(status));
+    close(channel[0]); modes_restored();
+    key(devices[1]); expect_console(1);
+    child = owner(channel);
+    CHECK(ioctl(tty, TIOCVHANGUP, 0) == 0);
+    close(tty);
+    {
+        char path[32];
+        snprintf(path, sizeof(path), "/dev/tty%u", owner_number);
+        tty = open(path, O_RDWR | O_NONBLOCK | O_NOCTTY | O_CLOEXEC);
+        CHECK(tty >= 0);
+    }
+    CHECK(waitpid(child, &status, 0) == child && WIFEXITED(status) && WEXITSTATUS(status) == 42);
     close(channel[0]); modes_restored();
     key(devices[1]); expect_console(1);
     child = owner(channel);
@@ -224,6 +270,6 @@ int main(void)
     CHECK(tcsetattr(tty, TCSANOW, &saved) == 0);
     ioctl(devices[0], UI_DEV_DESTROY); ioctl(devices[1], UI_DEV_DESTROY);
     close(devices[0]); close(devices[1]); close(tty);
-    puts("VT_KERNEL_PASS baseline_leak=observed muted=2_keyboards evdev_delivery=pass hotplug=pass release_acquire=pass normal_restore=pass sigkill_restore=pass inherited_fd=pass competing_owner=refused update_lease=pass hung_owner_watchdog=pass");
+    puts("VT_KERNEL_PASS baseline_leak=observed muted=2_keyboards evdev_delivery=pass hotplug=pass release_acquire=pass normal_restore=pass sigkill_restore=pass inherited_fd=pass competing_owner=refused owned_vhangup=recovered update_lease=pass hung_owner_watchdog=pass");
     return 0;
 }

@@ -1,5 +1,29 @@
 # Current state and restart point
 
+## 2026-10-21:586 physical acceptance FAILED;587 dedicated VT correction
+
+586 updated successfully viaAPI and preserved Modern22/settings/layout, but
+console diagnostics reported keyboard_mode=-1. Duplicating the actual owner's
+fd3 via pidfd_getfd confirms EIO; a fresh tty2 descriptor reads K_UNICODE3.
+getty@tty2 restarted at00:48:07 and00:49:12. Its login VT cannot be borrowed
+as a durable graphics owner. This was absent from the getty-free VM, so586
+is NOT an accepted keyboard isolation release. Hibr is not being changed.
+
+Candidate587 reserves an unused VT, keeps it busy before activation, remembers
+the previous VT, uses a global owner lock, and restores the previous VT on
+exit only if Blit's is still active. Periodic actual mode/descriptor validation
+stops on lost isolation; diagnostics add read errno and previous VT. Tests
+now simulate getty's TIOCVHANGUP on the original console during full-server
+presentation. Its own descriptor hangup also triggers safe recovery using a
+fresh open of only the reserved VT. Real module/full-server VM passes with
+getty-style hangup/reset, native scanout equality, physical VT chords, queue
+isolation, normal/crash/watchdog recovery and the install lease. Evidence
+/tmp/blit-vt-kernel.kAxkrF/serial.log. Package/rollout pending; live586 reachable.
+The exact586 package is red under the expanded fixture: original-console
+hangup/reset produces the same active=true/keyboard_mode=-1/unmuted diagnostic
+as10.54. Evidence /tmp/blit-vt-kernel.ptvwkj/serial.log. This is a reproduced
+mechanism, not an inferred Hibr fault.
+
 ## 2026-10-21:117 native keyboard isolation, candidate586
 
 Source44e3597 committed/pushed. Package586 SHA256

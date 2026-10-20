@@ -2,7 +2,7 @@
 /bin/busybox mount -t proc proc /proc
 /bin/busybox mount -t sysfs sysfs /sys
 /bin/busybox mount -t devtmpfs devtmpfs /dev
-/bin/busybox mkdir -p /dev/pts /tmp
+/bin/busybox mkdir -p /dev/pts /tmp /run
 /bin/busybox mount -t devpts devpts /dev/pts
 /bin/busybox insmod /evdev.ko
 /bin/busybox insmod /uinput.ko

@@ -7,7 +7,8 @@ void blit_vt_close(void);
 int blit_vt_owned(void);
 int blit_vt_active(void);
 int blit_vt_number(void);
-/* 1=release requested, 2=acquire requested, -1=recovery process lost. */
+/* 1=release requested, 2=acquire requested, -1=recovery process lost,
+   -2=VT descriptor or keyboard isolation lost. */
 int blit_vt_pending(void);
 /* Caller relinquishes/reacquires DRM before acknowledging. */
 int blit_vt_acknowledge(int acquire);

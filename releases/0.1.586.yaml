@@ -20,8 +20,10 @@ verification:
   packaged_server_evidence: /tmp/blit-vt-kernel.yWCkCY/serial.log
   final_update_restart_gate: passed
 deployment:
-  status: candidate_not_deployed
-  last_verified_live_version: 0.1.584
+  status: deployed_native_acceptance_failed
+  last_verified_live_version: 0.1.586
+  failure: Borrowed login VT invalidated by getty restart; original owner fd returns EIO and kernel keyboard is unmuted.
+  correction: Dedicated VT reservation in candidate587; do not treat586 as accepted isolation.
 acceptance_limits:
   - Native VT keyboard isolation is not exclusive evdev pointer or gamepad ownership.
   - SDL daemon ownership and physical multi-monitor VT acceptance remain pending in117.
