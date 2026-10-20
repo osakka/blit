@@ -1,5 +1,23 @@
 # Current state and restart point
 
+## 2026-10-20 config-source-108 reconciled into canonical main
+
+Configuration implementation2fb6f7f was already merged via803728a. The
+maintenance tip456f354 still lacked ancestry integration: its563 manifest and
+deployment ledger had equivalent main copies, while its historical current-state
+entry retained an unreconciled completion update. Merge the complete tip, keep
+one563 ledger/manifest, preserve every newer572 entry, and correct that stale
+historical status. No runtime/schema/assets/dependency/release downgrade.
+
+Pre-merge and merged production paths are identical. Fresh TCC server/helper
+hashes exactly match the572 manifest (serverfe6041327ebdbd461460c59dff307c283f5af248743ce1e42824533a71b507b1,
+helperb0736e2aceb7c77916470e279e7e9219c2219d565a6b6d77a2348f27d6034cf1).
+Schema/lifecycle25pass/0skip/0fail, including all11 provenance/API-repair cases.
+No live deployment or configuration change is needed for this history/docs
+reconciliation. Canonical development is main. The old config108 worktree is
+detached/locked at historical456f354 with ignored build/evidence preserved;
+retire its merged branch after verification, using an expected-tip lease.
+
 ## 2026-10-20 deployed572: one display temporarily removed by operator
 
 Operator needs the additional monitor elsewhere for a few hours. Do not infer
@@ -504,13 +522,17 @@ The user confirms all monitors work after restoring native KMS on10.54;
 the panel reports the correct backend. Saved API settings own this choice.
 The invalid environment fallback `kmsdrm` was corrected to `kms`, with a
 root-owned backup at `/etc/blit/blit.env.before-108`; credentials were preserved.
-The service must reload its environment at the next service restart.
+Deployment's service restart reloaded the corrected environment fallback.
 
-This maintenance branch is based on deployed561, not the unfinished new-font
+The historical maintenance release was based on deployed561, not the unfinished new-font
 candidate562. It adds explicit API provenance, invalid-default diagnostics and
 API-accessible recovery; it does not change rendering, input or font engines.
-The eleven-case provenance gate passes; packaging/full regression and live
-deployment are pending. See ADR0148 and Blit108. Historical entries below
+The eleven-case provenance gate passes; full regression104pass/5skip/0fail
+and GLES6pass/0skip/0fail. Package/update-restart checks pass separately.
+The reproducible563 package is API-deployed and verified: both physical outputs
+presenting, bottom-primary login retained, clean revision213 and unchanged
+saved document checksum. Installed panel0.1.7 matches the signed catalogue.
+See ADR0148 and verification-status.md for scope/skips. Historical entries below
 describe earlier candidates, not current live state.
 
 

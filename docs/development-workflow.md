@@ -55,6 +55,28 @@ screenshot, log, QEMU image, token, or unrelated Hibr checkout. After push,
 record the commit ID in the release manifest or evidence ledger before making
 the next runtime claim.
 
+## Reconcile and retire completed branches
+
+`main` is the canonical integration branch. A temporary maintenance branch may
+isolate a released runtime from pending feature work, but its complete tip,
+including release/documentation follow-ups, must be reconciled back into main.
+Copying/cherry-picking equivalent changes does not by itself reconcile ancestry.
+
+Before merging, fetch the remote, inspect both worktrees (including ignored
+build/evidence files), compare unique commits and actual content, and identify
+changes already integrated. Merge the reviewed tip without rewriting history.
+Resolve overlapping evidence by preserving one historical record and all newer
+results, not by duplicating sections or downgrading current source/manifests.
+If only history/docs differ, assert production-path tree identity and rebuild
+to verify unchanged binary hashes; run the relevant regression gates anyway.
+
+After verification, push main and retire only the exact merged branch tip.
+Use an explicit expected remote revision when deleting the remote branch so a
+concurrent update cannot be discarded. Preserve historical ignored artifacts:
+detach their worktree at the integrated historical commit rather than forcing
+its removal. Update the tracking issue and restart-point documentation. A
+retained historical build snapshot is not an active development/config owner.
+
 ## Required gates
 
 Use the narrowest gate that proves the change, then run the broader gate before

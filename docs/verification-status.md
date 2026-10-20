@@ -3,6 +3,19 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-20 configuration branch reconciliation: unchanged runtime
+
+Merge full config-source-108 tip456f354, whose implementation2fb6f7f already
+entered main through803728a. Remaining unique content is a historical563
+status completion; duplicated release/verification evidence stays single-copy,
+and newer results are preserved. Production paths match pre-merge main exactly.
+Fresh TCC builds match572 serverfe6041327ebdbd461460c59dff307c283f5af248743ce1e42824533a71b507b1
+and helperb0736e2aceb7c77916470e279e7e9219c2219d565a6b6d77a2348f27d6034cf1.
+Focused schema/lifecycle25pass/0skip/0fail, including11 provenance/recovery
+cases. Historical563 manifest is byte-identical to the branch tip. No host
+write/restart/deployment, version change, new physical acceptance or claim that
+existing renderer limitations are solved follows from reconciling Git history.
+
 ## 2026-10-20 deployed572: single-output evidence, operator topology change
 
 Byte-identical package SHA256
