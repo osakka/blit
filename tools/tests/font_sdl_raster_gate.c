@@ -3,6 +3,7 @@
 #define main blit_server_entry_for_font_gate
 #include "../../src/blit_server.c"
 #undef main
+#include "emoji_samples.h"
 
 #define CHECK(test) do { if (!(test)) { fprintf(stderr, "FAIL line %d: %s SDL=%s\n", __LINE__, #test, SDL_GetError()); return 1; } } while (0)
 int main(int argc, char **argv)
@@ -68,6 +69,34 @@ int main(int argc, char **argv)
             SDL_DestroySurface(image);
             ++samples;
         }
+        for (index = 0; index < 7; ++index) {
+            int span, cursor;
+            for (span = 1; span <= 2; ++span) for (cursor = 0; cursor <= 1; ++cursor) {
+                BlitCellCluster key;
+                BlitRasterGlyph glyph;
+                SDL_Surface *image;
+                uint32_t bg = cursor ? 0xbed2be : 0x123456;
+                int x, y;
+                CHECK(blit_cell_cluster_init(&key, emoji_samples[index][0],
+                    emoji_samples[index] + 1, emoji_lengths[index] - 1, span));
+                CHECK(font.raster_cluster_get(font.raster_state, &key, &glyph));
+                SDL_SetRenderDrawColor(renderer, bg >> 16 & 255, bg >> 8 & 255, bg & 255, 255);
+                CHECK(SDL_RenderClear(renderer));
+                CHECK(render_sdl_cluster(&output, &font, 0xabcdef, key.scalars[0],
+                    key.scalars + 1, key.length - 1, 8, 8, glyph.width, glyph.height, 0, 1));
+                flush_sdl_glyph_batch(&output);
+                image = SDL_RenderReadPixels(renderer, NULL); CHECK(image);
+                for (y = -1; y <= glyph.height; ++y) for (x = -1; x <= glyph.width; ++x) {
+                    Uint8 r, g, b, a;
+                    uint32_t want = blit_raster_blend(&glyph, x, y, 0xabcdef, bg);
+                    CHECK(SDL_ReadSurfacePixel(image, x + 8, y + 8, &r, &g, &b, &a));
+                    CHECK(abs((int)r - (int)(want >> 16 & 255)) <= 2);
+                    CHECK(abs((int)g - (int)(want >> 8 & 255)) <= 2);
+                    CHECK(abs((int)b - (int)(want & 255)) <= 2);
+                }
+                SDL_DestroySurface(image);
+            }
+        }
         SDL_DestroyTexture(output.glyph_atlas);
         free(output.glyph_vertices); free(output.glyph_indices);
     }
@@ -111,7 +140,7 @@ int main(int argc, char **argv)
     }
     blit_font_free(&font);
     SDL_DestroyRenderer(renderer); SDL_DestroyWindow(window); SDL_Quit();
-    printf("FONT_SDL_RASTER_PASS renderer=%s sizes=57 glyph_samples=%d tolerance=2\n",
+    printf("FONT_SDL_RASTER_PASS renderer=%s sizes=57 glyph_samples=%d cluster_cases=1596 tolerance=2\n",
            name ? name : "software", samples);
     return 0;
 }

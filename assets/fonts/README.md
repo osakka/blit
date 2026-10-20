@@ -46,8 +46,10 @@ shared-renderer work is [issue110](https://git.home.arpa/itdlabs/blit/issues/110
 Candidate576 adds an internal HarfBuzz/FreeType colour-cluster raster, tested
 against all5,244 pinned Emoji18.0 entries at16px and representative families
 at8..64px. The specimen includes its output, not a claim of terminal support.
-Terminal grouping, text/default presentation and backend consumption remain
-pending. Reproduce with `ruby tools/tests/emoji_cluster_raster_gate.rb`;
+Candidate577 adds compositor consumption, tested with representative sequence
+families in native KMS and both SDL paths. Terminal grouping and text/default
+presentation remain pending. Reproduce the complete-corpus raster test with
+`ruby tools/tests/emoji_cluster_raster_gate.rb`;
 `BLIT_FONT_VALGRIND=1` additionally checks that fixture under Valgrind.
 Missing scalars and protected box/block geometry retain pixel-art PSF fallback;
 wide BMP characters retain the separate wide PSF. No Hibr code is changed.

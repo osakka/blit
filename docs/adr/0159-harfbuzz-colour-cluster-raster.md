@@ -44,6 +44,8 @@ Keep this entry point unadvertised on the network until renderer consumption
 and PTY/API segmentation/width coordination pass end-to-end. Do not activate
 parser grouping before renderers can consume the result. No live/package
 deployment follows from a module test. Font107/emoji110 remain open.
+ADR0160/candidate577 adds compositor consumption; terminal ingress and complete
+presentation/width policy remain pending.
 
 Primary lifecycle/API references:
 https://harfbuzz.github.io/harfbuzz-hb-ft.html and

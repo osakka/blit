@@ -28,6 +28,7 @@ typedef struct BlitFont {
        loader and standalone legacy KMS gates independent of FreeType. */
     void *raster_state;
     int (*raster_get)(void *, uint32_t, int, struct BlitRasterGlyph *);
+    int (*raster_cluster_get)(void *, const BlitCellCluster *, struct BlitRasterGlyph *);
     void (*raster_free)(void *);
     uint32_t (*raster_blend)(const struct BlitRasterGlyph *, int, int,
                             uint32_t, uint32_t);

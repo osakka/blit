@@ -516,6 +516,25 @@ static int glyph_row_lean(int lean, int row, int rows)
 /* `trim` drops that many destination pixels from the right edge, and the
    matching source columns with them, so bold's overstrike gives up its last
    column instead of writing into the next cell. */
+static void draw_cell_raster(KmsOutput *output, const BlitFont *font,
+                              const BlitRasterGlyph *raster, int x, int y,
+                              int cw, int ch, uint32_t color, int lean, int trim)
+{
+    int row, column;
+    if (trim > 0 && raster->format == BLIT_RASTER_RGBA_PREMULTIPLIED) return;
+    for (row = 0; row < ch && row < raster->height; ++row) {
+        int py = y + row;
+        uint32_t *pixels;
+        if (py < 0 || py >= output->mode.vdisplay) continue;
+        pixels = (uint32_t *)((unsigned char *)output->back.map + py * output->back.pitch);
+        for (column = 0; column < cw - trim && column < raster->width; ++column) {
+            int px = x + column + glyph_row_lean(lean, row, ch);
+            if (px >= 0 && px < output->mode.hdisplay)
+                pixels[px] = font->raster_blend(raster, column, row, color, pixels[px]);
+        }
+    }
+}
+
 static void draw_glyph(KmsOutput *output, const BlitFont *font,
                        uint32_t codepoint, int x, int y, int cw, int ch,
                        uint32_t color, int lean, int trim)
@@ -529,19 +548,7 @@ static void draw_glyph(KmsOutput *output, const BlitFont *font,
         BlitRasterGlyph raster;
         int columns = cw > font->raster_cell_width ? 2 : 1;
         if (font->raster_get(font->raster_state, codepoint, columns, &raster)) {
-            if (trim > 0 && raster.format == BLIT_RASTER_RGBA_PREMULTIPLIED) return;
-            for (glyph_row = 0; glyph_row < ch && glyph_row < raster.height; ++glyph_row) {
-                int py = y + glyph_row;
-                uint32_t *pixels;
-                if (py < 0 || py >= output->mode.vdisplay) continue;
-                pixels = (uint32_t *)((unsigned char *)output->back.map + py * output->back.pitch);
-                for (glyph_column = 0; glyph_column < cw - trim && glyph_column < raster.width; ++glyph_column) {
-                    int px = x + glyph_column + glyph_row_lean(lean, glyph_row, ch);
-                    if (px >= 0 && px < output->mode.hdisplay)
-                        pixels[px] = font->raster_blend(&raster, glyph_column, glyph_row,
-                                                      color, pixels[px]);
-                }
-            }
+            draw_cell_raster(output, font, &raster, x, y, cw, ch, color, lean, trim);
             return;
         }
     }
@@ -595,6 +602,32 @@ static void draw_glyph(KmsOutput *output, const BlitFont *font,
 /* Kitty z bands, shared with the SDL path (issue #84, #88): below
    -2^30 an image is under cell backgrounds, from there up to zero it is over
    backgrounds and under text, and from zero up it is over text. */
+/* One cell path for normal text and block-cursor repaint. Unsupported
+   combining text retains its established scalar overlays. */
+static void draw_cell_glyphs(KmsOutput *output, const BlitFont *font,
+                              const BlitFont *wide_font, uint32_t cp,
+                              const uint32_t *marks, unsigned count,
+                              int x, int y, int cw, int ch, uint32_t fg,
+                              int lean, int bold)
+{
+    const BlitFont *glyph_font = wide_font && blit_font_has_glyph(wide_font, cp) ? wide_font : font;
+    BlitCellCluster key;
+    BlitRasterGlyph raster;
+    unsigned i;
+    if (count && font && font->raster_cluster_get && font->raster_blend &&
+        blit_cell_cluster_init(&key, cp, marks, count,
+                               cw > font->raster_cell_width ? 2 : 1) &&
+        font->raster_cluster_get(font->raster_state, &key, &raster)) {
+        draw_cell_raster(output, font, &raster, x, y, cw, ch, fg, lean, 0);
+        if (bold) draw_cell_raster(output, font, &raster, x + 1, y, cw, ch, fg, lean, 1);
+        return;
+    }
+    draw_glyph(output, glyph_font, cp, x, y, cw, ch, fg, lean, 0);
+    if (bold) draw_glyph(output, glyph_font, cp, x + 1, y, cw, ch, fg, lean, 1);
+    if (marks) for (i = 0; i < count && i < BLIT_MAX_COMBINING; ++i)
+        draw_glyph(output, font, marks[i], x, y, cw, ch, fg, lean, 0);
+}
+
 #define KMS_GRAPHICS_Z_UNDER_BACKGROUND (-1073741824)
 
 /* The image is clipped to [clip_x0,clip_x1) x [clip_y0,clip_y1), an absolute
@@ -942,33 +975,16 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
             /* ADR 0062: a wide character's glyph is 16 pixels wide and lives
                in the wide font; a codepoint that font does not map stays on
                the primary one, whose substitute is the visible marker. */
-            const BlitFont *glyph_font =
-                (attr & KMS_ATTR_WIDE) && wide_font != NULL &&
-                blit_font_has_glyph(wide_font, cp) ? wide_font : font;
             if (!(attr & KMS_ATTR_CONTINUATION)) {
-                draw_glyph(output, glyph_font, cp, x, y, glyph_width, ch, fg,
-                           lean, 0);
+                draw_cell_glyphs(output, font, (attr & KMS_ATTR_WIDE) ? wide_font : NULL,
+                    cp, view->combining ? &view->combining[index * BLIT_MAX_COMBINING] : NULL,
+                    view->combining_count ? view->combining_count[index] : 0,
+                    x, y, glyph_width, ch, fg, lean, (attr & 1) != 0);
             }
             if (!(attr & KMS_ATTR_CONTINUATION) && (attr & 4))
                 fill_rect(output, x, y + ch - 1, glyph_width, 1, underline);
             if (!(attr & KMS_ATTR_CONTINUATION) && (attr & 512))
                 fill_rect(output, x, y + ch / 2, glyph_width, 1, fg);
-            if (!(attr & KMS_ATTR_CONTINUATION) && (attr & 1))
-                /* Shifted a pixel right, so it gives up its last column
-                   rather than writing into the next cell. */
-                draw_glyph(output, glyph_font, cp, x + 1, y, glyph_width, ch,
-                           fg, lean, 1);
-            if (!(attr & KMS_ATTR_CONTINUATION) && view->combining != NULL &&
-                view->combining_count != NULL) {
-                int combining_index;
-                for (combining_index = 0;
-                     combining_index < view->combining_count[index] &&
-                     combining_index < BLIT_MAX_COMBINING; ++combining_index) {
-                    uint32_t mark = view->combining[index * BLIT_MAX_COMBINING + combining_index];
-                    draw_glyph(output, font, mark, x, y, glyph_width, ch, fg,
-                               lean, 0);
-                }
-            }
         }
     }
     for (draw_index = 0; draw_index < draw_count; ++draw_index)
@@ -1013,9 +1029,6 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
         else {
             uint32_t cursor_cp = view->codepoints[cursor_index];
             uint32_t cursor_bg = view_cell_background(view, cursor_index);
-            const BlitFont *cursor_font =
-                (cursor_attr & KMS_ATTR_WIDE) && wide_font != NULL &&
-                blit_font_has_glyph(wide_font, cursor_cp) ? wide_font : font;
             fill_rect(output, cursor_x, cursor_y, cw * cursor_cells, ch,
                       KMS_WHITE);
             /* A block cursor is an inverse cell, not an eraser: the
@@ -1023,10 +1036,11 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
                has to stay readable. */
             if (cursor_cp != 0 && cursor_cp != ' ' &&
                 !(cursor_attr & KMS_ATTR_CONCEAL))
-                draw_glyph(output, cursor_font, cursor_cp, cursor_x, cursor_y,
-                           cw * cursor_cells, ch, cursor_bg,
-                           (cursor_attr & KMS_ATTR_ITALIC) ? italic_lean : 0,
-                           0);
+                draw_cell_glyphs(output, font, (cursor_attr & KMS_ATTR_WIDE) ? wide_font : NULL,
+                    cursor_cp, view->combining ? &view->combining[cursor_index * BLIT_MAX_COMBINING] : NULL,
+                    view->combining_count ? view->combining_count[cursor_index] : 0,
+                    cursor_x, cursor_y, cw * cursor_cells, ch, cursor_bg,
+                    (cursor_attr & KMS_ATTR_ITALIC) ? italic_lean : 0, (cursor_attr & 1) != 0);
         }
     }
 }

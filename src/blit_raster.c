@@ -301,12 +301,16 @@ static int attached_get(void *state, uint32_t scalar, int columns,
 { return blit_raster_get((BlitRaster *)state, scalar, columns, glyph); }
 static void attached_free(void *state)
 { blit_raster_close((BlitRaster *)state); }
+static int attached_cluster_get(void *state, const BlitCellCluster *key,
+                                 BlitRasterGlyph *glyph)
+{ return blit_raster_get_cluster((BlitRaster *)state, key, glyph); }
 void blit_raster_attach(BlitFont *font, BlitRaster *raster)
 {
     if (font->raster_state && font->raster_free)
         font->raster_free(font->raster_state);
     font->raster_state = raster;
     font->raster_get = raster ? attached_get : NULL;
+    font->raster_cluster_get = raster ? attached_cluster_get : NULL;
     font->raster_free = raster ? attached_free : NULL;
     font->raster_blend = raster ? blit_raster_blend : NULL;
     font->raster_cell_width = raster ? raster->width : 0;

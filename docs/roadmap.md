@@ -27,7 +27,8 @@ misses174 RGI entries in the independent shaping audit. Candidate Noto2.057
 shapes all5,244 corpus entries to one nonzero glyph. Candidate576 adds the
 production shared colour-cluster raster with explicit HarfBuzz dependency:
 all entries pass16px raster checks; seven families cover every8..64px size.
-Terminal segmentation, presentation policy and backend cluster consumption
+Candidate577 wires clusters into all compositors with representative pixel
+tests. Terminal segmentation, presentation policy and full end-to-end coverage
 remain active; module tests do not prove complete terminal emoji support.
 
 Size remains the existing canonical 8..64px **cell-height** setting; legacy

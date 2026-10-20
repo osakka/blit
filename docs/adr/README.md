@@ -177,6 +177,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0157 — Versioned emoji acceptance corpus](0157-versioned-emoji-acceptance-corpus.md)
 - [0158 — Shared cell-cluster storage and cache key](0158-shared-cell-cluster-storage-and-cache-key.md)
 - [0159 — HarfBuzz colour-cluster raster](0159-harfbuzz-colour-cluster-raster.md)
+- [0160 — Shared cluster consumption](0160-shared-cluster-consumption.md)
 
 ## Adding an ADR
 

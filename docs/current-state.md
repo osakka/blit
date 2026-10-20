@@ -1,5 +1,22 @@
 # Current state and restart point
 
+## 2026-10-20 candidate577 — shared clusters reach all compositors
+
+ADR0160 wires the existing raster's cluster callback through BlitFont into
+native KMS and SDL software/OpenGL. Normal cells and block-cursor code use
+the complete owned value. Unsupported combining text retains scalar overlays.
+SDL's atlas compares full keys, flushes before collision replacement, and
+clears keys on font/size changes. No new cache/shaper or width ABI change.
+
+Ten focused gates pass: Modern/Retro on each of three backends, font API,
+cell paint/cursor, motion trail and KMS composition. Per backend/profile:
+1,596 representative cluster cases across57 sizes/both spans; native KMS
+tests actual draw_view/block cursor and exact guard pixels, SDL tests the
+shared atlas helper with both background cases (2-channel-level tolerance).
+This is not full-corpus backend or API/PTY sequence acceptance. Next: shared
+ingress grouping and complete presentation/width policy.107/110 remain open.
+No live changes, package, SSH or Hibr edits. Preserve releases/0.1.554.yaml.
+
 ## 2026-10-20 candidate576 — production colour-cluster raster, not deployed
 
 ADR0159 adds HarfBuzz through its public C API to the existing shared

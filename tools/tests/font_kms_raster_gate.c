@@ -1,5 +1,6 @@
 #include "../../src/blit_kms.c"
 #include "../../src/blit_raster.h"
+#include "emoji_samples.h"
 
 #define CHECK(test) do { if (!(test)) { fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #test); return 1; } } while (0)
 
@@ -44,6 +45,43 @@ static int attachment_layout_gate(BlitFont *font, KmsOutput *output,
     }
     return 1;
 }
+static int cluster_view_gate(BlitFont *font, KmsOutput *output, uint32_t *pixels, int size)
+{
+    int sample, span, cursor, x, y;
+    for (sample = 0; sample < 7; ++sample) for (span = 1; span <= 2; ++span)
+        for (cursor = 0; cursor <= 1; ++cursor) {
+            uint32_t cp[2] = {emoji_samples[sample][0], 0};
+            uint32_t marks[2 * BLIT_MAX_COMBINING] = {0}, colours[2] = {0};
+            unsigned char counts[2] = {emoji_lengths[sample] - 1, 0};
+            uint16_t attrs[2] = {1 | (span == 2 ? KMS_ATTR_WIDE : 0), KMS_ATTR_CONTINUATION};
+            BlitKmsSurfaceView view;
+            BlitCellCluster key;
+            BlitRasterGlyph glyph;
+            memcpy(marks, emoji_samples[sample] + 1, counts[0] * sizeof(*marks));
+            CHECK(blit_cell_cluster_init(&key, cp[0], marks, counts[0], span));
+            CHECK(font->raster_cluster_get(font->raster_state, &key, &glyph));
+            memset(&view, 0, sizeof(view));
+            view.columns = span; view.rows = 1; view.stride = 2;
+            view.origin_x = view.origin_y = 8;
+            view.cell_width = (size + 1) / 2; view.cell_height = size;
+            view.codepoints = cp; view.attributes = attrs;
+            view.combining = marks; view.combining_count = counts;
+            view.foreground = view.background = colours;
+            view.default_foreground = 0xabcdef; view.default_background = 0x123456;
+            view.cursor_visible = cursor; view.cursor_x = span - 1;
+            for (x = 0; x < 160 * 96; ++x) pixels[x] = 0x123456;
+            draw_view(output, font, NULL, &view);
+            for (y = 0; y < 96; ++y) for (x = 0; x < 160; ++x) {
+                uint32_t expected = 0x123456;
+                if (x >= 8 && x < 8 + glyph.width && y >= 8 && y < 8 + glyph.height)
+                    expected = blit_raster_blend(&glyph, x - 8, y - 8,
+                        cursor ? 0x123456 : 0xabcdef, cursor ? KMS_WHITE : 0x123456);
+                CHECK(pixels[y * 160 + x] == expected);
+            }
+        }
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     BlitFont font;
@@ -62,6 +100,7 @@ int main(int argc, char **argv)
         BlitRaster *raster = blit_raster_open(&font, argv[2], argv[3], (size + 1) / 2, size);
         CHECK(raster); blit_raster_attach(&font, raster);
         CHECK(attachment_layout_gate(&font, &output, pixels, size));
+        CHECK(cluster_view_gate(&font, &output, pixels, size) == 0);
         for (index = 0; index < sizeof(scalars) / sizeof(scalars[0]); ++index) {
             BlitRasterGlyph glyph;
             int columns = scalars[index] == 0x1f600 || scalars[index] == 0x1f514 ? 2 : 1;
@@ -80,6 +119,6 @@ int main(int argc, char **argv)
         }
     }
     blit_font_free(&font);
-    printf("FONT_KMS_RASTER_PASS sizes=57 glyph_samples=%d attachment_layout_cases=228 tolerance=0 guard_pixels=exact\n", samples);
+    printf("FONT_KMS_RASTER_PASS sizes=57 glyph_samples=%d attachment_layout_cases=228 cluster_cases=1596 cursor=covered tolerance=0 guard_pixels=exact\n", samples);
     return 0;
 }

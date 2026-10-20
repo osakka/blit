@@ -4,6 +4,12 @@ Tracking: [Blit#107](https://git.home.arpa/itdlabs/blit/issues/107).
 
 ## Active completion contract —107/110 before browser or SDL work
 
+Candidate577 wires owned clusters into native KMS and both SDL renderers,
+including block-cursor code and full-key SDL atlas identity/reset. All six
+backend/profile gates pass representative sequence/size/span cases; API/PTY
+grouping, presentation policy and complete-corpus end-to-end tests remain.
+See ADR0160 and the verification ledger for exact scope. No live deployment.
+
 Candidate576 implements ADR0159's internal colour-cluster raster atop the
 existing FreeType/compositor path. The public HarfBuzz C API is an explicit
 runtime dependency, with pinned headers and OS-maintained runtime>=6.0.0.

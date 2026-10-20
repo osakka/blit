@@ -3,6 +3,29 @@
 This ledger records the latest evidence for the Blit delivery contract. It is
 an evidence record, not a claim that the complete product is released.
 
+## 2026-10-20 candidate577: compositor consumption
+
+ADR0160. TCC server SHA
+d24c1b4707e05ef8b950203d9a228f26b1802e8517f437d470f77cecebfe0885;
+fresh rebuild byte-identical. Ten focused gates pass, no skips/failures:
+Modern/Retro font-backend gates for KMS, SDL software and offscreen-OpenGLES2
+(six); cell_paint, motion_trail, modern_font_api and kms_compose (four).
+Logs `/tmp/blit-fontcraft.IHU9AK/577-*.log`; KMS composition also run directly.
+The earlier120-gate result below belongs to576, not this changed server.
+
+Each backend/profile checks1,596 representative cluster cases (seven sequence
+families,57 sizes,1/2 spans and two background/cursor cases), alongside1,026
+scalar samples. Native KMS tests real draw_view including block-cursor repaint
+and exact out-of-cell guards; SDL tests actual atlas/helper/batching output
+with normal/cursor-like backgrounds, tolerance2 per RGB channel. Existing
+queued collision and native attachment-layout checks remain green. Font API
+checks both smooth faces/all57 heights, persistence and failed-change rollback.
+KMS composition retains its128-frame full-reference/held-pointer regressions.
+
+No full-corpus backend, complete presentation/width policy, terminal ingress,
+physical-display, performance or new-package acceptance is implied.107/110
+remain open. No Hibr edits, SSH or live writes. Next: shared API/PTY grouping.
+
 ## 2026-10-20 candidate576: shared production colour-cluster raster
 
 ADR0159 /107/110. Frozen TCC server and two fresh rebuilds are byte-identical:

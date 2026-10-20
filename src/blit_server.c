@@ -685,8 +685,7 @@ typedef struct {
     SDL_Texture *pointer_texture;
     unsigned long long pointer_art_revision;
     SDL_Texture *glyph_atlas;
-    uint32_t raster_scalars[128];
-    unsigned char raster_spans[128];
+    BlitCellCluster raster_keys[128];
     /* ADR 0062: wide glyphs come from a 16x16 font with fifty thousand
        bitmaps, which will not fit an atlas built up front. This one is a
        fixed size and is filled a glyph at a time on first use, with a
@@ -16114,7 +16113,7 @@ static int apply_font_configuration(BlitRuntime *runtime, const char *path,
     if (!runtime->direct_kms) {
         for (i = 0; i < runtime->output_count; ++i) {
             BlitOutput *output = &runtime->outputs[i];
-            memset(output->raster_spans, 0, sizeof(output->raster_spans));
+            memset(output->raster_keys, 0, sizeof(output->raster_keys));
             if (output->glyph_atlas != NULL)
                 SDL_DestroyTexture(output->glyph_atlas);
             output->glyph_atlas = atlases[i];
@@ -22733,8 +22732,8 @@ static void initialize_outputs(BlitRuntime *runtime)
                                    &runtime->outputs[runtime->output_count].glyph_atlas_width,
                                    &runtime->outputs[runtime->output_count].glyph_atlas_height);
         blit_startup_stage("atlas.end",display->id);
-        memset(runtime->outputs[runtime->output_count].raster_spans, 0,
-               sizeof(runtime->outputs[runtime->output_count].raster_spans));
+        memset(runtime->outputs[runtime->output_count].raster_keys, 0,
+               sizeof(runtime->outputs[runtime->output_count].raster_keys));
         runtime->outputs[runtime->output_count].display_id = display->id;
         ++runtime->output_count;
     }
@@ -24115,10 +24114,10 @@ static void flush_sdl_glyph_batch(BlitOutput *output)
 /* `lean` slants a glyph: the top edge moves right by this many pixels and the
    bottom edge moves left by the same amount, so the glyph stays centred in its
    cell and overhangs by at most `lean`. Zero draws upright. */
-static int queue_sdl_glyph(BlitOutput *output, const BlitFont *font,
+static int queue_sdl_glyph_key(BlitOutput *output, const BlitFont *font,
                            uint32_t colour, uint32_t codepoint, float x,
                            float y, float cell_width, float cell_height,
-                           float lean, float trim)
+                           float lean, float trim, const BlitCellCluster *cluster)
 {
     SDL_Vertex *vertices;
     int *indices;
@@ -24144,16 +24143,26 @@ static int queue_sdl_glyph(BlitOutput *output, const BlitFont *font,
     if (font->raster_get) {
         BlitRasterGlyph raster;
         int span = cell_width > font->raster_cell_width ? 2 : 1;
-        unsigned slot = (codepoint * 2654435761U + (unsigned)span) % 128U;
+        BlitCellCluster scalar_key;
+        const BlitCellCluster *key = cluster;
+        unsigned slot;
         int tile_width = font->raster_cell_width * 2 + 2;
         int tile_height = font->raster_cell_height + 2;
         SDL_Rect rect;
-        if (!font->raster_get(font->raster_state, codepoint, span, &raster)) return 0;
+        if (!key) {
+            if (!blit_cell_cluster_init(&scalar_key, codepoint, NULL, 0, span)) return 0;
+            key = &scalar_key;
+        }
+        slot = blit_cell_cluster_hash(key) % 128U;
+        if (cluster) {
+            if (!font->raster_cluster_get ||
+                !font->raster_cluster_get(font->raster_state, key, &raster)) return 0;
+        } else if (!font->raster_get(font->raster_state, codepoint, span, &raster)) return 0;
         if (trim > 0 && raster.format == BLIT_RASTER_RGBA_PREMULTIPLIED) return 1;
         rect.x = (slot % output->glyph_atlas_columns) * tile_width;
         rect.y = (slot / output->glyph_atlas_columns) * tile_height;
         rect.w = tile_width; rect.h = tile_height;
-        if (output->raster_spans[slot] != span || output->raster_scalars[slot] != codepoint) {
+        if (!blit_cell_cluster_equal(&output->raster_keys[slot], key)) {
             unsigned char *pixels = calloc((size_t)tile_width * tile_height, 4);
             int row, column;
             if (!pixels) return 0;
@@ -24172,8 +24181,7 @@ static int queue_sdl_glyph(BlitOutput *output, const BlitFont *font,
                 free(pixels); return 0;
             }
             free(pixels);
-            output->raster_scalars[slot] = codepoint;
-            output->raster_spans[slot] = (unsigned char)span;
+            output->raster_keys[slot] = *key;
         }
         source_x = (rect.x + 1) / 1024.0f;
         source_y = (rect.y + 1) / 1024.0f;
@@ -24239,6 +24247,15 @@ static int queue_sdl_glyph(BlitOutput *output, const BlitFont *font,
     output->glyph_vertex_count += 4;
     output->glyph_index_count += 6;
     return 1;
+}
+
+static int queue_sdl_glyph(BlitOutput *output, const BlitFont *font,
+                           uint32_t colour, uint32_t codepoint, float x,
+                           float y, float cell_width, float cell_height,
+                           float lean, float trim)
+{
+    return queue_sdl_glyph_key(output, font, colour, codepoint, x, y,
+                                cell_width, cell_height, lean, trim, NULL);
 }
 
 /* The horizontal offset of one glyph row under a slant: `lean` at the top row,
@@ -24577,6 +24594,24 @@ static void render_or_queue_sdl_glyph(BlitOutput *output,
     render_sdl_glyph(output->renderer, font, output->glyph_atlas,
                      output->glyph_atlas_columns, colour, codepoint, x, y,
                      cell_width, cell_height, lean, trim);
+}
+
+/* Try the canonical owned cluster once. A rejected ordinary combining
+   sequence falls back to the established base-plus-marks caller path. */
+static int render_sdl_cluster(BlitOutput *output, const BlitFont *font,
+                               uint32_t colour, uint32_t cp,
+                               const uint32_t *marks, unsigned count,
+                               float x, float y, float width, float height,
+                               float lean, int bold)
+{
+    BlitCellCluster key;
+    if (!count || !font || !font->raster_cluster_get ||
+        !blit_cell_cluster_init(&key, cp, marks, count,
+                               width > font->raster_cell_width ? 2 : 1)) return 0;
+    if (!queue_sdl_glyph_key(output, font, colour, cp, x, y, width, height, lean, 0, &key)) return 0;
+    if (bold) queue_sdl_glyph_key(output, font, colour, cp, x + 1, y, width, height, lean, 1, &key);
+    if (!output->glyph_geometry_enabled) flush_sdl_glyph_batch(output);
+    return 1;
 }
 
 static void destroy_sdl_graphics_cache(BlitOutput *output)
@@ -25913,7 +25948,16 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                         const BlitFont *glyph_font = cell_font(
                             runtime, attributes,
                             surface->codepoints[row][column]);
+                        int cluster_drawn = !(attributes & BLIT_ATTR_CONTINUATION) &&
+                            render_sdl_cluster(&runtime->outputs[output_index], &runtime->font,
+                                foreground, surface->codepoints[row][column],
+                                surface->combining[row][column], surface->combining_count[row][column],
+                                surface_origin_x + column * (float)cell_width,
+                                (float)surface_origin_y + row * (float)cell_height,
+                                (float)glyph_width, (float)cell_height, lean,
+                                (attributes & BLIT_ATTR_BOLD) != 0);
                         if (!(attributes & BLIT_ATTR_CONTINUATION) &&
+                            !cluster_drawn &&
                             surface->codepoints[row][column] != 0 &&
                             surface->codepoints[row][column] != ' ' &&
                             (glyph_font == &runtime->font ||
@@ -25930,7 +25974,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                                 (float)surface_origin_y + row * (float)cell_height,
                                 (float)glyph_width, (float)cell_height, lean,
                                 0.0f);
-                        if (surface->combining_count[row][column] > 0) {
+                        if (!cluster_drawn && !(attributes & BLIT_ATTR_CONTINUATION) &&
+                            surface->combining_count[row][column] > 0) {
                             int combining_index;
                             for (combining_index = 0;
                                  combining_index < surface->combining_count[row][column] &&
@@ -25947,7 +25992,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                                     lean, 0.0f);
                             }
                         }
-                        if (attributes & BLIT_ATTR_BOLD &&
+                        if (!cluster_drawn && attributes & BLIT_ATTR_BOLD &&
                             surface->codepoints[row][column] != 0 &&
                             surface->codepoints[row][column] != ' ' &&
                             glyph_font == &runtime->font)
@@ -26050,14 +26095,21 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                         int combining_index;
                         const BlitFont *cursor_font = cell_font(
                             runtime, cursor_attributes, cursor_codepoint);
-                        if (cursor_font == &runtime->font ||
+                        int cluster_drawn = render_sdl_cluster(&runtime->outputs[output_index],
+                            &runtime->font, cell_background, cursor_codepoint,
+                            surface->combining[surface->cursor_y][cursor_column],
+                            surface->combining_count[surface->cursor_y][cursor_column],
+                            cursor_x, cursor_y, (float)(cursor_cells * cell_width), (float)cell_height,
+                            (cursor_attributes & BLIT_ATTR_ITALIC) ? italic_lean : 0.0f,
+                            (cursor_attributes & BLIT_ATTR_BOLD) != 0);
+                        if (!cluster_drawn && (cursor_font == &runtime->font ||
                             !queue_sdl_wide_glyph(
                                 &runtime->outputs[output_index], cursor_font,
                                 cell_background, cursor_codepoint, cursor_x,
                                 cursor_y, (float)(cursor_cells * cell_width),
                                 (float)cell_height,
                                 (cursor_attributes & BLIT_ATTR_ITALIC) ?
-                                    italic_lean : 0.0f))
+                                    italic_lean : 0.0f)))
                         render_or_queue_sdl_glyph(
                             &runtime->outputs[output_index], &runtime->font,
                             cell_background, cursor_codepoint, cursor_x,
@@ -26065,7 +26117,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                             (float)cell_height,
                             (cursor_attributes & BLIT_ATTR_ITALIC) ?
                                 italic_lean : 0.0f, 0.0f);
-                        for (combining_index = 0;
+                        for (combining_index = 0; !cluster_drawn &&
                              combining_index <
                                  surface->combining_count[surface->cursor_y][cursor_column] &&
                              combining_index < BLIT_MAX_COMBINING;
