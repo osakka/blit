@@ -2,6 +2,7 @@
 
 ## 2026-10-20 config-source-108 reconciled into canonical main
 
+Merge13551e4 includes the complete maintenance tip456f354 as its second parent.
 Configuration implementation2fb6f7f was already merged via803728a. The
 maintenance tip456f354 still lacked ancestry integration: its563 manifest and
 deployment ledger had equivalent main copies, while its historical current-state
@@ -15,8 +16,9 @@ helperb0736e2aceb7c77916470e279e7e9219c2219d565a6b6d77a2348f27d6034cf1).
 Schema/lifecycle25pass/0skip/0fail, including all11 provenance/API-repair cases.
 No live deployment or configuration change is needed for this history/docs
 reconciliation. Canonical development is main. The old config108 worktree is
-detached/locked at historical456f354 with ignored build/evidence preserved;
-retire its merged branch after verification, using an expected-tip lease.
+detached/locked at historical456f354 with ignored build/evidence preserved.
+The merged local/remote fix branch is retired; remote deletion used an explicit
+expected-tip lease atomically with the main push. Only main remains active.
 
 ## 2026-10-20 deployed572: one display temporarily removed by operator
 

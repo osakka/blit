@@ -5,7 +5,7 @@ an evidence record, not a claim that the complete product is released.
 
 ## 2026-10-20 configuration branch reconciliation: unchanged runtime
 
-Merge full config-source-108 tip456f354, whose implementation2fb6f7f already
+Merge13551e4 includes full config-source-108 tip456f354, whose implementation2fb6f7f already
 entered main through803728a. Remaining unique content is a historical563
 status completion; duplicated release/verification evidence stays single-copy,
 and newer results are preserved. Production paths match pre-merge main exactly.
@@ -15,6 +15,11 @@ Focused schema/lifecycle25pass/0skip/0fail, including11 provenance/recovery
 cases. Historical563 manifest is byte-identical to the branch tip. No host
 write/restart/deployment, version change, new physical acceptance or claim that
 existing renderer limitations are solved follows from reconciling Git history.
+Verified ancestor relationship and unchanged non-documentation tree against
+pre-merge281809a. Main pushed atomically with expected-tip-protected deletion
+of the old remote branch; local branch retired. Historical ignored worktree
+artifacts preserved in detached/locked snapshot; user untracked554 manifest
+untouched. Main is the only remaining local/remote development branch.
 
 ## 2026-10-20 deployed572: single-output evidence, operator topology change
 
