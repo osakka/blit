@@ -1,5 +1,24 @@
 # Current state and restart point
 
+## 2026-10-21: Arabic is now the priority; no deployment yet
+
+Operator requires exquisite Arabic in both Retro/Modern, with Arabic-Indic
+"Hindi" digits U+0660..U+0669 (٠١٢٣٤٥٦٧٨٩), not Devanagari. Blit119 tracks
+this core requirement under118. Both current outline faces contain0/42 Arabic
+base letters and0/10 required digits; legacy PSF fallback is not acceptable
+Arabic typography. Hibr uni already emits shaped display-order forms and
+marks; inspect/read only, never edit Hibr or double-apply bidi. Kawkab Mono
+and Cascadia Mono Arabic are candidates being audited, not selected fixes.
+
+Icon/coverage candidate588 remains LOCAL; live587 is untouched. The stricter
+UI ink gate exposed lost thin strokes/checkboxes at8px. ADR0173 preserves
+shrinking native fallback coverage without changing exact half-blocks or
+bitmap-only profiles. Final selected schema/terminal/font/lifecycle run:
+66pass/0skip/0fail (build/tests/blit118-final-regression.log). Independent
+module half-block/known stroke checks pass. Initial package was rejected by
+an overbroad filename guard, fixed in38e2aaa; no package deployment followed.
+Hold deployment until Arabic rendering is implemented/validated as requested.
+
 ## 2026-10-21: candidate588 original icons /118
 
 ADR0172 adds seven original colour glyphs to Modern/Retro: Blit, Hibr pen,

@@ -56,6 +56,21 @@ int main(int argc, char **argv)
         unsigned long count;
         int x, y, partial = 0, coloured = 0;
         CHECK(raster);
+        {
+            /* An 8px point sample used to miss source row7 entirely. */
+            BlitRasterGlyph g;
+            int ink = 0;
+            CHECK(blit_raster_get(raster, 0x2500, 1, &g));
+            for (y = 0; y < size; ++y) for (x = 0; x < width; ++x)
+                ink += g.pixels[y * g.stride + x] != 0;
+            CHECK(ink);
+            if (size == 8) for (x = 0; x < width; ++x)
+                CHECK(g.pixels[3 * g.stride + x] == 127);
+            /* Preserve complete half-block rows, including odd cell sizes. */
+            CHECK(blit_raster_get(raster, 0x2580, 1, &g));
+            for (y = 0; y < size; ++y) for (x = 0; x < width; ++x)
+                CHECK(g.pixels[y * g.stride + x] == (y * 16 / size < 8 ? 255 : 0));
+        }
         CHECK(blit_raster_get(raster, 'A', 1, &a));
         CHECK(a.width == width && a.height == size && a.stride == width);
         CHECK(a.format == BLIT_RASTER_COVERAGE && !a.fallback);

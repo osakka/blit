@@ -1,5 +1,11 @@
 # Blit roadmap
 
+Core priority119: exquisite Retro/Modern Arabic with native outlines, correct
+existing Hibr display-order/presentation-form handling, diacritics and
+Arabic-Indic/Hindi numerals U+0660..U+0669. Devanagari is not requested.
+Do not accept generic Nerd/emoji tests as Arabic acceptance or modify Hibr.
+No icon-only deployment while this Arabic work is being established.
+
 Font completion118: original Blit/Hibr colour artwork, four Wi-Fi levels and
 Bluetooth are candidate588 (ADR0172); canonical mapping discovery is
 `GET /v1/fonts/icons`. Missing Hibr U+16D2/Retro U+21CC and wide-bitmap colour

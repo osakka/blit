@@ -31,8 +31,13 @@ int main(int argc, char **argv)
             cp = required[index];
             for (span = 1; span <= 2; ++span) {
                 BlitRasterGlyph g;
+                int x, y, ink = 0;
                 CHECK(blit_raster_get(r, cp, span, &g));
                 CHECK(!g.fallback || blit_font_has_glyph(&font, cp));
+                for (y = 0; y < g.height; ++y) for (x = 0; x < g.width; ++x)
+                    ink += g.pixels[y * g.stride + x * (int)g.format +
+                        (g.format == BLIT_RASTER_RGBA_PREMULTIPLIED ? 3 : 0)] != 0;
+                CHECK(ink);
                 ++ui_samples;
             }
         }

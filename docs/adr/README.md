@@ -190,6 +190,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0170 — Native console keyboard ownership](0170-native-console-keyboard-ownership.md)
 - [0171 — Native font coverage before wide bitmap](0171-native-font-coverage-before-wide-bitmap.md)
 - [0172 — Original colour icon catalogue](0172-original-colour-icon-catalogue.md)
+- [0173 — Retain shrinking fallback coverage](0173-retain-shrinking-fallback-coverage.md)
 
 ## Adding an ADR
 

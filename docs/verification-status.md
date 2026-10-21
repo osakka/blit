@@ -1,5 +1,17 @@
 # Verification status
 
+## 2026-10-21: final icon/stroke candidate588, Arabic work starts119
+
+Final strengthened UI fixture requires visible ink, not just mappings.
+Native fallback source-footprint coverage fixes the reproduced8px blank
+U+2500/U+2610; explicit half-block rows including odd heights stay exact.
+Selected schema/terminal/font/lifecycle66pass/0skip/0fail; log
+build/tests/blit118-final-regression.log. This supersedes the earlier65-gate
+run for the stroke change. No deployment or Arabic acceptance is claimed.
+Arabic119 audit: both outline faces lack required base letters/digits; Hibr
+uni display-order/presentation-form output was read-only verified. Retro and
+Modern Arabic face/mark/join evaluation is now the operator's priority.
+
 ## 2026-10-21: candidate588 original icons and concrete missing text glyphs
 
 Seven original colour icons:798 size/profile cases, distinct Wi-Fi levels,

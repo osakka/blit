@@ -162,6 +162,29 @@ static int invisible_format(uint32_t scalar)
         (scalar >= 0xe0100 && scalar <= 0xe01ef);
 }
 
+static unsigned char fallback_coverage(const BlitFont *font, size_t index, uint32_t scalar,
+                          int x, int y, int width, int height, int native)
+{
+    int sx = x * font->width / width, sy = y * font->height / height;
+    /* A shrinking point sample can skip all ink of a stroke/checkbox. Native
+       profiles retain source-footprint coverage rather than dropping it.
+       Exact fractional/quadrant block geometry and deliberate bitmap-only
+       profiles keep their existing point-sampling contract. */
+    if (native && (!(scalar >= 0x2580 && scalar <= 0x259f) ||
+                    (scalar >= 0x2591 && scalar <= 0x2593)) &&
+        (width < font->width || height < font->height)) {
+        int ex = (x + 1) * font->width / width;
+        int ey = (y + 1) * font->height / height;
+        int ix, iy, covered = 0;
+        if (ex <= sx) ex = sx + 1;
+        if (ey <= sy) ey = sy + 1;
+        for (iy = sy; iy < ey; ++iy) for (ix = sx; ix < ex; ++ix)
+            covered += blit_font_glyph_pixel(font, index, scalar, iy, ix) != 0;
+        return (unsigned char)(covered * 255 / ((ex - sx) * (ey - sy)));
+    }
+    return blit_font_glyph_pixel(font, index, scalar, sy, sx) ? 255 : 0;
+}
+
 static int draw_outline_face(FT_Face face, int baseline, uint32_t scalar, RasterEntry *entry)
 {
     FT_Bitmap *bitmap;
@@ -364,9 +387,8 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *key,
         for (y = 0; y < next.glyph.height; ++y)
             for (x = 0; x < next.glyph.width; ++x)
                 next.pixels[y * next.glyph.stride + x] =
-                    blit_font_glyph_pixel(font, index, scalar,
-                        y * font->height / next.glyph.height,
-                        x * font->width / next.glyph.width) ? 255 : 0;
+                    fallback_coverage(font, index, scalar, x, y,
+                        next.glyph.width, next.glyph.height, raster->outline != NULL);
     }
     next.valid = 1;
     free(entry->pixels);
