@@ -6,7 +6,42 @@ pane/session placement and input routing. The0.2 shared-damage fixtures do
 not certify it or authorize a backend switch. Live is now the0.2.0 native-KMS
 development canary below;v0.1.589 remains the stable rollback checkpoint.
 
-## 2026-10-21: 0.2 canary installed; authenticated desktop test pending
+## 2026-10-21: authenticated primary and joins verified; frame budget still missed
+
+User logged in after deployment. Read-only native association gate passes:
+one verified UID1000 owner and bottom primary, plus top/HDMI joins, no new
+sessions or input injection. Retro28px/14x28 cells and ABI16 remain unchanged.
+API screenshot shows the animated Matrix saver across the split: these are
+authenticated-session/saver measurements, not a window-drag benchmark.
+
+The10.146s observation reports55.05% of one Blit CPU core,96,822 terminal
+bytes/s,289 presentation calls across two outputs and104 missed deadlines.
+Last draw samples17.199/20.231ms still exceed a60Hz frame budget. No matched
+before/after speedup follows from uncontrolled samples or stale last-frame
+phases. Concurrent read-only association polling also adds observation cost.
+A separate5s font window sees0 new rasterizations and61,152 resident bytes;
+all three sessions report0 retained graphics images at that instant. These
+observations do not establish sustained image absence or identify CPU cost.
+
+Source/binary audit identifies another concrete work shape: native outline
+composition calls the canonical blend callback per raster pixel. The TCC
+coverage branch contains6 integer divisions, including coverage0/255.
+The identity `(product+127)/255 == ((product+128)*257)>>16` passes all65,026
+possible8-bit-channel products. This is arithmetic proof only, not a patched
+production blender, CPU attribution or a live speedup. Next: exhaustive
+production colour/alpha/bounds tests and a timed blend workload before an
+equivalent arithmetic/transparent-opaque fast path; preserve premultiplied
+colour, saturation and invalid-input semantics. Do not change Hibr/backend.
+
+Evidence: `build/tests/candidate-0.2-association*`,
+`candidate-0.2-authenticated-state.json`, `candidate-0.2-after-desktop.json`,
+`candidate-0.2-desktop-93.png` and `candidate-0.2-blender-disassembly.txt`.
+The15s follow-up window includes a screenshot request and has no confirmed
+drag workload, so it is not a clean movement benchmark. User movement/input
+feedback and active-workload latency acceptance remain outstanding.125/122
+and SDL parity104 stay open; canary remains0.2.0, stable rollback589.
+
+## 2026-10-21: 0.2 canary installation checkpoint (before user login)
 
 API updater installed the reproducible0.2.0-1 candidate from source4013bcd.
 Artifact identity is in `releases/0.2.0.yaml`; this is not a stable0.2 tag or

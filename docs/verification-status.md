@@ -1,5 +1,27 @@
 # Verification status
 
+## 2026-10-21: 0.2 authenticated association passes; performance not accepted
+
+Read-only native association gate passes3 samples with a verified UID1000
+owner, bottom primary and no mutations. Session inventory confirms one
+primary and two joins. All retain14x28 cells/Retro28px and compatible ABI16.
+Screenshot shows Matrix saver, not active window dragging.10.146s uncontrolled
+window:55.05% one server core,96,822 terminal bytes/s,289 aggregate presentation
+calls,104 missed deadlines. Last draw samples17.199/20.231ms; last-frame
+samples may be stale and are not percentiles. Association/API polling adds
+overhead. No fair589 comparison, confirmed movement result or FPS gain claimed.
+Font window:0 new rasterizations,61,152 cache bytes. Session inventory:0 images
+retained at the sampled instant; lifetime counters still record Kitty traffic.
+
+Native per-pixel raster callback remains unchanged. TCC disassembly confirms
+6 coverage-path integer divisions. Exact division-rounding identity tested
+for every product0..65025 (65,026 cases) passes, but production blender
+equivalence/timing tests and implementation remain future work. No source,
+API, host input, settings, font/backend or Hibr changes in this observation.
+The15s follow-up included screenshot capture and unconfirmed user activity;
+do not use it as a clean drag comparison. Evidence paths and next boundary are
+recorded at the top of current-state.125/122 remain open.
+
 ## 2026-10-21: 0.2 canary package and live startup, not desktop acceptance
 
 `releases/0.2.0.yaml` records source/docs4013bcd and the exact development
