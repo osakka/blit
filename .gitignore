@@ -12,6 +12,8 @@
 # Local release and diagnostic artifacts; provenance belongs in releases/*.yaml.
 *.deb
 *.tar.gz
+# Reviewed preferred source for the GPL-licensed experimental Arabic face.
+!assets/fonts/sources/freefont-src-20120503.tar.gz
 *.log
 diagnostics/
 test-artifacts/

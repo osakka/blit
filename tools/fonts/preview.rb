@@ -3,20 +3,31 @@
 require 'tmpdir'
 require 'zlib'
 require 'fileutils'
+require 'json'
 root = File.expand_path('../..', __dir__)
-output = File.expand_path(ARGV.fetch(0, 'build/font-preview/blit-fonts.png'))
+arabic = ARGV.delete('--arabic')
+output = File.expand_path(ARGV.fetch(0, arabic ? 'build/font-preview/blit-arabic.png' : 'build/font-preview/blit-fonts.png'))
 Dir.chdir(root) do
   Dir.mktmpdir('blit-font-preview') do |work|
     binary = File.join(work, 'preview')
     headers = ENV.fetch('BLIT_FREETYPE_INCLUDE', "#{root}/build/deps/prefix/include/freetype2")
     library = ENV.fetch('BLIT_FREETYPE_LIBRARY', '/lib/x86_64-linux-gnu/libfreetype.so.6')
     raise 'compile failed' unless system('tcc', '-O2', '-std=c99', '-Wall', "-I#{headers}",
-      'tools/probes/font_preview.c', 'src/blit_font.c', 'src/blit_raster.c', library,
+      arabic ? 'tools/probes/arabic_preview.c' : 'tools/probes/font_preview.c', 'src/blit_font.c', 'src/blit_raster.c', library,
       ENV.fetch('BLIT_HARFBUZZ_LIBRARY', '/lib/x86_64-linux-gnu/libharfbuzz.so.0'), '-o', binary)
     ppm = File.join(work, 'specimen.ppm')
-    raise 'raster failed' unless system(binary, 'assets/fonts/Blit-Hibr-Terminus16.psf',
+    arguments = ['assets/fonts/Blit-Hibr-Terminus16.psf',
       'assets/fonts/BlitRetroNerd-Regular.ttf', 'assets/fonts/BlitModernNerd-Regular.ttf',
-      'assets/fonts/NotoColorEmoji.ttf', ppm)
+    ]
+    if arabic
+      samples = JSON.parse(File.read('assets/fonts/arabic-specimens.json')).fetch('samples')
+      input = File.join(work, 'samples.txt')
+      File.write(input, samples.map { |s| cp=s.fetch('visual').codepoints; [cp.size,*cp.map { |c| c.to_s(16) }].join(' ') }.join("\n"))
+      arguments.concat(['assets/fonts/BlitArabicRetro.ttf', 'assets/fonts/BlitArabicModern.ttf', input, ppm])
+    else
+      arguments.concat(['assets/fonts/NotoColorEmoji.ttf', ppm])
+    end
+    raise 'raster failed' unless system(binary, *arguments)
     bytes = File.binread(ppm)
     header = /\AP6\n(\d+) (\d+)\n255\n/.match(bytes) or raise 'invalid specimen'
     w, h = header.captures.map(&:to_i)

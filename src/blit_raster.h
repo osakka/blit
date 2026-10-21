@@ -16,6 +16,10 @@ typedef struct BlitRasterGlyph {
     const unsigned char *pixels;
     int width, height, stride;
     int baseline;
+    /* Ink may extend beyond its allocated terminal cell. Consumers must add
+       these offsets, and invalidate/repaint neighbouring ink on damage.
+       Currently nonzero only for the opt-in Arabic module experiment. */
+    int ink_offset_x, ink_offset_y;
     BlitRasterFormat format;
     int fallback;
 } BlitRasterGlyph;
@@ -29,9 +33,13 @@ BlitRaster *blit_raster_open(const BlitFont *fallback,
                             const char *outline_path, const char *colour_path,
                             int cell_width, int cell_height);
 void blit_raster_close(BlitRaster *raster);
+/* Experimental Arabic companion. Attach once before any raster lookup;
+   failures leave the context unchanged. No bidi, paragraph shaping or profile
+   auto-selection. All letters share one face transform and baseline. */
+int blit_raster_set_arabic(BlitRaster *raster, const char *path);
 int blit_raster_get(BlitRaster *raster, uint32_t scalar, int columns,
                     BlitRasterGlyph *glyph);
-/* Internal bounded colour-cluster path. Unsupported multi-scalar forms fail
+/* Internal bounded colour/opt-in Arabic cluster path. Unsupported forms fail
    without replacing cache entries or the caller's output. Does not segment
    terminal input or choose a cluster's column allocation. */
 int blit_raster_get_cluster(BlitRaster *raster, const BlitCellCluster *cluster,

@@ -1,0 +1,35 @@
+{
+  "build": {"fonttools_version":"4.60.1", "unicode_decomposition_version":"14.0.0", "harfbuzz_version":"6.0.0"},
+  "retro": {
+    "family":"Blit Arabic Retro",
+    "file":"BlitArabicRetro.ttf",
+    "source_family":"Kawkab Mono Regular",
+    "version":"0.501",
+    "upstream":"https://github.com/aiaf/kawkab-mono/releases/download/v0.501/kawkab-mono-0.501.zip",
+    "member":"kawkab-mono-0.501/KawkabMono-Regular.ttf",
+    "upstream_sha256":"e16e63326d6827e5d3cf23b9dbf021c24568bf27be2ba8c642af124b030e982a",
+    "sha256":"6b31ffcd017b1546dba7e2fa99b2def949f38ba6cfb7b69c62cbeb639d4ef5fe",
+    "license_file":"KawkabMono-LICENSE.txt",
+    "license_sha256":"d0bb837bd4b170f869602be4ce7164bd692ff77a9842ade72c7f09fa013f79db"
+  },
+  "modern": {
+    "family":"Blit Arabic Modern",
+    "file":"BlitArabicModern.ttf",
+    "source_family":"GNU FreeMono",
+    "version":"20120503",
+    "upstream":"https://ftp.gnu.org/gnu/freefont/freefont-ttf-20120503.zip",
+    "member":"freefont-20120503/FreeMono.ttf",
+    "upstream_sha256":"0517b67f1e50bbcde4e54834a5fa597be2526cf3cbb69487a9fbdb0de1a83b4c",
+    "sha256":"6c9a2bbeb4811154cac80912e893755ec6a1477921caa5d232608a2ebbc075fe",
+    "license_file":"FreeMono-LICENSE.txt",
+    "license_sha256":"8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+    "source_upstream":"https://ftp.gnu.org/gnu/freefont/freefont-src-20120503.tar.gz",
+    "source_file":"sources/freefont-src-20120503.tar.gz",
+    "source_sha256":"0d62e2e22655f841c3ac5fb8c8059a52fe2c09c695d9e8eda9903406e942657a"
+  },
+  "status":"experimental shared-module companions; not enabled in server profiles or accepted on physical displays",
+  "specimens_file":"arabic-specimens.json",
+  "specimens_sha256":"5bb68482db9d96e1797a5372ea20437dade2f53b40a91efc4e733be242719497",
+  "rejected_candidates":{"Cascadia Mono 2407.24":"Contextual alias generation cannot produce the single glyph required for Hibr's one-cell lam-alef presentation forms FEF5..FEFC; do not silently widen or substitute.", "DejaVu Sans Mono 2.37":"Lacks U+0670 superscript alef used in the vocalized religious specimen; not accepted as the Modern companion.", "Vazir Code 1.1.2":"Contextual alias generation does not produce the single glyph required for Hibr's lam-alef presentation forms."},
+  "policy":"Preserve source Arabic outlines and OpenType positioning. Materialize missing presentation-form aliases using the pinned Unicode decomposition and HarfBuzz contextual shaping, never a second handwritten Arabic shaper. No Hibr changes or second bidi pass. Unrepresentable aliases are reported, not claimed complete."
+}

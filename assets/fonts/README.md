@@ -219,3 +219,39 @@ Only glyphs the BDF marks `DWIDTH 16` are taken; a narrow glyph belongs in the
 primary font. Codepoints outside the BMP are **not** covered, because
 `unifont.bdf` is a BMP font — emoji live in plane 1 and need Unifont's
 `unifont_upper`, which is a separate decision recorded in ADR 0062.
+## Experimental Arabic companions (119)
+
+`BlitArabicRetro.ttf` (Kawkab Mono0.501 derivative) and
+`BlitArabicModern.ttf` (GNU FreeMono20120503 derivative) are **module-only
+candidates**, not selected by the running server or accepted as finished fonts.
+They preserve source outlines and positioning; native antialiased glyphs and
+cell-local mark clusters replace PSF substitution only when explicitly attached
+in a test. There is no second bidi pass: Hibr already supplies visual forms.
+
+Canonical source/output hashes and licences: `arabic-fonts.source.json`.
+`tools/fonts/build-arabic-profile.py --profile retro|modern SOURCE OUTPUT`
+uses pinned fontTools4.60.1, Unicode14.0.0 decompositions and HarfBuzz6.0.0.
+It adds only missing presentation aliases that the source shaper resolves to
+one glyph; it does not promise all Arabic forms exist. Both faces retain the
+source notices. Kawkab is OFL1.1. FreeMono is GPLv3-or-later with its font
+embedding exception retained in the font and `FreeMono-README.txt`;
+`FreeMono-LICENSE.txt` is the GPL and `FreeMono-AUTHORS.txt` credits contributors.
+The complete upstream preferred-source/build archive is included at
+`sources/freefont-src-20120503.tar.gz`, pinned by the manifest; its
+`sfd/FreeMono.sfd`, FontForge generation scripts and build instructions are
+the source of the upstream outlines. Blit's offline derivative generator is
+the source of the naming/cmap modifications, not a new font-outline design.
+
+`arabic-specimens.json` records actual read-only Hibr0.99.277/ABI16 visual
+output, including `حِبْر`, vocalized Bismillah, lam-alef variants and
+Arabic-Indic/Hindi digits `٠١٢٣٤٥٦٧٨٩` (U+0660..0669), alongside ASCII digits.
+It is a finite corpus, not exhaustive Quranic/Unicode coverage.
+
+Run `ruby tools/tests/arabic_raster_gate.rb` or the normal font gate suite.
+Generate a real raster preview with
+`ruby tools/fonts/preview.rb --arabic build/font-preview/blit-arabic.png`.
+This fixture consumes ink offsets that existing backend adapters do not yet
+support. Backend composition, neighbouring-ink damage, runtime selection and
+physical appearance remain acceptance requirements before enabling companions.
+
+[Inspect the actual candidate raster specimen](../../docs/images/blit-arabic-candidates.png).

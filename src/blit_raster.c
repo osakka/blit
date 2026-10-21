@@ -22,7 +22,10 @@ typedef struct {
 struct BlitRaster {
     BlitFont fallback;
     FT_Library library;
-    FT_Face outline, colour, text_emoji;
+    FT_Face outline, colour, text_emoji, arabic;
+    hb_font_t *arabic_font;
+    hb_buffer_t *arabic_buffer;
+    int arabic_baseline;
     int text_em[2];
     hb_font_t *colour_font;
     hb_buffer_t *shape_buffer;
@@ -41,6 +44,9 @@ void blit_raster_close(BlitRaster *raster)
     for (i = 0; i < RASTER_SLOTS; ++i) free(raster->cache[i].pixels);
     if (raster->shape_buffer) hb_buffer_destroy(raster->shape_buffer);
     if (raster->colour_font) hb_font_destroy(raster->colour_font);
+    if (raster->arabic_font) hb_font_destroy(raster->arabic_font);
+    if (raster->arabic_buffer) hb_buffer_destroy(raster->arabic_buffer);
+    if (raster->arabic) FT_Done_Face(raster->arabic);
     if (raster->text_emoji) FT_Done_Face(raster->text_emoji);
     if (raster->outline) FT_Done_Face(raster->outline);
     if (raster->colour) FT_Done_Face(raster->colour);
@@ -126,6 +132,162 @@ BlitRaster *blit_raster_open(const BlitFont *fallback,
 fail:
     blit_raster_close(raster);
     return NULL;
+}
+
+int blit_raster_set_arabic(BlitRaster *raster, const char *path)
+{
+    FT_Face face = NULL;
+    hb_font_t *font = NULL;
+    hb_buffer_t *buffer = NULL;
+    FT_UInt nominal;
+    FT_Pos advance;
+    FT_F26Dot6 x_em, y_em;
+    int ascent, descent;
+    if (!raster || !path || !raster->library || raster->renders || raster->arabic)
+        return 0;
+    if (FT_New_Face(raster->library, path, 0, &face) || !FT_IS_SCALABLE(face) ||
+        !FT_IS_FIXED_WIDTH(face) || FT_Select_Charmap(face, FT_ENCODING_UNICODE)) goto fail;
+    nominal = FT_Get_Char_Index(face, 0x0628);
+    if (!nominal || FT_Load_Glyph(face, nominal, FT_LOAD_NO_SCALE)) goto fail;
+    advance = face->glyph->advance.x;
+    if (advance <= 0 || face->ascender <= 0 || face->descender > 0) goto fail;
+    /* One common transform, not per-letter fitting. Arabic advance rather
+       than max_advance: the latter includes multi-cell religious ligatures.
+       Fractional sizes and unhinted outlines preserve connecting strokes. */
+    x_em = (FT_F26Dot6)((long)raster->width * 64 * face->units_per_EM / advance);
+    y_em = (FT_F26Dot6)((long)raster->height * 64 * face->units_per_EM /
+                       (face->ascender - face->descender));
+    if (FT_Set_Char_Size(face, x_em, y_em, 72, 72)) goto fail;
+    ascent = (int)FT_MulFix(face->ascender, face->size->metrics.y_scale);
+    descent = (int)FT_MulFix(-face->descender, face->size->metrics.y_scale);
+    font = hb_ft_font_create_referenced(face);
+    buffer = hb_buffer_create();
+    if (font == hb_font_get_empty() ||
+        !hb_buffer_pre_allocate(buffer, BLIT_CLUSTER_MAX_SCALARS)) goto fail;
+    hb_ft_font_set_load_flags(font, FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP);
+    raster->arabic = face;
+    raster->arabic_font = font;
+    raster->arabic_buffer = buffer;
+    raster->arabic_baseline = (raster->height * 64 - ascent - descent) / 128 +
+                              (ascent + 32) / 64;
+    return 1;
+fail:
+    if (buffer) hb_buffer_destroy(buffer);
+    if (font) hb_font_destroy(font);
+    if (face) FT_Done_Face(face);
+    return 0;
+}
+
+static int arabic_scalar(uint32_t cp)
+{
+    return (cp >= 0x0600 && cp <= 0x06ff) || (cp >= 0x0750 && cp <= 0x077f) ||
+        (cp >= 0x08a0 && cp <= 0x08ff) || (cp >= 0xfb50 && cp <= 0xfdff) ||
+        (cp >= 0xfe70 && cp <= 0xfefc);
+}
+
+static int draw_arabic(BlitRaster *raster, RasterEntry *entry)
+{
+    static const hb_feature_t features[] = {
+        {HB_TAG('i','s','o','l'),0,0,(unsigned)-1},
+        {HB_TAG('i','n','i','t'),0,0,(unsigned)-1},
+        {HB_TAG('m','e','d','i'),0,0,(unsigned)-1},
+        {HB_TAG('f','i','n','a'),0,0,(unsigned)-1},
+        {HB_TAG('r','l','i','g'),0,0,(unsigned)-1},
+        {HB_TAG('l','i','g','a'),0,0,(unsigned)-1},
+        {HB_TAG('c','a','l','t'),0,0,(unsigned)-1}
+    };
+    hb_glyph_info_t *info;
+    hb_glyph_position_t *positions;
+    unsigned count, n;
+    int advance = 0, origin, pass;
+    int min_x = 0, min_y = 0, max_x = entry->glyph.width, max_y = entry->glyph.height;
+    FT_Face face = raster->arabic;
+    if (!face) return 0;
+    for (n = 0; n < entry->key.length; ++n)
+        if (!arabic_scalar(entry->key.scalars[n]) ||
+            !FT_Get_Char_Index(face, entry->key.scalars[n])) return 0;
+    hb_buffer_clear_contents(raster->arabic_buffer);
+    hb_buffer_add_utf32(raster->arabic_buffer, entry->key.scalars,
+        (int)entry->key.length, 0, (int)entry->key.length);
+    /* This is ONE visual cell, not a logical text run. Never reverse cells. */
+    hb_buffer_set_direction(raster->arabic_buffer, HB_DIRECTION_LTR);
+    hb_buffer_set_script(raster->arabic_buffer, HB_SCRIPT_ARABIC);
+    hb_buffer_set_language(raster->arabic_buffer, hb_language_from_string("ar", -1));
+    hb_shape(raster->arabic_font, raster->arabic_buffer, features,
+              sizeof(features) / sizeof(features[0]));
+    if (!hb_buffer_allocation_successful(raster->arabic_buffer)) return -1;
+    info = hb_buffer_get_glyph_infos(raster->arabic_buffer, &count);
+    positions = hb_buffer_get_glyph_positions(raster->arabic_buffer, NULL);
+    if (!count || count > BLIT_CLUSTER_MAX_SCALARS || !info || !positions) return 0;
+    for (n = 0; n < count; ++n) {
+        if (!info[n].codepoint) return 0;
+        advance += positions[n].x_advance;
+    }
+    origin = (entry->glyph.width * 64 - advance) / 2;
+    /* Measure actual ink first, then paint the exact bounding canvas. A cell
+       advance is not an ink clipping rectangle (Arabic cursive overhangs and
+       vowel marks are legitimate). Allocation remains bounded per context. */
+    for (pass = 0; pass < 2; ++pass) {
+      int pen_x = 0, pen_y = 0;
+      for (n = 0; n < count; ++n) {
+        FT_Bitmap *bitmap;
+        int left, top, x, y;
+        FT_Vector delta;
+        int px = origin + pen_x + positions[n].x_offset;
+        int py = pen_y + positions[n].y_offset;
+        /* Fractional placement is consumed by FreeType, not discarded before
+           scan conversion. Integer placement uses mathematical floor. */
+        left = px >= 0 ? px / 64 : -((-px + 63) / 64);
+        top = py >= 0 ? py / 64 : -((-py + 63) / 64);
+        delta.x = px - left * 64; delta.y = py - top * 64;
+        FT_Set_Transform(face, NULL, &delta);
+        if (FT_Load_Glyph(face, info[n].codepoint,
+                         FT_LOAD_RENDER | FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP)) {
+            FT_Set_Transform(face, NULL, NULL); return -1;
+        }
+        FT_Set_Transform(face, NULL, NULL);
+        bitmap = &face->glyph->bitmap;
+        left += face->glyph->bitmap_left;
+        top = raster->arabic_baseline - top - face->glyph->bitmap_top;
+        if (bitmap->pitch < 0 || bitmap->pixel_mode != FT_PIXEL_MODE_GRAY ||
+            bitmap->num_grays != 256) return -1;
+        if (!pass) {
+            if (left < min_x) min_x = left;
+            if (top < min_y) min_y = top;
+            if (left + (int)bitmap->width > max_x) max_x = left + (int)bitmap->width;
+            if (top + (int)bitmap->rows > max_y) max_y = top + (int)bitmap->rows;
+        } else {
+            left -= min_x; top -= min_y;
+            if (left < 0 || top < 0 || left + (int)bitmap->width > entry->glyph.width ||
+                top + (int)bitmap->rows > entry->glyph.height) return -1;
+            for (y = 0; y < (int)bitmap->rows; ++y) for (x = 0; x < (int)bitmap->width; ++x) {
+                unsigned char *out = entry->pixels + (top + y) * entry->glyph.stride + left + x;
+                unsigned in = bitmap->buffer[y * bitmap->pitch + x];
+                *out = (unsigned char)(in + (*out * (255 - in) + 127) / 255);
+            }
+        }
+        pen_x += positions[n].x_advance;
+        pen_y += positions[n].y_advance;
+      }
+      if (!pass) {
+        unsigned char *pixels;
+        size_t bytes;
+        if (min_x < -2 * raster->width || max_x > 4 * raster->width ||
+            min_y < -raster->height || max_y > 2 * raster->height) return 0;
+        bytes = (size_t)(max_x - min_x) * (max_y - min_y);
+        pixels = calloc(1, bytes);
+        if (!pixels) return -1;
+        free(entry->pixels);
+        entry->pixels = pixels;
+        entry->glyph.pixels = pixels;
+        entry->glyph.width = entry->glyph.stride = max_x - min_x;
+        entry->glyph.height = max_y - min_y;
+        entry->glyph.ink_offset_x = min_x;
+        entry->glyph.ink_offset_y = min_y;
+      }
+    }
+    entry->glyph.baseline = raster->arabic_baseline - min_y;
+    return 1;
 }
 
 static int protected_geometry(uint32_t scalar)
@@ -332,8 +494,9 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *key,
     unsigned slot, colour_index = 0;
     uint32_t scalar = key->scalars[0];
     int columns = key->columns;
+    int arabic = raster->arabic && arabic_scalar(scalar);
     int text_selector = key->length == 2 && key->scalars[1] == 0xfe0e && blit_emoji_variation(scalar);
-    int outline_colour = key->length == 1 && !protected_geometry(scalar) &&
+    int outline_colour = !arabic && key->length == 1 && !protected_geometry(scalar) &&
         !invisible_format(scalar) && outline_has_colour(raster->outline, scalar);
     int result = 0, x, y;
     slot = (unsigned)(blit_cell_cluster_hash(key) % RASTER_SLOTS);
@@ -354,8 +517,9 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *key,
         FT_Get_Char_Index(raster->colour, scalar) ?
         BLIT_RASTER_RGBA_PREMULTIPLIED : BLIT_RASTER_COVERAGE;
     if (outline_colour) next.glyph.format = BLIT_RASTER_RGBA_PREMULTIPLIED;
+    if (arabic) next.glyph.format = BLIT_RASTER_COVERAGE;
     if (text_selector) next.glyph.format = BLIT_RASTER_COVERAGE;
-    else if (key->length > 1) {
+    else if (key->length > 1 && !arabic) {
         colour_index = colour_cluster_glyph(raster, key);
         if (!colour_index) return 0;
         next.glyph.format = BLIT_RASTER_RGBA_PREMULTIPLIED;
@@ -368,7 +532,8 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *key,
     next.pixels = calloc(1, bytes);
     if (!next.pixels) return 0;
     next.glyph.pixels = next.pixels;
-    if (key->length == 1 && scalar >= 0xe0b0 && scalar <= 0xe0b3) {
+    if (arabic) result = draw_arabic(raster, &next);
+    else if (key->length == 1 && scalar >= 0xe0b0 && scalar <= 0xe0b3) {
         draw_powerline(scalar,&next); result=1;
     } else if (key->length == 1 && invisible_format(scalar)) result = 1;
     else if (next.glyph.format == BLIT_RASTER_RGBA_PREMULTIPLIED && !outline_colour)
@@ -378,7 +543,7 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *key,
         if (!result && (text_selector || blit_emoji_variation(scalar)))
             result = draw_text_emoji(raster, scalar, &next);
     }
-    if (result < 0 || (outline_colour && !result)) { free(next.pixels); return 0; }
+    if (result < 0 || ((outline_colour || arabic) && !result)) { free(next.pixels); return 0; }
     if (!result && key->length > 1 && !text_selector) { free(next.pixels); return 0; }
     if (!result) {
         const BlitFont *font = &raster->fallback;
@@ -390,6 +555,8 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *key,
                     fallback_coverage(font, index, scalar, x, y,
                         next.glyph.width, next.glyph.height, raster->outline != NULL);
     }
+    bytes = (size_t)next.glyph.stride * next.glyph.height;
+    if (raster->bytes - old_bytes + bytes > RASTER_MAX_BYTES) { free(next.pixels); return 0; }
     next.valid = 1;
     free(entry->pixels);
     *entry = next;

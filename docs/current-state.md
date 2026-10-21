@@ -1,11 +1,41 @@
 # Current state and restart point
 
+## 2026-10-21:119 shared Arabic module implemented; server remains unchanged
+
+ADR0174 adds explicit, pre-first-use Arabic companion attachment to the shared
+rasterizer. It preserves Hibr's visual/presentation forms, uses HarfBuzz for
+cell-local vowel-mark positioning and FreeType grayscale coverage, with one
+common face transform/advance. Measured ink offsets preserve cursive overhang
+and marks instead of clipping or shrinking individual letters. This exposed
+a real missing backend contract: KMS/SDL currently assume cell-bounded ink.
+Do NOT attach companions in server profiles until both composition and damage
+handle those offsets; the normal rendering paths remain unchanged.
+
+Experimental Retro=Kawkab Mono0.501; Modern=GNU FreeMono20120503. Cascadia and
+Vazir Code fail the one-glyph lam-alef alias requirement. DejaVu Sans Mono
+lacks U+0670 superscript alef. Source/derivative hashes, notices and preferred
+FreeMono source are included, not host-dependent font substitutions.
+Canonical specimens capture actual read-only Hibr0.99.277/ABI16 output.
+No Hibr source or installation changes. Both candidates pass16,986 finite
+scalar/mark/specimen cases each across8..64px; preview generated from the real
+raster is build/font-preview/blit-arabic.png, not a scanout screenshot.
+Selected regressions:67pass/0skip/0fail; offscreen GLES10pass/0skip/0fail;
+TCC rebuild passes. Final Arabic Valgrind:0errors/0lost bytes, with reachable
+library allocations recorded in verification-status. These do not enable or
+validate Arabic in the real backend; module/adapter acceptance stay separate.
+
+Next: independently validate positioning/joins, implement shared ink-overhang
+composition and damage parity, then enable atomic profile selection/inventory,
+package and real-host review. No deployment: live587/settings untouched,
+candidate588 remains unreleased.119/118 stay open; Arabic/Quranic completeness
+and "exquisite" physical appearance have NOT been established by these tests.
+
 ## 2026-10-21: Arabic is now the priority; no deployment yet
 
 Operator requires exquisite Arabic in both Retro/Modern, with Arabic-Indic
 "Hindi" digits U+0660..U+0669 (٠١٢٣٤٥٦٧٨٩), not Devanagari. Blit119 tracks
-this core requirement under118. Both current outline faces contain0/42 Arabic
-base letters and0/10 required digits; legacy PSF fallback is not acceptable
+this core requirement under118. Both current Latin/Nerd outline faces contain
+0/42 audited Arabic-range scalars and0/10 required digits; PSF fallback is not acceptable
 Arabic typography. Hibr uni already emits shaped display-order forms and
 marks; inspect/read only, never edit Hibr or double-apply bidi. Kawkab Mono
 and Cascadia Mono Arabic are candidates being audited, not selected fixes.

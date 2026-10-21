@@ -224,6 +224,7 @@ suite_font() {
     run_gate outline_catalogue_gate.rb ruby tools/tests/outline_catalogue_gate.rb
     run_gate custom_icon_gate.rb ruby tools/tests/custom_icon_gate.rb
     run_gate custom_icon_api_gate.rb ruby tools/tests/custom_icon_api_gate.rb
+    run_gate arabic_raster_gate.rb ruby tools/tests/arabic_raster_gate.rb
     run_gate emoji_corpus_gate.rb ruby tools/tests/emoji_corpus_gate.rb
     run_gate emoji_presentation_gate.rb ruby tools/tests/emoji_presentation_gate.rb
     run_gate cell_cluster_gate.rb ruby tools/tests/cell_cluster_gate.rb

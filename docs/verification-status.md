@@ -1,5 +1,46 @@
 # Verification status
 
+## 2026-10-21:119 Arabic companion module, not deployed
+
+ADR0174, source manifest arabic-fonts.source.json and captured Hibr0.99.277 /
+ABI16 specimens define the finite acceptance scope. Shared Arabic attachment
+uses FreeType outlines and HarfBuzz cell-local mark positioning, preserves
+presentation forms, and measures ink offsets rather than clipping overhang.
+Server profiles do not attach it: existing KMS/SDL adapters still assume
+cell-bounded ink and must gain composition/damage support before enabling it.
+
+Final module gate:16,986 scalar/mark/specimen cases per face at every8..64px
+cell height,0failed, including native ink,45 base/mark combinations per size,
+all captured word clusters, repeat-key cache hits, bounded cache, failed
+attachment/re-attachment and uncovered-scalar output/cache preservation.
+Retro839 and Modern910 scalar cases require overhang;2,565 mark comparisons
+per face differ from the unmarked base. These counts establish ink/coverage
+and mark presence, NOT independent correctness of every GPOS anchor or join.
+Log: build/tests/arabic-foundation-final-module.log.
+
+TCC candidate588 rebuild passes (arabic-foundation-tcc.log). Selected schema,
+terminal, font and lifecycle suite:67pass/0skip/0fail
+(build/tests/arabic-foundation-regression.log). Offscreen OpenGLES2 existing
+composition/damage suite:10pass/0skip/0fail (arabic-foundation-gles.log).
+These backend regressions use the existing profiles, NOT enabled Arabic.
+Final Arabic Valgrind run:0errors,0definite/indirect/possible bytes lost;
+18,804bytes/9blocks reachable per process, not reported as freed
+(arabic-foundation-final-valgrind.log). Both module fixtures rebuild from
+current sources; new experimental attachment is not used by the server.
+
+Both companion files regenerate byte-identically from pinned upstream TTFs.
+Negative control: the rejected DejaVu companion fails U+0670 mark/specimen
+cases in the same gate (build/tests/arabic-dejavu-negative.log). The earlier
+cell-clipped prototype rejected valid source ink; bounds logging identified
+negative bearings, top accents and descenders, rather than blaming Hibr.
+Real-raster preview docs/images/blit-arabic-candidates.png was generated and
+visually inspected; it is not a screenshot from the physical host.
+
+No changes to Hibr, live587, backend/layout/input or saved settings. No new
+package/deployment.119/118 remain open. Universal Arabic/Quranic coverage,
+backend parity, word-join correctness and operator aesthetic acceptance are
+not claimed. Remaining work is in current-state and ADR0174.
+
 ## 2026-10-21: final icon/stroke candidate588, Arabic work starts119
 
 Final strengthened UI fixture requires visible ink, not just mappings.

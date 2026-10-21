@@ -6,6 +6,13 @@ Arabic-Indic/Hindi numerals U+0660..U+0669. Devanagari is not requested.
 Do not accept generic Nerd/emoji tests as Arabic acceptance or modify Hibr.
 No icon-only deployment while this Arabic work is being established.
 
+119 progress: experimental companions and shared Arabic base/mark raster path
+exist (ADR0174), with measured ink offsets and a finite Hibr specimen gate.
+Next dependency is KMS/SDL composition plus neighbouring-ink damage; current
+adapters assume cell-bounded rasters, so server selection deliberately remains
+disabled. Runtime inventory/selection, protocol/backend acceptance, package and
+physical typographic review follow. Native coverage tests are not completion.
+
 Font completion118: original Blit/Hibr colour artwork, four Wi-Fi levels and
 Bluetooth are candidate588 (ADR0172); canonical mapping discovery is
 `GET /v1/fonts/icons`. Missing Hibr U+16D2/Retro U+21CC and wide-bitmap colour

@@ -3,6 +3,10 @@
 assets/fonts/licenses/nerd-v3.4.0/*.txt -text -whitespace
 assets/fonts/NotoColorEmoji-LICENSE.txt -text -whitespace
 assets/fonts/NotoEmojiText-LICENSE.txt -text -whitespace
+assets/fonts/KawkabMono-LICENSE.txt -text -whitespace
+assets/fonts/FreeMono-LICENSE.txt -text -whitespace
+assets/fonts/FreeMono-README.txt -text -whitespace
+assets/fonts/FreeMono-AUTHORS.txt -text -whitespace
 assets/fonts/nerd-glyphnames-v3.4.0.json -text
 assets/unicode/emoji-18.0/*.txt -text -whitespace
 vendor/harfbuzz/*.h -text -whitespace

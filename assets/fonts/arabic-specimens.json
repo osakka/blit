@@ -1,0 +1,13 @@
+{
+  "scope":"Finite core Arabic specimens, not complete Unicode/Quranic coverage or paragraph bidi acceptance",
+  "visual_source":"Read-only /usr/bin/hibr 0.99.277 ABI16, mod load uni; uni vis; captured 2026-10-21",
+  "samples":[
+    {"logical":"حِبْر","visual":"ﺮﺒْﺣِ"},
+    {"logical":"بِسْمِ اللهِ الرَّحْمٰنِ الرَّحِيمِ","visual":"ﻢِﻴﺣِﺮَّﻟﺍ ﻦِﻤٰﺣْﺮَّﻟﺍ ﻪِﻠﻟﺍ ﻢِﺴْﺑِ"},
+    {"logical":"السلام عليكم","visual":"ﻢﻜﻴﻠﻋ ﻡﻼﺴﻟﺍ"},
+    {"logical":"٠١٢٣٤٥٦٧٨٩ 0123456789","visual":"٠١٢٣٤٥٦٧٨٩ 0123456789"},
+    {"logical":"لا لأ لإ لآ","visual":"ﻵ ﻹ ﻷ ﻻ"},
+    {"logical":"العربية لغة جميلة","visual":"ﺔﻠﻴﻤﺟ ﺔﻐﻟ ﺔﻴﺑﺮﻌﻟﺍ"}
+  ],
+  "known_unaccepted_scope":["Extended Arabic U+063B..063F", "Complete Quranic annotation", "All religious word ligatures", "Backend ink-overhang composition and damage", "Physical aesthetic acceptance"]
+}
