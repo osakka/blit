@@ -9,12 +9,15 @@
 #include <string.h>
 #include <stdio.h>
 
-#define RASTER_SLOTS 128
+#define RASTER_SETS 128
+#define RASTER_WAYS 4
+#define RASTER_SLOTS (RASTER_SETS * RASTER_WAYS)
 #define RASTER_MAX_BYTES (4U * 1024U * 1024U)
 
 typedef struct {
     BlitCellCluster key;
     int valid;
+    unsigned age;
     unsigned char *pixels;
     BlitRasterGlyph glyph;
 } RasterEntry;
@@ -33,6 +36,7 @@ struct BlitRaster {
     int width, height, em, baseline;
     size_t bytes;
     unsigned long renders;
+    unsigned reclaim_slot;
     RasterEntry cache[RASTER_SLOTS];
 };
 
@@ -492,7 +496,8 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *key,
 {
     RasterEntry next, *entry;
     size_t bytes, old_bytes;
-    unsigned slot, colour_index = 0;
+    unsigned slot, way, chosen = 0, colour_index = 0;
+    RasterEntry *set;
     uint32_t scalar = key->scalars[0];
     int columns = key->columns;
     int arabic = raster->arabic && arabic_scalar(scalar);
@@ -500,12 +505,27 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *key,
     int outline_colour = !arabic && key->length == 1 && !protected_geometry(scalar) &&
         !invisible_format(scalar) && outline_has_colour(raster->outline, scalar);
     int result = 0, x, y;
-    slot = (unsigned)(blit_cell_cluster_hash(key) % RASTER_SLOTS);
-    entry = &raster->cache[slot];
-    if (entry->valid && blit_cell_cluster_equal(&entry->key, key)) {
-        *glyph = entry->glyph;
-        return 1;
+    slot = (unsigned)(blit_cell_cluster_hash(key) % RASTER_SETS);
+    set = &raster->cache[slot * RASTER_WAYS];
+    /* Four bounded full-key comparisons; collisions may coexist. Ages are
+       per-set ranks, not an ever-growing clock. Failure leaves the set alone. */
+    for (way = 0; way < RASTER_WAYS; ++way) {
+        entry = &set[way];
+        if (entry->valid && blit_cell_cluster_equal(&entry->key, key)) {
+            unsigned previous_age = entry->age, other;
+            for (other = 0; other < RASTER_WAYS; ++other)
+                if (set[other].valid && set[other].age < previous_age)
+                    ++set[other].age;
+            entry->age = 0;
+            *glyph = entry->glyph;
+            return 1;
+        }
     }
+    for (way = 0; way < RASTER_WAYS; ++way) {
+        if (!set[way].valid) { chosen = way; break; }
+        if (set[way].age > set[chosen].age) chosen = way;
+    }
+    entry = &set[chosen];
     memset(&next, 0, sizeof(next));
     next.key = *key;
     next.glyph.width = raster->width * columns;
@@ -529,7 +549,7 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *key,
     next.glyph.stride = next.glyph.width * (int)next.glyph.format;
     bytes = (size_t)next.glyph.stride * next.glyph.height;
     old_bytes = entry->valid ? (size_t)entry->glyph.stride * entry->glyph.height : 0;
-    if (raster->bytes - old_bytes + bytes > RASTER_MAX_BYTES) return 0;
+    if (bytes > RASTER_MAX_BYTES) return 0;
     next.pixels = calloc(1, bytes);
     if (!next.pixels) return 0;
     next.glyph.pixels = next.pixels;
@@ -557,8 +577,27 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *key,
                         next.glyph.width, next.glyph.height, raster->outline != NULL);
     }
     bytes = (size_t)next.glyph.stride * next.glyph.height;
-    if (raster->bytes - old_bytes + bytes > RASTER_MAX_BYTES) { free(next.pixels); return 0; }
+    if (bytes > RASTER_MAX_BYTES) { free(next.pixels); return 0; }
+    /* Only after a successful raster: reclaim resident pixels round-robin
+       across sets when larger glyphs exhaust the byte budget. Never reject
+       a supported glyph merely because other cached glyphs occupy it. */
+    while (raster->bytes - old_bytes + bytes > RASTER_MAX_BYTES) {
+        unsigned victim_slot = raster->reclaim_slot;
+        RasterEntry *victim = &raster->cache[victim_slot];
+        raster->reclaim_slot = (victim_slot + 1) % RASTER_SLOTS;
+        if (victim != entry && victim->valid) {
+            unsigned other, start = victim_slot / RASTER_WAYS * RASTER_WAYS;
+            for (other = start; other < start + RASTER_WAYS; ++other)
+                if (raster->cache[other].valid && raster->cache[other].age > victim->age)
+                    --raster->cache[other].age;
+            raster->bytes -= (size_t)victim->glyph.stride * victim->glyph.height;
+            free(victim->pixels);
+            memset(victim, 0, sizeof(*victim));
+        }
+    }
     next.valid = 1;
+    for (way = 0; way < RASTER_WAYS; ++way)
+        if (way != chosen && set[way].valid) ++set[way].age;
     free(entry->pixels);
     *entry = next;
     raster->bytes = raster->bytes - old_bytes + bytes;

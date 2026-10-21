@@ -92,8 +92,20 @@ int main(int argc, char **argv)
             CHECK(blit_raster_get(raster, 'A' + 128, 1, &again));
             CHECK(blit_raster_render_count(raster) == count + 1);
             CHECK(blit_raster_get(raster, 'A', 1, &again));
-            CHECK(blit_raster_render_count(raster) == count + 2);
+            CHECK(blit_raster_render_count(raster) == count + 1);
             CHECK(!memcmp(saved, again.pixels, again.stride * again.height));
+            /* Fill the remaining ways, touch A, then force an LRU eviction.
+               All five keys collide; the recently touched A must survive. */
+            CHECK(blit_raster_get(raster, 'A' + 256, 1, &again));
+            CHECK(blit_raster_get(raster, 'A' + 384, 1, &again));
+            CHECK(blit_raster_get(raster, 'A', 1, &again));
+            CHECK(blit_raster_get(raster, 'A' + 512, 1, &again));
+            count = blit_raster_render_count(raster);
+            CHECK(blit_raster_get(raster, 'A', 1, &again));
+            CHECK(blit_raster_render_count(raster) == count);
+            CHECK(!memcmp(saved, again.pixels, again.stride * again.height));
+            CHECK(blit_raster_get(raster, 'A' + 128, 1, &again));
+            CHECK(blit_raster_render_count(raster) == count + 1);
             CHECK(blit_raster_get(raster, 'A', 2, &again));
             CHECK(again.width == width * 2);
             CHECK(blit_raster_get(raster, 'A', 1, &again));
@@ -132,6 +144,23 @@ int main(int argc, char **argv)
         for (x = 32; x < 1024; ++x) CHECK(blit_raster_get(raster, (uint32_t)x, 1, &again));
         CHECK(blit_raster_cached_bytes(raster) <= 4U * 1024U * 1024U);
         CHECK(blit_raster_get(raster, 'A', 1, &again) && !again.fallback);
+        if (size == 64) {
+            unsigned char saved_colour[128 * 64 * 4];
+            int pass, saved_bytes;
+            CHECK(blit_raster_get(raster, 0x1f600, 2, &again));
+            saved_bytes = again.stride * again.height;
+            memcpy(saved_colour, again.pixels, saved_bytes);
+            /* More resident colour pixels than the byte budget can hold.
+               Successful glyphs must evict, never fail because it is full. */
+            for (pass = 0; pass < 2; ++pass)
+                for (x = 0x1f300; x < 0x1f500; ++x) {
+                    CHECK(blit_raster_get(raster, (uint32_t)x, 2, &again));
+                    CHECK(blit_raster_cached_bytes(raster) <= 4U * 1024U * 1024U);
+                }
+            CHECK(blit_raster_get(raster, 0x1f600, 2, &again));
+            CHECK(saved_bytes == again.stride * again.height);
+            CHECK(!memcmp(saved_colour, again.pixels, saved_bytes));
+        }
         printf("size=%d cell=%dx%d partial=%d coloured=%d cached_bytes=%lu PASS\n",
             size, width, size, partial, coloured, (unsigned long)blit_raster_cached_bytes(raster));
         blit_raster_close(raster);

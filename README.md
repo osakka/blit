@@ -4,6 +4,10 @@
 
 Public repository: [github.com/osakka/blit](https://github.com/osakka/blit).
 
+Stable checkpoint: **v0.1.589**. The **0.2.0 development line** targets measured
+rendering/CPU improvements without sacrificing correctness; see the
+[performance programme](docs/performance-0.2.md). Candidate is not a release.
+
 Blit is the display and terminal boundary; Hibr remains the desktop/session
 owner. The normal integration is one Blit service, one primary Hibr desktop,
 and zero or more Hibr `desktop --join` attachments placed by Blit's logical

@@ -239,6 +239,7 @@ suite_font() {
     run_gate emoji_transition_gate.rb ruby tools/tests/emoji_transition_gate.rb
     run_gate harfbuzz_identity_gate.rb ruby tools/tests/harfbuzz_identity_gate.rb
     run_gate emoji_cluster_raster_gate.rb ruby tools/tests/emoji_cluster_raster_gate.rb
+    run_gate font_cache_workload.rb ruby tools/probes/font_cache_workload.rb --check
     if [ -f "${BLIT_GATE_HARFBUZZ:-/lib/x86_64-linux-gnu/libharfbuzz.so.0}" ]; then
         run_gate emoji_font_audit_gate.rb ruby tools/tests/emoji_font_audit_gate.rb
     else
@@ -424,6 +425,7 @@ suite_packaging() {
 }
 
 suite_timing() {
+    run_gate performance_baseline_gate.rb ruby tools/tests/performance_baseline_gate.rb
     run_gate pointer_cadence_observation_gate.rb ruby tools/tests/pointer_cadence_observation_gate.rb
     run_gate frame_rate_gate.rb ruby tools/tests/frame_rate_gate.rb
     if start_server; then

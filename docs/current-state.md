@@ -1,5 +1,33 @@
 # Current state and restart point
 
+## 2026-10-21: 0.2 performance development; stable589 preserved
+
+The existing annotated v0.1.589 tag is verified on the public mirror; do not
+retag or overwrite it. packaging/VERSION is now0.2.0 for development, not a
+released/deployed0.2.0. Live host remains589; no backend/settings/session
+changes. Internal Blit122 tracks the[performance programme](performance-0.2.md).
+ADR0176 establishes four-way shared raster reuse within the existing4MiB
+pixel budget. The production cache workload eliminates28,800 repeat
+rasterizations per39,200 warmed ASCII+Hibr-UI lookups for each profile;
+glyph pixels/metrics are unchanged. This is not a measured live FPS gain.
+Final GLES11/11 and isolated timing4pass/2live-only skips/0fail pass;
+Arabic/emoji/all-size/colour-pressure/backend and Valgrind checks pass.
+Initial standard142pass/9skip/3fail is preserved in the verification ledger,
+with all failed gates subsequently passing corrected/isolated rechecks.
+Input-fixture intermittency is tracked in124; no clean full-suite or live
+speedup claim is made. Candidate remains undeployed.
+
+Read-only live diagnostics show direct-KMS CPU drawing beyond a60Hz frame
+budget in sampled frames. Existing APIs and the bounded read-only
+`tools/probes/performance_baseline.rb` separate this observation from a
+controlled benchmark. Next: function-level CPU/damage attribution and a
+matched live workload before any deployment claim. Preserve native/SDL
+correctness, Arabic/colour and font geometry; no Hibr edits or SSH.
+
+Update to earlier historical notes: upstream Hibr337 is closed, released in
+0.99.283/23fad83 with console/term/hold/desktop support. Actual installed
+version/new hold and through-hold acceleration still need Blit120 acceptance.
+
 ## 2026-10-21:0.1.589 released and deployed by operator request
 
 Supervised API update to192.168.10.54 succeeded. GET/v1/version reports589;

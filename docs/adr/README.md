@@ -193,6 +193,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0173 — Retain shrinking fallback coverage](0173-retain-shrinking-fallback-coverage.md)
 - [0174 — Arabic companion rasterization](0174-arabic-companion-rasterization.md)
 - [0175 — Complete-cell rectangle copy](0175-complete-cell-rectangle-copy.md)
+- [0176 — Measured performance and raster cache](0176-measured-performance-and-raster-cache.md)
 
 ## Adding an ADR
 

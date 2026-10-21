@@ -1,5 +1,13 @@
 # Blit roadmap
 
+0.2 performance programme: internal122; stablev0.1.589 remains the rollback
+checkpoint. Candidate0.2.0 starts with measured shared glyph-cache collision
+reuse, then CPU/damage attribution and GPU upload/batching based on profiles.
+See[acceptance and workload sequence](performance-0.2.md) and ADR0176. No
+universal Kitty superiority or live speedup is claimed from a microbenchmark.
+Hibr337 is now closed/released0.99.283;120 still owns live acceptance with a
+new hold server. The older implementation checkpoints below are historical.
+
 Solid drag120: released/deployed589 corrects the existing standard DECCRA cell-copy
 path and advertises rectangular editing through DA1 feature28 (ADR0175).
 Upstream Hibr337 owns console/term/hold/desktop integration; no Hibr edits in

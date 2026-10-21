@@ -1,5 +1,57 @@
 # Verification status
 
+## 2026-10-21: 0.2 development cache and observation checkpoint
+
+Stablev0.1.589 annotation/target is verified on the public GitHub mirror.
+Development packaging/VERSION is0.2.0; TCC builds it successfully. No0.2
+release/tag/package deployment is claimed; the live host still reports589.
+Internal122/123 and ADR0176 own the[performance programme](performance-0.2.md).
+
+Production cache workload: Retro and Modern,11x22px,200 warmed passes;
+ASCII19,000 lookups/0 repeats; ASCII+Hibr UI39,200/0 (released code28,800
+repeats); same-bucket Latin/Arabic/colour600/0 (released code600 repeats).
+Per-run glyph pixel/metric signatures match; CPU time includes signature
+checking and is not a live FPS benchmark. The4MiB resident pixel limit stays.
+
+Targeted final-code checks pass: full emoji-presentation corpus at every
+size8..64 in both profiles, full5,244-entry cluster corpus per profile,
+Arabic16,986 cases per companion, font-raster all57 sizes with five-way
+collision/LRU tests, and large64px colour-pressure/recovery in both profiles.
+Native-KMS, SDL software and offscreen GL raster fixtures also pass. Shared
+cache probe under Valgrind reports0 errors/0 definitely or indirectly lost.
+Schema and font-reference gates pass. The new observation sampler fixture
+passes exact CPU/counter units, GET-only operations, reset/backend-change
+rejection and credential-output checks.
+
+Initial associative code failed a supported emoji lookup at53px because the
+larger entry count hit the byte ceiling. Successful-miss budget reclamation
+fixes it; all-size presentation and dedicated large-colour pressure checks
+were rerun, not waived. Initial parallel GLES run also hit an occupied test
+port, and initial standard input-config fixture lost its fabricated event0;
+the isolated input-config recheck passes (tracked for investigation in124).
+The initial standard run finished142pass/9skip/3fail: presentation above,
+input-config, and full-scene timing44.697ms against its unchanged20ms budget.
+It ran alongside CPU-heavy raster/GLES checks; that is not a diagnosed cause
+of the timing miss. No threshold was relaxed. The nine skips explicitly
+include absent Hibr headers, package/live-host gates and QEMU oracles.
+Final GLES recheck passes11/11 with no occupied fixture port. These receipts
+are not a clean standard-suite run and do not certify release/deployment.
+No new live drag/cadence improvement is claimed.
+
+Final isolated timing suite:4pass/2live-only skips/0fail, including the new
+sampler fixture, unchanged frame-rate budget and120s/four-session PTY soak
+(11,072 snapshots/1,006 resizes). Final input-config recheck also passes.
+Final targeted Arabic/cluster/native-KMS/SDL-software/GL checks pass after
+byte-budget reclamation was added. All three initial failing gates now pass
+their corrected/isolated rechecks, but a new clean full standard-suite run
+has not been claimed. Input-fixture intermittency remains tracked in124.
+
+Read-only live589 window:5.091s server uptime delta,9.31% one server core,
+36 presentation calls/32 missed deadlines. Native direct-KMS; last sampled
+draw17.542ms/copy1.081ms. Workload uncontrolled; phases can repeat stale
+frames. The sampler does not measure Hibr/hold or GPU/compositor CPU.
+No live settings/backend/session changes, Hibr edits or SSH.
+
 ## 2026-10-21:0.1.589 supervised live release receipt
 
 Operator requested releasing589 after its149pass/5skip/0fail standard suite,

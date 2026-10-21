@@ -93,6 +93,13 @@ retained historical build snapshot is not an active development/config owner.
 
 ## Required gates
 
+For the[0.2 performance programme](performance-0.2.md), `font` also runs the
+production cache workload (`ruby tools/probes/font_cache_workload.rb --check`)
+and `timing` verifies the read-only baseline sampler's units, counter-reset
+rejection and backend-change rejection. Report cache work separately from
+live frame latency. Keep source/font identities and workload conditions with
+the result; never promote an idle API sample into a Kitty comparison.
+
 Use the narrowest gate that proves the change, then run the broader gate before
 handoff:
 
