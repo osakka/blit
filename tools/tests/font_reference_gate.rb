@@ -59,4 +59,9 @@ documents.each do |file|
     raise "broken local link #{file}: #{href}" unless target.file?
   end
 end
+public_entries = %w[README.md docs/README.md docs/font-reference.md assets/fonts/README.md assets/fonts/icons/README.md]
+public_entries.each do |path|
+  raise "internal URL in public entry point: #{path}" if File.read(File.join(root,path)).match?(%r{https?://git\.home\.arpa})
+end
+raise 'public reference address missing' unless File.read(File.join(root,'docs/font-reference.md')).include?('https://github.com/osakka/blit/blob/main/docs/font-reference.md')
 puts "FONT_REFERENCE_PASS nerd_names=#{found.size} nerd_scalars=#{found.values.uniq.size} originals=#{icons['icons'].size} emoji_entries=#{emoji.size} native_faces=6 links=local_exact scope=documentation_not_renderer"

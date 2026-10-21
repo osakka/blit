@@ -6,7 +6,10 @@ intended to provide a text-centric display surface without requiring X11 or
 Wayland, while still supporting a desktop-sized canvas spanning multiple
 monitors.
 
-Canonical repository: `git.home.arpa/itdlabs/blit`
+Public repository: [github.com/osakka/blit](https://github.com/osakka/blit).
+Public file links use repository-relative paths or GitHub `blob/main` URLs.
+The internal engineering origin and issue backlog remain separate; internal
+issue numbers must not be assumed to identify GitHub issues.
 
 This directory is the project contract. Implementation work should update the
 relevant documentation and schema in the same change.

@@ -1,5 +1,18 @@
 # Current state and restart point
 
+## 2026-10-21: public documentation uses GitHub, not internal Gitea
+
+Operator clarified the publication boundary: github.com/osakka/blit is the
+public repository; Gitea remains internal origin/backlog. The public font
+guide and hibr-apps pane guide return200. GitHub main already matched the
+internal reference commit9781791 before this correction. The earlier
+internal-browser404 investigation was not a public publishing blocker.
+
+Public entry points now use GitHub/relative file links. Internal ticket IDs
+remain explicitly internal, not guessed GitHub issue URLs. Workflow and
+font-reference regression checks enforce this distinction. No remote,
+runtime, font asset, host or Hibr change is involved.
+
 ## 2026-10-21:121 font developer reference
 
 docs/font-reference.md is the Hibr application author entry point, committed
@@ -14,10 +27,10 @@ Canonical catalogues/assets remain the source of truth. Generator --check,
 font_reference_gate, asset identity and schema checks pass. This cycle changes
 documentation/tooling only: no new package, host/backend/config/font changes,
 Hibr edits or physical conformance claims. Live version remains588.
-Gitea's contents API confirms publication. Its advertised browser and raw
-routes return404 from this agent environment, including the repository root;
-browser rendering/standalone-site hosting is not verified. Use the repository
-checkout or contents API for now; do not claim a separately hosted site exists.
+Internal Gitea's contents API confirmed the files. Its browser/raw404 results
+were initially misclassified as a public publishing concern; the public
+address correction above supersedes that conclusion. No separate standalone
+site was created; the public reference is GitHub repository documentation.
 
 ## 2026-10-21:0.1.588 deployed; physical Arabic review next
 

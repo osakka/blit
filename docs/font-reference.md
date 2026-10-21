@@ -4,6 +4,8 @@ For Hibr application, desktop and Control Panel developers. This reference
 describes the font assets delivered in0.1.588; query the running server for
 its actual selected profile. It does not require changes to Hibr core.
 
+Public reference: [github.com/osakka/blit — font reference](https://github.com/osakka/blit/blob/main/docs/font-reference.md).
+
 **Browse:** [every Nerd glyph by category](fonts/README.md),
 [Blit/Hibr special additions](fonts/special.md),
 [every pinned emoji by category](fonts/emoji.md),
@@ -120,8 +122,8 @@ character = chr(int(entry["codepoint"], 16))
 ```
 
 This illustrates scalar conversion, not a Hibr API or a replacement for its
-UI/glyph abstraction. [Hibr330](https://git.home.arpa/itdlabs/hibr/issues/330)
-tracks opt-in desktop integration. Merely installing the font does not
+UI/glyph abstraction. Internal Hibr tracking330 covers opt-in desktop
+integration; that number is not a GitHub issue mapping. Merely installing the font does not
 replace existing application icon selections. Hibr source is not modified
 by this reference.
 
@@ -168,8 +170,8 @@ using cluster layout must follow the [explicit emoji layout API](api.md#explicit
 including owner/continuation cells and width. Do not switch the existing Hibr
 desktop's layout policy globally to make an icon work. Font/corpus coverage,
 browser appearance and passing local raster tests are not universal terminal
-or physical conformance guarantees; [issue110](https://git.home.arpa/itdlabs/blit/issues/110)
-tracks remaining acceptance.
+or physical conformance guarantees; internal tracking110 covers remaining
+acceptance. See the [font plan](font-evolution-plan.md).
 
 ## Machine-readable sources and reproducibility
 
@@ -199,10 +201,10 @@ ruby tools/tests/font_reference_gate.rb
 The generator verifies pinned input hashes and both profiles' full Nerd and
 original-icon cmap coverage. Regenerate and commit derived tables together
 when canonical assets change. No host fonts, network or running display are
-needed. Repository Markdown is the publication format; Gitea's contents API
-confirms these files on main. Its advertised browser/raw URLs currently
-return404 from the agent environment, so browser rendering and separate-site
-hosting are not verified. The cloned repository remains usable. A future
+needed. Repository Markdown on [GitHub](https://github.com/osakka/blit) is the
+public publication format. Use repository-relative file links within the
+guide and GitHub `blob/main` URLs when sharing it externally. Internal Gitea
+addresses are for engineering workflow, not public publication. A future
 site should consume the same files rather than introduce a parallel catalogue.
 
 ## Licences and attribution

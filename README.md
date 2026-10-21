@@ -2,6 +2,8 @@
 
 > API-driven, text-first display service for SDL3/KMS Linux hosts.
 
+Public repository: [github.com/osakka/blit](https://github.com/osakka/blit).
+
 Blit is the display and terminal boundary; Hibr remains the desktop/session
 owner. The normal integration is one Blit service, one primary Hibr desktop,
 and zero or more Hibr `desktop --join` attachments placed by Blit's logical
@@ -140,7 +142,7 @@ save through Blit's API. Native horizontal sliders also select each monitor's in
 columns/rows (1–8 each). **Save as Default** applies/saves the grid; new
 unconfigured monitors start1x1. Blit refuses removing occupied panes instead
 of killing their terminals. See [the API layout contract](docs/api.md#displays-topology-and-fonts).
-The [pane guide](https://git.home.arpa/itdlabs/hibr-apps/src/branch/main/docs/blit.md)
+The [pane guide](https://github.com/osakka/hibr-apps/blob/main/docs/blit.md)
 documents connection, conflict handling, import/export and diagnostics. The
 canonical pane lives only in hibr-apps, not in Hibr core or this package.
 
@@ -160,7 +162,8 @@ not a universal Arabic/Quranic claim.
 Independent font shaping passes all5,244 pinned Emoji18.0 entries;
 the shared bounded cluster raster now shapes and draws the full corpus in
 offline16px module tests. Terminal segmentation, presentation policy and
-end-to-end conformance remain [issue110](https://git.home.arpa/itdlabs/blit/issues/110).
+end-to-end conformance remain open (internal tracking110; see the
+[font plan](docs/font-evolution-plan.md)).
 Owned clusters now reach native KMS and both SDL compositors, with full-key
 atlas caching and representative pixel checks. API updates can explicitly
 request `text_layout:"emoji"`; the scalar default is unchanged for existing
@@ -170,7 +173,7 @@ Unicode18.0 text/default presentation is implemented in the shared raster;
 remaining geometry and end-to-end acceptance are still open.
 HarfBuzz>=6.0.0 is an explicit runtime dependency, not a second renderer.
 Native KMS now reads the canonical sixteen-slot attachment layout correctly
-([113](https://git.home.arpa/itdlabs/blit/issues/113)). Not deployed. The active queue is
+(internal tracking113). Not deployed. The active queue is
 [fonts → browser sizing → SDL parity → performance/correctness → release](docs/roadmap.md).
 See [the font completion contract](docs/font-evolution-plan.md) for remaining
 work; shaping coverage alone does not mean complete terminal emoji support.
@@ -209,7 +212,7 @@ work; shaping coverage alone does not mean complete terminal emoji support.
 - Saved auxiliary defaults and a live Apply API with authenticated Hibr
   standby startup, native placement confirmation and observable progress.
 - A catalogue **Blit** Control Panel in
-  [hibr-apps](https://git.home.arpa/itdlabs/hibr-apps), with separate Apply/Save,
+  [hibr-apps](https://github.com/osakka/hibr-apps), with separate Apply/Save,
   fonts, login preferences, configuration import/export and diagnostics.
 - TCC builds, QEMU/VKMS fixtures, terminal conformance, package gates, and
   live-host diagnostic gates.

@@ -36,6 +36,20 @@ fixture input, not a valid package build target.
 
 ## Commit and push cadence
 
+### Public publication links
+
+The public repository is `https://github.com/osakka/blit`. Use relative paths
+for files within the repository and GitHub `blob/main` or `tree/main` links
+when publishing externally. Internal Gitea remains the engineering origin
+and backlog; do not replace the configured remote or create a parallel push
+workflow for a documentation-link change. Verify the public GitHub branch
+contains the intended commit before claiming publication. Internal issue
+numbers are not automatically GitHub issue numbers: preserve their internal
+identity rather than fabricating public issue links. Internal browser-route
+failures do not establish failure of the public GitHub documentation.
+
+### Completed-cycle commits
+
 Every completed cycle ends with `git diff --check`, an intentional-file review,
 a focused commit, `git push origin main`, and a final branch-status check. The
 commit contains the implementation, tests, ADR/documentation changes, and the

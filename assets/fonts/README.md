@@ -59,7 +59,8 @@ profiles; `cod-blank` intentionally has no ink. See ADR0156.
 
 Scope matters: this is **not all Unicode or all emoji sequences**. Font files
 alone do not shape flags, skin tones, ZWJ families or VS16 presentation; that
-shared-renderer work is [issue110](https://git.home.arpa/itdlabs/blit/issues/110).
+shared-renderer acceptance remains internal tracking110; see the
+[font plan](../../docs/font-evolution-plan.md).
 Candidate576 adds an internal HarfBuzz/FreeType colour-cluster raster, tested
 against all5,244 pinned Emoji18.0 entries at16px and representative families
 at8..64px. The specimen includes its output, not a claim of terminal support.

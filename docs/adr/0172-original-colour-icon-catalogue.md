@@ -64,7 +64,10 @@ Live installation/operator aesthetic acceptance must be recorded separately.
 
 ## Developer reference publication (Blit121)
 
-Publish docs/font-reference.md through the repository's Gitea web view.
+Publish docs/font-reference.md through the public github.com/osakka/blit
+repository. Gitea remains the internal engineering origin and issue backlog;
+it is not the public documentation address. Prefer repository-relative file
+links and GitHub blob/main URLs for externally shared documents.
 Generate docs/fonts tables from the existing hash-pinned Nerd catalogue,
 original icon catalogue, emoji corpus and exact font cmaps using the existing
 fontTools4.60.1 build dependency. Do not introduce another editable glyph

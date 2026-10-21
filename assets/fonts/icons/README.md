@@ -50,7 +50,7 @@ catalogue/missing/oversized errors, and PTY/API presented-pixel parity.
 Native/SDL adapter tests include the seven originals at every supported size.
 These are executable local checks, not physical visual acceptance.
 
-[Hibr330](https://git.home.arpa/itdlabs/hibr/issues/330) tracks opt-in menu,
+Internal Hibr tracking330 covers opt-in menu,
 Wi-Fi and Bluetooth selection. No Hibr source was changed here. Until Hibr
 selects the private glyphs, an existing Unicode/Nerd indicator is not evidence
 that these colour originals are missing from the font.

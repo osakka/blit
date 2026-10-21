@@ -1,5 +1,18 @@
 # Verification status
 
+## 2026-10-21: public link boundary correction
+
+Verified github.com/osakka/blit exists publicly, public font-reference URL
+returns200, and osakka/hibr-apps/blob/main/docs/blit.md returns200. Read-only
+git ls-remote confirmed public main exactly matched local9781791 before
+this documentation correction. Earlier internal Gitea browser404 results
+do not establish any failure of GitHub publication.
+
+Public entry points use GitHub/relative links, with no invented mapping from
+internal issue numbers to GitHub issues. font_reference_gate passes and now
+rejects internal host URLs in those entry points. Documentation/tooling only;
+no runtime/font/backend/remote/Hibr changes.
+
 ## 2026-10-21:121 generated font developer reference
 
 `build-reference.py --check` passes against all30 generated Markdown pages
@@ -15,10 +28,10 @@ all local links. Added to the standard font suite. Asset identity and48-path
 schema gates pass. Generated previews use the existing real raster tool;
 font artwork and runtime are unchanged. This is documentation correctness,
 not another renderer, shaping or physical validation claim. No host writes.
-After push, Gitea's contents API confirms the reference on main. Advertised
-browser/raw URLs return404 from the agent environment (repository root too).
-Local relative-link checks do not prove hosted routing or browser rendering;
-no standalone website was created or claimed verified.
+After push, internal Gitea's contents API confirmed the reference on main.
+Its internal browser/raw404 results were not a public GitHub test; the
+public-address correction above supersedes that publishing concern.
+No separate standalone website was created.
 
 ## 2026-10-21:119 candidate588 profile activation
 
