@@ -22,6 +22,77 @@ static SDL_Surface *scene_pixels(BlitOutput *o)
     rgba=SDL_ConvertSurface(p,SDL_PIXELFORMAT_RGBA32);CHECK(rgba);
     SDL_DestroySurface(p);CHECK(SDL_SetRenderTarget(o->renderer,NULL));return rgba;
 }
+static int protocol_max_damage_cells;
+static void protocol_frame(BlitRuntime *r, BlitSurface *v, const char *wire)
+{
+    SDL_Surface *incremental, *full;
+    unsigned long long before=v->graphics_presented.signature;
+    int y;
+    CHECK(terminal_consume_output(r,&r->sessions[0],v,
+        (const unsigned char *)wire,strlen(wire)));
+    CHECK(!r->sessions[0].graphics_rejected);
+    CHECK(v->damage_valid && (v->damage_width<v->width || v->damage_height<v->height));
+    if(v->damage_width*v->damage_height>protocol_max_damage_cells)
+        protocol_max_damage_cells=v->damage_width*v->damage_height;
+    ++v->revision;
+    r->sessions[0].terminal_synchronized=1;
+    render_current_surfaces(r,1,0);
+    CHECK(v->damage_valid && v->graphics_presented.signature==before);
+    r->sessions[0].terminal_synchronized=0;
+    render_current_surfaces(r,0,0);
+    CHECK(v->damage_valid && v->graphics_presented.signature==before);
+    /* Main-loop held attempts are restricted to pointer-dirty outputs. */
+    r->pointer_dirty=1;r->pointer_dirty_outputs=1;
+    render_current_surfaces(r,1,1);
+    CHECK(v->damage_valid && v->graphics_presented.signature==before);
+    scene_clears=0;
+    render_current_surfaces(r,1,0);
+    CHECK(!scene_clears && !v->damage_valid);
+    incremental=scene_pixels(&r->outputs[0]);
+    ++r->topology_revision;mark_surface_full_damage(v);
+    render_current_surfaces(r,1,0);CHECK(scene_clears);
+    full=scene_pixels(&r->outputs[0]);
+    CHECK(incremental->w==full->w && incremental->h==full->h);
+    for(y=0;y<full->h;++y)
+        CHECK(!memcmp((unsigned char *)incremental->pixels+y*incremental->pitch,
+                      (unsigned char *)full->pixels+y*full->pitch,full->w*4));
+    SDL_DestroySurface(incremental);SDL_DestroySurface(full);
+}
+static void protocol_frames(BlitRuntime *r, BlitSurface *v)
+{
+    char encoded[1024],wire[2048];
+    int step,i;
+    for(step=0;step<3;++step){
+        /* 128 independently specified Base64 quartets = 384 RGBA bytes. */
+        for(i=0;i<512;i+=4)memcpy(encoded+i,step==0?"4ihQ":step==1?"yihQ":"8ChQ",4);
+        encoded[512]=0;
+        v->cursor_x=4+step*3;v->cursor_y=3;
+        snprintf(wire,sizeof(wire),"\033_Ga=T,i=10,f=32,s=8,v=12,C=1,q=2,m=1;%.256s\033\\",encoded);
+        CHECK(!terminal_consume_output(r,&r->sessions[0],v,
+            (const unsigned char *)wire,strlen(wire)));
+        CHECK(!graphics_image_find(&r->sessions[0],10)->complete);
+        snprintf(wire,sizeof(wire),"\033_Gm=0,q=2;%s\033\\",encoded+256);
+        protocol_frame(r,v,wire);
+        v->cursor_x+=3;
+        protocol_frame(r,v,"\033_Ga=p,i=10,p=7,C=1,q=2;\033\\");
+        protocol_frame(r,v,"\033_Ga=d,d=i,i=10,p=7,q=2;\033\\");
+        CHECK(graphics_image_find(&r->sessions[0],10));
+        protocol_frame(r,v,"\033_Ga=d,d=I,i=10,q=2;\033\\");
+        CHECK(!graphics_image_find(&r->sessions[0],10));
+    }
+    /* Parameterized sixel, transparent and opaque, with retained wallpaper. */
+    v->cursor_x=5;v->cursor_y=3;
+    protocol_frame(r,v,"\033P0;1q\"1;1;8;6#1;2;100;0;0!8~\033\\");
+    v->cursor_x=10;v->cursor_y=4;
+    protocol_frame(r,v,"\033P0;2q\"1;1;8;6#1;2;0;100;0!8~\033\\");
+    for(i=0;i<BLIT_GRAPHICS_MAX_IMAGES;++i)
+        if(r->sessions[0].graphics[i].used &&
+           !strcmp(r->sessions[0].graphics[i].protocol,"sixel")){
+            snprintf(wire,sizeof(wire),"\033_Ga=d,d=I,i=%u,q=2;\033\\",r->sessions[0].graphics[i].id);
+            protocol_frame(r,v,wire);
+        }
+    printf("GRAPHICS_PROTOCOL_PASS frames=16 max_producer_damage_cells=%d full_cells=480 chunked_upload=hidden_until_complete placement_delete=bounded sixel=opaque_transparent full_reference=exact\n",protocol_max_damage_cells);
+}
 static void sdl_scene_gate(void)
 {
     BlitRuntime *r=calloc(1,sizeof(*r));
@@ -93,6 +164,7 @@ static void sdl_scene_gate(void)
       render_current_surfaces(r,0,0);
       CHECK(v->graphics_presented.signature==before&&v->damage_valid);
       render_current_surfaces(r,1,0);CHECK(v->graphics_presented.signature!=before); }
+    protocol_frames(r,v);
     destroy_outputs(r);blit_font_free(&r->font);free(v);free(r);SDL_Quit();
     printf("GRAPHICS_SDL_PASS renderer=%s steps=36 full_reference=exact clears=0 sync=held wallpaper_alpha_z_crop_pixels_delete=covered\n",name);
 }

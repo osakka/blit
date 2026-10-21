@@ -1,5 +1,12 @@
 # Blit roadmap
 
+125 protocol-image stage, candidate0.2.0: Kitty/sixel completion and Kitty
+deletion now wake the scheduler with placement bounds, not unconditional
+full-surface damage. Shared last-composed descriptors retain old/revealed
+coverage (ADR0177 extension). Local parser/full-reference tests cover16 added
+frames; native copying, GPU architecture and controlled live acceptance remain.
+SDL hotplug parity is still an explicit104 dependency.
+
 125 stage two, candidate0.2.0: linear Kitty chunk scanning and direct existing
 RGBA submission remove measured redundant work (ADR0178). RGB24 conversion
 and protocol/tail semantics remain. Protocol-image damage, native full-output

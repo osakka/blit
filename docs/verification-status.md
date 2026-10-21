@@ -1,5 +1,47 @@
 # Verification status
 
+## 2026-10-21: 125 protocol-image producer damage, candidate0.2.0 only
+
+ADR0177's extension narrows Kitty completion/deletion and sixel completion
+damage while retaining the shared last-composed comparison and renderer
+fallbacks. A production-parser regression fails on the prior full-surface
+Kitty completion handler. Sixteen added protocol frames pass software SDL
+and offscreen OpenGLES2 full-reference pixel comparisons: chunked uploads,
+multiple placements, placement-only/data deletion and opaque/transparent
+sixel over unchanged wallpaper. Maximum producer damage in these small-image
+cases is1 cell rather than480 full-view cells; this is fixture work, not a
+real application's damage bound or a physical FPS result. Held pointer,
+synchronized and masked attempts retain damage and the prior scene snapshot.
+Partial uploads remain invisible. Existing36-step native compositor tests
+(only DRM mocked) and deferred-flip tests also pass; do not describe these
+as physical native protocol acceptance.
+
+Final direct software/GL fixtures, TCC build and font-reference gate pass.
+Valgrind reports0 errors and0 definitely/indirectly/possibly lost bytes on
+software/protocol;18,804 bytes in9 library blocks remain reachable. Native
+fixture exits with0 allocated blocks and0 errors. Renderer suite:
+61pass/1explicit hardware-dependent skip/0fail. GLES suite:13pass/0skip/0fail.
+Combined schema/terminal/lifecycle suite:34pass/1explicit missing-pinned-Hibr-
+headers skip/0fail. No complete standard-suite or physical acceptance is claimed.
+Logs in `build/tests/`: `protocol-damage-software.log`,
+`protocol-damage-gl.log`, `protocol-damage-valgrind-final.log`,
+`protocol-damage-renderer.log`, `protocol-damage-gles.log` and
+`protocol-damage-contract.log`.
+
+Bounded read-only live observation still identifies589/native KMS. Over
+5,512ms it reports50.71% of one server CPU core,107,345 terminal bytes/s,
+149 presentation calls across two outputs and67 missed deadlines. Last-phase
+samples are display-93 (1920x2160):18.109ms draw/0.833ms copy/0.038ms submit
+and display-102 (2560x1440):20.595ms draw/0.714ms copy/0.020ms submit,
+both around60Hz.
+Workload is uncontrolled, samples can repeat stale frames, presentation calls
+are not distinct displayed frames, and CPU excludes Hibr/hold/GPU. No causal
+attribution, Kitty comparison or candidate live speedup follows from this
+window (`protocol-damage-live-observation.json`). No live writes, backend,
+session, layout or Hibr changes.125/122 remain open;104 still gates SDL
+multi-monitor hotplug parity. Native CPU composition/copying and controlled
+candidate video/input acceptance remain outstanding.
+
 ## 2026-10-21: 125 linear image ingestion, candidate0.2.0 only
 
 ADR0178 removes redundant ingestion work without changing protocol semantics.

@@ -55,8 +55,10 @@ scene. Both renderers preserve unchanged wallpaper outside affected regions.
 The new production fixture compares36 steps with full-redraw pixel oracles
 on native KMS (DRM mocked), software SDL and offscreen GL. It also verifies
 no movement-only texture uploads/whole-renderer clears and held/deferred
-damage retention. Completed protocol-image uploads remain full-damage for
-now; this is not yet the entire video-plus-drag performance fix.
+damage retention. The ADR0177 extension now also bounds completed Kitty/sixel
+producer damage and Kitty deletion. Sixteen additional real parser frames
+match full redraws on software/GL, including chunking and held attempts. This
+is not yet the entire video-plus-drag performance fix or a live FPS claim.
 
 Reproduce without a display or changing installed fonts:
 

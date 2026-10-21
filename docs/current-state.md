@@ -5,6 +5,28 @@ under internal104: discovery, unplug/replug, stable identities, saved layouts,
 pane/session placement and input routing. The0.2 shared-damage fixtures do
 not certify it or authorize a backend switch. Live remains native KMS589.
 
+## 2026-10-21: 125 protocol-image damage extension
+
+Candidate0.2.0 no longer unconditionally damages an entire terminal on Kitty
+upload completion/deletion or sixel completion. Producers mark current/removed
+placement bounds to wake the existing scheduler; the shared last-composed
+scene comparison adds old/revealed coverage. No duplicate scene or decoder.
+Partial uploads stay hidden and terminal damage still accumulates (ADR0177).
+
+The new parser regression fails on the previous full-surface upload handler.
+Sixteen real protocol frames compare incremental output with full redraws:
+chunked Kitty upload, multiple placements, placement-only/data deletion,
+opaque/transparent sixel and removal over retained wallpaper. Software/GL
+checks include synchronized, masked and pointer-held attempts; native retains
+its36-step compositor/deferred-flip oracle. See verification ledger for receipts.
+
+A read-only live5.512s window confirms589/native KMS, two outputs at roughly
+60Hz,50.71% of one server CPU core and67 missed deadlines. Final sampled draw
+phases18.109ms and20.595ms exceed a16.67ms budget; these may repeat stale frames
+and are not per-frame percentiles or a controlled Kitty comparison. No live
+writes/deployment. Native CPU composition/copying, GPU work and matched live
+acceptance remain under125/122;104 still gates SDL multi-monitor hotplug parity.
+
 ## 2026-10-21: 125 stage two — image ingestion passes removed
 
 Development0.2.0 computes each immutable Kitty chunk length once instead of

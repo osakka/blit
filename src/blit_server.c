@@ -7055,6 +7055,24 @@ static void mark_graphics_damage(BlitSurface *surface, int x, int y,
                               cell_right - cell_x, cell_bottom - cell_y);
 }
 
+/* Wake the existing surface scheduler with current placement coverage. The
+   shared last-composed scene delta adds any old/revealed coverage before
+   either renderer runs; never acknowledge that snapshot at protocol time. */
+static void mark_graphics_image_damage(BlitSurface *surface,
+                                       const BlitGraphicsImage *image,
+                                       int cell_width, int cell_height)
+{
+    BlitGraphicsDraw draws[BLIT_GRAPHICS_MAX_PLACEMENTS + 1];
+    int i;
+    int count = blit_graphics_collect(image, 1, draws,
+                                     BLIT_GRAPHICS_MAX_PLACEMENTS + 1);
+    for (i = 0; i < count; ++i)
+        mark_graphics_damage(surface, draws[i].x, draws[i].y,
+            draws[i].width, draws[i].height, cell_width, cell_height);
+    /* Offscreen/unplaced changes still need scene identity acknowledgement. */
+    if (!surface->damage_valid) mark_surface_damage(surface, 0, 0);
+}
+
 /* Issue #48. A cell's colours and attributes belong under `style`, and this
    parser finds keys by search, so a cell that carried them at the top level
    was accepted with 200 and no style applied. The schema says
@@ -10052,6 +10070,11 @@ static int kitty_delete(BlitSession *session, BlitSurface *surface,
                 break;
             }
             if (match) {
+                if (image->complete && blit_graphics_draw_resolve(image,
+                    placed.x, placed.y, placed.width, placed.height, placed.z,
+                    placed.src_x, placed.src_y, placed.src_w, placed.src_h, &draw))
+                    mark_graphics_damage(surface, draw.x, draw.y,
+                        draw.width, draw.height, cw, ch);
                 kitty_placement_remove(image, id);
                 ++removed;
             }
@@ -10060,7 +10083,7 @@ static int kitty_delete(BlitSession *session, BlitSurface *surface,
             !kitty_image_has_placement(image))
             graphics_image_release(image);
     }
-    mark_surface_full_damage(surface);
+    if (!surface->damage_valid) mark_surface_damage(surface, 0, 0);
     return 1;
 }
 
@@ -10539,10 +10562,7 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
                                  (unsigned int)(image->advance - 1));
             image->advance = 0;
         }
-        /* Image composition is part of the surface scene, not terminal cell
-           state.  Invalidate the scene when the final Kitty chunk arrives so
-           SDL/KMS cannot skip the newly completed image. */
-        mark_surface_full_damage(surface);
+        mark_graphics_image_damage(surface, image, cell_width, cell_height);
     }
 }
 
@@ -10948,7 +10968,7 @@ static void terminal_apply_sixel(BlitSession *session, BlitSurface *surface,
         image->generation = next_graphics_generation();
     }
     free(canvas.pixels);
-    mark_surface_full_damage(surface);
+    mark_graphics_image_damage(surface, image, cell_width, cell_height);
 }
 
 /* XTGETTCAP: DCS + q <hex-name> [; <hex-name>...] ST (issue #4).
