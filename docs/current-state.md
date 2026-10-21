@@ -1,5 +1,30 @@
 # Current state and restart point
 
+## 2026-10-21:0.1.588 deployed; physical Arabic review next
+
+The supervised API updater installed588 on192.168.10.54. GET/v1/version
+confirms588; read-only API reporting confirms the installed server and both
+Arabic face SHA256s match the release/provenance manifests exactly. No SSH
+or Hibr code changes were used.
+
+The operator changed the font before deployment: latest Retro22px, clean
+revision335. The complete saved document is identical after deployment:
+direct KMS, DP-1 split1x2, bottom-primary and auxiliary policy preserved.
+Active inventory reports Blit Arabic Retro, baseline17px, visual-cell-marks.
+One login-manager session owns pane-display-93-2; joins wait for login.
+Capture build/tests/blit-0.1.588-login.png shows its idle animation, not an
+Arabic desktop acceptance specimen. Initial diagnostics have no errors/warnings.
+
+Standard suite147pass/5skip/0fail (120s/four-session soak included), separate
+offscreen GLES11/11, reproducible artifact gate pass. Both font profiles
+include companions and original colour-icon mappings; Hibr330 must adopt
+those mappings.119/118 remain open for physical typography review and
+remaining coverage. No universal Arabic/Quranic/all-emoji claim.
+
+Next: operator login and Arabic/diacritics/digits visual review in each
+profile. Shared-raster preview: images/blit-arabic-candidates.png.
+Earlier checkpoints below describe historical rollout stages.
+
 ## 2026-10-21:119 candidate588 activation and rollout checkpoint
 
 Canonical Modern/Retro profiles now require their Arabic companion and load

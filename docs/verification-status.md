@@ -28,8 +28,21 @@ Source70999f2; package SHA256
 `b43b3f993882214f0259d40e342b03f6aad43972fff550722f28856fead46bcd`;
 server SHA256
 `e574cc31a3c91467aa7545bce57542d5368eabe991c62ed241cbda05c9b7e3e5`.
-Standard-suite and live receipts remain pending at this checkpoint. Earlier
-entries retain their historical scope, not current activation behaviour.
+Standard suite:147pass/5skip/0fail (`arabic-activation-all.log`), including
+120s soak with four sessions,11664 snapshots and1060 resizes. Skips:
+kernel/QEMU VT, explicit QEMU Hibr lifecycle, package not supplied to the
+suite, live multi-display, live screenshot timing. Separate package checks
+above resolve artifact acceptance, not the other skipped checks.
+
+Live588 update verified through the supervised API updater. Read-only API
+command report confirms exact server and both Arabic asset SHA256s
+(`arabic-588-live-identity.json`). Saved document is unchanged, clean
+revision335: Retro22px (operator changed it before deployment), direct KMS,
+DP-1 split1x2. Active Arabic Retro reports baseline17px. One bottom-pane
+login-manager owner; joins wait for authentication. Initial diagnostics have
+no errors/warnings. Capture build/tests/blit-0.1.588-login.png shows its idle
+animation, not physical Arabic aesthetics or desktop/join acceptance.
+Earlier entries retain their historical scope, not current activation behaviour.
 
 ## 2026-10-21:119 shared backend overhang/damage fixtures
 
