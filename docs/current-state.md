@@ -2,8 +2,8 @@
 
 ## 2026-10-21:121 font developer reference
 
-docs/font-reference.md is the Hibr application author entry point, published
-through Gitea. docs/fonts contains generated category tables for all10,764
+docs/font-reference.md is the Hibr application author entry point, committed
+to Gitea main. docs/fonts contains generated category tables for all10,764
 Nerd names/10,386 distinct scalars, seven original colour icons, all5244
 Emoji18.0 corpus entries and exact six-face cmap coverage. The guide explains
 API discovery, semantic IDs, JSON/UTF-8/one-cell rules, colour vs themed glyphs,
@@ -14,6 +14,10 @@ Canonical catalogues/assets remain the source of truth. Generator --check,
 font_reference_gate, asset identity and schema checks pass. This cycle changes
 documentation/tooling only: no new package, host/backend/config/font changes,
 Hibr edits or physical conformance claims. Live version remains588.
+Gitea's contents API confirms publication. Its advertised browser and raw
+routes return404 from this agent environment, including the repository root;
+browser rendering/standalone-site hosting is not verified. Use the repository
+checkout or contents API for now; do not claim a separately hosted site exists.
 
 ## 2026-10-21:0.1.588 deployed; physical Arabic review next
 

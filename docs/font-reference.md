@@ -199,7 +199,10 @@ ruby tools/tests/font_reference_gate.rb
 The generator verifies pinned input hashes and both profiles' full Nerd and
 original-icon cmap coverage. Regenerate and commit derived tables together
 when canonical assets change. No host fonts, network or running display are
-needed. The Gitea-rendered Markdown is the current web publication; a future
+needed. Repository Markdown is the publication format; Gitea's contents API
+confirms these files on main. Its advertised browser/raw URLs currently
+return404 from the agent environment, so browser rendering and separate-site
+hosting are not verified. The cloned repository remains usable. A future
 site should consume the same files rather than introduce a parallel catalogue.
 
 ## Licences and attribution

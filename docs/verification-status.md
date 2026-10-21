@@ -15,6 +15,10 @@ all local links. Added to the standard font suite. Asset identity and48-path
 schema gates pass. Generated previews use the existing real raster tool;
 font artwork and runtime are unchanged. This is documentation correctness,
 not another renderer, shaping or physical validation claim. No host writes.
+After push, Gitea's contents API confirms the reference on main. Advertised
+browser/raw URLs return404 from the agent environment (repository root too).
+Local relative-link checks do not prove hosted routing or browser rendering;
+no standalone website was created or claimed verified.
 
 ## 2026-10-21:119 candidate588 profile activation
 
