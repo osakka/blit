@@ -149,7 +149,10 @@ coverage in both outline profiles (10,386 codepoints) and Noto2D2.057 colour
 emoji. Existing bitmap profiles stay selectable. Generate an actual-raster
 specimen without a display using `ruby tools/fonts/preview.rb`.
 The [font guide](assets/fonts/README.md) records API selection, provenance and
-limits. Candidate0.1.588 adds separate Retro/Modern Arabic companions,
+limits. Hibr developers can browse the [full glyph reference](docs/font-reference.md):
+Nerd categories, original Blit/Hibr colour icons, emoji sequences, native
+coverage and API integration rules.
+Candidate0.1.588 adds separate Retro/Modern Arabic companions,
 positioned diacritics and Arabic-Indic digits; the font API reports the loaded
 companion. See the [Arabic raster preview](docs/images/blit-arabic-candidates.png)
 and [current rollout status](docs/current-state.md); finite test coverage is

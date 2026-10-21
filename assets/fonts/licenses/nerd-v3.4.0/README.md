@@ -2,7 +2,8 @@
 
 Blit Modern Nerd and Blit Retro Nerd are renamed derivatives of Nerd Fonts
 v3.4.0 Hack Mono and 3270 Mono. Blit's changes fit complete icon outlines to
-the terminal cap height/advance and alias U+270E to the Font Awesome pencil.
+the terminal cap height/advance. From588, U+270E uses Blit's original themed
+pen silhouette; earlier derivatives used the Font Awesome pencil alias.
 They are not original typeface designs or endorsed upstream products.
 
 The parent `NerdFonts-LICENSE.txt` and base-font licences remain applicable.

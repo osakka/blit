@@ -1,5 +1,9 @@
 # hibr integration
 
+For glyph selection and colour icons, use the [font developer reference](font-reference.md).
+It covers API discovery, complete generated categories, semantic mappings,
+width/UTF-8 rules and fallbacks without modifying Hibr core.
+
 ## Decision
 
 blit remains the standalone display server. The Hibr desktop is an external

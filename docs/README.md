@@ -20,7 +20,8 @@ another's assumptions:
    [OpenAPI contract](../openapi/blit-0.1.yaml) for exact fields and status
    codes.
 2. **Hibr integrators**: read [Hibr integration](integration-hibr.md) and the
-   Hibr lifecycle ADRs. Blit owns placement, input routes, surfaces, and
+   [font/glyph developer reference](font-reference.md), then the Hibr
+   lifecycle ADRs. Blit owns placement, input routes, surfaces, and
    diagnostics; Hibr owns desktop semantics and `--join` behavior.
 3. **Contributors and release operators**: read the
    [engineering constitution](engineering-constitution.md),

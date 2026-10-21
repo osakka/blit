@@ -1,5 +1,21 @@
 # Verification status
 
+## 2026-10-21:121 generated font developer reference
+
+`build-reference.py --check` passes against all30 generated Markdown pages
+and six-face coverage JSON using pinned fontTools4.60.1. Generation verifies
+font/catalogue/corpus SHA256s; both primary faces contain the complete Nerd
+and original icon repertoire. An empty-output negative control fails without
+creating files, proving missing reference artifacts are not accepted.
+
+`font_reference_gate.rb` passes:10,764 Nerd names/aliases,10,386 distinct
+scalars, seven originals with valid supplementary JSON strings,5244 complete
+emoji sequences matching corpus order, six native-face hashes/ranges/counts,
+all local links. Added to the standard font suite. Asset identity and48-path
+schema gates pass. Generated previews use the existing real raster tool;
+font artwork and runtime are unchanged. This is documentation correctness,
+not another renderer, shaping or physical validation claim. No host writes.
+
 ## 2026-10-21:119 candidate588 profile activation
 
 Shared-raster gate:16,986 cases per face over8..64px, zero failures;

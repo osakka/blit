@@ -61,3 +61,17 @@ local real-PTY/API fixture verifies split UTF-8 and presentation parity.
 Hibr must explicitly select the colour mappings;330 tracks that integration.
 No font/backend/layout change or Hibr edit is implied by generating assets.
 Live installation/operator aesthetic acceptance must be recorded separately.
+
+## Developer reference publication (Blit121)
+
+Publish docs/font-reference.md through the repository's Gitea web view.
+Generate docs/fonts tables from the existing hash-pinned Nerd catalogue,
+original icon catalogue, emoji corpus and exact font cmaps using the existing
+fontTools4.60.1 build dependency. Do not introduce another editable glyph
+registry, runtime route, hosted service or client-side numbering scheme.
+Generated JSON coverage is an asset inventory, not renderer capability or
+shaping acceptance. Browser glyphs are explicitly not production previews;
+the existing shared-raster specimen supplies that evidence. The reference
+generator's --check mode and font_reference_gate guard drift, encoding,
+category completeness and relative links. A future site consumes the same
+canonical files rather than forking the reference.

@@ -1,5 +1,9 @@
 # Original Blit icons
 
+Application authors: see the [full font/glyph developer reference](../../../docs/font-reference.md)
+and [generated special-additions table](../../../docs/fonts/special.md) for
+category browsing, valid JSON strings, capability discovery and fallbacks.
+
 The canonical mapping is [catalogue.json](catalogue.json), also returned by
 authenticated `GET /v1/fonts/icons`. The same SVG paths generate both Modern
 and Retro; there is no backend-specific artwork or runtime SVG renderer.

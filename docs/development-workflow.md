@@ -96,6 +96,15 @@ handoff:
 - performance/timing changes: diagnostics, measured intervals, CPU/RSS, and a
   bounded workload rather than a subjective “feels faster” claim.
 
+For font/catalogue asset changes, regenerate `docs/fonts` with
+`tools/fonts/build-reference.py` in the existing pinned fontTools4.60.1
+environment, then run its `--check` mode and
+`ruby tools/tests/font_reference_gate.rb`. This documentation gate is included
+in the font suite and uses no display. Tables and coverage inventories are
+derived from canonical assets; never repair a glyph mapping by editing the
+generated reference. A documentation-only change needs these focused checks,
+asset identity and link checks, not a live renderer restart.
+
 `tools/run-gates.sh` is that list, executable. Its suite names match the
 categories above, so the narrowest run is one suite and the pre-handoff run is
 `all`:

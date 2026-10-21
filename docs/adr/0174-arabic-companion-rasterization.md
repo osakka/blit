@@ -1,6 +1,6 @@
 # ADR0174: Arabic companion faces and cell-local mark positioning
 
-Status: accepted implementation; candidate0.1.588 profile activation;
+Status: accepted implementation; deployed0.1.588 profile activation;
 physical typography acceptance pending (2026-10-21).
 Tracks Blit119 under118.
 
@@ -34,8 +34,8 @@ form is already supplied. This is not paragraph shaping or implicit bidi.
 Ink extents are independent of terminal advance: measure first, allocate a
 bounded canvas and return ink offsets. No clipped letter is accepted. KMS
 and SDL now consume offsets and expand damage/source regions in backend
-fixtures. Companion attachment stays disabled in server profiles until the
-remaining integration and acceptance work is complete.
+fixtures. Companion attachment was initially test-only; deployed0.1.588
+activates canonical profiles atomically as described below.
 Unsupported clusters fail rather than being advertised as supported.
 
 ### Backend implementation cycle

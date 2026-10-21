@@ -1,5 +1,11 @@
 # Blit terminal fonts
 
+For application authors: [complete developer reference](../../docs/font-reference.md),
+[glyph categories](../../docs/fonts/README.md),
+[Blit/Hibr additions](../../docs/fonts/special.md), and
+[emoji categories](../../docs/fonts/emoji.md). Tables are generated from these
+canonical assets, not an independently maintained glyph registry.
+
 ## Smooth Blit Retro and Blit Modern
 
 `blit-retro` is the new smooth, rounded mainframe-inspired profile, based on

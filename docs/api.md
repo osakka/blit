@@ -1414,7 +1414,9 @@ mappings, one-cell allocation, four Wi-Fi signal levels and standard text
 fallback additions. Authentication is the same as other read endpoints. A
 missing/unreadable/oversized catalogue returns503
 `font_icon_catalogue_unavailable`; this request never changes the selected
-font or the screen. See [the icon contract](../assets/fonts/icons/README.md).
+font or the screen. See [the icon contract](../assets/fonts/icons/README.md)
+and [full developer glyph reference](font-reference.md) for generated category
+tables, semantic IDs, JSON encodings, width/colour rules and safe fallbacks.
 
 `GET /v1/fonts` remains authoritative for the active profile and exact pixel
 size; use `PUT /v1/fonts` to select Modern/Retro. Bitmap-only profiles do not
