@@ -1,6 +1,7 @@
 # ADR0174: Arabic companion faces and cell-local mark positioning
 
-Status: experimental, not enabled in server profiles pending acceptance (2026-10-21).
+Status: experimental raster/backend implementation; server profile activation
+and remaining acceptance pending (2026-10-21).
 Tracks Blit119 under118.
 
 ## Evidence and decision
@@ -31,11 +32,39 @@ nominal Arabic advance fits one terminal cell. Cell-local base+mark clusters
 use HarfBuzz GPOS; disable contextual joining substitutions because the base
 form is already supplied. This is not paragraph shaping or implicit bidi.
 Ink extents are independent of terminal advance: measure first, allocate a
-bounded canvas and return ink offsets. No clipped letter is accepted. Existing
-backends do not yet consume nonzero offsets or expand damage for neighbouring
-ink, so companion attachment stays disabled in server profiles. Enabling it
-before both composition and damage handling are updated would be incorrect.
+bounded canvas and return ink offsets. No clipped letter is accepted. KMS
+and SDL now consume offsets and expand damage/source regions in backend
+fixtures. Companion attachment stays disabled in server profiles until the
+remaining integration and acceptance work is complete.
 Unsupported clusters fail rather than being advertised as supported.
+
+### Backend implementation cycle
+
+Carry bounded maximum canvas and ink margins with the attached font. SDL
+atlas tiles must fit the canvas, use actual atlas dimensions for UVs, and
+place the ink at its offset without stretching it back into the cell. KMS
+uses the same offsets and a view/damage clip. Keep existing zero-margin
+profiles on their existing fast paths.
+
+For incremental updates distinguish the write rectangle from glyph sources:
+expand dirty cells by the bounded old/new ink halo, restore every layer in
+that write rectangle, then also sample neighbouring source cells whose ink
+can enter it. Clip those source glyphs to the write rectangle. Simply widening
+damage and drawing whole glyphs would reblend unchanged pixels or erase ink
+from a neighbouring cell. Share this geometry between the adapters; do not
+fall back to full-screen repainting as a substitute for damage correctness.
+Respect pane boundaries. Require incremental-vs-clean-frame pixel comparison
+and guard pixels before server profile selection is enabled.
+
+SDL uses power-of-two atlas extents with16×8 bounded tiles for overhanging
+contexts (up to32MiB/output at64px), keeping existing contexts at1024×1024.
+An arbitrary416×208 atlas reproducibly dropped an ink pixel at8px in SDL
+software; binary-exact UV boundaries fix that without changing tolerance.
+Texture creation remains fallible; future profile activation must validate
+the replacement on every output before swapping. No hardware limit override.
+Block cursors repaint all intersecting source ink clipped to the cursor cell,
+so adjacent marks survive and outside ink keeps its normal colour. SDL normal
+and cursor repaint use one shared cell-ink dispatch.
 
 ## Acceptance and limits
 

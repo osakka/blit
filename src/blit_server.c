@@ -15,6 +15,7 @@
 #include "blit_display_geometry.h"
 #include "blit_cell_geometry.h"
 #include "blit_damage.h"
+#include "blit_ink.h"
 #include "blit_trial_protocol.h"
 
 #include <arpa/inet.h>
@@ -24161,11 +24162,18 @@ static SDL_Texture *create_sdl_glyph_atlas(SDL_Renderer *renderer,
     int column;
 
     if (renderer && font && font->raster_get) {
+        int tile_w = font->raster_max_width + 2;
+        int tile_h = font->raster_max_height + 2;
+        int ink = blit_font_has_overhang(font);
+        /* Binary-exact UV boundaries: arbitrary texture extents can round
+           an integer source edge down in SDL's software geometry sampler. */
+        int atlas_w = ink ? glyph_atlas_extent(tile_w * 16) : 1024;
+        int atlas_h = ink ? glyph_atlas_extent(tile_h * 8) : 1024;
         SDL_Texture *result = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32,
-            SDL_TEXTUREACCESS_STATIC, 1024, 1024);
-        unsigned char *empty = calloc(1024U * 1024U, 4);
+            SDL_TEXTUREACCESS_STATIC, atlas_w, atlas_h);
+        unsigned char *empty = calloc((size_t)atlas_w * atlas_h, 4);
         if (!result || !empty ||
-            !SDL_UpdateTexture(result, NULL, empty, 4096) ||
+            !SDL_UpdateTexture(result, NULL, empty, atlas_w * 4) ||
             !SDL_SetTextureBlendMode(result, SDL_BLENDMODE_BLEND_PREMULTIPLIED) ||
             !SDL_SetTextureScaleMode(result, SDL_SCALEMODE_NEAREST)) {
             if (result) SDL_DestroyTexture(result);
@@ -24173,8 +24181,8 @@ static SDL_Texture *create_sdl_glyph_atlas(SDL_Renderer *renderer,
             return NULL;
         }
         free(empty);
-        *columns_out = 1024 / (font->raster_cell_width * 2 + 2);
-        *width_out = *height_out = 1024;
+        *columns_out = ink ? 16 : atlas_w / tile_w;
+        *width_out = atlas_w; *height_out = atlas_h;
         return result;
     }
     if (renderer == NULL || font == NULL || font->glyph_count == 0 ||
@@ -24450,8 +24458,8 @@ static int queue_sdl_glyph_key(BlitOutput *output, const BlitFont *font,
         BlitCellCluster scalar_key;
         const BlitCellCluster *key = cluster;
         unsigned slot;
-        int tile_width = font->raster_cell_width * 2 + 2;
-        int tile_height = font->raster_cell_height + 2;
+        int tile_width = font->raster_max_width + 2;
+        int tile_height = font->raster_max_height + 2;
         SDL_Rect rect;
         if (!key) {
             if (!blit_cell_cluster_init(&scalar_key, codepoint, NULL, 0, span)) return 0;
@@ -24462,6 +24470,7 @@ static int queue_sdl_glyph_key(BlitOutput *output, const BlitFont *font,
             if (!font->raster_cluster_get ||
                 !font->raster_cluster_get(font->raster_state, key, &raster)) return 0;
         } else if (!font->raster_get(font->raster_state, codepoint, span, &raster)) return 0;
+        if (raster.width > tile_width - 2 || raster.height > tile_height - 2) return 0;
         if (trim > 0 && raster.format == BLIT_RASTER_RGBA_PREMULTIPLIED) return 1;
         rect.x = (slot % output->glyph_atlas_columns) * tile_width;
         rect.y = (slot / output->glyph_atlas_columns) * tile_height;
@@ -24487,10 +24496,18 @@ static int queue_sdl_glyph_key(BlitOutput *output, const BlitFont *font,
             free(pixels);
             output->raster_keys[slot] = *key;
         }
-        source_x = (rect.x + 1) / 1024.0f;
-        source_y = (rect.y + 1) / 1024.0f;
-        source_w = raster.width / 1024.0f;
-        source_h = raster.height / 1024.0f;
+        source_x = (float)(rect.x + 1) / output->glyph_atlas_width;
+        source_y = (float)(rect.y + 1) / output->glyph_atlas_height;
+        source_w = (float)raster.width / output->glyph_atlas_width;
+        source_h = (float)raster.height / output->glyph_atlas_height;
+        {
+            float sx = cell_width / (font->raster_cell_width * span);
+            float sy = cell_height / font->raster_cell_height;
+            x += raster.ink_offset_x * sx;
+            y += raster.ink_offset_y * sy;
+            cell_width = raster.width * sx;
+            cell_height = raster.height * sy;
+        }
         if (raster.format == BLIT_RASTER_RGBA_PREMULTIPLIED) colour = 0xffffff;
     } else {
     glyph = blit_font_glyph_index(font, codepoint);
@@ -24916,6 +24933,29 @@ static int render_sdl_cluster(BlitOutput *output, const BlitFont *font,
     if (bold) queue_sdl_glyph_key(output, font, colour, cp, x + 1, y, width, height, lean, 1, &key);
     if (!output->glyph_geometry_enabled) flush_sdl_glyph_batch(output);
     return 1;
+}
+
+/* One glyph/cluster dispatch for normal ink and cursor-cell repaint. */
+static void render_sdl_cell_ink(BlitRuntime *runtime, BlitOutput *output,
+    uint32_t colour, uint32_t cp, const uint32_t *marks, unsigned count,
+    uint16_t attributes, float x, float y, float width, float height, float lean)
+{
+    const BlitFont *source;
+    unsigned i;
+    if (attributes & (BLIT_ATTR_CONTINUATION | BLIT_ATTR_CONCEAL)) return;
+    source = cell_font(runtime, attributes, cp);
+    if (render_sdl_cluster(output, &runtime->font, colour, cp, marks, count,
+                           x, y, width, height, lean, (attributes & BLIT_ATTR_BOLD)!=0)) return;
+    if (cp && cp != ' ' && (source == &runtime->font ||
+        !queue_sdl_wide_glyph(output, source, colour, cp, x, y, width, height, lean)))
+        render_or_queue_sdl_glyph(output, &runtime->font, colour, cp,
+                                  x, y, width, height, lean, 0);
+    for (i=0; marks && i<count && i<BLIT_MAX_COMBINING; ++i)
+        render_or_queue_sdl_glyph(output, &runtime->font, colour, marks[i],
+                                  x, y, width, height, lean, 0);
+    if ((attributes & BLIT_ATTR_BOLD) && cp && cp != ' ' && source == &runtime->font)
+        render_or_queue_sdl_glyph(output, &runtime->font, colour, cp,
+                                  x+1, y, width, height, lean, 1);
 }
 
 static void destroy_sdl_graphics_cache(BlitOutput *output)
@@ -25999,6 +26039,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             int surface_origin_y;
             int first_row = 0;
             int last_row;
+            BlitInkRegion ink;
+            int ink_enabled = blit_font_has_overhang(&runtime->font);
             int column;
             uint32_t default_foreground;
             uint32_t default_background;
@@ -26049,6 +26091,11 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                 first_row = plan->surfaces[plan_index].damage_y;
                 last_row = first_row +
                     plan->surfaces[plan_index].damage_height;
+                if (ink_enabled) {
+                    ink = blit_ink_region(&runtime->font, 0, first_row,
+                        surface->width, last_row, surface->width, surface->height);
+                    first_row = ink.y0; last_row = ink.y1;
+                }
                 {
                     /* Issue #72. The clear has to cover exactly what the
                        repaint below covers, and the repaint covers whole
@@ -26071,7 +26118,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                     damage.x = surface_origin_x;
                     damage.y = (float)surface_origin_y + first_row * (float)cell_height;
                     damage.w = (float)surface->width * (float)cell_width;
-                    damage.h = plan->surfaces[plan_index].damage_height * (float)cell_height;
+                    damage.h = (last_row - first_row) * (float)cell_height;
                     SDL_SetRenderDrawColor(renderer,
                         (unsigned char)(default_background >> 16),
                         (unsigned char)(default_background >> 8),
@@ -26099,6 +26146,12 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             last_row = full_redraw ? surface->height : last_row;
             if (last_row > BLIT_MAX_CELL_ROWS)
                 last_row = BLIT_MAX_CELL_ROWS;
+            if (full_redraw || !ink_enabled) {
+                ink.x0 = ink.source_x0 = 0;
+                ink.x1 = ink.source_x1 = surface->width;
+                ink.y0 = ink.source_y0 = first_row;
+                ink.y1 = ink.source_y1 = last_row;
+            }
             {
                 SDL_Rect graphics_clip;
                 graphics_clip.x = (int)surface_origin_x;
@@ -26111,9 +26164,9 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                        inside whatever was just cleared, so if it covered less
                        than the clear did the scene would develop black holes
                        exactly where the fix widened the clear. */
-                    graphics_clip.y += plan->surfaces[plan_index].damage_y *
+                    graphics_clip.y += first_row *
                         cell_height;
-                    graphics_clip.h = plan->surfaces[plan_index].damage_height *
+                    graphics_clip.h = (last_row - first_row) *
                         cell_height;
                 }
                 /* Negative-z images are the scene's wallpaper layer.  An
@@ -26211,7 +26264,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                 BLIT_GRAPHICS_MAX_IMAGES, surface_origin_x,
                 (float)surface_origin_y, BLIT_GRAPHICS_LAYER_UNDER_TEXT);
             SDL_SetRenderClipRect(renderer, NULL);
-            for (row = first_row; row < last_row; ++row) {
+            if (ink_enabled) SDL_SetRenderClipRect(renderer, &under_text_clip);
+            for (row = ink.source_y0; row < ink.source_y1; ++row) {
                 for (column = 0; column < surface->width &&
                      column < BLIT_MAX_CELL_COLS; ++column) {
                     uint32_t foreground = surface->foreground[row][column] ?
@@ -26249,67 +26303,12 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                         /* ADR 0062: a wide character's glyph is 16 pixels
                            wide and comes from the wide font and its own
                            batch, because a batch submits with one texture. */
-                        const BlitFont *glyph_font = cell_font(
-                            runtime, attributes,
-                            surface->codepoints[row][column]);
-                        int cluster_drawn = !(attributes & BLIT_ATTR_CONTINUATION) &&
-                            render_sdl_cluster(&runtime->outputs[output_index], &runtime->font,
-                                foreground, surface->codepoints[row][column],
-                                surface->combining[row][column], surface->combining_count[row][column],
-                                surface_origin_x + column * (float)cell_width,
-                                (float)surface_origin_y + row * (float)cell_height,
-                                (float)glyph_width, (float)cell_height, lean,
-                                (attributes & BLIT_ATTR_BOLD) != 0);
-                        if (!(attributes & BLIT_ATTR_CONTINUATION) &&
-                            !cluster_drawn &&
-                            surface->codepoints[row][column] != 0 &&
-                            surface->codepoints[row][column] != ' ' &&
-                            (glyph_font == &runtime->font ||
-                             !queue_sdl_wide_glyph(
-                                 &runtime->outputs[output_index], glyph_font,
-                                 foreground, surface->codepoints[row][column],
-                                 surface_origin_x + column * (float)cell_width,
-                                 (float)surface_origin_y + row * (float)cell_height,
-                                 (float)glyph_width, (float)cell_height, lean)))
-                            render_or_queue_sdl_glyph(
-                                &runtime->outputs[output_index], &runtime->font,
-                                foreground, surface->codepoints[row][column],
-                                surface_origin_x + column * (float)cell_width,
-                                (float)surface_origin_y + row * (float)cell_height,
-                                (float)glyph_width, (float)cell_height, lean,
-                                0.0f);
-                        if (!cluster_drawn && !(attributes & BLIT_ATTR_CONTINUATION) &&
-                            surface->combining_count[row][column] > 0) {
-                            int combining_index;
-                            for (combining_index = 0;
-                                 combining_index < surface->combining_count[row][column] &&
-                                 combining_index < BLIT_MAX_COMBINING;
-                                 ++combining_index) {
-                                render_or_queue_sdl_glyph(
-                                    &runtime->outputs[output_index],
-                                    &runtime->font,
-                                    foreground,
-                                    surface->combining[row][column][combining_index],
-                                    surface_origin_x + column * (float)cell_width,
-                                    (float)surface_origin_y + row * (float)cell_height,
-                                    (float)glyph_width, (float)cell_height,
-                                    lean, 0.0f);
-                            }
-                        }
-                        if (!cluster_drawn && attributes & BLIT_ATTR_BOLD &&
-                            surface->codepoints[row][column] != 0 &&
-                            surface->codepoints[row][column] != ' ' &&
-                            glyph_font == &runtime->font)
-                            render_or_queue_sdl_glyph(
-                                &runtime->outputs[output_index], &runtime->font,
-                                foreground, surface->codepoints[row][column],
-                                surface_origin_x + 1.0f + column * (float)cell_width,
-                                (float)surface_origin_y + row * (float)cell_height,
-                                (float)glyph_width, (float)cell_height, lean,
-                                /* The overstrike is shifted a pixel right, so
-                                   it gives up its last column rather than
-                                   writing into the next cell. */
-                                1.0f);
+                        render_sdl_cell_ink(runtime, &runtime->outputs[output_index],
+                            foreground, surface->codepoints[row][column],
+                            surface->combining[row][column], surface->combining_count[row][column],
+                            attributes, surface_origin_x + column * (float)cell_width,
+                            (float)surface_origin_y + row * (float)cell_height,
+                            (float)glyph_width, (float)cell_height, lean);
                         if (attributes & (BLIT_ATTR_UNDERLINE | BLIT_ATTR_STRIKE))
                             flush_sdl_glyph_batch(&runtime->outputs[output_index]);
                             flush_sdl_wide_batch(&runtime->outputs[output_index]);
@@ -26334,6 +26333,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             }
             flush_sdl_glyph_batch(&runtime->outputs[output_index]);
             flush_sdl_wide_batch(&runtime->outputs[output_index]);
+            if (ink_enabled) SDL_SetRenderClipRect(renderer, NULL);
             if (surface->cursor_visible &&
                 surface->cursor_y >= first_row && surface->cursor_y < last_row) {
                 int cursor_column = surface->cursor_x;
@@ -26394,7 +26394,31 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                     /* A block cursor is an inverse cell, not an eraser: the
                        character under it is what the user is about to
                        overwrite and has to stay readable. */
-                    if (cursor_codepoint != 0 && cursor_codepoint != ' ' &&
+                    if (ink_enabled) {
+                        BlitInkRegion sources = blit_ink_region(&runtime->font,
+                            cursor_column, surface->cursor_y, cursor_column+cursor_cells,
+                            surface->cursor_y+1, surface->width, surface->height);
+                        SDL_Rect cursor_clip = {(int)cursor_x,(int)cursor_y,
+                            cursor_cells*cell_width,cell_height};
+                        SDL_Rect clipped;
+                        int sy,sx;
+                        if (SDL_GetRectIntersection(&cursor_clip,&under_text_clip,&clipped)) {
+                            SDL_SetRenderClipRect(renderer,&clipped);
+                            for(sy=sources.source_y0;sy<sources.source_y1;++sy)
+                                for(sx=sources.source_x0;sx<sources.source_x1;++sx)
+                                    render_sdl_cell_ink(runtime,&runtime->outputs[output_index],
+                                        cell_background,surface->codepoints[sy][sx],
+                                        surface->combining[sy][sx],surface->combining_count[sy][sx],
+                                        surface->attributes[sy][sx],surface_origin_x+sx*cell_width,
+                                        (float)surface_origin_y+sy*cell_height,
+                                        (surface->attributes[sy][sx]&BLIT_ATTR_WIDE)?cell_width*2:cell_width,
+                                        cell_height,(surface->attributes[sy][sx]&BLIT_ATTR_ITALIC)?italic_lean:0);
+                            flush_sdl_glyph_batch(&runtime->outputs[output_index]);
+                            flush_sdl_wide_batch(&runtime->outputs[output_index]);
+                            SDL_SetRenderClipRect(renderer,NULL);
+                        }
+                    }
+                    if (!ink_enabled && cursor_codepoint != 0 && cursor_codepoint != ' ' &&
                         !(cursor_attributes & BLIT_ATTR_CONCEAL)) {
                         int combining_index;
                         const BlitFont *cursor_font = cell_font(

@@ -3,6 +3,7 @@
 #include "blit_font.h"
 #include "blit_raster.h"
 #include "blit_damage.h"
+#include "blit_ink.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -95,6 +96,8 @@ typedef struct {
     int pointer_width;
     int pointer_height;
     BlitFont *font;
+    int glyph_clip_active;
+    int glyph_clip_x0, glyph_clip_y0, glyph_clip_x1, glyph_clip_y1;
 } KmsOutput;
 
 typedef struct {
@@ -523,13 +526,18 @@ static void draw_cell_raster(KmsOutput *output, const BlitFont *font,
 {
     int row, column;
     if (trim > 0 && raster->format == BLIT_RASTER_RGBA_PREMULTIPLIED) return;
-    for (row = 0; row < ch && row < raster->height; ++row) {
-        int py = y + row;
+    for (row = 0; row < raster->height; ++row) {
+        int py = y + row + raster->ink_offset_y;
         uint32_t *pixels;
         if (py < 0 || py >= output->mode.vdisplay) continue;
+        if (output->glyph_clip_active &&
+            (py < output->glyph_clip_y0 || py >= output->glyph_clip_y1)) continue;
         pixels = (uint32_t *)((unsigned char *)output->back.map + py * output->back.pitch);
-        for (column = 0; column < cw - trim && column < raster->width; ++column) {
-            int px = x + column + glyph_row_lean(lean, row, ch);
+        for (column = 0; column < raster->width - trim; ++column) {
+            int px = x + column + raster->ink_offset_x +
+                glyph_row_lean(lean, row + raster->ink_offset_y, ch);
+            if (output->glyph_clip_active &&
+                (px < output->glyph_clip_x0 || px >= output->glyph_clip_x1)) continue;
             if (px >= 0 && px < output->mode.hdisplay)
                 pixels[px] = font->raster_blend(raster, column, row, color, pixels[px]);
         }
@@ -560,7 +568,7 @@ static void draw_glyph(KmsOutput *output, const BlitFont *font,
     }
     /* The unscaled fast path writes without a per-pixel bounds test, which a
        slant's overhang would break; a slanted glyph takes the general path. */
-    if (lean == 0 && trim == 0 && font != NULL && font->data != NULL &&
+    if (!output->glyph_clip_active && lean == 0 && trim == 0 && font != NULL && font->data != NULL &&
         cw == font_width &&
         ch == font_height && x >= 0 && y >= 0 &&
         x + cw <= output->mode.hdisplay && y + ch <= output->mode.vdisplay) {
@@ -587,12 +595,16 @@ static void draw_glyph(KmsOutput *output, const BlitFont *font,
         uint32_t row_bits = blit_font_glyph_row(font, glyph, codepoint,
                                                 source_row);
         if (py < 0 || py >= output->mode.vdisplay) continue;
+        if (output->glyph_clip_active &&
+            (py < output->glyph_clip_y0 || py >= output->glyph_clip_y1)) continue;
         if (source_row < 0 || source_row >= font_height) continue;
         pixels = (uint32_t *)((unsigned char *)output->back.map +
                               py * output->back.pitch);
         for (glyph_column = 0; glyph_column < cw; ++glyph_column) {
             int source_column = glyph_column * font_width / cw;
             int px = x + glyph_column + glyph_row_lean(lean, glyph_row, ch);
+            if (output->glyph_clip_active &&
+                (px < output->glyph_clip_x0 || px >= output->glyph_clip_x1)) continue;
             if ((row_bits & (1U << (font_width - source_column - 1))) &&
                 px >= 0 && px < output->mode.hdisplay)
                 pixels[px] = color;
@@ -865,6 +877,7 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
     int clip_y0;
     int clip_x1;
     int clip_y1;
+    BlitInkRegion ink;
     if (view->damage_valid) {
         first_row = view->damage_y;
         last_row = view->damage_y + view->damage_height;
@@ -875,6 +888,11 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
         if (last_row > view->rows) last_row = view->rows;
         if (last_column > view->columns) last_column = view->columns;
     }
+    if (last_row <= first_row || last_column <= first_column) return;
+    ink = blit_ink_region(font, first_column, first_row, last_column, last_row,
+                           view->columns, view->rows);
+    first_column = ink.x0; first_row = ink.y0;
+    last_column = ink.x1; last_row = ink.y1;
     clip_x0 = view->origin_x + first_column * cw;
     clip_y0 = view->origin_y + first_row * ch;
     clip_x1 = view->origin_x + last_column * cw;
@@ -885,6 +903,8 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
         clip_y1 = view->origin_y + view->rows * ch;
     if (last_row <= first_row || last_column <= first_column)
         return;
+    output->info.drawn_cells += (unsigned long long)(last_column-first_column) *
+                                 (last_row-first_row);
     /* The terminal's default background is the floor of the view, not a quad
        drawn over whatever is below it: a cell that resolves to the default
        colour is transparent to an image under the text, and an explicit
@@ -951,8 +971,11 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
             draws[draw_index].z < 0)
             draw_graphic(output, &draws[draw_index], view->origin_x,
                          view->origin_y, clip_x0, clip_y0, clip_x1, clip_y1);
-    for (row = first_row; row < last_row; ++row) {
-        for (column = first_column; column < last_column; ++column) {
+    output->glyph_clip_active = blit_font_has_overhang(font);
+    output->glyph_clip_x0 = clip_x0; output->glyph_clip_y0 = clip_y0;
+    output->glyph_clip_x1 = clip_x1; output->glyph_clip_y1 = clip_y1;
+    for (row = ink.source_y0; row < ink.source_y1; ++row) {
+        for (column = ink.source_x0; column < ink.source_x1; ++column) {
             int index = row * view->stride + column;
             uint32_t fg = view->foreground[index] ?
                 view->foreground[index] - 1 : view->default_foreground;
@@ -983,11 +1006,20 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
                     x, y, glyph_width, ch, fg, lean, (attr & 1) != 0);
             }
             if (!(attr & KMS_ATTR_CONTINUATION) && (attr & 4))
-                fill_rect(output, x, y + ch - 1, glyph_width, 1, underline);
+                if (y + ch - 1 >= clip_y0 && y + ch - 1 < clip_y1) {
+                    int left = x > clip_x0 ? x : clip_x0;
+                    int right = x + glyph_width < clip_x1 ? x + glyph_width : clip_x1;
+                    fill_rect(output, left, y + ch - 1, right - left, 1, underline);
+                }
             if (!(attr & KMS_ATTR_CONTINUATION) && (attr & 512))
-                fill_rect(output, x, y + ch / 2, glyph_width, 1, fg);
+                if (y + ch / 2 >= clip_y0 && y + ch / 2 < clip_y1) {
+                    int left = x > clip_x0 ? x : clip_x0;
+                    int right = x + glyph_width < clip_x1 ? x + glyph_width : clip_x1;
+                    fill_rect(output, left, y + ch / 2, right - left, 1, fg);
+                }
         }
     }
+    output->glyph_clip_active = 0;
     for (draw_index = 0; draw_index < draw_count; ++draw_index)
         if (draws[draw_index].z >= 0)
             draw_graphic(output, &draws[draw_index], view->origin_x,
@@ -1032,10 +1064,38 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
             uint32_t cursor_bg = view_cell_background(view, cursor_index);
             fill_rect(output, cursor_x, cursor_y, cw * cursor_cells, ch,
                       KMS_WHITE);
+            if (blit_font_has_overhang(font)) {
+                /* Recolour every source whose ink enters the cursor cell,
+                   not just its owner. Keep outside marks in normal colours. */
+                BlitInkRegion sources = blit_ink_region(font, cursor_column,
+                    view->cursor_y, cursor_column + cursor_cells,
+                    view->cursor_y + 1, view->columns, view->rows);
+                int sy, sx;
+                output->glyph_clip_active = 1;
+                output->glyph_clip_x0 = cursor_x > clip_x0 ? cursor_x : clip_x0;
+                output->glyph_clip_x1 = cursor_x + cursor_cells*cw < clip_x1 ?
+                    cursor_x + cursor_cells*cw : clip_x1;
+                output->glyph_clip_y0 = cursor_y > clip_y0 ? cursor_y : clip_y0;
+                output->glyph_clip_y1 = cursor_y + ch < clip_y1 ? cursor_y + ch : clip_y1;
+                for (sy=sources.source_y0; sy<sources.source_y1; ++sy)
+                    for (sx=sources.source_x0; sx<sources.source_x1; ++sx) {
+                        int at=sy*view->stride+sx;
+                        uint16_t a=view->attributes[at];
+                        uint32_t cp=view->codepoints[at];
+                        if (!cp || (a & (KMS_ATTR_CONTINUATION|KMS_ATTR_CONCEAL))) continue;
+                        draw_cell_glyphs(output,font,(a & KMS_ATTR_WIDE)?wide_font:NULL,
+                            cp,view->combining?view->combining+at*BLIT_MAX_COMBINING:NULL,
+                            view->combining_count?view->combining_count[at]:0,
+                            view->origin_x+sx*cw,view->origin_y+sy*ch,
+                            (a & KMS_ATTR_WIDE)?cw*2:cw,ch,cursor_bg,
+                            (a & KMS_ATTR_ITALIC)?italic_lean:0,(a & 1)!=0);
+                    }
+                output->glyph_clip_active = 0;
+            }
             /* A block cursor is an inverse cell, not an eraser: the
                character under it is what the user is about to overwrite and
                has to stay readable. */
-            if (cursor_cp != 0 && cursor_cp != ' ' &&
+            if (!blit_font_has_overhang(font) && cursor_cp != 0 && cursor_cp != ' ' &&
                 !(cursor_attr & KMS_ATTR_CONCEAL))
                 draw_cell_glyphs(output, font, (cursor_attr & KMS_ATTR_WIDE) ? wide_font : NULL,
                     cursor_cp, view->combining ? &view->combining[cursor_index * BLIT_MAX_COMBINING] : NULL,
@@ -1969,9 +2029,6 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                 }
                 if (full_redraw)
                     draw.damage_valid = 0;
-                output->info.drawn_cells += draw.damage_valid ?
-                    (unsigned long long)draw.damage_width * draw.damage_height :
-                    (unsigned long long)draw.columns * draw.rows;
                 draw_view(output, kms != NULL ? kms->font : NULL,
                           kms != NULL ? kms->wide_font : NULL, &draw);
             }

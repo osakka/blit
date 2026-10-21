@@ -1,5 +1,41 @@
 # Current state and restart point
 
+## 2026-10-21:119 backend ink composition/damage implemented, not deployed
+
+KMS and SDL now consume raster ink offsets without squeezing the result back
+into a terminal cell. `blit_ink.h` owns bounded write/source halos: clear and
+restore layers inside the write clip, sample neighbouring source cells, and
+clip their ink to that rectangle and the pane. KMS counts restored cells after
+expansion. Existing zero-margin profiles retain the existing damage policy.
+
+SDL atlas tiles fit the maximum canvas and use actual texture dimensions.
+Power-of-two extents are required for reliable software UV sampling; a
+416×208 negative-control atlas drops a real8px mark pixel. Ink-enabled atlas
+allocation is bounded at32MiB/output for64px. Block cursors preserve nearby
+ink by repainting intersecting glyph sources inside the cursor clip; normal
+SDL/cursor glyph dispatch is shared, not duplicated.
+
+New direct-KMS mock, SDL software and offscreen GLES fixtures compare moving,
+erased and marked glyphs against clean frames and a full-raster pixel oracle,
+including pane guards, cursor overlap, a negative-z image and deliberate
+Latin/Arabic/colour atlas collisions. Nine representative sizes cover8..64px;
+the earlier shared Arabic module still covers every integer height. Negative
+controls reproduce missed damage and non-binary atlas UV failures. Final
+results and limitations are recorded in verification-status.
+
+All standard gates:146pass/5skip/0fail, including120s terminal soak; offscreen
+GLES11pass/0skip/0fail. Final backend fixtures117 scenarios per face per path,
+702 total; native backend Valgrind0errors/0lost bytes (18,804bytes/9blocks
+reachable). TCC588 rebuild passes. Skipped VM/package/live checks are not
+acceptance. See verification-status for scope, logs and exact comparisons.
+
+Next: independent word/mark semantics, mixed-script baselines and styles/coverage review, then atomic
+profile attachment plus truthful API identity/availability, package and real
+host review. Server profiles still do not attach Arabic companions. Live
+version remains587; no deployment, settings changes, SSH or Hibr edits.
+Do not confuse these offscreen/mock fixtures with physical acceptance or
+claim that all Arabic/Unicode/Quranic forms are covered.119/118 remain open.
+
 ## 2026-10-21:119 shared Arabic module implemented; server remains unchanged
 
 ADR0174 adds explicit, pre-first-use Arabic companion attachment to the shared

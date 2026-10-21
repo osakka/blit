@@ -609,6 +609,11 @@ void blit_raster_attach(BlitFont *font, BlitRaster *raster)
     font->raster_blend = raster ? blit_raster_blend : NULL;
     font->raster_cell_width = raster ? raster->width : 0;
     font->raster_cell_height = raster ? raster->height : 0;
+    font->raster_max_width = raster ? raster->width * (raster->arabic ? 6 : 2) : 0;
+    font->raster_max_height = raster ? raster->height * (raster->arabic ? 3 : 1) : 0;
+    font->raster_ink_left = raster && raster->arabic ? 2 : 0;
+    font->raster_ink_right = raster && raster->arabic ? 3 : 0;
+    font->raster_ink_top = font->raster_ink_bottom = raster && raster->arabic ? 1 : 0;
 }
 
 uint32_t blit_raster_blend(const BlitRasterGlyph *glyph, int x, int y,

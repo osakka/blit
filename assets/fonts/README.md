@@ -250,8 +250,11 @@ It is a finite corpus, not exhaustive Quranic/Unicode coverage.
 Run `ruby tools/tests/arabic_raster_gate.rb` or the normal font gate suite.
 Generate a real raster preview with
 `ruby tools/fonts/preview.rb --arabic build/font-preview/blit-arabic.png`.
-This fixture consumes ink offsets that existing backend adapters do not yet
-support. Backend composition, neighbouring-ink damage, runtime selection and
-physical appearance remain acceptance requirements before enabling companions.
+Backend fixtures now consume ink offsets and verify neighbouring-ink damage,
+pane clipping, cursor repaint and mixed Latin/Arabic/colour cache collisions
+through KMS mock, SDL software and offscreen GLES. Run
+`ruby tools/tests/arabic_backend_gate.rb kms|software|opengles2` (one mode).
+These are finite composition tests, not physical scanout or typographic
+acceptance. Runtime profile selection remains disabled pending integration.
 
 [Inspect the actual candidate raster specimen](../../docs/images/blit-arabic-candidates.png).

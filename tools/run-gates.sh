@@ -225,6 +225,8 @@ suite_font() {
     run_gate custom_icon_gate.rb ruby tools/tests/custom_icon_gate.rb
     run_gate custom_icon_api_gate.rb ruby tools/tests/custom_icon_api_gate.rb
     run_gate arabic_raster_gate.rb ruby tools/tests/arabic_raster_gate.rb
+    run_gate arabic_kms_ink ruby tools/tests/arabic_backend_gate.rb kms
+    run_gate arabic_software_ink ruby tools/tests/arabic_backend_gate.rb software
     run_gate emoji_corpus_gate.rb ruby tools/tests/emoji_corpus_gate.rb
     run_gate emoji_presentation_gate.rb ruby tools/tests/emoji_presentation_gate.rb
     run_gate cell_cluster_gate.rb ruby tools/tests/cell_cluster_gate.rb
@@ -327,6 +329,7 @@ suite_renderer() {
 }
 
 suite_gles() {
+    run_gate arabic_gles_ink ruby tools/tests/arabic_backend_gate.rb opengles2
     run_gate sdl_gles_emoji_transitions env \
         BLIT_TEST_VIDEO_DRIVER=offscreen BLIT_TEST_RENDERER=opengles2 \
         LIBGL_ALWAYS_SOFTWARE=1 ruby tools/tests/emoji_transition_gate.rb

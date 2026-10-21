@@ -1,5 +1,41 @@
 # Verification status
 
+## 2026-10-21:119 shared backend overhang/damage fixtures
+
+KMS mock, SDL software and offscreen GLES each pass117 scenarios per face
+(Retro/Modern),702 total. Sizes8,9,16,17,22,23,32,48,64 cover movement, erasure,
+mark replacement, pane edges, block-cursor/adjacent ink, a negative-z retained
+image and deliberate Latin/Arabic/colour cache-slot collisions. Every
+incremental frame matches its clean-frame counterpart exactly. The separate
+full-raster oracle is exact for KMS, with≤4/channel for SDL overlapping-alpha
+composition and exact outside-pane guards. This tolerance is not a relaxation
+of any existing font gate. Fixtures call production draw_view/render_outputs,
+not a replacement renderer. Logs: build/tests/arabic-overhang-{kms,software,gles}.log.
+
+TCC0.1.588 rebuild passes. Standard `all`:146pass/5skip/0fail, including the
+120-second four-session terminal soak (arabic-adapter-all.log). Skips are
+native VT kernel/QEMU inputs, explicit QEMU Hibr oracle, absent package,
+unset live multi-display and live screenshot checks. They are not passes.
+Offscreen GLES suite:11pass/0skip/0fail (arabic-adapter-gles-suite.log).
+Final native backend Valgrind runs include117 scenarios per face,0errors,
+0definite/indirect/possible lost bytes (arabic-overhang-final-valgrind.log).
+Library-reachable allocations remain reported separately, not counted freed.
+
+Two deterministic negative controls fail the same checks: removing ink halos
+loses neighbour ink during incremental KMS repaint; a416×208 non-power-of-two
+SDL atlas loses an8px glyph pixel. Test-only compile flags reproduce those
+conditions; there are no product toggles. Logs: arabic-negative-damage.log and
+arabic-negative-atlas.log. SDL now keeps binary-exact UV bounds with correctly
+sized tiles; KMS/SDL share write/source halo geometry and clip to the write
+region. Cursor repaint includes intersecting neighbouring ink inside its cell.
+
+Companion selection remains disabled in the server. This is not end-to-end
+Hibr/PTY, physical scanout, performance or exhaustive Arabic acceptance.
+Independent mark/join semantics, mixed-script baseline alignment, styles and missing-coverage behaviour need
+review before atomic profile/API integration, package and live validation.
+No deployment, Hibr edits, SSH, topology, font or settings writes on10.54;
+live version was read-only confirmed587.
+
 ## 2026-10-21:119 Arabic companion module, not deployed
 
 ADR0174, source manifest arabic-fonts.source.json and captured Hibr0.99.277 /

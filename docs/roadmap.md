@@ -8,10 +8,11 @@ No icon-only deployment while this Arabic work is being established.
 
 119 progress: experimental companions and shared Arabic base/mark raster path
 exist (ADR0174), with measured ink offsets and a finite Hibr specimen gate.
-Next dependency is KMS/SDL composition plus neighbouring-ink damage; current
-adapters assume cell-bounded rasters, so server selection deliberately remains
-disabled. Runtime inventory/selection, protocol/backend acceptance, package and
-physical typographic review follow. Native coverage tests are not completion.
+KMS/SDL now have composition, bounded write/source damage halos and clipped
+cursor repaint, with mock/software/offscreen-GLES fixtures. Server selection
+deliberately remains disabled. Independent joining/marks, mixed-script baselines, styles and coverage,
+runtime inventory/atomic selection, protocol acceptance, package and physical
+typographic review follow. Native coverage tests are not completion.
 
 Font completion118: original Blit/Hibr colour artwork, four Wi-Fi levels and
 Bluetooth are candidate588 (ADR0172); canonical mapping discovery is

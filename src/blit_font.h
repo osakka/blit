@@ -33,6 +33,9 @@ typedef struct BlitFont {
     uint32_t (*raster_blend)(const struct BlitRasterGlyph *, int, int,
                             uint32_t, uint32_t);
     int raster_cell_width, raster_cell_height;
+    int raster_max_width, raster_max_height;
+    /* Maximum ink outside the advance rectangle, in whole cells. */
+    int raster_ink_left, raster_ink_right, raster_ink_top, raster_ink_bottom;
 } BlitFont;
 
 void blit_font_load(BlitFont *font);
