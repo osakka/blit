@@ -1,5 +1,17 @@
 # Verification status
 
+## 2026-10-21 live587 native VT kernel-state verification
+
+API-only supervised deployment succeeds; installed SHA256
+79e706f10673c921a0c5105599c0298f7e092f30da354748b95d7de74fb965e1 matches
+the reproducible archive. Native KMS ready,2outputs/3sessions and unchanged
+settings/Modern22. Active kernel VT is tty3, previous tty2; API reads K_OFF4,
+errno0 and active recovery. Independent pidfd_getfd duplication of the actual
+owner's fd confirms4, not586's EIO. No getty on tty3; getty on tty2 stays
+separate. Evidence /tmp/blit-rollout587.SKzt0W. No SSH, Hibr edits or manual
+desktop/join spawn. Physical operator typing/handover confirmation remains
+pending; no live crash, VT switch or destructive test was forced.
+
 ## 2026-10-21 candidate587 /117 getty coexistence correction
 
 Source89e54e8; package SHA256

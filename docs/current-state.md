@@ -1,5 +1,28 @@
 # Current state and restart point
 
+## 2026-10-21:587 deployed; dedicated native VT verified on10.54
+
+Authenticated updater reports587; exact installed binary SHA256
+79e706f10673c921a0c5105599c0298f7e092f30da354748b95d7de74fb965e1 matches
+the manifest. Native KMS ready,2outputs/3sessions,5keyboards/4pointers.
+Settings document equals preinstall: Modern22 and DP lower-primary/upper plus
+HDMI auxiliary policy preserved. No Hibr edits, backend/font/layout writes,
+manual desktop/join creation or SSH.
+
+Kernel sysfs active tty3. Console API: owner native,VT3,previousVT2,active,
+keyboard_mode4/K_OFF,keyboard_read_errno0,recovery registered,timeout10s.
+Duplicating the actual owner's fd3 with pidfd_getfd independently returns
+keyboard_mode4 (unlike586's EIO). getty@tty3 inactive; original getty@tty2
+active. Evidence /tmp/blit-rollout587.SKzt0W settings/diagnostics/update.log.
+Physical Ctrl+Alt+F2 leaves Blit, Ctrl+Alt+F3 returns; Ctrl+Alt+Backspace stops
+it using the existing shutdown chord. VM validates these paths; operator
+physical handover/typing confirmation remains pending. Do not remotely force
+VT changes or kill processes merely to turn that boundary into a pass.
+
+117 remains open for operator confirmation, SDL daemon ownership and any
+required pointer/gpm exclusivity. Native keyboard muting does not grab evdev
+devices. Do not claim586 was accepted: its failed real-host check led to587.
+
 ## 2026-10-21:586 physical acceptance FAILED;587 dedicated VT correction
 
 Source89e54e8 pushed. Package587 SHA256

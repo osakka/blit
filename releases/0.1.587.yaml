@@ -19,8 +19,17 @@ verification:
   getty_hangup_negative_on_586: reproduced
   negative_evidence: /tmp/blit-vt-kernel.ptvwkj/serial.log
 deployment:
-  status: candidate_not_deployed
+  status: deployed_native_kernel_state_verified
   previous_live_version: 0.1.586
+  host: 192.168.10.54
+  active_vt: 3
+  previous_vt: 2
+  actual_owner_descriptor_keyboard_mode: 4
+  keyboard_read_errno: 0
+  getty_on_owned_vt: inactive
+  saved_configuration: unchanged
+  font: Modern22
+  host_evidence: /tmp/blit-rollout587.SKzt0W
 acceptance_limits:
   - Native VT keyboard isolation does not provide evdev pointer or gamepad exclusivity.
   - SDL daemon and physical VT handover acceptance remain pending in117.
