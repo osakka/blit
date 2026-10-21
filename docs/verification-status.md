@@ -1,5 +1,22 @@
 # Verification status
 
+## 2026-10-21: Kitty architecture audit, no runtime implementation change
+
+Internal125/122; pinned Kitty source and exact local code paths are recorded
+in[the investigation](kitty-rendering-investigation.md). The bounded local
+TCC probe invokes production functions: moving an existing placement preserves
+pixel generation but damages all240x135 cells; wallpaper makes native graphics
+bounds full-view; production scanout preparation copies16,588,800 bytes.
+SDL software resource-policy fixture confirms unchanged images are reused,
+not re-uploaded for movement; changed generation causes the next upload.
+These are architecture/work-shape observations, not a real-GPU FPS test.
+
+`ruby tools/probes/graphics_work_shape.rb` passes native and shared-protocol/SDL
+fixtures; source hashes are included in its JSON. Ruby syntax, documentation
+reference gate and diff checks pass. No runtime sources, schemas, font assets,
+live settings/backend, Hibr source or sessions were changed. The earlier
+0.2 release-validation gaps remain; these probes do not close them.
+
 ## 2026-10-21: 0.2 development cache and observation checkpoint
 
 Stablev0.1.589 annotation/target is verified on the public GitHub mirror.

@@ -63,6 +63,12 @@ the window; application state/font identity still require explicit control.
 
 ## Execution and acceptance order
 
+The deeper[source-level Kitty comparison](kitty-rendering-investigation.md)
+and production work-shape probe identify blanket graphics invalidation,
+CPU native composition and avoidable SDL upload preparation. Prioritize the
+revised work-model sequence there; glyph caching is not a complete explanation
+for the owner's video-plus-window-movement workload.
+
 1. Preserve589 tag/package/settings as rollback. Establish identical input
    traces and visual oracles before measuring each candidate.
 2. Measure and remove shared CPU work: cache churn, damage area amplification,

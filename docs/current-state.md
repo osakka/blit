@@ -1,5 +1,21 @@
 # Current state and restart point
 
+## 2026-10-21: deeper Kitty graphics architecture investigation
+
+Internal125 under122: see[the source audit and production probe](kitty-rendering-investigation.md).
+Placement-only Kitty commands preserve pixel generation but invalidate the
+entire surface; native graphics-change bounds include unchanged wallpaper;
+native composition is CPU pixel work followed by a whole-output copy.
+SDL already reuses unchanged image textures, but still suffers blanket
+surface invalidation and stages/copies complete changed images on the CPU.
+This materially exceeds a glyph-cache issue. The local production-function
+probe reproduces these work shapes without live writes. Proposed next step
+is canonical per-placement damage and retained GPU scene work, preserving
+atomicity/layers/panes and backend parity, not another parallel renderer.
+Live remains589/native KMS; fresh last-frame draw25.937ms/copy0.854ms is an
+uncontrolled sample, not a YouTube benchmark or measured cause attribution.
+No source fix, Hibr changes, restart or backend switch in this investigation.
+
 ## 2026-10-21: 0.2 performance development; stable589 preserved
 
 The existing annotated v0.1.589 tag is verified on the public mirror; do not
