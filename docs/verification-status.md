@@ -35,6 +35,10 @@ Final isolated timing:4pass/2live-only skips/0fail with unchanged limits;
 `scene-contract-lifecycle.log`, `scene-timing.log`,
 `scene-placement-software.log`, `scene-placement-gl.log` and
 `scene-valgrind.log`. Earlier0.2 validation gaps remain explicitly recorded.
+Final review includes shared scene preparation inside aggregate frame timing
+and optional SDL trace timing; backend-only draw phases keep their narrower
+scope. No comparison may silently exclude preparation cost. Placement fixtures
+and the unchanged local frame-rate gate are rerun for this timing-only change.
 
 Image upload/delete handlers retain conservative full damage; native scanout
 copying and SDL changed-image staging are unchanged. Live remains589 with

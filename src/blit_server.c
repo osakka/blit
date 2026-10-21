@@ -25693,7 +25693,6 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *input_plan
        to be, those cells were never repainted again. */
     int surface_painted[BLIT_MAX_FRAME_SURFACES];
 
-    prepare_graphics_damage(runtime, &prepared_plan);
     memset(surface_painted, 0, sizeof(surface_painted));
     Uint64 render_started = 0;
     uint64_t diagnostic_render_started = monotonic_us();
@@ -25719,6 +25718,10 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *input_plan
         if (getenv("BLIT_SDL_TRACE_TIMING") != NULL)
             render_started = SDL_GetPerformanceCounter();
     }
+
+    /* Shared preparation is real frame work: include it in aggregate and
+       optional SDL trace timing rather than reporting only backend drawing. */
+    prepare_graphics_damage(runtime, &prepared_plan);
 
     if (runtime->direct_kms) {
         BlitKmsSurfaceView views[BLIT_MAX_SESSIONS];
