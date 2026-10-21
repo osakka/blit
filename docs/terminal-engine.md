@@ -154,7 +154,21 @@ shell conformance path is stable.
    operations do not shift a line; origin mode is the one exception and makes
    coordinates relative to the margins in both axes. An inverted or empty
    rectangle is ignored rather than clamped, as DECSTBM and DECSLRM already
-   are. DECCRA copies through a buffer so an overlapping copy is not smeared.
+   are. Candidate589 (ADR0175/internal120) makes DECCRA a complete-cell copy:
+   all16 attachment slots/count, wide/continuation state, colours including
+   underline, legacy cell representation and link ID survive. One bounded
+   row snapshot plus vertical memmove ordering preserves overlap semantics;
+   no per-operation allocation or full-grid scratch is needed. Incomplete
+   copied wide fragments become empty cells and cleared old boundary partners
+   are included in damage. Oversized DECCRA coordinates clamp to the effective
+   page; all page selectors resolve to its sole active page. Self-copy is a
+   no-op. Cursor and pen are unchanged. DA1/DECID append standard feature28
+   (rectangular editing), not a private mode or a new copy escape.
+   DECCRA does not copy or move retained Kitty/sixel placements, repaint the
+   source's exposed strip, or recomposite translucent content. Those remain
+   application responsibilities. Hibr console/term/hold/desktop integration
+   is tracked upstream as internal337; do not infer end-to-end solid-drag
+   performance from the native parser fixture or bypass hold negotiation.
    DECCARA and DECRARA accept only the four VT500 attribute parameters and
    their clearing forms.
    Left/right margins are implemented (issue #3): DECLRMM (`CSI ?69h`) enables

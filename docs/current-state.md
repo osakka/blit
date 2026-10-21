@@ -1,5 +1,25 @@
 # Current state and restart point
 
+## 2026-10-21:588 tagged;120 complete-cell rectangle work in candidate589
+
+Annotated v0.1.588 points to48c5fdf (documentation-inclusive checkpoint;
+packaged source70999f2 remains in its release manifest). Tag is pushed and
+verified on GitHub. Tagged package/source checks passed and live API reports
+588; no user file or existing release/tag was overwritten.
+
+Issue120 audit found existing DECCRA lost combining slots/count, underline
+colour and hyperlinks, with unsafe wide-pair cleanup. Candidate589 corrects
+the canonical copy path and reports standard DA1 feature28. ADR0175 records
+one bounded-row snapshot with overlap-safe row order, wide-boundary damage,
+page/clipping/default semantics and retained-graphics limits. Direct fixture
+passes1048 cases including512x160; the old code fails the mark-count check.
+No Hibr code edits. Upstream Hibr337 requests console/term/hold/desktop
+integration with fallback and real end-to-end measurement.120 stays open.
+
+Local candidate only: no589 package or deployment; live remains tagged588,
+with no font/layout/backend changes. See verification-status for completed
+suite and Valgrind receipts before deciding the next acceptance step.
+
 ## 2026-10-21: public documentation uses GitHub, not internal Gitea
 
 Operator clarified the publication boundary: github.com/osakka/blit is the

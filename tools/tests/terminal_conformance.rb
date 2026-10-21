@@ -1111,8 +1111,8 @@ snapshot = run_case(base, 'da2-query',
 assert_equal('1b5b3e313b31303b3063', row_text(snapshot), 'DA2 reply')
 
 snapshot = run_case(base, 'da1-query',
-                    "stty -icanon -echo min 0 time 5; printf '\\033[c'; dd if=/dev/tty bs=1 count=11 2>/dev/null | od -An -tx1 | tr -d ' \\n'", width: 80)
-assert_equal('1b5b3f36323b343b323263', row_text(snapshot), 'DA1 reply advertises sixel')
+                    "stty -icanon -echo min 0 time 5; printf '\\033[c'; dd if=/dev/tty bs=1 count=14 2>/dev/null | od -An -tx1 | tr -d ' \\n'", width: 80)
+assert_equal('1b5b3f36323b343b32323b323863', row_text(snapshot), 'DA1 advertises sixel and rectangular editing')
 
 snapshot = run_case(base, 'xtversion-query',
                     "stty -icanon -echo min 0 time 5; printf '\\033[>q'; dd if=/dev/tty bs=1 count=19 2>/dev/null | od -An -tx1 | tr -d ' \\n'", width: 80)
@@ -1389,6 +1389,22 @@ assert_equal(['AAAA1     ', 'AAAA2     ', 'BBBB3     ', 'CCCC4     ',
               '          ', '          '],
              margin_rows(snapshot),
              'DECCRA copies through a buffer, so an overlap is not smeared')
+
+snapshot = run_case(base, 'deccra-preserves-complete-cell',
+                    "printf '\\033]8;;https://example.test/copy\\033\\\\\\033[4;38;2;10;20;30;48;2;40;50;60;58;2;70;80;90mÁ\\033]8;;\\033\\\\\\033[0m\\033[1;1;1;1;1;2;3;1$v'",
+                    width: 10, height: 6)
+cells = cell_map(snapshot)
+assert_equal(cells.fetch([0,0]).reject { |k,_| %w[x y].include?(k) },
+             cells.fetch([2,1]).reject { |k,_| %w[x y].include?(k) },
+             'DECCRA preserves marks, underline colour, link and all style')
+
+snapshot = run_case(base, 'deccra-preserves-wide-pair',
+                    "printf '界\\033[2;1H界\\033[1;1;1;2;1;2;1;1$v'",
+                    width: 10, height: 6)
+cells = cell_map(snapshot)
+assert_equal('界', cells.fetch([0,1]).fetch('text'), 'DECCRA wide owner survives replacing a wide pair')
+assert_equal(2, cells.fetch([0,1]).fetch('width'), 'DECCRA retains wide allocation')
+assert_equal(0, cells.fetch([1,1]).fetch('width'), 'DECCRA retains continuation')
 
 snapshot = run_case(base, 'deccara-set-attributes',
                     "#{RECT_FILL}; printf '\\033[1;1;2;3;1$r'", width: 10, height: 6)
@@ -1743,8 +1759,8 @@ assert_equal('B', cells.fetch([1, 1]).fetch('text'), 'vertical-tab line feed')
 assert_equal('C', cells.fetch([2, 2]).fetch('text'), 'form-feed line feed')
 
 snapshot = run_case(base, 'legacy-decid-query',
-                    "stty -icanon -echo min 0 time 5; printf '\\033Z'; dd if=/dev/tty bs=1 count=11 2>/dev/null | od -An -tx1 | tr -d ' \\n'", width: 80)
-assert_equal('1b5b3f36323b343b323263', row_text(snapshot), 'legacy DECID reply')
+                    "stty -icanon -echo min 0 time 5; printf '\\033Z'; dd if=/dev/tty bs=1 count=14 2>/dev/null | od -An -tx1 | tr -d ' \\n'", width: 80)
+assert_equal('1b5b3f36323b343b32323b323863', row_text(snapshot), 'legacy DECID advertises rectangular editing')
 
 run_session_field_case(base, 'osc-title-bel', "printf '\\033]0;bel title\\007'",
                        'title', 'bel title')

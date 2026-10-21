@@ -1,5 +1,13 @@
 # Blit roadmap
 
+Solid drag120: candidate589 corrects the existing standard DECCRA cell-copy
+path and advertises rectangular editing through DA1 feature28 (ADR0175).
+Upstream Hibr337 owns console/term/hold/desktop integration; no Hibr edits in
+Blit. Preserve default outline drag and non-capable client fallback. Cell
+copies are not Kitty/sixel placement moves or translucent recomposition.
+Actual through-hold bytes, CPU and physical cadence must be measured before
+claiming faster solid desktop motion. Tagged/live588 is unchanged.
+
 Core priority119: exquisite Retro/Modern Arabic with native outlines, correct
 existing Hibr display-order/presentation-form handling, diacritics and
 Arabic-Indic/Hindi numerals U+0660..U+0669. Devanagari is not requested.

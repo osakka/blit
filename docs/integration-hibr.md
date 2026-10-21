@@ -4,6 +4,10 @@ For glyph selection and colour icons, use the [font developer reference](font-re
 It covers API discovery, complete generated categories, semantic mappings,
 width/UTF-8 rules and fallbacks without modifying Hibr core.
 
+For opt-in solid window movement, see the candidate
+[rectangle-copy contract](rectangle-copy.md). Standard DECCRA capability at
+Blit is not evidence that the complete Hibr/hold route supports forwarding it.
+
 ## Decision
 
 blit remains the standalone display server. The Hibr desktop is an external

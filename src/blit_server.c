@@ -91,9 +91,9 @@ extern char **environ;
    bounded parser buffer larger than the protocol chunk plus its header; this
    is terminal-stream storage, not an image allocation. */
 #define BLIT_TERMINAL_STRING_CAPACITY 16384
-/* DA1: VT500 class 62, 4 = sixel graphics, 22 = ANSI colour. A client that
-   is told sixel is absent never sends it (Gitea #87). */
-#define BLIT_DA1_REPLY "\033[?62;4;22c"
+/* Preserve identity62; extensions4=sixel,22=ANSI colour,28=rectangular
+   editing. Feature28 describes cell editing, not retained image movement. */
+#define BLIT_DA1_REPLY "\033[?62;4;22;28c"
 #define BLIT_MAX_INPUT_DEVICES 32
 #define BLIT_MAX_AUDIO_DEVICES 64
 /* ADR 0067. The settings document, and how long a burst of writes is allowed
@@ -11597,77 +11597,103 @@ static void terminal_erase_rectangle(BlitSession *session,
 
 /* DECCRA: copy a rectangle.
  *
- * Through a buffer, because DEC requires the result to be as if the source
- * were read whole before the destination was written -- a direct copy of
- * overlapping rectangles would read cells it had already overwritten. The
- * source rectangle is clipped to the page; whatever the destination pushes
- * past the page edge is dropped. */
-static void terminal_copy_rectangle(BlitSession *session,
+ * A complete-cell row snapshot plus vertical memmove ordering gives the
+ * same result as reading the whole source before writing any destination.
+ * Scratch storage is bounded by one row, with no allocation per operation.
+ * This changes cells only, not retained graphics (ADR0175). */
+static void terminal_copy_rectangle(const BlitSession *session,
                                     BlitSurface *surface, const int *params,
                                     int param_count)
 {
-    static uint32_t codepoints[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
-    static uint16_t attributes[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
-    static uint32_t foreground[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
-    static uint32_t background[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
+    struct {
+        uint32_t codepoint, foreground, background, underline_color;
+        uint32_t combining[BLIT_MAX_COMBINING];
+        uint16_t attributes, link;
+        char cell;
+        unsigned char combining_count;
+    } row[BLIT_MAX_CELL_COLS];
     BlitRectangle source;
     BlitRectangle destination;
     int origin_top = session->terminal_origin_mode ? surface->scroll_top : 0;
     int origin_left = session->terminal_origin_mode ?
         surface_line_start(surface) : 0;
-    int source_page = param_count > 4 ? params[4] : 0;
-    int destination_page = param_count > 7 ? params[7] : 0;
+    int limit_bottom = session->terminal_origin_mode ?
+        surface->scroll_bottom : surface->height - 1;
+    int limit_right = session->terminal_origin_mode ?
+        surface_line_end(surface) : surface->width - 1;
+    int coordinates[4];
     int top;
     int left;
     int height;
     int width;
     int x;
     int y;
+    int first, stop, step;
 
-    /* One page. A copy naming any other is not a copy Blit can make, so it
-       is ignored rather than silently done on the page it does have. */
-    if ((source_page > 1) || (destination_page > 1))
-        return;
-    if (!terminal_rectangle(session, surface, params, param_count, 0, 0,
+    /* DEC clamps page selectors to the last available page. There is only
+       one active page here, regardless of the inactive alternate buffer. */
+    for (x = 0; x < 4; ++x) {
+        int extent = (x & 1) ? limit_right - origin_left + 1 :
+                              limit_bottom - origin_top + 1;
+        coordinates[x] = x < param_count ? params[x] : 0;
+        if (coordinates[x] > extent) coordinates[x] = extent;
+    }
+    if (!terminal_rectangle(session, surface, coordinates, 4, 0, 0,
                             &source))
         return;
     top = param_count > 5 && params[5] > 0 ?
         origin_top + params[5] - 1 : origin_top;
     left = param_count > 6 && params[6] > 0 ?
         origin_left + params[6] - 1 : origin_left;
-    if (top < 0 || left < 0 || top >= surface->height ||
-        left >= surface->width)
-        return;
+    if (top > limit_bottom) top = limit_bottom;
+    if (left > limit_right) left = limit_right;
+    if (top < origin_top || left < origin_left) return;
     height = source.bottom - source.top + 1;
     width = source.right - source.left + 1;
-    if (top + height > surface->height)
-        height = surface->height - top;
-    if (left + width > surface->width)
-        width = surface->width - left;
+    if (top + height > limit_bottom + 1)
+        height = limit_bottom + 1 - top;
+    if (left + width > limit_right + 1)
+        width = limit_right + 1 - left;
     if (height <= 0 || width <= 0)
         return;
-    for (y = 0; y < height; ++y)
+    if (top == source.top && left == source.left) return;
+    first = top > source.top ? height - 1 : 0;
+    stop = top > source.top ? -1 : height;
+    step = top > source.top ? -1 : 1;
+    for (y = first; y != stop; y += step) {
         for (x = 0; x < width; ++x) {
-            codepoints[y][x] = surface->codepoints[source.top + y][source.left + x];
-            attributes[y][x] = surface->attributes[source.top + y][source.left + x];
-            foreground[y][x] = surface->foreground[source.top + y][source.left + x];
-            background[y][x] = surface->background[source.top + y][source.left + x];
+            int sx = source.left + x, sy = source.top + y;
+            row[x].cell = surface->cells[sy][sx];
+            row[x].codepoint = surface->codepoints[sy][sx];
+            row[x].combining_count = surface->combining_count[sy][sx];
+            memcpy(row[x].combining, surface->combining[sy][sx], sizeof(row[x].combining));
+            row[x].attributes = surface->attributes[sy][sx];
+            row[x].foreground = surface->foreground[sy][sx];
+            row[x].background = surface->background[sy][sx];
+            row[x].underline_color = surface->underline_color[sy][sx];
+            row[x].link = surface->links[sy][sx];
         }
-    for (y = 0; y < height; ++y) {
+        /* Only old boundary partners can be outside the overwritten range.
+           Do this before installing any copied owner/continuation pair. */
+        terminal_clear_wide_overlap(surface, left, top + y);
+        terminal_clear_wide_overlap(surface, left + width - 1, top + y);
         for (x = 0; x < width; ++x) {
             int destination_x = left + x;
             int destination_y = top + y;
-            terminal_clear_wide_overlap(surface, destination_x, destination_y);
-            surface->codepoints[destination_y][destination_x] = codepoints[y][x];
-            surface->combining_count[destination_y][destination_x] = 0;
-            surface->cells[destination_y][destination_x] =
-                codepoints[y][x] < 128 ? (char)codepoints[y][x] :
-                (codepoints[y][x] != 0 ? '?' : 0);
-            surface->attributes[destination_y][destination_x] = attributes[y][x];
-            surface->foreground[destination_y][destination_x] = foreground[y][x];
-            surface->background[destination_y][destination_x] = background[y][x];
-            surface->underline_color[destination_y][destination_x] = 0;
+            surface->cells[destination_y][destination_x] = row[x].cell;
+            surface->codepoints[destination_y][destination_x] = row[x].codepoint;
+            surface->combining_count[destination_y][destination_x] = row[x].combining_count;
+            memcpy(surface->combining[destination_y][destination_x], row[x].combining, sizeof(row[x].combining));
+            surface->attributes[destination_y][destination_x] = row[x].attributes;
+            surface->foreground[destination_y][destination_x] = row[x].foreground;
+            surface->background[destination_y][destination_x] = row[x].background;
+            surface->underline_color[destination_y][destination_x] = row[x].underline_color;
+            surface->links[destination_y][destination_x] = row[x].link;
         }
+        if (row[0].attributes & BLIT_ATTR_CONTINUATION)
+            terminal_clear_cell(surface, left, top + y);
+        if (row[width - 1].attributes & BLIT_ATTR_WIDE)
+            terminal_clear_cell(surface, left + width - 1, top + y);
         terminal_normalize_wide_row(surface, top + y);
     }
     destination.top = top;

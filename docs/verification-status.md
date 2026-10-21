@@ -1,5 +1,37 @@
 # Verification status
 
+## 2026-10-21:588 tag and120 candidate589 rectangle-copy checkpoint
+
+Annotated v0.1.588 targets48c5fdf, verified on origin and public GitHub.
+The release manifest still names its exact packaged source70999f2, package
+and binary SHA256s. Production-path diff from that source to the tagged
+commit is empty; subsequent changes through the tag are documentation/tooling.
+Live API version was verified588. User's unrelated releases/0.1.554.yaml is
+preserved; no tag overwrite or remote configuration change.
+
+Candidate589 corrects the existing DECCRA implementation, not a second escape.
+Negative control with the old code fails the combining-count assertion
+(`rectangle-copy-before.log`). New direct fixture passes1048 cases, including
+immutable-source overlap oracle, all16 attachment slots, style/underline/link
+metadata, wide cut/cleanup damage,512x160 limits, defaults/clipping/origin,
+byte-fragmented parser and DA1/DECID feature28 (`rectangle-copy-after.log`).
+Local30-copy144x38 CPU sample:8.582ms total,0.286ms mean. It excludes input,
+parser, hold, painting and scanout and proves no Hibr drag speed.
+
+TCC589 builds. Final const-only qualification rebuild is binary-identical to
+the tested binary. Terminal suite5pass/0skip/0fail includes new real PTY/API
+metadata and wide-pair checks. Renderer59pass/1skip/0fail; skipped native VT
+kernel fixture is not acceptance. GLES11pass/0skip/0fail. Valgrind fixture
+1048cases:0errors/0definite/indirect/possible lost bytes;18,804bytes in9
+reachable library blocks. Logs: build/tests/rectangle-copy-{build,after,
+terminal-suite,renderer-suite,gles-suite,valgrind}.log.
+
+The full standard suite is running at this checkpoint. No589 package or
+deployment; no live font/layout/backend/Hibr changes. Hibr337 is the upstream
+console/term/hold/desktop integration dependency.120 remains open until
+actual through-hold and physical solid-motion acceptance; retained pixel
+placements/translucency are not cell-copy capabilities.
+
 ## 2026-10-21: public link boundary correction
 
 Verified github.com/osakka/blit exists publicly, public font-reference URL

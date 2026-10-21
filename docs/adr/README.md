@@ -191,6 +191,8 @@ security policy, or compatibility rule requires a new ADR.
 - [0171 — Native font coverage before wide bitmap](0171-native-font-coverage-before-wide-bitmap.md)
 - [0172 — Original colour icon catalogue](0172-original-colour-icon-catalogue.md)
 - [0173 — Retain shrinking fallback coverage](0173-retain-shrinking-fallback-coverage.md)
+- [0174 — Arabic companion rasterization](0174-arabic-companion-rasterization.md)
+- [0175 — Complete-cell rectangle copy](0175-complete-cell-rectangle-copy.md)
 
 ## Adding an ADR
 

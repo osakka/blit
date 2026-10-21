@@ -198,6 +198,7 @@ suite_schema() {
 }
 
 suite_terminal() {
+    run_gate rectangle_copy_gate.rb ruby tools/tests/rectangle_copy_gate.rb
     run_gate kitty_keyboard_gate.rb ruby tools/tests/kitty_keyboard_gate.rb
     if start_server; then
         run_gate terminal_conformance.rb env \
