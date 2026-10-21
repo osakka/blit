@@ -1,5 +1,33 @@
 # Verification status
 
+## 2026-10-21: 0.2 canary package and live startup, not desktop acceptance
+
+`releases/0.2.0.yaml` records source/docs4013bcd and the exact development
+artifact. Package gate with rebuild enabled passes reproducible=yes; pinned
+ABI16 native-child-provider gate passes. Timing suite4pass/2explicit live-only
+skips/0fail;120-second four-PTY soak10512 snapshots/956 resizes. No thresholds
+were relaxed. Exact589 rollback package checksum/manifest also verify.
+
+Existing API updater accepted the candidate and independently reported
+server0.2.0 through `/v1/version`. Postflight confirms API0.1, native KMS,
+both output identities/modes, three pane grids, saved layout and settings
+document hash unchanged, clean revision397. Live Hibr is0.99.285/ABI16,
+compatible with the pinned adapter; updater/adapter package hashes match589.
+No SSH, Hibr edits or backend/font/layout mutations. Restart replaces PTYs.
+
+One running login manager occupies the saved bottom primary; identity waits
+for authentication. Auxiliaries have not been launched before login. User
+login, primary/join reattachment, physical pixels/input and matched desktop
+performance remain pending. Do not compare pre-update desktop CPU/cadence
+with post-update login idle as a speedup, or call this a stable0.2 release.
+Preflight, postflight, package/rebuild, timing, deployment, font/baseline
+observations and API screenshot are in `build/tests/candidate-0.2-*`.
+Pre-update5.108s sample:49.40% one server core,67,781 terminal bytes/s,
+141 presentation calls/24 missed deadlines; uncontrolled, not distinct FPS.
+Another5.516s font sample on Retro28px sees0 new rasterizations and49,392
+cache bytes, so no cache churn was observed in that particular window.
+These windows do not identify the expensive function or a Kitty comparison.
+
 ## 2026-10-21: 125 protocol-image producer damage, candidate0.2.0 only
 
 ADR0177's extension narrows Kitty completion/deletion and sixel completion

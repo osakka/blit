@@ -3,7 +3,37 @@
 SDL multi-monitor autodetection/hotplug parity is still pending acceptance
 under internal104: discovery, unplug/replug, stable identities, saved layouts,
 pane/session placement and input routing. The0.2 shared-damage fixtures do
-not certify it or authorize a backend switch. Live remains native KMS589.
+not certify it or authorize a backend switch. Live is now the0.2.0 native-KMS
+development canary below;v0.1.589 remains the stable rollback checkpoint.
+
+## 2026-10-21: 0.2 canary installed; authenticated desktop test pending
+
+API updater installed the reproducible0.2.0-1 candidate from source4013bcd.
+Artifact identity is in `releases/0.2.0.yaml`; this is not a stable0.2 tag or
+performance acceptance. The exact589 rollback archive remains available and
+matches its recorded checksum. Updater/adapter binaries are byte-identical
+to589. Hibr runtime0.99.285/ABI16 is compatible; Hibr was not modified.
+
+Post-update API checks confirm0.2.0/API0.1, native KMS, both physical output
+identities/modes, all three pane grids, saved layout and the exact settings
+document hash unchanged at clean revision397. One supervised login runs on
+bottom primary pane-display-93-2; authentication is waiting and automatic
+joins are gated by it. Restart replaced PTYs; uninterrupted desktop sessions
+were not preserved or claimed. No bypass login or competing desktop spawned.
+
+Package artifact/rebuild gates pass with identical SHA256. Native child
+provider passes using the pinned headers. Timing gates:4pass/2explicit
+live-only skips/0fail;120s/four-PTY soak10512 snapshots/956 resizes. Earlier
+renderer/GLES/protocol receipts remain in the ledger. Saved configuration
+checks are not physical rendering/input/performance acceptance.
+
+Next: user logs in, existing policy reconnects auxiliaries, then verify one
+primary/two joins, visuals/input and measure the same desktop workload.
+All panes were occupied before update: no synthetic workload replaced them.
+Before-update observations were uncontrolled and must not be compared with
+the idle login screen as a desktop speedup.125/122 and SDL parity104 stay open.
+Evidence lives in ignored `build/tests/candidate-0.2-*` artifacts. Historical
+589 observations below describe the pre-deployment state, not the current host.
 
 ## 2026-10-21: 125 protocol-image damage extension
 

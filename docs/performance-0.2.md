@@ -1,6 +1,9 @@
 # Blit 0.2: correctness-preserving performance
 
 Stable checkpoint: **v0.1.589**. Development candidate: **0.2.0**.
+The0.2.0-1 canary is now installed on10.54 with native KMS and unchanged saved
+configuration. Login/desktop workload acceptance is pending; no stable0.2 tag
+or live performance gain is claimed. See the verification ledger.
 Internal tracker: Blit122; first cache change123; reuse Blit120 for solid-copy integration and104 for
 backend parity. These are internal backlog identifiers, not GitHub issue links.
 Nothing here authorizes silent backend/layout/font changes or Hibr code edits.
