@@ -72,6 +72,14 @@ drag as the default until solid mode is proven end-to-end.
 Internal Hibr337 requests console emission, term-grid semantics, hold
 forwarding/fallback and desktop frame elision. Blit does not modify Hibr code.
 
+Read-only source audit at Hibr7dc5f74 (clean audited files) confirms why
+route-level negotiation is required: mods/term/vt.c `tm_csiin` currently
+ignores `$v`, while relayed `CSI c` is passed to the real terminal. A real
+terminal's feature28 reply must not enable DECCRA inside hold before both
+the emulator and forwarding path support it. This is source-checkout
+evidence, not a claim about the installed desktop binary. It is recorded
+in Hibr337; no Hibr files were changed.
+
 ## Verification and remaining acceptance
 
 `ruby tools/tests/rectangle_copy_gate.rb` tests the actual production parser

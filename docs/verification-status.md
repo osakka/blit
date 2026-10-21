@@ -30,10 +30,22 @@ The full standard suite passes149/5skip/0fail (`rectangle-copy-all.log`),
 including120s/four-session soak,11272 snapshots and1025 resizes. Skips are
 native VT kernel/QEMU fixtures, explicit QEMU Hibr lifecycle, package not
 supplied, live multi-display and live screenshot timing. They are not passes.
-No589 package or deployment at this checkpoint; no live font/layout/backend/Hibr changes. Hibr337 is the upstream
+Candidate589 artifact checks pass, including deterministic rebuild:
+package SHA25669ff6b1cfafbd6606a7f7bc9475c626f47e0c4beb58e83c4cf1c26d67854b73e,
+server SHA25686023def38c0186b0b5bb765ecf23fa9574aaca442caa5072c69926a5c4a5960;
+recorded source/documentation53b0a45. Log rectangle-589-package-artifact.log;
+manifest releases/0.1.589.yaml. It is not deployed: no live font/layout/backend/Hibr changes. Hibr337 is the upstream
 console/term/hold/desktop integration dependency.120 remains open until
 actual through-hold and physical solid-motion acceptance; retained pixel
 placements/translucency are not cell-copy capabilities.
+
+Read-only Hibr checkout audit:7dc5f74, clean audited term/gfxask/console-key
+files; term/vt.c SHA2566020360b9978d08e4c2f6700a6c0179c848916159119dd1eda0b66211b451ff7.
+tm_csiin ignores `$v`, whereas relayed primary DA is passed to the client.
+This can expose native DA28 without emulator support, so Hibr337 must
+qualify/filter negotiation before enabling the complete route. gfxask's
+decoder scans to the final CSI byte, not a fixed11-byte response. These are
+local source facts, not installed-host observations; no Hibr edits were made.
 
 ## 2026-10-21: public link boundary correction
 

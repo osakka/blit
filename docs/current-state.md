@@ -18,9 +18,14 @@ implementation is committed/pushed at01d6245. Package validation is next.
 No Hibr code edits. Upstream Hibr337 requests console/term/hold/desktop
 integration with fallback and real end-to-end measurement.120 stays open.
 
-Local candidate only: no589 package or deployment; live remains tagged588,
-with no font/layout/backend changes. See verification-status for completed
-suite and Valgrind receipts before deciding the next acceptance step.
+Candidate589 is packaged and reproducibly verified:
+build/packages/blit_0.1.589-1_amd64.deb, release identity in releases/0.1.589.yaml,
+source53b0a45. It is not deployed; live remains tagged588 with no
+font/layout/backend changes. Read-only Hibr7dc5f74 audit confirms term's
+intermediate handler ignores `$v` while relayed DA queries pass through.
+Hibr337 now contains that concrete false-capability hazard. The next
+end-to-end step requires upstream emulator/hold/console/desktop support;
+do not enable solid-copy mode through hold from native DA28 alone.
 
 ## 2026-10-21: public documentation uses GitHub, not internal Gitea
 
