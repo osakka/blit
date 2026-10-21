@@ -5,6 +5,12 @@ Internal tracker: Blit122; first cache change123; reuse Blit120 for solid-copy i
 backend parity. These are internal backlog identifiers, not GitHub issue links.
 Nothing here authorizes silent backend/layout/font changes or Hibr code edits.
 
+SDL multi-monitor autodetection/hotplug parity remains an explicit acceptance
+dependency under internal104. Rendering tests do not certify automatic
+discovery, disconnect/reconnect, stable identities, saved layout restoration,
+pane/session placement or input routing. Do not propose SDL/GL as a complete
+native-KMS replacement until those behaviours are verified on the real host.
+
 ## Why Kitty is a useful reference
 
 Kitty's [performance documentation](https://sw.kovidgoyal.net/kitty/performance/)

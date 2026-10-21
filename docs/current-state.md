@@ -1,5 +1,10 @@
 # Current state and restart point
 
+SDL multi-monitor autodetection/hotplug parity is still pending acceptance
+under internal104: discovery, unplug/replug, stable identities, saved layouts,
+pane/session placement and input routing. The0.2 shared-damage fixtures do
+not certify it or authorize a backend switch. Live remains native KMS589.
+
 ## 2026-10-21: 125 stage one — retained placement damage implemented
 
 Development0.2.0 now compares immutable presented placement descriptors at
