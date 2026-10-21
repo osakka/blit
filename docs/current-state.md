@@ -1,5 +1,21 @@
 # Current state and restart point
 
+## 2026-10-21:0.1.589 released and deployed by operator request
+
+Supervised API update to192.168.10.54 succeeded. GET/v1/version reports589;
+installed server SHA256 matches releases/0.1.589.yaml exactly. Complete saved
+settings document is identical before/after, clean revision341: Retro22px,
+Arabic Retro/baseline17px, direct KMS and DP-1 split1x2. One bottom-pane
+login-manager owner is running; joins wait for authentication. Initial
+diagnostics have no errors/warnings. No Hibr code edits or SSH were used.
+
+This releases the validated DECCRA correctness/discovery changes, not proven
+solid-drag acceleration through hold. Internal Hibr337 remains open for
+emulator/hold/console/desktop integration;120 remains open for end-to-end
+acceptance. Do not enable copy through hold solely from native DA28.
+The older588 tag/package remains available and unchanged. Earlier candidate
+checkpoints below retain their historical scope.
+
 ## 2026-10-21:588 tagged;120 complete-cell rectangle work in candidate589
 
 Annotated v0.1.588 points to48c5fdf (documentation-inclusive checkpoint;

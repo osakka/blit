@@ -1,7 +1,8 @@
 # Rectangle-copy integration contract
 
-Candidate0.1.589, internal Blit120 / Hibr337; not deployed. The live release
-remains [v0.1.588](https://github.com/osakka/blit/tree/v0.1.588).
+Released0.1.589, internal Blit120 / Hibr337. Deployed by operator request;
+version, binary identity and saved-configuration preservation verified.
+Hibr/hold integration and solid-drag performance acceptance remain pending.
 
 ## Capability and wire format
 
@@ -30,7 +31,7 @@ Spaces above separate notation only; emit `\x1b[2;3;5;10;1;8;4;1$v`.
 The original rectangle is not erased. Destination pixels are repainted from
 the canonical grid, not copied directly from a framebuffer.
 
-Query primary device attributes with `CSI c` (`ESC [ c`). Candidate589 replies
+Query primary device attributes with `CSI c` (`ESC [ c`). Blit589 replies
 `ESC [ ?62;4;22;28c`; feature28 reports rectangular editing. Keep the feature
 test separate from device identity62 and TERM. Legacy DECID uses the same
 reply. This is not a DECRQM mode, a claim of every VT400 function, or a claim

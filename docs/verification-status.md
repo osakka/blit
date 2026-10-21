@@ -1,5 +1,23 @@
 # Verification status
 
+## 2026-10-21:0.1.589 supervised live release receipt
+
+Operator requested releasing589 after its149pass/5skip/0fail standard suite,
+11/11 GLES gates and reproducible package acceptance. Existing API updater
+accepted the manifest-matching package and verified live version589.
+Read-only API command reporting confirms installed server SHA256
+86023def38c0186b0b5bb765ecf23fa9574aaca442caa5072c69926a5c4a5960.
+Logs: rectangle-589-live-update.log and rectangle-589-live-identity.json.
+
+The complete saved settings document is unchanged, clean revision341:
+Retro22px, Arabic Retro/baseline17px, direct KMS, DP-1 split1x2. One primary
+bottom-pane login-manager owner is running after restart; auxiliary joins
+wait for authentication. Initial diagnostics have no errors/warnings.
+No font/backend/layout/Hibr changes or SSH. This verifies installation and
+configuration preservation, not physical appearance or solid-drag speed.
+Hibr337/Blit120 remain open for the complete negotiated route and end-to-end
+acceptance; native DA28 alone is not held-route support.
+
 ## 2026-10-21:588 tag and120 candidate589 rectangle-copy checkpoint
 
 Annotated v0.1.588 targets48c5fdf, verified on origin and public GitHub.

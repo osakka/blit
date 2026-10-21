@@ -1,6 +1,6 @@
 # ADR0175: complete-cell rectangle copy and standard discovery
 
-- Status: accepted for local candidate589; end-to-end Hibr integration pending
+- Status: accepted; released/deployed589; end-to-end Hibr integration pending
 - Date:2026-10-21
 - Scope: canonical terminal grid, DECCRA and DA1; internal Blit120
 
