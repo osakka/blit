@@ -1,5 +1,24 @@
 {
   "profile": "blit-modern",
+  "ui_coverage": {
+    "file": "hibr-ui-glyphs.json",
+    "sha256": "627aefc6bc2073fa041acba899b971219e27f6c33e0e85403d62cc125b4ad4f9",
+    "scalars": 101
+  },
+  "custom_icons": {
+    "catalogue": "icons/catalogue.json",
+    "format": "COLR v0 / CPAL; original SVG paths; monochrome U+270E pen alias",
+    "sources": {
+      "icons/catalogue.json": "d31f8b6e5e40f56f216690c657a6d0726b673963f28474aa8d091f65976fcb79",
+      "icons/berkanan.svg": "f16019c94cf20f1a9dc42b7127e04ed68b0303260e6a8935ede1110bc1abdd5f",
+      "icons/wired.svg": "6a5207758fb6ef13dbda9d5392fb32aeb9e6c9beea33280ecf46bd64fe2200b1",
+      "icons/LICENSE.txt": "a1f68010aa91a710d0b41857f158f3fb1316778a0dc13321577f86cb82a9badb",
+      "icons/blit.svg": "7106e348a7ea198c09e459989b4d60c36a12ec9e73b02b6f86817554b0983cab",
+      "icons/hibr-pen.svg": "832950dba6ccf71c3dc57b188952d9c4cc90f7387fb820e36ca01a7d25fe8fb4",
+      "icons/wifi-bars.svg": "f4b75054e3da17019c2347d099d1c6907a4247d95bcb6289c5b7045a1c0cea8d",
+      "icons/bluetooth.svg": "65c0631d66b9edd267ea92de11a5068174978c47e0f7e3714ac12d6dd7fdc1ee"
+    }
+  },
   "text_emoji": {
     "file": "NotoEmojiText.ttf",
     "version": "3.002",
@@ -18,7 +37,7 @@
     "source": "Renamed derivative of Nerd Fonts v3.4.0 Hack Mono; full source Unicode and full pinned Nerd catalogue",
     "upstream": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/v3.4.0/patched-fonts/Hack/Regular/HackNerdFontMono-Regular.ttf",
     "upstream_sha256": "03e60d3c1a9f8bef4e1f78836f80aacb9ec005260a6b094f5bfc10043bb115ab",
-    "sha256": "42457a8ca5eb79fdd888b58bda459d539028cba8bfa84786fa52d68313482cf8",
+    "sha256": "ce98353a70c82996157bcf8d550fe31f13cff8296f60194fe68c1efa04d8dee5",
     "license_file": "licenses/HackNerd-LICENSE.txt",
     "license_sha256": "1f61bb7c790c59b4b0ecdf304628b94e42ae4c8020094a8c3da73381ab212623"
   },
@@ -93,14 +112,14 @@
       "sha256": "69cdedc8a4f57a30d68e4f045af8b9cce0ec3b1a6e7eec1ad41737c894f26790"
     }
   ],
-  "policy": "tools/fonts/build-outline-nerd.py --profile modern|retro with fontTools 4.60.1. Retain full source Unicode and all 10386 pinned Nerd catalogue codepoints. Fit complete icons with 5 percent side insets and each face's cap height; U+270E uses nf-fa-pencil. Renamed derivatives; upstream notices retained. Shared native grayscale raster and shared Noto 2.057 colour fallback; emoji corpus/shaping audit does not establish Blit cluster support. Protected geometry and missing scalars retain PSF fallback. No universal Unicode or emoji-sequence shaping claim. Nerd separators use optical icon fitting, not a guaranteed seamless Powerline geometry contract.",
+  "policy": "tools/fonts/build-outline-nerd.py --profile modern|retro with fontTools 4.60.1. Retain full source Unicode and all10386 pinned Nerd catalogue codepoints. Fit complete icons with5percent side insets and each face's cap height. Original SVG catalogue adds seven explicit plane16 COLRv0 colour icons, missing standard text glyphs and a themed U+270E pen alias. Renamed derivatives; upstream notices retained. Shared native grayscale/colour raster and Noto2.057 fallback; corpus audits do not imply universal terminal/Unicode coverage. Protected geometry and missing scalars retain PSF fallback. Core Powerline geometry is ADR0164, not a guarantee for all Extras.",
   "retro": {
     "profile": "blit-retro",
     "file": "BlitRetroNerd-Regular.ttf",
     "source": "Renamed derivative of Nerd Fonts v3.4.0 3270 Mono; full source Unicode and full pinned Nerd catalogue",
     "upstream": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/v3.4.0/patched-fonts/3270/Regular/3270NerdFontMono-Regular.ttf",
     "upstream_sha256": "3a6f45e14cafdf09bc888529d037f7da2d0c8256f23afbf64b81eb5e3f6deca3",
-    "sha256": "e7ca66583c2c694be10c8dc9ef85edf12e4598d67b01dac1295151ddfa43b99a",
+    "sha256": "bd2b2a09584bd2cdb62ee8aaac82b00da74a5ac1a8fab8630701bc087b56bbdc",
     "license_file": "licenses/3270-LICENSE.txt",
     "license_sha256": "ef855fadca28e91a4123f7299bd79dcd78a7e19dfc364039790bb75bdedd515a"
   },

@@ -11,13 +11,22 @@ at each requested size; neither profile enlarges a one-bit bitmap for text.
 Nerd icons take terminal colours; supported emoji scalars use the shared
 Noto Colour Emoji2.057 face for intrinsic multicolour artwork.
 
+Candidate588 adds [seven original colour icons](icons/README.md): Blit,
+Hibr pen, Wi-Fi levels1..4 and Bluetooth. Editable SVGs generate COLR v0
+layers in both faces. Discover their explicit one-cell mappings through
+`GET /v1/fonts/icons`; ordinary Nerd icons remain theme-coloured. The existing
+U+270E pen alias now uses original monochrome artwork. Missing Hibr text
+U+16D2 and Retro U+21CC are covered. This is not a claim of universal Unicode
+coverage; live reports and upstream icon selection remain separate in118/330.
+
 ![Actual shared-raster specimen: Blit Retro and Modern](../../docs/images/blit-fonts.png)
 
 Select with `PUT /v1/fonts`, for example
 `{"font_id":"blit-retro","size_px":24}`. The existing font inventory and
 Control Panel use the same profiles. Sizes8..64px specify exact cell height,
 not an em height or whole-display scale. Default Terminus and the selectable
-pixel-art Spleen remain unchanged. This source change has not been deployed.
+pixel-art Spleen remain unchanged. Deployment and acceptance are recorded in
+[current state](../../docs/current-state.md) and the verification ledger.
 
 `modern-fonts.source.json` is the single provenance manifest for **both**
 outline profiles, shared colour/monochrome emoji fallbacks, catalogue and licences.
@@ -104,8 +113,8 @@ Fonticons attribution and Font Awesome licensing. The original Hack face stays
 as a legacy provenance reference/negative emoji-audit fixture, not a second Modern runtime profile or
 an input to the full-Nerd generator. Noto remains
 unmodified, from upstream release `v2026-09-24-unicode18_0`, its2D CBDT/CBLC
-font rather than an unsupported COLRv1 face. This replaces the older Debian
-Noto2.042 asset in candidate574; it is not deployed to the host.
+font rather than an unsupported COLRv1 face. This replaced the older Debian
+Noto2.042 asset in candidate574; see the deployment ledger for current status.
 
 The complete Unicode Emoji18.0 test corpus and licence are pinned in
 `assets/unicode/emoji-18.0`. The independent offline font-shaping audit is:
@@ -123,9 +132,9 @@ bitmap validation or permission to claim complete emoji support. The audit
 does not install HarfBuzz or add it to the production binary. See ADR0157.
 
 Before ADR0156, Modern retained only1475 Font Awesome mappings; that restriction
-is superseded by the complete pinned Nerd catalogue above.
-U+270E (`✎`), Hibr's existing menu character, uses the
-Font Awesome pencil outline without changing Hibr or terminal codepoints.
+is superseded by the complete pinned Nerd catalogue above. Before588,
+U+270E (`✎`) used a Font Awesome pencil alias; ADR0172 replaces that alias
+with the original themed pen silhouette without changing Hibr codepoints.
 Complete icon outlines are fitted with5% side insets and the text cap-height
 bound; no cropping or proportional advance. Icons take the terminal foreground
 colour; colour emoji remain a separate mechanism. Generate with

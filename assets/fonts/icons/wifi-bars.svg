@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 20">
+  <title>Wireless signal — four ascending bars</title>
+  <path data-level="1" data-inactive-fill="#3e526b" fill="#41d6bf" d="M0 17Q0 16 1 16H2Q3 16 3 17V19H0Z"/>
+  <path data-level="2" data-inactive-fill="#3e526b" fill="#41d6bf" d="M4 13Q4 12 5 12H6Q7 12 7 13V19H4Z"/>
+  <path data-level="3" data-inactive-fill="#3e526b" fill="#41d6bf" d="M8 8Q8 7 9 7H10Q11 7 11 8V19H8Z"/>
+  <path data-level="4" data-inactive-fill="#3e526b" fill="#41d6bf" d="M12 2Q12 1 13 1H14Q15 1 15 2V19H12Z"/>
+</svg>

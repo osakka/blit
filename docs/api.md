@@ -1391,6 +1391,23 @@ An empty `modifiers` object clears the map. Every property is per device: two
 keyboards on one server can carry different layouts, different repeat rates
 and different remaps, which is what makes per-device routing usable.
 
+## Original font icon discovery
+
+`GET /v1/fonts/icons` returns the canonical packaged versioned catalogue for
+Modern/Retro: seven original intrinsic-colour icons, their hexadecimal scalar
+mappings, one-cell allocation, four Wi-Fi signal levels and standard text
+fallback additions. Authentication is the same as other read endpoints. A
+missing/unreadable/oversized catalogue returns503
+`font_icon_catalogue_unavailable`; this request never changes the selected
+font or the screen. See [the icon contract](../assets/fonts/icons/README.md).
+
+`GET /v1/fonts` remains authoritative for the active profile and exact pixel
+size; use `PUT /v1/fonts` to select Modern/Retro. Bitmap-only profiles do not
+gain these colour glyphs. Clients must select the documented characters;
+existing ASCII/Unicode/Nerd UI modes do not automatically become multicolour.
+Do not equate the active `glyphs`/`mappings` PSF fallback counters with the
+repertoire of the attached outline/emoji faces.
+
 ## Diagnostics and screenshots
 
 `GET /v1/diagnostics/observation` is the canonical incident snapshot. It is

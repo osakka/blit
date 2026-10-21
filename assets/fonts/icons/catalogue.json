@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "profiles": ["blit-modern", "blit-retro"],
+  "columns": 1,
+  "namespace": "Blit private-use plane16; not a Unicode or Nerd assignment",
+  "license": "LICENSE.txt",
+  "icons": [
+    {"id":"blit", "codepoint":"100000", "source":"blit.svg"},
+    {"id":"hibr-pen", "codepoint":"100001", "source":"hibr-pen.svg", "text_alias":"270E"},
+    {"id":"wifi-1", "codepoint":"100002", "source":"wifi-bars.svg", "signal_level":1},
+    {"id":"wifi-2", "codepoint":"100003", "source":"wifi-bars.svg", "signal_level":2},
+    {"id":"wifi-3", "codepoint":"100004", "source":"wifi-bars.svg", "signal_level":3},
+    {"id":"wifi-4", "codepoint":"100005", "source":"wifi-bars.svg", "signal_level":4},
+    {"id":"bluetooth", "codepoint":"100006", "source":"bluetooth.svg"}
+  ],
+  "text_glyphs": [
+    {"id":"berkanan", "codepoint":"16D2", "source":"berkanan.svg", "colour":false},
+    {"id":"wired", "codepoint":"21CC", "source":"wired.svg", "colour":false}
+  ]
+}

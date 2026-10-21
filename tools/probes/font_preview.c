@@ -5,7 +5,7 @@
 #include <string.h>
 
 #define WIDTH 1200
-#define HEIGHT 1170
+#define HEIGHT 1370
 static unsigned pixels[WIDTH * HEIGHT];
 
 static void paint(const BlitRasterGlyph *g, int x, int y, unsigned fg)
@@ -53,7 +53,7 @@ int main(int argc, char **argv)
     for (i = 0; i < WIDTH * HEIGHT; ++i) pixels[i] = 0x10171f;
     for (profile = 0; profile < 2; ++profile) {
         unsigned foreground = profile ? 0xd6e7f5 : 0xffc579;
-        int top = profile * 580;
+        int top = profile * 680;
         BlitRaster *label = blit_raster_open(&fallback, argv[profile + 2], argv[4], 12, 24);
         if (!label) return 1;
         text(label, 24, profile ? "BLIT MODERN / smooth, crisp, colourful" :
@@ -101,13 +101,16 @@ int main(int argc, char **argv)
                     paint(&g, 650 + i * 144 + selector * 52, top + 430, foreground);
                 }
             }
+            for (i = 0; i < 7; ++i)
+                glyph(r, 0x100000 + i, 1, 34 + i * 100, top + 506, foreground);
             blit_raster_close(r);
         }
         label = blit_raster_open(&fallback, argv[profile + 2], argv[4], 10, 20);
         if (!label) return 1;
-        text(label, 20, "10,386 Nerd codepoints / scalar + shaped colour emoji", 34, top + 506, 0x8ca2b4);
+        text(label, 20, "Blit / Hibr / Wi-Fi 1, 2, 3, 4 / Bluetooth", 34, top + 562, 0x8ca2b4);
+        text(label, 20, "10,386 Nerd codepoints / scalar + shaped colour emoji", 34, top + 606, 0x8ca2b4);
         text(label, 20, "VS15 / VS16", 650, top + 380, 0x8ca2b4);
-        text(label, 20, "Offline raster specimen / not a physical display capture", 34, top + 534, 0x8ca2b4);
+        text(label, 20, "Offline raster specimen / not a physical display capture", 34, top + 634, 0x8ca2b4);
         blit_raster_close(label);
     }
     output = fopen(argv[5], "wb");

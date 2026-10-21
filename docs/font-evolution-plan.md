@@ -1,5 +1,17 @@
 # Retro and modern colour fonts
 
+## Candidate588: original icons and actual Hibr coverage gaps
+
+ADR0171 fixes colour coverage being bypassed by the wide bitmap. ADR0172
+adds original vector/COLRv0 Blit/Hibr art, four Wi-Fi levels and Bluetooth,
+missing U+16D2 and Retro U+21CC, a versioned101-scalar Hibr GL snapshot and
+`GET /v1/fonts/icons` canonical discovery. The themed U+270E pen is now
+original, not the previous Font Awesome alias. Nerd mappings and Unicode
+emoji presentation remain unchanged. See [icon contract](../assets/fonts/icons/README.md).
+Hibr330 tracks opt-in selection; no Hibr source was modified. Local tests and
+specimen are not physical acceptance or proof of every application glyph.
+Earlier candidate/deployment statements below are dated historical evidence.
+
 Tracking: [Blit#107](https://git.home.arpa/itdlabs/blit/issues/107).
 
 ## Active completion contract —107/110 before browser or SDL work

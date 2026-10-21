@@ -1,5 +1,12 @@
 # Blit roadmap
 
+Font completion118: original Blit/Hibr colour artwork, four Wi-Fi levels and
+Bluetooth are candidate588 (ADR0172); canonical mapping discovery is
+`GET /v1/fonts/icons`. Missing Hibr U+16D2/Retro U+21CC and wide-bitmap colour
+bypass are concrete fixes, not universal coverage claims. Hibr330 owns opt-in
+application selection. Physical appearance and remaining reported examples
+must be accepted before closing118. See the icon contract and current state.
+
 The roadmap is ordered by dependency. A later milestone must not become a
 second, parallel implementation of an earlier one.
 

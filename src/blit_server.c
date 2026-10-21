@@ -16157,6 +16157,33 @@ static void fonts_json(const BlitRuntime *runtime, char *body, size_t capacity)
     snprintf(body + used, capacity - used, "]}");
 }
 
+/* One packaged catalogue is used by the generator and discovery API; do not
+   duplicate private-use mappings in the server or Control Panel. */
+static int font_icons_json(char *body, size_t capacity)
+{
+    const char *profile = NULL, *slash;
+    char path[1024];
+    FILE *file;
+    size_t length, limit = capacity < 8192 ? capacity : 8192;
+    int too_long, failed, i;
+    for (i = 0; i < blit_font_profile_count(); ++i)
+        if (strcmp(blit_font_profile_id(i), "blit-modern") == 0) {
+            profile = blit_font_profile_path(i); break;
+        }
+    slash = profile ? strrchr(profile, '/') : NULL;
+    if (!slash || limit < 2 || snprintf(path, sizeof(path), "%.*s/icons/catalogue.json",
+        (int)(slash - profile), profile) >= (int)sizeof(path)) return 0;
+    file = fopen(path, "rb");
+    if (!file) return 0;
+    length = fread(body, 1, limit - 1, file);
+    too_long = fgetc(file) != EOF;
+    failed = ferror(file);
+    fclose(file);
+    if (!length || too_long || failed) return 0;
+    body[length] = '\0';
+    return 1;
+}
+
 static int font_path_for_id(const char *id, char *path, size_t capacity)
 {
     int i;
@@ -22402,6 +22429,11 @@ static void handle_request(int fd, BlitRuntime *runtime,
     } else if (strcmp(path, "/v1/fonts") == 0) {
         fonts_json(runtime, body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
+    } else if (strcmp(path, "/v1/fonts/icons") == 0) {
+        if (font_icons_json(body, sizeof(body)))
+            send_http(fd, 200, "OK", "application/json", body);
+        else send_problem(fd, 503, "Service Unavailable", "font_icon_catalogue_unavailable",
+            "The packaged font icon catalogue is missing, unreadable or exceeds its size limit.");
     } else if (strcmp(path, "/v1/settings") == 0) {
         settings_json(runtime, body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);

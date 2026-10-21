@@ -1,0 +1,56 @@
+# ADR0172: one original vector catalogue for font generation and API discovery
+
+- Date: 2026-10-21
+- Status: implemented locally; physical acceptance pending
+- Scope: fonts, colour raster, API discovery
+- Tracking: [Blit118](https://git.home.arpa/itdlabs/blit/issues/118),
+  [Hibr330](https://git.home.arpa/itdlabs/hibr/issues/330)
+
+## Context
+
+Full Nerd cmap tests did not prove live glyph coverage or bespoke artwork.
+Read-only Hibr GL inspection found U+16D2 absent from both outline/PSF routes
+and U+21CC absent in Retro. Existing U+270E used a Font Awesome pencil alias;
+it was not the promised original design. The operator also requests four
+Wi-Fi levels and Bluetooth. Do not modify Hibr or silently replace Nerd codes.
+
+## Options and decision
+
+Keep ordinary Nerd glyphs foreground-coloured and standard emoji under
+ADR0163. Add seven explicit supplementary private-use icons in the original
+SVG catalogue `assets/fonts/icons/catalogue.json`, with one-cell advances in
+both Modern and Retro. Build-time fontTools generates glyf/COLR v0/CPAL from
+the same paths, pinned source hashes and licences. A themed monochrome pen
+alias replaces the previous U+270E alias; missing standard text glyphs keep
+their meanings. Preserve all original source Unicode/Nerd mappings otherwise.
+
+Prefer scalable COLR v0 to a new bitmap atlas or runtime SVG renderer. The
+existing FreeType dependency supports COLR v0 default blending through
+`FT_LOAD_COLOR`, returning premultiplied BGRA; shared raster code converts
+it to the existing premultiplied RGBA contract. Ordinary outline glyphs stay
+coverage masks. This is not COLR v1 or arbitrary SVG rendering support.
+See [FreeType glyph retrieval](https://freetype.org/freetype2/docs/reference/ft2-glyph_retrieval.html)
+and [layer management](https://freetype.org/freetype2/docs/reference/ft2-layer_management.html).
+
+Authenticated `GET /v1/fonts/icons`, specified first in OpenAPI, serves the
+packaged canonical catalogue (bounded8KiB), resolved from the same font root.
+Missing/unreadable/oversized assets return503 with
+`font_icon_catalogue_unavailable`; the reader does not mutate configuration.
+Package asset gates verify hash identity. Do not maintain another mapping
+table in the server, Control Panel or renderer. Native-font source selection
+continues to follow ADR0171; CJK and bitmap-only profiles remain intact.
+
+## Evidence and limits
+
+Custom raster gate covers7×57×2=798 originals, including distinct Wi-Fi
+levels at8px, partial alpha, premultiplication, foreground independence,
+unchanged advances/cache budget and themed U+270E. The hash-pinned Hibr GL
+snapshot covers101 scalars×57sizes×2spans×2profiles=23,028 non-replacement
+cases; legitimate PSF fallbacks remain explicitly allowed. It is not every
+application, every Unicode scalar or universal shaping. Nerd and emoji corpus
+gates remain independent. Native/SDL adapter gates include originals; the
+local real-PTY/API fixture verifies split UTF-8 and presentation parity.
+
+Hibr must explicitly select the colour mappings;330 tracks that integration.
+No font/backend/layout change or Hibr edit is implied by generating assets.
+Live installation/operator aesthetic acceptance must be recorded separately.

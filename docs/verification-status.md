@@ -1,5 +1,27 @@
 # Verification status
 
+## 2026-10-21: candidate588 original icons and concrete missing text glyphs
+
+Seven original colour icons:798 size/profile cases, distinct Wi-Fi levels,
+partial alpha/premultiplied colour, no foreground tint, themed pen and bounded
+cache. Versioned Hibr GL snapshot:101scalars×57sizes×2spans×2profiles=23,028
+non-replacement cases (legitimate PSF fallbacks explicitly allowed).
+Real local PTY/API fixture:12 cases, bytewise/whole UTF-8, one-cell originals,
+exact presented-pixel parity, canonical discovery and missing/oversized503.
+Both profiles/native KMS/SDL software/GLES:1710scalar cases each plus existing
+2052cluster/cursor cases; guard pixels/tolerances unchanged.
+
+Negative controls: actual587 Modern font fails at U+16D2 before originals;
+old shared raster from15e5956 fails to produce colour at U+100000 with the
+new assets. Both pass the corrected fixture. Both outline files rebuild
+byte-identically. Valgrind:0errors,0definite/indirect/possible loss;
+18,804bytes/9blocks still reachable each. Existing Nerd catalogue592,002cases
+per face and full5244-entry emoji raster corpus pass at their documented
+sizes/spans. Broader selected suite, package and live acceptance are pending;
+none of these local checks certifies every application or universal Unicode.
+Hibr330 tracks application selection; no Hibr edits. ADR0171/0172 and icon
+contract document source of truth and the exact presentation boundary.
+
 ## 2026-10-21:118 wide-bitmap colour loss
 
 Expanded native production-compositor gate with real Unifont and U+2615 is

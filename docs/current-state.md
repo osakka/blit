@@ -1,5 +1,24 @@
 # Current state and restart point
 
+## 2026-10-21: candidate588 original icons /118
+
+ADR0172 adds seven original colour glyphs to Modern/Retro: Blit, Hibr pen,
+Wi-Fi levels1..4 and Bluetooth, with canonical SVG sources/catalogue,
+COLRv0/CPAL and authenticated `GET /v1/fonts/icons`. Standard text U+16D2
+was genuinely uncovered in both old faces/PSF; Retro U+21CC was uncovered.
+Both now resolve without question-mark substitution. U+270E is an original
+themed pen; colour originals require explicit private-use selection.
+Hibr330 tracks that selection; never edit Hibr or overwrite Nerd meanings.
+
+Custom raster tests cover798 icon/size/profile cases and23,028 Hibr GL
+scalar/size/span/profile cases; real local PTY/API parity covers12 scenarios.
+Native/SDL software/GLES composition passes both profiles/all57 sizes;
+both fonts rebuild byte-identically. Valgrind reports0 errors/0 lost bytes,
+18,804bytes/9blocks reachable per face. Full Nerd catalogue and Emoji18
+cluster regressions pass at their documented scopes. Broader selected suite
+is running; packaging/deployment and physical aesthetic acceptance pending.
+Preview: docs/images/blit-fonts.png. No live settings or Hibr changes yet.
+
 ## 2026-10-21:118 font coverage investigation
 
 Live587 remains Modern22/native KMS; no deployment or settings change. Current

@@ -2,6 +2,7 @@
 #include "blit_emoji_presentation.h"
 #include <ft2build.h>
 #include FT_FREETYPE_H
+#include FT_COLOR_H
 #include "../vendor/harfbuzz/hb.h"
 #include "../vendor/harfbuzz/hb-ft.h"
 #include <stdlib.h>
@@ -166,11 +167,15 @@ static int draw_outline_face(FT_Face face, int baseline, uint32_t scalar, Raster
     FT_Bitmap *bitmap;
     int x, y, left, top;
     if (!face || !FT_Get_Char_Index(face, scalar)) return 0;
-    if (FT_Load_Char(face, scalar, FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL))
+    if (FT_Load_Char(face, scalar, FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL |
+        (entry->glyph.format == BLIT_RASTER_RGBA_PREMULTIPLIED ? FT_LOAD_COLOR : 0)))
         return -1;
     bitmap = &face->glyph->bitmap;
-    if (bitmap->pixel_mode != FT_PIXEL_MODE_GRAY || bitmap->num_grays != 256 ||
-        bitmap->pitch < 0) return -1;
+    if (bitmap->pitch < 0 ||
+        (entry->glyph.format == BLIT_RASTER_COVERAGE &&
+         (bitmap->pixel_mode != FT_PIXEL_MODE_GRAY || bitmap->num_grays != 256)) ||
+        (entry->glyph.format == BLIT_RASTER_RGBA_PREMULTIPLIED &&
+         bitmap->pixel_mode != FT_PIXEL_MODE_BGRA)) return -1;
     left = (entry->glyph.width - ceil_26_6(face->glyph->advance.x)) / 2 +
         face->glyph->bitmap_left;
     top = baseline - face->glyph->bitmap_top;
@@ -178,14 +183,31 @@ static int draw_outline_face(FT_Face face, int baseline, uint32_t scalar, Raster
     if (left < 0 || top < 0 || left + (int)bitmap->width > entry->glyph.width ||
         top + (int)bitmap->rows > entry->glyph.height) return 0;
     for (y = 0; y < (int)bitmap->rows; ++y)
-        for (x = 0; x < (int)bitmap->width; ++x)
-            entry->pixels[(top + y) * entry->glyph.stride + left + x] =
-                bitmap->buffer[y * bitmap->pitch + x];
+        for (x = 0; x < (int)bitmap->width; ++x) {
+            unsigned char *out = entry->pixels + (top + y) * entry->glyph.stride +
+                (left + x) * (int)entry->glyph.format;
+            const unsigned char *in = bitmap->buffer + y * bitmap->pitch +
+                x * (int)entry->glyph.format;
+            if (entry->glyph.format == BLIT_RASTER_COVERAGE) out[0] = in[0];
+            else {
+                out[0] = in[2]; out[1] = in[1]; out[2] = in[0]; out[3] = in[3];
+            }
+        }
     return 1;
 }
 
 static int draw_outline(BlitRaster *raster, uint32_t scalar, RasterEntry *entry)
 { return draw_outline_face(raster->outline, raster->baseline, scalar, entry); }
+
+static int outline_has_colour(FT_Face face, uint32_t scalar)
+{
+    FT_LayerIterator iterator;
+    FT_UInt glyph, colour;
+    if (!face || !FT_HAS_COLOR(face)) return 0;
+    memset(&iterator, 0, sizeof(iterator));
+    return FT_Get_Color_Glyph_Layer(face, FT_Get_Char_Index(face, scalar),
+                                   &glyph, &colour, &iterator);
+}
 
 static int draw_text_emoji(BlitRaster *raster, uint32_t scalar, RasterEntry *entry)
 {
@@ -288,6 +310,8 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *key,
     uint32_t scalar = key->scalars[0];
     int columns = key->columns;
     int text_selector = key->length == 2 && key->scalars[1] == 0xfe0e && blit_emoji_variation(scalar);
+    int outline_colour = key->length == 1 && !protected_geometry(scalar) &&
+        !invisible_format(scalar) && outline_has_colour(raster->outline, scalar);
     int result = 0, x, y;
     slot = (unsigned)(blit_cell_cluster_hash(key) % RASTER_SLOTS);
     entry = &raster->cache[slot];
@@ -306,6 +330,7 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *key,
          (!raster->outline || !FT_Get_Char_Index(raster->outline, scalar)))) &&
         FT_Get_Char_Index(raster->colour, scalar) ?
         BLIT_RASTER_RGBA_PREMULTIPLIED : BLIT_RASTER_COVERAGE;
+    if (outline_colour) next.glyph.format = BLIT_RASTER_RGBA_PREMULTIPLIED;
     if (text_selector) next.glyph.format = BLIT_RASTER_COVERAGE;
     else if (key->length > 1) {
         colour_index = colour_cluster_glyph(raster, key);
@@ -323,14 +348,14 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *key,
     if (key->length == 1 && scalar >= 0xe0b0 && scalar <= 0xe0b3) {
         draw_powerline(scalar,&next); result=1;
     } else if (key->length == 1 && invisible_format(scalar)) result = 1;
-    else if (next.glyph.format == BLIT_RASTER_RGBA_PREMULTIPLIED)
+    else if (next.glyph.format == BLIT_RASTER_RGBA_PREMULTIPLIED && !outline_colour)
         result = draw_colour_glyph(raster, colour_index, &next);
     else if (!protected_geometry(scalar)) {
         result = draw_outline(raster, scalar, &next);
         if (!result && (text_selector || blit_emoji_variation(scalar)))
             result = draw_text_emoji(raster, scalar, &next);
     }
-    if (result < 0) { free(next.pixels); return 0; }
+    if (result < 0 || (outline_colour && !result)) { free(next.pixels); return 0; }
     if (!result && key->length > 1 && !text_selector) { free(next.pixels); return 0; }
     if (!result) {
         const BlitFont *font = &raster->fallback;

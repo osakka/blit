@@ -146,6 +146,28 @@ paths:
                 $ref: '#/components/schemas/FontProfiles'
         default:
           $ref: '#/components/responses/Problem'
+  /v1/fonts/icons:
+    get:
+      tags: [terminals]
+      operationId: getFontIconCatalogue
+      summary: Discover Blit's versioned original icon mappings
+      description: >-
+        Return the packaged canonical catalogue shared by both outline profiles.
+        Private-use icons occupy one cell and carry intrinsic colour. Text
+        glyphs and the U+270E alias remain foreground-coloured. This is not
+        an assertion that the active font is an outline profile or that every
+        application selects these glyphs. No display or font setting changes.
+      responses:
+        '200':
+          description: Packaged original icon catalogue
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FontIconCatalogue'
+        '503':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /v1/graphics:
     get:
       tags: [hardware]
@@ -1871,6 +1893,35 @@ components:
         y: {type: integer}
         width: {type: integer, minimum: 1}
         height: {type: integer, minimum: 1}
+      additionalProperties: false
+    FontIcon:
+      type: object
+      required: [id, codepoint, source]
+      properties:
+        id: {type: string}
+        codepoint: {type: string, pattern: '^[0-9A-F]{4,6}$'}
+        source: {type: string}
+        text_alias: {type: string, pattern: '^[0-9A-F]{4,6}$'}
+        signal_level: {type: integer, minimum: 1, maximum: 4}
+        colour: {type: boolean}
+      additionalProperties: false
+    FontIconCatalogue:
+      type: object
+      required: [version, profiles, columns, namespace, license, icons, text_glyphs]
+      properties:
+        version: {type: integer, minimum: 1}
+        profiles:
+          type: array
+          items: {type: string}
+        columns: {type: integer, const: 1}
+        namespace: {type: string}
+        license: {type: string}
+        icons:
+          type: array
+          items: {$ref: '#/components/schemas/FontIcon'}
+        text_glyphs:
+          type: array
+          items: {$ref: '#/components/schemas/FontIcon'}
       additionalProperties: false
     FontProfile:
       type: object

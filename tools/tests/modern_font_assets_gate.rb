@@ -3,6 +3,11 @@ require 'json'
 require 'digest'
 root = ENV.fetch('BLIT_GATE_FONT_ROOT', File.expand_path('../../assets/fonts', __dir__))
 manifest = JSON.parse(File.read(File.join(root,'modern-fonts.source.json')))
+ui = manifest.fetch('ui_coverage')
+raise 'UI coverage identity mismatch' unless Digest::SHA256.file(File.join(root, ui.fetch('file'))).hexdigest == ui.fetch('sha256')
+manifest.fetch('custom_icons').fetch('sources').each do |file, hash|
+  raise "custom icon identity mismatch: #{file}" unless Digest::SHA256.file(File.join(root, file)).hexdigest == hash
+end
 %w[outline retro colour text_emoji].each do |kind|
   entry = manifest.fetch(kind)
   {'file'=>'sha256', 'license_file'=>'license_sha256'}.each do |file_key, hash_key|

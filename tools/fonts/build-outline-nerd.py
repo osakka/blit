@@ -7,11 +7,14 @@ Fit complete icon outlines, not bitmap enlargement or cropped overhangs.
 import argparse
 import hashlib
 import json
+import xml.etree.ElementTree as ET
 from pathlib import Path
 import fontTools
 from fontTools.ttLib import TTFont
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.pens.transformPen import TransformPen
+from fontTools.svgLib.path import parse_path
+from fontTools.colorLib.builder import buildCOLR, buildCPAL
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--profile', choices=['modern', 'retro'], required=True)
@@ -56,13 +59,81 @@ for name in sorted({cmap[cp] for cp in icons}):
     fitted.recalcBounds(font['glyf'])
     font['glyf'][name] = fitted
     font['hmtx'][name] = (advance, fitted.xMin)
-for table in font['cmap'].tables:
-    if table.isUnicode():
-        table.cmap[0x270e] = cmap[0xf040]
+# Original artwork is generated from one editable SVG catalogue for both
+# profiles. Plane16 mappings never replace Nerd or Unicode emoji assignments.
+custom = manifest['custom_icons']
+custom_root = root / 'assets/fonts'
+for path, expected in custom['sources'].items():
+    if hashlib.sha256((custom_root / path).read_bytes()).hexdigest() != expected:
+        raise SystemExit(f'unreviewed custom artwork: {path}')
+custom_catalogue = json.loads((custom_root / custom['catalogue']).read_text())
+layers, palette = {}, []
+order = list(font.getGlyphOrder())
+advance = font['hmtx'][cmap[ord('H')]][0]
+vertical = font['vmtx'].metrics if 'vmtx' in font else None
+vertical_metric = vertical[cmap[ord('H')]] if vertical is not None else None
+
+def store_glyph(name, glyph):
+    glyph.recalcBounds(font['glyf'])
+    font['glyf'][name] = glyph
+    font['hmtx'][name] = (advance, glyph.xMin)
+    if vertical is not None:
+        vertical[name] = vertical_metric
+    order.append(name)
+
+for icon in custom_catalogue['icons'] + custom_catalogue.get('text_glyphs', []):
+    cp = int(icon['codepoint'], 16)
+    intrinsic_colour = icon.get('colour', True)
+    if not intrinsic_colour and cp in cmap:
+        continue
+    if cp in cmap or (intrinsic_colour and not 0x100000 <= cp <= 0x10fffd):
+        raise SystemExit('custom icon mapping collides or is outside private-use plane16')
+    svg = ET.parse(custom_root / 'icons' / icon['source']).getroot()
+    vx, vy, vw, vh = map(float, svg.attrib['viewBox'].split())
+    scale = min(advance * .9 / vw, cap / vh)
+    transform = (scale, 0, 0, -scale,
+                 (advance - vw * scale) / 2 - vx * scale,
+                 (cap + vh * scale) / 2 + vy * scale)
+    name = 'blit.' + icon['id']
+    silhouette = TTGlyphPen(None)
+    colour_layers = []
+    for index, path in enumerate(svg.findall('{http://www.w3.org/2000/svg}path')):
+        active = int(path.attrib.get('data-level', '0')) <= icon.get('signal_level', 4)
+        colour = path.attrib['fill' if active else 'data-inactive-fill']
+        rgba = tuple(int(colour[i:i+2], 16) / 255 for i in (1, 3, 5)) + (1.0,)
+        if rgba not in palette:
+            palette.append(rgba)
+        pen = TTGlyphPen(None)
+        parse_path(path.attrib['d'], TransformPen(pen, transform))
+        layer_name = f'{name}.layer{index}'
+        glyph = pen.glyph()
+        store_glyph(layer_name, glyph)
+        colour_layers.append((layer_name, palette.index(rgba)))
+        if active:
+            parse_path(path.attrib['d'], TransformPen(silhouette, transform))
+    glyph = silhouette.glyph()
+    store_glyph(name, glyph)
+    if intrinsic_colour:
+        layers[name] = colour_layers
+    for table in font['cmap'].tables:
+        if table.isUnicode() and (cp <= 0xffff or table.format in (12, 13)):
+            table.cmap[cp] = name
+    # Keep the standard writing-pencil character monochrome/themed; the
+    # private-use Hibr glyph is the explicit intrinsic-colour counterpart.
+    if 'text_alias' in icon:
+        alias = int(icon['text_alias'], 16)
+        alias_name = name + '.text'
+        store_glyph(alias_name, glyph)
+        for table in font['cmap'].tables:
+            if table.isUnicode():
+                table.cmap[alias] = alias_name
+font.setGlyphOrder(order)
+font['COLR'] = buildCOLR(layers, version=0, glyphMap=font.getReverseGlyphMap())
+font['CPAL'] = buildCPAL([palette])
 # A renamed derivative, with upstream notices retained in name/license tables.
 family = 'Blit ' + args.profile.title() + ' Nerd'
 postscript = family.replace(' ', '')
-names = {1: family, 2: 'Regular', 3: postscript + '-2.0',
+names = {1: family, 2: 'Regular', 3: postscript + '-3.0',
          4: family + ' Regular', 6: postscript + '-Regular',
          16: family, 17: 'Regular'}
 for entry in font['name'].names:

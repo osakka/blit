@@ -34,7 +34,12 @@ font_active = schema.dig('components','schemas','FontProfiles','properties','act
 raise 'font size policy observation missing' unless
   %w[sizing size_px cell_pixels].all? { |key| font_active.fetch('required').include?(key) } &&
   font_active.dig('properties','sizing','enum') == %w[scale pixels]
-raise "unexpected path count #{paths.length}" unless paths.length == 47
+raise "unexpected path count #{paths.length}" unless paths.length == 48
+raise 'font icon discovery contract missing' unless
+  paths.dig('/v1/fonts/icons','get','operationId') == 'getFontIconCatalogue' &&
+  schema.dig('components','schemas','FontIconCatalogue','required').sort ==
+    %w[version profiles columns namespace license icons text_glyphs].sort &&
+  schema.dig('components','schemas','FontIcon','properties','signal_level','maximum') == 4
 console=schema.dig('components','schemas','ConsoleDiagnostics')
 raise 'native console observation contract missing' unless
   paths.dig('/v1/diagnostics/console','get','operationId') == 'getConsoleDiagnostics' &&

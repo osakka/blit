@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 24">
+  <title>Blit — split beam</title>
+  <path fill="#47d7e8" d="M2 2H8L6 10H2Z M2 14H6L8 22H2Z"/>
+  <path fill="#ffc15a" d="M10 1L5 13H9L7 23L15 10H11L14 1Z"/>
+  <path fill="#fff0be" d="M10 1L5 13H7L12 1Z"/>
+</svg>
