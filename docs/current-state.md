@@ -5,6 +5,26 @@ under internal104: discovery, unplug/replug, stable identities, saved layouts,
 pane/session placement and input routing. The0.2 shared-damage fixtures do
 not certify it or authorize a backend switch. Live remains native KMS589.
 
+## 2026-10-21: 125 stage two — image ingestion passes removed
+
+Development0.2.0 computes each immutable Kitty chunk length once instead of
+inside its per-byte loop. The TCC counted-call fixture falls from4,097 strlen
+calls to1 for4,096 payload bytes (logical length-scan sum16,785,409 to4,097;
+not hardware bandwidth or live frame timing). Binary/tail fragmentation,
+padded endings, whitespace, rejected inputs and capacity guards are checked.
+SDL now submits existing packed RGBA bytes directly to UpdateTexture, avoiding
+an extra allocation/full-image copy. RGB24 retains exact RGBA conversion;
+texture reuse, pixel generations, alpha and pitch are unchanged (ADR0178).
+Driver-internal copying/GPU uploads are not claimed eliminated.
+
+The counted-call regression fails on old code; baseline observation also
+shows old RGBA submissions used a different staging buffer. New software/GL
+fixtures pass exact SDL input/pitch/alpha and reuse checks. New fixture
+binaries are invocation-isolated to prevent parallel-suite build collisions.
+Live remains589/native KMS; no Hibr/settings/backend/session changes.125
+remains open for bounded protocol-image-update damage, native copy/GPU work
+and matched real video/input latency acceptance.104 still gates SDL hotplug.
+
 ## 2026-10-21: 125 stage one — retained placement damage implemented
 
 Development0.2.0 now compares immutable presented placement descriptors at

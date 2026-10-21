@@ -4,7 +4,9 @@ require 'tmpdir'
 root = File.expand_path('../..', __dir__)
 Dir.chdir(root)
 FileUtils.mkdir_p('build/tests')
-out = 'build/tests/graphics-placement-damage'
+out = "build/tests/graphics-placement-damage-#{Process.pid}"
+native = "build/tests/graphics-scene-native-#{Process.pid}"
+at_exit { [out, native].each { |path| File.delete(path) if File.file?(path) } }
 runner = ENV['BLIT_GRAPHICS_VALGRIND'] == '1' ? %w[valgrind --error-exitcode=99 --leak-check=full --errors-for-leak-kinds=definite,indirect] : []
 abort 'build failed' unless system('tcc', '-O2', '-std=c99',
   '-Ivendor/SDL3/include', '-Ibuild/deps/prefix/include', '-Ibuild/deps/prefix/include/libdrm',
@@ -15,7 +17,6 @@ abort 'build failed' unless system('tcc', '-O2', '-std=c99',
   '-ldrm', '-lutil', '-lz', '-o', out)
 abort 'graphics placement damage failed' unless system({ 'SDL_VIDEODRIVER' => ENV.fetch('BLIT_TEST_VIDEO_DRIVER','dummy'), 'LD_LIBRARY_PATH' =>
   "#{root}/build/sdl3-kms:#{root}/build/deps/prefix/lib/x86_64-linux-gnu" }, *runner, out)
-native = 'build/tests/graphics-scene-native'
 abort 'native build failed' unless system('tcc', '-O2', '-std=c99',
   '-Ivendor/SDL3/include', '-Ibuild/deps/prefix/include', '-Ibuild/deps/prefix/include/libdrm',
   'tools/tests/graphics_scene_native_gate.c', 'src/blit_font.c',

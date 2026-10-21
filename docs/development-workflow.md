@@ -93,6 +93,12 @@ retained historical build snapshot is not an active development/config owner.
 
 ## Required gates
 
+Image-ingestion changes require `ruby tools/tests/graphics_ingestion_gate.rb`
+and its explicit offscreen/OpenGLES2 counterpart. Renderer/GLES suites include
+them. They instrument the production decoder and SDL call boundary, not a
+parallel decoder. `--observe` intentionally disables performance assertions
+and must never be reported as a passing performance gate (ADR0178).
+
 Graphics damage changes require `ruby tools/tests/graphics_placement_damage_gate.rb`
 plus the same fixture with `BLIT_TEST_VIDEO_DRIVER=offscreen` and
 `BLIT_TEST_RENDERER=opengles2`. The renderer/GLES suites include them.

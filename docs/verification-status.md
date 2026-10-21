@@ -1,5 +1,37 @@
 # Verification status
 
+## 2026-10-21: 125 linear image ingestion, candidate0.2.0 only
+
+ADR0178 removes redundant ingestion work without changing protocol semantics.
+The production TCC fixture measures4,097 strlen calls for a4,096-byte chunk
+before the fix and1 afterward; summed logical scan lengths fall from
+16,785,409 to4,097 bytes. These are instrumented call/length counts, not
+physical memory traffic, elapsed CPU speedup or live FPS. The normal gate
+fails against the old decoder. Baseline `--observe` disables performance
+assertions and is observation only, regardless of its historical output label.
+
+Final direct software and explicit offscreen OpenGLES2 fixtures pass binary
+fragmentation at every split, valid padded endings, whitespace, rejected
+inputs, capacity canaries, exact RGB/alpha/pitch, texture reuse and changed
+generation submission. Already packed RGBA reaches SDL from its original
+buffer; RGB24 still converts exactly. SDL/driver uploads and internal copies
+remain: this is not zero-copy rendering. The fixture includes production
+functions, not a parallel decoder or uploader.
+
+The renderer suite passes61 checks, skips1 explicitly and fails0; the GLES
+suite passes13/13 with0 skips/failures. Software ingestion under
+Valgrind reports0 errors and0 definitely/indirectly/possibly lost bytes;
+18,804 bytes in9 SDL/library blocks remain reachable. TCC build,
+font-reference gate and diff checks pass. Logs: `build/tests/ingestion-before.log`,
+`ingestion-after.log`, `ingestion-gl.log`, `ingestion-valgrind.log`,
+`ingestion-renderer.log` and `ingestion-gles.log` in the same directory.
+
+No physical-host performance gain, full standard-suite acceptance, new Debian
+release or deployment is claimed. Live remains589/native KMS; no Hibr,
+settings, session or backend changes.125/122 remain open. Protocol-image
+upload/delete damage, native full-output copying and controlled video/input
+measurements remain;104 still gates SDL multi-monitor hotplug parity.
+
 ## 2026-10-21: 125 retained placement damage, candidate0.2.0 only
 
 ADR0177 establishes one shared comparison of immutable last-composed image

@@ -9756,9 +9756,10 @@ static int kitty_decode_chunk(BlitGraphicsImage *image, const char *payload)
     unsigned char quartet[4];
     int quartet_length = image->base64_tail_length;
     size_t offset = 0;
+    size_t payload_length = strlen(payload);
     if (quartet_length > 0)
         memcpy(quartet, image->base64_tail, (size_t)quartet_length);
-    while (offset < strlen(payload)) {
+    while (offset < payload_length) {
         int value;
         unsigned char byte = (unsigned char)payload[offset++];
         if (byte == '=' || kitty_base64_value(byte) >= 0) {
@@ -25055,7 +25056,8 @@ static SDL_Texture *sdl_graphics_texture(BlitOutput *output,
     int free_index = -1;
     int source_bytes;
     size_t pixel_count;
-    unsigned char *rgba;
+    unsigned char *rgba = NULL;
+    const unsigned char *upload_pixels;
     SDL_Texture *texture;
     int pixel_index;
     int reuse_texture = 0;
@@ -25103,16 +25105,21 @@ static SDL_Texture *sdl_graphics_texture(BlitOutput *output,
 
     source_bytes = image->format == 24 ? 3 : 4;
     pixel_count = (size_t)image->width * (size_t)image->height;
-    rgba = (unsigned char *)malloc(pixel_count * 4U);
-    if (rgba == NULL) return NULL;
-    for (pixel_index = 0; (size_t)pixel_index < pixel_count; ++pixel_index) {
-        rgba[pixel_index * 4U] = image->pixels[pixel_index * source_bytes];
-        rgba[pixel_index * 4U + 1] =
-            image->pixels[pixel_index * source_bytes + 1];
-        rgba[pixel_index * 4U + 2] =
-            image->pixels[pixel_index * source_bytes + 2];
-        rgba[pixel_index * 4U + 3] = source_bytes == 4 ?
-            image->pixels[pixel_index * source_bytes + 3] : 255;
+    upload_pixels = image->pixels;
+    /* RGBA is already packed in SDL's requested byte order. Keep its source
+       alive for this synchronous call; do not allocate/copy it a second time. */
+    if (source_bytes == 3) {
+        rgba = (unsigned char *)malloc(pixel_count * 4U);
+        if (rgba == NULL) return NULL;
+        for (pixel_index = 0; (size_t)pixel_index < pixel_count; ++pixel_index) {
+            rgba[pixel_index * 4U] = image->pixels[pixel_index * source_bytes];
+            rgba[pixel_index * 4U + 1] =
+                image->pixels[pixel_index * source_bytes + 1];
+            rgba[pixel_index * 4U + 2] =
+                image->pixels[pixel_index * source_bytes + 2];
+            rgba[pixel_index * 4U + 3] = 255;
+        }
+        upload_pixels = rgba;
     }
     texture = output->graphics_textures[free_index];
     if (texture == NULL) {
@@ -25134,7 +25141,7 @@ static SDL_Texture *sdl_graphics_texture(BlitOutput *output,
             return NULL;
         }
     }
-    if (!SDL_UpdateTexture(texture, NULL, rgba, image->width * 4)) {
+    if (!SDL_UpdateTexture(texture, NULL, upload_pixels, image->width * 4)) {
         fprintf(stderr, "blit: SDL graphics texture upload failed: %s\n",
                 SDL_GetError());
         SDL_DestroyTexture(texture);

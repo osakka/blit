@@ -1,5 +1,11 @@
 # Blit roadmap
 
+125 stage two, candidate0.2.0: linear Kitty chunk scanning and direct existing
+RGBA submission remove measured redundant work (ADR0178). RGB24 conversion
+and protocol/tail semantics remain. Protocol-image damage, native full-output
+copying and real GPU/video/input measurements are still pending;104 still
+gates SDL multi-monitor hotplug acceptance. Do not infer live FPS from counts.
+
 125 stage one is implemented in development0.2.0: shared last-composed scene
 descriptors, bounded old/new Kitty-placement damage and both renderer consumers
 (ADR0177). Local full-reference pixel oracles pass on native/software/GL.

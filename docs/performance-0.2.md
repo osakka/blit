@@ -84,6 +84,14 @@ CPU native composition and avoidable SDL upload preparation. Prioritize the
 revised work-model sequence there; glyph caching is not a complete explanation
 for the owner's video-plus-window-movement workload.
 
+ADR0178 removes confirmed ingestion passes: one length scan per Kitty chunk
+and direct packed-RGBA submission to SDL, with RGB24 conversion preserved.
+`ruby tools/tests/graphics_ingestion_gate.rb` asserts operation counts,
+fragmented/padded binary output, bounds and exact upload bytes/pitch/alpha.
+`--observe` reports current behaviour with performance assertions disabled;
+its output is not a performance-gate pass. The counters sum logical scan
+lengths, not physical memory traffic; no live speed ratio is inferred.
+
 1. Preserve589 tag/package/settings as rollback. Establish identical input
    traces and visual oracles before measuring each candidate.
 2. Measure and remove shared CPU work: cache churn, damage area amplification,
