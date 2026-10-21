@@ -308,9 +308,11 @@ output=$OUT/blit_${pkgver}_amd64.deb
 SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-1577836800}
 export SOURCE_DATE_EPOCH
 dpkg-deb --build --root-owner-group "$stage" "$output" >/dev/null
-# The runtime boundary is deliberately an allowlist.  Reject any shell
-# implementation or Hibr launcher if either ever reappears in the package.
-if dpkg-deb --contents "$output" | grep -Eq '(\.sh$|/((start|run|attach|hibr)-|((start|run|attach|hibr))$))'; then
+# Reject shell implementations and retired runtime launchers. The shared
+# policy distinguishes runtime entrypoints from non-executable font artwork;
+# a file named fonts/icons/hibr-pen.svg is not a Hibr launcher. Consume the
+# whole listing rather than grep -q closing dpkg-deb's pipe early.
+if dpkg-deb --contents "$output" | grep -E -f "$ROOT/tools/release/runtime-entrypoints.pattern" >/dev/null; then
 	rm -f "$output"
 	echo "blit: runtime package contains a shell implementation or Hibr launcher" >&2
 	exit 1

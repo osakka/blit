@@ -181,6 +181,7 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 suite_schema() {
+    run_gate package_entrypoint_policy_gate.rb ruby tools/tests/package_entrypoint_policy_gate.rb
     run_gate api_schema_gate.rb ruby tools/tests/api_schema_gate.rb
     run_gate observation_api_gate.rb ruby tools/tests/observation_api_gate.rb
     run_gate stream_replay_gate.rb ruby tools/tests/stream_replay_gate.rb

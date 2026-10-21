@@ -40,6 +40,13 @@ Package asset gates verify hash identity. Do not maintain another mapping
 table in the server, Control Panel or renderer. Native-font source selection
 continues to follow ADR0171; CJK and bitmap-only profiles remain intact.
 
+The initial588 package was rejected before deployment by an older heuristic
+that treated any `hibr-*` basename as a launcher, including `hibr-pen.svg`.
+Build and artifact gates now share one runtime-entrypoint path policy: reject
+shell files and retired launchers in runtime directories, not SVG/font assets.
+The boundary fixture tests six rejected and five legitimate paths. Listing
+checks consume the full producer output, avoiding quiet-grep SIGPIPE noise.
+
 ## Evidence and limits
 
 Custom raster gate covers7×57×2=798 originals, including distinct Wi-Fi

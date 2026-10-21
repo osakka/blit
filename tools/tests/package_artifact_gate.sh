@@ -137,7 +137,7 @@ for document in README.md roadmap.md verification-status.md diagnostic-capture.m
         exit 1
     }
 done
-if dpkg-deb --contents "$package" | grep -Eq '(/|^)([^ ]*\.sh|start-blit|run-blit|attach-blit)$'; then
+if dpkg-deb --contents "$package" | grep -E -f "$root/tools/release/runtime-entrypoints.pattern" >/dev/null; then
     echo "PACKAGE_ARTIFACT_FAIL shell implementation or launcher present" >&2
     exit 1
 fi
