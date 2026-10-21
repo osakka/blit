@@ -19,9 +19,17 @@ Backend fixtures additionally test uncovered-scalar parity and SDL italic
 geometry anchored to the original cell. Full arbitrary styled-text pixel
 parity and physical typography are not inferred from these checks.
 
-Final suite/package/live receipts follow below when completed. Earlier
-checkpoints retain their historical scope and do not describe current
-profile activation.
+Offscreen GLES:11pass/0skip/0fail (`arabic-activation-gles.log`). Backend
+fixtures pass117 scenarios per face/path,702 total, after baseline alignment.
+Candidate588 artifact gate passes with reproducible=yes, including exact
+source-commit comparison of Arabic faces, manifests, specimens, notices and
+the GPL preferred-source archive (`arabic-588-package-artifact.log`).
+Source70999f2; package SHA256
+`b43b3f993882214f0259d40e342b03f6aad43972fff550722f28856fead46bcd`;
+server SHA256
+`e574cc31a3c91467aa7545bce57542d5368eabe991c62ed241cbda05c9b7e3e5`.
+Standard-suite and live receipts remain pending at this checkpoint. Earlier
+entries retain their historical scope, not current activation behaviour.
 
 ## 2026-10-21:119 shared backend overhang/damage fixtures
 
