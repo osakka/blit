@@ -6,13 +6,14 @@ Arabic-Indic/Hindi numerals U+0660..U+0669. Devanagari is not requested.
 Do not accept generic Nerd/emoji tests as Arabic acceptance or modify Hibr.
 No icon-only deployment while this Arabic work is being established.
 
-119 progress: experimental companions and shared Arabic base/mark raster path
-exist (ADR0174), with measured ink offsets and a finite Hibr specimen gate.
-KMS/SDL now have composition, bounded write/source damage halos and clipped
-cursor repaint, with mock/software/offscreen-GLES fixtures. Server selection
-deliberately remains disabled. Independent joining/marks, mixed-script baselines, styles and coverage,
-runtime inventory/atomic selection, protocol acceptance, package and physical
-typographic review follow. Native coverage tests are not completion.
+119 progress: candidate588 activates companion faces atomically for both
+canonical profiles (ADR0174). Shared baselines, bounded overhanging ink,
+write/source damage halos, clipped cursor repaint and actual-loaded API
+identity are implemented. Independent whole-word OpenType positioning matches
+cell composition on the captured Hibr specimens. Byte-fragmented real PTY
+output and direct API presentation agree. Package validation, rollout and
+physical typography review are the remaining acceptance stages; no universal
+Arabic/Quranic or arbitrary style coverage is claimed.
 
 Font completion118: original Blit/Hibr colour artwork, four Wi-Fi levels and
 Bluetooth are candidate588 (ADR0172); canonical mapping discovery is

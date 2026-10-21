@@ -37,6 +37,9 @@ void blit_raster_close(BlitRaster *raster);
    failures leave the context unchanged. No bidi, paragraph shaping or profile
    auto-selection. All letters share one face transform and baseline. */
 int blit_raster_set_arabic(BlitRaster *raster, const char *path);
+const char *blit_raster_arabic_path(const BlitRaster *raster);
+const char *blit_raster_arabic_family(const BlitRaster *raster);
+int blit_raster_baseline(const BlitRaster *raster);
 int blit_raster_get(BlitRaster *raster, uint32_t scalar, int columns,
                     BlitRasterGlyph *glyph);
 /* Internal bounded colour/opt-in Arabic cluster path. Unsupported forms fail

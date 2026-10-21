@@ -25,6 +25,12 @@ int main(int argc, char **argv)
         BlitRaster *r = blit_raster_open(&fallback, argv[2], NULL, (height+1)/2, height);
         if (!r || blit_raster_set_arabic(r, "/nonexistent/blit-arabic-candidate.ttf")) return 2;
         if (!r || !blit_raster_set_arabic(r, argv[3])) return 2;
+        {
+            BlitRasterGlyph latin, arabic;
+            if (!blit_raster_get(r,'A',1,&latin) || !blit_raster_get(r,0xfea3,1,&arabic) ||
+                latin.baseline+latin.ink_offset_y != arabic.baseline+arabic.ink_offset_y)
+                return 2;
+        }
         for (cp = 0x0621; cp <= 0xfefc; ++cp) {
             BlitRasterGlyph g;
             unsigned i, ink = 0;
@@ -95,12 +101,16 @@ int main(int argc, char **argv)
             unsigned long renders = blit_raster_render_count(r);
             size_t bytes = blit_raster_cached_bytes(r);
             memset(&unchanged, 0x5a, sizeof(unchanged)); saved = unchanged;
-            /* Uncovered Arabic block scalar: no silent PSF/question mark,
-               no cache insertion, and caller's prior result unchanged. */
-            if (blit_raster_get(r, 0x08ff, 1, &unchanged) ||
+            /* Unsupported cluster preserves caller/cache; an uncovered
+               scalar explicitly reports its canonical visible fallback. */
+            BlitCellCluster missing;
+            uint32_t mark=0x064e;
+            if (!blit_cell_cluster_init(&missing,0x08ff,&mark,1,1) ||
+                blit_raster_get_cluster(r,&missing,&unchanged) ||
                 memcmp(&unchanged, &saved, sizeof(saved)) ||
                 blit_raster_render_count(r)!=renders || blit_raster_cached_bytes(r)!=bytes)
                 return 2;
+            if (!blit_raster_get(r,0x08ff,1,&unchanged) || !unchanged.fallback) return 2;
         }
         if (blit_raster_set_arabic(r, argv[3])) return 2;
         blit_raster_close(r);

@@ -51,10 +51,12 @@ Dir.mktmpdir('blit-custom-icon-api') do |work|
       raise 'capture failed' unless r.code=='200' && r.body.start_with?('BM')
       r.body
     end
-    sequence=(0x100000..0x100006).to_a.pack('U*')+"\u16d2\u21cc\u270e\u2615X"
+    sequences={icons:(0x100000..0x100006).to_a.pack('U*')+"\u16d2\u21cc\u270e\u2615X",
+               arabic:"ﺮﺒْﺣِ ٠١٢٣٤٥٦٧٨٩ ﻻX"}
     %w[blit-modern blit-retro].each do |profile|
       [16,17,22].each do |size|
         request.call('PUT','/v1/fonts',{font_id:profile,size_px:size})
+        sequences.each do |kind, sequence|
         [false,true].each do |fragmented|
           code=fragmented ? 'STDOUT.binmode;STDOUT.sync=true;ARGV[0].bytes.each{|b|STDOUT.write(b.chr);sleep 0.001};sleep 10' : 'STDOUT.binmode;STDOUT.sync=true;STDOUT.write(ARGV[0]);sleep 10'
           session=request.call('POST','/v1/terminal-sessions',{
@@ -71,7 +73,7 @@ Dir.mktmpdir('blit-custom-icon-api') do |work|
             end
             cells=snapshot.fetch('cells').select{|c|c['y']==0 && c['width']!=0}.sort_by{|c|c['x']}
             raise 'UTF-8 glyphs lost/reordered' unless cells.map{|c|c['text']}.join.rstrip==sequence
-            raise 'private glyphs changed terminal advance' unless cells.first(7).all?{|c|c['width']==1}
+            raise 'private glyphs changed terminal advance' if kind==:icons && !cells.first(7).all?{|c|c['width']==1}
             pty=capture.call
             request.call('PUT',path,{base_revision:snapshot.fetch('revision'),cells:[{x:0,y:0,text:' '*20},{x:0,y:0,text:sequence}]})
             raise 'PTY/API presented pixels differ' unless capture.call==pty
@@ -80,9 +82,10 @@ Dir.mktmpdir('blit-custom-icon-api') do |work|
             request.call('DELETE',"/v1/terminal-sessions/#{session.fetch('id')}",nil,204)
           end
         end
+        end
       end
     end
-    puts "CUSTOM_ICON_API_PASS catalogue=canonical profiles=2 sizes=16+17+22 real_PTY=contiguous+bytewise cases=#{cases} private_advances=1 presented_API_parity=exact scope=local_SDL_not_physical"
+    puts "CUSTOM_ICON_API_PASS catalogue=canonical profiles=2 sizes=16+17+22 real_PTY=contiguous+bytewise specimens=icons+Arabic_marks_digits cases=#{cases} private_advances=1 presented_API_parity=exact scope=local_SDL_not_physical"
   rescue Exception
     warn File.read(File.join(work,'server.log'))
     raise

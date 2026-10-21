@@ -48,6 +48,7 @@ int blit_font_profile_count(void);
 const char *blit_font_profile_id(int index);
 const char *blit_font_profile_path(int index);
 int blit_font_profile_available(int index);
+const char *blit_font_arabic_path(const char *primary);
 const char *blit_font_profile_for_path(const char *path);
 int blit_font_has_glyph(const BlitFont *font, uint32_t codepoint);
 /* Pass wide only for a two-cell character. Prefer a real native outline or

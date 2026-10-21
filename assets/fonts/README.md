@@ -219,14 +219,17 @@ Only glyphs the BDF marks `DWIDTH 16` are taken; a narrow glyph belongs in the
 primary font. Codepoints outside the BMP are **not** covered, because
 `unifont.bdf` is a BMP font — emoji live in plane 1 and need Unifont's
 `unifont_upper`, which is a separate decision recorded in ADR 0062.
-## Experimental Arabic companions (119)
+## Arabic companions (119)
 
 `BlitArabicRetro.ttf` (Kawkab Mono0.501 derivative) and
-`BlitArabicModern.ttf` (GNU FreeMono20120503 derivative) are **module-only
-candidates**, not selected by the running server or accepted as finished fonts.
+`BlitArabicModern.ttf` (GNU FreeMono20120503 derivative) are required companions
+of canonical Retro/Modern profiles in candidate0.1.588.
 They preserve source outlines and positioning; native antialiased glyphs and
-cell-local mark clusters replace PSF substitution only when explicitly attached
-in a test. There is no second bidi pass: Hibr already supplies visual forms.
+cell-local mark clusters replace PSF substitution for the tested Arabic
+repertoire. There is no second bidi pass: Hibr already supplies visual forms.
+The companion shares the primary Latin baseline. GET/v1/fonts identifies the
+loaded companion; missing files reject replacement atomically. Arbitrary
+custom font paths do not automatically receive a companion.
 
 Canonical source/output hashes and licences: `arabic-fonts.source.json`.
 `tools/fonts/build-arabic-profile.py --profile retro|modern SOURCE OUTPUT`
@@ -255,6 +258,6 @@ pane clipping, cursor repaint and mixed Latin/Arabic/colour cache collisions
 through KMS mock, SDL software and offscreen GLES. Run
 `ruby tools/tests/arabic_backend_gate.rb kms|software|opengles2` (one mode).
 These are finite composition tests, not physical scanout or typographic
-acceptance. Runtime profile selection remains disabled pending integration.
+acceptance. Physical typography review remains separate from automated gates.
 
 [Inspect the actual candidate raster specimen](../../docs/images/blit-arabic-candidates.png).

@@ -1,5 +1,28 @@
 # Verification status
 
+## 2026-10-21:119 candidate588 profile activation
+
+Shared-raster gate:16,986 cases per face over8..64px, zero failures;
+Latin/Arabic baselines agree at every size. Current overhang counts are
+Retro2048 and Modern109; each has2565 mark-difference checks. Unsupported
+scalar fallback is explicit, unsupported cluster failure preserves state.
+Independent HarfBuzz OT/design-unit whole-word positioning equals separate
+visual-cell placement for six captured specimens on both faces
+(`arabic_word_gate.py`), not a scanout or arbitrary-script assertion.
+
+The real local PTY/API gate passes24 cases across both profiles at16,17,22px:
+original icons plus Arabic marks/digits, contiguous and bytewise UTF-8, exact
+presented screenshot equality with direct API writes. The font API gate
+checks all57 heights, actual companion identity, missing-asset rollback and
+bitmap-null reporting. Logs: build/tests/arabic-activation-{module,api,pty}.log.
+Backend fixtures additionally test uncovered-scalar parity and SDL italic
+geometry anchored to the original cell. Full arbitrary styled-text pixel
+parity and physical typography are not inferred from these checks.
+
+Final suite/package/live receipts follow below when completed. Earlier
+checkpoints retain their historical scope and do not describe current
+profile activation.
+
 ## 2026-10-21:119 shared backend overhang/damage fixtures
 
 KMS mock, SDL software and offscreen GLES each pass117 scenarios per face

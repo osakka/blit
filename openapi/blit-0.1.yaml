@@ -1930,7 +1930,25 @@ components:
         id: {$ref: '#/components/schemas/ResourceId'}
         path: {type: string}
         available: {type: boolean}
+        arabic_companion_path:
+          type: string
+          nullable: true
+          description: Required companion asset for this profile; null for profiles without native Arabic. Availability includes this file.
         rasterization: {type: string, enum: [bitmap-nearest, native-antialiased]}
+      additionalProperties: false
+    ArabicCompanion:
+      type: object
+      nullable: true
+      description: Actually loaded Arabic companion, or null. Baseline is shared with the active primary font.
+      required: [path, family, baseline_px, shaping]
+      properties:
+        path: {type: string}
+        family: {type: string}
+        baseline_px: {type: integer, minimum: 0}
+        shaping:
+          type: string
+          enum: [visual-cell-marks]
+          description: Hibr supplies display-order forms. OpenType positions cell-local marks; Blit does not apply paragraph bidi again. Not a universal Unicode coverage claim.
       additionalProperties: false
     FontConfiguration:
       type: object
@@ -1965,6 +1983,8 @@ components:
             sizing: {type: string, enum: [scale, pixels]}
             rasterization: {type: string, enum: [bitmap-nearest, native-antialiased]}
             colour_glyphs: {type: boolean}
+            arabic_companion:
+              $ref: '#/components/schemas/ArabicCompanion'
             raster_cache:
               type: object
               required: [bytes, renders]

@@ -27,7 +27,7 @@
     "source_file":"sources/freefont-src-20120503.tar.gz",
     "source_sha256":"0d62e2e22655f841c3ac5fb8c8059a52fe2c09c695d9e8eda9903406e942657a"
   },
-  "status":"experimental shared-module companions; not enabled in server profiles or accepted on physical displays",
+  "status":"candidate 0.1.588: atomically enabled for canonical Retro/Modern profiles; finite automated acceptance, physical typography review pending",
   "specimens_file":"arabic-specimens.json",
   "specimens_sha256":"5bb68482db9d96e1797a5372ea20437dade2f53b40a91efc4e733be242719497",
   "rejected_candidates":{"Cascadia Mono 2407.24":"Contextual alias generation cannot produce the single glyph required for Hibr's one-cell lam-alef presentation forms FEF5..FEFC; do not silently widen or substitute.", "DejaVu Sans Mono 2.37":"Lacks U+0670 superscript alef used in the vocalized religious specimen; not accepted as the Modern companion.", "Vazir Code 1.1.2":"Contextual alias generation does not produce the single glyph required for Hibr's lam-alef presentation forms."},

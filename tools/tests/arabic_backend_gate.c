@@ -204,6 +204,26 @@ int main(int argc,char **argv)
         memset(r->outputs[0].raster_keys,0,sizeof(r->outputs[0].raster_keys));
         surface_origin_px(r,surface,&r->sessions[0],0,cw,ch,&ox,&oy);
 #endif
+        /* Expanded Arabic canvases must keep italic shear anchored to the
+           original cell, rather than re-centring it around their own ink. */
+#ifndef BLIT_TEST_NATIVE
+        {
+            BlitCellCluster key;
+            BlitRasterGlyph g;
+            float top, bottom;
+            CHECK(blit_cell_cluster_init(&key,0xfe92,(unsigned[]){0x0650},1,1));
+            CHECK(font->raster_cluster_get(font->raster_state,&key,&g));
+            flush_sdl_glyph_batch(&r->outputs[0]);
+            CHECK(queue_sdl_glyph_key(&r->outputs[0],font,0xffffff,0xfe92,
+                100,100,cw,ch,2,0,&key));
+            top=100+g.ink_offset_x+2*(1.0f-2.0f*g.ink_offset_y/ch);
+            bottom=100+g.ink_offset_x+2*(1.0f-2.0f*(g.ink_offset_y+g.height)/ch);
+            CHECK(r->outputs[0].glyph_vertices[0].position.x==top);
+            CHECK(r->outputs[0].glyph_vertices[3].position.x==bottom);
+            /* Discard the geometry-only probe before actual frame tests. */
+            r->outputs[0].glyph_vertex_count=r->outputs[0].glyph_index_count=0;
+        }
+#endif
         memset(cps,0,sizeof(cps)); memset(counts,0,sizeof(counts)); memset(marks,0,sizeof(marks));
         cursor_visible=wallpaper_active=0;
         memset(&wallpaper,0,sizeof(wallpaper));
@@ -221,6 +241,7 @@ int main(int argc,char **argv)
         /* All three scalar keys collide modulo128: mask/Arabic/colour
            replacement must flush queued users before reusing atlas texels. */
         cps[5][0]='A'; cps[5][1]=0xfec1; cps[5][2]=0x1f341;
+        cps[5][3]=0x08ff; /* uncovered Arabic scalar: explicit shared fallback */
         frame(1,0,0,COLS,ROWS);
         for(step=0;step<8;++step) {
             int oldx=7+(step? (step-1)%3:0),newx=7+step%3;

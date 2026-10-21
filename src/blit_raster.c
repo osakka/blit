@@ -26,6 +26,7 @@ struct BlitRaster {
     hb_font_t *arabic_font;
     hb_buffer_t *arabic_buffer;
     int arabic_baseline;
+    char arabic_path[1024];
     int text_em[2];
     hb_font_t *colour_font;
     hb_buffer_t *shape_buffer;
@@ -142,8 +143,8 @@ int blit_raster_set_arabic(BlitRaster *raster, const char *path)
     FT_UInt nominal;
     FT_Pos advance;
     FT_F26Dot6 x_em, y_em;
-    int ascent, descent;
-    if (!raster || !path || !raster->library || raster->renders || raster->arabic)
+    if (!raster || !path || strlen(path) >= sizeof(raster->arabic_path) ||
+        !raster->library || raster->renders || raster->arabic)
         return 0;
     if (FT_New_Face(raster->library, path, 0, &face) || !FT_IS_SCALABLE(face) ||
         !FT_IS_FIXED_WIDTH(face) || FT_Select_Charmap(face, FT_ENCODING_UNICODE)) goto fail;
@@ -158,8 +159,6 @@ int blit_raster_set_arabic(BlitRaster *raster, const char *path)
     y_em = (FT_F26Dot6)((long)raster->height * 64 * face->units_per_EM /
                        (face->ascender - face->descender));
     if (FT_Set_Char_Size(face, x_em, y_em, 72, 72)) goto fail;
-    ascent = (int)FT_MulFix(face->ascender, face->size->metrics.y_scale);
-    descent = (int)FT_MulFix(-face->descender, face->size->metrics.y_scale);
     font = hb_ft_font_create_referenced(face);
     buffer = hb_buffer_create();
     if (font == hb_font_get_empty() ||
@@ -168,8 +167,10 @@ int blit_raster_set_arabic(BlitRaster *raster, const char *path)
     raster->arabic = face;
     raster->arabic_font = font;
     raster->arabic_buffer = buffer;
-    raster->arabic_baseline = (raster->height * 64 - ascent - descent) / 128 +
-                              (ascent + 32) / 64;
+    /* Mixed scripts share a baseline; overhang is handled by ink bounds,
+       not by separately centring each face inside the same terminal row. */
+    raster->arabic_baseline = raster->baseline;
+    strcpy(raster->arabic_path, path);
     return 1;
 fail:
     if (buffer) hb_buffer_destroy(buffer);
@@ -543,7 +544,7 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *key,
         if (!result && (text_selector || blit_emoji_variation(scalar)))
             result = draw_text_emoji(raster, scalar, &next);
     }
-    if (result < 0 || ((outline_colour || arabic) && !result)) { free(next.pixels); return 0; }
+    if (result < 0 || (outline_colour && !result)) { free(next.pixels); return 0; }
     if (!result && key->length > 1 && !text_selector) { free(next.pixels); return 0; }
     if (!result) {
         const BlitFont *font = &raster->fallback;
@@ -587,6 +588,12 @@ int blit_raster_get(BlitRaster *raster, uint32_t scalar, int columns,
 
 size_t blit_raster_cached_bytes(const BlitRaster *raster)
 { return raster ? raster->bytes : 0; }
+const char *blit_raster_arabic_path(const BlitRaster *raster)
+{ return raster && raster->arabic ? raster->arabic_path : NULL; }
+const char *blit_raster_arabic_family(const BlitRaster *raster)
+{ return raster && raster->arabic ? raster->arabic->family_name : NULL; }
+int blit_raster_baseline(const BlitRaster *raster)
+{ return raster ? raster->baseline : 0; }
 unsigned long blit_raster_render_count(const BlitRaster *raster)
 { return raster ? raster->renders : 0; }
 

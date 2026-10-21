@@ -149,7 +149,12 @@ coverage in both outline profiles (10,386 codepoints) and Noto2D2.057 colour
 emoji. Existing bitmap profiles stay selectable. Generate an actual-raster
 specimen without a display using `ruby tools/fonts/preview.rb`.
 The [font guide](assets/fonts/README.md) records API selection, provenance and
-limits. Independent font shaping passes all5,244 pinned Emoji18.0 entries;
+limits. Candidate0.1.588 adds separate Retro/Modern Arabic companions,
+positioned diacritics and Arabic-Indic digits; the font API reports the loaded
+companion. See the [Arabic raster preview](docs/images/blit-arabic-candidates.png)
+and [current rollout status](docs/current-state.md); finite test coverage is
+not a universal Arabic/Quranic claim.
+Independent font shaping passes all5,244 pinned Emoji18.0 entries;
 the shared bounded cluster raster now shapes and draws the full corpus in
 offline16px module tests. Terminal segmentation, presentation policy and
 end-to-end conformance remain [issue110](https://git.home.arpa/itdlabs/blit/issues/110).

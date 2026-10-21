@@ -1,7 +1,7 @@
 # ADR0174: Arabic companion faces and cell-local mark positioning
 
-Status: experimental raster/backend implementation; server profile activation
-and remaining acceptance pending (2026-10-21).
+Status: accepted implementation; candidate0.1.588 profile activation;
+physical typography acceptance pending (2026-10-21).
 Tracks Blit119 under118.
 
 ## Evidence and decision
@@ -67,6 +67,26 @@ so adjacent marks survive and outside ink keeps its normal colour. SDL normal
 and cursor repaint use one shared cell-ink dispatch.
 
 ## Acceptance and limits
+
+### Candidate profile activation
+
+After whole-word OpenType positioning matches cell-local placement, align
+Arabic ink to the primary face's baseline (not a separately centred baseline).
+Missing scalar outlines use the existing, explicitly flagged PSF fallback;
+unsupported clusters still fail for the caller's established scalar path.
+Never let KMS display a replacement while SDL silently draws nothing.
+
+The canonical profile registry owns required companion filenames. Selecting
+Modern/Retro loads its primary, Arabic and emoji faces as one transaction;
+missing/unloadable companions reject the change and preserve the active font.
+Validate replacement SDL atlases on all outputs before swapping. Inventory
+reports the actually loaded Arabic path/family/baseline, not an inference from
+a font_id; profile availability includes the companion. Font size and saved
+configuration remain the existing single API-owned policy.
+
+Deploy only after module/backend/API/artifact checks. Whole-word comparisons
+cover the captured visual forms, not arbitrary paragraph bidi or universal
+Quranic coverage. Physical appearance remains a separate operator review.
 
 First implement an opt-in module fixture and inspect its real raster output.
 Do not wire an unaccepted candidate into live/server profile selection.

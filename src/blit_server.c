@@ -16114,12 +16114,21 @@ static int resize_session_surface(BlitSession *session, BlitSurface *surface,
 static void fonts_json(const BlitRuntime *runtime, char *body, size_t capacity)
 {
     char escaped_path[512];
+    char arabic_json[4096] = "null";
     const char *active_id;
     size_t used = 0;
     int i;
     int first = 1;
 
     active_id = blit_font_profile_for_path(runtime->font.path);
+    if (blit_raster_arabic_path(runtime->font.raster_state)) {
+        char path[2048],family[512];
+        json_escape(blit_raster_arabic_path(runtime->font.raster_state),path,sizeof(path));
+        json_escape(blit_raster_arabic_family(runtime->font.raster_state),family,sizeof(family));
+        snprintf(arabic_json,sizeof(arabic_json),
+            "{\"path\":\"%s\",\"family\":\"%s\",\"baseline_px\":%d,\"shaping\":\"visual-cell-marks\"}",
+            path,family,blit_raster_baseline(runtime->font.raster_state));
+    }
     json_escape(runtime->font.path, escaped_path, sizeof(escaped_path));
     used += (size_t)snprintf(body + used, capacity - used,
         "{\"revision\":1,\"active\":{\"id\":\"%s\",\"path\":\"%s\","
@@ -16130,7 +16139,7 @@ static void fonts_json(const BlitRuntime *runtime, char *body, size_t capacity)
            exactly how a stale 540-glyph copy in the build tree rendered
            characters as '?' while the released package drew them. */
         "\"glyphs\":%lu,\"mappings\":%lu,"
-        "\"rasterization\":\"%s\",\"colour_glyphs\":%s,"
+        "\"rasterization\":\"%s\",\"colour_glyphs\":%s,\"arabic_companion\":%s,"
         "\"raster_cache\":{\"bytes\":%lu,\"renders\":%lu}},"
         "\"profiles\":[",
         active_id, escaped_path, font_scale_value(runtime),
@@ -16142,17 +16151,24 @@ static void fonts_json(const BlitRuntime *runtime, char *body, size_t capacity)
         (unsigned long)runtime->font.unicode_count,
         runtime->font.raster_get ? "native-antialiased" : "bitmap-nearest",
         runtime->font.raster_get ? "true" : "false",
+        arabic_json,
         (unsigned long)blit_raster_cached_bytes(runtime->font.raster_state),
         blit_raster_render_count(runtime->font.raster_state));
     for (i = 0; i < blit_font_profile_count() && used + 128 < capacity; ++i) {
         const char *id = blit_font_profile_id(i);
         const char *path = blit_font_profile_path(i);
         char profile_path[1024];
+        char companion_json[2200]="null";
         json_escape(path, profile_path, sizeof(profile_path));
+        if (blit_font_arabic_path(path)) {
+            char escaped[2048];
+            json_escape(blit_font_arabic_path(path),escaped,sizeof(escaped));
+            snprintf(companion_json,sizeof(companion_json),"\"%s\"",escaped);
+        }
         used += (size_t)snprintf(body + used, capacity - used,
-            "%s{\"id\":\"%s\",\"path\":\"%s\",\"available\":%s,\"rasterization\":\"%s\"}",
+            "%s{\"id\":\"%s\",\"path\":\"%s\",\"available\":%s,\"rasterization\":\"%s\",\"arabic_companion_path\":%s}",
             first ? "" : ",", id, profile_path, blit_font_profile_available(i) ? "true" : "false",
-            strstr(path, ".ttf") ? "native-antialiased" : "bitmap-nearest");
+            strstr(path, ".ttf") ? "native-antialiased" : "bitmap-nearest",companion_json);
         first = 0;
     }
     snprintf(body + used, capacity - used, "]}");
@@ -16248,6 +16264,12 @@ static int prepare_font_raster(BlitFont *font, const char *path,
             font_cell_dimension(font, 1, scale, pixels),
             font_cell_dimension(font, 0, scale, pixels));
         if (!*result) return 0;
+        {
+            const char *arabic=blit_font_arabic_path(path);
+            if (arabic && !blit_raster_set_arabic(*result,arabic)) {
+                blit_raster_close(*result); *result=NULL; return 0;
+            }
+        }
     }
     return 1;
 }
@@ -24444,6 +24466,8 @@ static int queue_sdl_glyph_key(BlitOutput *output, const BlitFont *font,
     float red;
     float green;
     float blue;
+    float top_lean = lean;
+    float bottom_lean = -lean;
     int vertex;
     int index;
 
@@ -24503,6 +24527,12 @@ static int queue_sdl_glyph_key(BlitOutput *output, const BlitFont *font,
         {
             float sx = cell_width / (font->raster_cell_width * span);
             float sy = cell_height / font->raster_cell_height;
+            /* Slant about the terminal cell, not the expanded ink canvas.
+               Marks extending above/below it keep the same shear. */
+            top_lean = lean * (1.0f - 2.0f * raster.ink_offset_y /
+                              font->raster_cell_height);
+            bottom_lean = lean * (1.0f - 2.0f *
+                (raster.ink_offset_y + raster.height) / font->raster_cell_height);
             x += raster.ink_offset_x * sx;
             y += raster.ink_offset_y * sy;
             cell_width = raster.width * sx;
@@ -24535,13 +24565,13 @@ static int queue_sdl_glyph_key(BlitOutput *output, const BlitFont *font,
     blue = (float)(colour & 0xffU) / 255.0f;
     vertex = output->glyph_vertex_count;
     vertices = output->glyph_vertices + vertex;
-    vertices[0].position.x = x + lean;
+    vertices[0].position.x = x + top_lean;
     vertices[0].position.y = y;
-    vertices[1].position.x = x + cell_width + lean;
+    vertices[1].position.x = x + cell_width + top_lean;
     vertices[1].position.y = y;
-    vertices[2].position.x = x + cell_width - lean;
+    vertices[2].position.x = x + cell_width + bottom_lean;
     vertices[2].position.y = y + cell_height;
-    vertices[3].position.x = x - lean;
+    vertices[3].position.x = x + bottom_lean;
     vertices[3].position.y = y + cell_height;
     vertices[0].tex_coord.x = source_x;
     vertices[0].tex_coord.y = source_y;

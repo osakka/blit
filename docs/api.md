@@ -868,6 +868,21 @@ default. Profile/size changes validate the rasterizer and replacement SDL
 atlases before retiring active state. Native KMS and both SDL renderers share
 the same coverage/colour source, fallback policy and cell sizing.
 
+Candidate0.1.588 attaches a required Arabic companion to canonical
+`blit-retro` and `blit-modern` profiles. `profiles[].arabic_companion_path`
+identifies the packaged asset; `active.arabic_companion` reports the actually
+loaded `path`, `family`, `baseline_px` and `shaping: "visual-cell-marks"`.
+It is null for profiles without a companion. Availability includes the
+companion file; a failed font/size replacement preserves the active font.
+Arabic shares the Latin baseline and retains ink extending beyond a cell.
+Hibr supplies display-order presentation forms; Blit positions cell-local
+marks without applying a second bidi pass. Tested core letters, lam-alef,
+diacritics and Arabic-Indic digits `٠١٢٣٤٥٦٧٨٩` are a finite scope, not a
+promise of every Arabic/Quranic form. Uncovered scalars use the shared,
+explicitly flagged PSF fallback. Custom noncanonical font paths do not infer
+an Arabic companion. Primary `glyphs`/`mappings` still describe PSF fallback,
+not total companion coverage. Font size remains controlled by `size_px`.
+
 Integer JSON values such as `2` remain valid and mean `2.0`. Blit recalculates
 pane geometry and resizes attached PTYs. Because a framebuffer cell cannot be
 fractional, the physical width and height use one shared nearest-pixel rule;

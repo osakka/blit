@@ -239,13 +239,14 @@ static int font_load_file(BlitFont *font, const char *path)
 typedef struct {
     const char *id;
     const char *path;
+    const char *arabic;
 } BlitFontProfile;
 
 static const BlitFontProfile blit_font_profiles[] = {
     {"blit-hibr-terminus16", "/usr/lib/blit/fonts/Blit-Hibr-Terminus16.psf"},
     {"blit-hibr-spleen16", "/usr/lib/blit/fonts/Blit-Hibr-Spleen16.psf"},
-    {"blit-modern", "/usr/lib/blit/fonts/BlitModernNerd-Regular.ttf"},
-    {"blit-retro", "/usr/lib/blit/fonts/BlitRetroNerd-Regular.ttf"},
+    {"blit-modern", "/usr/lib/blit/fonts/BlitModernNerd-Regular.ttf", "BlitArabicModern.ttf"},
+    {"blit-retro", "/usr/lib/blit/fonts/BlitRetroNerd-Regular.ttf", "BlitArabicRetro.ttf"},
     {"uni2-terminus16", "/usr/lib/blit/fonts/Uni2-Terminus16.psf"},
     {"lat15-terminus16", "/usr/lib/blit/fonts/Lat15-Terminus16.psf"},
     {"uni2-console", "/usr/share/consolefonts/Uni2-Terminus16.psf"},
@@ -317,12 +318,32 @@ const char *blit_font_profile_for_path(const char *path)
     return "custom";
 }
 
+const char *blit_font_arabic_path(const char *primary)
+{
+    static char path[1024];
+    int i;
+    const char *slash;
+    if (!primary) return NULL;
+    for (i=0; i<blit_font_profile_count(); ++i)
+        if (!strcmp(primary,blit_font_profile_path(i)) && blit_font_profiles[i].arabic) {
+            slash=strrchr(primary,'/');
+            if (snprintf(path,sizeof(path),"%.*s%s",slash?(int)(slash-primary+1):0,
+                         primary,blit_font_profiles[i].arabic)>=(int)sizeof(path)) return NULL;
+            return path;
+        }
+    return NULL;
+}
+
 int blit_font_profile_available(int index)
 {
     const char *path = blit_font_profile_path(index);
     char sibling[512];
     const char *slash;
     if (!path || access(path, R_OK) != 0) return 0;
+    {
+        const char *arabic=blit_font_arabic_path(path);
+        if (arabic && access(arabic,R_OK)!=0) return 0;
+    }
     if (!strstr(path, ".ttf")) return 1;
     slash = strrchr(path, '/');
     snprintf(sibling, sizeof(sibling), "%.*sNotoColorEmoji.ttf",

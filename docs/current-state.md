@@ -1,5 +1,28 @@
 # Current state and restart point
 
+## 2026-10-21:119 candidate588 activation and rollout checkpoint
+
+Canonical Modern/Retro profiles now require their Arabic companion and load
+it atomically with the primary/emoji faces. GET/v1/fonts reports the actually
+loaded Arabic family/path/baseline; bitmap profiles report null. Missing
+companions reject replacement without losing the active font. Both faces
+share the Latin baseline. Uncovered Arabic scalars use flagged shared PSF
+fallback; unsupported clusters do not mutate cache/caller state.
+
+Independent whole-word OpenType glyph positions equal concatenated visual
+cells for all six captured Hibr specimens on both companions. The local real
+PTY gate covers contiguous/bytewise Arabic marks/digits plus original icons,
+with exact direct-API screenshot parity (24cases). SDL italic shear remains
+anchored to the original cell when the ink canvas extends outside it.
+See verification-status for final regression/package/live receipts.
+
+At this checkpoint the live host is587, saved Retro26px, two sessions on
+display93. No host settings, backend, layout or Hibr code have been changed.
+Deploy588 only after package checks; preserve the current operator settings.
+Physical Arabic review and Hibr330's colour-icon selection remain outstanding.
+Earlier dated entries below describe historical checkpoints, not current
+activation behaviour.
+
 ## 2026-10-21:119 backend ink composition/damage implemented, not deployed
 
 KMS and SDL now consume raster ink offsets without squeezing the result back

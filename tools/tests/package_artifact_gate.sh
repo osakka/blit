@@ -83,6 +83,13 @@ for font_asset in Blit-Hibr-Spleen16.psf Blit-Hibr-Spleen16.source.json licenses
         exit 1
     }
 done
+for font_asset in BlitArabicRetro.ttf BlitArabicModern.ttf arabic-fonts.source.json arabic-specimens.json KawkabMono-LICENSE.txt FreeMono-LICENSE.txt FreeMono-README.txt FreeMono-AUTHORS.txt sources/freefont-src-20120503.tar.gz; do
+    cmp -s <(git -C "$root" show "$source_commit:assets/fonts/$font_asset") \
+        "$stage/usr/lib/blit/fonts/$font_asset" || {
+        echo "PACKAGE_ARTIFACT_FAIL Arabic asset differs from recorded source: $font_asset" >&2
+        exit 1
+    }
+done
 for entrypoint in blit-session.hibr blit-login-session.hibr blit-desktop-observe.hibr blit-desktop-place.hibr; do
     cmp -s <(git -C "$root" show "$source_commit:hibr/$entrypoint") \
         "$stage/usr/share/blit/hibr/$entrypoint" || {
