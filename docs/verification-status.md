@@ -26,8 +26,11 @@ kernel fixture is not acceptance. GLES11pass/0skip/0fail. Valgrind fixture
 reachable library blocks. Logs: build/tests/rectangle-copy-{build,after,
 terminal-suite,renderer-suite,gles-suite,valgrind}.log.
 
-The full standard suite is running at this checkpoint. No589 package or
-deployment; no live font/layout/backend/Hibr changes. Hibr337 is the upstream
+The full standard suite passes149/5skip/0fail (`rectangle-copy-all.log`),
+including120s/four-session soak,11272 snapshots and1025 resizes. Skips are
+native VT kernel/QEMU fixtures, explicit QEMU Hibr lifecycle, package not
+supplied, live multi-display and live screenshot timing. They are not passes.
+No589 package or deployment at this checkpoint; no live font/layout/backend/Hibr changes. Hibr337 is the upstream
 console/term/hold/desktop integration dependency.120 remains open until
 actual through-hold and physical solid-motion acceptance; retained pixel
 placements/translucency are not cell-copy capabilities.

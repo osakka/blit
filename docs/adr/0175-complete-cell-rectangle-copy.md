@@ -70,6 +70,7 @@ including512x160. Terminal suite5pass/0skip/0fail; renderer59pass/1skip/0fail;
 offscreen GLES11pass/0skip/0fail. Valgrind reports0errors/0lost bytes.
 The remaining renderer skip requires native VT/QEMU kernel fixtures; it is
 not a pass. Hibr integration is tracked separately as internal337.
+The final standard suite passes149/5skip/0fail, including120s terminal soak.
 
 Primary references:
 

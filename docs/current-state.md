@@ -13,6 +13,8 @@ the canonical copy path and reports standard DA1 feature28. ADR0175 records
 one bounded-row snapshot with overlap-safe row order, wide-boundary damage,
 page/clipping/default semantics and retained-graphics limits. Direct fixture
 passes1048 cases including512x160; the old code fails the mark-count check.
+Final standard suite149pass/5skip/0fail, GLES11/11, Valgrind0errors/0lost;
+implementation is committed/pushed at01d6245. Package validation is next.
 No Hibr code edits. Upstream Hibr337 requests console/term/hold/desktop
 integration with fallback and real end-to-end measurement.120 stays open.
 
