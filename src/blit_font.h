@@ -47,6 +47,10 @@ const char *blit_font_profile_path(int index);
 int blit_font_profile_available(int index);
 const char *blit_font_profile_for_path(const char *path);
 int blit_font_has_glyph(const BlitFont *font, uint32_t codepoint);
+/* Pass wide only for a two-cell character. Prefer a real native outline or
+   colour raster; retain the wide bitmap for genuinely unsupported scalars. */
+const BlitFont *blit_font_cell_source(const BlitFont *font,
+                                     const BlitFont *wide, uint32_t codepoint);
 size_t blit_font_glyph_index(const BlitFont *font, uint32_t codepoint);
 uint32_t blit_font_glyph_row(const BlitFont *font, size_t glyph,
                              uint32_t codepoint, int row);

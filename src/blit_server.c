@@ -6400,17 +6400,13 @@ static int parse_color(const char *text, uint32_t *color)
     return 1;
 }
 
-/* ADR 0062: a wide character's glyph needs a 16x16 bitmap, which lives in the
-   wide font. Anything else -- including a wide codepoint the wide font does
-   not map -- is drawn from the primary font, whose substitute remains the
-   visible marker for genuinely uncovered codepoints. */
+/* ADR0171: native outline/colour coverage precedes the ADR0062 wide bitmap.
+   Both SDL and native KMS use the same selection rule. */
 static const BlitFont *cell_font(const BlitRuntime *runtime,
                                  uint16_t attributes, uint32_t codepoint)
 {
-    if ((attributes & BLIT_ATTR_WIDE) &&
-        blit_font_has_glyph(&runtime->wide_font, codepoint))
-        return &runtime->wide_font;
-    return &runtime->font;
+    return blit_font_cell_source(&runtime->font,
+        attributes & BLIT_ATTR_WIDE ? &runtime->wide_font : NULL, codepoint);
 }
 
 /* A session's default colours come from DT_INK/DT_FACE (or

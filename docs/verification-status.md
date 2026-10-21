@@ -1,5 +1,15 @@
 # Verification status
 
+## 2026-10-21:118 wide-bitmap colour loss
+
+Expanded native production-compositor gate with real Unifont and U+2615 is
+red before ADR0171, green afterward. Modern and Retro native KMS and SDL
+software pass all57 sizes, each1311 scalar samples and2052 cluster/cursor
+cases; Modern offscreen GLES also passes. Guard pixels/tolerances unchanged.
+SDL selection checks a real CJK fallback as well as the corrected colour
+choice. TCC server build passes. These are offline rendering tests, not a
+physical colour/missing-icon acceptance. Live587/settings remain unchanged.
+
 ## 2026-10-21 live587 native VT kernel-state verification
 
 API-only supervised deployment succeeds; installed SHA256

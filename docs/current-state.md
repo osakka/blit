@@ -1,5 +1,15 @@
 # Current state and restart point
 
+## 2026-10-21:118 font coverage investigation
+
+Live587 remains Modern22/native KMS; no deployment or settings change. Current
+primary cell snapshot has no literal question marks; the operator's missing
+icons still need captured affected codepoints. A separate reproduced defect
+routes two-cell U+2615 through monochrome Unifont despite colour coverage in
+the selected native font. ADR0171 corrects the shared native/SDL selection;
+expanded gates now load the actual wide font rather than bypassing selection.
+Custom branded artwork and live acceptance remain pending;118 is not complete.
+
 ## 2026-10-21:587 deployed; dedicated native VT verified on10.54
 
 Authenticated updater reports587; exact installed binary SHA256

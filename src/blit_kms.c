@@ -611,7 +611,7 @@ static void draw_cell_glyphs(KmsOutput *output, const BlitFont *font,
                               int x, int y, int cw, int ch, uint32_t fg,
                               int lean, int bold)
 {
-    const BlitFont *glyph_font = wide_font && blit_font_has_glyph(wide_font, cp) ? wide_font : font;
+    const BlitFont *glyph_font = blit_font_cell_source(font, wide_font, cp);
     BlitCellCluster key;
     BlitRasterGlyph raster;
     unsigned i;

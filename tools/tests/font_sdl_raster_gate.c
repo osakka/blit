@@ -9,12 +9,16 @@
 int main(int argc, char **argv)
 {
     BlitFont font;
+    BlitRuntime *runtime = calloc(1, sizeof(*runtime));
     BlitOutput output;
     SDL_Window *window;
     SDL_Renderer *renderer;
     int size, samples = 0;
     const char *name = getenv("BLIT_TEST_RENDERER");
     CHECK(argc == 4);
+    CHECK(runtime);
+    CHECK(blit_font_load_path(&runtime->wide_font, "assets/fonts/Blit-Hibr-Unifont16.psf") == 0);
+    CHECK(blit_font_has_glyph(&runtime->wide_font, 0x2615));
     CHECK(SDL_Init(SDL_INIT_VIDEO));
     window = SDL_CreateWindow("raster gate", 320, 160, SDL_WINDOW_HIDDEN);
     CHECK(window);
@@ -26,11 +30,15 @@ int main(int argc, char **argv)
     for (size = 8; size <= 64; ++size) {
         uint32_t scalars[] = {'A', 'g', 0x2588, 0x2500, 0x1f600, '9', 0x25c6, 0xfe0f, 0x200d,
             0x270e, 0xf040, 0xf015, 0xf07b, 0xf014, 0xf021, 0xf00c, 0xf071, 0x1f514,
-            0xe0b0, 0xe0b1, 0xe0b2, 0xe0b3};
+            0xe0b0, 0xe0b1, 0xe0b2, 0xe0b3, 0x2615};
         unsigned index;
         BlitRaster *raster = blit_raster_open(&font, argv[2], argv[3], (size + 1) / 2, size);
         CHECK(raster);
         blit_raster_attach(&font, raster);
+        runtime->font = font;
+        CHECK(cell_font(runtime, BLIT_ATTR_WIDE, 0x2615) == &runtime->font);
+        /* CJK absent from the outline still needs the existing wide fallback. */
+        CHECK(cell_font(runtime, BLIT_ATTR_WIDE, 0x4e2d) == &runtime->wide_font);
         memset(&output, 0, sizeof(output));
         output.renderer = renderer;
         output.glyph_geometry_enabled = 1;
@@ -38,7 +46,7 @@ int main(int argc, char **argv)
             &output.glyph_atlas_columns, &output.glyph_atlas_width, &output.glyph_atlas_height);
         CHECK(output.glyph_atlas);
         for (index = 0; index < sizeof(scalars) / sizeof(scalars[0]); ++index) {
-            int columns = scalars[index] == 0x1f600 || scalars[index] == 0x1f514 ? 2 : 1;
+            int columns = scalars[index] == 0x1f600 || scalars[index] == 0x1f514 || scalars[index] == 0x2615 ? 2 : 1;
             int powerline = scalars[index] >= 0xe0b0 && scalars[index] <= 0xe0b3;
             int x, y, channel;
             BlitRasterGlyph glyph;
@@ -159,6 +167,8 @@ int main(int argc, char **argv)
         free(output.glyph_vertices); free(output.glyph_indices);
     }
     blit_font_free(&font);
+    blit_font_free(&runtime->wide_font);
+    free(runtime);
     SDL_DestroyRenderer(renderer); SDL_DestroyWindow(window); SDL_Quit();
     printf("FONT_SDL_RASTER_PASS renderer=%s sizes=57 glyph_samples=%d cluster_cases=%u tolerance=2_per_pass bold_coverage=4 guard_pixels=exact\n",
            name ? name : "software", samples, (unsigned)EMOJI_SAMPLE_COUNT * 57 * 4);

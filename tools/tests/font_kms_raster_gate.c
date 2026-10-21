@@ -88,19 +88,22 @@ static int cluster_view_gate(BlitFont *font, KmsOutput *output, uint32_t *pixels
 
 int main(int argc, char **argv)
 {
-    BlitFont font;
+    BlitFont font, wide;
     KmsOutput output;
     uint32_t pixels[160 * 96];
     int size, samples = 0;
     CHECK(argc == 4);
     memset(&font, 0, sizeof(font)); memset(&output, 0, sizeof(output));
     CHECK(blit_font_load_path(&font, argv[1]) == 0);
+    memset(&wide, 0, sizeof(wide));
+    CHECK(blit_font_load_path(&wide, "assets/fonts/Blit-Hibr-Unifont16.psf") == 0);
+    CHECK(blit_font_has_glyph(&wide, 0x2615));
     output.mode.hdisplay = 160; output.mode.vdisplay = 96;
     output.back.map = pixels; output.back.pitch = 160 * 4;
     for (size = 8; size <= 64; ++size) {
         uint32_t scalars[] = {'A', 'g', 0x2588, 0x2500, 0x1f600, '9', 0x25c6, 0xfe0f, 0x200d,
             0x270e, 0xf040, 0xf015, 0xf07b, 0xf014, 0xf021, 0xf00c, 0xf071, 0x1f514,
-            0xe0b0, 0xe0b1, 0xe0b2, 0xe0b3};
+            0xe0b0, 0xe0b1, 0xe0b2, 0xe0b3, 0x2615};
         unsigned index;
         BlitRaster *raster = blit_raster_open(&font, argv[2], argv[3], (size + 1) / 2, size);
         CHECK(raster); blit_raster_attach(&font, raster);
@@ -108,12 +111,13 @@ int main(int argc, char **argv)
         CHECK(cluster_view_gate(&font, &output, pixels, size) == 0);
         for (index = 0; index < sizeof(scalars) / sizeof(scalars[0]); ++index) {
             BlitRasterGlyph glyph;
-            int columns = scalars[index] == 0x1f600 || scalars[index] == 0x1f514 ? 2 : 1;
+            int columns = scalars[index] == 0x1f600 || scalars[index] == 0x1f514 || scalars[index] == 0x2615 ? 2 : 1;
             int powerline = scalars[index] >= 0xe0b0 && scalars[index] <= 0xe0b3;
             int x, y;
             CHECK(font.raster_get(font.raster_state, scalars[index], columns, &glyph));
             for (x = 0; x < 160 * 96; ++x) pixels[x] = 0x123456;
-            draw_glyph(&output, &font, scalars[index], 8, 8, glyph.width,
+            draw_cell_glyphs(&output, &font, columns == 2 ? &wide : NULL,
+                       scalars[index], NULL, 0, 8, 8, glyph.width,
                        glyph.height, 0xabcdef, 0, 0);
             if (powerline) draw_glyph(&output, &font, scalars[index], 9, 8,
                 glyph.width, glyph.height, 0xabcdef, 0, 1);
@@ -129,6 +133,7 @@ int main(int argc, char **argv)
         }
     }
     blit_font_free(&font);
+    blit_font_free(&wide);
     printf("FONT_KMS_RASTER_PASS sizes=57 glyph_samples=%d attachment_layout_cases=228 cluster_cases=%u cursor=covered tolerance=0 guard_pixels=exact\n", samples, (unsigned)EMOJI_SAMPLE_COUNT * 57 * 4);
     return 0;
 }

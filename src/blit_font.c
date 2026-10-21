@@ -1,4 +1,5 @@
 #include "blit_font.h"
+#include "blit_raster.h"
 
 #include <unistd.h>
 #include <stdio.h>
@@ -376,6 +377,17 @@ void blit_font_load(BlitFont *font)
    glyph zero for a font that has no '?', so "it returned something" says
    nothing. Choosing between the primary and the wide font needs the real
    answer (ADR 0062). */
+const BlitFont *blit_font_cell_source(const BlitFont *font,
+                                     const BlitFont *wide, uint32_t codepoint)
+{
+    BlitRasterGlyph glyph;
+    if (!wide || !blit_font_has_glyph(wide, codepoint)) return font;
+    if (font && font->raster_get &&
+        font->raster_get(font->raster_state, codepoint, 2, &glyph) &&
+        !glyph.fallback) return font;
+    return wide;
+}
+
 int blit_font_has_glyph(const BlitFont *font, uint32_t codepoint)
 {
     BlitFontGlyphMap *map;
