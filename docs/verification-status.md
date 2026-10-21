@@ -2,6 +2,13 @@
 
 ## 2026-10-21 candidate587 /117 getty coexistence correction
 
+Source89e54e8; package SHA256
+3c294a089495b63e204456a76e8969201c3e8596409ffdc1fdc90cae9d08df9d.
+Artifact/provenance and byte-identical rebuild pass. Exact packaged payload
+79e706f10673c921a0c5105599c0298f7e092f30da354748b95d7de74fb965e1
+passes full expanded VM; /tmp/blit-vt-kernel.HuOiVe/serial.log. Focused
+schema/terminal/lifecycle33pass/0skip/0fail. Physical rollout pending here.
+
 586 failed physical acceptance despite the prior getty-free VM pass. Actual
 owner fd duplication returns EIO while a new tty2 descriptor reads K_UNICODE;
 getty@tty2 restarted after startup. This is recorded in the586 manifest,

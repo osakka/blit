@@ -2,6 +2,13 @@
 
 ## 2026-10-21:586 physical acceptance FAILED;587 dedicated VT correction
 
+Source89e54e8 pushed. Package587 SHA256
+3c294a089495b63e204456a76e8969201c3e8596409ffdc1fdc90cae9d08df9d
+passes artifact/provenance and byte-identical rebuild. Exact packaged payload
+passes expanded module/full-server VM again, including getty hangup/reset and
+owned-descriptor recovery; /tmp/blit-vt-kernel.HuOiVe/serial.log. Focused
+schema/terminal/lifecycle33pass/0skip/0fail. Physical rollout pending here.
+
 586 updated successfully viaAPI and preserved Modern22/settings/layout, but
 console diagnostics reported keyboard_mode=-1. Duplicating the actual owner's
 fd3 via pidfd_getfd confirms EIO; a fresh tty2 descriptor reads K_UNICODE3.
