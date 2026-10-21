@@ -64,6 +64,8 @@ typedef struct {
        The KMS presenter uses this identity to notice an image-only delete or
        move and repaint the pixels that the old placement exposed. */
     unsigned long long graphics_signature;
+    /* Shared scene comparison covered old/new placement pixels in damage. */
+    int graphics_damage_complete;
 } BlitKmsSurfaceView;
 
 typedef struct {

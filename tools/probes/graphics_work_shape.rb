@@ -22,6 +22,6 @@ results = %w[native protocol_sdl].map do |mode|
   abort "#{mode}: exit=#{status.exitstatus} signal=#{status.termsig} #{stderr}" unless status.success?
   JSON.parse(stdout)
 end
-files = %w[tools/probes/graphics_work_shape.c src/blit_server.c src/blit_kms.c src/blit_graphics.h]
+files = %w[tools/probes/graphics_work_shape.c src/blit_server.c src/blit_kms.c src/blit_graphics.h src/blit_graphics_scene.h]
 puts JSON.pretty_generate({ 'scope' => 'current production work-shape observation, no live writes or FPS claims',
   'sha256' => files.to_h { |f| [f, Digest::SHA256.file(f).hexdigest] }, 'results' => results })

@@ -7,6 +7,7 @@
 #include "blit_font.h"
 #include "blit_raster.h"
 #include "blit_graphics.h"
+#include "blit_graphics_scene.h"
 #include "blit_input_pointer.h"
 #include "blit_unicode_width.h"
 #include "blit_emoji_sequences.h"
@@ -310,6 +311,10 @@ typedef struct {
     int damage_y;
     int damage_width;
     int damage_height;
+    /* Descriptor snapshots acknowledge only composed graphics (ADR0177). */
+    BlitGraphicsScene graphics_presented;
+    BlitGraphicsScene graphics_prepared;
+    int graphics_damage_prepared;
     /* External cell producers may submit one logical frame in bounded HTTP
        chunks. Keep those chunks out of the renderer until the commit chunk
        arrives, otherwise Hibr's wallpaper/menu redraw is visibly torn. */
@@ -10280,6 +10285,9 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
         return;
     }
     if (strcmp(action, "p") == 0) {
+        BlitGraphicsPlacement previous, current;
+        BlitGraphicsDraw old_draw, new_draw;
+        int old_valid = 0, new_valid = 0;
         image = graphics_image_find(session, (unsigned int)image_id);
         if (image == NULL || !image->complete) {
             graphics_reject(session, "placement-incomplete");
@@ -10290,6 +10298,10 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
             kitty_reply(session, image_id, quiet, "EINVAL");
             return;
         }
+        if (kitty_placement_get(image, placement.id, &previous))
+            old_valid = blit_graphics_draw_resolve(image, previous.x, previous.y,
+                previous.width, previous.height, previous.z, previous.src_x,
+                previous.src_y, previous.src_w, previous.src_h, &old_draw);
         if (!kitty_place(image, &placement)) {
             graphics_reject(session, "placement-store-full");
             kitty_reply(session, image_id, quiet, "ENOSPC");
@@ -10297,7 +10309,15 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
         }
         if (!keep_cursor)
             kitty_advance_cursor(session, surface, image, placement.id);
-        mark_surface_full_damage(surface);
+        if (kitty_placement_get(image, placement.id, &current))
+            new_valid = blit_graphics_draw_resolve(image, current.x, current.y,
+                current.width, current.height, current.z, current.src_x,
+                current.src_y, current.src_w, current.src_h, &new_draw);
+        if (old_valid) mark_graphics_damage(surface, old_draw.x, old_draw.y,
+            old_draw.width, old_draw.height, cell_width, cell_height);
+        if (new_valid) mark_graphics_damage(surface, new_draw.x, new_draw.y,
+            new_draw.width, new_draw.height, cell_width, cell_height);
+        if (!surface->damage_valid) mark_surface_damage(surface, 0, 0);
         return;
     }
     if ((action[0] != '\0' && strcmp(action, "t") != 0) ||
@@ -24004,11 +24024,9 @@ static int surface_targets_output(BlitRuntime *runtime,
     return strcmp(session->display_id, display_id) == 0;
 }
 
-/* Cell damage can be composed incrementally from the committed scene cache.
- * Graphics are different: hiding/replacing an image can expose pixels that
- * are outside the cell rectangle that caused the render request. Track the
- * complete graphics scene separately so only graphics changes require a
- * full scene rebuild for an external Hibr surface. */
+/* Output identity detects graphics-only updates. Prepared descriptor deltas
+ * cover old/new placement pixels; unknown callers still require the full
+ * rebuild fallback when hiding/replacing exposes untracked coverage. */
 static unsigned long long graphics_scene_signature(const BlitRuntime *runtime,
                                                    int output_index)
 {
@@ -25596,9 +25614,69 @@ static void record_kms_frame_submission(BlitRuntime *runtime,
             ++runtime->diagnostic_present_calls;
 }
 
-static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
+typedef struct {
+    BlitSurface *surface;
+    int cw, ch;
+} GraphicsDamageOwner;
+
+static void graphics_stamp_damage(void *owner, const BlitGraphicsStamp *stamp)
+{
+    GraphicsDamageOwner *d = owner;
+    mark_graphics_damage(d->surface, stamp->x, stamp->y, stamp->width,
+                          stamp->height, d->cw, d->ch);
+}
+
+static void prepare_graphics_damage(BlitRuntime *runtime, BlitFramePlan *plan)
+{
+    int i;
+    for (i = 0; i < BLIT_MAX_SESSIONS; ++i)
+        if (runtime->surfaces[i]) runtime->surfaces[i]->graphics_damage_prepared = 0;
+    for (i = 0; i < plan->surface_count; ++i) {
+        BlitSurface *v = find_surface_id(runtime, plan->surfaces[i].surface_id);
+        BlitSession *s, *source;
+        GraphicsDamageOwner damage;
+        int changed;
+        if (!v || v->revision != plan->surfaces[i].surface_revision || v->frame_open) continue;
+        s = find_session_id(runtime, v->owner_session_id);
+        if (!s || s->terminal_synchronized) continue;
+        source = hibr_render_source(runtime, s);
+        if (!source) source = s;
+        blit_graphics_scene_build(&v->graphics_prepared, source->graphics, BLIT_GRAPHICS_MAX_IMAGES);
+        damage.surface = v;
+        damage.cw = runtime_terminal_cell_width(runtime);
+        damage.ch = runtime_terminal_cell_height(runtime);
+        if (!v->graphics_presented.valid) {
+            mark_surface_full_damage(v);
+        } else {
+            changed = blit_graphics_scene_delta(&v->graphics_presented,
+                &v->graphics_prepared, graphics_stamp_damage, &damage);
+            if (changed && !v->damage_valid) mark_surface_damage(v, 0, 0);
+        }
+        v->graphics_damage_prepared = 1;
+        plan->surfaces[i].damage_valid = v->damage_valid;
+        plan->surfaces[i].damage_x = v->damage_x;
+        plan->surfaces[i].damage_y = v->damage_y;
+        plan->surfaces[i].damage_width = v->damage_width;
+        plan->surfaces[i].damage_height = v->damage_height;
+    }
+}
+
+static int output_graphics_damage_complete(BlitRuntime *runtime, int output)
+{
+    int i;
+    for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
+        BlitSurface *v = runtime->surfaces[i];
+        if (v && v->used && surface_targets_output(runtime, v, output) &&
+            !v->graphics_damage_prepared) return 0;
+    }
+    return 1;
+}
+
+static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *input_plan,
                            uint32_t output_mask, int hold_scene)
 {
+    BlitFramePlan prepared_plan = *input_plan;
+    const BlitFramePlan *plan = &prepared_plan;
     int output_index;
     int plan_index;
     int row;
@@ -25615,6 +25693,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
        to be, those cells were never repainted again. */
     int surface_painted[BLIT_MAX_FRAME_SURFACES];
 
+    prepare_graphics_damage(runtime, &prepared_plan);
     memset(surface_painted, 0, sizeof(surface_painted));
     Uint64 render_started = 0;
     uint64_t diagnostic_render_started = monotonic_us();
@@ -25755,12 +25834,14 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                 session_default_background(render_source);
             views[view_count].graphics = render_source->graphics;
             views[view_count].graphics_count = BLIT_GRAPHICS_MAX_IMAGES;
-            /* KMS cannot infer an image-only mutation from the terminal
-               surface revision. Carry the complete graphics-scene identity
-               into the view so deleting or moving a Kitty/Sixel placement
-               forces a repaint even when no cell changed. */
+            /* Per-surface identity avoids redrawing unrelated panes. Shared
+               descriptor preparation covers graphics-only mutations even
+               when the producer changed no terminal cell/revision. */
             views[view_count].graphics_signature =
-                graphics_scene_signature(runtime, output_index_for_surface);
+                surface->graphics_damage_prepared ?
+                    surface->graphics_prepared.signature :
+                    graphics_scene_signature(runtime, output_index_for_surface);
+            views[view_count].graphics_damage_complete = surface->graphics_damage_prepared;
             ++view_count;
         }
         kms_present_started = monotonic_us();
@@ -25834,6 +25915,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                     BlitSession *session = find_session_id(
                         runtime, surface->owner_session_id);
                     surface->damage_valid = 0;
+                    if (surface->graphics_damage_prepared)
+                        surface->graphics_presented = surface->graphics_prepared;
                     surface->presented_revision =
                         views[surface_index].surface_revision;
                     if (session != NULL)
@@ -25942,7 +26025,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
         full_redraw = !sdl_incremental_scene_updates_enabled(
                 runtime, &runtime->outputs[output_index]) ||
             !runtime->outputs[output_index].initialized ||
-            graphics_changed ||
+            (graphics_changed && !output_graphics_damage_complete(runtime, output_index)) ||
             /* The software pointer is composed after the complete cached
              * scene is copied to the output. It is not part of scene_texture,
              * so pointer motion must not force a full scene rebuild when a
@@ -26576,6 +26659,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
             surface_painted[plan_index];
         if (rendered) {
             surface->damage_valid = 0;
+            if (surface->graphics_damage_prepared)
+                surface->graphics_presented = surface->graphics_prepared;
             surface->presented_revision =
                 plan->surfaces[plan_index].surface_revision;
         }

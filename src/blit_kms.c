@@ -1951,13 +1951,13 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                                             pointer_height);
                 }
                 if (pointer_damage) draw.damage_valid = 1;
-                /* A retained image mutation is bounded by the union of its
-                   previous and current cell coverage. Redraw that union so
-                   replacement/deletion exposes the prior scene, while
-                   avoiding a full wallpaper redraw for a small placement. */
+                /* The server supplies complete old/new descriptor damage.
+                   Unknown callers retain the conservative union of all old
+                   and current graphics; never trust a partial cell-only
+                   rectangle to cover a graphics deletion by itself. */
                 graphics_view_changed = !full_redraw &&
                     !output_graphics_unchanged(output, &views[view_index]);
-                if (graphics_view_changed) {
+                if (graphics_view_changed && !views[view_index].graphics_damage_complete) {
                     int current_x;
                     int current_y;
                     int current_width;

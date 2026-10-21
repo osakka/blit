@@ -1,5 +1,46 @@
 # Verification status
 
+## 2026-10-21: 125 retained placement damage, candidate0.2.0 only
+
+ADR0177 establishes one shared comparison of immutable last-composed image
+placement descriptors. The new production-command regression failed against
+the previous full-surface `a=p` handler, then passed with old/new coverage.
+The renderer consumers use prepared damage while preserving unknown-caller
+fallback, topology/full redraws and terminal damage accumulation.
+
+`graphics_placement_damage_gate.rb` passes with SDL software and explicit
+offscreen OpenGLES2. Each compares36 incremental frames against forced full
+redraws with exact pixels, full wallpaper, translucent moving foreground,
+stationary overlapping image, z/crop/pixel-generation changes, deletion,
+reappearance, fractional-cell and negative positions. SDL whole-renderer
+clears stay0 for the incremental steps; image uploads stay unchanged except
+the single changed-pixel case. Synchronized and masked-output attempts do
+not advance the surface's composed scene snapshot. Native production
+composition (only DRM mocked) matches the same36 full-reference cases with
+drawn cells strictly below the fixture's480 full-view cells. Explicit
+unknown-caller fallback still draws the whole graphics union; pending flips
+defer without consuming damage, and retry consumes it.
+
+Existing renderer suite59pass/1skip/0fail, GLES11pass/0fail, and combined
+schema/terminal/lifecycle34pass/1skip/0fail pass. The new software/native and
+GL fixture invocations above are additional to those receipts; suite hooks
+were added afterward. Valgrind on software/protocol and native fixtures:
+0 errors,0 definitely/indirectly lost; native exits with0 allocated blocks.
+TCC candidate build, font-reference gate and diff checks pass. No new full
+standard-suite pass or physical-host performance acceptance is claimed.
+
+Final isolated timing:4pass/2live-only skips/0fail with unchanged limits;
+120s/four-session soak performs11,756 snapshots/1,069 resizes. Logs are
+`build/tests/scene-renderer.log`, `scene-gles.log`,
+`scene-contract-lifecycle.log`, `scene-timing.log`,
+`scene-placement-software.log`, `scene-placement-gl.log` and
+`scene-valgrind.log`. Earlier0.2 validation gaps remain explicitly recorded.
+
+Image upload/delete handlers retain conservative full damage; native scanout
+copying and SDL changed-image staging are unchanged. Live remains589 with
+no backend/layout/session/Hibr changes or SSH.125 remains open for those
+remaining stages and controlled video/movement/input-latency measurement.
+
 ## 2026-10-21: Kitty architecture audit, no runtime implementation change
 
 Internal125/122; pinned Kitty source and exact local code paths are recorded

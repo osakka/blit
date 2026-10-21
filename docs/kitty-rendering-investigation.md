@@ -1,5 +1,12 @@
 # Kitty comparison: rendering architecture, not just glyph caching
 
+Follow-up: the0.2 development candidate now implements the first shared
+placement-damage stage in[ADR0177](adr/0177-retained-graphics-damage.md).
+The source findings and original probe outputs below describe the pinned
+pre-fix checkpoint; rerunning the probe on a newer source reflects its new
+behaviour. Image uploads, CPU native composition and whole-output copying
+are not claimed fixed by that stage. See current-state/verification notes.
+
 Date: 2026-10-21. Blit source checkpoint: c5e241e, development0.2.0.
 Live host remains0.1.589/native direct-KMS, untouched by this investigation.
 Parent tracker: internal Blit122; architectural follow-up125. This is an investigation and proposed

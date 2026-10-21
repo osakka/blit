@@ -268,6 +268,7 @@ suite_font() {
 }
 
 suite_renderer() {
+    run_gate graphics_placement_damage ruby tools/tests/graphics_placement_damage_gate.rb
     run_gate sdl_output_startup sh tools/tests/sdl_output_startup_gate.sh
     run_gate pixel_frame_gate.rb ruby tools/tests/pixel_frame_gate.rb
     run_gate hidden_cursor_damage_gate.rb ruby tools/tests/hidden_cursor_damage_gate.rb
@@ -333,6 +334,9 @@ suite_renderer() {
 }
 
 suite_gles() {
+    run_gate graphics_placement_damage_gles env \
+        BLIT_TEST_VIDEO_DRIVER=offscreen BLIT_TEST_RENDERER=opengles2 \
+        LIBGL_ALWAYS_SOFTWARE=1 ruby tools/tests/graphics_placement_damage_gate.rb
     run_gate arabic_gles_ink ruby tools/tests/arabic_backend_gate.rb opengles2
     run_gate sdl_gles_emoji_transitions env \
         BLIT_TEST_VIDEO_DRIVER=offscreen BLIT_TEST_RENDERER=opengles2 \

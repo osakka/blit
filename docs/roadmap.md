@@ -1,5 +1,12 @@
 # Blit roadmap
 
+125 stage one is implemented in development0.2.0: shared last-composed scene
+descriptors, bounded old/new Kitty-placement damage and both renderer consumers
+(ADR0177). Local full-reference pixel oracles pass on native/software/GL.
+Protocol image uploads/delete still use conservative full damage; image
+staging, native copy costs, GPU batching and matched live video/drag acceptance
+remain. Stable/live589 is unchanged; no0.2 release or physical speedup claim.
+
 0.2 performance programme: internal122; stablev0.1.589 remains the rollback
 checkpoint. Candidate0.2.0 starts with measured shared glyph-cache collision
 reuse, then CPU/damage attribution and GPU upload/batching based on profiles.

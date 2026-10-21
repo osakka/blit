@@ -43,6 +43,15 @@ ASCII is the no-churn control, not an advertised speedup. Full-key retention
 and four-way LRU are recorded in[ADR0176](adr/0176-measured-performance-and-raster-cache.md).
 This removes proven repeated work; it does **not** yet quantify live frame gain.
 
+Stage two/internal125 begins with[retained graphics damage](adr/0177-retained-graphics-damage.md):
+placement-only commands and one shared comparison against the last composed
+scene. Both renderers preserve unchanged wallpaper outside affected regions.
+The new production fixture compares36 steps with full-redraw pixel oracles
+on native KMS (DRM mocked), software SDL and offscreen GL. It also verifies
+no movement-only texture uploads/whole-renderer clears and held/deferred
+damage retention. Completed protocol-image uploads remain full-damage for
+now; this is not yet the entire video-plus-drag performance fix.
+
 Reproduce without a display or changing installed fonts:
 
 ```bash

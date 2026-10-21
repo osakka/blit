@@ -93,6 +93,13 @@ retained historical build snapshot is not an active development/config owner.
 
 ## Required gates
 
+Graphics damage changes require `ruby tools/tests/graphics_placement_damage_gate.rb`
+plus the same fixture with `BLIT_TEST_VIDEO_DRIVER=offscreen` and
+`BLIT_TEST_RENDERER=opengles2`. The renderer/GLES suites include them.
+These compare production incremental composition against full-redraw pixels;
+counts or screenshots alone are insufficient. Preserve held/deferred snapshot
+acknowledgement and unknown-caller fallback (ADR0177).
+
 For the[0.2 performance programme](performance-0.2.md), `font` also runs the
 production cache workload (`ruby tools/probes/font_cache_workload.rb --check`)
 and `timing` verifies the read-only baseline sampler's units, counter-reset

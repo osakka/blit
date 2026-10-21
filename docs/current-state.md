@@ -1,5 +1,32 @@
 # Current state and restart point
 
+## 2026-10-21: 125 stage one — retained placement damage implemented
+
+Development0.2.0 now compares immutable presented placement descriptors at
+the shared renderer boundary (ADR0177). Kitty placement commands accumulate
+old/new coverage instead of invalidating the whole surface. SDL and native
+KMS accept the same prepared graphics damage; native per-surface identity
+avoids treating another pane's graphics as its own mutation. Unknown callers
+retain conservative fallback. Snapshot acknowledgement follows actual surface
+composition, not a deferred/held render attempt.
+
+The new command regression failed on the previous full-surface behaviour.
+Production pixel tests now compare36 incremental steps against forced full
+redraws on native DRM-mocked KMS, SDL software and offscreen OpenGLES2:
+exact pixels, translucent moving image, stationary overlapping image,
+wallpaper, z/crop, changed pixels, deletion/reappearance and negative offsets.
+SDL movement causes no image reupload or full renderer clear; native draws
+fewer than the full480 fixture cells. Synchronization, masked outputs and
+native flip deferral retain damage/snapshot state. These are local fixtures,
+not a real-host FPS result. Existing renderer59pass/1skip, GLES11/11, and
+schema/terminal/lifecycle34pass/1skip pass before adding the new suite hooks.
+
+Live remains589. No backend/layout/Hibr changes or SSH.125 stays open:
+protocol image-upload/delete paths are still conservatively full-damage;
+image repacking, native whole-output copies, retained GPU batching and real
+video/input-latency measurements remain. Do not call stage one a Kitty win
+or a released0.2.0. See the verification ledger for the final timing receipt.
+
 ## 2026-10-21: deeper Kitty graphics architecture investigation
 
 Internal125 under122: see[the source audit and production probe](kitty-rendering-investigation.md).
