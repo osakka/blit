@@ -24,6 +24,12 @@ separate package/deployment verification. No host or Hibr changes so far.
 Full font suite:39pass/0skip/0fail, including all-size presentation and
 native/software raster consumers in Modern and Retro. No physical pixel,
 input-latency or active-window-drag acceptance follows from those local gates.
+Combined renderer/GLES suite:74pass/1explicit VT-kernel skip/0fail. This
+includes native mocked-DRM composition, software/GL raster consumers and
+graphics/damage/frame-lifecycle invariants, not physical GPU or hotplug acceptance.
+Package artifact/rebuild gate passes reproducible=yes for the manifest's exact
+0.2.1 archive. Local frame-rate gate passes at60Hz with unchanged20ms budget;
+this SDL fixture is not native live cadence or movement acceptance.
 
 ## 2026-10-21: 0.2 authenticated association passes; performance not accepted
 
