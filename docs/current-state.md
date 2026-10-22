@@ -3,10 +3,10 @@
 SDL multi-monitor autodetection/hotplug parity is still pending acceptance
 under internal104: discovery, unplug/replug, stable identities, saved layouts,
 pane/session placement and input routing. The0.2 shared-damage fixtures do
-not certify it or authorize a backend switch. Live is now the0.2.0 native-KMS
+not certify it or authorize a backend switch. Live is now the0.2.1 native-KMS
 development canary below;v0.1.589 remains the stable rollback checkpoint.
 
-## 2026-10-22: exact raster blending implemented in candidate0.2.1
+## 2026-10-22: exact raster blending deployed as canary0.2.1; login pending
 
 ADR0179 removes TCC's6 per-coverage-pixel integer divisions from the canonical
 blender using exact bounded multiply/shift arithmetic. Coverage0/255 returns
@@ -25,10 +25,20 @@ KMS; SDL/GL acceleration is not implied.
 
 Use `ruby tools/tests/raster_blend_gate.rb [--benchmark]`; `--observe` disables
 the work assertion, not semantic checks, and is not performance acceptance.
-Font suite includes the gate. Candidate0.2.1 avoids reusing deployed0.2.0's
-artifact identity. Live remains unchanged pending integration/package checks;
-deployment and active-workload acceptance must be recorded separately.
-Native CPU/copy/GPU work and104 hotplug parity remain.
+Font suite includes the gate. All39 font checks and74 renderer/GLES checks
+pass, with1 explicit VT-kernel skip. Package artifact/rebuild is reproducible;
+local frame-rate gate passes with unchanged20ms limit. Source7ca0dbc and exact
+artifact hashes are recorded in `releases/0.2.1.yaml`. API updater successfully
+installed0.2.1. Postflight confirms API0.1, native KMS, both outputs, three pane
+grids, exact font/settings document and clean revision397 unchanged. Hibr ABI16
+remains compatible; no Hibr code or login bypass. Updater/adapter are unchanged.
+
+The restart replaced PTYs and the bottom primary login manager is waiting for
+authentication; automatic joins remain gated. User logs in next, then verify
+one primary/two joins and actual movement/frame time. No whole-desktop speedup
+or physical acceptance is claimed from local blend timings.0.2.0 and stable589
+rollback archives remain available. Native CPU/copy/GPU work and104 hotplug
+parity remain. Deployment/package/postflight logs are `build/tests/blend-*`.
 
 ## 2026-10-21: authenticated primary and joins verified; frame budget still missed
 

@@ -1,6 +1,6 @@
 # ADR0179: exact integer raster blending without per-channel division
 
-- Status: accepted for development; live acceptance pending
+- Status: deployed in0.2.1 development canary; desktop performance acceptance pending
 - Date: 2026-10-22
 - Scope: internal125/122; canonical raster compositor, no protocol/font change
 

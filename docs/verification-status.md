@@ -1,5 +1,31 @@
 # Verification status
 
+## 2026-10-22: 0.2.1 canary installed; desktop acceptance awaits login
+
+Exact source7ca0dbc/package identity is in `releases/0.2.1.yaml`. Artifact
+rebuild is byte-identical. Updater/ABI16 adapter hashes remain identical to
+0.2.0/589. Existing API updater verifies live0.2.1; postflight checks version,
+API0.1, native KMS, both physical outputs, all three pane grids, exact font
+identity/settings hash, clean revision397 and compatible Hibr ABI16. No SSH,
+Hibr modification, backend/font/layout change or authentication bypass.
+
+Local receipts:39 font checks pass; combined renderer/GLES74pass/1explicit
+VT-kernel skip/0fail; schema and unchanged local frame-rate gate pass. Full
+standard-suite/lifecycle soak is not newly rerun or claimed for this arithmetic-
+only change.33,654,432 production blend comparisons and0 TCC divisions are
+recorded below; local timing gains are not native-frame/desktop acceptance.
+
+Restart replaces PTYs. One bottom-primary login manager is awaiting
+authentication and no premature joins are created. User login, association,
+physical rendering/input and actual movement/frame-time measurements remain
+pending. Pre-update6.194s window (0.2.0):52.37% of one server CPU core,
+176 aggregate presentation calls/60 missed deadlines; uncontrolled workload,
+not distinct-frame FPS or a fair before/after desktop comparison. Do not compare
+that desktop window with new idle login. Logs: `build/tests/blend-package.log`,
+`blend-frame-rate.log`, `blend-deploy.log`, `blend-postflight.json`,
+`blend-live-before-config.json` and `blend-live-before.json`.0.2.0 and stable589
+rollback archives are retained; no stable0.2 tag.125/122/104 remain open.
+
 ## 2026-10-22: 0.2.1 exact raster arithmetic, local implementation
 
 ADR0179's production function matches the frozen pre-change oracle in
