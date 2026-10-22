@@ -4,7 +4,7 @@
 
 Public repository: [github.com/osakka/blit](https://github.com/osakka/blit).
 
-Stable checkpoint: **v0.1.589**. The **0.2.0 development line** targets measured
+Stable checkpoint: **v0.1.589**. The **0.2 development line** targets measured
 rendering/CPU improvements without sacrificing correctness; see the
 [performance programme](docs/performance-0.2.md). Candidate is not a release.
 

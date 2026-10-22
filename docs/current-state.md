@@ -6,6 +6,30 @@ pane/session placement and input routing. The0.2 shared-damage fixtures do
 not certify it or authorize a backend switch. Live is now the0.2.0 native-KMS
 development canary below;v0.1.589 remains the stable rollback checkpoint.
 
+## 2026-10-22: exact raster blending implemented in candidate0.2.1
+
+ADR0179 removes TCC's6 per-coverage-pixel integer divisions from the canonical
+blender using exact bounded multiply/shift arithmetic. Coverage0/255 returns
+the masked24-bit destination/foreground. RGBA retains premultiplied source,
+foreground independence and non-premultiplied-input saturation semantics.
+No font assets, glyph geometry, precision, protocol or backend changes.
+
+Production matches a frozen test-only reference in33,654,432 coverage/RGBA/
+mixed-channel/stride/bounds/high-byte cases. Old TCC code contains6 divisions
+and fails the new work gate; candidate contains0. Same-build5-run process-CPU
+medians for2million pixels: transparent43.378ms reference/17.897ms candidate,
+opaque46.968/20.175ms, mixed42.099/35.413ms. Old-production/reference baseline
+timings were comparable. These are local function timings, not native frame
+FPS or physical input latency attribution. Actual runtime caller is native
+KMS; SDL/GL acceleration is not implied.
+
+Use `ruby tools/tests/raster_blend_gate.rb [--benchmark]`; `--observe` disables
+the work assertion, not semantic checks, and is not performance acceptance.
+Font suite includes the gate. Candidate0.2.1 avoids reusing deployed0.2.0's
+artifact identity. Live remains unchanged pending integration/package checks;
+deployment and active-workload acceptance must be recorded separately.
+Native CPU/copy/GPU work and104 hotplug parity remain.
+
 ## 2026-10-21: authenticated primary and joins verified; frame budget still missed
 
 User logged in after deployment. Read-only native association gate passes:

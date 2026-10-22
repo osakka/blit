@@ -93,6 +93,13 @@ retained historical build snapshot is not an active development/config owner.
 
 ## Required gates
 
+Raster-blending changes require `ruby tools/tests/raster_blend_gate.rb` and
+normal font/backend composition gates. The standalone gate exhausts production
+channel/alpha arithmetic against a frozen test-only oracle and checks TCC
+instruction work. `--benchmark` reports same-process CPU medians, not live FPS;
+`--observe` disables the division-count requirement and is not performance
+acceptance (ADR0179).
+
 Image-ingestion changes require `ruby tools/tests/graphics_ingestion_gate.rb`
 and its explicit offscreen/OpenGLES2 counterpart. Renderer/GLES suites include
 them. They instrument the production decoder and SDL call boundary, not a

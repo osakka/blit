@@ -1,5 +1,11 @@
 # Blit roadmap
 
+125 native blend stage, candidate0.2.1: exact integer source-over replaces
+6 per-coverage-pixel TCC divisions with bounded multiply/shift and endpoint
+paths (ADR0179). Exhaustive production equivalence and local CPU medians
+pass; backend integration and controlled live acceptance remain separate.
+This does not replace the retained GPU architecture/hotplug104 work.
+
 125 protocol-image stage, candidate0.2.0: Kitty/sixel completion and Kitty
 deletion now wake the scheduler with placement bounds, not unconditional
 full-surface damage. Shared last-composed descriptors retain old/revealed

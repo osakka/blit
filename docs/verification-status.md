@@ -1,5 +1,30 @@
 # Verification status
 
+## 2026-10-22: 0.2.1 exact raster arithmetic, local implementation
+
+ADR0179's production function matches the frozen pre-change oracle in
+33,654,432 cases: every alpha/source/background channel combination for
+coverage and RGBA, plus100,000 mixed-RGB/high-byte/stride/bounds/unsupported-
+format cases. Null inputs retain the original return. RGBA tests deliberately
+include channels above alpha, preserving original saturation behaviour rather
+than assuming only valid premultiplication. Old source passes equivalence,
+but fails the instruction-work requirement with6 TCC divisions; new source
+has0. Reference is test-only, not an alternate production implementation.
+
+The5-run alternating process-CPU benchmark (2million pixels) reports reference
+versus production medians: transparent43.378/17.897ms, opaque46.968/20.175ms,
+mixed42.099/35.413ms. Old-production baseline medians46.100/48.018/45.275ms
+were comparable with its reference43.489/47.960/45.009ms. These are local
+function timings, not whole-frame improvements, native CPU attribution or
+physical input acceptance. The runtime consumer is native KMS; no SDL/GPU
+speedup is inferred. Logs: `build/tests/blend-before.log`,
+`blend-before-benchmark.log`, `blend-after.log`, `blend-font.log` and
+`blend-renderers.log`. New candidate identity is0.2.1; live remains0.2.0 until
+separate package/deployment verification. No host or Hibr changes so far.
+Full font suite:39pass/0skip/0fail, including all-size presentation and
+native/software raster consumers in Modern and Retro. No physical pixel,
+input-latency or active-window-drag acceptance follows from those local gates.
+
 ## 2026-10-21: 0.2 authenticated association passes; performance not accepted
 
 Read-only native association gate passes3 samples with a verified UID1000

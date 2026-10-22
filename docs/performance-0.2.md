@@ -1,6 +1,6 @@
 # Blit 0.2: correctness-preserving performance
 
-Stable checkpoint: **v0.1.589**. Development candidate: **0.2.0**.
+Stable checkpoint: **v0.1.589**. Development candidate: **0.2.1**.
 The0.2.0-1 canary is now installed on10.54 with native KMS and unchanged saved
 configuration. Authenticated primary/two-join association passes; active
 desktop movement/performance acceptance is pending. No stable0.2 tag
@@ -83,6 +83,22 @@ they are not per-frame percentiles. Version/backend/geometry changes invalidate
 the window; application state/font identity still require explicit control.
 
 ## Execution and acceptance order
+
+ADR0179's0.2.1 candidate removes6 TCC divisions from the canonical native
+raster blend call with exact rounded arithmetic and coverage0/255 paths.
+33,654,432 production/reference cases pass, including premultiplied RGBA
+saturation and high-byte/stride/bounds semantics. Same-build process-CPU
+medians (5 runs,2million pixels each):
+
+| Coverage workload | Frozen reference | Candidate |
+| --- | ---: | ---: |
+| Transparent |43.378ms |17.897ms |
+| Opaque |46.968ms |20.175ms |
+| Mixed0..255 |42.099ms |35.413ms |
+
+Reproduce with `ruby tools/tests/raster_blend_gate.rb --benchmark`. This is
+local function throughput, not whole-scene or physical input latency. Native
+KMS calls this blender; a speedup for SDL/GPU composition is not implied.
 
 The deeper[source-level Kitty comparison](kitty-rendering-investigation.md)
 and production work-shape probe identify blanket graphics invalidation,

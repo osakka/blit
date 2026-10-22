@@ -662,6 +662,10 @@ void blit_raster_attach(BlitFont *font, BlitRaster *raster)
     font->raster_ink_top = font->raster_ink_bottom = raster && raster->arabic ? 1 : 0;
 }
 
+/* Exact rounded product/255 for two8-bit operands. Maximum intermediate is
+   (65025+128)*257 <2^24; avoid six TCC integer divisions per coverage pixel.
+   Macro keeps this bounded arithmetic inline with TCC (ADR0179). */
+#define RASTER_MUL255(a, b) (((((a) * (b)) + 128U) * 257U) >> 16)
 uint32_t blit_raster_blend(const BlitRasterGlyph *glyph, int x, int y,
                          uint32_t foreground, uint32_t background)
 {
@@ -672,15 +676,18 @@ uint32_t blit_raster_blend(const BlitRasterGlyph *glyph, int x, int y,
     p = glyph->pixels + y * glyph->stride + x * (int)glyph->format;
     if (glyph->format == BLIT_RASTER_COVERAGE) {
         alpha = p[0];
-        r = (((foreground >> 16) & 255) * alpha + 127) / 255;
-        g = (((foreground >> 8) & 255) * alpha + 127) / 255;
-        b = ((foreground & 255) * alpha + 127) / 255;
+        if (alpha == 0) return background & 0xffffffU;
+        if (alpha == 255) return foreground & 0xffffffU;
+        r = RASTER_MUL255((foreground >> 16) & 255, alpha);
+        g = RASTER_MUL255((foreground >> 8) & 255, alpha);
+        b = RASTER_MUL255(foreground & 255, alpha);
     } else if (glyph->format == BLIT_RASTER_RGBA_PREMULTIPLIED) {
         r = p[0]; g = p[1]; b = p[2]; alpha = p[3];
     } else return background;
-    r += (((background >> 16) & 255) * (255 - alpha) + 127) / 255;
-    g += (((background >> 8) & 255) * (255 - alpha) + 127) / 255;
-    b += ((background & 255) * (255 - alpha) + 127) / 255;
+    r += RASTER_MUL255((background >> 16) & 255, 255 - alpha);
+    g += RASTER_MUL255((background >> 8) & 255, 255 - alpha);
+    b += RASTER_MUL255(background & 255, 255 - alpha);
     return ((r > 255 ? 255 : r) << 16) |
         ((g > 255 ? 255 : g) << 8) | (b > 255 ? 255 : b);
 }
+#undef RASTER_MUL255
