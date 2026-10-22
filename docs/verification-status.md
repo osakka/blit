@@ -1,5 +1,22 @@
 # Verification status
 
+## 2026-10-22: architectural ticket handoff verified (planning only)
+
+Created internal126–135 and refreshed122/125/104/120 current-status bodies,
+preserving historical reports and leaving all issues open. Read-back verifies
+ten complete descriptions (scope, source pointers, tests/acceptance, boundaries
+and prerequisites),24 native Gitea dependency edges and0 unresolved template
+placeholders. The dependency index is
+[performance architecture handoff](performance-architecture-handoff.md);
+ADR0180 is proposed, with mechanism/native ownership approval delegated to128.
+Full issue work orders remain in Gitea, not a second editable repository copy.
+
+Documentation reference gate and diff checks pass. This cycle changes issues
+and documentation only: no runtime/SDL/Hibr edits, deployment, input/session
+mutation or live backend/font/layout change. Existing GPU/startup/hotplug/
+movement performance gaps remain open; creating a ticket is not implementing
+or accepting it. No unrelated backlog issues were closed or reclassified.
+
 ## 2026-10-22: authenticated0.2.1 observation; no movement acceptance yet
 
 Association passes3 read-only UID1000/bottom-primary samples; initial inventory

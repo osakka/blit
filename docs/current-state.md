@@ -6,6 +6,22 @@ pane/session placement and input routing. The0.2 shared-damage fixtures do
 not certify it or authorize a backend switch. Live is now the0.2.1 native-KMS
 development canary below;v0.1.589 remains the stable rollback checkpoint.
 
+## 2026-10-22: architectural work ticketed for independent implementation
+
+Internal126–135 are detailed, cross-linked implementation work orders covering
+metrics/replay, retained-resource feasibility, SDL startup/hotplug, text/images,
+composition, scheduling and physical acceptance.122/125/104/120 bodies now
+distinguish completed increments from remaining work; original reports remain
+explicit historical context. No ticket was closed, runtime changed, backend
+switched or Hibr modified by this planning operation.
+
+Start with the [handoff index](performance-architecture-handoff.md). Full scope,
+prerequisites, source entry points, failure tests and completion criteria live
+in each issue, not duplicated editable repository task descriptions. ADR0180
+is proposed:128 must resolve the real SDL/GL resource mechanism and native
+ownership/performance-contract decision before dependent implementation.
+Existing issues109/112/120/20/21/79/100/105/95 remain reused dependencies.
+
 ## 2026-10-22: authenticated0.2.1; movement and output-change clarification pending
 
 User logged in. Native association gate passes3 read-only samples for UID1000

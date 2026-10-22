@@ -11,6 +11,12 @@ Internal tracker: Blit122; first cache change123; reuse Blit120 for solid-copy i
 backend parity. These are internal backlog identifiers, not GitHub issue links.
 Nothing here authorizes silent backend/layout/font changes or Hibr code edits.
 
+Detailed implementation handoff: [architecture work index](performance-architecture-handoff.md).
+Internal126–135 split the structural work into independently pickable tickets;
+122/125/104 remain parent authorities and120 owns solid-copy integration.
+[ADR0180](adr/0180-retained-gpu-implementation-workstream.md) is proposed,
+not an approved SDL/raw-GL ownership mechanism or native contract downgrade.
+
 SDL multi-monitor autodetection/hotplug parity remains an explicit acceptance
 dependency under internal104. Rendering tests do not certify automatic
 discovery, disconnect/reconnect, stable identities, saved layout restoration,

@@ -1,5 +1,12 @@
 # Blit roadmap
 
+Architectural implementation is decomposed into internal126–135 under122/125
+and parity104. See the [handoff/dependency index](performance-architecture-handoff.md)
+and proposed ADR0180. Prioritize measured replay and a concrete retained-GPU
+ownership decision, then startup/hotplug and text/image/composition/scheduler
+work; physical acceptance is135. Completed local CPU savings are not the GPU
+architecture milestone. Existing native contracts are not silently retired.
+
 125 native blend stage, candidate0.2.1: exact integer source-over replaces
 6 per-coverage-pixel TCC divisions with bounded multiply/shift and endpoint
 paths (ADR0179). Exhaustive production equivalence and local CPU medians

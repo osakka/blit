@@ -2,11 +2,21 @@
 
 Status: implementation in progress, 2026-10-19. Physical acceptance remains open.
 
-Tracking: [Blit #104](https://git.home.arpa/itdlabs/blit/issues/104).
+Tracking: internal Blit104. Detailed implementation work orders126–135 are
+indexed in the [architecture handoff](performance-architecture-handoff.md).
 Decision: [ADR0137](adr/0137-presentation-backend-feature-and-performance-parity.md).
 Acceptance inventory: [backend parity matrix](backend-parity-matrix.md).
 
-## 2026-10-20 execution checkpoint
+## 2026-10-22 execution checkpoint
+
+Live development canary is0.2.1/native KMS, not the historical567/568 versions
+below. Stable589 remains a rollback reference. Issue104 remains open; startup
+and hotplug implementation are scoped in129/130, and physical performance
+acceptance in135. Existing independent recovery has specific observed/local
+evidence, not a universal kernel-hang guarantee. Read current-state and the
+verification ledger before any live trial; no silent backend switch.
+
+## Historical 2026-10-20 execution checkpoint
 
 Native565 physical pointer movement is operator-accepted; live567 retains
 that fix and adds Modern/Nerd/colour sizing (visual approval still separate).
@@ -19,7 +29,7 @@ Keep native567 live during local work. A physical comparison must record all
 SDL display identities and per-output initialization errors, and verify rollback
 before accepting the switch. Unsupported post-creation moves are not a solution.
 
-Startup recovery precondition ([Blit109](https://git.home.arpa/itdlabs/blit/issues/109)):
+Startup recovery precondition (internal Blit109):
 discover_displays/initialize_outputs precede
 creation of the API listener in the current main process. A blocked SDL call
 therefore prevents API-only rollback. Do not run a potentially blocking physical
