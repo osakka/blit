@@ -2,8 +2,10 @@
 
 Stable checkpoint: **v0.1.589**. Development candidate: **0.2.1**.
 The0.2.1-1 canary is now installed on10.54 with native KMS and unchanged saved
-configuration.0.2.0's primary/two-join association passed; after the0.2.1 update,
-login and active desktop movement/performance acceptance are pending. No stable0.2 tag
+configuration. Authenticated0.2.1 primary/join association passes; active
+desktop movement/performance acceptance remains pending. The latest output-
+inventory change is recorded in current-state, not a comparable benchmark.
+No stable0.2 tag
 or live performance gain is claimed. See the verification ledger.
 Internal tracker: Blit122; first cache change123; reuse Blit120 for solid-copy integration and104 for
 backend parity. These are internal backlog identifiers, not GitHub issue links.

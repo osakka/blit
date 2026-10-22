@@ -6,7 +6,34 @@ pane/session placement and input routing. The0.2 shared-damage fixtures do
 not certify it or authorize a backend switch. Live is now the0.2.1 native-KMS
 development canary below;v0.1.589 remains the stable rollback checkpoint.
 
-## 2026-10-22: exact raster blending deployed as canary0.2.1; login pending
+## 2026-10-22: authenticated0.2.1; movement and output-change clarification pending
+
+User logged in. Native association gate passes3 read-only samples for UID1000
+and bottom primary; initial inventory confirms primary plus two joins. The
+API capture now shows wallpaper/YouTube window, not Matrix saver.10.103s
+uncontrolled window:11.56% one server CPU core,1,316 terminal bytes/s,
+71 aggregate presentation calls/142 scheduler missed deadlines. Last-phase
+samples: DP1.285ms draw/40 cells; HDMI23.715ms/2294 cells. Samples may be stale
+and misses are scheduler counters, not confirmed lost scanout frames. Traffic
+is much lower than prior Matrix windows: no matched speedup/FPS claim.
+
+Later in this same observation HDMI-A-1 becomes unavailable: display inventory
+revision2 contains only DP-1, primary/top join remain ready, and the saved
+HDMI binding is `waiting_output`/`output_unavailable`. No configuration/input/
+session/lifecycle mutations were made by this check. User was asked whether
+the monitor was disconnected/switched away and how dragging feels. Do not
+attribute this change to the candidate or compare different output inventories.
+
+Current two DP wallpapers are RGB24,959x532 placed at1918x1064, exact2x.
+They qualify for the existing integer-scale compositor path; do not assume
+the general scaler's per-pixel divisions explain their cost. Function-level
+image/cell profiling and movement confirmation remain next, not another blind
+scaler change. No new runtime implementation or deployment in this observation.
+Evidence: `build/tests/blend-association*`, `blend-live-after.json`,
+`blend-authenticated-state.json`, `blend-desktop-93.png`,
+`blend-live-image-geometry.json`, `blend-followup-state.json`.125/122/104 open.
+
+## 2026-10-22: exact raster blending deployed as canary0.2.1 (installation checkpoint)
 
 ADR0179 removes TCC's6 per-coverage-pixel integer divisions from the canonical
 blender using exact bounded multiply/shift arithmetic. Coverage0/255 returns

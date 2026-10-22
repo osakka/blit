@@ -1,5 +1,25 @@
 # Verification status
 
+## 2026-10-22: authenticated0.2.1 observation; no movement acceptance yet
+
+Association passes3 read-only UID1000/bottom-primary samples; initial inventory
+contains one primary/two joins. Screenshot shows desktop wallpaper/YouTube
+window.10.103s window:11.56% one server CPU core,1,316 terminal bytes/s,
+71 aggregate presentation calls,142 scheduler misses; final phase samples
+DP1.285ms draw/40 cells and HDMI23.715ms/2294 cells. Lower traffic and different
+content than Matrix prevent any before/after blend speedup attribution. Last
+phases can be stale, scheduler misses are not confirmed lost physical frames,
+and concurrent association/API reads add overhead. Native KMS/Retro28px/ABI16
+unchanged. All three sessions initially retain one image each.
+
+Subsequent inventory revision2 contains only DP-1; HDMI-A-1 binding waits for
+its output, with primary/top join still ready. User clarification requested
+for monitor disconnect/switch and subjective movement. No live mutations or
+Hibr changes were performed. DP image geometry is RGB24/959x532 to1918x1064,
+an existing integer-scale fast-path case, not evidence of general-scaler cost.
+No runtime fix, physical movement result or performance acceptance claimed.
+Evidence paths are recorded in current-state.125/122/104 remain open.
+
 ## 2026-10-22: 0.2.1 canary installed; desktop acceptance awaits login
 
 Exact source7ca0dbc/package identity is in `releases/0.2.1.yaml`. Artifact
