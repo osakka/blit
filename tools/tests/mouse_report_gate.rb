@@ -206,6 +206,62 @@ if anywhere.length < 2
 end
 delete_session(any_event.fetch('id'))
 
+# blit#137. DEC 1016, SGR-Pixels: the same SGR report with the position in
+# pixels of the surface, one-based, so an application drawing pixels is told
+# where the pointer is rather than which cell it is in. The mode is asked for
+# with DECRQM first, the way a program finds out it can have it.
+pixels = reporting_session('\\033[?1016$p\\033[?1003h\\033[?1016h')
+sleep 2.0
+asked, text = wait_for(pixels.fetch('surface_id'), '^[[?1016;')
+if !asked
+  failures << "DECRQM for 1016 had no answer: #{text.inspect}"
+elsif !text.include?('^[[?1016;2$y')
+  failures << "DECRQM for 1016 before it was set should answer 2: #{text.inspect}"
+end
+def pixel_reports(surface_id)
+  echoed(surface_id).scan(/\^\[\[<(\d+);(\d+);(\d+)([Mm])/)
+                    .map { |code, x, y, k| [code.to_i, x.to_i, y.to_i, k] }
+end
+move_to(3, 2, 5)
+request('POST', '/v1/input/inject', 'kind' => 'pointer_button',
+        'button' => 0, 'pressed' => true)
+request('POST', '/v1/input/inject', 'kind' => 'pointer_button',
+        'button' => 0, 'pressed' => false)
+want_x = (3 - 1) * CELL_W + 5 + 1
+want_y = (2 - 1) * CELL_H + 2 + 1
+found, text = wait_for(pixels.fetch('surface_id'), "^[[<0;#{want_x};#{want_y}m")
+unless found
+  failures << "a click at pixel #{want_x},#{want_y} under 1016 was not reported " \
+              "in pixels: #{pixel_reports(pixels.fetch('surface_id')).inspect}"
+end
+# A sweep of forty samples with no pause between them is one per pixel, which
+# under 1016 would be forty reports where a cell report sends three. Held to a
+# frame, it is a handful, and the last one is where the pointer stopped.
+before = pixel_reports(pixels.fetch('surface_id')).length
+40.times { |i| move_to(1 + i / 8, 3, i % 8) }
+sleep 0.5
+swept = pixel_reports(pixels.fetch('surface_id'))[before..] || []
+moved = swept.select { |code, _, _, _| code >= 32 }
+last_x = (1 + 39 / 8 - 1) * CELL_W + 39 % 8 + 1
+if moved.empty?
+  failures << 'a sweep under 1003 and 1016 reported no motion at all'
+else
+  if moved.length > 20
+    failures << "a sweep of 40 samples sent #{moved.length} motion reports " \
+                'under 1016; it is held to one a frame'
+  end
+  unless moved.last[1] == last_x && moved.last[2] == CELL_H * 2 + 3
+    failures << "the last motion report under 1016 was #{moved.last.inspect}, " \
+                "not where the pointer stopped (#{last_x},#{CELL_H * 2 + 3})"
+  end
+end
+pixel_sweep = moved.length
+pixel_session = json('GET', "/v1/terminal-sessions/#{pixels.fetch('id')}")
+unless pixel_session.dig('mouse_reporting', 'pixels') == true
+  failures << "the session does not say it reports pixels: #{pixel_session['mouse_reporting'].inspect}"
+end
+delete_session(pixels.fetch('id'))
+
 # #44. A terminal that has stopped reading fills its input queue, and the PTY
 # master is nonblocking, so the report write is refused. That has to be
 # counted rather than vanishing.
@@ -267,4 +323,4 @@ unless failures.empty?
 end
 
 puts "MOUSE_REPORT_PASS legacy_wheel_byte=96 hover_1002=0 drag_1002=#{dragged.length} " \
-     "hover_1003=#{anywhere.length} reports_dropped=#{before.inspect}->#{after.inspect}"
+     "hover_1003=#{anywhere.length} pixel_sweep=#{pixel_sweep} reports_dropped=#{before.inspect}->#{after.inspect}"

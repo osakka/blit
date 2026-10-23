@@ -1,5 +1,19 @@
 # Verification status
 
+## 2026-10-23: 0.2.6 the mouse in pixels, mode 1016 (#137)
+
+A program can ask for SGR-Pixels (DEC 1016): the same SGR report with the
+pointer's position in pixels of the surface, one-based and clamped to it,
+instead of the cell it is in. DECRQM answers for it, so a program can find
+out before asking, and the session's `mouse_reporting` names it. Every
+sample moves a pixel, so motion under 1016 is held to one report a frame,
+the newest position kept and written by the main loop when it is due (its
+own wait clamp, so a pointer that stops is still reported where it
+stopped); a click writes any held motion before itself. Cell reports are
+unchanged. `mouse_report_gate` checks the answer, a click's exact pixel, a
+40-sample sweep (3 reports, the last where the pointer stopped) and the
+session field. For hibr #370, which asks for it from the desktop.
+
 ## 2026-10-23: 0.2.5 a preferred login pane is waited for before another takes it
 
 Reported by the owner: the primary display changed between logins. With a

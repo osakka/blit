@@ -394,6 +394,13 @@ is false while Blit is still repairing the desktop's startup or attach
 layout by nudging its terminal size, and true once that is done. A client
 that drives the desktop can wait for it before clicking.
 
+A session's `mouse_reporting` says what its program asked for: `mode`
+(1000, 1002, 1003 or 0), `sgr` for the SGR encoding (1006) and `pixels`
+for SGR-Pixels (1016), where a report carries the pointer's position in
+pixels of the surface, one-based, instead of its cell. Under 1016 motion is
+held to one report a frame (`BLIT_MOTION_PIXEL_US`, 16.7 ms), the newest
+position kept, and a button report writes any held motion first.
+
 When this map and the schema disagree, the schema wins and the documentation
 must be corrected in the same change. A route addition is not complete until
 the schema gate, a focused request test, and the verification ledger agree.

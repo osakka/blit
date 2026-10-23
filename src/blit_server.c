@@ -72,6 +72,7 @@ extern char **environ;
    field for clients, but no additional inset is applied by either renderer
    or hit testing. Pane dimensions and Hibr's logical layout stay unchanged. */
 #define BLIT_SURFACE_INSET_PX 0
+#define BLIT_MOTION_PIXEL_US 16667ULL
 #define BLIT_FONT_SCALE_MIN_TENTHS 10
 #define BLIT_FONT_SCALE_MAX_TENTHS 30
 #define BLIT_FONT_SIZE_MIN_PX 8
@@ -974,6 +975,10 @@ typedef struct {
     int terminal_bracketed_paste;
     int terminal_mouse_mode;
     int terminal_mouse_sgr;
+    /* DEC 1016, SGR-Pixels: the SGR encoding with the pointer's position in
+       pixels of the surface rather than in cells. It implies the SGR form
+       whether or not 1006 is also set, as in xterm. */
+    int terminal_mouse_pixels;
     int terminal_synchronized;
     int terminal_frame_batch;
     /* Pixel geometry advertised to child programs and used by Kitty/Sixel.
@@ -1071,6 +1076,15 @@ typedef struct {
     unsigned long long motion_report_session;
     int motion_report_column;
     int motion_report_row;
+    /* A pixel report changes with every sample, so motion in pixels is held
+       to one report a frame: the newest position waits here until
+       BLIT_MOTION_PIXEL_US has passed since the last one was written. A
+       click writes it first, so a press never arrives before the motion
+       that led to it. */
+    int motion_pending;
+    unsigned long long motion_pending_session;
+    char motion_pending_report[64];
+    uint64_t motion_sent_us;
     int font_scale_tenths;
     /* Exactly one size policy: positive pixels imply scale_tenths == 0. */
     int font_size_px;
@@ -12090,6 +12104,8 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         }
         if (terminal_csi_has_mode(sequence, 1006))
             session->terminal_mouse_sgr = enabled;
+        if (terminal_csi_has_mode(sequence, 1016))
+            session->terminal_mouse_pixels = enabled;
         if (terminal_csi_has_mode(sequence, 2026))
             session->terminal_synchronized = enabled;
         if (terminal_csi_has_mode(sequence, 25)) {
@@ -12152,6 +12168,7 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
             state = session->terminal_mouse_mode == first ? 1 : 2; break;
         case 1004: state = session->terminal_focus_reporting ? 1 : 2; break;
         case 1006: state = session->terminal_mouse_sgr ? 1 : 2; break;
+        case 1016: state = session->terminal_mouse_pixels ? 1 : 2; break;
         case 80: state = session->terminal_sixel_display_mode ? 1 : 2; break;
         case 8452:
             state = session->terminal_sixel_cursor_right ? 1 : 2; break;
@@ -12213,6 +12230,7 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         session->terminal_bracketed_paste = 0;
         session->terminal_mouse_mode = 0;
         session->terminal_mouse_sgr = 0;
+        session->terminal_mouse_pixels = 0;
         session->terminal_synchronized = 0;
         terminal_sixel_reset_palette(session);
         session->terminal_sixel_display_mode = 0;
@@ -12332,6 +12350,9 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
     } else if (private_mode && (command == 'h' || command == 'l') &&
                has_first && first == 1006) {
         session->terminal_mouse_sgr = command == 'h';
+    } else if (private_mode && (command == 'h' || command == 'l') &&
+               has_first && first == 1016) {
+        session->terminal_mouse_pixels = command == 'h';
     } else if (private_mode && (command == 'h' || command == 'l') &&
                has_first && first == 25) {
         int cursor_was_visible = surface->cursor_visible;
@@ -13014,6 +13035,7 @@ static int terminal_consume_chunk(BlitRuntime *runtime, BlitSession *session,
                 session->terminal_bracketed_paste = 0;
                 session->terminal_mouse_mode = 0;
                 session->terminal_mouse_sgr = 0;
+                session->terminal_mouse_pixels = 0;
                 session->terminal_synchronized = 0;
                 session->terminal_alternate_mode = 0;
                 terminal_scrollback_release(surface);
@@ -14405,9 +14427,10 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
        faults with the same symptom. */
     used += (size_t)snprintf(
         body + used, capacity - used,
-        ",\"mouse_reporting\":{\"mode\":%d,\"sgr\":%s}",
+        ",\"mouse_reporting\":{\"mode\":%d,\"sgr\":%s,\"pixels\":%s}",
         session->terminal_mouse_mode,
-        session->terminal_mouse_sgr ? "true" : "false");
+        session->terminal_mouse_sgr ? "true" : "false",
+        session->terminal_mouse_pixels ? "true" : "false");
     used += (size_t)snprintf(body + used, capacity - used,
                              ",\"graphics\":[");
     {
@@ -26898,9 +26921,9 @@ static int mouse_output_index(const BlitRuntime *runtime, SDL_WindowID window_id
     return -1;
 }
 
-static BlitSession *mouse_target(BlitRuntime *runtime, int output_index,
-                                float pixel_x, float pixel_y,
-                                int *column, int *row)
+static BlitSession *mouse_target_px(BlitRuntime *runtime, int output_index,
+                                   float pixel_x, float pixel_y,
+                                   int *column, int *row, int *px, int *py)
 {
     char display_id[128];
     int cell_width;
@@ -26973,10 +26996,59 @@ static BlitSession *mouse_target(BlitRuntime *runtime, int output_index,
             if (*row < 1) *row = 1;
             if (*column > surface->width) *column = surface->width;
             if (*row > surface->height) *row = surface->height;
+            if (px != NULL && py != NULL) {
+                /* One-based like a cell, and clamped to the surface the
+                   same way, so the inset reports the nearest edge pixel. */
+                *px = (int)(pixel_x - origin_x) + 1;
+                *py = (int)(pixel_y - origin_y) + 1;
+                if (*px < 1) *px = 1;
+                if (*py < 1) *py = 1;
+                if (*px > width) *px = width;
+                if (*py > height) *py = height;
+            }
             return session;
         }
     }
     return NULL;
+}
+
+static BlitSession *mouse_target(BlitRuntime *runtime, int output_index,
+                                float pixel_x, float pixel_y,
+                                int *column, int *row)
+{
+    return mouse_target_px(runtime, output_index, pixel_x, pixel_y,
+                           column, row, NULL, NULL);
+}
+
+static int write_input_bytes(BlitSession *session, const char *bytes,
+                             size_t length, unsigned long long *dropped);
+
+/* Writes the motion report held back by the frame limit, if any. */
+static void flush_mouse_motion(BlitRuntime *runtime)
+{
+    BlitSession *session;
+
+    if (!runtime->motion_pending)
+        return;
+    runtime->motion_pending = 0;
+    session = find_session_id(runtime, runtime->motion_pending_session);
+    if (session == NULL || session->pty_fd < 0)
+        return;
+    runtime->motion_sent_us = monotonic_us();
+    write_input_bytes(session, runtime->motion_pending_report,
+                      strlen(runtime->motion_pending_report),
+                      &runtime->diagnostic_input_reports_dropped);
+}
+
+/* How long the loop may sleep before a held motion report is due. */
+static int mouse_motion_wait_ms(const BlitRuntime *runtime, uint64_t now)
+{
+    uint64_t due;
+
+    if (!runtime->motion_pending)
+        return -1;
+    due = runtime->motion_sent_us + BLIT_MOTION_PIXEL_US;
+    return now >= due ? 0 : (int)((due - now + 999ULL) / 1000ULL);
 }
 
 static const char *pointer_routing_name(const BlitSession *target,
@@ -27110,8 +27182,10 @@ static void send_mouse_report(BlitRuntime *runtime, SDL_WindowID window_id,
     int output_index = mouse_output_index(runtime, window_id);
     int column = 0;
     int row = 0;
-    BlitSession *session = mouse_target(runtime, output_index, pixel_x,
-                                        pixel_y, &column, &row);
+    int px = 0;
+    int py = 0;
+    BlitSession *session = mouse_target_px(runtime, output_index, pixel_x,
+                                           pixel_y, &column, &row, &px, &py);
     BlitSession *routed = input_route_target(runtime, "evdev-pointer");
     int code;
 
@@ -27119,8 +27193,11 @@ static void send_mouse_report(BlitRuntime *runtime, SDL_WindowID window_id,
         session = routed;
         if (column == 0) column = 1;
         if (row == 0) row = 1;
+        if (px == 0) px = 1;
+        if (py == 0) py = 1;
     }
     session = session;
+    flush_mouse_motion(runtime);
     if (session != NULL && !release && button == 0)
         focus_session(runtime, session);
     if (session == NULL || session->pty_fd < 0)
@@ -27139,7 +27216,10 @@ static void send_mouse_report(BlitRuntime *runtime, SDL_WindowID window_id,
         return;
     }
     code = button + mouse_modifier_bits(runtime);
-    if (session->terminal_mouse_sgr) {
+    if (session->terminal_mouse_pixels) {
+        snprintf(report, sizeof(report), "\033[<%d;%d;%d%c", code, px, py,
+                 release ? 'm' : 'M');
+    } else if (session->terminal_mouse_sgr) {
         /* SGR mouse reports use button numbers 0..2 for press/release,
            32+button for motion, and 64+button for wheels.  The legacy
            encoding adds its protocol offset in the byte below; neither
@@ -27174,8 +27254,10 @@ static void send_mouse_motion_report(BlitRuntime *runtime,
     int output_index = mouse_output_index(runtime, window_id);
     int column = 0;
     int row = 0;
-    BlitSession *session = mouse_target(runtime, output_index, pixel_x,
-                                        pixel_y, &column, &row);
+    int px = 0;
+    int py = 0;
+    BlitSession *session = mouse_target_px(runtime, output_index, pixel_x,
+                                           pixel_y, &column, &row, &px, &py);
     BlitSession *routed = input_route_target(runtime, "evdev-pointer");
     int button = active_mouse_button(runtime);
     char report[64];
@@ -27184,6 +27266,8 @@ static void send_mouse_motion_report(BlitRuntime *runtime,
         session = routed;
         if (column == 0) column = 1;
         if (row == 0) row = 1;
+        if (px == 0) px = 1;
+        if (py == 0) py = 1;
     }
     session = session;
     if (session == NULL || session->pty_fd < 0)
@@ -27197,6 +27281,25 @@ static void send_mouse_motion_report(BlitRuntime *runtime,
        tracking and does report a bare hover. */
     if (session->terminal_mouse_mode == 1002 && runtime->mouse_buttons == 0)
         return;
+    if (session->terminal_mouse_pixels) {
+        /* Pixels move on every sample, so the cell test below never holds
+           one back; the frame limit does instead, keeping only the newest. */
+        if (runtime->motion_report_session == session->id &&
+            runtime->motion_report_column == px &&
+            runtime->motion_report_row == py)
+            return;
+        runtime->motion_report_session = session->id;
+        runtime->motion_report_column = px;
+        runtime->motion_report_row = py;
+        snprintf(runtime->motion_pending_report,
+                 sizeof(runtime->motion_pending_report), "\033[<%d;%d;%dM",
+                 button + mouse_modifier_bits(runtime) + 32, px, py);
+        runtime->motion_pending_session = session->id;
+        runtime->motion_pending = 1;
+        if (monotonic_us() >= runtime->motion_sent_us + BLIT_MOTION_PIXEL_US)
+            flush_mouse_motion(runtime);
+        return;
+    }
     /* A terminal reports motion when the *cell* changes.  The pointer is
        sampled per evdev SYN_REPORT, so a mouse crossing one eight-pixel cell
        otherwise emits a dozen identical reports. */
@@ -30147,6 +30250,8 @@ int main(int argc, char **argv)
         service_native_join_lifetimes(&runtime, monotonic_us());
         service_auxiliary_displays(&runtime, monotonic_us());
 
+        if (mouse_motion_wait_ms(&runtime, monotonic_us()) == 0)
+            flush_mouse_motion(&runtime);
         pending_before_events = runtime.render_pending;
         sdl_events_started_us = monotonic_us();
         if (runtime.sdl_ready && !runtime.direct_kms)
@@ -30299,6 +30404,14 @@ int main(int argc, char **argv)
             int middle_wait = middle_button_wait_ms(&runtime, now);
             if (middle_wait >= 0 && middle_wait < wait_ms)
                 wait_ms = middle_wait;
+        }
+        /* A held motion report is a deadline like the ones below: on a
+           pointer that has stopped, nothing else would wake the loop to send
+           where it stopped. */
+        {
+            int motion_wait = mouse_motion_wait_ms(&runtime, now);
+            if (motion_wait >= 0 && motion_wait < wait_ms)
+                wait_ms = motion_wait;
         }
         for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
             BlitSession *session = &runtime.sessions[i];
