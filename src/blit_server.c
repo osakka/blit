@@ -12,6 +12,7 @@
 #include "blit_unicode_width.h"
 #include "blit_emoji_sequences.h"
 #include "blit_input_identity.h"
+#include "blit_touchpad.h"
 #include "blit_audio_control.h"
 #include "blit_display_geometry.h"
 #include "blit_cell_geometry.h"
@@ -424,6 +425,9 @@ typedef struct {
    panel can hide a control the hardware does not have rather than offer one
    that will be refused. */
 #define BLIT_INPUT_CAP_REPEAT 64
+/* A touchpad: where the finger is (EV_ABS with a finger tool), not how far it
+   moved, read as a pointer through blit_touchpad.h. */
+#define BLIT_INPUT_CAP_TOUCHPAD 128
 
 /* Issue #66. The kernel autorepeats for a device that reports EV_REP, and the
    delay and period are per-device kernel settings reached with EVIOCGREP and
@@ -1073,6 +1077,8 @@ typedef struct {
     int evdev_mouse_count;
     int evdev_mouse_reported[BLIT_MAX_INPUT_DEVICES];
     unsigned int evdev_mouse_buttons[BLIT_MAX_INPUT_DEVICES];
+    /* Each pointer slot's touchpad state; active is 0 for a mouse. */
+    BlitTouchpad evdev_touchpads[BLIT_MAX_INPUT_DEVICES];
     /* open() calls the device scan has made, lifetime. The scan used to open
        every path once per kind, so this is how the reduction to one probe per
        path is measured rather than asserted. */
@@ -4974,6 +4980,7 @@ static void probe_input_device(int fd, unsigned *kinds,
     int keyboard;
     int pointer;
     int gamepad;
+    int touchpad;
     int has_axis;
 
     *kinds = 0;
@@ -4992,6 +4999,13 @@ static void probe_input_device(int fd, unsigned *kinds,
         (input_bit(key_bits, BTN_GAMEPAD) || input_bit(key_bits, BTN_SOUTH) ||
          input_bit(key_bits, BTN_EAST) || input_bit(key_bits, BTN_NORTH) ||
          input_bit(key_bits, BTN_WEST));
+    /* A touchpad reports where the finger is, not how far it moved, and is a
+       pointer all the same -- a MacBook's bcm5974 has no EV_REL at all. */
+    touchpad = blit_touchpad_caps(input_bit(abs_bits, ABS_X),
+                                  input_bit(abs_bits, ABS_Y),
+                                  input_bit(key_bits, BTN_TOOL_FINGER),
+                                  input_bit(key_bits, BTN_TOUCH), gamepad);
+    if (touchpad) pointer = 1;
     if (keyboard) *kinds |= BLIT_INPUT_KIND_KEYBOARD;
     if (pointer) *kinds |= BLIT_INPUT_KIND_POINTER;
     if (gamepad) *kinds |= BLIT_INPUT_KIND_GAMEPAD;
@@ -5001,6 +5015,7 @@ static void probe_input_device(int fd, unsigned *kinds,
     if (keyboard) *capabilities |= BLIT_INPUT_CAP_KEYS;
     if (has_axis) *capabilities |= BLIT_INPUT_CAP_AXES;
     if (gamepad) *capabilities |= BLIT_INPUT_CAP_GAMEPAD_BUTTONS;
+    if (touchpad) *capabilities |= BLIT_INPUT_CAP_TOUCHPAD;
     {
         unsigned long event_bits[2];
         memset(event_bits, 0, sizeof(event_bits));
@@ -5087,6 +5102,7 @@ static unsigned input_sidecar_capabilities(const char *text)
     if (strstr(text, "keys") != NULL) capabilities |= BLIT_INPUT_CAP_KEYS;
     if (strstr(text, "axes") != NULL) capabilities |= BLIT_INPUT_CAP_AXES;
     if (strstr(text, "repeat") != NULL) capabilities |= BLIT_INPUT_CAP_REPEAT;
+    if (strstr(text, "touchpad") != NULL) capabilities |= BLIT_INPUT_CAP_TOUCHPAD;
     return capabilities;
 }
 
@@ -5792,8 +5808,13 @@ static size_t input_device_item_json(const BlitRuntime *runtime,
                             first ? "" : ",");
         first = 0;
     }
-    if (device->capabilities & BLIT_INPUT_CAP_GAMEPAD_BUTTONS)
+    if (device->capabilities & BLIT_INPUT_CAP_GAMEPAD_BUTTONS) {
         complete &= json_appendf(body, capacity, &used, "%s\"gamepad-buttons\"",
+                            first ? "" : ",");
+        first = 0;
+    }
+    if (device->capabilities & BLIT_INPUT_CAP_TOUCHPAD)
+        complete &= json_appendf(body, capacity, &used, "%s\"touchpad\"",
                             first ? "" : ",");
     complete &= json_appendf(body, capacity, &used,
         "],\"identity\":{\"bustype\":%u,\"vendor\":%u,\"product\":%u,"
@@ -13510,12 +13531,15 @@ static void remove_evdev_mouse(BlitRuntime *runtime, int index)
                  runtime->evdev_mouse_paths[i + 1]);
         runtime->evdev_mouse_reported[i] = runtime->evdev_mouse_reported[i + 1];
         runtime->evdev_mouse_buttons[i] = runtime->evdev_mouse_buttons[i + 1];
+        runtime->evdev_touchpads[i] = runtime->evdev_touchpads[i + 1];
     }
     --runtime->evdev_mouse_count;
     runtime->evdev_mouse_fds[runtime->evdev_mouse_count] = -1;
     runtime->evdev_mouse_paths[runtime->evdev_mouse_count][0] = '\0';
     runtime->evdev_mouse_reported[runtime->evdev_mouse_count] = 0;
     runtime->evdev_mouse_buttons[runtime->evdev_mouse_count] = 0;
+    memset(&runtime->evdev_touchpads[runtime->evdev_mouse_count], 0,
+           sizeof(runtime->evdev_touchpads[0]));
     /* Keep the configured route across hotplug.  Device availability is
        reported independently; a reconnect should resume the same route
        without requiring a controller to recreate it. */
@@ -23371,6 +23395,42 @@ static int evdev_has_gamepad(int fd)
     return has_axis && has_button;
 }
 
+/* A pointer slot's touchpad state, from the device itself: its finger tool
+   and the ranges and resolutions of its X and Y. A mouse, a fabricated node
+   (whose ioctls fail) and a gamepad leave it inactive, read as before. */
+static void evdev_touchpad_setup(BlitRuntime *runtime, int slot, int fd,
+                                 const char *path)
+{
+    unsigned long keys[32];
+    unsigned long absolute[4];
+    struct input_absinfo ax;
+    struct input_absinfo ay;
+    BlitTouchpad *t = &runtime->evdev_touchpads[slot];
+
+    memset(t, 0, sizeof(*t));
+    memset(keys, 0, sizeof(keys));
+    memset(absolute, 0, sizeof(absolute));
+    if (ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(keys)), keys) < 0 ||
+        ioctl(fd, EVIOCGBIT(EV_ABS, sizeof(absolute)), absolute) < 0)
+        return;
+    if (!blit_touchpad_caps(input_bit(absolute, ABS_X),
+                            input_bit(absolute, ABS_Y),
+                            input_bit(keys, BTN_TOOL_FINGER),
+                            input_bit(keys, BTN_TOUCH),
+                            evdev_has_gamepad(fd)))
+        return;
+    memset(&ax, 0, sizeof(ax));
+    memset(&ay, 0, sizeof(ay));
+    if (ioctl(fd, EVIOCGABS(ABS_X), &ax) < 0 ||
+        ioctl(fd, EVIOCGABS(ABS_Y), &ay) < 0)
+        return;
+    blit_touchpad_init(t, ax.minimum, ax.maximum, ax.resolution,
+                       ay.minimum, ay.maximum, ay.resolution);
+    fprintf(stderr, "blit: evdev touchpad: %s x=%d..%d/%d y=%d..%d/%d\n",
+            path, ax.minimum, ax.maximum, ax.resolution, ay.minimum,
+            ay.maximum, ay.resolution);
+}
+
 static int input_path_seen(char paths[][128], int count, const char *path)
 {
     int i;
@@ -23690,6 +23750,7 @@ static void evdev_register_path(BlitRuntime *runtime, const char *path,
         snprintf(runtime->evdev_mouse_paths[slot], 128, "%s", path);
         runtime->evdev_mouse_reported[slot] = 0;
         runtime->evdev_mouse_buttons[slot] = 0;
+        evdev_touchpad_setup(runtime, slot, probe, path);
         claimed = 1;
         if (announce) {
             fprintf(stderr, "blit: evdev mouse reconnected: %s fd=%d\n",
@@ -23823,6 +23884,7 @@ static void adopt_opened_device(BlitRuntime *runtime,
                      opened->path);
             runtime->evdev_mouse_reported[slot] = 0;
             runtime->evdev_mouse_buttons[slot] = 0;
+            evdev_touchpad_setup(runtime, slot, opened->fd[1], opened->path);
             if (announce) {
                 fprintf(stderr, "blit: evdev mouse reconnected: %s fd=%d\n",
                         opened->path, opened->fd[1]);
@@ -27485,6 +27547,33 @@ static void service_evdev_gamepad(BlitRuntime *runtime)
     }
 }
 
+
+/* One notch of a wheel, a mouse's or a touchpad's two-finger scroll: the
+   device's wheel step of reports, its direction turned for Natural Scroll.
+   value is the notch's own sign (REL_WHEEL's: positive is up, or right for
+   the horizontal wheel). */
+static void evdev_emit_wheel(BlitRuntime *runtime,
+                             BlitInputDevice *configuration, int horizontal,
+                             int value, int natural_scroll, int scroll_step)
+{
+    int button;
+    int emitted;
+    int direction = natural_scroll ? -value : value;
+
+    ++runtime->diagnostic_evdev_mouse_wheel_events;
+    if (configuration != NULL) ++configuration->pointer_wheel;
+    if (horizontal)
+        button = direction > 0 ? 66 : 67;
+    else
+        button = direction > 0 ? 64 : 65;
+    for (emitted = 0; emitted < scroll_step; ++emitted) {
+        broadcast_evdev_pointer(runtime, "pointer_wheel", button, 1, value,
+                                "evdev-pointer");
+        send_mouse_report(runtime, 0, runtime->evdev_mouse_x,
+                          runtime->evdev_mouse_y, button, 0);
+    }
+}
+
 static void service_evdev_mouse(BlitRuntime *runtime)
 {
     struct input_event event;
@@ -27537,25 +27626,60 @@ static void service_evdev_mouse(BlitRuntime *runtime)
                         runtime->evdev_mouse_paths[device_index]);
                 runtime->evdev_mouse_reported[device_index] = 1;
             }
+            /* A touchpad's own events go through blit_touchpad.h, which
+               answers in the terms a mouse would have used: motion, a
+               button, wheel ticks. */
+            if (runtime->evdev_touchpads[device_index].active &&
+                (event.type == EV_ABS ||
+                 (event.type == EV_SYN && event.code == SYN_REPORT) ||
+                 (event.type == EV_KEY &&
+                  (event.code == BTN_LEFT || event.code == BTN_TOUCH ||
+                   (event.code >= BTN_TOOL_FINGER &&
+                    event.code <= BTN_TOOL_QUADTAP))))) {
+                BlitTouchpadOut pad;
+                int tick;
+                if (blit_touchpad_event(&runtime->evdev_touchpads[device_index],
+                                        event.type, event.code, event.value,
+                                        &pad)) {
+                    if (pad.button_changed) {
+                        ++runtime->diagnostic_evdev_mouse_button_events;
+                        if (configuration != NULL)
+                            ++configuration->pointer_buttons;
+                        dispatch_evdev_mouse_button(runtime, device_index,
+                                                    pad.button,
+                                                    pad.button_pressed);
+                    }
+                    if (pad.dx != 0 || pad.dy != 0) {
+                        ++runtime->diagnostic_evdev_mouse_motion_events;
+                        if (configuration != NULL)
+                            ++configuration->pointer_motion;
+                        runtime->evdev_mouse_x +=
+                            scale_pointer_delta(pad.dx, sensitivity, adaptive);
+                        runtime->evdev_mouse_y +=
+                            scale_pointer_delta(pad.dy, sensitivity, adaptive);
+                    }
+                    for (tick = 0; tick < abs(pad.wheel_y); ++tick)
+                        evdev_emit_wheel(runtime, configuration, 0,
+                                         pad.wheel_y > 0 ? 1 : -1,
+                                         natural_scroll, scroll_step);
+                    for (tick = 0; tick < abs(pad.wheel_x); ++tick)
+                        evdev_emit_wheel(runtime, configuration, 1,
+                                         pad.wheel_x > 0 ? 1 : -1,
+                                         natural_scroll, scroll_step);
+                }
+                if (event.type == EV_SYN) {
+                    ++runtime->diagnostic_evdev_mouse_syncs;
+                    if (configuration != NULL) ++configuration->pointer_syncs;
+                    update_evdev_pointer(runtime);
+                }
+                record_input_dispatch(runtime, input_started_us);
+                continue;
+            }
             if (event.type == EV_REL) {
                 if (event.code == REL_WHEEL || event.code == REL_HWHEEL) {
-                    int button;
-                    int emitted;
-                    ++runtime->diagnostic_evdev_mouse_wheel_events;
-                    if (configuration != NULL) ++configuration->pointer_wheel;
-                    int direction = natural_scroll ? -event.value :
-                        event.value;
-                    if (event.code == REL_HWHEEL)
-                        button = direction > 0 ? 66 : 67;
-                    else
-                        button = direction > 0 ? 64 : 65;
-                    for (emitted = 0; emitted < scroll_step; ++emitted) {
-                        broadcast_evdev_pointer(runtime, "pointer_wheel",
-                                                 button, 1, event.value,
-                                                 "evdev-pointer");
-                        send_mouse_report(runtime, 0, runtime->evdev_mouse_x,
-                                          runtime->evdev_mouse_y, button, 0);
-                    }
+                    evdev_emit_wheel(runtime, configuration,
+                                     event.code == REL_HWHEEL, event.value,
+                                     natural_scroll, scroll_step);
                     record_input_dispatch(runtime, input_started_us);
                     continue;
                 }
