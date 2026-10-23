@@ -15,6 +15,15 @@ mod load sys || {
 	exit 1
 }
 
+# The seat and VT this display is, which a login screen running on a pty
+# cannot see: handed to PAM, they make a login here a local session on seat0,
+# as one on the machine's own console is (hibr #367). A Hibr from before
+# 0.99.305 does not read them, and logs in as it always did.
+if [ -n "${BLIT_VTNR-}" ]; then
+	LG_SEAT=${LG_SEAT:-seat0}
+	LG_VTNR=${LG_VTNR:-$BLIT_VTNR}
+fi
+
 login=${BLIT_HIBR_LOGIN_SCRIPT:-/usr/share/hibr/desktop/login/login.hibr}
 if [ ! -r "$login" ]; then
 	echo "blit-login: Hibr login script not readable: $login" >&2

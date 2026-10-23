@@ -15192,6 +15192,17 @@ static int create_session(BlitRuntime *runtime, const char *json,
                 _exit(126);
         if (pane_id[0] != '\0' && setenv("BLIT_PANE_ID", pane_id, 1) != 0)
             _exit(126);
+        /* The VT this display owns, for a login screen running here: a pty
+           says no seat and no VT, so without it logind registered every
+           login on a Blit display as a remote session with no seat, and
+           WirePlumber, NetworkManager's policy and logind's own brightness
+           would not serve the person at the machine (hibr #367). */
+        if (blit_vt_number() > 0) {
+            char vt_text[16];
+            snprintf(vt_text, sizeof(vt_text), "%d", blit_vt_number());
+            if (setenv("BLIT_VTNR", vt_text, 1) != 0)
+                _exit(126);
+        }
         /* Native hold alone owns the 2-D union. Optional initial placement
            is explicit; never infer horizontal slots or move the primary. */
         if (join_position_present) {

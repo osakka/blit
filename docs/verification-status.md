@@ -1,5 +1,20 @@
 # Verification status
 
+## 2026-10-23: 0.2.7 a login on a Blit display is a local session (hibr #367)
+
+Hibr's login screen runs on Blit's pty, which tells PAM no seat and no VT, so
+logind registered every login on a Blit display as a remote session with no
+seat (`loginctl`: `Seat=`, `Remote=yes`, `Type=tty`). WirePlumber then drives
+no Bluetooth audio for that user, so a connected headset never became a sound
+output; NetworkManager's policy for an active session does not apply, so Wi-Fi
+wanted root's password; logind's brightness and power need it too. Blit now
+exports the VT it owns as `BLIT_VTNR` to the sessions it starts, and its login
+wrapper passes `LG_SEAT=seat0` and `LG_VTNR` to Hibr's login screen, which
+hands them to PAM as `XDG_SEAT`/`XDG_VTNR` (Hibr 0.99.305). An older Hibr
+ignores them and logs in as before. `login_seat_gate` checks the wrapper both
+ways; the export itself needs a real VT, which the dummy backend never owns,
+so it is checked on hardware.
+
 ## 2026-10-23: 0.2.6 the mouse in pixels, mode 1016 (#137)
 
 A program can ask for SGR-Pixels (DEC 1016): the same SGR report with the
