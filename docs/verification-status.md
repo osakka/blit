@@ -1,5 +1,19 @@
 # Verification status
 
+## 2026-10-23: 0.2.5 a preferred login pane is waited for before another takes it
+
+Reported by the owner: the primary display changed between logins. With a
+preferred login pane set and Fallback `first_available`, a preferred pane
+not present the moment the login screen started -- its monitor still
+waking, or its connector discovered a beat later than another -- gave the
+login screen at once to whichever pane was first, so the primary depended on
+discovery order. Now a missing preferred pane is waited for up to 10 s
+(`BLIT_LOGIN_PREFERRED_GRACE_US`; logged once as
+`login_preferred_pane_waiting`) before the first available takes its place,
+retried on the login loop's own 5 s cadence. `wait` and a present preferred
+pane are unchanged. `login_policy_gate` checks that the fallback waits, then
+falls back after the grace. Not yet observed on the owner's hardware.
+
 ## 2026-10-23: 0.2.4 a font change no longer shakes a running desktop (#136)
 
 Every layout resize of a Hibr session -- a font change reflowing the pane,

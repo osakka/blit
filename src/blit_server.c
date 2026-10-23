@@ -149,6 +149,13 @@ extern char **environ;
 #define BLIT_MAX_OVERLAYS 16
 #define BLIT_UPDATE_IDLE_TIMEOUT_US 30000000ULL
 #define BLIT_LOGIN_RESTART_DELAY_US 1000000ULL
+/* How long a preferred login pane that has not appeared yet is waited for
+   before the login screen goes to the first pane there is. A primary chosen
+   by whichever output happened to be discovered first is a primary that
+   moves from one boot to the next. */
+#ifndef BLIT_LOGIN_PREFERRED_GRACE_US
+#define BLIT_LOGIN_PREFERRED_GRACE_US 10000000ULL
+#endif
 #define BLIT_NATIVE_QUERY_INTERVAL_US 1000000ULL
 #define BLIT_NATIVE_QUERY_DEADLINE_US 2000000ULL
 #define BLIT_NATIVE_OBSERVATION_TTL_US 3000000ULL
@@ -1144,6 +1151,10 @@ typedef struct {
     char boot_login_pane_id[128];
     int boot_login_enabled;
     int login_fallback_wait;
+    /* When a preferred login pane was first found missing, so a monitor that
+       is slow to wake is waited for a moment before its place is given to
+       whichever pane came up first. 0 while it is present or none is set. */
+    uint64_t login_preferred_missing_us;
     int login_start_reported;
     /* One asynchronous native observer, scoped to a login generation. */
     pid_t login_observer_pid;
@@ -15384,9 +15395,26 @@ static int create_login_session(BlitRuntime *runtime, BlitSession **created)
     pane_id[0] = '\0';
     if (runtime->login_preferred_pane_id[0] != '\0' &&
         find_pane_id(runtime, runtime->login_preferred_pane_id) != NULL) {
+        runtime->login_preferred_missing_us = 0;
         snprintf(pane_id, sizeof(pane_id), "%s", runtime->login_preferred_pane_id);
     } else if (runtime->login_preferred_pane_id[0] != '\0' &&
                runtime->login_fallback_wait) {
+        return -3;
+    } else if (runtime->login_preferred_pane_id[0] != '\0' &&
+               (runtime->login_preferred_missing_us == 0 ||
+                monotonic_us() - runtime->login_preferred_missing_us <
+                    BLIT_LOGIN_PREFERRED_GRACE_US)) {
+        /* The preferred pane is not there yet: give it a moment, since its
+           monitor may still be waking, rather than making another primary. */
+        if (runtime->login_preferred_missing_us == 0) {
+            char detail[256];
+            runtime->login_preferred_missing_us = monotonic_us();
+            snprintf(detail, sizeof(detail),
+                     "preferred login pane %s is not present yet; waiting up to %llu s before the first available",
+                     runtime->login_preferred_pane_id,
+                     (unsigned long long)(BLIT_LOGIN_PREFERRED_GRACE_US / 1000000ULL));
+            diagnostic_log(runtime, "info", "login_preferred_pane_waiting", detail);
+        }
         return -3;
     } else if (runtime->pane_count > 0) {
         for (pane_index = 0; pane_index < runtime->pane_count; ++pane_index)

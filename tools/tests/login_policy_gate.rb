@@ -115,7 +115,13 @@ Dir.mktmpdir('blit-login-policy') do |root|
   status,_=request('PUT','/v1/settings',{document:document},state['revision']);check(status==200,'fallback save failed')
   stop;start(root)
   if ROOT_OK
-    Timeout.timeout(5){sleep 0.05 until get('/v1/login')['session']}
+    # A preferred pane that is not there yet is waited for a moment -- its
+    # monitor may still be waking -- before the first available takes its
+    # place (BLIT_LOGIN_PREFERRED_GRACE_US, 10 s): a primary chosen by
+    # whichever output was discovered first moved from one boot to the next.
+    sleep 3
+    check(get('/v1/login')['session'].nil?,'fallback did not wait for the preferred pane')
+    Timeout.timeout(20){sleep 0.1 until get('/v1/login')['session']}
     login=get('/v1/login')
     check(login['pane_id']=='pane-display-1-1','fallback did not use available pane')
     check(login['preferred_pane_id']=='pane-unavailable','fallback overwrote intent')
@@ -134,4 +140,4 @@ Dir.mktmpdir('blit-login-policy') do |root|
   check(!get('/v1/login')['enabled'],'reset did not restore boot login default')
   stop
 end
-puts "LOGIN_POLICY_PASS save_error=honest old_file=retained restart=preserved fallback=explicit root_assignment=#{ROOT_OK ? 'tested' : 'not-tested'}"
+puts "LOGIN_POLICY_PASS save_error=honest old_file=retained restart=preserved fallback=explicit,after_grace root_assignment=#{ROOT_OK ? 'tested' : 'not-tested'}"
