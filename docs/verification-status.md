@@ -1,5 +1,24 @@
 # Verification status
 
+## 2026-10-23: 0.2.3 tap to click; 0.2.2 confirmed on the Air's trackpad
+
+The owner reports 0.2.2 on the MacBook Air mid-2012 (bcm5974): the pointer
+moves and the pad's own click works. That is the first hardware
+confirmation of the touchpad path, which 0.2.2's entry left outstanding.
+Tapping did nothing, because 0.2.2 had none.
+
+0.2.3 adds `tap_to_click`, a per-device setting offered only on a device
+Blit reads as a touchpad, off by default: a touch that ends within180 ms
+having moved less than8 px, the pad never pressed, is a click -- left for
+one finger, right for two. Tap-and-drag is not done. `touchpad_gate`
+covers it on the recorded sequence (off, left, two-finger right, long,
+moved, pressed, a small wobble); the new `tap_setting_gate` covers the API:
+offered for a touchpad and not a mouse, 422 on a mouse, 400 for a
+non-boolean, kept in the settings document. The seven input gates pass
+against this build. Tapping itself is not yet confirmed on the hardware.
+The Blit Mouse pane (catalogue 0.1.10) shows a Tap to Click row for a
+touchpad.
+
 ## 2026-10-23: 0.2.2 touchpad pointer; first package in hibr's apt repository
 
 Source59cdd2c; package identity is in `releases/0.2.2.yaml`. A touchpad

@@ -6,7 +6,9 @@
  * feeds the arithmetic the sequence that trackpad sends and checks every
  * answer: motion for one finger, no jump when a finger is lifted or added, a
  * click from the pad's own button (right with two fingers on it), wheel ticks
- * for two fingers moving, and a slow finger still moving the pointer.
+ * for two fingers moving, a slow finger still moving the pointer, and, only
+ * where tap_to_click is on, a quick touch as a click: left for one finger,
+ * right for two, nothing for a long touch, a moving one or a pressed pad.
  *
  * The ranges are the 2012 Air's: x -4620..5140 and y -150..6600 with no
  * resolution reported, so the whole width is BLIT_TOUCHPAD_WIDTH_PX (640)
@@ -19,15 +21,40 @@
 static int failures;
 static BlitTouchpad pad;
 static BlitTouchpadOut out;
+static long long now_us;
 
 static int ev(int type, int code, int value)
 {
-    return blit_touchpad_event(&pad, type, code, value, &out);
+    return blit_touchpad_event(&pad, now_us, type, code, value, &out);
 }
 
 static int syn(void)
 {
     return ev(EV_SYN, SYN_REPORT, 0);
+}
+
+/* A whole touch: down at x,y with the given finger tool, held for ms,
+   moved by dx units, and lifted. Answers the tap the lift gave, or -1. */
+static int touch(int tool, int ms, int dx, int press)
+{
+    ev(EV_KEY, BTN_TOUCH, 1);
+    ev(EV_KEY, tool, 1);
+    ev(EV_ABS, ABS_X, 1000);
+    ev(EV_ABS, ABS_Y, 1000);
+    syn();
+    if (press)
+        ev(EV_KEY, BTN_LEFT, 1);
+    now_us += (long long)ms * 500;
+    ev(EV_ABS, ABS_X, 1000 + dx);
+    syn();
+    if (press)
+        ev(EV_KEY, BTN_LEFT, 0);
+    now_us += (long long)ms * 500;
+    ev(EV_KEY, BTN_TOUCH, 0);
+    ev(EV_KEY, tool, 0);
+    syn();
+    now_us += 1000000;
+    return out.tap_button;
 }
 
 static void expect(int got, int want, const char *what)
@@ -143,10 +170,22 @@ int main(void)
     syn();
     expect(out.dx, 8, "a millimetre of a resolved pad is 8 px");
 
+    /* Tapping, on the Air's ranges again. Off, nothing; on, a quick still
+       touch is a click, and anything else is not. */
+    blit_touchpad_init(&pad, -4620, 5140, 0, -150, 6600, 0);
+    expect(touch(BTN_TOOL_FINGER, 100, 0, 0), -1, "with tapping off a tap is nothing");
+    pad.tap = 1;
+    expect(touch(BTN_TOOL_FINGER, 100, 0, 0), 0, "a quick one-finger tap is a left click");
+    expect(touch(BTN_TOOL_DOUBLETAP, 100, 0, 0), 2, "a quick two-finger tap is a right click");
+    expect(touch(BTN_TOOL_FINGER, 400, 0, 0), -1, "a long touch is not a tap");
+    expect(touch(BTN_TOOL_FINGER, 100, 976, 0), -1, "a touch that moved is not a tap");
+    expect(touch(BTN_TOOL_FINGER, 100, 0, 1), -1, "pressing the pad clicks once, not twice");
+    expect(touch(BTN_TOOL_FINGER, 100, 30, 0), 0, "a tap that wobbles a little is still one");
+
     if (failures) {
         printf("TOUCHPAD_GATE_FAIL %d\n", failures);
         return 1;
     }
-    puts("TOUCHPAD_GATE_PASS motion=64px_per_tenth no_jump=lift,add,drop click=left,right_two_fingers scroll=2_ticks_per_48px slow=accumulated resolution=8px_per_mm");
+    puts("TOUCHPAD_GATE_PASS motion=64px_per_tenth no_jump=lift,add,drop click=left,right_two_fingers scroll=2_ticks_per_48px slow=accumulated resolution=8px_per_mm tap=opt_in,left,right_two_fingers,not_long,not_moved,not_pressed");
     return 0;
 }

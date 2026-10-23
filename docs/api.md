@@ -1292,6 +1292,7 @@ sample repeatedly and correlate with CPU, loop gaps and physical input counts.
 | `buttons` | a sparse map from evdev code to the button it produces |
 | `scroll_step` | how many reports one wheel notch produces |
 | `acceleration` | `{"profile":"flat"}` or `{"profile":"adaptive"}` |
+| `tap_to_click` | a touchpad only: a quick touch is a click (one finger left, two right); off by default |
 | `deadzone_percent` | gamepad axes: what reads as zero |
 | `invert_axes` | gamepad axes: which have their sign flipped |
 

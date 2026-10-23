@@ -22,9 +22,14 @@
  *                            what a Mac's trackpad is
  *
  * A change in the number of fingers starts the movement again from where
- * they now are, so lifting or adding one never jumps the pointer. Tapping
- * to click is not done: macOS does not do it by default either, and a tap
- * made by a palm while typing is a click nobody meant.
+ * they now are, so lifting or adding one never jumps the pointer.
+ *
+ * Tapping to click is a per-device choice (tap_to_click), off unless asked
+ * for: macOS does not tap by default either, and a palm resting while
+ * typing is a click nobody meant. A tap is a touch that ends within
+ * BLIT_TOUCHPAD_TAP_MS having moved less than BLIT_TOUCHPAD_TAP_PX, and the
+ * pad never pressed down during it: one finger is a left click, two are a
+ * right one. Tap-and-drag is not done.
  */
 
 #include <linux/input.h>
@@ -38,6 +43,12 @@
 #endif
 #ifndef BLIT_TOUCHPAD_SCROLL_PX
 #define BLIT_TOUCHPAD_SCROLL_PX 24
+#endif
+#ifndef BLIT_TOUCHPAD_TAP_MS
+#define BLIT_TOUCHPAD_TAP_MS 180
+#endif
+#ifndef BLIT_TOUCHPAD_TAP_PX
+#define BLIT_TOUCHPAD_TAP_PX 8
 #endif
 
 typedef struct BlitTouchpad {
@@ -56,16 +67,25 @@ typedef struct BlitTouchpad {
     long scroll_x, scroll_y;
     int pressed;
     int pressed_button;
+    /* Tapping: whether it is wanted, and the touch it would be. */
+    int tap;
+    int down;
+    long long down_us;
+    int down_fingers;
+    long down_moved;
+    int down_pressed;
 } BlitTouchpad;
 
 /* What one event asks of the pointer: motion and wheel on a SYN_REPORT,
-   a button on the pad being pressed or let go. */
+   a button on the pad being pressed or let go, or a tap -- a whole click,
+   press and release, of tap_button (-1 for none). */
 typedef struct BlitTouchpadOut {
     int dx, dy;
     int wheel_x, wheel_y;
     int button_changed;
     int button;
     int button_pressed;
+    int tap_button;
 } BlitTouchpadOut;
 
 /* Whether a device's capabilities are a touchpad's: absolute X and Y, a
@@ -112,15 +132,23 @@ static int blit_touchpad_take(long *acc)
     return (int)whole;
 }
 
-/* One event. Returns 1 when out holds something for the pointer. */
-static int blit_touchpad_event(BlitTouchpad *t, int type, int code,
-                               int value, BlitTouchpadOut *out)
+/* Pixels of 1/256 to add to a touch's travel, whichever way it went. */
+static long blit_touchpad_abs(long v)
+{
+    return v < 0 ? -v : v;
+}
+
+/* One event, at now_us on a monotonic clock (only a tap reads it). Returns
+   1 when out holds something for the pointer. */
+static int blit_touchpad_event(BlitTouchpad *t, long long now_us, int type,
+                               int code, int value, BlitTouchpadOut *out)
 {
     int fingers;
     int dx_units, dy_units;
     long px, py;
 
     memset(out, 0, sizeof(*out));
+    out->tap_button = -1;
     if (type == EV_ABS) {
         if (code == ABS_X) { t->nx = value; t->got_x = 1; }
         else if (code == ABS_Y) { t->ny = value; t->got_y = 1; }
@@ -144,6 +172,7 @@ static int blit_touchpad_event(BlitTouchpad *t, int type, int code,
                     return 0;
                 t->pressed = 1;
                 t->pressed_button = t->fingers_seen >= 2 ? 2 : 0;
+                t->down_pressed = 1;
             } else {
                 if (!t->pressed)
                     return 0;
@@ -161,12 +190,27 @@ static int blit_touchpad_event(BlitTouchpad *t, int type, int code,
         return 0;
     fingers = t->fingers_seen;
     if (!t->touching || fingers == 0) {
+        int tapped = t->tap && t->down && !t->down_pressed && !t->pressed &&
+            now_us - t->down_us <= BLIT_TOUCHPAD_TAP_MS * 1000LL &&
+            t->down_moved < 256L * BLIT_TOUCHPAD_TAP_PX;
+        if (tapped)
+            out->tap_button = t->down_fingers >= 2 ? 2 : 0;
+        t->down = 0;
         t->have = 0;
         t->retouch = 0;
         t->got_x = t->got_y = 0;
         t->fingers = 0;
-        return 0;
+        return tapped;
     }
+    if (!t->down) {
+        t->down = 1;
+        t->down_us = now_us;
+        t->down_fingers = 0;
+        t->down_moved = 0;
+        t->down_pressed = t->pressed;
+    }
+    if (fingers > t->down_fingers)
+        t->down_fingers = fingers;
     if (!t->have || t->retouch || fingers != t->fingers) {
         t->retouch = 0;
         if (t->got_x) t->x = t->nx;
@@ -187,6 +231,7 @@ static int blit_touchpad_event(BlitTouchpad *t, int type, int code,
         return 0;
     px = blit_touchpad_scale(t, dx_units, 0);
     py = blit_touchpad_scale(t, dy_units, 1);
+    t->down_moved += blit_touchpad_abs(px) + blit_touchpad_abs(py);
     if (fingers >= 2) {
         /* Two fingers scroll the traditional way: an upward stroke is a
            wheel tick up, as a wheel turned away from the person is. Natural

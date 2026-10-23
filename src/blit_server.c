@@ -527,6 +527,9 @@ typedef struct {
     unsigned char button_targets[BLIT_MAX_BUTTON_OVERRIDES];
     int scroll_step;
     int acceleration_adaptive;
+    /* A touchpad's tap: a quick touch is a click (blit_touchpad.h). Off
+       unless asked for, as macOS has it. */
+    int tap_to_click;
     /* Issue #71. A left/right press is held briefly only when this opt-in
        emulation is enabled. The pending state belongs to the device, not the
        aggregate pointer, so two mice cannot complete each other's chord. */
@@ -5442,6 +5445,7 @@ static int input_device_configured(const BlitInputDevice *device)
         device->middle_button_emulation_enabled ||
         device->middle_button_window_ms != BLIT_MIDDLE_BUTTON_WINDOW_DEFAULT ||
         device->scroll_step > BLIT_INPUT_SCROLL_STEP_DEFAULT ||
+        device->tap_to_click ||
         device->deadzone_percent > 0 || device->invert_axis_count > 0 ||
         device->repeat_configured || device->caps_lock_boot >= 0 ||
         device->num_lock_boot >= 0;
@@ -5855,6 +5859,10 @@ static size_t input_device_item_json(const BlitRuntime *runtime,
             device->scroll_step > 0 ? device->scroll_step :
                 BLIT_INPUT_SCROLL_STEP_DEFAULT,
             device->acceleration_adaptive ? "adaptive" : "flat");
+        if (device->capabilities & BLIT_INPUT_CAP_TOUCHPAD)
+            complete &= json_appendf(body, capacity, &used,
+                ",\"tap_to_click\":%s",
+                device->tap_to_click ? "true" : "false");
         if (device->button_count > 0) {
             int button_index;
             complete &= json_appendf(body, capacity, &used, ",\"buttons\":{");
@@ -7635,6 +7643,7 @@ enum {
     BLIT_INPUT_PROPERTY_MIDDLE_BUTTON_EMULATION,
     BLIT_INPUT_PROPERTY_DEADZONE,
     BLIT_INPUT_PROPERTY_INVERT_AXES,
+    BLIT_INPUT_PROPERTY_TAP_TO_CLICK,
     BLIT_INPUT_PROPERTY_COUNT
 };
 
@@ -7646,7 +7655,7 @@ static const char *const blit_input_device_properties[] = {
     "repeat_delay_ms", "repeat_rate_hz", "caps_lock_boot",
     "num_lock_boot", "modifiers", "buttons", "scroll_step",
     "acceleration", "middle_button_emulation", "deadzone_percent",
-    "invert_axes"
+    "invert_axes", "tap_to_click"
 };
 
 static int input_device_property_index(const char *property)
@@ -7689,6 +7698,8 @@ static int input_device_property_applicability(const BlitInputDevice *device,
     case BLIT_INPUT_PROPERTY_DEADZONE:
     case BLIT_INPUT_PROPERTY_INVERT_AXES:
         return input_device_supports(device, BLIT_INPUT_KIND_GAMEPAD);
+    case BLIT_INPUT_PROPERTY_TAP_TO_CLICK:
+        return (device->capabilities & BLIT_INPUT_CAP_TOUCHPAD) != 0;
     default:
         return -1;
     }
@@ -17811,6 +17822,8 @@ static int apply_input_device_configuration(BlitRuntime *runtime,
     int sensitivity_requested;
     int natural_scroll = 0;
     int natural_scroll_requested;
+    int tap_to_click = 0;
+    int tap_to_click_requested;
     char route[512];
     char route_target[128];
     const char *route_cursor;
@@ -17866,8 +17879,8 @@ static int apply_input_device_configuration(BlitRuntime *runtime,
         char detail[256];
         snprintf(detail, sizeof(detail),
                  "A device configuration carries \"%s\", which is not a "
-                 "writable property. Writable: enabled, and for a pointer "
-                 "sensitivity_percent and natural_scroll.", rejected);
+                 "writable property. GET /v1/input-devices shows each "
+                 "device's own writable configuration.", rejected);
         config_problem(problem, 400, "Bad Request", "invalid_device_property",
                                 detail);
         return 0;
@@ -17895,6 +17908,22 @@ static int apply_input_device_configuration(BlitRuntime *runtime,
         config_problem(problem, 400, "Bad Request",
                                 "invalid_device_configuration",
                                 "natural_scroll must be a JSON boolean.");
+        return 0;
+    }
+    tap_to_click_requested = json_bool(scalars, "tap_to_click",
+                                       &tap_to_click);
+    if (json_key_cursor(scalars, "tap_to_click") != NULL &&
+        !tap_to_click_requested) {
+        config_problem(problem, 400, "Bad Request",
+                       "invalid_device_configuration",
+                       "tap_to_click must be a JSON boolean.");
+        return 0;
+    }
+    if (tap_to_click_requested &&
+        input_device_property_applicability(device, "tap_to_click") != 1) {
+        config_problem(problem, 422, "Unprocessable Entity",
+                       "device_property_not_applicable",
+                       "tap_to_click applies to a device Blit reads as a touchpad.");
         return 0;
     }
     repeat_delay_requested = json_int(scalars, "repeat_delay_ms",
@@ -18315,6 +18344,10 @@ static int apply_input_device_configuration(BlitRuntime *runtime,
     }
     if (scroll_step_requested && scroll_step != device->scroll_step) {
         device->scroll_step = scroll_step;
+        changed = 1;
+    }
+    if (tap_to_click_requested && tap_to_click != device->tap_to_click) {
+        device->tap_to_click = tap_to_click;
         changed = 1;
     }
     if (acceleration_requested &&
@@ -19047,6 +19080,11 @@ static size_t settings_input_configuration(const BlitInputDevice *device,
     if (device->scroll_step > BLIT_INPUT_SCROLL_STEP_DEFAULT) {
         json_appendf(out, capacity, &used, "%s\"scroll_step\":%d",
                      first ? "" : ",", device->scroll_step);
+        first = 0;
+    }
+    if (device->tap_to_click) {
+        json_appendf(out, capacity, &used, "%s\"tap_to_click\":true",
+                     first ? "" : ",");
         first = 0;
     }
     if (device->acceleration_adaptive) {
@@ -20405,6 +20443,7 @@ static int settings_reset(BlitRuntime *runtime, int remove_file)
         memset(device->button_targets, 0, sizeof(device->button_targets));
         device->scroll_step = BLIT_INPUT_SCROLL_STEP_DEFAULT;
         device->acceleration_adaptive = 0;
+        device->tap_to_click = 0;
         flush_middle_button_pending(runtime, device);
         device->middle_button_emulation_enabled = 0;
         device->middle_button_window_ms = BLIT_MIDDLE_BUTTON_WINDOW_DEFAULT;
@@ -27638,9 +27677,21 @@ static void service_evdev_mouse(BlitRuntime *runtime)
                     event.code <= BTN_TOOL_QUADTAP))))) {
                 BlitTouchpadOut pad;
                 int tick;
+                runtime->evdev_touchpads[device_index].tap =
+                    configuration != NULL && configuration->tap_to_click;
                 if (blit_touchpad_event(&runtime->evdev_touchpads[device_index],
+                                        (long long)input_started_us,
                                         event.type, event.code, event.value,
                                         &pad)) {
+                    if (pad.tap_button >= 0) {
+                        ++runtime->diagnostic_evdev_mouse_button_events;
+                        if (configuration != NULL)
+                            configuration->pointer_buttons += 2;
+                        dispatch_evdev_mouse_button(runtime, device_index,
+                                                    pad.tap_button, 1);
+                        dispatch_evdev_mouse_button(runtime, device_index,
+                                                    pad.tap_button, 0);
+                    }
                     if (pad.button_changed) {
                         ++runtime->diagnostic_evdev_mouse_button_events;
                         if (configuration != NULL)
