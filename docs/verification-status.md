@@ -1,5 +1,22 @@
 # Verification status
 
+## 2026-10-23: 0.2.2 touchpad pointer; first package in hibr's apt repository
+
+Source59cdd2c; package identity is in `releases/0.2.2.yaml`. A touchpad
+(absolute X/Y, a finger tool and touch, not a gamepad) is now classified as
+a pointer: one finger moves, two fingers scroll at24 px a tick, the pad's
+own button is left or, with two fingers on it, right. `touchpad_gate`
+passes on a recorded MacBook Air mid-2012 (bcm5974) sequence, and the
+existing input gates (input_device_api, input_device_config,
+pointer_settings, mouse_report, evdev_scan, input_device_route,
+pointer_target) pass against this build. Updater and ABI16 adapter hashes
+are identical to0.2.1. Not yet run on the physical trackpad: no hardware
+or /dev/uinput here, so physical acceptance on the Air remains outstanding.
+
+This is the first Blit package published into hibr's apt repository
+(pool/main/b/blit); source, tickets and the Control Panel pane's
+catalogue entry are unchanged.
+
 ## 2026-10-22: architectural ticket handoff verified (planning only)
 
 Created internal126–135 and refreshed122/125/104/120 current-status bodies,
