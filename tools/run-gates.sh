@@ -210,6 +210,7 @@ suite_terminal() {
     fi
     run_gate session_lifecycle_gate.sh "$ROOT"/tools/tests/session_lifecycle_gate.sh
     run_gate session_write_resize_gate.rb ruby tools/tests/session_write_resize_gate.rb
+    run_gate layout_reassert_gate.rb ruby tools/tests/layout_reassert_gate.rb
 }
 
 suite_font() {
@@ -285,6 +286,8 @@ suite_renderer() {
     run_gate native_vt_kernel_gate.sh sh tools/tests/native_vt_kernel_gate.sh
     run_gate input_device_api_gate.rb ruby tools/tests/input_device_api_gate.rb
     run_gate input_device_config_gate.rb ruby tools/tests/input_device_config_gate.rb
+    run_gate touchpad_gate.sh "$ROOT"/tools/tests/touchpad_gate.sh
+    run_gate tap_setting_gate.rb ruby tools/tests/tap_setting_gate.rb
     run_gate settings_persistence_gate.rb ruby tools/tests/settings_persistence_gate.rb
     run_gate login_policy_gate.rb ruby tools/tests/login_policy_gate.rb
     run_gate input_hotplug_cycle_gate.rb ruby tools/tests/input_hotplug_cycle_gate.rb

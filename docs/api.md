@@ -389,6 +389,11 @@ POST/GET /v1/control/update*               verified package supervision
 POST/DELETE /v1/overlays[/{id}]            bounded graphic overlays
 ```
 
+A Hibr session's `hibr_attachment.settled` (in `GET /v1/terminal-sessions`)
+is false while Blit is still repairing the desktop's startup or attach
+layout by nudging its terminal size, and true once that is done. A client
+that drives the desktop can wait for it before clicking.
+
 When this map and the schema disagree, the schema wins and the documentation
 must be corrected in the same change. A route addition is not complete until
 the schema gate, a focused request test, and the verification ledger agree.

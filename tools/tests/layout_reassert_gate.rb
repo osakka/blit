@@ -54,10 +54,12 @@ result = nil
 Dir.mktmpdir('blit-reassert') do |root|
   counter = File.join(root, 'winch')
   script = File.join(root, 'count.hibr')
+  File.mkfifo(File.join(root, 'idle'))
   File.write(script, <<~HIBR)
     n=0
     trap 'n=$((n + 1)); printf "%s\\n" "$n" > #{counter}' WINCH
-    while :; do read -t 0.05 x < /dev/null; done
+    exec 3<> #{File.join(root, 'idle')}
+    while :; do read -t 0.05 -u 3 x; done
   HIBR
   server = spawn({ 'SDL_VIDEODRIVER' => 'dummy', 'BLIT_RENDERER' => 'software',
                    'BLIT_PSF_FONT' => FONT, 'BLIT_LOGIN_AUTOSTART' => '0',

@@ -24,8 +24,10 @@ The new `layout_reassert_gate` counts the SIGWINCH a Hibr session receives
 after two font changes: 2 on this build, 11 on 0.2.3, limit 4. hibr's
 `blit_ui_gate` passes 8 of 8, from 4 of 8. Twelve attach, hold, join,
 resize and font gates pass, `native_hold_observer` and
-`hibr_resume_guard` among them. Not yet run against the owner's held
-desktop on hardware.
+`hibr_resume_guard` among them. The full `tools/run-gates.sh all`
+passes 152, skips 10, fails 0 (16 minutes), with `layout_reassert_gate`,
+`touchpad_gate` and `tap_setting_gate` now in it. Not yet run against the
+owner's held desktop on hardware.
 
 ## 2026-10-23: 0.2.3 tap to click; 0.2.2 confirmed on the Air's trackpad
 
