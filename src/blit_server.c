@@ -839,6 +839,11 @@ typedef struct {
     uint64_t attach_reassert_due_us;
     int attach_reassert_attempts;
     int attach_reassert_max_attempts;
+    /* Set while a startup or attach repair loop is owed or running, and
+       cleared when it stops re-arming. A session that never needed one, or
+       whose loop has finished, has its resize handling, so a later layout
+       resize needs no loop of its own (blit#136). */
+    int attach_unsettled;
     int attach_reassert_hibr_matches;
     int hibr_process;
     int hibr_desktop_primary;
@@ -14092,6 +14097,37 @@ static void service_unpainted_desktops(BlitRuntime *runtime, uint64_t now)
     }
 }
 
+/* A layout resize of a Hibr session -- a font change reflowing the pane, a
+   new grid. Until the startup/attach loop has settled it starts that loop
+   again, as it always did, since the desktop may not be listening yet. Once
+   settled, a resize that changed the geometry already signalled the desktop
+   through TIOCSWINSZ, and starting the loop again only kicked a running
+   desktop one row shorter and back every 250 ms for eight seconds, each
+   kick a clear and a repaint (blit#136); one that changed nothing gets a
+   single pass. While a startup or attach repair is still running it is
+   left to finish its own window, rather than started again from nothing,
+   which stretched it by eight seconds per font change. */
+static void arm_layout_reassert(BlitSession *session, int changed)
+{
+    if (!session->hibr_process)
+        return;
+    if (session->attach_unsettled) {
+        if (session->attach_reassert_pending)
+            return;
+        session->attach_reassert_pending = 1;
+        session->attach_reassert_due_us = monotonic_us();
+        session->attach_reassert_attempts = 0;
+        session->attach_reassert_max_attempts = 32;
+        return;
+    }
+    if (changed)
+        return;
+    session->attach_reassert_pending = 1;
+    session->attach_reassert_due_us = monotonic_us();
+    session->attach_reassert_attempts = 0;
+    session->attach_reassert_max_attempts = 1;
+}
+
 static void service_attach_reasserts(BlitRuntime *runtime, uint64_t now)
 {
     int i;
@@ -14205,6 +14241,8 @@ static void service_attach_reasserts(BlitRuntime *runtime, uint64_t now)
             session->attach_reassert_pending = 1;
             session->attach_reassert_due_us = now +
                 (hibr_matches > 0 ? 2000000ULL : 250000ULL);
+        } else {
+            session->attach_unsettled = 0;
         }
     }
 }
@@ -14311,7 +14349,7 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
         "\"reassert_attempts\":%d,\"owner_matches\":%d,"
         "\"unresolved\":%s,\"owner_registered\":%s,"
         "\"owner_pid\":%ld,\"owner_writes\":%llu,"
-        "\"owner_painted\":%s}",
+        "\"owner_painted\":%s,\"settled\":%s}",
         session->hibr_resume_requested ? "true" : "false",
         session->attach_reassert_attempts,
         session->attach_reassert_hibr_matches,
@@ -14319,7 +14357,8 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
         session->hibr_owner_registered ? "true" : "false",
         (long)session->hibr_owner_pid,
         session->hibr_owner_writes,
-        session->hibr_owner_writes > 0 ? "true" : "false");
+        session->hibr_owner_writes > 0 ? "true" : "false",
+        session->attach_unsettled ? "false" : "true");
     used += (size_t)snprintf(
         body + used, capacity - used,
         ",\"hibr_desktop\":{\"role\":\"%s\",\"session\":\"%s\"}",
@@ -15258,6 +15297,7 @@ static int create_session(BlitRuntime *runtime, const char *json,
                 session->attach_reassert_pending = 1;
                 session->attach_reassert_attempts = 0;
                 session->attach_reassert_max_attempts = 32;
+                session->attach_unsettled = 1;
                 session->attach_reassert_hibr_matches = 0;
                 session->attach_reassert_due_us = monotonic_us() + 250000ULL;
             }
@@ -16464,8 +16504,14 @@ static int apply_font_configuration(BlitRuntime *runtime, const char *path,
         BlitPane *pane;
         int width;
         int height;
+        int old_cell_width;
+        int old_cell_height;
+        int old_width;
+        int old_height;
         if (!session->used)
             continue;
+        old_cell_width = session->terminal_cell_width;
+        old_cell_height = session->terminal_cell_height;
         session->terminal_cell_width = runtime_terminal_cell_width(runtime);
         session->terminal_cell_height = runtime_terminal_cell_height(runtime);
         pane = find_pane_id(runtime, session->pane_id);
@@ -16492,15 +16538,16 @@ static int apply_font_configuration(BlitRuntime *runtime, const char *path,
         } else {
             continue;
         }
-        if (surface == NULL || !resize_session_surface(session, surface,
-                                                        width, height))
+        if (surface == NULL)
             return 0;
-        if (session->hibr_process) {
-            session->attach_reassert_pending = 1;
-            session->attach_reassert_due_us = monotonic_us();
-            session->attach_reassert_attempts = 0;
-            session->attach_reassert_max_attempts = 32;
-        }
+        old_width = surface->width;
+        old_height = surface->height;
+        if (!resize_session_surface(session, surface, width, height))
+            return 0;
+        arm_layout_reassert(session, old_width != width ||
+                            old_height != height ||
+                            old_cell_width != session->terminal_cell_width ||
+                            old_cell_height != session->terminal_cell_height);
         ++session->revision;
     }
     ++runtime->topology_revision;
@@ -17072,6 +17119,7 @@ static void service_session_output(BlitRuntime *runtime, int fd)
                 runtime->sessions[i].attach_reassert_pending = 1;
                 runtime->sessions[i].attach_reassert_attempts = 0;
                 runtime->sessions[i].attach_reassert_max_attempts = 32;
+                runtime->sessions[i].attach_unsettled = 1;
                 runtime->sessions[i].attach_reassert_hibr_matches = 0;
                 runtime->sessions[i].attach_reassert_due_us =
                     monotonic_us() + 250000ULL;
@@ -20187,12 +20235,7 @@ static void settings_apply_pane_layout(BlitRuntime *runtime, int old_columns,
             diagnostic_log(runtime, "error", "layout_surface_resize_failed", session->pane_id);
             continue;
         }
-        if (session->hibr_process) {
-            session->attach_reassert_pending = 1;
-            session->attach_reassert_due_us = monotonic_us();
-            session->attach_reassert_attempts = 0;
-            session->attach_reassert_max_attempts = 32;
-        }
+        arm_layout_reassert(session, 1);
         ++session->revision;
     }
     for (i = 0; i < runtime->output_count; ++i)
@@ -21334,6 +21377,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
         session->attach_reassert_attempts = 0;
         session->attach_reassert_hibr_matches = 0;
         session->attach_reassert_due_us = monotonic_us();
+        session->attach_unsettled = 1;
         send_http(fd, 202, "Accepted", "application/json",
                   "{\"state\":\"registered\",\"detail\":\""
                   "Hibr owner registered for resize reassertion\"}");

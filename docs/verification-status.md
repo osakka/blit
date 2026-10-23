@@ -1,5 +1,32 @@
 # Verification status
 
+## 2026-10-23: 0.2.4 a font change no longer shakes a running desktop (#136)
+
+Every layout resize of a Hibr session -- a font change reflowing the pane,
+a new grid -- started the attach repair loop again: up to 32 passes, 250 ms
+apart (2 s once a held desktop's processes were found), each pushing the
+terminal one row shorter and back. A desktop already running took every
+pass as a resize, cleared and repainted, for about eight seconds after each
+font change, and a click landing in one was lost. That was the whole of
+hibr's flaky Blit UI gate (hibr #362). It was first filed as the font
+flipping between two sizes, which was wrong: the 19/20 px alternation in
+that trace was the gate's own font writes.
+
+Now a session is *unsettled* only while a startup or attach repair is owed
+or running. Once settled, a layout resize that changed the geometry arms
+nothing, since TIOCSWINSZ already signalled the program, and one that
+changed nothing gets a single pass. A resize during a repair leaves the
+running loop to finish its own window rather than restarting it. The
+startup and attach sites are unchanged. `GET /v1/terminal-sessions` reports
+it as `hibr_attachment.settled`.
+
+The new `layout_reassert_gate` counts the SIGWINCH a Hibr session receives
+after two font changes: 2 on this build, 11 on 0.2.3, limit 4. hibr's
+`blit_ui_gate` passes 8 of 8, from 4 of 8. Twelve attach, hold, join,
+resize and font gates pass, `native_hold_observer` and
+`hibr_resume_guard` among them. Not yet run against the owner's held
+desktop on hardware.
+
 ## 2026-10-23: 0.2.3 tap to click; 0.2.2 confirmed on the Air's trackpad
 
 The owner reports 0.2.2 on the MacBook Air mid-2012 (bcm5974): the pointer
