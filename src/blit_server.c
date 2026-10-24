@@ -2550,10 +2550,18 @@ static int send_kms_screenshot(BlitHttpClient *client, BlitRuntime *runtime,
     unsigned char *bytes = NULL;
     size_t length = 0;
     char capture_headers[1024];
-    int result = blit_kms_screenshot(runtime->kms, output_index,
-                                     &bytes, &length);
+    size_t used;
+    int result;
+    /* Answer from a frame the panel is showing, as SDL answers from a
+       presented one: the front buffer is submitted before its flip
+       completes, so wait for the completion (or the flip timeout). */
+    if (!blit_kms_front_presented(runtime->kms, output_index)) return 0;
+    result = blit_kms_screenshot(runtime->kms, output_index, &bytes, &length);
     capture_identity_headers(runtime, capture_headers,
                              sizeof(capture_headers));
+    used = strlen(capture_headers);
+    snprintf(capture_headers + used, sizeof(capture_headers) - used,
+             "X-Blit-Capture-Presented: true\r\n");
     if (result == 0) return 0;
     if (result < 0) {
         send_problem(client->fd, 503, "Service Unavailable", "screenshot_failed",

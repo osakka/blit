@@ -2243,6 +2243,16 @@ static void kms_bmp32(unsigned char *header, uint32_t offset,
     header[37] = (unsigned char)(image_size >> 24);
 }
 
+/* Whether the buffer a screenshot reads is the one being scanned out. The
+   front buffer is the last frame submitted; until its flip completes the
+   panel still shows the one before it. */
+int blit_kms_front_presented(const BlitKms *kms, int index)
+{
+    if (kms == NULL || index < 0 || index >= kms->output_count) return 0;
+    return !kms_output(kms, index)->flip_pending &&
+        kms_output(kms, index)->initialized;
+}
+
 int blit_kms_screenshot(BlitKms *kms, int index,
                         unsigned char **bytes, size_t *length)
 {
