@@ -107,6 +107,13 @@ typedef struct {
     unsigned long long vblank_span_count;
     unsigned long long vblank_span_us;
     double observed_refresh_hz;
+    /* ADR 0181: which compositor this output's frames come from ("cpu" or
+       "gles"), what was asked for, and why they differ when they do. */
+    char compositor[8];
+    char compositor_requested[8];
+    char compositor_reason[160];
+    char compositor_renderer[128];
+    unsigned long long gles_frames;
 } BlitKmsDisplayInfo;
 
 typedef struct {

@@ -78,6 +78,7 @@ static int kms_release_output(BlitKms *kms, KmsOutput *output, int restore)
        invalidate its immutable cookie before this stable slot can be reused. */
     output->generation = ++kms->generation;
     output->flip_pending = 0;
+    kms_gles_detach(kms, output, NULL);
     free_buffer(kms->fd, &output->front);
     free_buffer(kms->fd, &output->back);
     free(output->scene);
@@ -148,6 +149,8 @@ static int kms_activate_output(BlitKms *kms, const KmsConnector *connector)
     if (drmModeSetCrtc(kms->fd, crtc, output->front.fb, 0, 0,
                       &output->connector, 1, &output->mode) < 0) goto failed;
     output->allocated = 1;
+    output->owner = kms;
+    kms_gles_attach(kms, output);
     kms->slots[kms->output_count++] = slot;
     fprintf(stderr, "blit: KMS output added connector=%s id=%u mode=%ux%u\n",
             connector->name, connector->id, output->mode.hdisplay, output->mode.vdisplay);

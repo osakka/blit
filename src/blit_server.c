@@ -1044,6 +1044,12 @@ typedef struct {
     int boot_pane_columns;
     int boot_pane_rows;
     int boot_kms_async_pageflip;
+    /* ADR 0181: the native backend's compositor, "cpu" or "gles". Read by
+       blit_kms_open through BLIT_KMS_COMPOSITOR, so a change applies at the
+       next start. */
+    int boot_kms_compositor_gles;
+    int kms_compositor_gles;
+    int kms_compositor_configured;
     int boot_expect_desktop;
     char boot_renderer_request[64];
     char renderer_request[64];
@@ -3282,7 +3288,7 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
             "\"submit_ms\":%.3f,\"drawn_cells\":%llu},"
             "\"render_width\":%d,\"render_height\":%d,"
             "\"viewport_width\":%d,\"viewport_height\":%d,"
-            "\"scale_x\":%.3f,\"scale_y\":%.3f}",
+            "\"scale_x\":%.3f,\"scale_y\":%.3f,",
             i == 0 ? "" : ",", runtime->outputs[i].display_id,
             output_refresh_hz(runtime, i),
             runtime->test_refresh_override ? "test-override" : "display-mode",
@@ -3326,8 +3332,27 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
                 runtime->outputs[i].viewport_height,
             runtime->direct_kms ? 1.0f : runtime->outputs[i].scale_x,
             runtime->direct_kms ? 1.0f : runtime->outputs[i].scale_y);
+        /* ADR 0181: which compositor made this output's frames. SDL outputs
+           are composed by SDL's renderer. */
+        if (used < capacity) {
+            char reason[384];
+            char renderer[256];
+            json_escape(have_kms_info ? kms_info.compositor_reason : "", reason,
+                        sizeof(reason));
+            json_escape(have_kms_info ? kms_info.compositor_renderer : "", renderer,
+                        sizeof(renderer));
+            used += (size_t)snprintf(
+                body + used, capacity - used,
+                "\"compositor\":{\"active\":\"%s\",\"requested\":\"%s\","
+                "\"reason\":\"%s\",\"renderer\":\"%s\",\"gles_frames\":%llu}}",
+                have_kms_info ? kms_info.compositor : "sdl",
+                have_kms_info && kms_info.compositor_requested[0] ?
+                    kms_info.compositor_requested : (have_kms_info ? "cpu" : "sdl"),
+                reason, renderer, have_kms_info ? kms_info.gles_frames : 0ULL);
+        }
     }
-    snprintf(body + used, capacity - used, "]");
+    if (used < capacity)
+        snprintf(body + used, capacity - used, "]");
 }
 
 static void diagnostics_json(const BlitRuntime *runtime, char *body,
@@ -19583,7 +19608,7 @@ static void settings_copy_unseen_server(BlitRuntime *runtime, char *out,
 {
     static const char *const known[] = {
         "render_interval_ms", "pane_layout", "renderer",
-        "kms_async_pageflip", "expect_desktop", "shutdown_key"
+        "kms_async_pageflip", "expect_desktop", "shutdown_key", "kms_compositor"
     };
     const char *cursor = json_key_cursor(runtime->settings_document, "server");
     char key[64];
@@ -19975,6 +20000,11 @@ static size_t settings_build(BlitRuntime *runtime, char *out, size_t capacity,
                      first ? "" : ",", runtime->display_backend_kms ? "kms" : "sdl");
         first = 0;
     }
+    if (runtime->kms_compositor_configured) {
+        json_appendf(out, capacity, &used, "%s\"kms_compositor\":\"%s\"",
+                     first ? "" : ",", runtime->kms_compositor_gles ? "gles" : "cpu");
+        first = 0;
+    }
     if (runtime->kms_async_configured) {
         json_appendf(out, capacity, &used,
                      "%s\"kms_async_pageflip\":%s", first ? "" : ",",
@@ -20296,6 +20326,11 @@ static void settings_apply_server(BlitRuntime *runtime)
             runtime->display_backend_kms = strcmp(chord, "kms") == 0;
             runtime->display_backend_configured = 1;
         }
+        if (json_string(server, "kms_compositor", chord, sizeof(chord)) &&
+            (strcmp(chord, "cpu") == 0 || strcmp(chord, "gles") == 0)) {
+            runtime->kms_compositor_gles = strcmp(chord, "gles") == 0;
+            runtime->kms_compositor_configured = 1;
+        }
         if (json_bool(server, "kms_async_pageflip", &value)) {
             runtime->kms_async_pageflip = value;
             runtime->kms_async_configured = 1;
@@ -20363,6 +20398,10 @@ static int settings_server_backend_valid(const char *document)
     char server[2048], backend[64];
     if (cursor == NULL) return 1;
     if (!json_object_slice(cursor, server, sizeof(server))) return 0;
+    if (json_key_cursor(server, "kms_compositor") != NULL &&
+        !(json_string(server, "kms_compositor", backend, sizeof(backend)) &&
+          (strcmp(backend, "cpu") == 0 || strcmp(backend, "gles") == 0)))
+        return 0;
     if (json_key_cursor(server, "display_backend") == NULL) return 1;
     return json_string(server, "display_backend", backend, sizeof(backend)) &&
         (strcmp(backend, "kms") == 0 || strcmp(backend, "sdl") == 0);
@@ -20515,7 +20554,8 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
                  "\"renderer_source\":\"%s\",\"renderer_applicable\":%s,"
                  "\"video_driver_active\":\"%s\"},"
                  "\"presentation_restart_required\":%s,"
-                 "\"kms_async_pageflip\":%s,\"expect_desktop\":%s,"
+                 "\"kms_async_pageflip\":%s,\"kms_compositor\":\"%s\","
+                 "\"expect_desktop\":%s,"
                  "\"login\":%s,\"login_restart_required\":%s,"
                  "\"pointer\":{\"shape\":\"%s\",\"palette\":\"%s\","
                  "\"size_px\":%d,\"shadow\":%s},"
@@ -20556,6 +20596,7 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
                     strcmp(runtime->renderer_request, runtime->sdl_renderer_name) != 0)))) ?
                      "true" : "false",
                  runtime->kms_async_pageflip ? "true" : "false",
+                 runtime->kms_compositor_gles ? "gles" : "cpu",
                  runtime->expect_desktop ? "true" : "false", login,
                  restart_required ? "true" : "false",
                  blit_pointer_shapes[runtime->pointer_art.config.shape],
@@ -20663,12 +20704,15 @@ static int settings_reset(BlitRuntime *runtime, int remove_file)
     runtime->display_backend_kms = runtime->boot_display_backend_kms;
     runtime->kms_async_pageflip = runtime->boot_kms_async_pageflip;
     runtime->kms_async_configured = 0;
+    runtime->kms_compositor_gles = runtime->boot_kms_compositor_gles;
+    runtime->kms_compositor_configured = 0;
     runtime->expect_desktop = runtime->boot_expect_desktop;
     runtime->expect_desktop_configured = 0;
     if (runtime->kms_async_pageflip)
         setenv("BLIT_KMS_ASYNC_PAGEFLIP", "1", 1);
     else
         unsetenv("BLIT_KMS_ASYNC_PAGEFLIP");
+    setenv("BLIT_KMS_COMPOSITOR", runtime->kms_compositor_gles ? "gles" : "cpu", 1);
     for (i = 0; i < BLIT_MAX_INPUT_DEVICES; ++i) {
         BlitInputDevice *device = &runtime->input_devices[i];
         if (!device->used)
@@ -21932,7 +21976,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
             }
             if (!settings_server_backend_valid(document)) {
                 send_problem(fd, 400, "Bad Request", "invalid_settings_server",
-                             "server.display_backend must be kms or sdl.");
+                             "server.display_backend must be kms or sdl, and server.kms_compositor cpu or gles.");
                 return;
             }
             if (!settings_server_layout(document, &requested_columns,
@@ -21990,6 +22034,8 @@ static void handle_request(int fd, BlitRuntime *runtime,
                 setenv("BLIT_KMS_ASYNC_PAGEFLIP", "1", 1);
             else
                 unsetenv("BLIT_KMS_ASYNC_PAGEFLIP");
+            setenv("BLIT_KMS_COMPOSITOR",
+                   runtime->kms_compositor_gles ? "gles" : "cpu", 1);
             cursor = json_key_cursor(document, "input_devices");
             while (cursor != NULL && *cursor != '\0' && *cursor != '{')
                 ++cursor;
@@ -30016,6 +30062,9 @@ int main(int argc, char **argv)
         strcmp(getenv("BLIT_DISPLAY_BACKEND"), "kms") == 0;
     runtime.display_backend_kms = runtime.boot_display_backend_kms;
     runtime.boot_kms_async_pageflip = runtime.kms_async_pageflip;
+    runtime.boot_kms_compositor_gles = getenv("BLIT_KMS_COMPOSITOR") != NULL &&
+        strcmp(getenv("BLIT_KMS_COMPOSITOR"), "gles") == 0;
+    runtime.kms_compositor_gles = runtime.boot_kms_compositor_gles;
     snprintf(runtime.boot_renderer_request, sizeof(runtime.boot_renderer_request),
              "%s", runtime.renderer_request);
     runtime.boot_pane_columns = 1;
@@ -30227,6 +30276,7 @@ int main(int argc, char **argv)
             setenv("BLIT_KMS_ASYNC_PAGEFLIP", "1", 1);
         else
             unsetenv("BLIT_KMS_ASYNC_PAGEFLIP");
+        setenv("BLIT_KMS_COMPOSITOR", runtime.kms_compositor_gles ? "gles" : "cpu", 1);
         if (!runtime.settings_enabled)
             fprintf(stderr, "blit: BLIT_SETTINGS=ignore; starting from the "
                             "defaults and leaving %s alone\n",

@@ -1,5 +1,34 @@
 # Verification status
 
+## 2026-10-24: 0.2.9 ADR 0181 step 2 -- GLES inside native KMS
+
+`src/blit_gles.c` loads Mesa's EGL, GLESv2 and GBM at runtime (no link
+dependency; `dlopen` is in glibc here) and draws one textured quad: GBM on
+the KMS device for scanout, Mesa's surfaceless platform for tests. The
+native backend draws each CPU-composed frame through it and flips the GBM
+buffer, holding each buffer until the flip that replaces it completes. Any
+EGL/GBM/context failure drops the output to CPU with the reason. Selected by
+`document.server.kms_compositor` (`cpu` default, `gles`), which is what makes
+it configurable on a host through the API; `/v1/diagnostics` reports each
+output's compositor, renderer, reason and GLES frame count.
+
+Evidence: `gles_frame_gate.c` reads a frame back byte for byte at 1024x768,
+1920x2160 and a padded pitch on llvmpipe (Mesa 22.3.6) and softpipe (Mesa
+26.2.3); swapping red/blue, flipping rows or adding linear filtering each
+fail it. `gles_compositor_gate.rb` checks the surfaceless output on GLES,
+GBM falling back to CPU with a reason under the DRM mock, and the setting
+saved and applied. `BLIT_GATE_BACKEND=gles` runs every gate with frames
+drawn by GLES and read back.
+
+`run-gates.sh all`: native 159 pass, 6 skip, 0 fail; SDL 159 pass, 6 skip,
+0 fail; gles 158 pass, 6 skip, 1 fail -- frame_rate_gate's 20 ms full-scene
+budget, 33.9 ms there, because the gles test mode renders with llvmpipe (GL
+on the CPU) and reads every frame back for screenshots. Neither happens on a
+host GPU; recorded, the budget is not relaxed.
+
+Not claimed: speed. Step 2 is the CPU frame plus an upload; it cannot be
+faster than native CPU. The GBM path is exercised only on a host.
+
 ## 2026-10-24: ADR 0181 step 1 -- gates run on the native compositor
 
 The DRM mock (`tools/tests/fixtures/drm_hotplug_mock.c`, LD_PRELOAD) runs the

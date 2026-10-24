@@ -22,8 +22,8 @@ module SdlTestProfile
   def self.font = ENV.fetch('BLIT_GATE_FONT', File.join(ROOT, 'assets/fonts/Blit-Hibr-Terminus16.psf'))
 
   def self.environment
-    display = if backend == 'native'
-                gate_display_env(backend: 'native')
+    display = if backend != 'sdl'
+                gate_display_env(backend: backend)
               else
                 {'SDL_VIDEODRIVER'=>driver, 'BLIT_RENDERER'=>renderer, 'SDL_RENDERER'=>renderer,
                  'BLIT_DISPLAY_BACKEND'=>'sdl'}
@@ -37,7 +37,7 @@ module SdlTestProfile
 
   def self.verify!(diagnostics)
     actual = diagnostics.fetch('render')
-    if backend == 'native'
+    if backend != 'sdl'
       return if diagnostics.dig('health', 'ready') &&
                 diagnostics.dig('health', 'backend') == 'drm-kms' && actual.fetch('direct_kms')
       raise "unexpected presentation path: #{actual.slice('direct_kms', 'video_driver', 'renderer')}"

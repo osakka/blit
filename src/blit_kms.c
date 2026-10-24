@@ -1,6 +1,8 @@
 #define _GNU_SOURCE
 #include "blit_kms.h"
 #include "blit_font.h"
+/* ADR 0181: the GLES compositor is part of the native backend's unit. */
+#include "blit_gles.c"
 #include "blit_raster.h"
 #include "blit_damage.h"
 #include "blit_ink.h"
@@ -47,6 +49,13 @@ typedef struct {
 
 typedef struct {
     BlitKmsDisplayInfo info;
+    /* ADR 0181 GLES compositor. A GBM buffer is held from submission until
+       the flip that replaces it completes: next is drawn, pending is
+       flipping, shown is on the panel. */
+    BlitGlesTarget *gles_target;
+    BlitKms *owner;
+    void *gles_next_bo, *gles_pending_bo, *gles_shown_bo;
+    uint32_t gles_next_fb, gles_pending_fb, gles_shown_fb;
     unsigned long long generation;
     int allocated;
     uint32_t connector;
@@ -157,6 +166,9 @@ struct BlitKms {
     unsigned long screenshot_frame;
     unsigned long screenshot_after;
     int screenshot_written;
+    BlitGles *gles;
+    int gles_requested;
+    char gles_error[160];
 };
 
 static KmsOutput *kms_output(const BlitKms *kms, int index)
@@ -183,6 +195,9 @@ static int kms_flip_timeout_ms(void)
     return timeout_ms;
 }
 
+static void kms_gles_release_bo(BlitKms *kms, KmsOutput *output,
+                               void **bo, uint32_t *fb);
+
 static void kms_flip_handler(int fd, unsigned int frame, unsigned int sec,
                              unsigned int usec, void *data)
 {
@@ -206,6 +221,14 @@ static void kms_flip_handler(int fd, unsigned int frame, unsigned int sec,
             }
         }
         ++output->info.flip_completions;
+        if (output->gles_pending_bo != NULL && output->owner != NULL) {
+            kms_gles_release_bo(output->owner, output, &output->gles_shown_bo,
+                                &output->gles_shown_fb);
+            output->gles_shown_bo = output->gles_pending_bo;
+            output->gles_shown_fb = output->gles_pending_fb;
+            output->gles_pending_bo = NULL;
+            output->gles_pending_fb = 0;
+        }
         output->flip_done = 1;
         output->flip_pending = 0;
         output->flip_started_us = 0;
@@ -1568,7 +1591,103 @@ static int all_outputs_have_content(const BlitKms *kms,
     return 1;
 }
 
+static void kms_gles_detach(BlitKms *kms, KmsOutput *output, const char *reason);
+static void kms_gles_attach(BlitKms *kms, KmsOutput *output);
 #include "blit_kms_hotplug.h"
+
+static void kms_gles_release_bo(BlitKms *kms, KmsOutput *output,
+                               void **bo, uint32_t *fb)
+{
+    if (*fb != 0) drmModeRmFB(kms->fd, *fb);
+    if (*bo != NULL) blit_gles_release(kms->gles, output->gles_target, *bo);
+    *bo = NULL;
+    *fb = 0;
+}
+
+/* Back to the CPU compositor for this output, keeping the reason. The CPU
+   frame is composed regardless, so the next flip simply uses it. */
+static void kms_gles_detach(BlitKms *kms, KmsOutput *output, const char *reason)
+{
+    if (output->gles_target != NULL) {
+        kms_gles_release_bo(kms, output, &output->gles_next_bo, &output->gles_next_fb);
+        kms_gles_release_bo(kms, output, &output->gles_pending_bo, &output->gles_pending_fb);
+        kms_gles_release_bo(kms, output, &output->gles_shown_bo, &output->gles_shown_fb);
+        blit_gles_target_close(kms->gles, output->gles_target);
+        output->gles_target = NULL;
+    }
+    snprintf(output->info.compositor, sizeof(output->info.compositor), "cpu");
+    if (reason != NULL) {
+        snprintf(output->info.compositor_reason,
+                 sizeof(output->info.compositor_reason), "%s", reason);
+        if (kms->gles_requested)
+            fprintf(stderr, "blit: GLES compositor off for connector=%u: %s\n",
+                    output->connector, reason);
+    }
+}
+
+static void kms_gles_attach(BlitKms *kms, KmsOutput *output)
+{
+    char error[160];
+    snprintf(output->info.compositor_requested,
+             sizeof(output->info.compositor_requested), "%s",
+             kms->gles_requested ? "gles" : "cpu");
+    snprintf(output->info.compositor, sizeof(output->info.compositor), "cpu");
+    output->info.compositor_reason[0] = '\0';
+    if (!kms->gles_requested) return;
+    if (kms->gles == NULL) {
+        kms_gles_detach(kms, output, kms->gles_error);
+        return;
+    }
+    error[0] = '\0';
+    output->gles_target = blit_gles_target_open(kms->gles, output->mode.hdisplay,
+                                                output->mode.vdisplay,
+                                                error, sizeof(error));
+    if (output->gles_target == NULL) {
+        kms_gles_detach(kms, output, error);
+        return;
+    }
+    snprintf(output->info.compositor, sizeof(output->info.compositor), "gles");
+    snprintf(output->info.compositor_renderer,
+             sizeof(output->info.compositor_renderer), "%s",
+             blit_gles_identity(kms->gles));
+}
+
+/* Step 2: the CPU frame in back is drawn by GLES. Surfaceless (tests) reads
+   the result back into back, so every screenshot shows GLES output; GBM
+   locks the drawn buffer for the flip. */
+static int kms_gles_frame(BlitKms *kms, KmsOutput *output)
+{
+    char error[160];
+    uint32_t handle = 0, pitch = 0;
+    if (output->gles_target == NULL) return 0;
+    error[0] = '\0';
+    if (blit_gles_draw_frame(kms->gles, output->gles_target, output->back.map,
+                             (int)output->back.pitch, error, sizeof(error)) < 0) {
+        kms_gles_detach(kms, output, error);
+        return -1;
+    }
+    if (getenv("BLIT_GLES_PLATFORM") != NULL &&
+        strcmp(getenv("BLIT_GLES_PLATFORM"), "surfaceless") == 0) {
+        if (blit_gles_read_frame(kms->gles, output->gles_target, output->back.map,
+                                 (int)output->back.pitch) < 0) {
+            kms_gles_detach(kms, output, "GLES readback failed");
+            return -1;
+        }
+        ++output->info.gles_frames;
+        return 0;
+    }
+    output->gles_next_bo = blit_gles_lock_front(kms->gles, output->gles_target,
+                                                &handle, &pitch);
+    if (output->gles_next_bo == NULL ||
+        drmModeAddFB(kms->fd, output->mode.hdisplay, output->mode.vdisplay, 24, 32,
+                     pitch, handle, &output->gles_next_fb) < 0) {
+        output->gles_next_fb = 0;
+        kms_gles_detach(kms, output, "GBM buffer cannot be scanned out");
+        return -1;
+    }
+    ++output->info.gles_frames;
+    return 0;
+}
 
 BlitKms *blit_kms_new(BlitFont *font, BlitFont *wide_font)
 {
@@ -1588,6 +1707,19 @@ int blit_kms_open(BlitKms *kms, char *error, size_t error_capacity)
     kms->fd = open(getenv("BLIT_DRM_DEVICE") ? getenv("BLIT_DRM_DEVICE") :
                    "/dev/dri/card0", O_RDWR | O_CLOEXEC | O_NONBLOCK);
     if (kms->fd < 0) { set_error(error, error_capacity, strerror(errno)); return -1; }
+    configured = getenv("BLIT_KMS_COMPOSITOR");
+    kms->gles_requested = configured != NULL && strcmp(configured, "gles") == 0;
+    if (kms->gles_requested) {
+        const char *platform = getenv("BLIT_GLES_PLATFORM");
+        kms->gles = platform != NULL && strcmp(platform, "surfaceless") == 0 ?
+            blit_gles_open_surfaceless(kms->gles_error, sizeof(kms->gles_error)) :
+            blit_gles_open_gbm(kms->fd, kms->gles_error, sizeof(kms->gles_error));
+        if (kms->gles != NULL)
+            fprintf(stderr, "blit: GLES compositor: %s\n", blit_gles_identity(kms->gles));
+        else
+            fprintf(stderr, "blit: GLES compositor unavailable, using CPU: %s\n",
+                    kms->gles_error);
+    }
     configured = getenv("BLIT_KMS_SCREENSHOT_DIR");
     if (configured != NULL) snprintf(kms->screenshot_dir, sizeof(kms->screenshot_dir), "%s", configured);
     configured = getenv("BLIT_KMS_SCREENSHOT_AFTER");
@@ -2083,6 +2215,7 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
             output->back.map = scanout_map;
             copy_scene_to_back(output);
         }
+        kms_gles_frame(kms, output);
         output->info.copy_ms = (double)(kms_now_us() - flip_started) / 1000.0;
         /* Capture the frame composed by this present call.  Capturing before
            the scene-buffer copy reads the previous scanout buffer and makes
@@ -2097,9 +2230,24 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
             long long submit_started = kms_now_us();
             if (modeset_frame) {
                 flip_result = drmModeSetCrtc(kms->fd, output->crtc,
-                                             output->back.fb, 0, 0,
+                                             output->gles_next_fb ?
+                                                 output->gles_next_fb :
+                                                 output->back.fb, 0, 0,
                                              &output->connector, 1,
                                              &output->mode);
+                if (flip_result < 0)
+                    kms_gles_release_bo(kms, output, &output->gles_next_bo,
+                                        &output->gles_next_fb);
+                else if (output->gles_next_bo != NULL) {
+                    kms_gles_release_bo(kms, output, &output->gles_shown_bo,
+                                        &output->gles_shown_fb);
+                    kms_gles_release_bo(kms, output, &output->gles_pending_bo,
+                                        &output->gles_pending_fb);
+                    output->gles_shown_bo = output->gles_next_bo;
+                    output->gles_shown_fb = output->gles_next_fb;
+                    output->gles_next_bo = NULL;
+                    output->gles_next_fb = 0;
+                }
                 output->info.submit_ms = (double)(kms_now_us() - submit_started) / 1000.0;
                 if (flip_result < 0) {
                     output->info.presentation_state =
@@ -2153,13 +2301,26 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                 continue;
             }
             output->flip_done = 0;
-            flip_result = drmModePageFlip(kms->fd, output->crtc,
-                                          output->back.fb, flags, cookie);
-            if (flip_result < 0 && (flags & DRM_MODE_PAGE_FLIP_ASYNC))
+            {
+                uint32_t scanout_fb = output->gles_next_fb ?
+                    output->gles_next_fb : output->back.fb;
                 flip_result = drmModePageFlip(kms->fd, output->crtc,
-                                              output->back.fb,
-                                              DRM_MODE_PAGE_FLIP_EVENT,
-                                              cookie);
+                                              scanout_fb, flags, cookie);
+                if (flip_result < 0 && (flags & DRM_MODE_PAGE_FLIP_ASYNC))
+                    flip_result = drmModePageFlip(kms->fd, output->crtc,
+                                                  scanout_fb,
+                                                  DRM_MODE_PAGE_FLIP_EVENT,
+                                                  cookie);
+            }
+            if (flip_result < 0)
+                kms_gles_release_bo(kms, output, &output->gles_next_bo,
+                                    &output->gles_next_fb);
+            else if (output->gles_next_bo != NULL) {
+                output->gles_pending_bo = output->gles_next_bo;
+                output->gles_pending_fb = output->gles_next_fb;
+                output->gles_next_bo = NULL;
+                output->gles_next_fb = 0;
+            }
             output->info.submit_ms = (double)(kms_now_us() - submit_started) / 1000.0;
             if (flip_result < 0) {
                 cookie->used = 0;
@@ -2314,11 +2475,13 @@ void blit_kms_close(BlitKms *kms)
             /* Close the DRM file before unmapping a failed teardown's buffers. */
             if (kms->fd >= 0) close(kms->fd);
             kms->fd = -1;
+            kms_gles_detach(kms, output, NULL);
             free_buffer(-1, &output->front); free_buffer(-1, &output->back);
             free(output->scene);
             if (output->old_crtc) drmModeFreeCrtc(output->old_crtc);
         }
     }
+    if (kms->gles != NULL) blit_gles_close(kms->gles);
     if (kms->fd >= 0) close(kms->fd);
     pthread_mutex_destroy(&kms->monitor_lock);
     free(kms);

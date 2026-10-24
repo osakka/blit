@@ -217,6 +217,20 @@ changing `/etc/blit/blit.env` does not erase an existing saved choice.
 variable `SDL_VIDEODRIVER=kmsdrm` selects SDL's console driver and does not
 select Blit's native backend. `server.renderer` applies only to SDL.
 
+`document.server.kms_compositor` (0.2.9, ADR 0181) chooses how the native
+backend composes a frame: `cpu` (the default, the reference) or `gles`. It is
+read when the native backend opens, so a change applies at the next start
+(`POST /v1/control/restart`); `effective.kms_compositor` is the saved choice
+and `BLIT_KMS_COMPOSITOR` the boot default. Any other value is a 400
+`invalid_settings_server`. In `/v1/diagnostics`, each
+`render.outputs[].compositor` says what an output actually uses: `active`
+(`cpu`, `gles`, or `sdl` on the SDL backend), `requested`, `reason` when GLES
+was asked for and not used (no EGL/GBM, no scanout config, a lost context),
+`renderer` (GL renderer and version) and `gles_frames`. A GLES failure at
+start or while running drops that output to CPU and keeps presenting. In
+0.2.9 GLES draws the CPU compositor's finished frame; later steps move the
+composition itself onto the GPU.
+
 Read `effective.display_backend_requested`, `display_backend_active`,
 `renderer_active` and `presentation_restart_required`, and runtime
 `render.direct_kms`, `video_driver`, `renderer`. Save via the revisioned
