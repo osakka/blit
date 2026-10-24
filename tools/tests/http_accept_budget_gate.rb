@@ -10,6 +10,8 @@ require 'timeout'
 require 'tmpdir'
 require_relative 'gate_port'
 require_relative 'sdl_test_profile'
+# SDL path only (preloads a simulated slow SDL present); retired at the GLES cutover.
+SdlTestProfile.sdl_only!
 
 port = gate_port(Integer(ENV.fetch('BLIT_HTTP_ACCEPT_BUDGET_PORT','19941')))
 base = URI("http://127.0.0.1:#{port}")

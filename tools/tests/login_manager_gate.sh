@@ -1,6 +1,8 @@
 #!/bin/sh
 set -eu
 . "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/gate_port.sh"
+. "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/gate_display.sh"
+gate_display_setup
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 binary=${BLIT_GATE_BINARY:-$root/build/blit/blit-server}
@@ -17,6 +19,7 @@ fi
 
 cleanup()
 {
+    gate_display_cleanup
     if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
         sudo -n kill -TERM "${pid}" 2>/dev/null || true
         wait "${pid}" 2>/dev/null || true
@@ -25,7 +28,7 @@ cleanup()
 }
 trap cleanup EXIT INT TERM
 
-sudo -n env SDL_VIDEODRIVER=dummy LD_LIBRARY_PATH="$root/build/sdl3-kms" \
+sudo -n env $GATE_DISPLAY_ENV LD_LIBRARY_PATH="$root/build/sdl3-kms" \
     BLIT_LOGIN_COMMAND=/bin/true BLIT_LOGIN_SCRIPT='' \
     BLIT_LOGIN_AUTOSTART=0 BLIT_AUTH_TOKEN="$token" \
     "$binary" "$port" >"$log" 2>&1 &

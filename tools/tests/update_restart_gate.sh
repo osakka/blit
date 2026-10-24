@@ -1,6 +1,8 @@
 #!/bin/sh
 set -eu
 . "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/gate_port.sh"
+. "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/gate_display.sh"
+gate_display_setup
 
 # Issue #63. Two mechanisms used to restart the service after a package
 # install and they raced: the privileged helper runs `systemctl restart`,
@@ -34,6 +36,7 @@ helper_pid=
 
 cleanup()
 {
+    gate_display_cleanup
     [ -n "$helper_pid" ] && { kill -TERM "$helper_pid" 2>/dev/null || true; }
     [ -n "$pid" ] && { kill -TERM "$pid" 2>/dev/null || true; }
     # The stub is a python child of a subshell on some shells, so name it by
@@ -97,7 +100,7 @@ test -S "$socket"
 start_server()
 {
     BLIT_UPDATE_TOKEN_FILE="$token_file" BLIT_UPDATE_DIRECTORY="$work" \
-        BLIT_UPDATE_SOCKET="$socket" SDL_VIDEODRIVER=dummy \
+        BLIT_UPDATE_SOCKET="$socket" env $GATE_DISPLAY_ENV \
         LD_LIBRARY_PATH="$root/build/sdl3-kms" \
         "$binary" "$port" >>"$log" 2>&1 &
     pid=$!

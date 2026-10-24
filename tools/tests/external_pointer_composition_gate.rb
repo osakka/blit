@@ -18,6 +18,8 @@ require 'timeout'
 require 'uri'
 require_relative 'gate_port'
 require_relative 'sdl_test_profile'
+# SDL path only (asserts the SDL pointer cache); retired at the GLES cutover.
+SdlTestProfile.sdl_only!
 
 port = gate_port(Integer(ENV.fetch('BLIT_EXTERNAL_POINTER_PORT', '19252')))
 base = URI("http://127.0.0.1:#{port}")

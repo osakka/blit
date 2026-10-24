@@ -1,6 +1,8 @@
 #!/bin/sh
 set -eu
 . "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/gate_port.sh"
+. "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/gate_display.sh"
+gate_display_setup
 
 binary=${BLIT_GATE_BINARY:-build/blit/blit-server}
 port=${BLIT_UPDATE_RESET_PORT:-19203}
@@ -12,6 +14,7 @@ pid=
 
 cleanup()
 {
+    gate_display_cleanup
     if [ -n "${pid}" ]; then
         kill -TERM "${pid}" 2>/dev/null || true
         wait "${pid}" 2>/dev/null || true
@@ -23,7 +26,7 @@ trap cleanup EXIT INT TERM
 printf '%s\n' test-token >"$token_file"
 printf '%s\n' not-a-debian-package >"$bad_package"
 BLIT_UPDATE_TOKEN_FILE="$token_file" BLIT_UPDATE_DIRECTORY="${TMPDIR:-/tmp}" \
-    SDL_VIDEODRIVER=dummy LD_LIBRARY_PATH=build/sdl3-kms \
+    env $GATE_DISPLAY_ENV LD_LIBRARY_PATH=build/sdl3-kms \
     "$binary" "$port" >"$log" 2>&1 &
 pid=$!
 ready=0

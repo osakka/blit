@@ -3,6 +3,8 @@
 # frame which changes nothing costs nothing. See adapter_coalesce_gate.c.
 set -eu
 . "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/gate_port.sh"
+. "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/gate_display.sh"
+gate_display_setup
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 BINARY=${BLIT_GATE_BINARY:-$ROOT/build/blit/blit-server}
@@ -14,6 +16,7 @@ LOG=$(mktemp /tmp/blit-coalesce-gate.XXXXXX)
 SESSION=$(mktemp /tmp/blit-coalesce-session.XXXXXX)
 server_pid=
 cleanup() {
+    gate_display_cleanup
     if [ -n "$server_pid" ]; then kill "$server_pid" 2>/dev/null || true; fi
     rm -f "$LOG" "$SESSION"
 }
@@ -42,7 +45,7 @@ gcc -std=gnu99 -O1 -Wall -Wextra -Wno-format-truncation \
     -I"$hibr_root/include" -I"$hibr_root/mods" -I"$ROOT/hibr" \
     -o "$PROBE" "$ROOT/tools/tests/adapter_coalesce_gate.c"
 
-SDL_VIDEODRIVER=dummy LD_LIBRARY_PATH="$ROOT/build/sdl3-kms" \
+env $GATE_DISPLAY_ENV LD_LIBRARY_PATH="$ROOT/build/sdl3-kms" \
     BLIT_PSF_FONT="$FONT" "$BINARY" "$PORT" >"$LOG" 2>&1 &
 server_pid=$!
 ready=0

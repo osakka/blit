@@ -5,6 +5,7 @@ require 'net/http'
 require 'timeout'
 require_relative 'gate_port'
 require_relative 'sdl_test_profile'
+require_relative 'gate_bmp'
 
 port = gate_port(Integer(ENV.fetch('BLIT_FONT_API_PORT','18995')))
 env = SdlTestProfile.environment
@@ -34,14 +35,7 @@ def screenshot(base)
 end
 
 def bmp_pixel(bmp, x, y)
-  width = bmp.byteslice(18, 4).unpack1('l<')
-  height = bmp.byteslice(22, 4).unpack1('l<')
-  bits = bmp.byteslice(28, 2).unpack1('v')
-  raise 'unexpected font gate screenshot' unless bits == 24
-  stride = ((width * 3 + 3) / 4) * 4
-  offset = 54 + (height - 1 - y) * stride + x * 3
-  bytes = bmp.byteslice(offset, 3).bytes
-  [bytes[2], bytes[1], bytes[0]]
+  gate_pixel(bmp, x, y)
 end
 
 def solid_rect?(bmp, x, y, width, height, colour)
