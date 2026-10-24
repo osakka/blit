@@ -511,12 +511,20 @@ static uint32_t view_cell_background(const BlitKmsSurfaceView *view,
 }
 
 /* The horizontal offset of one glyph row under a slant: `lean` at the top row,
-   -`lean` at the bottom, so the glyph stays centred in its cell. */
+   -`lean` at the bottom, so the glyph stays centred in its cell. Rounded to
+   the nearest pixel: truncating toward zero moved only the first and last
+   rows at a lean of 1, where most glyphs have no ink, so italic drew as
+   plain in 16-pixel cells. */
 static int glyph_row_lean(int lean, int row, int rows)
 {
+    int numerator, denominator;
     if (lean == 0 || rows < 2)
         return 0;
-    return lean * (rows - 1 - 2 * row) / (rows - 1);
+    numerator = lean * (rows - 1 - 2 * row);
+    denominator = rows - 1;
+    return numerator >= 0 ?
+        (2 * numerator + denominator) / (2 * denominator) :
+        -((-2 * numerator + denominator) / (2 * denominator));
 }
 
 /* `trim` drops that many destination pixels from the right edge, and the
