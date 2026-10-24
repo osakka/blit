@@ -276,6 +276,50 @@ and both renderers free of orphaned wide-glyph halves.
 Insert-line and delete-line operations preserve their scroll-region semantics
 and reset the cursor column to zero, matching the Hibr terminal contract.
 
+## Pointer shapes, OSC 22 (issue #138)
+
+Blit follows kitty's pointer-shape protocol
+(<https://sw.kovidgoyal.net/kitty/pointer-shapes/>): `OSC 22 ; name ST` or
+`=name` sets the shape in force (replacing the top of the stack), an empty
+name resets it to the display's own pointer, `>a,b` pushes, `<` pops, and
+`?a,b` is answered with `OSC 22 ; 1,0,... ST`, one digit per name. The answer
+is written while the request is parsed, like DA1's, so a program that asks
+before its device-attributes request reads the answer first. `__current__`
+answers the name in force or `0`; `__default__` and `__grabbed__` answer
+`default`. BEL and ST both terminate.
+
+`none` hides the pointer: Blit draws its own pointer, so unlike a terminal on
+a desktop it can honour that, for a program that draws its own (hibr's Boxer).
+Names Blit draws, with kitty's CSS names and the X11 names it accepts:
+
+| art | names |
+|---|---|
+| the display's own (API) | `default`, `left_ptr`, `top_left_arrow`, `arrow` |
+| hidden | `none` |
+| hand | `pointer`, `grab`, `grabbing`, `hand`, `hand1`, `hand2`, `pointing_hand`, `openhand`, `closedhand` |
+| precision | `crosshair`, `cell`, `cross`, `tcross`, `plus`, `precision` |
+| I-beam | `text`, `xterm`, `ibeam` |
+| busy | `wait`, `progress`, `watch`, `clock`, `left_ptr_watch` |
+| move | `move`, `all-scroll`, `fleur`, `size_all` |
+| horizontal resize | `e-resize`, `w-resize`, `ew-resize`, `col-resize`, `sb_h_double_arrow`, `h_double_arrow`, `left_side`, `right_side`, `size_hor`, `split_h` |
+| vertical resize | `n-resize`, `s-resize`, `ns-resize`, `row-resize`, `sb_v_double_arrow`, `v_double_arrow`, `top_side`, `bottom_side`, `size_ver`, `split_v` |
+| diagonal resize | `nw-resize`, `se-resize`, `nwse-resize`, `top_left_corner`, `bottom_right_corner`, `size_fdiag` |
+| anti-diagonal resize | `ne-resize`, `sw-resize`, `nesw-resize`, `top_right_corner`, `bottom_left_corner`, `size_bdiag` |
+| not allowed | `not-allowed`, `no-drop`, `forbidden`, `crossed_circle` |
+
+Any other name (`help`, `zoom-in`, `vertical-text`, ...) answers `0` and,
+when set, shows the display's own pointer -- never nothing.
+
+The request belongs to the session, and is honoured only while the pointer is
+over that session's surface: a hidden pointer over one pane is drawn over its
+neighbour. It is given back without the program's help on RIS, a soft reset,
+the program exiting, and a new session in the pane. Shape is decided once a
+frame and fed to both the SDL and direct KMS presenters; palette, size and
+shadow are always the settings API's. The art for every shape comes from the
+one vector source in `src/blit_pointer_art.h`. `pointer_shape_gate.rb` checks
+the query, the hide (one pane only), the exact I-beam pixels, push/pop, RIS
+and exit.
+
 ## Conformance gate
 
 Run `tools/tests/terminal_conformance.rb` against a TCC-built server with the

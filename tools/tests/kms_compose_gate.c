@@ -654,6 +654,11 @@ static void pointer_art_present_gate(void)
             config.shape=(step/8)%3;config.palette=(step/8)%4;
             config.size=step%16 ? 64 : 24;config.shadow=step%16!=0;
             blit_pointer_build(&art,config);blit_kms_set_pointer_art(&kms,&art);
+        } else if (step%8==4) {
+            /* OSC 22 swaps the shape at the same size: incremental, no
+               full repaint, and no pixel of the old shape may survive. */
+            config.shape=3+(step/8)%(BLIT_POINTER_SHAPE_COUNT-3);
+            blit_pointer_build(&art,config);blit_kms_set_pointer_art(&kms,&art);
         }
         target->flip_pending=0;
         blit_kms_present(&kms,&view,1,px,py,visible,1,NULL,0,0,0,0,0,0,&submitted,&deferred);
@@ -668,7 +673,7 @@ static void pointer_art_present_gate(void)
         }
     }
     free(target->scene);
-    puts("KMS_POINTER_ART_PASS frames=48 every_pixel=exact size_changes=clean shadow=clean edges=clipped hotspot=exact");
+    puts("KMS_POINTER_ART_PASS frames=48 every_pixel=exact size_changes=clean same_size_swaps=clean shadow=clean edges=clipped hotspot=exact");
 }
 
 int main(void)

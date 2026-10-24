@@ -19,7 +19,8 @@ int main(int argc, char **argv)
         fwrite(&art.hotspot_x,sizeof(int),1,file);fwrite(&art.hotspot_y,sizeof(int),1,file);
         fwrite(art.rgba,4,art.width*art.height,file);fclose(file);free(sheet);return 0;
     }
-    for (shape = 0; shape < 3; ++shape) for (palette = 0; palette < 4; ++palette)
+    for (shape = 0; shape < BLIT_POINTER_SHAPE_COUNT; ++shape)
+        for (palette = 0; palette < 4; ++palette)
         for (size = 24; size <= 64; ++size) {
             config.shape = shape; config.palette = palette; config.size = size;
             blit_pointer_build(&art, config);
@@ -55,6 +56,6 @@ int main(int argc, char **argv)
         fprintf(file,"P6\n640 320\n255\n");fwrite(sheet,1,640*320*3,file);fclose(file);
     }
     free(sheet);
-    puts("POINTER_ART_PASS shapes=3 palettes=4 sizes=41 antialias=present hotspot=bounded alpha=exact preview=source-derived");
+    printf("POINTER_ART_PASS shapes=%d palettes=4 sizes=41 antialias=present hotspot=bounded alpha=exact preview=source-derived\n", BLIT_POINTER_SHAPE_COUNT);
     return 0;
 }

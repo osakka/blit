@@ -1,5 +1,34 @@
 # Verification status
 
+## 2026-10-24: 0.2.8 pointer shapes and hiding the pointer, OSC 22 (#138, hibr #373)
+
+Hibr's Boxer draws the game's own cursor and Blit drew its pointer on top, so
+a game showed two arrows. Blit now implements kitty's OSC 22: set, reset,
+push, pop and query, answered in the same pass as DA1, plus `none`, which
+hides Blit's pointer. Eight new shapes come from the one vector source --
+I-beam, busy, move, the four resizes and not-allowed -- with kitty's CSS names
+and the X11 aliases mapped onto them; a name with no art answers `0` and shows
+the display's own pointer. A request is honoured only while the pointer is
+over its session's surface, and is given back on RIS, a soft reset and the
+program exiting. Palette, size and shadow stay the settings API's;
+`effective.pointer` is unchanged and `effective.pointer_shown` reports what is
+drawn. Direct KMS now repaints fully only when an art change changes the
+pointer's size; a same-size swap is incremental.
+
+Evidence, local build on the dummy SDL backend:
+- `pointer_shape_gate.rb` PASS: `query=1,1,0,0 hidden=pane_a_only
+  text=exact push_pop=wait ris=restored exit=restored`, plus the pane edge
+  and the API state. Against the 0.2.7 binary it fails at the first step:
+  the query is never answered.
+- `pointer_art_gate` covers all 11 shapes (antialias, hotspot, alpha);
+  `kms_compose_gate` adds same-size shape swaps, every pixel exact.
+- `run-gates.sh all` on the 0.2.8 binary: 158 pass, 6 skip (QEMU, package
+  and live-host gates), 0 fail. `hibr_join_frame_barrier_gate` failed once in
+  an earlier run; it is flaky on 0.2.7 too (1 of 2 runs failed there).
+
+Not yet: published, run on hardware, or checked from hibr (`hold pointers`
+should say `yes` for a Blit display; Boxer should show one arrow).
+
 ## 2026-10-23: 0.2.7 a login on a Blit display is a local session (hibr #367)
 
 Hibr's login screen runs on Blit's pty, which tells PAM no seat and no VT, so

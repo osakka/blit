@@ -148,6 +148,8 @@ struct BlitKms {
     BlitFont *font;
     const BlitPointerArt *pointer_art;
     unsigned long long pointer_art_revision;
+    int pointer_art_width;
+    int pointer_art_height;
     /* ADR 0062: the 16x16 font for wide cells. */
     BlitFont *wide_font;
     int cell_width_override;
@@ -1757,12 +1759,19 @@ void blit_kms_set_pointer_art(BlitKms *kms, const BlitPointerArt *art)
     kms->pointer_art = art;
     if (kms->pointer_art_revision == art->revision) return;
     kms->pointer_art_revision = art->revision;
-    /* Appearance changes can shrink the footprint; invalidate once so no
-       pixels of the previous, larger shape survive. Motion is incremental. */
-    for (i = 0; i < kms->output_count; ++i) {
-        kms_output(kms,i)->initialized = 0;
-        kms_output(kms,i)->pointer_state_valid = 0;
+    /* A footprint that changes size can leave pixels of the previous shape
+       outside the new one, so that repaints everything. A shape swap at the
+       same size -- every OSC 22 change -- is covered by the saved
+       background under the old stamp, and stays incremental. */
+    if (kms->pointer_art_width != art->width ||
+        kms->pointer_art_height != art->height) {
+        kms->pointer_art_width = art->width;
+        kms->pointer_art_height = art->height;
+        for (i = 0; i < kms->output_count; ++i)
+            kms_output(kms,i)->initialized = 0;
     }
+    for (i = 0; i < kms->output_count; ++i)
+        kms_output(kms,i)->pointer_state_valid = 0;
 }
 
 int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_count,

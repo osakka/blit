@@ -394,6 +394,10 @@ is false while Blit is still repairing the desktop's startup or attach
 layout by nudging its terminal size, and true once that is done. A client
 that drives the desktop can wait for it before clicking.
 
+A session's `pointer_shape` is its OSC 22 request: `requested` is the shape
+name on top of its stack as the program sent it (or `null`), and `depth` the
+stack's size. It is cleared by RIS, a soft reset, and the program exiting.
+
 A session's `mouse_reporting` says what its program asked for: `mode`
 (1000, 1002, 1003 or 0), `sgr` for the SGR encoding (1006) and `pixels`
 for SGR-Pixels (1016), where a report carries the pointer's position in
@@ -1283,6 +1287,15 @@ pointer hit-testing. The same cached vector source drives SDL and direct KMS;
 size is independent of font scale. Motion does not rerasterize the artwork.
 SDL rotates the shape with its output; direct KMS's existing rotation
 capability/refusal contract is unchanged.
+
+A program may ask for another shape by OSC 22 (below); the settings stay the
+display's own pointer and are never changed by it. `effective.pointer_shown`
+reports what is drawn now: `{"shape":"text","hidden":false}`, where `shape`
+is one of the API shapes or a program shape (`text`, `wait`, `move`,
+`ew-resize`, `ns-resize`, `nwse-resize`, `nesw-resize`, `not-allowed`) and
+`hidden` is true while the program under the pointer asked for `none`.
+Program shapes take this palette, size and shadow; the API cannot select them
+as the display's own pointer.
 
 Catalogue `control-panel/blit`0.1.5 registers **Blit Mouse** alongside Blit.
 Appearance and stable-ID device controls share its staged settings draft and

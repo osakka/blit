@@ -94,7 +94,8 @@ static void settings_apply_pointer(BlitRuntime *runtime)
     if (runtime->pointer_art.revision &&
         !memcmp(&config,&runtime->pointer_art.config,sizeof(config))) return;
     blit_pointer_build(&runtime->pointer_art, config);
-    if (runtime->kms) blit_kms_set_pointer_art(runtime->kms, &runtime->pointer_art);
+    /* update_pointer_shape derives the drawn art from this and hands it to
+       KMS; the API art itself is never drawn directly. */
     for (i=0; i<runtime->output_count; ++i) runtime->outputs[i].initialized=0;
     runtime->pointer_dirty_outputs = all_output_mask(runtime);
     runtime->pointer_dirty = runtime->pointer_dirty_outputs != 0;

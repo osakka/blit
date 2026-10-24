@@ -94,6 +94,7 @@ extern char **environ;
    bounded parser buffer larger than the protocol chunk plus its header; this
    is terminal-stream storage, not an image allocation. */
 #define BLIT_TERMINAL_STRING_CAPACITY 16384
+#define BLIT_POINTER_STACK_DEPTH 16
 /* Preserve identity62; extensions4=sixel,22=ANSI colour,28=rectangular
    editing. Feature28 describes cell editing, not retained image movement. */
 #define BLIT_DA1_REPLY "\033[?62;4;22;28c"
@@ -979,6 +980,11 @@ typedef struct {
        pixels of the surface rather than in cells. It implies the SGR form
        whether or not 1006 is also set, as in xterm. */
     int terminal_mouse_pixels;
+    /* OSC 22 (#138): the pointer shapes the program asked for, innermost
+       last. Names are stored as sent; the art they resolve to is decided
+       when the pointer is drawn over this session. */
+    char terminal_pointer_stack[BLIT_POINTER_STACK_DEPTH][32];
+    int terminal_pointer_depth;
     int terminal_synchronized;
     int terminal_frame_batch;
     /* Pixel geometry advertised to child programs and used by Kitty/Sixel.
@@ -1089,7 +1095,12 @@ typedef struct {
     /* Exactly one size policy: positive pixels imply scale_tenths == 0. */
     int font_size_px;
     int pointer_valid;
+    /* The appearance the settings API chose. What is drawn is
+       pointer_shown_art: the same palette, size and shadow, with the shape a
+       program under the pointer asked for by OSC 22 (#138). */
     BlitPointerArt pointer_art;
+    BlitPointerArt pointer_shown_art;
+    int pointer_hidden;
     int pointer_output;
     float pointer_x;
     float pointer_y;
@@ -1737,7 +1748,7 @@ static void overlays_json(const BlitRuntime *runtime, char *body,
 static void render_pointer(BlitRuntime *runtime, int output_index)
 {
     BlitOutput *output = &runtime->outputs[output_index];
-    const BlitPointerArt *art = &runtime->pointer_art;
+    const BlitPointerArt *art = &runtime->pointer_shown_art;
     SDL_Vertex vertices[4];
     static const int indices[6] = {0,1,2,0,2,3};
     static const float corners[4][2] = {{0,0},{1,0},{1,1},{0,1}};
@@ -1745,7 +1756,8 @@ static void render_pointer(BlitRuntime *runtime, int output_index)
     int i;
     float x, y;
 
-    if (!runtime->pointer_valid || runtime->pointer_output != output_index)
+    if (!runtime->pointer_valid || runtime->pointer_hidden ||
+        runtime->pointer_output != output_index || !art->revision)
         return;
     display_index = display_index_for_output(runtime, output_index);
     if (display_index < 0)
@@ -2095,6 +2107,8 @@ static int render_wait_ms(const BlitRuntime *runtime, uint64_t now)
     return wait_ms;
 }
 
+static void update_pointer_shape(BlitRuntime *runtime);
+
 static int render_work_remains(const BlitRuntime *runtime)
 {
     int i;
@@ -2129,6 +2143,7 @@ static void render_current_surfaces(BlitRuntime *runtime,
     BlitFramePlan plan;
     int i;
 
+    update_pointer_shape(runtime);
     memset(&plan, 0, sizeof(plan));
     plan.revision = runtime->frame_revision;
     for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
@@ -9418,6 +9433,99 @@ static int terminal_colour_value(const char *value, char *out, size_t capacity)
     return 1;
 }
 
+static int terminal_pointer_name_valid(const char *name, size_t length)
+{
+    size_t i;
+    if (length == 0 || length >= 32) return 0;
+    for (i = 0; i < length; ++i)
+        if (!((name[i] >= 'a' && name[i] <= 'z') ||
+              (name[i] >= '0' && name[i] <= '9') ||
+              name[i] == '_' || name[i] == '-'))
+            return 0;
+    return 1;
+}
+
+static void terminal_pointer_push(BlitSession *session, const char *name,
+                                  size_t length)
+{
+    if (session->terminal_pointer_depth == BLIT_POINTER_STACK_DEPTH) {
+        memmove(session->terminal_pointer_stack[0],
+                session->terminal_pointer_stack[1],
+                sizeof(session->terminal_pointer_stack[0]) *
+                    (BLIT_POINTER_STACK_DEPTH - 1));
+        --session->terminal_pointer_depth;
+    }
+    memcpy(session->terminal_pointer_stack[session->terminal_pointer_depth],
+           name, length);
+    session->terminal_pointer_stack[session->terminal_pointer_depth][length] = '\0';
+    ++session->terminal_pointer_depth;
+}
+
+/* OSC 22, kitty's pointer shapes: `name` or `=name` sets, empty resets,
+   `>a,b` pushes, `<` pops, `?a,b` asks. The answer is written here, in the
+   same pass as DA1's, so a program that asks before DA reads it first. */
+static void terminal_apply_pointer_shape(BlitSession *session,
+                                         const char *payload)
+{
+    char operation = payload[0];
+    const char *cursor;
+    if (operation == '\0') {
+        session->terminal_pointer_depth = 0;
+        return;
+    }
+    if (operation == '<') {
+        if (session->terminal_pointer_depth > 0)
+            --session->terminal_pointer_depth;
+        return;
+    }
+    cursor = (operation == '=' || operation == '>' || operation == '?') ?
+        payload + 1 : payload;
+    if (operation == '?') {
+        char reply[512];
+        size_t used = (size_t)snprintf(reply, sizeof(reply), "\033]22;");
+        int first = 1;
+        while (*cursor != '\0') {
+            const char *end = strchr(cursor, ',');
+            size_t length = end != NULL ? (size_t)(end - cursor) : strlen(cursor);
+            char name[32];
+            const char *answer = "0";
+            if (terminal_pointer_name_valid(cursor, length)) {
+                memcpy(name, cursor, length);
+                name[length] = '\0';
+                if (!strcmp(name, "__current__"))
+                    answer = session->terminal_pointer_depth > 0 ?
+                        session->terminal_pointer_stack[
+                            session->terminal_pointer_depth - 1] : "0";
+                else if (!strcmp(name, "__default__") ||
+                         !strcmp(name, "__grabbed__"))
+                    answer = "default";
+                else if (blit_pointer_name_shape(name) != -1)
+                    answer = "1";
+            }
+            if (used + strlen(answer) + 4 < sizeof(reply))
+                used += (size_t)snprintf(reply + used, sizeof(reply) - used,
+                                         "%s%s", first ? "" : ",", answer);
+            first = 0;
+            if (end == NULL) break;
+            cursor = end + 1;
+        }
+        snprintf(reply + used, sizeof(reply) - used, "\033\\");
+        terminal_write_reply(session, reply);
+        return;
+    }
+    while (*cursor != '\0') {
+        const char *end = strchr(cursor, ',');
+        size_t length = end != NULL ? (size_t)(end - cursor) : strlen(cursor);
+        if (terminal_pointer_name_valid(cursor, length)) {
+            if (operation != '>' && session->terminal_pointer_depth > 0)
+                --session->terminal_pointer_depth;
+            terminal_pointer_push(session, cursor, length);
+        }
+        if (end == NULL) break;
+        cursor = end + 1;
+    }
+}
+
 static void terminal_apply_osc(BlitSession *session, BlitSurface *surface)
 {
     char *separator;
@@ -9435,6 +9543,8 @@ static void terminal_apply_osc(BlitSession *session, BlitSurface *surface)
     if (command == 0 || command == 1 || command == 2) {
         snprintf(session->terminal_title, sizeof(session->terminal_title),
                  "%s", payload);
+    } else if (command == 22) {
+        terminal_apply_pointer_shape(session, payload);
     } else if ((command == 10 || command == 11) &&
                strcmp(payload, "?") == 0) {
         char colour[32];
@@ -12231,6 +12341,7 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         session->terminal_mouse_mode = 0;
         session->terminal_mouse_sgr = 0;
         session->terminal_mouse_pixels = 0;
+        session->terminal_pointer_depth = 0;
         session->terminal_synchronized = 0;
         terminal_sixel_reset_palette(session);
         session->terminal_sixel_display_mode = 0;
@@ -13036,6 +13147,7 @@ static int terminal_consume_chunk(BlitRuntime *runtime, BlitSession *session,
                 session->terminal_mouse_mode = 0;
                 session->terminal_mouse_sgr = 0;
                 session->terminal_mouse_pixels = 0;
+                session->terminal_pointer_depth = 0;
                 session->terminal_synchronized = 0;
                 session->terminal_alternate_mode = 0;
                 terminal_scrollback_release(surface);
@@ -13829,6 +13941,7 @@ static void refresh_session_state(BlitRuntime *runtime, BlitSession *session)
                 snprintf(session->state, sizeof(session->state), "failed");
         }
         session->child_exited = 1;
+        session->terminal_pointer_depth = 0;
         /* Keep the PTY readable after waitpid reaps the child.  The child may
            have emitted final terminal bytes (including an OSC title or a
            protocol reply) immediately before exit.  Do not retire the
@@ -14431,6 +14544,16 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
         session->terminal_mouse_mode,
         session->terminal_mouse_sgr ? "true" : "false",
         session->terminal_mouse_pixels ? "true" : "false");
+    /* OSC 22 names are [a-z0-9_-] only, so they need no JSON escaping. */
+    used += (size_t)snprintf(
+        body + used, capacity - used,
+        ",\"pointer_shape\":{\"requested\":%s%s%s,\"depth\":%d}",
+        session->terminal_pointer_depth > 0 ? "\"" : "",
+        session->terminal_pointer_depth > 0 ?
+            session->terminal_pointer_stack[session->terminal_pointer_depth - 1] :
+            "null",
+        session->terminal_pointer_depth > 0 ? "\"" : "",
+        session->terminal_pointer_depth);
     used += (size_t)snprintf(body + used, capacity - used,
                              ",\"graphics\":[");
     {
@@ -20387,7 +20510,8 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
                  "\"kms_async_pageflip\":%s,\"expect_desktop\":%s,"
                  "\"login\":%s,\"login_restart_required\":%s,"
                  "\"pointer\":{\"shape\":\"%s\",\"palette\":\"%s\","
-                 "\"size_px\":%d,\"shadow\":%s}}}",
+                 "\"size_px\":%d,\"shadow\":%s},"
+                 "\"pointer_shown\":{\"shape\":\"%s\",\"hidden\":%s}}}",
                  runtime->settings_revision, runtime->settings_path,
                  runtime->settings_enabled && !blit_trial_id_valid(getenv("BLIT_PRESENTATION_TRIAL_ID")) ? "true" : "false",
                  !runtime->settings_enabled ? "disabled" :
@@ -20429,7 +20553,11 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
                  blit_pointer_shapes[runtime->pointer_art.config.shape],
                  blit_pointer_palettes[runtime->pointer_art.config.palette],
                  runtime->pointer_art.config.size,
-                 runtime->pointer_art.config.shadow ? "true" : "false");
+                 runtime->pointer_art.config.shadow ? "true" : "false",
+                 blit_pointer_shapes[runtime->pointer_shown_art.revision ?
+                     runtime->pointer_shown_art.config.shape :
+                     runtime->pointer_art.config.shape],
+                 runtime->pointer_hidden ? "true" : "false");
 }
 
 /* A read-only, point-in-event-loop-turn state dump for operators and
@@ -22867,7 +22995,7 @@ static void discover_displays(BlitRuntime *runtime)
             atexit(blit_vt_close);
         }
         runtime->kms = blit_kms_new(&runtime->font, &runtime->wide_font);
-        blit_kms_set_pointer_art(runtime->kms,&runtime->pointer_art);
+        blit_kms_set_pointer_art(runtime->kms,&runtime->pointer_shown_art);
         if (runtime->kms == NULL || blit_kms_open(runtime->kms, error,
                                                    sizeof(error)) < 0) {
             blit_vt_close();
@@ -23454,7 +23582,7 @@ static int activate_direct_kms_fallback(BlitRuntime *runtime)
     destroy_outputs(runtime);
     error[0] = '\0';
     runtime->kms = blit_kms_new(&runtime->font, &runtime->wide_font);
-    blit_kms_set_pointer_art(runtime->kms,&runtime->pointer_art);
+    blit_kms_set_pointer_art(runtime->kms,&runtime->pointer_shown_art);
     if (runtime->kms == NULL || blit_kms_open(runtime->kms, error,
                                                sizeof(error)) < 0) {
         if (runtime->kms != NULL) {
@@ -26084,7 +26212,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *input_plan
         kms_present_started = monotonic_us();
         if (blit_kms_present(runtime->kms, views, view_count,
                              runtime->pointer_x, runtime->pointer_y,
-                             runtime->pointer_valid, output_mask,
+                             runtime->pointer_valid && !runtime->pointer_hidden,
+                             output_mask,
                              kms_overlays, kms_overlay_count,
                              visual_revision,
                              runtime->effect.enabled &&
@@ -27021,6 +27150,49 @@ static BlitSession *mouse_target_px(BlitRuntime *runtime, int output_index,
         }
     }
     return NULL;
+}
+
+
+/* OSC 22 (#138). The pointer takes the shape asked for by the program under
+   it, and only there: another surface, or no surface, shows the display's
+   own. An exited program's request is not honoured even if its last bytes
+   are still being drained. Palette, size and shadow stay the API's. */
+static void update_pointer_shape(BlitRuntime *runtime)
+{
+    BlitPointerConfig config = runtime->pointer_art.config;
+    int shape = BLIT_POINTER_SHAPE_DEFAULT;
+    int hidden;
+
+    if (!runtime->pointer_art.revision)
+        return;
+    if (runtime->pointer_valid && runtime->pointer_output >= 0) {
+        int column, row;
+        BlitSession *session = mouse_target_px(runtime,
+            runtime->pointer_output, runtime->pointer_x, runtime->pointer_y,
+            &column, &row, NULL, NULL);
+        if (session != NULL && session->terminal_pointer_depth > 0 &&
+            !session->child_exited && session->pty_fd >= 0) {
+            shape = blit_pointer_name_shape(session->terminal_pointer_stack[
+                session->terminal_pointer_depth - 1]);
+            if (shape == -1)
+                shape = BLIT_POINTER_SHAPE_DEFAULT;
+        }
+    }
+    hidden = shape == BLIT_POINTER_SHAPE_HIDDEN;
+    if (shape >= 0)
+        config.shape = shape;
+    if (!runtime->pointer_shown_art.revision ||
+        memcmp(&config, &runtime->pointer_shown_art.config, sizeof(config))) {
+        blit_pointer_build(&runtime->pointer_shown_art, config);
+        if (runtime->kms)
+            blit_kms_set_pointer_art(runtime->kms, &runtime->pointer_shown_art);
+    } else if (hidden == runtime->pointer_hidden) {
+        return;
+    }
+    runtime->pointer_hidden = hidden;
+    mark_pointer_dirty_outputs(runtime, runtime->pointer_output,
+                               runtime->pointer_output);
+    runtime->render_pending = 1;
 }
 
 static BlitSession *mouse_target(BlitRuntime *runtime, int output_index,
@@ -30582,6 +30754,7 @@ int main(int argc, char **argv)
                              "deadline_expired_bounded_release");
             runtime.hibr_frame_barrier_until_us = 0;
         }
+        update_pointer_shape(&runtime);
         if (blit_vt_active() && runtime.render_pending &&
             (output_mask = due_output_mask(&runtime, now)) != 0) {
             int hold_scene = now < runtime.terminal_frame_quiet_until_us ||
