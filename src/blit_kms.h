@@ -120,6 +120,17 @@ typedef struct {
     unsigned long long gles_composed_frames;
     unsigned long long gles_cpu_frames;
     char gles_cpu_reason[96];
+    /* Submit to flip event: the frame's GPU work (implicit fence) plus the
+       wait for vblank. */
+    double last_flip_ms, max_flip_ms;
+    unsigned long long flip_wait_total_us, flip_waits;
+    /* GPU frames: GPU time (when the driver can time it), and the last
+       frame's quads, draw calls and texture upload time. */
+    int gpu_timed;
+    double gpu_last_ms, gpu_max_ms;
+    unsigned long long gpu_total_us, gpu_frames;
+    unsigned long long gles_frame_quads, gles_frame_draws;
+    double gles_upload_ms;
 } BlitKmsDisplayInfo;
 
 typedef struct {

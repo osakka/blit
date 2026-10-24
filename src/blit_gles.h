@@ -88,6 +88,18 @@ void blit_gles_clip(BlitGles *gles, int x, int y, int width, int height);
 int blit_gles_frame_end(BlitGles *gles, BlitGlesTarget *target,
                         char *error, size_t error_capacity);
 unsigned long long blit_gles_draw_calls(const BlitGles *gles);
+/* Cumulative draw calls and vertices submitted. */
+void blit_gles_counters(const BlitGles *gles, unsigned long long *draw_calls,
+                        unsigned long long *vertices);
+
+/* GPU time of a target's frames (frame_begin to frame_end), measured with
+   GL_EXT_disjoint_timer_query and collected a few frames late. -1 when the
+   driver cannot time them. */
+typedef struct {
+    double last_ms, max_ms;
+    unsigned long long total_us, frames;
+} BlitGlesGpuTime;
+int blit_gles_gpu_time(const BlitGlesTarget *target, BlitGlesGpuTime *out);
 
 /* A persistent offscreen scene, as the CPU compositor keeps one in RAM:
    views are composed into it, and what was not recomposed keeps its pixels.

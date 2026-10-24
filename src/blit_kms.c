@@ -228,6 +228,16 @@ static void kms_flip_handler(int fd, unsigned int frame, unsigned int sec,
             }
         }
         ++output->info.flip_completions;
+        if (output->flip_started_us > 0) {
+            long long waited = kms_now_us() - output->flip_started_us;
+            if (waited >= 0) {
+                output->info.last_flip_ms = (double)waited / 1000.0;
+                if (output->info.last_flip_ms > output->info.max_flip_ms)
+                    output->info.max_flip_ms = output->info.last_flip_ms;
+                output->info.flip_wait_total_us += (unsigned long long)waited;
+                ++output->info.flip_waits;
+            }
+        }
         if (output->gles_pending_bo != NULL && output->owner != NULL) {
             kms_gles_release_bo(output->owner, output, &output->gles_shown_bo,
                                 &output->gles_shown_fb);

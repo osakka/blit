@@ -3399,7 +3399,13 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
                 "\"compositor\":{\"active\":\"%s\",\"requested\":\"%s\","
                 "\"reason\":\"%s\",\"renderer\":\"%s\",\"gles_frames\":%llu,"
                 "\"gles_uploaded_rows\":%llu,\"gpu_composed_frames\":%llu,"
-                "\"cpu_composed_frames\":%llu,\"cpu_reason\":\"%s\"}}",
+                "\"cpu_composed_frames\":%llu,\"cpu_reason\":\"%s\","
+                "\"gpu_timed\":%s,\"gpu_last_ms\":%.3f,\"gpu_max_ms\":%.3f,"
+                "\"gpu_total_us\":%llu,\"gpu_frames\":%llu,"
+                "\"frame_quads\":%llu,\"frame_draw_calls\":%llu,"
+                "\"upload_ms\":%.3f},"
+                "\"flip\":{\"last_ms\":%.3f,\"max_ms\":%.3f,"
+                "\"total_us\":%llu,\"count\":%llu}}",
                 have_kms_info ? kms_info.compositor : "sdl",
                 have_kms_info && kms_info.compositor_requested[0] ?
                     kms_info.compositor_requested : (have_kms_info ? "cpu" : "sdl"),
@@ -3407,7 +3413,19 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
                 have_kms_info ? kms_info.gles_uploaded_rows : 0ULL,
                 have_kms_info ? kms_info.gles_composed_frames : 0ULL,
                 have_kms_info ? kms_info.gles_cpu_frames : 0ULL,
-                have_kms_info ? kms_info.gles_cpu_reason : "");
+                have_kms_info ? kms_info.gles_cpu_reason : "",
+                have_kms_info && kms_info.gpu_timed ? "true" : "false",
+                have_kms_info ? kms_info.gpu_last_ms : 0.0,
+                have_kms_info ? kms_info.gpu_max_ms : 0.0,
+                have_kms_info ? kms_info.gpu_total_us : 0ULL,
+                have_kms_info ? kms_info.gpu_frames : 0ULL,
+                have_kms_info ? kms_info.gles_frame_quads : 0ULL,
+                have_kms_info ? kms_info.gles_frame_draws : 0ULL,
+                have_kms_info ? kms_info.gles_upload_ms : 0.0,
+                have_kms_info ? kms_info.last_flip_ms : 0.0,
+                have_kms_info ? kms_info.max_flip_ms : 0.0,
+                have_kms_info ? kms_info.flip_wait_total_us : 0ULL,
+                have_kms_info ? kms_info.flip_waits : 0ULL);
         }
     }
     if (used < capacity)

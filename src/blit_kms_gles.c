@@ -54,6 +54,8 @@ struct KmsGlesResources {
     char font_path[256];
     const void *font_raster, *font_data;
     int font_cell_width, font_cell_height;
+    /* Time this frame spent making sprites and uploading textures. */
+    long long upload_us;
     uint32_t *scratch_black, *scratch_white;
     unsigned char *sprite_pixels;
     size_t scratch_pixels;
@@ -163,6 +165,7 @@ static const KmsSprite *kms_sprite(BlitKms *kms, KmsGlesResources *r,
     int sw = width + 2 * margin_x, sh = height + 2 * margin_y;
     size_t pixels = (size_t)sw * (size_t)sh;
     int i, any = 0, premultiplied = 0, x, y, x0, y0, x1, y1;
+    long long made;
 
     memset(&key, 0, sizeof(key));
     key.cp = cp;
@@ -179,6 +182,7 @@ static const KmsSprite *kms_sprite(BlitKms *kms, KmsGlesResources *r,
         if (kms_sprite_same(s, &key)) return s;
     }
     if (r->sprite_count >= KMS_SPRITE_SLOTS * 3 / 4) kms_atlas_reset(r);
+    made = kms_now_us();
 
     if (pixels > r->scratch_pixels) {
         free(r->scratch_black); free(r->scratch_white); free(r->sprite_pixels);
@@ -255,6 +259,7 @@ static const KmsSprite *kms_sprite(BlitKms *kms, KmsGlesResources *r,
         slot = &r->sprites[(start + probe) % KMS_SPRITE_SLOTS];
         if (!slot->used) break;
     }
+    r->upload_us += kms_now_us() - made;
     if (probe == KMS_SPRITE_SLOTS) return NULL;
     *slot = key;
     ++r->sprite_count;
@@ -267,6 +272,7 @@ static BlitGlesTexture kms_gles_image(BlitKms *kms, KmsGlesResources *r,
     KmsImageTexture *slot = NULL;
     int bytes = image->format == 24 ? 3 : 4;
     int i;
+    long long uploaded;
     for (i = 0; i < KMS_IMAGE_TEXTURES; ++i)
         if (r->images[i].texture && r->images[i].image == image) {
             slot = &r->images[i];
@@ -291,6 +297,7 @@ static BlitGlesTexture kms_gles_image(BlitKms *kms, KmsGlesResources *r,
         blit_gles_texture_delete(kms->gles, slot->texture);
         slot->texture = 0;
     }
+    uploaded = kms_now_us();
     if (!slot->texture)
         slot->texture = blit_gles_texture_create(kms->gles, image->width,
                                                  image->height, bytes);
@@ -299,8 +306,10 @@ static BlitGlesTexture kms_gles_image(BlitKms *kms, KmsGlesResources *r,
                                  image->width, image->height, image->pixels,
                                  image->width * bytes) < 0) {
         slot->image = NULL;
+        r->upload_us += kms_now_us() - uploaded;
         return 0;
     }
+    r->upload_us += kms_now_us() - uploaded;
     slot->image = image;
     slot->generation = image->generation;
     slot->width = image->width;
@@ -533,7 +542,10 @@ static int kms_gles_compose(BlitKms *kms, KmsOutput *output,
         kms_gles_detach(kms, output, "no GPU atlas");
         return -1;
     }
+    unsigned long long draws_before, vertices_before, draws_after, vertices_after;
     ++r->frame;
+    r->upload_us = 0;
+    blit_gles_counters(kms->gles, &draws_before, &vertices_before);
     kms_gles_font_check(r, kms->font);
     if (output->gles_scene == NULL) {
         output->gles_scene = blit_gles_scene_open(kms->gles, output->mode.hdisplay,
@@ -611,5 +623,19 @@ static int kms_gles_compose(BlitKms *kms, KmsOutput *output,
         return -1;
     }
     ++output->info.gles_composed_frames;
+    blit_gles_counters(kms->gles, &draws_after, &vertices_after);
+    output->info.gles_frame_draws = draws_after - draws_before;
+    output->info.gles_frame_quads = (vertices_after - vertices_before) / 6;
+    output->info.gles_upload_ms = (double)r->upload_us / 1000.0;
+    {
+        BlitGlesGpuTime gpu;
+        if (blit_gles_gpu_time(output->gles_target, &gpu) == 0) {
+            output->info.gpu_timed = 1;
+            output->info.gpu_last_ms = gpu.last_ms;
+            output->info.gpu_max_ms = gpu.max_ms;
+            output->info.gpu_total_us = gpu.total_us;
+            output->info.gpu_frames = gpu.frames;
+        }
+    }
     return 0;
 }

@@ -231,7 +231,14 @@ was asked for and not used (no EGL/GBM, no scanout config, a lost context),
 0.2.12 the GPU composes frames itself: `gpu_composed_frames` counts them,
 `cpu_composed_frames` counts frames the CPU had to compose instead, and
 `cpu_reason` says why the last one could not be composed by the GPU. A GLES failure at
-start or while running drops that output to CPU and keeps presenting. In
+start or while running drops that output to CPU and keeps presenting. From
+0.2.16 the compositor object also reports GPU time per GPU-composed frame
+(`gpu_timed`, `gpu_last_ms`, `gpu_max_ms`, `gpu_total_us`, `gpu_frames`;
+measured with `GL_EXT_disjoint_timer_query` when the driver has it), and the
+last frame's `frame_quads`, `frame_draw_calls` and `upload_ms` (sprites made
+and textures uploaded). Each output's `flip` object (`last_ms`, `max_ms`,
+`total_us`, `count`) times page flips from submission to their completion
+event, for either compositor. In
 0.2.9 GLES draws the CPU compositor's finished frame; later steps move the
 composition itself onto the GPU.
 

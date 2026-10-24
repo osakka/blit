@@ -5,6 +5,7 @@
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <GLES2/gl2.h>
+#include <GLES2/gl2ext.h>
 #include <gbm.h>
 #include <dlfcn.h>
 #include <stdio.h>
@@ -51,7 +52,17 @@ struct BlitGles {
     GLuint batch_texture;
     BlitGlesTarget *frame_target;
     int bound_height;
-    unsigned long long draw_calls;
+    unsigned long long draw_calls, vertices_drawn;
+    /* GL_EXT_disjoint_timer_query, when the driver has it: GPU time per
+       frame, read back a few frames later so nothing waits on it. */
+    int timer_queries;
+    void (*GenQueries)(GLsizei, GLuint *);
+    void (*DeleteQueries)(GLsizei, const GLuint *);
+    void (*BeginQuery)(GLenum, GLuint);
+    void (*EndQuery)(GLenum);
+    void (*GetQueryObjectuiv)(GLuint, GLenum, GLuint *);
+    void (*GetQueryObjectui64v)(GLuint, GLenum, GLuint64 *);
+    void (*GetIntegerv)(GLenum, GLint *);
 
     PFNEGLGETPROCADDRESSPROC GetProcAddress;
     PFNEGLGETPLATFORMDISPLAYPROC GetPlatformDisplay;
@@ -138,6 +149,8 @@ struct BlitGlesScene {
     GLuint texture, framebuffer;
 };
 
+#define BLIT_GLES_QUERIES 4
+
 struct BlitGlesTarget {
     int width;
     int height;
@@ -150,6 +163,10 @@ struct BlitGlesTarget {
     GLuint framebuffer_texture;
     struct gbm_surface *gbm_surface;
     EGLSurface surface;
+    GLuint queries[BLIT_GLES_QUERIES];
+    int query_pending[BLIT_GLES_QUERIES];
+    int query_next, query_open;
+    BlitGlesGpuTime gpu;
 };
 
 static void gles_flush(BlitGles *gles);
@@ -388,6 +405,86 @@ static int gles_build_program(BlitGles *gles, char *error, size_t capacity)
     return 0;
 }
 
+static void gles_load_timer_queries(BlitGles *gles)
+{
+    const char *extensions = (const char *)gles->glGetString(GL_EXTENSIONS);
+    if (extensions == NULL || strstr(extensions, "GL_EXT_disjoint_timer_query") == NULL)
+        return;
+    gles->GenQueries = (void (*)(GLsizei, GLuint *))
+        gles->GetProcAddress("glGenQueriesEXT");
+    gles->DeleteQueries = (void (*)(GLsizei, const GLuint *))
+        gles->GetProcAddress("glDeleteQueriesEXT");
+    gles->BeginQuery = (void (*)(GLenum, GLuint))
+        gles->GetProcAddress("glBeginQueryEXT");
+    gles->EndQuery = (void (*)(GLenum))gles->GetProcAddress("glEndQueryEXT");
+    gles->GetQueryObjectuiv = (void (*)(GLuint, GLenum, GLuint *))
+        gles->GetProcAddress("glGetQueryObjectuivEXT");
+    gles->GetQueryObjectui64v = (void (*)(GLuint, GLenum, GLuint64 *))
+        gles->GetProcAddress("glGetQueryObjectui64vEXT");
+    gles->GetIntegerv = (void (*)(GLenum, GLint *))
+        gles->GetProcAddress("glGetIntegerv");
+    gles->timer_queries = gles->GenQueries && gles->DeleteQueries &&
+        gles->BeginQuery && gles->EndQuery && gles->GetQueryObjectuiv &&
+        gles->GetQueryObjectui64v && gles->GetIntegerv;
+}
+
+/* Collects finished timings without waiting, then opens the next query. A
+   disjoint event (clock change, power state) voids the results it spans. */
+static void gles_timer_begin(BlitGles *gles, BlitGlesTarget *target)
+{
+    int i;
+    GLint disjoint = 0;
+    if (!gles->timer_queries) return;
+    if (target->queries[0] == 0) {
+        gles->GenQueries(BLIT_GLES_QUERIES, target->queries);
+        while (gles->glGetError() != GL_NO_ERROR) {}
+    }
+    gles->GetIntegerv(GL_GPU_DISJOINT_EXT, &disjoint);
+    for (i = 0; i < BLIT_GLES_QUERIES; ++i) {
+        GLuint available = 0;
+        GLuint64 elapsed = 0;
+        if (!target->query_pending[i]) continue;
+        gles->GetQueryObjectuiv(target->queries[i], GL_QUERY_RESULT_AVAILABLE_EXT,
+                                &available);
+        if (!available && !disjoint) continue;
+        target->query_pending[i] = 0;
+        if (disjoint) continue;
+        gles->GetQueryObjectui64v(target->queries[i], GL_QUERY_RESULT_EXT, &elapsed);
+        target->gpu.last_ms = (double)elapsed / 1e6;
+        if (target->gpu.last_ms > target->gpu.max_ms)
+            target->gpu.max_ms = target->gpu.last_ms;
+        target->gpu.total_us += elapsed / 1000ULL;
+        ++target->gpu.frames;
+    }
+    if (target->query_pending[target->query_next]) return;
+    gles->BeginQuery(GL_TIME_ELAPSED_EXT, target->queries[target->query_next]);
+    target->query_open = 1;
+}
+
+static void gles_timer_end(BlitGles *gles, BlitGlesTarget *target)
+{
+    if (!target->query_open) return;
+    gles->EndQuery(GL_TIME_ELAPSED_EXT);
+    target->query_open = 0;
+    target->query_pending[target->query_next] = 1;
+    target->query_next = (target->query_next + 1) % BLIT_GLES_QUERIES;
+}
+
+int blit_gles_gpu_time(const BlitGlesTarget *target, BlitGlesGpuTime *out)
+{
+    if (target == NULL || out == NULL) return -1;
+    *out = target->gpu;
+    return target->gpu.frames > 0 || target->query_pending[0] ||
+        target->queries[0] != 0 ? 0 : -1;
+}
+
+void blit_gles_counters(const BlitGles *gles, unsigned long long *draw_calls,
+                        unsigned long long *vertices)
+{
+    if (draw_calls != NULL) *draw_calls = gles != NULL ? gles->draw_calls : 0ULL;
+    if (vertices != NULL) *vertices = gles != NULL ? gles->vertices_drawn : 0ULL;
+}
+
 static BlitGles *gles_open_common(int surfaceless, int drm_fd, char *error,
                              size_t capacity)
 {
@@ -460,6 +557,7 @@ static BlitGles *gles_open_common(int surfaceless, int drm_fd, char *error,
     snprintf(gles->identity, sizeof(gles->identity), "%s | %s",
              (const char *)gles->glGetString(GL_RENDERER),
              (const char *)gles->glGetString(GL_VERSION));
+    gles_load_timer_queries(gles);
     return gles;
 failed:
     blit_gles_close(gles);
@@ -605,6 +703,10 @@ void blit_gles_target_close(BlitGles *gles, BlitGlesTarget *target)
     if (gles == NULL || target == NULL) return;
     gles->MakeCurrent(gles->display, EGL_NO_SURFACE, EGL_NO_SURFACE,
                       gles->context);
+    if (target->queries[0] != 0 && gles->timer_queries) {
+        if (target->query_open) gles->EndQuery(GL_TIME_ELAPSED_EXT);
+        gles->DeleteQueries(BLIT_GLES_QUERIES, target->queries);
+    }
     if (target->framebuffer) gles->glDeleteFramebuffers(1, &target->framebuffer);
     if (target->framebuffer_texture)
         gles->glDeleteTextures(1, &target->framebuffer_texture);
@@ -826,6 +928,7 @@ static void gles_flush(BlitGles *gles)
                                 (void *)(sizeof(GLfloat) * 4 + 4));
     gles->glDrawArrays(GL_TRIANGLES, 0, gles->vertex_count);
     ++gles->draw_calls;
+    gles->vertices_drawn += (unsigned long long)gles->vertex_count;
     gles->vertex_count = 0;
 }
 
@@ -871,6 +974,7 @@ int blit_gles_frame_begin(BlitGles *gles, BlitGlesTarget *target,
     gles->frame_target = target;
     gles->bound_height = target->height;
     gles->vertex_count = 0;
+    gles_timer_begin(gles, target);
     gles->glViewport(0, 0, target->width, target->height);
     gles->glDisable(GL_SCISSOR_TEST);
     gles->glEnable(GL_BLEND);
@@ -962,6 +1066,7 @@ int blit_gles_frame_end(BlitGles *gles, BlitGlesTarget *target,
 {
     if (gles == NULL || target == NULL) return -1;
     gles_flush(gles);
+    gles_timer_end(gles, target);
     gles->glDisable(GL_SCISSOR_TEST);
     gles->glDisable(GL_BLEND);
     gles->frame_target = NULL;
