@@ -16,6 +16,9 @@ Internal126–135 split the structural work into independently pickable tickets;
 122/125/104 remain parent authorities and120 owns solid-copy integration.
 [ADR0180](adr/0180-retained-gpu-implementation-workstream.md) is proposed,
 not an approved SDL/raw-GL ownership mechanism or native contract downgrade.
+[ADR0181](adr/0181-gles-compositor-inside-native-kms.md) decides the
+mechanism (accepted 2026-10-24): a GLES compositor inside native KMS, CPU kept as the baseline and
+oracle, SDL retired at cutover.
 
 SDL multi-monitor autodetection/hotplug parity remains an explicit acceptance
 dependency under internal104. Rendering tests do not certify automatic
