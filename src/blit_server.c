@@ -2639,20 +2639,32 @@ static int send_kms_screenshot(BlitHttpClient *client, BlitRuntime *runtime,
 
 static void json_escape(const char *input, char *output, size_t capacity)
 {
+    /* Bytes that are escaped (" and \\ ) or dropped (other controls); runs
+       of anything else are copied whole. */
+    static const char special[] =
+        "\"\\\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f"
+        "\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f";
     size_t in = 0;
     size_t out = 0;
 
+    if (capacity == 0) return;
     while (input[in] != '\0' && out + 2 < capacity) {
-        unsigned char c = (unsigned char)input[in++];
-
+        size_t plain = strcspn(input + in, special);
+        unsigned char c;
+        if (plain > 0) {
+            if (plain > capacity - 2 - out) plain = capacity - 2 - out;
+            memcpy(output + out, input + in, plain);
+            out += plain;
+            in += plain;
+            continue;
+        }
+        c = (unsigned char)input[in++];
         if (c == '"' || c == '\\') {
             output[out++] = '\\';
             output[out++] = (char)c;
         } else if (c == '\n' && out + 2 < capacity) {
             output[out++] = '\\';
             output[out++] = 'n';
-        } else if (c >= 0x20) {
-            output[out++] = (char)c;
         }
     }
     output[out] = '\0';
@@ -10155,24 +10167,60 @@ static int kitty_base64_value(unsigned char byte)
     return -1;
 }
 
+/* Base64 digit values; -2 is '=', -3 is whitespace that is skipped, -1 is
+   anything else. Built once. */
+static signed char kitty_base64_table[256];
+static int kitty_base64_table_ready;
+
+static void kitty_base64_table_build(void)
+{
+    int i;
+    for (i = 0; i < 256; ++i)
+        kitty_base64_table[i] = (signed char)kitty_base64_value((unsigned char)i);
+    kitty_base64_table['='] = -2;
+    kitty_base64_table['\n'] = kitty_base64_table['\r'] = -3;
+    kitty_base64_table[' '] = kitty_base64_table['\t'] = -3;
+    kitty_base64_table_ready = 1;
+}
+
 static int kitty_decode_chunk(BlitGraphicsImage *image, const char *payload)
 {
+    const signed char *table = kitty_base64_table;
+    const unsigned char *in = (const unsigned char *)payload;
     unsigned char quartet[4];
     int quartet_length = image->base64_tail_length;
     size_t offset = 0;
     size_t payload_length = strlen(payload);
+    if (!kitty_base64_table_ready) kitty_base64_table_build();
     if (quartet_length > 0)
         memcpy(quartet, image->base64_tail, (size_t)quartet_length);
     while (offset < payload_length) {
-        int value;
-        unsigned char byte = (unsigned char)payload[offset++];
-        if (byte == '=' || kitty_base64_value(byte) >= 0) {
+        unsigned char byte;
+        /* Whole quartets of plain digits, the common case, decode
+           directly; anything else goes through the general path below. */
+        if (quartet_length == 0) {
+            unsigned char *out = image->pixels + image->bytes;
+            size_t room = image->capacity - image->bytes;
+            size_t done = 0;
+            while (offset + 4 <= payload_length && done + 3 <= room) {
+                int a = table[in[offset]], b = table[in[offset + 1]];
+                int c = table[in[offset + 2]], d = table[in[offset + 3]];
+                if ((a | b | c | d) < 0) break;
+                out[done] = (unsigned char)((a << 2) | (b >> 4));
+                out[done + 1] = (unsigned char)((b << 4) | (c >> 2));
+                out[done + 2] = (unsigned char)((c << 6) | d);
+                done += 3;
+                offset += 4;
+            }
+            image->bytes += done;
+            if (offset >= payload_length) break;
+        }
+        byte = in[offset++];
+        if (table[byte] >= 0 || table[byte] == -2) {
             quartet[quartet_length++] = byte;
             if (quartet_length == 4) {
-                int a = quartet[0] == '=' ? -1 : kitty_base64_value(quartet[0]);
-                int b = quartet[1] == '=' ? -1 : kitty_base64_value(quartet[1]);
-                int c = quartet[2] == '=' ? -1 : kitty_base64_value(quartet[2]);
-                int d = quartet[3] == '=' ? -1 : kitty_base64_value(quartet[3]);
+                int a = table[quartet[0]], b = table[quartet[1]];
+                int c = table[quartet[2]], d = table[quartet[3]];
                 if (a < 0 || b < 0 || (c < 0 && quartet[2] != '=') ||
                     (d < 0 && quartet[3] != '=')) return 0;
                 if (image->bytes + 1 > image->capacity) return 0;
@@ -10187,7 +10235,7 @@ static int kitty_decode_chunk(BlitGraphicsImage *image, const char *payload)
                 }
                 quartet_length = 0;
             }
-        } else if (byte != '\n' && byte != '\r' && byte != ' ' && byte != '\t') {
+        } else if (table[byte] != -3) {
             return 0;
         }
     }
@@ -13381,6 +13429,36 @@ static int terminal_consume_chunk(BlitRuntime *runtime, BlitSession *session,
                 session->terminal_escape = 0;
             }
             ++offset;
+            continue;
+        }
+        if (session->terminal_escape == 3 && byte != 0x1b && byte != 0x9c &&
+            !(byte == '\a' && session->terminal_string_type == ']')) {
+            /* The body of a string control (a Kitty image chunk is 4 KB of
+               base64) is copied in one run up to its next possible
+               terminator, not byte by byte through the state machine. */
+            /* The ESC that opened the string already ended any cluster,
+               and nothing inside one starts another. */
+            const unsigned char *start = data + offset, *end = data + length;
+            const unsigned char *stop;
+            size_t run;
+            size_t space = sizeof(session->terminal_string) - 1 -
+                (size_t)session->terminal_string_length;
+            stop = memchr(start, 0x1b, (size_t)(end - start));
+            if (stop == NULL) stop = end;
+            {
+                const unsigned char *st = memchr(start, 0x9c, (size_t)(stop - start));
+                if (st != NULL) stop = st;
+            }
+            if (session->terminal_string_type == ']') {
+                const unsigned char *bell = memchr(start, '\a', (size_t)(stop - start));
+                if (bell != NULL) stop = bell;
+            }
+            run = (size_t)(stop - data);
+            if (run - offset < space) space = run - offset;
+            memcpy(session->terminal_string + session->terminal_string_length,
+                   data + offset, space);
+            session->terminal_string_length += (int)space;
+            offset = run;
             continue;
         }
         if (session->terminal_escape == 3) {
