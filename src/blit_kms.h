@@ -114,6 +114,7 @@ typedef struct {
     char compositor_reason[160];
     char compositor_renderer[128];
     unsigned long long gles_frames;
+    unsigned long long gles_uploaded_rows;
 } BlitKmsDisplayInfo;
 
 typedef struct {

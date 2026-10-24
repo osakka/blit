@@ -226,7 +226,8 @@ and `BLIT_KMS_COMPOSITOR` the boot default. Any other value is a 400
 `render.outputs[].compositor` says what an output actually uses: `active`
 (`cpu`, `gles`, or `sdl` on the SDL backend), `requested`, `reason` when GLES
 was asked for and not used (no EGL/GBM, no scanout config, a lost context),
-`renderer` (GL renderer and version) and `gles_frames`. A GLES failure at
+`renderer` (GL renderer and version), `gles_frames` and `gles_uploaded_rows`
+(rows sent to the GPU; unchanged rows are not resent, from 0.2.11). A GLES failure at
 start or while running drops that output to CPU and keeps presenting. In
 0.2.9 GLES draws the CPU compositor's finished frame; later steps move the
 composition itself onto the GPU.

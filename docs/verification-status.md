@@ -1,5 +1,23 @@
 # Verification status
 
+## 2026-10-24: 0.2.11 GLES uploads changed rows from RAM
+
+First host run of GLES (0.2.10 on 10.54, `server.kms_compositor: gles`):
+both outputs `active: gles` on "AMD Radeon Graphics (radeonsi, rembrandt,
+LLVM 19.1.7, DRM 3.61) | OpenGL ES 3.2 Mesa 25.0.7"; 577 frames drawn and
+flipped on DP-1, 0 missed deadlines, the start guard cleared. But a 10 s
+probe at the login screen measured 74.8% of one core against 8.4% on CPU,
+and 69 ms per frame in the copy/upload phase against 0.7 ms: the frame was
+uploaded from the scanout dumb buffer, whose write-combined mapping is very
+slow for the CPU to read. The host was set back to `cpu`.
+
+0.2.11 uploads from the compositor's RAM scene and only the rows that
+changed since the last upload (a RAM shadow of it; the texture keeps the
+rest). `gles_frame_gate` adds: an unchanged frame uploads 0 rows; changing
+the first row, a middle band and the last row uploads exactly 5 and reads
+back exact. `compositor.gles_uploaded_rows` reports the count. Renderer and
+terminal suites: native 71 pass, gles 71 pass.
+
 ## 2026-10-24: 0.2.10 GLES start guard; 0.2.9 deployed on CPU
 
 0.2.9 installed on 10.54 through `tools/deploy/update-live.sh` (receipt

@@ -45,6 +45,44 @@ static int check(BlitGles *gles, int w, int h, int padding)
                             w, h, padding, x, y, back[y * w + x] & 0xffffffU, pattern(x, y, w, h));
                 ++bad;
             }
+    /* Partial uploads: an unchanged frame sends nothing; changing the first
+       row, a middle band and the last row sends exactly those rows, and the
+       texture keeps everything else. */
+    {
+        unsigned long long before = blit_gles_uploaded_rows(target);
+        int changed[] = { 0, h / 2, h / 2 + 1, h / 2 + 2, h - 1 };
+        int c;
+        if (before != (unsigned long long)h) {
+            fprintf(stderr, "GLES_FRAME_FAIL first upload sent %llu rows, not %d\n", before, h);
+            exit(1);
+        }
+        blit_gles_draw_frame(gles, target, frame, pitch, error, sizeof(error));
+        if (blit_gles_uploaded_rows(target) != before) {
+            fprintf(stderr, "GLES_FRAME_FAIL an unchanged frame uploaded rows\n");
+            exit(1);
+        }
+        for (c = 0; c < 5; ++c)
+            for (x = 0; x < w; ++x)
+                ((uint32_t *)(frame + (size_t)changed[c] * pitch))[x] ^= 0x00a5a5a5U;
+        if (blit_gles_draw_frame(gles, target, frame, pitch, error, sizeof(error)) < 0 ||
+            blit_gles_read_frame(gles, target, back, w * 4) < 0) {
+            fprintf(stderr, "GLES_FRAME_FAIL partial draw: %s\n", error);
+            exit(1);
+        }
+        if (blit_gles_uploaded_rows(target) - before != 5) {
+            fprintf(stderr, "GLES_FRAME_FAIL changing 5 rows uploaded %llu\n",
+                    blit_gles_uploaded_rows(target) - before);
+            exit(1);
+        }
+        for (y = 0; y < h; ++y)
+            for (x = 0; x < w; ++x)
+                if ((back[y * w + x] & 0xffffffU) !=
+                    (((uint32_t *)(frame + (size_t)y * pitch))[x] & 0xffffffU)) {
+                    if (!bad)
+                        fprintf(stderr, "GLES_FRAME_FAIL partial %dx%d at %d,%d\n", w, h, x, y);
+                    ++bad;
+                }
+    }
     blit_gles_target_close(gles, target);
     free(frame);
     free(back);
@@ -64,7 +102,7 @@ int main(void)
     bad += check(gles, 1920, 2160, 0);
     bad += check(gles, 333, 77, 12);
     if (bad) return 1;
-    printf("GLES_FRAME_PASS sizes=1024x768,1920x2160,333x77+pad exact renderer=\"%s\"\n",
+    printf("GLES_FRAME_PASS sizes=1024x768,1920x2160,333x77+pad exact partial=changed_rows_only renderer=\"%s\"\n",
            blit_gles_identity(gles));
     blit_gles_close(gles);
     return 0;

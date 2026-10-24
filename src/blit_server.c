@@ -3396,11 +3396,13 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
             used += (size_t)snprintf(
                 body + used, capacity - used,
                 "\"compositor\":{\"active\":\"%s\",\"requested\":\"%s\","
-                "\"reason\":\"%s\",\"renderer\":\"%s\",\"gles_frames\":%llu}}",
+                "\"reason\":\"%s\",\"renderer\":\"%s\",\"gles_frames\":%llu,"
+                "\"gles_uploaded_rows\":%llu}}",
                 have_kms_info ? kms_info.compositor : "sdl",
                 have_kms_info && kms_info.compositor_requested[0] ?
                     kms_info.compositor_requested : (have_kms_info ? "cpu" : "sdl"),
-                reason, renderer, have_kms_info ? kms_info.gles_frames : 0ULL);
+                reason, renderer, have_kms_info ? kms_info.gles_frames : 0ULL,
+                have_kms_info ? kms_info.gles_uploaded_rows : 0ULL);
         }
     }
     if (used < capacity)

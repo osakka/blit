@@ -1661,7 +1661,12 @@ static int kms_gles_frame(BlitKms *kms, KmsOutput *output)
     uint32_t handle = 0, pitch = 0;
     if (output->gles_target == NULL) return 0;
     error[0] = '\0';
-    if (blit_gles_draw_frame(kms->gles, output->gles_target, output->back.map,
+    /* The RAM scene, never the scanout buffer: that mapping is
+       write-combined, and reading it back cost ~69 ms a frame on the host. */
+    if (blit_gles_draw_frame(kms->gles, output->gles_target,
+                             output->scene != NULL &&
+                                 output->scene_size == output->back.size ?
+                                 output->scene : output->back.map,
                              (int)output->back.pitch, error, sizeof(error)) < 0) {
         kms_gles_detach(kms, output, error);
         return -1;
@@ -1674,6 +1679,8 @@ static int kms_gles_frame(BlitKms *kms, KmsOutput *output)
             return -1;
         }
         ++output->info.gles_frames;
+        output->info.gles_uploaded_rows =
+            blit_gles_uploaded_rows(output->gles_target);
         return 0;
     }
     output->gles_next_bo = blit_gles_lock_front(kms->gles, output->gles_target,
@@ -1686,6 +1693,8 @@ static int kms_gles_frame(BlitKms *kms, KmsOutput *output)
         return -1;
     }
     ++output->info.gles_frames;
+    output->info.gles_uploaded_rows =
+        blit_gles_uploaded_rows(output->gles_target);
     return 0;
 }
 

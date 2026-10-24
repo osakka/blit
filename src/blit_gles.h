@@ -35,6 +35,9 @@ int blit_gles_draw_frame(BlitGles *gles, BlitGlesTarget *target,
                          const void *pixels, int pitch,
                          char *error, size_t error_capacity);
 
+/* Rows uploaded so far: unchanged rows are not sent again. */
+unsigned long long blit_gles_uploaded_rows(const BlitGlesTarget *target);
+
 /* Reads the target back as top-down XRGB8888 (surfaceless targets). */
 int blit_gles_read_frame(BlitGles *gles, BlitGlesTarget *target,
                          void *pixels, int pitch);

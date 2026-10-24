@@ -112,6 +112,10 @@ struct BlitGles {
 struct BlitGlesTarget {
     int width;
     int height;
+    /* The frame last uploaded, so only rows that changed are sent again; the
+       texture keeps the rest. NULL until the first upload. */
+    unsigned char *shadow;
+    unsigned long long uploaded_rows;
     GLuint texture;
     GLuint framebuffer;
     GLuint framebuffer_texture;
@@ -507,6 +511,7 @@ void blit_gles_target_close(BlitGles *gles, BlitGlesTarget *target)
         gles->DestroySurface(gles->display, target->surface);
     if (target->gbm_surface != NULL)
         gles->gbm_surface_destroy(target->gbm_surface);
+    free(target->shadow);
     free(target);
 }
 
@@ -527,15 +532,54 @@ int blit_gles_draw_frame(BlitGles *gles, BlitGlesTarget *target,
     }
     gles->glBindTexture(GL_TEXTURE_2D, target->texture);
     gles->glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-    /* GLES 2 has no row length, so a padded pitch uploads row by row. */
-    if (pitch == target->width * 4)
-        gles->glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, target->width,
-                              target->height, GL_RGBA, GL_UNSIGNED_BYTE, rows);
-    else
-        for (y = 0; y < target->height; ++y)
-            gles->glTexSubImage2D(GL_TEXTURE_2D, 0, 0, y, target->width, 1,
-                                  GL_RGBA, GL_UNSIGNED_BYTE,
-                                  rows + (size_t)y * (size_t)pitch);
+    {
+        size_t row_bytes = (size_t)target->width * 4U;
+        int first_upload = target->shadow == NULL;
+        if (first_upload) {
+            target->shadow = malloc(row_bytes * (size_t)target->height);
+            if (target->shadow == NULL) {
+                gles_error(error, capacity, "out of memory");
+                return -1;
+            }
+        }
+        /* Upload each run of changed rows. GLES 2 has no row length, so a
+           padded source pitch is sent a row at a time. */
+        y = 0;
+        while (y < target->height) {
+            int end;
+            if (!first_upload &&
+                memcmp(target->shadow + (size_t)y * row_bytes,
+                       rows + (size_t)y * (size_t)pitch, row_bytes) == 0) {
+                ++y;
+                continue;
+            }
+            end = y + 1;
+            while (end < target->height &&
+                   (first_upload ||
+                    memcmp(target->shadow + (size_t)end * row_bytes,
+                           rows + (size_t)end * (size_t)pitch, row_bytes) != 0))
+                ++end;
+            if ((size_t)pitch == row_bytes) {
+                gles->glTexSubImage2D(GL_TEXTURE_2D, 0, 0, y, target->width,
+                                      end - y, GL_RGBA, GL_UNSIGNED_BYTE,
+                                      rows + (size_t)y * (size_t)pitch);
+                memcpy(target->shadow + (size_t)y * row_bytes,
+                       rows + (size_t)y * (size_t)pitch,
+                       row_bytes * (size_t)(end - y));
+            } else {
+                int row;
+                for (row = y; row < end; ++row) {
+                    gles->glTexSubImage2D(GL_TEXTURE_2D, 0, 0, row, target->width, 1,
+                                          GL_RGBA, GL_UNSIGNED_BYTE,
+                                          rows + (size_t)row * (size_t)pitch);
+                    memcpy(target->shadow + (size_t)row * row_bytes,
+                           rows + (size_t)row * (size_t)pitch, row_bytes);
+                }
+            }
+            target->uploaded_rows += (unsigned long long)(end - y);
+            y = end;
+        }
+    }
     gles->glViewport(0, 0, target->width, target->height);
     gles->glDisable(GL_BLEND);
     gles->glUseProgram(gles->program);
@@ -557,6 +601,11 @@ int blit_gles_draw_frame(BlitGles *gles, BlitGlesTarget *target,
         return -1;
     }
     return 0;
+}
+
+unsigned long long blit_gles_uploaded_rows(const BlitGlesTarget *target)
+{
+    return target != NULL ? target->uploaded_rows : 0ULL;
 }
 
 int blit_gles_read_frame(BlitGles *gles, BlitGlesTarget *target,
