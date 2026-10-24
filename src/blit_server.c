@@ -2961,6 +2961,110 @@ static double diagnostic_owner_cpu_ms(pid_t pid, unsigned long long expected_sta
     return start == expected_start ? (double)(user + system) * 1000.0 / ticks : -1;
 }
 
+/* The logged-in owner's processes, busiest first by cumulative CPU, so a
+   desktop that is slow because something upstream of Blit is saturating a
+   core can be diagnosed through the API. Callers diff two samples. */
+typedef struct {
+    long pid, ppid, threads;
+    double cpu_ms;
+    unsigned long long rss_kib;
+    char comm[64];
+} DiagnosticProcess;
+
+static int diagnostic_process_read(long pid, uid_t want_uid, DiagnosticProcess *out)
+{
+    char path[64], data[4096], *open_paren, *close_paren, *cursor, *save, *field;
+    struct stat info;
+    unsigned long long user = 0, system = 0, rss_pages = 0;
+    long ticks = sysconf(_SC_CLK_TCK), page = sysconf(_SC_PAGESIZE);
+    int fd, number = 3;
+    ssize_t length;
+    snprintf(path, sizeof(path), "/proc/%ld", pid);
+    if (stat(path, &info) != 0 || info.st_uid != want_uid) return 0;
+    snprintf(path, sizeof(path), "/proc/%ld/stat", pid);
+    fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return 0;
+    length = read(fd, data, sizeof(data) - 1);
+    close(fd);
+    if (length <= 0 || ticks <= 0) return 0;
+    data[length] = 0;
+    open_paren = strchr(data, '(');
+    close_paren = strrchr(data, ')');
+    if (open_paren == NULL || close_paren == NULL || close_paren < open_paren) return 0;
+    memset(out, 0, sizeof(*out));
+    out->pid = pid;
+    snprintf(out->comm, sizeof(out->comm), "%.*s",
+             (int)(close_paren - open_paren - 1), open_paren + 1);
+    for (field = strtok_r(close_paren + 1, " ", &save); field;
+         field = strtok_r(NULL, " ", &save), ++number) {
+        if (number == 4) out->ppid = strtol(field, NULL, 10);
+        if (number == 14) user = strtoull(field, NULL, 10);
+        if (number == 15) system = strtoull(field, NULL, 10);
+        if (number == 20) out->threads = strtol(field, NULL, 10);
+        if (number == 24) { rss_pages = strtoull(field, NULL, 10); break; }
+    }
+    out->cpu_ms = (double)(user + system) * 1000.0 / (double)ticks;
+    out->rss_kib = rss_pages * (unsigned long long)(page > 0 ? page : 4096) / 1024ULL;
+    return 1;
+}
+
+static void diagnostic_processes_json(const BlitRuntime *runtime, char *body,
+                                      size_t capacity)
+{
+    enum { KEEP = 16 };
+    DiagnosticProcess top[KEEP], candidate;
+    int kept = 0, i, have_owner = 0;
+    uid_t owner = 0;
+    size_t used;
+    DIR *proc;
+    struct dirent *entry;
+    for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
+        const BlitSession *session = &runtime->sessions[i];
+        if (session->used && session->login_manager &&
+            session->login_identity_state == 2) {
+            owner = session->login_identity_uid;
+            have_owner = 1;
+            break;
+        }
+    }
+    if (!have_owner) owner = getuid();
+    proc = opendir("/proc");
+    while (proc != NULL && (entry = readdir(proc)) != NULL) {
+        char *end;
+        long pid = strtol(entry->d_name, &end, 10);
+        int at;
+        if (*end != 0 || pid <= 0) continue;
+        if (!diagnostic_process_read(pid, owner, &candidate)) continue;
+        if (kept < KEEP) at = kept++;
+        else {
+            at = 0;
+            for (i = 1; i < KEEP; ++i) if (top[i].cpu_ms < top[at].cpu_ms) at = i;
+            if (top[at].cpu_ms >= candidate.cpu_ms) continue;
+        }
+        top[at] = candidate;
+    }
+    if (proc != NULL) closedir(proc);
+    for (i = 1; i < kept; ++i) {
+        DiagnosticProcess moving = top[i];
+        int j = i - 1;
+        while (j >= 0 && top[j].cpu_ms < moving.cpu_ms) { top[j + 1] = top[j]; --j; }
+        top[j + 1] = moving;
+    }
+    used = (size_t)snprintf(body, capacity,
+        "{\"uid\":%lu,\"owner\":%s,\"blit_pid\":%ld,\"processes\":[",
+        (unsigned long)owner, have_owner ? "true" : "false", (long)getpid());
+    for (i = 0; i < kept && used < capacity; ++i) {
+        char comm[160];
+        json_escape(top[i].comm, comm, sizeof(comm));
+        used += (size_t)snprintf(body + used, capacity - used,
+            "%s{\"pid\":%ld,\"ppid\":%ld,\"comm\":\"%s\",\"cpu_ms\":%.0f,"
+            "\"threads\":%ld,\"rss_kib\":%llu}",
+            i ? "," : "", top[i].pid, top[i].ppid, comm, top[i].cpu_ms,
+            top[i].threads, top[i].rss_kib);
+    }
+    if (used < capacity) snprintf(body + used, capacity - used, "]}");
+}
+
 static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
                                      size_t capacity)
 {
@@ -22960,6 +23064,9 @@ static void handle_request(int fd, BlitRuntime *runtime,
         send_http(fd, 200, "OK", "application/json", body);
     } else if (strcmp(path, "/v1/diagnostics/runtime") == 0) {
         runtime_diagnostics_json(runtime, body, sizeof(body));
+        send_http(fd, 200, "OK", "application/json", body);
+    } else if (strcmp(path, "/v1/diagnostics/processes") == 0) {
+        diagnostic_processes_json(runtime, body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
     } else if (strcmp(path, "/v1/diagnostics/console") == 0) {
         blit_vt_json(body, sizeof(body));

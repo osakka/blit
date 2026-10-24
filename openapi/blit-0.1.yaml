@@ -656,6 +656,24 @@ paths:
                 $ref: '#/components/schemas/ConsoleDiagnostics'
         default:
           $ref: '#/components/responses/Problem'
+  /v1/diagnostics/processes:
+    get:
+      tags: [diagnostics]
+      operationId: getProcessDiagnostics
+      summary: List the logged-in owner's busiest processes by cumulative CPU
+      description: >-
+        Up to 16 processes owned by the logged-in desktop user (Blit's own
+        user before login), busiest first by cumulative CPU time. Diff two
+        samples to see what is using the CPU now.
+      responses:
+        '200':
+          description: Owner processes with pid, ppid, comm, cpu_ms, threads, rss_kib
+          content:
+            application/json:
+              schema:
+                type: object
+        default:
+          $ref: '#/components/responses/Problem'
   /v1/diagnostics/runtime:
     get:
       tags: [diagnostics]

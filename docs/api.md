@@ -2,6 +2,11 @@
 
 ## Native console ownership (candidate0.1.587)
 
+`GET /v1/diagnostics/processes` (0.2.17) lists up to 16 processes of the
+logged-in owner (Blit's own user before login), busiest first by cumulative
+CPU (`pid`, `ppid`, `comm`, `cpu_ms`, `threads`, `rss_kib`); diff two samples
+to see what is using the CPU now.
+
 `GET /v1/diagnostics/console` reports Blit's native VT ownership, VT number,
 active state, previous VT, actual Linux keyboard mode/read errno, keyboard
 muting, registered recovery
