@@ -1,5 +1,34 @@
 # Verification status
 
+## 2026-10-24: ADR 0181 step 1 -- gates run on the native compositor
+
+The DRM mock (`tools/tests/fixtures/drm_hotplug_mock.c`, LD_PRELOAD) runs the
+whole server headless on native direct KMS once its buffer slots fit a real
+output (6068ad5). `tools/tests/gate_server.rb` makes that the default display
+for gates (`BLIT_GATE_BACKEND=native`; `sdl` keeps SDL's dummy driver until
+cutover); `gate_bmp.rb` reads either backend's screenshot. 60 gates migrated
+(1219a99). Most had never run against the compositor the host uses.
+
+First native sweep, 18 failures, classified:
+
+| class | gates | outcome |
+|---|---|---|
+| gate parsed SDL's 24-bit BMP | cell_paint, deferred_damage, display_settings, font_identity, kitty_placement, pointer_geometry, sync_output, wide_glyph, render_state_agreement, sixel_decoder | shared reader; pass |
+| gate assumed SDL display naming | auxiliary_native, auxiliary_desktop | compare the connector; pass on both |
+| tests SDL itself | display_settings (rotation), pointer_pixel (rotation), observation_api, backend_selection, presentation_provenance, pointer_damage_atomic, pointer_wallpaper_stress | pinned `backend: 'sdl'`; retire at cutover |
+| **native bug** | cell_paint: italic drew as plain in 16 px cells | fixed, 3d57095 |
+| **native bug** | sync_output: screenshot answered before its flip completed, never said presented | fixed, ac2254d |
+
+Native has no rotation (refused by contract); SDL has. That is a feature gap
+for the GLES compositor to close, not a gate to keep.
+
+Result: native `run-gates.sh all` 158 pass, 6 skip, 0 fail; SDL 157 pass,
+6 skip, 1 fail -- frame_rate_gate's 20 ms wall-clock budget, which misses
+under host load equally on the pre-change and current binaries (A/B, 1 of 3
+each). Still on SDL: 12 gates through `sdl_test_profile.rb`, 3 Ruby gates
+with their own SDL driver choice, 14 shell gates and 21 C harnesses that
+include the SDL renderer; their migration is the rest of step 1.
+
 ## 2026-10-24: 0.2.8 pointer shapes and hiding the pointer, OSC 22 (#138, hibr #373)
 
 Hibr's Boxer draws the game's own cursor and Blit drew its pointer on top, so
