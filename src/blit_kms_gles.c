@@ -9,7 +9,7 @@
    two compositors cannot disagree about what a glyph looks like.
 
    The CPU compositor stays the reference. A frame the GPU cannot compose
-   (effects on, a font whose ink overhangs its cell, a scaled image) is
+   (effects on, a scaled image) is
    composed by the CPU and uploaded instead, per frame. */
 
 #define KMS_ATLAS_SIZE 2048
@@ -145,7 +145,15 @@ static const KmsSprite *kms_sprite(BlitKms *kms, KmsGlesResources *r,
     KmsSprite *slot;
     unsigned start, probe;
     KmsOutput scratch;
-    int margin_x = lean + 4, margin_y = KMS_SPRITE_MARGIN_Y;
+    /* Room for everything the CPU would draw from this cell: italic lean,
+       bold's extra column, and ink the font says can leave the cell. */
+    int cell = font != NULL && font->raster_cell_width > 0 ? font->raster_cell_width : width;
+    int ink_x = font ? (font->raster_ink_left > font->raster_ink_right ?
+                        font->raster_ink_left : font->raster_ink_right) : 0;
+    int ink_y = font ? (font->raster_ink_top > font->raster_ink_bottom ?
+                        font->raster_ink_top : font->raster_ink_bottom) : 0;
+    int margin_x = lean + 4 + (ink_x ? (ink_x + 1) * cell : 0);
+    int margin_y = KMS_SPRITE_MARGIN_Y + ink_y * height;
     int sw = width + 2 * margin_x, sh = height + 2 * margin_y;
     size_t pixels = (size_t)sw * (size_t)sh;
     int i, any = 0, premultiplied = 0, x, y, x0, y0, x1, y1;
@@ -305,8 +313,6 @@ static const char *kms_gles_unsupported(BlitKms *kms, const KmsOutput *output,
     int v, d;
     if (effect_enabled && effect_intensity > 0)
         return "a display effect is on";
-    if (blit_font_has_overhang(kms->font))
-        return "the font's ink overhangs its cell";
     for (v = 0; v < view_count; ++v) {
         BlitGraphicsDraw draws[BLIT_GRAPHICS_MAX_DRAWS];
         int count;
@@ -454,7 +460,30 @@ static void kms_gles_view(BlitKms *kms, KmsGlesResources *r, const KmsOutput *ou
             uint32_t cursor_bg = view_cell_background(view, cursor_index);
             blit_gles_rect(kms->gles, cursor_x, cursor_y, cw * cursor_cells, ch,
                            KMS_WHITE, 255);
-            if (cursor_cp != 0 && cursor_cp != ' ' && !(cursor_attr & KMS_ATTR_CONCEAL))
+            if (blit_font_has_overhang(font)) {
+                /* Every glyph whose ink enters the cursor cell is redrawn in
+                   the cursor's colour, clipped to the cell, as the CPU does. */
+                BlitInkRegion sources = blit_ink_region(font, cursor_column,
+                    view->cursor_y, cursor_column + cursor_cells,
+                    view->cursor_y + 1, view->columns, view->rows);
+                int sx, sy, cx0 = cursor_x > x0 ? cursor_x : x0;
+                int cx1 = cursor_x + cursor_cells * cw < x1 ? cursor_x + cursor_cells * cw : x1;
+                int cy0 = cursor_y > y0 ? cursor_y : y0;
+                int cy1 = cursor_y + ch < y1 ? cursor_y + ch : y1;
+                blit_gles_clip(kms->gles, cx0, cy0, cx1 - cx0, cy1 - cy0);
+                for (sy = sources.source_y0; sy < sources.source_y1; ++sy)
+                    for (sx = sources.source_x0; sx < sources.source_x1; ++sx) {
+                        int at = sy * view->stride + sx;
+                        uint16_t a = view->attributes[at];
+                        if (!view->codepoints[at] ||
+                            (a & (KMS_ATTR_CONTINUATION | KMS_ATTR_CONCEAL)))
+                            continue;
+                        kms_gles_glyph(kms, r, view, at, x0 + sx * cw, y0 + sy * ch,
+                                       (a & KMS_ATTR_WIDE) ? cw * 2 : cw, ch, cursor_bg,
+                                       (a & KMS_ATTR_ITALIC) ? italic_lean : 0, (a & 1) != 0);
+                    }
+                blit_gles_clip(kms->gles, x0, y0, x1 - x0, y1 - y0);
+            } else if (cursor_cp != 0 && cursor_cp != ' ' && !(cursor_attr & KMS_ATTR_CONCEAL))
                 kms_gles_glyph(kms, r, view, cursor_index, cursor_x, cursor_y,
                                cw * cursor_cells, ch, cursor_bg,
                                (cursor_attr & KMS_ATTR_ITALIC) ? italic_lean : 0,

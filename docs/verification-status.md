@@ -1,5 +1,19 @@
 # Verification status
 
+## 2026-10-24: 0.2.13 GPU composition with overhanging fonts
+
+0.2.12 on the host (deployed) composed nothing on the GPU: every frame fell
+back with "the font's ink overhangs its cell", because the host's Modern
+11x22 font has the Arabic companion attached, which reports overhang.
+0.2.13 sizes sprite margins from the font's reported overhang and redraws
+glyphs whose ink enters a block cursor in the cursor colour, clipped to it,
+as the CPU does. `gles_compose_gate` adds the host's font (Modern 11x22,
+colour emoji, Arabic): Latin, bold, italic, a wide emoji, Arabic with a
+mark, and a block cursor on overhanging ink. Max difference 2, on one
+antialiased bold edge (CPU rounds bold's two strikes separately); the gate
+allows 2 inside bold cells only, 1 elsewhere. Renderer, terminal and font
+suites: gles 111 pass, native 111 pass.
+
 ## 2026-10-24: 0.2.12 the GPU composes views (ADR 0181 steps 3-4, first cut)
 
 `src/blit_kms_gles.c` composes each output on the GPU in `draw_view`'s

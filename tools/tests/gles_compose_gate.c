@@ -4,6 +4,7 @@
    allowing 1 per channel for blend rounding (ADR 0181). Uses the packaged
    Terminus and wide fonts, so glyphs are the ones the host draws. */
 #include "../../src/blit_kms.c"
+#include "../../src/blit_raster.h"
 
 #define W 320
 #define H 160
@@ -80,6 +81,16 @@ static void compare(const char *scene, BlitKms *kms, KmsOutput *out, BlitKmsSurf
             if (d > worst) worst = d;
         }
         if (worst > max_diff) max_diff = worst;
+        /* Bold is two strikes on the CPU, each rounded, and one blend of
+           their combined coverage on the GPU: up to 2 on its antialiased
+           edges. Everywhere else the contract is 1. */
+        {
+            int cx = (i % W - view->origin_x) / view->cell_width;
+            int cy = (i / W - view->origin_y) / view->cell_height;
+            if (worst == 2 && cx >= 0 && cy >= 0 && cx < view->columns && cy < view->rows &&
+                (view->attributes[cy * view->stride + cx] & 1))
+                worst = 1;
+        }
         if (worst > 1) {
             if (bad < 3)
                 fprintf(stderr, "GLES_COMPOSE_FAIL %s at %d,%d: cpu %06x gpu %06x\n",
@@ -170,7 +181,45 @@ int main(void)
     view.surface_revision = 4; ++view.graphics_signature;
     compare("image bands", &kms, out, &view);
 
-    printf("GLES_COMPOSE_PASS scenes=5 max_channel_diff=%d renderer=\"%s\"\n",
-           max_diff, blit_gles_identity(kms.gles));
+    /* The host's font: Modern at 11x22 with colour emoji and the Arabic
+       companion, whose ink overhangs its cells. */
+    {
+        BlitRaster *raster = blit_raster_open(&font, "assets/fonts/BlitModernNerd-Regular.ttf",
+                                              "assets/fonts/NotoColorEmoji.ttf", 11, 22);
+        if (raster == NULL || !blit_raster_set_arabic(raster, "assets/fonts/BlitArabicModern.ttf")) {
+            fprintf(stderr, "GLES_COMPOSE_FAIL the Modern/Arabic raster does not open\n");
+            return 1;
+        }
+        blit_raster_attach(&font, raster);
+    }
+    reset();
+    view.cell_width = 11; view.cell_height = 22;
+    view.columns = 29; view.rows = 7;
+    text(0, 0, "Modern text, 11x22", 0, 0, 0);
+    text(0, 1, "bold", 0, 0, 1);
+    text(6, 1, "italic", 0xffd080, 0x203040, 128);
+    codepoints[2 * COLS + 0] = 0x1F600; attributes[2 * COLS + 0] = KMS_ATTR_WIDE;
+    attributes[2 * COLS + 1] = KMS_ATTR_CONTINUATION;
+    codepoints[2 * COLS + 3] = 0x2764;
+    codepoints[3 * COLS + 4] = 0xfeb2;
+    codepoints[3 * COLS + 5] = 0xfe92;
+    {
+        static uint32_t combining[COLS * ROWS * BLIT_MAX_COMBINING];
+        static unsigned char counts[COLS * ROWS];
+        memset(combining, 0, sizeof(combining));
+        memset(counts, 0, sizeof(counts));
+        combining[(3 * COLS + 5) * BLIT_MAX_COMBINING] = 0x0650;
+        counts[3 * COLS + 5] = 1;
+        view.combining = combining;
+        view.combining_count = counts;
+        view.cursor_visible = 0;
+        view.surface_revision = 10;
+        compare("modern, emoji, arabic", &kms, out, &view);
+        view.cursor_visible = 1; view.cursor_style = 1;
+        view.cursor_x = 5; view.cursor_y = 3; view.surface_revision = 11;
+        compare("block cursor on overhanging ink", &kms, out, &view);
+    }
+    printf("GLES_COMPOSE_PASS scenes=7 max_channel_diff=%d overhang=%s renderer=\"%s\"\n",
+           max_diff, blit_font_has_overhang(&font) ? "yes" : "no", blit_gles_identity(kms.gles));
     return 0;
 }
