@@ -25,9 +25,23 @@ for the GLES compositor to close, not a gate to keep.
 Result: native `run-gates.sh all` 158 pass, 6 skip, 0 fail; SDL 157 pass,
 6 skip, 1 fail -- frame_rate_gate's 20 ms wall-clock budget, which misses
 under host load equally on the pre-change and current binaries (A/B, 1 of 3
-each). Still on SDL: 18 gates through `sdl_test_profile.rb`, 5 Ruby gates
-with their own SDL driver choice, 14 shell gates and 12 C harnesses that
-include the SDL renderer; their migration is the rest of step 1.
+each).
+
+Rest of step 1 (6b5e432). `sdl_test_profile.rb` and a new `gate_display.sh`
+follow the same backend switch: 16 of 18 profile gates and 12 of 14 shell
+gates run on native by default. Remaining on SDL, each by design:
+
+| kind | gates | why |
+|---|---|---|
+| tests SDL itself (pinned, retire at cutover) | 7 server gates above; http_accept_budget, external_pointer_composition; sdl_graphics_cache, sdl_background_batch | SDL traces, caches, rotation, simulated SDL present |
+| SDL half of a pair whose native half runs | font_backend_raster (kms mode), arabic_backend (kms mode), graphics_placement_damage (graphics_scene_native) | both halves in the suite |
+| SDL-only C harnesses | sdl_kms_policy (2), sdl_output_startup, sdl_glyph_filter | SDL startup and filtering |
+| canonical-state C harnesses | emoji_layout, rectangle_copy, surface_damage, presentation_trial_api, graphics_ingestion | test terminal/graphics state; leave SDL with `blit_server.c` |
+| GLES suite | 13 gates | SDL's GL path, kept green until cutover |
+
+Final: `run-gates.sh all` native 158 pass, 6 skip, 0 fail; with
+`BLIT_GATE_BACKEND=sdl` 158 pass, 6 skip, 0 fail; `gles` 13 pass. The
+headless oracle for the GLES compositor is in place.
 
 ## 2026-10-24: 0.2.8 pointer shapes and hiding the pointer, OSC 22 (#138, hibr #373)
 
