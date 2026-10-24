@@ -1,5 +1,21 @@
 # Verification status
 
+## 2026-10-24: 0.2.15 scaled images on the GPU; sprite atlas follows the font
+
+On the host (0.2.14, owner logged in), ~30% of frames were still CPU
+composed with "an image is scaled": the wallpaper. The GPU now samples a
+scaled image at s = source + d*k + 0.5/width texels (k = source/destination),
+the same texel as the CPU's integer floor(d*k) at any ratio;
+`gles_compose_gate` adds scaled RGB and RGBA images at 37x23, 9x41, 200x120
+and 13x13 from 16x16 and 12x12, within 1 per channel. The owner reported
+title-bar buttons clipped on the right by a few pixels; not reproduced (the
+screen was locked): the brackets-style buttons fit their cells in Modern,
+and GPU equals CPU for that exact bar against a view's right edge (new
+scene). One GPU-only way to get it was closed regardless: the sprite atlas
+is now emptied whenever the font's path, cell size, raster or data change,
+since a replacement raster can reuse the old one's address. Renderer,
+terminal and font suites: gles 112 pass, native 112 pass.
+
 ## 2026-10-24: 0.2.14 title-bar corner glyphs U+100007/U+100008 (#140)
 
 For hibr 0.99.316's `bar` frame (Charcoal): two Blit originals, a cell

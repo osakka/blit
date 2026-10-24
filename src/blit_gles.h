@@ -76,6 +76,12 @@ void blit_gles_quad(BlitGles *gles, int mode, BlitGlesTexture texture,
                     int source_x, int source_y, int source_width,
                     int source_height, int x, int y, int width, int height,
                     uint32_t rgb);
+/* An IMAGE quad that samples exactly the source pixel the CPU compositor's
+   integer scaler picks, floor(d * source / destination), at any ratio. */
+void blit_gles_image(BlitGles *gles, BlitGlesTexture texture,
+                     int texture_width, int texture_height,
+                     int source_x, int source_y, int source_width,
+                     int source_height, int x, int y, int width, int height);
 /* Clip later quads to a rectangle; width 0 clears the clip. */
 void blit_gles_clip(BlitGles *gles, int x, int y, int width, int height);
 /* Flushes; on GBM queues the frame (lock it with blit_gles_lock_front). */

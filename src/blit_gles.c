@@ -915,6 +915,35 @@ void blit_gles_quad(BlitGles *gles, int mode, BlitGlesTexture texture,
                    rgb, 255, mode);
 }
 
+void blit_gles_image(BlitGles *gles, BlitGlesTexture texture,
+                     int texture_width, int texture_height,
+                     int source_x, int source_y, int source_width,
+                     int source_height, int x, int y, int width, int height)
+{
+    /* A pixel centre d + 0.5 samples s = source + d*k + 0.5/width texels
+       (k = source/destination): the same texel as floor(d*k), since d*k is
+       a multiple of 1/width and the nudge never crosses the next integer. */
+    double kx, ky, u0, v0, u1, v1;
+    if (gles == NULL || texture == 0 || width < 1 || height < 1 ||
+        source_width < 1 || source_height < 1)
+        return;
+    kx = (double)source_width / width;
+    ky = (double)source_height / height;
+    u0 = source_x - 0.5 * kx + 0.5 / width;
+    v0 = source_y - 0.5 * ky + 0.5 / height;
+    u1 = u0 + source_width;
+    v1 = v0 + source_height;
+    if (gles->batch_texture != texture) {
+        gles_flush(gles);
+        gles->glBindTexture(GL_TEXTURE_2D, texture);
+        gles->batch_texture = texture;
+    }
+    gles_rectangle(gles, (float)x, (float)y, (float)(x + width), (float)(y + height),
+                   (float)(u0 / texture_width), (float)(v0 / texture_height),
+                   (float)(u1 / texture_width), (float)(v1 / texture_height),
+                   0, 255, BLIT_GLES_IMAGE);
+}
+
 void blit_gles_clip(BlitGles *gles, int x, int y, int width, int height)
 {
     if (gles == NULL || gles->bound_height == 0) return;

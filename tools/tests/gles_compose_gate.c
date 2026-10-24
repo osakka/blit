@@ -218,8 +218,44 @@ int main(void)
         view.cursor_visible = 1; view.cursor_style = 1;
         view.cursor_x = 5; view.cursor_y = 3; view.surface_revision = 11;
         compare("block cursor on overhanging ink", &kms, out, &view);
+        /* hibr's title bar, brackets style, against the view's right edge:
+           a tee, "_ <white square> x", a tee, on the bar's colour. */
+        {
+            static const uint32_t bar[] = { 0x2524, '_', ' ', 0x25a1, ' ', 'x', 0x251c };
+            int k, start = view.columns - 7;
+            view.cursor_visible = 0;
+            for (k = 0; k < view.columns; ++k) {
+                codepoints[5 * COLS + k] = ' ';
+                background[5 * COLS + k] = 0x3a3f48 + 1;
+                foreground[5 * COLS + k] = 0xe0e0e0 + 1;
+                attributes[5 * COLS + k] = 0;
+            }
+            for (k = 0; k < 7; ++k) codepoints[5 * COLS + start + k] = bar[k];
+            foreground[5 * COLS + start + 5] = 0xff5050 + 1;
+            view.surface_revision = 12;
+            compare("title bar buttons at the right edge", &kms, out, &view);
+        }
     }
-    printf("GLES_COMPOSE_PASS scenes=7 max_channel_diff=%d overhang=%s renderer=\"%s\"\n",
+    /* Scaled images, as a wallpaper is: odd ratios up and down. */
+    {
+        static const int sizes[][2] = { {37, 23}, {9, 41}, {200, 120}, {13, 13} };
+        int k;
+        reset();
+        view.cell_width = 11; view.cell_height = 22; view.columns = 29; view.rows = 7;
+        view.combining = NULL; view.combining_count = NULL; view.cursor_visible = 0;
+        text(0, 1, "text over a scaled wallpaper", 0xffffff, 0, 0);
+        for (k = 0; k < 4; ++k) {
+            image(0, 3 + k * 50, 5, -1073741825, 0);
+            images[0].placement_width = sizes[k][0];
+            images[0].placement_height = sizes[k][1];
+            image(1, 60, 70, -1, 1);
+            images[1].placement_width = 31 + k * 17;
+            images[1].placement_height = 5 + k * 9;
+            view.surface_revision = 20 + k; ++view.graphics_signature;
+            compare("scaled images", &kms, out, &view);
+        }
+    }
+    printf("GLES_COMPOSE_PASS scenes=12 max_channel_diff=%d overhang=%s renderer=\"%s\"\n",
            max_diff, blit_font_has_overhang(&font) ? "yes" : "no", blit_gles_identity(kms.gles));
     return 0;
 }

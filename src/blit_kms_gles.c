@@ -9,7 +9,7 @@
    two compositors cannot disagree about what a glyph looks like.
 
    The CPU compositor stays the reference. A frame the GPU cannot compose
-   (effects on, a scaled image) is
+   (an effect on) is
    composed by the CPU and uploaded instead, per frame. */
 
 #define KMS_ATLAS_SIZE 2048
@@ -48,6 +48,12 @@ struct KmsGlesResources {
     BlitGlesTexture pointer;
     unsigned long long pointer_revision;
     int pointer_width, pointer_height;
+    /* The font the sprites were made from. A replaced font can land at the
+       same addresses as the one it replaced, so its path and cell size are
+       compared too, and any change empties the atlas. */
+    char font_path[256];
+    const void *font_raster, *font_data;
+    int font_cell_width, font_cell_height;
     uint32_t *scratch_black, *scratch_white;
     unsigned char *sprite_pixels;
     size_t scratch_pixels;
@@ -321,13 +327,29 @@ static const char *kms_gles_unsupported(BlitKms *kms, const KmsOutput *output,
         count = blit_graphics_collect(views[v].graphics, views[v].graphics_count,
                                       draws, BLIT_GRAPHICS_MAX_DRAWS);
         for (d = 0; d < count; ++d) {
-            if (draws[d].width != draws[d].src_w || draws[d].height != draws[d].src_h)
-                return "an image is scaled";
             if (draws[d].image->format != 24 && draws[d].image->format != 32)
                 return "an image has an unsupported format";
         }
     }
     return NULL;
+}
+
+static void kms_gles_font_check(KmsGlesResources *r, const BlitFont *font)
+{
+    const char *path = font != NULL ? font->path : "";
+    const void *raster = font != NULL ? font->raster_state : NULL;
+    const void *data = font != NULL ? font->data : NULL;
+    int cw = font != NULL ? font->raster_cell_width : 0;
+    int ch = font != NULL ? font->raster_cell_height : 0;
+    if (strcmp(r->font_path, path) == 0 && r->font_raster == raster &&
+        r->font_data == data && r->font_cell_width == cw && r->font_cell_height == ch)
+        return;
+    kms_atlas_reset(r);
+    snprintf(r->font_path, sizeof(r->font_path), "%s", path);
+    r->font_raster = raster;
+    r->font_data = data;
+    r->font_cell_width = cw;
+    r->font_cell_height = ch;
 }
 
 static void kms_gles_images(BlitKms *kms, KmsGlesResources *r,
@@ -345,10 +367,10 @@ static void kms_gles_images(BlitKms *kms, KmsGlesResources *r,
         if (!in_band) continue;
         texture = kms_gles_image(kms, r, draw->image);
         if (!texture) continue;
-        blit_gles_quad(kms->gles, BLIT_GLES_IMAGE, texture, draw->image->width,
-                       draw->image->height, draw->src_x, draw->src_y,
-                       draw->src_w, draw->src_h, view->origin_x + draw->x,
-                       view->origin_y + draw->y, draw->width, draw->height, 0);
+        blit_gles_image(kms->gles, texture, draw->image->width, draw->image->height,
+                        draw->src_x, draw->src_y, draw->src_w, draw->src_h,
+                        view->origin_x + draw->x, view->origin_y + draw->y,
+                        draw->width, draw->height);
     }
 }
 
@@ -512,6 +534,7 @@ static int kms_gles_compose(BlitKms *kms, KmsOutput *output,
         return -1;
     }
     ++r->frame;
+    kms_gles_font_check(r, kms->font);
     if (output->gles_scene == NULL) {
         output->gles_scene = blit_gles_scene_open(kms->gles, output->mode.hdisplay,
                                                   output->mode.vdisplay);
