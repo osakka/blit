@@ -39,6 +39,8 @@ require 'net/http'
 require 'timeout'
 require 'uri'
 require_relative 'gate_port'
+require_relative 'gate_server'
+require_relative 'gate_bmp'
 
 ROOT = File.expand_path('../..', __dir__)
 PORT = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', '19572'), 10))
@@ -80,7 +82,7 @@ def json(method, path, body = nil)
   JSON.parse(response.body) rescue {}
 end
 
-server = spawn({ 'SDL_VIDEODRIVER' => 'dummy', 'BLIT_PSF_FONT' => FONT,
+server = spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
                  'LD_LIBRARY_PATH' => File.join(ROOT, 'build/sdl3-kms') },
                BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')
 at_exit do
@@ -159,7 +161,6 @@ def screen(x, y)
 end
 
 def lit_cells(bmp, inset)
-  stride = (PANEL_W * 3 + 3) & ~3
   lit = []
   (0...ROWS).each do |cy|
     (0...COLUMNS).each do |cx|
@@ -168,9 +169,7 @@ def lit_cells(bmp, inset)
         [2, 5].each do |dx|
           x = inset + cx * CELL_W + dx
           y = inset + cy * CELL_H + dy
-          offset = 54 + (PANEL_H - 1 - y) * stride + x * 3
-          if bmp.getbyte(offset).to_i + bmp.getbyte(offset + 1).to_i +
-             bmp.getbyte(offset + 2).to_i > 0
+          if gate_pixel(bmp, x, y).sum > 0
             found = true
             break
           end

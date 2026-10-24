@@ -8,6 +8,7 @@ require 'timeout'
 require 'fileutils'
 require 'open3'
 require_relative 'gate_port'
+require_relative 'gate_server'
 ROOT=File.expand_path('../..',__dir__)
 BINARY=ENV.fetch('BLIT_GATE_BINARY',File.join(ROOT,'build/blit/blit-server'))
 PORT=gate_port(ENV.fetch('BLIT_AUXILIARY_NATIVE_PORT','19494'))
@@ -94,7 +95,7 @@ Dir.mktmpdir('blit-native-auxiliary') do |root|
     redirect = trace.empty? ? '' : " >>'#{root}/placement.log' 2>&1"
     File.write(file,"strict\nexport TMPDIR='#{root}'\nexec \"$HIBR\"#{trace} '#{ROOT}/hibr/#{script}' \"$@\"#{redirect}\n")
   end
-  server_env={'SDL_VIDEODRIVER'=>'dummy','BLIT_RENDERER'=>'software','LD_LIBRARY_PATH'=>File.join(ROOT,'build/sdl3-kms'),
+  server_env={**gate_display_env,'BLIT_RENDERER'=>'software','LD_LIBRARY_PATH'=>File.join(ROOT,'build/sdl3-kms'),
     'BLIT_PSF_FONT'=>File.join(ROOT,'assets/fonts/Blit-Hibr-Terminus16.psf'),'BLIT_INPUT_ROOT'=>File.join(root,'input'),
     'BLIT_SETTINGS'=>'ignore','BLIT_AUTH_TOKEN'=>'native-auxiliary-admin','BLIT_PANE_LAYOUT'=>'1x2',
     'BLIT_LOGIN_PANE_ID'=>'pane-display-1-2','BLIT_LOGIN_AUTOSTART'=>'1',
@@ -106,8 +107,11 @@ Dir.mktmpdir('blit-native-auxiliary') do |root|
   begin
     pid=spawn('sudo','-n','env',*server_env.map{|k,v|"#{k}=#{v}"},BINARY,PORT.to_s,out:log,err:[:child,:out])
     login=await('actual native login association'){q=request('GET','/v1/login');q if q.dig('desktop','state')=='ready'}
-    output=request('GET','/v1/displays')['displays'].first['name']
-    check(login.dig('desktop','client_name')=="blit-#{output}-p2",'primary native name is not stable output/ordinal identity')
+    display=request('GET','/v1/displays')['displays'].first
+    # The client name carries the connector, the output's stable identity; a
+    # native display's `name` is 'KMS connector <id>', SDL's is the connector.
+    output=display.dig('state','connector') || display['name']
+    check(login.dig('desktop','client_name')=="blit-#{output}-p2","primary native name is not stable output/ordinal identity: #{login.dig('desktop','client_name').inspect} for output #{output.inspect}")
     request('POST','/v1/auxiliary-displays/apply',{'bindings'=>[{'output'=>output,'pane_ordinal'=>1}]})
     b=await('actual standby started'){q=request('GET','/v1/auxiliary-displays')['bindings'][0];q if q['session_id']}
     request('PUT','/v1/fonts',{'scale'=>1.1}) if ENV['BLIT_NATIVE_AUXILIARY_RESIZE']=='1'

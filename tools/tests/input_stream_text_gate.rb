@@ -12,6 +12,7 @@ require 'timeout'
 require 'tmpdir'
 require 'uri'
 require_relative 'gate_port'
+require_relative 'gate_server'
 
 ROOT = File.expand_path('../..', __dir__)
 PORT = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', '19283'), 10))
@@ -109,7 +110,7 @@ keymap = {
 
 Dir.mktmpdir('blit-stream-text') do |input_root|
   File.write(File.join(input_root, 'event0'), '')
-  pid = Process.spawn({'SDL_VIDEODRIVER' => 'dummy',
+  pid = Process.spawn({**gate_display_env,
                        'BLIT_PSF_FONT' => FONT,
                        'BLIT_INPUT_ROOT' => input_root,
                        'LD_LIBRARY_PATH' => File.join(ROOT, 'build/sdl3-kms')},

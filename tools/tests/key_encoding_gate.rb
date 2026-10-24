@@ -27,6 +27,7 @@ require 'tmpdir'
 require 'timeout'
 require 'uri'
 require_relative 'gate_port'
+require_relative 'gate_server'
 
 ROOT = File.expand_path('../..', __dir__)
 PORT = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', '19254'), 10))
@@ -118,7 +119,7 @@ DEVICE_A = 'input-node-event0'
 DEVICE_B = 'input-node-event1'
 at_exit { FileUtils.remove_entry(INPUT_ROOT) rescue nil }
 
-server = spawn({ 'SDL_VIDEODRIVER' => 'dummy', 'BLIT_PSF_FONT' => FONT,
+server = spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
                  'BLIT_INPUT_ROOT' => INPUT_ROOT,
                  'LD_LIBRARY_PATH' => File.join(ROOT, 'build/sdl3-kms') },
                BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')

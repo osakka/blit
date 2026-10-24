@@ -3,6 +3,7 @@
 require 'json'
 require 'net/http'
 require 'fileutils'
+require_relative 'gate_server'
 
 port = 18_997
 root = File.expand_path('../..', __dir__)
@@ -13,7 +14,7 @@ FileUtils.rm_f(fake_desktop)
 File.symlink('/bin/sh', fake_desktop)
 
 env = {
-  'SDL_VIDEODRIVER' => 'dummy',
+  **gate_display_env,
   'SDL_RENDERER' => 'software',
   'LD_LIBRARY_PATH' => File.join(root, 'build/sdl3-kms'),
   'BLIT_COMMAND_ALLOWLIST' => fake_desktop

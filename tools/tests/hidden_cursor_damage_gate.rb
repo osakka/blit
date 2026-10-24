@@ -8,12 +8,13 @@ require 'json'
 require 'net/http'
 require 'timeout'
 require_relative 'gate_port'
+require_relative 'gate_server'
 
 port = gate_port(Integer(ENV.fetch('BLIT_HIDDEN_CURSOR_PORT', '19249')))
 base = URI("http://127.0.0.1:#{port}")
 log = "/tmp/blit-hidden-cursor-#{Process.pid}.log"
 env = {
-  'SDL_VIDEODRIVER' => 'dummy',
+  **gate_display_env,
   'SDL_RENDERER' => 'software',
   'LD_LIBRARY_PATH' => 'build/sdl3-kms'
 }

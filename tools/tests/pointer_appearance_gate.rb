@@ -4,6 +4,7 @@ require 'net/http'
 require 'tmpdir'
 require 'timeout'
 require_relative 'gate_port'
+require_relative 'gate_server'
 ROOT=File.expand_path('../..',__dir__)
 PORT=gate_port(Integer(ENV.fetch('BLIT_GATE_PORT','19521')))
 BASE=URI("http://127.0.0.1:#{PORT}")
@@ -18,7 +19,7 @@ Dir.mktmpdir('blit-pointer-appearance') do |root|
   pid=nil
   begin
     start=-> do
-      env={'SDL_VIDEODRIVER'=>'dummy','BLIT_RENDERER'=>'software','BLIT_LOGIN_AUTOSTART'=>'0',
+      env={**gate_display_env,'BLIT_RENDERER'=>'software','BLIT_LOGIN_AUTOSTART'=>'0',
            'BLIT_SETTINGS_PATH'=>File.join(root,'settings.json'),'BLIT_INPUT_ROOT'=>root,
            'BLIT_PSF_FONT'=>File.join(ROOT,'assets/fonts/Blit-Hibr-Terminus16.psf'),
            'LD_LIBRARY_PATH'=>File.join(ROOT,'build/sdl3-kms')}

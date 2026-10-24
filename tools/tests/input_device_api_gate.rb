@@ -38,6 +38,7 @@ require 'timeout'
 require 'tmpdir'
 require 'uri'
 require_relative 'gate_port'
+require_relative 'gate_server'
 
 ROOT = File.expand_path('../..', __dir__)
 PORT = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', '19246'), 10))
@@ -66,7 +67,7 @@ end
 # devices by it, so the server refuses a path that would be truncated.
 Dir.mktmpdir('blit-dev') do |root|
   NODES.each { |node| File.write(File.join(root, node), '') }
-  server = spawn({ 'SDL_VIDEODRIVER' => 'dummy', 'BLIT_PSF_FONT' => FONT,
+  server = spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
                    'BLIT_INPUT_ROOT' => root,
                    'LD_LIBRARY_PATH' => File.join(ROOT, 'build/sdl3-kms') },
                  BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')

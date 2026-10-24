@@ -19,6 +19,7 @@ require 'net/http'
 require 'timeout'
 require 'uri'
 require_relative 'gate_port'
+require_relative 'gate_server'
 
 ROOT = File.expand_path('../..', __dir__)
 PORT = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', '19265'), 10))
@@ -60,7 +61,7 @@ def check(condition, message)
   warn "graphics-trace gate: FAIL #{message}"
 end
 
-server = spawn({ 'SDL_VIDEODRIVER' => 'dummy', 'SDL_RENDERER' => 'software',
+server = spawn({ **gate_display_env, 'SDL_RENDERER' => 'software',
                  'BLIT_PSF_FONT' => FONT,
                  'BLIT_COMMAND_ALLOWLIST' => "/bin/sh,#{KITTY_PROBE}",
                  'LD_LIBRARY_PATH' => File.join(ROOT, 'build/sdl3-kms') },

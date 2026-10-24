@@ -8,6 +8,7 @@ require 'fileutils'
 require 'socket'
 require 'fcntl'
 require_relative 'gate_port'
+require_relative 'gate_server'
 
 ROOT = File.expand_path('../..', __dir__)
 BINARY = ENV.fetch('BLIT_GATE_BINARY', File.join(ROOT, 'build/blit/blit-server'))
@@ -52,7 +53,7 @@ Dir.mktmpdir('blit-login-identity') do |root|
   modes.each do |mode|
     result=File.join(root,"#{mode}.result")
     File.write(result,'');File.chmod(0666,result)
-    env={'SDL_VIDEODRIVER'=>'dummy','BLIT_RENDERER'=>'software',
+    env={**gate_display_env,'BLIT_RENDERER'=>'software',
       'LD_LIBRARY_PATH'=>File.join(ROOT,'build/sdl3-kms'),
       'BLIT_PSF_FONT'=>File.join(ROOT,'assets/fonts/Blit-Hibr-Terminus16.psf'),
       'BLIT_INPUT_ROOT'=>File.join(root,'input'),'BLIT_SETTINGS'=>'ignore',

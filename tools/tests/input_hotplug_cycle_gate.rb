@@ -37,6 +37,7 @@ require 'timeout'
 require 'tmpdir'
 require 'uri'
 require_relative 'gate_port'
+require_relative 'gate_server'
 
 ROOT = File.expand_path('../..', __dir__)
 PORT = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', '19613'), 10))
@@ -137,7 +138,7 @@ Dir.mktmpdir('blit-hotplug') do |base|
   plug(root, 'event0', KEYBOARD_IDENTITY)
   plug(root, 'event1', POINTER_IDENTITY)
 
-  server = spawn({ 'SDL_VIDEODRIVER' => 'dummy', 'BLIT_PSF_FONT' => FONT,
+  server = spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
                    'LD_LIBRARY_PATH' => File.join(ROOT, 'build/sdl3-kms'),
                    'BLIT_INPUT_ROOT' => root,
                    'BLIT_SETTINGS_PATH' => settings },

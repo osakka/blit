@@ -7,6 +7,7 @@ require 'tmpdir'
 require 'timeout'
 require 'fileutils'
 require_relative 'gate_port'
+require_relative 'gate_server'
 ROOT = File.expand_path('../..', __dir__)
 BINARY = ENV.fetch('BLIT_GATE_BINARY', File.join(ROOT, 'build/blit/blit-server'))
 PORT = gate_port(ENV.fetch('BLIT_AUXILIARY_GATE_PORT', '19493'))
@@ -88,7 +89,7 @@ Dir.mktmpdir('blit-auxiliary') do |root|
   HIBR
   log = File.join(root,'server.log')
   settings = File.join(root,'settings.json')
-  env = {'SDL_VIDEODRIVER'=>'dummy','BLIT_RENDERER'=>'software','LD_LIBRARY_PATH'=>File.join(ROOT,'build/sdl3-kms'),
+  env = {**gate_display_env,'BLIT_RENDERER'=>'software','LD_LIBRARY_PATH'=>File.join(ROOT,'build/sdl3-kms'),
     'BLIT_PSF_FONT'=>File.join(ROOT,'assets/fonts/Blit-Hibr-Terminus16.psf'),'BLIT_INPUT_ROOT'=>File.join(root,'input'),
     'BLIT_SETTINGS_PATH'=>settings,'BLIT_AUTH_TOKEN'=>'auxiliary-admin','BLIT_PANE_LAYOUT'=>'1x2',
     'BLIT_LOGIN_PANE_ID'=>'pane-display-1-2','BLIT_LOGIN_AUTOSTART'=>'0',

@@ -6,6 +6,7 @@ require 'net/http'
 require 'tmpdir'
 require 'timeout'
 require_relative 'gate_port'
+require_relative 'gate_server'
 
 remote_server = ENV['BLIT_GATE_SERVER']
 if remote_server
@@ -16,7 +17,7 @@ else
   base = URI("http://127.0.0.1:#{port}")
   log = File.join(Dir.tmpdir, "blit-frame-rate-#{Process.pid}.log")
   env = {
-    'SDL_VIDEODRIVER' => 'dummy',
+    **gate_display_env,
     'LD_LIBRARY_PATH' => 'build/sdl3-kms'
   }
   pid = Process.spawn(env, 'build/blit/blit-server', port.to_s,

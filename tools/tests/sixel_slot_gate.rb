@@ -13,13 +13,14 @@ require 'json'
 require 'net/http'
 require 'timeout'
 require_relative 'gate_port'
+require_relative 'gate_server'
 
 port = gate_port(Integer(ENV.fetch('BLIT_SIXEL_SLOT_PORT', '19235')))
 base = URI("http://127.0.0.1:#{port}")
 binary = ENV.fetch('BLIT_GATE_BINARY', 'build/blit/blit-server')
 log = "/tmp/blit-sixel-slot-#{Process.pid}.log"
 env = {
-  'SDL_VIDEODRIVER' => 'dummy',
+  **gate_display_env,
   'SDL_RENDERER' => 'software',
   'LD_LIBRARY_PATH' => ENV.fetch('BLIT_GATE_LIBS', 'build/sdl3-kms')
 }

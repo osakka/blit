@@ -11,11 +11,13 @@ require 'net/http'
 require 'timeout'
 require 'uri'
 require_relative 'gate_port'
+require_relative 'gate_server'
 
 port = gate_port(Integer(ENV.fetch('BLIT_WALLPAPER_POINTER_PORT', '19213')))
 base = URI("http://127.0.0.1:#{port}")
 log = "/tmp/blit-wallpaper-pointer-#{Process.pid}.log"
-pid = Process.spawn({'SDL_VIDEODRIVER' => 'dummy',
+# SDL path only (asserts the SDL pointer-cache path); retired at the GLES cutover.
+pid = Process.spawn({**gate_display_env(backend: 'sdl'),
                      'BLIT_RENDERER' => 'software',
                      'LD_LIBRARY_PATH' => 'build/sdl3-kms'},
                     'build/blit/blit-server', port.to_s,

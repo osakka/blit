@@ -14,6 +14,7 @@ require 'timeout'
 require 'tmpdir'
 require 'uri'
 require_relative 'gate_port'
+require_relative 'gate_server'
 
 ROOT = File.expand_path('../..', __dir__)
 PORT = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', '19253'), 10))
@@ -58,7 +59,7 @@ Dir.mktmpdir('blit-tap') do |root|
              "bustype=0003\nvendor=05ac\nproduct=0252\nversion=0110\nname=bcm5974\n" \
              "kinds=pointer\ncapabilities=buttons,touchpad\n")
   settings = File.join(root, 'settings.json')
-  server = spawn({ 'SDL_VIDEODRIVER' => 'dummy', 'BLIT_PSF_FONT' => FONT,
+  server = spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
                    'BLIT_INPUT_ROOT' => root, 'BLIT_SETTINGS_PATH' => settings,
                    'LD_LIBRARY_PATH' => File.join(ROOT, 'build/sdl3-kms') },
                  BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')

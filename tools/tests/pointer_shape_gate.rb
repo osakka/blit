@@ -11,6 +11,7 @@ require 'net/http'
 require 'tmpdir'
 require 'timeout'
 require_relative 'gate_port'
+require_relative 'gate_server'
 
 ROOT = File.expand_path('../..', __dir__)
 PORT = gate_port(Integer(ENV.fetch('BLIT_POINTER_SHAPE_PORT', '19524')))
@@ -89,7 +90,7 @@ Dir.mktmpdir('blit-pointer-shape') do |root|
     system(helper, '--stamp', index.to_s, '0', '24', path) || raise("stamp #{name} failed")
     stamps[name] = File.binread(path)
   end
-  pid = spawn({ 'SDL_VIDEODRIVER' => 'dummy', 'BLIT_RENDERER' => 'software',
+  pid = spawn({ **gate_display_env, 'BLIT_RENDERER' => 'software',
                 'BLIT_LOGIN_AUTOSTART' => '0',
                 'BLIT_SETTINGS_PATH' => File.join(root, 'settings.json'),
                 'BLIT_INPUT_ROOT' => root,

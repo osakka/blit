@@ -5,6 +5,7 @@ require 'net/http'
 require 'tmpdir'
 require 'timeout'
 require_relative 'gate_port'
+require_relative 'gate_server'
 
 ROOT = File.expand_path('../..', __dir__)
 PORT = gate_port(Integer(ENV.fetch('BLIT_BACKEND_GATE_PORT', '19531')))
@@ -31,7 +32,8 @@ Dir.mktmpdir('blit-backend-selection') do |root|
   path = File.join(root, 'settings.json')
   pid = nil
   start = lambda do |backend, mode = nil|
-    env = {'SDL_VIDEODRIVER'=>'dummy', 'BLIT_RENDERER'=>'software',
+    # SDL path only (tests switching between SDL and native); retired at the GLES cutover.
+    env = {**gate_display_env(backend: 'sdl'), 'BLIT_RENDERER'=>'software',
            'BLIT_DISPLAY_BACKEND'=>backend, 'BLIT_DRM_DEVICE'=>File.join(root, 'absent-drm'),
            'BLIT_LOGIN_AUTOSTART'=>'0', 'BLIT_AUTH_TOKEN'=>'', 'BLIT_BIND_ADDRESS'=>'127.0.0.1',
            'BLIT_SETTINGS_PATH'=>path, 'BLIT_SETTINGS'=>mode, 'BLIT_INPUT_ROOT'=>root,

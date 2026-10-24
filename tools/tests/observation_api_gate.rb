@@ -10,6 +10,7 @@ require 'net/http'
 require 'timeout'
 require 'uri'
 require_relative 'gate_port'
+require_relative 'gate_server'
 
 ROOT = File.expand_path('../..', __dir__)
 PORT = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', '19251'), 10))
@@ -53,7 +54,8 @@ def delete(path)
 end
 
 server = Process.spawn({
-  'SDL_VIDEODRIVER' => 'dummy',
+  # SDL path only (asserts the telemetry of the SDL dummy output); retired at the GLES cutover.
+  **gate_display_env(backend: 'sdl'),
   'SDL_RENDERER' => 'software',
   'BLIT_LOGIN_AUTOSTART' => '0',
   'BLIT_EXPECT_DESKTOP' => '0',

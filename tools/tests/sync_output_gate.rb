@@ -28,6 +28,8 @@ require 'net/http'
 require 'timeout'
 require 'uri'
 require_relative 'gate_port'
+require_relative 'gate_server'
+require_relative 'gate_bmp'
 
 ROOT = File.expand_path('../..', __dir__)
 PORT = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', '19243'), 10))
@@ -79,10 +81,7 @@ end
 
 # 24-bit BMP, bottom-up, rows padded to four bytes.
 def pixel(bmp, x, y)
-  stride = (FB_WIDTH * 3 + 3) & ~3
-  offset = 54 + (FB_HEIGHT - 1 - y) * stride + x * 3
-  (bmp.getbyte(offset + 2) << 16) | (bmp.getbyte(offset + 1) << 8) |
-    bmp.getbyte(offset)
+  gate_pixel_rgb24(bmp, x, y)
 end
 
 # The lit pixels of the first four cells of a surface's first row, as a
@@ -120,7 +119,7 @@ BATCH = "printf '\\033[?25lBBBB'; sleep 2.5; " \
 DRIVER = "printf '\\033[?25lAAAA'; " \
          "while :; do sleep 0.25; printf '\\033[2;1Hx'; done"
 
-server = spawn({ 'SDL_VIDEODRIVER' => 'dummy', 'BLIT_PSF_FONT' => FONT,
+server = spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
                  'LD_LIBRARY_PATH' => File.join(ROOT, 'build/sdl3-kms') },
                BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')
 at_exit do

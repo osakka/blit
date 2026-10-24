@@ -4,6 +4,7 @@ require 'net/http'
 require 'tmpdir'
 require 'timeout'
 require_relative 'gate_port'
+require_relative 'gate_server'
 
 ROOT = File.expand_path('../..', __dir__)
 BINARY = ENV.fetch('BLIT_GATE_BINARY', File.join(ROOT,'build/blit/blit-server'))
@@ -28,7 +29,8 @@ cases.each_with_index do |(environment,saved,source,valid),index|
   Dir.mktmpdir('blit-config-source') do |work|
     path=File.join(work,'settings.json');log=File.join(work,'server.log')
     File.write(path,JSON.generate(version:1,revision:1,input_devices:{},server:{display_backend:saved})) if saved
-    env={'SDL_VIDEODRIVER'=>'dummy','BLIT_RENDERER'=>index==0 ? nil : 'software',
+    # SDL path only (reports SDL renderer identity); retired at the GLES cutover.
+    env={**gate_display_env(backend: 'sdl'),'BLIT_RENDERER'=>index==0 ? nil : 'software',
          'BLIT_DISPLAY_BACKEND'=>environment,'BLIT_DRM_DEVICE'=>File.join(work,'absent-drm'),
          'BLIT_SETTINGS_PATH'=>path,'BLIT_SETTINGS'=>nil,'BLIT_AUTH_TOKEN'=>'',
          'BLIT_LOGIN_AUTOSTART'=>'0','BLIT_EXPECT_DESKTOP'=>'0','BLIT_BIND_ADDRESS'=>'127.0.0.1',

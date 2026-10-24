@@ -27,6 +27,7 @@ require 'timeout'
 require 'tmpdir'
 require 'uri'
 require_relative 'gate_port'
+require_relative 'gate_server'
 
 ROOT = File.expand_path('../..', __dir__)
 PORT = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', '19251'), 10))
@@ -65,7 +66,7 @@ Dir.mktmpdir('blit-open') do |root|
   # passed against the defect. The live 3.46s event was a rescan: inotify sees
   # a node appear and reconnect_evdev_devices runs inside the loop.
   File.write(File.join(root, 'event0'), '')
-  server = spawn({ 'SDL_VIDEODRIVER' => 'dummy', 'BLIT_PSF_FONT' => FONT,
+  server = spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
                    'BLIT_INPUT_ROOT' => root,
                    'BLIT_INPUT_OPEN_DELAY_US' => OPEN_DELAY_US.to_s,
                    'LD_LIBRARY_PATH' => File.join(ROOT, 'build/sdl3-kms') },

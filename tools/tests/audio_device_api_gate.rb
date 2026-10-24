@@ -29,6 +29,7 @@ require 'timeout'
 require 'tmpdir'
 require 'uri'
 require_relative 'gate_port'
+require_relative 'gate_server'
 
 ROOT = File.expand_path('../..', __dir__)
 PORT = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', '19249'), 10))
@@ -160,7 +161,7 @@ Dir.mktmpdir('blit-audio') do |root|
   # hotplug watch observes; the procfs tree only supplies metadata.
   %w[pcmC0D0p pcmC0D3p pcmC0D0c].each { |n| File.write(File.join(snd, n), '') }
 
-  server = spawn({ 'SDL_VIDEODRIVER' => 'dummy', 'BLIT_PSF_FONT' => FONT,
+  server = spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
                    'BLIT_ASOUND_ROOT' => asound, 'BLIT_SND_ROOT' => snd,
                    'BLIT_COMMAND_ALLOWLIST' => '/bin/sh',
                    'LD_LIBRARY_PATH' => File.join(ROOT, 'build/sdl3-kms') },

@@ -6,6 +6,7 @@ require 'tmpdir'
 require 'timeout'
 require 'open3'
 require_relative 'gate_port'
+require_relative 'gate_server'
 ROOT=File.expand_path('../..',__dir__)
 PORT=gate_port(Integer(ENV.fetch('BLIT_GATE_PORT','19522')))
 BASE=URI("http://127.0.0.1:#{PORT}")
@@ -19,7 +20,8 @@ def data(*args) = JSON.parse(req(*args))
 Dir.mktmpdir('blit-pointer-pixels') do |root|
   helper=File.join(root,'art');stamp=File.join(root,'stamp')
   abort('cannot compile actual pointer source') unless system('tcc','-O2',File.join(ROOT,'tools/tests/pointer_art_gate.c'),'-o',helper)
-  pid=spawn({'SDL_VIDEODRIVER'=>'dummy','BLIT_RENDERER'=>'software','BLIT_LOGIN_AUTOSTART'=>'0',
+  # SDL path only (checks SDL rotating the pointer with its output); retired at the GLES cutover.
+  pid=spawn({**gate_display_env(backend: 'sdl'),'BLIT_RENDERER'=>'software','BLIT_LOGIN_AUTOSTART'=>'0',
     'BLIT_SETTINGS_PATH'=>File.join(root,'settings.json'),'BLIT_INPUT_ROOT'=>root,
     'BLIT_PSF_FONT'=>File.join(ROOT,'assets/fonts/Blit-Hibr-Terminus16.psf'),
     'LD_LIBRARY_PATH'=>File.join(ROOT,'build/sdl3-kms')},

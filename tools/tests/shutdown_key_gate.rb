@@ -28,6 +28,7 @@ require 'timeout'
 require 'tmpdir'
 require 'uri'
 require_relative 'gate_port'
+require_relative 'gate_server'
 
 ROOT = File.expand_path('../..', __dir__)
 PORT = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', '19721'), 10))
@@ -66,7 +67,7 @@ end
 
 $server = nil
 def start(root, settings)
-  $server = spawn({ 'SDL_VIDEODRIVER' => 'dummy', 'BLIT_PSF_FONT' => FONT,
+  $server = spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
                     'LD_LIBRARY_PATH' => File.join(ROOT, 'build/sdl3-kms'),
                     'BLIT_INPUT_ROOT' => root,
                     'BLIT_SETTINGS_PATH' => settings },

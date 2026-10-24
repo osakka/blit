@@ -12,6 +12,7 @@ require 'open3'
 require 'tmpdir'
 require 'uri'
 require_relative 'gate_port'
+require_relative 'gate_server'
 
 ROOT = File.expand_path('../..', __dir__)
 PORT = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', '19291'), 10))
@@ -56,7 +57,7 @@ Dir.mktmpdir('blit-split-capture-gate') do |work|
   FileUtils.chmod(0o755, launcher)
 
   env = {
-    'SDL_VIDEODRIVER' => 'dummy',
+    **gate_display_env,
     'SDL_RENDERER' => 'software',
     'BLIT_PSF_FONT' => ENV.fetch('BLIT_GATE_FONT', File.join(ROOT, 'assets/fonts/Blit-Hibr-Terminus16.psf')),
     'BLIT_SETTINGS' => 'ignore',

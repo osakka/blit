@@ -9,6 +9,7 @@ require 'net/http'
 require 'timeout'
 require 'uri'
 require_relative 'gate_port'
+require_relative 'gate_server'
 
 ROOT = File.expand_path('../..', __dir__)
 PORT = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', '19243'), 10))
@@ -35,7 +36,7 @@ def surface_text(body)
 end
 
 server = Process.spawn({
-  'SDL_VIDEODRIVER' => 'dummy',
+  **gate_display_env,
   'SDL_RENDERER' => 'software',
   'LD_LIBRARY_PATH' => File.join(ROOT, 'build/sdl3-kms')
 }, BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')

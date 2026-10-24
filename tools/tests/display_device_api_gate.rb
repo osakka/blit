@@ -22,6 +22,7 @@ require 'net/http'
 require 'timeout'
 require 'uri'
 require_relative 'gate_port'
+require_relative 'gate_server'
 
 ROOT = File.expand_path('../..', __dir__)
 PORT = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', '19250'), 10))
@@ -53,7 +54,7 @@ def request(method, path, body: nil)
   [response.code.to_i, parsed]
 end
 
-server = spawn({ 'SDL_VIDEODRIVER' => 'dummy', 'BLIT_PSF_FONT' => FONT,
+server = spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
                  'LD_LIBRARY_PATH' => File.join(ROOT, 'build/sdl3-kms') },
                BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')
 at_exit do

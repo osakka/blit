@@ -18,6 +18,8 @@ require 'tmpdir'
 require 'timeout'
 require 'uri'
 require_relative 'gate_port'
+require_relative 'gate_server'
+require_relative 'gate_bmp'
 
 ROOT = File.expand_path('../..', __dir__)
 PORT = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', '19241'), 10))
@@ -61,9 +63,7 @@ def capture
 end
 
 def pixel(bmp, width, height, x, y)
-  stride = (width * 3 + 3) & ~3
-  offset = 54 + (height - 1 - y) * stride + x * 3
-  [bmp.getbyte(offset + 2), bmp.getbyte(offset + 1), bmp.getbyte(offset)]
+  gate_pixel(bmp, x, y)
 end
 
 $failures = []
@@ -74,7 +74,7 @@ def check(condition, message)
   warn "kitty-placement gate: FAIL #{message}"
 end
 
-server = spawn({ 'SDL_VIDEODRIVER' => 'dummy', 'SDL_RENDERER' => 'software',
+server = spawn({ **gate_display_env, 'SDL_RENDERER' => 'software',
                  'BLIT_PSF_FONT' => FONT,
                  'LD_LIBRARY_PATH' => File.join(ROOT, 'build/sdl3-kms') },
                BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')

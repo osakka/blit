@@ -7,12 +7,13 @@ require 'socket'
 require 'tmpdir'
 require 'timeout'
 require_relative 'gate_port'
+require_relative 'gate_server'
 
 port = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', ARGV.fetch(0, '19206'))))
 base = URI("http://127.0.0.1:#{port}")
 log_path = File.join(Dir.tmpdir, "blit-stream-replay-#{Process.pid}.log")
 env = {
-  'SDL_VIDEODRIVER' => 'dummy',
+  **gate_display_env,
   'LD_LIBRARY_PATH' => 'build/sdl3-kms',
   'BLIT_COMMAND_ALLOWLIST' => '/bin/sh'
 }

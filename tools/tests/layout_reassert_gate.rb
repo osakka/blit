@@ -21,6 +21,7 @@ require 'timeout'
 require 'tmpdir'
 require 'uri'
 require_relative 'gate_port'
+require_relative 'gate_server'
 
 ROOT = File.expand_path('../..', __dir__)
 PORT = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', '19257'), 10))
@@ -61,7 +62,7 @@ Dir.mktmpdir('blit-reassert') do |root|
     exec 3<> #{File.join(root, 'idle')}
     while :; do read -t 0.05 -u 3 x; done
   HIBR
-  server = spawn({ 'SDL_VIDEODRIVER' => 'dummy', 'BLIT_RENDERER' => 'software',
+  server = spawn({ **gate_display_env, 'BLIT_RENDERER' => 'software',
                    'BLIT_PSF_FONT' => FONT, 'BLIT_LOGIN_AUTOSTART' => '0',
                    'BLIT_SETTINGS_PATH' => File.join(root, 'settings.json'),
                    'BLIT_INPUT_ROOT' => File.join(root, 'input'),

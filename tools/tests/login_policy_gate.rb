@@ -5,6 +5,7 @@ require 'net/http'
 require 'tmpdir'
 require 'timeout'
 require_relative 'gate_port'
+require_relative 'gate_server'
 
 ROOT = File.expand_path('../..', __dir__)
 BINARY = ENV.fetch('BLIT_GATE_BINARY', File.join(ROOT, 'build/blit/blit-server'))
@@ -29,7 +30,7 @@ def durable_bytes(path)
   IO.popen(['sudo','-n','cat',path], &:read)
 end
 def start(root, extra={})
-  env={'SDL_VIDEODRIVER'=>'dummy','BLIT_RENDERER'=>'software',
+  env={**gate_display_env,'BLIT_RENDERER'=>'software',
        'LD_LIBRARY_PATH'=>File.join(ROOT,'build/sdl3-kms'),
        'BLIT_PSF_FONT'=>File.join(ROOT,'assets/fonts/Blit-Hibr-Terminus16.psf'),
        'BLIT_INPUT_ROOT'=>File.join(root,'input'), 'BLIT_SETTINGS_PATH'=>File.join(root,'settings.json'),

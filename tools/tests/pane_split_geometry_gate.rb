@@ -9,10 +9,11 @@
 require 'json'
 require 'net/http'
 require 'uri'
+require_relative 'gate_server'
 
 port = Integer(ENV.fetch('BLIT_PANE_SPLIT_PORT', '19291'), 10)
 env = {
-  'SDL_VIDEODRIVER' => 'dummy',
+  **gate_display_env,
   'SDL_RENDERER' => 'software',
   'LD_LIBRARY_PATH' => 'build/sdl3-kms',
   'BLIT_PSF_FONT' => 'assets/fonts/Blit-Hibr-Terminus16.psf'

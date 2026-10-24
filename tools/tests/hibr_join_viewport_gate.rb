@@ -11,6 +11,7 @@ require 'json'
 require 'net/http'
 require 'fileutils'
 require 'uri'
+require_relative 'gate_server'
 
 PORT = Integer(ENV.fetch('BLIT_GATE_PORT', '18998'))
 ROOT = File.expand_path('../..', __dir__)
@@ -30,7 +31,7 @@ FileUtils.chmod(0o755, FAKE_DESKTOP_IMPL)
 FileUtils.ln_s(FAKE_DESKTOP_IMPL, FAKE_DESKTOP)
 
 env = {
-  'SDL_VIDEODRIVER' => 'dummy',
+  **gate_display_env,
   'SDL_RENDERER' => 'software',
   'LD_LIBRARY_PATH' => File.join(ROOT, 'build/sdl3-kms'),
   'BLIT_COMMAND_ALLOWLIST' => FAKE_DESKTOP

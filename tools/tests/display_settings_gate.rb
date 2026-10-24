@@ -40,6 +40,8 @@ require 'timeout'
 require 'tmpdir'
 require 'uri'
 require_relative 'gate_port'
+require_relative 'gate_server'
+require_relative 'gate_bmp'
 
 ROOT = File.expand_path('../..', __dir__)
 PORT = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', '19392'), 10))
@@ -94,7 +96,8 @@ end
 
 $server = nil
 def start(env)
-  $server = spawn({ 'SDL_VIDEODRIVER' => 'dummy', 'BLIT_PSF_FONT' => FONT,
+  # SDL path only (rotation is an SDL capability; native refuses it); retired at the GLES cutover.
+  $server = spawn({ **gate_display_env(backend: 'sdl'), 'BLIT_PSF_FONT' => FONT,
                     'LD_LIBRARY_PATH' => File.join(ROOT, 'build/sdl3-kms') }
                     .merge(env),
                   BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')
@@ -138,10 +141,7 @@ end
 # A BMP pixel, bottom-up, 24-bit. The capture is always the panel's own size:
 # rotation changes what is in it, not how big it is.
 def pixel(bmp, x, y)
-  stride = (PANEL_W * 3 + 3) & ~3
-  offset = 54 + (PANEL_H - 1 - y) * stride + x * 3
-  (bmp.getbyte(offset + 2) << 16) | (bmp.getbyte(offset + 1) << 8) |
-    bmp.getbyte(offset)
+  gate_pixel_rgb24(bmp, x, y)
 end
 
 def screenshot
