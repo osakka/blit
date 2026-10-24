@@ -25,8 +25,8 @@ for the GLES compositor to close, not a gate to keep.
 Result: native `run-gates.sh all` 158 pass, 6 skip, 0 fail; SDL 157 pass,
 6 skip, 1 fail -- frame_rate_gate's 20 ms wall-clock budget, which misses
 under host load equally on the pre-change and current binaries (A/B, 1 of 3
-each). Still on SDL: 12 gates through `sdl_test_profile.rb`, 3 Ruby gates
-with their own SDL driver choice, 14 shell gates and 21 C harnesses that
+each). Still on SDL: 18 gates through `sdl_test_profile.rb`, 5 Ruby gates
+with their own SDL driver choice, 14 shell gates and 12 C harnesses that
 include the SDL renderer; their migration is the rest of step 1.
 
 ## 2026-10-24: 0.2.8 pointer shapes and hiding the pointer, OSC 22 (#138, hibr #373)
