@@ -231,6 +231,15 @@ start or while running drops that output to CPU and keeps presenting. In
 0.2.9 GLES draws the CPU compositor's finished frame; later steps move the
 composition itself onto the GPU.
 
+From 0.2.10 a GLES start is guarded. Blit creates
+`<settings path>.gles-starting` before opening GLES and removes it once every
+GLES output has drawn and flipped frames for 30 seconds. A marker still
+present at the next start means that start never became healthy (a crash
+included): that run uses the CPU compositor with `compositor.reason`
+`previous GLES start did not complete`, logs `gles_start_guard`, and clears
+the marker, so a deliberate restart tries GLES again. The saved setting is
+never rewritten.
+
 Read `effective.display_backend_requested`, `display_backend_active`,
 `renderer_active` and `presentation_restart_required`, and runtime
 `render.direct_kms`, `video_driver`, `renderer`. Save via the revisioned

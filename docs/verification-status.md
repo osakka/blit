@@ -1,5 +1,22 @@
 # Verification status
 
+## 2026-10-24: 0.2.10 GLES start guard; 0.2.9 deployed on CPU
+
+0.2.9 installed on 10.54 through `tools/deploy/update-live.sh` (receipt
+`releases/0.2.9.yaml`, sha256 11d8334b...); `/v1/version` 0.2.9, both
+outputs (DP-1, HDMI-A-1) ready on the CPU compositor, login screen running.
+GLES was not enabled: a crash in it would restart into the same saved setting
+and lock the API out. 0.2.10 adds a start guard (marker beside the settings
+document, cleared after 30 s of healthy GLES frames on every GLES output; a
+marker found at start forces CPU for that run with the reason, then clears).
+`gles_compositor_gate` covers both halves.
+
+`run-gates.sh all` on 0.2.10: native 159 pass, 6 skip, 0 fail; gles 156 pass,
+6 skip, 3 fail, all timing under llvmpipe plus per-frame readback (test mode
+only): frame_rate (34 ms > 20 ms), hibr_split_capture (analyzer passes every
+boundary but "presentation: missed deadlines: 1", 34.6 ms render), and
+sync_output, which passed twice when rerun alone. No functional failure.
+
 ## 2026-10-24: 0.2.9 ADR 0181 step 2 -- GLES inside native KMS
 
 `src/blit_gles.c` loads Mesa's EGL, GLESv2 and GBM at runtime (no link

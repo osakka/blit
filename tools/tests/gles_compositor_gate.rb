@@ -9,6 +9,7 @@
 #   3. GBM requested where there is none (the DRM mock is a plain file): the
 #      output falls back to `cpu`, says why, and keeps presenting.
 #   4. server.kms_compositor is validated, saved, and applied at the next start.
+#   5. A GLES start that never became healthy is not repeated on the next start.
 # Every other gate runs through GLES with BLIT_GATE_BACKEND=gles.
 
 require 'json'
@@ -109,7 +110,33 @@ Dir.mktmpdir('blit-gles-setting') do |root|
     abort "GLES_COMPOSITOR_FAIL the saved compositor did not apply: #{effective} #{state.inspect}" unless
       effective == 'gles' && state['active'] == 'gles'
   end
+
+  # 5. The start guard. A marker left by a GLES start that never became
+  #    healthy (a crash) makes the next start use CPU, saying why, and is
+  #    cleared so a deliberate restart tries GLES again. A healthy start
+  #    removes its own marker once every GLES output has drawn and flipped.
+  marker = File.join(root, 'settings.json.gles-starting')
+  File.write(marker, '')
+  server(port, env) do |base|
+    state = compositor(base)
+    abort "GLES_COMPOSITOR_FAIL a crashed GLES start was retried: #{state.inspect}" unless
+      state['active'] == 'cpu' && state['requested'] == 'gles' &&
+      state['reason'].include?('previous GLES start')
+    abort 'GLES_COMPOSITOR_FAIL the guard marker was not cleared' if File.exist?(marker)
+  end
+  server(port, env.merge('BLIT_GLES_GUARD_SECONDS' => '1')) do |base|
+    abort 'GLES_COMPOSITOR_FAIL a GLES start left no marker' unless File.exist?(marker)
+    abort 'GLES_COMPOSITOR_FAIL GLES did not start after the guard' unless compositor(base)['active'] == 'gles'
+    Timeout.timeout(10) do
+      until !File.exist?(marker)
+        Net::HTTP.post(base + '/v1/input/inject',
+                       JSON.generate(kind: 'pointer_motion', x: 100 + rand(200), y: 100),
+                       'Content-Type' => 'application/json')
+        sleep 0.2
+      end
+    end
+  end
 end
 
 puts "GLES_COMPOSITOR_PASS #{frame_line.sub('GLES_FRAME_PASS ', 'frame=')} " \
-     'surfaceless=gles fallback=cpu_with_reason setting=saved_and_applied'
+     'surfaceless=gles fallback=cpu_with_reason setting=saved_and_applied guard=crash_start_skipped_then_retried'

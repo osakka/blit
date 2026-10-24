@@ -1050,6 +1050,12 @@ typedef struct {
     int boot_kms_compositor_gles;
     int kms_compositor_gles;
     int kms_compositor_configured;
+    /* A GLES start is marked beside the settings document until it has been
+       healthy for a while; a marker found at startup means the last one
+       crashed, so that run uses CPU (ADR 0181). */
+    char gles_guard_path[300];
+    int gles_guard_active;
+    uint64_t gles_guard_since_us;
     int boot_expect_desktop;
     char boot_renderer_request[64];
     char renderer_request[64];
@@ -2114,6 +2120,52 @@ static int render_wait_ms(const BlitRuntime *runtime, uint64_t now)
 }
 
 static void update_pointer_shape(BlitRuntime *runtime);
+
+static void gles_guard_start(BlitRuntime *runtime)
+{
+    int fd;
+    unsetenv("BLIT_KMS_GLES_BLOCKED");
+    if (!runtime->kms_compositor_gles || !runtime->settings_enabled ||
+        runtime->settings_path[0] == '\0')
+        return;
+    snprintf(runtime->gles_guard_path, sizeof(runtime->gles_guard_path),
+             "%s.gles-starting", runtime->settings_path);
+    if (access(runtime->gles_guard_path, F_OK) == 0) {
+        /* Retried at the next deliberate restart, not on this one. */
+        unlink(runtime->gles_guard_path);
+        setenv("BLIT_KMS_GLES_BLOCKED", "previous GLES start did not complete", 1);
+        diagnostic_log(runtime, "error", "gles_start_guard",
+                       "The previous start with the GLES compositor did not reach a healthy state; this run uses the CPU compositor. Restart to try GLES again.");
+        return;
+    }
+    fd = open(runtime->gles_guard_path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+    if (fd < 0) return;
+    close(fd);
+    runtime->gles_guard_active = 1;
+    runtime->gles_guard_since_us = monotonic_us();
+}
+
+/* Healthy: every output on GLES has drawn and flipped, for long enough. An
+   output that fell back to CPU on its own did not crash, and counts too. */
+static void gles_guard_check(BlitRuntime *runtime)
+{
+    const char *configured = getenv("BLIT_GLES_GUARD_SECONDS");
+    uint64_t hold = (uint64_t)(configured ? atoi(configured) : 30) * 1000000ULL;
+    int i;
+    if (!runtime->gles_guard_active ||
+        monotonic_us() - runtime->gles_guard_since_us < hold ||
+        !runtime->direct_kms)
+        return;
+    for (i = 0; i < runtime->display_count; ++i) {
+        BlitKmsDisplayInfo info;
+        if (blit_kms_display_info(runtime->kms, i, &info) != 0) continue;
+        if (strcmp(info.compositor, "gles") == 0 &&
+            (info.gles_frames == 0 || info.flip_completions == 0))
+            return;
+    }
+    unlink(runtime->gles_guard_path);
+    runtime->gles_guard_active = 0;
+}
 
 static int render_work_remains(const BlitRuntime *runtime)
 {
@@ -30277,6 +30329,7 @@ int main(int argc, char **argv)
         else
             unsetenv("BLIT_KMS_ASYNC_PAGEFLIP");
         setenv("BLIT_KMS_COMPOSITOR", runtime.kms_compositor_gles ? "gles" : "cpu", 1);
+        gles_guard_start(&runtime);
         if (!runtime.settings_enabled)
             fprintf(stderr, "blit: BLIT_SETTINGS=ignore; starting from the "
                             "defaults and leaving %s alone\n",
@@ -30813,6 +30866,7 @@ int main(int argc, char **argv)
             runtime.hibr_frame_barrier_until_us = 0;
         }
         update_pointer_shape(&runtime);
+        gles_guard_check(&runtime);
         if (blit_vt_active() && runtime.render_pending &&
             (output_mask = due_output_mask(&runtime, now)) != 0) {
             int hold_scene = now < runtime.terminal_frame_quiet_until_us ||

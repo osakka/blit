@@ -1709,7 +1709,11 @@ int blit_kms_open(BlitKms *kms, char *error, size_t error_capacity)
     if (kms->fd < 0) { set_error(error, error_capacity, strerror(errno)); return -1; }
     configured = getenv("BLIT_KMS_COMPOSITOR");
     kms->gles_requested = configured != NULL && strcmp(configured, "gles") == 0;
-    if (kms->gles_requested) {
+    if (kms->gles_requested && getenv("BLIT_KMS_GLES_BLOCKED") != NULL) {
+        snprintf(kms->gles_error, sizeof(kms->gles_error), "%s",
+                 getenv("BLIT_KMS_GLES_BLOCKED"));
+        fprintf(stderr, "blit: GLES compositor not started: %s\n", kms->gles_error);
+    } else if (kms->gles_requested) {
         const char *platform = getenv("BLIT_GLES_PLATFORM");
         kms->gles = platform != NULL && strcmp(platform, "surfaceless") == 0 ?
             blit_gles_open_surfaceless(kms->gles_error, sizeof(kms->gles_error)) :
