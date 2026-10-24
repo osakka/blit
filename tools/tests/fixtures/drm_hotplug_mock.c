@@ -44,7 +44,7 @@ drmModeConnectorPtr drmModeGetConnector(int fd, uint32_t id)
     MockState s = state(); int i; (void)fd;
     drmModeConnectorPtr c = calloc(1, sizeof(*c));
     c->connector_id = id; c->connector_type = DRM_MODE_CONNECTOR_DisplayPort;
-    c->connector_type_id = id - 92;
+    c->connector_type_id = id >= 93 ? id - 92 : id;
     for (i = 0; i < s.count; ++i) if (s.ids[i] == id) {
         if (s.fail_add == -1000 - (int)id) { c->connection = DRM_MODE_UNKNOWNCONNECTION; break; }
         c->connection = DRM_MODE_CONNECTED; c->count_modes = 1;
@@ -72,15 +72,17 @@ int drmModeSetCrtc(int fd, uint32_t crtc, uint32_t fb, uint32_t x, uint32_t y,
     if (!fb && (int)crtc == s.fail_remove) return -1;
     trace(fb ? "modeset" : "disable", crtc, fb); return 0;
 }
+/* One sparse slot per dumb buffer, large enough for 4096x4096 at 32 bpp. */
+#define MOCK_SLOT ((off_t)64 << 20)
 int drmIoctl(int fd, unsigned long request, void *arg)
 {
     static unsigned handle;
     if (request == DRM_IOCTL_MODE_CREATE_DUMB) {
         struct drm_mode_create_dumb *c = arg;
         c->handle = ++handle; c->pitch = c->width * 4; c->size = (uint64_t)c->pitch * c->height;
-        ftruncate(fd, (off_t)(handle + 1) * 1048576); trace("allocate", c->handle, (unsigned)c->size);
+        ftruncate(fd, (off_t)(handle + 1) * MOCK_SLOT); trace("allocate", c->handle, (unsigned)c->size);
     } else if (request == DRM_IOCTL_MODE_MAP_DUMB) {
-        struct drm_mode_map_dumb *m = arg; m->offset = (uint64_t)m->handle * 1048576;
+        struct drm_mode_map_dumb *m = arg; m->offset = (uint64_t)m->handle * (uint64_t)MOCK_SLOT;
     } else if (request == DRM_IOCTL_MODE_DESTROY_DUMB) {
         trace("free", ((struct drm_mode_destroy_dumb *)arg)->handle, 0);
     }
