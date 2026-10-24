@@ -69,8 +69,11 @@ server(port, gate_display_env(backend: 'gles')) do |base|
                  'Content-Type' => 'application/json')
   sleep 0.5
   after = compositor(base)
+  drawn = ->(c) { c['gles_frames'] + c.fetch('gpu_composed_frames', 0) }
   abort "GLES_COMPOSITOR_FAIL frames are not drawn through GLES: #{after.inspect}" unless
-    after['gles_frames'] > first['gles_frames']
+    drawn.call(after) > drawn.call(first)
+  abort "GLES_COMPOSITOR_FAIL the GPU did not compose: #{after.inspect}" unless
+    after['gpu_composed_frames'].to_i.positive?
 end
 
 gbm = gate_display_env(backend: 'gles').merge('BLIT_GLES_PLATFORM' => nil)

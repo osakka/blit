@@ -115,6 +115,11 @@ typedef struct {
     char compositor_renderer[128];
     unsigned long long gles_frames;
     unsigned long long gles_uploaded_rows;
+    /* Frames the GPU composed itself, frames the CPU composed and GLES only
+       uploaded, and why the last such frame could not be composed. */
+    unsigned long long gles_composed_frames;
+    unsigned long long gles_cpu_frames;
+    char gles_cpu_reason[96];
 } BlitKmsDisplayInfo;
 
 typedef struct {

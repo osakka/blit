@@ -2160,7 +2160,8 @@ static void gles_guard_check(BlitRuntime *runtime)
         BlitKmsDisplayInfo info;
         if (blit_kms_display_info(runtime->kms, i, &info) != 0) continue;
         if (strcmp(info.compositor, "gles") == 0 &&
-            (info.gles_frames == 0 || info.flip_completions == 0))
+            (info.gles_frames + info.gles_composed_frames == 0 ||
+             info.flip_completions == 0))
             return;
     }
     unlink(runtime->gles_guard_path);
@@ -3397,12 +3398,16 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
                 body + used, capacity - used,
                 "\"compositor\":{\"active\":\"%s\",\"requested\":\"%s\","
                 "\"reason\":\"%s\",\"renderer\":\"%s\",\"gles_frames\":%llu,"
-                "\"gles_uploaded_rows\":%llu}}",
+                "\"gles_uploaded_rows\":%llu,\"gpu_composed_frames\":%llu,"
+                "\"cpu_composed_frames\":%llu,\"cpu_reason\":\"%s\"}}",
                 have_kms_info ? kms_info.compositor : "sdl",
                 have_kms_info && kms_info.compositor_requested[0] ?
                     kms_info.compositor_requested : (have_kms_info ? "cpu" : "sdl"),
                 reason, renderer, have_kms_info ? kms_info.gles_frames : 0ULL,
-                have_kms_info ? kms_info.gles_uploaded_rows : 0ULL);
+                have_kms_info ? kms_info.gles_uploaded_rows : 0ULL,
+                have_kms_info ? kms_info.gles_composed_frames : 0ULL,
+                have_kms_info ? kms_info.gles_cpu_frames : 0ULL,
+                have_kms_info ? kms_info.gles_cpu_reason : "");
         }
     }
     if (used < capacity)

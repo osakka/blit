@@ -47,6 +47,8 @@ typedef struct {
     void *map;
 } KmsBuffer;
 
+typedef struct KmsGlesResources KmsGlesResources;
+
 typedef struct {
     BlitKmsDisplayInfo info;
     /* ADR 0181 GLES compositor. A GBM buffer is held from submission until
@@ -54,6 +56,10 @@ typedef struct {
        flipping, shown is on the panel. */
     BlitGlesTarget *gles_target;
     BlitKms *owner;
+    BlitGlesScene *gles_scene;
+    int gles_scene_fresh;
+    /* The RAM scene missed GPU-composed frames; the next CPU frame is full. */
+    int cpu_scene_stale;
     void *gles_next_bo, *gles_pending_bo, *gles_shown_bo;
     uint32_t gles_next_fb, gles_pending_fb, gles_shown_fb;
     unsigned long long generation;
@@ -167,6 +173,7 @@ struct BlitKms {
     unsigned long screenshot_after;
     int screenshot_written;
     BlitGles *gles;
+    KmsGlesResources *gles_resources;
     int gles_requested;
     char gles_error[160];
 };
@@ -1595,6 +1602,9 @@ static void kms_gles_detach(BlitKms *kms, KmsOutput *output, const char *reason)
 static void kms_gles_attach(BlitKms *kms, KmsOutput *output);
 #include "blit_kms_hotplug.h"
 
+static void kms_gles_detach(BlitKms *kms, KmsOutput *output, const char *reason);
+#include "blit_kms_gles.c"
+
 static void kms_gles_release_bo(BlitKms *kms, KmsOutput *output,
                                void **bo, uint32_t *fb)
 {
@@ -1612,8 +1622,11 @@ static void kms_gles_detach(BlitKms *kms, KmsOutput *output, const char *reason)
         kms_gles_release_bo(kms, output, &output->gles_next_bo, &output->gles_next_fb);
         kms_gles_release_bo(kms, output, &output->gles_pending_bo, &output->gles_pending_fb);
         kms_gles_release_bo(kms, output, &output->gles_shown_bo, &output->gles_shown_fb);
+        blit_gles_scene_close(kms->gles, output->gles_scene);
+        output->gles_scene = NULL;
         blit_gles_target_close(kms->gles, output->gles_target);
         output->gles_target = NULL;
+        output->cpu_scene_stale = 1;
     }
     snprintf(output->info.compositor, sizeof(output->info.compositor), "cpu");
     if (reason != NULL) {
@@ -1652,6 +1665,28 @@ static void kms_gles_attach(BlitKms *kms, KmsOutput *output)
              blit_gles_identity(kms->gles));
 }
 
+/* GBM: the buffer GLES just drew becomes the next scanout buffer. */
+static int kms_gles_lock_scanout(BlitKms *kms, KmsOutput *output)
+{
+    uint32_t handle = 0, pitch = 0;
+    output->gles_next_bo = blit_gles_lock_front(kms->gles, output->gles_target,
+                                                &handle, &pitch);
+    if (output->gles_next_bo == NULL ||
+        drmModeAddFB(kms->fd, output->mode.hdisplay, output->mode.vdisplay, 24, 32,
+                     pitch, handle, &output->gles_next_fb) < 0) {
+        output->gles_next_fb = 0;
+        kms_gles_detach(kms, output, "GBM buffer cannot be scanned out");
+        return -1;
+    }
+    return 0;
+}
+
+static int kms_gles_surfaceless(void)
+{
+    const char *platform = getenv("BLIT_GLES_PLATFORM");
+    return platform != NULL && strcmp(platform, "surfaceless") == 0;
+}
+
 /* Step 2: the CPU frame in back is drawn by GLES. Surfaceless (tests) reads
    the result back into back, so every screenshot shows GLES output; GBM
    locks the drawn buffer for the flip. */
@@ -1683,15 +1718,8 @@ static int kms_gles_frame(BlitKms *kms, KmsOutput *output)
             blit_gles_uploaded_rows(output->gles_target);
         return 0;
     }
-    output->gles_next_bo = blit_gles_lock_front(kms->gles, output->gles_target,
-                                                &handle, &pitch);
-    if (output->gles_next_bo == NULL ||
-        drmModeAddFB(kms->fd, output->mode.hdisplay, output->mode.vdisplay, 24, 32,
-                     pitch, handle, &output->gles_next_fb) < 0) {
-        output->gles_next_fb = 0;
-        kms_gles_detach(kms, output, "GBM buffer cannot be scanned out");
-        return -1;
-    }
+    (void)handle; (void)pitch;
+    if (kms_gles_lock_scanout(kms, output) < 0) return -1;
     ++output->info.gles_frames;
     output->info.gles_uploaded_rows =
         blit_gles_uploaded_rows(output->gles_target);
@@ -2063,8 +2091,52 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         {
             void *scanout_map = output->back.map;
             int render_scene = ensure_scene_buffer(output);
-            if (render_scene)
+            int gpu_composed = 0;
+            /* ADR 0181: the GPU composes this frame when it can; otherwise
+               the CPU does, and GLES uploads its result. */
+            if (output->gles_target != NULL) {
+                const char *why = kms_gles_unsupported(kms, output, views, view_count,
+                                                       effect_enabled, effect_intensity);
+                if (why == NULL) {
+                    int readback = kms_gles_surfaceless() || capture ||
+                        (screenshot_output_mask & (1U << i)) != 0;
+                    draw_started = kms_now_us();
+                    output->info.drawn_cells = 0;
+                    gpu_composed = kms_gles_compose(kms, output, views, view_count,
+                        hold_scene, full_redraw, overlays, overlay_count,
+                        pointer_x, pointer_y, pointer_visible,
+                        readback ? scanout_map : NULL) == 0;
+                    if (gpu_composed && !kms_gles_surfaceless() &&
+                        kms_gles_lock_scanout(kms, output) < 0)
+                        gpu_composed = 0;
+                    if (!gpu_composed)
+                        full_redraw = 1;
+                } else {
+                    snprintf(output->info.gles_cpu_reason,
+                             sizeof(output->info.gles_cpu_reason), "%s", why);
+                }
+            }
+            if (gpu_composed) {
+                output->cpu_scene_stale = 1;
+                output->pointer_background_valid = 0;
+                flip_started = kms_now_us();
+                output->info.draw_ms = (double)(flip_started - draw_started) / 1000.0;
+                output->info.copy_ms = 0;
+            } else {
+                if (output->cpu_scene_stale) {
+                    /* Held content is not in the RAM scene; keep the last
+                       GPU frame on screen rather than compose a hole. */
+                    if (hold_scene) continue;
+                    full_redraw = 1;
+                }
+                if (output->gles_target != NULL) {
+                    ++output->info.gles_cpu_frames;
+                    output->gles_scene_fresh = 1;
+                }
+            }
+            if (render_scene && !gpu_composed)
                 output->back.map = output->scene;
+        if (!gpu_composed) {
         if (trace_phases)
             fprintf(stderr, "blit: KMS phase connector=%u wait_us=%lld\n",
                     output->connector, kms_now_us() - output_started);
@@ -2229,7 +2301,9 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
             copy_scene_to_back(output);
         }
         kms_gles_frame(kms, output);
+        output->cpu_scene_stale = 0;
         output->info.copy_ms = (double)(kms_now_us() - flip_started) / 1000.0;
+        }
         /* Capture the frame composed by this present call.  Capturing before
            the scene-buffer copy reads the previous scanout buffer and makes
            diagnostics disagree with the authoritative surface state. */
@@ -2494,6 +2568,7 @@ void blit_kms_close(BlitKms *kms)
             if (output->old_crtc) drmModeFreeCrtc(output->old_crtc);
         }
     }
+    kms_gles_resources_free(kms);
     if (kms->gles != NULL) blit_gles_close(kms->gles);
     if (kms->fd >= 0) close(kms->fd);
     pthread_mutex_destroy(&kms->monitor_lock);

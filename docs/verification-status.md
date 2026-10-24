@@ -1,5 +1,30 @@
 # Verification status
 
+## 2026-10-24: 0.2.12 the GPU composes views (ADR 0181 steps 3-4, first cut)
+
+`src/blit_kms_gles.c` composes each output on the GPU in `draw_view`'s
+order: default-background floor, under-background images, background runs,
+under-text images, glyph sprites with underline and strike, over-text
+images, cursor; then the persistent scene, overlays and pointer. Sprites are
+rendered by the CPU's own `draw_cell_glyphs` (white over black and over
+white), atlased in one 2048x2048 texture; images are textures keyed by image
+and pixel generation. Frames with an effect, an overhanging font or a scaled
+image fall back to CPU composition plus upload. `/v1/diagnostics` reports
+`gpu_composed_frames`, `cpu_composed_frames` and `cpu_reason`.
+
+`gles_compose_gate`: CPU `draw_view` and the GPU compositor agree within 1
+per channel on five scenes (Terminus and the wide font; plain, colours,
+explicit black, bold, italic, underline, strike, dim, reverse, box drawing,
+a wide CJK cell, block/underline/bar cursors; RGB and RGBA images in all
+three bands), max difference 1. Two bugs found on the way, both fixed: a new
+texture was bound before queued quads were drawn (they sampled it), and the
+start guard counted only uploaded frames, so a fully GPU-composed start
+would never clear its marker.
+
+`run-gates.sh all`: native 159 pass, 6 skip, 0 fail (after the guard fix);
+gles 157 pass, 6 skip, 3 fail before the fix -- the guard gate, plus the two
+llvmpipe timing gates (frame_rate 26.7 ms, was 33.9 with uploads).
+
 ## 2026-10-24: 0.2.11 GLES uploads changed rows from RAM
 
 First host run of GLES (0.2.10 on 10.54, `server.kms_compositor: gles`):

@@ -227,7 +227,10 @@ and `BLIT_KMS_COMPOSITOR` the boot default. Any other value is a 400
 (`cpu`, `gles`, or `sdl` on the SDL backend), `requested`, `reason` when GLES
 was asked for and not used (no EGL/GBM, no scanout config, a lost context),
 `renderer` (GL renderer and version), `gles_frames` and `gles_uploaded_rows`
-(rows sent to the GPU; unchanged rows are not resent, from 0.2.11). A GLES failure at
+(rows sent to the GPU; unchanged rows are not resent, from 0.2.11). From
+0.2.12 the GPU composes frames itself: `gpu_composed_frames` counts them,
+`cpu_composed_frames` counts frames the CPU had to compose instead, and
+`cpu_reason` says why the last one could not be composed by the GPU. A GLES failure at
 start or while running drops that output to CPU and keeps presenting. In
 0.2.9 GLES draws the CPU compositor's finished frame; later steps move the
 composition itself onto the GPU.

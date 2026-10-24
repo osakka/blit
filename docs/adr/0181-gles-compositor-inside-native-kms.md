@@ -132,6 +132,28 @@ difference is a failure, never a mask.
 | windowed developer mode, SDL mouse events | removed; evdev remains the input path |
 | vendored `libSDL3` (10.7 MB in the package), `build/sdl3-kms`, SDL include path | removed from `build-tcc.sh` and `build-deb.sh` |
 
+## Refinement, 2026-10-24: steps 3 and 4 are one compositor
+
+Text cannot move to the GPU on its own: glyphs sit between the under-text
+and over-text image bands and under the cursor, overlays and pointer, so a
+GPU text layer over a CPU frame breaks every z >= 0 element. The GPU
+therefore composes a whole view in `draw_view`'s order, and an output's
+frame (scene, overlays, pointer). Each output keeps a persistent GPU scene,
+as the CPU keeps its RAM scene: changed views are recomposed into it, held
+and unchanged views keep their pixels.
+
+Glyph sprites are produced by the CPU compositor's own `draw_cell_glyphs`,
+rendered once white over black and once white over white: that pair gives
+exact coverage, or premultiplied colour and alpha for colour emoji, with
+italic, bold, wide cells and marks applied. One glyph policy serves both
+compositors.
+
+Per frame and per output, a frame the GPU cannot compose yet (an effect, a
+font whose ink overhangs its cell, a scaled image) is composed by the CPU
+and uploaded (step 2); the next CPU frame after GPU frames is a full redraw.
+`gles_compose_gate` compares the two compositors pixel by pixel within 1 per
+channel.
+
 ## Consequences
 
 - Supersedes ADR 0137's three first-class paths: one backend, two

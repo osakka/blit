@@ -41,6 +41,17 @@ struct BlitGles {
     GLint sampler;
     GLuint quad;
     char identity[256];
+    /* Composition: one program, a client-side vertex batch. */
+    GLuint compose_program;
+    GLint compose_sampler, compose_size;
+    GLuint compose_buffer;
+    GLuint white;
+    struct BlitGlesVertex *vertices;
+    int vertex_count, vertex_capacity;
+    GLuint batch_texture;
+    BlitGlesTarget *frame_target;
+    int bound_height;
+    unsigned long long draw_calls;
 
     PFNEGLGETPROCADDRESSPROC GetProcAddress;
     PFNEGLGETPLATFORMDISPLAYPROC GetPlatformDisplay;
@@ -98,6 +109,13 @@ struct BlitGles {
     PFNGLDRAWARRAYSPROC glDrawArrays;
     PFNGLREADPIXELSPROC glReadPixels;
     PFNGLFINISHPROC glFinish;
+    PFNGLENABLEPROC glEnable;
+    PFNGLBLENDFUNCPROC glBlendFunc;
+    PFNGLSCISSORPROC glScissor;
+    PFNGLUNIFORM2FPROC glUniform2f;
+    PFNGLBUFFERSUBDATAPROC glBufferSubData;
+    PFNGLGETATTRIBLOCATIONPROC glGetAttribLocation;
+    PFNGLDISABLEVERTEXATTRIBARRAYPROC glDisableVertexAttribArray;
 
     BlitGbmCreateDevice gbm_create_device;
     BlitGbmDeviceDestroy gbm_device_destroy;
@@ -107,6 +125,17 @@ struct BlitGles {
     BlitGbmRelease gbm_surface_release_buffer;
     BlitGbmBoHandle gbm_bo_get_handle;
     BlitGbmBoStride gbm_bo_get_stride;
+};
+
+struct BlitGlesVertex {
+    GLfloat x, y, u, v;
+    GLubyte r, g, b, a;
+    GLfloat mode;
+};
+
+struct BlitGlesScene {
+    int width, height;
+    GLuint texture, framebuffer;
 };
 
 struct BlitGlesTarget {
@@ -122,6 +151,8 @@ struct BlitGlesTarget {
     struct gbm_surface *gbm_surface;
     EGLSurface surface;
 };
+
+static void gles_flush(BlitGles *gles);
 
 static void gles_error(char *error, size_t capacity, const char *what)
 {
@@ -183,7 +214,10 @@ static int gles_load_egl_gl(BlitGles *gles, char *error, size_t capacity)
             "glDeleteTextures", "glPixelStorei", "glActiveTexture",
             "glGenFramebuffers", "glBindFramebuffer", "glFramebufferTexture2D",
             "glCheckFramebufferStatus", "glDeleteFramebuffers", "glViewport",
-            "glDisable", "glDrawArrays", "glReadPixels", "glFinish", NULL
+            "glDisable", "glDrawArrays", "glReadPixels", "glFinish",
+            "glEnable", "glBlendFunc", "glScissor", "glUniform2f",
+            "glBufferSubData", "glGetAttribLocation",
+            "glDisableVertexAttribArray", NULL
         };
         if (gles_load_symbols(gles->gl_library, (void **)&gles->glGetString, names) < 0) {
             gles_error(error, capacity, "libGLESv2 lacks a GLES 2 entry point");
@@ -284,6 +318,70 @@ static int gles_build_program(BlitGles *gles, char *error, size_t capacity)
         return -1;
     }
     gles->sampler = gles->glGetUniformLocation(gles->program, "frame");
+    {
+        static const char *compose_vertex =
+            "uniform vec2 size;\n"
+            "attribute vec2 position;\n"
+            "attribute vec2 texel;\n"
+            "attribute vec4 colour;\n"
+            "attribute float mode;\n"
+            "varying vec2 coordinate;\n"
+            "varying vec4 tint;\n"
+            "varying float kind;\n"
+            "void main() {\n"
+            "  coordinate = texel; tint = colour; kind = mode;\n"
+            "  gl_Position = vec4(position.x / size.x * 2.0 - 1.0,\n"
+            "                     1.0 - position.y / size.y * 2.0, 0.0, 1.0);\n"
+            "}\n";
+        static const char *compose_fragment =
+            "#ifdef GL_FRAGMENT_PRECISION_HIGH\n"
+            "precision highp float;\n"
+            "#else\n"
+            "precision mediump float;\n"
+            "#endif\n"
+            "varying vec2 coordinate;\n"
+            "varying vec4 tint;\n"
+            "varying float kind;\n"
+            "uniform sampler2D sprite;\n"
+            "void main() {\n"
+            "  vec4 s = texture2D(sprite, coordinate);\n"
+            "  if (kind < 0.5) gl_FragColor = vec4(tint.rgb * tint.a, tint.a);\n"
+            "  else if (kind < 1.5) gl_FragColor = vec4(tint.rgb * s.a, s.a);\n"
+            "  else if (kind < 2.5) gl_FragColor = s;\n"
+            "  else gl_FragColor = vec4(s.rgb * s.a, s.a);\n"
+            "}\n";
+        static const GLubyte white[4] = { 255, 255, 255, 255 };
+        GLuint v = gles_compile(gles, GL_VERTEX_SHADER, compose_vertex, error, capacity);
+        GLuint f = v ? gles_compile(gles, GL_FRAGMENT_SHADER, compose_fragment, error, capacity) : 0;
+        if (f == 0) {
+            if (v) gles->glDeleteShader(v);
+            return -1;
+        }
+        gles->compose_program = gles->glCreateProgram();
+        gles->glAttachShader(gles->compose_program, v);
+        gles->glAttachShader(gles->compose_program, f);
+        gles->glBindAttribLocation(gles->compose_program, 0, "position");
+        gles->glBindAttribLocation(gles->compose_program, 1, "texel");
+        gles->glBindAttribLocation(gles->compose_program, 2, "colour");
+        gles->glBindAttribLocation(gles->compose_program, 3, "mode");
+        gles->glLinkProgram(gles->compose_program);
+        gles->glDeleteShader(v);
+        gles->glDeleteShader(f);
+        gles->glGetProgramiv(gles->compose_program, GL_LINK_STATUS, &status);
+        if (!status) {
+            gles_error(error, capacity, "composition program does not link");
+            return -1;
+        }
+        gles->compose_sampler = gles->glGetUniformLocation(gles->compose_program, "sprite");
+        gles->compose_size = gles->glGetUniformLocation(gles->compose_program, "size");
+        gles->glGenBuffers(1, &gles->compose_buffer);
+        gles->glGenTextures(1, &gles->white);
+        gles->glBindTexture(GL_TEXTURE_2D, gles->white);
+        gles->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        gles->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        gles->glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA,
+                           GL_UNSIGNED_BYTE, white);
+    }
     gles->glGenBuffers(1, &gles->quad);
     gles->glBindBuffer(GL_ARRAY_BUFFER, gles->quad);
     gles->glBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad, GL_STATIC_DRAW);
@@ -391,6 +489,9 @@ void blit_gles_close(BlitGles *gles)
             gles->MakeCurrent(gles->display, EGL_NO_SURFACE, EGL_NO_SURFACE,
                               gles->context);
             if (gles->program) gles->glDeleteProgram(gles->program);
+            if (gles->compose_program) gles->glDeleteProgram(gles->compose_program);
+            if (gles->compose_buffer) gles->glDeleteBuffers(1, &gles->compose_buffer);
+            if (gles->white) gles->glDeleteTextures(1, &gles->white);
             if (gles->quad) gles->glDeleteBuffers(1, &gles->quad);
             gles->MakeCurrent(gles->display, EGL_NO_SURFACE, EGL_NO_SURFACE,
                               EGL_NO_CONTEXT);
@@ -398,6 +499,7 @@ void blit_gles_close(BlitGles *gles)
         }
         gles->Terminate(gles->display);
     }
+    free(gles->vertices);
     if (gles->gbm != NULL) gles->gbm_device_destroy(gles->gbm);
     if (gles->gbm_library) dlclose(gles->gbm_library);
     if (gles->gl_library) dlclose(gles->gl_library);
@@ -587,6 +689,9 @@ int blit_gles_draw_frame(BlitGles *gles, BlitGlesTarget *target,
     gles->glBindTexture(GL_TEXTURE_2D, target->texture);
     gles->glUniform1i(gles->sampler, 0);
     gles->glBindBuffer(GL_ARRAY_BUFFER, gles->quad);
+    gles->glDisableVertexAttribArray(1);
+    gles->glDisableVertexAttribArray(2);
+    gles->glDisableVertexAttribArray(3);
     gles->glEnableVertexAttribArray(0);
     gles->glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, (void *)0);
     gles->glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
@@ -613,9 +718,10 @@ int blit_gles_read_frame(BlitGles *gles, BlitGlesTarget *target,
 {
     unsigned char *rgba;
     int x, y;
-    if (gles == NULL || target == NULL || !gles->surfaceless ||
-        pitch < target->width * 4)
+    if (gles == NULL || target == NULL || pitch < target->width * 4)
         return -1;
+    /* On GBM this reads the frame being composed, before its swap. */
+    gles_flush(gles);
     if (gles_make_current(gles, target) < 0) return -1;
     rgba = malloc((size_t)target->width * (size_t)target->height * 4U);
     if (rgba == NULL) return -1;
@@ -636,6 +742,304 @@ int blit_gles_read_frame(BlitGles *gles, BlitGlesTarget *target,
     }
     free(rgba);
     return gles->glGetError() == GL_NO_ERROR ? 0 : -1;
+}
+
+BlitGlesTexture blit_gles_texture_create(BlitGles *gles, int width, int height,
+                                         int bytes_per_pixel)
+{
+    GLuint texture = 0;
+    GLenum format = bytes_per_pixel == 3 ? GL_RGB : GL_RGBA;
+    if (gles == NULL || width < 1 || height < 1) return 0;
+    /* Binding a new texture must not change what queued quads sample. */
+    gles_flush(gles);
+    /* Only this call's errors decide its result. */
+    while (gles->glGetError() != GL_NO_ERROR) {}
+    gles->glGenTextures(1, &texture);
+    gles->glBindTexture(GL_TEXTURE_2D, texture);
+    gles->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    gles->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    gles->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    gles->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    gles->glTexImage2D(GL_TEXTURE_2D, 0, (GLint)format, width, height, 0, format,
+                       GL_UNSIGNED_BYTE, NULL);
+    gles->batch_texture = (GLuint)-1;
+    if (gles->glGetError() != GL_NO_ERROR) {
+        gles->glDeleteTextures(1, &texture);
+        return 0;
+    }
+    return texture;
+}
+
+static void gles_flush(BlitGles *gles);
+
+int blit_gles_texture_update(BlitGles *gles, BlitGlesTexture texture,
+                             int bytes_per_pixel, int x, int y, int width,
+                             int height, const void *pixels, int pitch)
+{
+    GLenum format = bytes_per_pixel == 3 ? GL_RGB : GL_RGBA;
+    const unsigned char *rows = pixels;
+    int row;
+    if (gles == NULL || texture == 0 || pixels == NULL || width < 1 || height < 1)
+        return -1;
+    /* Queued quads may sample the old contents. */
+    gles_flush(gles);
+    while (gles->glGetError() != GL_NO_ERROR) {}
+    gles->glBindTexture(GL_TEXTURE_2D, texture);
+    gles->batch_texture = (GLuint)-1;
+    gles->glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    if (pitch == width * bytes_per_pixel)
+        gles->glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, width, height, format,
+                              GL_UNSIGNED_BYTE, pixels);
+    else
+        for (row = 0; row < height; ++row)
+            gles->glTexSubImage2D(GL_TEXTURE_2D, 0, x, y + row, width, 1, format,
+                                  GL_UNSIGNED_BYTE, rows + (size_t)row * (size_t)pitch);
+    gles->glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    return gles->glGetError() == GL_NO_ERROR ? 0 : -1;
+}
+
+void blit_gles_texture_delete(BlitGles *gles, BlitGlesTexture texture)
+{
+    if (gles == NULL || texture == 0) return;
+    gles_flush(gles);
+    gles->glDeleteTextures(1, &texture);
+    gles->batch_texture = (GLuint)-1;
+}
+
+static void gles_flush(BlitGles *gles)
+{
+    size_t stride = sizeof(struct BlitGlesVertex);
+    if (gles->vertex_count == 0) return;
+    gles->glBindBuffer(GL_ARRAY_BUFFER, gles->compose_buffer);
+    gles->glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(stride * (size_t)gles->vertex_count),
+                       gles->vertices, GL_STREAM_DRAW);
+    gles->glEnableVertexAttribArray(0);
+    gles->glEnableVertexAttribArray(1);
+    gles->glEnableVertexAttribArray(2);
+    gles->glEnableVertexAttribArray(3);
+    gles->glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, (GLsizei)stride, (void *)0);
+    gles->glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, (GLsizei)stride,
+                                (void *)(sizeof(GLfloat) * 2));
+    gles->glVertexAttribPointer(2, 4, GL_UNSIGNED_BYTE, GL_TRUE, (GLsizei)stride,
+                                (void *)(sizeof(GLfloat) * 4));
+    gles->glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, (GLsizei)stride,
+                                (void *)(sizeof(GLfloat) * 4 + 4));
+    gles->glDrawArrays(GL_TRIANGLES, 0, gles->vertex_count);
+    ++gles->draw_calls;
+    gles->vertex_count = 0;
+}
+
+static void gles_vertex(BlitGles *gles, float x, float y, float u, float v,
+                        uint32_t rgb, unsigned alpha, int mode)
+{
+    struct BlitGlesVertex *out;
+    if (gles->vertex_count == gles->vertex_capacity) {
+        int capacity = gles->vertex_capacity ? gles->vertex_capacity * 2 : 6 * 4096;
+        struct BlitGlesVertex *grown = realloc(gles->vertices,
+                                               sizeof(*grown) * (size_t)capacity);
+        if (grown == NULL) return;
+        gles->vertices = grown;
+        gles->vertex_capacity = capacity;
+    }
+    out = &gles->vertices[gles->vertex_count++];
+    out->x = x; out->y = y; out->u = u; out->v = v;
+    out->r = (GLubyte)(rgb >> 16); out->g = (GLubyte)(rgb >> 8); out->b = (GLubyte)rgb;
+    out->a = (GLubyte)alpha;
+    out->mode = (GLfloat)mode;
+}
+
+static void gles_rectangle(BlitGles *gles, float x0, float y0, float x1, float y1,
+                           float u0, float v0, float u1, float v1,
+                           uint32_t rgb, unsigned alpha, int mode)
+{
+    gles_vertex(gles, x0, y0, u0, v0, rgb, alpha, mode);
+    gles_vertex(gles, x1, y0, u1, v0, rgb, alpha, mode);
+    gles_vertex(gles, x0, y1, u0, v1, rgb, alpha, mode);
+    gles_vertex(gles, x1, y0, u1, v0, rgb, alpha, mode);
+    gles_vertex(gles, x1, y1, u1, v1, rgb, alpha, mode);
+    gles_vertex(gles, x0, y1, u0, v1, rgb, alpha, mode);
+}
+
+int blit_gles_frame_begin(BlitGles *gles, BlitGlesTarget *target,
+                          char *error, size_t capacity)
+{
+    if (gles == NULL || target == NULL ||
+        gles_make_current(gles, target) < 0) {
+        gles_error(error, capacity, "eglMakeCurrent failed");
+        return -1;
+    }
+    gles->frame_target = target;
+    gles->bound_height = target->height;
+    gles->vertex_count = 0;
+    gles->glViewport(0, 0, target->width, target->height);
+    gles->glDisable(GL_SCISSOR_TEST);
+    gles->glEnable(GL_BLEND);
+    gles->glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    gles->glUseProgram(gles->compose_program);
+    gles->glUniform2f(gles->compose_size, (GLfloat)target->width,
+                      (GLfloat)target->height);
+    gles->glUniform1i(gles->compose_sampler, 0);
+    gles->glActiveTexture(GL_TEXTURE0);
+    gles->glBindTexture(GL_TEXTURE_2D, gles->white);
+    gles->batch_texture = gles->white;
+    return 0;
+}
+
+void blit_gles_rect(BlitGles *gles, int x, int y, int width, int height,
+                    uint32_t rgb, unsigned alpha)
+{
+    if (gles == NULL || width < 1 || height < 1 || alpha == 0) return;
+    gles_rectangle(gles, (float)x, (float)y, (float)(x + width), (float)(y + height),
+                   0, 0, 1, 1, rgb, alpha > 255 ? 255 : alpha, BLIT_GLES_SOLID);
+}
+
+void blit_gles_quad(BlitGles *gles, int mode, BlitGlesTexture texture,
+                    int texture_width, int texture_height,
+                    int source_x, int source_y, int source_width,
+                    int source_height, int x, int y, int width, int height,
+                    uint32_t rgb)
+{
+    if (gles == NULL || texture == 0 || width < 1 || height < 1 ||
+        texture_width < 1 || texture_height < 1)
+        return;
+    if (gles->batch_texture != texture) {
+        gles_flush(gles);
+        gles->glBindTexture(GL_TEXTURE_2D, texture);
+        gles->batch_texture = texture;
+    }
+    gles_rectangle(gles, (float)x, (float)y, (float)(x + width), (float)(y + height),
+                   (float)source_x / (float)texture_width,
+                   (float)source_y / (float)texture_height,
+                   (float)(source_x + source_width) / (float)texture_width,
+                   (float)(source_y + source_height) / (float)texture_height,
+                   rgb, 255, mode);
+}
+
+void blit_gles_clip(BlitGles *gles, int x, int y, int width, int height)
+{
+    if (gles == NULL || gles->bound_height == 0) return;
+    gles_flush(gles);
+    if (width <= 0 || height <= 0) {
+        gles->glDisable(GL_SCISSOR_TEST);
+        return;
+    }
+    gles->glEnable(GL_SCISSOR_TEST);
+    /* GL's scissor is bottom-up. */
+    gles->glScissor(x, gles->bound_height - (y + height), width, height);
+}
+
+int blit_gles_frame_end(BlitGles *gles, BlitGlesTarget *target,
+                        char *error, size_t capacity)
+{
+    if (gles == NULL || target == NULL) return -1;
+    gles_flush(gles);
+    gles->glDisable(GL_SCISSOR_TEST);
+    gles->glDisable(GL_BLEND);
+    gles->frame_target = NULL;
+    gles->bound_height = 0;
+    if (gles->glGetError() != GL_NO_ERROR) {
+        gles_error(error, capacity, "GL error composing the frame");
+        return -1;
+    }
+    if (!gles->surfaceless && !gles->SwapBuffers(gles->display, target->surface)) {
+        gles_error(error, capacity, gles->GetError() == EGL_CONTEXT_LOST ?
+                   "the GLES context was lost" : "eglSwapBuffers failed");
+        return -1;
+    }
+    return 0;
+}
+
+BlitGlesScene *blit_gles_scene_open(BlitGles *gles, int width, int height)
+{
+    BlitGlesScene *scene;
+    if (gles == NULL || width < 1 || height < 1) return NULL;
+    scene = calloc(1, sizeof(*scene));
+    if (scene == NULL) return NULL;
+    scene->width = width;
+    scene->height = height;
+    scene->texture = gles_new_texture(gles, width, height);
+    gles->glGenFramebuffers(1, &scene->framebuffer);
+    gles->glBindFramebuffer(GL_FRAMEBUFFER, scene->framebuffer);
+    gles->glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                                 GL_TEXTURE_2D, scene->texture, 0);
+    gles->batch_texture = (GLuint)-1;
+    if (gles->glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE ||
+        gles->glGetError() != GL_NO_ERROR) {
+        blit_gles_scene_close(gles, scene);
+        return NULL;
+    }
+    if (blit_gles_scene_begin(gles, scene) == 0) {
+        blit_gles_rect(gles, 0, 0, width, height, 0, 255);
+        blit_gles_scene_end(gles);
+    }
+    return scene;
+}
+
+void blit_gles_scene_close(BlitGles *gles, BlitGlesScene *scene)
+{
+    if (gles == NULL || scene == NULL) return;
+    gles_flush(gles);
+    if (scene->framebuffer) gles->glDeleteFramebuffers(1, &scene->framebuffer);
+    if (scene->texture) gles->glDeleteTextures(1, &scene->texture);
+    gles->batch_texture = (GLuint)-1;
+    free(scene);
+}
+
+int blit_gles_scene_begin(BlitGles *gles, BlitGlesScene *scene)
+{
+    if (gles == NULL || scene == NULL) return -1;
+    gles_flush(gles);
+    if (gles->frame_target == NULL &&
+        !gles->MakeCurrent(gles->display, EGL_NO_SURFACE, EGL_NO_SURFACE,
+                           gles->context))
+        return -1;
+    gles->glBindFramebuffer(GL_FRAMEBUFFER, scene->framebuffer);
+    gles->bound_height = scene->height;
+    gles->glViewport(0, 0, scene->width, scene->height);
+    gles->glDisable(GL_SCISSOR_TEST);
+    gles->glEnable(GL_BLEND);
+    gles->glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    gles->glUseProgram(gles->compose_program);
+    gles->glUniform2f(gles->compose_size, (GLfloat)scene->width,
+                      (GLfloat)scene->height);
+    gles->glUniform1i(gles->compose_sampler, 0);
+    gles->glActiveTexture(GL_TEXTURE0);
+    gles->glBindTexture(GL_TEXTURE_2D, gles->white);
+    gles->batch_texture = gles->white;
+    return 0;
+}
+
+void blit_gles_scene_end(BlitGles *gles)
+{
+    if (gles == NULL) return;
+    gles_flush(gles);
+    gles->glDisable(GL_SCISSOR_TEST);
+    if (gles->frame_target != NULL) {
+        /* Back to the frame being composed. */
+        BlitGlesTarget *target = gles->frame_target;
+        gles_make_current(gles, target);
+        gles->bound_height = target->height;
+        gles->glViewport(0, 0, target->width, target->height);
+        gles->glUniform2f(gles->compose_size, (GLfloat)target->width,
+                          (GLfloat)target->height);
+    } else {
+        gles->bound_height = 0;
+    }
+}
+
+void blit_gles_scene_draw(BlitGles *gles, BlitGlesScene *scene)
+{
+    if (gles == NULL || scene == NULL) return;
+    /* The scene is opaque, so premultiplied source-over is a copy. Its rows
+       are bottom-up as rendered, so the source runs from its top down. */
+    blit_gles_quad(gles, BLIT_GLES_PREMULT, scene->texture, scene->width,
+                   scene->height, 0, scene->height, scene->width, -scene->height,
+                   0, 0, scene->width, scene->height, 0);
+}
+
+unsigned long long blit_gles_draw_calls(const BlitGles *gles)
+{
+    return gles != NULL ? gles->draw_calls : 0ULL;
 }
 
 void *blit_gles_lock_front(BlitGles *gles, BlitGlesTarget *target,

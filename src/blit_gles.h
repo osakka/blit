@@ -38,9 +38,63 @@ int blit_gles_draw_frame(BlitGles *gles, BlitGlesTarget *target,
 /* Rows uploaded so far: unchanged rows are not sent again. */
 unsigned long long blit_gles_uploaded_rows(const BlitGlesTarget *target);
 
-/* Reads the target back as top-down XRGB8888 (surfaceless targets). */
+/* Reads the target back as top-down XRGB8888: a surfaceless target, or on
+   GBM the frame being composed, before blit_gles_frame_end swaps it. */
 int blit_gles_read_frame(BlitGles *gles, BlitGlesTarget *target,
                          void *pixels, int pitch);
+
+/* ---- Composition (ADR 0181 steps 3-4): the GPU draws a view itself. ----
+   Coordinates are target pixels, top-left origin. Every quad blends as
+   premultiplied source-over, as the CPU compositor's integer rules do:
+     SOLID     colour at opacity `alpha` (255 = opaque)
+     COVERAGE  a sprite's alpha tints `rgb` (glyph ink)
+     PREMULT   a sprite's premultiplied colour (colour emoji)
+     IMAGE     straight-alpha RGBA or RGB texture (Kitty/sixel/API images)
+   State changes flush the batch; draw order is submission order. */
+enum {
+    BLIT_GLES_SOLID = 0,
+    BLIT_GLES_COVERAGE = 1,
+    BLIT_GLES_PREMULT = 2,
+    BLIT_GLES_IMAGE = 3
+};
+typedef unsigned int BlitGlesTexture;
+
+/* RGBA or RGB bytes in natural order; 0 on failure. */
+BlitGlesTexture blit_gles_texture_create(BlitGles *gles, int width, int height,
+                                         int bytes_per_pixel);
+int blit_gles_texture_update(BlitGles *gles, BlitGlesTexture texture,
+                             int bytes_per_pixel, int x, int y, int width,
+                             int height, const void *pixels, int pitch);
+void blit_gles_texture_delete(BlitGles *gles, BlitGlesTexture texture);
+
+int blit_gles_frame_begin(BlitGles *gles, BlitGlesTarget *target,
+                          char *error, size_t error_capacity);
+void blit_gles_rect(BlitGles *gles, int x, int y, int width, int height,
+                    uint32_t rgb, unsigned alpha);
+void blit_gles_quad(BlitGles *gles, int mode, BlitGlesTexture texture,
+                    int texture_width, int texture_height,
+                    int source_x, int source_y, int source_width,
+                    int source_height, int x, int y, int width, int height,
+                    uint32_t rgb);
+/* Clip later quads to a rectangle; width 0 clears the clip. */
+void blit_gles_clip(BlitGles *gles, int x, int y, int width, int height);
+/* Flushes; on GBM queues the frame (lock it with blit_gles_lock_front). */
+int blit_gles_frame_end(BlitGles *gles, BlitGlesTarget *target,
+                        char *error, size_t error_capacity);
+unsigned long long blit_gles_draw_calls(const BlitGles *gles);
+
+/* A persistent offscreen scene, as the CPU compositor keeps one in RAM:
+   views are composed into it, and what was not recomposed keeps its pixels.
+   Opaque; cleared to black when opened. */
+typedef struct BlitGlesScene BlitGlesScene;
+BlitGlesScene *blit_gles_scene_open(BlitGles *gles, int width, int height);
+void blit_gles_scene_close(BlitGles *gles, BlitGlesScene *scene);
+/* Compose into the scene; blit_gles_rect/quad/clip apply to it until
+   blit_gles_scene_end. */
+int blit_gles_scene_begin(BlitGles *gles, BlitGlesScene *scene);
+void blit_gles_scene_end(BlitGles *gles);
+/* Inside blit_gles_frame_begin/end: the whole scene, copied 1:1 at (0, 0). */
+void blit_gles_scene_draw(BlitGles *gles, BlitGlesScene *scene);
 
 /* GBM only: the buffer just drawn, for drmModeAddFB2 and a page flip. It
    stays locked until released, which must wait for its flip to complete. */

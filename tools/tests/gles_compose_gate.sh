@@ -1,0 +1,12 @@
+#!/bin/sh
+# ADR 0181 step 3: GPU view composition against the CPU compositor.
+set -eu
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+bin=${TMPDIR:-/tmp}/blit-gles-compose-$$
+trap 'rm -f "$bin"' EXIT
+cd "$ROOT"
+tcc -O2 -std=c99 -I"$ROOT/vendor/SDL3/include" -I"$ROOT/build/deps/prefix/include" \
+    -I"$ROOT/build/deps/prefix/include/libdrm" \
+    tools/tests/gles_compose_gate.c src/blit_font.c \
+    -L"$ROOT/build/deps/prefix/lib/x86_64-linux-gnu" -ldrm -lz -o "$bin"
+LD_LIBRARY_PATH="$ROOT/build/deps/prefix/lib/x86_64-linux-gnu" "$bin"
