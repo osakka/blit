@@ -225,6 +225,7 @@ suite_font() {
     run_gate modern_font_assets_gate.rb ruby tools/tests/modern_font_assets_gate.rb
     run_gate font_reference_gate.rb ruby tools/tests/font_reference_gate.rb
     run_gate powerline_geometry_gate.rb ruby tools/tests/powerline_geometry_gate.rb
+    run_gate bar_corner_gate.rb ruby tools/tests/bar_corner_gate.rb
     run_gate outline_catalogue_gate.rb ruby tools/tests/outline_catalogue_gate.rb
     run_gate custom_icon_gate.rb ruby tools/tests/custom_icon_gate.rb
     run_gate custom_icon_api_gate.rb ruby tools/tests/custom_icon_api_gate.rb

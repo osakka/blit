@@ -22,7 +22,7 @@ end
 raise 'Nerd reference incomplete' unless found.keys.sort == nerd.keys.sort
 icons = JSON.parse(File.read(File.join(fonts, 'icons/catalogue.json')))
 special = File.read(File.join(pages, 'special.md'))
-icons.fetch('icons').each do |icon|
+(icons.fetch('icons') + icons.fetch('cell_geometry', [])).each do |icon|
   hex = icon.fetch('codepoint')
   raise "missing special icon #{icon['id']}" unless special.include?("| `#{icon['id']}` | `U+#{hex}` |")
   row = special.lines.find { |l| l.start_with?("| `#{icon['id']}` |") }

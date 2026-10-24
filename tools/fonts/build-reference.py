@@ -111,7 +111,13 @@ def generate():
     for icon in icons['text_glyphs']:
         cp = int(icon['codepoint'], 16)
         special += f'| `{icon["id"]}` | `U+{cp:04X}` | `{json.dumps(chr(cp))}` |\n'
-    special += '\nBerkanan preserves its runic meaning; it is not the Bluetooth icon. Existing standard/Nerd assignments are not repurposed.\n\n[Production-raster specimen, including all seven colour originals](../images/blit-fonts.png).\n'
+    special += '\nBerkanan preserves its runic meaning; it is not the Bluetooth icon. Existing standard/Nerd assignments are not repurposed.\n'
+    special += '\n## Cell geometry\n\nDrawn by the shared raster at every cell size, edge to edge, in the terminal foreground: no outline font carries them, so neighbouring cells join without a seam. One cell each, in both native profiles.\n\n'
+    special += '| Semantic ID | Codepoint | JSON string | Shape |\n| --- | --- | --- | --- |\n'
+    for icon in icons.get('cell_geometry', []):
+        cp = int(icon['codepoint'], 16)
+        special += f'| `{icon["id"]}` | `U+{cp:04X}` | `{json.dumps(chr(cp))}` | {icon["shape"]} |\n'
+    special += '\n[Production-raster specimen, including all seven colour originals](../images/blit-fonts.png).\n'
     outputs['special.md'] = special
     emoji_root = ROOT / 'assets/unicode/emoji-18.0'
     emoji_manifest = json.loads((emoji_root / 'source.json').read_text(encoding='utf-8'))

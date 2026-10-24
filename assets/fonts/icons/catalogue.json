@@ -16,5 +16,9 @@
   "text_glyphs": [
     {"id":"berkanan", "codepoint":"16D2", "source":"berkanan.svg", "colour":false},
     {"id":"wired", "codepoint":"21CC", "source":"wired.svg", "colour":false}
+  ],
+  "cell_geometry": [
+    {"id":"bar-corner-left", "codepoint":"100007", "colour":false, "shape":"cell filled except a quarter-circle cut at its top-left, radius the cell's shorter side"},
+    {"id":"bar-corner-right", "codepoint":"100008", "colour":false, "shape":"cell filled except a quarter-circle cut at its top-right, radius the cell's shorter side"}
   ]
 }

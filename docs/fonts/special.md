@@ -26,4 +26,13 @@ Text aliases use the terminal foreground, not intrinsic colour.
 
 Berkanan preserves its runic meaning; it is not the Bluetooth icon. Existing standard/Nerd assignments are not repurposed.
 
+## Cell geometry
+
+Drawn by the shared raster at every cell size, edge to edge, in the terminal foreground: no outline font carries them, so neighbouring cells join without a seam. One cell each, in both native profiles.
+
+| Semantic ID | Codepoint | JSON string | Shape |
+| --- | --- | --- | --- |
+| `bar-corner-left` | `U+100007` | `"\udbc0\udc07"` | cell filled except a quarter-circle cut at its top-left, radius the cell's shorter side |
+| `bar-corner-right` | `U+100008` | `"\udbc0\udc08"` | cell filled except a quarter-circle cut at its top-right, radius the cell's shorter side |
+
 [Production-raster specimen, including all seven colour originals](../images/blit-fonts.png).

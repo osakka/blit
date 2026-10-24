@@ -322,6 +322,37 @@ static void draw_powerline(uint32_t scalar, RasterEntry *entry)
     }
 }
 
+/* Blit originals that are cell geometry (blit#140), in the catalogue's
+   cell_geometry section: a cell filled except a quarter-circle cut at its
+   top-left (U+100007) or top-right (U+100008), radius the cell's shorter
+   side. A title bar's ends in the bar's colour: rounded top corners only,
+   the bottom square where it meets the window. Edge to edge at every size,
+   so neighbouring bar cells join without a seam. */
+#define BLIT_BAR_CORNER_LEFT 0x100007
+#define BLIT_BAR_CORNER_RIGHT 0x100008
+
+static int bar_corner(uint32_t scalar)
+{
+    return scalar == BLIT_BAR_CORNER_LEFT || scalar == BLIT_BAR_CORNER_RIGHT;
+}
+
+static void draw_bar_corner(uint32_t scalar, RasterEntry *entry)
+{
+    int x, y, sx, sy, w = entry->glyph.width, h = entry->glyph.height;
+    int mirror = scalar == BLIT_BAR_CORNER_RIGHT;
+    long r = w < h ? w : h;
+    for (y = 0; y < h; ++y) for (x = 0; x < w; ++x) {
+        int px = mirror ? w - 1 - x : x, covered = 0;
+        /* 8x8 samples per pixel, in sixteenths: centre of the arc at (r, r). */
+        for (sy = 0; sy < 8; ++sy) for (sx = 0; sx < 8; ++sx) {
+            long qx = 16L * px + 2 * sx + 1, qy = 16L * y + 2 * sy + 1;
+            long dx = 16 * r - qx, dy = 16 * r - qy;
+            covered += !(qx < 16 * r && qy < 16 * r && dx * dx + dy * dy > 256 * r * r);
+        }
+        entry->pixels[y * entry->glyph.stride + x] = (unsigned char)((covered * 255 + 32) / 64);
+    }
+}
+
 static int invisible_format(uint32_t scalar)
 {
     return scalar == 0x200c || scalar == 0x200d ||
@@ -556,6 +587,8 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *key,
     if (arabic) result = draw_arabic(raster, &next);
     else if (key->length == 1 && scalar >= 0xe0b0 && scalar <= 0xe0b3) {
         draw_powerline(scalar,&next); result=1;
+    } else if (key->length == 1 && bar_corner(scalar)) {
+        draw_bar_corner(scalar, &next); result = 1;
     } else if (key->length == 1 && invisible_format(scalar)) result = 1;
     else if (next.glyph.format == BLIT_RASTER_RGBA_PREMULTIPLIED && !outline_colour)
         result = draw_colour_glyph(raster, colour_index, &next);

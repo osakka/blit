@@ -1,5 +1,23 @@
 # Verification status
 
+## 2026-10-24: 0.2.14 title-bar corner glyphs U+100007/U+100008 (#140)
+
+For hibr 0.99.316's `bar` frame (Charcoal): two Blit originals, a cell
+filled except a quarter-circle cut at its top-left (U+100007) or top-right
+(U+100008), radius the cell's shorter side; rounded top corners only, the
+bottom square where the bar meets the window. They are cell geometry drawn
+by the shared raster, as Powerline separators are, so they fill the cell
+edge to edge at every size with no seam against the bar's other cells; no
+outline font binary changed. The catalogue's new `cell_geometry` section
+lists them (served by `GET /v1/fonts/icons`), its pinned hash is updated,
+and `docs/fonts/special.md` is regenerated with fontTools 4.60.1.
+
+`bar_corner_gate`: 57 sizes x 2 profiles, the corner pixel empty, solid
+below the arc and along the inner edge (the arc's last top-row pixel is at
+least 247/255), exact mirrors, antialiased arc, cached. The KMS and SDL font
+raster gates draw both through each compositor (KMS tolerance 0). Font suite
+40 pass.
+
 ## 2026-10-24: 0.2.13 GPU composition with overhanging fonts
 
 0.2.12 on the host (deployed) composed nothing on the GPU: every frame fell
