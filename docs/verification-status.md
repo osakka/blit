@@ -18,6 +18,14 @@ the first row, a middle band and the last row uploads exactly 5 and reads
 back exact. `compositor.gles_uploaded_rows` reports the count. Renderer and
 terminal suites: native 71 pass, gles 71 pass.
 
+Host, 0.2.11 on GLES (deployed through the update helper, receipt
+`releases/0.2.11.yaml`), same 10 s probe at the login screen: 10.9% of one
+core (CPU compositor 8.4%, 0.2.10 GLES 74.8%), upload phase median 3.9 ms
+(0.2.10: 69 ms), 0 missed deadlines, both outputs `active: gles`; DP-1
+averaged ~200 uploaded rows a frame for the login animation. Step 2 is
+still the CPU frame plus an upload, so it trails the CPU compositor
+slightly, as expected; step 3 removes the CPU drawing of text.
+
 ## 2026-10-24: 0.2.10 GLES start guard; 0.2.9 deployed on CPU
 
 0.2.9 installed on 10.54 through `tools/deploy/update-live.sh` (receipt
