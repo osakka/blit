@@ -14,6 +14,15 @@ antialiased bold edge (CPU rounds bold's two strikes separately); the gate
 allows 2 inside bold cells only, 1 elsewhere. Renderer, terminal and font
 suites: gles 111 pass, native 111 pass.
 
+Host, 0.2.13 (update helper, receipt `releases/0.2.13.yaml`), saved
+`kms_compositor: gles`: both outputs `active: gles`, GPU-composed frames
+rising, 0 CPU-composed frames. The API screenshot is now the GPU frame read
+back before its swap; it shows the login screen and pointer correctly. Same
+10 s probe at the login screen: 3.0% of one core (CPU compositor 8.4%,
+0.2.11 upload path 10.9%), per-frame work median 0.45 ms with no copy, 0
+missed deadlines. Not yet measured: an active desktop, window dragging and
+video, which need the owner logged in (ADR 0181 cutover criteria).
+
 ## 2026-10-24: 0.2.12 the GPU composes views (ADR 0181 steps 3-4, first cut)
 
 `src/blit_kms_gles.c` composes each output on the GPU in `draw_view`'s
