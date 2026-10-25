@@ -1,5 +1,27 @@
 # Verification status
 
+## 2026-10-25: 0.2.24 a sign-in at Blit's login screen resumes the desktop without its saver
+
+Issue #145. The owner logged in and was shown Hibr's screen saver on the primary. Hibr's
+desktop outlives a Blit restart. Its idle clock ran out while the login
+screen was up, and the resume did not say a password had just been given.
+
+Hibr's own `login/start.hibr` exports `HIBR_SIGNEDIN=1` before
+`session.hibr --resume`. `dt_autohold` (Hibr 0.99.326) then sends the
+desktop `signedin`, which stops the saver, drops the lock and restarts the
+idle clock. Blit's login hook (`hibr/blit-login-session.hibr`) replaces
+`start.hibr` and did not export it; it now does, for the desktop only.
+
+The host runs Hibr 0.99.341.
+
+Gates:
+- `login_identity_gate`:
+  - the fake desktop now reports the `HIBR_SIGNEDIN` it receives: `1` for
+    a desktop, absent for a shell;
+  - without the fix it fails with `0:absent:65534:absent`.
+- The auxiliary policy, auxiliary native and login desktop observer gates
+  pass, as does the native suite.
+
 ## 2026-10-25: 0.2.23 symbols centred in their cell
 
 ADR 0185, the owner's report that window buttons and icons looked clipped

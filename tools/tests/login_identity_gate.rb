@@ -80,7 +80,8 @@ Dir.mktmpdir('blit-login-identity') do |root|
       check(identity['session_kind']==mode && identity['sender_pid']>1,'selected kind or sender PID missing')
       check(login.dig('session','hibr_desktop','role')=='none','identity incorrectly claims desktop ownership')
       Timeout.timeout(8){sleep 0.03 until !File.read(result).empty?}
-      check(File.read(result).strip=='0:absent:65534',"capability/admin-token leak: #{File.read(result).strip}")
+      signed=mode=='desktop' ? '1' : 'absent'
+      check(File.read(result).strip=="0:absent:65534:#{signed}","capability/admin-token leak or sign-in signal wrong: #{File.read(result).strip}")
     else
       check(%w[uid gid sender_pid session_kind].all?{|k|identity[k].nil?},'unverified metadata exposed as trusted')
       reasons={'root'=>'root_sender','invalid'=>'invalid_message',
@@ -131,10 +132,10 @@ Dir.mktmpdir('blit-login-identity') do |root|
   check(Timeout.timeout(2){receiver.recv(32)}=='desktop','hook did not send exactly one datagram')
   Timeout.timeout(8){sleep 0.03 until File.exist?(result) && !File.read(result).empty?}
   check(Process.clock_gettime(Process::CLOCK_MONOTONIC)-started>=4.5,'receive deadline not applied')
-  check(File.read(result).strip=="0:absent:#{Process.uid}",'timeout leaked channel or prevented session start')
+  check(File.read(result).strip=="0:absent:#{Process.uid}:1",'timeout leaked channel or prevented session start')
 ensure
   receiver&.close;sender&.close unless sender&.closed?
   Process.kill('TERM',hook_pid) rescue nil
   Process.wait(hook_pid) rescue nil
 end
-puts 'LOGIN_IDENTITY_PASS kinds=2 credentials=dropped rejection=5 custom=unchanged lifecycle=revoked timeout=bounded'
+puts 'LOGIN_IDENTITY_PASS kinds=2 credentials=dropped rejection=5 custom=unchanged lifecycle=revoked timeout=bounded signedin=desktop_only'

@@ -52,6 +52,11 @@ if [ -n "$handoff_fd" ]; then
 fi
 case "$session" in
 desktop)
+    # The password was just given, so a desktop resumed here must not show
+    # its saver or ask for its lock again: Hibr's own login/start.hibr says
+    # so the same way, and dt_autohold (wm/hold.hibr, Hibr 0.99.326) reads
+    # it and takes it out of the environment.
+    export HIBR_SIGNEDIN=1
     launcher=${BLIT_HIBR_SESSION_LAUNCHER:-/usr/share/blit/hibr/blit-session.hibr}
     if [ -n "$client_name" ]; then
         exec "$HIBR" "$launcher" --session=desktop --resume "--name=$client_name"
