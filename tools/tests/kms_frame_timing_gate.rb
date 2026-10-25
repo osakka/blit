@@ -8,11 +8,11 @@
 # the first vblank boundary after its submission, as a display does, so the
 # submit-to-flip time measures where in the refresh the frame was composed.
 #
-# Asserted, against the same server switched live to
-# server.kms_frame_timing=immediate (an invalid value is refused):
+# Asserted, on one server switched live from the default (immediate) to
+# server.kms_frame_timing=late (an invalid value is refused):
 # - late compose waits at most 65% as long per flip (the lead grows on a
 #   busy machine, so the bound is relative);
-# - it presents at least 90% as many frames;
+# - it presents at least 85% as many frames;
 # - under 5% of its flips miss their vblank, and the lead stays in bounds.
 
 require 'json'
@@ -82,7 +82,7 @@ def sample(port)
   }
 end
 
-# One server, default timing (late), then switched live to immediate
+# One server, default timing (immediate), then switched live to late
 # through the settings resource -- the way a host is A/B tested.
 port = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', '19263'), 10))
 late = immediate = nil
@@ -104,18 +104,18 @@ Dir.mktmpdir('blit-frame-timing') do |root|
          'command' => '/bin/sh',
          'arguments' => ['-c', 'i=0; while :; do i=$((i+1)); printf "\r%08d" $i; done'],
          'display_id' => 'display-1')
-    late = sample(port)
+    immediate = sample(port)
     settings = get(port, '/v1/settings')
     server_settings = settings['document'].fetch('server', {})
     code = put_settings(port, settings['document'].merge(
       'server' => server_settings.merge('kms_frame_timing' => 'soon')), settings['revision'])
     setting_failures << "an invalid kms_frame_timing was accepted: #{code}" unless code == '400'
     code = put_settings(port, settings['document'].merge(
-      'server' => server_settings.merge('kms_frame_timing' => 'immediate')), settings['revision'])
+      'server' => server_settings.merge('kms_frame_timing' => 'late')), settings['revision'])
     setting_failures << "saving kms_frame_timing failed: #{code}" unless code == '200'
     effective = get(port, '/v1/settings').dig('effective', 'kms_frame_timing')
-    setting_failures << "effective kms_frame_timing is #{effective.inspect}" unless effective == 'immediate'
-    immediate = sample(port)
+    setting_failures << "effective kms_frame_timing is #{effective.inspect}" unless effective == 'late'
+    late = sample(port)
   ensure
     Process.kill('TERM', server) rescue nil
     Process.wait(server) rescue nil
@@ -127,8 +127,10 @@ failures << "timing modes not reported: #{immediate[:timing]}/#{late[:timing]}" 
 failures << format('late compose waits %.1f ms per flip, immediate %.1f: expected at most 65%%',
                    late[:flip_ms], immediate[:flip_ms]) unless
   late[:flip_ms] <= immediate[:flip_ms] * 0.65
+# A loop stall through a late slot costs a frame immediate keeps; on a
+# loaded build machine that is a few percent.
 failures << format('late compose presents %.1f/s against %.1f/s', late[:fps], immediate[:fps]) unless
-  late[:fps] >= immediate[:fps] * 0.9
+  late[:fps] >= immediate[:fps] * 0.85
 total = late[:late] + late[:on_time]
 failures << "#{late[:late]} of #{total} late-compose flips missed their vblank" unless
   total.positive? && late[:late] <= total * 0.05

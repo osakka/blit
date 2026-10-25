@@ -1969,7 +1969,7 @@ static uint64_t output_render_period_us(const BlitRuntime *runtime,
    `lead` before its next vblank, predicted from the kernel's own vblank
    timestamps: the earliest time the schedule already allows, moved to the
    first such point at or after it. Before an output has flipped twice, or
-   with BLIT_KMS_FRAME_TIMING=immediate, the schedule is unchanged. */
+   with immediate timing (the default), the schedule is unchanged. */
 #define KMS_LEAD_MIN_US 2000ULL
 #define KMS_LEAD_START_US 4000ULL
 static uint64_t kms_aligned_due(BlitRuntime *runtime, int output_index,
@@ -30483,8 +30483,11 @@ int main(int argc, char **argv)
     runtime.boot_kms_compositor_gles = getenv("BLIT_KMS_COMPOSITOR") != NULL &&
         strcmp(getenv("BLIT_KMS_COMPOSITOR"), "gles") == 0;
     runtime.kms_compositor_gles = runtime.boot_kms_compositor_gles;
-    runtime.boot_kms_frame_timing_immediate = getenv("BLIT_KMS_FRAME_TIMING") != NULL &&
-        strcmp(getenv("BLIT_KMS_FRAME_TIMING"), "immediate") == 0;
+    /* Immediate by default: on the host the owner found it smoother, and a
+       loop stall through a late slot costs a frame that immediate does not
+       lose. Late compose is opt-in (ADR 0183). */
+    runtime.boot_kms_frame_timing_immediate = getenv("BLIT_KMS_FRAME_TIMING") == NULL ||
+        strcmp(getenv("BLIT_KMS_FRAME_TIMING"), "late") != 0;
     runtime.kms_frame_timing_immediate = runtime.boot_kms_frame_timing_immediate;
     snprintf(runtime.boot_renderer_request, sizeof(runtime.boot_renderer_request),
              "%s", runtime.renderer_request);

@@ -248,16 +248,17 @@ event, for either compositor. In
 composition itself onto the GPU.
 
 From 0.2.20 `server.kms_frame_timing` chooses when a native KMS frame is
-composed: `late` (the default) composes each output's frame a lead before its
+composed: `immediate` (the default from 0.2.21) composes as soon as the
+previous flip completes; `late` composes each output's frame a lead before its
 next vblank, predicted from the kernel's vblank timestamps, so input that
-arrives during the refresh is shown at that vblank rather than the next;
-`immediate` composes as soon as the previous flip completes, as before. It
+arrives during the refresh is shown at that vblank rather than the next. It
 applies live, without a restart; `BLIT_KMS_FRAME_TIMING` sets the boot
 default. The lead starts at 4 ms, grows by 1 ms (to half a refresh) when a
-frame misses its vblank -- a late flip, or the loop busy through the compose
-slot -- and shrinks by 0.25 ms (to 2 ms) after 240 flips on time. Each output's
+frame misses its vblank -- a flip completing two or more vblanks after the
+CRTC's vblank number at submission, or the loop busy through the compose slot
+-- and shrinks by 0.25 ms (to 2 ms) after 240 flips on time. Each output's
 `flip` object in `/v1/diagnostics` reports `timing`, `lead_us`, `on_time`,
-`late` and `slot_misses`.
+`late` and `slot_misses`. See ADR 0183.
 
 From 0.2.10 a GLES start is guarded. Blit creates
 `<settings path>.gles-starting` before opening GLES and removes it once every

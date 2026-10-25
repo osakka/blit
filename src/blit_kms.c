@@ -80,6 +80,10 @@ typedef struct {
     void *scene;
     uint64_t scene_size;
     int flip_pending;
+    /* The CRTC's vblank number just after the pending flip was submitted;
+       the flip is on time if it completes at that vblank or the next. */
+    uint64_t flip_submit_sequence;
+    int flip_submit_sequence_valid;
     volatile int flip_done;
     long long flip_started_us;
     int modeset_fallback;
@@ -228,13 +232,22 @@ static void kms_flip_handler(int fd, unsigned int frame, unsigned int sec,
             }
         }
         ++output->info.flip_completions;
-        if (output->flip_started_us > 0 && output->info.refresh_hz >= 1.0) {
+        if (output->flip_submit_sequence_valid) {
+            uint32_t after = frame - (uint32_t)output->flip_submit_sequence;
+            if (after >= 2U && after < 0x80000000U) ++output->info.flips_late;
+            else ++output->info.flips_on_time;
+        } else if (output->flip_started_us > 0 && output->info.refresh_hz >= 1.0) {
+            /* No vblank counter: a flip event's timestamp is the start of
+               the new frame's scanout, after the vblank began, so an on-time
+               flip can be stamped more than a period after its submission;
+               a late one is a whole period later again. */
             long long shown = (long long)timestamp - output->flip_started_us;
-            if (shown > (long long)(1000000.0 / output->info.refresh_hz))
+            if (shown > (long long)(1500000.0 / output->info.refresh_hz))
                 ++output->info.flips_late;
             else
                 ++output->info.flips_on_time;
         }
+        output->flip_submit_sequence_valid = 0;
         if (output->flip_started_us > 0) {
             long long waited = kms_now_us() - output->flip_started_us;
             if (waited >= 0) {
@@ -2436,6 +2449,12 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         }
         output->flip_pending = 1;
         output->flip_started_us = kms_now_us();
+        {
+            uint64_t sequence = 0, ns = 0;
+            output->flip_submit_sequence_valid =
+                drmCrtcGetSequence(kms->fd, output->crtc, &sequence, &ns) == 0;
+            output->flip_submit_sequence = sequence;
+        }
         if (submitted_output_mask != NULL)
             *submitted_output_mask |= 1U << i;
         swap_buffers(output);

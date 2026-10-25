@@ -119,6 +119,16 @@ int drmModePageFlip(int fd, uint32_t crtc, uint32_t fb, uint32_t flags, void *da
     pending[pending_count++].submitted_us = mock_now_us();
     return 0;
 }
+/* In periodic mode, the vblank number now is the count of whole periods. */
+int drmCrtcGetSequence(int fd, uint32_t crtc, uint64_t *sequence, uint64_t *ns)
+{
+    unsigned long long period = mock_period_us(), now = mock_now_us();
+    (void)fd; (void)crtc;
+    if (!period) return -1;
+    if (sequence) *sequence = now / period;
+    if (ns) *ns = (now / period) * period * 1000ULL;
+    return 0;
+}
 int drmHandleEvent(int fd, drmEventContextPtr context)
 {
     static unsigned sequence; struct timespec now; int i, kept = 0;

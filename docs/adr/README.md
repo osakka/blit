@@ -200,6 +200,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0180 — Proposed retained GPU implementation workstream](0180-retained-gpu-implementation-workstream.md)
 - [0181 — GLES compositor inside native KMS; SDL retired at cutover](0181-gles-compositor-inside-native-kms.md)
 - [0182 — Desktop video off the PTY (proposed)](0182-desktop-video-off-the-pty.md)
+- [0183 — Late compose is opt-in; immediate is the default](0183-late-compose-is-opt-in.md)
 
 ## Adding an ADR
 

@@ -1,5 +1,16 @@
 # Verification status
 
+## 2026-10-25: 0.2.21 immediate is the default; late flips from the vblank counter
+
+Host A/B on 0.2.20 (owner dragging): late 36 fps with 31 "late" flips at the
+capped 8.3 ms lead; immediate preferred by the owner. Most "late" flips were
+false: the driver stamps a flip event with the new frame's scanout start,
+after the vblank began, and the classifier compared that time with one
+period. A flip is now late when it completes two or more vblanks after the
+CRTC's vblank number read right after submission (`drmCrtcGetSequence`; time
+fallback 1.5 periods). Immediate is the default; late is opt-in (ADR 0183).
+The host keeps its saved `kms_frame_timing: immediate`.
+
 ## 2026-10-25: 0.2.20 late compose (server.kms_frame_timing)
 
 The owner found drags fast but jumpy. On the host a frame was composed as
