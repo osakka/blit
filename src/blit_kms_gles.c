@@ -401,9 +401,12 @@ static void kms_gles_glyph(BlitKms *kms, KmsGlesResources *r,
                    x + sprite->dx, y + sprite->dy, sprite->w, sprite->h, fg);
 }
 
-/* One view, whole, in draw_view's order. */
+/* One view in draw_view's order: whole, or (damage) only the cells
+   [dx0,dx1) x [dy0,dy1), widened for ink overhang exactly as draw_view
+   widens them. The persistent scene keeps every other pixel. */
 static void kms_gles_view(BlitKms *kms, KmsGlesResources *r, const KmsOutput *output,
-                          const BlitKmsSurfaceView *view)
+                          const BlitKmsSurfaceView *view, int partial,
+                          int dx0, int dy0, int dx1, int dy1)
 {
     const BlitFont *font = kms->font;
     int cw = view->cell_width > 0 ? view->cell_width :
@@ -416,20 +419,43 @@ static void kms_gles_view(BlitKms *kms, KmsGlesResources *r, const KmsOutput *ou
     int draw_count = 0, row, column;
     int x0 = view->origin_x, y0 = view->origin_y;
     int x1 = x0 + view->columns * cw, y1 = y0 + view->rows * ch;
+    int first_row = 0, last_row = view->rows, first_column = 0, last_column = view->columns;
+    int src_row0 = 0, src_row1 = view->rows, src_col0 = 0, src_col1 = view->columns;
+    int cx0 = x0, cy0 = y0, cx1 = x1, cy1 = y1;
+    int overhang = blit_font_has_overhang(font);
     (void)output;
     if (view->columns < 1 || view->rows < 1) return;
-    blit_gles_clip(kms->gles, x0, y0, x1 - x0, y1 - y0);
-    blit_gles_rect(kms->gles, x0, y0, x1 - x0, y1 - y0, floor_colour, 255);
+    if (partial) {
+        BlitInkRegion ink;
+        first_row = dy0 < 0 ? 0 : dy0;
+        first_column = dx0 < 0 ? 0 : dx0;
+        last_row = dy1 > view->rows ? view->rows : dy1;
+        last_column = dx1 > view->columns ? view->columns : dx1;
+        if (last_row <= first_row || last_column <= first_column) return;
+        ink = blit_ink_region(font, first_column, first_row, last_column, last_row,
+                              view->columns, view->rows);
+        first_column = ink.x0; first_row = ink.y0;
+        last_column = ink.x1; last_row = ink.y1;
+        src_col0 = ink.source_x0; src_row0 = ink.source_y0;
+        src_col1 = ink.source_x1; src_row1 = ink.source_y1;
+        cx0 = x0 + first_column * cw; cy0 = y0 + first_row * ch;
+        cx1 = x0 + last_column * cw; cy1 = y0 + last_row * ch;
+        if (cx1 > x1) cx1 = x1;
+        if (cy1 > y1) cy1 = y1;
+        if (cx1 <= cx0 || cy1 <= cy0) return;
+    }
+    blit_gles_clip(kms->gles, cx0, cy0, cx1 - cx0, cy1 - cy0);
+    blit_gles_rect(kms->gles, cx0, cy0, cx1 - cx0, cy1 - cy0, floor_colour, 255);
     if (view->graphics != NULL)
         draw_count = blit_graphics_collect(view->graphics, view->graphics_count,
                                            draws, BLIT_GRAPHICS_MAX_DRAWS);
     kms_gles_images(kms, r, view, draws, draw_count, 0);
-    for (row = 0; row < view->rows; ++row) {
-        column = 0;
-        while (column < view->columns) {
+    for (row = first_row; row < last_row; ++row) {
+        column = first_column;
+        while (column < last_column) {
             uint32_t background = view_cell_background(view, row * view->stride + column);
             int end = column + 1;
-            while (end < view->columns &&
+            while (end < last_column &&
                    view_cell_background(view, row * view->stride + end) == background)
                 ++end;
             if (background != floor_colour)
@@ -439,8 +465,12 @@ static void kms_gles_view(BlitKms *kms, KmsGlesResources *r, const KmsOutput *ou
         }
     }
     kms_gles_images(kms, r, view, draws, draw_count, 1);
-    for (row = 0; row < view->rows; ++row)
-        for (column = 0; column < view->columns; ++column) {
+    /* draw_view clips glyph ink to the region only for a font that
+       overhangs; otherwise a damaged cell's ink may cross its edge. */
+    if (partial && !overhang)
+        blit_gles_clip(kms->gles, x0, y0, x1 - x0, y1 - y0);
+    for (row = src_row0; row < src_row1; ++row)
+        for (column = src_col0; column < src_col1; ++column) {
             int index = row * view->stride + column;
             uint32_t fg = view->foreground[index] ?
                 view->foreground[index] - 1 : view->default_foreground;
@@ -460,14 +490,26 @@ static void kms_gles_view(BlitKms *kms, KmsGlesResources *r, const KmsOutput *ou
                 continue;
             if (attr & KMS_ATTR_CONTINUATION) continue;
             kms_gles_glyph(kms, r, view, index, x, y, width, ch, fg, lean, (attr & 1) != 0);
-            if (attr & 4)
-                blit_gles_rect(kms->gles, x, y + ch - 1, width, 1, underline, 255);
-            if (attr & 512)
-                blit_gles_rect(kms->gles, x, y + ch / 2, width, 1, fg, 255);
+            /* Underline and strike are clipped to the region, as fill_rect
+               is in draw_view. */
+            if (attr & (4 | 512)) {
+                int left = x > cx0 ? x : cx0;
+                int right = x + width < cx1 ? x + width : cx1;
+                if ((attr & 4) && y + ch - 1 >= cy0 && y + ch - 1 < cy1)
+                    blit_gles_rect(kms->gles, left, y + ch - 1, right - left, 1, underline, 255);
+                if ((attr & 512) && y + ch / 2 >= cy0 && y + ch / 2 < cy1)
+                    blit_gles_rect(kms->gles, left, y + ch / 2, right - left, 1, fg, 255);
+            }
         }
+    if (partial && !overhang)
+        blit_gles_clip(kms->gles, cx0, cy0, cx1 - cx0, cy1 - cy0);
     kms_gles_images(kms, r, view, draws, draw_count, 2);
+    /* The cursor only where draw_view draws it: inside the region's rows
+       and columns; draw_view does not clip it further. */
+    if (partial) blit_gles_clip(kms->gles, x0, y0, x1 - x0, y1 - y0);
     if (view->cursor_visible && view->cursor_x >= 0 && view->cursor_y >= 0 &&
-        view->cursor_y < view->rows) {
+        view->cursor_y < view->rows && view->cursor_y >= first_row &&
+        view->cursor_y < last_row) {
         int cursor_column = view->cursor_x < view->columns ? view->cursor_x : view->columns - 1;
         int cursor_cells = 1, cursor_index, cursor_x, cursor_y = y0 + view->cursor_y * ch;
         uint16_t cursor_attr;
@@ -480,6 +522,10 @@ static void kms_gles_view(BlitKms *kms, KmsGlesResources *r, const KmsOutput *ou
             cursor_attr = view->attributes[cursor_index];
         }
         if (cursor_attr & KMS_ATTR_WIDE) cursor_cells = 2;
+        if (cursor_column >= last_column || cursor_column + cursor_cells <= first_column) {
+            blit_gles_clip(kms->gles, 0, 0, 0, 0);
+            return;
+        }
         cursor_x = x0 + cursor_column * cw;
         if (view->cursor_style == 3 || view->cursor_style == 4)
             blit_gles_rect(kms->gles, cursor_x, cursor_y + ch - 1, cw * cursor_cells, 1,
@@ -567,13 +613,37 @@ static int kms_gles_compose(BlitKms *kms, KmsOutput *output,
             blit_gles_rect(kms->gles, 0, 0, output->mode.hdisplay,
                            output->mode.vdisplay, 0, 255);
         for (v = 0; v < view_count; ++v) {
-            if (views[v].display_id != output->info.id) continue;
-            if (!everything && (views[v].synchronized ||
-                                output_view_unchanged(output, &views[v])))
+            const BlitKmsSurfaceView *view = &views[v];
+            int partial = 0, dx = 0, dy = 0, dw = 0, dh = 0;
+            if (view->display_id != output->info.id) continue;
+            if (!everything && (view->synchronized ||
+                                output_view_unchanged(output, view)))
                 continue;
-            kms_gles_view(kms, r, output, &views[v]);
-            output->info.drawn_cells += (unsigned long long)views[v].columns *
-                (unsigned long long)views[v].rows;
+            if (!everything) {
+                /* The present path's damage rules: the view's cell damage,
+                   and for a graphics change without complete damage the old
+                   and new image bounds; unbounded means the whole view. */
+                int graphics_changed = !output_graphics_unchanged(output, view);
+                partial = view->damage_valid;
+                dx = view->damage_x; dy = view->damage_y;
+                dw = view->damage_width; dh = view->damage_height;
+                if (graphics_changed && !view->graphics_damage_complete) {
+                    int bx, by, bw, bh, bounded = 0;
+                    if (graphics_bounds_for_view(view, &bx, &by, &bw, &bh)) {
+                        include_cell_damage(&partial, &dx, &dy, &dw, &dh, bx, by, bw, bh);
+                        bounded = 1;
+                    }
+                    if (output_previous_graphics_bounds(output, view, &bx, &by, &bw, &bh)) {
+                        include_cell_damage(&partial, &dx, &dy, &dw, &dh, bx, by, bw, bh);
+                        bounded = 1;
+                    }
+                    if (!bounded) partial = 0;
+                }
+            }
+            kms_gles_view(kms, r, output, view, partial, dx, dy, dx + dw, dy + dh);
+            output->info.drawn_cells += partial ?
+                (unsigned long long)(dw > 0 ? dw : 0) * (unsigned long long)(dh > 0 ? dh : 0) :
+                (unsigned long long)view->columns * (unsigned long long)view->rows;
         }
         blit_gles_scene_end(kms->gles);
         output->gles_scene_fresh = 0;

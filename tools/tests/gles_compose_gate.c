@@ -16,11 +16,11 @@
 static uint32_t codepoints[COLS * ROWS], foreground[COLS * ROWS],
     background[COLS * ROWS];
 static uint16_t attributes[COLS * ROWS];
-static uint32_t reference[W * H], gpu[W * H];
+static uint32_t reference[W * H], gpu[W * H], retained[W * H];
 static BlitGraphicsImage images[BLIT_GRAPHICS_MAX_IMAGES];
 static unsigned char image_rgb[16 * 16 * 3], image_rgba[12 * 12 * 4];
 static BlitFont font, wide;
-static int max_diff;
+static int max_diff, damage_scenes, scenes;
 
 static void text(int x, int y, const char *s, uint32_t fg, uint32_t bg, uint16_t attr)
 {
@@ -55,10 +55,11 @@ static void image(int slot, int x, int y, int z, int rgba)
     im->generation = (unsigned long long)slot + 1;
 }
 
+static void diff(const char *scene, const BlitKmsSurfaceView *view);
+
 static void compare(const char *scene, BlitKms *kms, KmsOutput *out, BlitKmsSurfaceView *view)
 {
     KmsOutput ref;
-    int i, bad = 0;
     memset(&ref, 0, sizeof(ref));
     ref.mode = out->mode;
     ref.back.map = reference;
@@ -72,6 +73,54 @@ static void compare(const char *scene, BlitKms *kms, KmsOutput *out, BlitKmsSurf
                 out->info.compositor_reason);
         exit(1);
     }
+    remember_output_views(out, view, 1, 1);
+    memcpy(retained, reference, sizeof(retained));
+    diff(scene, view);
+}
+
+/* A damage frame, as the present path makes one: the CPU clears the damage
+   rectangle and redraws the view limited to it over the frame it retained;
+   the GPU recomposes only that damage into its persistent scene. Cells that
+   changed outside the damage must stay stale on both. */
+static void compare_damage(const char *scene, BlitKms *kms, KmsOutput *out,
+                           BlitKmsSurfaceView *view, int dx, int dy, int dw, int dh)
+{
+    KmsOutput ref;
+    memset(&ref, 0, sizeof(ref));
+    ref.mode = out->mode;
+    ref.back.map = retained;
+    ref.back.pitch = W * 4;
+    ref.back.size = sizeof(retained);
+    view->damage_valid = 1;
+    view->damage_x = dx; view->damage_y = dy;
+    view->damage_width = dw; view->damage_height = dh;
+    fill_rect(&ref, view->origin_x + dx * view->cell_width,
+              view->origin_y + dy * view->cell_height,
+              dw * view->cell_width, dh * view->cell_height, 0);
+    draw_view(&ref, &font, &wide, view);
+    memcpy(reference, retained, sizeof(reference));
+    memset(gpu, 0x55, sizeof(gpu));
+    out->info.drawn_cells = 0;
+    if (kms_gles_compose(kms, out, view, 1, 0, 0, NULL, 0, 0, 0, 0, gpu) < 0) {
+        fprintf(stderr, "GLES_COMPOSE_FAIL %s: GPU composition failed: %s\n", scene,
+                out->info.compositor_reason);
+        exit(1);
+    }
+    remember_output_views(out, view, 1, 1);
+    view->damage_valid = 0;
+    if (out->info.drawn_cells >= (unsigned long long)view->columns * view->rows) {
+        fprintf(stderr, "GLES_COMPOSE_FAIL %s: the GPU recomposed the whole view (%llu cells)\n",
+                scene, out->info.drawn_cells);
+        exit(1);
+    }
+    diff(scene, view);
+    ++damage_scenes;
+}
+
+static void diff(const char *scene, const BlitKmsSurfaceView *view)
+{
+    int i, bad = 0;
+    ++scenes;
     for (i = 0; i < W * H; ++i) {
         uint32_t a = reference[i] & 0xffffffU, b = gpu[i] & 0xffffffU;
         int c, worst = 0;
@@ -171,6 +220,18 @@ int main(void)
     view.cursor_style = 6; view.surface_revision = 3;
     compare("bar cursor", &kms, out, &view);
 
+    /* Damage: rewrite part of row 2 and move the cursor inside the damage;
+       also change a cell outside it, which both must leave stale. */
+    view.cursor_style = 1; view.cursor_x = 3; view.cursor_y = 0; view.surface_revision = 30;
+    compare("damage base", &kms, out, &view);
+    text(2, 2, "NEW ital", 0xffe000, 0x402040, 128);
+    text(30, 6, "stale", 0, 0, 0);
+    view.cursor_x = 5; view.cursor_y = 2; view.surface_revision = 31;
+    compare_damage("damage: italic run and cursor", &kms, out, &view, 0, 0, 12, 3);
+    text(14, 2, "UNDER", 0x40ff40, 0, 4 | 1);
+    view.surface_revision = 32;
+    compare_damage("damage: bold underline mid-row", &kms, out, &view, 14, 2, 5, 1);
+
     reset();
     text(0, 2, "text over, under and between images", 0xffffff, 0, 0);
     text(2, 3, "coloured cell", 0, 0x0000c0, 0);
@@ -218,6 +279,16 @@ int main(void)
         view.cursor_visible = 1; view.cursor_style = 1;
         view.cursor_x = 5; view.cursor_y = 3; view.surface_revision = 11;
         compare("block cursor on overhanging ink", &kms, out, &view);
+        /* Damage on the overhanging font: the region widens for ink, and
+           sources outside it redraw clipped. */
+        codepoints[3 * COLS + 6] = 0xfeb3;
+        codepoints[1 * COLS + 20] = 'Q';
+        view.cursor_x = 6; view.surface_revision = 13;
+        compare_damage("damage: arabic neighbour under the cursor, overhang", &kms, out,
+                       &view, 6, 3, 1, 1);
+        text(0, 4, "wide damage", 0xffffff, 0x305030, 1);
+        view.cursor_visible = 0; view.surface_revision = 14;
+        compare_damage("damage: bold row on overhanging font", &kms, out, &view, 0, 4, 11, 1);
         /* hibr's title bar, brackets style, against the view's right edge:
            a tee, "_ <white square> x", a tee, on the bar's colour. */
         {
@@ -255,7 +326,7 @@ int main(void)
             compare("scaled images", &kms, out, &view);
         }
     }
-    printf("GLES_COMPOSE_PASS scenes=12 max_channel_diff=%d overhang=%s renderer=\"%s\"\n",
-           max_diff, blit_font_has_overhang(&font) ? "yes" : "no", blit_gles_identity(kms.gles));
+    printf("GLES_COMPOSE_PASS scenes=%d damage_scenes=%d max_channel_diff=%d overhang=%s "
+           "renderer=\"%s\"\n", scenes, damage_scenes, max_diff, blit_font_has_overhang(&font) ? "yes" : "no", blit_gles_identity(kms.gles));
     return 0;
 }

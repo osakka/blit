@@ -1,5 +1,27 @@
 # Verification status
 
+## 2026-10-25: 0.2.16–0.2.19 where the time goes; damage-limited GPU recompose
+
+The owner found window drags slightly laggy and YouTube choppy on GLES.
+0.2.16 adds GPU time per frame (`GL_EXT_disjoint_timer_query`), flip latency
+for every output and per-frame quads/draw calls/uploads; 0.2.17 adds `GET
+/v1/diagnostics/processes`. On the host during drag + video the GPU
+compositor costs at most 2.9 ms CPU and 3.4 ms GPU for 17,052 cells with no
+CPU fallbacks; video reaches Blit from WebKit → hibr-wpe → Hibr desktop
+(44% of a core) → hold (22%) at ~13 fps with no saturated process (ADR 0182,
+proposed; blit #141). 0.2.18 makes Kitty ingest cheaper (string bodies
+copied in runs, table base64, json_escape runs): locally 33.7 → 11.0 ms of
+CPU per MB of base64; on the host Blit went from 24–42% of a core at 20 MB/s
+to 12% at 12 MB/s. A Kitty `t=s` prototype was withdrawn before release: it
+contradicts ADR 0066. 0.2.19 recomposes only a changed view's damage on the
+GPU, with draw_view's rules (ink widening, region clipping, cursor only
+inside the region); `gles_compose_gate` adds four damage frames, Terminus
+and the overhanging Modern/Arabic font, including a changed cell outside the
+damage that both compositors must leave stale, and fails if the GPU
+recomposes the whole view. Renderer, terminal and font suites on the GLES
+backend: 111 pass, 1 skip; mouse_report_gate failed once on its
+motion-report count under load and passes on rerun on gles and native.
+
 ## 2026-10-24: 0.2.15 scaled images on the GPU; sprite atlas follows the font
 
 On the host (0.2.14, owner logged in), ~30% of frames were still CPU
