@@ -1,5 +1,24 @@
 # Verification status
 
+## 2026-10-25: 0.2.25 an orderly stop is not a GLES crash
+
+The GLES start guard (ADR 0181) leaves `<settings>.gles-starting` until a
+GLES start has been healthy for 30 s. It never removed the marker on an
+orderly exit. So any update, restart or stop inside those 30 s made the
+next start treat GLES as crashed and use the CPU. On the host this
+happened today after back-to-back restarts: the Blit panel showed
+"Software (CPU); GPU unavailable" with nothing wrong with the GPU.
+
+Every exit path converges at the end of `main`. After the outputs are torn
+down, an active guard now removes its marker there. A crash, which never
+reaches that point, still leaves the marker and is still skipped once.
+
+Gates:
+- `gles_compositor_gate`: a GLES start stopped by SIGTERM inside the hold
+  leaves no marker, and the next start runs GLES. Without the fix it fails
+  with "an orderly stop left the guard marker".
+- The native suite.
+
 ## 2026-10-25: 0.2.24 a sign-in at Blit's login screen resumes the desktop without its saver
 
 Issue #145. The owner logged in and was shown Hibr's screen saver on the primary. Hibr's

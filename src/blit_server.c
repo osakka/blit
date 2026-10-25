@@ -27942,6 +27942,11 @@ int main(int argc, char **argv)
        restart is exactly when it would not. */
     settings_flush(&runtime, 1);
     destroy_outputs(&runtime);
+    /* The start guard is for a crash. A start stopped in order before its
+       hold was over -- an update, a restart, a stop -- tore its outputs down
+       and is no evidence against GLES: it must not cost the next start the
+       GPU. */
+    if (runtime.gles_guard_active) unlink(runtime.gles_guard_path);
     blit_font_free(&runtime.font);
     blit_vt_close();
     if (blit_restart_requested) {

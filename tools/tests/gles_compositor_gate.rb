@@ -127,6 +127,17 @@ Dir.mktmpdir('blit-gles-setting') do |root|
       state['reason'].include?('previous GLES start')
     abort 'GLES_COMPOSITOR_FAIL the guard marker was not cleared' if File.exist?(marker)
   end
+  # A start stopped in order inside the hold (an update, a restart) is not a
+  # crash: it removes its marker, and the next start still gets GLES.
+  server(port, env) do |base|
+    abort 'GLES_COMPOSITOR_FAIL a GLES start left no marker' unless File.exist?(marker)
+  end
+  abort 'GLES_COMPOSITOR_FAIL an orderly stop left the guard marker' if File.exist?(marker)
+  server(port, env) do |base|
+    state = compositor(base)
+    abort "GLES_COMPOSITOR_FAIL an orderly stop cost the next start GLES: #{state.inspect}" unless
+      state['active'] == 'gles'
+  end
   server(port, env.merge('BLIT_GLES_GUARD_SECONDS' => '1')) do |base|
     abort 'GLES_COMPOSITOR_FAIL a GLES start left no marker' unless File.exist?(marker)
     abort 'GLES_COMPOSITOR_FAIL GLES did not start after the guard' unless compositor(base)['active'] == 'gles'
@@ -142,4 +153,4 @@ Dir.mktmpdir('blit-gles-setting') do |root|
 end
 
 puts "GLES_COMPOSITOR_PASS #{frame_line.sub('GLES_FRAME_PASS ', 'frame=')} " \
-     'surfaceless=gles fallback=cpu_with_reason setting=saved_and_applied guard=crash_start_skipped_then_retried'
+     'surfaceless=gles fallback=cpu_with_reason setting=saved_and_applied guard=crash_start_skipped_then_retried orderly_stop=not_a_crash'
