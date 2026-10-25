@@ -124,6 +124,9 @@ typedef struct {
        wait for vblank. */
     double last_flip_ms, max_flip_ms;
     unsigned long long flip_wait_total_us, flip_waits;
+    /* Flips shown at the first vblank after their submission, and flips
+       that missed it (kernel vblank time minus submission > one period). */
+    unsigned long long flips_on_time, flips_late;
     /* GPU frames: GPU time (when the driver can time it), and the last
        frame's quads, draw calls and texture upload time. */
     int gpu_timed;

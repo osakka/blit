@@ -1,5 +1,26 @@
 # Verification status
 
+## 2026-10-25: 0.2.20 late compose (server.kms_frame_timing)
+
+The owner found drags fast but jumpy. On the host a frame was composed as
+soon as the previous flip completed -- right after a vblank -- and waited
+~15.7 ms to be shown. Native KMS now composes each output's frame a lead
+before its next vblank, predicted from the kernel's vblank timestamps and
+the mode's refresh (the measured rate refines it only within 2%). The lead
+starts at 4 ms and adapts: +1 ms (to half a refresh) for a late flip or a
+compose slot the loop was busy through, -0.25 ms (to 2 ms) per 240 flips on
+time. An output asked to render at once (a capture) renders unaligned.
+`server.kms_frame_timing` (`late` default, `immediate`) applies live.
+`kms_frame_timing_gate` (new; the DRM mock gains a periodic-vblank mode)
+switches one server live from late to immediate under continuous output:
+locally flip wait 14.7 → 4–7 ms at the same frame rate, 0 late flips, an
+invalid value refused. Two defects found on the way and gated: aligning
+"now" chased the next slot forever (captures never rendered), and a vblank
+count that is not a vblank count set a period of seconds. Native timing,
+renderer, schema and terminal suites: 83 pass, 3 skip; GLES renderer suite
+passes with the timing gate skipped there (it measures scheduling, which the
+surfaceless software rasteriser's readback would dominate).
+
 ## 2026-10-25: 0.2.16–0.2.19 where the time goes; damage-limited GPU recompose
 
 The owner found window drags slightly laggy and YouTube choppy on GLES.

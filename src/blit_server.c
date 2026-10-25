@@ -1072,6 +1072,20 @@ typedef struct {
     char boot_font_path[512];
     int boot_font_scale_tenths;
     uint64_t render_next_us[BLIT_MAX_DISPLAYS];
+    /* Late compose (0.2.20): how long before an output's next vblank its
+       frame is composed, adapted from flips that missed their vblank. */
+    int kms_frame_timing_immediate;
+    int boot_kms_frame_timing_immediate;
+    int kms_frame_timing_configured;
+    uint64_t kms_lead_us[BLIT_MAX_DISPLAYS];
+    unsigned long long kms_late_seen[BLIT_MAX_DISPLAYS];
+    unsigned long long kms_on_time_seen[BLIT_MAX_DISPLAYS];
+    unsigned long long kms_on_time_at_change[BLIT_MAX_DISPLAYS];
+    /* The compose time aimed at, and frames composed after their vblank had
+       already passed (the loop was busy through the slot). */
+    int kms_slot_missed[BLIT_MAX_DISPLAYS];
+    unsigned long long kms_slot_misses[BLIT_MAX_DISPLAYS];
+    uint64_t kms_slot_checked_us;
     unsigned long render_missed_deadlines[BLIT_MAX_DISPLAYS];
     int test_refresh_override;
     int session_count;
@@ -1949,6 +1963,106 @@ static uint64_t output_render_period_us(const BlitRuntime *runtime,
     return (uint64_t)period_us;
 }
 
+/* Late compose. A frame composed right after a flip completes -- right after
+   a vblank -- waits most of a refresh to be shown, so input that arrives in
+   that time is a frame late. On direct KMS, delay each output's compose to
+   `lead` before its next vblank, predicted from the kernel's own vblank
+   timestamps: the earliest time the schedule already allows, moved to the
+   first such point at or after it. Before an output has flipped twice, or
+   with BLIT_KMS_FRAME_TIMING=immediate, the schedule is unchanged. */
+#define KMS_LEAD_MIN_US 2000ULL
+#define KMS_LEAD_START_US 4000ULL
+static uint64_t kms_aligned_due(BlitRuntime *runtime, int output_index,
+                                uint64_t earliest)
+{
+    BlitKmsDisplayInfo info;
+    double refresh;
+    uint64_t period, lead, vblank, k;
+    int display_index;
+    if (!runtime->direct_kms || runtime->kms_frame_timing_immediate ||
+        output_index < 0 || output_index >= BLIT_MAX_DISPLAYS)
+        return earliest;
+    display_index = display_index_for_output(runtime, output_index);
+    if (display_index < 0 ||
+        blit_kms_display_info(runtime->kms, display_index, &info) != 0 ||
+        info.flip_completions < 2 || info.vblank_timestamp_us == 0)
+        return earliest;
+    /* The mode's refresh, refined by the measured one only when they agree:
+       the measurement divides vblank numbers by time, and a source whose
+       numbers do not count vblanks would otherwise set a period of seconds. */
+    refresh = info.refresh_hz;
+    if (refresh < 1.0) return earliest;
+    if (info.observed_refresh_hz > refresh * 0.98 && info.observed_refresh_hz < refresh * 1.02)
+        refresh = info.observed_refresh_hz;
+    period = (uint64_t)(1000000.0 / refresh);
+    if (runtime->kms_lead_us[output_index] == 0)
+        runtime->kms_lead_us[output_index] = KMS_LEAD_START_US;
+    lead = runtime->kms_lead_us[output_index];
+    if (lead > period / 2) lead = period / 2;
+    vblank = info.vblank_timestamp_us;
+    if (earliest + lead <= vblank) return earliest;
+    k = (earliest + lead - vblank + period - 1) / period;
+    return vblank + k * period - lead;
+}
+
+/* A frame that missed its vblank -- its flip landed a refresh late, or it
+   was composed after the vblank it aimed at because the loop was busy
+   through the slot -- lengthens the lead by 1 ms (up to half a refresh);
+   240 flips on time shorten it by 0.25 ms (down to 2 ms). Called once per
+   composed frame. */
+static void kms_adapt_lead(BlitRuntime *runtime, int output_index)
+{
+    BlitKmsDisplayInfo info;
+    int display_index = display_index_for_output(runtime, output_index);
+    uint64_t lead;
+    int missed;
+    if (!runtime->direct_kms || output_index < 0 || output_index >= BLIT_MAX_DISPLAYS ||
+        display_index < 0 ||
+        blit_kms_display_info(runtime->kms, display_index, &info) != 0)
+        return;
+    lead = runtime->kms_lead_us[output_index] ?
+        runtime->kms_lead_us[output_index] : KMS_LEAD_START_US;
+    missed = info.flips_late > runtime->kms_late_seen[output_index];
+    if (runtime->kms_slot_missed[output_index]) {
+        runtime->kms_slot_missed[output_index] = 0;
+        ++runtime->kms_slot_misses[output_index];
+        missed = 1;
+    }
+    if (missed) {
+        double refresh = info.refresh_hz >= 1.0 ? info.refresh_hz : 60.0;
+        uint64_t limit = (uint64_t)(500000.0 / refresh);
+        lead += 1000ULL;
+        if (lead > limit) lead = limit;
+        runtime->kms_on_time_at_change[output_index] = info.flips_on_time;
+    } else if (info.flips_on_time >= runtime->kms_on_time_at_change[output_index] + 240ULL) {
+        lead = lead > KMS_LEAD_MIN_US + 250ULL ? lead - 250ULL : KMS_LEAD_MIN_US;
+        runtime->kms_on_time_at_change[output_index] = info.flips_on_time;
+    }
+    runtime->kms_lead_us[output_index] = lead;
+    runtime->kms_late_seen[output_index] = info.flips_late;
+    runtime->kms_on_time_seen[output_index] = info.flips_on_time;
+}
+
+/* Once per loop pass: a frame was waiting, nothing held the scene, and the
+   loop's previous pass came before an output's compose slot while this one
+   comes after that slot's vblank -- the loop was busy through it. */
+static void kms_check_slots(BlitRuntime *runtime, uint64_t now, int held)
+{
+    int i;
+    uint64_t previous = runtime->kms_slot_checked_us;
+    runtime->kms_slot_checked_us = now;
+    if (!runtime->render_pending || held || previous == 0) return;
+    for (i = 0; i < runtime->output_count && i < BLIT_MAX_DISPLAYS; ++i) {
+        uint64_t due = runtime->render_next_us[i];
+        uint64_t slot, lead;
+        if (due == 0) continue;
+        slot = kms_aligned_due(runtime, i, due);
+        lead = runtime->kms_lead_us[i] ? runtime->kms_lead_us[i] : KMS_LEAD_START_US;
+        if (slot != due && previous < slot && now > slot + lead)
+            runtime->kms_slot_missed[i] = 1;
+    }
+}
+
 static void reset_render_schedule(BlitRuntime *runtime, uint64_t now)
 {
     int i;
@@ -2012,14 +2126,17 @@ static void mark_pointer_dirty_outputs(BlitRuntime *runtime,
     runtime->pointer_dirty = runtime->pointer_dirty_outputs != 0;
 }
 
-static uint32_t due_output_mask(const BlitRuntime *runtime, uint64_t now)
+static uint32_t due_output_mask(BlitRuntime *runtime, uint64_t now)
 {
     uint32_t mask = 0;
     int i;
 
     for (i = 0; i < runtime->output_count; ++i) {
-        if (runtime->render_next_us[i] == 0 ||
-            now >= runtime->render_next_us[i])
+        /* 0 means "now" (a capture, a reset): render at once, unaligned.
+           Aligning `now` itself would chase the next slot forever. */
+        uint64_t aligned = runtime->render_next_us[i] == 0 ? now :
+            kms_aligned_due(runtime, i, runtime->render_next_us[i]);
+        if (now >= aligned)
             mask |= 1U << i;
     }
     return mask;
@@ -2075,6 +2192,7 @@ static void advance_render_schedule(BlitRuntime *runtime, uint64_t now,
         uint64_t missed;
         if (!(output_mask & (1U << i)))
             continue;
+        kms_adapt_lead(runtime, i);
         period = output_render_period_us(runtime, i);
         if (runtime->render_next_us[i] == 0 ||
             now < runtime->render_next_us[i]) {
@@ -2084,13 +2202,22 @@ static void advance_render_schedule(BlitRuntime *runtime, uint64_t now,
         late = now - runtime->render_next_us[i];
         missed = late / period;
         runtime->render_missed_deadlines[i] += (unsigned long)missed;
+        /* Late compose takes its phase from the vblanks: allow the next
+           frame half a refresh from now and let kms_aligned_due pick the
+           point before the next vblank. Stepping the configured interval
+           instead drifts against the refresh and skips a vblank whenever
+           it lands between that point and the vblank. */
+        if (kms_aligned_due(runtime, i, now + period / 2) != now + period / 2) {
+            runtime->render_next_us[i] = now + period / 2;
+            continue;
+        }
         /* Preserve the output's phase.  Advancing from `now` would make every
            late frame permanently shift the cadence and amplify jitter. */
         runtime->render_next_us[i] += (missed + 1) * period;
     }
 }
 
-static int render_wait_ms(const BlitRuntime *runtime, uint64_t now)
+static int render_wait_ms(BlitRuntime *runtime, uint64_t now)
 {
     int wait_ms = 10;
     int i;
@@ -2110,6 +2237,7 @@ static int render_wait_ms(const BlitRuntime *runtime, uint64_t now)
            the last committed scene. Retain each output's refresh deadline. */
         if (!(runtime->pointer_dirty_outputs & (1U << i)) && due < not_before)
             due = not_before;
+        if (due != 0) due = kms_aligned_due(runtime, i, due);
         if (due <= now)
             return 0;
         delta = due - now;
@@ -3521,7 +3649,9 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
                 "\"frame_quads\":%llu,\"frame_draw_calls\":%llu,"
                 "\"upload_ms\":%.3f},"
                 "\"flip\":{\"last_ms\":%.3f,\"max_ms\":%.3f,"
-                "\"total_us\":%llu,\"count\":%llu}}",
+                "\"total_us\":%llu,\"count\":%llu,"
+                "\"timing\":\"%s\",\"lead_us\":%llu,"
+                "\"on_time\":%llu,\"late\":%llu,\"slot_misses\":%llu}}",
                 have_kms_info ? kms_info.compositor : "sdl",
                 have_kms_info && kms_info.compositor_requested[0] ?
                     kms_info.compositor_requested : (have_kms_info ? "cpu" : "sdl"),
@@ -3541,7 +3671,14 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
                 have_kms_info ? kms_info.last_flip_ms : 0.0,
                 have_kms_info ? kms_info.max_flip_ms : 0.0,
                 have_kms_info ? kms_info.flip_wait_total_us : 0ULL,
-                have_kms_info ? kms_info.flip_waits : 0ULL);
+                have_kms_info ? kms_info.flip_waits : 0ULL,
+                !runtime->direct_kms ? "sdl" :
+                    runtime->kms_frame_timing_immediate ? "immediate" : "late",
+                (unsigned long long)(i < BLIT_MAX_DISPLAYS && !runtime->kms_frame_timing_immediate ?
+                                     runtime->kms_lead_us[i] : 0),
+                have_kms_info ? kms_info.flips_on_time : 0ULL,
+                have_kms_info ? kms_info.flips_late : 0ULL,
+                (unsigned long long)(i < BLIT_MAX_DISPLAYS ? runtime->kms_slot_misses[i] : 0));
         }
     }
     if (used < capacity)
@@ -19867,7 +20004,8 @@ static void settings_copy_unseen_server(BlitRuntime *runtime, char *out,
 {
     static const char *const known[] = {
         "render_interval_ms", "pane_layout", "renderer",
-        "kms_async_pageflip", "expect_desktop", "shutdown_key", "kms_compositor"
+        "kms_async_pageflip", "expect_desktop", "shutdown_key", "kms_compositor",
+        "kms_frame_timing"
     };
     const char *cursor = json_key_cursor(runtime->settings_document, "server");
     char key[64];
@@ -20264,6 +20402,11 @@ static size_t settings_build(BlitRuntime *runtime, char *out, size_t capacity,
                      first ? "" : ",", runtime->kms_compositor_gles ? "gles" : "cpu");
         first = 0;
     }
+    if (runtime->kms_frame_timing_configured) {
+        json_appendf(out, capacity, &used, "%s\"kms_frame_timing\":\"%s\"",
+                     first ? "" : ",", runtime->kms_frame_timing_immediate ? "immediate" : "late");
+        first = 0;
+    }
     if (runtime->kms_async_configured) {
         json_appendf(out, capacity, &used,
                      "%s\"kms_async_pageflip\":%s", first ? "" : ",",
@@ -20590,6 +20733,11 @@ static void settings_apply_server(BlitRuntime *runtime)
             runtime->kms_compositor_gles = strcmp(chord, "gles") == 0;
             runtime->kms_compositor_configured = 1;
         }
+        if (json_string(server, "kms_frame_timing", chord, sizeof(chord)) &&
+            (strcmp(chord, "late") == 0 || strcmp(chord, "immediate") == 0)) {
+            runtime->kms_frame_timing_immediate = strcmp(chord, "immediate") == 0;
+            runtime->kms_frame_timing_configured = 1;
+        }
         if (json_bool(server, "kms_async_pageflip", &value)) {
             runtime->kms_async_pageflip = value;
             runtime->kms_async_configured = 1;
@@ -20660,6 +20808,10 @@ static int settings_server_backend_valid(const char *document)
     if (json_key_cursor(server, "kms_compositor") != NULL &&
         !(json_string(server, "kms_compositor", backend, sizeof(backend)) &&
           (strcmp(backend, "cpu") == 0 || strcmp(backend, "gles") == 0)))
+        return 0;
+    if (json_key_cursor(server, "kms_frame_timing") != NULL &&
+        !(json_string(server, "kms_frame_timing", backend, sizeof(backend)) &&
+          (strcmp(backend, "late") == 0 || strcmp(backend, "immediate") == 0)))
         return 0;
     if (json_key_cursor(server, "display_backend") == NULL) return 1;
     return json_string(server, "display_backend", backend, sizeof(backend)) &&
@@ -20814,6 +20966,7 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
                  "\"video_driver_active\":\"%s\"},"
                  "\"presentation_restart_required\":%s,"
                  "\"kms_async_pageflip\":%s,\"kms_compositor\":\"%s\","
+                 "\"kms_frame_timing\":\"%s\","
                  "\"expect_desktop\":%s,"
                  "\"login\":%s,\"login_restart_required\":%s,"
                  "\"pointer\":{\"shape\":\"%s\",\"palette\":\"%s\","
@@ -20856,6 +21009,7 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
                      "true" : "false",
                  runtime->kms_async_pageflip ? "true" : "false",
                  runtime->kms_compositor_gles ? "gles" : "cpu",
+                 runtime->kms_frame_timing_immediate ? "immediate" : "late",
                  runtime->expect_desktop ? "true" : "false", login,
                  restart_required ? "true" : "false",
                  blit_pointer_shapes[runtime->pointer_art.config.shape],
@@ -20965,6 +21119,8 @@ static int settings_reset(BlitRuntime *runtime, int remove_file)
     runtime->kms_async_configured = 0;
     runtime->kms_compositor_gles = runtime->boot_kms_compositor_gles;
     runtime->kms_compositor_configured = 0;
+    runtime->kms_frame_timing_immediate = runtime->boot_kms_frame_timing_immediate;
+    runtime->kms_frame_timing_configured = 0;
     runtime->expect_desktop = runtime->boot_expect_desktop;
     runtime->expect_desktop_configured = 0;
     if (runtime->kms_async_pageflip)
@@ -22235,7 +22391,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
             }
             if (!settings_server_backend_valid(document)) {
                 send_problem(fd, 400, "Bad Request", "invalid_settings_server",
-                             "server.display_backend must be kms or sdl, and server.kms_compositor cpu or gles.");
+                             "server.display_backend must be kms or sdl, server.kms_compositor cpu or gles, and server.kms_frame_timing late or immediate.");
                 return;
             }
             if (!settings_server_layout(document, &requested_columns,
@@ -30327,6 +30483,9 @@ int main(int argc, char **argv)
     runtime.boot_kms_compositor_gles = getenv("BLIT_KMS_COMPOSITOR") != NULL &&
         strcmp(getenv("BLIT_KMS_COMPOSITOR"), "gles") == 0;
     runtime.kms_compositor_gles = runtime.boot_kms_compositor_gles;
+    runtime.boot_kms_frame_timing_immediate = getenv("BLIT_KMS_FRAME_TIMING") != NULL &&
+        strcmp(getenv("BLIT_KMS_FRAME_TIMING"), "immediate") == 0;
+    runtime.kms_frame_timing_immediate = runtime.boot_kms_frame_timing_immediate;
     snprintf(runtime.boot_renderer_request, sizeof(runtime.boot_renderer_request),
              "%s", runtime.renderer_request);
     runtime.boot_pane_columns = 1;
@@ -31077,6 +31236,8 @@ int main(int argc, char **argv)
         }
         update_pointer_shape(&runtime);
         gles_guard_check(&runtime);
+        kms_check_slots(&runtime, now, now < runtime.terminal_frame_quiet_until_us ||
+                        hibr_frame_barrier_active(&runtime, now));
         if (blit_vt_active() && runtime.render_pending &&
             (output_mask = due_output_mask(&runtime, now)) != 0) {
             int hold_scene = now < runtime.terminal_frame_quiet_until_us ||

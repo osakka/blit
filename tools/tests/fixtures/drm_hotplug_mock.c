@@ -94,18 +94,50 @@ int drmModeAddFB(int fd, uint32_t w, uint32_t h, uint8_t d, uint8_t b,
     (void)fd; (void)w; (void)h; (void)d; (void)b; (void)pitch; *fb = handle; return 0;
 }
 int drmModeRmFB(int fd, uint32_t fb) { (void)fd; (void)fb; return 0; }
-typedef struct { void *data; } Pending;
+typedef struct { void *data; unsigned long long submitted_us; } Pending;
 static Pending pending[256]; static int pending_count;
+static unsigned long long mock_now_us(void)
+{
+    struct timespec now; clock_gettime(CLOCK_MONOTONIC, &now);
+    return (unsigned long long)now.tv_sec * 1000000ULL + (unsigned long long)now.tv_nsec / 1000ULL;
+}
+/* BLIT_DRM_MOCK_VBLANK_HZ makes flips behave like a display: each completes
+   at the first vblank boundary (a multiple of the period on the monotonic
+   clock) after its submission, stamped with that vblank's time and number.
+   Unset, a flip completes at the next event poll, as before. */
+static unsigned long long mock_period_us(void)
+{
+    const char *hz = getenv("BLIT_DRM_MOCK_VBLANK_HZ");
+    double value = hz ? atof(hz) : 0.0;
+    return value >= 1.0 ? (unsigned long long)(1000000.0 / value) : 0ULL;
+}
 int drmModePageFlip(int fd, uint32_t crtc, uint32_t fb, uint32_t flags, void *data)
 {
     (void)fd; (void)crtc; (void)fb; (void)flags;
     if (pending_count >= 256) return -1;
-    pending[pending_count++].data = data; return 0;
+    pending[pending_count].data = data;
+    pending[pending_count++].submitted_us = mock_now_us();
+    return 0;
 }
 int drmHandleEvent(int fd, drmEventContextPtr context)
 {
-    static unsigned sequence; struct timespec now; int i;
+    static unsigned sequence; struct timespec now; int i, kept = 0;
+    unsigned long long period = mock_period_us();
     usleep(1000); clock_gettime(CLOCK_MONOTONIC, &now);
+    if (period) {
+        unsigned long long at = mock_now_us();
+        for (i = 0; i < pending_count; ++i) {
+            unsigned long long vblank = (pending[i].submitted_us / period + 1) * period;
+            if (at >= vblank)
+                context->page_flip_handler(fd, (unsigned)(vblank / period),
+                    (unsigned)(vblank / 1000000ULL), (unsigned)(vblank % 1000000ULL),
+                    pending[i].data);
+            else
+                pending[kept++] = pending[i];
+        }
+        pending_count = kept;
+        return 0;
+    }
     for (i = 0; i < pending_count; ++i)
         context->page_flip_handler(fd, ++sequence, now.tv_sec, now.tv_nsec / 1000, pending[i].data);
     pending_count = 0; return 0;

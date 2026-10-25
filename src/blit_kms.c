@@ -228,6 +228,13 @@ static void kms_flip_handler(int fd, unsigned int frame, unsigned int sec,
             }
         }
         ++output->info.flip_completions;
+        if (output->flip_started_us > 0 && output->info.refresh_hz >= 1.0) {
+            long long shown = (long long)timestamp - output->flip_started_us;
+            if (shown > (long long)(1000000.0 / output->info.refresh_hz))
+                ++output->info.flips_late;
+            else
+                ++output->info.flips_on_time;
+        }
         if (output->flip_started_us > 0) {
             long long waited = kms_now_us() - output->flip_started_us;
             if (waited >= 0) {
