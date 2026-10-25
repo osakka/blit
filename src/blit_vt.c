@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "blit_vt.h"
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/kd.h>
@@ -10,6 +11,7 @@
 #include <string.h>
 #include <sys/file.h>
 #include <sys/ioctl.h>
+#include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
@@ -36,11 +38,63 @@ static struct {
 } vt = { .fd = -1, .lock_fd = -1, .stop = -1, .watchdog_timeout_ms = 10000 };
 static volatile sig_atomic_t release_pending, acquire_pending;
 
+/* What the main loop is doing, in a page shared with the recovery process,
+   so a watchdog kill says where the loop was stuck rather than only that it
+   was. `phase` is always a string literal: fork copied the binary's
+   mappings, so the pointer reads the same text in both processes. */
+static struct BlitVtMark {
+    const char *volatile phase;
+    volatile long long since_ms;
+} *mark;
+
 static long long vt_now_ms(void)
 {
     struct timespec now;
     clock_gettime(CLOCK_MONOTONIC, &now);
     return (long long)now.tv_sec * 1000 + now.tv_nsec / 1000000;
+}
+
+void blit_vt_phase(const char *phase)
+{
+    if (mark && mark->phase != phase) {
+        mark->since_ms = vt_now_ms();
+        mark->phase = phase;
+    }
+}
+
+/* The server's threads as the kernel sees them: what each waits in (wchan),
+   the system call it is in, and its kernel stack. Read-only, from /proc. */
+static void report_stuck(pid_t server)
+{
+    static const char *const files[] = { "comm", "wchan", "syscall", "stack" };
+    char path[96], line[4096];
+    struct dirent *entry;
+    DIR *tasks;
+    unsigned f;
+    if (mark && mark->phase)
+        dprintf(2, "blit: watchdog: main loop in \"%s\" for %lld ms\n",
+                mark->phase, vt_now_ms() - mark->since_ms);
+    snprintf(path, sizeof(path), "/proc/%d/task", (int)server);
+    tasks = opendir(path);
+    if (!tasks) return;
+    while ((entry = readdir(tasks)) != NULL) {
+        if (entry->d_name[0] < '0' || entry->d_name[0] > '9') continue;
+        for (f = 0; f < sizeof(files) / sizeof(files[0]); ++f) {
+            ssize_t count;
+            int fd;
+            snprintf(path, sizeof(path), "/proc/%d/task/%.16s/%s",
+                     (int)server, entry->d_name, files[f]);
+            fd = open(path, O_RDONLY | O_CLOEXEC);
+            if (fd < 0) continue;
+            count = read(fd, line, sizeof(line) - 1);
+            close(fd);
+            if (count <= 0) continue;
+            line[count] = '\0';
+            dprintf(2, "blit: watchdog: task %s %s: %s%s", entry->d_name,
+                    files[f], line, line[count - 1] == '\n' ? "" : "\n");
+        }
+    }
+    closedir(tasks);
 }
 
 static void vt_signal(int signal_number)
@@ -102,6 +156,7 @@ static void recover_vt(int death, int command)
                Hardware/OS hangs and killing this recovery process too are
                outside this process-level recovery boundary. */
             dprintf(2, "blit: console watchdog expired; killing unresponsive server\n");
+            report_stuck(getppid());
             syscall(SYS_pidfd_send_signal, death, SIGKILL, NULL, 0);
             break;
         }
@@ -169,6 +224,11 @@ int blit_vt_open(char *error, unsigned capacity)
     death = (int)syscall(SYS_pidfd_open, getpid(), 0);
     if (death < 0 || socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC,
                               0, channel) < 0) goto fail;
+    if (!mark) {
+        mark = mmap(NULL, sizeof(*mark), PROT_READ | PROT_WRITE,
+                    MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+        if (mark == MAP_FAILED) mark = NULL;
+    }
     vt.recovery = fork();
     if (vt.recovery < 0) goto fail;
     if (vt.recovery == 0) {

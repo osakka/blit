@@ -27758,7 +27758,9 @@ int main(int argc, char **argv)
         timeout.tv_sec = wait_ms / 1000;
         timeout.tv_usec = (wait_ms % 1000) * 1000;
         select_started_us = monotonic_us();
+        blit_vt_phase("select: waiting for events");
         ready = select(max_fd + 1, &readable, &writable, NULL, &timeout);
+        blit_vt_phase("loop: after select");
         service_native_console(&runtime);
         if (!blit_running) break;
         runtime.diagnostic_last_select_ms =
@@ -27771,7 +27773,9 @@ int main(int argc, char **argv)
         if (kms_fd >= 0 && ready > 0 && FD_ISSET(kms_fd, &readable))
             kms_ready = 1;
         if (runtime.kms != NULL) {
-            int serviced = blit_kms_service(runtime.kms, kms_ready);
+            int serviced;
+            blit_vt_phase("kms: flip events and presentation");
+            serviced = blit_kms_service(runtime.kms, kms_ready);
             if (serviced < 0)
                 fprintf(stderr, "blit: KMS event service failed\n");
             else if (serviced > 0) {
@@ -27788,7 +27792,9 @@ int main(int argc, char **argv)
            land between the drain and the select, and the queue is cheap to
            check. The pipe is what stops select() sleeping through one. */
         service_evdev_opener(&runtime, 1);
+        blit_vt_phase("settings: flush");
         settings_flush(&runtime, 0);
+        blit_vt_phase("input, sessions and API");
         if (ready > 0 && FD_ISSET(server_fd, &readable)) {
             if (!accept_http_clients(&runtime, server_fd))
                 break;
@@ -27875,7 +27881,9 @@ int main(int argc, char **argv)
             if (hold_scene)
                 output_mask &= runtime.pointer_dirty_outputs;
             if (output_mask != 0) {
+                blit_vt_phase("render: compose and present outputs");
                 render_current_surfaces(&runtime, output_mask, hold_scene);
+                blit_vt_phase("loop: after render");
                 if (!hold_scene)
                     runtime.terminal_frame_quiet_until_us = 0;
                 advance_render_schedule(&runtime, now, output_mask);

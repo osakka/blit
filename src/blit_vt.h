@@ -17,5 +17,8 @@ int blit_vt_switch(int number);
    the normal heartbeat. This is a bounded lease, never watchdog disable. */
 int blit_vt_update_lease(int enabled);
 void blit_vt_json(char *body, unsigned capacity);
+/* Name what the main loop is doing, for the watchdog's report if it stalls.
+   A string literal only; cheap enough to call around every step. */
+void blit_vt_phase(const char *phase);
 
 #endif

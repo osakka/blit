@@ -1,5 +1,28 @@
 # Verification status
 
+## 2026-10-25: 0.2.26 the console watchdog says where the loop was stuck
+
+Issue #146. On the host, a font-size change from 21 to 22 px twice stalled
+the main loop for more than 10 s on the GLES compositor. The console
+watchdog SIGKILLed Blit each time. The journal said only "console watchdog
+expired". The kernel log was clean, and the stall did not reproduce
+locally.
+
+Before it kills, the watchdog now logs:
+- the main-loop step the server last named (`blit_vt_phase`), and for how
+  long;
+- `comm`, `wchan`, `syscall` and the kernel `stack` of every server thread.
+
+The step lives in a page the server shares with the recovery process.
+Steps are named for select, KMS flip events, settings flush,
+input/sessions/API, and render compose and present.
+
+Gates:
+- `vt_watchdog_report_gate` (new): a live process stands in for the stuck
+  server; the report names its step and both of its threads with `wchan`.
+  As root, `syscall` and `stack` are reported too (checked by hand).
+- The native suite.
+
 ## 2026-10-25: 0.2.25 an orderly stop is not a GLES crash
 
 The GLES start guard (ADR 0181) leaves `<settings>.gles-starting` until a

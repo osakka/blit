@@ -279,6 +279,7 @@ suite_renderer() {
     run_gate display_geometry_gate.sh "$ROOT"/tools/tests/display_geometry_gate.sh
     run_gate evdev_char_gate.sh "$ROOT"/tools/tests/evdev_char_gate.sh
     run_gate native_vt_kernel_gate.sh sh tools/tests/native_vt_kernel_gate.sh
+    run_gate vt_watchdog_report_gate.sh sh "$ROOT"/tools/tests/vt_watchdog_report_gate.sh
     run_gate input_device_api_gate.rb ruby tools/tests/input_device_api_gate.rb
     run_gate input_device_config_gate.rb ruby tools/tests/input_device_config_gate.rb
     run_gate touchpad_gate.sh "$ROOT"/tools/tests/touchpad_gate.sh
