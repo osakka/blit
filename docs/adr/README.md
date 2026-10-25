@@ -199,6 +199,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0179 — Exact integer raster blending](0179-exact-integer-raster-blending.md)
 - [0180 — Proposed retained GPU implementation workstream](0180-retained-gpu-implementation-workstream.md)
 - [0181 — GLES compositor inside native KMS; SDL retired at cutover](0181-gles-compositor-inside-native-kms.md)
+- [0182 — Desktop video off the PTY (proposed)](0182-desktop-video-off-the-pty.md)
 
 ## Adding an ADR
 
