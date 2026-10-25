@@ -1,27 +1,39 @@
 # Effect testing
 
-Effects are renderer state, not terminal state. The canonical API is
-`PUT /v1/effects`; the initial bounded preset is `scanlines`, with intensity
-from `0` through `100`. The SDL3 and direct KMS backends apply it after text
-composition and before the software pointer. The response identifies the
-active renderer as `sdl3` or `drm-kms`.
+Pane effects (ADR 0186) are renderer state, not terminal state. They are kept
+per pane in the settings document, keyed by output name and pane ordinal, and
+applied live:
 
-With a TCC-built server using the dummy SDL backend:
-
-```sh
-SDL_VIDEODRIVER=dummy LD_LIBRARY_PATH=build/sdl3-kms \
-  build/blit-desktop-current/bin/blit-server 8080
-curl --fail http://127.0.0.1:8080/v1/effects
-curl --fail -X PUT http://127.0.0.1:8080/v1/effects \
-  -H 'Content-Type: application/json' \
-  --data '{"revision":1,"enabled":true,"preset":"scanlines","intensity":40}'
+```json
+"effects": {
+  "DP-1": {
+    "1": {"corners": {"radius_px": 24}},
+    "2": {"corners": {"radius_px": 24}, "scanlines": {"intensity": 40}}
+  }
+}
 ```
 
-The terminal conformance runner verifies effect revisioning and stale-update
-rejection. The SDL capture gate additionally compares disabled and enabled
-frames; both captures must be valid 1024×768 BMPs and their payload hashes must
-differ. This proves the preset reaches pixels without making screenshot output
-the canonical state.
+`GET /v1/effects` reports what each live pane draws: the available effects with
+their parameter and maximum, and each pane's set, with a corner radius clamped
+to half the pane's shorter side. It is read-only; any write is
+`405 effects_read_only`. Each output's render diagnostics carry an `effects`
+object: CPU time for the last and worst frame, and GPU quads for the last one.
+
+`tools/tests/pane_effects_gate.rb` splits one mock display 1x2 and paints each
+pane one colour. It runs on both compositors (`BLIT_GATE_BACKEND=native` and
+`gles`) and checks:
+- placement: the pane's own four corners only;
+- every pixel of the corner squares and two rows against the shared rule in
+  `src/blit_effects.h` (exact on the CPU, within 1 on the GPU);
+- idempotence: two seconds of redraws over the corner cells change no pixel;
+- that the GPU composes the frame itself with effects on;
+- strict settings, the read-only endpoint, radius clamping, and persistence
+  across a restart.
+
+```sh
+ruby tools/tests/pane_effects_gate.rb
+BLIT_GATE_BACKEND=gles ruby tools/tests/pane_effects_gate.rb
+```
 
 ## Bounded graphic overlays
 

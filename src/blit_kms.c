@@ -117,6 +117,7 @@ typedef struct {
     BlitFont *font;
     int glyph_clip_active;
     int glyph_clip_x0, glyph_clip_y0, glyph_clip_x1, glyph_clip_y1;
+    long long effects_frame_us;
 } KmsOutput;
 
 typedef struct {
@@ -520,18 +521,57 @@ static void blend_rect(KmsOutput *output, int x, int y, int width, int height,
     }
 }
 
-static void draw_kms_effects(KmsOutput *output, int enabled,
-                             int intensity)
+/* ADR 0186: a pane's effects over a rectangle this view has just repainted.
+   Only repainted pixels are touched, so an effect is applied once per pixel
+   whatever the damage, and nothing outside damage is redone. The blend
+   rounds as the GPU's does, so both compositors give the same pixel. */
+static void effect_darken(KmsOutput *output, int x, int y, unsigned alpha)
 {
-    int y;
-    unsigned int alpha;
+    uint32_t *pixel = (uint32_t *)((unsigned char *)output->back.map +
+                                   y * output->back.pitch) + x;
+    unsigned inverse = 255U - alpha;
+    uint32_t old = *pixel;
+    *pixel = (((((old >> 16) & 0xffU) * inverse + 127U) / 255U) << 16) |
+        (((((old >> 8) & 0xffU) * inverse + 127U) / 255U) << 8) |
+        (((old & 0xffU) * inverse + 127U) / 255U);
+}
 
-    if (!enabled || intensity <= 0)
-        return;
-    if (intensity > 100) intensity = 100;
-    alpha = (unsigned int)(intensity * 255 / 100);
-    for (y = 1; y < output->mode.vdisplay; y += 2)
-        blend_rect(output, 0, y, output->mode.hdisplay, 1, 0, alpha);
+static void apply_view_effects(KmsOutput *output, const BlitKmsSurfaceView *view,
+                               int x0, int y0, int x1, int y1)
+{
+    const BlitEffectSet *set = &view->effects;
+    int x, y, radius, corner;
+    long long started;
+    if (!blit_effect_set_active(set)) return;
+    started = kms_now_us();
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 > output->mode.hdisplay) x1 = output->mode.hdisplay;
+    if (y1 > output->mode.vdisplay) y1 = output->mode.vdisplay;
+    if (x1 <= x0 || y1 <= y0) return;
+    if (set->value[BLIT_EFFECT_SCANLINES] > 0)
+        for (y = y0; y < y1; ++y) {
+            unsigned alpha = blit_effect_scanline_alpha(set, y - view->effect_y);
+            if (alpha)
+                for (x = x0; x < x1; ++x) effect_darken(output, x, y, alpha);
+        }
+    radius = blit_effect_corner_radius(set, view->effect_width, view->effect_height);
+    for (corner = 0; radius > 0 && corner < 4; ++corner) {
+        int right = corner & 1, bottom = corner >> 1;
+        int cx = view->effect_x + (right ? view->effect_width - radius : 0);
+        int cy = view->effect_y + (bottom ? view->effect_height - radius : 0);
+        int ax0 = cx > x0 ? cx : x0, ay0 = cy > y0 ? cy : y0;
+        int ax1 = cx + radius < x1 ? cx + radius : x1;
+        int ay1 = cy + radius < y1 ? cy + radius : y1;
+        for (y = ay0; y < ay1; ++y)
+            for (x = ax0; x < ax1; ++x) {
+                int px = x - cx, py = y - cy;
+                unsigned char coverage = blit_effect_corner_coverage(radius,
+                    right ? radius - 1 - px : px, bottom ? radius - 1 - py : py);
+                if (coverage) effect_darken(output, x, y, coverage);
+            }
+    }
+    output->effects_frame_us += kms_now_us() - started;
 }
 
 static void draw_kms_overlays(KmsOutput *output,
@@ -1120,7 +1160,7 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
         if (cursor_attr & KMS_ATTR_WIDE) cursor_cells = 2;
         if (cursor_column >= last_column ||
             cursor_column + cursor_cells <= first_column)
-            return;
+            goto effects;
         cursor_x = view->origin_x + cursor_column * cw;
         if (view->cursor_style == 3 || view->cursor_style == 4)
             fill_rect(output, cursor_x, cursor_y + ch - 1,
@@ -1172,6 +1212,9 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
                     (cursor_attr & KMS_ATTR_ITALIC) ? italic_lean : 0, (cursor_attr & 1) != 0);
         }
     }
+effects:
+    /* ADR 0186: last, over the rectangle repainted above. */
+    apply_view_effects(output, view, clip_x0, clip_y0, clip_x1, clip_y1);
 }
 
 static int wait_flip(BlitKms *kms, KmsOutput *output)
@@ -1987,7 +2030,6 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                      float pointer_x, float pointer_y, int pointer_visible,
                      uint32_t output_mask, const BlitKmsOverlay *overlays,
                      int overlay_count, unsigned long long visual_revision,
-                     int effect_enabled, int effect_intensity,
                      int hold_scene,
                      uint32_t screenshot_output_mask,
                      uint32_t *submitted_output_mask,
@@ -2123,8 +2165,7 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
             /* ADR 0181: the GPU composes this frame when it can; otherwise
                the CPU does, and GLES uploads its result. */
             if (output->gles_target != NULL) {
-                const char *why = kms_gles_unsupported(kms, output, views, view_count,
-                                                       effect_enabled, effect_intensity);
+                const char *why = kms_gles_unsupported(kms, output, views, view_count);
                 if (why == NULL) {
                     int readback = kms_gles_surfaceless() || capture ||
                         (screenshot_output_mask & (1U << i)) != 0;
@@ -2176,6 +2217,7 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         prepare_repaint_buffer(output, full_redraw, render_scene);
         draw_started = kms_now_us();
         output->info.drawn_cells = 0;
+        output->effects_frame_us = 0;
         for (view_index = 0; !hold_scene && view_index < view_count; ++view_index)
             if (views[view_index].display_id == output->info.id) {
                 BlitKmsSurfaceView draw = views[view_index];
@@ -2295,7 +2337,6 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                           kms != NULL ? kms->wide_font : NULL, &draw);
             }
         if (!hold_scene) {
-            draw_kms_effects(output, effect_enabled, effect_intensity);
             draw_kms_overlays(output, overlays, overlay_count);
         }
         if (pointer_intersects_output(output, pointer_x, pointer_y, pointer_visible)) {
@@ -2324,6 +2365,10 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         }
         flip_started = kms_now_us();
         output->info.draw_ms = (double)(flip_started - draw_started) / 1000.0;
+        output->info.effects_last_ms = (double)output->effects_frame_us / 1000.0;
+        if (output->info.effects_last_ms > output->info.effects_max_ms)
+            output->info.effects_max_ms = output->info.effects_last_ms;
+        output->info.effects_quads = 0;
         if (render_scene) {
             output->back.map = scanout_map;
             copy_scene_to_back(output);

@@ -1009,31 +1009,15 @@ paths:
     get:
       tags: [effects]
       operationId: getEffects
-      summary: Get the bounded renderer effect state
+      summary: Report each live pane's effects
+      description: >-
+        Read-only (ADR 0186). Pane effects are kept in document.effects and set
+        with PUT /v1/settings; any other method is 405 effects_read_only. A
+        pane's values are the ones drawn, so a corner radius beyond half the
+        pane's shorter side reports the clamped radius.
       responses:
         '200':
-          description: Current effect state
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/EffectState'
-        default:
-          $ref: '#/components/responses/Problem'
-    put:
-      tags: [effects]
-      operationId: updateEffects
-      summary: Set the bounded renderer effect state
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/EffectUpdate'
-      responses:
-        '200':
-          description: Updated effect state
+          description: The available effects and each live pane's set
           content:
             application/json:
               schema:
@@ -2526,6 +2510,22 @@ components:
                 scale: {type: number, minimum: 1.0, maximum: 3.0}
                 size_px: {type: integer, minimum: 8, maximum: 64}
             pointer: {$ref: '#/components/schemas/PointerAppearance'}
+            effects:
+              type: object
+              maxProperties: 16
+              propertyNames:
+                type: string
+                pattern: '^[A-Za-z0-9_.:-]{1,63}$'
+              description: >-
+                Pane effects (ADR 0186), keyed like display_layouts by stable
+                connector, then by pane ordinal ("1" through "64"). Applied
+                live; persisted; unknown effects or parameters and values out
+                of range are 400 invalid_settings_effects. Entries for absent
+                outputs or panes are kept and apply when they appear.
+              additionalProperties:
+                type: object
+                propertyNames: {type: string, pattern: '^[1-9][0-9]?$'}
+                additionalProperties: {$ref: '#/components/schemas/EffectSet'}
             display_layouts:
               type: object
               maxProperties: 16
@@ -3181,30 +3181,54 @@ components:
               items: {$ref: '#/components/schemas/Overlay'}
           additionalProperties: false
       additionalProperties: false
+    EffectSet:
+      type: object
+      description: >-
+        Named pane effects, each with its one parameter; 0 or absent is off.
+        Applied in a fixed order (scanlines, then corners), over each pane's
+        pixel region, beneath the pointer and API overlays.
+      additionalProperties: false
+      properties:
+        scanlines:
+          type: object
+          additionalProperties: false
+          required: [intensity]
+          properties:
+            intensity: {type: integer, minimum: 0, maximum: 100}
+        corners:
+          type: object
+          additionalProperties: false
+          required: [radius_px]
+          properties:
+            radius_px: {type: integer, minimum: 0, maximum: 1024}
     EffectState:
       type: object
-      required: [revision, enabled, preset, intensity, backend]
+      required: [revision, available, panes, configure]
       properties:
         revision: {$ref: '#/components/schemas/Revision'}
-        enabled: {type: boolean}
-        preset:
-          type: string
-          enum: [none, scanlines]
-        intensity: {type: integer, minimum: 0, maximum: 100}
-        backend:
-          type: string
-          enum: [drm-kms, unavailable]
-      additionalProperties: false
-    EffectUpdate:
-      type: object
-      required: [revision, enabled, preset, intensity]
-      properties:
-        revision: {$ref: '#/components/schemas/Revision'}
-        enabled: {type: boolean}
-        preset:
-          type: string
-          enum: [none, scanlines]
-        intensity: {type: integer, minimum: 0, maximum: 100}
+        available:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [name, parameter, maximum]
+            properties:
+              name: {type: string, enum: [scanlines, corners]}
+              parameter: {type: string}
+              maximum: {type: integer}
+        panes:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [pane_id, display_id, output, pane_ordinal, effects]
+            properties:
+              pane_id: {$ref: '#/components/schemas/ResourceId'}
+              display_id: {$ref: '#/components/schemas/ResourceId'}
+              output: {type: string}
+              pane_ordinal: {type: integer, minimum: 0, maximum: 64}
+              effects: {$ref: '#/components/schemas/EffectSet'}
+        configure: {type: string}
       additionalProperties: false
     Overlay:
       type: object

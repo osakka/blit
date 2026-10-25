@@ -177,9 +177,9 @@ echo "$graphics_inventory" | $b grep -q '"device":"' || graphics_pass=0
 echo "$graphics_inventory" | $b grep -q '"driver":"' || graphics_pass=0
 echo "$graphics_inventory" | $b grep -q '"hardware_acceleration":' || graphics_pass=0
 if [ "$visuals_test" -eq 1 ]; then
-    /blit-stage/http-put 19191 /v1/effects '{"revision":1,"enabled":true,"preset":"scanlines","intensity":100}' >/tmp/effect.json || true
+    # Pane effects (ADR 0186) are set in document.effects and covered by
+    # tools/tests/pane_effects_gate.rb on both compositors.
     $b wget -qO /tmp/overlay.json --post-data='{"display_id":"display-47","x":2,"y":32,"width":4,"height":4,"color":"#0000ff","opacity":100}' --header='Content-Type: application/json' http://127.0.0.1:19191/v1/overlays || true
-    echo VISUAL_EFFECT; $b cat /tmp/effect.json 2>/dev/null || true
     echo VISUAL_OVERLAY; $b cat /tmp/overlay.json 2>/dev/null || true
 fi
 pixel_display_id=display-47

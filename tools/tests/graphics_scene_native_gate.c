@@ -19,7 +19,7 @@ static void complete(BlitKms *kms)
 static void present(BlitKms *kms, BlitKmsSurfaceView *view, unsigned long long visual)
 {
     uint32_t submitted = 0, deferred = 0;
-    CHECK(blit_kms_present(kms,view,1,0,0,0,1,NULL,0,visual,0,0,0,0,&submitted,&deferred)==0);
+    CHECK(blit_kms_present(kms,view,1,0,0,0,1,NULL,0,visual,0,0,&submitted,&deferred)==0);
     CHECK(submitted == 1 && !deferred);
     complete(kms);
 }
@@ -103,10 +103,10 @@ int main(int argc, char **argv)
         uint32_t submitted=0,deferred=0;int consumed=0;
         v.graphics_damage_complete=1;v.damage_consumed=&consumed;
         ++v.surface_revision;v.graphics_signature^=1;
-        CHECK(blit_kms_present(kms,&v,1,0,0,0,1,NULL,0,visual,0,0,0,0,&submitted,&deferred)==0);
+        CHECK(blit_kms_present(kms,&v,1,0,0,0,1,NULL,0,visual,0,0,&submitted,&deferred)==0);
         CHECK(submitted==1&&consumed);
         consumed=0;submitted=deferred=0;++v.surface_revision;
-        CHECK(blit_kms_present(kms,&v,1,0,0,0,1,NULL,0,visual,0,0,0,0,&submitted,&deferred)==0);
+        CHECK(blit_kms_present(kms,&v,1,0,0,0,1,NULL,0,visual,0,0,&submitted,&deferred)==0);
         CHECK(!submitted&&deferred==1&&!consumed);
         complete(kms);present(kms,&v,visual);CHECK(consumed);
     }

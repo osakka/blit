@@ -381,7 +381,7 @@ status codes.
 | Surfaces | `GET/PUT /v1/surfaces/{id}/cells`, `GET /v1/surfaces/{id}/summary`, `GET /v1/surfaces/{id}/scrollback` | Read and revision-update authoritative terminal state |
 | Input | `GET /v1/input/devices`, `GET/POST /v1/input/inject`, `GET/PUT /v1/input/routes` | Discover, diagnose, and route physical or synthetic input |
 | Presentation | `POST /v1/frames`, `GET /v1/stream` | Commit coherent frames and consume event/pixel streams |
-| Graphics | `GET/PUT /v1/effects`, `POST/DELETE /v1/overlays/{id}` | Configure effects and bounded overlays |
+| Graphics | `GET /v1/effects`, `POST/DELETE /v1/overlays/{id}` | Report pane effects; manage bounded overlays |
 | Diagnostics | `GET /v1/diagnostics`, `/runtime`, `/observation`, `/trace`, `/screenshots/{display_id}` | Inspect aggregate state, timing, events, and evidence captures |
 | Control | `POST /v1/control/shutdown`, `/restart` | Stop or restart the supervised server |
 | Updates | `POST /v1/control/update`, `GET /status`, `POST /cancel`, `/reset` | Upload and supervise a verified package update |
@@ -401,7 +401,8 @@ GET    /v1/graphics /displays /audio       hardware inventory
 GET/PUT /v1/control/shutdown-key           the keyboard stop chord
 GET/PATCH /v1/displays/{id}                rotation and brightness
 GET/PATCH /v1/audio/cards[/{id}]           a card's mixer
-GET/PUT /v1/fonts /topology /effects       revisioned configuration
+GET/PUT /v1/fonts /topology               revisioned configuration
+GET     /v1/effects                        pane effects (set in settings)
 GET/PUT/DELETE /v1/settings                persisted server and font settings
 GET    /v1/terminal-sessions               authoritative live session inventory
 POST   /v1/terminal-sessions               create a PTY-backed session
@@ -690,6 +691,39 @@ sub-cell grids return400; removing an occupied pane returns409
 `topology_in_use` without changing settings. Detach it explicitly first.
 Surviving terminal IDs/processes retain their pane ordinal and receive PTY
 resize. Hibr Displays still owns native desktop arrangement.
+
+### Pane effects
+
+`document.effects` gives each pane its effects (ADR 0186). It is keyed like
+`display_layouts`, by stable connector, then by pane ordinal:
+
+```json
+"effects": {
+  "DP-1": {
+    "1": {"corners": {"radius_px": 24}},
+    "2": {"corners": {"radius_px": 24}, "scanlines": {"intensity": 40}}
+  }
+}
+```
+
+| Effect | Parameter | Range | What it draws |
+|---|---|---|---|
+| `scanlines` | `intensity` | 0–100 | Every second pixel row from the pane's top, darkened by that percentage |
+| `corners` | `radius_px` | 0–1024 | Each corner of the pane cut to a quarter circle in black, anti-aliased |
+
+- **Order:** effects are applied in a fixed order (scanlines, then corners),
+  over the pane's pixel region, beneath the pointer and API overlays.
+  Pictures inside the pane are under them.
+- **Clamping:** a radius beyond half the pane's shorter side is drawn, and
+  reported, at that half.
+- **Refusals:** an unknown output character, a pane ordinal outside 1–64, an
+  unknown effect or parameter, and a value out of range are
+  `400 invalid_settings_effects`.
+- **Absent panes:** entries for absent outputs or panes are kept and apply
+  when they appear.
+- **Compositors:** both apply them, and the GPU keeps composing. Each
+  output's render diagnostics report their cost: `effects.cpu_last_ms`,
+  `cpu_max_ms` and `gpu_quads`.
 
 `GET /v1/topology.outputs[].layout` reports each actual grid. Its top-level
 `layout` and `server.pane_layout` are legacy bulk controls, not the per-output
@@ -1551,9 +1585,11 @@ the limiting boundary.
 
 ## Effects, overlays, and control
 
-`GET/PUT /v1/effects` manages bounded named effects such as `scanlines`.
-`POST/DELETE /v1/overlays` manages explicit graphic overlays. Effects and
-overlays are downstream of terminal state and cannot silently replace it.
+Pane effects are set in the settings document's `effects` (see "Pane effects"
+under settings). `GET /v1/effects` reports what each live pane draws, and is
+read-only. `POST/DELETE /v1/overlays` manages explicit graphic overlays.
+Effects and overlays are downstream of terminal state and cannot silently
+replace it.
 
 `POST /v1/control/shutdown` is an asynchronous clean stop. It terminates
 managed child process groups and releases outputs; it cannot restart itself.

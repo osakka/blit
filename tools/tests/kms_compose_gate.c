@@ -164,6 +164,9 @@ static void held_scene_pointer_gate(void)
         view.codepoints = codepoints; view.background = background;
         view.foreground = foreground; view.attributes = attributes;
         view.default_background = 0x607080; view.damage_consumed = &consumed;
+        /* A pane effect is part of the held frame (ADR 0186). */
+        view.effects.value[BLIT_EFFECT_SCANLINES] = 40;
+        view.effect_width = W; view.effect_height = H;
         overlay.display_id = 93; overlay.x = 20; overlay.y = 15;
         overlay.width = 40; overlay.height = 30;
         overlay.color = 0x304050; overlay.opacity = 50;
@@ -173,16 +176,17 @@ static void held_scene_pointer_gate(void)
         else unsetenv("BLIT_KMS_MODESET");
         /* No committed scene yet: do not expose the pending cells. */
         blit_kms_present(&kms, &view, 1, 20, 20, 1, 1, &overlay, 1,
-                         1, 1, 40, 1, 0, &submitted, &deferred);
+                         1, 1, 0, &submitted, &deferred);
         if (submitted || consumed || target->initialized) exit(1);
         blit_kms_present(&kms, &view, 1, 0, 0, 0, 1, &overlay, 1,
-                         1, 1, 40, 0, 0, &submitted, &deferred);
+                         1, 0, 0, &submitted, &deferred);
         if (submitted != 1 || !consumed) exit(1);
         memcpy(baseline, target->front.map, sizeof(baseline));
         view.surface_revision = 2; view.graphics_signature = 2;
         view.origin_x = 8; view.synchronized = 1;
         view.damage_valid = 1; view.damage_width = COLS; view.damage_height = ROWS;
         view.default_background = RED;
+        view.effects.value[BLIT_EFFECT_SCANLINES] = 80;
         overlay.color = RED;
         for (step = 0; step < 32; ++step) {
             int px = (step * 37 % (W + 80)) - 40;
@@ -191,7 +195,7 @@ static void held_scene_pointer_gate(void)
             target->flip_pending = 0;
             blit_kms_present(&kms, &view, step == 31 ? 0 : 1,
                              px, py, visible, 1, &overlay, 1,
-                             2, 1, 80, 1, 0, &submitted, &deferred);
+                             2, 1, 0, &submitted, &deferred);
             if (consumed || target->last_surface_revisions[0] != 1 ||
                 target->last_visual_revision != 1 || target->last_view_count != 1 ||
                 target->info.drawn_cells != 0) exit(1);
@@ -207,8 +211,9 @@ static void held_scene_pointer_gate(void)
             }
         }
         target->flip_pending = 0; view.synchronized = 0;
+        view.effects.value[BLIT_EFFECT_SCANLINES] = 0;
         blit_kms_present(&kms, &view, 1, 0, 0, 0, 1, NULL, 0,
-                         2, 0, 0, 0, 0, &submitted, &deferred);
+                         2, 0, 0, &submitted, &deferred);
         if (submitted != 1 || !consumed || target->last_surface_revisions[0] != 2 ||
             target->last_visual_revision != 2 ||
             ((uint32_t *)target->front.map)[CH * W + 2 * CW] != RED) exit(1);
@@ -248,7 +253,7 @@ static void pointer_terminal_present_gate(void)
     view.default_background = 0x102030;
     background[COLS + 2] = RED + 1;
     blit_kms_present(&kms, &view, 1, 40, 32, 1, 1, NULL, 0,
-                     0, 0, 0, 0, 0, &submitted, &deferred);
+                     0, 0, 0, &submitted, &deferred);
     target->flip_pending = 0; /* completion of the fake kernel flip */
     background[COLS + 2] = 0;
     background[6 * COLS + 15] = RED + 1;
@@ -256,7 +261,7 @@ static void pointer_terminal_present_gate(void)
     view.damage_valid = 1; view.damage_x = 2; view.damage_y = 1;
     view.damage_width = 14; view.damage_height = 6;
     blit_kms_present(&kms, &view, 1, 48, 32, 1, 1, NULL, 0,
-                     0, 0, 0, 0, 0, &submitted, &deferred);
+                     0, 0, 0, &submitted, &deferred);
     shown = target->front.map;
     if (target->info.draw_ms < 0 || target->info.copy_ms < 0 ||
         target->info.submit_ms < 0 || target->info.drawn_cells != 14 * 6) {
@@ -337,7 +342,7 @@ static void incremental_matches_full_gate(void)
         }
         target->flip_pending = 0;
         blit_kms_present(&kms, &view, 1, px, py, 1, 1, NULL, 0,
-                         0, 0, 0, 0, 0, &submitted, &deferred);
+                         0, 0, 0, &submitted, &deferred);
         memset(pixels, 0, sizeof(pixels));
         reference_view = view;
         reference_view.damage_valid = 0;
@@ -661,7 +666,7 @@ static void pointer_art_present_gate(void)
             blit_pointer_build(&art,config);blit_kms_set_pointer_art(&kms,&art);
         }
         target->flip_pending=0;
-        blit_kms_present(&kms,&view,1,px,py,visible,1,NULL,0,0,0,0,0,0,&submitted,&deferred);
+        blit_kms_present(&kms,&view,1,px,py,visible,1,NULL,0,0,0,0,&submitted,&deferred);
         for (y=0;y<H;++y) for (x=0;x<W;++x) {
             uint32_t expected=0x102030;
             int ax=x-px+art.hotspot_x,ay=y-py+art.hotspot_y;

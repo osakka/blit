@@ -88,10 +88,20 @@ inputs, parameters, supported color formats, and cost characteristics. The
 engine needs a bounded policy for expensive effects and a clear behavior when
 an effect cannot run.
 
-The first bounded effect contract is exposed at `/v1/effects`: the SDL3 and
-direct KMS paths support the deterministic `scanlines` preset with an explicit
-0--100 intensity and revision. Effect state is downstream of terminal state
-and resets only when explicitly changed by the API.
+Effects are per pane (ADR 0186). They are set in the settings document's
+`effects`, keyed by output name and pane ordinal, and reported by
+`GET /v1/effects`. One registry (`src/blit_effects.h`) names them, bounds their
+parameters, fixes their order and holds the pixel rule that both compositors
+use.
+
+The effects so far, scanlines and rounded corners, are local: a pixel's result
+depends only on its position and the pixel underneath. Each compositor applies
+them inside the rectangle it has just repainted, so an effect costs nothing
+outside damage and no pixel is darkened twice.
+
+Effects that sample neighbours or move geometry (curvature, glow) are a
+separate class. They need an offscreen pass per pane and run on the GPU only;
+on the CPU compositor they would be reported as unavailable, not imitated.
 
 ### Overlay compositor
 

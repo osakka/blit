@@ -725,12 +725,14 @@ typedef struct {
     char message[2304];
 } BlitEventRecord;
 
+/* ADR 0186: one pane's effects from document.effects, keyed as
+   display_layouts and auxiliary_displays are, by output name and pane
+   ordinal, so they follow the pane across restarts and hotplug. */
 typedef struct {
-    unsigned long long revision;
-    int enabled;
-    char preset[32];
-    int intensity;
-} BlitEffectState;
+    char output[64];
+    int ordinal;
+    BlitEffectSet set;
+} BlitPaneEffects;
 
 typedef struct {
     char name[64];
@@ -1203,7 +1205,9 @@ typedef struct {
     BlitIdempotency idempotency[BLIT_MAX_IDEMPOTENCY];
     BlitEventRecord event_history[BLIT_MAX_EVENT_HISTORY];
     unsigned int next_event_history;
-    BlitEffectState effect;
+    BlitPaneEffects pane_effects[BLIT_MAX_PANES];
+    int pane_effect_count;
+    unsigned long long effects_revision;
     BlitOverlay overlays[BLIT_MAX_OVERLAYS];
     unsigned long long next_overlay_id;
     char auth_token[256];
@@ -1614,18 +1618,7 @@ static int middle_button_wait_ms(const BlitRuntime *runtime, uint64_t now);
 static size_t shutdown_key_json(const BlitRuntime *runtime, char *body,
                                 size_t capacity);
 
-static void effect_json(const BlitRuntime *runtime, char *body,
-                        size_t capacity)
-{
-    snprintf(body, capacity,
-             "{\"revision\":%llu,\"enabled\":%s,"
-             "\"preset\":\"%s\",\"intensity\":%d,"
-             "\"backend\":\"%s\"}",
-             runtime->effect.revision,
-             runtime->effect.enabled ? "true" : "false",
-             runtime->effect.preset, runtime->effect.intensity,
-             runtime->kms != NULL ? "drm-kms" : "unavailable");
-}
+static void effect_json(BlitRuntime *runtime, char *body, size_t capacity);
 
 static void overlay_json(const BlitOverlay *overlay, char *body,
                          size_t capacity)
@@ -3251,6 +3244,8 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
                 "\"gpu_total_us\":%llu,\"gpu_frames\":%llu,"
                 "\"frame_quads\":%llu,\"frame_draw_calls\":%llu,"
                 "\"upload_ms\":%.3f},"
+                "\"effects\":{\"cpu_last_ms\":%.3f,\"cpu_max_ms\":%.3f,"
+                "\"gpu_quads\":%llu},"
                 "\"flip\":{\"last_ms\":%.3f,\"max_ms\":%.3f,"
                 "\"total_us\":%llu,\"count\":%llu,"
                 "\"timing\":\"%s\",\"lead_us\":%llu,"
@@ -3271,6 +3266,9 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
                 have_kms_info ? kms_info.gles_frame_quads : 0ULL,
                 have_kms_info ? kms_info.gles_frame_draws : 0ULL,
                 have_kms_info ? kms_info.gles_upload_ms : 0.0,
+                have_kms_info ? kms_info.effects_last_ms : 0.0,
+                have_kms_info ? kms_info.effects_max_ms : 0.0,
+                have_kms_info ? kms_info.effects_quads : 0ULL,
                 have_kms_info ? kms_info.last_flip_ms : 0.0,
                 have_kms_info ? kms_info.max_flip_ms : 0.0,
                 have_kms_info ? kms_info.flip_wait_total_us : 0ULL,
@@ -19614,6 +19612,198 @@ static int settings_auxiliary_policy_valid(const char *document)
     return settings_auxiliary_policy_parse(document, NULL, NULL);
 }
 
+/* ADR 0186. document.effects names effects per pane, by output name and pane
+   ordinal:  {"DP-1": {"1": {"corners": {"radius_px": 24},
+                             "scanlines": {"intensity": 40}}}}
+   Strict: an unknown output character, ordinal, effect or parameter, a
+   repeated one, or a value out of range makes the section invalid. An absent
+   section is no effects. Effect names and bounds come from blit_effects.h. */
+static int effects_integer(const char *text, int maximum, int *out)
+{
+    char *end;
+    long number;
+    while (*text == ' ' || *text == '\t' || *text == '\n' || *text == '\r') ++text;
+    if (*text < '0' || *text > '9') return 0;
+    number = strtol(text, &end, 10);
+    while (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r') ++end;
+    if (*end != '\0' || number < 0 || number > maximum) return 0;
+    *out = (int)number;
+    return 1;
+}
+
+static int settings_effects_parse(const char *document, BlitPaneEffects *table,
+                                  int *table_count)
+{
+    static char section[BLIT_SETTINGS_CAPACITY], panes[16384], effects[4096];
+    char key[128], ordinal_key[16], name[64], member[512], parameter[64], number[64];
+    const char *cursor = document, *outputs, *pane_cursor, *effect_cursor, *param_cursor;
+    int count = 0, found = 0;
+    if (table_count != NULL) *table_count = 0;
+    if (document == NULL || document[0] == '\0') return 1;
+    while (*cursor && *cursor != '{') ++cursor;
+    if (*cursor++ != '{') return 0;
+    while ((cursor = json_next_member(cursor, key, sizeof(key), section,
+                                      sizeof(section))) != NULL) {
+        if (strcmp(key, "effects") != 0) continue;
+        if (found++ || section[0] != '{') return 0;
+        break;
+    }
+    if (!found) return 1;
+    outputs = section;
+    while ((outputs = json_next_member(outputs, key, sizeof(key), panes,
+                                       sizeof(panes))) != NULL) {
+        size_t i, length = strlen(key);
+        int j;
+        if (length == 0 || length > 63 || panes[0] != '{') return 0;
+        for (i = 0; i < length; ++i) {
+            unsigned char c = (unsigned char)key[i];
+            if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                  (c >= '0' && c <= '9') || c == '-' || c == '_' ||
+                  c == '.' || c == ':')) return 0;
+        }
+        pane_cursor = panes;
+        while ((pane_cursor = json_next_member(pane_cursor, ordinal_key,
+                                               sizeof(ordinal_key), effects,
+                                               sizeof(effects))) != NULL) {
+            BlitPaneEffects entry;
+            int ordinal;
+            unsigned seen = 0;
+            if (!effects_integer(ordinal_key, BLIT_MAX_PANES, &ordinal) ||
+                ordinal < 1 || ordinal_key[0] == '0' || effects[0] != '{' ||
+                count >= BLIT_MAX_PANES) return 0;
+            for (j = 0; j < count; ++j)
+                if (table[j].ordinal == ordinal &&
+                    strcmp(table[j].output, key) == 0) return 0;
+            memset(&entry, 0, sizeof(entry));
+            snprintf(entry.output, sizeof(entry.output), "%s", key);
+            entry.ordinal = ordinal;
+            effect_cursor = effects;
+            while ((effect_cursor = json_next_member(effect_cursor, name, sizeof(name),
+                                                     member, sizeof(member))) != NULL) {
+                int id, params = 0;
+                for (id = 0; id < BLIT_EFFECT_COUNT; ++id)
+                    if (strcmp(name, blit_effect_specs[id].name) == 0) break;
+                if (id == BLIT_EFFECT_COUNT || (seen & (1u << id)) || member[0] != '{')
+                    return 0;
+                seen |= 1u << id;
+                param_cursor = member;
+                while ((param_cursor = json_next_member(param_cursor, parameter,
+                                                        sizeof(parameter), number,
+                                                        sizeof(number))) != NULL) {
+                    if (params++ || strcmp(parameter, blit_effect_specs[id].param) != 0 ||
+                        !effects_integer(number, blit_effect_specs[id].maximum,
+                                         &entry.set.value[id])) return 0;
+                }
+                if (params != 1) return 0;
+            }
+            table[count++] = entry;
+        }
+    }
+    if (table_count != NULL) *table_count = count;
+    return 1;
+}
+
+static int settings_effects_valid(const char *document)
+{
+    static BlitPaneEffects table[BLIT_MAX_PANES];
+    int count;
+    return settings_effects_parse(document, table, &count);
+}
+
+/* Apply document.effects. A change repaints every output in full, since an
+   effect covers pixels no cell damage names. */
+static void settings_apply_effects(BlitRuntime *runtime)
+{
+    BlitPaneEffects table[BLIT_MAX_PANES];
+    int count = 0, i;
+    memset(table, 0, sizeof(table));
+    if (!settings_effects_parse(runtime->settings_document, table, &count)) {
+        diagnostic_log(runtime, "warning", "invalid_settings_effects",
+                       "Stored pane effects are invalid; no effects are applied until they are corrected through the settings API.");
+        count = 0;
+        memset(table, 0, sizeof(table));
+    }
+    if (count == runtime->pane_effect_count &&
+        memcmp(table, runtime->pane_effects, sizeof(table)) == 0)
+        return;
+    memcpy(runtime->pane_effects, table, sizeof(table));
+    runtime->pane_effect_count = count;
+    ++runtime->effects_revision;
+    for (i = 0; i < runtime->output_count; ++i)
+        runtime->outputs[i].initialized = 0;
+    runtime->render_pending = 1;
+}
+
+/* The pane's output name and ordinal, as document.effects keys them. */
+static int pane_effects_key(const BlitRuntime *runtime, const BlitPane *pane,
+                            const char **output, int *ordinal)
+{
+    const char *dash = strrchr(pane->id, '-');
+    unsigned long long display = 0;
+    int i;
+    if (dash == NULL || strncmp(pane->display_id, "display-", 8) != 0) return 0;
+    display = strtoull(pane->display_id + 8, NULL, 10);
+    *ordinal = atoi(dash + 1);
+    for (i = 0; i < runtime->display_count; ++i)
+        if (runtime->displays[i].id == display && runtime->displays[i].connector[0]) {
+            *output = runtime->displays[i].connector;
+            return *ordinal > 0;
+        }
+    return 0;
+}
+
+static BlitEffectSet pane_effect_set(const BlitRuntime *runtime, const BlitPane *pane)
+{
+    BlitEffectSet none;
+    const char *output;
+    int ordinal, i;
+    memset(&none, 0, sizeof(none));
+    if (pane == NULL || !pane_effects_key(runtime, pane, &output, &ordinal)) return none;
+    for (i = 0; i < runtime->pane_effect_count; ++i)
+        if (runtime->pane_effects[i].ordinal == ordinal &&
+            strcmp(runtime->pane_effects[i].output, output) == 0)
+            return runtime->pane_effects[i].set;
+    return none;
+}
+
+/* GET /v1/effects: what each live pane draws now. They are set through
+   document.effects (PUT /v1/settings), the one place they are kept. */
+static void effect_json(BlitRuntime *runtime, char *body, size_t capacity)
+{
+    size_t used = 0;
+    int i, id;
+    json_appendf(body, capacity, &used, "{\"revision\":%llu,\"available\":[",
+                 runtime->effects_revision);
+    for (id = 0; id < BLIT_EFFECT_COUNT; ++id)
+        json_appendf(body, capacity, &used, "%s{\"name\":\"%s\",\"parameter\":\"%s\",\"maximum\":%d}",
+                     id ? "," : "", blit_effect_specs[id].name,
+                     blit_effect_specs[id].param, blit_effect_specs[id].maximum);
+    json_appendf(body, capacity, &used, "],\"panes\":[");
+    for (i = 0; i < runtime->pane_count; ++i) {
+        const BlitPane *pane = &runtime->panes[i];
+        BlitEffectSet set = pane_effect_set(runtime, pane);
+        const char *output = "";
+        int ordinal = 0, first = 1;
+        pane_effects_key(runtime, pane, &output, &ordinal);
+        json_appendf(body, capacity, &used,
+                     "%s{\"pane_id\":\"%s\",\"display_id\":\"%s\",\"output\":\"%s\","
+                     "\"pane_ordinal\":%d,\"effects\":{",
+                     i ? "," : "", pane->id, pane->display_id, output, ordinal);
+        for (id = 0; id < BLIT_EFFECT_COUNT; ++id) {
+            int value = set.value[id];
+            if (value <= 0) continue;
+            if (id == BLIT_EFFECT_CORNERS)
+                value = blit_effect_corner_radius(&set, pane->pixel_region_width,
+                                                  pane->pixel_region_height);
+            json_appendf(body, capacity, &used, "%s\"%s\":{\"%s\":%d}", first ? "" : ",",
+                         blit_effect_specs[id].name, blit_effect_specs[id].param, value);
+            first = 0;
+        }
+        json_appendf(body, capacity, &used, "}}");
+    }
+    json_appendf(body, capacity, &used, "],\"configure\":\"PUT /v1/settings document.effects\"}");
+}
+
 #include "blit_display_layout.h"
 #include "blit_client_name.h"
 #include "blit_auxiliary_controller.h"
@@ -20522,6 +20712,7 @@ static int settings_reset(BlitRuntime *runtime, int remove_file)
     runtime->settings_dirty = 0;
     ++runtime->settings_revision;
     settings_apply_pointer(runtime);
+    settings_apply_effects(runtime);
     if (remove_file) {
         runtime->settings_saved_revision = runtime->settings_revision;
         runtime->settings_write_reported = 0;
@@ -21749,6 +21940,11 @@ static void handle_request(int fd, BlitRuntime *runtime,
                              "auxiliary_displays must contain at most 16 unique {output, pane_ordinal} bindings; output names use stable connector characters and pane_ordinal is 1 through 64.");
                 return;
             }
+            if (!settings_effects_valid(document)) {
+                send_problem(fd, 400, "Bad Request", "invalid_settings_effects",
+                             "effects maps an output name to pane ordinals (1 through 64), each to named effects with their one parameter: scanlines {intensity 0..100}, corners {radius_px 0..1024}.");
+                return;
+            }
             if (!requested_layout) {
                 requested_columns = runtime->boot_pane_columns;
                 requested_rows = runtime->boot_pane_rows;
@@ -21773,6 +21969,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
             settings_apply_font(runtime);
             settings_apply_server(runtime);
             settings_apply_pointer(runtime);
+            settings_apply_effects(runtime);
             display_layouts_materialize(runtime, 0);
             settings_apply_pane_layout(runtime, old_columns, old_rows);
             reset_render_schedule(runtime, monotonic_us());
@@ -22469,50 +22666,14 @@ static void handle_request(int fd, BlitRuntime *runtime,
         send_http(fd, 200, "OK", "application/json", body);
         return;
     }
-    if (strcmp(path, "/v1/effects") == 0 &&
-        (strcmp(method, "GET") == 0 || strcmp(method, "PUT") == 0)) {
-        int enabled;
-        int intensity;
-        int revision;
-        char preset[32];
-
-        if (strcmp(method, "GET") == 0) {
-            effect_json(runtime, body, sizeof(body));
-            send_http(fd, 200, "OK", "application/json", body);
+    if (strcmp(path, "/v1/effects") == 0) {
+        /* ADR 0186: read-only. Effects are kept in document.effects and
+           written with the rest of the settings, not through a second door. */
+        if (strcmp(method, "GET") != 0) {
+            send_problem(fd, 405, "Method Not Allowed", "effects_read_only",
+                         "Pane effects are set in document.effects with PUT /v1/settings; /v1/effects reports what each pane draws.");
             return;
         }
-        if (!json_int(payload, "revision", &revision) || revision < 0) {
-            send_problem(fd, 400, "Bad Request", "invalid_effect_revision",
-                         "revision must be a non-negative integer.");
-            return;
-        }
-        if ((unsigned long long)revision != runtime->effect.revision) {
-            send_revision_problem(fd, "revision_conflict",
-                                  "The effect revision is no longer current.",
-                                  runtime->effect.revision);
-            return;
-        }
-        if (!json_bool(payload, "enabled", &enabled) ||
-            !json_string(payload, "preset", preset, sizeof(preset)) ||
-            !json_int(payload, "intensity", &intensity) || intensity < 0 ||
-            intensity > 100 || (strcmp(preset, "none") != 0 &&
-                                strcmp(preset, "scanlines") != 0)) {
-            send_problem(fd, 400, "Bad Request", "invalid_effect",
-                         "revision, enabled, preset, and intensity are required; preset must be none or scanlines and intensity must be 0..100.");
-            return;
-        }
-        runtime->effect.enabled = enabled;
-        snprintf(runtime->effect.preset, sizeof(runtime->effect.preset),
-                 "%s", preset);
-        runtime->effect.intensity = intensity;
-        ++runtime->effect.revision;
-        {
-            int output_index;
-            for (output_index = 0; output_index < runtime->output_count;
-                 ++output_index)
-                runtime->outputs[output_index].initialized = 0;
-        }
-        runtime->render_pending = 1;
         effect_json(runtime, body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
         return;
@@ -24142,7 +24303,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *input_plan
        rather than reporting only the compositor's drawing. */
     prepare_graphics_damage(runtime, &prepared_plan);
 
-    visual_revision = runtime->effect.revision ^ runtime->next_overlay_id;
+    visual_revision = runtime->effects_revision ^ runtime->next_overlay_id;
     memset(damage_consumed, 0, sizeof(damage_consumed));
     memset(kms_overlays, 0, sizeof(kms_overlays));
     for (overlay_index = 0; overlay_index < BLIT_MAX_OVERLAYS;
@@ -24250,6 +24411,13 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *input_plan
                 surface->graphics_prepared.signature :
                 graphics_scene_signature(runtime, output_index_for_surface);
         views[view_count].graphics_damage_complete = surface->graphics_damage_prepared;
+        if (pane != NULL) {
+            views[view_count].effects = pane_effect_set(runtime, pane);
+            views[view_count].effect_x = pane->pixel_region_x;
+            views[view_count].effect_y = pane->pixel_region_y;
+            views[view_count].effect_width = pane->pixel_region_width;
+            views[view_count].effect_height = pane->pixel_region_height;
+        }
         ++view_count;
     }
     kms_present_started = monotonic_us();
@@ -24259,9 +24427,6 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *input_plan
                          output_mask,
                          kms_overlays, kms_overlay_count,
                          visual_revision,
-                         runtime->effect.enabled &&
-                             strcmp(runtime->effect.preset, "scanlines") == 0,
-                         runtime->effect.intensity,
                          hold_scene,
                          runtime->screenshot_requested_mask,
                          &kms_submitted_output_mask,
@@ -27182,8 +27347,7 @@ int main(int argc, char **argv)
     runtime.audio_devices_revision = 1;
     runtime.displays_revision = 1;
     runtime.next_overlay_id = 1;
-    runtime.effect.revision = 1;
-    snprintf(runtime.effect.preset, sizeof(runtime.effect.preset), "none");
+    runtime.effects_revision = 1;
     {
         const char *auth_token = getenv("BLIT_AUTH_TOKEN");
         if (auth_token != NULL)
@@ -27338,6 +27502,7 @@ int main(int argc, char **argv)
         settings_apply_font(&runtime);
         settings_apply_server(&runtime);
         settings_apply_pointer(&runtime);
+        settings_apply_effects(&runtime);
         settings_apply_login_at_boot(&runtime);
         if (runtime.kms_async_pageflip)
             setenv("BLIT_KMS_ASYNC_PAGEFLIP", "1", 1);

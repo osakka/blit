@@ -59,6 +59,11 @@ struct KmsGlesResources {
     uint32_t *scratch_black, *scratch_white;
     unsigned char *sprite_pixels;
     size_t scratch_pixels;
+    /* ADR 0186: the four corner masks for one radius, as a 2r x 2r coverage
+       texture made by the same function the CPU compositor uses. */
+    BlitGlesTexture corners;
+    int corners_radius;
+    unsigned long long effect_quads;
 };
 
 static void kms_gles_resources_free(BlitKms *kms)
@@ -69,6 +74,7 @@ static void kms_gles_resources_free(BlitKms *kms)
     if (kms->gles != NULL) {
         blit_gles_texture_delete(kms->gles, r->atlas);
         blit_gles_texture_delete(kms->gles, r->pointer);
+        blit_gles_texture_delete(kms->gles, r->corners);
         for (i = 0; i < KMS_IMAGE_TEXTURES; ++i)
             blit_gles_texture_delete(kms->gles, r->images[i].texture);
     }
@@ -322,12 +328,9 @@ static BlitGlesTexture kms_gles_image(BlitKms *kms, KmsGlesResources *r,
 /* NULL when the GPU can compose this output's frame; otherwise why not. */
 static const char *kms_gles_unsupported(BlitKms *kms, const KmsOutput *output,
                                         const BlitKmsSurfaceView *views,
-                                        int view_count, int effect_enabled,
-                                        int effect_intensity)
+                                        int view_count)
 {
     int v, d;
-    if (effect_enabled && effect_intensity > 0)
-        return "a display effect is on";
     for (v = 0; v < view_count; ++v) {
         BlitGraphicsDraw draws[BLIT_GRAPHICS_MAX_DRAWS];
         int count;
@@ -404,6 +407,55 @@ static void kms_gles_glyph(BlitKms *kms, KmsGlesResources *r,
 /* One view in draw_view's order: whole, or (damage) only the cells
    [dx0,dx1) x [dy0,dy1), widened for ink overhang exactly as draw_view
    widens them. The persistent scene keeps every other pixel. */
+/* ADR 0186: a pane's effects over the rectangle kms_gles_view just
+   repainted, recorded into the output's scene with the rest of the view so
+   they replay with it. The same pixels as apply_view_effects (blit_kms.c). */
+static void kms_gles_effects(BlitKms *kms, KmsGlesResources *r,
+                             const BlitKmsSurfaceView *view,
+                             int x0, int y0, int x1, int y1)
+{
+    const BlitEffectSet *set = &view->effects;
+    int y, radius, corner;
+    if (!blit_effect_set_active(set) || x1 <= x0 || y1 <= y0) return;
+    blit_gles_clip(kms->gles, x0, y0, x1 - x0, y1 - y0);
+    if (set->value[BLIT_EFFECT_SCANLINES] > 0)
+        for (y = y0; y < y1; ++y) {
+            unsigned alpha = blit_effect_scanline_alpha(set, y - view->effect_y);
+            if (alpha) {
+                blit_gles_rect(kms->gles, x0, y, x1 - x0, 1, 0, alpha);
+                ++r->effect_quads;
+            }
+        }
+    radius = blit_effect_corner_radius(set, view->effect_width, view->effect_height);
+    if (radius > 0 && (r->corners == 0 || r->corners_radius != radius)) {
+        int size = radius * 2, x;
+        unsigned char *mask = calloc((size_t)size * (size_t)size, 4);
+        blit_gles_texture_delete(kms->gles, r->corners);
+        r->corners = 0;
+        if (mask != NULL) {
+            for (y = 0; y < size; ++y)
+                for (x = 0; x < size; ++x)
+                    mask[((size_t)y * size + x) * 4 + 3] = blit_effect_corner_coverage(radius,
+                        x < radius ? x : size - 1 - x, y < radius ? y : size - 1 - y);
+            r->corners = blit_gles_texture_create(kms->gles, size, size, 4);
+            if (r->corners)
+                blit_gles_texture_update(kms->gles, r->corners, 4, 0, 0, size, size,
+                                         mask, size * 4);
+            free(mask);
+        }
+        r->corners_radius = radius;
+    }
+    for (corner = 0; radius > 0 && r->corners && corner < 4; ++corner) {
+        int right = corner & 1, bottom = corner >> 1;
+        blit_gles_quad(kms->gles, BLIT_GLES_COVERAGE, r->corners, radius * 2, radius * 2,
+                       right ? radius : 0, bottom ? radius : 0, radius, radius,
+                       view->effect_x + (right ? view->effect_width - radius : 0),
+                       view->effect_y + (bottom ? view->effect_height - radius : 0),
+                       radius, radius, 0);
+        ++r->effect_quads;
+    }
+}
+
 static void kms_gles_view(BlitKms *kms, KmsGlesResources *r, const KmsOutput *output,
                           const BlitKmsSurfaceView *view, int partial,
                           int dx0, int dy0, int dx1, int dy1)
@@ -522,10 +574,8 @@ static void kms_gles_view(BlitKms *kms, KmsGlesResources *r, const KmsOutput *ou
             cursor_attr = view->attributes[cursor_index];
         }
         if (cursor_attr & KMS_ATTR_WIDE) cursor_cells = 2;
-        if (cursor_column >= last_column || cursor_column + cursor_cells <= first_column) {
-            blit_gles_clip(kms->gles, 0, 0, 0, 0);
-            return;
-        }
+        if (cursor_column >= last_column || cursor_column + cursor_cells <= first_column)
+            goto effects;
         cursor_x = x0 + cursor_column * cw;
         if (view->cursor_style == 3 || view->cursor_style == 4)
             blit_gles_rect(kms->gles, cursor_x, cursor_y + ch - 1, cw * cursor_cells, 1,
@@ -567,6 +617,8 @@ static void kms_gles_view(BlitKms *kms, KmsGlesResources *r, const KmsOutput *ou
                                (cursor_attr & 1) != 0);
         }
     }
+effects:
+    kms_gles_effects(kms, r, view, cx0, cy0, cx1, cy1);
     blit_gles_clip(kms->gles, 0, 0, 0, 0);
 }
 
@@ -591,6 +643,7 @@ static int kms_gles_compose(BlitKms *kms, KmsOutput *output,
     unsigned long long draws_before, vertices_before, draws_after, vertices_after;
     ++r->frame;
     r->upload_us = 0;
+    r->effect_quads = 0;
     blit_gles_counters(kms->gles, &draws_before, &vertices_before);
     kms_gles_font_check(r, kms->font);
     if (output->gles_scene == NULL) {
@@ -697,6 +750,8 @@ static int kms_gles_compose(BlitKms *kms, KmsOutput *output,
     output->info.gles_frame_draws = draws_after - draws_before;
     output->info.gles_frame_quads = (vertices_after - vertices_before) / 6;
     output->info.gles_upload_ms = (double)r->upload_us / 1000.0;
+    output->info.effects_quads = r->effect_quads;
+    output->info.effects_last_ms = 0;
     {
         BlitGlesGpuTime gpu;
         if (blit_gles_gpu_time(output->gles_target, &gpu) == 0) {

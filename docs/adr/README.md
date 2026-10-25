@@ -203,6 +203,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0183 — Late compose is opt-in; immediate is the default](0183-late-compose-is-opt-in.md)
 - [0184 — SDL is removed; native KMS is the only presentation path](0184-sdl-is-removed.md)
 - [0185 — Outline glyphs are centred at sub-pixel precision; shapes get the icon fit](0185-symbols-centred-in-their-cell.md)
+- [0186 — Effects are per pane, local, and drawn by both compositors](0186-pane-effects.md)
 
 ## Adding an ADR
 

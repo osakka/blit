@@ -178,32 +178,18 @@ assert_equal(display_bounds.fetch('height') / 16,
 request(base, 'DELETE', "/v1/terminal-sessions/#{derived_session.fetch('id')}")
 puts 'PASS display-derived-surface-geometry'
 
+# ADR 0186: effects are per pane and live in document.effects; this endpoint
+# only reports them. pane_effects_gate.rb covers drawing and settings.
 effects = request(base, 'GET', '/v1/effects')
-assert_equal('none', effects.fetch('preset'), 'initial effect preset')
-effect_update = request(base, 'PUT', '/v1/effects', {
-  'revision' => effects.fetch('revision'),
-  'enabled' => true,
-  'preset' => 'scanlines',
-  'intensity' => 40
-})
-assert_equal('scanlines', effect_update.fetch('preset'), 'effect preset update')
-assert_equal(true, effect_update.fetch('enabled'), 'effect enable update')
-stale_effect_status, stale_effect = request_with_status(base, 'PUT', '/v1/effects', {
-  'revision' => effects.fetch('revision'),
-  'enabled' => false,
-  'preset' => 'none',
-  'intensity' => 0
-})
-assert_equal(409, stale_effect_status, 'stale effect revision status')
-assert_equal('revision_conflict', stale_effect.fetch('code'),
-             'stale effect revision code')
-request(base, 'PUT', '/v1/effects', {
-  'revision' => effect_update.fetch('revision'),
-  'enabled' => false,
-  'preset' => 'none',
-  'intensity' => 0
-})
-puts 'PASS bounded-effect-state-and-revision'
+assert_equal(%w[corners scanlines], effects.fetch('available').map { |e| e.fetch('name') }.sort,
+             'available pane effects')
+assert_equal(topology.fetch('panes').map { |p| p.fetch('id') }.sort,
+             effects.fetch('panes').map { |p| p.fetch('pane_id') }.sort, 'effects list every live pane')
+assert_equal(true, effects.fetch('panes').all? { |p| p.fetch('effects') == {} }, 'no effect by default')
+effect_write_status, effect_write = request_with_status(base, 'PUT', '/v1/effects', {})
+assert_equal(405, effect_write_status, 'effects endpoint is read-only')
+assert_equal('effects_read_only', effect_write.fetch('code'), 'read-only effects code')
+puts 'PASS pane-effects-read-only'
 
 overlay_display = topology.fetch('outputs').fetch(0).fetch('display_id')
 overlay = request(base, 'POST', '/v1/overlays', {

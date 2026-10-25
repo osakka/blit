@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "blit_effects.h"
 #include "blit_font.h"
 #include "blit_graphics.h"
 #include "blit_pointer_art.h"
@@ -66,6 +67,13 @@ typedef struct {
     unsigned long long graphics_signature;
     /* Shared scene comparison covered old/new placement pixels in damage. */
     int graphics_damage_complete;
+    /* ADR 0186: the pane's effects, applied inside whatever this view
+       repaints, measured from the pane's pixel region (output-relative). */
+    BlitEffectSet effects;
+    int effect_x;
+    int effect_y;
+    int effect_width;
+    int effect_height;
 } BlitKmsSurfaceView;
 
 typedef struct {
@@ -134,6 +142,11 @@ typedef struct {
     unsigned long long gpu_total_us, gpu_frames;
     unsigned long long gles_frame_quads, gles_frame_draws;
     double gles_upload_ms;
+    /* ADR 0186: what pane effects cost this output's last frame -- CPU time
+       laying them on, or the quads the GPU drew for them -- and the worst
+       CPU frame, so a new effect's cost is visible before it is a problem. */
+    double effects_last_ms, effects_max_ms;
+    unsigned long long effects_quads;
 } BlitKmsDisplayInfo;
 
 typedef struct {
@@ -172,7 +185,6 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views,
                      int pointer_visible, uint32_t output_mask,
                      const BlitKmsOverlay *overlays, int overlay_count,
                      unsigned long long visual_revision,
-                     int effect_enabled, int effect_intensity,
                      int hold_scene,
                      uint32_t screenshot_output_mask,
                      uint32_t *submitted_output_mask,

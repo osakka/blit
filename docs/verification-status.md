@@ -1,5 +1,36 @@
 # Verification status
 
+## 2026-10-25: 0.2.27 pane effects: rounded corners and scanlines, per pane
+
+ADR 0186, the owner's request for per-pane effects starting with rounded
+corners.
+- Effects are set per pane in the settings document's `effects`, keyed by
+  connector and pane ordinal, applied live and saved. `GET /v1/effects` reports
+  them, read-only.
+- One registry in `src/blit_effects.h` holds the effects, their bounds and
+  their order, and the pixel rule both compositors use.
+- Both compositors apply a pane's effects over exactly the rectangle they
+  repainted. Effects are idempotent under damage, and the GPU keeps composing
+  with them on; the CPU fallback "a display effect is on" is gone.
+- The old global scanlines effect (`PUT /v1/effects`) is removed; scanlines are
+  now a per-pane effect.
+- Each output's render diagnostics report the effects' cost.
+
+Also carries 0.2.26 (the console watchdog's report of where the loop was
+stuck), which was not deployed on its own.
+
+Gates:
+- `pane_effects_gate` (new), on both compositors: placement, 7,680 pixels
+  against the shared rule (exact on the CPU, within 1 on the GPU), no change
+  under repeated damage, the GPU composing, cost reported, strict settings,
+  read-only endpoint, clamping, and persistence.
+- `kms_compose_gate`'s held-frame test carries a pane scanline effect.
+  `terminal_conformance` checks the read-only endpoint.
+- Native suite: all pass after a typo fix in `terminal_conformance`; the
+  terminal suite reran clean on both compositors.
+- `BLIT_GATE_BACKEND=gles`: all pass except `terminal_soak_gate`, the known
+  software-GL RSS ceiling.
+
 ## 2026-10-25: 0.2.26 the console watchdog says where the loop was stuck
 
 Issue #146. On the host, a font-size change from 21 to 22 px twice stalled

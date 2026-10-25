@@ -6,7 +6,7 @@
 static unsigned present(BlitKms *kms, float x, int visible, unsigned mask)
 {
     uint32_t submitted=0, deferred=0;
-    CHECK(blit_kms_present(kms,NULL,0,x,20,visible,mask,NULL,0,1,0,0,0,0,
+    CHECK(blit_kms_present(kms,NULL,0,x,20,visible,mask,NULL,0,1,0,0,
                           &submitted,&deferred)==0,"present failed");
     return submitted;
 }
