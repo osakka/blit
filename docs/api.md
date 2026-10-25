@@ -11,8 +11,8 @@ to see what is using the CPU now.
 active state, previous VT, actual Linux keyboard mode/read errno, keyboard
 muting, registered recovery
 process and main-loop watchdog timeout (normally10s, bounded120s during the
-privileged package-install exchange). `owner: unmanaged` is not
-evidence of SDL isolation; it means this native owner is not managing a VT.
+privileged package-install exchange). `owner: unmanaged` means Blit is not
+managing a VT.
 The endpoint is read-only and uses the normal API authentication policy.
 
 Native KMS reserves its own unused text/automatic VT, never the active login
@@ -32,35 +32,27 @@ The recovery process handles main-process death and an expired heartbeat.
 It does not cover a kernel/GPU hang or killing the whole recovery group.
 `evdev_exclusive: false` is deliberate: keyboard muting covers all keyboards
 without grabbing one of a combined device's separate evdev clients. It does
-not prevent a separately running gpm from reading pointer events. SDL daemon
-ownership and pointer exclusivity remain117 acceptance work, not implied by
-native tests. See [ADR0170](adr/0170-native-console-keyboard-ownership.md).
-
-An SDL startup failure cannot silently enter native KMS without VT ownership;
-select the native backend explicitly and restart to acquire it safely before
-device-I/O threads start. This does not change a successfully running SDL
-renderer or give SDL a competing VT owner.
+not prevent a separately running gpm from reading pointer events; pointer
+exclusivity remains issue 117 acceptance work. See [ADR0170](adr/0170-native-console-keyboard-ownership.md).
 
 ## Presentation configuration ownership (0.1.563)
 
-Saved `/v1/settings` is the canonical configuration. Its
-`document.server.display_backend` takes precedence over the startup fallback
-`BLIT_DISPLAY_BACKEND`. Valid backend values are `kms` (native DRM/KMS) and
-`sdl`. `kmsdrm` belongs to `SDL_VIDEODRIVER`, not to Blit's backend selector.
+Saved `/v1/settings` is the canonical configuration. Native KMS is the only
+presentation backend (ADR 0184): `document.server.display_backend` and the
+startup fallback `BLIT_DISPLAY_BACKEND` accept only `kms`. Any other saved
+value is a 400 `invalid_settings_server`; an invalid environment value logs
+`invalid_environment_backend` and, without a saved backend, leaves the API
+available with no presentation, for repair.
 
-Read `effective.presentation_configuration` to distinguish the backend source,
-environment validity/override, renderer source and actual SDL video driver.
-These fields are derived observations, never a second writable configuration.
-The existing effective requested/active fields and restart-required flag tell
-clients whether the saved choice has been activated. Native KMS reports the
-SDL driver as `not-applicable`; retaining an SDL renderer preference does not
-activate SDL. Invalid defaults without a saved backend block display startup,
-log `invalid_environment_backend`, and leave the API available for repair.
+Read `effective.presentation_configuration` for the backend source and the
+environment's validity. These fields are derived observations, never a second
+writable configuration. `effective.display_backend_active` is `drm-kms`, or
+`unavailable` when no DRM device could be opened (Blit then serves its API
+with no outputs and says why in `/v1/diagnostics`).
 
 Change intent through the settings API, save it using the storage API, and
 restart presentation. Editing an environment file requires a service restart
 to reload it; an in-process restart inherits the original environment.
-
 
 This is the human-facing guide to the API. The normative contract is always
 [`openapi/blit-0.1.yaml`](../openapi/blit-0.1.yaml); this guide explains the
@@ -215,12 +207,9 @@ resource is usable only when its API state and capability fields say it is.
 ## Presentation configuration ownership
 
 `GET /v1/settings` is authoritative for saved presentation intent.
-`document.server.display_backend` accepts `kms` (native DRM/KMS, no SDL
-rendering) or `sdl`. Saved values override environment startup defaults;
-changing `/etc/blit/blit.env` does not erase an existing saved choice.
-`BLIT_DISPLAY_BACKEND` uses that same `kms`/`sdl` vocabulary. The different
-variable `SDL_VIDEODRIVER=kmsdrm` selects SDL's console driver and does not
-select Blit's native backend. `server.renderer` applies only to SDL.
+`document.server.display_backend` accepts only `kms` (ADR 0184), as does
+`BLIT_DISPLAY_BACKEND`. `server.renderer`, which chose an SDL renderer, no
+longer exists: a saved value is carried as an unknown key and has no effect.
 
 `document.server.kms_compositor` (0.2.9, ADR 0181) chooses how the native
 backend composes a frame: `cpu` (the default, the reference) or `gles`. It is
@@ -229,7 +218,7 @@ read when the native backend opens, so a change applies at the next start
 and `BLIT_KMS_COMPOSITOR` the boot default. Any other value is a 400
 `invalid_settings_server`. In `/v1/diagnostics`, each
 `render.outputs[].compositor` says what an output actually uses: `active`
-(`cpu`, `gles`, or `sdl` on the SDL backend), `requested`, `reason` when GLES
+(`cpu` or `gles`), `requested`, `reason` when GLES
 was asked for and not used (no EGL/GBM, no scanout config, a lost context),
 `renderer` (GL renderer and version), `gles_frames` and `gles_uploaded_rows`
 (rows sent to the GPU; unchanged rows are not resent, from 0.2.11). From
@@ -269,18 +258,9 @@ included): that run uses the CPU compositor with `compositor.reason`
 the marker, so a deliberate restart tries GLES again. The saved setting is
 never rewritten.
 
-Read `effective.display_backend_requested`, `display_backend_active`,
-`renderer_active` and `presentation_restart_required`, and runtime
-`render.direct_kms`, `video_driver`, `renderer`. Save via the revisioned
-settings API, then request `/v1/control/restart` to apply presentation changes.
-Do not maintain competing writable backend preferences in a control panel.
-Current561 silently mishandles invalid environment backend names and the UI
-does not show source/layers clearly; issue108 tracks correction, not a promise
-that invalid values such as `kmsdrm` or `ksmdrm` are accepted.
-
-Pane IDs are backend-scoped. On a deliberate backend switch, resolve the same
-connector/ordinal and update the saved primary reference, rather than leaving
-a stale SDL pane ID to fall back to the first native pane. See ADR0138.
+Read `effective.display_backend_active` and runtime
+`render.presentation_sync`. Do not maintain competing writable backend
+preferences in a control panel.
 
 ## Hibr login manager
 
@@ -342,7 +322,7 @@ startup; it prevents trusting that login for future automation. See ADR 0125.
 The `desktop` object in `GET /v1/login` observes the exact named login client using Hibr's
 native `hold list` and `hold clients`, as the verified user. Since0.1.549,
 the packaged hook's existing desktop `--name` argument is stable: connector
-(otherwise SDL display name) plus one-based row-major pane ordinal, such as
+(otherwise the display name) plus one-based row-major pane ordinal, such as
 `blit-DP-1-p2`. Auxiliary clients use the same rule, not their role or boot-time
 IDs. Long/unsafe selectors receive a bounded readable prefix plus a hash of
 the whole selector; duplicate inventory or occupied managed identities refuse
@@ -719,8 +699,7 @@ only; a later new monitor does not inherit another output's split.
 `PUT /v1/fonts` applies the selected profile and scale to pixels, not only to
 metadata. The reported `cell_pixels` dimensions are the physical cell metrics
 used by the renderer, PTY resize, pane/display geometry, pointer hit-testing,
-and Kitty/Sixel placement. SDL scene textures remain physical-sized output
-textures; changing scale does not rely on a backend-specific renderer
+and Kitty/Sixel placement; changing scale does not rely on a renderer
 transform. A display-attached Hibr session is reflowed to the new display grid
 and receives the existing resize/reassert contract. Hibr source is never
 modified by this operation. Pixel acceptance is covered by the local font API
@@ -766,39 +745,14 @@ object used.
 
 ```text
 mode-report   always
-rotation      the SDL path. Blit's own render transform.
 brightness    only where a backlight is attributed to the display.
 ```
 
-**`rotation`** is `0`, `90`, `180` or `270`: the angle, clockwise, by which
-Blit rotates the rendered image before presenting it. At 90, what Blit drew at
-the top-left of the logical rectangle appears at the **top-right of the
-panel**. The contract is stated as a corner on purpose, because every enum
-that could stand in for it means something different -- DRM's `ROTATE_90` is
-anticlockwise and RandR calls the same transform "right".
-
-Rotation moves the display's rectangle, not its mode:
-
-```text
-bounds            the logical rectangle: 1920x2160 becomes 2160x1920 at 90
-modes             physical, unchanged
-active_mode       physical, unchanged
-state.physical    the mode the connector drives
-```
-
-`bounds` is the logical one because that is what a rotated monitor occupies on
-a desk, and because the cell grid, the pointer hit test and the topology
-placements then all work in one coordinate space. `xrandr` reports the same
-split. `GET /v1/topology` carries the same rectangle and the same rotation.
-
-A rotation is refused with **409 `display_rotation_in_use`** while a surface is
-present on the display. Exchanging width and height exchanges the cell grid,
-and a surface's owner is the one that decides its size -- so this is issue
-#60's problem again, and the refusal is a conflict rather than a prohibition:
-remove the sessions and the same request succeeds. A rotation is persisted
-(ADR 0067) against the display's **name**, which on the SDL KMSDRM backend is
-its connector (`DP-1`); setting it back to `0` removes the stored entry rather
-than leaving a zero behind.
+**`rotation`** is not a capability: native KMS composes straight into the
+connector's framebuffer and has no rotation transform (ADR 0184 removed the
+SDL path that had one). A PATCH with `rotation` is a 422
+`display_rotation_unsupported`; a value other than `0`, `90`, `180` or `270`
+is still a 400 `invalid_display_rotation`.
 
 **`brightness_percent`** reads `actual_brightness` -- what the panel is doing
 -- and writes `brightness` -- what was requested. A driver that ramps will
@@ -819,13 +773,11 @@ host say why:
 
 ```text
 /sys/class/drm/card0-DP-1/dpms   mode 444; a root write returns EACCES
-/dev/dri/card0                   one open fd, held by blit through SDL
+/dev/dri/card0                   one open fd, held by blit (DRM master)
 ```
 
-So sysfs is not an avenue on any backend -- that is the kernel, not SDL -- and
-setting the property needs DRM master, which belongs to SDL's KMSDRM backend.
-SDL publishes that master fd per window, which is the route the rest of #69
-takes. `/sys/class/graphics/fb0/blank` is not an alternative: fbdev emulation
+So sysfs is not an avenue -- that is the kernel -- and setting the property
+needs DRM master, which Blit holds; that is the route the rest of #69 takes. `/sys/class/graphics/fb0/blank` is not an alternative: fbdev emulation
 is one device for the whole card, so it could not express "turn off this one
 display" even if it worked behind a master.
 
@@ -932,9 +884,9 @@ reports bounded cached bytes and render count. `glyphs` and `mappings` retain
 their PSF identity meaning (the canonical fallback for the modern profile),
 not a total Unicode coverage claim for the outline/emoji faces. Profiles
 report their rasterization and availability. Installation keeps Terminus as
-default. Profile/size changes validate the rasterizer and replacement SDL
-atlases before retiring active state. Native KMS and both SDL renderers share
-the same coverage/colour source, fallback policy and cell sizing.
+default. Profile/size changes validate the rasterizer before retiring active
+state. Both native KMS compositors (CPU and GLES) share the same
+coverage/colour source, fallback policy and cell sizing.
 
 Candidate0.1.588 attaches a required Arabic companion to canonical
 `blit-retro` and `blit-modern` profiles. `profiles[].arabic_companion_path`
@@ -991,11 +943,9 @@ settings. The response has three relevant parts: `document` is the sparse
 stored document, `effective` is what this process is using now, and
 `revision` is the optimistic-concurrency value for replacement. The document
 contains `font` (`font_id`, `scale`) and `server` values for
-`render_interval_ms`, `renderer`, `kms_async_pageflip`, and `expect_desktop`.
-The environment variables with the corresponding names are boot defaults only
-when the document is silent. A stored renderer request is applied at the next
-start; `effective.renderer_requested` and `effective.renderer_active` make
-that distinction explicit.
+`render_interval_ms`, `kms_async_pageflip`, and `expect_desktop`. The
+environment variables with the corresponding names are boot defaults only
+when the document is silent.
 
 Per-output pane layout is owned by `document.display_layouts`, applied live by
 settings replacement. Legacy `PUT /v1/topology` applies one1x1/1x2/2x1/2x2
@@ -1085,14 +1035,10 @@ new standby can be provisioned after fresh authenticated native readiness.
 Its initial placement is verified once. Surviving clients' user placement is
 not reasserted. Unmanaged/primary PTYs are not terminated by output loss.
 
-Display discovery in the current SDL implementation occurs at server startup.
-It does not handle live SDL display-added/removed events by rebuilding output
-resources and topology. Consequently an auxiliary waiting for a connector
-does not prove that plugging in a monitor will make that connector discoverable
-without restarting the service. API and Control Panel refreshes report the
-server inventory; they are not hardware rescans. Startup-detected monitors can
-be selected explicitly through Apply and saved as defaults. New monitors are
-not automatically added to the requested auxiliary set.
+Native KMS discovers connectors live (see the hotplug section above), so a
+monitor plugged in later becomes an output without restarting the service.
+New monitors are not automatically added to the requested auxiliary set;
+select them explicitly through Apply and save them as defaults.
 
 `GET /v1/auxiliary-displays` returns the live policy revision, operation ID,
 source (`startup` or `apply`), and per-binding progress. Each binding reports
@@ -1335,10 +1281,8 @@ Shapes: `arrow`, `hand`, `precision`. Palettes: `pearl`, `obsidian`, `neon`,
 `amber`. Nominal size24–64 integer physical pixels; up to six additional pixels
 hold antialiasing/shadow. Defaults are arrow/pearl/24/shadow-on. Missing fields
 use defaults; remove the object to reset. Shape-specific hotspots preserve
-pointer hit-testing. The same cached vector source drives SDL and direct KMS;
-size is independent of font scale. Motion does not rerasterize the artwork.
-SDL rotates the shape with its output; direct KMS's existing rotation
-capability/refusal contract is unchanged.
+pointer hit-testing. One cached vector source drives the pointer; size is
+independent of font scale. Motion does not rerasterize the artwork.
 
 A program may ask for another shape by OSC 22 (below); the settings stay the
 display's own pointer and are never changed by it. `effective.pointer_shown`
@@ -1359,7 +1303,7 @@ For direct-KMS pointer stalls, inspect
 `draw_ms`, `copy_ms` and `submit_ms` separate the last frame's CPU scene work,
 scene-to-scanout copy and kernel submission. `drawn_cells` counts requested
 terminal damage across views (overlaps may be counted twice), not pointer
-pixels. SDL reports zeros. These are last-frame values, not latency quantiles;
+pixels. These are last-frame values, not latency quantiles;
 sample repeatedly and correlate with CPU, loop gaps and physical input counts.
 
 | property | what it is |
@@ -1517,40 +1461,15 @@ does not include terminal cell contents or framebuffer bytes: pair it with a
 surface snapshot and `GET /v1/diagnostics/screenshots/{display_id}` when pixel
 evidence is required.
 
-For SDL presentation, `diagnostics.render.video_driver` is the exact SDL video
-driver selected at startup (for example `kmsdrm`); `direct_kms` is `true` only
-for Blit's separate direct DRM/KMS backend. `renderer` is the SDL renderer
-(for example `opengles2`), not the video driver.
-
-From candidate568, SDL output initialization records these codes in the
-existing bounded runtime log; details identify the requested display:
-
-| Code | Failed boundary |
-| --- | --- |
-| `sdl_output_window_failed` | Window properties/allocation |
-| `sdl_output_binding_failed` | Actual window display differs from requested display |
-| `sdl_output_fullscreen_failed` | Fullscreen activation |
-| `sdl_output_renderer_failed` | Renderer creation |
-
-An explicit `sdl_kms_fallback` means native KMS took over, not that SDL
-succeeded. Read the actual backend and inventory independently. If startup
-blocks before the listener exists, these API endpoints cannot service recovery;
-independent startup rollback is tracked in Blit109. Candidate568's mocked-
-display tests do not establish physical connector discovery or scanout.
+`diagnostics.render.presentation_sync` names how frames reach the panel:
+`drm-page-flip`, or `drm-page-flip-async`. Each output's `compositor` says
+whether the GPU (`gles`) or the CPU composed it, and why.
 
 Each `render.outputs[]` entry's `present_calls`, `last_present_ms` and
-`max_present_ms` belongs to that output's resource lifetime. SDL values count
-and time `SDL_RenderPresent` calls; direct KMS counts submitted frames.
-An idle output does not inherit another output's counts or timing. Runtime
-performance totals remain aggregate counters. SDL call completion does not
-prove physical scanout; direct-KMS flip/vblank evidence remains in
-`kms_scanout`.
-
-To select a presentation path, read `GET /v1/settings`, preserve its complete
-`document`, set `document.server.display_backend` to `kms` or `sdl`, and save
-it with `PUT /v1/settings` and the current revision in `If-Match`. For SDL,
-`document.server.renderer` selects `software` or `opengles2` on the supported
-bare-console paths. The saved backend overrides the service's boot default.
+`max_present_ms` belongs to that output's resource lifetime and counts
+submitted frames. An idle output does not inherit another output's counts or
+timing. Runtime performance totals remain aggregate counters. Submission does
+not prove physical scanout; flip/vblank evidence is in `kms_scanout`.
 The response reports `effective.display_backend_requested`,
 `effective.display_backend_active` and `effective.presentation_restart_required`.
 Saving leaves current displays/sessions running. Confirm storage is `clean`
@@ -1604,7 +1523,7 @@ KMS, `present_calls` counts submitted frames while
 `vblank_sequence`, `last_vblank_timestamp_us`, `vblank_span_count`, and
 `vblank_span_us` fields expose the kernel's output timing; its
 `observed_refresh_hz` is the vblank rate, not the rate of changed content.
-`available` is false and the KMS-only counters are zero for SDL renderers.
+`available` is false, and the counters zero, for an output with no KMS state.
 The top-level `frame_rate_hz` remains an overall Blit composition rate; it is
 not a per-display scanout measurement. Use deltas of per-output completion
 counters over a measured interval to evaluate delivered frames per display.
@@ -1631,46 +1550,6 @@ surface commit, scheduler, renderer, KMS submission, or physical scanout is
 the limiting boundary.
 
 ## Effects, overlays, and control
-
-### Bounded presentation trials (0.1.569)
-
-From572, `/v1/diagnostics` and observation `diagnostics.render.sdl_kms_mode`
-report `legacy`/`atomic` for SDL KMS, or null for native/other drivers.
-Pinned SDL3.4.16 defaults to its documented legacy-KMS path because secondary
-atomic plane initialization is missing (ADR0155). Explicit environment
-atomic=1 is refused with a backend diagnostic, not silently overridden. This
-does not claim SDL timing, pixels, connector mode selection or hotplug parity.
-
-`GET /v1/control/presentation-trial` reads the privileged helper's trial state.
-`POST` accepts only `{"renderer":"opengles2","timeout_seconds":60}` (or
-`software`, integer timeout30..120). It requires normal API authentication,
-a clean native-KMS baseline, no authenticated desktop or other active non-login
-terminal session, and the current settings revision in `If-Match`. The response
-is202 with an opaque trial ID; startup happens asynchronously.
-
-Before startup, the helper arms an independent systemd recovery timer. The
-same service temporarily reads a frozen settings snapshot, with login disabled;
-the normal saved document is never overwritten. During the trial, configuration
-mutations are refused and `/v1/settings` explicitly reports `persisted:false`,
-storage `trial-read-only`, and provenance `trial-snapshot`. Diagnostic surface,
-terminal-session and input-injection fixtures remain available.
-
-`DELETE /v1/control/presentation-trial` with `{"id":"<current32hexid>"}`
-requests early restoration. Its202 body is the last observed state, not proof
-of completion. Stale IDs receive409. Expiry also restores the normal service
-without requiring the Blit listener or event loop. A `restored` helper state
-means the normal restart was queued: verify `/v1/version`, actual backend,
-output inventory and settings before calling the baseline restored. Updates
-are refused while recovery remains active. Failures stay explicit; this is
-not a guarantee of recovery from kernel/GPU D-state or system-manager failure.
-
-Verification scope: local helper/dispatcher fault tests use mocked systemd.
-On10.54, actual timer expiry restored the identical saved native configuration
-after both software and GLES startup crashes. This proves recovery from those
-observed failures, not recovery from every kernel/GPU hang or SDL correctness.
-The API-only startup/recovery oracle is
-`tools/probes/host_presentation_trial.rb`; it records recovery and SDL startup
-as separate verdicts. See ADR0153.
 
 `GET/PUT /v1/effects` manages bounded named effects such as `scanlines`.
 `POST/DELETE /v1/overlays` manages explicit graphic overlays. Effects and

@@ -28,7 +28,7 @@ curl --fail --request POST http://127.0.0.1:8080/v1/control/shutdown
 ```
 
 The endpoint acknowledges first, then the event loop terminates child process
-groups and releases SDL/KMS outputs before exiting. Starting a new server still
+groups and releases KMS outputs before exiting. Starting a new server still
 belongs to the host supervisor or launch command because a stopped process
 cannot serve its own restart request.
 
@@ -170,8 +170,8 @@ original topology afterward. `BLIT_HIBR_COMMAND` and `BLIT_HIBR_SESSION` can
 override the installed Hibr paths. Exit status `77` means the host does not
 currently expose enough physical displays and is not a pass.
 
-The TCC-built server has been exercised locally with the SDL dummy backend and
-in QEMU with direct DRM/KMS:
+The TCC-built server has been exercised locally on the DRM mock and in QEMU
+with direct DRM/KMS:
 
 - OpenAPI YAML parses as OpenAPI 3.1 with 25 paths and 45 schemas.
 - The WebSocket upgrade on `/v1/stream` returns `101 Switching Protocols`.
@@ -186,9 +186,6 @@ in QEMU with direct DRM/KMS:
   surface output.
 - QEMU direct-KMS mode reports a ready backend, KMS display mode, graphics
   capabilities, evdev keyboard/pointer inventory, and a running PTY session.
-- QEMU virtio-GPU mode reports a ready SDL3 KMSDRM backend, a virtio PCI
-  graphics card, refresh-aware runtime diagnostics, and a running PTY-backed
-  Hibr workload whose surface revision advances with desktop text.
 - The terminal conformance runner passes printable text, cursor addressing,
   styles, erase, scrolling, scroll regions, alternate-screen restoration,
   saved cursors, UTF-8, truecolor SGR, and fragmented CSI sequences over the
@@ -248,14 +245,9 @@ BLIT_GATE_PORT=19202 BLIT_GATE_TOKEN=blit-network-gate \
 It holds one request fragmented for one second while requiring an independent
 authenticated diagnostics request to complete in under 800 ms.
 
-The SDL3 adapter obtains the complete fullscreen mode list when the backend
-provides it and reports the current/native active mode through the same
-`/v1/displays` contract as direct KMS. If SDL cannot provide a mode list, the
-reported single entry is the observed current mode, not an invented maximum.
-SDL renderers are explicitly configured for vsync and `/v1/diagnostics`
-reports `presentation_sync` as `sdl-vsync`; unsupported SDL synchronization is
-reported as `scheduler-only` rather than being presented as a hardware timing
-guarantee.
+`/v1/diagnostics` reports `presentation_sync` as `drm-page-flip`, or
+`drm-page-flip-async` when the explicit asynchronous page-flip test policy is
+enabled.
 
 Writes use the same bounded policy: HTTP and WebSocket sends are nonblocking.
 If a receiver cannot accept the next bounded write, the HTTP response is
@@ -394,8 +386,8 @@ raw PTY, and confirms that the query does not create an image. This matters for
 Hibr wallpaper startup because Hibr performs this probe before transmitting the
 actual image payload.
 
-The stream reconnect/replay gate runs against that exact binary with the
-dummy video backend:
+The stream reconnect/replay gate runs against that exact binary on the
+DRM mock:
 
 ```sh
 BLIT_GATE_PORT=19245 ruby tools/tests/stream_replay_gate.rb
@@ -417,30 +409,17 @@ zero.
 
 ## Run locally
 
-The dummy video driver is useful for exercising the network contract without
-owning a physical DRM device:
-
-For an SDL-path framebuffer capture and render-cost trace, create a writable
-directory and set the diagnostic variables before starting the server:
+The DRM mock the gates use exercises the network contract without owning a
+physical DRM device:
 
 ```sh
-mkdir -p /tmp/blit-sdl-capture
-BLIT_SDL_SCREENSHOT_DIR=/tmp/blit-sdl-capture \
-BLIT_SDL_SCREENSHOT_AFTER=2 \
-BLIT_SDL_TRACE_TIMING=1 \
-SDL_VIDEODRIVER=dummy \
-./build/blit/blit-server 8080
+. tools/tests/gate_display.sh && gate_display_setup
+env $GATE_DISPLAY_ENV ./build/blit/blit-server 8080
 ```
 
-The server writes one BMP per SDL output after the requested frame and logs
-`render_ms` for each composed frame. This is an opt-in diagnostic path; it is
-not required by the installed runtime and is never enabled by default.
-
-```sh
-SDL_VIDEODRIVER=dummy \
-LD_LIBRARY_PATH=build/sdl3-kms \
-  ./build/blit/blit-server 8080
-```
+Add `BLIT_KMS_COMPOSITOR=gles BLIT_GLES_PLATFORM=surfaceless` (or set
+`BLIT_GATE_BACKEND=gles` before `gate_display_setup`) to compose with GLES.
+`GET /v1/diagnostics/screenshots/display-1` returns the presented frame.
 
 The installed listener defaults to all IPv4 interfaces (`0.0.0.0`) so a client
 on the management network can reach it. Authentication is disabled when
@@ -486,7 +465,7 @@ Set `BLIT_PIXEL_FRAME_COUNT` for a longer sustained workload when diagnosing
 physical presentation cadence; the default is 30 frames.
 
 The paced assertion requires at least 24 of 30 accepted frames to be rendered.
-It is deliberately below 30 to allow scheduler jitter in the dummy backend;
+It is deliberately below 30 to allow scheduler jitter on the DRM mock;
 physical release acceptance still requires display-mode timing and input
 latency evidence. The gate registers session cleanup immediately after the
 session is created, so a failed assertion cannot leave a test surface running
@@ -497,8 +476,8 @@ runtime diagnostics endpoint. It requires a completed, fresh measurement
 window, a configurable minimum measured rate, and zero missed refresh
 deadlines; cumulative frame counters alone are not treated as a refresh-rate
 measurement. The windowed render maximum is reported for diagnosis and can be
-made a hard failure criterion because SDL vsync presentation time can
-include the wait for the next physical vblank; missed deadlines are the
+made a hard failure criterion because KMS presentation time can include the
+wait for the next physical vblank; missed deadlines are the
 authoritative cadence failure:
 
 ```sh
@@ -513,7 +492,7 @@ BLIT_GATE_SERVER=http://192.168.10.54:8080 BLIT_GATE_MIN_HZ=55 \
 ```
 
 The same gate can run against an already-running physical host without
-silently starting a local dummy server:
+silently starting a local DRM-mock server:
 
 ```sh
 BLIT_GATE_SERVER=http://192.168.10.54:8080 ruby tools/tests/frame_rate_gate.rb
@@ -521,7 +500,7 @@ BLIT_GATE_SERVER=http://192.168.10.54:8080 ruby tools/tests/frame_rate_gate.rb
 
 For a full-surface physical composition workload, provide the API token and
 the surface dimensions. The 60 Hz release acceptance uses a 17 ms render
-budget; the default 20 ms value is only a local dummy-backend smoke budget:
+budget; the default 20 ms value is only a local DRM-mock smoke budget:
 
 ```sh
 BLIT_GATE_SERVER=http://192.168.10.54:8080 \
@@ -544,21 +523,13 @@ the cursor disabled does not schedule presentation frames:
 ruby tools/tests/hidden_cursor_damage_gate.rb
 ```
 
-The SDL glyph-render gate checks the public screenshot boundary for the
+The glyph-render gate checks the public screenshot boundary for the
 bundled Hibr font. It asserts deterministic light/heavy/double box geometry,
 vertical geometry, block coverage, and both halves of a wide glyph; terminal
 cell snapshots alone do not prove these pixel shapes:
 
 ```sh
-ruby tools/tests/sdl_glyph_render_gate.rb
-```
-
-The SDL graphics-cache gate transmits a Kitty image, then generates repeated
-terminal damage while the image remains unchanged. It requires one initial
-texture upload and subsequent cache hits with no additional uploads:
-
-```sh
-ruby tools/tests/sdl_graphics_cache_gate.rb
+ruby tools/tests/glyph_render_gate.rb
 ```
 
 The result is exposed by `GET /v1/diagnostics/runtime` under `performance` as
@@ -596,15 +567,9 @@ direct-KMS duration is reported as `last_kms_present_ms` and
 `max_kms_present_ms`; these measure the complete KMS present call, including
 page-flip submission and driver event servicing. Interpret them alongside
 `snapshot.render.outputs[].missed_deadlines` to separate renderer work from a
-slow KMS or virtual-display backend. The
-SDL presentation duration is reported separately as `last_sdl_present_ms` and
-`max_sdl_present_ms`; these measure the `SDL_RenderPresent` boundary,
-including backend synchronization. The existing `last_render_ms` and
-`max_render_ms` values retain their complete render-path meaning for
-compatibility. The
-SDL event-pump duration is reported as `last_sdl_events_ms` and
-`max_sdl_events_ms`; evdev scan duration is reported as
-`last_evdev_scan_ms` and `max_evdev_scan_ms`. The rate is measured from
+slow KMS or virtual-display backend. The `last_render_ms` and
+`max_render_ms` values retain their complete render-path meaning. Evdev scan
+duration is reported as `last_evdev_scan_ms` and `max_evdev_scan_ms`. The rate is measured from
 presented frames, not inferred from the display mode or configured interval.
 Input dispatch is independently observable through `input_events`,
 `last_input_dispatch_ms`, and `max_input_dispatch_ms`. These counters cover
@@ -637,40 +602,9 @@ came from a device generation that is no longer in the current input table.
 The keyboard has the corresponding `last_evdev_keyboard_device_id` and
 `last_evdev_keyboard_device_present` fields. This prevents a historical node
 path from being mistaken for the currently opened device.
-The runtime also reports `sdl_mouse_events_discarded`,
-`sdl_mouse_events_processed`, `sdl_mouse_motion_events`, and
-`sdl_mouse_button_events`. With an evdev device present, discarded SDL mouse
-events are expected to remain zero during normal operation; a nonzero value
-with unchanged raw-evdev counters identifies competing SDL input ownership or
-backend delivery that requires correction before blaming composition.
-`sdl_mouse_fallback_events` counts SDL mouse events accepted while an evdev
-device was present but had never delivered a recent record. This is an
-intentional bounded fallback: recent evdev activity remains authoritative, so
-the fallback cannot duplicate an active raw stream merely because SDL also
-receives it.
 Each scheduler output also reports `last_present_ms`, `max_present_ms`, and
-`present_calls`, which identify per-output KMS/SDL presentation cost rather
+`present_calls`, which identify per-output KMS presentation cost rather
 than hiding it in one aggregate server-wide maximum.
-Graphics composition counters are reported as `graphics_cache_hits` and
-`graphics_texture_uploads`; they make wallpaper upload churn observable through
-the API rather than inferred from screenshots. `last_graphics_upload_ms` and
-`max_graphics_upload_ms` measure the texture creation/update path itself, which
-is required when qualifying high-rate Kitty/Sixel or API pixel streams.
-
-The SDL path uses a per-output monochrome glyph atlas and suppresses damage
-for terminal writes whose complete cell state is unchanged. This is especially
-important for Hibr wallpaper themes, which may repeatedly emit the same glyph
-grid. The atlas does not change the canonical surface or direct-KMS renderer;
-the initial full redraw and pointer-only cached-scene paths must be measured
-separately. In multi-pane SDL output the scene cache is retained across
-ordinary pane damage, with full composition reserved for first frame, pointer,
-graphics, topology, and surface-count changes. SDL uses two scene render
-targets: it copies the last complete scene into the work target before
-applying damage, so the cache does not assume that a backend preserves a
-render target when it is rebound. ADR 0099 records this boundary. Every
-backend still has an explicit full-rebuild fallback, and
-`BLIT_SDL_SCENE_CACHE` overrides the default in both directions for anyone
-repeating the measurement.
 
 The shutdown gate verifies that `POST /v1/control/shutdown` acknowledges the
 request and the Blit process exits cleanly:
@@ -685,16 +619,9 @@ It requires `401` without a token and `200` with the configured bearer token.
 TLS termination, token rotation, and per-client authorization remain
 deployment responsibilities; do not expose an unauthenticated listener.
 
-When SDL3 reports displays, the gateway creates one borderless SDL window and
-renderer per output, positions each window at the reported bounds, and presents
-an initial black frame. For a direct-KMS session on a DRM-capable VT, set
-`BLIT_DISPLAY_BACKEND=kms`; that path owns DRM connectors and page-flips its
-scanout buffers without creating SDL windows.
-
-SDL output uses SDL's automatic renderer selection by default so a physical
-host can use its accelerated renderer. Set `BLIT_RENDERER=software` only for a
-deterministic software/VKMS fixture. The selected renderer is reported by
-`GET /v1/diagnostics/runtime` as `snapshot.render.renderer`.
+Native KMS is the only presentation path (ADR 0184): the gateway owns the DRM
+connectors and page-flips its scanout buffers on a DRM-capable VT, composing
+with GLES and falling back to the CPU compositor.
 
 ## Exercise discovery
 
@@ -852,12 +779,10 @@ curl --fail --request POST \
 ```
 
 Stale cell revisions are rejected with `409 Conflict`. Cell mutations update
-authoritative state; frame receipts record acceptance and trigger the SDL3
-output adapter from an immutable surface/revision plan. The first frame for an
+authoritative state; frame receipts record acceptance and trigger the KMS
+output from an immutable surface/revision plan. The first frame for an
 output is a full draw; subsequent single-surface frames use the captured dirty
-rows, while multi-surface frames conservatively redraw the output. The renderer
-uses deterministic vertical stacking for multiple surfaces on one output and
-SDL3's built-in bitmap text primitive. Cell styles accept six-digit foreground
+rows, while multi-surface frames conservatively redraw the output. Cell styles accept six-digit foreground
 and background colors plus bold, dim, underline, and inverse flags; invalid
 colors are rejected. Text is validated as UTF-8 and decoded into logical
 cells; malformed UTF-8 and zero-width sequences without a preceding base
@@ -888,16 +813,15 @@ or applying state again; reusing a key with a different payload returns
 `idempotency_conflict`.
 
 Unsupported inventories are returned as empty arrays until their native
-backends are implemented. Display discovery is sourced from SDL3.
+backends are implemented. Display discovery is sourced from DRM/KMS.
 
-SDL3 mouse clicks, drags, and wheel events are routed to the Blit pane under
+Evdev mouse clicks, drags, and wheel events are routed to the Blit pane under
 the pointer and encoded as SGR mouse reports for the owning PTY. A primary
 button press focuses that pane; keyboard input then follows the focused live
 session until the API changes focus. Hibr's console mouse mode controls
 whether the joined desktop consumes those reports. Pointer capture, touch,
-and seat-level policy remain follow-up work. SDL windows and evdev devices are
-normalized to the same virtual-desktop coordinate space; only the final SDL
-warp uses per-window local coordinates. This prevents a pointer on an
+and seat-level policy remain follow-up work. KMS outputs and evdev devices are
+normalized to the same virtual-desktop coordinate space. This prevents a pointer on an
 auxiliary monitor from being hit-tested or clicked against the primary
 monitor. The 0.1 API supports explicit
 `evdev-keyboard` and `evdev-pointer` routes through `/v1/input/routes/{id}`;

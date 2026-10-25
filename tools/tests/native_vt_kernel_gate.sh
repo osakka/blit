@@ -41,7 +41,7 @@ if [ "${BLIT_VT_SERVER_TEST:-0}" = 1 ]; then
     cp "$modules/kernel/drivers/gpu/drm/tiny/bochs.ko" "$work/root/bochs.ko"
     executables="$executables $work/root/vt-server-gate $work/root/blit-server"
 fi
-for library in $(LD_LIBRARY_PATH="$root/build/sdl3-kms:$root/build/deps/prefix/lib/x86_64-linux-gnu" ldd $executables | awk '{if ($3 ~ /^\//) print $3; else if ($1 ~ /^\// && $1 !~ /:$/) print $1}' | sort -u); do
+for library in $(LD_LIBRARY_PATH="$root/build/deps/prefix/lib/x86_64-linux-gnu" ldd $executables | awk '{if ($3 ~ /^\//) print $3; else if ($1 ~ /^\// && $1 !~ /:$/) print $1}' | sort -u); do
     mkdir -p "$work/root$(dirname "$library")"
     cp "$library" "$work/root$library"
     mkdir -p "$work/root/lib/x86_64-linux-gnu"

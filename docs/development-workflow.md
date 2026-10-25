@@ -100,16 +100,13 @@ instruction work. `--benchmark` reports same-process CPU medians, not live FPS;
 `--observe` disables the division-count requirement and is not performance
 acceptance (ADR0179).
 
-Image-ingestion changes require `ruby tools/tests/graphics_ingestion_gate.rb`
-and its explicit offscreen/OpenGLES2 counterpart. Renderer/GLES suites include
-them. They instrument the production decoder and SDL call boundary, not a
-parallel decoder. `--observe` intentionally disables performance assertions
+Image-ingestion changes require `ruby tools/tests/graphics_ingestion_gate.rb`.
+It instruments the production decoder, not a parallel decoder. `--observe` intentionally disables performance assertions
 and must never be reported as a passing performance gate (ADR0178).
 
-Graphics damage changes require `ruby tools/tests/graphics_placement_damage_gate.rb`
-plus the same fixture with `BLIT_TEST_VIDEO_DRIVER=offscreen` and
-`BLIT_TEST_RENDERER=opengles2`. The renderer/GLES suites include them.
-These compare production incremental composition against full-redraw pixels;
+Graphics damage changes require `ruby tools/tests/graphics_placement_damage_gate.rb`,
+on both `BLIT_GATE_BACKEND=native` and `gles`. It compares production
+incremental composition against full-redraw pixels;
 counts or screenshots alone are insufficient. Preserve held/deferred snapshot
 acknowledgement and unknown-caller fallback (ADR0177).
 
@@ -126,14 +123,13 @@ handoff:
 - schema/API changes: schema validation, API conformance, and version identity;
 - terminal changes: TCC build and `tools/tests/terminal_conformance.rb`;
 - font/Unicode changes: glyph coverage, UTF-8 snapshots, and a Hibr capture;
-- renderer/input changes: dummy backend plus direct-KMS/VKMS pixel and input;
+- renderer/input changes: the renderer suite on `BLIT_GATE_BACKEND=native` and
+  `gles`, plus KMS/VKMS pixel and input;
 - multi-display/Hibr changes: two-output topology, pane matrix, primary plus
   `--join`, routing, and cleanup;
 - packaging changes: allowlist, embedded version identity, install/service
   checks, and checksum;
-- presentation startup/recovery changes: lifecycle suite including
-  `presentation_trial_gate.sh` and `presentation_trial_helper_gate.rb`; record
-  their mocked-systemd boundary separately from real timer/service recovery;
+- presentation startup/recovery changes: the lifecycle suite;
 - performance/timing changes: diagnostics, measured intervals, CPU/RSS, and a
   bounded workload rather than a subjective “feels faster” claim.
 
@@ -153,21 +149,19 @@ categories above, so the narrowest run is one suite and the pre-handoff run is
 ```sh
 tools/run-gates.sh terminal          # the narrowest gate for a terminal change
 tools/run-gates.sh all               # before handoff
-tools/run-gates.sh gles              # explicit offscreen GLES2 composition check
+BLIT_GATE_BACKEND=gles tools/run-gates.sh all   # the same suites on the GLES compositor
 BLIT_GATE_PACKAGE=blit_X.Y.Z-1_amd64.deb tools/run-gates.sh packaging
 BLIT_GATE_LIVE=http://HOST:8080 tools/run-gates.sh timing
 ```
 
 Prefer it over invoking a gate directly.
 
-The explicit `gles` suite runs shared glyph, Kitty layering, motion-trail,
-wallpaper-damage, held-scene pointer and two-renderer output-metrics fixtures through SDL
-offscreen/OpenGLES2 using software GL. It requires working
-EGL/GLES libraries and fails if actual renderer identity differs. It is
-separate from `all`, which remains runnable without EGL/GLES. Record its
-result alongside `all` for SDL changes; inability to run it is an open
-coverage boundary. This proves GL composition on software GL, not GPU/KMSDRM
-scanout or physical refresh-rate performance.
+Every gate runs against native KMS on the DRM mock (ADR 0184).
+`BLIT_GATE_BACKEND=gles` runs the same suites through the GLES compositor on
+Mesa's surfaceless platform, reading each frame back. It needs working EGL/GLES
+libraries; record its result alongside the native run for compositor changes.
+It proves GL composition on software GL, not GPU scanout or physical
+refresh-rate performance.
 
 The gates do not share one calling
 convention: some take `BLIT_TEST_SERVER`, some `BLIT_GATE_SERVER`, some
@@ -191,15 +185,13 @@ is correct. It is not a statement about the behaviour it cannot reach, and the
 distance between those two has cost this project multiple releases. The known
 blind spots, so that a green run is read for what it is:
 
-**Renderer coverage depends on the selected suite.** Historically the SDL
+**Renderer coverage depends on the selected backend.** Historically the SDL
 renderer gates ran only against `software` in a container without a GPU,
-while the physical SDL path used `opengles2`. An optimisation that assumed
+while the physical path used `opengles2`. An optimisation that assumed
 render-target persistence produced a visible screensaver trail that survived
 two "fixed" claims. Five reproductions passed because all five ran on
-`software`. See ADRs0070/0099 and issue79. The explicit `gles` suite now covers
-glyphs, Kitty layering, motion trails, wallpaper damage/deletion, held-scene pointer pixels and independent output
-metrics through offscreen/OpenGLES2 using software GL. The remaining fixtures
-and physical KMSDRM/GPU timing still require matching-backend acceptance.
+`software`. See ADRs0070/0099 and issue79. Run compositor changes on both
+`native` and `gles`; physical GPU timing still requires host acceptance.
 
 **A gate that cannot fail is not evidence.** Every gate should be run once
 against the reverted change and observed to fail; a gate added alongside a fix

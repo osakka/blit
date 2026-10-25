@@ -4,12 +4,12 @@ require 'json'
 require 'net/http'
 require 'timeout'
 require_relative 'gate_port'
-require_relative 'sdl_test_profile'
+require_relative 'test_profile'
 require_relative 'gate_bmp'
 
 port = gate_port(Integer(ENV.fetch('BLIT_FONT_API_PORT','18995')))
-env = SdlTestProfile.environment
-pid = Process.spawn(env, SdlTestProfile.binary, port.to_s,
+env = TestProfile.environment
+pid = Process.spawn(env, TestProfile.binary, port.to_s,
                     out: '/tmp/blit-font-api-gate.log', err: [:child, :out])
 at_exit do
   Process.kill('TERM', pid) rescue nil
@@ -62,7 +62,7 @@ end
 end
 
 topology = request(URI("#{base}/v1/topology"))
-SdlTestProfile.verify!(request(base + '/v1/diagnostics'))
+TestProfile.verify!(request(base + '/v1/diagnostics'))
 pane = topology.fetch('panes').first
 raise 'no test pane discovered' unless pane
 

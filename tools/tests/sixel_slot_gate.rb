@@ -21,8 +21,7 @@ binary = ENV.fetch('BLIT_GATE_BINARY', 'build/blit/blit-server')
 log = "/tmp/blit-sixel-slot-#{Process.pid}.log"
 env = {
   **gate_display_env,
-  'SDL_RENDERER' => 'software',
-  'LD_LIBRARY_PATH' => ENV.fetch('BLIT_GATE_LIBS', 'build/sdl3-kms')
+  
 }
 pid = Process.spawn(env, binary, port.to_s, out: log, err: [:child, :out])
 

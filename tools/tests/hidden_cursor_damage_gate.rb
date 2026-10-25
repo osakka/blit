@@ -15,8 +15,7 @@ base = URI("http://127.0.0.1:#{port}")
 log = "/tmp/blit-hidden-cursor-#{Process.pid}.log"
 env = {
   **gate_display_env,
-  'SDL_RENDERER' => 'software',
-  'LD_LIBRARY_PATH' => 'build/sdl3-kms'
+  
 }
 pid = Process.spawn(env, 'build/blit/blit-server', port.to_s,
                     out: log, err: [:child, :out])

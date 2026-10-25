@@ -69,7 +69,7 @@ Dir.mktmpdir('blit-open') do |root|
   server = spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
                    'BLIT_INPUT_ROOT' => root,
                    'BLIT_INPUT_OPEN_DELAY_US' => OPEN_DELAY_US.to_s,
-                   'LD_LIBRARY_PATH' => File.join(ROOT, 'build/sdl3-kms') },
+                   },
                  BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')
   begin
     # The server must answer while the opens are still in flight. With the

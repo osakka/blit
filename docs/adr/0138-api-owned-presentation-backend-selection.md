@@ -1,6 +1,7 @@
 # ADR 0138: Select the presentation backend through saved settings
 
 - Status: implemented; physical comparison pending
+- Superseded by [ADR 0184](0184-sdl-is-removed.md): SDL is removed; native KMS is the only presentation path.
 - Date: 2026-10-19
 - Issue: Blit104; related ADRs0089,0137
 

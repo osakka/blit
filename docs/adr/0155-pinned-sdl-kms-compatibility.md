@@ -2,6 +2,7 @@
 
 - Date:2026-10-20
 - Status: deployed572; single-output startup verified, multi-output pending
+- Superseded by [ADR 0184](0184-sdl-is-removed.md): SDL is removed; native KMS is the only presentation path.
 - Tracking: Blit104
 
 Physical571 fault: second output first SDL_RenderPresent, before its completion

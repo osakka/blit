@@ -34,7 +34,7 @@ font_active = schema.dig('components','schemas','FontProfiles','properties','act
 raise 'font size policy observation missing' unless
   %w[sizing size_px cell_pixels].all? { |key| font_active.fetch('required').include?(key) } &&
   font_active.dig('properties','sizing','enum') == %w[scale pixels]
-raise "unexpected path count #{paths.length}" unless paths.length == 49
+raise "unexpected path count #{paths.length}" unless paths.length == 48
 raise 'font icon discovery contract missing' unless
   paths.dig('/v1/fonts/icons','get','operationId') == 'getFontIconCatalogue' &&
   schema.dig('components','schemas','FontIconCatalogue','required').sort ==
@@ -52,9 +52,8 @@ provenance = settings.dig('properties','effective','properties','presentation_co
 raise 'presentation provenance contract missing' unless provenance &&
   provenance['additionalProperties'] == false &&
   provenance['required'].sort == %w[backend_source backend_environment
-    backend_environment_valid backend_environment_overridden configuration_valid
-    renderer_source renderer_applicable video_driver_active].sort &&
-  provenance.dig('properties','backend_source','enum') == %w[saved-settings environment default trial-snapshot]
+    backend_environment_valid configuration_valid].sort &&
+  provenance.dig('properties','backend_source','enum') == %w[saved-settings environment default]
 appearance = schema.fetch('components').fetch('schemas').fetch('PointerAppearance')
 raise 'pointer appearance contract changed' unless
   appearance.dig('properties','shape','enum') == %w[arrow hand precision] &&

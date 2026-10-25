@@ -83,7 +83,7 @@ def json(method, path, body = nil)
 end
 
 server = spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
-                 'LD_LIBRARY_PATH' => File.join(ROOT, 'build/sdl3-kms') },
+                 },
                BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')
 at_exit do
   Process.kill('TERM', server) rescue nil

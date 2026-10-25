@@ -20,7 +20,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-env $GATE_DISPLAY_ENV LD_LIBRARY_PATH="$root/build/sdl3-kms" \
+env $GATE_DISPLAY_ENV \
     "$root/build/blit/blit-server" "$port" >"$log" 2>&1 &
 server_pid=$!
 

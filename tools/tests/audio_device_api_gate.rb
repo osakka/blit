@@ -164,7 +164,7 @@ Dir.mktmpdir('blit-audio') do |root|
   server = spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
                    'BLIT_ASOUND_ROOT' => asound, 'BLIT_SND_ROOT' => snd,
                    'BLIT_COMMAND_ALLOWLIST' => '/bin/sh',
-                   'LD_LIBRARY_PATH' => File.join(ROOT, 'build/sdl3-kms') },
+                   },
                  BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')
   begin
     Timeout.timeout(15) do

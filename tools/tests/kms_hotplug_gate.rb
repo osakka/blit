@@ -40,7 +40,7 @@ Dir.mktmpdir('blit-kms-hotplug') do |root|
   ids=-> {req('GET','/v1/displays')['displays'].map{|d|d['id']}}
   write.call([93]);device=File.join(root,'drm');File.write(device,'');Dir.mkdir(File.join(root,'input'))
   env={'BLIT_DISPLAY_BACKEND'=>'kms','BLIT_DRM_DEVICE'=>device,'BLIT_DRM_MOCK_STATE'=>state,'BLIT_DRM_MOCK_TRACE'=>trace,
-    'LD_PRELOAD'=>mock,'LD_LIBRARY_PATH'=>File.join(ROOT,'build/sdl3-kms')+':'+File.join(ROOT,'build/deps/prefix/lib/x86_64-linux-gnu'),
+    'LD_PRELOAD'=>mock,'LD_LIBRARY_PATH'=>File.join(ROOT,'build/deps/prefix/lib/x86_64-linux-gnu'),
     'BLIT_AUTH_TOKEN'=>'hotplug-test','BLIT_LOGIN_AUTOSTART'=>'0','BLIT_PANE_LAYOUT'=>'1x2',
     'BLIT_SETTINGS_PATH'=>File.join(root,'settings.json'),'BLIT_INPUT_ROOT'=>File.join(root,'input'),
     'BLIT_PSF_FONT'=>File.join(ROOT,'assets/fonts/Blit-Hibr-Terminus16.psf')}

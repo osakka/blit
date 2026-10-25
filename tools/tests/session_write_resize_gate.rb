@@ -13,7 +13,6 @@ base = URI("http://127.0.0.1:#{port}")
 log_path = File.join(Dir.tmpdir, "blit-session-write-resize-#{Process.pid}.log")
 env = {
   **gate_display_env,
-  'LD_LIBRARY_PATH' => 'build/sdl3-kms',
   'BLIT_COMMAND_ALLOWLIST' => '/bin/sh'
 }
 pid = Process.spawn(env, 'build/blit/blit-server', port.to_s,

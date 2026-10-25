@@ -131,7 +131,7 @@ Dir.mktmpdir('blit-cfg') do |root|
   File.write(File.join(root, 'event0'), '')
   server = spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
                    'BLIT_INPUT_ROOT' => root,
-                   'LD_LIBRARY_PATH' => File.join(ROOT, 'build/sdl3-kms') },
+                   },
                  BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')
   begin
     Timeout.timeout(15) do

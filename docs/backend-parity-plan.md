@@ -1,5 +1,7 @@
 # Presentation backend parity plan
 
+> **Superseded by [ADR 0184](adr/0184-sdl-is-removed.md).** SDL is removed and native KMS is the only presentation path, so there is no backend parity to track. Kept as a historical record; tools it names may no longer exist.
+
 Status: implementation in progress, 2026-10-19. Physical acceptance remains open.
 
 Tracking: internal Blit104. Detailed implementation work orders126–135 are

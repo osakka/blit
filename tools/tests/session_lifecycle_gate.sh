@@ -24,7 +24,7 @@ cleanup()
 }
 trap cleanup EXIT INT TERM
 
-env $GATE_DISPLAY_ENV LD_LIBRARY_PATH=build/sdl3-kms \
+env $GATE_DISPLAY_ENV \
     "$binary" "$port" >"$log" 2>&1 &
 pid=$!
 ready=0

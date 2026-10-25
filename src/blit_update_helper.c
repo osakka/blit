@@ -138,8 +138,6 @@ static int run_command(const char *command, char *const arguments[],
                        char *detail, size_t detail_capacity)
 { return run_command_bounded(command, arguments, detail, detail_capacity, 0); }
 
-#include "blit_presentation_trial.h"
-
 static int package_identity(const char *path)
 {
     int pipe_fds[2];
@@ -233,15 +231,10 @@ int main(int argc, char **argv)
 {
     struct sockaddr_un address;
     int server_fd;
-    BlitTrialState initial_trial;
-    char initial_detail[COMMAND_DETAIL_CAPACITY] = "";
     signal(SIGPIPE, SIG_IGN);
-    if (argc == 3 && strcmp(argv[1], "--recover-trial") == 0)
-        return trial_restore(argv[2], initial_detail, sizeof(initial_detail)) ? 0 : 1;
+    (void)argv;
     if (argc != 1) return 2;
     mkdir(UPDATE_RUNTIME_DIR, 0755);
-    if (trial_state_read(&initial_trial) && initial_trial.active)
-        (void)trial_restore(initial_trial.id, initial_detail, sizeof(initial_detail));
     unlink(UPDATE_SOCKET);
     server_fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (server_fd < 0) return 1;
@@ -258,9 +251,6 @@ int main(int argc, char **argv)
         char sha[65];
         char detail[COMMAND_DETAIL_CAPACITY];
         int updated = 0;
-        int trial_action = 0;
-        BlitTrialState trial;
-        char trial_id[33] = "", trial_extra;
         struct timeval socket_timeout = {3, 0};
         if (client_fd < 0) continue;
         setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, &socket_timeout, sizeof(socket_timeout));
@@ -269,60 +259,10 @@ int main(int argc, char **argv)
         if (!read_line(client_fd, line, sizeof(line))) {
             close(client_fd); continue;
         }
-        if (strcmp(line, "TRIAL_STATUS\n") == 0) {
-            char response[1024];
-            int lock = trial_lock();
-            if (lock >= 0 && trial_state_read(&trial)) {
-                trial_json(&trial, response + 3, sizeof(response) - 5);
-                memcpy(response, "OK ", 3); strcat(response, "\n");
-                write(client_fd, response, strlen(response));
-            } else write(client_fd, "ERROR trial state unavailable\n", 30);
-            if (lock >= 0) close(lock);
-            close(client_fd); continue;
+        if (sscanf(line, "UPDATE %255s %64s", path, sha) == 2) {
+            if (request_update(path, sha, detail, sizeof(detail))) updated = 1;
         }
-        if (strncmp(line, "TRIAL_PREPARE ", 14) == 0) {
-            int seconds; size_t length, used = 0;
-            char renderer[16], extra;
-            char *document = NULL;
-            if (sscanf(line, "TRIAL_PREPARE %d %15s %lu %c", &seconds, renderer,
-                &length, &extra) == 3 && length <= BLIT_TRIAL_MAX_DOCUMENT && length >= 2)
-                document = malloc(length + 1);
-            if (document) {
-                while (used < length) {
-                    ssize_t count = read(client_fd, document + used, length - used);
-                    if (count < 0 && errno == EINTR) continue;
-                    if (count <= 0) break;
-                    used += (size_t)count;
-                }
-                document[used] = 0;
-                if (used == length && trial_prepare(document, length, renderer, seconds,
-                    &trial, detail, sizeof(detail))) {
-                    char response[1024];
-                    trial_json(&trial, response + 3, sizeof(response) - 5);
-                    memcpy(response, "OK ", 3); strcat(response, "\n");
-                    write(client_fd, response, strlen(response));
-                    free(document); close(client_fd); continue;
-                }
-                free(document);
-            }
-            if (!detail[0]) snprintf(detail, sizeof(detail), "invalid trial request");
-        } else if (sscanf(line, "TRIAL_ACTIVATE %32s %c", trial_id, &trial_extra) == 1 && blit_trial_id_valid(trial_id)) {
-            trial_action = 1;
-        } else if (sscanf(line, "TRIAL_RESTORE %32s %c", trial_id, &trial_extra) == 1 && blit_trial_id_valid(trial_id)) {
-            trial_action = 2;
-        } else if (sscanf(line, "UPDATE %255s %64s", path, sha) == 2) {
-            if (!trial_state_read(&trial))
-                snprintf(detail, sizeof(detail), "trial state unreadable; update refused");
-            else if (trial.active)
-                snprintf(detail, sizeof(detail), "presentation trial requires recovery; update refused");
-            else if (request_update(path, sha, detail, sizeof(detail))) updated = 1;
-        }
-        if (trial_action) {
-            if (!trial_state_read(&trial) || !trial.active || strcmp(trial.id, trial_id) != 0) {
-                snprintf(detail, sizeof(detail), "stale trial id"); trial_action = 0;
-            } else write(client_fd, "OK\n", 3);
-        }
-        if (!updated && !trial_action) {
+        if (!updated) {
             char response[COMMAND_DETAIL_CAPACITY + 8];
             if (detail[0] == '\0')
                 snprintf(detail, sizeof(detail), "invalid update request");
@@ -332,10 +272,6 @@ int main(int argc, char **argv)
         if (updated)
             write(client_fd, "OK\n", 3);
         close(client_fd);
-        if (trial_action == 1 && !trial_activate(trial_id, detail, sizeof(detail)))
-            fprintf(stderr, "blit: trial activation failed id=%s detail=%s\n", trial_id, detail);
-        if (trial_action == 2 && !trial_restore(trial_id, detail, sizeof(detail)))
-            fprintf(stderr, "blit: trial recovery failed id=%s detail=%s\n", trial_id, detail);
         if (updated) {
             char restart_detail[COMMAND_DETAIL_CAPACITY];
             /* The package may have changed the service unit itself. Reload

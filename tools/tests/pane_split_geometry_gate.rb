@@ -14,8 +14,7 @@ require_relative 'gate_server'
 port = Integer(ENV.fetch('BLIT_PANE_SPLIT_PORT', '19291'), 10)
 env = {
   **gate_display_env,
-  'SDL_RENDERER' => 'software',
-  'LD_LIBRARY_PATH' => 'build/sdl3-kms',
+  
   'BLIT_PSF_FONT' => 'assets/fonts/Blit-Hibr-Terminus16.psf'
 }
 pid = Process.spawn(env, 'build/blit/blit-server', port.to_s,

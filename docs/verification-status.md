@@ -1,5 +1,29 @@
 # Verification status
 
+## 2026-10-25: 0.2.22 SDL removed; native KMS is the only presentation path
+
+ADR 0184, the owner's decision. Removed:
+- the SDL renderer and compose pass, SDL display discovery, SDL screenshots,
+  SDL mouse events and the KMSDRM policy;
+- the presentation trial (API route, update-helper commands, recovery);
+- `server.renderer`, `BLIT_RENDERER`, and the SDL-only diagnostics fields;
+- `libSDL3` from the package, and `vendor/SDL3`.
+
+`display_backend` accepts only `kms`. Display rotation, which only SDL could
+draw, is refused (422). blit_server.c is about 4,000 lines shorter.
+
+Gates:
+- native suite: all pass after the SDL-only gates were retired and the rest
+  ported to the DRM mock;
+- `BLIT_GATE_BACKEND=gles`: 140 pass, 2 fail. `hibr_split_capture_gate` (one
+  missed deadline at a 31 ms software-GL render) and `terminal_soak_gate`
+  (RSS 131,952 KiB against a 131,072 KiB ceiling) fail the same way on the
+  pre-removal build (32.7 ms; 132,580 KiB), so they are software-GL limits,
+  not regressions.
+
+Also carries 0.2.21 (immediate frame timing by default), which was not
+deployed on its own.
+
 ## 2026-10-25: 0.2.21 immediate is the default; late flips from the vblank counter
 
 Host A/B on 0.2.20 (owner dragging): late 36 fps with 31 "late" flips at the

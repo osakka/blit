@@ -1,5 +1,4 @@
 #define _GNU_SOURCE 1
-#include <SDL3/SDL.h>
 #include <linux/input.h>
 #include <dirent.h>
 #include "blit_kms.h"
@@ -18,7 +17,6 @@
 #include "blit_cell_geometry.h"
 #include "blit_damage.h"
 #include "blit_ink.h"
-#include "blit_trial_protocol.h"
 
 #include <arpa/inet.h>
 #include <ctype.h>
@@ -52,8 +50,6 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <pty.h>
-#include "blit_startup_diagnostics.h"
-#include "blit_sdl_kms_policy.h"
 /* ADR 0056: DEFLATE for PNG (f=100) and Kitty o=z payloads. */
 #include <xf86drmMode.h>
 #include <zlib.h>
@@ -182,7 +178,9 @@ extern char **environ;
    cell style the API reports or accepts. */
 #define BLIT_ATTR_PROTECTED 1024
 
-#define BLIT_SDL_GRAPHICS_CACHE 32
+typedef struct {
+    int x, y, w, h;
+} BlitRect;
 
 typedef struct {
     unsigned long long id;
@@ -194,7 +192,7 @@ typedef struct {
        it and cannot derive it once bounds has rotated: the one draw that
        presents the scene, the software pointer, and matching this display to
        its DRM connector. */
-    SDL_Rect bounds;
+    BlitRect bounds;
     int physical_width;
     int physical_height;
     int rotation;
@@ -704,81 +702,8 @@ typedef struct {
 } BlitAudioCard;
 
 typedef struct {
-    SDL_Window *window;
-    SDL_Renderer *renderer;
-    SDL_Texture *scene_texture;
-    SDL_Texture *scene_work_texture;
-    SDL_Texture *pointer_texture;
-    unsigned long long pointer_art_revision;
-    SDL_Texture *glyph_atlas;
-    BlitCellCluster raster_keys[128];
-    /* ADR 0062: wide glyphs come from a 16x16 font with fifty thousand
-       bitmaps, which will not fit an atlas built up front. This one is a
-       fixed size and is filled a glyph at a time on first use, with a
-       codepoint-indexed slot table so the lookup costs nothing per frame.
-       Wide glyphs also batch separately, because a batch submits with one
-       texture. */
-    SDL_Texture *wide_atlas;
-    int wide_atlas_columns;
-    int wide_atlas_slots;
-    int wide_atlas_next;
-    int32_t *wide_atlas_slot_of;
-    SDL_Vertex *wide_vertices;
-    int *wide_indices;
-    int wide_capacity;
-    int wide_vertex_count;
-    int wide_index_count;
-    unsigned long long wide_glyph_uploads;
-    SDL_Texture *graphics_textures[BLIT_SDL_GRAPHICS_CACHE];
-    const BlitGraphicsImage *graphics_sources[BLIT_SDL_GRAPHICS_CACHE];
-    unsigned long long graphics_generations[BLIT_SDL_GRAPHICS_CACHE];
-    int graphics_widths[BLIT_SDL_GRAPHICS_CACHE];
-    int graphics_heights[BLIT_SDL_GRAPHICS_CACHE];
-    int graphics_formats[BLIT_SDL_GRAPHICS_CACHE];
-    unsigned long long graphics_cache_hits;
-    unsigned long long graphics_texture_uploads;
-    double last_graphics_upload_ms;
-    double max_graphics_upload_ms;
-    unsigned long long last_graphics_signature;
-    unsigned long long last_topology_revision;
-    int last_target_count;
-    int glyph_atlas_columns;
-    int glyph_atlas_width;
-    int glyph_atlas_height;
-    /* Selectable because the live GLES2 geometry path has shown atlas
-       corruption; diagnostics must identify the active glyph path. */
-    int glyph_geometry_enabled;
-    SDL_Vertex *glyph_vertices;
-    int *glyph_indices;
-    int glyph_vertex_count;
-    int glyph_index_count;
-    int glyph_capacity;
-    SDL_Vertex *background_vertices;
-    int *background_indices;
-    int background_vertex_count;
-    int background_index_count;
-    int background_capacity;
-    unsigned long long background_batch_submissions;
-    unsigned long long background_quads;
-    SDL_Surface *screenshot_surface;
-    /* The identity of the frame those pixels came from, recorded when they
-       were read rather than when they are sent: a slow client can collect a
-       capture several frames later, and headers computed at send time name a
-       state the pixels never had. */
-    char screenshot_identity[1024];
-    int screenshot_presented;
     unsigned long long display_id;
     int initialized;
-    int vsync_enabled;
-    unsigned long long present_calls;
-    double last_present_ms;
-    double max_present_ms;
-    int render_width;
-    int render_height;
-    int viewport_width;
-    int viewport_height;
-    float scale_x;
-    float scale_y;
 } BlitOutput;
 
 typedef struct {
@@ -1057,11 +982,6 @@ typedef struct {
     int gles_guard_active;
     uint64_t gles_guard_since_us;
     int boot_expect_desktop;
-    char boot_renderer_request[64];
-    char renderer_request[64];
-    int renderer_configured;
-    int boot_display_backend_kms;
-    int display_backend_kms;
     int display_backend_configured;
     int render_interval_configured;
     int pane_layout_configured;
@@ -1272,8 +1192,8 @@ typedef struct {
     /* The physical device whose events are being dispatched right now, or
        NULL. ADR 0064 stage 3 routes per device, and the alternative was
        threading a device through keyboard_target and seven
-       input_route_target call sites -- functions SDL also calls, which would
-       all pass NULL. A field is honest here because the input path is
+       input_route_target call sites, several of which have no device and
+       would all pass NULL. A field is honest here because the input path is
        single-threaded and synchronous: a device's events are fully dispatched
        before the next device's drain begins. The discipline that makes it
        safe is that it is set at the top of a drain and cleared at the bottom,
@@ -1289,24 +1209,17 @@ typedef struct {
     char auth_token[256];
     char command_allowlist[1024];
     int output_count;
-    int sdl_ready;
-    int direct_kms;
     uint32_t kms_retry_outputs;
     unsigned long long kms_vblank_traced[BLIT_MAX_DISPLAYS];
     /* Issue #69. A DRM connector's power state is read at most once a second:
        it is three ioctls per connector and nothing changes it but Blit. */
     uint64_t display_power_checked_us;
-    int sdl_vsync_failures;
-    char sdl_renderer_name[64];
     BlitKms *kms;
     BlitFont font;
     /* ADR 0062: the 16x16 font for cells a wide character occupies. Its
        glyph_count is zero when it could not be loaded, which is the test for
        whether a wide cell can be drawn from it. */
     BlitFont wide_font;
-    char sdl_screenshot_dir[256];
-    unsigned long sdl_screenshot_after;
-    unsigned long sdl_frame;
     uint64_t started_us;
     unsigned long long diagnostic_frames;
     double diagnostic_last_frame_gap_ms;
@@ -1352,10 +1265,6 @@ typedef struct {
     double diagnostic_max_select_ms;
     double diagnostic_last_kms_present_ms;
     double diagnostic_max_kms_present_ms;
-    double diagnostic_last_sdl_present_ms;
-    double diagnostic_max_sdl_present_ms;
-    double diagnostic_last_sdl_events_ms;
-    double diagnostic_max_sdl_events_ms;
     double diagnostic_last_evdev_scan_ms;
     double diagnostic_max_evdev_scan_ms;
     double diagnostic_last_render_ms;
@@ -1398,16 +1307,6 @@ typedef struct {
     char diagnostic_last_evdev_keyboard_path[128];
     char diagnostic_last_evdev_keyboard_device_id[128];
     int diagnostic_last_evdev_keyboard_device_present;
-    unsigned long long diagnostic_sdl_mouse_events_discarded;
-    unsigned long long diagnostic_sdl_mouse_events_processed;
-    unsigned long long diagnostic_sdl_mouse_motion_events;
-    unsigned long long diagnostic_sdl_mouse_button_events;
-    unsigned long long diagnostic_sdl_mouse_fallback_events;
-    int sdl_warp_pending;
-    float sdl_warp_x;
-    float sdl_warp_y;
-    int sdl_warp_output;
-    uint64_t sdl_warp_us;
     unsigned long long diagnostic_stream_dropped_events;
     unsigned long long diagnostic_stream_backpressure_disconnects;
     unsigned long long diagnostic_stream_queue_peak_bytes;
@@ -1430,9 +1329,8 @@ typedef struct {
     int diagnostic_graphics_trace_count;
     int diagnostic_graphics_trace_next;
     char diagnostic_graphics_trace[BLIT_MAX_TRACE_EVENTS][768];
-    int sdl_screenshot_written;
     uint32_t screenshot_requested_mask;
-    char sdl_error[256];
+    char presentation_error[256];
     int listen_port;
     char update_token[256];
     char update_state[32];
@@ -1596,10 +1494,6 @@ static char blit_version[64] = BLIT_BUILD_VERSION;
 
 static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                            uint32_t output_mask, int hold_scene);
-static SDL_Texture *create_sdl_glyph_atlas(SDL_Renderer *renderer,
-                                           const BlitFont *font,
-                                           int *columns_out,
-                                           int *width_out, int *height_out);
 static const char *pane_surface_id(const BlitRuntime *runtime,
                                    const BlitPane *pane);
 static void discover_panes(BlitRuntime *runtime);
@@ -1626,8 +1520,6 @@ static int display_index_for_id(const BlitRuntime *runtime, const char *id);
 static void focus_session(BlitRuntime *runtime, BlitSession *target);
 static void disable_input_routes_for_target(BlitRuntime *runtime,
                                             const char *target_id);
-static int activate_direct_kms_fallback(BlitRuntime *runtime);
-static void destroy_sdl_graphics_cache(BlitOutput *output);
 static uint64_t monotonic_us(void);
 static void diagnostic_trace(BlitRuntime *runtime, const char *kind,
                              const char *detail);
@@ -1677,7 +1569,7 @@ static void reset_update_state(BlitRuntime *runtime, int fd,
 static int terminate_session_process(pid_t process_id);
 static void remove_session_streams(BlitRuntime *runtime,
                                    const char *session_id);
-static void send_mouse_report(BlitRuntime *runtime, SDL_WindowID window_id,
+static void send_mouse_report(BlitRuntime *runtime,
                               float pixel_x, float pixel_y, int button,
                               int release);
 static void update_evdev_pointer(BlitRuntime *runtime);
@@ -1732,8 +1624,7 @@ static void effect_json(const BlitRuntime *runtime, char *body,
              runtime->effect.revision,
              runtime->effect.enabled ? "true" : "false",
              runtime->effect.preset, runtime->effect.intensity,
-             runtime->direct_kms ? "drm-kms" :
-                 (runtime->sdl_ready ? "sdl3" : "unavailable"));
+             runtime->kms != NULL ? "drm-kms" : "unavailable");
 }
 
 static void overlay_json(const BlitOverlay *overlay, char *body,
@@ -1758,8 +1649,7 @@ static void overlays_json(const BlitRuntime *runtime, char *body,
     used += (size_t)snprintf(body + used, capacity - used,
                              "{\"revision\":1,\"backend\":\"%s\","
                              "\"overlays\":[",
-                             runtime->direct_kms ? "drm-kms" :
-                                 (runtime->sdl_ready ? "sdl3" : "unavailable"));
+                             runtime->kms != NULL ? "drm-kms" : "unavailable");
     for (i = 0; i < BLIT_MAX_OVERLAYS; ++i) {
         char item[768];
         if (!runtime->overlays[i].used) continue;
@@ -1769,53 +1659,6 @@ static void overlays_json(const BlitRuntime *runtime, char *body,
                                  item);
     }
     snprintf(body + used, capacity - used, "]}");
-}
-
-static void render_pointer(BlitRuntime *runtime, int output_index)
-{
-    BlitOutput *output = &runtime->outputs[output_index];
-    const BlitPointerArt *art = &runtime->pointer_shown_art;
-    SDL_Vertex vertices[4];
-    static const int indices[6] = {0,1,2,0,2,3};
-    static const float corners[4][2] = {{0,0},{1,0},{1,1},{0,1}};
-    int display_index;
-    int i;
-    float x, y;
-
-    if (!runtime->pointer_valid || runtime->pointer_hidden ||
-        runtime->pointer_output != output_index || !art->revision)
-        return;
-    display_index = display_index_for_output(runtime, output_index);
-    if (display_index < 0)
-        return;
-    if (output->pointer_art_revision != art->revision) {
-        if (output->pointer_texture) SDL_DestroyTexture(output->pointer_texture);
-        output->pointer_texture=SDL_CreateTexture(output->renderer,
-            SDL_PIXELFORMAT_RGBA32,SDL_TEXTUREACCESS_STATIC,art->width,art->height);
-        output->pointer_art_revision=art->revision;
-        if (!output->pointer_texture) {
-            diagnostic_log(runtime,"error","pointer_texture_failed",SDL_GetError());return;
-        }
-        if (!SDL_UpdateTexture(output->pointer_texture,NULL,art->rgba,art->width*4) ||
-            !SDL_SetTextureBlendMode(output->pointer_texture,SDL_BLENDMODE_BLEND)) {
-            SDL_DestroyTexture(output->pointer_texture);output->pointer_texture=NULL;
-            diagnostic_log(runtime,"error","pointer_texture_failed",SDL_GetError());return;
-        }
-        SDL_SetTextureScaleMode(output->pointer_texture,SDL_SCALEMODE_NEAREST);
-    }
-    if (!output->pointer_texture) return;
-    x=runtime->pointer_x-runtime->displays[display_index].bounds.x-art->hotspot_x;
-    y=runtime->pointer_y-runtime->displays[display_index].bounds.y-art->hotspot_y;
-    for (i=0;i<4;++i) {
-        blit_rotate_point(runtime->displays[display_index].rotation,
-            runtime->displays[display_index].physical_width,
-            runtime->displays[display_index].physical_height,
-            x+corners[i][0]*art->width,y+corners[i][1]*art->height,
-            &vertices[i].position.x,&vertices[i].position.y);
-        vertices[i].tex_coord.x=corners[i][0];vertices[i].tex_coord.y=corners[i][1];
-        vertices[i].color.r=vertices[i].color.g=vertices[i].color.b=vertices[i].color.a=1.0f;
-    }
-    SDL_RenderGeometry(output->renderer,output->pointer_texture,vertices,4,indices,6);
 }
 
 static int refresh_period_ms(double refresh_hz)
@@ -1979,7 +1822,7 @@ static uint64_t kms_aligned_due(BlitRuntime *runtime, int output_index,
     double refresh;
     uint64_t period, lead, vblank, k;
     int display_index;
-    if (!runtime->direct_kms || runtime->kms_frame_timing_immediate ||
+    if (runtime->kms_frame_timing_immediate ||
         output_index < 0 || output_index >= BLIT_MAX_DISPLAYS)
         return earliest;
     display_index = display_index_for_output(runtime, output_index);
@@ -2016,7 +1859,7 @@ static void kms_adapt_lead(BlitRuntime *runtime, int output_index)
     int display_index = display_index_for_output(runtime, output_index);
     uint64_t lead;
     int missed;
-    if (!runtime->direct_kms || output_index < 0 || output_index >= BLIT_MAX_DISPLAYS ||
+    if (output_index < 0 || output_index >= BLIT_MAX_DISPLAYS ||
         display_index < 0 ||
         blit_kms_display_info(runtime->kms, display_index, &info) != 0)
         return;
@@ -2105,14 +1948,6 @@ static uint32_t all_output_mask(const BlitRuntime *runtime)
         return 0xffffffffU;
     return runtime->output_count > 0 ?
         (1U << runtime->output_count) - 1U : 0;
-}
-
-static int pointer_dirty_for_output(const BlitRuntime *runtime,
-                                    int output_index)
-{
-    return runtime->pointer_dirty && output_index >= 0 &&
-        output_index < 32 &&
-        (runtime->pointer_dirty_outputs & (1U << output_index)) != 0;
 }
 
 static void mark_pointer_dirty_outputs(BlitRuntime *runtime,
@@ -2281,8 +2116,7 @@ static void gles_guard_check(BlitRuntime *runtime)
     uint64_t hold = (uint64_t)(configured ? atoi(configured) : 30) * 1000000ULL;
     int i;
     if (!runtime->gles_guard_active ||
-        monotonic_us() - runtime->gles_guard_since_us < hold ||
-        !runtime->direct_kms)
+        monotonic_us() - runtime->gles_guard_since_us < hold)
         return;
     for (i = 0; i < runtime->display_count; ++i) {
         BlitKmsDisplayInfo info;
@@ -2607,130 +2441,6 @@ static int screenshot_cached_request(const char *path)
     return path != NULL && strstr(path, "?cached=1") != NULL;
 }
 
-static void bmp_u16(unsigned char *p, uint16_t value)
-{
-    p[0] = (unsigned char)(value & 0xffU);
-    p[1] = (unsigned char)((value >> 8) & 0xffU);
-}
-
-static void bmp_u32(unsigned char *p, uint32_t value)
-{
-    p[0] = (unsigned char)(value & 0xffU);
-    p[1] = (unsigned char)((value >> 8) & 0xffU);
-    p[2] = (unsigned char)((value >> 16) & 0xffU);
-    p[3] = (unsigned char)((value >> 24) & 0xffU);
-}
-
-/* Encode the readback directly. SDL_SaveBMP performs the same conversion but
-   its IO failure path is silent on the real GLES2 renderer. Keeping this
-   bounded encoder here makes the diagnostic snapshot independent of SDL's
-   filesystem/IO implementation while preserving a conventional 24-bit BMP. */
-static int encode_bmp_surface(SDL_Surface *source, unsigned char **encoded,
-                              size_t *encoded_length)
-{
-    SDL_Surface *surface;
-    size_t row_bytes;
-    size_t stride;
-    size_t total;
-    int y;
-    unsigned char *data;
-
-    if (source == NULL || source->w < 1 || source->h < 1)
-        return 0;
-    row_bytes = (size_t)source->w * 3U;
-    stride = (row_bytes + 3U) & ~((size_t)3U);
-    if ((size_t)source->h > (SIZE_MAX - 54U) / stride)
-        return 0;
-    total = 54U + stride * (size_t)source->h;
-    if (total > UINT32_MAX)
-        return 0;
-    surface = SDL_ConvertSurface(source, SDL_PIXELFORMAT_BGR24);
-    if (surface == NULL || surface->pixels == NULL) {
-        if (surface != NULL) SDL_DestroySurface(surface);
-        return 0;
-    }
-    data = (unsigned char *)calloc(1, total);
-    if (data == NULL) {
-        SDL_DestroySurface(surface);
-        return 0;
-    }
-    data[0] = 'B'; data[1] = 'M';
-    bmp_u32(data + 2, (uint32_t)total);
-    bmp_u32(data + 10, 54U);
-    bmp_u32(data + 14, 40U);
-    bmp_u32(data + 18, (uint32_t)surface->w);
-    bmp_u32(data + 22, (uint32_t)surface->h);
-    bmp_u16(data + 26, 1U);
-    bmp_u16(data + 28, 24U);
-    bmp_u32(data + 34, (uint32_t)(stride * (size_t)surface->h));
-    bmp_u32(data + 38, 2835U);
-    bmp_u32(data + 42, 2835U);
-    for (y = 0; y < surface->h; ++y) {
-        const unsigned char *row = (const unsigned char *)surface->pixels +
-            (size_t)(surface->h - 1 - y) * (size_t)surface->pitch;
-        memcpy(data + 54U + (size_t)y * stride, row, row_bytes);
-    }
-    SDL_DestroySurface(surface);
-    *encoded = data;
-    *encoded_length = total;
-    return 1;
-}
-
-static int send_sdl_screenshot(BlitHttpClient *client, BlitRuntime *runtime,
-                               const char *path)
-{
-    unsigned char *bytes = NULL;
-    SDL_Surface *pixels;
-    int output_index;
-    BlitOutput *output;
-    size_t length = 0;
-    char capture_headers[1024];
-
-    if (runtime->direct_kms || !runtime->sdl_ready) {
-        send_problem(client->fd, 501, "Not Implemented", "screenshot_backend",
-                     "API screenshots currently require the SDL3 backend.");
-        return -1;
-    }
-    output_index = screenshot_output_index(runtime, path);
-    if (output_index < 0 || runtime->outputs[output_index].renderer == NULL) {
-        send_problem(client->fd, 404, "Not Found", "display_not_found",
-                     "The requested display does not exist or has no renderer.");
-        return -1;
-    }
-    output = &runtime->outputs[output_index];
-    /* Only a frame that was captured during a present is served. Reading the
-       renderer's current back buffer here used to be the fallback, which could
-       answer with pixels that were never presented; the caller waits for a
-       capture instead. */
-    pixels = output->screenshot_surface;
-    if (pixels == NULL) {
-        send_problem(client->fd, 503, "Service Unavailable", "screenshot_failed",
-                     "No presented frame has been captured for this display.");
-        return -1;
-    }
-    output->screenshot_surface = NULL;
-    snprintf(capture_headers, sizeof(capture_headers), "%s%s",
-             output->screenshot_identity,
-             output->screenshot_presented ?
-                 "X-Blit-Capture-Presented: true\r\n" :
-                 "X-Blit-Capture-Presented: false\r\n");
-    if (!encode_bmp_surface(pixels, &bytes, &length)) {
-        SDL_DestroySurface(pixels);
-        send_problem(client->fd, 503, "Service Unavailable", "screenshot_failed",
-                     "The SDL framebuffer could not be converted to BMP.");
-        return -1;
-    }
-    SDL_DestroySurface(pixels);
-    if (!queue_http_bytes_extra(client, 200, "OK", "image/bmp",
-                                capture_headers, bytes, length)) {
-        free(bytes);
-        send_problem(client->fd, 503, "Service Unavailable", "screenshot_failed",
-                     "The framebuffer response could not be queued.");
-        return -1;
-    }
-    return 1;
-}
-
 static int send_kms_screenshot(BlitHttpClient *client, BlitRuntime *runtime,
                                int output_index)
 {
@@ -2739,9 +2449,9 @@ static int send_kms_screenshot(BlitHttpClient *client, BlitRuntime *runtime,
     char capture_headers[1024];
     size_t used;
     int result;
-    /* Answer from a frame the panel is showing, as SDL answers from a
-       presented one: the front buffer is submitted before its flip
-       completes, so wait for the completion (or the flip timeout). */
+    /* Answer from a frame the panel is showing: the front buffer is
+       submitted before its flip completes, so wait for the completion (or
+       the flip timeout). */
     if (!blit_kms_front_presented(runtime->kms, output_index)) return 0;
     result = blit_kms_screenshot(runtime->kms, output_index, &bytes, &length);
     capture_identity_headers(runtime, capture_headers,
@@ -2946,25 +2656,7 @@ static unsigned long long diagnostic_missed_deadlines(
     return total;
 }
 
-static unsigned long long diagnostic_graphics_cache_hits(
-    const BlitRuntime *runtime)
-{
-    unsigned long long total = 0;
-    int i;
-    for (i = 0; i < runtime->output_count; ++i)
-        total += runtime->outputs[i].graphics_cache_hits;
-    return total;
-}
 
-static unsigned long long diagnostic_graphics_texture_uploads(
-    const BlitRuntime *runtime)
-{
-    unsigned long long total = 0;
-    int i;
-    for (i = 0; i < runtime->output_count; ++i)
-        total += runtime->outputs[i].graphics_texture_uploads;
-    return total;
-}
 
 static unsigned long long diagnostic_pixel_frames_pending(
     const BlitRuntime *runtime)
@@ -2976,45 +2668,9 @@ static unsigned long long diagnostic_pixel_frames_pending(
     return total;
 }
 
-static double diagnostic_last_graphics_upload_ms(const BlitRuntime *runtime)
-{
-    double value = 0.0;
-    int i;
-    for (i = 0; i < runtime->output_count; ++i)
-        if (runtime->outputs[i].last_graphics_upload_ms > value)
-            value = runtime->outputs[i].last_graphics_upload_ms;
-    return value;
-}
 
-static double diagnostic_max_graphics_upload_ms(const BlitRuntime *runtime)
-{
-    double value = 0.0;
-    int i;
-    for (i = 0; i < runtime->output_count; ++i)
-        if (runtime->outputs[i].max_graphics_upload_ms > value)
-            value = runtime->outputs[i].max_graphics_upload_ms;
-    return value;
-}
 
-static unsigned long long diagnostic_background_batches(
-    const BlitRuntime *runtime)
-{
-    unsigned long long total = 0;
-    int i;
-    for (i = 0; i < runtime->output_count; ++i)
-        total += runtime->outputs[i].background_batch_submissions;
-    return total;
-}
 
-static unsigned long long diagnostic_background_quads(
-    const BlitRuntime *runtime)
-{
-    unsigned long long total = 0;
-    int i;
-    for (i = 0; i < runtime->output_count; ++i)
-        total += runtime->outputs[i].background_quads;
-    return total;
-}
 
 static unsigned long long diagnostic_stream_queue_bytes(
     const BlitRuntime *runtime)
@@ -3291,20 +2947,12 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"last_evdev_keyboard_path\":\"%s\","
         "\"last_evdev_keyboard_device_id\":\"%s\","
         "\"last_evdev_keyboard_device_present\":%s,"
-        "\"sdl_mouse_events_discarded\":%llu,"
-        "\"sdl_mouse_events_processed\":%llu,"
-        "\"sdl_mouse_motion_events\":%llu,"
-        "\"sdl_mouse_button_events\":%llu,"
-        "\"sdl_mouse_fallback_events\":%llu,"
         "\"stream_queue_bytes\":%llu,\"stream_queue_peak_bytes\":%llu,"
         "\"stream_dropped_events\":%llu,"
         "\"stream_backpressure_disconnects\":%llu,"
         "\"graphics_payloads\":%llu,\"graphics_payloads_kitty\":%llu,"
         "\"graphics_payloads_sixel\":%llu,"
         "\"graphics_payloads_rejected\":%llu,"
-        "\"graphics_cache_hits\":%llu,\"graphics_texture_uploads\":%llu,"
-        "\"last_graphics_upload_ms\":%.3f,\"max_graphics_upload_ms\":%.3f,"
-        "\"background_batches\":%llu,\"background_quads\":%llu,"
         "\"pixel_frames_accepted\":%llu,\"pixel_frame_errors\":%llu,"
         "\"pixel_frames_pending\":%llu,"
         "\"frame_rate_frames\":%llu,\"frame_rate_window_ms\":%llu,"
@@ -3323,9 +2971,7 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"loop_gap_window_sequence\":%llu,"
         "\"loop_gap_window_max_ms\":%.3f,"
         "\"last_kms_present_ms\":%.3f,\"max_kms_present_ms\":%.3f,"
-        "\"last_sdl_present_ms\":%.3f,\"max_sdl_present_ms\":%.3f,"
         "\"last_select_ms\":%.3f,\"max_select_ms\":%.3f,"
-        "\"last_sdl_events_ms\":%.3f,\"max_sdl_events_ms\":%.3f,"
         "\"last_evdev_scan_ms\":%.3f,\"max_evdev_scan_ms\":%.3f,"
         "\"evdev_open_requests\":%llu,"
         "\"evdev_open_requests_dropped\":%llu,"
@@ -3391,11 +3037,6 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         runtime->diagnostic_last_evdev_keyboard_path,
         runtime->diagnostic_last_evdev_keyboard_device_id,
         runtime->diagnostic_last_evdev_keyboard_device_present ? "true" : "false",
-        runtime->diagnostic_sdl_mouse_events_discarded,
-        runtime->diagnostic_sdl_mouse_events_processed,
-        runtime->diagnostic_sdl_mouse_motion_events,
-        runtime->diagnostic_sdl_mouse_button_events,
-        runtime->diagnostic_sdl_mouse_fallback_events,
         diagnostic_stream_queue_bytes(runtime),
         runtime->diagnostic_stream_queue_peak_bytes,
         runtime->diagnostic_stream_dropped_events,
@@ -3404,12 +3045,6 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         runtime->graphics_payloads_kitty,
         runtime->graphics_payloads_sixel,
         runtime->graphics_payloads_rejected,
-        diagnostic_graphics_cache_hits(runtime),
-        diagnostic_graphics_texture_uploads(runtime),
-        diagnostic_last_graphics_upload_ms(runtime),
-        diagnostic_max_graphics_upload_ms(runtime),
-        diagnostic_background_batches(runtime),
-        diagnostic_background_quads(runtime),
         runtime->pixel_frames_accepted,
         runtime->pixel_frame_errors,
         diagnostic_pixel_frames_pending(runtime),
@@ -3434,12 +3069,8 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         runtime->diagnostic_loop_window_max_gap_ms,
         runtime->diagnostic_last_kms_present_ms,
         runtime->diagnostic_max_kms_present_ms,
-        runtime->diagnostic_last_sdl_present_ms,
-        runtime->diagnostic_max_sdl_present_ms,
         runtime->diagnostic_last_select_ms,
         runtime->diagnostic_max_select_ms,
-        runtime->diagnostic_last_sdl_events_ms,
-        runtime->diagnostic_max_sdl_events_ms,
         runtime->diagnostic_last_evdev_scan_ms,
         runtime->diagnostic_max_evdev_scan_ms,
         runtime->diagnostic_open_requests,
@@ -3464,9 +3095,8 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
 static void server_json(const BlitRuntime *runtime, char *body, size_t capacity)
 {
     char escaped_error[256];
-    const char *backend = runtime->direct_kms ? "drm-kms" :
-        (runtime->sdl_ready ? "sdl3" : "unavailable");
-    json_escape(runtime->sdl_error, escaped_error, sizeof(escaped_error));
+    const char *backend = runtime->kms != NULL ? "drm-kms" : "unavailable";
+    json_escape(runtime->presentation_error, escaped_error, sizeof(escaped_error));
     snprintf(body, capacity,
              "{\"id\":\"blit\",\"name\":\"blit\","
              "\"server_version\":\"%s\",\"api_version\":\"0.1\",\"revision\":1,"
@@ -3480,7 +3110,7 @@ static void server_json(const BlitRuntime *runtime, char *body, size_t capacity)
              "\"settings-persistence\","
              "\"login-manager\",\"network-terminal-input\",\"diagnostics\","
              "\"runtime-diagnostics\",\"observation-snapshot\","
-             "\"lifecycle-control\",\"bounded-presentation-trials\","
+             "\"lifecycle-control\","
              "\"effects\",\"overlays\",\"font-selection\"],\"display_count\":%d,"
              "\"display_backend\":{\"name\":\"%s\",\"ready\":%s,"
              "\"error\":\"%s\"},\"resources\":{"
@@ -3495,7 +3125,6 @@ static void server_json(const BlitRuntime *runtime, char *body, size_t capacity)
              "\"diagnostics\":\"/v1/diagnostics\","
              "\"runtime_diagnostics\":\"/v1/diagnostics/runtime\","
              "\"observation\":\"/v1/diagnostics/observation\","
-             "\"presentation_trial\":\"/v1/control/presentation-trial\","
              "\"effects\":\"/v1/effects\","
              "\"overlays\":\"/v1/overlays\"},"
              /* ADR 0065: the posture the server actually came up with, so an
@@ -3505,9 +3134,7 @@ static void server_json(const BlitRuntime *runtime, char *body, size_t capacity)
              "\"authentication\":\"%s\","
              "\"command_allowlist\":%s}}",
              blit_version, runtime->display_count, backend,
-             (runtime->direct_kms ? runtime->display_count > 0 :
-              runtime->sdl_ready && runtime->output_count > 0 &&
-              runtime->output_count == runtime->display_count) ?
+             runtime->kms != NULL && runtime->display_count > 0 ?
                  "true" : "false", escaped_error,
              runtime->listener_bind, runtime->listener_port,
              runtime->auth_token[0] != '\0' ? "required" : "none",
@@ -3524,25 +3151,14 @@ static void version_json(char *body, size_t capacity)
 static const char *display_presentation_state(const BlitRuntime *runtime,
                                               int display_index)
 {
-    if (runtime->direct_kms) {
-        BlitKmsDisplayInfo info;
-        if (blit_kms_display_info(runtime->kms, display_index, &info) == 0) {
-            if (info.presentation_state == BLIT_KMS_PRESENTATION_FAILED)
-                return "failed";
-            if (info.presentation_state == BLIT_KMS_PRESENTATION_RECOVERING)
-                return "recovering";
-        }
-        return "presenting";
+    BlitKmsDisplayInfo info;
+    if (blit_kms_display_info(runtime->kms, display_index, &info) == 0) {
+        if (info.presentation_state == BLIT_KMS_PRESENTATION_FAILED)
+            return "failed";
+        if (info.presentation_state == BLIT_KMS_PRESENTATION_RECOVERING)
+            return "recovering";
     }
-    {
-        int output_index;
-        for (output_index = 0; output_index < runtime->output_count;
-             ++output_index)
-            if (runtime->outputs[output_index].display_id ==
-                runtime->displays[display_index].id)
-                return "presenting";
-    }
-    return "failed";
+    return "presenting";
 }
 
 static int runtime_has_failed_display(const BlitRuntime *runtime)
@@ -3564,7 +3180,7 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
     for (i = 0; i < runtime->output_count && used < capacity; ++i) {
         int display_index = display_index_for_output(runtime, i);
         BlitKmsDisplayInfo kms_info;
-        int have_kms_info = runtime->direct_kms && display_index >= 0 &&
+        int have_kms_info = display_index >= 0 &&
             blit_kms_display_info(runtime->kms, display_index, &kms_info) == 0;
         used += (size_t)snprintf(
             body + used, capacity - used,
@@ -3593,16 +3209,11 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
             (unsigned long long)output_render_period_us(runtime, i),
             (double)output_render_period_us(runtime, i) / 1000.0,
             runtime->render_missed_deadlines[i],
-            runtime->direct_kms ?
-                (have_kms_info ? kms_info.last_present_ms :
-                    runtime->diagnostic_last_kms_present_ms) :
-                runtime->outputs[i].last_present_ms,
-            runtime->direct_kms ?
-                (have_kms_info ? kms_info.max_present_ms :
-                    runtime->diagnostic_max_kms_present_ms) :
-                runtime->outputs[i].max_present_ms,
-            have_kms_info ? kms_info.present_calls :
-                (runtime->direct_kms ? 0ULL : runtime->outputs[i].present_calls),
+            have_kms_info ? kms_info.last_present_ms :
+                runtime->diagnostic_last_kms_present_ms,
+            have_kms_info ? kms_info.max_present_ms :
+                runtime->diagnostic_max_kms_present_ms,
+            have_kms_info ? kms_info.present_calls : 0ULL,
             have_kms_info ? "true" : "false",
             have_kms_info ? kms_info.flip_completions : 0ULL,
             have_kms_info ? kms_info.vblank_sequence : 0U,
@@ -3617,20 +3228,12 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
             have_kms_info ? kms_info.copy_ms : 0.0,
             have_kms_info ? kms_info.submit_ms : 0.0,
             have_kms_info ? kms_info.drawn_cells : 0ULL,
-            runtime->direct_kms ?
-                runtime->displays[display_index].bounds.w :
-                runtime->outputs[i].render_width,
-            runtime->direct_kms ?
-                runtime->displays[display_index].bounds.h :
-                runtime->outputs[i].render_height,
-            runtime->direct_kms ? runtime->displays[display_index].bounds.w :
-                runtime->outputs[i].viewport_width,
-            runtime->direct_kms ? runtime->displays[display_index].bounds.h :
-                runtime->outputs[i].viewport_height,
-            runtime->direct_kms ? 1.0f : runtime->outputs[i].scale_x,
-            runtime->direct_kms ? 1.0f : runtime->outputs[i].scale_y);
-        /* ADR 0181: which compositor made this output's frames. SDL outputs
-           are composed by SDL's renderer. */
+            runtime->displays[display_index].bounds.w,
+            runtime->displays[display_index].bounds.h,
+            runtime->displays[display_index].bounds.w,
+            runtime->displays[display_index].bounds.h,
+            1.0f, 1.0f);
+        /* ADR 0181: which compositor made this output's frames. */
         if (used < capacity) {
             char reason[384];
             char renderer[256];
@@ -3652,9 +3255,9 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
                 "\"total_us\":%llu,\"count\":%llu,"
                 "\"timing\":\"%s\",\"lead_us\":%llu,"
                 "\"on_time\":%llu,\"late\":%llu,\"slot_misses\":%llu}}",
-                have_kms_info ? kms_info.compositor : "sdl",
+                have_kms_info ? kms_info.compositor : "unavailable",
                 have_kms_info && kms_info.compositor_requested[0] ?
-                    kms_info.compositor_requested : (have_kms_info ? "cpu" : "sdl"),
+                    kms_info.compositor_requested : (have_kms_info ? "cpu" : "unavailable"),
                 reason, renderer, have_kms_info ? kms_info.gles_frames : 0ULL,
                 have_kms_info ? kms_info.gles_uploaded_rows : 0ULL,
                 have_kms_info ? kms_info.gles_composed_frames : 0ULL,
@@ -3672,8 +3275,7 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
                 have_kms_info ? kms_info.max_flip_ms : 0.0,
                 have_kms_info ? kms_info.flip_wait_total_us : 0ULL,
                 have_kms_info ? kms_info.flip_waits : 0ULL,
-                !runtime->direct_kms ? "sdl" :
-                    runtime->kms_frame_timing_immediate ? "immediate" : "late",
+                runtime->kms_frame_timing_immediate ? "immediate" : "late",
                 (unsigned long long)(i < BLIT_MAX_DISPLAYS && !runtime->kms_frame_timing_immediate ?
                                      runtime->kms_lead_us[i] : 0),
                 have_kms_info ? kms_info.flips_on_time : 0ULL,
@@ -3695,8 +3297,7 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
     char hotplug[512];
     char hotplug_error[256];
     BlitKmsHotplugInfo hotplug_info;
-    const char *backend = runtime->direct_kms ? "drm-kms" :
-        (runtime->sdl_ready ? "sdl3" : "unavailable");
+    const char *backend = runtime->kms != NULL ? "drm-kms" : "unavailable";
     int sessions = 0;
     int streams = 0;
     int routes = 0;
@@ -3705,9 +3306,6 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
     int idle_outputs = 0;
     char warnings[224];
     const char *presentation_sync;
-    const char *video_driver;
-    char escaped_renderer[128];
-    char escaped_video_driver[128];
     int i;
     for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
         if (runtime->sessions[i].used) ++sessions;
@@ -3721,7 +3319,7 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
     for (i = 0; i < BLIT_MAX_INPUT_DEVICES; ++i)
         if (runtime->input_devices[i].used) ++input_devices;
     render_scheduler_json(runtime, scheduler, sizeof(scheduler));
-    blit_kms_hotplug_info(runtime->direct_kms ? runtime->kms : NULL, &hotplug_info);
+    blit_kms_hotplug_info(runtime->kms, &hotplug_info);
     json_escape(hotplug_info.error, hotplug_error, sizeof(hotplug_error));
     snprintf(hotplug, sizeof(hotplug),
         "{\"supported\":%s,\"observer\":\"%s\",\"inventory_revision\":%llu,"
@@ -3729,20 +3327,9 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
         hotplug_info.observer ? "true" : "false",
         !hotplug_info.observer ? "unavailable" : hotplug_info.uevents ? "uevent+periodic" : "periodic",
         hotplug_info.inventory_revision, hotplug_info.scans, hotplug_info.last_scan_ms, hotplug_error);
-    json_escape(runtime->sdl_error, escaped_error, sizeof(escaped_error));
-    json_escape(runtime->sdl_renderer_name, escaped_renderer,
-                sizeof(escaped_renderer));
-    video_driver = runtime->direct_kms ? "direct-kms" :
-        (SDL_GetCurrentVideoDriver() != NULL ?
-             SDL_GetCurrentVideoDriver() : "unavailable");
-    json_escape(video_driver, escaped_video_driver,
-                sizeof(escaped_video_driver));
-    presentation_sync = runtime->direct_kms ?
-        (runtime->kms_async_pageflip ?
-             "drm-page-flip-async" : "drm-page-flip") :
-        (runtime->output_count == 0 ||
-         runtime->output_count != runtime->display_count ||
-         runtime->sdl_vsync_failures > 0 ? "scheduler-only" : "sdl-vsync");
+    json_escape(runtime->presentation_error, escaped_error, sizeof(escaped_error));
+    presentation_sync = runtime->kms_async_pageflip ?
+        "drm-page-flip-async" : "drm-page-flip";
     /* An output with nothing on it (issue #55).
  *
  * A Blit restart leaves the host with no desktop: the session is gone and
@@ -3855,7 +3442,7 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
         errors[0] = '\0';
         error_used += (size_t)snprintf(errors + error_used,
                                        sizeof(errors) - error_used, "[");
-        if (runtime->sdl_error[0]) {
+        if (runtime->presentation_error[0]) {
             error_used += (size_t)snprintf(errors + error_used,
                 sizeof(errors) - error_used, "\"backend_error\"");
             first_error = 0;
@@ -3885,11 +3472,6 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              "\"effective_interval_ms\":%d,\"mode\":\"refresh-aware\","
              "\"outputs\":%s,"
              "\"font_scale\":%.4f,\"surface_inset_px\":%d,"
-             "\"direct_kms\":%s,"
-             "\"video_driver\":\"%s\","
-             "\"sdl_kms_mode\":%s,"
-             "\"renderer\":\"%s\","
-             "\"glyph_path\":\"%s\","
              "\"presentation_sync\":\"%s\","
              "\"hotplug\":%s,"
              "\"pointer\":{\"valid\":%s,\"x\":%.1f,\"y\":%.1f,"
@@ -3906,9 +3488,7 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              "\"sixel_max_width\":%d,\"sixel_max_height\":%d,"
              "\"sixel_color_registers\":%d},"
              "\"errors\":%s,\"warnings\":%s}",
-             (runtime->direct_kms ? runtime->display_count > 0 :
-              runtime->sdl_ready && runtime->output_count > 0 &&
-              runtime->output_count == runtime->display_count) ?
+             runtime->kms != NULL && runtime->display_count > 0 ?
                  "true" : "false", backend, escaped_error,
              runtime->display_count, runtime->output_count, sessions, surfaces,
              streams, routes, runtime->evdev_keyboard_count,
@@ -3921,13 +3501,6 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              scheduler,
              font_scale_value(runtime),
              BLIT_SURFACE_INSET_PX,
-             runtime->direct_kms ? "true" : "false", escaped_video_driver,
-             blit_sdl_kms_mode_json(video_driver),
-             escaped_renderer,
-             runtime->direct_kms ? "kms" :
-                 (runtime->output_count > 0 &&
-                  runtime->outputs[0].glyph_geometry_enabled ?
-                      "geometry-batch" : "immediate-texture"),
              presentation_sync,
              hotplug,
              runtime->pointer_valid ? "true" : "false",
@@ -3976,18 +3549,14 @@ static int display_index_by_id(const BlitRuntime *runtime, const char *id)
  * What is left over is the settings that resize nothing, and they divide by
  * who is allowed to perform them:
  *
- *   rotation    Blit's own render transform. No DRM master needed, so it is
- *               available wherever the scene is composed into a texture that
- *               can be drawn rotated -- which is the SDL path.
+ *   rotation    a render transform. Native KMS composes straight into the
+ *               connector's framebuffer and has none, so it is refused
+ *               (ADR 0184 removed the SDL path that had one).
  *   power       the connector's DPMS, which needs DRM master. Measured on the
  *               live host: /sys/class/drm/card0-DP-1/dpms is mode 444 and a
- *               root write returns EACCES, so sysfs is not an avenue on any
- *               backend; and one fd holds /dev/dri/card0, which is Blit's own
- *               through SDL. SDL publishes that master fd per window
- *               (SDL_PROP_WINDOW_KMSDRM_DRM_FD_NUMBER), which is the
- *               "cooperation with SDL" branch ADR 0067 recorded as a
- *               dependency. 0.1.456 reads it; `capabilities` does not claim
- *               `power` until something can set it.
+ *               root write returns EACCES, so sysfs is not an avenue; Blit
+ *               holds the master fd itself. 0.1.456 reads it; `capabilities`
+ *               does not claim `power` until something can set it.
  *   brightness  a backlight, which this host does not have:
  *               /sys/class/backlight exists and is empty. The capability is
  *               therefore absent here, and that is the answer rather than a
@@ -4023,8 +3592,7 @@ static int read_sysfs_long(const char *path, long *value)
 /* The attribution rule, and the whole of it: a backlight belongs to a display
    only when the host has exactly one of each.
  
-   There is no link from a backlight device to a connector in sysfs, and under
-   SDL there is no connector to link it to. Guessing -- "the first backlight
+   There is no link from a backlight device to a connector in sysfs. Guessing -- "the first backlight
    goes to the first display" -- would put a laptop panel's brightness on an
    external monitor, and a brightness control that dims the wrong screen is
    worse than one that is absent. So the ambiguous case reports nothing, and
@@ -4115,31 +3683,11 @@ static int display_write_brightness(const BlitDisplay *display, int percent)
     return written == (ssize_t)length ? 0 : -1;
 }
 
-/* The DRM fd, from whichever backend holds it. On the direct-KMS path Blit
-   opened it; under SDL it belongs to SDL's KMSDRM backend, which publishes it
-   per window. Nothing here ever reads from the fd -- SDL waits for its own
-   pageflip events on it with no timeout, so consuming one behind its back
-   would hang the render thread for good. */
+/* The DRM fd Blit opened for native KMS. Nothing here ever reads from it:
+   the flip events on it belong to the compositor. */
 static int display_drm_fd(BlitRuntime *runtime)
 {
-    int output_index;
-
-    if (runtime->direct_kms)
-        return runtime->kms != NULL ? blit_kms_fd(runtime->kms) : -1;
-    for (output_index = 0; output_index < runtime->output_count;
-         ++output_index) {
-        SDL_Window *window = runtime->outputs[output_index].window;
-        int fd;
-
-        if (window == NULL)
-            continue;
-        fd = (int)SDL_GetNumberProperty(SDL_GetWindowProperties(window),
-                                        SDL_PROP_WINDOW_KMSDRM_DRM_FD_NUMBER,
-                                        -1);
-        if (fd >= 0)
-            return fd;
-    }
-    return -1;
+    return runtime->kms != NULL ? blit_kms_fd(runtime->kms) : -1;
 }
 
 static int connector_dpms_value(int fd, const drmModeConnector *connector)
@@ -4164,14 +3712,11 @@ static int connector_dpms_value(int fd, const drmModeConnector *connector)
 
 /* Match each display to its connector, and read that connector's power state.
  
-   The match is by name, not by index, because index order is the bug: SDL
-   enumerates only the connectors it is driving, the kernel enumerates all of
-   them, and this host has eight with one connected -- so display 0 is
-   connector 0 only by luck. SDL names a KMSDRM display "<type>-<type_id>"
-   from libdrm's own connector type name, so the display Blit already reports
-   as `DP-1` is the connector that formats to `DP-1`. On the direct-KMS path
-   Blit names a display after the connector id instead, so that path matches
-   on the id it already holds. */
+   The match is by connector id, not by index, because index order is the
+   bug: the kernel enumerates every connector, and this host has eight with
+   one connected -- so display 0 is connector 0 only by luck. Native KMS
+   names a display after its connector id, so it matches on the id it
+   already holds. */
 static void refresh_display_power(BlitRuntime *runtime)
 {
     int fd;
@@ -4205,9 +3750,8 @@ static void refresh_display_power(BlitRuntime *runtime)
         for (display_index = 0; display_index < runtime->display_count;
              ++display_index) {
             BlitDisplay *display = &runtime->displays[display_index];
-            int matched = runtime->direct_kms ?
-                display->id == (unsigned long long)connector->connector_id :
-                strcmp(display->name, name) == 0;
+            int matched =
+                display->id == (unsigned long long)connector->connector_id;
 
             if (!matched)
                 continue;
@@ -4271,17 +3815,13 @@ static size_t display_item_json(const BlitRuntime *runtime, int index,
        does nothing is worse than its absence, which is the reasoning ADR 0064
        used for the empty object this replaces.
 
-       `rotation` is Blit's own render transform and needs no DRM master, but
-       it needs a composed scene texture to draw rotated, which is the SDL
-       path; the direct-KMS compositor has no transform and says so by
-       omission. `brightness` is present only where a backlight was
+       `rotation` is absent: the native KMS compositor has no transform and
+       says so by omission. `brightness` is present only where a backlight was
        attributed. `power` is readable here but is not a capability: nothing
        can set it yet (#69 continues). */
     complete &= json_appendf(body, capacity, &used,
         ",\"presentation_state\":\"%s\",\"capabilities\":[\"mode-report\"",
         display_presentation_state(runtime, index));
-    if (!runtime->direct_kms)
-        complete &= json_appendf(body, capacity, &used, ",\"rotation\"");
     if (display->backlight[0] != '\0')
         complete &= json_appendf(body, capacity, &used, ",\"brightness\"");
     complete &= json_appendf(body, capacity, &used,
@@ -4309,15 +3849,11 @@ static size_t display_item_json(const BlitRuntime *runtime, int index,
                                  escaped_backlight);
     }
     complete &= json_appendf(body, capacity, &used, "},\"configuration\":{");
-    if (!runtime->direct_kms)
-        complete &= json_appendf(body, capacity, &used, "\"rotation\":%d",
-                                 display->rotation);
     if (display->backlight[0] != '\0') {
         int percent = display_brightness_percent(display);
         if (percent >= 0)
             complete &= json_appendf(body, capacity, &used,
-                                     "%s\"brightness_percent\":%d",
-                                     runtime->direct_kms ? "" : ",", percent);
+                                     "\"brightness_percent\":%d", percent);
     }
     complete &= json_appendf(body, capacity, &used,
                              "},\"revision\":%llu}",
@@ -6841,15 +6377,6 @@ static int parse_color(const char *text, uint32_t *color)
         return 0;
     *color = (uint32_t)value;
     return 1;
-}
-
-/* ADR0171: native outline/colour coverage precedes the ADR0062 wide bitmap.
-   Both SDL and native KMS use the same selection rule. */
-static const BlitFont *cell_font(const BlitRuntime *runtime,
-                                 uint16_t attributes, uint32_t codepoint)
-{
-    return blit_font_cell_source(&runtime->font,
-        attributes & BLIT_ATTR_WIDE ? &runtime->wide_font : NULL, codepoint);
 }
 
 /* A session's default colours come from DT_INK/DT_FACE (or
@@ -14082,7 +13609,7 @@ static void dispatch_evdev_mouse_button(BlitRuntime *runtime, int device_index,
         return;
     bit = 1U << button;
     /* The per-device masks are the authoritative evdev state.  Do not use
-       the logical mask here: SDL/API input may update that mask between two
+       the logical mask here: API input may update that mask between two
        evdev devices, which can suppress a transition without recording the
        duplicate as a coalesced multi-device event. */
     before = evdev_mouse_button_aggregate(runtime);
@@ -14265,7 +13792,7 @@ static int display_index_at(const BlitRuntime *runtime, float x, float y)
     int i;
 
     for (i = 0; i < runtime->display_count; ++i) {
-        const SDL_Rect *bounds = &runtime->displays[i].bounds;
+        const BlitRect *bounds = &runtime->displays[i].bounds;
         if (x >= bounds->x && x < bounds->x + bounds->w &&
             y >= bounds->y && y < bounds->y + bounds->h)
             return i;
@@ -14285,28 +13812,13 @@ static void apply_display_placements(BlitRuntime *runtime,
         if (display_index < 0) continue;
         runtime->displays[display_index].bounds.x = xs[i];
         runtime->displays[display_index].bounds.y = ys[i];
-        if (runtime->direct_kms)
-            blit_kms_set_display_position(runtime->kms, display_index,
-                                          xs[i], ys[i]);
-    }
-    if (!runtime->direct_kms) {
-        for (output_index = 0; output_index < runtime->output_count;
-             ++output_index) {
-            for (i = 0; i < count; ++i) {
-                int display_index = display_index_for_id(runtime, ids[i]);
-                if (display_index >= 0 &&
-                    runtime->outputs[output_index].display_id ==
-                    runtime->displays[display_index].id)
-                    SDL_SetWindowPosition(runtime->outputs[output_index].window,
-                                          xs[i], ys[i]);
-            }
-        }
+        blit_kms_set_display_position(runtime->kms, display_index,
+                                      xs[i], ys[i]);
     }
     for (output_index = 0; output_index < runtime->output_count;
          ++output_index)
         runtime->outputs[output_index].initialized = 0;
-    if (runtime->direct_kms)
-        runtime->pointer_output = output_index_for_display_index(runtime,
+    runtime->pointer_output = output_index_for_display_index(runtime,
             display_index_at(runtime, runtime->pointer_x,
                              runtime->pointer_y));
     runtime->pointer_dirty_outputs = all_output_mask(runtime);
@@ -17035,8 +16547,6 @@ static int apply_font_configuration(BlitRuntime *runtime, const char *path,
 {
     BlitFont candidate;
     BlitRaster *raster = NULL;
-    SDL_Texture *atlases[BLIT_MAX_DISPLAYS] = {0};
-    int atlas_columns[BLIT_MAX_DISPLAYS], atlas_widths[BLIT_MAX_DISPLAYS], atlas_heights[BLIT_MAX_DISPLAYS];
     int i;
 
     if (runtime == NULL || path == NULL || path[0] == '\0' ||
@@ -17071,21 +16581,6 @@ static int apply_font_configuration(BlitRuntime *runtime, const char *path,
             return 0;
         }
     }
-    if (!runtime->direct_kms) {
-        BlitFont view = candidate.data ? candidate : runtime->font;
-        view.raster_state = NULL; view.raster_free = NULL;
-        blit_raster_attach(&view, raster);
-        for (i = 0; i < runtime->output_count; ++i) {
-            atlases[i] = create_sdl_glyph_atlas(runtime->outputs[i].renderer, &view,
-                &atlas_columns[i], &atlas_widths[i], &atlas_heights[i]);
-            if (!atlases[i]) {
-                int j;
-                for (j = 0; j < i; ++j) SDL_DestroyTexture(atlases[j]);
-                blit_raster_close(raster); blit_font_free(&candidate);
-                return 0;
-            }
-        }
-    }
     if (candidate.data != NULL) {
         blit_font_free(&runtime->font);
         runtime->font = candidate;
@@ -17093,20 +16588,6 @@ static int apply_font_configuration(BlitRuntime *runtime, const char *path,
     blit_raster_attach(&runtime->font, raster);
     runtime->font_scale_tenths = scale_tenths;
     runtime->font_size_px = size_px;
-    if (!runtime->direct_kms) {
-        for (i = 0; i < runtime->output_count; ++i) {
-            BlitOutput *output = &runtime->outputs[i];
-            memset(output->raster_keys, 0, sizeof(output->raster_keys));
-            if (output->glyph_atlas != NULL)
-                SDL_DestroyTexture(output->glyph_atlas);
-            output->glyph_atlas = atlases[i];
-            output->glyph_atlas_columns = atlas_columns[i];
-            output->glyph_atlas_width = atlas_widths[i];
-            output->glyph_atlas_height = atlas_heights[i];
-            SDL_SetRenderScale(output->renderer, 1.0f, 1.0f);
-            output->initialized = 0;
-        }
-    }
     discover_panes(runtime);
     /* A font change alters every cell's physical rectangle. Rebuilding the
        atlas and reflowing surfaces is not enough: the next presentation must
@@ -17262,23 +16743,10 @@ static void destroy_session(BlitRuntime *runtime, BlitSession *session)
         close(session->login_identity_fd);
     disable_input_routes_for_target(runtime, target_id);
     remove_session_streams(runtime, target_id);
-    /* Image records are owned by the session, but SDL textures and the
-       composed scene cache are owned by each output.  Invalidate both before
-       releasing the records; otherwise a replacement session can present
-       pixels from the stopped session (notably a stale wallpaper or Kitty
-       image) until a later full redraw happens. */
-    for (i = 0; i < runtime->output_count; ++i) {
-        destroy_sdl_graphics_cache(&runtime->outputs[i]);
-        if (runtime->outputs[i].scene_texture != NULL)
-            SDL_DestroyTexture(runtime->outputs[i].scene_texture);
-        if (runtime->outputs[i].scene_work_texture != NULL)
-            SDL_DestroyTexture(runtime->outputs[i].scene_work_texture);
-        runtime->outputs[i].scene_texture = NULL;
-        runtime->outputs[i].scene_work_texture = NULL;
+    /* A replacement session must not present pixels from the stopped one
+       (notably a stale wallpaper or Kitty image): every output redraws. */
+    for (i = 0; i < runtime->output_count; ++i)
         runtime->outputs[i].initialized = 0;
-        runtime->outputs[i].last_graphics_signature = 0;
-        runtime->outputs[i].last_target_count = 0;
-    }
     if (surface != NULL) {
         terminal_scrollback_release(surface);
         memset(surface, 0, sizeof(*surface));
@@ -18077,20 +17545,6 @@ static int service_pixel_frame_binary(BlitRuntime *runtime,
     if (surface != NULL)
         ++surface->revision;
     runtime->render_pending = 1;
-    if (!runtime->direct_kms && surface != NULL) {
-        /* SDL's scene cache needs a persistent pending count so an external
-           pixel producer cannot be lost between vblanks. Direct KMS already
-           consumes each accepted frame through its page-flip path; replaying
-           the latest 60 Hz image at a 240 Hz mode would create artificial
-           deadline misses in the scheduler. */
-        int output_index;
-        for (output_index = 0; output_index < runtime->output_count;
-             ++output_index)
-            if (surface_targets_output(runtime, surface, output_index)) {
-                ++runtime->pixel_frames_pending[output_index];
-                break;
-            }
-    }
     ++runtime->pixel_frames_accepted;
     runtime->pixel_frames_last_accepted_us = monotonic_us();
     if (stream->pixel_frame_ack)
@@ -19248,35 +18702,10 @@ static const char *display_rejected_property(const char *configuration)
                                   sizeof(writable) / sizeof(writable[0]));
 }
 
-/* Rotation changes the effective cell grid, and a Hibr desktop's cells come
-   from its owner (ADR 0063), so rotating under a live surface would hand its
-   owner a grid it never agreed to -- the same resize problem as issue #60.
-   Every surface has an owning session (there is no route that creates one
-   without), so "an owned surface is present" is simply "a surface targets
-   this display", and that is what the refusal says. */
-static int display_carries_surface(BlitRuntime *runtime, int display_index)
-{
-    int output_index = output_index_for_display_index(runtime, display_index);
-    int index;
-
-    if (output_index < 0)
-        return 0;
-    for (index = 0; index < BLIT_MAX_SESSIONS; ++index) {
-        BlitSurface *surface = runtime->surfaces[index];
-
-        if (surface == NULL || !surface->used)
-            continue;
-        if (surface_targets_output(runtime, surface, output_index))
-            return 1;
-    }
-    return 0;
-}
-
 static int apply_display_rotation(BlitRuntime *runtime, int display_index,
                                   int rotation, BlitConfigProblem *problem)
 {
     BlitDisplay *display = &runtime->displays[display_index];
-    int output_index;
 
     if (!blit_rotation_valid(rotation)) {
         config_problem(problem, 400, "Bad Request", "invalid_display_rotation",
@@ -19286,53 +18715,15 @@ static int apply_display_rotation(BlitRuntime *runtime, int display_index,
                        "top-right of the panel.");
         return 0;
     }
-    if (runtime->direct_kms) {
-        config_problem(problem, 422, "Unprocessable Entity",
-                       "display_rotation_unsupported",
-                       "The direct-KMS path composes straight into the "
-                       "connector's framebuffer and has no rotation "
-                       "transform, so this display does not list `rotation` "
-                       "among its capabilities.");
-        return 0;
-    }
-    if (display->rotation == rotation)
+    if (rotation == display->rotation)
         return 1;
-    if (display_carries_surface(runtime, display_index)) {
-        config_problem(problem, 409, "Conflict", "display_rotation_in_use",
-                       "Rotating exchanges the display's width and height and "
-                       "therefore its cell grid, and a surface's owner is the "
-                       "one that decides its size (ADR 0063). Remove the "
-                       "sessions on this display first. Resizing a live "
-                       "surface is issue #60.");
-        return 0;
-    }
-    output_index = output_index_for_display_index(runtime, display_index);
-    /* The scene is composed at the logical size and drawn rotated, so the
-       cached texture is the wrong shape the moment rotation changes. Drop it
-       and ask for a full frame; a renderer that kept it would present a
-       correctly rotated copy of a stale picture. */
-    if (output_index >= 0) {
-        if (runtime->outputs[output_index].scene_texture != NULL) {
-            SDL_DestroyTexture(runtime->outputs[output_index].scene_texture);
-            runtime->outputs[output_index].scene_texture = NULL;
-        }
-        if (runtime->outputs[output_index].scene_work_texture != NULL) {
-            SDL_DestroyTexture(runtime->outputs[output_index].scene_work_texture);
-            runtime->outputs[output_index].scene_work_texture = NULL;
-        }
-        runtime->outputs[output_index].initialized = 0;
-    }
-    display->rotation = rotation;
-    set_display_geometry(display, display->bounds.x, display->bounds.y,
-                         display->physical_width, display->physical_height);
-    /* A rotation changes the logical display rectangle and therefore the
-       quantized pane grid. There are no attached surfaces here (the caller
-       refuses those above), so rebuild the topology in the same operation
-       instead of leaving pane bounds in the old orientation. */
-    discover_panes(runtime);
-    ++runtime->displays_revision;
-    ++runtime->topology_revision;
-    return 1;
+    (void)runtime;
+    config_problem(problem, 422, "Unprocessable Entity",
+                   "display_rotation_unsupported",
+                   "Native KMS composes straight into the connector's "
+                   "framebuffer and has no rotation transform, so this "
+                   "display does not list `rotation` among its capabilities.");
+    return 0;
 }
 
 static int apply_display_configuration(BlitRuntime *runtime,
@@ -19924,15 +19315,12 @@ static size_t settings_merge_object(const BlitInputDevice *device,
    attached at all since boot has to keep them too, or the first save after a
    restart would quietly delete every entry for hardware that happens to be
    unplugged today. */
-/* Issue #69. A display's stored key is its name, which on every backend Blit
-   ships is the hardware's own: SDL's KMSDRM backend names a display after the
-   connector it drives, so the live host's display is `DP-1`, and the
-   direct-KMS path names it after the connector id. ADR 0064's stability test
+/* Issue #69. A display's stored key is its name, which is the hardware's
+   own: native KMS names a display after its connector. ADR 0064's stability test
    is what is being applied here -- stage 1 refused to persist against
    `input-node-<n>` because the kernel reassigns node numbers, and
    `display-<n>` is enumeration order in exactly the same way, while a
-   connector name is the physical port. The dummy backend the gates run
-   against names its single display `1`. */
+   connector name is the physical port. */
 static int find_display_name(const BlitRuntime *runtime, const char *name)
 {
     int i;
@@ -19945,8 +19333,8 @@ static int find_display_name(const BlitRuntime *runtime, const char *name)
 
 /* Rotation, and only rotation.
  
-   Power is deliberately not persisted: SDL's initialisation performs a
-   modeset that turns the panel on anyway, so a stored `off` would be a dark
+   Power is deliberately not persisted: startup performs a modeset that
+   turns the panel on anyway, so a stored `off` would be a dark
    boot whose only remedy is the API the operator cannot see. Brightness is
    not persisted either, for the reason stage 4 gave about mixer values --
    systemd-backlight already restores it across a boot, and two things
@@ -20003,7 +19391,7 @@ static void settings_copy_unseen_server(BlitRuntime *runtime, char *out,
                                         int *first)
 {
     static const char *const known[] = {
-        "render_interval_ms", "pane_layout", "renderer",
+        "render_interval_ms", "pane_layout", "display_backend",
         "kms_async_pageflip", "expect_desktop", "shutdown_key", "kms_compositor",
         "kms_frame_timing"
     };
@@ -20387,14 +19775,9 @@ static size_t settings_build(BlitRuntime *runtime, char *out, size_t capacity,
                      runtime->pane_rows);
         first = 0;
     }
-    if (runtime->renderer_configured) {
-        json_appendf(out, capacity, &used, "%s\"renderer\":\"%s\"",
-                     first ? "" : ",", runtime->renderer_request);
-        first = 0;
-    }
     if (runtime->display_backend_configured) {
-        json_appendf(out, capacity, &used, "%s\"display_backend\":\"%s\"",
-                     first ? "" : ",", runtime->display_backend_kms ? "kms" : "sdl");
+        json_appendf(out, capacity, &used, "%s\"display_backend\":\"kms\"",
+                     first ? "" : ",");
         first = 0;
     }
     if (runtime->kms_compositor_configured) {
@@ -20514,7 +19897,6 @@ static void settings_flush(BlitRuntime *runtime, int force)
     static char document[BLIT_SETTINGS_CAPACITY];
     size_t length;
 
-    if (blit_trial_id_valid(getenv("BLIT_PRESENTATION_TRIAL_ID"))) return;
     if (runtime == NULL || !runtime->settings_enabled || !runtime->settings_dirty)
         return;
     if (!force &&
@@ -20695,19 +20077,14 @@ static void settings_apply_server(BlitRuntime *runtime)
 
     runtime->render_interval_configured = 0;
     runtime->pane_layout_configured = 0;
-    runtime->renderer_configured = 0;
     runtime->display_backend_configured = 0;
-    runtime->display_backend_kms = runtime->boot_display_backend_kms;
     runtime->kms_async_configured = 0;
     runtime->expect_desktop_configured = 0;
-    runtime->renderer_request[0] = '\0';
     runtime->render_interval_ms = runtime->boot_render_interval_ms;
     runtime->pane_columns = runtime->boot_pane_columns;
     runtime->pane_rows = runtime->boot_pane_rows;
     runtime->kms_async_pageflip = runtime->boot_kms_async_pageflip;
     runtime->expect_desktop = runtime->boot_expect_desktop;
-    snprintf(runtime->renderer_request, sizeof(runtime->renderer_request),
-             "%s", runtime->boot_renderer_request);
     if (!runtime->settings_enabled || runtime->settings_document[0] == '\0')
         return;
     cursor = json_key_cursor(runtime->settings_document, "server");
@@ -20720,14 +20097,9 @@ static void settings_apply_server(BlitRuntime *runtime)
             runtime->render_interval_ms = value;
             runtime->render_interval_configured = 1;
         }
-        if (json_string(server, "renderer", runtime->renderer_request,
-                        sizeof(runtime->renderer_request)))
-            runtime->renderer_configured = 1;
         if (json_string(server, "display_backend", chord, sizeof(chord)) &&
-            (strcmp(chord, "kms") == 0 || strcmp(chord, "sdl") == 0)) {
-            runtime->display_backend_kms = strcmp(chord, "kms") == 0;
+            strcmp(chord, "kms") == 0)
             runtime->display_backend_configured = 1;
-        }
         if (json_string(server, "kms_compositor", chord, sizeof(chord)) &&
             (strcmp(chord, "cpu") == 0 || strcmp(chord, "gles") == 0)) {
             runtime->kms_compositor_gles = strcmp(chord, "gles") == 0;
@@ -20815,7 +20187,7 @@ static int settings_server_backend_valid(const char *document)
         return 0;
     if (json_key_cursor(server, "display_backend") == NULL) return 1;
     return json_string(server, "display_backend", backend, sizeof(backend)) &&
-        (strcmp(backend, "kms") == 0 || strcmp(backend, "sdl") == 0);
+        strcmp(backend, "kms") == 0;
 }
 
 static int settings_server_layout(const char *document, int *columns,
@@ -20911,10 +20283,12 @@ static void settings_apply_displays(BlitRuntime *runtime)
 
 #include "blit_pointer_settings.h"
 
+/* ADR 0184: native KMS is the only presentation backend, so `kms` is the
+   only valid value; anything else is diagnosed like any invalid setting. */
 static int backend_environment_valid(void)
 {
     const char *value = getenv("BLIT_DISPLAY_BACKEND");
-    return value == NULL || strcmp(value, "kms") == 0 || strcmp(value, "sdl") == 0;
+    return value == NULL || strcmp(value, "kms") == 0;
 }
 
 static int presentation_configuration_valid(const BlitRuntime *runtime)
@@ -20931,7 +20305,6 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
     char login[512];
     char environment_value[512];
     const char *backend_env = getenv("BLIT_DISPLAY_BACKEND");
-    const char *video_driver = SDL_GetCurrentVideoDriver();
     int restart_required;
 
     if (backend_env) {
@@ -20957,14 +20330,10 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
                  "\"storage\":{\"state\":\"%s\",\"saved_revision\":%llu,"
                  "\"error\":\"%s\"},\"document\":%s,\"effective\":{"
                  "\"render_interval_ms\":%d,\"pane_layout\":\"%dx%d\","
-                 "\"renderer_requested\":\"%s\",\"renderer_active\":\"%s\","
-                 "\"display_backend_requested\":\"%s\",\"display_backend_active\":\"%s\","
+                 "\"display_backend_requested\":\"kms\",\"display_backend_active\":\"%s\","
                  "\"presentation_configuration\":{\"backend_source\":\"%s\","
                  "\"backend_environment\":%s,\"backend_environment_valid\":%s,"
-                 "\"backend_environment_overridden\":%s,\"configuration_valid\":%s,"
-                 "\"renderer_source\":\"%s\",\"renderer_applicable\":%s,"
-                 "\"video_driver_active\":\"%s\"},"
-                 "\"presentation_restart_required\":%s,"
+                 "\"configuration_valid\":%s},"
                  "\"kms_async_pageflip\":%s,\"kms_compositor\":\"%s\","
                  "\"kms_frame_timing\":\"%s\","
                  "\"expect_desktop\":%s,"
@@ -20973,40 +20342,20 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
                  "\"size_px\":%d,\"shadow\":%s},"
                  "\"pointer_shown\":{\"shape\":\"%s\",\"hidden\":%s}}}",
                  runtime->settings_revision, runtime->settings_path,
-                 runtime->settings_enabled && !blit_trial_id_valid(getenv("BLIT_PRESENTATION_TRIAL_ID")) ? "true" : "false",
+                 runtime->settings_enabled ? "true" : "false",
                  !runtime->settings_enabled ? "disabled" :
-                    (blit_trial_id_valid(getenv("BLIT_PRESENTATION_TRIAL_ID")) ? "trial-read-only" :
                     (runtime->settings_write_reported ? "error" :
-                     (runtime->settings_dirty ? "pending" : "clean"))),
+                     (runtime->settings_dirty ? "pending" : "clean")),
                  runtime->settings_saved_revision,
                  runtime->settings_write_reported ? "settings_write_failed" : "",
                  document[0] != '\0' ? document : "{}",
                  runtime->render_interval_ms, runtime->pane_columns,
-                 runtime->pane_rows, runtime->renderer_request,
-                 runtime->direct_kms ? "drm-kms" :
-                     (runtime->sdl_renderer_name[0] != '\0' ?
-                         runtime->sdl_renderer_name : "unavailable"),
-                 runtime->display_backend_kms ? "kms" : "sdl",
-                 runtime->direct_kms ? "drm-kms" :
-                     (runtime->sdl_ready ? "sdl3" : "unavailable"),
-                 blit_trial_id_valid(getenv("BLIT_PRESENTATION_TRIAL_ID")) ? "trial-snapshot" :
+                 runtime->pane_rows,
+                 runtime->kms != NULL ? "drm-kms" : "unavailable",
                  runtime->display_backend_configured ? "saved-settings" :
                      (backend_env ? "environment" : "default"),
                  environment_value, backend_environment_valid() ? "true" : "false",
-                 runtime->display_backend_configured && backend_env ? "true" : "false",
                  presentation_configuration_valid(runtime) ? "true" : "false",
-                 blit_trial_id_valid(getenv("BLIT_PRESENTATION_TRIAL_ID")) ? "trial-snapshot" :
-                 runtime->renderer_configured ? "saved-settings" :
-                     (getenv("BLIT_RENDERER") ? "environment" : "default"),
-                 runtime->direct_kms ? "false" : "true",
-                 runtime->direct_kms ? "not-applicable" :
-                     (video_driver ? video_driver : "unavailable"),
-                 (!presentation_configuration_valid(runtime) ||
-                  runtime->display_backend_kms != runtime->direct_kms ||
-                  (!runtime->display_backend_kms &&
-                   (!runtime->sdl_ready || (runtime->renderer_request[0] != '\0' &&
-                    strcmp(runtime->renderer_request, runtime->sdl_renderer_name) != 0)))) ?
-                     "true" : "false",
                  runtime->kms_async_pageflip ? "true" : "false",
                  runtime->kms_compositor_gles ? "gles" : "cpu",
                  runtime->kms_frame_timing_immediate ? "immediate" : "late",
@@ -21107,14 +20456,9 @@ static int settings_reset(BlitRuntime *runtime, int remove_file)
     runtime->render_interval_ms = runtime->boot_render_interval_ms;
     runtime->pane_columns = runtime->boot_pane_columns;
     runtime->pane_rows = runtime->boot_pane_rows;
-    runtime->renderer_request[0] = '\0';
-    snprintf(runtime->renderer_request, sizeof(runtime->renderer_request),
-             "%s", runtime->boot_renderer_request);
     runtime->render_interval_configured = 0;
     runtime->pane_layout_configured = 0;
-    runtime->renderer_configured = 0;
     runtime->display_backend_configured = 0;
-    runtime->display_backend_kms = runtime->boot_display_backend_kms;
     runtime->kms_async_pageflip = runtime->boot_kms_async_pageflip;
     runtime->kms_async_configured = 0;
     runtime->kms_compositor_gles = runtime->boot_kms_compositor_gles;
@@ -21185,7 +20529,6 @@ static int settings_reset(BlitRuntime *runtime, int remove_file)
     return 1;
 }
 
-#include "blit_trial_api.h"
 
 static void handle_request(int fd, BlitRuntime *runtime,
                            BlitHttpClient *client, const char *request)
@@ -21219,17 +20562,6 @@ static void handle_request(int fd, BlitRuntime *runtime,
         }
     }
 
-    if (blit_trial_id_valid(getenv("BLIT_PRESENTATION_TRIAL_ID")) && strcmp(method,"GET") &&
-        !(strcmp(path,BLIT_TRIAL_API_PATH)==0 && strcmp(method,"DELETE")==0) &&
-        strncmp(path,"/v1/surfaces",12) && strncmp(path,"/v1/terminal-sessions",21) &&
-        strcmp(path,"/v1/input/inject")) {
-        send_problem(fd,409,"Conflict","trial_configuration_read_only",
-            "This is a temporary presentation trial. Configuration is read-only; DELETE the current trial or await expiry to return to the normal service.");
-        return;
-    }
-    if (strcmp(path,BLIT_TRIAL_API_PATH)==0) {
-        presentation_trial_request(fd,runtime,method,request,payload); return;
-    }
     if (strcmp(path, "/v1/auxiliary-displays") == 0 && strcmp(method, "GET") == 0) {
         auxiliary_json(runtime, body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
@@ -21571,8 +20903,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
         strcmp(method, "GET") == 0) {
         int output_index = screenshot_output_index(runtime, path);
         int cached = screenshot_cached_request(path);
-        if (output_index < 0 ||
-            (!runtime->direct_kms && runtime->outputs[output_index].renderer == NULL)) {
+        if (output_index < 0) {
             send_problem(fd, 404, "Not Found", "display_not_found",
                          "The requested display does not exist or has no renderer.");
             return;
@@ -22391,7 +21722,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
             }
             if (!settings_server_backend_valid(document)) {
                 send_problem(fd, 400, "Bad Request", "invalid_settings_server",
-                             "server.display_backend must be kms or sdl, server.kms_compositor cpu or gles, and server.kms_frame_timing late or immediate.");
+                             "server.display_backend must be kms, server.kms_compositor cpu or gles, and server.kms_frame_timing late or immediate.");
                 return;
             }
             if (!settings_server_layout(document, &requested_columns,
@@ -22801,7 +22132,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
                     broadcast_evdev_pointer(runtime, "pointer_wheel",
                                              direction > 0 ? 64 : 65, 1, delta,
                                              "api-pointer");
-                    send_mouse_report(runtime, 0, runtime->pointer_x,
+                    send_mouse_report(runtime, runtime->pointer_x,
                                       runtime->pointer_y,
                                       direction > 0 ? 64 : 65, 0);
                 }
@@ -23433,177 +22764,71 @@ static void handle_request(int fd, BlitRuntime *runtime,
 
 static void discover_displays(BlitRuntime *runtime)
 {
-    SDL_DisplayID *ids;
-    int count = 0;
+    char error[256];
+    struct stat drm_node;
+    const char *drm_path = getenv("BLIT_DRM_DEVICE");
     int i;
 
     if (!backend_environment_valid()) {
-        const char *detail = "BLIT_DISPLAY_BACKEND accepts only kms or sdl; kmsdrm is an SDL video driver. Saved API settings override startup defaults.";
+        const char *detail = "BLIT_DISPLAY_BACKEND accepts only kms (ADR 0184). Saved API settings override startup defaults.";
         fprintf(stderr, "blit: %s\n", detail);
         diagnostic_log(runtime, runtime->display_backend_configured ? "warning" : "error",
                        "invalid_environment_backend", detail);
         if (!presentation_configuration_valid(runtime)) {
-            snprintf(runtime->sdl_error, sizeof(runtime->sdl_error),
-                     "Invalid BLIT_DISPLAY_BACKEND; use kms or sdl, or save a valid backend through /v1/settings and restart.");
+            snprintf(runtime->presentation_error, sizeof(runtime->presentation_error),
+                     "Invalid BLIT_DISPLAY_BACKEND; use kms, or save it through /v1/settings and restart.");
             return;
         }
     }
-    if (runtime->display_backend_kms) {
-        char error[256];
-        struct stat drm_node;
-        const char *drm_path = getenv("BLIT_DRM_DEVICE");
-        error[0] = '\0';
-        runtime->direct_kms = 1;
-        /* Before either device-I/O thread exists. A missing DRM device still
-           takes the normal degraded/API-only startup path without touching
-           a console. A real native presentation must have a recoverable VT. */
-        if (stat(drm_path ? drm_path : "/dev/dri/card0", &drm_node) == 0 &&
-            S_ISCHR(drm_node.st_mode) && !blit_vt_owned()) {
-            if (blit_vt_open(error, sizeof(error)) < 0) {
-                snprintf(runtime->sdl_error, sizeof(runtime->sdl_error), "%s", error);
-                diagnostic_log(runtime, "error", "console_ownership_failed", error);
-                return;
-            }
-            atexit(blit_vt_close);
-        }
-        runtime->kms = blit_kms_new(&runtime->font, &runtime->wide_font);
-        blit_kms_set_pointer_art(runtime->kms,&runtime->pointer_shown_art);
-        if (runtime->kms == NULL || blit_kms_open(runtime->kms, error,
-                                                   sizeof(error)) < 0) {
-            blit_vt_close();
-            snprintf(runtime->sdl_error, sizeof(runtime->sdl_error),
-                     "direct KMS: %s", error[0] ? error : "initialization failed");
-            fprintf(stderr, "blit: %s\n", runtime->sdl_error);
+    error[0] = '\0';
+    /* Before either device-I/O thread exists. A missing DRM device still
+       takes the normal degraded/API-only startup path without touching
+       a console. A real native presentation must have a recoverable VT. */
+    if (stat(drm_path ? drm_path : "/dev/dri/card0", &drm_node) == 0 &&
+        S_ISCHR(drm_node.st_mode) && !blit_vt_owned()) {
+        if (blit_vt_open(error, sizeof(error)) < 0) {
+            snprintf(runtime->presentation_error, sizeof(runtime->presentation_error), "%s", error);
+            diagnostic_log(runtime, "error", "console_ownership_failed", error);
             return;
         }
-        runtime->display_count = blit_kms_display_count(runtime->kms);
-        if (runtime->display_count > BLIT_MAX_DISPLAYS)
-            runtime->display_count = BLIT_MAX_DISPLAYS;
-        for (i = 0; i < runtime->display_count; ++i) {
-            BlitKmsDisplayInfo info;
-            if (blit_kms_display_info(runtime->kms, i, &info) < 0)
-                continue;
-            runtime->displays[i].id = info.id;
-            snprintf(runtime->displays[i].connector, sizeof(runtime->displays[i].connector), "%s", info.connector);
-            snprintf(runtime->displays[i].name,
-                     sizeof(runtime->displays[i].name), "%s", info.name);
-            set_display_geometry(&runtime->displays[i], info.x, info.y,
-                                 info.width, info.height);
-            runtime->displays[i].refresh_hz = info.refresh_hz;
-            runtime->displays[i].mode_count = info.mode_count;
-            runtime->displays[i].active_mode = info.active_mode;
-            memcpy(runtime->displays[i].modes, info.modes,
-                   sizeof(runtime->displays[i].modes));
+        atexit(blit_vt_close);
+    }
+    runtime->kms = blit_kms_new(&runtime->font, &runtime->wide_font);
+    blit_kms_set_pointer_art(runtime->kms,&runtime->pointer_shown_art);
+    if (runtime->kms == NULL || blit_kms_open(runtime->kms, error,
+                                               sizeof(error)) < 0) {
+        /* No KMS is no presentation: Blit serves its API with no outputs
+           and says why in /v1/diagnostics. */
+        if (runtime->kms != NULL) {
+            blit_kms_close(runtime->kms);
+            runtime->kms = NULL;
         }
-        runtime->sdl_error[0] = '\0';
+        blit_vt_close();
+        snprintf(runtime->presentation_error, sizeof(runtime->presentation_error),
+                 "direct KMS: %s", error[0] ? error : "initialization failed");
+        fprintf(stderr, "blit: %s\n", runtime->presentation_error);
         return;
     }
-
-    {
-        const char *evdev_devices = getenv("SDL_EVDEV_DEVICES");
-        if (evdev_devices != NULL && evdev_devices[0] != '\0')
-            SDL_SetHint("SDL_EVDEV_DEVICES", evdev_devices);
+    runtime->display_count = blit_kms_display_count(runtime->kms);
+    if (runtime->display_count > BLIT_MAX_DISPLAYS)
+        runtime->display_count = BLIT_MAX_DISPLAYS;
+    for (i = 0; i < runtime->display_count; ++i) {
+        BlitKmsDisplayInfo info;
+        if (blit_kms_display_info(runtime->kms, i, &info) < 0)
+            continue;
+        runtime->displays[i].id = info.id;
+        snprintf(runtime->displays[i].connector, sizeof(runtime->displays[i].connector), "%s", info.connector);
+        snprintf(runtime->displays[i].name,
+                 sizeof(runtime->displays[i].name), "%s", info.name);
+        set_display_geometry(&runtime->displays[i], info.x, info.y,
+                             info.width, info.height);
+        runtime->displays[i].refresh_hz = info.refresh_hz;
+        runtime->displays[i].mode_count = info.mode_count;
+        runtime->displays[i].active_mode = info.active_mode;
+        memcpy(runtime->displays[i].modes, info.modes,
+               sizeof(runtime->displays[i].modes));
     }
-    blit_sdl_kms_policy_prepare();
-    runtime->sdl_ready = SDL_Init(SDL_INIT_VIDEO) ? 1 : 0;
-    if (!runtime->sdl_ready) {
-        snprintf(runtime->sdl_error, sizeof(runtime->sdl_error), "%s",
-                 SDL_GetError());
-        return;
-    }
-    {
-        const char *policy_error=blit_sdl_kms_policy_error();
-        const char *driver=SDL_GetCurrentVideoDriver();
-        if (policy_error) {
-            snprintf(runtime->sdl_error,sizeof(runtime->sdl_error),"%s",policy_error);
-            diagnostic_log(runtime,"error","sdl_kms_atomic_unsupported",policy_error);
-            fprintf(stderr,"blit: %s\n",policy_error);
-            SDL_QuitSubSystem(SDL_INIT_VIDEO);
-            runtime->sdl_ready=0;
-            return;
-        }
-        if (blit_sdl_kms_policy_affected() && driver && !strcmp(driver,"kmsdrm")) {
-            const char *detail="Pinned SDL3.4.16 uses legacy KMS presentation to avoid uninitialized secondary atomic display-plane state; rendering/cadence parity requires verification.";
-            diagnostic_log(runtime,"warning","sdl_kms_legacy_compatibility",detail);
-            fprintf(stderr,"blit: %s\n",detail);
-        }
-    }
-    ids = SDL_GetDisplays(&count);
-    if (ids == NULL) {
-        snprintf(runtime->sdl_error, sizeof(runtime->sdl_error), "%s",
-                 SDL_GetError());
-        return;
-    }
-    if (count > BLIT_MAX_DISPLAYS)
-        count = BLIT_MAX_DISPLAYS;
-    runtime->display_count = count;
-    runtime->sdl_error[0] = '\0';
-    for (i = 0; i < count; ++i) {
-        const char *name = SDL_GetDisplayName(ids[i]);
-        const SDL_DisplayMode *mode;
-        runtime->displays[i].id = (unsigned long long)ids[i];
-        snprintf(runtime->displays[i].name, sizeof(runtime->displays[i].name),
-                 "%s", name ? name : "unknown");
-        {
-            SDL_Rect reported;
-            if (!SDL_GetDisplayBounds(ids[i], &reported)) {
-                reported.x = 0;
-                reported.y = 0;
-                reported.w = 0;
-                reported.h = 0;
-            }
-            set_display_geometry(&runtime->displays[i], reported.x, reported.y,
-                                 reported.w, reported.h);
-        }
-        mode = SDL_GetCurrentDisplayMode(ids[i]);
-        if (mode == NULL)
-            mode = SDL_GetDesktopDisplayMode(ids[i]);
-        runtime->displays[i].refresh_hz = mode != NULL &&
-            mode->refresh_rate > 0.0f ? (double)mode->refresh_rate : 60.0;
-        {
-            SDL_DisplayMode **available;
-            int available_count = 0;
-            int mode_index;
-            int target_width = mode != NULL ? mode->w :
-                runtime->displays[i].bounds.w;
-            int target_height = mode != NULL ? mode->h :
-                runtime->displays[i].bounds.h;
-            available = SDL_GetFullscreenDisplayModes(ids[i],
-                                                       &available_count);
-            runtime->displays[i].mode_count = available_count <
-                BLIT_KMS_MAX_MODES ? available_count : BLIT_KMS_MAX_MODES;
-            runtime->displays[i].active_mode = -1;
-            for (mode_index = 0; mode_index < runtime->displays[i].mode_count;
-                 ++mode_index) {
-                SDL_DisplayMode *available_mode = available[mode_index];
-                BlitKmsMode *stored = &runtime->displays[i].modes[mode_index];
-                stored->width = available_mode->w;
-                stored->height = available_mode->h;
-                stored->refresh_hz = available_mode->refresh_rate > 0.0f ?
-                    (double)available_mode->refresh_rate : 60.0;
-                stored->preferred = available_mode->w == target_width &&
-                    available_mode->h == target_height;
-                if (stored->width == target_width &&
-                    stored->height == target_height &&
-                    runtime->displays[i].active_mode < 0)
-                    runtime->displays[i].active_mode = mode_index;
-            }
-            if (available != NULL)
-                SDL_free(available);
-            if (runtime->displays[i].mode_count == 0) {
-                runtime->displays[i].mode_count = 1;
-                runtime->displays[i].active_mode = 0;
-                runtime->displays[i].modes[0].width = target_width;
-                runtime->displays[i].modes[0].height = target_height;
-                runtime->displays[i].modes[0].refresh_hz =
-                    runtime->displays[i].refresh_hz;
-                runtime->displays[i].modes[0].preferred = 1;
-            } else if (runtime->displays[i].active_mode < 0) {
-                runtime->displays[i].active_mode = 0;
-            }
-        }
-    }
-    SDL_free(ids);
+    runtime->presentation_error[0] = '\0';
 }
 
 static void discover_panes(BlitRuntime *runtime)
@@ -23708,231 +22933,18 @@ static void discover_panes(BlitRuntime *runtime)
 
 static void initialize_outputs(BlitRuntime *runtime)
 {
-    const char *renderer_name = runtime->renderer_request[0] != '\0' ?
-        runtime->renderer_request : NULL;
-    const char *glyph_batch_mode = getenv("BLIT_SDL_GLYPH_BATCH");
     int i;
 
-    if (runtime->direct_kms) {
-        runtime->output_count = runtime->display_count;
-        for (i = 0; i < runtime->output_count; ++i)
-            runtime->outputs[i].display_id = runtime->displays[i].id;
-        return;
-    }
-
-    /* Let SDL choose the accelerated renderer on real hardware.  Software is
-       still available as an explicit deterministic fallback for VKMS and
-       headless fixtures: BLIT_RENDERER=software. */
-    if (renderer_name != NULL && renderer_name[0] == '\0')
-        renderer_name = NULL;
-
-    for (i = 0; i < runtime->display_count; ++i) {
-        SDL_Window *window = NULL;
-        SDL_Renderer *renderer;
-        BlitDisplay *display = &runtime->displays[i];
-        SDL_PropertiesID properties = SDL_CreateProperties();
-
-        /* KMSDRM chooses its display resources during window creation and
-           rejects subsequent moves. Bind before allocation, not by moving a
-           default-display window after its GBM surfaces already exist. */
-        if (properties != 0) {
-            if (SDL_SetStringProperty(properties, SDL_PROP_WINDOW_CREATE_TITLE_STRING, "blit") &&
-                SDL_SetNumberProperty(properties, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, display->bounds.w) &&
-                SDL_SetNumberProperty(properties, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, display->bounds.h) &&
-                SDL_SetBooleanProperty(properties, SDL_PROP_WINDOW_CREATE_BORDERLESS_BOOLEAN, true) &&
-                SDL_SetNumberProperty(properties, SDL_PROP_WINDOW_CREATE_X_NUMBER,
-                    SDL_WINDOWPOS_CENTERED_DISPLAY((SDL_DisplayID)display->id)) &&
-                SDL_SetNumberProperty(properties, SDL_PROP_WINDOW_CREATE_Y_NUMBER,
-                    SDL_WINDOWPOS_CENTERED_DISPLAY((SDL_DisplayID)display->id)))
-                window = SDL_CreateWindowWithProperties(properties);
-            SDL_DestroyProperties(properties);
-        }
-        if (window == NULL) {
-            snprintf(runtime->sdl_error, sizeof(runtime->sdl_error),
-                     "display %llu window: %s", display->id, SDL_GetError());
-            diagnostic_log(runtime, "error", "sdl_output_window_failed", runtime->sdl_error);
-            continue;
-        }
-        if (SDL_GetDisplayForWindow(window) != (SDL_DisplayID)display->id) {
-            snprintf(runtime->sdl_error, sizeof(runtime->sdl_error),
-                     "display %llu window bound to unexpected display %u",
-                     display->id, (unsigned)SDL_GetDisplayForWindow(window));
-            diagnostic_log(runtime, "error", "sdl_output_binding_failed", runtime->sdl_error);
-            SDL_DestroyWindow(window);
-            continue;
-        }
-        /* A borderless window is not sufficient on KMSDRM: the backend can
-           retain its default mode-sized GBM surface even when the requested
-           window dimensions match the display.  Enter exclusive fullscreen
-           after positioning so each output owns its complete scanout mode,
-           including portrait/tall modes such as 1920x2160. */
-        if (!SDL_SetWindowFullscreen(window, true)) {
-            snprintf(runtime->sdl_error, sizeof(runtime->sdl_error),
-                     "display %llu fullscreen: %s", display->id, SDL_GetError());
-            diagnostic_log(runtime, "error", "sdl_output_fullscreen_failed", runtime->sdl_error);
-            SDL_DestroyWindow(window);
-            continue;
-        }
-        renderer = SDL_CreateRenderer(window, renderer_name);
-        if (renderer == NULL) {
-            snprintf(runtime->sdl_error, sizeof(runtime->sdl_error),
-                     "display %llu renderer: %s", display->id, SDL_GetError());
-            diagnostic_log(runtime, "error", "sdl_output_renderer_failed", runtime->sdl_error);
-            SDL_DestroyWindow(window);
-            continue;
-        }
-        /* Hide after the window exists.  Some SDL video backends do not apply
-           the global cursor state to a window created later, which leaves a
-           native cursor competing with Blit's software cursor. */
-        SDL_HideCursor();
-        if (runtime->sdl_renderer_name[0] == '\0')
-            snprintf(runtime->sdl_renderer_name,
-                     sizeof(runtime->sdl_renderer_name), "%s",
-                     SDL_GetRendererName(renderer) != NULL ?
-                     SDL_GetRendererName(renderer) : "unknown");
-        if (!SDL_GetRenderOutputSize(renderer,
-                                     &runtime->outputs[runtime->output_count].render_width,
-                                     &runtime->outputs[runtime->output_count].render_height)) {
-            runtime->outputs[runtime->output_count].render_width = 0;
-            runtime->outputs[runtime->output_count].render_height = 0;
-        }
-        {
-            SDL_Rect viewport;
-            if (SDL_GetRenderViewport(renderer, &viewport)) {
-                runtime->outputs[runtime->output_count].viewport_width =
-                    viewport.w;
-                runtime->outputs[runtime->output_count].viewport_height =
-                    viewport.h;
-            }
-            if (!SDL_GetRenderScale(renderer,
-                                    &runtime->outputs[runtime->output_count].scale_x,
-                                    &runtime->outputs[runtime->output_count].scale_y)) {
-                runtime->outputs[runtime->output_count].scale_x = 0.0f;
-                runtime->outputs[runtime->output_count].scale_y = 0.0f;
-            }
-        }
-        fprintf(stderr, "blit: SDL output display=%llu render=%dx%d\n",
-                display->id,
-                runtime->outputs[runtime->output_count].render_width,
-                runtime->outputs[runtime->output_count].render_height);
-        fprintf(stderr, "blit: SDL viewport display=%llu size=%dx%d scale=%.3fx%.3f\n",
-                display->id,
-                runtime->outputs[runtime->output_count].viewport_width,
-                runtime->outputs[runtime->output_count].viewport_height,
-                runtime->outputs[runtime->output_count].scale_x,
-                runtime->outputs[runtime->output_count].scale_y);
-        if (i+1 == runtime->display_count) blit_startup_modules();
-        blit_startup_stage("vsync.begin",display->id);
-        if (SDL_SetRenderVSync(renderer, 1)) {
-            int vsync = 0;
-            if (SDL_GetRenderVSync(renderer, &vsync) && vsync > 0)
-                runtime->outputs[runtime->output_count].vsync_enabled = 1;
-            else
-                ++runtime->sdl_vsync_failures;
-        } else {
-            ++runtime->sdl_vsync_failures;
-            fprintf(stderr,
-                    "blit: SDL renderer display=%llu cannot enable vsync: %s\n",
-                    display->id, SDL_GetError());
-        }
-        blit_startup_stage("vsync.end",display->id);
-        /* Render targets and cached scenes are physical-sized textures.
-           Font scale is carried by the shared cell metrics, never by a
-           renderer transform. */
-        SDL_SetRenderScale(renderer, 1.0f, 1.0f);
-        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-        blit_startup_stage("clear.begin",display->id);
-        SDL_RenderClear(renderer);
-        blit_startup_stage("present.begin",display->id);
-        SDL_RenderPresent(renderer);
-        blit_startup_stage("present.end",display->id);
-        runtime->outputs[runtime->output_count].window = window;
-        runtime->outputs[runtime->output_count].renderer = renderer;
-        /* Geometry batching is the normal path for every SDL renderer. The
-           immediate path remains an explicit emergency workaround for a
-           backend-specific atlas regression and is selected with `off`. */
-        runtime->outputs[runtime->output_count].glyph_geometry_enabled =
-            glyph_batch_mode == NULL || strcmp(glyph_batch_mode, "on") == 0;
-        if (glyph_batch_mode != NULL && strcmp(glyph_batch_mode, "off") != 0 &&
-            strcmp(glyph_batch_mode, "on") != 0)
-            fprintf(stderr,
-                    "blit: invalid BLIT_SDL_GLYPH_BATCH=%s (use on/off)\n",
-                    glyph_batch_mode);
-        blit_startup_stage("atlas.begin",display->id);
-        runtime->outputs[runtime->output_count].glyph_atlas =
-            create_sdl_glyph_atlas(renderer, &runtime->font,
-                                   &runtime->outputs[runtime->output_count].glyph_atlas_columns,
-                                   &runtime->outputs[runtime->output_count].glyph_atlas_width,
-                                   &runtime->outputs[runtime->output_count].glyph_atlas_height);
-        blit_startup_stage("atlas.end",display->id);
-        memset(runtime->outputs[runtime->output_count].raster_keys, 0,
-               sizeof(runtime->outputs[runtime->output_count].raster_keys));
-        runtime->outputs[runtime->output_count].display_id = display->id;
-        ++runtime->output_count;
-    }
-    if (runtime->output_count != runtime->display_count)
-        activate_direct_kms_fallback(runtime);
+    runtime->output_count = runtime->display_count;
+    for (i = 0; i < runtime->output_count; ++i)
+        runtime->outputs[i].display_id = runtime->displays[i].id;
 }
 
 static void destroy_outputs(BlitRuntime *runtime)
 {
-    int i;
-    if (runtime->direct_kms) {
-        if (runtime->kms != NULL)
-            blit_kms_close(runtime->kms);
-        runtime->kms = NULL;
-        runtime->output_count = 0;
-        return;
-    }
-    for (i = 0; i < runtime->output_count; ++i) {
-        if (runtime->outputs[i].screenshot_surface != NULL)
-            SDL_DestroySurface(runtime->outputs[i].screenshot_surface);
-        runtime->outputs[i].screenshot_surface = NULL;
-        destroy_sdl_graphics_cache(&runtime->outputs[i]);
-        if (runtime->outputs[i].scene_texture != NULL)
-            SDL_DestroyTexture(runtime->outputs[i].scene_texture);
-        if (runtime->outputs[i].scene_work_texture != NULL)
-            SDL_DestroyTexture(runtime->outputs[i].scene_work_texture);
-        runtime->outputs[i].scene_texture = NULL;
-        runtime->outputs[i].scene_work_texture = NULL;
-        if (runtime->outputs[i].pointer_texture) SDL_DestroyTexture(runtime->outputs[i].pointer_texture);
-        runtime->outputs[i].pointer_texture=NULL;
-        runtime->outputs[i].pointer_art_revision=0;
-        if (runtime->outputs[i].glyph_atlas != NULL)
-            SDL_DestroyTexture(runtime->outputs[i].glyph_atlas);
-        if (runtime->outputs[i].wide_atlas != NULL)
-            SDL_DestroyTexture(runtime->outputs[i].wide_atlas);
-        free(runtime->outputs[i].wide_atlas_slot_of);
-        free(runtime->outputs[i].wide_vertices);
-        free(runtime->outputs[i].wide_indices);
-        runtime->outputs[i].wide_atlas = NULL;
-        runtime->outputs[i].wide_atlas_slot_of = NULL;
-        runtime->outputs[i].wide_vertices = NULL;
-        runtime->outputs[i].wide_indices = NULL;
-        runtime->outputs[i].glyph_atlas = NULL;
-        runtime->outputs[i].glyph_atlas_columns = 0;
-        runtime->outputs[i].glyph_atlas_width = 0;
-        runtime->outputs[i].glyph_atlas_height = 0;
-        free(runtime->outputs[i].glyph_vertices);
-        free(runtime->outputs[i].glyph_indices);
-        free(runtime->outputs[i].background_vertices);
-        free(runtime->outputs[i].background_indices);
-        runtime->outputs[i].glyph_vertices = NULL;
-        runtime->outputs[i].glyph_indices = NULL;
-        runtime->outputs[i].glyph_vertex_count = 0;
-        runtime->outputs[i].glyph_index_count = 0;
-        runtime->outputs[i].glyph_capacity = 0;
-        runtime->outputs[i].background_vertices = NULL;
-        runtime->outputs[i].background_indices = NULL;
-        runtime->outputs[i].background_vertex_count = 0;
-        runtime->outputs[i].background_index_count = 0;
-        runtime->outputs[i].background_capacity = 0;
-        SDL_DestroyRenderer(runtime->outputs[i].renderer);
-        SDL_DestroyWindow(runtime->outputs[i].window);
-        runtime->outputs[i].present_calls = 0;
-        runtime->outputs[i].last_present_ms = 0.0;
-        runtime->outputs[i].max_present_ms = 0.0;
-    }
+    if (runtime->kms != NULL)
+        blit_kms_close(runtime->kms);
+    runtime->kms = NULL;
     runtime->output_count = 0;
 }
 
@@ -23945,7 +22957,7 @@ static void reconcile_kms_topology(BlitRuntime *runtime)
     unsigned long long revision = blit_kms_inventory_revision(runtime->kms);
     unsigned long long pending[BLIT_MAX_DISPLAYS];
     unsigned long missed[BLIT_MAX_DISPLAYS];
-    if (!runtime->direct_kms || revision == runtime->kms_inventory_revision) return;
+    if (revision == runtime->kms_inventory_revision) return;
     memcpy(previous, runtime->displays, sizeof(previous));
     memcpy(pending, runtime->pixel_frames_pending, sizeof(pending));
     memcpy(missed, runtime->render_missed_deadlines, sizeof(missed));
@@ -24035,68 +23047,6 @@ static void service_kms_presentation_change(BlitRuntime *runtime, uint64_t now)
     }
     retry_ready_kms_outputs(runtime,
         blit_kms_ready_output_mask(runtime->kms), now);
-}
-
-static int activate_direct_kms_fallback(BlitRuntime *runtime)
-{
-    char error[256];
-    int i;
-
-    if (runtime->direct_kms || runtime->display_count == 0)
-        return 0;
-    if (!blit_vt_owned()) {
-        destroy_outputs(runtime);
-        snprintf(runtime->sdl_error, sizeof(runtime->sdl_error),
-                 "Native KMS fallback requires VT ownership; select kms explicitly and restart.");
-        diagnostic_log(runtime, "error", "console_ownership_required", runtime->sdl_error);
-        return 0;
-    }
-    destroy_outputs(runtime);
-    error[0] = '\0';
-    runtime->kms = blit_kms_new(&runtime->font, &runtime->wide_font);
-    blit_kms_set_pointer_art(runtime->kms,&runtime->pointer_shown_art);
-    if (runtime->kms == NULL || blit_kms_open(runtime->kms, error,
-                                               sizeof(error)) < 0) {
-        if (runtime->kms != NULL) {
-            blit_kms_close(runtime->kms);
-            runtime->kms = NULL;
-        }
-        snprintf(runtime->sdl_error, sizeof(runtime->sdl_error),
-                 "SDL outputs unavailable; direct KMS fallback failed: %s",
-                 error[0] ? error : "initialization failed");
-        diagnostic_log(runtime, "error", "sdl_kms_fallback_failed",
-                       runtime->sdl_error);
-        return 0;
-    }
-    runtime->direct_kms = 1;
-    runtime->display_count = blit_kms_display_count(runtime->kms);
-    if (runtime->display_count > BLIT_MAX_DISPLAYS)
-        runtime->display_count = BLIT_MAX_DISPLAYS;
-    for (i = 0; i < runtime->display_count; ++i) {
-        BlitKmsDisplayInfo info;
-        if (blit_kms_display_info(runtime->kms, i, &info) < 0)
-            continue;
-        runtime->displays[i].id = info.id;
-        snprintf(runtime->displays[i].name,
-                 sizeof(runtime->displays[i].name), "%s", info.name);
-        set_display_geometry(&runtime->displays[i], info.x, info.y,
-                             info.width, info.height);
-        runtime->displays[i].refresh_hz = info.refresh_hz;
-        runtime->displays[i].mode_count = info.mode_count;
-        runtime->displays[i].active_mode = info.active_mode;
-        memcpy(runtime->displays[i].modes, info.modes,
-               sizeof(runtime->displays[i].modes));
-        runtime->outputs[i].display_id = info.id;
-    }
-    apply_test_refresh_override(runtime);
-    runtime->output_count = runtime->display_count;
-    runtime->sdl_error[0] = '\0';
-    fprintf(stderr,
-            "blit: SDL presentation unavailable; using direct KMS fallback "
-            "(%d display(s))\n", runtime->display_count);
-    diagnostic_log(runtime, "warning", "sdl_kms_fallback",
-                   "SDL outputs were unavailable; direct KMS is active");
-    return runtime->display_count > 0;
 }
 
 static int evdev_has_rel_xy(int fd)
@@ -24232,7 +23182,6 @@ static int native_console_accepts_event(const BlitRuntime *runtime,
                                        const struct input_event *event)
 {
     uint64_t timestamp;
-    if (!runtime->direct_kms) return 1;
     if (!blit_vt_owned() || !blit_vt_active()) return 0;
     timestamp = (uint64_t)event->time.tv_sec * 1000000ULL +
         (uint64_t)event->time.tv_usec;
@@ -24975,1021 +23924,8 @@ static unsigned long long graphics_scene_signature(const BlitRuntime *runtime,
     return signature;
 }
 
-static int graphics_scene_count(const BlitRuntime *runtime, int output_index)
-{
-    int session_index;
-    int image_index;
-    int count = 0;
-
-    if (runtime == NULL || output_index < 0 ||
-        output_index >= runtime->output_count)
-        return 0;
-    for (session_index = 0; session_index < BLIT_MAX_SESSIONS;
-         ++session_index) {
-        const BlitSession *session = &runtime->sessions[session_index];
-        const BlitSession *graphics_session;
-        BlitSurface *surface;
-        if (!session->used)
-            continue;
-        surface = find_surface_id((BlitRuntime *)runtime, session->id);
-        if (surface == NULL || !surface_targets_output((BlitRuntime *)runtime,
-                                                        surface, output_index))
-            continue;
-        graphics_session = hibr_render_source((BlitRuntime *)runtime,
-                                               (BlitSession *)session);
-        if (graphics_session == NULL)
-            graphics_session = session;
-        for (image_index = 0; image_index < BLIT_GRAPHICS_MAX_IMAGES;
-             ++image_index)
-            if (graphics_session->graphics[image_index].used)
-                ++count;
-    }
-    return count;
-}
-
-static int active_output_surface_count(const BlitRuntime *runtime,
-                                       int output_index)
-{
-    int surface_index;
-    int count = 0;
-
-    if (runtime == NULL || output_index < 0 ||
-        output_index >= runtime->output_count)
-        return 0;
-    for (surface_index = 0; surface_index < BLIT_MAX_SESSIONS;
-         ++surface_index) {
-        BlitSurface *surface = runtime->surfaces[surface_index];
-        if (surface != NULL && surface->used &&
-            surface_targets_output((BlitRuntime *)runtime, surface,
-                                   output_index))
-            ++count;
-    }
-    return count;
-}
-
-/* Power-of-two extents make integer texel boundaries exactly representable
-   as binary UV coordinates. SDL software geometry truncates UV*extent. */
-static int glyph_atlas_extent(int minimum)
-{
-    int extent = 1;
-    if (minimum < 1 || minimum > 8192) return 0;
-    while (extent < minimum) extent *= 2;
-    return extent;
-}
-
-static SDL_Texture *create_sdl_glyph_atlas(SDL_Renderer *renderer,
-                                           const BlitFont *font,
-                                           int *columns_out,
-                                           int *width_out, int *height_out)
-{
-    SDL_Texture *texture;
-    unsigned char *pixels;
-    size_t pixel_bytes;
-    size_t glyph;
-    int columns;
-    int rows;
-    int width;
-    int height;
-    int tile_width;
-    int tile_height;
-    int row;
-    int column;
-
-    if (renderer && font && font->raster_get) {
-        int tile_w = font->raster_max_width + 2;
-        int tile_h = font->raster_max_height + 2;
-        int ink = blit_font_has_overhang(font);
-        /* Binary-exact UV boundaries: arbitrary texture extents can round
-           an integer source edge down in SDL's software geometry sampler. */
-        int atlas_w = ink ? glyph_atlas_extent(tile_w * 16) : 1024;
-        int atlas_h = ink ? glyph_atlas_extent(tile_h * 8) : 1024;
-        SDL_Texture *result = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32,
-            SDL_TEXTUREACCESS_STATIC, atlas_w, atlas_h);
-        unsigned char *empty = calloc((size_t)atlas_w * atlas_h, 4);
-        if (!result || !empty ||
-            !SDL_UpdateTexture(result, NULL, empty, atlas_w * 4) ||
-            !SDL_SetTextureBlendMode(result, SDL_BLENDMODE_BLEND_PREMULTIPLIED) ||
-            !SDL_SetTextureScaleMode(result, SDL_SCALEMODE_NEAREST)) {
-            if (result) SDL_DestroyTexture(result);
-            free(empty);
-            return NULL;
-        }
-        free(empty);
-        *columns_out = ink ? 16 : atlas_w / tile_w;
-        *width_out = atlas_w; *height_out = atlas_h;
-        return result;
-    }
-    if (renderer == NULL || font == NULL || font->glyph_count == 0 ||
-        font->width < 1 || font->height < 1 || font->width > 32 ||
-        font->height > 64 ||
-        font->glyph_count > 32U * (8192U / (unsigned)(font->height + 2)))
-        return NULL;
-    /* Keep the atlas compact while leaving room for the bundled Hibr font and
-       future PSF2 additions. Every cell is a white alpha mask; the renderer
-       applies the terminal foreground colour with texture modulation. */
-    columns = 32;
-    /* Keep a transparent/duplicated edge around every bitmap.  Nearest
-       filtering avoids interpolation, but rasterization at a normalized
-       tile boundary can still select a neighbouring texel after scaling.
-       The border makes the atlas tile self-contained. */
-    tile_width = font->width + 2;
-    tile_height = font->height + 2;
-    rows = (int)((font->glyph_count + (size_t)columns - 1) /
-                 (size_t)columns);
-    width = glyph_atlas_extent(columns * tile_width);
-    height = glyph_atlas_extent(rows * tile_height);
-    if (!width || !height) return NULL;
-    pixel_bytes = (size_t)width * (size_t)height * 4U;
-    pixels = (unsigned char *)calloc(1, pixel_bytes);
-    if (pixels == NULL)
-        return NULL;
-    for (glyph = 0; glyph < font->glyph_count; ++glyph) {
-        int atlas_x = (int)(glyph % (size_t)columns) * tile_width + 1;
-        int atlas_y = (int)(glyph / (size_t)columns) * tile_height + 1;
-        for (row = 0; row < font->height; ++row) {
-            uint32_t bits = blit_font_glyph_row(font, glyph,
-                                                font->codepoints != NULL ?
-                                                    font->codepoints[glyph] : 0,
-                                                row);
-            for (column = 0; column < font->width; ++column) {
-                size_t offset;
-                if (!(bits & (1U << (font->width - column - 1))))
-                    continue;
-                offset = ((size_t)(atlas_y + row) * (size_t)width +
-                          (size_t)(atlas_x + column)) * 4U;
-                pixels[offset] = 255;
-                pixels[offset + 1] = 255;
-                pixels[offset + 2] = 255;
-                pixels[offset + 3] = 255;
-            }
-        }
-        /* Duplicate the interior edge texels into the border.  Transparent
-           edge pixels remain transparent; lit edge pixels remain continuous
-           if the sampler lands on the guard texel. */
-        for (row = 0; row < font->height; ++row) {
-            size_t left = ((size_t)(atlas_y + row) * (size_t)width +
-                           (size_t)(atlas_x - 1)) * 4U;
-            size_t right = ((size_t)(atlas_y + row) * (size_t)width +
-                            (size_t)(atlas_x + font->width)) * 4U;
-            memcpy(pixels + left, pixels + left + 4U, 4U);
-            memcpy(pixels + right, pixels + right - 4U, 4U);
-        }
-        for (column = -1; column <= font->width; ++column) {
-            size_t top = ((size_t)(atlas_y - 1) * (size_t)width +
-                          (size_t)(atlas_x + column)) * 4U;
-            size_t bottom = ((size_t)(atlas_y + font->height) *
-                             (size_t)width + (size_t)(atlas_x + column)) * 4U;
-            memcpy(pixels + top, pixels + top + (size_t)width * 4U, 4U);
-            memcpy(pixels + bottom,
-                   pixels + bottom - (size_t)width * 4U, 4U);
-        }
-    }
-    texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32,
-                                SDL_TEXTUREACCESS_STATIC, width, height);
-    if (texture == NULL || !SDL_UpdateTexture(texture, NULL, pixels,
-                                               width * 4)) {
-        if (texture != NULL)
-            SDL_DestroyTexture(texture);
-        free(pixels);
-        return NULL;
-    }
-    free(pixels);
-    SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
-    /* SDL3 defaults textures to linear filtering. The atlas contains
-       adjacent bitmap glyphs with no padding, so linear sampling can blend
-       neighbouring glyph pixels into scaled cell edges. Terminal glyphs are
-       discrete bitmap cells: use nearest sampling, and fall back to the
-       existing per-pixel renderer if the mode is unavailable. */
-    if (!SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST)) {
-        SDL_DestroyTexture(texture);
-        return NULL;
-    }
-    if (columns_out != NULL)
-        *columns_out = columns;
-    if (width_out != NULL) *width_out = width;
-    if (height_out != NULL) *height_out = height;
-    return texture;
-}
-
-static int ensure_sdl_background_batch(BlitOutput *output,
-                                       int additional_quads)
-{
-    SDL_Vertex *vertices;
-    int *indices;
-    int required;
-    int capacity;
-
-    if (output == NULL || additional_quads < 1)
-        return 0;
-    required = output->background_vertex_count + additional_quads * 4;
-    if (required <= output->background_capacity)
-        return 1;
-    capacity = output->background_capacity > 0 ? output->background_capacity : 256;
-    while (capacity < required) {
-        if (capacity > 1000000)
-            return 0;
-        capacity *= 2;
-    }
-    vertices = (SDL_Vertex *)realloc(output->background_vertices,
-                                     (size_t)capacity * sizeof(*vertices));
-    if (vertices == NULL)
-        return 0;
-    indices = (int *)realloc(output->background_indices,
-                             (size_t)(capacity / 4) * 6U * sizeof(*indices));
-    if (indices == NULL) {
-        output->background_vertices = vertices;
-        return 0;
-    }
-    output->background_vertices = vertices;
-    output->background_indices = indices;
-    output->background_capacity = capacity;
-    return 1;
-}
-
-static void flush_sdl_background_batch(BlitOutput *output)
-{
-    if (output == NULL || output->renderer == NULL ||
-        output->background_vertex_count == 0)
-        return;
-    SDL_RenderGeometry(output->renderer, NULL,
-                       output->background_vertices,
-                       output->background_vertex_count,
-                       output->background_indices,
-                       output->background_index_count);
-    ++output->background_batch_submissions;
-    output->background_vertex_count = 0;
-    output->background_index_count = 0;
-}
-
-static int queue_sdl_background(BlitOutput *output, uint32_t colour,
-                                float x, float y, float width, float height)
-{
-    SDL_Vertex *vertices;
-    int *indices;
-    int vertex;
-    int index;
-    float red;
-    float green;
-    float blue;
-
-    if (output == NULL || !ensure_sdl_background_batch(output, 1))
-        return 0;
-    red = (float)((colour >> 16) & 0xffU) / 255.0f;
-    green = (float)((colour >> 8) & 0xffU) / 255.0f;
-    blue = (float)(colour & 0xffU) / 255.0f;
-    vertex = output->background_vertex_count;
-    vertices = output->background_vertices + vertex;
-    vertices[0].position.x = x;
-    vertices[0].position.y = y;
-    vertices[1].position.x = x + width;
-    vertices[1].position.y = y;
-    vertices[2].position.x = x + width;
-    vertices[2].position.y = y + height;
-    vertices[3].position.x = x;
-    vertices[3].position.y = y + height;
-    for (index = 0; index < 4; ++index) {
-        vertices[index].color.r = red;
-        vertices[index].color.g = green;
-        vertices[index].color.b = blue;
-        vertices[index].color.a = 1.0f;
-        vertices[index].tex_coord.x = 0.0f;
-        vertices[index].tex_coord.y = 0.0f;
-    }
-    index = output->background_index_count;
-    indices = output->background_indices + index;
-    indices[0] = vertex;
-    indices[1] = vertex + 1;
-    indices[2] = vertex + 2;
-    indices[3] = vertex;
-    indices[4] = vertex + 2;
-    indices[5] = vertex + 3;
-    output->background_vertex_count += 4;
-    output->background_index_count += 6;
-    ++output->background_quads;
-    return 1;
-}
-
-static int ensure_sdl_glyph_batch(BlitOutput *output, int additional_quads)
-{
-    int required;
-    int capacity;
-    SDL_Vertex *vertices;
-    int *indices;
-
-    if (output == NULL || additional_quads < 1)
-        return 0;
-    required = output->glyph_vertex_count + additional_quads * 4;
-    if (required <= output->glyph_capacity)
-        return 1;
-    capacity = output->glyph_capacity > 0 ? output->glyph_capacity : 256;
-    while (capacity < required) {
-        if (capacity > 1000000)
-            return 0;
-        capacity *= 2;
-    }
-    vertices = (SDL_Vertex *)realloc(output->glyph_vertices,
-                                     (size_t)capacity * sizeof(*vertices));
-    if (vertices == NULL)
-        return 0;
-    indices = (int *)realloc(output->glyph_indices,
-                             (size_t)(capacity / 4) * 6U * sizeof(*indices));
-    if (indices == NULL) {
-        /* Keep the vertex allocation valid; the caller falls back to the
-           established one-draw path when the index buffer cannot grow. */
-        output->glyph_vertices = vertices;
-        return 0;
-    }
-    output->glyph_vertices = vertices;
-    output->glyph_indices = indices;
-    output->glyph_capacity = capacity;
-    return 1;
-}
-
-static void flush_sdl_glyph_batch(BlitOutput *output)
-{
-    if (output == NULL || output->renderer == NULL ||
-        output->glyph_atlas == NULL || output->glyph_vertex_count == 0)
-        return;
-    SDL_RenderGeometry(output->renderer, output->glyph_atlas,
-                       output->glyph_vertices, output->glyph_vertex_count,
-                       output->glyph_indices, output->glyph_index_count);
-    output->glyph_vertex_count = 0;
-    output->glyph_index_count = 0;
-}
-
-/* `lean` slants a glyph: the top edge moves right by this many pixels and the
-   bottom edge moves left by the same amount, so the glyph stays centred in its
-   cell and overhangs by at most `lean`. Zero draws upright. */
-static int queue_sdl_glyph_key(BlitOutput *output, const BlitFont *font,
-                           uint32_t colour, uint32_t codepoint, float x,
-                           float y, float cell_width, float cell_height,
-                           float lean, float trim, const BlitCellCluster *cluster)
-{
-    SDL_Vertex *vertices;
-    int *indices;
-    size_t glyph;
-    int columns;
-    int atlas_width;
-    int atlas_height;
-    float source_x;
-    float source_y;
-    float source_w;
-    float source_h;
-    float red;
-    float green;
-    float blue;
-    float top_lean = lean;
-    float bottom_lean = -lean;
-    int vertex;
-    int index;
-
-    if (output == NULL || font == NULL || font->data == NULL ||
-        output->glyph_atlas == NULL || output->glyph_atlas_columns < 1 ||
-        output->glyph_atlas_width < 1 || output->glyph_atlas_height < 1)
-        return 0;
-    if (!ensure_sdl_glyph_batch(output, 1)) return 0;
-    if (font->raster_get) {
-        BlitRasterGlyph raster;
-        int span = cell_width > font->raster_cell_width ? 2 : 1;
-        BlitCellCluster scalar_key;
-        const BlitCellCluster *key = cluster;
-        unsigned slot;
-        int tile_width = font->raster_max_width + 2;
-        int tile_height = font->raster_max_height + 2;
-        SDL_Rect rect;
-        if (!key) {
-            if (!blit_cell_cluster_init(&scalar_key, codepoint, NULL, 0, span)) return 0;
-            key = &scalar_key;
-        }
-        slot = blit_cell_cluster_hash(key) % 128U;
-        if (cluster) {
-            if (!font->raster_cluster_get ||
-                !font->raster_cluster_get(font->raster_state, key, &raster)) return 0;
-        } else if (!font->raster_get(font->raster_state, codepoint, span, &raster)) return 0;
-        if (raster.width > tile_width - 2 || raster.height > tile_height - 2) return 0;
-        if (trim > 0 && raster.format == BLIT_RASTER_RGBA_PREMULTIPLIED) return 1;
-        rect.x = (slot % output->glyph_atlas_columns) * tile_width;
-        rect.y = (slot / output->glyph_atlas_columns) * tile_height;
-        rect.w = tile_width; rect.h = tile_height;
-        if (!blit_cell_cluster_equal(&output->raster_keys[slot], key)) {
-            unsigned char *pixels = calloc((size_t)tile_width * tile_height, 4);
-            int row, column;
-            if (!pixels) return 0;
-            for (row = 0; row < raster.height; ++row)
-                for (column = 0; column < raster.width; ++column) {
-                    unsigned char *out = pixels + ((row + 1) * tile_width + column + 1) * 4;
-                    const unsigned char *in = raster.pixels + row * raster.stride +
-                        column * (int)raster.format;
-                    if (raster.format == BLIT_RASTER_COVERAGE)
-                        out[0] = out[1] = out[2] = out[3] = in[0];
-                    else memcpy(out, in, 4);
-                }
-            /* A collision may replace texels referenced by pending vertices. */
-            flush_sdl_glyph_batch(output);
-            if (!SDL_UpdateTexture(output->glyph_atlas, &rect, pixels, tile_width * 4)) {
-                free(pixels); return 0;
-            }
-            free(pixels);
-            output->raster_keys[slot] = *key;
-        }
-        source_x = (float)(rect.x + 1) / output->glyph_atlas_width;
-        source_y = (float)(rect.y + 1) / output->glyph_atlas_height;
-        source_w = (float)raster.width / output->glyph_atlas_width;
-        source_h = (float)raster.height / output->glyph_atlas_height;
-        {
-            float sx = cell_width / (font->raster_cell_width * span);
-            float sy = cell_height / font->raster_cell_height;
-            /* Slant about the terminal cell, not the expanded ink canvas.
-               Marks extending above/below it keep the same shear. */
-            top_lean = lean * (1.0f - 2.0f * raster.ink_offset_y /
-                              font->raster_cell_height);
-            bottom_lean = lean * (1.0f - 2.0f *
-                (raster.ink_offset_y + raster.height) / font->raster_cell_height);
-            x += raster.ink_offset_x * sx;
-            y += raster.ink_offset_y * sy;
-            cell_width = raster.width * sx;
-            cell_height = raster.height * sy;
-        }
-        if (raster.format == BLIT_RASTER_RGBA_PREMULTIPLIED) colour = 0xffffff;
-    } else {
-    glyph = blit_font_glyph_index(font, codepoint);
-    if (glyph >= font->glyph_count) return 0;
-    columns = output->glyph_atlas_columns;
-    atlas_width = output->glyph_atlas_width;
-    atlas_height = output->glyph_atlas_height;
-    source_x = (float)((int)(glyph % (size_t)columns) * (font->width + 2) + 1) /
-        (float)atlas_width;
-    source_y = (float)((int)(glyph / (size_t)columns) * (font->height + 2) + 1) /
-        (float)atlas_height;
-    source_w = (float)font->width / (float)atlas_width;
-    source_h = (float)font->height / (float)atlas_height;
-    }
-    /* Dropping the same fraction from the source and the destination keeps
-       the glyph at its own scale and simply does not draw its rightmost
-       column, which is what stops bold's overstrike from writing into the
-       next cell. */
-    if (trim > 0.0f && cell_width > trim) {
-        source_w *= (cell_width - trim) / cell_width;
-        cell_width -= trim;
-    }
-    red = (float)((colour >> 16) & 0xffU) / 255.0f;
-    green = (float)((colour >> 8) & 0xffU) / 255.0f;
-    blue = (float)(colour & 0xffU) / 255.0f;
-    vertex = output->glyph_vertex_count;
-    vertices = output->glyph_vertices + vertex;
-    vertices[0].position.x = x + top_lean;
-    vertices[0].position.y = y;
-    vertices[1].position.x = x + cell_width + top_lean;
-    vertices[1].position.y = y;
-    vertices[2].position.x = x + cell_width + bottom_lean;
-    vertices[2].position.y = y + cell_height;
-    vertices[3].position.x = x + bottom_lean;
-    vertices[3].position.y = y + cell_height;
-    vertices[0].tex_coord.x = source_x;
-    vertices[0].tex_coord.y = source_y;
-    vertices[1].tex_coord.x = source_x + source_w;
-    vertices[1].tex_coord.y = source_y;
-    vertices[2].tex_coord.x = source_x + source_w;
-    vertices[2].tex_coord.y = source_y + source_h;
-    vertices[3].tex_coord.x = source_x;
-    vertices[3].tex_coord.y = source_y + source_h;
-    for (index = 0; index < 4; ++index) {
-        vertices[index].color.r = red;
-        vertices[index].color.g = green;
-        vertices[index].color.b = blue;
-        vertices[index].color.a = 1.0f;
-    }
-    index = output->glyph_index_count;
-    indices = output->glyph_indices + index;
-    indices[0] = vertex;
-    indices[1] = vertex + 1;
-    indices[2] = vertex + 2;
-    indices[3] = vertex;
-    indices[4] = vertex + 2;
-    indices[5] = vertex + 3;
-    output->glyph_vertex_count += 4;
-    output->glyph_index_count += 6;
-    return 1;
-}
-
-static int queue_sdl_glyph(BlitOutput *output, const BlitFont *font,
-                           uint32_t colour, uint32_t codepoint, float x,
-                           float y, float cell_width, float cell_height,
-                           float lean, float trim)
-{
-    return queue_sdl_glyph_key(output, font, colour, codepoint, x, y,
-                                cell_width, cell_height, lean, trim, NULL);
-}
-
-/* The horizontal offset of one glyph row under a slant: `lean` at the top row,
-   -`lean` at the bottom. */
-static float glyph_row_lean(float lean, int row, int rows)
-{
-    if (lean == 0.0f || rows < 2)
-        return 0.0f;
-    return lean * (float)(rows - 1 - 2 * row) / (float)(rows - 1);
-}
-
 #define BLIT_WIDE_ATLAS_PIXELS 2048
 #define BLIT_WIDE_ATLAS_CODEPOINTS 0x10000
-
-/* The wide atlas and its slot table, created on first wide glyph so a session
-   that never shows one pays nothing. */
-static int ensure_sdl_wide_atlas(BlitOutput *output, const BlitFont *font)
-{
-    int tile;
-    int index;
-
-    if (output == NULL || output->renderer == NULL || font == NULL ||
-        font->data == NULL || font->width < 1 || font->height < 1)
-        return 0;
-    if (output->wide_atlas != NULL)
-        return 1;
-    tile = font->width > font->height ? font->width : font->height;
-    tile += 2;
-    output->wide_atlas = SDL_CreateTexture(output->renderer,
-                                           SDL_PIXELFORMAT_RGBA32,
-                                           SDL_TEXTUREACCESS_STATIC,
-                                           BLIT_WIDE_ATLAS_PIXELS,
-                                           BLIT_WIDE_ATLAS_PIXELS);
-    if (output->wide_atlas == NULL)
-        return 0;
-    SDL_SetTextureBlendMode(output->wide_atlas, SDL_BLENDMODE_BLEND);
-    if (!SDL_SetTextureScaleMode(output->wide_atlas, SDL_SCALEMODE_NEAREST)) {
-        SDL_DestroyTexture(output->wide_atlas);
-        output->wide_atlas = NULL;
-        return 0;
-    }
-    output->wide_atlas_columns = BLIT_WIDE_ATLAS_PIXELS / tile;
-    output->wide_atlas_slots = output->wide_atlas_columns *
-        (BLIT_WIDE_ATLAS_PIXELS / tile);
-    output->wide_atlas_slot_of = (int32_t *)malloc(
-        (size_t)BLIT_WIDE_ATLAS_CODEPOINTS * sizeof(*output->wide_atlas_slot_of));
-    if (output->wide_atlas_slot_of == NULL) {
-        SDL_DestroyTexture(output->wide_atlas);
-        output->wide_atlas = NULL;
-        return 0;
-    }
-    for (index = 0; index < BLIT_WIDE_ATLAS_CODEPOINTS; ++index)
-        output->wide_atlas_slot_of[index] = -1;
-    output->wide_atlas_next = 0;
-    return 1;
-}
-
-/* The slot holding this codepoint's bitmap, uploading it on first use.
-   Returns -1 when the atlas is full, which the caller treats as "not
-   available" rather than evicting something that is on screen. */
-static int sdl_wide_atlas_slot(BlitOutput *output, const BlitFont *font,
-                               uint32_t codepoint)
-{
-    unsigned char *pixels;
-    size_t glyph;
-    int tile = font->width > font->height ? font->width : font->height;
-    int slot;
-    int row;
-    int column;
-    SDL_Rect rect;
-
-    if (codepoint >= BLIT_WIDE_ATLAS_CODEPOINTS)
-        return -1;
-    if (!ensure_sdl_wide_atlas(output, font))
-        return -1;
-    if (output->wide_atlas_slot_of[codepoint] >= 0)
-        return output->wide_atlas_slot_of[codepoint];
-    if (output->wide_atlas_next >= output->wide_atlas_slots)
-        return -1;
-    tile += 2;
-    glyph = blit_font_glyph_index(font, codepoint);
-    pixels = (unsigned char *)calloc(1, (size_t)tile * (size_t)tile * 4U);
-    if (pixels == NULL)
-        return -1;
-    for (row = 0; row < font->height; ++row) {
-        uint32_t bits = blit_font_glyph_row(font, glyph, codepoint, row);
-        for (column = 0; column < font->width; ++column) {
-            size_t offset;
-            if (!(bits & (1U << (font->width - column - 1))))
-                continue;
-            offset = ((size_t)(row + 1) * (size_t)tile +
-                      (size_t)(column + 1)) * 4U;
-            pixels[offset] = 255;
-            pixels[offset + 1] = 255;
-            pixels[offset + 2] = 255;
-            pixels[offset + 3] = 255;
-        }
-    }
-    slot = output->wide_atlas_next++;
-    rect.x = (slot % output->wide_atlas_columns) * tile;
-    rect.y = (slot / output->wide_atlas_columns) * tile;
-    rect.w = tile;
-    rect.h = tile;
-    if (!SDL_UpdateTexture(output->wide_atlas, &rect, pixels, tile * 4)) {
-        free(pixels);
-        --output->wide_atlas_next;
-        return -1;
-    }
-    free(pixels);
-    output->wide_atlas_slot_of[codepoint] = slot;
-    ++output->wide_glyph_uploads;
-    return slot;
-}
-
-static void flush_sdl_wide_batch(BlitOutput *output)
-{
-    if (output == NULL || output->renderer == NULL ||
-        output->wide_atlas == NULL || output->wide_vertex_count == 0)
-        return;
-    SDL_RenderGeometry(output->renderer, output->wide_atlas,
-                       output->wide_vertices, output->wide_vertex_count,
-                       output->wide_indices, output->wide_index_count);
-    output->wide_vertex_count = 0;
-    output->wide_index_count = 0;
-}
-
-static int queue_sdl_wide_glyph(BlitOutput *output, const BlitFont *font,
-                                uint32_t colour, uint32_t codepoint, float x,
-                                float y, float cell_width, float cell_height,
-                                float lean)
-{
-    SDL_Vertex *vertices;
-    int *indices;
-    int slot;
-    int tile;
-    float source_x;
-    float source_y;
-    float source_w;
-    float source_h;
-    float red;
-    float green;
-    float blue;
-    int vertex;
-    int index;
-    int required;
-
-    slot = sdl_wide_atlas_slot(output, font, codepoint);
-    if (slot < 0)
-        return 0;
-    tile = (font->width > font->height ? font->width : font->height) + 2;
-    required = output->wide_vertex_count + 4;
-    if (required > output->wide_capacity) {
-        int capacity = output->wide_capacity > 0 ? output->wide_capacity : 256;
-        SDL_Vertex *grown;
-        int *grown_indices;
-        while (capacity < required) {
-            if (capacity > 1000000)
-                return 0;
-            capacity *= 2;
-        }
-        grown = (SDL_Vertex *)realloc(output->wide_vertices,
-                                      (size_t)capacity * sizeof(*grown));
-        if (grown == NULL)
-            return 0;
-        output->wide_vertices = grown;
-        grown_indices = (int *)realloc(output->wide_indices,
-                                       (size_t)(capacity / 4) * 6U *
-                                       sizeof(*grown_indices));
-        if (grown_indices == NULL)
-            return 0;
-        output->wide_indices = grown_indices;
-        output->wide_capacity = capacity;
-    }
-    source_x = (float)((slot % output->wide_atlas_columns) * tile + 1) /
-        (float)BLIT_WIDE_ATLAS_PIXELS;
-    source_y = (float)((slot / output->wide_atlas_columns) * tile + 1) /
-        (float)BLIT_WIDE_ATLAS_PIXELS;
-    source_w = (float)font->width / (float)BLIT_WIDE_ATLAS_PIXELS;
-    source_h = (float)font->height / (float)BLIT_WIDE_ATLAS_PIXELS;
-    red = (float)((colour >> 16) & 0xffU) / 255.0f;
-    green = (float)((colour >> 8) & 0xffU) / 255.0f;
-    blue = (float)(colour & 0xffU) / 255.0f;
-    vertex = output->wide_vertex_count;
-    vertices = output->wide_vertices + vertex;
-    vertices[0].position.x = x + lean;
-    vertices[0].position.y = y;
-    vertices[1].position.x = x + cell_width + lean;
-    vertices[1].position.y = y;
-    vertices[2].position.x = x + cell_width - lean;
-    vertices[2].position.y = y + cell_height;
-    vertices[3].position.x = x - lean;
-    vertices[3].position.y = y + cell_height;
-    vertices[0].tex_coord.x = source_x;
-    vertices[0].tex_coord.y = source_y;
-    vertices[1].tex_coord.x = source_x + source_w;
-    vertices[1].tex_coord.y = source_y;
-    vertices[2].tex_coord.x = source_x + source_w;
-    vertices[2].tex_coord.y = source_y + source_h;
-    vertices[3].tex_coord.x = source_x;
-    vertices[3].tex_coord.y = source_y + source_h;
-    for (index = 0; index < 4; ++index) {
-        vertices[index].color.r = red;
-        vertices[index].color.g = green;
-        vertices[index].color.b = blue;
-        vertices[index].color.a = 1.0f;
-    }
-    index = output->wide_index_count;
-    indices = output->wide_indices + index;
-    indices[0] = vertex;
-    indices[1] = vertex + 1;
-    indices[2] = vertex + 2;
-    indices[3] = vertex;
-    indices[4] = vertex + 2;
-    indices[5] = vertex + 3;
-    output->wide_vertex_count += 4;
-    output->wide_index_count += 6;
-    return 1;
-}
-
-static void render_sdl_glyph(SDL_Renderer *renderer, const BlitFont *font,
-                             SDL_Texture *glyph_atlas, int atlas_columns,
-                             uint32_t colour, uint32_t codepoint, float x,
-                             float y, float cell_width, float cell_height,
-                             float lean, float trim)
-{
-    int source_width = font != NULL && font->data ? font->width : 5;
-    int source_height = font != NULL && font->data ? font->height : 7;
-    size_t glyph = blit_font_glyph_index(font, codepoint);
-    int source_row;
-    float source_scale = 1.0f;
-
-    if (trim > 0.0f && cell_width > trim) {
-        source_scale = (cell_width - trim) / cell_width;
-        cell_width -= trim;
-    }
-
-    if (glyph_atlas != NULL && font != NULL && font->data != NULL &&
-        glyph < font->glyph_count && atlas_columns > 0) {
-        SDL_FRect source;
-        SDL_FRect destination;
-        source.x = (float)((int)(glyph % (size_t)atlas_columns) *
-                           (font->width + 2) + 1);
-        source.y = (float)((int)(glyph / (size_t)atlas_columns) *
-                           (font->height + 2) + 1);
-        source.w = (float)font->width * source_scale;
-        source.h = (float)font->height;
-        destination.x = x;
-        destination.y = y;
-        destination.w = cell_width;
-        destination.h = cell_height;
-        SDL_SetTextureColorMod(glyph_atlas,
-                               (unsigned char)(colour >> 16),
-                               (unsigned char)(colour >> 8),
-                               (unsigned char)colour);
-        if (lean == 0.0f) {
-            SDL_RenderTexture(renderer, glyph_atlas, &source, &destination);
-            return;
-        }
-        /* A single textured quad cannot be slanted through this call, so a
-           slanted glyph is drawn one source row at a time. This is the
-           emergency immediate path (BLIT_SDL_GLYPH_BATCH=off); the geometry
-           path slants the quad itself. */
-        for (source_row = 0; source_row < font->height; ++source_row) {
-            SDL_FRect row_source = source;
-            /* source.w already carries the trim. */
-            SDL_FRect row_destination;
-            row_source.y = source.y + (float)source_row;
-            row_source.h = 1.0f;
-            row_destination.x = x + glyph_row_lean(lean, source_row,
-                                                   font->height);
-            row_destination.y = y + cell_height * (float)source_row /
-                (float)font->height;
-            row_destination.w = cell_width;
-            row_destination.h = cell_height / (float)font->height + 0.5f;
-            SDL_RenderTexture(renderer, glyph_atlas, &row_source,
-                              &row_destination);
-        }
-        return;
-    }
-    for (source_row = 0; source_row < source_height; ++source_row) {
-        uint32_t row_bits = blit_font_glyph_row(font, glyph, codepoint,
-                                                source_row);
-        int source_column = 0;
-        while (source_column < source_width) {
-            int run_start;
-            int run_end;
-            while (source_column < source_width &&
-                   !(row_bits & (1U << (source_width - source_column - 1))))
-                ++source_column;
-            run_start = source_column;
-            while (source_column < source_width &&
-                   (row_bits & (1U << (source_width - source_column - 1))))
-                ++source_column;
-            run_end = source_column;
-            if (run_end > (int)((float)source_width * source_scale))
-                run_end = (int)((float)source_width * source_scale);
-            if (run_end > run_start) {
-                SDL_FRect pixel_run;
-                pixel_run.x = x + cell_width * run_start / source_width +
-                    glyph_row_lean(lean, source_row, source_height);
-                pixel_run.y = y + cell_height * source_row / source_height;
-                pixel_run.w = cell_width * (run_end - run_start) /
-                    source_width;
-                pixel_run.h = cell_height / source_height + 0.5f;
-                SDL_RenderFillRect(renderer, &pixel_run);
-            }
-        }
-    }
-}
-
-static void render_or_queue_sdl_glyph(BlitOutput *output,
-                                      const BlitFont *font, uint32_t colour,
-                                      uint32_t codepoint, float x, float y,
-                                      float cell_width, float cell_height,
-                                      float lean, float trim)
-{
-    if (font && font->raster_get) {
-        if (queue_sdl_glyph(output, font, colour, codepoint, x, y,
-                           cell_width, cell_height, lean, trim)) {
-            if (!output->glyph_geometry_enabled) flush_sdl_glyph_batch(output);
-            return;
-        }
-        /* Do not accidentally interpret the modern atlas as a PSF atlas. */
-        return;
-    }
-    if (output != NULL && !output->glyph_geometry_enabled) {
-        render_sdl_glyph(output->renderer, font, output->glyph_atlas,
-                         output->glyph_atlas_columns, colour, codepoint, x, y,
-                         cell_width, cell_height, lean, trim);
-        return;
-    }
-    if (queue_sdl_glyph(output, font, colour, codepoint, x, y,
-                        cell_width, cell_height, lean, trim))
-        return;
-    flush_sdl_glyph_batch(output);
-    render_sdl_glyph(output->renderer, font, output->glyph_atlas,
-                     output->glyph_atlas_columns, colour, codepoint, x, y,
-                     cell_width, cell_height, lean, trim);
-}
-
-/* Try the canonical owned cluster once. A rejected ordinary combining
-   sequence falls back to the established base-plus-marks caller path. */
-static int render_sdl_cluster(BlitOutput *output, const BlitFont *font,
-                               uint32_t colour, uint32_t cp,
-                               const uint32_t *marks, unsigned count,
-                               float x, float y, float width, float height,
-                               float lean, int bold)
-{
-    BlitCellCluster key;
-    if (!count || !font || !font->raster_cluster_get ||
-        !blit_cell_cluster_init(&key, cp, marks, count,
-                               width > font->raster_cell_width ? 2 : 1)) return 0;
-    if (!queue_sdl_glyph_key(output, font, colour, cp, x, y, width, height, lean, 0, &key)) return 0;
-    if (bold) queue_sdl_glyph_key(output, font, colour, cp, x + 1, y, width, height, lean, 1, &key);
-    if (!output->glyph_geometry_enabled) flush_sdl_glyph_batch(output);
-    return 1;
-}
-
-/* One glyph/cluster dispatch for normal ink and cursor-cell repaint. */
-static void render_sdl_cell_ink(BlitRuntime *runtime, BlitOutput *output,
-    uint32_t colour, uint32_t cp, const uint32_t *marks, unsigned count,
-    uint16_t attributes, float x, float y, float width, float height, float lean)
-{
-    const BlitFont *source;
-    unsigned i;
-    if (attributes & (BLIT_ATTR_CONTINUATION | BLIT_ATTR_CONCEAL)) return;
-    source = cell_font(runtime, attributes, cp);
-    if (render_sdl_cluster(output, &runtime->font, colour, cp, marks, count,
-                           x, y, width, height, lean, (attributes & BLIT_ATTR_BOLD)!=0)) return;
-    if (cp && cp != ' ' && (source == &runtime->font ||
-        !queue_sdl_wide_glyph(output, source, colour, cp, x, y, width, height, lean)))
-        render_or_queue_sdl_glyph(output, &runtime->font, colour, cp,
-                                  x, y, width, height, lean, 0);
-    for (i=0; marks && i<count && i<BLIT_MAX_COMBINING; ++i)
-        render_or_queue_sdl_glyph(output, &runtime->font, colour, marks[i],
-                                  x, y, width, height, lean, 0);
-    if ((attributes & BLIT_ATTR_BOLD) && cp && cp != ' ' && source == &runtime->font)
-        render_or_queue_sdl_glyph(output, &runtime->font, colour, cp,
-                                  x+1, y, width, height, lean, 1);
-}
-
-static void destroy_sdl_graphics_cache(BlitOutput *output)
-{
-    int index;
-    if (output == NULL) return;
-    for (index = 0; index < BLIT_SDL_GRAPHICS_CACHE; ++index) {
-        if (output->graphics_textures[index] != NULL)
-            SDL_DestroyTexture(output->graphics_textures[index]);
-        output->graphics_textures[index] = NULL;
-        output->graphics_sources[index] = NULL;
-        output->graphics_generations[index] = 0;
-        output->graphics_widths[index] = 0;
-        output->graphics_heights[index] = 0;
-        output->graphics_formats[index] = 0;
-    }
-}
-
-static SDL_Texture *sdl_graphics_texture(BlitOutput *output,
-                                         const BlitGraphicsImage *image)
-{
-    int index;
-    int free_index = -1;
-    int source_bytes;
-    size_t pixel_count;
-    unsigned char *rgba = NULL;
-    const unsigned char *upload_pixels;
-    SDL_Texture *texture;
-    int pixel_index;
-    int reuse_texture = 0;
-    uint64_t upload_started_us;
-
-    if (output == NULL || output->renderer == NULL || image == NULL ||
-        image->pixels == NULL || image->width < 1 || image->height < 1)
-        return NULL;
-    upload_started_us = monotonic_us();
-    for (index = 0; index < BLIT_SDL_GRAPHICS_CACHE; ++index) {
-        if (output->graphics_sources[index] == image) {
-            if (output->graphics_generations[index] == image->generation &&
-                output->graphics_textures[index] != NULL) {
-                ++output->graphics_cache_hits;
-                return output->graphics_textures[index];
-            }
-            if (output->graphics_textures[index] != NULL &&
-                output->graphics_widths[index] == image->width &&
-                output->graphics_heights[index] == image->height &&
-                output->graphics_formats[index] == image->format) {
-                /* API pixel frames deliberately retain image identity. Update
-                   the existing GPU texture in place instead of destroying and
-                   recreating it for every frame. */
-                free_index = index;
-                reuse_texture = 1;
-                break;
-            }
-            if (output->graphics_textures[index] != NULL)
-                SDL_DestroyTexture(output->graphics_textures[index]);
-            output->graphics_textures[index] = NULL;
-            free_index = index;
-            break;
-        }
-        if (free_index < 0 && output->graphics_sources[index] == NULL)
-            free_index = index;
-    }
-    if (free_index < 0) free_index = 0;
-    if (!reuse_texture && output->graphics_sources[free_index] != NULL &&
-        output->graphics_textures[free_index] != NULL)
-        SDL_DestroyTexture(output->graphics_textures[free_index]);
-    if (!reuse_texture)
-        output->graphics_textures[free_index] = NULL;
-    output->graphics_sources[free_index] = NULL;
-    output->graphics_generations[free_index] = 0;
-
-    source_bytes = image->format == 24 ? 3 : 4;
-    pixel_count = (size_t)image->width * (size_t)image->height;
-    upload_pixels = image->pixels;
-    /* RGBA is already packed in SDL's requested byte order. Keep its source
-       alive for this synchronous call; do not allocate/copy it a second time. */
-    if (source_bytes == 3) {
-        rgba = (unsigned char *)malloc(pixel_count * 4U);
-        if (rgba == NULL) return NULL;
-        for (pixel_index = 0; (size_t)pixel_index < pixel_count; ++pixel_index) {
-            rgba[pixel_index * 4U] = image->pixels[pixel_index * source_bytes];
-            rgba[pixel_index * 4U + 1] =
-                image->pixels[pixel_index * source_bytes + 1];
-            rgba[pixel_index * 4U + 2] =
-                image->pixels[pixel_index * source_bytes + 2];
-            rgba[pixel_index * 4U + 3] = 255;
-        }
-        upload_pixels = rgba;
-    }
-    texture = output->graphics_textures[free_index];
-    if (texture == NULL) {
-        texture = SDL_CreateTexture(output->renderer, SDL_PIXELFORMAT_RGBA32,
-                                    SDL_TEXTUREACCESS_STATIC,
-                                    image->width, image->height);
-        if (texture == NULL) {
-            fprintf(stderr, "blit: SDL graphics texture create failed: %s\n",
-                    SDL_GetError());
-            free(rgba);
-            return NULL;
-        }
-        if (!SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST) ||
-            !SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND)) {
-            fprintf(stderr, "blit: SDL graphics texture policy failed: %s\n",
-                    SDL_GetError());
-            SDL_DestroyTexture(texture);
-            free(rgba);
-            return NULL;
-        }
-    }
-    if (!SDL_UpdateTexture(texture, NULL, upload_pixels, image->width * 4)) {
-        fprintf(stderr, "blit: SDL graphics texture upload failed: %s\n",
-                SDL_GetError());
-        SDL_DestroyTexture(texture);
-        free(rgba);
-        output->graphics_textures[free_index] = NULL;
-        return NULL;
-    }
-    free(rgba);
-    output->graphics_sources[free_index] = image;
-    output->graphics_generations[free_index] = image->generation;
-    output->graphics_widths[free_index] = image->width;
-    output->graphics_heights[free_index] = image->height;
-    output->graphics_formats[free_index] = image->format;
-    output->graphics_textures[free_index] = texture;
-    output->last_graphics_upload_ms =
-        (double)(monotonic_us() - upload_started_us) / 1000.0;
-    if (output->last_graphics_upload_ms > output->max_graphics_upload_ms)
-        output->max_graphics_upload_ms = output->last_graphics_upload_ms;
-    ++output->graphics_texture_uploads;
-    return texture;
-}
 
 /* Kitty z bands: below -2^30 is under cell backgrounds, [-2^30, 0) is over
    backgrounds but under text, and 0 or more is over text. */
@@ -26000,279 +23936,6 @@ enum {
     BLIT_GRAPHICS_LAYER_UNDER_BACKGROUND = 1,
     BLIT_GRAPHICS_LAYER_UNDER_TEXT = 2
 };
-
-static int render_sdl_graphics(BlitOutput *output,
-                               const BlitGraphicsImage *images,
-                               int image_count, float origin_x, float origin_y,
-                               int layer)
-{
-    SDL_Renderer *renderer = output != NULL ? output->renderer : NULL;
-    BlitGraphicsDraw draws[BLIT_GRAPHICS_MAX_DRAWS];
-    int api_images_drawn = 0;
-    int count = blit_graphics_collect(images, image_count, draws,
-                                      BLIT_GRAPHICS_MAX_DRAWS);
-    int index;
-    for (index = 0; index < count; ++index) {
-        const BlitGraphicsDraw *draw = &draws[index];
-        SDL_Texture *texture;
-        SDL_FRect source;
-        SDL_FRect destination;
-
-        if (layer == BLIT_GRAPHICS_LAYER_UNDER_BACKGROUND ?
-                draw->z >= BLIT_GRAPHICS_Z_UNDER_BACKGROUND :
-            layer == BLIT_GRAPHICS_LAYER_UNDER_TEXT ?
-                (draw->z < BLIT_GRAPHICS_Z_UNDER_BACKGROUND || draw->z >= 0) :
-                draw->z < 0)
-            continue;
-        texture = sdl_graphics_texture(output, draw->image);
-        if (texture == NULL) continue;
-        source.x = (float)draw->src_x;
-        source.y = (float)draw->src_y;
-        source.w = (float)draw->src_w;
-        source.h = (float)draw->src_h;
-        destination.x = origin_x + draw->x;
-        destination.y = origin_y + draw->y;
-        destination.w = (float)draw->width;
-        destination.h = (float)draw->height;
-        SDL_RenderTexture(renderer, texture, &source, &destination);
-        if (strcmp(draw->image->protocol, "api") == 0)
-            ++api_images_drawn;
-    }
-    return api_images_drawn;
-}
-
-static void render_sdl_effects(const BlitRuntime *runtime,
-                               SDL_Renderer *renderer, int width, int height)
-{
-    int y;
-    unsigned char alpha;
-
-    if (!runtime->effect.enabled ||
-        strcmp(runtime->effect.preset, "scanlines") != 0)
-        return;
-    alpha = (unsigned char)((runtime->effect.intensity * 255) / 100);
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, alpha);
-    for (y = 1; y < height; y += 2)
-        SDL_RenderLine(renderer, 0.0f, (float)y,
-                       (float)(width - 1), (float)y);
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
-}
-
-static int overlay_targets_output(const BlitRuntime *runtime,
-                                  const BlitOverlay *overlay, int output_index)
-{
-    char display_id[128];
-    snprintf(display_id, sizeof(display_id), "display-%llu",
-             runtime->outputs[output_index].display_id);
-    return strcmp(overlay->display_id, display_id) == 0;
-}
-
-static void render_sdl_overlays(const BlitRuntime *runtime,
-                                SDL_Renderer *renderer, int output_index)
-{
-    int i;
-
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-    for (i = 0; i < BLIT_MAX_OVERLAYS; ++i) {
-        SDL_FRect rectangle;
-        if (!runtime->overlays[i].used ||
-            !overlay_targets_output(runtime, &runtime->overlays[i],
-                                     output_index))
-            continue;
-        rectangle.x = (float)runtime->overlays[i].x;
-        rectangle.y = (float)runtime->overlays[i].y;
-        rectangle.w = (float)runtime->overlays[i].width;
-        rectangle.h = (float)runtime->overlays[i].height;
-        SDL_SetRenderDrawColor(renderer,
-            (unsigned char)(runtime->overlays[i].color >> 16),
-            (unsigned char)(runtime->overlays[i].color >> 8),
-            (unsigned char)runtime->overlays[i].color,
-            (unsigned char)((runtime->overlays[i].opacity * 255) / 100));
-        SDL_RenderFillRect(renderer, &rectangle);
-    }
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
-}
-
-static void capture_sdl_frame(BlitRuntime *runtime, int output_index,
-                              SDL_Renderer *renderer)
-{
-    SDL_Surface *pixels;
-    char path[512];
-    if (runtime->sdl_screenshot_dir[0] == '\0' ||
-        runtime->sdl_screenshot_written ||
-        runtime->sdl_frame < runtime->sdl_screenshot_after)
-        return;
-    pixels = SDL_RenderReadPixels(renderer, NULL);
-    if (pixels == NULL) {
-        fprintf(stderr, "blit: SDL screenshot read failed: %s\n", SDL_GetError());
-        runtime->sdl_screenshot_written = 1;
-        return;
-    }
-    snprintf(path, sizeof(path), "%s/display-%llu.bmp",
-             runtime->sdl_screenshot_dir,
-             runtime->outputs[output_index].display_id);
-    if (!SDL_SaveBMP(pixels, path))
-        fprintf(stderr, "blit: SDL screenshot save failed: %s\n", SDL_GetError());
-    else
-        fprintf(stderr, "blit: SDL screenshot=%s\n", path);
-    SDL_DestroySurface(pixels);
-    if (output_index + 1 >= runtime->output_count)
-        runtime->sdl_screenshot_written = 1;
-}
-
-static void capture_requested_screenshot(BlitRuntime *runtime,
-                                         int output_index,
-                                         SDL_Renderer *renderer)
-{
-    SDL_Surface *pixels;
-
-    if (!(runtime->screenshot_requested_mask & (1U << output_index)))
-        return;
-    if (runtime->outputs[output_index].screenshot_surface != NULL) {
-        SDL_DestroySurface(runtime->outputs[output_index].screenshot_surface);
-        runtime->outputs[output_index].screenshot_surface = NULL;
-    }
-    pixels = SDL_RenderReadPixels(renderer, NULL);
-    if (pixels == NULL) {
-        fprintf(stderr, "blit: API screenshot read failed: %s\n",
-                SDL_GetError());
-        return;
-    }
-    runtime->outputs[output_index].screenshot_surface = pixels;
-    capture_identity_headers(runtime,
-                             runtime->outputs[output_index].screenshot_identity,
-                             sizeof(runtime->outputs[output_index].screenshot_identity));
-    /* These pixels are the ones about to be presented.  The flag becomes true
-       once that present returns, so a client can tell a capture that reached
-       the screen from one that did not. */
-    runtime->outputs[output_index].screenshot_presented = 0;
-}
-
-/* Issue #69. The cached scene is the size Blit *composes* into, which is the
-   display's logical rectangle -- the connector's mode with its axes exchanged
-   at 90 and 270. It used to be the renderer's output size, which is the same
-   thing only while nothing is rotated. */
-/* Incrementally updating a cached scene has a precondition: the backend must
-   preserve a render target's contents between passes, so that repainting only
-   the damaged rows leaves the rest of the previous frame intact.
- 
-   That precondition is *false* on the live host's opengles2 path, measured
-   rather than reasoned about. Same machine, same screensaver, cache on
-   against cache off:
- 
-     on    stale 170 of 329 cells drawn, and 740 earlier under a busier saver
-     off   stale 0, six samples, on a workload with 10875 cells drawn and
-           1015 changing between reads
- 
-   It took five reproductions to get there, every one of them clean, because
-   every one ran against SDL's software renderer -- where the precondition
-   does hold, which is why the whole gate suite agrees the renderer is
-   correct. The development container has no GPU, so no gate here can see
-   this.
- 
-   So the scene cache uses two render-target textures. A content frame copies
-   the last complete scene into the other texture, applies only the committed
-   damage, and swaps the two pointers before presentation. The copy is an
-   explicit source-to-destination operation; it does not assume that rebinding
-   one GLES2 render target preserves its old pixels. Pointer-only frames still
-   copy the immutable current scene directly to the output.
-
-   BLIT_SDL_SCENE_CACHE=1 forces incremental composition when the two
-   textures are available; =0 forces a full rebuild. The variable overrides
-   the default in both directions so a backend can be measured without
-   silently selecting a second implementation. */
-static int sdl_incremental_scene_updates_enabled(const BlitRuntime *runtime,
-                                                 const BlitOutput *output)
-{
-    const char *value = getenv("BLIT_SDL_SCENE_CACHE");
-
-    if (value != NULL && value[0] != '\0')
-        return strcmp(value, "0") != 0;
-    /* A single SDL render-target texture is not a safe incremental backing
-       store on every backend: the live GLES2 path can discard its contents
-       when the target is rebound. The output therefore keeps a second
-       texture and copies the last complete scene into it before applying
-       damage. That makes incremental composition backend-independent. */
-    return runtime != NULL && output != NULL &&
-        output->scene_texture != NULL && output->scene_work_texture != NULL;
-}
-
-static int ensure_sdl_scene_texture(const BlitRuntime *runtime,
-                                    BlitOutput *output, int logical_width,
-                                    int logical_height)
-{
-    int width = logical_width;
-    int height = logical_height;
-
-    if (output == NULL || output->renderer == NULL)
-        return 0;
-    /* A scene snapshot and incremental scene updates are different
-       capabilities. Even when BLIT_SDL_SCENE_CACHE=0 requires every content
-       change to rebuild the target in full, retain that complete target so a
-       pointer-only frame can copy it. If target textures are unsupported,
-       creation below fails closed and the existing direct full-redraw path
-       remains the one implementation. */
-    if (output->scene_texture != NULL || output->scene_work_texture != NULL) {
-        float existing_width = 0.0f;
-        float existing_height = 0.0f;
-
-        if (width > 0 && height > 0 &&
-            output->scene_texture != NULL &&
-            SDL_GetTextureSize(output->scene_texture, &existing_width,
-                               &existing_height) &&
-            ((int)existing_width != width || (int)existing_height != height)) {
-            if (output->scene_texture != NULL)
-                SDL_DestroyTexture(output->scene_texture);
-            if (output->scene_work_texture != NULL)
-                SDL_DestroyTexture(output->scene_work_texture);
-            output->scene_texture = NULL;
-            output->scene_work_texture = NULL;
-            output->initialized = 0;
-        } else if (output->scene_texture != NULL &&
-                   output->scene_work_texture != NULL) {
-            return 1;
-        }
-    }
-    if ((width < 1 || height < 1) &&
-        (!SDL_GetRenderOutputSize(output->renderer, &width, &height) ||
-         width < 1 || height < 1))
-        return 0;
-    if (output->scene_texture == NULL)
-        output->scene_texture = SDL_CreateTexture(
-            output->renderer, SDL_PIXELFORMAT_RGBA8888,
-            SDL_TEXTUREACCESS_TARGET, width, height);
-    if (output->scene_work_texture == NULL)
-        output->scene_work_texture = SDL_CreateTexture(
-            output->renderer, SDL_PIXELFORMAT_RGBA8888,
-            SDL_TEXTUREACCESS_TARGET, width, height);
-    if (output->scene_texture == NULL || output->scene_work_texture == NULL) {
-        fprintf(stderr, "blit: SDL scene cache unavailable: %s\n",
-                SDL_GetError());
-        if (output->scene_texture != NULL)
-            SDL_DestroyTexture(output->scene_texture);
-        if (output->scene_work_texture != NULL)
-            SDL_DestroyTexture(output->scene_work_texture);
-        output->scene_texture = NULL;
-        output->scene_work_texture = NULL;
-        return 0;
-    }
-    SDL_SetTextureBlendMode(output->scene_texture, SDL_BLENDMODE_NONE);
-    SDL_SetTextureBlendMode(output->scene_work_texture, SDL_BLENDMODE_NONE);
-    return 1;
-}
-
-static void swap_sdl_scene_textures(BlitOutput *output)
-{
-    SDL_Texture *scene;
-
-    if (output == NULL || output->scene_texture == NULL ||
-        output->scene_work_texture == NULL)
-        return;
-    scene = output->scene_texture;
-    output->scene_texture = output->scene_work_texture;
-    output->scene_work_texture = scene;
-}
 
 /* ADR 0061: a surface's pixel origin on an output, computed in one place.
    A surface attached to a pane sits at its pane's cell position; a surface
@@ -26339,60 +24002,6 @@ static void surface_origin_px(BlitRuntime *runtime, const BlitSurface *surface,
    at 90; `display_geometry_gate.c` asserts the footprint for that reason. The
    render scale is set to 1 for the draw because the scene texture is in
    device pixels while the renderer is in font-scaled units. */
-static void present_sdl_scene(BlitRuntime *runtime, int output_index)
-{
-    SDL_Renderer *renderer = runtime->outputs[output_index].renderer;
-    SDL_Texture *scene = runtime->outputs[output_index].scene_texture;
-    int display_index = display_index_for_output(runtime, output_index);
-    int rotation = display_index >= 0 ?
-        runtime->displays[display_index].rotation : 0;
-    SDL_FRect destination;
-
-    SDL_SetRenderTarget(renderer, NULL);
-    SDL_SetRenderScale(renderer, 1.0f, 1.0f);
-    if (scene == NULL)
-        return;
-    if (rotation == 0) {
-        SDL_RenderTexture(renderer, scene, NULL, NULL);
-        return;
-    }
-    blit_rotation_present_rect(rotation,
-        runtime->displays[display_index].physical_width,
-        runtime->displays[display_index].physical_height,
-        &destination.x, &destination.y, &destination.w, &destination.h);
-    SDL_RenderTextureRotated(renderer, scene, NULL, &destination,
-                             blit_rotation_angle(rotation), NULL,
-                             SDL_FLIP_NONE);
-}
-
-static void finish_sdl_output(BlitRuntime *runtime, int output_index,
-                              int scene_target)
-{
-    SDL_Renderer *renderer = runtime->outputs[output_index].renderer;
-    uint64_t present_started_us;
-    double present_ms;
-    int captured;
-
-    if (scene_target)
-        present_sdl_scene(runtime, output_index);
-    render_pointer(runtime, output_index);
-    capture_sdl_frame(runtime, output_index, renderer);
-    capture_requested_screenshot(runtime, output_index, renderer);
-    captured = runtime->outputs[output_index].screenshot_surface != NULL;
-    present_started_us = monotonic_us();
-    SDL_RenderPresent(renderer);
-    if (captured)
-        runtime->outputs[output_index].screenshot_presented = 1;
-    present_ms = (double)(monotonic_us() - present_started_us) / 1000.0;
-    runtime->outputs[output_index].last_present_ms = present_ms;
-    if (present_ms > runtime->outputs[output_index].max_present_ms)
-        runtime->outputs[output_index].max_present_ms = present_ms;
-    ++runtime->outputs[output_index].present_calls;
-    runtime->diagnostic_last_sdl_present_ms = present_ms;
-    if (present_ms > runtime->diagnostic_max_sdl_present_ms)
-        runtime->diagnostic_max_sdl_present_ms = present_ms;
-    ++runtime->diagnostic_present_calls;
-}
 
 static void finish_render_diagnostics(BlitRuntime *runtime,
                                       uint64_t diagnostic_render_started)
@@ -26495,41 +24104,23 @@ static void prepare_graphics_damage(BlitRuntime *runtime, BlitFramePlan *plan)
     }
 }
 
-static int output_graphics_damage_complete(BlitRuntime *runtime, int output)
-{
-    int i;
-    for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
-        BlitSurface *v = runtime->surfaces[i];
-        if (v && v->used && surface_targets_output(runtime, v, output) &&
-            !v->graphics_damage_prepared) return 0;
-    }
-    return 1;
-}
-
 static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *input_plan,
                            uint32_t output_mask, int hold_scene)
 {
     BlitFramePlan prepared_plan = *input_plan;
-    const BlitFramePlan *plan = &prepared_plan;
-    int output_index;
-    int plan_index;
-    int row;
-    int cell_width = runtime_terminal_cell_width(runtime);
-    int cell_height = runtime_terminal_cell_height(runtime);
-    float italic_lean = (float)((cell_height + 15) / 16);
-    /* Issue #72. Damage is cleared only for a surface this pass actually
-       painted. It used to be cleared for every surface that *targets* an
-       output in the mask, which is a different question: the per-output loop
-       has several paths that skip drawing -- a held synchronized frame, an
-       output with nothing on it, a session whose display_id does not match,
-       a display powered down -- and every one of them discarded damage that
-       had never reached a pixel. Whatever the damage rectangle then went on
-       to be, those cells were never repainted again. */
-    int surface_painted[BLIT_MAX_FRAME_SURFACES];
-
-    memset(surface_painted, 0, sizeof(surface_painted));
-    Uint64 render_started = 0;
     uint64_t diagnostic_render_started = monotonic_us();
+    BlitKmsSurfaceView views[BLIT_MAX_SESSIONS];
+    BlitKmsOverlay kms_overlays[BLIT_MAX_OVERLAYS];
+    int damage_consumed[BLIT_MAX_SESSIONS];
+    int view_count = 0;
+    int kms_overlay_count = 0;
+    uint64_t kms_present_started;
+    double kms_present_ms;
+    uint32_t kms_submitted_output_mask = 0;
+    uint32_t kms_deferred_output_mask = 0;
+    int surface_index;
+    int overlay_index;
+    unsigned long long visual_revision;
 
     if (runtime->render_last_us != 0) {
         double gap = (double)(diagnostic_render_started -
@@ -26547,987 +24138,221 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *input_plan
     }
     ++runtime->diagnostic_frame_rate_frames;
 
-    if (!runtime->direct_kms) {
-        ++runtime->sdl_frame;
-        if (getenv("BLIT_SDL_TRACE_TIMING") != NULL)
-            render_started = SDL_GetPerformanceCounter();
-    }
-
-    /* Shared preparation is real frame work: include it in aggregate and
-       optional SDL trace timing rather than reporting only backend drawing. */
+    /* Shared preparation is real frame work: include it in the aggregate
+       rather than reporting only the compositor's drawing. */
     prepare_graphics_damage(runtime, &prepared_plan);
 
-    if (runtime->direct_kms) {
-        BlitKmsSurfaceView views[BLIT_MAX_SESSIONS];
-        BlitKmsOverlay kms_overlays[BLIT_MAX_OVERLAYS];
-        int damage_consumed[BLIT_MAX_SESSIONS];
-        int view_count = 0;
-        int kms_overlay_count = 0;
-        uint64_t kms_present_started;
-        double kms_present_ms;
-        uint32_t kms_submitted_output_mask = 0;
-        uint32_t kms_deferred_output_mask = 0;
-        int surface_index;
-        int overlay_index;
-        unsigned long long visual_revision = runtime->effect.revision ^
-            runtime->next_overlay_id;
-        (void)plan;
-        memset(damage_consumed, 0, sizeof(damage_consumed));
-        memset(kms_overlays, 0, sizeof(kms_overlays));
-        for (overlay_index = 0; overlay_index < BLIT_MAX_OVERLAYS;
-             ++overlay_index) {
-            BlitOverlay *overlay = &runtime->overlays[overlay_index];
-            if (!overlay->used || kms_overlay_count >= BLIT_MAX_OVERLAYS)
-                continue;
-            kms_overlays[kms_overlay_count].display_id = strtoull(
-                overlay->display_id +
-                    (strncmp(overlay->display_id, "display-", 8) == 0 ? 8 : 0),
-                NULL, 10);
-            kms_overlays[kms_overlay_count].x = overlay->x;
-            kms_overlays[kms_overlay_count].y = overlay->y;
-            kms_overlays[kms_overlay_count].width = overlay->width;
-            kms_overlays[kms_overlay_count].height = overlay->height;
-            kms_overlays[kms_overlay_count].color = overlay->color;
-            kms_overlays[kms_overlay_count].opacity = overlay->opacity;
-            visual_revision ^= overlay->id * 11400714819323198485ULL;
-            visual_revision ^= overlay->revision +
-                ((unsigned long long)overlay->opacity << 32);
-            ++kms_overlay_count;
-        }
-        for (surface_index = 0; surface_index < BLIT_MAX_SESSIONS &&
-             view_count < BLIT_MAX_SESSIONS; ++surface_index) {
-            BlitSurface *surface = runtime->surfaces[surface_index];
-            BlitSession *session;
-            BlitSession *render_source;
-            BlitPane *pane;
-            int output_index_for_surface = 0;
-            if (surface == NULL || !surface->used) continue;
-            session = find_session_id(runtime, surface->owner_session_id);
-            if (session == NULL) continue;
-            render_source = hibr_render_source(runtime, session);
-            if (render_source == NULL)
-                render_source = session;
-            pane = find_pane_id(runtime, session->pane_id);
-            if (session->display_id[0] != '\0') {
-                for (output_index_for_surface = 0;
-                     output_index_for_surface < runtime->output_count;
-                     ++output_index_for_surface) {
-                    char display_id[128];
-                    snprintf(display_id, sizeof(display_id), "display-%llu",
-                             runtime->outputs[output_index_for_surface].display_id);
-                    if (strcmp(display_id, session->display_id) == 0) break;
-                }
-                if (output_index_for_surface >= runtime->output_count) continue;
-            }
-            memset(&views[view_count], 0, sizeof(views[view_count]));
-            views[view_count].surface_id = surface->id;
-            views[view_count].surface_revision = surface->revision;
-            views[view_count].display_id = runtime->outputs[output_index_for_surface].display_id;
-            {
-                int origin_x;
-                int origin_y;
-                surface_origin_px(runtime, surface, session,
-                                  output_index_for_surface,
-                                  runtime_terminal_cell_width(runtime),
-                                  runtime_terminal_cell_height(runtime),
-                                  &origin_x, &origin_y);
-                views[view_count].origin_x = origin_x;
-                views[view_count].origin_y = origin_y;
-            }
-            views[view_count].cell_width =
-                runtime_terminal_cell_width(runtime);
-            views[view_count].cell_height =
-                runtime_terminal_cell_height(runtime);
-            views[view_count].columns = surface->width;
-            views[view_count].rows = surface->height;
-            views[view_count].stride = BLIT_MAX_CELL_COLS;
-            views[view_count].codepoints = &surface->codepoints[0][0];
-            views[view_count].combining = &surface->combining[0][0][0];
-            views[view_count].combining_count = &surface->combining_count[0][0];
-            views[view_count].foreground = &surface->foreground[0][0];
-            views[view_count].background = &surface->background[0][0];
-            views[view_count].underline_color =
-                &surface->underline_color[0][0];
-            views[view_count].attributes = &surface->attributes[0][0];
-            views[view_count].cursor_x = surface->cursor_x;
-            views[view_count].cursor_y = surface->cursor_y;
-            views[view_count].cursor_visible = surface->cursor_visible;
-            views[view_count].cursor_style = surface->cursor_style;
-            views[view_count].damage_valid = surface->damage_valid;
-            views[view_count].damage_x = surface->damage_x;
-            views[view_count].damage_y = surface->damage_y;
-            views[view_count].damage_width = surface->damage_width;
-            views[view_count].damage_height = surface->damage_height;
-            views[view_count].damage_consumed =
-                &damage_consumed[view_count];
-            /* Synchronized output retains its last presented frame.  The view
-               is submitted so the output's view count does not move -- a
-               count change is a full redraw, which clears the frame being
-               held -- and blit_kms_present leaves its pixels alone. */
-            views[view_count].synchronized = session->terminal_synchronized;
-            views[view_count].default_foreground =
-                session_default_foreground(render_source);
-            views[view_count].default_background =
-                session_default_background(render_source);
-            views[view_count].graphics = render_source->graphics;
-            views[view_count].graphics_count = BLIT_GRAPHICS_MAX_IMAGES;
-            /* Per-surface identity avoids redrawing unrelated panes. Shared
-               descriptor preparation covers graphics-only mutations even
-               when the producer changed no terminal cell/revision. */
-            views[view_count].graphics_signature =
-                surface->graphics_damage_prepared ?
-                    surface->graphics_prepared.signature :
-                    graphics_scene_signature(runtime, output_index_for_surface);
-            views[view_count].graphics_damage_complete = surface->graphics_damage_prepared;
-            ++view_count;
-        }
-        kms_present_started = monotonic_us();
-        if (blit_kms_present(runtime->kms, views, view_count,
-                             runtime->pointer_x, runtime->pointer_y,
-                             runtime->pointer_valid && !runtime->pointer_hidden,
-                             output_mask,
-                             kms_overlays, kms_overlay_count,
-                             visual_revision,
-                             runtime->effect.enabled &&
-                                 strcmp(runtime->effect.preset, "scanlines") == 0,
-                             runtime->effect.intensity,
-                             hold_scene,
-                             runtime->screenshot_requested_mask,
-                             &kms_submitted_output_mask,
-                             &kms_deferred_output_mask) < 0)
-            fprintf(stderr, "blit: direct KMS present failed\n");
-        kms_present_ms = (double)(monotonic_us() - kms_present_started) /
-            1000.0;
-        runtime->kms_retry_outputs |= kms_deferred_output_mask;
-        runtime->kms_retry_outputs &= ~kms_submitted_output_mask;
-        runtime->diagnostic_last_kms_present_ms = kms_present_ms;
-        if (kms_present_ms > runtime->diagnostic_max_kms_present_ms)
-            runtime->diagnostic_max_kms_present_ms = kms_present_ms;
-        {
-            char detail[768];
-            size_t detail_used = 0;
-            int trace_view_count = view_count < 4 ? view_count : 4;
-            int trace_view;
-            int written;
-
-            written = snprintf(detail, sizeof(detail),
-                               "backend=kms path=direct-kms output_mask=0x%x "
-                               "submitted_mask=0x%x deferred_mask=0x%x "
-                               "views=%d overlays=%d present_ms=%.3f "
-                               "pointer=%.1f,%.1f valid=%d hold_scene=%d",
-                               output_mask, kms_submitted_output_mask,
-                               kms_deferred_output_mask, view_count,
-                               kms_overlay_count, kms_present_ms,
-                               runtime->pointer_x, runtime->pointer_y,
-                               runtime->pointer_valid, hold_scene);
-            if (written > 0)
-                detail_used = (size_t)written < sizeof(detail) ?
-                    (size_t)written : sizeof(detail) - 1;
-            for (trace_view = 0; trace_view < trace_view_count &&
-                 detail_used + 96 < sizeof(detail); ++trace_view) {
-                const BlitKmsSurfaceView *view = &views[trace_view];
-                written = snprintf(detail + detail_used,
-                                   sizeof(detail) - detail_used,
-                                   " view%d=surface-%llu/rev-%llu/"
-                                   "damage-%d,%d,%dx%d/%d/"
-                                   "cursor-%d,%d,%d/sync-%d",
-                                   trace_view, view->surface_id,
-                                   view->surface_revision,
-                                   view->damage_x, view->damage_y,
-                                   view->damage_width, view->damage_height,
-                                   view->damage_valid, view->cursor_x,
-                                   view->cursor_y, view->cursor_visible,
-                                   view->synchronized);
-                if (written > 0)
-                    detail_used += (size_t)written <
-                        sizeof(detail) - detail_used ?
-                        (size_t)written : sizeof(detail) - detail_used - 1;
-            }
-            diagnostic_trace(runtime, "render_path", detail);
-        }
-        for (surface_index = 0; surface_index < view_count; ++surface_index)
-            if (damage_consumed[surface_index]) {
-                BlitSurface *surface = find_surface_id(
-                    runtime, views[surface_index].surface_id);
-                if (surface != NULL && !views[surface_index].synchronized) {
-                    BlitSession *session = find_session_id(
-                        runtime, surface->owner_session_id);
-                    surface->damage_valid = 0;
-                    if (surface->graphics_damage_prepared)
-                        surface->graphics_presented = surface->graphics_prepared;
-                    surface->presented_revision =
-                        views[surface_index].surface_revision;
-                    if (session != NULL)
-                        session->terminal_frame_batch = 0;
-                }
-            }
-        for (surface_index = 0; surface_index < runtime->output_count;
-             ++surface_index)
-            if (!hold_scene && (kms_submitted_output_mask & (1U << surface_index)) &&
-                runtime->pixel_frames_pending[surface_index] > 0)
-                --runtime->pixel_frames_pending[surface_index];
-        /* Retain pointer damage for outputs whose refresh deadline has not
-           arrived yet. A single global clear used to lose the cursor on a
-           differently phased secondary output. */
-        runtime->pointer_dirty_outputs &= ~kms_submitted_output_mask;
-        runtime->pointer_dirty = runtime->pointer_dirty_outputs != 0;
-        record_kms_frame_submission(runtime, kms_submitted_output_mask);
-        finish_render_diagnostics(runtime, diagnostic_render_started);
-        return;
+    visual_revision = runtime->effect.revision ^ runtime->next_overlay_id;
+    memset(damage_consumed, 0, sizeof(damage_consumed));
+    memset(kms_overlays, 0, sizeof(kms_overlays));
+    for (overlay_index = 0; overlay_index < BLIT_MAX_OVERLAYS;
+         ++overlay_index) {
+        BlitOverlay *overlay = &runtime->overlays[overlay_index];
+        if (!overlay->used || kms_overlay_count >= BLIT_MAX_OVERLAYS)
+            continue;
+        kms_overlays[kms_overlay_count].display_id = strtoull(
+            overlay->display_id +
+                (strncmp(overlay->display_id, "display-", 8) == 0 ? 8 : 0),
+            NULL, 10);
+        kms_overlays[kms_overlay_count].x = overlay->x;
+        kms_overlays[kms_overlay_count].y = overlay->y;
+        kms_overlays[kms_overlay_count].width = overlay->width;
+        kms_overlays[kms_overlay_count].height = overlay->height;
+        kms_overlays[kms_overlay_count].color = overlay->color;
+        kms_overlays[kms_overlay_count].opacity = overlay->opacity;
+        visual_revision ^= overlay->id * 11400714819323198485ULL;
+        visual_revision ^= overlay->revision +
+            ((unsigned long long)overlay->opacity << 32);
+        ++kms_overlay_count;
     }
-
-    for (output_index = 0; output_index < runtime->output_count;
-         ++output_index) {
-        int target_count = 0;
-        int synchronized_count = 0;
-        int overlay_count = 0;
-        int target_changed = 0;
-        int external_target_changed = 0;
-        int graphics_changed;
-        int full_redraw;
-        int scene_target = 0;
-        int pointer_only;
-        int api_images_drawn = 0;
-        SDL_Renderer *renderer = runtime->outputs[output_index].renderer;
-
-        if (!(output_mask & (1U << output_index)))
-            continue;
-
-        /* Never rebuild a held terminal scene, even when geometry, graphics
-           or damage changed. An uninitialized cache has no committed frame
-           to show; leave its pointer damage pending until a normal commit. */
-        if (hold_scene && (!runtime->outputs[output_index].initialized ||
-                          runtime->outputs[output_index].scene_texture == NULL)) {
-            output_mask &= ~(1U << output_index);
-            continue;
+    for (surface_index = 0; surface_index < BLIT_MAX_SESSIONS &&
+         view_count < BLIT_MAX_SESSIONS; ++surface_index) {
+        BlitSurface *surface = runtime->surfaces[surface_index];
+        BlitSession *session;
+        BlitSession *render_source;
+        BlitPane *pane;
+        int output_index_for_surface = 0;
+        if (surface == NULL || !surface->used) continue;
+        session = find_session_id(runtime, surface->owner_session_id);
+        if (session == NULL) continue;
+        render_source = hibr_render_source(runtime, session);
+        if (render_source == NULL)
+            render_source = session;
+        pane = find_pane_id(runtime, session->pane_id);
+        if (session->display_id[0] != '\0') {
+            for (output_index_for_surface = 0;
+                 output_index_for_surface < runtime->output_count;
+                 ++output_index_for_surface) {
+                char display_id[128];
+                snprintf(display_id, sizeof(display_id), "display-%llu",
+                         runtime->outputs[output_index_for_surface].display_id);
+                if (strcmp(display_id, session->display_id) == 0) break;
+            }
+            if (output_index_for_surface >= runtime->output_count) continue;
         }
+        memset(&views[view_count], 0, sizeof(views[view_count]));
+        views[view_count].surface_id = surface->id;
+        views[view_count].surface_revision = surface->revision;
+        views[view_count].display_id = runtime->outputs[output_index_for_surface].display_id;
+        {
+            int origin_x;
+            int origin_y;
+            surface_origin_px(runtime, surface, session,
+                              output_index_for_surface,
+                              runtime_terminal_cell_width(runtime),
+                              runtime_terminal_cell_height(runtime),
+                              &origin_x, &origin_y);
+            views[view_count].origin_x = origin_x;
+            views[view_count].origin_y = origin_y;
+        }
+        views[view_count].cell_width =
+            runtime_terminal_cell_width(runtime);
+        views[view_count].cell_height =
+            runtime_terminal_cell_height(runtime);
+        views[view_count].columns = surface->width;
+        views[view_count].rows = surface->height;
+        views[view_count].stride = BLIT_MAX_CELL_COLS;
+        views[view_count].codepoints = &surface->codepoints[0][0];
+        views[view_count].combining = &surface->combining[0][0][0];
+        views[view_count].combining_count = &surface->combining_count[0][0];
+        views[view_count].foreground = &surface->foreground[0][0];
+        views[view_count].background = &surface->background[0][0];
+        views[view_count].underline_color =
+            &surface->underline_color[0][0];
+        views[view_count].attributes = &surface->attributes[0][0];
+        views[view_count].cursor_x = surface->cursor_x;
+        views[view_count].cursor_y = surface->cursor_y;
+        views[view_count].cursor_visible = surface->cursor_visible;
+        views[view_count].cursor_style = surface->cursor_style;
+        views[view_count].damage_valid = surface->damage_valid;
+        views[view_count].damage_x = surface->damage_x;
+        views[view_count].damage_y = surface->damage_y;
+        views[view_count].damage_width = surface->damage_width;
+        views[view_count].damage_height = surface->damage_height;
+        views[view_count].damage_consumed =
+            &damage_consumed[view_count];
+        /* Synchronized output retains its last presented frame.  The view
+           is submitted so the output's view count does not move -- a
+           count change is a full redraw, which clears the frame being
+           held -- and blit_kms_present leaves its pixels alone. */
+        views[view_count].synchronized = session->terminal_synchronized;
+        views[view_count].default_foreground =
+            session_default_foreground(render_source);
+        views[view_count].default_background =
+            session_default_background(render_source);
+        views[view_count].graphics = render_source->graphics;
+        views[view_count].graphics_count = BLIT_GRAPHICS_MAX_IMAGES;
+        /* Per-surface identity avoids redrawing unrelated panes. Shared
+           descriptor preparation covers graphics-only mutations even
+           when the producer changed no terminal cell/revision. */
+        views[view_count].graphics_signature =
+            surface->graphics_damage_prepared ?
+                surface->graphics_prepared.signature :
+                graphics_scene_signature(runtime, output_index_for_surface);
+        views[view_count].graphics_damage_complete = surface->graphics_damage_prepared;
+        ++view_count;
+    }
+    kms_present_started = monotonic_us();
+    if (blit_kms_present(runtime->kms, views, view_count,
+                         runtime->pointer_x, runtime->pointer_y,
+                         runtime->pointer_valid && !runtime->pointer_hidden,
+                         output_mask,
+                         kms_overlays, kms_overlay_count,
+                         visual_revision,
+                         runtime->effect.enabled &&
+                             strcmp(runtime->effect.preset, "scanlines") == 0,
+                         runtime->effect.intensity,
+                         hold_scene,
+                         runtime->screenshot_requested_mask,
+                         &kms_submitted_output_mask,
+                         &kms_deferred_output_mask) < 0)
+        fprintf(stderr, "blit: direct KMS present failed\n");
+    kms_present_ms = (double)(monotonic_us() - kms_present_started) /
+        1000.0;
+    runtime->kms_retry_outputs |= kms_deferred_output_mask;
+    runtime->kms_retry_outputs &= ~kms_submitted_output_mask;
+    runtime->diagnostic_last_kms_present_ms = kms_present_ms;
+    if (kms_present_ms > runtime->diagnostic_max_kms_present_ms)
+        runtime->diagnostic_max_kms_present_ms = kms_present_ms;
+    {
+        char detail[768];
+        size_t detail_used = 0;
+        int trace_view_count = view_count < 4 ? view_count : 4;
+        int trace_view;
+        int written;
 
-        for (plan_index = 0; plan_index < plan->surface_count;
-             ++plan_index) {
+        written = snprintf(detail, sizeof(detail),
+                           "backend=kms path=direct-kms output_mask=0x%x "
+                           "submitted_mask=0x%x deferred_mask=0x%x "
+                           "views=%d overlays=%d present_ms=%.3f "
+                           "pointer=%.1f,%.1f valid=%d hold_scene=%d",
+                           output_mask, kms_submitted_output_mask,
+                           kms_deferred_output_mask, view_count,
+                           kms_overlay_count, kms_present_ms,
+                           runtime->pointer_x, runtime->pointer_y,
+                           runtime->pointer_valid, hold_scene);
+        if (written > 0)
+            detail_used = (size_t)written < sizeof(detail) ?
+                (size_t)written : sizeof(detail) - 1;
+        for (trace_view = 0; trace_view < trace_view_count &&
+             detail_used + 96 < sizeof(detail); ++trace_view) {
+            const BlitKmsSurfaceView *view = &views[trace_view];
+            written = snprintf(detail + detail_used,
+                               sizeof(detail) - detail_used,
+                               " view%d=surface-%llu/rev-%llu/"
+                               "damage-%d,%d,%dx%d/%d/"
+                               "cursor-%d,%d,%d/sync-%d",
+                               trace_view, view->surface_id,
+                               view->surface_revision,
+                               view->damage_x, view->damage_y,
+                               view->damage_width, view->damage_height,
+                               view->damage_valid, view->cursor_x,
+                               view->cursor_y, view->cursor_visible,
+                               view->synchronized);
+            if (written > 0)
+                detail_used += (size_t)written <
+                    sizeof(detail) - detail_used ?
+                    (size_t)written : sizeof(detail) - detail_used - 1;
+        }
+        diagnostic_trace(runtime, "render_path", detail);
+    }
+    for (surface_index = 0; surface_index < view_count; ++surface_index)
+        if (damage_consumed[surface_index]) {
             BlitSurface *surface = find_surface_id(
-                runtime, plan->surfaces[plan_index].surface_id);
-
-            if (surface == NULL || !surface->used)
-                continue;
-            if (surface_targets_output(runtime, surface, output_index)) {
+                runtime, views[surface_index].surface_id);
+            if (surface != NULL && !views[surface_index].synchronized) {
                 BlitSession *session = find_session_id(
                     runtime, surface->owner_session_id);
-                /* A synchronized surface is still a target.  Dropping it
-                   from the count moves last_target_count, which forces a
-                   full redraw, which clears the very pixels the mode
-                   exists to hold. */
-                ++target_count;
-                if (session != NULL && session->terminal_synchronized) {
-                    ++synchronized_count;
-                    continue;
-                }
-                if (surface->damage_valid) {
-                    target_changed = 1;
-                    if (session != NULL &&
-                        session->surface_mode == BLIT_SURFACE_EXTERNAL)
-                        external_target_changed = 1;
-                }
+                surface->damage_valid = 0;
+                if (surface->graphics_damage_prepared)
+                    surface->graphics_presented = surface->graphics_prepared;
+                surface->presented_revision =
+                    views[surface_index].surface_revision;
+                if (session != NULL)
+                    session->terminal_frame_batch = 0;
             }
         }
-        if (runtime->pixel_frames_pending[output_index] > 0)
-            target_changed = 1;
-        graphics_changed = runtime->outputs[output_index].initialized == 0 ||
-            runtime->outputs[output_index].last_graphics_signature !=
-                graphics_scene_signature(runtime, output_index);
-        {
-            int overlay_index;
-            for (overlay_index = 0; overlay_index < BLIT_MAX_OVERLAYS;
-                 ++overlay_index)
-                if (runtime->overlays[overlay_index].used &&
-                    overlay_targets_output(runtime,
-                        &runtime->overlays[overlay_index], output_index))
-                    ++overlay_count;
-        }
-        pointer_only = pointer_dirty_for_output(runtime, output_index) &&
-            runtime->outputs[output_index].initialized &&
-            runtime->outputs[output_index].scene_texture != NULL &&
-            (hold_scene || !target_changed);
-        if (pointer_only) {
-            ++runtime->diagnostic_pointer_cache_hits;
-            {
-                char detail[160];
-                snprintf(detail, sizeof(detail),
-                         "output=%d path=pointer-cache target_changed=%d hold_scene=%d",
-                         output_index, target_changed, hold_scene);
-                diagnostic_trace(runtime, "render_path", detail);
-            }
-            present_sdl_scene(runtime, output_index);
-            finish_sdl_output(runtime, output_index, 0);
-            continue;
-        }
-        full_redraw = !sdl_incremental_scene_updates_enabled(
-                runtime, &runtime->outputs[output_index]) ||
-            !runtime->outputs[output_index].initialized ||
-            (graphics_changed && !output_graphics_damage_complete(runtime, output_index)) ||
-            /* The software pointer is composed after the complete cached
-             * scene is copied to the output. It is not part of scene_texture,
-             * so pointer motion must not force a full scene rebuild when a
-             * committed cell damage rectangle arrives in the same frame. */
-            target_count != runtime->outputs[output_index].last_target_count ||
-            runtime->topology_revision !=
-                runtime->outputs[output_index].last_topology_revision;
-        if (pointer_dirty_for_output(runtime, output_index))
-            ++runtime->diagnostic_pointer_cache_misses;
-        {
-            char detail[256];
-            snprintf(detail, sizeof(detail),
-                     "output=%d path=%s target_count=%d active_surfaces=%d target_changed=%d external_changed=%d pointer_dirty=%d initialized=%d graphics_changed=%d graphics_images=%d damage=%d,%d,%dx%d last_graphics_signature=%llu graphics_signature=%llu",
-                     output_index, full_redraw ? "full-redraw" :
-                         "incremental-damage",
-                     target_count, active_output_surface_count(runtime, output_index),
-                     target_changed, external_target_changed,
-                     pointer_dirty_for_output(runtime, output_index),
-                     runtime->outputs[output_index].initialized,
-                     graphics_changed,
-                     graphics_scene_count(runtime, output_index),
-                     plan->surface_count > 0 ?
-                         plan->surfaces[0].damage_x : -1,
-                     plan->surface_count > 0 ?
-                         plan->surfaces[0].damage_y : -1,
-                     plan->surface_count > 0 ?
-                         plan->surfaces[0].damage_width : -1,
-                     plan->surface_count > 0 ?
-                         plan->surfaces[0].damage_height : -1,
-                     runtime->outputs[output_index].last_graphics_signature,
-                     graphics_scene_signature(runtime, output_index));
-            diagnostic_trace(runtime, "render_path", detail);
-        }
-        if (target_count == synchronized_count && overlay_count == 0 &&
-            synchronized_count > 0 &&
-            !(runtime->screenshot_requested_mask & (1U << output_index))) {
-            /* Leave the synchronized output untouched until its owner sends
-               the matching CSI ?2026 l.  In particular, do not clear it
-               merely because another output caused a render pass.  A pending
-               screenshot falls through instead of being skipped, so that
-               inspecting a synchronized output returns the frame it is
-               holding rather than whatever was captured last. */
-            continue;
-        }
-        {
-            int scene_display = display_index_for_output(runtime,
-                                                         output_index);
-            scene_target = ensure_sdl_scene_texture(
-                runtime, &runtime->outputs[output_index],
-                scene_display >= 0 ?
-                    runtime->displays[scene_display].bounds.w : 0,
-                scene_display >= 0 ?
-                    runtime->displays[scene_display].bounds.h : 0);
-        }
-        if (scene_target) {
-            SDL_Texture *target =
-                runtime->outputs[output_index].scene_work_texture != NULL ?
-                runtime->outputs[output_index].scene_work_texture :
-                runtime->outputs[output_index].scene_texture;
-            SDL_SetRenderTarget(renderer, target);
-            if (!full_redraw &&
-                runtime->outputs[output_index].scene_texture != NULL &&
-                runtime->outputs[output_index].scene_work_texture != NULL)
-                SDL_RenderTexture(renderer,
-                    runtime->outputs[output_index].scene_texture, NULL, NULL);
-        }
-        if (target_count == 0 && overlay_count == 0) {
-            /* The output is already in its empty state.  A pending render
-               can be caused by another display's PTY or by a stream event;
-               do not submit another clear/present for this output. */
-            if (!runtime->outputs[output_index].initialized &&
-                !pointer_dirty_for_output(runtime, output_index) &&
-                !(runtime->screenshot_requested_mask & (1U << output_index)))
-                continue;
-            if (!runtime->outputs[output_index].initialized) {
-                SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-                SDL_RenderClear(renderer);
-            } else if (pointer_dirty_for_output(runtime, output_index)) {
-                SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-                SDL_RenderClear(renderer);
-            }
-            if (scene_target)
-                swap_sdl_scene_textures(&runtime->outputs[output_index]);
-            finish_sdl_output(runtime, output_index, scene_target);
-            /* A later session needs a full first frame, even if this output
-               was previously presenting the empty desktop. */
-            runtime->outputs[output_index].initialized = 0;
-            continue;
-        }
-        if (target_count == 0) {
-            if (!runtime->outputs[output_index].initialized)
-                SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-            if (!runtime->outputs[output_index].initialized)
-                SDL_RenderClear(renderer);
-            else if (pointer_dirty_for_output(runtime, output_index)) {
-                SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-                SDL_RenderClear(renderer);
-            }
-            render_sdl_effects(runtime, renderer,
-                               runtime->displays[display_index_for_output(
-                                   runtime, output_index)].bounds.w,
-                               runtime->displays[display_index_for_output(
-                                   runtime, output_index)].bounds.h);
-            render_sdl_overlays(runtime, renderer, output_index);
-            if (scene_target)
-                swap_sdl_scene_textures(&runtime->outputs[output_index]);
-            finish_sdl_output(runtime, output_index, scene_target);
-            runtime->outputs[output_index].initialized = 1;
-            runtime->outputs[output_index].last_topology_revision =
-                runtime->topology_revision;
-            runtime->outputs[output_index].last_target_count = target_count;
-            continue;
-        }
-        /* A surface can be present without having changed since the last
-           presentation.  Avoid walking and rasterizing its entire grid, and
-           avoid SDL_RenderPresent, until damage or pointer state requires a
-           new frame. */
-        if (runtime->outputs[output_index].initialized &&
-            !pointer_dirty_for_output(runtime, output_index) &&
-            !target_changed) {
-            if (runtime->screenshot_requested_mask & (1U << output_index)) {
-                /* Cached screenshot requests observe the scene texture and
-                   current software cursor without rebuilding terminal cells,
-                   graphics, or wallpaper. */
-                present_sdl_scene(runtime, output_index);
-                finish_sdl_output(runtime, output_index, 0);
-            }
-            continue;
-        }
-        if (!runtime->outputs[output_index].initialized) {
-            SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-            SDL_RenderClear(renderer);
-        } else if (full_redraw) {
-            /* A full scene rebuild starts from a clean cache. Pointer-only
-               motion is handled above, while pointer-plus-cell-damage keeps
-               the untouched cached scene and clears only that damage. */
-            SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-            SDL_RenderClear(renderer);
-        }
-        SDL_SetRenderDrawColor(renderer, 190, 210, 190, 255);
-        for (plan_index = 0; plan_index < plan->surface_count;
-             ++plan_index) {
-            BlitSurface *surface = find_surface_id(
-                runtime, plan->surfaces[plan_index].surface_id);
-            BlitSession *session;
-            BlitSession *render_source;
-            BlitPane *pane;
-            char display_id[128];
-            float surface_origin_x;
-            int surface_origin_y;
-            int first_row = 0;
-            int last_row;
-            BlitInkRegion ink;
-            int ink_enabled = blit_font_has_overhang(&runtime->font);
-            int column;
-            uint32_t default_foreground;
-            uint32_t default_background;
-            SDL_Rect under_text_clip = {0, 0, 0, 0};
-
-            if (surface == NULL || !surface->used ||
-                surface->revision != plan->surfaces[plan_index].surface_revision)
-                continue;
-            if (!surface_targets_output(runtime, surface, output_index))
-                continue;
-            session = find_session_id(runtime, surface->owner_session_id);
-            if (session == NULL)
-                continue;
-            render_source = hibr_render_source(runtime, session);
-            if (render_source == NULL)
-                render_source = session;
-            /* Hold the last presented pixels: they are already in the
-               cached scene texture and the incremental path does not touch
-               this surface's rectangle.  A genuine full redraw has cleared
-               the scene, so there is nothing left to hold -- draw the
-               current cells and tear once rather than leave a hole. */
-            if (session->terminal_synchronized && !full_redraw)
-                continue;
-            default_foreground = session_default_foreground(render_source);
-            default_background = session_default_background(render_source);
-            pane = find_pane_id(runtime, session->pane_id);
-            if (session->display_id[0] == '\0') {
-                if (output_index != 0)
-                    continue;
-            } else {
-                snprintf(display_id, sizeof(display_id), "display-%llu",
-                         runtime->outputs[output_index].display_id);
-                if (strcmp(session->display_id, display_id) != 0)
-                    continue;
-            }
-            {
-                int origin_x;
-                int origin_y;
-                surface_origin_px(runtime, surface, session, output_index,
-                                  cell_width, cell_height, &origin_x,
-                                  &origin_y);
-                surface_origin_x = (float)origin_x;
-                surface_origin_y = origin_y;
-            }
-            if (!full_redraw) {
-                if (!plan->surfaces[plan_index].damage_valid)
-                    continue;
-                first_row = plan->surfaces[plan_index].damage_y;
-                last_row = first_row +
-                    plan->surfaces[plan_index].damage_height;
-                if (ink_enabled) {
-                    ink = blit_ink_region(&runtime->font, 0, first_row,
-                        surface->width, last_row, surface->width, surface->height);
-                    first_row = ink.y0; last_row = ink.y1;
-                }
-                {
-                    /* Issue #72. The clear has to cover exactly what the
-                       repaint below covers, and the repaint covers whole
-                       *rows*: it walks `column = 0` to `surface->width` for
-                       every damaged row. Clearing only the damage rectangle's
-                       columns left the two disagreeing, and the disagreement
-                       is invisible until a cell goes from ink to blank outside
-                       those columns -- because a blank cell with the default
-                       background draws nothing at all, so its old pixels
-                       simply stayed. On the live host that was a screensaver
-                       leaving a solid trail of itself across the panel: 8407
-                       cells painted that the cell snapshot said were blank.
-
-                       Clearing the full width of the damaged rows is the safe
-                       direction of the two. It can only erase pixels the
-                       repaint is about to write, and it makes the incremental
-                       path correct whatever the damage rectangle's columns
-                       happen to be. */
-                    SDL_FRect damage;
-                    damage.x = surface_origin_x;
-                    damage.y = (float)surface_origin_y + first_row * (float)cell_height;
-                    damage.w = (float)surface->width * (float)cell_width;
-                    damage.h = (last_row - first_row) * (float)cell_height;
-                    SDL_SetRenderDrawColor(renderer,
-                        (unsigned char)(default_background >> 16),
-                        (unsigned char)(default_background >> 8),
-                        (unsigned char)default_background, 255);
-                    SDL_RenderFillRect(renderer, &damage);
-                    SDL_SetRenderDrawColor(renderer, 190, 210, 190, 255);
-                }
-            } else if (default_background != 0) {
-                /* The scene was cleared to black. A cell that takes the
-                   default background draws no quad of its own (so images
-                   below the text can show through it), which means the
-                   default colour has to be the surface's own floor. */
-                SDL_FRect floor_rect;
-                floor_rect.x = surface_origin_x;
-                floor_rect.y = (float)surface_origin_y;
-                floor_rect.w = (float)surface->width * (float)cell_width;
-                floor_rect.h = (float)surface->height * (float)cell_height;
-                SDL_SetRenderDrawColor(renderer,
-                    (unsigned char)(default_background >> 16),
-                    (unsigned char)(default_background >> 8),
-                    (unsigned char)default_background, 255);
-                SDL_RenderFillRect(renderer, &floor_rect);
-                SDL_SetRenderDrawColor(renderer, 190, 210, 190, 255);
-            }
-            last_row = full_redraw ? surface->height : last_row;
-            if (last_row > BLIT_MAX_CELL_ROWS)
-                last_row = BLIT_MAX_CELL_ROWS;
-            if (full_redraw || !ink_enabled) {
-                ink.x0 = ink.source_x0 = 0;
-                ink.x1 = ink.source_x1 = surface->width;
-                ink.y0 = ink.source_y0 = first_row;
-                ink.y1 = ink.source_y1 = last_row;
-            }
-            {
-                SDL_Rect graphics_clip;
-                graphics_clip.x = (int)surface_origin_x;
-                graphics_clip.y = surface_origin_y;
-                graphics_clip.w = surface->width * cell_width;
-                graphics_clip.h = surface->height * cell_height;
-                if (!full_redraw) {
-                    /* Issue #72: the same rows the clear above took, at the
-                       same full width. This clip restores the wallpaper layer
-                       inside whatever was just cleared, so if it covered less
-                       than the clear did the scene would develop black holes
-                       exactly where the fix widened the clear. */
-                    graphics_clip.y += first_row *
-                        cell_height;
-                    graphics_clip.h = (last_row - first_row) *
-                        cell_height;
-                }
-                /* Negative-z images are the scene's wallpaper layer.  An
-                   incremental terminal update clears its damage rectangle
-                   before repainting cells; restore that layer in the same
-                   clipped rectangle or the cached scene develops black
-                   holes whenever Hibr updates one cell over a wallpaper. */
-                SDL_SetRenderClipRect(renderer, &graphics_clip);
-                api_images_drawn += render_sdl_graphics(
-                    &runtime->outputs[output_index], render_source->graphics,
-                    BLIT_GRAPHICS_MAX_IMAGES, surface_origin_x,
-                    (float)surface_origin_y,
-                    BLIT_GRAPHICS_LAYER_UNDER_BACKGROUND);
-                SDL_SetRenderClipRect(renderer, NULL);
-                under_text_clip = graphics_clip;
-            }
-
-            /* Wallpaper themes commonly express nearly every terminal cell
-               as a coloured background.  Submitting one SDL rectangle per
-               cell makes a full-screen Hibr redraw CPU-bound.  Build the
-               opaque background quads first, then draw the glyph layer on
-               top, preserving the canonical cell ordering while reducing
-               thousands of renderer calls to one geometry submission. */
-            for (row = first_row; row < last_row; ++row) {
-                column = 0;
-                while (column < surface->width &&
-                       column < BLIT_MAX_CELL_COLS) {
-                    uint32_t foreground = surface->foreground[row][column] ?
-                        surface->foreground[row][column] - 1 :
-                        default_foreground;
-                    uint32_t background = surface->background[row][column] ?
-                        surface->background[row][column] - 1 :
-                        default_background;
-                    uint16_t attributes = surface->attributes[row][column];
-                    int run_start;
-                    int run_end;
-                    if (attributes & BLIT_ATTR_INVERSE) {
-                        uint32_t swapped = foreground;
-                        foreground = background ? background : 0;
-                        background = swapped;
-                    }
-                    if (background == default_background) {
-                        ++column;
-                        continue;
-                    }
-                    run_start = column;
-                    run_end = column + 1;
-                    while (run_end < surface->width &&
-                           run_end < BLIT_MAX_CELL_COLS) {
-                        uint32_t next_foreground =
-                            surface->foreground[row][run_end] ?
-                            surface->foreground[row][run_end] - 1 :
-                            default_foreground;
-                        uint32_t next_background =
-                            surface->background[row][run_end] ?
-                            surface->background[row][run_end] - 1 :
-                            default_background;
-                        uint16_t next_attributes =
-                            surface->attributes[row][run_end];
-                        if (next_attributes & BLIT_ATTR_INVERSE) {
-                            uint32_t swapped = next_foreground;
-                            next_foreground = next_background ?
-                                next_background : 0;
-                            next_background = swapped;
-                        }
-                        if (next_background != background)
-                            break;
-                        ++run_end;
-                    }
-                    if (!queue_sdl_background(
-                            &runtime->outputs[output_index], background,
-                            surface_origin_x + run_start * (float)cell_width,
-                            (float)surface_origin_y + row * (float)cell_height,
-                            (float)(run_end - run_start) * cell_width,
-                            (float)cell_height)) {
-                        flush_sdl_background_batch(
-                            &runtime->outputs[output_index]);
-                        SDL_SetRenderDrawColor(renderer,
-                            (unsigned char)(background >> 16),
-                            (unsigned char)(background >> 8),
-                            (unsigned char)background, 255);
-                        SDL_RenderFillRect(renderer, &(SDL_FRect){
-                            surface_origin_x + run_start * (float)cell_width,
-                            (float)surface_origin_y + row * (float)cell_height,
-                            (float)(run_end - run_start) * cell_width,
-                            (float)cell_height});
-                    }
-                    column = run_end;
-                }
-            }
-            flush_sdl_background_batch(&runtime->outputs[output_index]);
-            SDL_SetRenderClipRect(renderer, &under_text_clip);
-            api_images_drawn += render_sdl_graphics(
-                &runtime->outputs[output_index], render_source->graphics,
-                BLIT_GRAPHICS_MAX_IMAGES, surface_origin_x,
-                (float)surface_origin_y, BLIT_GRAPHICS_LAYER_UNDER_TEXT);
-            SDL_SetRenderClipRect(renderer, NULL);
-            if (ink_enabled) SDL_SetRenderClipRect(renderer, &under_text_clip);
-            for (row = ink.source_y0; row < ink.source_y1; ++row) {
-                for (column = 0; column < surface->width &&
-                     column < BLIT_MAX_CELL_COLS; ++column) {
-                    uint32_t foreground = surface->foreground[row][column] ?
-                        surface->foreground[row][column] - 1 :
-                        default_foreground;
-                    uint32_t background = surface->background[row][column] ?
-                        surface->background[row][column] - 1 :
-                        default_background;
-                    uint16_t attributes = surface->attributes[row][column];
-
-                    if (attributes & BLIT_ATTR_INVERSE) {
-                        uint32_t swapped = foreground;
-                        foreground = background ? background : 0;
-                        background = swapped;
-                    }
-                    if (attributes & BLIT_ATTR_DIM)
-                        foreground = ((foreground & 0xfefefeU) >> 1);
-                    {
-                        int glyph_width = (attributes & BLIT_ATTR_WIDE) ?
-                            cell_width * 2 : cell_width;
-                        uint32_t underline_color =
-                            surface->underline_color[row][column] ?
-                            surface->underline_color[row][column] - 1 :
-                            foreground;
-                    SDL_SetRenderDrawColor(renderer,
-                        (unsigned char)(foreground >> 16),
-                        (unsigned char)(foreground >> 8),
-                        (unsigned char)foreground, 255);
-                    if (!(attributes & BLIT_ATTR_CONCEAL)) {
-                        /* Italic is a slant.  Drawing it as a second strike
-                           one pixel over, which is what bold is, made the two
-                           attributes render identically. */
-                        float lean = (attributes & BLIT_ATTR_ITALIC) ?
-                            italic_lean : 0.0f;
-                        /* ADR 0062: a wide character's glyph is 16 pixels
-                           wide and comes from the wide font and its own
-                           batch, because a batch submits with one texture. */
-                        render_sdl_cell_ink(runtime, &runtime->outputs[output_index],
-                            foreground, surface->codepoints[row][column],
-                            surface->combining[row][column], surface->combining_count[row][column],
-                            attributes, surface_origin_x + column * (float)cell_width,
-                            (float)surface_origin_y + row * (float)cell_height,
-                            (float)glyph_width, (float)cell_height, lean);
-                        if (attributes & (BLIT_ATTR_UNDERLINE | BLIT_ATTR_STRIKE))
-                            flush_sdl_glyph_batch(&runtime->outputs[output_index]);
-                            flush_sdl_wide_batch(&runtime->outputs[output_index]);
-                        if (attributes & BLIT_ATTR_UNDERLINE)
-                            SDL_SetRenderDrawColor(renderer,
-                                (unsigned char)(underline_color >> 16),
-                                (unsigned char)(underline_color >> 8),
-                                (unsigned char)underline_color, 255);
-                        if (attributes & BLIT_ATTR_UNDERLINE)
-                            SDL_RenderLine(renderer, surface_origin_x + column * (float)cell_width,
-                                (float)surface_origin_y + row * (float)cell_height + cell_height - 1.0f,
-                                surface_origin_x + column * (float)cell_width + glyph_width - 1.0f,
-                                (float)surface_origin_y + row * (float)cell_height + cell_height - 1.0f);
-                        if (attributes & BLIT_ATTR_STRIKE)
-                            SDL_RenderLine(renderer, surface_origin_x + column * (float)cell_width,
-                                (float)surface_origin_y + row * (float)cell_height + cell_height / 2.0f,
-                                surface_origin_x + column * (float)cell_width + glyph_width - 1.0f,
-                                (float)surface_origin_y + row * (float)cell_height + cell_height / 2.0f);
-                    }
-                    }
-                }
-            }
-            flush_sdl_glyph_batch(&runtime->outputs[output_index]);
-            flush_sdl_wide_batch(&runtime->outputs[output_index]);
-            if (ink_enabled) SDL_SetRenderClipRect(renderer, NULL);
-            if (surface->cursor_visible &&
-                surface->cursor_y >= first_row && surface->cursor_y < last_row) {
-                int cursor_column = surface->cursor_x;
-                int cursor_cells = 1;
-                uint16_t cursor_attributes;
-                float cursor_x;
-                float cursor_y = (float)surface_origin_y + surface->cursor_y * (float)cell_height;
-                if (cursor_column < 0)
-                    cursor_column = 0;
-                if (cursor_column >= BLIT_MAX_CELL_COLS)
-                    cursor_column = BLIT_MAX_CELL_COLS - 1;
-                cursor_attributes =
-                    surface->attributes[surface->cursor_y][cursor_column];
-                /* A wide character owns both of its cells, so the cursor
-                   covers the pair rather than half a glyph. */
-                if ((cursor_attributes & BLIT_ATTR_CONTINUATION) &&
-                    cursor_column > 0) {
-                    --cursor_column;
-                    cursor_attributes =
-                        surface->attributes[surface->cursor_y][cursor_column];
-                }
-                if (cursor_attributes & BLIT_ATTR_WIDE)
-                    cursor_cells = 2;
-                cursor_x = surface_origin_x + cursor_column * (float)cell_width;
-                SDL_SetRenderDrawColor(renderer,
-                    (unsigned char)(BLIT_DEFAULT_FOREGROUND >> 16),
-                    (unsigned char)(BLIT_DEFAULT_FOREGROUND >> 8),
-                    (unsigned char)BLIT_DEFAULT_FOREGROUND, 255);
-                if (surface->cursor_style == 3 || surface->cursor_style == 4)
-                    SDL_RenderLine(renderer, cursor_x, cursor_y + cell_height - 1.0f,
-                                   cursor_x + cursor_cells * cell_width - 1.0f,
-                                   cursor_y + cell_height - 1.0f);
-                else if (surface->cursor_style == 5 || surface->cursor_style == 6)
-                    SDL_RenderLine(renderer, cursor_x, cursor_y,
-                                   cursor_x, cursor_y + cell_height - 1.0f);
-                else {
-                    uint32_t cursor_codepoint =
-                        surface->codepoints[surface->cursor_y][cursor_column];
-                    uint32_t cell_foreground =
-                        surface->foreground[surface->cursor_y][cursor_column] ?
-                        surface->foreground[surface->cursor_y][cursor_column] - 1 :
-                        default_foreground;
-                    uint32_t cell_background =
-                        surface->background[surface->cursor_y][cursor_column] ?
-                        surface->background[surface->cursor_y][cursor_column] - 1 :
-                        default_background;
-                    SDL_FRect cursor_rect;
-                    cursor_rect.x = cursor_x;
-                    cursor_rect.y = cursor_y;
-                    cursor_rect.w = (float)(cursor_cells * cell_width);
-                    cursor_rect.h = (float)cell_height;
-                    SDL_RenderFillRect(renderer, &cursor_rect);
-                    if (cursor_attributes & BLIT_ATTR_INVERSE) {
-                        uint32_t swapped = cell_foreground;
-                        cell_foreground = cell_background ? cell_background : 0;
-                        cell_background = swapped;
-                    }
-                    /* A block cursor is an inverse cell, not an eraser: the
-                       character under it is what the user is about to
-                       overwrite and has to stay readable. */
-                    if (ink_enabled) {
-                        BlitInkRegion sources = blit_ink_region(&runtime->font,
-                            cursor_column, surface->cursor_y, cursor_column+cursor_cells,
-                            surface->cursor_y+1, surface->width, surface->height);
-                        SDL_Rect cursor_clip = {(int)cursor_x,(int)cursor_y,
-                            cursor_cells*cell_width,cell_height};
-                        SDL_Rect clipped;
-                        int sy,sx;
-                        if (SDL_GetRectIntersection(&cursor_clip,&under_text_clip,&clipped)) {
-                            SDL_SetRenderClipRect(renderer,&clipped);
-                            for(sy=sources.source_y0;sy<sources.source_y1;++sy)
-                                for(sx=sources.source_x0;sx<sources.source_x1;++sx)
-                                    render_sdl_cell_ink(runtime,&runtime->outputs[output_index],
-                                        cell_background,surface->codepoints[sy][sx],
-                                        surface->combining[sy][sx],surface->combining_count[sy][sx],
-                                        surface->attributes[sy][sx],surface_origin_x+sx*cell_width,
-                                        (float)surface_origin_y+sy*cell_height,
-                                        (surface->attributes[sy][sx]&BLIT_ATTR_WIDE)?cell_width*2:cell_width,
-                                        cell_height,(surface->attributes[sy][sx]&BLIT_ATTR_ITALIC)?italic_lean:0);
-                            flush_sdl_glyph_batch(&runtime->outputs[output_index]);
-                            flush_sdl_wide_batch(&runtime->outputs[output_index]);
-                            SDL_SetRenderClipRect(renderer,NULL);
-                        }
-                    }
-                    if (!ink_enabled && cursor_codepoint != 0 && cursor_codepoint != ' ' &&
-                        !(cursor_attributes & BLIT_ATTR_CONCEAL)) {
-                        int combining_index;
-                        const BlitFont *cursor_font = cell_font(
-                            runtime, cursor_attributes, cursor_codepoint);
-                        int cluster_drawn = render_sdl_cluster(&runtime->outputs[output_index],
-                            &runtime->font, cell_background, cursor_codepoint,
-                            surface->combining[surface->cursor_y][cursor_column],
-                            surface->combining_count[surface->cursor_y][cursor_column],
-                            cursor_x, cursor_y, (float)(cursor_cells * cell_width), (float)cell_height,
-                            (cursor_attributes & BLIT_ATTR_ITALIC) ? italic_lean : 0.0f,
-                            (cursor_attributes & BLIT_ATTR_BOLD) != 0);
-                        if (!cluster_drawn && (cursor_font == &runtime->font ||
-                            !queue_sdl_wide_glyph(
-                                &runtime->outputs[output_index], cursor_font,
-                                cell_background, cursor_codepoint, cursor_x,
-                                cursor_y, (float)(cursor_cells * cell_width),
-                                (float)cell_height,
-                                (cursor_attributes & BLIT_ATTR_ITALIC) ?
-                                    italic_lean : 0.0f)))
-                        render_or_queue_sdl_glyph(
-                            &runtime->outputs[output_index], &runtime->font,
-                            cell_background, cursor_codepoint, cursor_x,
-                            cursor_y, (float)(cursor_cells * cell_width),
-                            (float)cell_height,
-                            (cursor_attributes & BLIT_ATTR_ITALIC) ?
-                                italic_lean : 0.0f, 0.0f);
-                        for (combining_index = 0; !cluster_drawn &&
-                             combining_index <
-                                 surface->combining_count[surface->cursor_y][cursor_column] &&
-                             combining_index < BLIT_MAX_COMBINING;
-                             ++combining_index)
-                            render_or_queue_sdl_glyph(
-                                &runtime->outputs[output_index], &runtime->font,
-                                cell_background,
-                                surface->combining[surface->cursor_y][cursor_column][combining_index],
-                                cursor_x, cursor_y,
-                                (float)(cursor_cells * cell_width),
-                                (float)cell_height,
-                                (cursor_attributes & BLIT_ATTR_ITALIC) ?
-                                    italic_lean : 0.0f, 0.0f);
-                        flush_sdl_glyph_batch(&runtime->outputs[output_index]);
-                        flush_sdl_wide_batch(&runtime->outputs[output_index]);
-                    }
-                }
-            }
-            {
-                SDL_Rect graphics_clip;
-                graphics_clip.x = (int)surface_origin_x;
-                graphics_clip.y = surface_origin_y;
-                graphics_clip.w = surface->width * cell_width;
-                graphics_clip.h = surface->height * cell_height;
-                SDL_SetRenderClipRect(renderer, &graphics_clip);
-                api_images_drawn += render_sdl_graphics(
-                    &runtime->outputs[output_index], render_source->graphics,
-                    BLIT_GRAPHICS_MAX_IMAGES, surface_origin_x,
-                    (float)surface_origin_y, 0);
-                SDL_SetRenderClipRect(renderer, NULL);
-            }
-            if (plan_index < BLIT_MAX_FRAME_SURFACES)
-                surface_painted[plan_index] = 1;
-        }
-        render_sdl_effects(runtime, renderer,
-                           runtime->displays[display_index_for_output(
-                               runtime, output_index)].bounds.w,
-                           runtime->displays[display_index_for_output(
-                               runtime, output_index)].bounds.h);
-        render_sdl_overlays(runtime, renderer, output_index);
-        if (scene_target)
-            swap_sdl_scene_textures(&runtime->outputs[output_index]);
-        finish_sdl_output(runtime, output_index, scene_target);
-        if (api_images_drawn > 0 &&
-            runtime->pixel_frames_pending[output_index] > 0)
-            --runtime->pixel_frames_pending[output_index];
-        runtime->outputs[output_index].initialized = 1;
-        runtime->outputs[output_index].last_topology_revision =
-            runtime->topology_revision;
-        runtime->outputs[output_index].last_target_count = target_count;
-        runtime->outputs[output_index].last_graphics_signature =
-            graphics_scene_signature(runtime, output_index);
-    }
-    if (render_started != 0) {
-        Uint64 elapsed = SDL_GetPerformanceCounter() - render_started;
-        double milliseconds = (double)elapsed * 1000.0 /
-            (double)SDL_GetPerformanceFrequency();
-        runtime->diagnostic_last_render_ms = milliseconds;
-        if (milliseconds > runtime->diagnostic_max_render_ms)
-            runtime->diagnostic_max_render_ms = milliseconds;
-        fprintf(stderr, "blit: SDL frame=%lu render_ms=%.3f\n",
-                runtime->sdl_frame, milliseconds);
-    }
-    for (plan_index = 0; plan_index < plan->surface_count; ++plan_index) {
-        BlitSurface *surface = find_surface_id(
-            runtime, plan->surfaces[plan_index].surface_id);
-        BlitSession *session = surface != NULL ? find_session_id(
-            runtime, surface->owner_session_id) : NULL;
-        int rendered = surface != NULL &&
-            (session == NULL || !session->terminal_synchronized) &&
-            plan_index < BLIT_MAX_FRAME_SURFACES &&
-            surface_painted[plan_index];
-        if (rendered) {
-            surface->damage_valid = 0;
-            if (surface->graphics_damage_prepared)
-                surface->graphics_presented = surface->graphics_prepared;
-            surface->presented_revision =
-                plan->surfaces[plan_index].surface_revision;
-        }
-        if (rendered && session != NULL)
-            session->terminal_frame_batch = 0;
-    }
-    runtime->pointer_dirty_outputs &= ~output_mask;
+    for (surface_index = 0; surface_index < runtime->output_count;
+         ++surface_index)
+        if (!hold_scene && (kms_submitted_output_mask & (1U << surface_index)) &&
+            runtime->pixel_frames_pending[surface_index] > 0)
+            --runtime->pixel_frames_pending[surface_index];
+    /* Retain pointer damage for outputs whose refresh deadline has not
+       arrived yet. A single global clear used to lose the cursor on a
+       differently phased secondary output. */
+    runtime->pointer_dirty_outputs &= ~kms_submitted_output_mask;
     runtime->pointer_dirty = runtime->pointer_dirty_outputs != 0;
+    record_kms_frame_submission(runtime, kms_submitted_output_mask);
     finish_render_diagnostics(runtime, diagnostic_render_started);
 }
 
-static int mouse_output_index(const BlitRuntime *runtime, SDL_WindowID window_id)
+static int mouse_output_index(const BlitRuntime *runtime)
 {
-    int i;
-
-    /* Direct KMS outputs do not have SDL windows.  SDL reports window ID 0
-       for the synthetic event path, and asking SDL for the ID of a NULL
-       window can make every output look like that same window.  Resolve
-       zero-ID KMS input from the server-owned pointer output below instead. */
-    if (!runtime->direct_kms && window_id != 0)
-        for (i = 0; i < runtime->output_count; ++i)
-            if (SDL_GetWindowID(runtime->outputs[i].window) == window_id)
-                return i;
-    /* Some KMSDRM event paths report a zero window id.  With one physical
-       output the target is unambiguous, so retain pointer input there. */
+    /* With one output the target is unambiguous; otherwise the pointer is
+       on the output the server placed it on. */
     if (runtime->output_count == 1)
         return 0;
-    if (runtime->direct_kms && window_id == 0 &&
-        runtime->pointer_output >= 0 &&
+    if (runtime->pointer_output >= 0 &&
         runtime->pointer_output < runtime->output_count)
         return runtime->pointer_output;
     return -1;
@@ -27829,12 +24654,12 @@ static void focus_session(BlitRuntime *runtime, BlitSession *target)
     }
 }
 
-static void send_mouse_report(BlitRuntime *runtime, SDL_WindowID window_id,
+static void send_mouse_report(BlitRuntime *runtime,
                               float pixel_x, float pixel_y, int button,
                               int release)
 {
     char report[64];
-    int output_index = mouse_output_index(runtime, window_id);
+    int output_index = mouse_output_index(runtime);
     int column = 0;
     int row = 0;
     int px = 0;
@@ -27903,10 +24728,9 @@ static void send_mouse_report(BlitRuntime *runtime, SDL_WindowID window_id,
 }
 
 static void send_mouse_motion_report(BlitRuntime *runtime,
-                                     SDL_WindowID window_id,
                                      float pixel_x, float pixel_y)
 {
-    int output_index = mouse_output_index(runtime, window_id);
+    int output_index = mouse_output_index(runtime);
     int column = 0;
     int row = 0;
     int px = 0;
@@ -28003,7 +24827,7 @@ static void update_pointer_position(BlitRuntime *runtime,
         int display_index;
         for (display_index = 1; display_index < runtime->display_count;
              ++display_index) {
-            const SDL_Rect *bounds = &runtime->displays[display_index].bounds;
+            const BlitRect *bounds = &runtime->displays[display_index].bounds;
             if (bounds->x < min_x) min_x = bounds->x;
             if (bounds->y < min_y) min_y = bounds->y;
             if (bounds->x + bounds->w > max_x) max_x = bounds->x + bounds->w;
@@ -28074,13 +24898,9 @@ static void update_pointer_position(BlitRuntime *runtime,
                  (mouse_modifier_bits(runtime) & 8) ? "true" : "false");
         broadcast_stream(runtime, input_event, BLIT_STREAM_INPUT);
     }
-    /* Raw evdev is authoritative when it is available.  Do not warp SDL's
-       native pointer in response: SDL then emits an asynchronous synthetic
-       motion event, and a single pending-warp flag cannot distinguish a
-       delayed event from a real fallback event during high-rate movement.
-       The software cursor is composed from the global evdev coordinates, so
-       SDL has no presentation state that needs synchronising here. */
-    send_mouse_motion_report(runtime, 0, runtime->evdev_mouse_x,
+    /* Raw evdev is authoritative: the software cursor is composed from the
+       global evdev coordinates. */
+    send_mouse_motion_report(runtime, runtime->evdev_mouse_x,
                              runtime->evdev_mouse_y);
 }
 
@@ -28179,7 +24999,7 @@ static void dispatch_pointer_button_raw(BlitRuntime *runtime, int button,
         runtime->mouse_buttons |= 1U << button;
     broadcast_evdev_pointer(runtime, "pointer_button", button, pressed, 0,
                              device_id);
-    send_mouse_report(runtime, 0, runtime->pointer_x, runtime->pointer_y,
+    send_mouse_report(runtime, runtime->pointer_x, runtime->pointer_y,
                       button, !pressed);
     if (!pressed)
         runtime->mouse_buttons &= ~(1U << button);
@@ -28438,7 +25258,7 @@ static void evdev_emit_wheel(BlitRuntime *runtime,
     for (emitted = 0; emitted < scroll_step; ++emitted) {
         broadcast_evdev_pointer(runtime, "pointer_wheel", button, 1, value,
                                 "evdev-pointer");
-        send_mouse_report(runtime, 0, runtime->evdev_mouse_x,
+        send_mouse_report(runtime, runtime->evdev_mouse_x,
                           runtime->evdev_mouse_y, button, 0);
     }
 }
@@ -29619,167 +26439,6 @@ static void service_native_console(BlitRuntime *runtime)
     }
 }
 
-static void service_sdl_events(BlitRuntime *runtime)
-{
-    SDL_Event event;
-
-    while (SDL_PollEvent(&event)) {
-        int evdev_mouse_active = runtime->evdev_mouse_count > 0 &&
-            runtime->diagnostic_last_evdev_mouse_event_us > 0 &&
-            monotonic_us() >= runtime->diagnostic_last_evdev_mouse_event_us &&
-            monotonic_us() - runtime->diagnostic_last_evdev_mouse_event_us <=
-                BLIT_EVDEV_MOUSE_ACTIVITY_US;
-        if (event.type == SDL_EVENT_MOUSE_MOTION &&
-            runtime->sdl_warp_pending) {
-            int output_index = mouse_output_index(runtime,
-                                                  event.motion.windowID);
-            float x = event.motion.x;
-            float y = event.motion.y;
-            int same_position = 0;
-            uint64_t now = monotonic_us();
-            if (output_index >= 0) {
-                int display_index = display_index_for_output(runtime,
-                                                              output_index);
-                if (display_index >= 0) {
-                    x += runtime->displays[display_index].bounds.x;
-                    y += runtime->displays[display_index].bounds.y;
-                }
-            }
-            if (output_index == runtime->sdl_warp_output &&
-                x == runtime->sdl_warp_x && y == runtime->sdl_warp_y &&
-                now >= runtime->sdl_warp_us &&
-                now - runtime->sdl_warp_us <= BLIT_EVDEV_MOUSE_ACTIVITY_US)
-                same_position = 1;
-            runtime->sdl_warp_pending = 0;
-            if (same_position)
-                continue;
-        }
-        /* KMSDRM can feed the same evdev device into SDL while Blit is also
-           reading it directly.  The raw path handles motion, buttons, and
-           wheel events with the display-global coordinates required for
-           multi-output routing.  Discard SDL mouse events while that path is
-           active, preventing duplicate clicks and cursor trails.  If the
-           device is present but has never delivered a record, or has gone
-           quiet, retain SDL as a bounded fallback so a backend event cannot
-           be lost solely because an evdev node exists. */
-        if (evdev_mouse_active &&
-            (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
-             event.type == SDL_EVENT_MOUSE_BUTTON_UP ||
-             event.type == SDL_EVENT_MOUSE_MOTION ||
-             event.type == SDL_EVENT_MOUSE_WHEEL)) {
-            ++runtime->diagnostic_sdl_mouse_events_discarded;
-            continue;
-        }
-        if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
-            ++runtime->diagnostic_sdl_mouse_button_events;
-            ++runtime->diagnostic_sdl_mouse_events_processed;
-            if (runtime->evdev_mouse_count > 0 && !evdev_mouse_active)
-                ++runtime->diagnostic_sdl_mouse_fallback_events;
-            int button = event.button.button == 1 ? 0 :
-                event.button.button == 2 ? 1 :
-                event.button.button == 3 ? 2 : -1;
-            if (button >= 0) {
-                int output_index = mouse_output_index(runtime,
-                                                      event.button.windowID);
-                float x = event.button.x;
-                float y = event.button.y;
-                if (output_index >= 0) {
-                    int display_index = display_index_for_output(runtime,
-                                                                  output_index);
-                    if (display_index >= 0) {
-                        x += runtime->displays[display_index].bounds.x;
-                        y += runtime->displays[display_index].bounds.y;
-                    }
-                }
-                runtime->mouse_buttons |= 1U << button;
-                send_mouse_report(runtime, event.button.windowID,
-                                  x, y, button, 0);
-            }
-        } else if (event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
-            ++runtime->diagnostic_sdl_mouse_button_events;
-            ++runtime->diagnostic_sdl_mouse_events_processed;
-            if (runtime->evdev_mouse_count > 0 && !evdev_mouse_active)
-                ++runtime->diagnostic_sdl_mouse_fallback_events;
-            int button = event.button.button == 1 ? 0 :
-                event.button.button == 2 ? 1 :
-                event.button.button == 3 ? 2 : -1;
-            if (button >= 0) {
-                int output_index = mouse_output_index(runtime,
-                                                      event.button.windowID);
-                float x = event.button.x;
-                float y = event.button.y;
-                if (output_index >= 0) {
-                    int display_index = display_index_for_output(runtime,
-                                                                  output_index);
-                    if (display_index >= 0) {
-                        x += runtime->displays[display_index].bounds.x;
-                        y += runtime->displays[display_index].bounds.y;
-                    }
-                }
-                send_mouse_report(runtime, event.button.windowID,
-                                  x, y, button, 1);
-                runtime->mouse_buttons &= ~(1U << button);
-            }
-        } else if (event.type == SDL_EVENT_MOUSE_MOTION) {
-            ++runtime->diagnostic_sdl_mouse_motion_events;
-            ++runtime->diagnostic_sdl_mouse_events_processed;
-            if (runtime->evdev_mouse_count > 0 && !evdev_mouse_active)
-                ++runtime->diagnostic_sdl_mouse_fallback_events;
-            int output_index = mouse_output_index(runtime,
-                                                  event.motion.windowID);
-            float x = event.motion.x;
-            float y = event.motion.y;
-            if (output_index >= 0) {
-                int display_index = display_index_for_output(runtime,
-                                                              output_index);
-                if (display_index >= 0) {
-                    x += runtime->displays[display_index].bounds.x;
-                    y += runtime->displays[display_index].bounds.y;
-                }
-            }
-            runtime->previous_pointer_x = runtime->pointer_x;
-            runtime->previous_pointer_y = runtime->pointer_y;
-            runtime->previous_pointer_output = runtime->pointer_output;
-            runtime->pointer_valid = 1;
-            runtime->pointer_output = mouse_output_index(runtime,
-                                                         event.motion.windowID);
-            runtime->pointer_x = x;
-            runtime->pointer_y = y;
-    mark_pointer_dirty_outputs(runtime, runtime->previous_pointer_output,
-                               runtime->pointer_output);
-    runtime->render_pending = 1;
-    {
-        char detail[160];
-        snprintf(detail, sizeof(detail), "x=%.1f y=%.1f output=%d",
-                 runtime->pointer_x, runtime->pointer_y,
-                 runtime->pointer_output);
-        diagnostic_trace(runtime, "pointer_motion", detail);
-    }
-            send_mouse_motion_report(runtime, event.motion.windowID,
-                                     x, y);
-        } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
-            ++runtime->diagnostic_sdl_mouse_events_processed;
-            if (runtime->evdev_mouse_count > 0 && !evdev_mouse_active)
-                ++runtime->diagnostic_sdl_mouse_fallback_events;
-            int button = event.wheel.y > 0 ? 64 : 65;
-            int output_index = mouse_output_index(runtime,
-                                                  event.wheel.windowID);
-            float x = event.wheel.mouse_x;
-            float y = event.wheel.mouse_y;
-            if (output_index >= 0) {
-                int display_index = display_index_for_output(runtime,
-                                                              output_index);
-                if (display_index >= 0) {
-                    x += runtime->displays[display_index].bounds.x;
-                    y += runtime->displays[display_index].bounds.y;
-                }
-            }
-            send_mouse_report(runtime, event.wheel.windowID, x, y,
-                              button, 0);
-        }
-    }
-}
-
 static void remove_http_client(BlitRuntime *runtime, int index)
 {
     if (index < 0 || index >= BLIT_MAX_HTTP_CLIENTS ||
@@ -30452,10 +27111,7 @@ int main(int argc, char **argv)
     {
         const char *font_scale = getenv("BLIT_FONT_SCALE");
         const char *render_interval = getenv("BLIT_RENDER_INTERVAL_MS");
-        const char *renderer = getenv("BLIT_RENDERER");
         const char *async_pageflip = getenv("BLIT_KMS_ASYNC_PAGEFLIP");
-        const char *screenshot_dir = getenv("BLIT_SDL_SCREENSHOT_DIR");
-        const char *screenshot_after = getenv("BLIT_SDL_SCREENSHOT_AFTER");
         if (font_scale != NULL) {
             int parsed_scale = parse_font_scale_text(font_scale);
             if (parsed_scale > 0)
@@ -30463,22 +27119,11 @@ int main(int argc, char **argv)
         }
         if (render_interval != NULL)
             runtime.render_interval_ms = atoi(render_interval);
-        if (renderer != NULL)
-            snprintf(runtime.renderer_request,
-                     sizeof(runtime.renderer_request), "%s", renderer);
         runtime.kms_async_pageflip = async_pageflip != NULL;
-        if (screenshot_dir != NULL)
-            snprintf(runtime.sdl_screenshot_dir,
-                     sizeof(runtime.sdl_screenshot_dir), "%s", screenshot_dir);
-        runtime.sdl_screenshot_after = screenshot_after != NULL ?
-            (unsigned long)strtoul(screenshot_after, NULL, 10) : 1;
         if (runtime.render_interval_ms < 1 || runtime.render_interval_ms > 100)
             runtime.render_interval_ms = 16;
     }
     runtime.boot_render_interval_ms = runtime.render_interval_ms;
-    runtime.boot_display_backend_kms = getenv("BLIT_DISPLAY_BACKEND") != NULL &&
-        strcmp(getenv("BLIT_DISPLAY_BACKEND"), "kms") == 0;
-    runtime.display_backend_kms = runtime.boot_display_backend_kms;
     runtime.boot_kms_async_pageflip = runtime.kms_async_pageflip;
     runtime.boot_kms_compositor_gles = getenv("BLIT_KMS_COMPOSITOR") != NULL &&
         strcmp(getenv("BLIT_KMS_COMPOSITOR"), "gles") == 0;
@@ -30489,8 +27134,6 @@ int main(int argc, char **argv)
     runtime.boot_kms_frame_timing_immediate = getenv("BLIT_KMS_FRAME_TIMING") == NULL ||
         strcmp(getenv("BLIT_KMS_FRAME_TIMING"), "late") != 0;
     runtime.kms_frame_timing_immediate = runtime.boot_kms_frame_timing_immediate;
-    snprintf(runtime.boot_renderer_request, sizeof(runtime.boot_renderer_request),
-             "%s", runtime.renderer_request);
     runtime.boot_pane_columns = 1;
     runtime.boot_pane_rows = 1;
     {
@@ -30728,9 +27371,8 @@ int main(int argc, char **argv)
        brightness is refused on a display that has no backlight. */
     discover_backlights(&runtime);
     runtime.kms_inventory_revision = blit_kms_inventory_revision(runtime.kms);
-    if (runtime.sdl_ready || runtime.direct_kms)
+    if (runtime.kms != NULL)
         initialize_outputs(&runtime);
-    blit_startup_stage("outputs.complete",0);
     /* Issue #69. After the outputs exist, because a rotation drops the
        output's cached scene texture, and before the first frame, because that
        texture is sized from the display's logical rectangle. The document was
@@ -30738,11 +27380,8 @@ int main(int argc, char **argv)
        a device enters the table and the boot scan is below -- so displays are
        the one stored section whose subjects do not exist yet when it loads.
        Stage 1 made this same mistake in the other direction. */
-    blit_startup_stage("settings.displays.begin",0);
     settings_apply_displays(&runtime);
-    blit_startup_stage("panes.begin",0);
     discover_panes(&runtime);
-    blit_startup_stage("panes.end",0);
     {
         BlitAuxiliaryBinding bindings[16];
         int count = 0;
@@ -30799,12 +27438,10 @@ int main(int argc, char **argv)
     if (runtime.output_count > 0) {
         runtime.pointer_valid = 1;
         runtime.pointer_output = 0;
-        runtime.pointer_x = (runtime.direct_kms ?
-            runtime.displays[0].bounds.x : 0) +
+        runtime.pointer_x = runtime.displays[0].bounds.x +
             (runtime.displays[0].bounds.w > 0 ?
              runtime.displays[0].bounds.w / 2.0f : 0.0f);
-        runtime.pointer_y = (runtime.direct_kms ?
-            runtime.displays[0].bounds.y : 0) +
+        runtime.pointer_y = runtime.displays[0].bounds.y +
             (runtime.displays[0].bounds.h > 0 ?
              runtime.displays[0].bounds.h / 2.0f : 0.0f);
         runtime.pointer_dirty_outputs = runtime.pointer_output >= 0 &&
@@ -30855,7 +27492,7 @@ int main(int argc, char **argv)
         int keyboard_ready = 0;
         int gamepad_ready = 0;
         int kms_ready = 0;
-        int kms_fd = runtime.direct_kms ? blit_kms_fd(runtime.kms) : -1;
+        int kms_fd = blit_kms_fd(runtime.kms);
         int i;
         fd_set readable;
         fd_set writable;
@@ -30865,7 +27502,6 @@ int main(int argc, char **argv)
         uint32_t output_mask;
         int pending_before_events;
         uint64_t select_started_us;
-        uint64_t sdl_events_started_us;
         uint64_t loop_started_us;
 
         service_native_console(&runtime);
@@ -30919,15 +27555,6 @@ int main(int argc, char **argv)
         if (mouse_motion_wait_ms(&runtime, monotonic_us()) == 0)
             flush_mouse_motion(&runtime);
         pending_before_events = runtime.render_pending;
-        sdl_events_started_us = monotonic_us();
-        if (runtime.sdl_ready && !runtime.direct_kms)
-            service_sdl_events(&runtime);
-        runtime.diagnostic_last_sdl_events_ms =
-            (double)(monotonic_us() - sdl_events_started_us) / 1000.0;
-        if (runtime.diagnostic_last_sdl_events_ms >
-            runtime.diagnostic_max_sdl_events_ms)
-            runtime.diagnostic_max_sdl_events_ms =
-                runtime.diagnostic_last_sdl_events_ms;
         now = monotonic_us();
         for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i) {
             BlitHttpClient *client = &runtime.http_clients[i];
@@ -31143,7 +27770,7 @@ int main(int argc, char **argv)
         service_middle_button_deadlines(&runtime, monotonic_us());
         if (kms_fd >= 0 && ready > 0 && FD_ISSET(kms_fd, &readable))
             kms_ready = 1;
-        if (runtime.direct_kms && runtime.kms != NULL) {
+        if (runtime.kms != NULL) {
             int serviced = blit_kms_service(runtime.kms, kms_ready);
             if (serviced < 0)
                 fprintf(stderr, "blit: KMS event service failed\n");
@@ -31260,31 +27887,19 @@ int main(int argc, char **argv)
         for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i) {
             BlitHttpClient *client = &runtime.http_clients[i];
             int screenshot_index;
-            char screenshot_path[128];
+            int screenshot_result;
             if (!client->used || client->screenshot_output_index <= 0)
                 continue;
             screenshot_index = client->screenshot_output_index - 1;
             if (screenshot_index < 0 || screenshot_index >= runtime.output_count)
                 continue;
-            snprintf(screenshot_path, sizeof(screenshot_path),
-                     "/v1/diagnostics/screenshots/display-%llu",
-                     runtime.outputs[screenshot_index].display_id);
-            if (runtime.direct_kms) {
-                int screenshot_result = send_kms_screenshot(
-                    client, &runtime, screenshot_index);
-                if (screenshot_result == 0)
-                    continue;
-                if (screenshot_result < 0) {
-                    remove_http_client(&runtime, i);
-                    continue;
-                }
-            } else {
-                if (runtime.outputs[screenshot_index].screenshot_surface == NULL)
-                    continue;
-                if (send_sdl_screenshot(client, &runtime, screenshot_path) < 0) {
-                    remove_http_client(&runtime, i);
-                    continue;
-                }
+            screenshot_result = send_kms_screenshot(client, &runtime,
+                                                    screenshot_index);
+            if (screenshot_result == 0)
+                continue;
+            if (screenshot_result < 0) {
+                remove_http_client(&runtime, i);
+                continue;
             }
             runtime.screenshot_requested_mask &= ~(1U << screenshot_index);
             client->screenshot_output_index = 0;
@@ -31328,8 +27943,6 @@ int main(int argc, char **argv)
     settings_flush(&runtime, 1);
     destroy_outputs(&runtime);
     blit_font_free(&runtime.font);
-    if (runtime.sdl_ready)
-        SDL_Quit();
     blit_vt_close();
     if (blit_restart_requested) {
         restart_server_process(&runtime);

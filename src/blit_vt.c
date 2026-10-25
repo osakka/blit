@@ -77,7 +77,7 @@ static int restore_vt(void)
     return failed ? -1 : 0;
 }
 
-/* Forked BEFORE SDL, DRM monitor and evdev opener threads start. A pidfd
+/* Forked BEFORE the DRM monitor and evdev opener threads start. A pidfd
    observes death even if a forked PTY child still holds the stop pipe. Never
    use EOF alone as the crash detector. Do not retain any server/DRM fd. */
 static void recover_vt(int death, int command)

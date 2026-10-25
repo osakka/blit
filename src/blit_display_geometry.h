@@ -10,8 +10,8 @@
  * the contract -- it is in the OpenAPI description and
  * `display_geometry_gate.c` asserts exactly it -- because every other way of
  * saying it borrows someone else's enum: DRM's ROTATE_90 is anticlockwise,
- * RandR calls the same transform "right", and SDL's render angle is
- * clockwise. Naming the corner a pixel lands in cannot be read two ways.
+ * RandR calls the same transform "right", and a renderer's angle is
+ * usually clockwise. Naming the corner a pixel lands in cannot be read two ways.
  *
  * Two sizes follow, and the repo keeps both:
  *
@@ -82,8 +82,7 @@ static void blit_rotate_point(int rotation, int physical_width,
    output's rectangle instead is the mistake this function exists to stop,
    because at 0 and 180 the two are identical and the bug only appears at 90.
 
-   `blit_rotation_angle` is what SDL is handed; it is clockwise, so it is the
-   rotation itself. */
+   `blit_rotation_angle` is clockwise, so it is the rotation itself. */
 static double blit_rotation_angle(int rotation)
 {
     return blit_rotation_valid(rotation) ? (double)rotation : 0.0;

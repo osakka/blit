@@ -90,12 +90,12 @@ Dir.mktmpdir('blit-pointer-shape') do |root|
     system(helper, '--stamp', index.to_s, '0', '24', path) || raise("stamp #{name} failed")
     stamps[name] = File.binread(path)
   end
-  pid = spawn({ **gate_display_env, 'BLIT_RENDERER' => 'software',
+  pid = spawn({ **gate_display_env,
                 'BLIT_LOGIN_AUTOSTART' => '0',
                 'BLIT_SETTINGS_PATH' => File.join(root, 'settings.json'),
                 'BLIT_INPUT_ROOT' => root,
                 'BLIT_PSF_FONT' => File.join(ROOT, 'assets/fonts/Blit-Hibr-Terminus16.psf'),
-                'LD_LIBRARY_PATH' => File.join(ROOT, 'build/sdl3-kms') },
+                },
               ENV.fetch('BLIT_GATE_BINARY', File.join(ROOT, 'build/blit/blit-server')),
               PORT.to_s, out: File.join(root, 'server.log'), err: %i[child out])
   begin

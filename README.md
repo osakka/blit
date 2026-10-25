@@ -1,6 +1,6 @@
 # Blit
 
-> API-driven, text-first display service for SDL3/KMS Linux hosts.
+> API-driven, text-first display service for native KMS Linux hosts.
 
 Public repository: [github.com/osakka/blit](https://github.com/osakka/blit).
 
@@ -25,15 +25,15 @@ desktop/session commands, but never edits the Hibr source tree.
 Presentation configuration has one owner: saved API settings. The environment
 supplies startup fallbacks, not silent overrides. Read
 `/v1/settings` → `effective.presentation_configuration` to see the source,
-validity and actual backend/driver. Use `kms` for native DRM/KMS or `sdl`
-for SDL; `kmsdrm` is an SDL video-driver value, not a Blit backend selector.
+validity and actual backend. Native KMS is the only presentation backend
+(ADR 0184); its compositor is GLES on the GPU, with the CPU as the fallback.
 See [the configuration ownership guide](docs/api.md#presentation-configuration-ownership-01563).
 
 Blit is a server, not a terminal launcher script and not a replacement for
 Hibr. A client connects to Blit's TCP API, discovers hardware, creates or
 observes terminal sessions, assigns surfaces to logical panes, and receives
 state, diagnostics, input, and frame events. Blit presents the result through
-SDL3/KMS and can expose bounded Kitty/Sixel-compatible graphics alongside
+native KMS and can expose bounded Kitty/Sixel-compatible graphics alongside
 terminal cells.
 
 The canonical boundaries are deliberately simple:
@@ -48,7 +48,7 @@ OpenAPI/HTTP + WebSocket
           |
           +---- logical topology and panes
           |
-          +---- SDL3/KMS presentation
+          +---- native KMS presentation (GLES, CPU fallback)
 ```
 
 ## What Blit owns—and what it does not
@@ -170,8 +170,8 @@ the shared bounded cluster raster now shapes and draws the full corpus in
 offline16px module tests. Terminal segmentation, presentation policy and
 end-to-end conformance remain open (internal tracking110; see the
 [font plan](docs/font-evolution-plan.md)).
-Owned clusters now reach native KMS and both SDL compositors, with full-key
-atlas caching and representative pixel checks. API updates can explicitly
+Owned clusters reach both native KMS compositors (CPU and GLES), with
+representative pixel checks. API updates can explicitly
 request `text_layout:"emoji"`; the scalar default is unchanged for existing
 providers. New PTY sessions can also select `text_layout:"emoji"` explicitly;
 the full corpus passes contiguous/byte-fragmented parser tests. Complete
@@ -180,7 +180,7 @@ remaining geometry and end-to-end acceptance are still open.
 HarfBuzz>=6.0.0 is an explicit runtime dependency, not a second renderer.
 Native KMS now reads the canonical sixteen-slot attachment layout correctly
 (internal tracking113). Not deployed. The active queue is
-[fonts → browser sizing → SDL parity → performance/correctness → release](docs/roadmap.md).
+[fonts → browser sizing → performance/correctness → release](docs/roadmap.md).
 See [the font completion contract](docs/font-evolution-plan.md) for remaining
 work; shaping coverage alone does not mean complete terminal emoji support.
 
@@ -205,12 +205,11 @@ work; shaping coverage alone does not mean complete terminal emoji support.
 - PTY-backed terminal sessions with revisioned cell surfaces and scrollback.
 - A single supervised Hibr login manager with root-owned KMS/input and
   per-user desktop or shell children.
-- Direct KMS and SDL3 presentation paths, refresh-aware scheduling, and
-  diagnostics for frames, render time, missed deadlines, input, and streams.
+- Native KMS presentation (GLES compositor, CPU fallback), refresh-aware
+  scheduling, and diagnostics for frames, render time, missed deadlines,
+  input, and streams.
 - Direct-KMS live output reconciliation with a background connector observer,
   stable output lifetimes, API-visible hotplug errors and zero-output recovery.
-  SDL's KMSDRM path still requires startup-connected monitors; see the
-  [API's backend-specific hotplug contract](docs/api.md#live-auxiliary-displays-01543).
 - Logical multi-display topology and pane layouts, including Hibr primary plus
   `desktop --join` ownership rules.
 - API-selectable font profiles and logical scale, Kitty-first graphics, and a
@@ -270,12 +269,12 @@ tools/tests/package_artifact_gate.sh /path/to/blit_<version>-1_amd64.deb
 ```
 
 The conformance runner deliberately targets a caller-owned server so the same
-test can validate a local dummy backend or a controlled remote fixture. Start
-the server in one terminal, then run the gate in another:
+test can validate a local mocked display or a controlled remote fixture.
+`tools/run-gates.sh terminal` starts one on the DRM mock for you; by hand:
 
 ```sh
-BLIT_PSF_FONT=build/blit-desktop-current/fonts/Lat15-Terminus16.psf \
-SDL_VIDEODRIVER=dummy LD_LIBRARY_PATH=build/sdl3-kms \
+. tools/tests/gate_display.sh && gate_display_setup
+env BLIT_PSF_FONT=assets/fonts/Blit-Hibr-Terminus16.psf $GATE_DISPLAY_ENV \
   build/blit/blit-server 19195
 
 BLIT_TEST_SERVER=http://127.0.0.1:19195 \
@@ -287,7 +286,7 @@ The bounded soak uses the same ownership rule and additionally requires the
 server PID so it can enforce the RSS ceiling. See
 [`docs/implementation-and-verification.md`](docs/implementation-and-verification.md)
 for the exact two-process invocation and cleanup contract. Gates that own
-their dummy server, such as the frame-rate gate, state that explicitly.
+their server, such as the frame-rate gate, state that explicitly.
 
 The package is a derived release artifact. Build it only after the source,
 schema, tests, documentation, and verification entry agree; the package gate

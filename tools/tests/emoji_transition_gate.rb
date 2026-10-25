@@ -7,7 +7,7 @@ require 'timeout'
 require 'rbconfig'
 require 'fileutils'
 require_relative 'gate_port'
-require_relative 'sdl_test_profile'
+require_relative 'test_profile'
 base=URI("http://127.0.0.1:#{gate_port(19568)}")
 request=lambda do |method,path,body=nil,status=200,headers={}|
   q={'GET'=>Net::HTTP::Get,'POST'=>Net::HTTP::Post,'PUT'=>Net::HTTP::Put,
@@ -20,8 +20,8 @@ request=lambda do |method,path,body=nil,status=200,headers={}|
   r.body.to_s.empty? ? nil : JSON.parse(r.body)
 end
 Dir.mktmpdir('blit-emoji-transitions') do |work|
-  env=SdlTestProfile.environment.merge('BLIT_FONT_ROOT'=>File.join(SdlTestProfile::ROOT,'assets/fonts'))
-  pid=spawn(env,SdlTestProfile.binary,base.port.to_s,out:File.join(work,'server.log'),err:[:child,:out])
+  env=TestProfile.environment.merge('BLIT_FONT_ROOT'=>File.join(TestProfile::ROOT,'assets/fonts'))
+  pid=spawn(env,TestProfile.binary,base.port.to_s,out:File.join(work,'server.log'),err:[:child,:out])
   context='startup'; cases=0; serial=0
   begin
     Timeout.timeout(8) do
@@ -33,8 +33,8 @@ Dir.mktmpdir('blit-emoji-transitions') do |work|
         end
       end
     end
-    SdlTestProfile.verify!(request.call('GET','/v1/diagnostics'))
-    display=SdlTestProfile.display_id!(request.call('GET','/v1/displays'))
+    TestProfile.verify!(request.call('GET','/v1/diagnostics'))
+    display=TestProfile.display_id!(request.call('GET','/v1/displays'))
     samples=["❤️","1️⃣","🇬🇧","👍🏽","👩‍💻","👨‍👩‍👧‍👦",
       "🏴\u{e0067 e0062 e0065 e006e e0067 e007f}","\u2764\ufe0e","\u{1f41f}\ufe0e"]
     child='require "io/console";require "json";STDIN.raw!;STDOUT.sync=true;STDOUT.write("\e[?25l\e]2;ready\a");STDIN.each_line{|l|STDOUT.write(JSON.parse(l))}'
@@ -138,7 +138,7 @@ Dir.mktmpdir('blit-emoji-transitions') do |work|
         end
       end
     end
-    puts "EMOJI_TRANSITION_PASS renderer=#{SdlTestProfile.renderer} profiles=2 sizes=#{ENV.fetch('BLIT_TRANSITION_SIZES','15,16')} sequences=9 transitions=move+overwrite+erase+scroll+alternate+clear+shrink+grow checks=#{cases} oracle=independent_grid presented_revision=exact pixels=API_parity scope=local_PTY_not_physical_or_Kitty_sixel"
+    puts "EMOJI_TRANSITION_PASS backend=#{GATE_BACKEND} profiles=2 sizes=#{ENV.fetch('BLIT_TRANSITION_SIZES','15,16')} sequences=9 transitions=move+overwrite+erase+scroll+alternate+clear+shrink+grow checks=#{cases} oracle=independent_grid presented_revision=exact pixels=API_parity scope=local_PTY_not_physical_or_Kitty_sixel"
   rescue Exception
     warn "EMOJI_TRANSITION_FAIL #{context} log=#{work}/server.log"
     warn File.read(File.join(work,'server.log'))

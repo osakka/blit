@@ -28,7 +28,7 @@ cleanup()
 }
 trap cleanup EXIT INT TERM
 
-sudo -n env $GATE_DISPLAY_ENV LD_LIBRARY_PATH="$root/build/sdl3-kms" \
+sudo -n env $GATE_DISPLAY_ENV \
     BLIT_LOGIN_COMMAND=/bin/true BLIT_LOGIN_SCRIPT='' \
     BLIT_LOGIN_AUTOSTART=0 BLIT_AUTH_TOKEN="$token" \
     "$binary" "$port" >"$log" 2>&1 &

@@ -21,9 +21,8 @@ root = File.expand_path('../..', __dir__)
           { server_version: 'fixture', api_version: '0.1' }
         when '/v1/diagnostics'
           observations += 1
-          { render: { direct_kms: true,
-              video_driver: mode == 'changed_backend' && observations > 1 ? 'other' : 'direct-kms',
-              renderer: '', font_scale: 1,
+          { render: { presentation_sync: mode == 'changed_backend' && observations > 1 ? 'other' : 'drm-page-flip',
+              font_scale: 1,
               outputs: [{ display_id: 'fixture', render_width: 800, render_height: 600,
                           refresh_hz: 60, kms_phases: { draw_ms: 2 } }] } }
         when '/v1/diagnostics/runtime'

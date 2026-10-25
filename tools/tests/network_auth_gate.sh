@@ -39,7 +39,7 @@ if [ ! -x "$BINARY" ]; then
     exit 1
 fi
 
-env $GATE_DISPLAY_ENV LD_LIBRARY_PATH="$ROOT/build/sdl3-kms" \
+env $GATE_DISPLAY_ENV \
     BLIT_BIND_ADDRESS=0.0.0.0 BLIT_AUTH_TOKEN="$TOKEN" \
     BLIT_COMMAND_ALLOWLIST=/bin/true \
     "$BINARY" "$PORT" >"$LOG" 2>&1 &
@@ -185,7 +185,7 @@ token_cleanup() {
 }
 trap token_cleanup EXIT HUP INT TERM
 
-env $GATE_DISPLAY_ENV LD_LIBRARY_PATH="$ROOT/build/sdl3-kms" \
+env $GATE_DISPLAY_ENV \
     BLIT_AUTH_TOKEN="$TOKEN" BLIT_COMMAND_ALLOWLIST=/bin/sh \
     "$BINARY" "$TOKEN_PORT" >>"$LOG" 2>&1 &
 token_server_pid=$!
@@ -271,7 +271,7 @@ trap posture_cleanup EXIT HUP INT TERM
 
 # 1. No token and no requested address: safe by default, and still a working
 #    server for development.
-env $GATE_DISPLAY_ENV LD_LIBRARY_PATH="$ROOT/build/sdl3-kms" \
+env $GATE_DISPLAY_ENV \
     "$BINARY" "$POSTURE_PORT" >"$POSTURE_LOG" 2>&1 &
 posture_pid=$!
 ready=0
@@ -307,7 +307,7 @@ posture_pid=
 #    operator who asked for that cannot have meant it, and the server says
 #    which of the three ways out to take.
 # `set -e` would abort on the refusal itself, which is the result under test.
-if env $GATE_DISPLAY_ENV LD_LIBRARY_PATH="$ROOT/build/sdl3-kms" \
+if env $GATE_DISPLAY_ENV \
        BLIT_BIND_ADDRESS=0.0.0.0 \
        "$BINARY" $((POSTURE_PORT + 1)) >"$POSTURE_LOG" 2>&1; then
     echo "network gate: a network bind with no token must be refused" >&2
@@ -322,7 +322,7 @@ fi
 
 # 3. The override exists for a fixture with no network, has to be asked for by
 #    name, and is reported where health is read rather than only on stderr.
-env $GATE_DISPLAY_ENV LD_LIBRARY_PATH="$ROOT/build/sdl3-kms" \
+env $GATE_DISPLAY_ENV \
     BLIT_BIND_ADDRESS=0.0.0.0 BLIT_ALLOW_UNAUTHENTICATED_NETWORK=1 \
     "$BINARY" $((POSTURE_PORT + 2)) >"$POSTURE_LOG" 2>&1 &
 posture_pid=$!

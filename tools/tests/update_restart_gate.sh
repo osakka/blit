@@ -101,7 +101,7 @@ start_server()
 {
     BLIT_UPDATE_TOKEN_FILE="$token_file" BLIT_UPDATE_DIRECTORY="$work" \
         BLIT_UPDATE_SOCKET="$socket" env $GATE_DISPLAY_ENV \
-        LD_LIBRARY_PATH="$root/build/sdl3-kms" \
+        \
         "$binary" "$port" >>"$log" 2>&1 &
     pid=$!
     i=0

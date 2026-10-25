@@ -30,7 +30,7 @@ trap cleanup EXIT INT TERM
 
 printf '%s\n' test-token >"$token_file"
 BLIT_UPDATE_TOKEN_FILE="$token_file" BLIT_UPDATE_DIRECTORY="${TMPDIR:-/tmp}" env $GATE_DISPLAY_ENV \
-    LD_LIBRARY_PATH=build/sdl3-kms "$binary" "$port" >"$log" 2>&1 &
+    "$binary" "$port" >"$log" 2>&1 &
 pid=$!
 ready=0
 for attempt in 1 2 3 4 5 6 7 8 9 10; do

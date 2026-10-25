@@ -2,6 +2,7 @@
 
 - Date:2026-10-20
 - Status: implemented/deployed569; physical expiry recovery verified
+- Superseded by [ADR 0184](0184-sdl-is-removed.md): SDL is removed; native KMS is the only presentation path.
 - Tracking: Blit109/104
 
 SDL initialization runs before Blit's listener. Recovery must therefore not

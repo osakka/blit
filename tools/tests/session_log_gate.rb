@@ -5,7 +5,7 @@ require 'timeout'
 require 'tmpdir'
 require 'fileutils'
 require_relative 'gate_port'
-require_relative 'sdl_test_profile'
+require_relative 'test_profile'
 base=URI("http://127.0.0.1:#{gate_port(19571)}")
 req=lambda do |method,path,body=nil|
   q={'GET'=>Net::HTTP::Get,'POST'=>Net::HTTP::Post,'DELETE'=>Net::HTTP::Delete}.fetch(method).new(base+path)
@@ -15,7 +15,7 @@ req=lambda do |method,path,body=nil|
   r.body.to_s.empty? ? nil : JSON.parse(r.body)
 end
 Dir.mktmpdir('blit-session-log-gate') do |work|
-  pid=spawn(SdlTestProfile.environment.merge('DT_LOG'=>nil),SdlTestProfile.binary,base.port.to_s,
+  pid=spawn(TestProfile.environment.merge('DT_LOG'=>nil),TestProfile.binary,base.port.to_s,
     out:File.join(work,'server.log'),err:[:child,:out])
   paths=[]
   begin

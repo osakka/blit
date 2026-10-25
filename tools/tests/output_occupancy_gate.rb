@@ -41,7 +41,7 @@ def with_server(port, environment)
   base = URI("http://127.0.0.1:#{port}")
   server = spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
                    'BLIT_COMMAND_ALLOWLIST' => '/bin/sh',
-                   'LD_LIBRARY_PATH' => File.join(ROOT, 'build/sdl3-kms') }
+                   }
                    .merge(environment),
                  BINARY, port.to_s, out: '/dev/null', err: '/dev/null')
   begin

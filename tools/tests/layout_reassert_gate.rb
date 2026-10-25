@@ -62,11 +62,11 @@ Dir.mktmpdir('blit-reassert') do |root|
     exec 3<> #{File.join(root, 'idle')}
     while :; do read -t 0.05 -u 3 x; done
   HIBR
-  server = spawn({ **gate_display_env, 'BLIT_RENDERER' => 'software',
+  server = spawn({ **gate_display_env,
                    'BLIT_PSF_FONT' => FONT, 'BLIT_LOGIN_AUTOSTART' => '0',
                    'BLIT_SETTINGS_PATH' => File.join(root, 'settings.json'),
                    'BLIT_INPUT_ROOT' => File.join(root, 'input'),
-                   'LD_LIBRARY_PATH' => File.join(ROOT, 'build/sdl3-kms') },
+                   },
                  BINARY, PORT.to_s, out: File.join(root, 'server.log'), err: %i[child out])
   Dir.mkdir(File.join(root, 'input'))
   begin

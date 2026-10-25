@@ -1,6 +1,7 @@
 # ADR 0129: SDL KMSDRM hotplug crosses the dependency boundary
 
 - Status: deferred; user selected direct KMS for this delivery (ADR0130)
+- Superseded by [ADR 0184](0184-sdl-is-removed.md): SDL is removed; native KMS is the only presentation path.
 - Date: 2026-10-18
 - Issue: [Blit#100](https://git.home.arpa/itdlabs/blit/issues/100)
 - Related: ADRs0124,0128; hibr-apps ADR0002

@@ -30,8 +30,7 @@ def durable_bytes(path)
   IO.popen(['sudo','-n','cat',path], &:read)
 end
 def start(root, extra={})
-  env={**gate_display_env,'BLIT_RENDERER'=>'software',
-       'LD_LIBRARY_PATH'=>File.join(ROOT,'build/sdl3-kms'),
+  env={**gate_display_env,
        'BLIT_PSF_FONT'=>File.join(ROOT,'assets/fonts/Blit-Hibr-Terminus16.psf'),
        'BLIT_INPUT_ROOT'=>File.join(root,'input'), 'BLIT_SETTINGS_PATH'=>File.join(root,'settings.json'),
        'BLIT_PANE_LAYOUT'=>'1x2','BLIT_LOGIN_AUTOSTART'=>'0',

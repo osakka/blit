@@ -395,8 +395,7 @@ static void swap_buffers(KmsOutput *output)
    drawn into back, so it must begin as a complete copy of front.  Copying
    only the previous damage rectangle leaves older pixels everywhere else in
    back; pointer motion and window movement then expose those pixels as
-   trails.  This is the same complete-scene invariant used by the SDL scene
-   ping-pong path. */
+   trails. */
 static void copy_front_to_back(KmsOutput *output)
 {
     int row;
@@ -682,7 +681,7 @@ static void draw_glyph(KmsOutput *output, const BlitFont *font,
     }
 }
 
-/* Kitty z bands, shared with the SDL path (issue #84, #88): below
+/* Kitty z bands (issue #84, #88): below
    -2^30 an image is under cell backgrounds, from there up to zero it is over
    backgrounds and under text, and from zero up it is over text. */
 /* One cell path for normal text and block-cursor repaint. Unsupported
@@ -1097,8 +1096,7 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
     /* The cursor is part of the terminal view, not an output-wide overlay.
        A partial repaint may only write inside its cell damage rectangle;
        drawing the cursor outside that rectangle corrupts the retained scene
-       and produces a moving block/trail on the next page flip. SDL applies
-       the same row boundary before drawing its cursor. */
+       and produces a moving block/trail on the next page flip. */
     if (view->cursor_visible && view->cursor_x >= 0 && view->cursor_y >= 0 &&
         view->cursor_y < view->rows && view->cursor_y >= first_row &&
         view->cursor_y < last_row) {

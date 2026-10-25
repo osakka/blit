@@ -80,7 +80,7 @@ end
 $server = nil
 def start(env)
   $server = spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
-                    'LD_LIBRARY_PATH' => File.join(ROOT, 'build/sdl3-kms') }
+                    }
                     .merge(env),
                   BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')
   Timeout.timeout(20) do
@@ -515,7 +515,6 @@ Dir.mktmpdir('blit-settings') do |root|
   verdict('server-settings-follow-document-over-boot-environment') do
     boot = { 'BLIT_RENDER_INTERVAL_MS' => '23',
              'BLIT_PANE_LAYOUT' => '2x1',
-             'BLIT_RENDERER' => 'software',
              'BLIT_KMS_ASYNC_PAGEFLIP' => '1',
              'BLIT_EXPECT_DESKTOP' => '1' }
     stop
@@ -527,8 +526,6 @@ Dir.mktmpdir('blit-settings') do |root|
           "silent document honours BLIT_RENDER_INTERVAL_MS, got #{effective.inspect}")
     check(effective['pane_layout'] == '2x1',
           "silent document honours BLIT_PANE_LAYOUT, got #{effective.inspect}")
-    check(effective['renderer_requested'] == 'software',
-          "silent document honours BLIT_RENDERER, got #{effective.inspect}")
     check(effective['kms_async_pageflip'] == true,
           "silent document honours BLIT_KMS_ASYNC_PAGEFLIP, got #{effective.inspect}")
     check(effective['expect_desktop'] == true,
@@ -553,7 +550,6 @@ Dir.mktmpdir('blit-settings') do |root|
       'font' => { 'font_id' => font_id, 'scale' => 1.1 },
       'server' => { 'render_interval_ms' => 7,
                     'pane_layout' => '1x2',
-                    'renderer' => 'software',
                     'kms_async_pageflip' => false,
                     'expect_desktop' => false }
     }
@@ -563,7 +559,6 @@ Dir.mktmpdir('blit-settings') do |root|
     effective = settings.to_h.fetch('effective', {})
     check(effective['render_interval_ms'] == 7 &&
           effective['pane_layout'] == '1x2' &&
-          effective['renderer_requested'] == 'software' &&
           effective['kms_async_pageflip'] == false &&
           effective['expect_desktop'] == false,
           "stored server settings are effective, got #{effective.inspect}")

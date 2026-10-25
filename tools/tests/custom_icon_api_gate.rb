@@ -7,7 +7,7 @@ require 'timeout'
 require 'rbconfig'
 require 'fileutils'
 require_relative 'gate_port'
-require_relative 'sdl_test_profile'
+require_relative 'test_profile'
 port = gate_port(19573)
 base = URI("http://127.0.0.1:#{port}")
 request = lambda do |method, path, body = nil, expected = 200|
@@ -19,9 +19,9 @@ request = lambda do |method, path, body = nil, expected = 200|
 end
 Dir.mktmpdir('blit-custom-icon-api') do |work|
   fonts=File.join(work,'fonts')
-  FileUtils.cp_r(File.join(SdlTestProfile::ROOT,'assets/fonts'),fonts)
-  env=SdlTestProfile.environment.merge('BLIT_FONT_ROOT'=>fonts)
-  pid=spawn(env,SdlTestProfile.binary,port.to_s,out:File.join(work,'server.log'),err:[:child,:out])
+  FileUtils.cp_r(File.join(TestProfile::ROOT,'assets/fonts'),fonts)
+  env=TestProfile.environment.merge('BLIT_FONT_ROOT'=>fonts)
+  pid=spawn(env,TestProfile.binary,port.to_s,out:File.join(work,'server.log'),err:[:child,:out])
   cases=0
   begin
     Timeout.timeout(8) do
@@ -33,9 +33,9 @@ Dir.mktmpdir('blit-custom-icon-api') do |work|
         end
       end
     end
-    SdlTestProfile.verify!(request.call('GET','/v1/diagnostics'))
-    display=SdlTestProfile.display_id!(request.call('GET','/v1/displays'))
-    expected=JSON.parse(File.read(File.join(SdlTestProfile::ROOT,'assets/fonts/icons/catalogue.json')))
+    TestProfile.verify!(request.call('GET','/v1/diagnostics'))
+    display=TestProfile.display_id!(request.call('GET','/v1/displays'))
+    expected=JSON.parse(File.read(File.join(TestProfile::ROOT,'assets/fonts/icons/catalogue.json')))
     raise 'API catalogue differs from generator source' unless request.call('GET','/v1/fonts/icons')==expected
     catalogue=File.join(fonts,'icons/catalogue.json')
     File.rename(catalogue,catalogue+'.saved')

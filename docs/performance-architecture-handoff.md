@@ -18,7 +18,8 @@ do not manufacture corresponding GitHub issue links. Public code/docs live at
   [source investigation](kitty-rendering-investigation.md).
 - [Backend parity plan](backend-parity-plan.md),
   [matrix](backend-parity-matrix.md) and
-  [ADR0137](adr/0137-presentation-backend-feature-and-performance-parity.md).
+  [ADR0137](adr/0137-presentation-backend-feature-and-performance-parity.md),
+  superseded by [ADR 0184](adr/0184-sdl-is-removed.md), which removed SDL.
 - [Proposed retained-rendering decision](adr/0180-retained-gpu-implementation-workstream.md):
   implementation mechanism and native ownership decision remain open in128.
 
@@ -39,9 +40,9 @@ Local blend gains and113 font/renderer checks do not establish a dragging win.
 The owner reports approximately unchanged dragging; no matched end-to-end
 performance acceptance exists.
 
-Native drawing is CPU composition; SDL/GL already retains image textures and
-glyph atlases but reconstructs row-level drawing work. Existing scene-copy
-and ping-pong safety must not be removed merely because a GPU design is desired.
+Native KMS composes with GLES, with the CPU compositor as its fallback; SDL
+was removed in ADR 0184. Existing damage and last-complete-frame safety must
+not be removed merely because a GPU design is desired.
 Hibr owns semantic desktop windows; Blit sees terminal updates/image placements,
 not a new window-manager scene. Preserve that boundary.
 
@@ -57,18 +58,18 @@ different workloads. Existing last-frame counters can repeat stale samples.
 | --- | --- | --- |
 |126 | Revision-correlated frame/latency observability | Extends existing observation/schema; no second diagnostics owner |
 |127 | Deterministic protocol/input/video replay and independent pixel oracle |126 for instrumented acceptance; fixtures can start immediately |
-|128 | Retained GPU scene/resource contract and tested capability slice |126/127; owns the explicit SDL/GL/native ownership decision |
-|129 | Bounded real-GPU SDL/KMSDRM startup and independent multi-output presentation |126; reuse104/109/79/105 and existing independent recovery |
-|130 | SDL-owned connector hotplug/replug and stable Blit reconciliation |129; reuse100/104/20; no parallel inventory or persistence owner |
+|128 | Retained GPU scene/resource contract and tested capability slice |126/127; owns the explicit GL/native ownership decision |
+|129 | Bounded real-GPU SDL/KMSDRM startup and independent multi-output presentation | Obsolete: SDL removed in ADR 0184 |
+|130 | SDL-owned connector hotplug/replug and stable Blit reconciliation | Obsolete: SDL removed in ADR 0184 |
 |131 | Retained cell/glyph resources and changed-range updates |128/127; integrate with133 |
 |132 | Generation-aware image/video resource updates and lifetime |128/127; extend existing cache, integrate with133 |
 |133 | Atomic retained GPU pane/layer composition |128/131/132; coordinate134 |
 |134 | Fair input/PTY/API service and independent output cadence |126/128/127; coordinate133/130, reuse95/105 |
 |135 | Matched real-host benchmarks, parity signoff and recoverable rollout |126–134; reuse104/20/21/79/112/120 |
 
-Start126/127 and recovery/startup evidence in129. Resolve128 before committing
-to dependent rendering interfaces. Text/image implementation lanes can proceed
-in parallel with the SDL startup/hotplug lane after their prerequisites.
+Start126/127. Resolve128 before committing to dependent rendering interfaces.
+Text/image implementation lanes can proceed in parallel after their
+prerequisites.
 Composition and scheduling converge before135's physical acceptance.
 
 The ten issues also have24 native Gitea dependency edges, verified by API
@@ -81,11 +82,12 @@ instrumented acceptance prerequisite is complete.
 - 122: programme and outcome signoff; links the complete work breakdown.
 - 125: architecture implementation epic; completed increments are distinguished
   from remaining GPU/physical work.
-- 104: three-path feature/presentation parity; local GL results cannot close it.
+- 104: three-path feature/presentation parity; obsolete since ADR 0184 left
+  one presentation path.
 - 120: implemented DECCRA's live Hibr/hold negotiation/forwarding and solid-drag
   acceptance; upstream release metadata is not a running-hold result.
-- 109: independent startup recovery; reuse the helper/timer and trial safety
-  constraints rather than relying on an API that may never start.
+- 109: independent startup recovery; do not rely on an API that may never
+  start.
 - 112: release/security/reproducibility/recovery; not replaced by135.
 - 20/21/79: physical multi-output, high-refresh hardware and actual GPU evidence.
 - 100/105/95: native hotplug, HTTP fairness and loop-stall evidence respectively.
@@ -99,7 +101,7 @@ Other unrelated backlog issues were not changed by this handoff.
 One canonical terminal/grid, image store, geometry, input/config owner and
 atomic frame contract. Backend caches are derived resources, not alternative
 terminal implementations. The retained-GPU mechanism is a proposal to resolve
-in128, not approval for a third GL backend or unsafe raw-GL/SDL state mixing.
+in128, not approval for a second GL backend beside the KMS GLES compositor.
 Keep the installed TCC boundary. No Hibr edits or SSH, and no silent live
 backend/font/layout/session changes. Credentials stay in operator-provided
 secret channels, never issues, examples, recordings or evidence artifacts.
@@ -127,7 +129,6 @@ hardware or completion metrics remain pending/unavailable, not simulated passes.
 Useful checked-in commands (scope is documented by each tool):
 
 ```bash
-ruby tools/probes/graphics_work_shape.rb
 ruby tools/tests/graphics_placement_damage_gate.rb
 ruby tools/tests/graphics_ingestion_gate.rb
 ruby tools/tests/raster_blend_gate.rb --benchmark
@@ -136,7 +137,7 @@ sh tools/run-gates.sh font renderer gles
 
 Use the existing live API observation/probes only with current operator-supplied
 credentials and an explicitly scoped trial. Rehearse independent recovery before
-hazardous SDL startup and respect authenticated-session restrictions. Do not
+a hazardous startup and respect authenticated-session restrictions. Do not
 replace occupied desktop panes to obtain an easy synthetic benchmark.
 
 Ignored `build/tests` captures/logs are local evidence, not a portable dependency.

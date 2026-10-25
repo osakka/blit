@@ -4,7 +4,7 @@ require 'net/http'
 require 'tmpdir'
 require 'timeout'
 require_relative 'gate_port'
-require_relative 'sdl_test_profile'
+require_relative 'test_profile'
 port = gate_port(19566)
 base = URI("http://127.0.0.1:#{port}")
 request = lambda do |method, path, body = nil, expected = 200|
@@ -16,8 +16,8 @@ request = lambda do |method, path, body = nil, expected = 200|
   JSON.parse(r.body)
 end
 Dir.mktmpdir('blit-emoji-api') do |work|
-  env = SdlTestProfile.environment.merge('BLIT_FONT_ROOT'=>File.join(SdlTestProfile::ROOT,'assets/fonts'))
-  pid = spawn(env, SdlTestProfile.binary, port.to_s,
+  env = TestProfile.environment.merge('BLIT_FONT_ROOT'=>File.join(TestProfile::ROOT,'assets/fonts'))
+  pid = spawn(env, TestProfile.binary, port.to_s,
               out:File.join(work,'server.log'), err:[:child,:out])
   begin
     Timeout.timeout(8) do

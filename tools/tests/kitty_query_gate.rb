@@ -37,8 +37,7 @@ end
 
 server = Process.spawn({
   **gate_display_env,
-  'SDL_RENDERER' => 'software',
-  'LD_LIBRARY_PATH' => File.join(ROOT, 'build/sdl3-kms')
+  
 }, BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')
 at_exit do
   Process.kill('TERM', server) rescue nil

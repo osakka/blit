@@ -15,8 +15,7 @@ File.symlink('/bin/sh', fake_desktop)
 
 env = {
   **gate_display_env,
-  'SDL_RENDERER' => 'software',
-  'LD_LIBRARY_PATH' => File.join(root, 'build/sdl3-kms'),
+  
   'BLIT_COMMAND_ALLOWLIST' => fake_desktop
 }
 pid = Process.spawn(env, BINARY, port.to_s,

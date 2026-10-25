@@ -20,7 +20,7 @@ require 'net/http'
 require 'timeout'
 require 'uri'
 require_relative 'gate_port'
-require_relative 'sdl_test_profile'
+require_relative 'test_profile'
 
 ROOT = File.expand_path('../..', __dir__)
 PORT = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', '19255'), 10))
@@ -84,7 +84,7 @@ def pixel(bmp, x, y)
   [bmp.getbyte(offset + 2), bmp.getbyte(offset + 1), bmp.getbyte(offset)]
 end
 
-server = spawn(SdlTestProfile.environment.merge('BLIT_PSF_FONT' => FONT),
+server = spawn(TestProfile.environment.merge('BLIT_PSF_FONT' => FONT),
                BINARY, PORT.to_s, out: '/dev/null',
                err: ENV.fetch('BLIT_GATE_SERVER_LOG', '/dev/null'))
 at_exit do
@@ -104,8 +104,8 @@ Timeout.timeout(15) do
 end
 
 diagnostics = json('GET', '/v1/diagnostics')
-SdlTestProfile.verify!(diagnostics)
-DISPLAY_ID = SdlTestProfile.display_id!(json('GET', '/v1/displays'))
+TestProfile.verify!(diagnostics)
+DISPLAY_ID = TestProfile.display_id!(json('GET', '/v1/displays'))
 inset = diagnostics.fetch('render').fetch('surface_inset_px')
 
 # An owner-authored surface, so the motion is driven one committed frame at a

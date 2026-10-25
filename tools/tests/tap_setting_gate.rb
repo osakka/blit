@@ -61,7 +61,7 @@ Dir.mktmpdir('blit-tap') do |root|
   settings = File.join(root, 'settings.json')
   server = spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
                    'BLIT_INPUT_ROOT' => root, 'BLIT_SETTINGS_PATH' => settings,
-                   'LD_LIBRARY_PATH' => File.join(ROOT, 'build/sdl3-kms') },
+                   },
                  BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')
   begin
     Timeout.timeout(15) do

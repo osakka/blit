@@ -5,7 +5,7 @@ require 'tmpdir'
 require 'timeout'
 require 'rbconfig'
 require_relative 'gate_port'
-require_relative 'sdl_test_profile'
+require_relative 'test_profile'
 port = gate_port(19567)
 base = URI("http://127.0.0.1:#{port}")
 request = lambda do |method, path, body = nil, expected = 200|
@@ -17,8 +17,8 @@ request = lambda do |method, path, body = nil, expected = 200|
   r.body.to_s.empty? ? nil : JSON.parse(r.body)
 end
 Dir.mktmpdir('blit-emoji-pty') do |work|
-  env = SdlTestProfile.environment.merge('BLIT_FONT_ROOT'=>File.join(SdlTestProfile::ROOT,'assets/fonts'))
-  pid = spawn(env, SdlTestProfile.binary, port.to_s,
+  env = TestProfile.environment.merge('BLIT_FONT_ROOT'=>File.join(TestProfile::ROOT,'assets/fonts'))
+  pid = spawn(env, TestProfile.binary, port.to_s,
     out:File.join(work,'server.log'),err:[:child,:out])
   begin
     Timeout.timeout(8) do
@@ -31,7 +31,7 @@ Dir.mktmpdir('blit-emoji-pty') do |work|
       end
     end
     request.call('PUT','/v1/fonts',{font_id:'blit-modern',size_px:16})
-    display = SdlTestProfile.display_id!(request.call('GET','/v1/displays'))
+    display = TestProfile.display_id!(request.call('GET','/v1/displays'))
     capture = lambda do
       r = Net::HTTP.get_response(base + "/v1/diagnostics/screenshots/#{display}")
       raise 'capture failed' unless r.code == '200' && r.body.start_with?('BM')
@@ -40,7 +40,7 @@ Dir.mktmpdir('blit-emoji-pty') do |work|
     samples = ["❤️", "1️⃣", "🇬🇧", "👍🏽", "👩‍💻", "👨‍👩‍👧‍👦", "🏴\u{e0067 e0062 e0065 e006e e0067 e007f}", "\u2764\ufe0e", "\u{1f41f}\ufe0e"]
     # Independent scalar oracle from the canonical width data, not a second
     # production width engine. Byte writes need not equal OS read boundaries.
-    ranges = File.read(File.join(SdlTestProfile::ROOT,'src/blit_unicode_width.h'))
+    ranges = File.read(File.join(TestProfile::ROOT,'src/blit_unicode_width.h'))
       .scan(/\{\s*0x([0-9a-f]+),\s*0x([0-9a-f]+),\s*(\d)\s*\}/i)
       .map { |a,b,w| [a.to_i(16),b.to_i(16),w.to_i] }
     scalar_width = ->(cp) { ranges.find { |a,b,_| cp >= a && cp <= b }&.last || 1 }

@@ -8,12 +8,12 @@ require 'net/http'
 require 'open3'
 require 'timeout'
 require_relative 'gate_port'
-require_relative 'sdl_test_profile'
+require_relative 'test_profile'
 
 port = gate_port(Integer(ENV.fetch('BLIT_SIXEL_COMPOSITION_PORT', '19304')))
 base = "http://127.0.0.1:#{port}"
 log = "/tmp/blit-sixel-composition-#{Process.pid}.log"
-pid = Process.spawn(SdlTestProfile.environment, SdlTestProfile.binary, port.to_s,
+pid = Process.spawn(TestProfile.environment, TestProfile.binary, port.to_s,
                     out: log, err: [:child, :out])
 begin
   diagnostics = Timeout.timeout(10) do
@@ -27,7 +27,7 @@ begin
       sleep 0.05
     end
   end
-  SdlTestProfile.verify!(diagnostics)
+  TestProfile.verify!(diagnostics)
   topology = JSON.parse(Net::HTTP.get(URI(base + '/v1/topology')))
   request = Net::HTTP::Put.new('/v1/topology')
   request['Content-Type'] = 'application/json'
@@ -46,7 +46,7 @@ begin
      'BLIT_SIXEL_PANE_ID'=>panes.last.fetch('id')},
     'ruby', File.expand_path('../probes/host_sixel.rb', __dir__))
   raise "sixel probe failed:\n#{output}#{error}" unless status.success?
-  puts "SIXEL_COMPOSITION_PASS driver=#{SdlTestProfile.driver} renderer=#{SdlTestProfile.renderer} #{output.lines.last.to_s.strip}"
+  puts "SIXEL_COMPOSITION_PASS backend=#{GATE_BACKEND} #{output.lines.last.to_s.strip}"
 ensure
   Process.kill('TERM', pid) rescue nil
   Process.wait(pid) rescue nil

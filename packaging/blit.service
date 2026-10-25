@@ -1,5 +1,5 @@
 [Unit]
-Description=Blit API-driven SDL3/KMS display server
+Description=Blit API-driven native KMS display server
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=60s
@@ -22,7 +22,6 @@ EnvironmentFile=-/etc/blit/blit.env
 # `blit` instead -- which it could not do before, because the directory was
 # root:root 0755 and the blit user is in group blit alone.
 StateDirectory=blit
-Environment=LD_LIBRARY_PATH=/usr/lib/blit/lib
 ExecStart=/usr/bin/blit 8080
 Restart=on-failure
 RestartSec=10s

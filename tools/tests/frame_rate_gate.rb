@@ -18,7 +18,6 @@ else
   log = File.join(Dir.tmpdir, "blit-frame-rate-#{Process.pid}.log")
   env = {
     **gate_display_env,
-    'LD_LIBRARY_PATH' => 'build/sdl3-kms'
   }
   pid = Process.spawn(env, 'build/blit/blit-server', port.to_s,
                       out: log, err: [:child, :out])

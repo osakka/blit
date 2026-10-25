@@ -67,7 +67,7 @@ fi
 for runtime_file in "$BUNDLE"/bin/* "$BUNDLE"/lib/*; do
 	[ -e "$runtime_file" ] || continue
 	case "$runtime_file" in
-		"$BUNDLE/bin/blit-server"|"$BUNDLE/lib/libSDL3.so.0.4.16") ;;
+		"$BUNDLE/bin/blit-server") ;;
 		*)
 			echo "blit: non-runtime artifact in build bundle: $runtime_file" >&2
 			exit 1
@@ -98,7 +98,7 @@ mkdir -p "$stage/usr/lib/blit" "$stage/usr/bin" \
 # Install only the runtime boundary.  Shell launchers are test/deployment
 # conveniences, not part of the server runtime; Hibr remains an external
 # executable and session/orchestration layer.
-mkdir -p "$stage/usr/lib/blit/bin" "$stage/usr/lib/blit/lib" \
+mkdir -p "$stage/usr/lib/blit/bin" \
     "$stage/usr/lib/blit/hibr" \
     "$stage/usr/share/blit/probes" \
     "$stage/usr/lib/blit/fonts" "$stage/usr/share/blit/hibr" \
@@ -144,8 +144,6 @@ cp -a "$ROOT/packaging/blit.service" "$stage/lib/systemd/system/"
 install -d -m 0755 "$stage/usr/share/doc/blit/examples"
 cp -a "$ROOT/packaging/blit-unprivileged.conf" \
     "$stage/usr/share/doc/blit/examples/"
-cp -a "$BUNDLE/lib/libSDL3.so.0.4.16" "$stage/usr/lib/blit/lib/"
-ln -s libSDL3.so.0.4.16 "$stage/usr/lib/blit/lib/libSDL3.so.0"
 cp -a "$BUNDLE/fonts/." "$stage/usr/lib/blit/fonts/"
 if [ -d "$ROOT/assets/fonts" ]; then
 	cp -a "$ROOT/assets/fonts/." "$stage/usr/lib/blit/fonts/"
@@ -202,10 +200,8 @@ if [ ! -f /etc/blit/blit.env ]; then
     umask 077
     cat > /etc/blit/blit.env <<'CONFIG'
 BLIT_BIND_ADDRESS=0.0.0.0
-# Startup fallback only: saved /v1/settings document.server.display_backend
-# takes precedence. Use the API to change/save the desired backend, then
-# restart. kms=native DRM/KMS; sdl=SDL. kmsdrm is an SDL_VIDEODRIVER value,
-# never a BLIT_DISPLAY_BACKEND value. Invalid defaults are diagnosed.
+# Native KMS is the only presentation backend (ADR 0184); any other value is
+# diagnosed as invalid.
 BLIT_DISPLAY_BACKEND=kms
 BLIT_UPDATE_TOKEN_FILE=/etc/blit/update.token
 # Issue #55. This package exists to present a desktop, so an output with
@@ -286,7 +282,7 @@ Architecture: amd64
 Maintainer: ITD Labs <itdlabs@localhost>
 Depends: libc6, libdrm2, zlib1g, libfreetype6 (>= 2.12.1), libharfbuzz0b (>= 6.0.0)
 Suggests: hibr
-Description: API-driven SDL3/KMS text display server
+Description: API-driven native KMS text display server
  Blit provides a text-first display server with one terminal surface per
  physical display or pane, HTTP control, streaming, and Hibr integration.
  Hibr is kept as an explicit external integration because its package and

@@ -26,13 +26,15 @@ usage: run-gates.sh [SUITE ...]
 Suites (from docs/development-workflow.md "Required gates"):
   schema      schema validation, API conformance, version identity, streams
   terminal    TCC terminal conformance, session lifecycle, write/resize
-  font        glyph coverage, UTF-8 snapshots, font API, atlas filter
-  renderer    dummy-backend pixel, damage, pointer, graphics cache
-  gles        explicit offscreen OpenGLES2 composition (requires working EGL/GLES)
+  font        glyph coverage, UTF-8 snapshots, font API, raster paths
+  renderer    native KMS pixel, damage, pointer and graphics composition
   hibr        singleton ownership and resume fail-closed behaviour
   lifecycle   restart, shutdown, supervised update handling
   timing      measured presentation cadence and the bounded PTY soak
-  all         standard suites above; run gles separately where EGL/GLES is available
+  all         every suite above
+
+The display is native KMS on the DRM mock (ADR 0184); BLIT_GATE_BACKEND=gles
+runs the same suites through the GLES compositor (surfaceless, needs EGL).
 
 Environment:
   BLIT_GATE_BINARY   server under test  (default build/blit/blit-server)
@@ -41,7 +43,7 @@ Environment:
   BLIT_GATE_COLOUR   colour bitmap font; requires FreeType headers/library
   BLIT_GATE_HARFBUZZ shared library for offline emoji font audit
   BLIT_HARFBUZZ_LIBRARY runtime link path (default OS libharfbuzz.so.0; >=6.0.0)
-  BLIT_GATE_LIBS     LD_LIBRARY_PATH    (default build/sdl3-kms)
+  BLIT_GATE_BACKEND  native (default) or gles
   BLIT_GATE_PACKAGE  .deb path; enables the packaging artifact gate
   BLIT_GATE_LIVE     live base URL; enables the live-host-only gates
   BLIT_SOAK_SECONDS  soak duration      (default 120, gate's own default)
@@ -56,6 +58,8 @@ EOF
 }
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+GATE_DISPLAY_SOURCE=$ROOT/tools/tests/gate_display.sh
+. "$ROOT/tools/tests/gate_display.sh"
 cd "$ROOT"
 
 BINARY=${BLIT_GATE_BINARY:-$ROOT/build/blit/blit-server}
@@ -64,7 +68,6 @@ BINARY=${BLIT_GATE_BINARY:-$ROOT/build/blit/blit-server}
 # observed stale and short of glyphs the manifest gate requires, so a local
 # run must not reach for it by default.
 FONT=${BLIT_GATE_FONT:-$ROOT/assets/fonts/Blit-Hibr-Terminus16.psf}
-LIBS=${BLIT_GATE_LIBS:-$ROOT/build/sdl3-kms}
 PACKAGE=${BLIT_GATE_PACKAGE:-}
 LIVE=${BLIT_GATE_LIVE:-}
 PORT=${BLIT_GATE_BASE_PORT:-19400}
@@ -128,7 +131,6 @@ run_gate() {
         # Keep the whole output of a failing gate, and name the file.  This
         # reported only the last line, so a gate that failed once in a suite
         # run and passed on its own left nothing to diagnose -- which is
-        # exactly what happened to pointer_damage_atomic_gate.rb (issue #61).
         # An intermittent gate makes every later run ambiguous; losing its
         # message makes it permanent.
         fail=$((fail + 1))
@@ -149,7 +151,9 @@ run_gate() {
 server_pid=''
 start_server() {
     PORT=$((PORT + 1))
-    BLIT_PSF_FONT="$FONT" SDL_VIDEODRIVER=dummy LD_LIBRARY_PATH="$LIBS" \
+    # The same mocked display the gates themselves use.
+    gate_display_setup || return 1
+    env BLIT_PSF_FONT="$FONT" $GATE_DISPLAY_ENV \
         "$BINARY" "$PORT" >"$tmpdir/server-$PORT.log" 2>&1 &
     server_pid=$!
     i=0
@@ -171,6 +175,7 @@ stop_server() {
     kill "$server_pid" 2>/dev/null || true
     wait "$server_pid" 2>/dev/null || true
     server_pid=''
+    gate_display_cleanup
 }
 
 tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/blit-run-gates.XXXXXX")
@@ -218,7 +223,7 @@ suite_font() {
     run_gate font_api_gate.rb ruby tools/tests/font_api_gate.rb
     run_gate font_identity_gate.rb ruby tools/tests/font_identity_gate.rb
     run_gate wide_glyph_gate.rb ruby tools/tests/wide_glyph_gate.rb
-    run_gate sdl_glyph_render_gate.rb ruby tools/tests/sdl_glyph_render_gate.rb
+    run_gate glyph_render_gate.rb ruby tools/tests/glyph_render_gate.rb
     run_gate hibr_font_manifest_gate.py python3 tools/tests/hibr_font_manifest_gate.py
     run_gate font_fit_gate.py python3 tools/tests/font_fit_gate.py
     run_gate retro_font_gate.py python3 tools/tests/retro_font_gate.py
@@ -231,8 +236,7 @@ suite_font() {
     run_gate custom_icon_api_gate.rb ruby tools/tests/custom_icon_api_gate.rb
     run_gate arabic_raster_gate.rb ruby tools/tests/arabic_raster_gate.rb
     run_gate arabic_word_gate.py python3 tools/tests/arabic_word_gate.py
-    run_gate arabic_kms_ink ruby tools/tests/arabic_backend_gate.rb kms
-    run_gate arabic_software_ink ruby tools/tests/arabic_backend_gate.rb software
+    run_gate arabic_kms_ink ruby tools/tests/arabic_backend_gate.rb
     run_gate emoji_corpus_gate.rb ruby tools/tests/emoji_corpus_gate.rb
     run_gate emoji_presentation_gate.rb ruby tools/tests/emoji_presentation_gate.rb
     run_gate cell_cluster_gate.rb ruby tools/tests/cell_cluster_gate.rb
@@ -252,31 +256,21 @@ suite_font() {
     run_gate font_raster_gate.sh sh tools/tests/font_raster_gate.sh \
         "$FONT" "${BLIT_GATE_OUTLINE:-$ROOT/assets/fonts/BlitModernNerd-Regular.ttf}" \
         "${BLIT_GATE_COLOUR:-$ROOT/assets/fonts/NotoColorEmoji.ttf}"
-    run_gate font_kms_raster sh tools/tests/font_backend_raster_gate.sh kms
-    run_gate font_software_raster sh tools/tests/font_backend_raster_gate.sh software
+    run_gate font_kms_raster sh tools/tests/font_backend_raster_gate.sh
     run_gate retro_outline_raster sh tools/tests/font_raster_gate.sh \
         "$FONT" "$ROOT/assets/fonts/BlitRetroNerd-Regular.ttf" \
         "$ROOT/assets/fonts/NotoColorEmoji.ttf" 20
     run_gate retro_outline_kms env BLIT_GATE_OUTLINE="$ROOT/assets/fonts/BlitRetroNerd-Regular.ttf" \
-        sh tools/tests/font_backend_raster_gate.sh kms
-    run_gate retro_outline_software env BLIT_GATE_OUTLINE="$ROOT/assets/fonts/BlitRetroNerd-Regular.ttf" \
-        sh tools/tests/font_backend_raster_gate.sh software
+        sh tools/tests/font_backend_raster_gate.sh
     run_gate modern_font_api_gate.rb ruby tools/tests/modern_font_api_gate.rb
     run_gate host_font_probe_gate.rb ruby tools/tests/host_font_probe_gate.rb
-    if [ -d "$ROOT/vendor/SDL3/include" ]; then
-        run_gate sdl_glyph_filter_gate.sh "$ROOT"/tools/tests/sdl_glyph_filter_gate.sh
-    else
-        skip_gate sdl_glyph_filter_gate.sh "needs vendor/SDL3/include"
-    fi
 }
 
 suite_renderer() {
     run_gate graphics_ingestion ruby tools/tests/graphics_ingestion_gate.rb
     run_gate graphics_placement_damage ruby tools/tests/graphics_placement_damage_gate.rb
-    run_gate sdl_output_startup sh tools/tests/sdl_output_startup_gate.sh
     run_gate pixel_frame_gate.rb ruby tools/tests/pixel_frame_gate.rb
     run_gate hidden_cursor_damage_gate.rb ruby tools/tests/hidden_cursor_damage_gate.rb
-    run_gate pointer_damage_atomic_gate.rb ruby tools/tests/pointer_damage_atomic_gate.rb
     run_gate evdev_scan_gate.rb ruby tools/tests/evdev_scan_gate.rb
     run_gate evdev_open_latency_gate.rb ruby tools/tests/evdev_open_latency_gate.rb
     run_gate input_identity_gate.sh "$ROOT"/tools/tests/input_identity_gate.sh
@@ -297,13 +291,6 @@ suite_renderer() {
     run_gate audio_card_gate.rb ruby tools/tests/audio_card_gate.rb
     run_gate display_device_api_gate.rb ruby tools/tests/display_device_api_gate.rb
     run_gate pointer_target_gate.rb ruby tools/tests/pointer_target_gate.rb
-    run_gate pointer_wallpaper_stress_gate.rb ruby tools/tests/pointer_wallpaper_stress_gate.rb
-    run_gate external_pointer_composition_gate.rb ruby tools/tests/external_pointer_composition_gate.rb
-    run_gate external_pointer_full_rebuild_gate.rb env \
-        BLIT_TEST_SCENE_CACHE=0 BLIT_EXTERNAL_POINTER_PORT=19282 \
-        ruby tools/tests/external_pointer_composition_gate.rb
-    run_gate sdl_background_batch_gate.rb ruby tools/tests/sdl_background_batch_gate.rb
-    run_gate sdl_graphics_cache_gate.rb ruby tools/tests/sdl_graphics_cache_gate.rb
     run_gate kitty_query_gate.rb ruby tools/tests/kitty_query_gate.rb
     run_gate kitty_placement_gate.rb ruby tools/tests/kitty_placement_gate.rb
     run_gate kms_frame_timing_gate.rb ruby tools/tests/kms_frame_timing_gate.rb
@@ -322,15 +309,14 @@ suite_renderer() {
     run_gate keyboard_settings_gate.rb ruby tools/tests/keyboard_settings_gate.rb
     run_gate pointer_settings_gate.rb ruby tools/tests/pointer_settings_gate.rb
     run_gate display_settings_gate.rb ruby tools/tests/display_settings_gate.rb
-    run_gate sdl_wallpaper_damage_gate.rb ruby tools/tests/sdl_wallpaper_damage_gate.rb
-    run_gate sdl_graphics_band_gate.rb ruby tools/tests/sdl_graphics_band_gate.rb
+    run_gate wallpaper_damage_gate.rb ruby tools/tests/wallpaper_damage_gate.rb
+    run_gate graphics_band_gate.rb ruby tools/tests/graphics_band_gate.rb
     run_gate sixel_slot_gate.rb ruby tools/tests/sixel_slot_gate.rb
     run_gate kms_compose_gate.sh "$ROOT"/tools/tests/kms_compose_gate.sh
     run_gate gles_compositor_gate.rb ruby "$ROOT/tools/tests/gles_compositor_gate.rb"
     run_gate gles_compose_gate.sh sh "$ROOT/tools/tests/gles_compose_gate.sh"
     run_gate pointer_art_gate.sh sh "$ROOT/tools/tests/pointer_art_gate.sh"
     run_gate pointer_appearance_gate.rb ruby "$ROOT/tools/tests/pointer_appearance_gate.rb"
-    run_gate pointer_pixel_gate.rb ruby "$ROOT/tools/tests/pointer_pixel_gate.rb"
     run_gate pointer_shape_gate.rb ruby "$ROOT/tools/tests/pointer_shape_gate.rb"
     run_gate kms_graphics_clip_gate.sh sh "$ROOT/tools/tests/kms_graphics_clip_gate.sh"
     run_gate kms_hotplug_gate.rb ruby "$ROOT"/tools/tests/kms_hotplug_gate.rb
@@ -341,46 +327,6 @@ suite_renderer() {
     run_gate render_state_agreement_gate.rb ruby tools/tests/render_state_agreement_gate.rb
     run_gate pane_split_geometry_gate.rb ruby tools/tests/pane_split_geometry_gate.rb
     run_gate display_layout_gate.rb ruby tools/tests/display_layout_gate.rb
-}
-
-suite_gles() {
-    run_gate graphics_ingestion_gles env \
-        BLIT_TEST_VIDEO_DRIVER=offscreen BLIT_TEST_RENDERER=opengles2 \
-        LIBGL_ALWAYS_SOFTWARE=1 ruby tools/tests/graphics_ingestion_gate.rb
-    run_gate graphics_placement_damage_gles env \
-        BLIT_TEST_VIDEO_DRIVER=offscreen BLIT_TEST_RENDERER=opengles2 \
-        LIBGL_ALWAYS_SOFTWARE=1 ruby tools/tests/graphics_placement_damage_gate.rb
-    run_gate arabic_gles_ink ruby tools/tests/arabic_backend_gate.rb opengles2
-    run_gate sdl_gles_emoji_transitions env \
-        BLIT_TEST_VIDEO_DRIVER=offscreen BLIT_TEST_RENDERER=opengles2 \
-        LIBGL_ALWAYS_SOFTWARE=1 ruby tools/tests/emoji_transition_gate.rb
-    run_gate sdl_gles_output_startup sh tools/tests/sdl_output_startup_gate.sh opengles2
-    run_gate font_gles_raster sh tools/tests/font_backend_raster_gate.sh opengles2
-    run_gate retro_outline_gles env BLIT_GATE_OUTLINE="$ROOT/assets/fonts/BlitRetroNerd-Regular.ttf" \
-        sh tools/tests/font_backend_raster_gate.sh opengles2
-    run_gate sdl_gles_sixel_composition env \
-        BLIT_GATE_BINARY="$BINARY" BLIT_GATE_FONT="$FONT" BLIT_GATE_LIBS="$LIBS" \
-        BLIT_TEST_VIDEO_DRIVER=offscreen BLIT_TEST_RENDERER=opengles2 \
-        LIBGL_ALWAYS_SOFTWARE=1 ruby tools/tests/sixel_composition_gate.rb
-    run_gate sdl_gles_glyphs env \
-        BLIT_GATE_BINARY="$BINARY" BLIT_GATE_FONT="$FONT" BLIT_GATE_LIBS="$LIBS" \
-        BLIT_TEST_VIDEO_DRIVER=offscreen BLIT_TEST_RENDERER=opengles2 \
-        LIBGL_ALWAYS_SOFTWARE=1 ruby tools/tests/sdl_glyph_render_gate.rb
-    run_gate sdl_gles_graphics_bands env \
-        BLIT_GATE_BINARY="$BINARY" BLIT_GATE_FONT="$FONT" BLIT_GATE_LIBS="$LIBS" \
-        BLIT_TEST_VIDEO_DRIVER=offscreen BLIT_TEST_RENDERER=opengles2 \
-        LIBGL_ALWAYS_SOFTWARE=1 ruby tools/tests/sdl_graphics_band_gate.rb
-    run_gate sdl_gles_motion_trails env \
-        BLIT_GATE_BINARY="$BINARY" BLIT_GATE_FONT="$FONT" BLIT_GATE_LIBS="$LIBS" \
-        BLIT_TEST_VIDEO_DRIVER=offscreen BLIT_TEST_RENDERER=opengles2 \
-        LIBGL_ALWAYS_SOFTWARE=1 ruby tools/tests/motion_trail_gate.rb
-    run_gate sdl_gles_wallpaper_damage env \
-        BLIT_GATE_BINARY="$BINARY" BLIT_GATE_FONT="$FONT" BLIT_GATE_LIBS="$LIBS" \
-        BLIT_TEST_VIDEO_DRIVER=offscreen BLIT_TEST_RENDERER=opengles2 \
-        LIBGL_ALWAYS_SOFTWARE=1 ruby tools/tests/sdl_wallpaper_damage_gate.rb
-    run_gate sdl_gles_scene_and_metrics env \
-        BLIT_TEST_VIDEO_DRIVER=offscreen BLIT_TEST_RENDERER=opengles2 \
-        LIBGL_ALWAYS_SOFTWARE=1 sh tools/tests/surface_damage_gate.sh
 }
 
 suite_hibr() {
@@ -412,14 +358,6 @@ suite_lifecycle() {
     run_gate service_boundary_gate.rb ruby tools/tests/service_boundary_gate.rb
     run_gate session_log_gate.rb ruby tools/tests/session_log_gate.rb
     run_gate tcc_fault_trace_gate.rb ruby tools/tests/tcc_fault_trace_gate.rb
-    run_gate startup_diagnostics_gate.rb ruby tools/tests/startup_diagnostics_gate.rb
-    run_gate sdl_kms_policy_gate.rb ruby tools/tests/sdl_kms_policy_gate.rb
-    run_gate presentation_trial_gate.sh sh tools/tests/presentation_trial_gate.sh
-    run_gate presentation_trial_helper_gate.rb ruby tools/tests/presentation_trial_helper_gate.rb
-    run_gate http_accept_budget_gate.rb ruby tools/tests/http_accept_budget_gate.rb
-    run_gate backend_selection_gate.rb ruby tools/tests/backend_selection_gate.rb
-    run_gate presentation_provenance_gate.rb ruby tools/tests/presentation_provenance_gate.rb
-    run_gate backend_comparison_cleanup_gate.rb ruby tools/tests/backend_comparison_cleanup_gate.rb
     run_gate auxiliary_policy_gate.rb ruby tools/tests/auxiliary_policy_gate.rb
     run_gate login_desktop_observer_gate.rb ruby tools/tests/login_desktop_observer_gate.rb
     run_gate login_identity_gate.rb ruby tools/tests/login_identity_gate.rb
@@ -472,7 +410,7 @@ suite_timing() {
 for argument in "$@"; do
     case "$argument" in
         -h|--help) usage ;;
-        schema|terminal|font|renderer|gles|hibr|lifecycle|packaging|timing|all) ;;
+        schema|terminal|font|renderer|hibr|lifecycle|packaging|timing|all) ;;
         *) echo "run-gates: unknown suite '$argument'" >&2; usage ;;
     esac
 done

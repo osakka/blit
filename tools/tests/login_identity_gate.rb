@@ -53,8 +53,7 @@ Dir.mktmpdir('blit-login-identity') do |root|
   modes.each do |mode|
     result=File.join(root,"#{mode}.result")
     File.write(result,'');File.chmod(0666,result)
-    env={**gate_display_env,'BLIT_RENDERER'=>'software',
-      'LD_LIBRARY_PATH'=>File.join(ROOT,'build/sdl3-kms'),
+    env={**gate_display_env,
       'BLIT_PSF_FONT'=>File.join(ROOT,'assets/fonts/Blit-Hibr-Terminus16.psf'),
       'BLIT_INPUT_ROOT'=>File.join(root,'input'),'BLIT_SETTINGS'=>'ignore',
       'BLIT_LOGIN_AUTOSTART'=>'1','BLIT_LOGIN_COMMAND'=>fixture,

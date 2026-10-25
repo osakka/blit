@@ -1,7 +1,7 @@
 #ifndef BLIT_POINTER_ART_H
 #define BLIT_POINTER_ART_H
 
-/* One code-native vector source for SDL and KMS. Straight-alpha RGBA bytes;
+/* One code-native vector source for the pointer. Straight-alpha RGBA bytes;
    raster work is bounded and only performed when appearance changes. */
 #include <stdint.h>
 #include <string.h>

@@ -7,7 +7,7 @@ require 'timeout'
 require 'rbconfig'
 require 'base64'
 require_relative 'gate_port'
-require_relative 'sdl_test_profile'
+require_relative 'test_profile'
 base=URI("http://127.0.0.1:#{gate_port(19573)}")
 req=lambda do |method,path,body=nil,headers={}|
   q={'GET'=>Net::HTTP::Get,'POST'=>Net::HTTP::Post,'DELETE'=>Net::HTTP::Delete,'PATCH'=>Net::HTTP::Patch}.fetch(method).new(base+path)
@@ -21,8 +21,8 @@ Dir.mktmpdir('blit-kitty-keyboard') do |work|
   Dir.mkdir(File.join(work,'input'))
   File.write(File.join(work,'input/event0'),'')
   File.write(File.join(work,'input/event0.identity'),"bustype=3\nvendor=1234\nproduct=5678\nversion=1\nphys=usb-kitty-test/input0\nname=Kitty fixture\nkinds=keyboard\ncapabilities=keys\n")
-  pid=spawn(SdlTestProfile.environment.merge('BLIT_INPUT_ROOT'=>File.join(work,'input')),
-    SdlTestProfile.binary,base.port.to_s,out:File.join(work,'server.log'),err:[:child,:out])
+  pid=spawn(TestProfile.environment.merge('BLIT_INPUT_ROOT'=>File.join(work,'input')),
+    TestProfile.binary,base.port.to_s,out:File.join(work,'server.log'),err:[:child,:out])
   begin
     Timeout.timeout(8){loop{begin;req.call('GET','/v1/version');break;rescue Errno::ECONNREFUSED;sleep 0.02;end}}
     code=<<~'CHILD'

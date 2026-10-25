@@ -30,7 +30,7 @@ last = get.call('/v1/diagnostics/runtime').fetch('performance')
 elapsed = clock.call - started
 final_version = get.call('/v1/version')
 identity = lambda do |render|
-  [render.values_at('direct_kms', 'video_driver', 'renderer', 'font_scale'),
+  [render.values_at('presentation_sync', 'font_scale'),
    render.fetch('outputs').map { |o| o.values_at('display_id', 'render_width', 'render_height', 'refresh_hz') }]
 end
 abort 'backend/output geometry/version changed; discard comparison' unless
@@ -58,7 +58,7 @@ puts JSON.pretty_generate({
   'terminal_bytes_per_second' => 1000.0 * delta.call('terminal_bytes') / server_ms,
   'present_calls_delta' => delta.call('present_calls'),
   'missed_deadlines_delta' => delta.call('missed_deadlines'),
-  'backend' => samples.last.values_at('direct_kms', 'video_driver', 'renderer'),
+  'backend' => samples.last.values_at('presentation_sync'),
   'outputs' => outputs,
   'limitations' => ['CPU excludes Hibr/hold, compositor and GPU',
     'Last-frame phase samples may repeat a stale frame; not per-frame percentiles',

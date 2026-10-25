@@ -16,8 +16,8 @@ port = gate_port(Integer(ENV.fetch('BLIT_POINTER_TARGET_PORT', '19256')))
 base = URI("http://127.0.0.1:#{port}")
 log = "/tmp/blit-pointer-target-#{Process.pid}.log"
 pid = Process.spawn({**gate_display_env,
-                     'BLIT_RENDERER' => 'software',
-                     'LD_LIBRARY_PATH' => 'build/sdl3-kms'},
+                     
+                     },
                     'build/blit/blit-server', port.to_s,
                     out: log, err: [:child, :out])
 

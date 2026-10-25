@@ -26,7 +26,7 @@ trap cleanup EXIT INT TERM
 printf '%s\n' test-token >"$token_file"
 printf '%s\n' not-a-debian-package >"$bad_package"
 BLIT_UPDATE_TOKEN_FILE="$token_file" BLIT_UPDATE_DIRECTORY="${TMPDIR:-/tmp}" \
-    env $GATE_DISPLAY_ENV LD_LIBRARY_PATH=build/sdl3-kms \
+    env $GATE_DISPLAY_ENV \
     "$binary" "$port" >"$log" 2>&1 &
 pid=$!
 ready=0

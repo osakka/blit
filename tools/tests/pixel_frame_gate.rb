@@ -14,7 +14,7 @@ require 'tmpdir'
 require 'timeout'
 require 'uri'
 require_relative 'gate_port'
-require_relative 'sdl_test_profile'
+require_relative 'test_profile'
 
 external_base = ENV['BLIT_TEST_SERVER']
 port = Integer(ENV.fetch('BLIT_GATE_PORT', '19208'))
@@ -25,7 +25,7 @@ base = external_base ? URI(external_base) : URI("http://127.0.0.1:#{port}")
 log = File.join(Dir.tmpdir, "blit-pixel-frame-#{Process.pid}.log")
 pid = nil
 unless external_base
-  pid = Process.spawn(SdlTestProfile.environment,
+  pid = Process.spawn(TestProfile.environment,
                       ENV.fetch('BLIT_GATE_BINARY','build/blit/blit-server'), port.to_s,
                       out: log, err: [:child, :out])
 end
@@ -64,7 +64,7 @@ Timeout.timeout(8) do
   end
 end
 
-SdlTestProfile.verify!(http_json(base,:get,'/v1/diagnostics')) unless external_base
+TestProfile.verify!(http_json(base,:get,'/v1/diagnostics')) unless external_base
 session = http_json(base, :post, '/v1/terminal-sessions',
                     'command' => '/bin/sh',
                     'surface_mode' => 'external',

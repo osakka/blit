@@ -55,7 +55,7 @@ typedef struct {
 } BlitGraphicsPlacement;
 
 /* Renderer-neutral graphics record.  Kitty and sixel decoders both publish
-   into this store; SDL3 and direct KMS receive read-only views of the same
+   into this store; the compositors receive read-only views of the same
    pixels. */
 typedef struct {
     int used;
@@ -87,7 +87,7 @@ typedef struct {
        sixel and API frames have. */
     BlitGraphicsPlacement placements[BLIT_GRAPHICS_MAX_PLACEMENTS];
     unsigned long long revision;
-    /* Unique identity for the pixel contents.  SDL output caches use this
+    /* Unique identity for the pixel contents.  The GPU compositor uses this
        to discard a texture when a Kitty/Sixel image is replaced or updated. */
     unsigned long long generation;
     unsigned char base64_tail[4];
@@ -113,7 +113,7 @@ typedef struct {
 /* One thing a renderer draws: a placement with its defaults resolved and its
    source rectangle clamped to the image. Both renderers draw from a list of
    these rather than walking images, so a placement means the same thing on
-   SDL and on KMS. */
+   the CPU and GPU compositors. */
 typedef struct {
     const BlitGraphicsImage *image;
     /* Kitty's retained scene orders equal-z references by image id and then

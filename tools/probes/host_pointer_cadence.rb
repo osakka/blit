@@ -113,7 +113,7 @@ window_s = (after.fetch('captured_monotonic_us') - before.fetch('captured_monoto
 raise 'invalid server observation interval' unless window_s.positive?
 first = before.dig('runtime','performance'); last = after.dig('runtime','performance')
 verdict = {version:before['version'], displays:before.dig('displays','count'),
-  identity:before.fetch('diagnostics').fetch('render').slice('direct_kms','video_driver','renderer','presentation_sync'),
+  identity:before.fetch('diagnostics').fetch('render').slice('presentation_sync'),
   pattern:pattern, original_pointer:{x:x,y:y},
   requested_motion_hz:rate, step_px:step_px,
   http_connection:'close', late_slots:late_slots,

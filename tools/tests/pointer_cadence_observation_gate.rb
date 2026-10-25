@@ -41,7 +41,7 @@ require 'fileutils'
           body = {'version'=>{'server_version'=>'fixture'},'captured_monotonic_us'=>later ? 3_000_000 : 1_000_000,
                   'runtime'=>{'performance'=>perf},'login'=>{},
                   'displays'=>{'count'=>1,'displays'=>[{'id'=>'display-1','bounds'=>{'x'=>0,'y'=>0,'width'=>1024,'height'=>768}}]},
-                  'diagnostics'=>{'render'=>{'direct_kms'=>native,'pointer'=>{'valid'=>true,'x'=>100,'y'=>100,'output'=>0},
+                  'diagnostics'=>{'render'=>{'pointer'=>{'valid'=>true,'x'=>100,'y'=>100,'output'=>0},
                     'outputs'=>[output],'hotplug'=>{}}}}
           body['captured_monotonic_us'] = 1_000_000 if scenario == :zero_window
           body['diagnostics']['render']['outputs'] = [] if later && scenario == :removed
@@ -107,4 +107,4 @@ require 'fileutils'
     FileUtils.remove_entry(evidence)
   end
 end
-puts 'POINTER_CADENCE_OBSERVATION_PASS server_interval=exact submissions=separate native_completions=45 SDL_completions=unavailable invalid_samples=4_rejected'
+puts 'POINTER_CADENCE_OBSERVATION_PASS server_interval=exact submissions=separate native_completions=45 no_scanout_completions=unavailable invalid_samples=4_rejected'

@@ -32,7 +32,7 @@ end
 identity = ->(active) { active.reject { |key,_| key == 'raster_cache' } }
 raise 'pixel font API not installed' unless font.key?('sizing') && font.key?('size_px')
 backend = baseline.dig('diagnostics','health','backend')
-renderer = baseline.dig('diagnostics','render','renderer')
+sync = baseline.dig('diagnostics','render','presentation_sync')
 regions = baseline.fetch('topology').fetch('panes').to_h { |p| [p['id'],p.fetch('pixel_region')] }
 restore = font['sizing']=='pixels' ? {'size_px'=>font['size_px']} : {'scale'=>font['scale']}
 restore['font_id'] = font.fetch('id')
@@ -49,7 +49,7 @@ begin
     raise 'requested profile not retained' if profile && applied['id']!=profile
     observation = get.call('/v1/diagnostics/observation')
     raise 'presentation identity changed' unless observation.dig('diagnostics','health','backend')==backend &&
-      observation.dig('diagnostics','render','renderer')==renderer
+      observation.dig('diagnostics','render','presentation_sync')==sync
     observation.fetch('topology').fetch('panes').each do |pane|
       region = pane.fetch('pixel_region');grid = pane.fetch('cell_grid')
       raise 'physical pane split changed' unless region==regions.fetch(pane['id'])
@@ -65,7 +65,7 @@ begin
       File.binwrite(File.join(out,"size-#{size}-#{display.fetch('id')}.bmp"),capture.body)
     end
     File.write(File.join(out,"size-#{size}.json"),JSON.pretty_generate(observation))
-    puts "FONT_SIZE_GEOMETRY_PASS font=#{applied['id']} raster=#{applied['rasterization']} size_px=#{size} cells=#{applied['cell_pixels']} panes=#{regions.size} renderer=#{renderer}"
+    puts "FONT_SIZE_GEOMETRY_PASS font=#{applied['id']} raster=#{applied['rasterization']} size_px=#{size} cells=#{applied['cell_pixels']} panes=#{regions.size} sync=#{sync}"
     $stdout.flush
   end
 ensure

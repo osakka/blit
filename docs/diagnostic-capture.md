@@ -20,8 +20,9 @@ input. A moving pointer, unavailable appearance, unsupported geometry or
 insufficient visible pixels reports an explicit skip, not a pass. Set
 `BLIT_EVIDENCE_DIR` to retain the BMP and verdict. This checks API framebuffer
 pixels, not glass, antialiased-background blending or input-to-photon latency;
-production KMS full-frame and SDL rotation tests cover those pixel boundaries
-locally. Physical performance acceptance remains separate.
+production KMS full-frame and pointer gates (`kms_compose_gate.sh`,
+`gles_compose_gate.sh`, `kms_pointer_phase_gate.rb`) cover those pixel
+boundaries locally. Physical performance acceptance remains separate.
 
 `GET /v1/diagnostics/runtime.performance` now exposes cumulative
 `process_cpu_ms` (Blit including its threads), `desktop_cpu_ms` (verified
@@ -48,7 +49,7 @@ renderer.
 seconds; otherwise it retains the original 360-request workload. Rates use
 the server's two observation timestamps, not a client interval that excludes
 part of the counter sample. `submission_hz` counts presentation calls;
-`confirmed_flip_hz` counts direct-KMS completion events and is `null` on SDL.
+`confirmed_flip_hz` counts direct-KMS page-flip completion events.
 The JSON records actual backend identity, offered rate, request latency,
 concurrent request ordering, and the included final pointer-restoration motion.
 Evidence retains both raw observations. Restart, changed output inventory or
@@ -177,7 +178,7 @@ and the BMP hashes provide visual evidence. Zero physical evdev events means
 the input/device path is the blocker; accepted events with bad BMPs means the
 Blit presentation path; correct BMPs with incorrect terminal content means
 the terminal surface. Keep screenshots disabled for timing/input captures:
-the SDL screenshot readback is a heavyweight operation and can perturb the
+the screenshot readback is a heavyweight operation and can perturb the
 single-threaded render loop. It does not start or modify Hibr.
 
 The runtime performance object also reports `surface_commits`,
@@ -197,22 +198,20 @@ session to be present when the physical interaction occurs.
 
 ## Deterministic wallpaper/pointer regression
 
-The live Hibr desktop is a large opaque terminal surface, so the small atomic
-pointer test is not sufficient by itself. Run the full-surface stress gate
-after a renderer change:
+The live Hibr desktop is a large opaque terminal surface with a Kitty
+wallpaper beneath it. Run the wallpaper and pointer gates after a renderer
+change:
 
 ```sh
-ruby tools/tests/pointer_wallpaper_stress_gate.rb
+ruby tools/tests/wallpaper_damage_gate.rb
+ruby tools/tests/kms_pointer_phase_gate.rb
 ```
 
-It sends the surface in bounded deferred chunks followed by one commit, then
-interleaves pointer motion with further commits. Six samples outside the
-changed cells must remain non-black, the trace must show the pointer-plus-
-damage incremental-damage boundary, and a pointer-only update must use the cached
-scene. This reproduces the compositor ordering without changing Hibr or
-requiring a physical device.
+The first requires a negative-z Kitty wallpaper to survive an incremental
+terminal damage repaint; the second checks the KMS pointer against the
+composed frame. Neither changes Hibr or requires a physical device.
 
-The gate is a renderer regression test, not physical-input acceptance. The
+These gates are a renderer regression test, not physical-input acceptance. The
 physical acceptance boundary remains `verify-live-physical.sh`, run while the
 real pointer is being moved.
 
@@ -455,9 +454,10 @@ after the outputs are initialised and before the first frame.
 What is in each section is the setting Blit owns and nothing else:
 
 ```text
-displays   rotation only. Power is not persisted -- SDL's initialising
-           modeset turns the panel on anyway, so a stored `off` would be a
-           dark boot whose only remedy is an API nobody can see. Brightness
+displays   rotation only, which native KMS refuses (ADR 0184), so in
+           practice the section stays empty. Power is not persisted -- the
+           startup modeset turns the panel on anyway, so a stored `off` would
+           be a dark boot whose only remedy is an API nobody can see. Brightness
            is not persisted either: systemd-backlight already restores it.
 audio      the per-PCM `default` flag, not mixer values. A card keeps its own
            volume, and storing it would make Blit fight alsactl for a setting
@@ -657,18 +657,6 @@ deferred updates and one final `commit` per Hibr flush. This bounds transport
 overhead without exposing a partial frame. The batch is still limited by the
 adapter's fixed request buffer and the server's bounded HTTP body policy.
 
-The pointer/damage regression gate verifies the SDL atomic boundary directly:
-
-```sh
-ruby tools/tests/pointer_damage_atomic_gate.rb
-```
-
-It queues pointer input and an external surface commit in the same event-loop
-turn, requires a `pointer_dirty=1` incremental-damage trace, and samples pixels outside
-the changed cell. A pass proves that pointer motion cannot expose cleared SDL
-background outside the damage rectangle; the separate external-pointer gate
-continues to prove that pointer-only motion uses the cached scene.
-
 ## Pointer-artifact transaction
 
 When pointer movement appears to make an external Hibr desktop blink, trail, or
@@ -732,9 +720,8 @@ Interpret the evidence in this order:
 2. `terminal_bytes` and `terminal_reads` prove producer activity.
    `surface_commit_hz`, its window/age/gap fields, `surface_commits`, and
    `frame_commits` apply only to their corresponding producers.
-3. `graphics_texture_uploads`, `pixel_frames_accepted`, and
-   `pixel_frame_errors` distinguish a Hibr/image transport problem from an SDL
-   presentation problem.
+3. `pixel_frames_accepted` and `pixel_frame_errors` distinguish a Hibr/image
+   transport problem from a presentation problem.
 4. Aggregate evdev counters plus the per-device entries and input traces
    distinguish no physical input from a wrong device, duplicate device, or
    dispatch problem.
@@ -742,7 +729,7 @@ Interpret the evidence in this order:
    not be used to infer a frame rate.
 
 An image-only Hibr probe is the control experiment. If it accepts a pixel frame
-and uploads a texture while the desktop capture reports zero image activity,
+and presents it while the desktop capture reports zero image activity,
 the display server and adapter are working and the desktop is selecting its
 glyph fallback/configuration path. That conclusion is evidence-based and does
 not require changing Hibr.
@@ -790,12 +777,13 @@ The same boundary was reproduced against 0.1.393 on 2026-10-09. The ordinary
 shell control returned `stty size` `135 240` and the Hibr capture was saved at
 `diagnostics/live-hibr-screenshot-20261009T084834Z/`. The screenshot is the
 authoritative visual artifact for this run: it shows the Hibr scene above the
-black lower region while the API reports a healthy 1920x2160, 60 Hz SDL output.
+black lower region while the API reports a healthy 1920x2160, 60 Hz output
+(then on SDL, removed in ADR 0184).
 
 ## What a capture is, and what its headers mean
 
 `GET /v1/diagnostics/screenshots/{display}` answers from **one** source: the
-pixels read during a present, immediately before `SDL_RenderPresent`. There is
+pixels read during a present, from the composed frame handed to KMS. There is
 no second path. Two older behaviours are gone, because each of them could
 answer with something that was never on a screen:
 

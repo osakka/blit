@@ -1,7 +1,7 @@
 #ifndef BLIT_VT_H
 #define BLIT_VT_H
 
-/* One native Linux console owner per server. SDL retains its own VT owner. */
+/* One native Linux console owner per server. */
 int blit_vt_open(char *error, unsigned capacity);
 void blit_vt_close(void);
 int blit_vt_owned(void);

@@ -91,8 +91,7 @@ Dir.mktmpdir('blit-login-observe') do |root|
       #{action}
     HIBR
     File.write(observer,source)
-    env={**gate_display_env,'BLIT_RENDERER'=>'software',
-      'LD_LIBRARY_PATH'=>File.join(ROOT,'build/sdl3-kms'),
+    env={**gate_display_env,
       'BLIT_PSF_FONT'=>File.join(ROOT,'assets/fonts/Blit-Hibr-Terminus16.psf'),
       'BLIT_INPUT_ROOT'=>File.join(root,'input'),'BLIT_SETTINGS'=>'ignore',
       'BLIT_LOGIN_AUTOSTART'=>'1','BLIT_AUTH_TOKEN'=>'observer-admin',

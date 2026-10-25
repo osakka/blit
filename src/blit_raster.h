@@ -3,7 +3,7 @@
 
 #include "blit_font.h"
 
-/* Backend-independent cell rasters. No SDL, DRM, or terminal state here.
+/* Backend-independent cell rasters. No DRM or terminal state here.
    Coverage is tinted by terminal foreground; premultiplied RGBA is not.
    Pixels and metrics remain valid until the next get or close on this object.
    The immutable PSF fallback must outlive the rasterizer. Single-thread owner. */

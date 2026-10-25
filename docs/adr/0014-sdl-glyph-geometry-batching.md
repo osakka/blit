@@ -2,6 +2,8 @@
 
 ## Status
 
+Retired by [ADR 0184](0184-sdl-is-removed.md): the SDL code it describes was removed.
+
 Accepted.
 
 ## Context

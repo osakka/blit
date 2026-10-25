@@ -76,11 +76,11 @@ check(sessions.size==1 && sessions.first['login_manager'],'restart created unexp
 request('PATCH',"/v1/terminal-sessions/#{login['session']['id']}",{focused:true})
 after_topology=get('/v1/topology');after_render=get('/v1/diagnostics').fetch('render')
 check(geometry(after_topology)==geometry(topology),'restart changed topology geometry')
-%w[video_driver renderer presentation_sync font_scale surface_inset_px].each do |key|
+%w[presentation_sync font_scale surface_inset_px].each do |key|
   check(after_render[key]==render[key],"restart changed #{key}")
 end
 check(get('/v1/fonts')['active']==font,'restart changed font identity or scale')
 record('after-settings',after);record('after-login',get('/v1/login'))
 record('after-topology',after_topology);record('after-diagnostics',get('/v1/diagnostics'))
 record('after-version',get('/v1/version'))
-puts "HOST_LOGIN_POLICY_PASS pane=#{PANE} save=clean restart=verified geometry=unchanged renderer=#{after_render['renderer']}"
+puts "HOST_LOGIN_POLICY_PASS pane=#{PANE} save=clean restart=verified geometry=unchanged sync=#{after_render['presentation_sync']}"

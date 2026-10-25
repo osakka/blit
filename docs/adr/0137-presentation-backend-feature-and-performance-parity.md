@@ -1,6 +1,7 @@
 # ADR 0137: One feature contract across presentation backends
 
 - Status: implementation in progress; parity acceptance pending
+- Superseded by [ADR 0184](0184-sdl-is-removed.md): SDL is removed; native KMS is the only presentation path.
 - Date: 2026-10-19
 - Issue: [Blit #104](https://git.home.arpa/itdlabs/blit/issues/104)
 - Related: ADRs0004,0006,0044,0099,0129,0130,0136

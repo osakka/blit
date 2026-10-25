@@ -201,6 +201,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0181 — GLES compositor inside native KMS; SDL retired at cutover](0181-gles-compositor-inside-native-kms.md)
 - [0182 — Desktop video stays on the PTY](0182-desktop-video-off-the-pty.md)
 - [0183 — Late compose is opt-in; immediate is the default](0183-late-compose-is-opt-in.md)
+- [0184 — SDL is removed; native KMS is the only presentation path](0184-sdl-is-removed.md)
 
 ## Adding an ADR
 

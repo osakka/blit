@@ -113,7 +113,7 @@ Dir.mktmpdir('blit-stream-text') do |input_root|
   pid = Process.spawn({**gate_display_env,
                        'BLIT_PSF_FONT' => FONT,
                        'BLIT_INPUT_ROOT' => input_root,
-                       'LD_LIBRARY_PATH' => File.join(ROOT, 'build/sdl3-kms')},
+                       },
                       BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')
   begin
     Timeout.timeout(15) do

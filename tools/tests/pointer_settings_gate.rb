@@ -158,7 +158,7 @@ def start
   $server = spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
                     'BLIT_INPUT_ROOT' => File.join(INPUT_ROOT, 'nodes'),
                     'BLIT_SETTINGS_PATH' => DOCUMENT,
-                    'LD_LIBRARY_PATH' => File.join(ROOT, 'build/sdl3-kms') },
+                    },
                   BINARY, PORT.to_s,
                   out: (ENV['BLIT_GATE_LOG'] ? [ENV['BLIT_GATE_LOG'], 'a'] : '/dev/null'),
                   err: (ENV['BLIT_GATE_LOG'] ? [ENV['BLIT_GATE_LOG'], 'a'] : '/dev/null'))

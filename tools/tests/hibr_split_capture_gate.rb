@@ -58,10 +58,9 @@ Dir.mktmpdir('blit-split-capture-gate') do |work|
 
   env = {
     **gate_display_env,
-    'SDL_RENDERER' => 'software',
+    
     'BLIT_PSF_FONT' => ENV.fetch('BLIT_GATE_FONT', File.join(ROOT, 'assets/fonts/Blit-Hibr-Terminus16.psf')),
     'BLIT_SETTINGS' => 'ignore',
-    'LD_LIBRARY_PATH' => File.join(ROOT, 'build/sdl3-kms'),
     'BLIT_COMMAND_ALLOWLIST' => launcher
   }
   server = Process.spawn(env, BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')

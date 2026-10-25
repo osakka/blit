@@ -2,6 +2,7 @@
 
 - Date:2026-10-20
 - Status: implemented; physical multi-connector validation pending
+- Superseded by [ADR 0184](0184-sdl-is-removed.md): SDL is removed; native KMS is the only presentation path.
 - Tracking: Blit104; SDL dependency unchanged
 
 Blit created every window with SDL_CreateWindow's default position and only

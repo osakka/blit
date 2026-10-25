@@ -5,7 +5,7 @@ require 'tmpdir'
 require 'fileutils'
 require 'timeout'
 require_relative 'gate_port'
-require_relative 'sdl_test_profile'
+require_relative 'test_profile'
 
 root = File.expand_path('../..', __dir__)
 port = gate_port(19562)
@@ -23,11 +23,11 @@ Dir.mktmpdir('blit-modern-api') do |work|
   %w[Blit-Hibr-Terminus16.psf Blit-Hibr-Spleen16.psf BlitModernNerd-Regular.ttf BlitRetroNerd-Regular.ttf BlitArabicModern.ttf BlitArabicRetro.ttf NotoColorEmoji.ttf NotoEmojiText.ttf].each do |asset|
     FileUtils.copy_file(File.join(root, 'assets/fonts', asset), File.join(fonts, asset))
   end
-  env = SdlTestProfile.environment.merge('BLIT_SETTINGS'=>'load',
+  env = TestProfile.environment.merge('BLIT_SETTINGS'=>'load',
     'BLIT_SETTINGS_PATH'=>File.join(work, 'settings.json'), 'BLIT_FONT_ROOT'=>fonts)
   pid = nil
   launch = lambda do
-    pid = spawn(env, SdlTestProfile.binary, port.to_s, out:File.join(work, 'server.log'), err:[:child,:out])
+    pid = spawn(env, TestProfile.binary, port.to_s, out:File.join(work, 'server.log'), err:[:child,:out])
     Timeout.timeout(10) do
       loop do
         begin

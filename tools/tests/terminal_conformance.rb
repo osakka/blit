@@ -133,7 +133,7 @@ puts 'PASS pointer-diagnostics'
 runtime_diagnostics = request(base, 'GET', '/v1/diagnostics/runtime')
 performance = runtime_diagnostics.fetch('performance')
 %w[input_events last_input_dispatch_ms max_input_dispatch_ms
-   last_sdl_present_ms max_sdl_present_ms surface_commit_hz
+   last_kms_present_ms max_kms_present_ms surface_commit_hz
    surface_commit_frames surface_commit_window_ms
    surface_commit_window_sequence surface_commit_age_ms
    last_surface_commit_gap_ms max_surface_commit_gap_ms].each do |field|
@@ -145,12 +145,6 @@ runtime_diagnostics.fetch('snapshot').fetch('render').fetch('outputs').each do |
   %w[last_present_ms max_present_ms present_calls].each do |field|
     raise "per-output diagnostics missing #{field}" unless output.key?(field)
   end
-end
-render_snapshot = runtime_diagnostics.fetch('snapshot').fetch('render')
-if !render_snapshot.fetch('direct_kms') &&
-   performance.fetch('max_sdl_present_ms', 0).to_f > 0 &&
-   render_snapshot.fetch('outputs').any? { |output| output.fetch('max_present_ms').to_f <= 0 }
-  raise 'SDL per-output presentation timing is not sourced from SDL diagnostics'
 end
 puts 'PASS per-output-presentation-diagnostics'
 

@@ -6,7 +6,7 @@ require 'tmpdir'
 require 'timeout'
 require 'open3'
 require_relative 'gate_port'
-require_relative 'sdl_test_profile'
+require_relative 'test_profile'
 
 root = File.expand_path('../..', __dir__)
 port = gate_port(19566)
@@ -18,9 +18,9 @@ get = lambda do |path|
 end
 identity = ->(font) { font.reject { |key,_| key=='raster_cache' } }
 Dir.mktmpdir('blit-font-probe-gate') do |work|
-  env = SdlTestProfile.environment.merge('BLIT_FONT_ROOT'=>File.join(root,'assets/fonts'),
+  env = TestProfile.environment.merge('BLIT_FONT_ROOT'=>File.join(root,'assets/fonts'),
     'BLIT_SETTINGS'=>'load', 'BLIT_SETTINGS_PATH'=>File.join(work,'settings.json'))
-  pid = spawn(env, SdlTestProfile.binary, port.to_s, out:File.join(work,'server.log'), err:[:child,:out])
+  pid = spawn(env, TestProfile.binary, port.to_s, out:File.join(work,'server.log'), err:[:child,:out])
   begin
     Timeout.timeout(10) do
       loop do

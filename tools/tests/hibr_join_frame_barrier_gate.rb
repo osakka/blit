@@ -29,10 +29,9 @@ FileUtils.ln_s(FAKE_DESKTOP_IMPL, FAKE_DESKTOP)
 
 env = {
   **gate_display_env,
-  'SDL_RENDERER' => 'software',
+  
   'BLIT_PSF_FONT' => ENV.fetch('BLIT_GATE_FONT', File.join(ROOT, 'assets/fonts/Blit-Hibr-Terminus16.psf')),
   'BLIT_SETTINGS' => 'ignore',
-  'LD_LIBRARY_PATH' => File.join(ROOT, 'build/sdl3-kms'),
   'BLIT_COMMAND_ALLOWLIST' => FAKE_DESKTOP
 }
 pid = Process.spawn(env, SERVER, PORT.to_s,

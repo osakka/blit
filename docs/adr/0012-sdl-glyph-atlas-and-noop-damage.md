@@ -1,6 +1,7 @@
 # ADR 0012: Cache SDL glyphs and suppress unchanged terminal damage
 
 - Status: accepted
+- Retired by [ADR 0184](0184-sdl-is-removed.md): the SDL code it describes was removed.
 - Date: 2026-10-07
 
 ## Context

@@ -121,7 +121,7 @@ at_exit { FileUtils.remove_entry(INPUT_ROOT) rescue nil }
 
 server = spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
                  'BLIT_INPUT_ROOT' => INPUT_ROOT,
-                 'LD_LIBRARY_PATH' => File.join(ROOT, 'build/sdl3-kms') },
+                 },
                BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')
 at_exit do
   Process.kill('TERM', server) rescue nil

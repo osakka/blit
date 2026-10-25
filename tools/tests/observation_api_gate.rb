@@ -54,13 +54,10 @@ def delete(path)
 end
 
 server = Process.spawn({
-  # SDL path only (asserts the telemetry of the SDL dummy output); retired at the GLES cutover.
-  **gate_display_env(backend: 'sdl'),
-  'SDL_RENDERER' => 'software',
+  **gate_display_env,
   'BLIT_LOGIN_AUTOSTART' => '0',
   'BLIT_EXPECT_DESKTOP' => '0',
   'BLIT_PSF_FONT' => FONT,
-  'LD_LIBRARY_PATH' => File.join(ROOT, 'build/sdl3-kms')
 }, BINARY, PORT.to_s, out: '/tmp/blit-observation-api-gate.log', err: [:child, :out])
 
 at_exit do
@@ -131,9 +128,8 @@ raise 'observation runtime is missing performance' unless
   observation['runtime']['performance'].is_a?(Hash)
 raise 'pointer-position transition counter is missing' unless
   observation.dig('runtime', 'performance', 'pointer_position_changes').is_a?(Integer)
-raise 'observation render is missing the exact video driver' unless
-  observation['diagnostics']['render']['video_driver'].is_a?(String) &&
-  !observation['diagnostics']['render']['video_driver'].empty?
+raise 'observation render is missing the presentation sync' unless
+  observation['diagnostics']['render']['presentation_sync'].to_s.start_with?('drm-page-flip')
 render_outputs = observation.dig('diagnostics', 'render', 'outputs')
 raise 'observation render outputs are missing' unless
   render_outputs.is_a?(Array) && !render_outputs.empty?
@@ -145,12 +141,8 @@ render_outputs.each do |output|
       pointer_change_requests pointer_frame_deferred
       pointer_frame_submissions vblank_sequence vblank_span_count
       vblank_span_us].sort
-  raise 'SDL dummy output falsely claims DRM/KMS telemetry' unless
-    scanout['available'] == false && scanout['flip_completions'].zero? &&
-    scanout['observed_refresh_hz'].zero? &&
-    scanout['pointer_change_requests'].zero? &&
-    scanout['pointer_frame_deferred'].zero? &&
-    scanout['pointer_frame_submissions'].zero?
+  raise 'native output reports no KMS scanout' unless
+    scanout['available'] == true && scanout['flip_completions'].positive?
 end
 
 puts "OBSERVATION_API_PASS fields=#{required.length} sessions=#{observation['sessions']['count']} displays=#{observation['displays']['count']}"

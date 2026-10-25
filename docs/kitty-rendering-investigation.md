@@ -3,9 +3,9 @@
 Follow-up: the0.2 development candidate now implements the first shared
 placement-damage stage in[ADR0177](adr/0177-retained-graphics-damage.md).
 The source findings and original probe outputs below describe the pinned
-pre-fix checkpoint; rerunning the probe on a newer source reflects its new
-behaviour. Image uploads, CPU native composition and whole-output copying
-are not claimed fixed by that stage. See current-state/verification notes.
+pre-fix checkpoint; the probe itself was removed with SDL in
+[ADR 0184](adr/0184-sdl-is-removed.md). Image uploads, CPU native composition
+and whole-output copying are not claimed fixed by that stage. See current-state/verification notes.
 
 Date: 2026-10-21. Blit source checkpoint: c5e241e, development0.2.0.
 Live host remains0.1.589/native direct-KMS, untouched by this investigation.
@@ -24,7 +24,8 @@ included in a matched comparison; low terminal CPU alone is not total cost.
 The previous glyph-cache improvement removes real repeated work but does
 not explain or solve the entire graphics/video gap. The important question
 is whether the CPU is rebuilding pixels, or submitting GPU resources and
-placement geometry. The existing native and SDL paths differ materially.
+placement geometry. At this checkpoint the native and SDL paths differed
+materially (SDL, removed in ADR 0184).
 
 ## What Kitty actually does
 
@@ -63,13 +64,10 @@ must not be replaced with a mythical fully zero-copy video renderer.
 | Native graphics invalidation | `graphics_bounds_for_view` unions **all** visible image placements; previous/current unions are included on scene changes | A retained full-pane wallpaper makes the graphics damage bounds full-pane |
 | Native graphics composition | `draw_graphic` loops over destination pixels, including conversion, scaling and alpha blending on the CPU | Cached source images still cost CPU composition work on redraw |
 | Native scanout preparation | `copy_scene_to_back` copies every display row for a scene submission | Full-output memory copy even after a small scene update |
-| SDL retained images | `sdl_graphics_texture` caches identity/generation and reuses matching texture storage | Blit already avoids uploading unchanged images; claiming otherwise is incorrect |
-| SDL changed image | Allocate a new RGBA staging buffer, loop over every source pixel including existing RGBA, then full `SDL_UpdateTexture` | Extra CPU copy/conversion plus upload; contribution needs measurement |
-| SDL composition | Damaged terminal cells still use CPU traversal/geometry generation and glyph-atlas queues; scene targets are ping-ponged | GL alone does not remove full-surface invalidation or CPU preparation |
 | Event loop | Input service, PTY parsing/image decode and `render_current_surfaces` run in the main loop | Expensive decode/render can delay subsequent input/API service; no causal latency measurement yet |
 
 See `src/blit_server.c`: `terminal_apply_kitty`, `terminal_apply_sixel`,
-`sdl_graphics_texture`, `render_current_surfaces`, `service_session_output`,
+`render_current_surfaces`, `service_session_output`,
 and `main`; and `src/blit_kms.c`: `graphics_bounds_for_view`, `draw_graphic`,
 `draw_view`, `copy_scene_to_back` and the graphics-scene-change damage branch.
 Native KMS already uses DRM page flips: do not diagnose tearing as simply
@@ -78,15 +76,10 @@ must be investigated separately.
 
 ## Reproduced with production functions
 
-Run the bounded, local-only TCC probe:
-
-```bash
-ruby tools/probes/graphics_work_shape.rb
-```
-
-It includes production functions rather than reimplementing their logic.
-It uses ordinary memory and SDL dummy/software, never a DRM device, Hibr,
-live API input or saved settings. Source digests accompany the report.
+The bounded, local-only TCC probe `graphics_work_shape.rb` (removed in ADR
+0184) included production functions rather than reimplementing their logic.
+It used ordinary memory, never a DRM device, Hibr, live API input or saved
+settings. Source digests accompanied the report.
 
 Observed at a model1920x2160 view,8x16 cells:
 
@@ -100,9 +93,6 @@ Observed at a model1920x2160 view,8x16 cells:
   outside the small image. At a hypothetical60 scene submissions/s, that is
   995MB/s of destination writes **plus** corresponding source reads, before
   composition. This is arithmetic, not measured host bandwidth or FPS.
-- Production SDL texture lookup performs one upload for initial pixels and
-  no additional upload for the placement move; a new pixel generation causes
-  a second upload. This confirms resource reuse already exists in SDL.
 
 Fresh read-only live observation:589/native direct-KMS,1920x2160@59.997Hz;
 last-frame draw25.937ms,copy0.854ms,submit0.042ms,16,856 drawn cells.
@@ -124,9 +114,8 @@ a controlled YouTube/drag benchmark.
    must preserve exact composition. Do not just remove full-damage calls.
 3. Make accelerated rendering a retained GPU scene: unchanged images stay
    resident; movement changes geometry; video changes pixel resources;
-   text updates change cell/glyph data. Audit the current SDL path first and
-   extend it rather than creating another parallel GL terminal. Backend104
-   owns native/SDL display, hotplug and input parity. Native CPU fallback
+   text updates change cell/glyph data. Extend the KMS GLES compositor rather
+   than creating another parallel GL terminal. Native CPU fallback
    correctness remains required, but cannot be promised Kitty-class low CPU
    for high-resolution video without hardware-specific evidence.
 4. Remove avoidable CPU image repacking, instrument image bytes decoded,
