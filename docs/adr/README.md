@@ -202,6 +202,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0182 — Desktop video stays on the PTY](0182-desktop-video-off-the-pty.md)
 - [0183 — Late compose is opt-in; immediate is the default](0183-late-compose-is-opt-in.md)
 - [0184 — SDL is removed; native KMS is the only presentation path](0184-sdl-is-removed.md)
+- [0185 — Outline glyphs are centred at sub-pixel precision; shapes get the icon fit](0185-symbols-centred-in-their-cell.md)
 
 ## Adding an ADR
 

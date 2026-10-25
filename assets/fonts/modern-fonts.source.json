@@ -37,7 +37,7 @@
     "source": "Renamed derivative of Nerd Fonts v3.4.0 Hack Mono; full source Unicode and full pinned Nerd catalogue",
     "upstream": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/v3.4.0/patched-fonts/Hack/Regular/HackNerdFontMono-Regular.ttf",
     "upstream_sha256": "03e60d3c1a9f8bef4e1f78836f80aacb9ec005260a6b094f5bfc10043bb115ab",
-    "sha256": "ce98353a70c82996157bcf8d550fe31f13cff8296f60194fe68c1efa04d8dee5",
+    "sha256": "7b0f089431151250322c107d58feed79b8feb4ad35c5e6b33299720bac4ec923",
     "license_file": "licenses/HackNerd-LICENSE.txt",
     "license_sha256": "1f61bb7c790c59b4b0ecdf304628b94e42ae4c8020094a8c3da73381ab212623"
   },
@@ -112,14 +112,14 @@
       "sha256": "69cdedc8a4f57a30d68e4f045af8b9cce0ec3b1a6e7eec1ad41737c894f26790"
     }
   ],
-  "policy": "tools/fonts/build-outline-nerd.py --profile modern|retro with fontTools 4.60.1. Retain full source Unicode and all10386 pinned Nerd catalogue codepoints. Fit complete icons with5percent side insets and each face's cap height. Original SVG catalogue adds seven explicit plane16 COLRv0 colour icons, missing standard text glyphs and a themed U+270E pen alias. Renamed derivatives; upstream notices retained. Shared native grayscale/colour raster and Noto2.057 fallback; corpus audits do not imply universal terminal/Unicode coverage. Protected geometry and missing scalars retain PSF fallback. Core Powerline geometry is ADR0164, not a guarantee for all Extras.",
+  "policy": "tools/fonts/build-outline-nerd.py --profile modern|retro with fontTools 4.60.1. Retain full source Unicode and all10386 pinned Nerd catalogue codepoints. Fit complete icons and the Geometric Shapes block (not its corner triangles) with5percent side insets and each face's cap height. Original SVG catalogue adds seven explicit plane16 COLRv0 colour icons, missing standard text glyphs and a themed U+270E pen alias. Renamed derivatives; upstream notices retained. Shared native grayscale/colour raster and Noto2.057 fallback; corpus audits do not imply universal terminal/Unicode coverage. Protected geometry and missing scalars retain PSF fallback. Core Powerline geometry is ADR0164, not a guarantee for all Extras.",
   "retro": {
     "profile": "blit-retro",
     "file": "BlitRetroNerd-Regular.ttf",
     "source": "Renamed derivative of Nerd Fonts v3.4.0 3270 Mono; full source Unicode and full pinned Nerd catalogue",
     "upstream": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/v3.4.0/patched-fonts/3270/Regular/3270NerdFontMono-Regular.ttf",
     "upstream_sha256": "3a6f45e14cafdf09bc888529d037f7da2d0c8256f23afbf64b81eb5e3f6deca3",
-    "sha256": "bd2b2a09584bd2cdb62ee8aaac82b00da74a5ac1a8fab8630701bc087b56bbdc",
+    "sha256": "36331874e17041a926bc06a4cbfdf622e2200909e36257a75a24913865cf88af",
     "license_file": "licenses/3270-LICENSE.txt",
     "license_sha256": "ef855fadca28e91a4123f7299bd79dcd78a7e19dfc364039790bb75bdedd515a"
   },

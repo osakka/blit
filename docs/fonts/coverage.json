@@ -4,7 +4,7 @@
   "faces": {
     "modern": {
       "file": "BlitModernNerd-Regular.ttf",
-      "sha256": "ce98353a70c82996157bcf8d550fe31f13cff8296f60194fe68c1efa04d8dee5",
+      "sha256": "7b0f089431151250322c107d58feed79b8feb4ad35c5e6b33299720bac4ec923",
       "scalar_count": 11954,
       "ranges": [
         [
@@ -587,7 +587,7 @@
     },
     "retro": {
       "file": "BlitRetroNerd-Regular.ttf",
-      "sha256": "bd2b2a09584bd2cdb62ee8aaac82b00da74a5ac1a8fab8630701bc087b56bbdc",
+      "sha256": "36331874e17041a926bc06a4cbfdf622e2200909e36257a75a24913865cf88af",
       "scalar_count": 12480,
       "ranges": [
         [

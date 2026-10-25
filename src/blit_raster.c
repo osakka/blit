@@ -3,6 +3,7 @@
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_COLOR_H
+#include FT_ADVANCES_H
 #include "../vendor/harfbuzz/hb.h"
 #include "../vendor/harfbuzz/hb-ft.h"
 #include <stdlib.h>
@@ -386,21 +387,35 @@ static unsigned char fallback_coverage(const BlitFont *font, size_t index, uint3
 static int draw_outline_face(FT_Face face, int baseline, uint32_t scalar, RasterEntry *entry)
 {
     FT_Bitmap *bitmap;
-    int x, y, left, top;
-    if (!face || !FT_Get_Char_Index(face, scalar)) return 0;
-    if (FT_Load_Char(face, scalar, FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL |
-        (entry->glyph.format == BLIT_RASTER_RGBA_PREMULTIPLIED ? FT_LOAD_COLOR : 0)))
-        return -1;
+    FT_Fixed advance;
+    FT_Vector delta;
+    FT_UInt index;
+    int x, y, left, top, origin, failed;
+    if (!face || !(index = FT_Get_Char_Index(face, scalar))) return 0;
+    /* Centre the unrounded advance in the cell at 26.6 precision. Rounding
+       it up first put all the slack on the right: a symbol that fills its
+       advance got a hard left edge and a faint right one. Horizontal only,
+       so vertical hinting is untouched. */
+    if (FT_Get_Advance(face, index, FT_LOAD_NO_HINTING, &advance)) return -1;
+    origin = (int)((entry->glyph.width * 65536L - advance) / 2048);
+    left = origin >= 0 ? origin / 64 : -((-origin + 63) / 64);
+    delta.x = origin - left * 64; delta.y = 0;
+    FT_Set_Transform(face, NULL, &delta);
+    failed = FT_Load_Glyph(face, index, FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL |
+        (entry->glyph.format == BLIT_RASTER_RGBA_PREMULTIPLIED ? FT_LOAD_COLOR : 0));
+    FT_Set_Transform(face, NULL, NULL);
+    if (failed) return -1;
     bitmap = &face->glyph->bitmap;
     if (bitmap->pitch < 0 ||
         (entry->glyph.format == BLIT_RASTER_COVERAGE &&
          (bitmap->pixel_mode != FT_PIXEL_MODE_GRAY || bitmap->num_grays != 256)) ||
         (entry->glyph.format == BLIT_RASTER_RGBA_PREMULTIPLIED &&
          bitmap->pixel_mode != FT_PIXEL_MODE_BGRA)) return -1;
-    left = (entry->glyph.width - ceil_26_6(face->glyph->advance.x)) / 2 +
-        face->glyph->bitmap_left;
+    left += face->glyph->bitmap_left;
     top = baseline - face->glyph->bitmap_top;
-    /* Never silently clip a glyph. Caller can use the canonical fallback. */
+    /* Never silently clip a glyph. Caller can use the canonical fallback.
+       A blank glyph has no ink to clip, wherever its origin lands. */
+    if (!bitmap->width || !bitmap->rows) return 1;
     if (left < 0 || top < 0 || left + (int)bitmap->width > entry->glyph.width ||
         top + (int)bitmap->rows > entry->glyph.height) return 0;
     for (y = 0; y < (int)bitmap->rows; ++y)

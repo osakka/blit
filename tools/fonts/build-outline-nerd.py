@@ -40,10 +40,16 @@ if len(icons) != manifest['catalogue']['unique_codepoints'] or not icons <= cmap
 # Upstream Mono icons can retain negative sidebearings/slight overhang.
 # Fit complete outlines, never crop: a shared optical cap-height/side inset
 # keeps icons readable within the same terminal advance as ordinary text.
+# Geometric Shapes are standalone symbols too (Hibr's window buttons, file
+# and scroll marks): Hack draws them edge to edge, which reads as clipped.
+# The corner triangles are cell-corner geometry (Hibr's resize grip) and
+# keep touching their edges.
+corners = {0x25E2, 0x25E3, 0x25E4, 0x25E5, 0x25F8, 0x25F9, 0x25FA, 0x25FF}
+shapes = {cp for cp in range(0x25A0, 0x2600) if cp in cmap and cp not in corners}
 glyph_set = font.getGlyphSet()
 font['glyf'][cmap[ord('H')]].recalcBounds(font['glyf'])
 cap = font['glyf'][cmap[ord('H')]].yMax
-for name in sorted({cmap[cp] for cp in icons}):
+for name in sorted({cmap[cp] for cp in icons | shapes}):
     glyph = font['glyf'][name]
     glyph.recalcBounds(font['glyf'])
     if not hasattr(glyph, 'xMin') or glyph.xMax == glyph.xMin:

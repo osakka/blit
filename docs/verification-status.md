@@ -1,5 +1,30 @@
 # Verification status
 
+## 2026-10-25: 0.2.23 symbols centred in their cell
+
+ADR 0185, the owner's report that window buttons and icons looked clipped
+on the right with Modern.
+- The shared raster centres each outline glyph's unrounded advance at 26.6
+  precision; it used to centre `ceil(advance)`, which put all the slack on
+  the right. Blank glyphs skip the clip check.
+- The font generator gives the Geometric Shapes block (not its corner
+  triangles) the icon fit. Modern and Retro are rebuilt from the pinned
+  sources, so only those glyphs change.
+
+Blit's raster at 16x32 and 11x22: `●`, U+F015 and `M` have equal left and
+right edge columns.
+
+Gates:
+- native suite: 142 pass.
+- `BLIT_GATE_BACKEND=gles`: 140 pass, 2 fail, neither caused by this change.
+  - `terminal_soak_gate`: the known software-GL RSS ceiling.
+  - `frame_rate_gate`: the full-scene render is around its 20 ms budget on
+    software GL. Over three alternating runs, it failed twice on 0.2.23
+    and twice on 0.2.22.
+- The first run failed `outline_catalogue_gate` (`cod-blank` at large
+  sizes) and `arabic_raster_gate` (the space), which led to the blank-glyph
+  rule; both pass now.
+
 ## 2026-10-25: 0.2.22 SDL removed; native KMS is the only presentation path
 
 ADR 0184, the owner's decision. Removed:
