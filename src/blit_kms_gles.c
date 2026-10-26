@@ -737,6 +737,7 @@ static int kms_gles_compose(BlitKms *kms, KmsOutput *output,
         pane->k = blit_effect_curvature_k(&view->effects);
         pane->scanline_alpha = blit_effect_scanlines_presented(&view->effects, 1) ?
             blit_effect_scanline_alpha(&view->effects, 1) : 0;
+        pane->shift_px = blit_effect_rgb_shift_px(&view->effects, view->cell_width);
         pane->glow = view->effects.value[BLIT_EFFECT_GLOW] > 0 ?
             BLIT_EFFECT_GLOW_GAIN * (view->effects.value[BLIT_EFFECT_GLOW] > 100 ? 100 :
                                      view->effects.value[BLIT_EFFECT_GLOW]) / 100.0 : 0.0;

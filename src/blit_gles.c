@@ -70,6 +70,7 @@ struct BlitGles {
     GLuint present_program, present_buffer;
     GLint present_target, present_scene, present_glow, present_scene_size;
     GLint present_rect, present_k, present_scan, present_gain, present_glow_size;
+    GLint present_shift;
     void (*Uniform1f)(GLint, GLfloat);
     void (*Uniform4f)(GLint, GLfloat, GLfloat, GLfloat, GLfloat);
     void (*GetShaderPrecisionFormat)(GLenum, GLenum, GLint *, GLint *);
@@ -459,6 +460,7 @@ static void gles_build_present(BlitGles *gles)
         "uniform float k;\n"
         "uniform float scan;\n"
         "uniform float gain;\n"
+        "uniform float shift;\n"
         "void main() {\n"
         "  vec2 q = (pixel - rect.xy) / rect.zw * 2.0 - 1.0;\n"
         "  vec2 s = q * ((1.0 + k * dot(q, q)) / (1.0 + k));\n"
@@ -467,15 +469,24 @@ static void gles_build_present(BlitGles *gles)
         "    return;\n"
         "  }\n"
         "  vec2 t = s * 0.5 + 0.5;\n"
-        "  vec2 p = clamp(rect.xy + t * rect.zw, rect.xy + 0.5, rect.xy + rect.zw - 0.5);\n"
+        "  vec2 lo = rect.xy + 0.5, hi = rect.xy + rect.zw - 0.5;\n"
+        "  vec2 p = clamp(rect.xy + t * rect.zw, lo, hi);\n"
         "  vec3 c = texture2D(scene, vec2(p.x, scene_size.y - p.y) / scene_size).rgb;\n"
+        "  if (shift > 0.0) {\n"
+        "    vec2 pl = clamp(p - vec2(shift, 0.0), lo, hi), pr = clamp(p + vec2(shift, 0.0), lo, hi);\n"
+        "    vec3 l = texture2D(scene, vec2(pl.x, scene_size.y - pl.y) / scene_size).rgb;\n"
+        "    vec3 r = texture2D(scene, vec2(pr.x, scene_size.y - pr.y) / scene_size).rgb;\n"
+        "    c = vec3(dot(vec3(l.r, c.r, r.r), vec3(0.1, 0.6, 0.3)),\n"
+        "             dot(vec3(l.g, c.g, r.g), vec3(0.2, 0.6, 0.2)),\n"
+        "             dot(vec3(l.b, c.b, r.b), vec3(0.3, 0.6, 0.1)));\n"
+        "  }\n"
         "  if (gain > 0.0) {\n"
         "    vec2 g = vec2(t.x, 1.0 - t.y), d = 1.0 / glow_size;\n"
-        "    vec2 lo = 0.5 * d, hi = 1.0 - 0.5 * d;\n"
+        "    vec2 glo = 0.5 * d, ghi = 1.0 - 0.5 * d;\n"
         "    vec3 b = vec3(0.0);\n"
         "    for (int j = -1; j <= 1; ++j)\n"
         "      for (int i = -1; i <= 1; ++i)\n"
-        "        b += texture2D(glow, clamp(g + vec2(float(i), float(j)) * d, lo, hi)).rgb\n"
+        "        b += texture2D(glow, clamp(g + vec2(float(i), float(j)) * d, glo, ghi)).rgb\n"
         "             * ((2.0 - abs(float(i))) * (2.0 - abs(float(j))));\n"
         "    c = min(c + gain * b / 16.0, 1.0);\n"
         "  }\n"
@@ -522,6 +533,7 @@ static void gles_build_present(BlitGles *gles)
     gles->present_k = gles->glGetUniformLocation(gles->present_program, "k");
     gles->present_scan = gles->glGetUniformLocation(gles->present_program, "scan");
     gles->present_gain = gles->glGetUniformLocation(gles->present_program, "gain");
+    gles->present_shift = gles->glGetUniformLocation(gles->present_program, "shift");
     gles->glGenBuffers(1, &gles->present_buffer);
     while (gles->glGetError() != GL_NO_ERROR) {}
     gles->presents = 1;
@@ -1436,6 +1448,7 @@ void blit_gles_scene_present(BlitGles *gles, BlitGlesScene *scene,
         gles->Uniform1f(gles->present_k, (GLfloat)pane->k);
         gles->Uniform1f(gles->present_scan, (GLfloat)pane->scanline_alpha);
         gles->Uniform1f(gles->present_gain, glow ? (GLfloat)pane->glow : 0.0f);
+        gles->Uniform1f(gles->present_shift, (GLfloat)pane->shift_px);
         gles->glUniform2f(gles->present_glow_size,
                           glow ? (GLfloat)glow->quarter_width : 1.0f,
                           glow ? (GLfloat)glow->quarter_height : 1.0f);
@@ -1445,8 +1458,9 @@ void blit_gles_scene_present(BlitGles *gles, BlitGlesScene *scene,
         gles->glBindTexture(GL_TEXTURE_2D, glow ? glow->quarter : gles->white);
         gles->glActiveTexture(GL_TEXTURE0);
         gles->glBindTexture(GL_TEXTURE_2D, scene->texture);
-        /* Under a warp the mapping is not 1:1: linear, or glyph edges jag. */
-        if (pane->k > 0) {
+        /* Under a warp, or between pixels for RGB shift, the mapping is not
+           1:1: linear, or glyph edges jag. */
+        if (pane->k > 0 || pane->shift_px > 0) {
             gles->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
             gles->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         }
@@ -1460,7 +1474,7 @@ void blit_gles_scene_present(BlitGles *gles, BlitGlesScene *scene,
         gles->glDrawArrays(GL_TRIANGLES, 0, 6);
         ++gles->draw_calls;
         gles->vertices_drawn += 6;
-        if (pane->k > 0) {
+        if (pane->k > 0 || pane->shift_px > 0) {
             gles->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
             gles->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         }

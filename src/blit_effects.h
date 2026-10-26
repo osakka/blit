@@ -28,6 +28,7 @@ typedef enum {
     BLIT_EFFECT_CORNERS,
     BLIT_EFFECT_CURVATURE,
     BLIT_EFFECT_GLOW,
+    BLIT_EFFECT_RGB_SHIFT,
     BLIT_EFFECT_COUNT
 } BlitEffectId;
 
@@ -41,17 +42,21 @@ typedef struct {
     const char *param;  /* its one parameter; 0 is off */
     int maximum;
     BlitEffectClass effect_class;
+    const char *title;  /* what a person reads, e.g. a control panel label */
 } BlitEffectSpec;
 
 static const BlitEffectSpec blit_effect_specs[BLIT_EFFECT_COUNT] = {
     /* Every second pixel row from the pane's top, darkened by intensity%. */
-    { "scanlines", "intensity", 100, BLIT_EFFECT_LOCAL },
+    { "scanlines", "intensity", 100, BLIT_EFFECT_LOCAL, "Scanlines" },
     /* Each corner of the pane's region cut to a quarter circle, in black. */
-    { "corners", "radius_px", 1024, BLIT_EFFECT_LOCAL },
+    { "corners", "radius_px", 1024, BLIT_EFFECT_LOCAL, "Corners" },
     /* The pane bulges like a tube: blit_effect_warp. */
-    { "curvature", "amount", 100, BLIT_EFFECT_PRESENTATION },
+    { "curvature", "amount", 100, BLIT_EFFECT_PRESENTATION, "Curvature" },
     /* A soft bloom from a blurred copy of the pane, added on top. */
-    { "glow", "intensity", 100, BLIT_EFFECT_PRESENTATION },
+    { "glow", "intensity", 100, BLIT_EFFECT_PRESENTATION, "Glow" },
+    /* An old set's colour fringe: each channel leans to one side,
+       blit_effect_rgb_shift_px apart (cool-retro-term's rgb shift). */
+    { "rgb_shift", "amount", 100, BLIT_EFFECT_PRESENTATION, "RGB shift" },
 };
 
 /* Glow at intensity 100 adds this much of the blurred colour. */
@@ -88,6 +93,18 @@ static inline double blit_effect_curvature_k(const BlitEffectSet *set)
     int amount = set->value[BLIT_EFFECT_CURVATURE];
     if (amount <= 0) return 0.0;
     return (amount > 100 ? 100 : amount) / 400.0;
+}
+
+/* RGB shift's sample distance in pixels: half a cell at 100, so the fringe
+   keeps its look at every font size (cool-retro-term's 4 px at its 8 px
+   base cell). The three samples, left, centre and right, weigh
+   R 0.1/0.6/0.3, G 0.2/0.6/0.2 and B 0.3/0.6/0.1: each sums to 1, so a flat
+   colour is unchanged and only edges fringe. */
+static inline double blit_effect_rgb_shift_px(const BlitEffectSet *set, int cell_width)
+{
+    int amount = set->value[BLIT_EFFECT_RGB_SHIFT];
+    if (amount <= 0 || cell_width <= 0) return 0.0;
+    return (amount > 100 ? 100 : amount) / 100.0 * cell_width / 2.0;
 }
 
 /* The warp, shared by the shader (blit_gles.c, the same expression) and

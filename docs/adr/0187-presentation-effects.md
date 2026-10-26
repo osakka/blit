@@ -245,6 +245,32 @@ gains these cases, on `gles`:
 - **Cost:** the GPU milliseconds are reported. The budget is checked on the
   owner's GPU, not llvmpipe.
 
+## Addendum: RGB shift (0.2.30)
+
+The owner asked for cool-retro-term's "RGB shift", the colour fringe of an old
+television. It is static, so it is a presentation effect like curvature, not
+a new class.
+- **Registry:** `rgb_shift: {amount: 0..100}`.
+- **Distance:** samples `blit_effect_rgb_shift_px` apart, half a cell at
+  100. cool-retro-term's 4 px is at its 8 px base cell and scales with its
+  font; tying the distance to the cell keeps the look at every font size.
+- **Taps:** three, at the warped position and ±that distance horizontally,
+  each clamped to the pane like the centre sample. The weights are
+  cool-retro-term's: R 0.1/0.6/0.3, G 0.2/0.6/0.2, B 0.3/0.6/0.1 (left,
+  centre, right). Each sums to 1, so a flat colour is unchanged and only
+  edges fringe.
+- **Glow** is sampled at the centre only.
+- **Filtering:** the scene is sampled linearly when a pane is curved *or*
+  shifted.
+- **Names:** the registry gains a `title` column ("RGB shift"), reported by
+  `GET /v1/effects` and shown by the Control Panel, so a key name never has
+  to read well.
+- **Evidence:** `presentation_effects_gate` paints vertical stripes three
+  cells wide and sets amount 50 on 8 px cells. That gives samples 2 px
+  apart, whole pixels, so every pixel is predicted exactly from the plain
+  capture. More than a thousand pixels must fringe, pane 2 is untouched,
+  and with curvature too the tube's outside stays black.
+
 ### Measured on the owner's Radeon (0.2.29, 2026-10-26)
 
 DP-1 at 1920×2160, split 1×2. Both panes have curvature, glow, scanlines and

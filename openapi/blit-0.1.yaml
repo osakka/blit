@@ -3232,6 +3232,16 @@ components:
           required: [intensity]
           properties:
             intensity: {type: integer, minimum: 0, maximum: 100}
+        rgb_shift:
+          type: object
+          additionalProperties: false
+          required: [amount]
+          properties:
+            amount:
+              type: integer
+              minimum: 0
+              maximum: 100
+              description: Samples half a cell apart at 100; R, G and B lean right, centre and left.
     EffectState:
       type: object
       required: [revision, enabled, available, panes, configure]
@@ -3245,9 +3255,10 @@ components:
           items:
             type: object
             additionalProperties: false
-            required: [name, parameter, maximum, class]
+            required: [name, title, parameter, maximum, class]
             properties:
-              name: {type: string, enum: [scanlines, corners, curvature, glow]}
+              name: {type: string, enum: [scanlines, corners, curvature, glow, rgb_shift]}
+              title: {type: string, description: "The effect's name for people, e.g. RGB shift."}
               parameter: {type: string}
               maximum: {type: integer}
               class: {type: string, enum: [local, presentation]}

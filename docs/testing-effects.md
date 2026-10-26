@@ -48,6 +48,10 @@ On `gles` it checks:
   So they are drawn once, with no moiré and no flattening;
 - **glow:** one white cell on black brightens a pixel 4 px away, leaves a
   far pixel black, and never reaches pane 2;
+- **RGB shift:** vertical stripes three cells wide, with amount 50 on 8 px
+  cells (samples 2 px apart). Every pixel matches the three-tap rule applied
+  to the plain capture; more than a thousand pixels fringe; and with
+  curvature too, the tube's outside stays black;
 - **isolation:** pane 2 is unchanged by pane 1's effects;
 - **pointer:** a real SGR mouse report from a session in the curved pane
   names the cell the warp shows under the pointer, including the clamp in the

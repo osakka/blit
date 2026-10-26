@@ -119,6 +119,13 @@ def bands(pane)
             'i=$((i + 1)); done; sleep 600')
 end
 
+# Vertical stripes, three cells wide, in A and B: edges for RGB shift.
+def stripes(pane)
+  run(pane, "printf '\\033[?25l'; a='\\033[48;2;#{A.join(';')}m   '; b='\\033[48;2;#{B.join(';')}m   '; " \
+            "r=''; i=0; while [ $i -lt 14 ]; do r=\"$r$a$b\"; i=$((i + 1)); done; " \
+            'j=1; while [ $j -le 14 ]; do printf "\\033[$j;1H$r"; j=$((j + 1)); done; sleep 600')
+end
+
 def save_effects(effects)
   Timeout.timeout(5) { sleep 0.05 until get('/v1/settings').dig('storage', 'state') == 'clean' }
   settings = get('/v1/settings')
@@ -169,8 +176,11 @@ Dir.mktmpdir('blit-presentation-effects') do |root|
   # The registry says which class each effect is.
   classes = get('/v1/effects')['available'].to_h { |e| [e['name'], e['class']] }
   check(classes == { 'scanlines' => 'local', 'corners' => 'local',
-                     'curvature' => 'presentation', 'glow' => 'presentation' },
+                     'curvature' => 'presentation', 'glow' => 'presentation',
+                     'rgb_shift' => 'presentation' },
         "effect classes: #{classes}")
+  titles = get('/v1/effects')['available'].to_h { |e| [e['name'], e['title']] }
+  check(titles['rgb_shift'] == 'RGB shift' && titles['corners'] == 'Corners', "effect titles: #{titles}")
 
   if GLES
     # The plain path: no presentation effects, nothing for the pass to draw.
@@ -234,6 +244,41 @@ Dir.mktmpdir('blit-presentation-effects') do |root|
             "pointer at #{x},#{y} reached #{col},#{row}, the warp shows #{want_col},#{want_row}")
     end
     park.call
+
+    # RGB shift: vertical stripes three cells wide, so every stripe edge
+    # fringes. At amount 50 on 8 px cells the samples are 2 px apart: whole
+    # pixels, so the three-tap rule predicts every pixel from the plain
+    # capture (flat colour is unchanged: the weights sum to 1).
+    stripes('pane-display-1-1')
+    saved!(output => { '1' => {} })
+    striped = pane1(screenshot)
+    saved!(output => { '1' => { 'rgb_shift' => { 'amount' => 50 } } })
+    shifted = screenshot
+    weights = [[0.1, 0.6, 0.3], [0.2, 0.6, 0.2], [0.3, 0.6, 0.1]]
+    fringed = 0
+    shifted_checked = 0
+    (0...PANE_H).step(2) do |y|
+      (0...W).each do |x|
+        l = striped[y][(x - 2).clamp(0, W - 1)]
+        c = striped[y][x]
+        r = striped[y][(x + 2).clamp(0, W - 1)]
+        want = (0..2).map { |ch| (weights[ch][0] * l[ch] + weights[ch][1] * c[ch] + weights[ch][2] * r[ch]).round }
+        check(near?(shifted.pixel(x, y), want),
+              "RGB shift #{x},#{y} is #{shifted.pixel(x, y)}, expected #{want} from #{l} #{c} #{r}")
+        fringed += 1 if want != c
+        shifted_checked += 1
+      end
+    end
+    check(fringed > 1000, "RGB shift changed too few pixels to prove anything: #{fringed}")
+    check(pane2_bytes(shifted) == plain_pane2, 'RGB shift reached pane 2')
+    # With curvature too: inside one stripe away from its edges the colour is
+    # the stripe's, and outside the tube it is black.
+    saved!(output => { '1' => { 'rgb_shift' => { 'amount' => 50 }, 'curvature' => { 'amount' => CURVATURE } } })
+    both = screenshot
+    sx, sy = warp(k, (2 + 0.5) / W * 2 - 1, (2 + 0.5) / PANE_H * 2 - 1)
+    check(sx.abs > 1 || sy.abs > 1, 'corner probe is inside the tube')
+    check(both.pixel(2, 2) == [0, 0, 0], "curved RGB shift outside the tube: #{both.pixel(2, 2)}")
+    check(both.pixel(W / 2, PANE_H / 2) != [0, 0, 0], 'curved RGB shift drew nothing at the centre')
 
     # Scanlines under curvature: on the glass, once.
     flat('pane-display-1-1', A)
@@ -343,6 +388,6 @@ Dir.mktmpdir('blit-presentation-effects') do |root|
   check(sizes.size <= 1, "effects writes passed the panes through other sizes: #{sizes}")
 
   puts "PRESENTATION_EFFECTS_PASS backend=#{GATE_BACKEND} warped_pixels=#{checked} " \
-       "#{GLES ? 'warp=shared glass_scanlines=once glow=bounded,own_pane isolation=pane pointer=warped plain_path=untouched' : 'cpu=unavailable_kept'} " \
+       "#{GLES ? 'warp=shared glass_scanlines=once glow=bounded,own_pane rgb_shift=exact isolation=pane pointer=warped plain_path=untouched' : 'cpu=unavailable_kept'} " \
        'switches=bypass values=kept settings_writes=no_reflow'
 end

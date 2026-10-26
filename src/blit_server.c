@@ -19847,8 +19847,9 @@ static void effect_json(BlitRuntime *runtime, char *body, size_t capacity)
                  runtime->effects_revision, runtime->effects_disabled ? "false" : "true");
     for (id = 0; id < BLIT_EFFECT_COUNT; ++id)
         json_appendf(body, capacity, &used,
-                     "%s{\"name\":\"%s\",\"parameter\":\"%s\",\"maximum\":%d,\"class\":\"%s\"}",
-                     id ? "," : "", blit_effect_specs[id].name,
+                     "%s{\"name\":\"%s\",\"title\":\"%s\",\"parameter\":\"%s\","
+                     "\"maximum\":%d,\"class\":\"%s\"}",
+                     id ? "," : "", blit_effect_specs[id].name, blit_effect_specs[id].title,
                      blit_effect_specs[id].param, blit_effect_specs[id].maximum,
                      blit_effect_specs[id].effect_class == BLIT_EFFECT_PRESENTATION ?
                      "presentation" : "local");

@@ -120,12 +120,14 @@ void blit_gles_scene_draw(BlitGles *gles, BlitGlesScene *scene);
 int blit_gles_presents(const BlitGles *gles);
 /* A pane drawn by the presentation pass: its rectangle in target pixels
    (top-left origin), the curvature warp's k (blit_effect_curvature_k), the
-   glass scanlines' alpha (0..255, 0 none) and glow's gain (0 none). */
+   glass scanlines' alpha (0..255, 0 none), glow's gain (0 none) and RGB
+   shift's distance in pixels (0 none). */
 typedef struct {
     int x, y, width, height;
     double k;
     unsigned scanline_alpha;
     double glow;
+    double shift_px;   /* RGB shift's sample distance, 0 none */
 } BlitGlesPresentPane;
 /* Inside blit_gles_frame_begin/end, after the scene was composed: rebuild a
    pane's blurred copy from its rectangle of the scene (halved twice). */
