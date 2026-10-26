@@ -1,6 +1,6 @@
 # ADR 0188: Animated effects re-present a held scene on a frame clock that exists only while one is on
 
-- Status: proposed
+- Status: accepted (2026-10-26, after the measurement below)
 - Date: 2026-10-26
 - Scope: effects registry, main loop render scheduling, KMS present path,
   GLES presentation pass, diagnostics
@@ -158,3 +158,22 @@ ADR 0187.
   unavailable, and the output presents no ticks.
 
 Plus a measurement on the owner's Radeon of the GPU share at 30 Hz.
+
+### Measured on the owner's Radeon (0.2.31, 2026-10-26)
+
+DP-1 at 1920×2160, both panes with scanlines, corners, curvature, glow,
+RGB shift and the hum bar at 15, during ordinary desktop use. 10 s per
+row, A/B on the hum bar alone:
+
+| Hum bar | GPU per frame | Frames per second | Animation-only frames per second |
+|---|---|---|---|
+| 15 | 2.33 ms | 39 | 22.6 |
+| off | 2.36 ms | 31 | 0 |
+| 15 again | 2.31 ms | 36 | 25.2 |
+
+- The band adds no measurable GPU time per frame.
+- Its cost is the frames it adds: about 8 per second above the desktop's own
+  31, since the rest of the 30 Hz ticks coincide with frames the desktop
+  was making anyway. In all, about 19 ms of GPU per second, roughly 2%.
+- With the line off, `animation_hz` is 0 and no animation frames are made.
+
