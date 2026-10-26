@@ -182,7 +182,8 @@ puts 'PASS display-derived-surface-geometry'
 # only reports them. pane_effects_gate.rb covers drawing and settings.
 effects = request(base, 'GET', '/v1/effects')
 assert_equal({ 'corners' => 'local', 'curvature' => 'presentation', 'glow' => 'presentation',
-               'rgb_shift' => 'presentation', 'scanlines' => 'local' },
+               'rgb_shift' => 'presentation', 'glowing_line' => 'presentation',
+               'scanlines' => 'local' },
              effects.fetch('available').to_h { |e| [e.fetch('name'), e.fetch('class')] },
              'available pane effects and their classes')
 assert_equal(true, effects.fetch('enabled'), 'effects are switched on by default')

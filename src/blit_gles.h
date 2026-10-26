@@ -128,6 +128,8 @@ typedef struct {
     unsigned scanline_alpha;
     double glow;
     double shift_px;   /* RGB shift's sample distance, 0 none */
+    double line;       /* the glowing line's strength, 0 none */
+    double phase;      /* the glowing line's phase, 0..1 (blit_effect_line_phase) */
 } BlitGlesPresentPane;
 /* Inside blit_gles_frame_begin/end, after the scene was composed: rebuild a
    pane's blurred copy from its rectangle of the scene (halved twice). */

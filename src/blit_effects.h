@@ -29,6 +29,7 @@ typedef enum {
     BLIT_EFFECT_CURVATURE,
     BLIT_EFFECT_GLOW,
     BLIT_EFFECT_RGB_SHIFT,
+    BLIT_EFFECT_GLOWING_LINE,
     BLIT_EFFECT_COUNT
 } BlitEffectId;
 
@@ -43,21 +44,33 @@ typedef struct {
     int maximum;
     BlitEffectClass effect_class;
     const char *title;  /* what a person reads, e.g. a control panel label */
+    int animated;       /* changes with time: needs the frame clock (ADR 0188) */
 } BlitEffectSpec;
 
 static const BlitEffectSpec blit_effect_specs[BLIT_EFFECT_COUNT] = {
     /* Every second pixel row from the pane's top, darkened by intensity%. */
-    { "scanlines", "intensity", 100, BLIT_EFFECT_LOCAL, "Scanlines" },
+    { "scanlines", "intensity", 100, BLIT_EFFECT_LOCAL, "Scanlines", 0 },
     /* Each corner of the pane's region cut to a quarter circle, in black. */
-    { "corners", "radius_px", 1024, BLIT_EFFECT_LOCAL, "Corners" },
+    { "corners", "radius_px", 1024, BLIT_EFFECT_LOCAL, "Corners", 0 },
     /* The pane bulges like a tube: blit_effect_warp. */
-    { "curvature", "amount", 100, BLIT_EFFECT_PRESENTATION, "Curvature" },
+    { "curvature", "amount", 100, BLIT_EFFECT_PRESENTATION, "Curvature", 0 },
     /* A soft bloom from a blurred copy of the pane, added on top. */
-    { "glow", "intensity", 100, BLIT_EFFECT_PRESENTATION, "Glow" },
+    { "glow", "intensity", 100, BLIT_EFFECT_PRESENTATION, "Glow", 0 },
     /* An old set's colour fringe: each channel leans to one side,
        blit_effect_rgb_shift_px apart (cool-retro-term's rgb shift). */
-    { "rgb_shift", "amount", 100, BLIT_EFFECT_PRESENTATION, "RGB shift" },
+    { "rgb_shift", "amount", 100, BLIT_EFFECT_PRESENTATION, "RGB shift", 0 },
+    /* A soft band of light sweeping down the pane (cool-retro-term's
+       glowing line): blit_effect_line_value. */
+    { "glowing_line", "intensity", 100, BLIT_EFFECT_PRESENTATION, "Glowing line", 1 },
 };
+
+/* The glowing line (ADR 0188), as cool-retro-term's randomPass: its length,
+   a third of the pane; its speed, 0.15 sweeps a second (one sweep is the
+   pane's height plus the band's length); its strength, white light up to
+   0.2 at 100. */
+#define BLIT_EFFECT_LINE_LENGTH (1.0 / 3.0)
+#define BLIT_EFFECT_LINE_SPEED 0.15
+#define BLIT_EFFECT_LINE_GAIN 0.2
 
 /* Glow at intensity 100 adds this much of the blurred colour. */
 #define BLIT_EFFECT_GLOW_GAIN 0.6f
@@ -93,6 +106,44 @@ static inline double blit_effect_curvature_k(const BlitEffectSet *set)
     int amount = set->value[BLIT_EFFECT_CURVATURE];
     if (amount <= 0) return 0.0;
     return (amount > 100 ? 100 : amount) / 400.0;
+}
+
+/* Whether the set has an effect that changes with time. */
+static inline int blit_effect_set_animated(const BlitEffectSet *set)
+{
+    int i;
+    for (i = 0; i < BLIT_EFFECT_COUNT; ++i)
+        if (set->value[i] > 0 && blit_effect_specs[i].animated) return 1;
+    return 0;
+}
+
+/* The glowing line's strength, 0..BLIT_EFFECT_LINE_GAIN. */
+static inline double blit_effect_line_strength(const BlitEffectSet *set)
+{
+    int intensity = set->value[BLIT_EFFECT_GLOWING_LINE];
+    if (intensity <= 0) return 0.0;
+    return (intensity > 100 ? 100 : intensity) / 100.0 * BLIT_EFFECT_LINE_GAIN;
+}
+
+/* The line's phase, 0..1, at a monotonic time: computed here in double,
+   never as a raw time in a shader's float. */
+static inline double blit_effect_line_phase(double seconds)
+{
+    double cycles = seconds * BLIT_EFFECT_LINE_SPEED;
+    return cycles - (double)(long long)cycles;
+}
+
+/* The line's added light, 0..1, at `y` (0 at the pane's top, 1 at its
+   bottom) for a phase: a smoothstep ramp up to the leading edge at
+   (1 + length) * phase, and nothing below it -- cool-retro-term's
+   fract(smoothstep(-L, 0, y - p)). The shader computes the same. */
+static inline double blit_effect_line_value(double phase, double y)
+{
+    double edge = (1.0 + BLIT_EFFECT_LINE_LENGTH) * phase;
+    double d = y - edge, u;
+    if (d <= -BLIT_EFFECT_LINE_LENGTH || d >= 0.0) return 0.0;
+    u = (d + BLIT_EFFECT_LINE_LENGTH) / BLIT_EFFECT_LINE_LENGTH;
+    return u * u * (3.0 - 2.0 * u);
 }
 
 /* RGB shift's sample distance in pixels: half a cell at 100, so the fringe

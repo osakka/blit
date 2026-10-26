@@ -1019,6 +1019,13 @@ typedef struct {
     int kms_frame_timing_immediate;
     int boot_kms_frame_timing_immediate;
     int kms_frame_timing_configured;
+    /* ADR 0188: the frame clock for animated effects. It ticks an output
+       only while one of its panes has an animated effect it can draw and
+       the output is presenting; each tick re-presents, never recomposes. */
+    int effects_animation_hz;
+    int effects_animation_hz_configured;
+    uint32_t animation_due;
+    uint64_t animation_next_us[BLIT_MAX_DISPLAYS];
     uint64_t kms_lead_us[BLIT_MAX_DISPLAYS];
     unsigned long long kms_late_seen[BLIT_MAX_DISPLAYS];
     unsigned long long kms_on_time_seen[BLIT_MAX_DISPLAYS];
@@ -1593,6 +1600,7 @@ static BlitSurface *find_surface_id(BlitRuntime *runtime,
 static BlitSession *find_session_id(BlitRuntime *runtime,
                                     unsigned long long session_id);
 static void destroy_session(BlitRuntime *runtime, BlitSession *session);
+static int output_animated(const BlitRuntime *runtime, int output_index);
 static void cancel_auxiliary_worker(BlitRuntime *runtime);
 static int hibr_frame_barrier_active(const BlitRuntime *runtime,
                                      uint64_t now);
@@ -3293,7 +3301,8 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
                 "\"upload_ms\":%.3f},"
                 "\"effects\":{\"cpu_last_ms\":%.3f,\"cpu_max_ms\":%.3f,"
                 "\"gpu_quads\":%llu,\"present_panes\":%llu,\"glow_rebuilds\":%llu,"
-                "\"presentation_unavailable\":\"%s\"},"
+                "\"presentation_unavailable\":\"%s\",\"animation_hz\":%d,"
+                "\"animation_frames\":%llu,\"animation_phase\":%.4f},"
                 "\"flip\":{\"last_ms\":%.3f,\"max_ms\":%.3f,"
                 "\"total_us\":%llu,\"count\":%llu,"
                 "\"timing\":\"%s\",\"lead_us\":%llu,"
@@ -3320,6 +3329,9 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
                 have_kms_info ? kms_info.effects_present_quads : 0ULL,
                 have_kms_info ? kms_info.effects_glow_rebuilds : 0ULL,
                 have_kms_info ? kms_info.presentation_unavailable : "cpu compositor",
+                output_animated(runtime, i) ? runtime->effects_animation_hz : 0,
+                have_kms_info ? kms_info.effects_animation_frames : 0ULL,
+                have_kms_info ? kms_info.effects_animation_phase : 0.0,
                 have_kms_info ? kms_info.last_flip_ms : 0.0,
                 have_kms_info ? kms_info.max_flip_ms : 0.0,
                 have_kms_info ? kms_info.flip_wait_total_us : 0ULL,
@@ -19496,7 +19508,7 @@ static void settings_copy_unseen_server(BlitRuntime *runtime, char *out,
     static const char *const known[] = {
         "render_interval_ms", "pane_layout", "display_backend",
         "kms_async_pageflip", "expect_desktop", "shutdown_key", "kms_compositor",
-        "kms_frame_timing"
+        "kms_frame_timing", "effects_animation_hz"
     };
     const char *cursor = json_key_cursor(runtime->settings_document, "server");
     char key[64];
@@ -19929,6 +19941,62 @@ static const char *pane_presentation_unavailable(const BlitRuntime *runtime,
     return blit_kms_presentation_unavailable(runtime->kms, index);
 }
 
+/* ADR 0188: whether an output's frame clock should run -- a pane of it has
+   an animated effect it can draw, and the output is presenting: the display
+   powered (DPMS on, or never read), its KMS output presenting, and Blit
+   holding the VT. Anything else, and no tick, no frame, no cost. */
+static int output_animated(const BlitRuntime *runtime, int output_index)
+{
+    char display_id[64];
+    int display_index, i;
+    if (runtime->kms == NULL || !blit_vt_active()) return 0;
+    display_index = display_index_for_output(runtime, output_index);
+    if (display_index < 0 ||
+        (runtime->displays[display_index].power_state != -1 &&
+         runtime->displays[display_index].power_state != 0) ||
+        !blit_kms_output_presenting(runtime->kms, display_index))
+        return 0;
+    snprintf(display_id, sizeof(display_id), "display-%llu",
+             runtime->outputs[output_index].display_id);
+    for (i = 0; i < runtime->pane_count; ++i) {
+        const BlitPane *pane = &runtime->panes[i];
+        BlitEffectSet set;
+        if (strcmp(pane->display_id, display_id) != 0) continue;
+        set = pane_effect_set(runtime, pane);
+        if (blit_effect_set_animated(&set) &&
+            pane_presentation_unavailable(runtime, pane)[0] == '\0')
+            return 1;
+    }
+    return 0;
+}
+
+/* The frame clock: an animated output is made due at effects_animation_hz.
+   It owns its own cadence -- render_pending stays 0 between ticks, so the
+   loop does not present every refresh -- and the present goes through the
+   usual schedule, aligned to the vblank and coalescing with real changes. */
+static void effects_animation_tick(BlitRuntime *runtime, uint64_t now)
+{
+    uint64_t period = 1000000ULL / (uint64_t)(runtime->effects_animation_hz > 0 ?
+                                              runtime->effects_animation_hz : 30);
+    int i;
+    for (i = 0; i < runtime->output_count && i < BLIT_MAX_DISPLAYS; ++i) {
+        uint32_t bit = 1U << i;
+        if (!output_animated(runtime, i)) {
+            runtime->animation_next_us[i] = 0;
+            runtime->animation_due &= ~bit;
+            continue;
+        }
+        if (runtime->animation_next_us[i] != 0 && now < runtime->animation_next_us[i])
+            continue;
+        runtime->animation_due |= bit;
+        runtime->render_pending = 1;
+        if (runtime->render_next_us[i] > now) runtime->render_next_us[i] = now;
+        runtime->animation_next_us[i] =
+            runtime->animation_next_us[i] == 0 || now - runtime->animation_next_us[i] > period ?
+            now + period : runtime->animation_next_us[i] + period;
+    }
+}
+
 /* GET /v1/effects: what each live pane draws now. They are set through
    document.effects (PUT /v1/settings), the one place they are kept. */
 static void effect_json(BlitRuntime *runtime, char *body, size_t capacity)
@@ -19940,11 +20008,12 @@ static void effect_json(BlitRuntime *runtime, char *body, size_t capacity)
     for (id = 0; id < BLIT_EFFECT_COUNT; ++id)
         json_appendf(body, capacity, &used,
                      "%s{\"name\":\"%s\",\"title\":\"%s\",\"parameter\":\"%s\","
-                     "\"maximum\":%d,\"class\":\"%s\"}",
+                     "\"maximum\":%d,\"class\":\"%s\",\"animated\":%s}",
                      id ? "," : "", blit_effect_specs[id].name, blit_effect_specs[id].title,
                      blit_effect_specs[id].param, blit_effect_specs[id].maximum,
                      blit_effect_specs[id].effect_class == BLIT_EFFECT_PRESENTATION ?
-                     "presentation" : "local");
+                     "presentation" : "local",
+                     blit_effect_specs[id].animated ? "true" : "false");
     json_appendf(body, capacity, &used, "],\"panes\":[");
     for (i = 0; i < runtime->pane_count; ++i) {
         const BlitPane *pane = &runtime->panes[i];
@@ -20161,6 +20230,11 @@ static size_t settings_build(BlitRuntime *runtime, char *out, size_t capacity,
     if (runtime->kms_frame_timing_configured) {
         json_appendf(out, capacity, &used, "%s\"kms_frame_timing\":\"%s\"",
                      first ? "" : ",", runtime->kms_frame_timing_immediate ? "immediate" : "late");
+        first = 0;
+    }
+    if (runtime->effects_animation_hz_configured) {
+        json_appendf(out, capacity, &used, "%s\"effects_animation_hz\":%d",
+                     first ? "" : ",", runtime->effects_animation_hz);
         first = 0;
     }
     if (runtime->kms_async_configured) {
@@ -20688,6 +20762,13 @@ static void settings_apply_server(BlitRuntime *runtime)
             runtime->kms_frame_timing_immediate = strcmp(chord, "immediate") == 0;
             runtime->kms_frame_timing_configured = 1;
         }
+        {
+            int hz;
+            if (json_int(server, "effects_animation_hz", &hz) && hz >= 10 && hz <= 30) {
+                runtime->effects_animation_hz = hz;
+                runtime->effects_animation_hz_configured = 1;
+            }
+        }
         if (json_bool(server, "kms_async_pageflip", &value)) {
             runtime->kms_async_pageflip = value;
             runtime->kms_async_configured = 1;
@@ -20763,6 +20844,11 @@ static int settings_server_backend_valid(const char *document)
         !(json_string(server, "kms_frame_timing", backend, sizeof(backend)) &&
           (strcmp(backend, "late") == 0 || strcmp(backend, "immediate") == 0)))
         return 0;
+    if (json_key_cursor(server, "effects_animation_hz") != NULL) {
+        int hz;
+        if (!json_int(server, "effects_animation_hz", &hz) || hz < 10 || hz > 30)
+            return 0;
+    }
     if (json_key_cursor(server, "display_backend") == NULL) return 1;
     return json_string(server, "display_backend", backend, sizeof(backend)) &&
         strcmp(backend, "kms") == 0;
@@ -20913,7 +20999,7 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
                  "\"backend_environment\":%s,\"backend_environment_valid\":%s,"
                  "\"configuration_valid\":%s},"
                  "\"kms_async_pageflip\":%s,\"kms_compositor\":\"%s\","
-                 "\"kms_frame_timing\":\"%s\","
+                 "\"kms_frame_timing\":\"%s\",\"effects_animation_hz\":%d,"
                  "\"expect_desktop\":%s,"
                  "\"login\":%s,\"login_restart_required\":%s,"
                  "\"pointer\":{\"shape\":\"%s\",\"palette\":\"%s\","
@@ -20937,6 +21023,7 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
                  runtime->kms_async_pageflip ? "true" : "false",
                  runtime->kms_compositor_gles ? "gles" : "cpu",
                  runtime->kms_frame_timing_immediate ? "immediate" : "late",
+                 runtime->effects_animation_hz,
                  runtime->expect_desktop ? "true" : "false", login,
                  restart_required ? "true" : "false",
                  blit_pointer_shapes[runtime->pointer_art.config.shape],
@@ -21046,6 +21133,8 @@ static int settings_reset(BlitRuntime *runtime, int remove_file)
     runtime->kms_compositor_configured = 0;
     runtime->kms_frame_timing_immediate = runtime->boot_kms_frame_timing_immediate;
     runtime->kms_frame_timing_configured = 0;
+    runtime->effects_animation_hz = 30;
+    runtime->effects_animation_hz_configured = 0;
     runtime->expect_desktop = runtime->boot_expect_desktop;
     runtime->expect_desktop_configured = 0;
     if (runtime->kms_async_pageflip)
@@ -27875,6 +27964,7 @@ int main(int argc, char **argv)
     runtime.boot_kms_frame_timing_immediate = getenv("BLIT_KMS_FRAME_TIMING") == NULL ||
         strcmp(getenv("BLIT_KMS_FRAME_TIMING"), "late") != 0;
     runtime.kms_frame_timing_immediate = runtime.boot_kms_frame_timing_immediate;
+    runtime.effects_animation_hz = 30;
     runtime.boot_pane_columns = 1;
     runtime.boot_pane_rows = 1;
     {
@@ -28628,14 +28718,19 @@ int main(int argc, char **argv)
         gles_guard_check(&runtime);
         kms_check_slots(&runtime, now, now < runtime.terminal_frame_quiet_until_us ||
                         hibr_frame_barrier_active(&runtime, now));
+        effects_animation_tick(&runtime, now);
         if (blit_vt_active() && runtime.render_pending &&
             (output_mask = due_output_mask(&runtime, now)) != 0) {
             int hold_scene = now < runtime.terminal_frame_quiet_until_us ||
                 hibr_frame_barrier_active(&runtime, now);
+            /* Inside a quiet window only the pointer -- and, ADR 0188, an
+               animation tick -- may present; both with the scene held. */
             if (hold_scene)
-                output_mask &= runtime.pointer_dirty_outputs;
+                output_mask &= runtime.pointer_dirty_outputs | runtime.animation_due;
             if (output_mask != 0) {
                 blit_vt_phase("render: compose and present outputs");
+                blit_kms_request_animation(runtime.kms, runtime.animation_due & output_mask);
+                runtime.animation_due &= ~output_mask;
                 render_current_surfaces(&runtime, output_mask, hold_scene);
                 blit_vt_phase("loop: after render");
                 if (!hold_scene)

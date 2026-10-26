@@ -47,8 +47,8 @@ effect, with the title "Glowing line". The band and its timing are defined
 once in `blit_effects.h`:
 - **Band length:** a third of the pane's height.
 - **Period:** 1 / 0.15 s, sweeping the pane's height plus one band length.
-- **Shape:** brightness rising linearly toward the leading edge, zero below
-  it.
+- **Shape:** brightness rising along a smoothstep to the leading edge, zero
+  below it, as cool-retro-term's `fract(smoothstep(-L, 0, y - p))`.
 - **Strength:** `intensity / 100 × 0.2`, added to each channel and clamped.
 
 The band is placed in content space, at the warped coordinate, so it bends
@@ -76,6 +76,15 @@ scene; it only makes its outputs due and changed:
   scene, as for the pointer.
 - **Pacing:** an output that is not yet initialised is skipped, and a flip
   still pending waits, as for the pointer.
+
+**Implementation.**
+- The registry gains an `animated` column, reported by `GET /v1/effects`.
+- The band is `blit_effect_line_value` in C, and the same expression in the
+  presentation shader. The phase is `blit_effect_line_phase` of the KMS
+  monotonic clock, computed in C per frame.
+- The KMS side takes an animation request, `blit_kms_request_animation`: a
+  mask of outputs the next present treats as changed. The present call's
+  signature and its callers are unchanged.
 
 **The clock exists only while it is needed.**
 - An output's animation is due only while all of these hold:

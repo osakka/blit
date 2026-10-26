@@ -716,6 +716,7 @@ apply live, with no restart, and are saved:
 | `curvature` | presentation | `amount` | 0–100 | The pane bulges like a tube; its edges become arcs, black beyond them |
 | `glow` | presentation | `intensity` | 0–100 | A soft bloom around bright content, from a blurred copy of the pane |
 | `rgb_shift` | presentation | `amount` | 0–100 | An old set's colour fringe: each channel leans to one side, up to half a cell apart |
+| `glowing_line` | presentation, animated | `intensity` | 0–100 | A soft band of light sweeping down the pane every 6.7 s (cool-retro-term's glowing line) |
 
 - **Order:** effects are applied in a fixed order (scanlines, then corners),
   over the pane's pixel region, beneath the pointer and API overlays.
@@ -739,6 +740,13 @@ apply live, with no restart, and are saved:
   pane under `unavailable`, with the reason (`cpu compositor`, `no highp
   fragment precision`). When a pane's curvature is drawn, its scanlines are
   drawn on the glass, in screen space, rather than bent with the picture.
+- **Animation (ADR 0188):** an effect marked `animated` is driven by a frame
+  clock. The clock runs only while such an effect is on, switched on, and
+  drawable on a presenting display, at `document.server.effects_animation_hz`
+  (10–30, default 30). Each tick re-presents the frame without redrawing
+  anything. With no animated effect on, an idle screen presents nothing.
+  Diagnostics: `effects.animation_hz` (0 when off), `animation_frames` and
+  `animation_phase`.
 - **Names:** `GET /v1/effects` gives each effect a `title` for people
   ("RGB shift") beside its key.
 - **Pointer:** under curvature a click reaches the cell the screen shows at

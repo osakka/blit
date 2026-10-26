@@ -177,10 +177,12 @@ Dir.mktmpdir('blit-presentation-effects') do |root|
   classes = get('/v1/effects')['available'].to_h { |e| [e['name'], e['class']] }
   check(classes == { 'scanlines' => 'local', 'corners' => 'local',
                      'curvature' => 'presentation', 'glow' => 'presentation',
-                     'rgb_shift' => 'presentation' },
+                     'rgb_shift' => 'presentation', 'glowing_line' => 'presentation' },
         "effect classes: #{classes}")
   titles = get('/v1/effects')['available'].to_h { |e| [e['name'], e['title']] }
   check(titles['rgb_shift'] == 'RGB shift' && titles['corners'] == 'Corners', "effect titles: #{titles}")
+  animated = get('/v1/effects')['available'].select { |e| e['animated'] }.map { |e| e['name'] }
+  check(animated == ['glowing_line'], "animated effects: #{animated}")
 
   if GLES
     # The plain path: no presentation effects, nothing for the pass to draw.
@@ -326,7 +328,88 @@ Dir.mktmpdir('blit-presentation-effects') do |root|
     check(later == settled, "drawing in pane 2 rebuilt pane 1's glow #{later - settled} times")
     flat('pane-display-1-2', B)
     sleep 0.5
+    # The glowing line (ADR 0188). Over a flat colour, the brightened rows of
+    # pane 1 are one run ending at the band's leading edge, rising toward it
+    # by the shared smoothstep, nothing below it; a moment later the edge is
+    # lower. It is animated by the frame clock, which re-presents without
+    # redrawing, at the configured rate, and stops when the line is off.
+    flat('pane-display-1-1', A)
+    run('pane-display-1-2', "printf '\\033[?25l\\033[48;2;#{B.join(';')}m\\033[2J'; sleep 600")
+    saved!(output => { '1' => { 'glowing_line' => { 'intensity' => 100 } } })
+    lift = ->(shot, y) { shot.pixel(W / 2, y)[0] - A[0] }
+    edge_of = lambda do |shot|
+      rows = (0...PANE_H).select { |y| lift.call(shot, y) > 1 }
+      next nil if rows.empty? || rows.last >= PANE_H - 2 || rows.first <= 1
+      check(rows == (rows.first..rows.last).to_a, "the band is not one run: #{rows}")
+      rows
+    end
+    band = nil
+    Timeout.timeout(15) { sleep 0.2 until (band = edge_of.call(screenshot)) }
+    shot = screenshot
+    band = edge_of.call(shot) || band
+    length = PANE_H / 3
+    check(band.size <= length + 2 && band.size >= length / 2, "band length #{band.size}, expected about #{length}")
+    lifts = band.map { |y| lift.call(shot, y) }
+    check(lifts.each_cons(2).all? { |a, b| b >= a - 1 }, "the band does not rise toward its edge: #{lifts}")
+    check(lifts.last >= 30 && lifts.last <= 52, "the band's brightest row adds #{lifts.last}, expected up to 51")
+    check(lift.call(shot, band.last + 2).abs <= 1, 'light below the leading edge')
+    sleep 0.6
+    later = nil
+    Timeout.timeout(10) { sleep 0.1 until (later = edge_of.call(screenshot)) }
+    check(later.last > band.last || later.last < band.first, "the band did not move down: #{band.last} -> #{later.last}")
+    # The clock: frames at the configured rate, nothing redrawn, no glow work.
+    fx = -> { get('/v1/diagnostics').dig('render', 'outputs', 0) }
+    first = fx.call
+    check(first.dig('effects', 'animation_hz') == 30, "animation_hz #{first.dig('effects', 'animation_hz')}")
+    drawn = []
+    10.times { sleep 0.2; drawn << fx.call.dig('kms_phases', 'drawn_cells') }
+    last = fx.call
+    ticks = last.dig('effects', 'animation_frames') - first.dig('effects', 'animation_frames')
+    elapsed = 2.0
+    check(ticks >= 30 && ticks <= 75, "#{ticks} animation frames in about #{elapsed} s at 30 Hz")
+    check(drawn.all?(&:zero?), "animation frames redrew cells: #{drawn}")
+    check(last.dig('effects', 'glow_rebuilds') == first.dig('effects', 'glow_rebuilds'), 'animation rebuilt glow')
+    # The rate setting.
+    settings = get('/v1/settings')
+    document = settings['document']
+    document['server'] = (document['server'] || {}).merge('effects_animation_hz' => 60)
+    code, = request('PUT', '/v1/settings', { document: document }, settings['revision'])
+    check(code == 400, "effects_animation_hz 60 -> #{code}")
+    document['server']['effects_animation_hz'] = 10
+    code, = request('PUT', '/v1/settings', { document: document }, settings['revision'])
+    check(code == 200, "effects_animation_hz 10 -> #{code}")
+    a = fx.call.dig('effects', 'animation_frames')
+    sleep 2
+    slow = fx.call.dig('effects', 'animation_frames') - a
+    check(slow >= 10 && slow <= 28, "#{slow} animation frames in 2 s at 10 Hz")
+    document = get('/v1/settings')['document']
+    document['server'].delete('effects_animation_hz')
+    request('PUT', '/v1/settings', { document: document }, get('/v1/settings')['revision'])
+    # No clock while it is off: an idle screen presents nothing.
+    [{ output => { '1' => {} } },
+     { output => { '1' => { 'enabled' => false, 'glowing_line' => { 'intensity' => 100 } } } },
+     { 'enabled' => false, output => { '1' => { 'glowing_line' => { 'intensity' => 100 } } } }].each do |off|
+      saved!(off)
+      sleep 0.6
+      p0 = fx.call['present_calls']
+      sleep 1.5
+      p1 = fx.call['present_calls']
+      check(p1 - p0 <= 2, "an idle screen presented #{p1 - p0} frames with the line off (#{off})")
+      check(fx.call.dig('effects', 'animation_hz').zero?, "animation_hz not 0 with the line off (#{off})")
+    end
+    flat('pane-display-1-2', B)
   else
+    # CPU: a saved glowing line is kept, reported unavailable, and costs no
+    # frames.
+    flat('pane-display-1-1', A)
+    saved!(output => { '1' => { 'glowing_line' => { 'intensity' => 100 } } })
+    pane = get('/v1/effects')['panes'].find { |p| p['pane_id'] == 'pane-display-1-1' }
+    check(pane['unavailable'] == { 'glowing_line' => 'cpu compositor' }, "CPU glowing line: #{pane}")
+    sleep 0.6
+    p0 = get('/v1/diagnostics').dig('render', 'outputs', 0, 'present_calls')
+    sleep 1.5
+    p1 = get('/v1/diagnostics').dig('render', 'outputs', 0, 'present_calls')
+    check(p1 - p0 <= 2, "a CPU-composed idle screen presented #{p1 - p0} frames for a glowing line")
     # CPU: kept, reported unavailable, local effects still drawn.
     flat('pane-display-1-1', A)
     saved!(output => { '1' => { 'curvature' => { 'amount' => 50 }, 'corners' => { 'radius_px' => 20 } } })
@@ -388,6 +471,6 @@ Dir.mktmpdir('blit-presentation-effects') do |root|
   check(sizes.size <= 1, "effects writes passed the panes through other sizes: #{sizes}")
 
   puts "PRESENTATION_EFFECTS_PASS backend=#{GATE_BACKEND} warped_pixels=#{checked} " \
-       "#{GLES ? 'warp=shared glass_scanlines=once glow=bounded,own_pane rgb_shift=exact isolation=pane pointer=warped plain_path=untouched' : 'cpu=unavailable_kept'} " \
+       "#{GLES ? 'warp=shared glass_scanlines=once glow=bounded,own_pane rgb_shift=exact glowing_line=shape,moves,clock,off_is_free isolation=pane pointer=warped plain_path=untouched' : 'cpu=unavailable_kept'} " \
        'switches=bypass values=kept settings_writes=no_reflow'
 end

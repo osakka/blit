@@ -3317,6 +3317,16 @@ components:
               minimum: 0
               maximum: 100
               description: Samples half a cell apart at 100; R, G and B lean right, centre and left.
+        glowing_line:
+          type: object
+          additionalProperties: false
+          required: [intensity]
+          properties:
+            intensity:
+              type: integer
+              minimum: 0
+              maximum: 100
+              description: Animated (ADR 0188); white light up to 0.2 at 100.
     EffectState:
       type: object
       required: [revision, enabled, available, panes, configure]
@@ -3330,9 +3340,10 @@ components:
           items:
             type: object
             additionalProperties: false
-            required: [name, title, parameter, maximum, class]
+            required: [name, title, parameter, maximum, class, animated]
             properties:
-              name: {type: string, enum: [scanlines, corners, curvature, glow, rgb_shift]}
+              name: {type: string, enum: [scanlines, corners, curvature, glow, rgb_shift, glowing_line]}
+              animated: {type: boolean, description: Driven by the frame clock (ADR 0188).}
               title: {type: string, description: "The effect's name for people, e.g. RGB shift."}
               parameter: {type: string}
               maximum: {type: integer}

@@ -1,6 +1,13 @@
 # Verification status
 
-## 2026-10-26: 0.2.31 session output capture; a base64 fix
+## 2026-10-26: 0.2.31 glowing line; session output capture; a base64 fix
+
+- **ADR 0188, the glowing line:** the first animated effect, and the frame
+  clock behind it.
+  - The clock ticks an output only while an animated effect is drawable on
+    it and the display is presenting, at `server.effects_animation_hz`
+    (10–30, default 30).
+  - A tick re-presents through a KMS animation request; it never recomposes.
 
 - `POST/GET/DELETE /v1/terminal-sessions/{id}/output-capture`: a bounded,
   explicitly armed capture of a session's raw PTY output (at most 120 s and
@@ -13,6 +20,14 @@
   ends in two bytes, the one case it got right.
 
 Gates:
+- `presentation_effects_gate`, the glowing line (gles):
+  - the band is one run, about a third of the pane, rising to a leading
+    edge that adds up to 51, with nothing below it; it moves down;
+  - 30 Hz ticks, with `drawn_cells` 0 and no glow rebuilds;
+  - the rate setting (60 refused, 10 Hz honoured);
+  - an idle screen presents nothing with the line at 0, its pane switched
+    off, or the master switch off.
+  On native, a saved line is reported unavailable and costs no frames.
 - `output_capture_gate` (new): the exact bytes in order, timed reads,
   truncation at `max_bytes`, `DELETE` frees, 400 and 404 refusals.
 - The WebSocket gates `stream_replay`, `input_stream_text`,

@@ -146,6 +146,8 @@ typedef struct {
 #define KMS_MAX_FLIP_COOKIES 256
 
 struct BlitKms {
+    /* ADR 0188: outputs whose next present is due to an animated effect. */
+    uint32_t animation_mask;
     int fd;
     int suspended;
     int output_count;
@@ -1981,6 +1983,17 @@ int blit_kms_display_info(const BlitKms *kms, int index, BlitKmsDisplayInfo *inf
     return 0;
 }
 
+void blit_kms_request_animation(BlitKms *kms, uint32_t output_mask)
+{
+    if (kms != NULL) kms->animation_mask |= output_mask;
+}
+
+int blit_kms_output_presenting(const BlitKms *kms, int index)
+{
+    if (kms == NULL || index < 0 || index >= kms->output_count) return 0;
+    return kms_output(kms, index)->info.presentation_state == BLIT_KMS_PRESENTATION_PRESENTING;
+}
+
 const char *blit_kms_presentation_unavailable(const BlitKms *kms, int index)
 {
     if (kms == NULL || index < 0 || index >= kms->output_count) return "cpu compositor";
@@ -2123,7 +2136,7 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
             continue;
         }
         output_started = kms_now_us();
-        int output_changed;
+        int output_changed, animated_only;
         full_redraw = !output->initialized ||
             output->last_visual_revision != visual_revision;
         for (view_index = 0; view_index < view_count; ++view_index)
@@ -2134,6 +2147,9 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         output_changed = full_redraw || capture ||
             (screenshot_output_mask & (1U << i)) != 0 ||
             pointer_affects_output;
+        /* An animated effect due on this output: presented with the scene as
+           it is (ADR 0188). Counted only when nothing else asked for it. */
+        animated_only = !output_changed && (kms->animation_mask & (1U << i)) != 0;
         /* Inspect scene changes even when pointer/capture work has already
            scheduled this output. Relocation must clear the old bounds. */
         for (view_index = 0; !hold_scene && view_index < view_count; ++view_index) {
@@ -2162,6 +2178,11 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
            case: page flips are not a heartbeat, and repeatedly submitting
            unchanged buffers makes a slow KMS driver look hung while wasting
            a CPU and event slot on every display. */
+        if (animated_only && !output_changed) {
+            output_changed = 1;
+            ++output->info.effects_animation_frames;
+        }
+        kms->animation_mask &= ~(1U << i);
         if (!output_changed)
             continue;
         if (hold_scene)

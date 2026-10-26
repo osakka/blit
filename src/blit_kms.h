@@ -153,6 +153,10 @@ typedef struct {
     /* Why presentation effects are not drawn on this output ("" when they
        are): "cpu compositor" or "no highp fragment precision". */
     char presentation_unavailable[48];
+    /* ADR 0188: frames presented only because an animated effect was due,
+       and the glowing line's phase in the last frame that drew it. */
+    unsigned long long effects_animation_frames;
+    double effects_animation_phase;
 } BlitKmsDisplayInfo;
 
 typedef struct {
@@ -176,6 +180,12 @@ int blit_kms_display_count(const BlitKms *kms);
 /* ADR 0187: why presentation effects are not drawn on an output, "" when
    they are -- without copying its whole display info, for the pointer path. */
 const char *blit_kms_presentation_unavailable(const BlitKms *kms, int index);
+/* ADR 0188: outputs the next blit_kms_present must present even with
+   nothing changed -- an animated effect is due -- with the scene as it is.
+   Consumed by that present. */
+void blit_kms_request_animation(BlitKms *kms, uint32_t output_mask);
+/* Whether an output is presenting (BLIT_KMS_PRESENTATION_PRESENTING). */
+int blit_kms_output_presenting(const BlitKms *kms, int index);
 int blit_kms_display_info(const BlitKms *kms, int index,
                           BlitKmsDisplayInfo *info);
 int blit_kms_set_display_position(BlitKms *kms, int index, int x, int y);

@@ -70,7 +70,7 @@ struct BlitGles {
     GLuint present_program, present_buffer;
     GLint present_target, present_scene, present_glow, present_scene_size;
     GLint present_rect, present_k, present_scan, present_gain, present_glow_size;
-    GLint present_shift;
+    GLint present_shift, present_line, present_phase;
     void (*Uniform1f)(GLint, GLfloat);
     void (*Uniform4f)(GLint, GLfloat, GLfloat, GLfloat, GLfloat);
     void (*GetShaderPrecisionFormat)(GLenum, GLenum, GLint *, GLint *);
@@ -461,6 +461,8 @@ static void gles_build_present(BlitGles *gles)
         "uniform float scan;\n"
         "uniform float gain;\n"
         "uniform float shift;\n"
+        "uniform float line;\n"
+        "uniform float phase;\n"
         "void main() {\n"
         "  vec2 q = (pixel - rect.xy) / rect.zw * 2.0 - 1.0;\n"
         "  vec2 s = q * ((1.0 + k * dot(q, q)) / (1.0 + k));\n"
@@ -489,6 +491,13 @@ static void gles_build_present(BlitGles *gles)
         "        b += texture2D(glow, clamp(g + vec2(float(i), float(j)) * d, glo, ghi)).rgb\n"
         "             * ((2.0 - abs(float(i))) * (2.0 - abs(float(j))));\n"
         "    c = min(c + gain * b / 16.0, 1.0);\n"
+        "  }\n"
+        "  if (line > 0.0) {\n"
+        "    float L = 1.0 / 3.0, d = t.y - (1.0 + L) * phase;\n"
+        "    if (d > -L && d < 0.0) {\n"
+        "      float u = (d + L) / L;\n"
+        "      c = min(c + vec3(line * u * u * (3.0 - 2.0 * u)), 1.0);\n"
+        "    }\n"
         "  }\n"
         "  if (scan > 0.0 && mod(floor(pixel.y - rect.y), 2.0) > 0.5)\n"
         "    c = floor(c * (255.0 - scan) + 0.5) / 255.0;\n"
@@ -534,6 +543,8 @@ static void gles_build_present(BlitGles *gles)
     gles->present_scan = gles->glGetUniformLocation(gles->present_program, "scan");
     gles->present_gain = gles->glGetUniformLocation(gles->present_program, "gain");
     gles->present_shift = gles->glGetUniformLocation(gles->present_program, "shift");
+    gles->present_line = gles->glGetUniformLocation(gles->present_program, "line");
+    gles->present_phase = gles->glGetUniformLocation(gles->present_program, "phase");
     gles->glGenBuffers(1, &gles->present_buffer);
     while (gles->glGetError() != GL_NO_ERROR) {}
     gles->presents = 1;
@@ -1449,6 +1460,8 @@ void blit_gles_scene_present(BlitGles *gles, BlitGlesScene *scene,
         gles->Uniform1f(gles->present_scan, (GLfloat)pane->scanline_alpha);
         gles->Uniform1f(gles->present_gain, glow ? (GLfloat)pane->glow : 0.0f);
         gles->Uniform1f(gles->present_shift, (GLfloat)pane->shift_px);
+        gles->Uniform1f(gles->present_line, (GLfloat)pane->line);
+        gles->Uniform1f(gles->present_phase, (GLfloat)pane->phase);
         gles->glUniform2f(gles->present_glow_size,
                           glow ? (GLfloat)glow->quarter_width : 1.0f,
                           glow ? (GLfloat)glow->quarter_height : 1.0f);
