@@ -1,5 +1,22 @@
 # Verification status
 
+## 2026-10-26: 0.2.33 video ingest; animation fills gaps only
+
+The owner reported slow YouTube and window moves after turning on the
+effects. Measured live, the video reached Blit at about 8 frames a second
+whatever the effects, so the effects were not the cause.
+- **ADR 0192:** Blit read about 4 KiB of a session's output per loop pass,
+  4,103 bytes per read live. It now fills its 64 KiB buffer from what is
+  queued. `terminal_ingest_gate` (new) passes at 42,597 bytes per read and
+  fails on 0.2.32 at 4,088.
+- **Hibr's side:** hold parsed each frame byte by byte, about 150 ms a
+  frame. Fixed in Hibr 0.99.352.
+- **ADR 0188, amended:** animation ticks fill gaps only. Live, they had
+  tripled the presents during video and raised late flips from under 1 a
+  second to 4 or 5. `presentation_effects_gate` gains `fills_gaps_only`.
+- **Still to come:** the live re-measure once both releases are on the
+  owner's machine.
+
 ## 2026-10-26: 0.2.32 flicker, horizontal sync and jitter; Braille, blocks and symbols
 
 - **ADR 0191, second half:**

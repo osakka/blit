@@ -391,6 +391,32 @@ Dir.mktmpdir('blit-presentation-effects') do |root|
     check(ticks >= 30 && ticks <= 75, "#{ticks} animation frames in about #{elapsed} s at 30 Hz")
     check(drawn.all?(&:zero?), "animation frames redrew cells: #{drawn}")
     check(last.dig('effects', 'glow_rebuilds') == first.dig('effects', 'glow_rebuilds'), 'animation rebuilt glow')
+    # Real frames carry the animation; ticks only fill gaps. With pane 2
+    # drawing continuously (as video does), the present rate is what it is
+    # without animation, and almost no frame is animation-only. (On the
+    # owner's machine, with video playing, ticks beside real frames made 42
+    # presents a second instead of 14 and multiplied the late flips.)
+    # Both runs keep a static presentation effect (curvature), so the only
+    # difference is the animation: the presentation pass itself costs time
+    # on a software GPU, and is measured elsewhere.
+    saved!(output => { '1' => { 'glowing_line' => { 'intensity' => 100 }, 'curvature' => { 'amount' => 10 } } })
+    run('pane-display-1-2', "printf '\\033[?25l'; i=0; while :; do i=$((i + 1)); printf '\\033[1;1H%d' $i; sleep 0.004; done")
+    sleep 0.8
+    rate = lambda do
+      a0 = fx.call; sleep 2; a1 = fx.call
+      [(a1['present_calls'] - a0['present_calls']) / 2.0,
+       (a1.dig('effects', 'animation_frames') - a0.dig('effects', 'animation_frames')) / 2.0]
+    end
+    with_line, gap_ticks = rate.call
+    saved!(output => { '1' => { 'curvature' => { 'amount' => 10 } } })
+    sleep 0.5
+    without_line, = rate.call
+    check(with_line >= without_line * 0.85,
+          "animation held real frames back: #{with_line}/s with the line, #{without_line}/s without")
+    check(gap_ticks <= 3, "#{gap_ticks} animation-only frames/s while real frames were flowing")
+    saved!(output => { '1' => { 'glowing_line' => { 'intensity' => 100 } } })
+    flat('pane-display-1-2', B)
+    sleep 0.6
     # The rate setting.
     settings = get('/v1/settings')
     document = settings['document']
@@ -541,6 +567,6 @@ Dir.mktmpdir('blit-presentation-effects') do |root|
   check(sizes.size <= 1, "effects writes passed the panes through other sizes: #{sizes}")
 
   puts "PRESENTATION_EFFECTS_PASS backend=#{GATE_BACKEND} warped_pixels=#{checked} " \
-       "#{GLES ? 'warp=shared glass_scanlines=once glow=bounded,own_pane rgb_shift=exact glowing_line=shape,moves,clock,off_is_free flicker=uniform,varies sync=sways,corners_still jitter=shimmers,mean_holds isolation=pane pointer=warped plain_path=untouched' : 'cpu=unavailable_kept'} " \
+       "#{GLES ? 'warp=shared glass_scanlines=once glow=bounded,own_pane rgb_shift=exact glowing_line=shape,moves,clock,off_is_free,fills_gaps_only flicker=uniform,varies sync=sways,corners_still jitter=shimmers,mean_holds isolation=pane pointer=warped plain_path=untouched' : 'cpu=unavailable_kept'} " \
        'switches=bypass values=kept settings_writes=no_reflow'
 end

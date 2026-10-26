@@ -26,6 +26,7 @@
 #include <netinet/in.h>
 #include <grp.h>
 #include <pwd.h>
+#include <poll.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdarg.h>
@@ -1026,6 +1027,11 @@ typedef struct {
     int effects_animation_hz_configured;
     uint32_t animation_due;
     uint64_t animation_next_us[BLIT_MAX_DISPLAYS];
+    /* When each output last presented anything, read from its KMS present
+       count: a tick only fills a gap, never competes with real frames for
+       the flip. */
+    uint64_t output_presented_us[BLIT_MAX_DISPLAYS];
+    unsigned long long output_present_calls[BLIT_MAX_DISPLAYS];
     uint64_t kms_lead_us[BLIT_MAX_DISPLAYS];
     unsigned long long kms_late_seen[BLIT_MAX_DISPLAYS];
     unsigned long long kms_on_time_seen[BLIT_MAX_DISPLAYS];
@@ -17275,7 +17281,33 @@ static void service_session_output(BlitRuntime *runtime, int fd)
     int i;
     uint64_t service_started = monotonic_us();
 
-    received = read(fd, output, sizeof(output) - 1);
+    /* A PTY hands over at most one 4 KiB line-discipline buffer per read, so
+       a single read made a pass of the loop per 4 KiB: a 6.4 MB video frame
+       took about 1,560 passes, which held Hibr's video to about 8 frames a
+       second on the owner's machine. Fill the buffer from what is already
+       queued instead; the work per pass stays bounded by its size. */
+    received = 0;
+    while (received < (ssize_t)sizeof(output) - 1) {
+        ssize_t got;
+        if (received > 0) {
+            /* Only what is already queued: never wait for more, whatever
+               the descriptor's blocking mode. */
+            struct pollfd more = { fd, POLLIN, 0 };
+            if (poll(&more, 1, 0) != 1 || !(more.revents & POLLIN)) break;
+        }
+        got = read(fd, output + received,
+                   sizeof(output) - 1 - (size_t)received);
+        if (got > 0) {
+            received += got;
+            continue;
+        }
+        if (got < 0 && errno == EINTR) continue;
+        /* Queue drained, end of file or an error: report it only when
+           nothing was read, so the data in hand is consumed first and the
+           next pass sees the same condition again. */
+        if (received == 0) received = got;
+        break;
+    }
     if (received < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
         return;
     if (received <= 0) {
@@ -19976,7 +20008,17 @@ static int output_animated(const BlitRuntime *runtime, int output_index)
 /* The frame clock: an animated output is made due at effects_animation_hz.
    It owns its own cadence -- render_pending stays 0 between ticks, so the
    loop does not present every refresh -- and the present goes through the
-   usual schedule, aligned to the vblank and coalescing with real changes. */
+   usual schedule, aligned to the vblank.
+
+   A tick only fills a gap. Real frames (video, a window moving) carry the
+   new phase themselves, since it is read from the clock each frame. Ticks
+   at arbitrary moments added flips beside them: on the owner's machine,
+   with video playing, 42 presents a second instead of 14 and late flips
+   up from under one a second to four or five, delaying real frames and the
+   pointer. So an output is ticked only when it has presented nothing for a
+   whole period, and never inside a quiet window or a Hibr frame barrier,
+   where real content is on its way. */
+
 static void effects_animation_tick(BlitRuntime *runtime, uint64_t now)
 {
     uint64_t period = 1000000ULL / (uint64_t)(runtime->effects_animation_hz > 0 ?
@@ -19991,12 +20033,19 @@ static void effects_animation_tick(BlitRuntime *runtime, uint64_t now)
         }
         if (runtime->animation_next_us[i] != 0 && now < runtime->animation_next_us[i])
             continue;
+        if (now - runtime->output_presented_us[i] < period ||
+            now < runtime->terminal_frame_quiet_until_us ||
+            hibr_frame_barrier_active(runtime, now)) {
+            /* Real frames are flowing, or about to: look again a period
+               after the last one. */
+            runtime->animation_next_us[i] = runtime->output_presented_us[i] + period;
+            if (runtime->animation_next_us[i] <= now) runtime->animation_next_us[i] = now + period / 4;
+            continue;
+        }
         runtime->animation_due |= bit;
         runtime->render_pending = 1;
         if (runtime->render_next_us[i] > now) runtime->render_next_us[i] = now;
-        runtime->animation_next_us[i] =
-            runtime->animation_next_us[i] == 0 || now - runtime->animation_next_us[i] > period ?
-            now + period : runtime->animation_next_us[i] + period;
+        runtime->animation_next_us[i] = now + period;
     }
 }
 
@@ -28726,15 +28775,28 @@ int main(int argc, char **argv)
             (output_mask = due_output_mask(&runtime, now)) != 0) {
             int hold_scene = now < runtime.terminal_frame_quiet_until_us ||
                 hibr_frame_barrier_active(&runtime, now);
-            /* Inside a quiet window only the pointer -- and, ADR 0188, an
-               animation tick -- may present; both with the scene held. */
+            /* Inside a quiet window only the pointer may present, with the
+               scene held. (Animation ticks never fire inside one.) */
             if (hold_scene)
-                output_mask &= runtime.pointer_dirty_outputs | runtime.animation_due;
+                output_mask &= runtime.pointer_dirty_outputs;
             if (output_mask != 0) {
                 blit_vt_phase("render: compose and present outputs");
                 blit_kms_request_animation(runtime.kms, runtime.animation_due & output_mask);
                 runtime.animation_due &= ~output_mask;
                 render_current_surfaces(&runtime, output_mask, hold_scene);
+                for (i = 0; i < runtime.output_count && i < BLIT_MAX_DISPLAYS; ++i) {
+                    int display_index = display_index_for_output(&runtime, i);
+                    BlitKmsDisplayInfo kms_info;
+                    if (!(output_mask & (1U << i)) || display_index < 0 ||
+                        blit_kms_display_info(runtime.kms, display_index, &kms_info) != 0)
+                        continue;
+                    /* Only a real present counts: an unchanged output is
+                       not presented, and must not hold the clock back. */
+                    if (kms_info.present_calls != runtime.output_present_calls[i]) {
+                        runtime.output_present_calls[i] = kms_info.present_calls;
+                        runtime.output_presented_us[i] = now;
+                    }
+                }
                 blit_vt_phase("loop: after render");
                 if (!hold_scene)
                     runtime.terminal_frame_quiet_until_us = 0;

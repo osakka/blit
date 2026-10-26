@@ -177,3 +177,27 @@ row, A/B on the hum bar alone:
   was making anyway. In all, about 19 ms of GPU per second, roughly 2%.
 - With the line off, `animation_hz` is 0 and no animation frames are made.
 
+
+### Amended in 0.2.33: ticks only fill gaps
+
+Measured on the owner's machine with video playing (0.2.32):
+- **With the animated effects on:** 42 presents a second, 28 of them
+  animation-only, and 4 to 5 late flips a second.
+- **With them off:** 14 presents a second and under one late flip.
+
+The video's own rate did not change; that was ADR 0192's ceiling. But the
+extra flips delayed real frames and the pointer.
+
+Real frames already carry the phase, which is read from the clock on every
+frame. So now:
+- An output is ticked only when it has presented nothing for a whole
+  period. "Presented" is read from its KMS present count, so an unchanged
+  output that was skipped does not hold the clock back.
+- No tick fires inside a quiet window or a Hibr frame barrier.
+- The quiet-window filter no longer lets ticks through. It is the pointer's
+  alone again.
+
+`presentation_effects_gate` gains `fills_gaps_only`:
+- With a pane drawing continuously and curvature on in both runs, the
+  present rate with the line is at least 85% of the rate without it.
+- At most 3 animation-only frames a second are made.

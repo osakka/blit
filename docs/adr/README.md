@@ -209,6 +209,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0189 — Settings writes never block the main loop; the receipt is unchanged](0189-settings-writes-off-the-loop.md)
 - [0190 — Flicker, horizontal sync and jitter: per-frame randomness from C, on the frame clock](0190-flicker-horizontal-sync-jitter.md)
 - [0191 — Braille is cell geometry; missing symbol blocks come from reviewed Noto sources](0191-braille-and-symbol-coverage.md)
+- [0192 — A session's output is taken in full buffers, not one PTY read per loop pass](0192-terminal-output-in-full-buffers.md)
 
 ## Adding an ADR
 
