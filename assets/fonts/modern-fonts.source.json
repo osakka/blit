@@ -37,7 +37,7 @@
     "source": "Renamed derivative of Nerd Fonts v3.4.0 Hack Mono; full source Unicode and full pinned Nerd catalogue",
     "upstream": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/v3.4.0/patched-fonts/Hack/Regular/HackNerdFontMono-Regular.ttf",
     "upstream_sha256": "03e60d3c1a9f8bef4e1f78836f80aacb9ec005260a6b094f5bfc10043bb115ab",
-    "sha256": "7b0f089431151250322c107d58feed79b8feb4ad35c5e6b33299720bac4ec923",
+    "sha256": "02bd553862e705cde0cb55fa2947c6107052bc361400bdcd56da88b69d159a07",
     "license_file": "licenses/HackNerd-LICENSE.txt",
     "license_sha256": "1f61bb7c790c59b4b0ecdf304628b94e42ae4c8020094a8c3da73381ab212623"
   },
@@ -119,7 +119,7 @@
     "source": "Renamed derivative of Nerd Fonts v3.4.0 3270 Mono; full source Unicode and full pinned Nerd catalogue",
     "upstream": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/v3.4.0/patched-fonts/3270/Regular/3270NerdFontMono-Regular.ttf",
     "upstream_sha256": "3a6f45e14cafdf09bc888529d037f7da2d0c8256f23afbf64b81eb5e3f6deca3",
-    "sha256": "36331874e17041a926bc06a4cbfdf622e2200909e36257a75a24913865cf88af",
+    "sha256": "486a3ecdecd126cc94d8ebbbd123ad6b9475df1a3a34a0b04f5f6a6df1683c14",
     "license_file": "licenses/3270-LICENSE.txt",
     "license_sha256": "ef855fadca28e91a4123f7299bd79dcd78a7e19dfc364039790bb75bdedd515a"
   },
@@ -129,5 +129,84 @@
     "sha256": "e2d10d23f5bff0bd6f0676e9b01d9789fcdc656de7b498a2955c27716ea4439c",
     "unique_codepoints": 10386,
     "intentionally_blank": "U+EC03 cod-blank"
+  },
+  "symbols": {
+    "note": "ADR 0191: codepoints of these blocks the base font lacks, from the first source that has them, at their natural size shrunk only to fit the cell. Braille is cell geometry, not a glyph.",
+    "ranges": [
+      [
+        "2000",
+        "206F"
+      ],
+      [
+        "2190",
+        "21FF"
+      ],
+      [
+        "2200",
+        "22FF"
+      ],
+      [
+        "2300",
+        "23FF"
+      ],
+      [
+        "2600",
+        "26FF"
+      ],
+      [
+        "2700",
+        "27BF"
+      ],
+      [
+        "27F0",
+        "27FF"
+      ],
+      [
+        "2900",
+        "297F"
+      ],
+      [
+        "2980",
+        "29FF"
+      ],
+      [
+        "2B00",
+        "2BFF"
+      ],
+      [
+        "1FB00",
+        "1FBFF"
+      ]
+    ],
+    "sources": [
+      {
+        "file": "NotoSansSymbols2-Regular.ttf",
+        "upstream": "https://raw.githubusercontent.com/google/fonts/7b6724ac7ececc713e9ba93af309f7520c9a80a3/ofl/notosanssymbols2/NotoSansSymbols2-Regular.ttf",
+        "upstream_sha256": "7d5fb73b7ca67a6798101741f5d280a3d016a56a197afcd4199dbb57b4b82a21",
+        "license_file": "licenses/NotoSansSymbols2-OFL.txt",
+        "license_sha256": "b118dd41337806a5d4797052c77caf3bd096aed783e5eb21b4d11154351e1ac0"
+      },
+      {
+        "file": "NotoSansSymbols-Regular.ttf",
+        "upstream": "https://raw.githubusercontent.com/google/fonts/caa8c83707a5797d62fd02f14301391986f21d75/ofl/notosanssymbols/NotoSansSymbols%5Bwght%5D.ttf",
+        "upstream_sha256": "f7e7e04b4a24b6c78893d50cbfd2b2f6cae49617ab047bfef668d252adb128f7",
+        "license_file": "licenses/NotoSansSymbols-OFL.txt",
+        "license_sha256": "b118dd41337806a5d4797052c77caf3bd096aed783e5eb21b4d11154351e1ac0"
+      },
+      {
+        "file": "NotoSansMath-Regular.ttf",
+        "upstream": "https://raw.githubusercontent.com/google/fonts/dbd1ab6e65dc59bcda3ca8de9fd372f58f98e0af/ofl/notosansmath/NotoSansMath-Regular.ttf",
+        "upstream_sha256": "3f495fe933c06786e4d5f6d86b8ee70b6753a68ee3b9d87528726de0f6e2c47d",
+        "license_file": "licenses/NotoSansMath-OFL.txt",
+        "license_sha256": "c9c63b8ed6cf76b2ce0c58b241acfc1195c2c928334c989c7047cbdac58773d9"
+      },
+      {
+        "file": "NotoSansMono-Regular.ttf",
+        "upstream": "https://raw.githubusercontent.com/google/fonts/a23c2cd328ea51097b6e32d8f9e0241261e2495e/ofl/notosansmono/NotoSansMono%5Bwdth%2Cwght%5D.ttf",
+        "upstream_sha256": "2cb2adb378a8f574213e23df697050b83c54c27df465a2015552740b2769a081",
+        "license_file": "licenses/NotoSansMono-OFL.txt",
+        "license_sha256": "cee9892f9f0cc8fe882c9e9537ee6a89621d86ee7ceaf70b02e2b2b1c25c061a"
+      }
+    ]
   }
 }

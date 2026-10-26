@@ -111,8 +111,10 @@ int main(int argc, char **argv)
             CHECK(blit_raster_get(raster, 'A', 1, &again));
             CHECK(again.width == width && !memcmp(saved, again.pixels, again.stride * again.height));
         }
+        /* ADR 0191: Block Elements are the raster's own cell geometry, not
+           the PSF fallback; the full block still fills the cell exactly. */
         CHECK(blit_raster_get(raster, 0x2588, 1, &block));
-        CHECK(block.fallback && block.format == BLIT_RASTER_COVERAGE);
+        CHECK(!block.fallback && block.format == BLIT_RASTER_COVERAGE);
         for (y = 0; y < size; ++y)
             for (x = 0; x < width; ++x) CHECK(block.pixels[y * block.stride + x] == 255);
         CHECK(blit_raster_get(raster, 0x1f600, 2, &emoji));

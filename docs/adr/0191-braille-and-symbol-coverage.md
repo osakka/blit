@@ -1,6 +1,6 @@
 # ADR 0191: Braille is cell geometry; missing symbol blocks come from reviewed Noto sources
 
-- Status: proposed
+- Status: accepted (2026-10-26; the owner's screen is the last check)
 - Date: 2026-10-26
 - Scope: raster cell geometry, the outline font generator and its manifest,
   both outline profiles (modern, retro)
@@ -91,3 +91,42 @@ codepoints from the same sources, so the two profiles cover the same set.
   every glyph Hack already had is unchanged, outline for outline.
 - **On the owner's screen:** btop's graphs, and Claude Code's ⏺, ⎿ and
   spinner.
+
+## Implementation (0.2.32)
+
+- **Braille:** `draw_braille` in `blit_raster.c`. Dot radius is 0.3 of the
+  smaller dot spacing, not the 0.19 first proposed: at 22 px that gives
+  3.3 px dots with a 2.2 px gap; at 16 px, 2.4 px dots with a 1.6 px gap.
+- **Block Elements too (U+2580–259F):** `draw_block_element`.
+  - They were in `protected_geometry` and so came from the PSF fallback,
+    which lacks the quadrants. Claude Code's logo, ▐▛███▜▌, then drew as
+    `?`.
+  - Halves, eighths, quadrants and shades are now exact cell geometry with
+    one split per axis. On an odd cell the upper and left halves take the
+    larger half, as the bitmap path always drew them.
+- **Symbols:** the generator's `--symbols` takes the manifest's
+  `symbols.sources`, each pinned to a google/fonts commit and verified by
+  SHA-256 along with its OFL licence. It adds:
+  - **Blit Modern Nerd:** 1,418 codepoints;
+  - **Blit Retro Nerd:** 1,336 codepoints.
+  Both bases still reproduce byte for byte without the change, and with it
+  0 of the 11,954 (modern) and 12,480 (retro) existing glyphs changed.
+
+### Evidence
+
+- `braille_gate`, on both compositors at 22 and 16 px: 152 checks of dot
+  centres, gaps, halves, quadrants and shades, with no `?`. The 0.2.30
+  binary fails it at the first dot.
+- **All 21 key Claude Code and Codex symbols** are covered in both
+  profiles.
+- **The font suite passes:** 36 gates, including `font_reference` with the
+  regenerated catalogue. `font_raster_gate` now expects the full block from
+  geometry, not from the fallback.
+
+### Known remainder
+
+A few Hack glyphs overhang the cell, such as the long arrows U+27F5–27FF.
+The raster refuses to clip them and falls back to `?`. Neither Claude Code
+nor Codex uses them. Fitting those few is a follow-up, since it would change
+Hack glyphs.
+

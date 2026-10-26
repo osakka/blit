@@ -1,6 +1,13 @@
 # Verification status
 
-## 2026-10-26: 0.2.32 flicker, horizontal sync and jitter; Braille
+## 2026-10-26: 0.2.32 flicker, horizontal sync and jitter; Braille, blocks and symbols
+
+- **ADR 0191, second half:**
+  - Block Elements are cell geometry, so Claude Code's ▐▛███▜▌ logo draws.
+  - Both outline profiles gain the symbol blocks they lacked, from pinned
+    Noto sources: 1,418 codepoints in Modern, 1,336 in Retro, with no
+    existing glyph changed. That covers ⏺ ⎿ ⏵ ✻ ✶ ✳ ✢ ✓ ✗ ⚠ ⋮ ⧉ ※ ⌘ ⌥.
+  - The font suite passes (36 gates).
 
 - **ADR 0191, first half: Braille is cell geometry.** btop's graphs showed
   `?`. It sends real Braille, and Blit Modern Nerd has none of the 256. Dots

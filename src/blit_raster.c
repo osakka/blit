@@ -304,6 +304,48 @@ static int protected_geometry(uint32_t scalar)
         (scalar >= 0x2800 && scalar <= 0x28ff);
 }
 
+/* ADR 0191: Block Elements (U+2580-259F) are cell geometry too -- halves,
+   eighths, quadrants and shades, with every edge on a whole pixel so
+   neighbouring cells meet without a seam (Claude Code's logo is ▐▛███▜▌).
+   The PSF fallback they used to come from lacks the quadrants, which then
+   drew as '?'. Returns 0 for a codepoint outside the block. */
+static int draw_block_element(uint32_t scalar, RasterEntry *entry)
+{
+    /* Quadrant masks: bit 0 upper left, 1 upper right, 2 lower left,
+       3 lower right; for U+2596-259F. */
+    static const unsigned char quadrants[10] = { 4, 8, 1, 13, 9, 7, 11, 2, 6, 14 };
+    int x, y, w = entry->glyph.width, h = entry->glyph.height;
+    int x0 = 0, x1 = w, y0 = 0, y1 = h, mask = 0, shade = 255;
+    /* One split per axis, shared by the halves, the eighths and the
+       quadrants: the left and upper halves take the larger half of an odd
+       cell, as the bitmap path always drew them. */
+    int hx = (w + 1) / 2, hy = (h + 1) / 2;
+    if (scalar == 0x2580) y1 = hy;
+    else if (scalar >= 0x2581 && scalar <= 0x2588)
+        y0 = h - (int)(((long)h * (long)(scalar - 0x2580)) / 8);
+    else if (scalar >= 0x2589 && scalar <= 0x258f)
+        x1 = (int)(((long)w * (long)(0x2590 - scalar) + 4) / 8);
+    else if (scalar == 0x2590) x0 = hx;
+    else if (scalar >= 0x2591 && scalar <= 0x2593) shade = (int)(scalar - 0x2590) * 64;
+    else if (scalar == 0x2594) y1 = (h + 4) / 8;
+    else if (scalar == 0x2595) x0 = w - (w + 4) / 8;
+    else if (scalar >= 0x2596 && scalar <= 0x259f) mask = quadrants[scalar - 0x2596];
+    else return 0;
+    if (y1 < 1) y1 = 1;
+    if (x1 < 1) x1 = 1;
+    for (y = 0; y < h; ++y) for (x = 0; x < w; ++x) {
+        int on;
+        if (mask) {
+            int bit = (y >= hy ? 2 : 0) + (x >= hx ? 1 : 0);
+            on = (mask >> bit) & 1;
+        } else {
+            on = x >= x0 && x < x1 && y >= y0 && y < y1;
+        }
+        entry->pixels[y * entry->glyph.stride + x] = on ? (unsigned char)shade : 0;
+    }
+    return 1;
+}
+
 /* ADR 0191: Braille (U+2800-28FF) is cell geometry, as terminals draw it --
    a font's dots rarely land on the cell grid, and graphs then show gaps.
    2 columns x 4 rows: bits 0-2 are dots 1-3 down the left column, bits 3-5
@@ -644,6 +686,10 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *key,
     } else if (key->length == 1 && scalar >= 0x2800 && scalar <= 0x28ff &&
                next.glyph.format == BLIT_RASTER_COVERAGE) {
         draw_braille(scalar, &next); result = 1;
+    } else if (key->length == 1 && scalar >= 0x2580 && scalar <= 0x259f &&
+               next.glyph.format == BLIT_RASTER_COVERAGE &&
+               draw_block_element(scalar, &next)) {
+        result = 1;
     } else if (key->length == 1 && invisible_format(scalar)) result = 1;
     else if (next.glyph.format == BLIT_RASTER_RGBA_PREMULTIPLIED && !outline_colour)
         result = draw_colour_glyph(raster, colour_index, &next);

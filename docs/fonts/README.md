@@ -32,8 +32,8 @@ These are asset cmap counts, not glyph counts, application coverage or effective
 
 | Face role | Asset | Mapped scalars |
 | --- | --- | ---: |
-| modern | `BlitModernNerd-Regular.ttf` | 11954 |
-| retro | `BlitRetroNerd-Regular.ttf` | 12480 |
+| modern | `BlitModernNerd-Regular.ttf` | 13372 |
+| retro | `BlitRetroNerd-Regular.ttf` | 13816 |
 | arabic-modern | `BlitArabicModern.ttf` | 4160 |
 | arabic-retro | `BlitArabicRetro.ttf` | 1561 |
 | colour-emoji | `NotoColorEmoji.ttf` | 1510 |

@@ -99,8 +99,43 @@ Dir.mktmpdir('blit-braille') do |root|
       end
       request('DELETE', "/v1/terminal-sessions/#{session['id']}")
       sleep 0.3
+
+      # Block Elements are cell geometry too: halves, quadrants (Claude
+      # Code's logo is ▐▛███▜▌), the full block and the shades. Each is
+      # sampled a quarter in from the cell's sides: [left/right, top/bottom].
+      blocks = { 0x2580 => [[1, 1], [0, 0]], 0x2584 => [[0, 0], [1, 1]], 0x258C => [[1, 0], [1, 0]],
+                 0x2590 => [[0, 1], [0, 1]], 0x259B => [[1, 1], [1, 0]], 0x259C => [[1, 1], [0, 1]],
+                 0x2598 => [[1, 0], [0, 0]], 0x259D => [[0, 1], [0, 0]], 0x2596 => [[0, 0], [1, 0]],
+                 0x2597 => [[0, 0], [0, 1]], 0x2588 => [[1, 1], [1, 1]] }
+      line = blocks.keys.map { |cp| [cp].pack('U') }.join(' ') + ' ' + [0x2591, 0x2592, 0x2593].pack('U*')
+      code, session = request('POST', '/v1/terminal-sessions',
+                              { command: '/bin/sh', display_id: 'display-1',
+                                arguments: ['-c', "printf '\\033[?25l\\033[38;2;255;255;255;48;2;0;0;0m\\033[2J\\033[2;3H#{line}'; sleep 600"] })
+      check(code == 201, "block session -> #{code}")
+      sleep 1.0
+      shot = GateBmp.new(Net::HTTP.get(BASE + '/v1/diagnostics/screenshots/display-1'))
+      blocks.each_with_index do |(cp, (top, bottom)), index|
+        x0 = grid['origin_x'] + (2 + index * 2) * cw
+        y0 = grid['origin_y'] + ch
+        [[top, cw / 4, ch / 4], [bottom, cw / 4, 3 * ch / 4]].each do |(left_on, right_on), _, py|
+          [[left_on, cw / 4], [right_on, 3 * cw / 4]].each do |on, px|
+            v = shot.pixel(x0 + px, y0 + py).max
+            want = on == 1 ? 'lit' : 'dark'
+            check(on == 1 ? v >= 200 : v <= 30,
+                  "#{size}px U+#{cp.to_s(16).upcase} is not #{want} at #{px},#{py} of its cell (#{v})")
+            checked += 1
+          end
+        end
+      end
+      x0 = grid['origin_x'] + (2 + blocks.size * 2) * cw
+      [[0, 64], [1, 128], [2, 192]].each do |i, level|
+        v = shot.pixel(x0 + i * cw + cw / 2, grid['origin_y'] + ch + ch / 2).max
+        check((v - level).abs <= 12, "#{size}px shade U+#{(0x2591 + i).to_s(16).upcase} is #{v}, expected about #{level}")
+      end
+      request('DELETE', "/v1/terminal-sessions/#{session['id']}")
+      sleep 0.3
     end
-    puts "BRAILLE_PASS backend=#{GATE_BACKEND} sizes=22,16 dots_checked=#{checked} gaps=dark fallback=none"
+    puts "BRAILLE_PASS backend=#{GATE_BACKEND} sizes=22,16 cells_checked=#{checked} braille_gaps=dark blocks=halves,quadrants,shades fallback=none"
   ensure
     Process.kill('TERM', pid) rescue nil
     Process.wait(pid) rescue nil

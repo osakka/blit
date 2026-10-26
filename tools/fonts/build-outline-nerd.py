@@ -15,11 +15,15 @@ from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.pens.transformPen import TransformPen
 from fontTools.svgLib.path import parse_path
 from fontTools.colorLib.builder import buildCOLR, buildCPAL
+from fontTools.pens.recordingPen import DecomposingRecordingPen
+from fontTools.pens.boundsPen import BoundsPen
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--profile', choices=['modern', 'retro'], required=True)
 parser.add_argument('source', type=Path)
 parser.add_argument('output', type=Path)
+parser.add_argument('--symbols', type=Path, required=True,
+                    help="directory holding the manifest's reviewed symbol sources (ADR 0191)")
 args = parser.parse_args()
 root = Path(__file__).resolve().parents[2]
 manifest = json.loads((root / 'assets/fonts/modern-fonts.source.json').read_text())
@@ -133,6 +137,62 @@ for icon in custom_catalogue['icons'] + custom_catalogue.get('text_glyphs', []):
         for table in font['cmap'].tables:
             if table.isUnicode():
                 table.cmap[alias] = alias_name
+# ADR 0191: the symbol blocks the base font lacks -- Claude Code's and
+# Codex's markers and spinners, btop's arrows -- from reviewed Noto sources,
+# the first that has each codepoint. Never a codepoint the base font has:
+# its text keeps its look. At natural size (source units scaled to ours),
+# shrunk only to fit the advance and the line, centred in the advance.
+# Braille is cell geometry, drawn by Blit's raster, not taken here.
+symbols = manifest['symbols']
+symbol_sources = []
+for entry in symbols['sources']:
+    path = args.symbols / entry['file']
+    if hashlib.sha256(path.read_bytes()).hexdigest() != entry['upstream_sha256']:
+        raise SystemExit(f'unreviewed symbol source: {entry["file"]}')
+    licence = custom_root / entry['license_file']
+    if hashlib.sha256(licence.read_bytes()).hexdigest() != entry['license_sha256']:
+        raise SystemExit(f'unreviewed symbol licence: {entry["license_file"]}')
+    source_font = TTFont(path, recalcTimestamp=False)
+    symbol_sources.append((source_font.getBestCmap(), source_font.getGlyphSet(),
+                           source_font['head'].unitsPerEm))
+units = font['head'].unitsPerEm
+ascent, descent = font['hhea'].ascent, font['hhea'].descent
+added = 0
+for low, high in symbols['ranges']:
+    for cp in range(int(low, 16), int(high, 16) + 1):
+        if cp in cmap or 0x2800 <= cp <= 0x28ff:
+            continue
+        for source_cmap, source_glyphs, source_units in symbol_sources:
+            if cp in source_cmap:
+                break
+        else:
+            continue
+        recording = DecomposingRecordingPen(source_glyphs)
+        source_glyphs[source_cmap[cp]].draw(recording)
+        bounds = BoundsPen(None)
+        recording.replay(bounds)
+        if bounds.bounds is None:
+            continue
+        base = units / source_units
+        x_min, y_min, x_max, y_max = (v * base for v in bounds.bounds)
+        fit = min(1.0, advance * .9 / max(1.0, x_max - x_min),
+                  (ascent - descent) * .95 / max(1.0, y_max - y_min))
+        centre = (y_min + y_max) / 2
+        ty = centre * (1 - fit)
+        top, bottom = fit * y_max + ty, fit * y_min + ty
+        if top > ascent:
+            ty -= top - ascent
+        elif bottom < descent:
+            ty += descent - bottom
+        tx = advance / 2 - fit * (x_min + x_max) / 2
+        pen = TTGlyphPen(None)
+        recording.replay(TransformPen(pen, (base * fit, 0, 0, base * fit, tx, ty)))
+        name = 'blit.sym.%04X' % cp
+        store_glyph(name, pen.glyph())
+        for table in font['cmap'].tables:
+            if table.isUnicode() and (cp <= 0xffff or table.format in (12, 13)):
+                table.cmap[cp] = name
+        added += 1
 font.setGlyphOrder(order)
 font['COLR'] = buildCOLR(layers, version=0, glyphMap=font.getReverseGlyphMap())
 font['CPAL'] = buildCPAL([palette])
@@ -147,4 +207,4 @@ for entry in font['name'].names:
         entry.string = names[entry.nameID].encode(entry.getEncoding())
 font.save(args.output, reorderTables=True)
 print(f'OUTLINE_NERD_BUILD_PASS profile={args.profile} icons={len(icons)} '
-      f'menu=U+270E sha256={hashlib.sha256(args.output.read_bytes()).hexdigest()}')
+      f'symbols={added} menu=U+270E sha256={hashlib.sha256(args.output.read_bytes()).hexdigest()}')
