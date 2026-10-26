@@ -1,5 +1,23 @@
 # Verification status
 
+## 2026-10-26: 0.2.31 session output capture; a base64 fix
+
+- `POST/GET/DELETE /v1/terminal-sessions/{id}/output-capture`: a bounded,
+  explicitly armed capture of a session's raw PTY output (at most 120 s and
+  2 MiB, base64, with timed reads). It was asked for by the Hibr session, to
+  see the bytes behind the face-coloured fill that p1 gets when the desktop
+  restarts.
+- **`base64_encode` padded by the read index, not the group size.** A full
+  last group lost its final character, and a single trailing byte got one
+  `=` too few. Its only caller until now, the 20-byte WebSocket accept key,
+  ends in two bytes, the one case it got right.
+
+Gates:
+- `output_capture_gate` (new): the exact bytes in order, timed reads,
+  truncation at `max_bytes`, `DELETE` frees, 400 and 404 refusals.
+- The WebSocket gates `stream_replay`, `input_stream_text`,
+  `audio_device_api` and `pixel_frame` pass with the corrected encoder.
+
 ## 2026-10-26: 0.2.30 settings saves off the main loop; RGB shift
 
 - **ADR 0189.** The owner's 11:23 restart on 0.2.28 was the console

@@ -1525,6 +1525,81 @@ paths:
                 $ref: '#/components/schemas/TerminalInputReceipt'
         default:
           $ref: '#/components/responses/Problem'
+  /v1/terminal-sessions/{session_id}/output-capture:
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+    post:
+      tags: [diagnostics]
+      operationId: armOutputCapture
+      summary: Capture the session's raw PTY output for a while
+      description: >-
+        Records the bytes the session's program writes, exactly as they
+        arrive and before the terminal parser, for `seconds` (1-120, default
+        30) or until `max_bytes` (1-2097152, default 1048576). Re-arming
+        replaces an earlier capture. For diagnosing which escape sequences a
+        program sent, which the cell snapshot cannot show. The bytes can
+        contain anything the program printed.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                seconds: {type: integer, minimum: 1, maximum: 120}
+                max_bytes: {type: integer, minimum: 1, maximum: 2097152}
+      responses:
+        '202':
+          description: Armed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [state, seconds, max_bytes]
+                properties:
+                  state: {type: string, enum: [armed]}
+                  seconds: {type: integer}
+                  max_bytes: {type: integer}
+        default:
+          $ref: '#/components/responses/Problem'
+    get:
+      tags: [diagnostics]
+      operationId: getOutputCapture
+      summary: Read the captured output
+      responses:
+        '200':
+          description: >-
+            The capture so far. `reads` lists each PTY read as [byte offset,
+            milliseconds since arming].
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [state, bytes, truncated, reads, data_base64]
+                properties:
+                  state: {type: string, enum: [none, armed, complete]}
+                  bytes: {type: integer, minimum: 0}
+                  truncated: {type: boolean}
+                  reads:
+                    type: array
+                    items:
+                      type: array
+                      items: {type: integer, minimum: 0}
+                      minItems: 2
+                      maxItems: 2
+                  data_base64: {type: string}
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      tags: [diagnostics]
+      operationId: deleteOutputCapture
+      summary: Free the capture
+      responses:
+        '204':
+          description: Freed
+        default:
+          $ref: '#/components/responses/Problem'
   /v1/terminal-sessions/{session_id}/graphics:
     parameters:
       - $ref: '#/components/parameters/SessionId'

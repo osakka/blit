@@ -1154,6 +1154,18 @@ Failure after rename but before directory sync means durability is unconfirmed,
 not that the old file is guaranteed still present. Failed background writes
 retry at the coalescing interval, not every event-loop turn.
 
+### Output capture
+
+`POST /v1/terminal-sessions/{id}/output-capture` records a session's raw PTY
+output for diagnosis: the bytes exactly as the program wrote them, before
+the terminal parser, for up to 120 s and at most 2 MiB. `GET` returns them
+as base64, with each read's byte offset and time since arming. `DELETE`
+frees the capture, as does closing the session. The cell snapshot shows the
+result; the capture shows the sequence that produced it, such as a clear
+arriving while a background colour was set. It can contain anything the
+program printed, so it requires the API token like every endpoint, and is
+only recorded while armed.
+
 ## Terminal surfaces and atomic updates
 
 The surface cell snapshot is authoritative. Use `GET /v1/surfaces/{id}/summary`

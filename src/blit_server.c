@@ -935,6 +935,16 @@ typedef struct {
     unsigned long graphics_rejected;
     unsigned long graphics_evicted;
     char graphics_last_error[64];
+    /* A diagnostic capture of this session's raw PTY output, armed with
+       POST .../output-capture and read with GET: the bytes exactly as they
+       arrived, before the parser, with each read's offset and time. Bounded,
+       explicit, and freed on read-out (DELETE) or with the session. */
+    unsigned char *capture;
+    size_t capture_length, capture_capacity;
+    uint64_t capture_started_us, capture_until_us;
+    unsigned capture_reads;
+    unsigned (*capture_index)[2];       /* {offset, milliseconds since start} */
+    int capture_truncated;
 } BlitSession;
 
 enum {
@@ -16761,9 +16771,49 @@ static void stop_sessions(BlitRuntime *runtime)
     }
 }
 
+#define BLIT_CAPTURE_MAX_BYTES (2U * 1024U * 1024U)
+#define BLIT_CAPTURE_MAX_READS 8192U
+
+static void session_capture_free(BlitSession *session)
+{
+    free(session->capture);
+    free(session->capture_index);
+    session->capture = NULL;
+    session->capture_index = NULL;
+    session->capture_length = session->capture_capacity = 0;
+    session->capture_reads = 0;
+    session->capture_started_us = session->capture_until_us = 0;
+    session->capture_truncated = 0;
+}
+
+/* The bytes of one PTY read, appended while the capture is armed. */
+static void session_capture_append(BlitSession *session, const unsigned char *bytes,
+                                   size_t length)
+{
+    uint64_t now;
+    size_t room;
+    if (session->capture == NULL || length == 0) return;
+    now = monotonic_us();
+    if (now > session->capture_until_us) return;
+    room = session->capture_capacity - session->capture_length;
+    if (length > room || session->capture_reads >= BLIT_CAPTURE_MAX_READS) {
+        session->capture_truncated = 1;
+        if (session->capture_reads >= BLIT_CAPTURE_MAX_READS) return;
+        length = room;
+        if (length == 0) return;
+    }
+    session->capture_index[session->capture_reads][0] = (unsigned)session->capture_length;
+    session->capture_index[session->capture_reads][1] =
+        (unsigned)((now - session->capture_started_us) / 1000ULL);
+    ++session->capture_reads;
+    memcpy(session->capture + session->capture_length, bytes, length);
+    session->capture_length += length;
+}
+
 static void destroy_session(BlitRuntime *runtime, BlitSession *session)
 {
     BlitSurface *surface = find_surface_id(runtime, session->id);
+    session_capture_free(session);
     int had_pane = session->pane_id[0] != '\0';
     char target_id[128];
     int i;
@@ -16917,14 +16967,21 @@ static void base64_encode(const unsigned char *input, size_t length,
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     size_t i = 0, out = 0;
 
+    /* Padding follows how many bytes the group really has: one gives two
+       '=', two give one, three none. (It was computed from the index after
+       reading, which put '=' in place of a full last group's final
+       character; only the 20-byte WebSocket key, ending in two bytes, used
+       it until the output capture.) */
     while (i < length && out + 4 < capacity) {
-        unsigned int a = input[i++];
-        unsigned int b = i < length ? input[i++] : 0;
-        unsigned int c = i < length ? input[i++] : 0;
+        size_t have = length - i >= 3 ? 3 : length - i;
+        unsigned int a = input[i];
+        unsigned int b = have > 1 ? input[i + 1] : 0;
+        unsigned int c = have > 2 ? input[i + 2] : 0;
+        i += have;
         output[out++] = alphabet[(a >> 2) & 63];
         output[out++] = alphabet[((a << 4) | (b >> 4)) & 63];
-        output[out++] = i - 1 < length ? alphabet[((b << 2) | (c >> 6)) & 63] : '=';
-        output[out++] = i < length ? alphabet[c & 63] : '=';
+        output[out++] = have > 1 ? alphabet[((b << 2) | (c >> 6)) & 63] : '=';
+        output[out++] = have > 2 ? alphabet[c & 63] : '=';
     }
     output[out] = '\0';
 }
@@ -17222,6 +17279,9 @@ static void service_session_output(BlitRuntime *runtime, int fd)
         return;
     }
     ++runtime->diagnostic_terminal_reads;
+    for (i = 0; i < BLIT_MAX_SESSIONS; ++i)
+        if (runtime->sessions[i].used && runtime->sessions[i].pty_fd == fd)
+            session_capture_append(&runtime->sessions[i], output, (size_t)received);
     output[received] = '\0';
     json_escape((char *)output, escaped, sizeof(escaped));
     for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
@@ -21898,6 +21958,88 @@ static void handle_request(int fd, BlitRuntime *runtime,
                      "{\"type\":\"frame\",\"frame\":%s}", body);
             broadcast_stream(runtime, event, BLIT_STREAM_FRAMES);
         }
+        return;
+    }
+    if (strncmp(path, "/v1/terminal-sessions/",
+                strlen("/v1/terminal-sessions/")) == 0 &&
+        strlen(path) > 15 && strcmp(path + strlen(path) - 15, "/output-capture") == 0) {
+        char session_path[128];
+        size_t session_path_length = strlen(path) - 15;
+        BlitSession *session;
+        if (session_path_length >= sizeof(session_path)) {
+            send_problem(fd, 404, "Not Found", "session_not_found", "The terminal session does not exist.");
+            return;
+        }
+        memcpy(session_path, path, session_path_length);
+        session_path[session_path_length] = '\0';
+        session = find_session(runtime, session_path);
+        if (session == NULL) {
+            send_problem(fd, 404, "Not Found", "session_not_found", "The terminal session does not exist.");
+            return;
+        }
+        if (strcmp(method, "POST") == 0) {
+            int seconds = 30, max_bytes = 1024 * 1024;
+            if (payload != NULL && payload[0] != '\0') {
+                if (strstr(payload, "\"seconds\"") && !json_int(payload, "seconds", &seconds)) seconds = -1;
+                if (strstr(payload, "\"max_bytes\"") && !json_int(payload, "max_bytes", &max_bytes)) max_bytes = -1;
+            }
+            if (seconds < 1 || seconds > 120 || max_bytes < 1 ||
+                (unsigned)max_bytes > BLIT_CAPTURE_MAX_BYTES) {
+                send_problem(fd, 400, "Bad Request", "invalid_output_capture",
+                             "seconds is 1..120 and max_bytes 1..2097152.");
+                return;
+            }
+            session_capture_free(session);
+            session->capture = malloc((size_t)max_bytes);
+            session->capture_index = calloc(BLIT_CAPTURE_MAX_READS, sizeof(*session->capture_index));
+            if (session->capture == NULL || session->capture_index == NULL) {
+                session_capture_free(session);
+                send_problem(fd, 503, "Service Unavailable", "output_capture_unavailable",
+                             "No memory for the capture.");
+                return;
+            }
+            session->capture_capacity = (size_t)max_bytes;
+            session->capture_started_us = monotonic_us();
+            session->capture_until_us = session->capture_started_us + (uint64_t)seconds * 1000000ULL;
+            snprintf(body, sizeof(body),
+                     "{\"state\":\"armed\",\"seconds\":%d,\"max_bytes\":%d}", seconds, max_bytes);
+            send_http(fd, 202, "Accepted", "application/json", body);
+            return;
+        }
+        if (strcmp(method, "DELETE") == 0) {
+            session_capture_free(session);
+            send_http(fd, 204, "No Content", "application/json", "");
+            return;
+        }
+        if (strcmp(method, "GET") == 0) {
+            size_t used = 0, need;
+            char *reply;
+            unsigned r;
+            const char *state = session->capture == NULL ? "none" :
+                (monotonic_us() <= session->capture_until_us ? "armed" : "complete");
+            need = 256 + (size_t)session->capture_reads * 24 + session->capture_length * 4 / 3 + 8;
+            reply = malloc(need);
+            if (reply == NULL) {
+                send_problem(fd, 503, "Service Unavailable", "output_capture_unavailable", "No memory.");
+                return;
+            }
+            used = (size_t)snprintf(reply, need,
+                "{\"state\":\"%s\",\"bytes\":%zu,\"truncated\":%s,\"reads\":[",
+                state, session->capture_length, session->capture_truncated ? "true" : "false");
+            for (r = 0; r < session->capture_reads; ++r)
+                used += (size_t)snprintf(reply + used, need - used, "%s[%u,%u]", r ? "," : "",
+                                         session->capture_index[r][0], session->capture_index[r][1]);
+            used += (size_t)snprintf(reply + used, need - used, "],\"data_base64\":\"");
+            if (session->capture_length > 0)
+                base64_encode(session->capture, session->capture_length, reply + used, need - used);
+            used += strlen(reply + used);
+            snprintf(reply + used, need - used, "\"}");
+            send_http(fd, 200, "OK", "application/json", reply);
+            free(reply);
+            return;
+        }
+        send_problem(fd, 405, "Method Not Allowed", "method_not_allowed",
+                     "output-capture takes POST, GET and DELETE.");
         return;
     }
     if (strncmp(path, "/v1/terminal-sessions/",
