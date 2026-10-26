@@ -135,3 +135,26 @@ nothing, as ADR 0188 already guarantees.
 - **Free when off:** as ADR 0188.
 - **Determinism:** the C hash gives the same r and g for the same frame
   number. A unit check covers it.
+
+## Implementation (0.2.32)
+
+- **Registry:**
+  - the rows `flicker`, `horizontal_sync` and `jitter`;
+  - `blit_effect_frame_noise`: splitmix64 of the composed-frame count, three
+    lanes;
+  - `blit_effect_flicker`, `blit_effect_horizontal_sync` (scale, frequency,
+    and phase reduced mod 2π) and `blit_effect_jitter` (j²);
+  - `blit_effect_corners_presented`.
+- **Shader:**
+  - sync: one `sin`;
+  - jitter: value noise, four hashes at a `cell_width / 6` px grid,
+    bilinear;
+  - flicker: one multiply;
+  - corners: the shared 8×8 coverage rule at the undisplaced position,
+    evaluated only in the corner squares.
+- **Filtering:** linear when a pane is curved, shifted, swaying or
+  jittered.
+
+Measured evidence on the owner's GPU is still to come; the gates above pass
+on gles, and on native the effects are reported unavailable.
+

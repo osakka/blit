@@ -177,12 +177,34 @@ Dir.mktmpdir('blit-presentation-effects') do |root|
   classes = get('/v1/effects')['available'].to_h { |e| [e['name'], e['class']] }
   check(classes == { 'scanlines' => 'local', 'corners' => 'local',
                      'curvature' => 'presentation', 'glow' => 'presentation',
-                     'rgb_shift' => 'presentation', 'glowing_line' => 'presentation' },
+                     'rgb_shift' => 'presentation', 'glowing_line' => 'presentation',
+                     'flicker' => 'presentation', 'horizontal_sync' => 'presentation',
+                     'jitter' => 'presentation' },
         "effect classes: #{classes}")
   titles = get('/v1/effects')['available'].to_h { |e| [e['name'], e['title']] }
   check(titles['rgb_shift'] == 'RGB shift' && titles['corners'] == 'Corners', "effect titles: #{titles}")
   animated = get('/v1/effects')['available'].select { |e| e['animated'] }.map { |e| e['name'] }
-  check(animated == ['glowing_line'], "animated effects: #{animated}")
+  check(animated == %w[glowing_line flicker horizontal_sync jitter], "animated effects: #{animated}")
+  # ADR 0190's per-frame randomness is a pure function of the frame number.
+  probe = File.join(root, 'noise_probe')
+  File.write("#{probe}.c", <<~C)
+    #include <stdio.h>
+    #include "blit_effects.h"
+    int main(void) {
+        unsigned long long f;
+        for (f = 1; f <= 3; ++f) {
+            double r, g, s, r2, g2, s2;
+            blit_effect_frame_noise(f, &r, &g, &s);
+            blit_effect_frame_noise(f, &r2, &g2, &s2);
+            if (r != r2 || g != g2 || s != s2 || r < 0 || r >= 1 || g < 0 || g >= 1) return 1;
+            printf("%.6f %.6f\n", r, g);
+        }
+        return 0;
+    }
+  C
+  check(system('tcc', '-I', File.join(ROOT, 'src'), "#{probe}.c", '-o', probe), 'noise probe compile')
+  values = `#{probe}`.split("\n")
+  check($?.success? && values.uniq.size == 3, "frame noise is not a deterministic function of the frame: #{values}")
 
   if GLES
     # The plain path: no presentation effects, nothing for the pass to draw.
@@ -398,6 +420,54 @@ Dir.mktmpdir('blit-presentation-effects') do |root|
       check(fx.call.dig('effects', 'animation_hz').zero?, "animation_hz not 0 with the line off (#{off})")
     end
     flat('pane-display-1-2', B)
+
+    # ADR 0190. Flicker: one brightness for the whole pane per frame,
+    # within 1 +- intensity/200, varying between frames. A dark grey, so
+    # nothing clips at +-50%.
+    grey = [60, 60, 60]
+    flat('pane-display-1-1', grey)
+    saved!(output => { '1' => { 'flicker' => { 'intensity' => 100 } } })
+    factors = []
+    8.times do
+      shot = screenshot
+      samples = [[W / 4, PANE_H / 4], [W / 2, PANE_H / 2], [3 * W / 4, 3 * PANE_H / 4]].map { |x, y| shot.pixel(x, y) }
+      check(samples.uniq.size == 1, "flicker is not one brightness across the pane: #{samples}")
+      v = samples[0][0]
+      check(v >= 29 && v <= 91, "flicker took #{grey[0]} to #{v}, outside +-50%")
+      factors << v
+      check(pane2_bytes(shot) == plain_pane2, 'flicker reached pane 2')
+    end
+    check(factors.uniq.size >= 3, "flicker did not vary: #{factors}")
+
+    # Horizontal sync at 100: over stripes, some frames sway (rows displaced
+    # by a sine), some are plain; the corners do not move.
+    stripes('pane-display-1-1')
+    saved!(output => { '1' => { 'corners' => { 'radius_px' => 24 } } })
+    still = pane1(screenshot)
+    saved!(output => { '1' => { 'corners' => { 'radius_px' => 24 }, 'horizontal_sync' => { 'amount' => 100 } } })
+    swayed = plain = 0
+    # The pass draws these corners in float, the scene in integers: within 2.
+    worst = ->(img) { img.each_with_index.map { |row, y| row.each_with_index.map { |px, x| px.zip(still[y][x]).map { |p, q| (p - q).abs }.max }.max }.max }
+    20.times do
+      shot = pane1(screenshot)
+      if worst.call(shot) <= 2 then plain += 1 else swayed += 1 end
+      check(shot[0][0] == [0, 0, 0] && shot[1][2] == [0, 0, 0] && shot[PANE_H - 1][W - 1] == [0, 0, 0],
+            'a corner moved during horizontal sync')
+    end
+    check(swayed >= 2 && plain >= 2, "horizontal sync: #{swayed} swaying frames, #{plain} plain, of 20")
+
+    # Jitter at 100: stripe edges shimmer between frames; the pane's mean
+    # colour holds.
+    saved!(output => { '1' => { 'jitter' => { 'amount' => 100 } } })
+    a = pane1(screenshot)
+    b = pane1(screenshot)
+    edge = (0...PANE_H).count { |y| a[y] != b[y] }
+    check(edge > PANE_H / 4, "jitter changed only #{edge} rows between frames")
+    mean = ->(img) { img.flatten(1).transpose.map { |ch| ch.sum.to_f / ch.size } }
+    m0 = mean.call(striped)
+    m1 = mean.call(a)
+    check(m0.zip(m1).all? { |x, y| (x - y).abs < 6 }, "jitter moved the mean colour: #{m0} -> #{m1}")
+    saved!(output => { '1' => {} })
   else
     # CPU: a saved glowing line is kept, reported unavailable, and costs no
     # frames.
@@ -471,6 +541,6 @@ Dir.mktmpdir('blit-presentation-effects') do |root|
   check(sizes.size <= 1, "effects writes passed the panes through other sizes: #{sizes}")
 
   puts "PRESENTATION_EFFECTS_PASS backend=#{GATE_BACKEND} warped_pixels=#{checked} " \
-       "#{GLES ? 'warp=shared glass_scanlines=once glow=bounded,own_pane rgb_shift=exact glowing_line=shape,moves,clock,off_is_free isolation=pane pointer=warped plain_path=untouched' : 'cpu=unavailable_kept'} " \
+       "#{GLES ? 'warp=shared glass_scanlines=once glow=bounded,own_pane rgb_shift=exact glowing_line=shape,moves,clock,off_is_free flicker=uniform,varies sync=sways,corners_still jitter=shimmers,mean_holds isolation=pane pointer=warped plain_path=untouched' : 'cpu=unavailable_kept'} " \
        'switches=bypass values=kept settings_writes=no_reflow'
 end

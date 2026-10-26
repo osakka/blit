@@ -71,8 +71,10 @@ struct BlitGles {
     GLint present_target, present_scene, present_glow, present_scene_size;
     GLint present_rect, present_k, present_scan, present_gain, present_glow_size;
     GLint present_shift, present_line, present_phase;
+    GLint present_flick, present_sync, present_jit, present_corner;
     void (*Uniform1f)(GLint, GLfloat);
     void (*Uniform4f)(GLint, GLfloat, GLfloat, GLfloat, GLfloat);
+    void (*Uniform3f)(GLint, GLfloat, GLfloat, GLfloat);
     void (*GetShaderPrecisionFormat)(GLenum, GLenum, GLint *, GLint *);
 
     PFNEGLGETPROCADDRESSPROC GetProcAddress;
@@ -463,6 +465,29 @@ static void gles_build_present(BlitGles *gles)
         "uniform float shift;\n"
         "uniform float line;\n"
         "uniform float phase;\n"
+        "uniform float flick;\n"
+        "uniform vec3 sync;\n"
+        "uniform vec4 jit;\n"
+        "uniform float corner;\n"
+        "float hash(vec2 q) { return fract(sin(dot(q, vec2(12.9898, 78.233)) + jit.w) * 43758.5453); }\n"
+        "vec2 vnoise(vec2 q) {\n"
+        "  vec2 i = floor(q), f = q - i;\n"
+        "  vec2 a = vec2(hash(i), hash(i + vec2(17.0, 31.0)));\n"
+        "  vec2 b = vec2(hash(i + vec2(1.0, 0.0)), hash(i + vec2(18.0, 31.0)));\n"
+        "  vec2 c = vec2(hash(i + vec2(0.0, 1.0)), hash(i + vec2(17.0, 32.0)));\n"
+        "  vec2 d = vec2(hash(i + vec2(1.0, 1.0)), hash(i + vec2(18.0, 32.0)));\n"
+        "  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);\n"
+        "}\n"
+        "float cover(vec2 local) {\n"
+        "  float outside = 0.0;\n"
+        "  for (int sy = 0; sy < 8; ++sy)\n"
+        "    for (int sx = 0; sx < 8; ++sx) {\n"
+        "      vec2 q = 16.0 * local + 2.0 * vec2(float(sx), float(sy)) + 1.0;\n"
+        "      vec2 d = 16.0 * corner - q;\n"
+        "      if (d.x > 0.0 && d.y > 0.0 && dot(d, d) > 256.0 * corner * corner) outside += 1.0;\n"
+        "    }\n"
+        "  return floor((outside * 255.0 + 32.0) / 64.0) / 255.0;\n"
+        "}\n"
         "void main() {\n"
         "  vec2 q = (pixel - rect.xy) / rect.zw * 2.0 - 1.0;\n"
         "  vec2 s = q * ((1.0 + k * dot(q, q)) / (1.0 + k));\n"
@@ -470,7 +495,9 @@ static void gles_build_present(BlitGles *gles)
         "    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);\n"
         "    return;\n"
         "  }\n"
-        "  vec2 t = s * 0.5 + 0.5;\n"
+        "  vec2 t = s * 0.5 + 0.5, t0 = t;\n"
+        "  if (sync.x > 0.0) t.x += sin(t.y * sync.y + sync.z) * sync.x;\n"
+        "  if (jit.x > 0.0) t += (vnoise(t * rect.zw / jit.z) - 0.5) * jit.xy;\n"
         "  vec2 lo = rect.xy + 0.5, hi = rect.xy + rect.zw - 0.5;\n"
         "  vec2 p = clamp(rect.xy + t * rect.zw, lo, hi);\n"
         "  vec3 c = texture2D(scene, vec2(p.x, scene_size.y - p.y) / scene_size).rgb;\n"
@@ -499,6 +526,13 @@ static void gles_build_present(BlitGles *gles)
         "      c = min(c + vec3(line * u * u * (3.0 - 2.0 * u)), 1.0);\n"
         "    }\n"
         "  }\n"
+        "  c = min(c * flick, 1.0);\n"
+        "  if (corner > 0.0) {\n"
+        "    vec2 local = floor(t0 * rect.zw);\n"
+        "    vec2 m = vec2(local.x < corner ? local.x : rect.z - 1.0 - local.x,\n"
+        "                  local.y < corner ? local.y : rect.w - 1.0 - local.y);\n"
+        "    if (m.x < corner && m.y < corner) c *= 1.0 - cover(m);\n"
+        "  }\n"
         "  if (scan > 0.0 && mod(floor(pixel.y - rect.y), 2.0) > 0.5)\n"
         "    c = floor(c * (255.0 - scan) + 0.5) / 255.0;\n"
         "  gl_FragColor = vec4(c, 1.0);\n"
@@ -509,6 +543,7 @@ static void gles_build_present(BlitGles *gles)
     gles->presents = 0;
     if (!BLIT_LOAD(gles->gl_library, Uniform1f, "glUniform1f") ||
         !BLIT_LOAD(gles->gl_library, Uniform4f, "glUniform4f") ||
+        !BLIT_LOAD(gles->gl_library, Uniform3f, "glUniform3f") ||
         !BLIT_LOAD(gles->gl_library, GetShaderPrecisionFormat,
                    "glGetShaderPrecisionFormat"))
         return;
@@ -545,6 +580,10 @@ static void gles_build_present(BlitGles *gles)
     gles->present_shift = gles->glGetUniformLocation(gles->present_program, "shift");
     gles->present_line = gles->glGetUniformLocation(gles->present_program, "line");
     gles->present_phase = gles->glGetUniformLocation(gles->present_program, "phase");
+    gles->present_flick = gles->glGetUniformLocation(gles->present_program, "flick");
+    gles->present_sync = gles->glGetUniformLocation(gles->present_program, "sync");
+    gles->present_jit = gles->glGetUniformLocation(gles->present_program, "jit");
+    gles->present_corner = gles->glGetUniformLocation(gles->present_program, "corner");
     gles->glGenBuffers(1, &gles->present_buffer);
     while (gles->glGetError() != GL_NO_ERROR) {}
     gles->presents = 1;
@@ -1462,6 +1501,14 @@ void blit_gles_scene_present(BlitGles *gles, BlitGlesScene *scene,
         gles->Uniform1f(gles->present_shift, (GLfloat)pane->shift_px);
         gles->Uniform1f(gles->present_line, (GLfloat)pane->line);
         gles->Uniform1f(gles->present_phase, (GLfloat)pane->phase);
+        gles->Uniform1f(gles->present_flick, (GLfloat)(pane->flicker > 0 ? pane->flicker : 1.0));
+        gles->Uniform3f(gles->present_sync, (GLfloat)pane->sync_scale, (GLfloat)pane->sync_freq,
+                        (GLfloat)pane->sync_phase);
+        gles->Uniform4f(gles->present_jit, (GLfloat)(0.007 * pane->jitter),
+                        (GLfloat)(0.002 * pane->jitter),
+                        (GLfloat)(pane->jitter_cell > 0 ? pane->jitter_cell : 1.0),
+                        (GLfloat)pane->jitter_seed);
+        gles->Uniform1f(gles->present_corner, (GLfloat)pane->corner_radius);
         gles->glUniform2f(gles->present_glow_size,
                           glow ? (GLfloat)glow->quarter_width : 1.0f,
                           glow ? (GLfloat)glow->quarter_height : 1.0f);
@@ -1473,7 +1520,7 @@ void blit_gles_scene_present(BlitGles *gles, BlitGlesScene *scene,
         gles->glBindTexture(GL_TEXTURE_2D, scene->texture);
         /* Under a warp, or between pixels for RGB shift, the mapping is not
            1:1: linear, or glyph edges jag. */
-        if (pane->k > 0 || pane->shift_px > 0) {
+        if (pane->k > 0 || pane->shift_px > 0 || pane->sync_scale > 0 || pane->jitter > 0) {
             gles->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
             gles->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         }
@@ -1487,7 +1534,7 @@ void blit_gles_scene_present(BlitGles *gles, BlitGlesScene *scene,
         gles->glDrawArrays(GL_TRIANGLES, 0, 6);
         ++gles->draw_calls;
         gles->vertices_drawn += 6;
-        if (pane->k > 0 || pane->shift_px > 0) {
+        if (pane->k > 0 || pane->shift_px > 0 || pane->sync_scale > 0 || pane->jitter > 0) {
             gles->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
             gles->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         }

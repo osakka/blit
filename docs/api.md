@@ -717,6 +717,9 @@ apply live, with no restart, and are saved:
 | `glow` | presentation | `intensity` | 0–100 | A soft bloom around bright content, from a blurred copy of the pane |
 | `rgb_shift` | presentation | `amount` | 0–100 | An old set's colour fringe: each channel leans to one side, up to half a cell apart |
 | `glowing_line` | presentation, animated | `intensity` | 0–100 | "Hum bar": a soft band of light sweeping down the pane every 6.7 s (cool-retro-term's glowing line) |
+| `flicker` | presentation, animated | `intensity` | 0–100 | The whole pane brightens or dims a little, at random, each frame (up to ±50% at 100) |
+| `horizontal_sync` | presentation, animated | `amount` | 0–100 | On a random share of frames the picture sways sideways in a sine wave (up to 12% of the width at 100) |
+| `jitter` | presentation, animated | `amount` | 0–100 | A fine shimmer of the sample points; grows with the square of the amount |
 
 - **Order:** effects are applied in a fixed order (scanlines, then corners),
   over the pane's pixel region, beneath the pointer and API overlays.
@@ -749,6 +752,11 @@ apply live, with no restart, and are saved:
   `animation_phase`.
 - **Names:** `GET /v1/effects` gives each effect a `title` for people
   ("RGB shift") beside its key.
+- **Moving effects (ADR 0190):** flicker, horizontal sync and jitter take
+  their randomness from the frame number, so each frame is reproducible. A
+  pane with horizontal sync or jitter has its corners drawn by the
+  presentation pass, so they stay still while the picture sways. Pointer
+  input follows curvature only, never the sway.
 - **Pointer:** under curvature a click reaches the cell the screen shows at
   that point; a click in the black margin reaches the nearest edge cell.
 - **Cost:** each output's render diagnostics report it:

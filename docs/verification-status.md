@@ -1,5 +1,26 @@
 # Verification status
 
+## 2026-10-26: 0.2.32 flicker, horizontal sync and jitter
+
+ADR 0190, the owner's "implement the real ones", read from cool-retro-term's
+`terminal_dynamic` shaders: flicker, horizontal sync and jitter.
+- Animated presentation effects on ADR 0188's clock, with each frame's
+  randomness from its number.
+- A pane with sync or jitter has its corners drawn by the presentation pass,
+  so they stay still.
+
+Gates:
+- `presentation_effects_gate` (gles):
+  - flicker is one brightness per frame across the pane, within ±50%, and
+    varies;
+  - horizontal sync sways some frames and leaves others plain, with the
+    corners still;
+  - jitter shimmers stripe edges while the mean holds;
+  - the noise is deterministic per frame (a C probe).
+- `terminal_conformance` expects the nine effects and their classes.
+- `pane_effects_gate` (native) trips only its CPU budget at load around 6,
+  as the 0.2.30 binary does at the same load.
+
 ## 2026-10-26: 0.2.31 glowing line; session output capture; a base64 fix
 
 - **ADR 0188, the glowing line:** the first animated effect, and the frame

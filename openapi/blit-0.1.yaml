@@ -3327,6 +3327,24 @@ components:
               minimum: 0
               maximum: 100
               description: Animated (ADR 0188); white light up to 0.2 at 100.
+        flicker:
+          type: object
+          additionalProperties: false
+          required: [intensity]
+          properties:
+            intensity: {type: integer, minimum: 0, maximum: 100}
+        horizontal_sync:
+          type: object
+          additionalProperties: false
+          required: [amount]
+          properties:
+            amount: {type: integer, minimum: 0, maximum: 100}
+        jitter:
+          type: object
+          additionalProperties: false
+          required: [amount]
+          properties:
+            amount: {type: integer, minimum: 0, maximum: 100}
     EffectState:
       type: object
       required: [revision, enabled, available, panes, configure]
@@ -3342,7 +3360,7 @@ components:
             additionalProperties: false
             required: [name, title, parameter, maximum, class, animated]
             properties:
-              name: {type: string, enum: [scanlines, corners, curvature, glow, rgb_shift, glowing_line]}
+              name: {type: string, enum: [scanlines, corners, curvature, glow, rgb_shift, glowing_line, flicker, horizontal_sync, jitter]}
               animated: {type: boolean, description: Driven by the frame clock (ADR 0188).}
               title: {type: string, description: "The effect's name for people, e.g. RGB shift."}
               parameter: {type: string}

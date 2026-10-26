@@ -30,6 +30,9 @@ typedef enum {
     BLIT_EFFECT_GLOW,
     BLIT_EFFECT_RGB_SHIFT,
     BLIT_EFFECT_GLOWING_LINE,
+    BLIT_EFFECT_FLICKER,
+    BLIT_EFFECT_HORIZONTAL_SYNC,
+    BLIT_EFFECT_JITTER,
     BLIT_EFFECT_COUNT
 } BlitEffectId;
 
@@ -63,6 +66,11 @@ static const BlitEffectSpec blit_effect_specs[BLIT_EFFECT_COUNT] = {
        The key is cool-retro-term's name ("glowing line"); the title is the
        owner's, after the real CRT artefact it evokes. */
     { "glowing_line", "intensity", 100, BLIT_EFFECT_PRESENTATION, "Hum bar", 1 },
+    /* ADR 0190, cool-retro-term's moving set: the brightness wavers, the
+       picture sways sideways now and then, and its sample points shimmer. */
+    { "flicker", "intensity", 100, BLIT_EFFECT_PRESENTATION, "Flicker", 1 },
+    { "horizontal_sync", "amount", 100, BLIT_EFFECT_PRESENTATION, "Horizontal sync", 1 },
+    { "jitter", "amount", 100, BLIT_EFFECT_PRESENTATION, "Jitter", 1 },
 };
 
 /* The glowing line (ADR 0188), as cool-retro-term's randomPass: its length,
@@ -145,6 +153,74 @@ static inline double blit_effect_line_value(double phase, double y)
     if (d <= -BLIT_EFFECT_LINE_LENGTH || d >= 0.0) return 0.0;
     u = (d + BLIT_EFFECT_LINE_LENGTH) / BLIT_EFFECT_LINE_LENGTH;
     return u * u * (3.0 - 2.0 * u);
+}
+
+/* ADR 0190: one frame's randomness, from its number, never the clock --
+   cool-retro-term reads two values of a noise texture per frame; this is
+   splitmix64 of the frame number, so a frame's values can be checked. `r`
+   and `g` play the texture's red and green, `seed` jitter's noise seed. */
+static inline double blit_effect_unit(uint64_t x)
+{
+    x += 0x9e3779b97f4a7c15ULL;
+    x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
+    x ^= x >> 31;
+    return (double)(x >> 11) / 9007199254740992.0;
+}
+
+static inline void blit_effect_frame_noise(uint64_t frame, double *r, double *g,
+                                           double *seed)
+{
+    *r = blit_effect_unit(frame * 3U);
+    *g = blit_effect_unit(frame * 3U + 1U);
+    *seed = blit_effect_unit(frame * 3U + 2U);
+}
+
+/* Flicker's brightness for a frame: 1 + (g - 0.5) x flickering. */
+static inline double blit_effect_flicker(const BlitEffectSet *set, double g)
+{
+    int intensity = set->value[BLIT_EFFECT_FLICKER];
+    if (intensity <= 0) return 1.0;
+    return 1.0 + (g - 0.5) * (intensity > 100 ? 100 : intensity) / 100.0;
+}
+
+/* Horizontal sync for a frame, as cool-retro-term: strength = mix(0.05,
+   0.35, h); the picture sways, x += sin(y x freq + phase) x scale, only on
+   frames whose r falls under the strength. `phase` is (seconds x freq) mod
+   2 pi, so no large time reaches the shader. */
+static inline void blit_effect_horizontal_sync(const BlitEffectSet *set, double r,
+                                               double g, double seconds,
+                                               double *scale, double *freq,
+                                               double *phase)
+{
+    int amount = set->value[BLIT_EFFECT_HORIZONTAL_SYNC];
+    double h = amount <= 0 ? 0.0 : (amount > 100 ? 100 : amount) / 100.0;
+    double strength = 0.05 + 0.30 * h, rand = strength - r, turns;
+    *freq = 4.0 + 36.0 * g;
+    *scale = h > 0 && rand > 0 ? rand * strength * h : 0.0;
+    turns = seconds * *freq / 6.283185307179586;
+    *phase = (turns - (double)(long long)turns) * 6.283185307179586;
+}
+
+/* Jitter's largest displacement, as fractions of the pane: (0.007, 0.002)
+   x j^2, since cool-retro-term multiplies by j twice. Its noise grid is
+   cell_width / 6 pixels: cool-retro-term's 1.33 x font scale on an 8 px
+   base cell. */
+static inline double blit_effect_jitter(const BlitEffectSet *set)
+{
+    int amount = set->value[BLIT_EFFECT_JITTER];
+    double j = amount <= 0 ? 0.0 : (amount > 100 ? 100 : amount) / 100.0;
+    return j * j;
+}
+
+/* The one predicate for corners under content-moving effects: a pane with
+   horizontal sync or jitter has its corners applied by the presentation
+   pass, at the undisplaced position, so they stay still while the picture
+   sways; the scene then skips them. */
+static inline int blit_effect_corners_presented(const BlitEffectSet *set, int presented)
+{
+    return presented && set->value[BLIT_EFFECT_CORNERS] > 0 &&
+        (set->value[BLIT_EFFECT_HORIZONTAL_SYNC] > 0 || set->value[BLIT_EFFECT_JITTER] > 0);
 }
 
 /* RGB shift's sample distance in pixels: half a cell at 100, so the fringe

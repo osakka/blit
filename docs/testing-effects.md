@@ -52,6 +52,14 @@ On `gles` it checks:
   cells (samples 2 px apart). Every pixel matches the three-tap rule applied
   to the plain capture; more than a thousand pixels fringe; and with
   curvature too, the tube's outside stays black;
+- **flicker:** over a dark grey pane, every frame has one brightness across
+  the pane, within ±50% at 100, and it varies between frames;
+- **horizontal sync:** over stripes at 100, of 20 frames some sway and some
+  are plain, within 2 of the still picture; the rounded corners never move;
+- **jitter:** stripe edges shimmer between frames while the pane's mean
+  colour holds;
+- **noise:** a small C probe checks that each frame's values are a pure
+  function of its number;
 - **isolation:** pane 2 is unchanged by pane 1's effects;
 - **pointer:** a real SGR mouse report from a session in the curved pane
   names the cell the warp shows under the pointer, including the clamp in the

@@ -431,7 +431,10 @@ static void kms_gles_effects(BlitKms *kms, KmsGlesResources *r,
                 ++r->effect_quads;
             }
         }
-    radius = blit_effect_corner_radius(set, view->effect_width, view->effect_height);
+    /* ADR 0190: under horizontal sync or jitter the presentation pass
+       applies the corners, so they stay still while the picture sways. */
+    radius = blit_effect_corners_presented(set, blit_gles_presents(kms->gles)) ? 0 :
+        blit_effect_corner_radius(set, view->effect_width, view->effect_height);
     if (radius > 0 && (r->corners == 0 || r->corners_radius != radius)) {
         int size = radius * 2, x;
         unsigned char *mask = calloc((size_t)size * (size_t)size, 4);
@@ -738,6 +741,20 @@ static int kms_gles_compose(BlitKms *kms, KmsOutput *output,
         pane->scanline_alpha = blit_effect_scanlines_presented(&view->effects, 1) ?
             blit_effect_scanline_alpha(&view->effects, 1) : 0;
         pane->shift_px = blit_effect_rgb_shift_px(&view->effects, view->cell_width);
+        {
+            /* ADR 0190: this frame's randomness, from its number. */
+            double r, g, seed, seconds = (double)kms_now_us() / 1000000.0;
+            blit_effect_frame_noise(output->info.gles_composed_frames, &r, &g, &seed);
+            pane->flicker = blit_effect_flicker(&view->effects, g);
+            blit_effect_horizontal_sync(&view->effects, r, g, seconds, &pane->sync_scale,
+                                        &pane->sync_freq, &pane->sync_phase);
+            pane->jitter = blit_effect_jitter(&view->effects);
+            pane->jitter_cell = view->cell_width > 0 ? view->cell_width / 6.0 : 1.0;
+            pane->jitter_seed = seed;
+            pane->corner_radius = blit_effect_corners_presented(&view->effects, 1) ?
+                blit_effect_corner_radius(&view->effects, view->effect_width,
+                                          view->effect_height) : 0;
+        }
         pane->line = blit_effect_line_strength(&view->effects);
         pane->phase = blit_effect_line_phase((double)kms_now_us() / 1000000.0);
         if (pane->line > 0) output->info.effects_animation_phase = pane->phase;

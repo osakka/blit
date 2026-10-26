@@ -130,6 +130,14 @@ typedef struct {
     double shift_px;   /* RGB shift's sample distance, 0 none */
     double line;       /* the glowing line's strength, 0 none */
     double phase;      /* the glowing line's phase, 0..1 (blit_effect_line_phase) */
+    /* ADR 0190: this frame's flicker brightness (0 or 1 none), horizontal
+       sync's scale, frequency and phase, jitter's j^2, noise grid (px) and
+       seed, and the corner radius the pass applies itself (0: the scene
+       has the corners). */
+    double flicker;
+    double sync_scale, sync_freq, sync_phase;
+    double jitter, jitter_cell, jitter_seed;
+    double corner_radius;
 } BlitGlesPresentPane;
 /* Inside blit_gles_frame_begin/end, after the scene was composed: rebuild a
    pane's blurred copy from its rectangle of the scene (halved twice). */
