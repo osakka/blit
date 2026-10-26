@@ -640,7 +640,10 @@ static int kms_gles_compose(BlitKms *kms, KmsOutput *output,
     char error[160];
     KmsGlesResources *r = kms_gles_resources(kms);
     BlitGlesPresentPane present[BLIT_KMS_PRESENT_PANES];
-    int v, present_count = 0, scene_changed = 0;
+    /* Panes (by their effect origin) redrawn into the scene this frame, so
+       a pane's glow copy is rebuilt only when that pane changed. */
+    int drawn_x[BLIT_KMS_PRESENT_PANES], drawn_y[BLIT_KMS_PRESENT_PANES];
+    int v, present_count = 0, drawn_count = 0, everything_drawn = 0;
     error[0] = '\0';
     if (r == NULL) {
         kms_gles_detach(kms, output, "no GPU atlas");
@@ -700,14 +703,19 @@ static int kms_gles_compose(BlitKms *kms, KmsOutput *output,
                 }
             }
             kms_gles_view(kms, r, output, view, partial, dx, dy, dx + dw, dy + dh);
-            scene_changed = 1;
+            if (drawn_count < BLIT_KMS_PRESENT_PANES) {
+                drawn_x[drawn_count] = view->effect_x;
+                drawn_y[drawn_count++] = view->effect_y;
+            } else {
+                everything_drawn = 1;
+            }
             output->info.drawn_cells += partial ?
                 (unsigned long long)(dw > 0 ? dw : 0) * (unsigned long long)(dh > 0 ? dh : 0) :
                 (unsigned long long)view->columns * (unsigned long long)view->rows;
         }
         blit_gles_scene_end(kms->gles);
         output->gles_scene_fresh = 0;
-        if (everything) scene_changed = 1;
+        if (everything) everything_drawn = 1;
     }
     /* ADR 0187: panes with presentation effects are drawn again over the
        plain copy by the presentation program; with none, the copy is all. */
@@ -732,8 +740,11 @@ static int kms_gles_compose(BlitKms *kms, KmsOutput *output,
         pane->glow = view->effects.value[BLIT_EFFECT_GLOW] > 0 ?
             BLIT_EFFECT_GLOW_GAIN * (view->effects.value[BLIT_EFFECT_GLOW] > 100 ? 100 :
                                      view->effects.value[BLIT_EFFECT_GLOW]) / 100.0 : 0.0;
-        /* The blurred copy follows the scene: rebuilt only when it changed. */
-        if (pane->glow > 0 && scene_changed &&
+        /* The blurred copy follows the pane: rebuilt only when it changed. */
+        int changed = everything_drawn;
+        for (i = 0; !changed && i < drawn_count; ++i)
+            changed = drawn_x[i] == pane->x && drawn_y[i] == pane->y;
+        if (pane->glow > 0 && changed &&
             blit_gles_scene_glow(kms->gles, output->gles_scene, pane->x, pane->y,
                                  pane->width, pane->height) == 0)
             ++output->info.effects_glow_rebuilds;

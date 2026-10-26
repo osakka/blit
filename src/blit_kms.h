@@ -173,6 +173,9 @@ typedef struct {
 BlitKms *blit_kms_new(BlitFont *font, BlitFont *wide_font);
 int blit_kms_open(BlitKms *kms, char *error, size_t error_capacity);
 int blit_kms_display_count(const BlitKms *kms);
+/* ADR 0187: why presentation effects are not drawn on an output, "" when
+   they are -- without copying its whole display info, for the pointer path. */
+const char *blit_kms_presentation_unavailable(const BlitKms *kms, int index);
 int blit_kms_display_info(const BlitKms *kms, int index,
                           BlitKmsDisplayInfo *info);
 int blit_kms_set_display_position(BlitKms *kms, int index, int x, int y);

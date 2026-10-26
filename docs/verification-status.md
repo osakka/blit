@@ -1,5 +1,46 @@
 # Verification status
 
+## 2026-10-26: 0.2.29 settings writes no longer reflow the panes
+
+Found while tracing the owner's report that Blit restarted once while they
+changed curvature on 0.2.28.
+- **The bug:** every `PUT /v1/settings` reset to the boot font, then
+  re-applied the saved one. Each write was two real font changes: every
+  pane's PTY resized to the boot font's grid and back, every Hibr desktop
+  repainted twice, and the glyph atlas was rebuilt twice. The live Blit
+  Effects pane writes the settings on every slider release.
+- On the owner's Radeon a font change is the #146 stall, which the console
+  watchdog kills. That is the suspected cause of the restart; the journal is
+  asked for to confirm it.
+- **The fix:**
+  - `settings_reset` no longer installs the boot font.
+  - `settings_apply_font` installs, in one step, the document's font, or the
+    boot font when the document names none, or names one that is unavailable
+    or does not fit.
+  - `apply_font_configuration` does nothing when that is already the active
+    font.
+  - `DELETE /v1/settings` installs the boot font through the same path.
+- **Also:**
+  - A pane's glow copy is rebuilt only when that pane was redrawn. On the
+    owner's display it had been rebuilt on more than half of all frames,
+    because a change in either pane rebuilt both.
+  - The pointer path reads an output's presentation availability without
+    copying its display info.
+
+Gates:
+- `presentation_effects_gate` (both compositors): with a saved
+  `blit-modern` profile, ten effects writes leave the grid, the font and
+  every session's geometry unchanged. The shipped 0.2.28 fails this,
+  passing the panes through `12 80` and back to `9 64`. Also, two seconds
+  of drawing in pane 2 rebuild nothing for pane 1's glow.
+- `settings_persistence_gate`: `DELETE` restores the active boot font, not
+  only the document.
+- `display_settings`, `font_api`, `font_identity`, `login_policy`,
+  `pointer_appearance` and `settings_persistence` pass.
+- A 60 s soak on gles, 153 live effects writes with curvature and glow
+  flipping and both panes drawing: no failure, worst write 0.26 s, still on
+  the GPU.
+
 ## 2026-10-26: 0.2.28 curvature, glow and effect switches
 
 ADR 0187 (proposed; accepted once its GPU cost is measured on the owner's

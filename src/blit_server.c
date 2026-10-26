@@ -16562,6 +16562,10 @@ static int apply_font_configuration(BlitRuntime *runtime, const char *path,
          (size_px < BLIT_FONT_SIZE_MIN_PX || size_px > BLIT_FONT_SIZE_MAX_PX ||
           scale_tenths != 0)))
         return 0;
+    /* Already the active font: nothing to rasterise, reflow or redraw. */
+    if (runtime->font.data != NULL && strcmp(path, runtime->font.path) == 0 &&
+        scale_tenths == runtime->font_scale_tenths && size_px == runtime->font_size_px)
+        return 1;
     memset(&candidate, 0, sizeof(candidate));
     if (strcmp(path, runtime->font.path) != 0 &&
         blit_font_load_path(&candidate, path) != 0) {
@@ -19828,12 +19832,9 @@ static int pane_effects_switched_on(const BlitRuntime *runtime, const BlitPane *
 static const char *pane_presentation_unavailable(const BlitRuntime *runtime,
                                                  const BlitPane *pane)
 {
-    static BlitKmsDisplayInfo info;
     int index = display_index_for_id(runtime, pane->display_id);
-    if (runtime->kms == NULL || index < 0 ||
-        blit_kms_display_info(runtime->kms, index, &info) != 0)
-        return "cpu compositor";
-    return info.presentation_unavailable;
+    if (runtime->kms == NULL || index < 0) return "cpu compositor";
+    return blit_kms_presentation_unavailable(runtime->kms, index);
 }
 
 /* GET /v1/effects: what each live pane draws now. They are set through
@@ -20285,6 +20286,9 @@ static void settings_apply_input_device(BlitRuntime *runtime,
                 device->id, problem.detail);
 }
 
+/* Install the font the settings document selects, or the boot font when it
+   selects none (or one that is unavailable or does not fit): one target,
+   installed once, and not at all when it is already the active font. */
 static void settings_apply_font(BlitRuntime *runtime)
 {
     const char *cursor;
@@ -20295,28 +20299,27 @@ static void settings_apply_font(BlitRuntime *runtime)
     int size_px;
 
     runtime->font_configured = 0;
-    if (!runtime->settings_enabled || runtime->settings_document[0] == '\0')
-        return;
-    cursor = json_key_cursor(runtime->settings_document, "font");
-    if (cursor == NULL || !json_object_slice(cursor, configuration,
-                                             sizeof(configuration)))
-        return;
-    if (!json_string(configuration, "font_id", font_id, sizeof(font_id)) ||
-        !font_path_for_id(font_id, path, sizeof(path))) {
-        fprintf(stderr, "blit: stored font selection is not available\n");
-        return;
+    if (runtime->settings_enabled && runtime->settings_document[0] != '\0' &&
+        (cursor = json_key_cursor(runtime->settings_document, "font")) != NULL &&
+        json_object_slice(cursor, configuration, sizeof(configuration))) {
+        if (!json_string(configuration, "font_id", font_id, sizeof(font_id)) ||
+            !font_path_for_id(font_id, path, sizeof(path))) {
+            fprintf(stderr, "blit: stored font selection is not available\n");
+        } else {
+            scale_tenths = runtime->font_scale_tenths;
+            size_px = runtime->font_size_px;
+            if (font_sizing_parse(configuration, &scale_tenths, &size_px) < 0)
+                fprintf(stderr, "blit: stored font size policy is invalid\n");
+            else if (!apply_font_configuration(runtime, path, scale_tenths, size_px))
+                fprintf(stderr, "blit: stored font selection could not be applied\n");
+            else {
+                runtime->font_configured = 1;
+                return;
+            }
+        }
     }
-    scale_tenths = runtime->font_scale_tenths;
-    size_px = runtime->font_size_px;
-    if (font_sizing_parse(configuration, &scale_tenths, &size_px) < 0) {
-        fprintf(stderr, "blit: stored font size policy is invalid\n");
-        return;
-    }
-    if (!apply_font_configuration(runtime, path, scale_tenths, size_px)) {
-        fprintf(stderr, "blit: stored font selection could not be applied\n");
-        return;
-    }
-    runtime->font_configured = 1;
+    apply_font_configuration(runtime, runtime->boot_font_path,
+                             runtime->boot_font_scale_tenths, 0);
 }
 
 static void settings_apply_audio_device(BlitRuntime *runtime,
@@ -20729,8 +20732,11 @@ static int settings_reset(BlitRuntime *runtime, int remove_file)
     }
 
     runtime->settings_document[0] = '\0';
-    apply_font_configuration(runtime, runtime->boot_font_path,
-                             runtime->boot_font_scale_tenths, 0);
+    /* The font is not reset here: settings_apply_font installs the one the
+       new document selects -- the boot font when it selects none -- in one
+       step, and nothing when that is the font already active. Resetting it
+       here first made every settings write two font changes, each one a
+       reflow of every pane and a glyph atlas rebuild. */
     runtime->font_configured = 0;
     runtime->render_interval_ms = runtime->boot_render_interval_ms;
     runtime->pane_columns = runtime->boot_pane_columns;
@@ -21950,6 +21956,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
                                  "Settings reset could not be confirmed durable; live configuration unchanged. Inspect settings storage state.");
                     return;
                 }
+                settings_apply_font(runtime);
                 settings_apply_pane_layout(runtime, old_columns, old_rows);
                 reset_render_schedule(runtime, monotonic_us());
             }

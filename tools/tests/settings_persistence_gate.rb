@@ -541,6 +541,7 @@ Dir.mktmpdir('blit-settings') do |root|
           "topology is the live owner and persists its layout, got #{settings.dig('document', 'server').inspect}")
 
     _, fonts = request('GET', '/v1/fonts')
+    boot_font = fonts.to_h.fetch('active', {}).slice('id', 'scale', 'size_px', 'cell_pixels')
     font_id = fonts.to_h.fetch('profiles', [])
       .find { |profile| profile['available'] }&.fetch('id')
     replacement = {
@@ -622,6 +623,11 @@ Dir.mktmpdir('blit-settings') do |root|
           "diagnostics report the restored render interval, got #{diagnostics.dig('snapshot', 'render').inspect}")
     check(settings.dig('document', 'font') == {},
           "DELETE removes the persisted font choice, got #{settings.dig('document', 'font').inspect}")
+    # And the boot font is active again: a reset is the one settings change
+    # that installs it without the document naming it.
+    _, fonts = request('GET', '/v1/fonts')
+    restored = fonts.to_h.fetch('active', {}).slice('id', 'scale', 'size_px', 'cell_pixels')
+    check(restored == boot_font, "DELETE restores the boot font, got #{restored.inspect}, boot #{boot_font.inspect}")
   end
 end
 

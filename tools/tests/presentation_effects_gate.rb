@@ -80,7 +80,8 @@ end
 
 env = gate_display_env(width: W, height: H).merge(
   'BLIT_PSF_FONT' => FONT, 'BLIT_LOGIN_AUTOSTART' => '0', 'BLIT_EXPECT_DESKTOP' => '0',
-  'BLIT_PANE_LAYOUT' => '1x2', 'BLIT_AUTH_TOKEN' => '')
+  'BLIT_PANE_LAYOUT' => '1x2', 'BLIT_AUTH_TOKEN' => '',
+  'BLIT_FONT_ROOT' => File.join(ROOT, 'assets/fonts'))
 $server = nil
 def start(env)
   $server = spawn(env, BINARY, PORT.to_s, out: File::NULL, err: File::NULL)
@@ -270,6 +271,16 @@ Dir.mktmpdir('blit-presentation-effects') do |root|
                        "#{diff.first(3).map { |px, i| [i % W, PANE_H + i / W, px, plain_pane2[i]] }}")
     rebuilds = get('/v1/diagnostics').dig('render', 'outputs', 0, 'effects', 'glow_rebuilds')
     check(rebuilds.positive?, "glow rebuilds not reported: #{rebuilds}")
+    # A glow copy follows its own pane: two seconds of drawing in pane 2
+    # rebuild nothing for the idle, glowing pane 1.
+    run('pane-display-1-2', "printf '\\033[?25l'; i=0; while :; do i=$((i + 1)); printf '\\033[1;1H%d' $i; sleep 0.05; done")
+    sleep 0.6
+    settled = get('/v1/diagnostics').dig('render', 'outputs', 0, 'effects', 'glow_rebuilds')
+    sleep 2
+    later = get('/v1/diagnostics').dig('render', 'outputs', 0, 'effects', 'glow_rebuilds')
+    check(later == settled, "drawing in pane 2 rebuilt pane 1's glow #{later - settled} times")
+    flat('pane-display-1-2', B)
+    sleep 0.5
   else
     # CPU: kept, reported unavailable, local effects still drawn.
     flat('pane-display-1-1', A)
@@ -307,7 +318,31 @@ Dir.mktmpdir('blit-presentation-effects') do |root|
   code, = save_effects(output => { '1' => on.merge('enabled' => 1) })
   check(code == 400, "a pane switch that is not a boolean -> #{code}")
 
+  # A settings write that leaves the font alone does not touch it: no pane
+  # is resized, so a session sees no SIGWINCH. Writing the whole document
+  # used to reset to the boot font and back -- two reflows of every pane
+  # and two glyph atlas rebuilds per write, on every live effects change.
+  # A saved font profile other than the boot font, as on a real desktop.
+  code, = request('PUT', '/v1/fonts', { font_id: 'blit-modern', size_px: 20 })
+  check(code == 200, "font profile: #{code}")
+  Timeout.timeout(10) { sleep 0.1 until get('/v1/settings').dig('document', 'font', 'size_px') == 20 }
+  before = get('/v1/topology')['panes'].map { |p| p['cell_grid'].values_at('columns', 'rows') }
+  winch = File.join(root, 'winch.txt')
+  run('pane-display-1-2', "trap 'echo W $(stty size) >> #{winch}' WINCH; : > #{winch}; printf '\\033[?25l'; while :; do sleep 0.1; done")
+  # The session's own start-up size kick is not what is measured.
+  sleep 1.5
+  File.write(winch, '')
+  10.times { |i| saved!(output => { '1' => { 'corners' => { 'radius_px' => 10 + i } } }) }
+  sleep 0.5
+  after = get('/v1/topology')['panes'].map { |p| p['cell_grid'].values_at('columns', 'rows') }
+  check(after == before, "effects writes changed the grid: #{before} -> #{after}")
+  check(get('/v1/fonts').dig('active', 'size_px') == 20, 'effects writes changed the font')
+  # Blit's own attach kicks to a new session are not resizes; a font round
+  # trip would show a second geometry in between.
+  sizes = File.read(winch).split("\n").map { |l| l.sub('W ', '') }.uniq
+  check(sizes.size <= 1, "effects writes passed the panes through other sizes: #{sizes}")
+
   puts "PRESENTATION_EFFECTS_PASS backend=#{GATE_BACKEND} warped_pixels=#{checked} " \
-       "#{GLES ? 'warp=shared glass_scanlines=once glow=bounded isolation=pane pointer=warped plain_path=untouched' : 'cpu=unavailable_kept'} " \
-       'switches=bypass values=kept'
+       "#{GLES ? 'warp=shared glass_scanlines=once glow=bounded,own_pane isolation=pane pointer=warped plain_path=untouched' : 'cpu=unavailable_kept'} " \
+       'switches=bypass values=kept settings_writes=no_reflow'
 end

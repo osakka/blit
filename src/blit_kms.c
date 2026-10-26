@@ -1981,6 +1981,12 @@ int blit_kms_display_info(const BlitKms *kms, int index, BlitKmsDisplayInfo *inf
     return 0;
 }
 
+const char *blit_kms_presentation_unavailable(const BlitKms *kms, int index)
+{
+    if (kms == NULL || index < 0 || index >= kms->output_count) return "cpu compositor";
+    return kms_output(kms, index)->info.presentation_unavailable;
+}
+
 uint32_t blit_kms_ready_output_mask(const BlitKms *kms)
 {
     uint32_t mask = 0;
