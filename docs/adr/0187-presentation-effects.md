@@ -89,18 +89,19 @@ What this means:
 The panel shows the amount as a percentage.
 
 **Glow.** Its source is a small blurred copy of each glowing pane:
-- The copy is made by repeated halving, to half size and then to a quarter,
-  optionally once more. Each step is one linear-filtered draw at exactly half
+- Each glowing pane has its own half- and quarter-size textures, so glow
+  never reads another pane.
+- The copy is made by repeated halving, to half size and then to a quarter. Each step is one linear-filtered draw at exactly half
   size, so every output texel is a true 2×2 box of its source. A single 4×
   step would sample only some of the source pixels, and a thin glyph stroke
   could fall between samples and get no glow.
-- Each pane is drawn into its own region of the glow texture, with a black
-  border of one texel, so glow never crosses into a neighbouring pane.
 - The copy is rebuilt only when the scene changed this frame, and only for
   panes with glow above zero.
 
-The shader adds `intensity / 100 × G` times the blurred colour at the same
-warped coordinate, then clamps to white. G is a gain fixed in the registry.
+The shader softens the quarter-size copy with nine taps (1-2-1 weights), so
+glow spreads about 8 px around bright text, not 2. It adds `intensity / 100
+× G` times that blurred colour at the same warped coordinate, then clamps to
+white. The taps run only on glowing panes. G is a gain fixed in the registry.
 The result is a soft, slightly blocky bloom. A separable Gaussian is a later
 option, if the owner wants it smoother.
 
@@ -175,6 +176,18 @@ values are kept, and `GET /v1/effects` reports them under each pane's
 still draw there. This keeps ADR 0186's rule that entries are kept, not
 dropped.
 
+**Switches bypass, they do not dim.** The owner asked for effects to be
+switchable, with no cost while off:
+- `document.effects.enabled` is a master switch, and each pane's entry may
+  carry `"enabled": false`. Both default to on.
+- Off keeps the values, so on brings them back exactly.
+- Off is decided in one place: the server's per-pane effect set is empty for
+  a switched-off pane. The compositors then take exactly the path of a pane
+  that never had effects: no local pass, and no presentation pass. With every
+  pane off, the frame is today's plain copy.
+- `GET /v1/effects` reports both switches, and an empty set for a
+  switched-off pane.
+
 **Cost is bounded and visible.**
 - Budget: the present pass, glow rebuild included, at most 2 ms of GPU time
   at 2560x1440 on the owner's Radeon. Evidence: the existing per-output
@@ -199,8 +212,12 @@ dropped.
 - **Deployment.** This is more per-frame GPU work than anything shipped so
   far. It is not deployed while #146 (the 21→22 px stall on the real GPU) is
   being reproduced, so a stall can be attributed to one change or the other.
-- **Control Panel.** Blit Effects gains Curvature and Glow sliders. On a pane
-  where they are unavailable, it shows the reason.
+- **Control Panel.** The Blit Effects pane applies changes live: a slider
+  when it is let go, a switch at once. It writes the server's current
+  settings with only `effects` replaced, so nothing another pane has staged
+  is saved with it. Its sliders come from `GET /v1/effects`'s list, so
+  Curvature and Glow appear with this release. On a pane where they are
+  unavailable, it shows the reason.
 
 ## Evidence
 

@@ -410,15 +410,20 @@ static void kms_gles_glyph(BlitKms *kms, KmsGlesResources *r,
 /* ADR 0186: a pane's effects over the rectangle kms_gles_view just
    repainted, recorded into the output's scene with the rest of the view so
    they replay with it. The same pixels as apply_view_effects (blit_kms.c). */
+/* At most this many panes per output get the presentation pass. */
+#define BLIT_KMS_PRESENT_PANES 16
+
 static void kms_gles_effects(BlitKms *kms, KmsGlesResources *r,
                              const BlitKmsSurfaceView *view,
                              int x0, int y0, int x1, int y1)
 {
     const BlitEffectSet *set = &view->effects;
     int y, radius, corner;
-    if (!blit_effect_set_active(set) || x1 <= x0 || y1 <= y0) return;
+    if (!blit_effect_set_has(set, BLIT_EFFECT_LOCAL) || x1 <= x0 || y1 <= y0) return;
     blit_gles_clip(kms->gles, x0, y0, x1 - x0, y1 - y0);
-    if (set->value[BLIT_EFFECT_SCANLINES] > 0)
+    /* ADR 0187: a curved pane's scanlines are drawn on the glass instead. */
+    if (set->value[BLIT_EFFECT_SCANLINES] > 0 &&
+        !blit_effect_scanlines_presented(set, blit_gles_presents(kms->gles)))
         for (y = y0; y < y1; ++y) {
             unsigned alpha = blit_effect_scanline_alpha(set, y - view->effect_y);
             if (alpha) {
@@ -634,7 +639,8 @@ static int kms_gles_compose(BlitKms *kms, KmsOutput *output,
 {
     char error[160];
     KmsGlesResources *r = kms_gles_resources(kms);
-    int v;
+    BlitGlesPresentPane present[BLIT_KMS_PRESENT_PANES];
+    int v, present_count = 0, scene_changed = 0;
     error[0] = '\0';
     if (r == NULL) {
         kms_gles_detach(kms, output, "no GPU atlas");
@@ -694,14 +700,47 @@ static int kms_gles_compose(BlitKms *kms, KmsOutput *output,
                 }
             }
             kms_gles_view(kms, r, output, view, partial, dx, dy, dx + dw, dy + dh);
+            scene_changed = 1;
             output->info.drawn_cells += partial ?
                 (unsigned long long)(dw > 0 ? dw : 0) * (unsigned long long)(dh > 0 ? dh : 0) :
                 (unsigned long long)view->columns * (unsigned long long)view->rows;
         }
         blit_gles_scene_end(kms->gles);
         output->gles_scene_fresh = 0;
+        if (everything) scene_changed = 1;
     }
-    blit_gles_scene_draw(kms->gles, output->gles_scene);
+    /* ADR 0187: panes with presentation effects are drawn again over the
+       plain copy by the presentation program; with none, the copy is all. */
+    for (v = 0; blit_gles_presents(kms->gles) && v < view_count &&
+         present_count < BLIT_KMS_PRESENT_PANES; ++v) {
+        const BlitKmsSurfaceView *view = &views[v];
+        BlitGlesPresentPane *pane = &present[present_count];
+        int i, duplicate = 0;
+        if (view->display_id != output->info.id ||
+            !blit_effect_set_has(&view->effects, BLIT_EFFECT_PRESENTATION))
+            continue;
+        for (i = 0; i < present_count; ++i)
+            duplicate |= present[i].x == view->effect_x && present[i].y == view->effect_y;
+        if (duplicate) continue;
+        pane->x = view->effect_x;
+        pane->y = view->effect_y;
+        pane->width = view->effect_width;
+        pane->height = view->effect_height;
+        pane->k = blit_effect_curvature_k(&view->effects);
+        pane->scanline_alpha = blit_effect_scanlines_presented(&view->effects, 1) ?
+            blit_effect_scanline_alpha(&view->effects, 1) : 0;
+        pane->glow = view->effects.value[BLIT_EFFECT_GLOW] > 0 ?
+            BLIT_EFFECT_GLOW_GAIN * (view->effects.value[BLIT_EFFECT_GLOW] > 100 ? 100 :
+                                     view->effects.value[BLIT_EFFECT_GLOW]) / 100.0 : 0.0;
+        /* The blurred copy follows the scene: rebuilt only when it changed. */
+        if (pane->glow > 0 && scene_changed &&
+            blit_gles_scene_glow(kms->gles, output->gles_scene, pane->x, pane->y,
+                                 pane->width, pane->height) == 0)
+            ++output->info.effects_glow_rebuilds;
+        ++present_count;
+    }
+    blit_gles_scene_present(kms->gles, output->gles_scene, present, present_count);
+    output->info.effects_present_quads = (unsigned long long)present_count;
     for (v = 0; overlays != NULL && v < overlay_count; ++v) {
         const BlitKmsOverlay *overlay = &overlays[v];
         if (overlay->display_id != output->info.id || overlay->width < 1 ||

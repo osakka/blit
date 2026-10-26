@@ -181,8 +181,11 @@ puts 'PASS display-derived-surface-geometry'
 # ADR 0186: effects are per pane and live in document.effects; this endpoint
 # only reports them. pane_effects_gate.rb covers drawing and settings.
 effects = request(base, 'GET', '/v1/effects')
-assert_equal(%w[corners scanlines], effects.fetch('available').map { |e| e.fetch('name') }.sort,
-             'available pane effects')
+assert_equal({ 'corners' => 'local', 'curvature' => 'presentation', 'glow' => 'presentation',
+               'scanlines' => 'local' },
+             effects.fetch('available').to_h { |e| [e.fetch('name'), e.fetch('class')] },
+             'available pane effects and their classes')
+assert_equal(true, effects.fetch('enabled'), 'effects are switched on by default')
 assert_equal(topology.fetch('panes').map { |p| p.fetch('id') }.sort,
              effects.fetch('panes').map { |p| p.fetch('pane_id') }.sort, 'effects list every live pane')
 assert_equal(true, effects.fetch('panes').all? { |p| p.fetch('effects') == {} }, 'no effect by default')

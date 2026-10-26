@@ -2517,11 +2517,16 @@ components:
                 type: string
                 pattern: '^[A-Za-z0-9_.:-]{1,63}$'
               description: >-
-                Pane effects (ADR 0186), keyed like display_layouts by stable
-                connector, then by pane ordinal ("1" through "64"). Applied
-                live; persisted; unknown effects or parameters and values out
-                of range are 400 invalid_settings_effects. Entries for absent
-                outputs or panes are kept and apply when they appear.
+                Pane effects (ADR 0186, 0187), keyed like display_layouts by
+                stable connector, then by pane ordinal ("1" through "64"),
+                plus the master switch `enabled` (boolean, default true).
+                Applied live; persisted; unknown effects or parameters, values
+                out of range and switches that are not booleans are 400
+                invalid_settings_effects. Entries for absent outputs or panes
+                are kept and apply when they appear. Switched off, everywhere
+                or per pane, nothing is drawn and nothing is spent.
+              properties:
+                enabled: {type: boolean}
               additionalProperties:
                 type: object
                 propertyNames: {type: string, pattern: '^[1-9][0-9]?$'}
@@ -3185,10 +3190,18 @@ components:
       type: object
       description: >-
         Named pane effects, each with its one parameter; 0 or absent is off.
-        Applied in a fixed order (scanlines, then corners), over each pane's
-        pixel region, beneath the pointer and API overlays.
+        Local effects (scanlines, corners; ADR 0186) are applied in a fixed
+        order over each pane's pixel region by both compositors.
+        Presentation effects (curvature, glow; ADR 0187) are drawn by the
+        GLES compositor as it presents the frame; when a pane's curvature is
+        drawn its scanlines are drawn on the glass instead. All are beneath
+        the pointer and API overlays. In settings, `enabled: false` switches
+        the pane's effects off and keeps its values.
       additionalProperties: false
       properties:
+        enabled:
+          type: boolean
+          description: Settings only. The pane's own switch; default true.
         scanlines:
           type: object
           additionalProperties: false
@@ -3201,33 +3214,66 @@ components:
           required: [radius_px]
           properties:
             radius_px: {type: integer, minimum: 0, maximum: 1024}
+        curvature:
+          type: object
+          additionalProperties: false
+          required: [amount]
+          properties:
+            amount:
+              type: integer
+              minimum: 0
+              maximum: 100
+              description: >-
+                The tube warp s = q(1 + k r^2)/(1 + k), k = amount/400, in
+                pane-normalised coordinates; pointer input follows it.
+        glow:
+          type: object
+          additionalProperties: false
+          required: [intensity]
+          properties:
+            intensity: {type: integer, minimum: 0, maximum: 100}
     EffectState:
       type: object
-      required: [revision, available, panes, configure]
+      required: [revision, enabled, available, panes, configure]
       properties:
         revision: {$ref: '#/components/schemas/Revision'}
+        enabled:
+          type: boolean
+          description: The master switch, document.effects.enabled; false draws no effect anywhere.
         available:
           type: array
           items:
             type: object
             additionalProperties: false
-            required: [name, parameter, maximum]
+            required: [name, parameter, maximum, class]
             properties:
-              name: {type: string, enum: [scanlines, corners]}
+              name: {type: string, enum: [scanlines, corners, curvature, glow]}
               parameter: {type: string}
               maximum: {type: integer}
+              class: {type: string, enum: [local, presentation]}
         panes:
           type: array
           items:
             type: object
             additionalProperties: false
-            required: [pane_id, display_id, output, pane_ordinal, effects]
+            required: [pane_id, display_id, output, pane_ordinal, enabled, effects, unavailable]
             properties:
               pane_id: {$ref: '#/components/schemas/ResourceId'}
               display_id: {$ref: '#/components/schemas/ResourceId'}
               output: {type: string}
               pane_ordinal: {type: integer, minimum: 0, maximum: 64}
-              effects: {$ref: '#/components/schemas/EffectSet'}
+              enabled: {type: boolean, description: "The pane's own switch."}
+              effects:
+                allOf:
+                  - {$ref: '#/components/schemas/EffectSet'}
+                description: What the pane draws now; empty while switched off.
+              unavailable:
+                type: object
+                description: >-
+                  Saved presentation effects this pane cannot draw, by name,
+                  with the reason ("cpu compositor", "no highp fragment
+                  precision"). They are kept, not dropped.
+                additionalProperties: {type: string}
         configure: {type: string}
       additionalProperties: false
     Overlay:

@@ -63,6 +63,16 @@ struct BlitGles {
     void (*GetQueryObjectuiv)(GLuint, GLenum, GLuint *);
     void (*GetQueryObjectui64v)(GLuint, GLenum, GLuint64 *);
     void (*GetIntegerv)(GLenum, GLint *);
+    /* ADR 0187: the presentation pass, a second program used only over
+       panes with presentation effects. `presents` is 0 when the driver has
+       no highp fragment floats or the program could not be built. */
+    int presents;
+    GLuint present_program, present_buffer;
+    GLint present_target, present_scene, present_glow, present_scene_size;
+    GLint present_rect, present_k, present_scan, present_gain, present_glow_size;
+    void (*Uniform1f)(GLint, GLfloat);
+    void (*Uniform4f)(GLint, GLfloat, GLfloat, GLfloat, GLfloat);
+    void (*GetShaderPrecisionFormat)(GLenum, GLenum, GLint *, GLint *);
 
     PFNEGLGETPROCADDRESSPROC GetProcAddress;
     PFNEGLGETPLATFORMDISPLAYPROC GetPlatformDisplay;
@@ -144,9 +154,21 @@ struct BlitGlesVertex {
     GLfloat mode;
 };
 
+/* ADR 0187: a glowing pane's own blurred copy, halved twice from its
+   rectangle of the scene, so glow never reads another pane. */
+#define BLIT_GLES_GLOW_SLOTS 8
+struct BlitGlesGlow {
+    int x, y, width, height;
+    int half_width, half_height, quarter_width, quarter_height;
+    GLuint half, half_framebuffer, quarter, quarter_framebuffer;
+    unsigned long long used;
+};
+
 struct BlitGlesScene {
     int width, height;
     GLuint texture, framebuffer;
+    struct BlitGlesGlow glow[BLIT_GLES_GLOW_SLOTS];
+    unsigned long long glow_clock;
 };
 
 #define BLIT_GLES_QUERIES 4
@@ -405,6 +427,111 @@ static int gles_build_program(BlitGles *gles, char *error, size_t capacity)
     return 0;
 }
 
+/* ADR 0187: the presentation program. It needs highp fragment floats --
+   the curvature warp at 2560 px is visibly wrong in mediump -- which only a
+   query at run time can tell, so without them, or without the program,
+   presentation effects are unavailable and said so; nothing else changes.
+
+   One fragment per screen pixel of a pane with presentation effects:
+   normalise within the pane, warp exactly as blit_effect_warp does, black
+   outside the tube, otherwise the scene inside the pane's own rectangle
+   (its rows are bottom-up), then the glass scanlines and the glow. */
+static void gles_build_present(BlitGles *gles)
+{
+    static const char *vertex_source =
+        "precision highp float;\n"
+        "uniform vec2 target;\n"
+        "attribute vec2 position;\n"
+        "varying vec2 pixel;\n"
+        "void main() {\n"
+        "  pixel = position;\n"
+        "  gl_Position = vec4(position.x / target.x * 2.0 - 1.0,\n"
+        "                     1.0 - position.y / target.y * 2.0, 0.0, 1.0);\n"
+        "}\n";
+    static const char *fragment_source =
+        "precision highp float;\n"
+        "varying vec2 pixel;\n"
+        "uniform sampler2D scene;\n"
+        "uniform sampler2D glow;\n"
+        "uniform vec2 scene_size;\n"
+        "uniform vec2 glow_size;\n"
+        "uniform vec4 rect;\n"
+        "uniform float k;\n"
+        "uniform float scan;\n"
+        "uniform float gain;\n"
+        "void main() {\n"
+        "  vec2 q = (pixel - rect.xy) / rect.zw * 2.0 - 1.0;\n"
+        "  vec2 s = q * ((1.0 + k * dot(q, q)) / (1.0 + k));\n"
+        "  if (abs(s.x) > 1.0 || abs(s.y) > 1.0) {\n"
+        "    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);\n"
+        "    return;\n"
+        "  }\n"
+        "  vec2 t = s * 0.5 + 0.5;\n"
+        "  vec2 p = clamp(rect.xy + t * rect.zw, rect.xy + 0.5, rect.xy + rect.zw - 0.5);\n"
+        "  vec3 c = texture2D(scene, vec2(p.x, scene_size.y - p.y) / scene_size).rgb;\n"
+        "  if (gain > 0.0) {\n"
+        "    vec2 g = vec2(t.x, 1.0 - t.y), d = 1.0 / glow_size;\n"
+        "    vec2 lo = 0.5 * d, hi = 1.0 - 0.5 * d;\n"
+        "    vec3 b = vec3(0.0);\n"
+        "    for (int j = -1; j <= 1; ++j)\n"
+        "      for (int i = -1; i <= 1; ++i)\n"
+        "        b += texture2D(glow, clamp(g + vec2(float(i), float(j)) * d, lo, hi)).rgb\n"
+        "             * ((2.0 - abs(float(i))) * (2.0 - abs(float(j))));\n"
+        "    c = min(c + gain * b / 16.0, 1.0);\n"
+        "  }\n"
+        "  if (scan > 0.0 && mod(floor(pixel.y - rect.y), 2.0) > 0.5)\n"
+        "    c = floor(c * (255.0 - scan) + 0.5) / 255.0;\n"
+        "  gl_FragColor = vec4(c, 1.0);\n"
+        "}\n";
+    GLint range[2] = { 0, 0 }, precision = 0, status = 0;
+    GLuint v, f;
+    char error[160];
+    gles->presents = 0;
+    if (!BLIT_LOAD(gles->gl_library, Uniform1f, "glUniform1f") ||
+        !BLIT_LOAD(gles->gl_library, Uniform4f, "glUniform4f") ||
+        !BLIT_LOAD(gles->gl_library, GetShaderPrecisionFormat,
+                   "glGetShaderPrecisionFormat"))
+        return;
+    gles->GetShaderPrecisionFormat(GL_FRAGMENT_SHADER, GL_HIGH_FLOAT, range, &precision);
+    if (range[0] <= 0 || range[1] <= 0 || precision <= 0) return;
+    v = gles_compile(gles, GL_VERTEX_SHADER, vertex_source, error, sizeof(error));
+    f = v ? gles_compile(gles, GL_FRAGMENT_SHADER, fragment_source, error, sizeof(error)) : 0;
+    if (f == 0) {
+        if (v) gles->glDeleteShader(v);
+        return;
+    }
+    gles->present_program = gles->glCreateProgram();
+    gles->glAttachShader(gles->present_program, v);
+    gles->glAttachShader(gles->present_program, f);
+    gles->glBindAttribLocation(gles->present_program, 0, "position");
+    gles->glLinkProgram(gles->present_program);
+    gles->glDeleteShader(v);
+    gles->glDeleteShader(f);
+    gles->glGetProgramiv(gles->present_program, GL_LINK_STATUS, &status);
+    if (!status) {
+        gles->glDeleteProgram(gles->present_program);
+        gles->present_program = 0;
+        return;
+    }
+    gles->present_target = gles->glGetUniformLocation(gles->present_program, "target");
+    gles->present_scene = gles->glGetUniformLocation(gles->present_program, "scene");
+    gles->present_glow = gles->glGetUniformLocation(gles->present_program, "glow");
+    gles->present_scene_size = gles->glGetUniformLocation(gles->present_program, "scene_size");
+    gles->present_glow_size = gles->glGetUniformLocation(gles->present_program, "glow_size");
+    gles->present_rect = gles->glGetUniformLocation(gles->present_program, "rect");
+    gles->present_k = gles->glGetUniformLocation(gles->present_program, "k");
+    gles->present_scan = gles->glGetUniformLocation(gles->present_program, "scan");
+    gles->present_gain = gles->glGetUniformLocation(gles->present_program, "gain");
+    gles->glGenBuffers(1, &gles->present_buffer);
+    while (gles->glGetError() != GL_NO_ERROR) {}
+    gles->presents = 1;
+}
+
+int blit_gles_presents(const BlitGles *gles)
+{
+    return gles != NULL && gles->presents;
+}
+
 static void gles_load_timer_queries(BlitGles *gles)
 {
     const char *extensions = (const char *)gles->glGetString(GL_EXTENSIONS);
@@ -558,6 +685,7 @@ static BlitGles *gles_open_common(int surfaceless, int drm_fd, char *error,
              (const char *)gles->glGetString(GL_RENDERER),
              (const char *)gles->glGetString(GL_VERSION));
     gles_load_timer_queries(gles);
+    gles_build_present(gles);
     return gles;
 failed:
     blit_gles_close(gles);
@@ -591,6 +719,8 @@ void blit_gles_close(BlitGles *gles)
             if (gles->compose_buffer) gles->glDeleteBuffers(1, &gles->compose_buffer);
             if (gles->white) gles->glDeleteTextures(1, &gles->white);
             if (gles->quad) gles->glDeleteBuffers(1, &gles->quad);
+            if (gles->present_program) gles->glDeleteProgram(gles->present_program);
+            if (gles->present_buffer) gles->glDeleteBuffers(1, &gles->present_buffer);
             gles->MakeCurrent(gles->display, EGL_NO_SURFACE, EGL_NO_SURFACE,
                               EGL_NO_CONTEXT);
             gles->DestroyContext(gles->display, gles->context);
@@ -1109,10 +1239,21 @@ BlitGlesScene *blit_gles_scene_open(BlitGles *gles, int width, int height)
     return scene;
 }
 
+static void gles_glow_free(BlitGles *gles, struct BlitGlesGlow *glow)
+{
+    if (glow->half_framebuffer) gles->glDeleteFramebuffers(1, &glow->half_framebuffer);
+    if (glow->quarter_framebuffer) gles->glDeleteFramebuffers(1, &glow->quarter_framebuffer);
+    if (glow->half) gles->glDeleteTextures(1, &glow->half);
+    if (glow->quarter) gles->glDeleteTextures(1, &glow->quarter);
+    memset(glow, 0, sizeof(*glow));
+}
+
 void blit_gles_scene_close(BlitGles *gles, BlitGlesScene *scene)
 {
+    int i;
     if (gles == NULL || scene == NULL) return;
     gles_flush(gles);
+    for (i = 0; i < BLIT_GLES_GLOW_SLOTS; ++i) gles_glow_free(gles, &scene->glow[i]);
     if (scene->framebuffer) gles->glDeleteFramebuffers(1, &scene->framebuffer);
     if (scene->texture) gles->glDeleteTextures(1, &scene->texture);
     gles->batch_texture = (GLuint)-1;
@@ -1169,6 +1310,163 @@ void blit_gles_scene_draw(BlitGles *gles, BlitGlesScene *scene)
     blit_gles_quad(gles, BLIT_GLES_PREMULT, scene->texture, scene->width,
                    scene->height, 0, scene->height, scene->width, -scene->height,
                    0, 0, scene->width, scene->height, 0);
+}
+
+/* A linear-filtered texture and a framebuffer drawing into it. */
+static int gles_glow_target(BlitGles *gles, int width, int height,
+                            GLuint *texture, GLuint *framebuffer)
+{
+    *texture = gles_new_texture(gles, width, height);
+    gles->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    gles->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    gles->glGenFramebuffers(1, framebuffer);
+    gles->glBindFramebuffer(GL_FRAMEBUFFER, *framebuffer);
+    gles->glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                                 GL_TEXTURE_2D, *texture, 0);
+    return gles->glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+}
+
+static struct BlitGlesGlow *gles_glow_slot(BlitGles *gles, BlitGlesScene *scene,
+                                           int x, int y, int width, int height)
+{
+    struct BlitGlesGlow *glow = NULL;
+    int i;
+    for (i = 0; i < BLIT_GLES_GLOW_SLOTS; ++i) {
+        struct BlitGlesGlow *slot = &scene->glow[i];
+        if (slot->half && slot->x == x && slot->y == y &&
+            slot->width == width && slot->height == height)
+            return slot;
+        if (glow == NULL || slot->used < glow->used) glow = slot;
+    }
+    /* The least recently used slot; a pane that went away frees its own. */
+    gles_glow_free(gles, glow);
+    glow->x = x; glow->y = y; glow->width = width; glow->height = height;
+    glow->half_width = width / 2 > 0 ? width / 2 : 1;
+    glow->half_height = height / 2 > 0 ? height / 2 : 1;
+    glow->quarter_width = glow->half_width / 2 > 0 ? glow->half_width / 2 : 1;
+    glow->quarter_height = glow->half_height / 2 > 0 ? glow->half_height / 2 : 1;
+    if (!gles_glow_target(gles, glow->half_width, glow->half_height,
+                          &glow->half, &glow->half_framebuffer) ||
+        !gles_glow_target(gles, glow->quarter_width, glow->quarter_height,
+                          &glow->quarter, &glow->quarter_framebuffer)) {
+        gles_glow_free(gles, glow);
+        return NULL;
+    }
+    return glow;
+}
+
+/* Draw `source` (bottom-up rows, as everything rendered here is) halved
+   into a glow target: each output texel is the 2x2 box under it. */
+static void gles_glow_halve(BlitGles *gles, GLuint framebuffer, int width, int height,
+                            GLuint source, int source_width, int source_height,
+                            int x, int y, int w, int h)
+{
+    gles->glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    gles->bound_height = height;
+    gles->glViewport(0, 0, width, height);
+    gles->glUniform2f(gles->compose_size, (GLfloat)width, (GLfloat)height);
+    blit_gles_quad(gles, BLIT_GLES_PREMULT, source, source_width, source_height,
+                   x, source_height - y, w, -h, 0, 0, width, height, 0);
+    gles_flush(gles);
+}
+
+int blit_gles_scene_glow(BlitGles *gles, BlitGlesScene *scene,
+                         int x, int y, int width, int height)
+{
+    struct BlitGlesGlow *glow;
+    if (gles == NULL || scene == NULL || !gles->presents || width < 2 || height < 2)
+        return -1;
+    gles_flush(gles);
+    glow = gles_glow_slot(gles, scene, x, y, width, height);
+    if (glow == NULL) {
+        blit_gles_scene_end(gles);
+        return -1;
+    }
+    glow->used = ++scene->glow_clock;
+    gles->glDisable(GL_SCISSOR_TEST);
+    gles->glBindTexture(GL_TEXTURE_2D, scene->texture);
+    gles->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    gles->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    gles->batch_texture = scene->texture;
+    gles_glow_halve(gles, glow->half_framebuffer, glow->half_width, glow->half_height,
+                    scene->texture, scene->width, scene->height, x, y, width, height);
+    gles->glBindTexture(GL_TEXTURE_2D, scene->texture);
+    gles->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    gles->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    gles->batch_texture = (GLuint)-1;
+    gles_glow_halve(gles, glow->quarter_framebuffer, glow->quarter_width,
+                    glow->quarter_height, glow->half, glow->half_width,
+                    glow->half_height, 0, 0, glow->half_width, glow->half_height);
+    /* Back to the frame being composed. */
+    blit_gles_scene_end(gles);
+    return 0;
+}
+
+void blit_gles_scene_present(BlitGles *gles, BlitGlesScene *scene,
+                             const BlitGlesPresentPane *panes, int count)
+{
+    int i;
+    blit_gles_scene_draw(gles, scene);
+    if (gles == NULL || scene == NULL || !gles->presents || gles->frame_target == NULL)
+        return;
+    for (i = 0; i < count; ++i) {
+        const BlitGlesPresentPane *pane = &panes[i];
+        struct BlitGlesGlow *glow = NULL;
+        float x0 = (float)pane->x, y0 = (float)pane->y;
+        float x1 = x0 + (float)pane->width, y1 = y0 + (float)pane->height;
+        GLfloat quad[12];
+        int j;
+        if (pane->width < 1 || pane->height < 1) continue;
+        if (pane->glow > 0)
+            for (j = 0; j < BLIT_GLES_GLOW_SLOTS; ++j)
+                if (scene->glow[j].half && scene->glow[j].x == pane->x &&
+                    scene->glow[j].y == pane->y && scene->glow[j].width == pane->width &&
+                    scene->glow[j].height == pane->height)
+                    glow = &scene->glow[j];
+        quad[0] = x0; quad[1] = y0; quad[2] = x1; quad[3] = y0; quad[4] = x0; quad[5] = y1;
+        quad[6] = x1; quad[7] = y0; quad[8] = x1; quad[9] = y1; quad[10] = x0; quad[11] = y1;
+        gles_flush(gles);
+        gles->glUseProgram(gles->present_program);
+        gles->glUniform2f(gles->present_target, (GLfloat)gles->frame_target->width,
+                          (GLfloat)gles->frame_target->height);
+        gles->glUniform2f(gles->present_scene_size, (GLfloat)scene->width,
+                          (GLfloat)scene->height);
+        gles->Uniform4f(gles->present_rect, x0, y0, (GLfloat)pane->width,
+                        (GLfloat)pane->height);
+        gles->Uniform1f(gles->present_k, (GLfloat)pane->k);
+        gles->Uniform1f(gles->present_scan, (GLfloat)pane->scanline_alpha);
+        gles->Uniform1f(gles->present_gain, glow ? (GLfloat)pane->glow : 0.0f);
+        gles->glUniform2f(gles->present_glow_size,
+                          glow ? (GLfloat)glow->quarter_width : 1.0f,
+                          glow ? (GLfloat)glow->quarter_height : 1.0f);
+        gles->glUniform1i(gles->present_scene, 0);
+        gles->glUniform1i(gles->present_glow, 1);
+        gles->glActiveTexture(GL_TEXTURE1);
+        gles->glBindTexture(GL_TEXTURE_2D, glow ? glow->quarter : gles->white);
+        gles->glActiveTexture(GL_TEXTURE0);
+        gles->glBindTexture(GL_TEXTURE_2D, scene->texture);
+        /* Under a warp the mapping is not 1:1: linear, or glyph edges jag. */
+        if (pane->k > 0) {
+            gles->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            gles->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        }
+        gles->glBindBuffer(GL_ARRAY_BUFFER, gles->present_buffer);
+        gles->glBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad, GL_STREAM_DRAW);
+        gles->glDisableVertexAttribArray(1);
+        gles->glDisableVertexAttribArray(2);
+        gles->glDisableVertexAttribArray(3);
+        gles->glEnableVertexAttribArray(0);
+        gles->glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, (void *)0);
+        gles->glDrawArrays(GL_TRIANGLES, 0, 6);
+        ++gles->draw_calls;
+        gles->vertices_drawn += 6;
+        if (pane->k > 0) {
+            gles->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            gles->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        }
+        gles->glUseProgram(gles->compose_program);
+        gles->batch_texture = (GLuint)-1;
+    }
 }
 
 unsigned long long blit_gles_draw_calls(const BlitGles *gles)

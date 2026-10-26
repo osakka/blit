@@ -694,22 +694,27 @@ resize. Hibr Displays still owns native desktop arrangement.
 
 ### Pane effects
 
-`document.effects` gives each pane its effects (ADR 0186). It is keyed like
-`display_layouts`, by stable connector, then by pane ordinal:
+`document.effects` gives each pane its effects (ADR 0186, 0187). It is keyed
+like `display_layouts`, by stable connector, then by pane ordinal. Changes
+apply live, with no restart, and are saved:
 
 ```json
 "effects": {
+  "enabled": true,
   "DP-1": {
-    "1": {"corners": {"radius_px": 24}},
-    "2": {"corners": {"radius_px": 24}, "scanlines": {"intensity": 40}}
+    "1": {"corners": {"radius_px": 24}, "curvature": {"amount": 40}},
+    "2": {"enabled": false, "corners": {"radius_px": 24},
+          "scanlines": {"intensity": 40}, "glow": {"intensity": 30}}
   }
 }
 ```
 
-| Effect | Parameter | Range | What it draws |
-|---|---|---|---|
-| `scanlines` | `intensity` | 0–100 | Every second pixel row from the pane's top, darkened by that percentage |
-| `corners` | `radius_px` | 0–1024 | Each corner of the pane cut to a quarter circle in black, anti-aliased |
+| Effect | Class | Parameter | Range | What it draws |
+|---|---|---|---|---|
+| `scanlines` | local | `intensity` | 0–100 | Every second pixel row from the pane's top, darkened by that percentage |
+| `corners` | local | `radius_px` | 0–1024 | Each corner of the pane cut to a quarter circle in black, anti-aliased |
+| `curvature` | presentation | `amount` | 0–100 | The pane bulges like a tube; its edges become arcs, black beyond them |
+| `glow` | presentation | `intensity` | 0–100 | A soft bloom around bright content, from a blurred copy of the pane |
 
 - **Order:** effects are applied in a fixed order (scanlines, then corners),
   over the pane's pixel region, beneath the pointer and API overlays.
@@ -721,9 +726,26 @@ resize. Hibr Displays still owns native desktop arrangement.
   `400 invalid_settings_effects`.
 - **Absent panes:** entries for absent outputs or panes are kept and apply
   when they appear.
-- **Compositors:** both apply them, and the GPU keeps composing. Each
-  output's render diagnostics report their cost: `effects.cpu_last_ms`,
-  `cpu_max_ms` and `gpu_quads`.
+- **Switches:** `effects.enabled: false` turns every effect off, and a
+  pane's own `"enabled": false` turns its effects off. The values are kept.
+  Switched off, the compositors take exactly the path of a pane with no
+  effects, so nothing is spent on them. `GET /v1/effects` reports `enabled`
+  for the master and for each pane, and a switched-off pane's `effects` as
+  empty.
+- **Compositors:** both apply local effects, and the GPU keeps composing.
+  Presentation effects are drawn only by the GLES compositor, as it presents
+  the frame (ADR 0187). Elsewhere they are kept, not drawn, and reported per
+  pane under `unavailable`, with the reason (`cpu compositor`, `no highp
+  fragment precision`). When a pane's curvature is drawn, its scanlines are
+  drawn on the glass, in screen space, rather than bent with the picture.
+- **Pointer:** under curvature a click reaches the cell the screen shows at
+  that point; a click in the black margin reaches the nearest edge cell.
+- **Cost:** each output's render diagnostics report it:
+  - `effects.cpu_last_ms`, `cpu_max_ms` and `gpu_quads` (local effects);
+  - `present_panes`, the panes the presentation pass drew last frame (0 when
+    no pane has presentation effects: the plain path);
+  - `glow_rebuilds`, blurred copies rebuilt, only when a frame changed;
+  - `presentation_unavailable`, empty when the output can draw them.
 
 `GET /v1/topology.outputs[].layout` reports each actual grid. Its top-level
 `layout` and `server.pane_layout` are legacy bulk controls, not the per-output

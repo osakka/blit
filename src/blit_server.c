@@ -732,6 +732,9 @@ typedef struct {
     char output[64];
     int ordinal;
     BlitEffectSet set;
+    /* The pane's own switch, off: its values are kept but nothing is drawn,
+       exactly as for a pane with no effects. */
+    int disabled;
 } BlitPaneEffects;
 
 typedef struct {
@@ -1207,6 +1210,8 @@ typedef struct {
     unsigned int next_event_history;
     BlitPaneEffects pane_effects[BLIT_MAX_PANES];
     int pane_effect_count;
+    /* document.effects.enabled is false: no pane draws any effect. */
+    int effects_disabled;
     unsigned long long effects_revision;
     BlitOverlay overlays[BLIT_MAX_OVERLAYS];
     unsigned long long next_overlay_id;
@@ -3245,7 +3250,8 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
                 "\"frame_quads\":%llu,\"frame_draw_calls\":%llu,"
                 "\"upload_ms\":%.3f},"
                 "\"effects\":{\"cpu_last_ms\":%.3f,\"cpu_max_ms\":%.3f,"
-                "\"gpu_quads\":%llu},"
+                "\"gpu_quads\":%llu,\"present_panes\":%llu,\"glow_rebuilds\":%llu,"
+                "\"presentation_unavailable\":\"%s\"},"
                 "\"flip\":{\"last_ms\":%.3f,\"max_ms\":%.3f,"
                 "\"total_us\":%llu,\"count\":%llu,"
                 "\"timing\":\"%s\",\"lead_us\":%llu,"
@@ -3269,6 +3275,9 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
                 have_kms_info ? kms_info.effects_last_ms : 0.0,
                 have_kms_info ? kms_info.effects_max_ms : 0.0,
                 have_kms_info ? kms_info.effects_quads : 0ULL,
+                have_kms_info ? kms_info.effects_present_quads : 0ULL,
+                have_kms_info ? kms_info.effects_glow_rebuilds : 0ULL,
+                have_kms_info ? kms_info.presentation_unavailable : "cpu compositor",
                 have_kms_info ? kms_info.last_flip_ms : 0.0,
                 have_kms_info ? kms_info.max_flip_ms : 0.0,
                 have_kms_info ? kms_info.flip_wait_total_us : 0ULL,
@@ -19631,14 +19640,30 @@ static int effects_integer(const char *text, int maximum, int *out)
     return 1;
 }
 
+/* A JSON boolean: 1 true, 0 false, -1 anything else. */
+static int effects_boolean(const char *text)
+{
+    int value;
+    while (*text == ' ' || *text == '\t' || *text == '\n' || *text == '\r') ++text;
+    if (strncmp(text, "true", 4) == 0) { value = 1; text += 4; }
+    else if (strncmp(text, "false", 5) == 0) { value = 0; text += 5; }
+    else return -1;
+    while (*text == ' ' || *text == '\t' || *text == '\n' || *text == '\r') ++text;
+    return *text ? -1 : value;
+}
+
+/* document.effects: {"enabled": bool, "<output>": {"<ordinal>": {"enabled":
+   bool, "<effect>": {"<param>": N}}}}. Both switches default to on; off
+   keeps the values and draws nothing (`all_disabled`, entry.disabled). */
 static int settings_effects_parse(const char *document, BlitPaneEffects *table,
-                                  int *table_count)
+                                  int *table_count, int *all_disabled)
 {
     static char section[BLIT_SETTINGS_CAPACITY], panes[16384], effects[4096];
     char key[128], ordinal_key[16], name[64], member[512], parameter[64], number[64];
     const char *cursor = document, *outputs, *pane_cursor, *effect_cursor, *param_cursor;
-    int count = 0, found = 0;
+    int count = 0, found = 0, master_seen = 0;
     if (table_count != NULL) *table_count = 0;
+    if (all_disabled != NULL) *all_disabled = 0;
     if (document == NULL || document[0] == '\0') return 1;
     while (*cursor && *cursor != '{') ++cursor;
     if (*cursor++ != '{') return 0;
@@ -19654,6 +19679,12 @@ static int settings_effects_parse(const char *document, BlitPaneEffects *table,
                                        sizeof(panes))) != NULL) {
         size_t i, length = strlen(key);
         int j;
+        if (strcmp(key, "enabled") == 0) {
+            int on = effects_boolean(panes);
+            if (on < 0 || master_seen++) return 0;
+            if (all_disabled != NULL) *all_disabled = !on;
+            continue;
+        }
         if (length == 0 || length > 63 || panes[0] != '{') return 0;
         for (i = 0; i < length; ++i) {
             unsigned char c = (unsigned char)key[i];
@@ -19681,6 +19712,13 @@ static int settings_effects_parse(const char *document, BlitPaneEffects *table,
             while ((effect_cursor = json_next_member(effect_cursor, name, sizeof(name),
                                                      member, sizeof(member))) != NULL) {
                 int id, params = 0;
+                if (strcmp(name, "enabled") == 0) {
+                    int on = effects_boolean(member);
+                    if (on < 0 || (seen & (1u << BLIT_EFFECT_COUNT))) return 0;
+                    seen |= 1u << BLIT_EFFECT_COUNT;
+                    entry.disabled = !on;
+                    continue;
+                }
                 for (id = 0; id < BLIT_EFFECT_COUNT; ++id)
                     if (strcmp(name, blit_effect_specs[id].name) == 0) break;
                 if (id == BLIT_EFFECT_COUNT || (seen & (1u << id)) || member[0] != '{')
@@ -19706,8 +19744,8 @@ static int settings_effects_parse(const char *document, BlitPaneEffects *table,
 static int settings_effects_valid(const char *document)
 {
     static BlitPaneEffects table[BLIT_MAX_PANES];
-    int count;
-    return settings_effects_parse(document, table, &count);
+    int count, all_disabled;
+    return settings_effects_parse(document, table, &count, &all_disabled);
 }
 
 /* Apply document.effects. A change repaints every output in full, since an
@@ -19715,19 +19753,22 @@ static int settings_effects_valid(const char *document)
 static void settings_apply_effects(BlitRuntime *runtime)
 {
     BlitPaneEffects table[BLIT_MAX_PANES];
-    int count = 0, i;
+    int count = 0, i, all_disabled = 0;
     memset(table, 0, sizeof(table));
-    if (!settings_effects_parse(runtime->settings_document, table, &count)) {
+    if (!settings_effects_parse(runtime->settings_document, table, &count, &all_disabled)) {
         diagnostic_log(runtime, "warning", "invalid_settings_effects",
                        "Stored pane effects are invalid; no effects are applied until they are corrected through the settings API.");
         count = 0;
+        all_disabled = 0;
         memset(table, 0, sizeof(table));
     }
     if (count == runtime->pane_effect_count &&
+        all_disabled == runtime->effects_disabled &&
         memcmp(table, runtime->pane_effects, sizeof(table)) == 0)
         return;
     memcpy(runtime->pane_effects, table, sizeof(table));
     runtime->pane_effect_count = count;
+    runtime->effects_disabled = all_disabled;
     ++runtime->effects_revision;
     for (i = 0; i < runtime->output_count; ++i)
         runtime->outputs[i].initialized = 0;
@@ -19759,11 +19800,40 @@ static BlitEffectSet pane_effect_set(const BlitRuntime *runtime, const BlitPane 
     int ordinal, i;
     memset(&none, 0, sizeof(none));
     if (pane == NULL || !pane_effects_key(runtime, pane, &output, &ordinal)) return none;
+    /* Switched off, everywhere or for this pane: no effects at all, so the
+       compositors take exactly the path of a pane that never had any. */
+    if (runtime->effects_disabled) return none;
     for (i = 0; i < runtime->pane_effect_count; ++i)
         if (runtime->pane_effects[i].ordinal == ordinal &&
             strcmp(runtime->pane_effects[i].output, output) == 0)
-            return runtime->pane_effects[i].set;
+            return runtime->pane_effects[i].disabled ? none : runtime->pane_effects[i].set;
     return none;
+}
+
+/* Whether a pane's own switch is on (its values may still be all zero). */
+static int pane_effects_switched_on(const BlitRuntime *runtime, const BlitPane *pane)
+{
+    const char *output;
+    int ordinal, i;
+    if (pane == NULL || !pane_effects_key(runtime, pane, &output, &ordinal)) return 1;
+    for (i = 0; i < runtime->pane_effect_count; ++i)
+        if (runtime->pane_effects[i].ordinal == ordinal &&
+            strcmp(runtime->pane_effects[i].output, output) == 0)
+            return !runtime->pane_effects[i].disabled;
+    return 1;
+}
+
+/* ADR 0187: why a pane's presentation effects are not drawn, or "" when
+   they are -- only the GLES compositor with highp floats draws them. */
+static const char *pane_presentation_unavailable(const BlitRuntime *runtime,
+                                                 const BlitPane *pane)
+{
+    static BlitKmsDisplayInfo info;
+    int index = display_index_for_id(runtime, pane->display_id);
+    if (runtime->kms == NULL || index < 0 ||
+        blit_kms_display_info(runtime->kms, index, &info) != 0)
+        return "cpu compositor";
+    return info.presentation_unavailable;
 }
 
 /* GET /v1/effects: what each live pane draws now. They are set through
@@ -19772,12 +19842,15 @@ static void effect_json(BlitRuntime *runtime, char *body, size_t capacity)
 {
     size_t used = 0;
     int i, id;
-    json_appendf(body, capacity, &used, "{\"revision\":%llu,\"available\":[",
-                 runtime->effects_revision);
+    json_appendf(body, capacity, &used, "{\"revision\":%llu,\"enabled\":%s,\"available\":[",
+                 runtime->effects_revision, runtime->effects_disabled ? "false" : "true");
     for (id = 0; id < BLIT_EFFECT_COUNT; ++id)
-        json_appendf(body, capacity, &used, "%s{\"name\":\"%s\",\"parameter\":\"%s\",\"maximum\":%d}",
+        json_appendf(body, capacity, &used,
+                     "%s{\"name\":\"%s\",\"parameter\":\"%s\",\"maximum\":%d,\"class\":\"%s\"}",
                      id ? "," : "", blit_effect_specs[id].name,
-                     blit_effect_specs[id].param, blit_effect_specs[id].maximum);
+                     blit_effect_specs[id].param, blit_effect_specs[id].maximum,
+                     blit_effect_specs[id].effect_class == BLIT_EFFECT_PRESENTATION ?
+                     "presentation" : "local");
     json_appendf(body, capacity, &used, "],\"panes\":[");
     for (i = 0; i < runtime->pane_count; ++i) {
         const BlitPane *pane = &runtime->panes[i];
@@ -19787,8 +19860,9 @@ static void effect_json(BlitRuntime *runtime, char *body, size_t capacity)
         pane_effects_key(runtime, pane, &output, &ordinal);
         json_appendf(body, capacity, &used,
                      "%s{\"pane_id\":\"%s\",\"display_id\":\"%s\",\"output\":\"%s\","
-                     "\"pane_ordinal\":%d,\"effects\":{",
-                     i ? "," : "", pane->id, pane->display_id, output, ordinal);
+                     "\"pane_ordinal\":%d,\"enabled\":%s,\"effects\":{",
+                     i ? "," : "", pane->id, pane->display_id, output, ordinal,
+                     pane_effects_switched_on(runtime, pane) ? "true" : "false");
         for (id = 0; id < BLIT_EFFECT_COUNT; ++id) {
             int value = set.value[id];
             if (value <= 0) continue;
@@ -19799,7 +19873,22 @@ static void effect_json(BlitRuntime *runtime, char *body, size_t capacity)
                          blit_effect_specs[id].name, blit_effect_specs[id].param, value);
             first = 0;
         }
-        json_appendf(body, capacity, &used, "}}");
+        json_appendf(body, capacity, &used, "}");
+        /* Saved presentation effects this pane cannot draw: kept, and said. */
+        {
+            const char *reason = pane_presentation_unavailable(runtime, pane);
+            first = 1;
+            json_appendf(body, capacity, &used, ",\"unavailable\":{");
+            for (id = 0; reason[0] && id < BLIT_EFFECT_COUNT; ++id) {
+                if (set.value[id] <= 0 ||
+                    blit_effect_specs[id].effect_class != BLIT_EFFECT_PRESENTATION)
+                    continue;
+                json_appendf(body, capacity, &used, "%s\"%s\":\"%s\"", first ? "" : ",",
+                             blit_effect_specs[id].name, reason);
+                first = 0;
+            }
+            json_appendf(body, capacity, &used, "}}");
+        }
     }
     json_appendf(body, capacity, &used, "],\"configure\":\"PUT /v1/settings document.effects\"}");
 }
@@ -24559,6 +24648,7 @@ static BlitSession *mouse_target_px(BlitRuntime *runtime, int output_index,
             int origin_y;
             int width;
             int height;
+            float hit_x = pixel_x, hit_y = pixel_y;
             if (!session->used || session->native_retire_due_us != 0)
                 continue;
             paned = session->pane_id[0] != '\0';
@@ -24571,6 +24661,29 @@ static BlitSession *mouse_target_px(BlitRuntime *runtime, int output_index,
                 if (pane == NULL ||
                     strcmp(pane->display_id, display_id) != 0)
                     continue;
+                /* ADR 0187: under curvature the screen shows the content of
+                   the warped point, so a click goes where the user sees it.
+                   The same registry warp the shader draws with; the black
+                   margin clamps to the edge, like the inset below. */
+                if (pixel_x >= pane->pixel_region_x &&
+                    pixel_y >= pane->pixel_region_y &&
+                    pixel_x < pane->pixel_region_x + pane->pixel_region_width &&
+                    pixel_y < pane->pixel_region_y + pane->pixel_region_height) {
+                    BlitEffectSet set = pane_effect_set(runtime, pane);
+                    double k = blit_effect_curvature_k(&set), sx, sy;
+                    if (k > 0 && pane_presentation_unavailable(runtime, pane)[0] == '\0') {
+                        double w = pane->pixel_region_width, h = pane->pixel_region_height;
+                        blit_effect_warp(k, (pixel_x - pane->pixel_region_x) / w * 2.0 - 1.0,
+                                         (pixel_y - pane->pixel_region_y) / h * 2.0 - 1.0,
+                                         &sx, &sy);
+                        if (sx < -1.0) sx = -1.0;
+                        if (sx > 1.0) sx = 1.0;
+                        if (sy < -1.0) sy = -1.0;
+                        if (sy > 1.0) sy = 1.0;
+                        hit_x = (float)(pane->pixel_region_x + (sx + 1.0) * 0.5 * w);
+                        hit_y = (float)(pane->pixel_region_y + (sy + 1.0) * 0.5 * h);
+                    }
+                }
             } else if (session->display_id[0] == '\0') {
                 /* A session with no display is rendered on the first one. */
                 if (output_index != 0)
@@ -24587,13 +24700,13 @@ static BlitSession *mouse_target_px(BlitRuntime *runtime, int output_index,
             height = surface->height * cell_height;
             /* The inset belongs to the surface it surrounds: a click in it
                reports the nearest edge cell rather than being discarded. */
-            if (pixel_x < origin_x - BLIT_SURFACE_INSET_PX ||
-                pixel_y < origin_y - BLIT_SURFACE_INSET_PX ||
-                pixel_x >= origin_x + width + BLIT_SURFACE_INSET_PX ||
-                pixel_y >= origin_y + height + BLIT_SURFACE_INSET_PX)
+            if (hit_x < origin_x - BLIT_SURFACE_INSET_PX ||
+                hit_y < origin_y - BLIT_SURFACE_INSET_PX ||
+                hit_x >= origin_x + width + BLIT_SURFACE_INSET_PX ||
+                hit_y >= origin_y + height + BLIT_SURFACE_INSET_PX)
                 continue;
-            *column = (int)((pixel_x - origin_x) / (float)cell_width) + 1;
-            *row = (int)((pixel_y - origin_y) / (float)cell_height) + 1;
+            *column = (int)((hit_x - origin_x) / (float)cell_width) + 1;
+            *row = (int)((hit_y - origin_y) / (float)cell_height) + 1;
             if (*column < 1) *column = 1;
             if (*row < 1) *row = 1;
             if (*column > surface->width) *column = surface->width;
@@ -24601,8 +24714,8 @@ static BlitSession *mouse_target_px(BlitRuntime *runtime, int output_index,
             if (px != NULL && py != NULL) {
                 /* One-based like a cell, and clamped to the surface the
                    same way, so the inset reports the nearest edge pixel. */
-                *px = (int)(pixel_x - origin_x) + 1;
-                *py = (int)(pixel_y - origin_y) + 1;
+                *px = (int)(hit_x - origin_x) + 1;
+                *py = (int)(hit_y - origin_y) + 1;
                 if (*px < 1) *px = 1;
                 if (*py < 1) *py = 1;
                 if (*px > width) *px = width;

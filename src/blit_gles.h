@@ -114,6 +114,28 @@ void blit_gles_scene_end(BlitGles *gles);
 /* Inside blit_gles_frame_begin/end: the whole scene, copied 1:1 at (0, 0). */
 void blit_gles_scene_draw(BlitGles *gles, BlitGlesScene *scene);
 
+/* ---- ADR 0187: presentation effects, drawn as the scene is presented. ----
+   1 when this context can draw them: highp fragment floats and the present
+   program. Otherwise they are unavailable, and nothing else changes. */
+int blit_gles_presents(const BlitGles *gles);
+/* A pane drawn by the presentation pass: its rectangle in target pixels
+   (top-left origin), the curvature warp's k (blit_effect_curvature_k), the
+   glass scanlines' alpha (0..255, 0 none) and glow's gain (0 none). */
+typedef struct {
+    int x, y, width, height;
+    double k;
+    unsigned scanline_alpha;
+    double glow;
+} BlitGlesPresentPane;
+/* Inside blit_gles_frame_begin/end, after the scene was composed: rebuild a
+   pane's blurred copy from its rectangle of the scene (halved twice). */
+int blit_gles_scene_glow(BlitGles *gles, BlitGlesScene *scene,
+                         int x, int y, int width, int height);
+/* Inside blit_gles_frame_begin/end: the plain copy, then each pane drawn
+   again by the presentation program over its own rectangle. */
+void blit_gles_scene_present(BlitGles *gles, BlitGlesScene *scene,
+                             const BlitGlesPresentPane *panes, int count);
+
 /* GBM only: the buffer just drawn, for drmModeAddFB2 and a page flip. It
    stays locked until released, which must wait for its flip to complete. */
 void *blit_gles_lock_front(BlitGles *gles, BlitGlesTarget *target,

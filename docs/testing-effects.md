@@ -1,6 +1,6 @@
 # Effect testing
 
-Pane effects (ADR 0186) are renderer state, not terminal state. They are kept
+Pane effects (ADR 0186, 0187) are renderer state, not terminal state. They are kept
 per pane in the settings document, keyed by output name and pane ordinal, and
 applied live:
 
@@ -33,6 +33,36 @@ pane one colour. It runs on both compositors (`BLIT_GATE_BACKEND=native` and
 ```sh
 ruby tools/tests/pane_effects_gate.rb
 BLIT_GATE_BACKEND=gles ruby tools/tests/pane_effects_gate.rb
+```
+
+Presentation effects and the switches (ADR 0187) are checked by
+`tools/tests/presentation_effects_gate.rb`, also on one display split 1x2.
+
+On `gles` it checks:
+- **warp:** pane 1 is captured plain, then with curvature 100. Each sampled
+  warped pixel is predicted from the plain capture with the shared warp and
+  the shader's linear sampling, wherever the 2×2 texels it reads are one
+  colour (over 11,000 pixels); outside the tube it must be black;
+- **glass scanlines:** with curvature and scanlines over a flat colour, every
+  odd screen row is darkened by the shared rule and every even row is not.
+  So they are drawn once, with no moiré and no flattening;
+- **glow:** one white cell on black brightens a pixel 4 px away, leaves a
+  far pixel black, and never reaches pane 2;
+- **isolation:** pane 2 is unchanged by pane 1's effects;
+- **pointer:** a real SGR mouse report from a session in the curved pane
+  names the cell the warp shows under the pointer, including the clamp in the
+  black margin;
+- **the plain path:** with no presentation effects, `present_panes` is 0.
+
+On both compositors it checks the switches: master or pane switched off
+draws exactly what no effects draws, costs nothing, keeps the values and is
+reported by the API; a switch that is not a boolean is refused. On `native`
+it also checks that saved curvature is kept and reported unavailable
+(`cpu compositor`), while the local effects still draw.
+
+```sh
+ruby tools/tests/presentation_effects_gate.rb
+BLIT_GATE_BACKEND=gles ruby tools/tests/presentation_effects_gate.rb
 ```
 
 ## Bounded graphic overlays

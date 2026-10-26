@@ -147,6 +147,12 @@ typedef struct {
        CPU frame, so a new effect's cost is visible before it is a problem. */
     double effects_last_ms, effects_max_ms;
     unsigned long long effects_quads;
+    /* ADR 0187: panes the presentation pass drew in the last frame, and
+       glow copies rebuilt so far (only when the scene changed). */
+    unsigned long long effects_present_quads, effects_glow_rebuilds;
+    /* Why presentation effects are not drawn on this output ("" when they
+       are): "cpu compositor" or "no highp fragment precision". */
+    char presentation_unavailable[48];
 } BlitKmsDisplayInfo;
 
 typedef struct {

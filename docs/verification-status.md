@@ -1,5 +1,43 @@
 # Verification status
 
+## 2026-10-26: 0.2.28 curvature, glow and effect switches
+
+ADR 0187 (proposed; accepted once its GPU cost is measured on the owner's
+Radeon), the owner's request to continue the effects:
+- **Presentation effects,** drawn by the GLES compositor as it presents each
+  frame, with a second program used only over panes that have them:
+  - Curvature: one registry warp, shared by the shader and pointer input.
+  - Glow: a per-pane blurred copy, halved twice, softened with nine taps.
+  - On a curved pane, scanlines are drawn on the glass.
+  - On the CPU compositor, or without highp, they are kept and reported
+    unavailable per pane.
+- **Switches,** at the owner's request: `effects.enabled` and a pane's own
+  `enabled`. Off keeps the values and takes exactly the no-effects path.
+- `GET /v1/effects` reports each effect's class, both switches, and what is
+  unavailable. Diagnostics report `present_panes`, `glow_rebuilds` and
+  `presentation_unavailable`.
+
+Gates:
+- `presentation_effects_gate` (new), on gles:
+  - 11,813 warped pixels predicted exactly from a plain capture;
+  - glass scanlines drawn once;
+  - glow bounded to its pane;
+  - pane isolation;
+  - SGR mouse reports through the warp;
+  - the untouched plain path.
+  On both compositors: the switches. On native: CPU unavailability.
+- `pane_effects_gate` unchanged and passing on both compositors.
+- `terminal_conformance` expects the four effects, their classes and the
+  master switch.
+- Suites: the native and gles suites ran under a sustained load of about 5.5
+  from other sessions.
+  - `terminal_conformance`'s failure was the stale expectation above.
+  - `pane_effects_gate`'s CPU budget passed on a rerun.
+  - `mouse_report_gate` (gles) and `hibr_split_capture_gate` fail the same
+    way with the shipped 0.2.27 binary, so they are not this change.
+  - `frame_rate_gate` and `terminal_soak_gate` are the known software-GL
+    flakes.
+
 ## 2026-10-25: 0.2.27 pane effects: rounded corners and scanlines, per pane
 
 ADR 0186, the owner's request for per-pane effects starting with rounded

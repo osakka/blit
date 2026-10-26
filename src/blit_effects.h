@@ -5,48 +5,103 @@
    both compositors: adding an effect is a row here, a parameter in
    BlitEffectSet, and one branch in each compositor.
 
-   Every effect here is LOCAL: a pixel's result depends only on its position
-   in the pane and on the pixel underneath. That is what lets a compositor
-   apply them inside exactly the rectangle it just repainted, so an unchanged
-   pixel is never darkened twice and an effect costs nothing outside damage.
-   Effects that sample neighbours or move geometry (curvature, glow) need an
-   offscreen pass and are a different class, not added here.
+   Two classes (ADR 0187):
+   - LOCAL effects: a pixel's result depends only on its position in the
+     pane and on the pixel underneath. That lets a compositor apply them
+     inside exactly the rectangle it just repainted, so an unchanged pixel is
+     never darkened twice and an effect costs nothing outside damage. Both
+     compositors draw them, into the scene.
+   - PRESENTATION effects move geometry or read neighbours (curvature, glow).
+     Only the GLES compositor draws them, as it presents the scene; elsewhere
+     they are kept and reported unavailable, never imitated.
 
-   The registry order is the order of application: corners last, because
-   they define the pane's edge. No backend or user reorders them. */
+   The registry order is the order of application: corners last of the local
+   ones, because they define the pane's edge. No backend or user reorders
+   them. One exception, decided by one predicate: when a pane's curvature is
+   drawn, its scanlines are drawn on the glass by the presentation pass, not
+   in the scene (blit_effect_scanlines_presented). */
 
 #include <stdint.h>
 
 typedef enum {
     BLIT_EFFECT_SCANLINES,
     BLIT_EFFECT_CORNERS,
+    BLIT_EFFECT_CURVATURE,
+    BLIT_EFFECT_GLOW,
     BLIT_EFFECT_COUNT
 } BlitEffectId;
+
+typedef enum {
+    BLIT_EFFECT_LOCAL,
+    BLIT_EFFECT_PRESENTATION
+} BlitEffectClass;
 
 typedef struct {
     const char *name;   /* the settings and API key */
     const char *param;  /* its one parameter; 0 is off */
     int maximum;
+    BlitEffectClass effect_class;
 } BlitEffectSpec;
 
 static const BlitEffectSpec blit_effect_specs[BLIT_EFFECT_COUNT] = {
     /* Every second pixel row from the pane's top, darkened by intensity%. */
-    { "scanlines", "intensity", 100 },
+    { "scanlines", "intensity", 100, BLIT_EFFECT_LOCAL },
     /* Each corner of the pane's region cut to a quarter circle, in black. */
-    { "corners", "radius_px", 1024 },
+    { "corners", "radius_px", 1024, BLIT_EFFECT_LOCAL },
+    /* The pane bulges like a tube: blit_effect_warp. */
+    { "curvature", "amount", 100, BLIT_EFFECT_PRESENTATION },
+    /* A soft bloom from a blurred copy of the pane, added on top. */
+    { "glow", "intensity", 100, BLIT_EFFECT_PRESENTATION },
 };
+
+/* Glow at intensity 100 adds this much of the blurred colour. */
+#define BLIT_EFFECT_GLOW_GAIN 0.6f
 
 /* A pane's effects, by BlitEffectId. All zero is no effect. */
 typedef struct {
     int value[BLIT_EFFECT_COUNT];
 } BlitEffectSet;
 
-static inline int blit_effect_set_active(const BlitEffectSet *set)
+/* Whether the set has any effect of that class. */
+static inline int blit_effect_set_has(const BlitEffectSet *set,
+                                      BlitEffectClass effect_class)
 {
     int i;
     for (i = 0; i < BLIT_EFFECT_COUNT; ++i)
-        if (set->value[i] > 0) return 1;
+        if (set->value[i] > 0 && blit_effect_specs[i].effect_class == effect_class)
+            return 1;
     return 0;
+}
+
+/* The one predicate of ADR 0187: a pane's scanlines move from the scene to
+   the presentation pass exactly when its curvature is drawn, which needs a
+   compositor that draws presentation effects (`presented`). */
+static inline int blit_effect_scanlines_presented(const BlitEffectSet *set,
+                                                  int presented)
+{
+    return presented && set->value[BLIT_EFFECT_CURVATURE] > 0;
+}
+
+/* The curvature warp's k: 0 off, 0.25 at the maximum. */
+static inline double blit_effect_curvature_k(const BlitEffectSet *set)
+{
+    int amount = set->value[BLIT_EFFECT_CURVATURE];
+    if (amount <= 0) return 0.0;
+    return (amount > 100 ? 100 : amount) / 400.0;
+}
+
+/* The warp, shared by the shader (blit_gles.c, the same expression) and
+   pointer input: the screen point q, in pane-normalised [-1, 1] coordinates,
+   shows the content at s = q (1 + k r^2) / (1 + k). The centre and each
+   edge's midpoint stay put; the rest bulges outward. Returns 0 when s falls
+   outside the pane, where the screen is black. */
+static inline int blit_effect_warp(double k, double qx, double qy,
+                                   double *sx, double *sy)
+{
+    double f = (1.0 + k * (qx * qx + qy * qy)) / (1.0 + k);
+    *sx = qx * f;
+    *sy = qy * f;
+    return *sx >= -1.0 && *sx <= 1.0 && *sy >= -1.0 && *sy <= 1.0;
 }
 
 /* The black alpha laid on pane row `row` (0 at the pane's top). */

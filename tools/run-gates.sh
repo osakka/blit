@@ -313,6 +313,7 @@ suite_renderer() {
     run_gate wallpaper_damage_gate.rb ruby tools/tests/wallpaper_damage_gate.rb
     run_gate graphics_band_gate.rb ruby tools/tests/graphics_band_gate.rb
     run_gate pane_effects_gate.rb ruby tools/tests/pane_effects_gate.rb
+    run_gate presentation_effects_gate.rb ruby tools/tests/presentation_effects_gate.rb
     run_gate sixel_slot_gate.rb ruby tools/tests/sixel_slot_gate.rb
     run_gate kms_compose_gate.sh "$ROOT"/tools/tests/kms_compose_gate.sh
     run_gate gles_compositor_gate.rb ruby "$ROOT/tools/tests/gles_compositor_gate.rb"

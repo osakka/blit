@@ -542,7 +542,9 @@ static void apply_view_effects(KmsOutput *output, const BlitKmsSurfaceView *view
     const BlitEffectSet *set = &view->effects;
     int x, y, radius, corner;
     long long started;
-    if (!blit_effect_set_active(set)) return;
+    /* Local effects only: the CPU compositor never draws presentation
+       effects (ADR 0187), so scanlines always stay here. */
+    if (!blit_effect_set_has(set, BLIT_EFFECT_LOCAL)) return;
     started = kms_now_us();
     if (x0 < 0) x0 = 0;
     if (y0 < 0) y0 = 0;
@@ -1700,6 +1702,8 @@ static void kms_gles_detach(BlitKms *kms, KmsOutput *output, const char *reason)
         output->cpu_scene_stale = 1;
     }
     snprintf(output->info.compositor, sizeof(output->info.compositor), "cpu");
+    snprintf(output->info.presentation_unavailable,
+             sizeof(output->info.presentation_unavailable), "cpu compositor");
     if (reason != NULL) {
         snprintf(output->info.compositor_reason,
                  sizeof(output->info.compositor_reason), "%s", reason);
@@ -1717,6 +1721,8 @@ static void kms_gles_attach(BlitKms *kms, KmsOutput *output)
              kms->gles_requested ? "gles" : "cpu");
     snprintf(output->info.compositor, sizeof(output->info.compositor), "cpu");
     output->info.compositor_reason[0] = '\0';
+    snprintf(output->info.presentation_unavailable,
+             sizeof(output->info.presentation_unavailable), "cpu compositor");
     if (!kms->gles_requested) return;
     if (kms->gles == NULL) {
         kms_gles_detach(kms, output, kms->gles_error);
@@ -1731,6 +1737,9 @@ static void kms_gles_attach(BlitKms *kms, KmsOutput *output)
         return;
     }
     snprintf(output->info.compositor, sizeof(output->info.compositor), "gles");
+    snprintf(output->info.presentation_unavailable,
+             sizeof(output->info.presentation_unavailable), "%s",
+             blit_gles_presents(kms->gles) ? "" : "no highp fragment precision");
     snprintf(output->info.compositor_renderer,
              sizeof(output->info.compositor_renderer), "%s",
              blit_gles_identity(kms->gles));
