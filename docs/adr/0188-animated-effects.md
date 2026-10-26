@@ -43,7 +43,8 @@ or cost when they are off.
 
 **The registry gains animation.** Each spec says whether its effect
 animates. `glowing_line: {intensity: 0..100}` is the first, a presentation
-effect, with the title "Glowing line". The band and its timing are defined
+effect, titled "Hum bar" at the owner's choice: the real CRT artefact
+it evokes. The key keeps cool-retro-term's name. The band and its timing are defined
 once in `blit_effects.h`:
 - **Band length:** a third of the pane's height.
 - **Period:** 1 / 0.15 s, sweeping the pane's height plus one band length.

@@ -716,7 +716,7 @@ apply live, with no restart, and are saved:
 | `curvature` | presentation | `amount` | 0–100 | The pane bulges like a tube; its edges become arcs, black beyond them |
 | `glow` | presentation | `intensity` | 0–100 | A soft bloom around bright content, from a blurred copy of the pane |
 | `rgb_shift` | presentation | `amount` | 0–100 | An old set's colour fringe: each channel leans to one side, up to half a cell apart |
-| `glowing_line` | presentation, animated | `intensity` | 0–100 | A soft band of light sweeping down the pane every 6.7 s (cool-retro-term's glowing line) |
+| `glowing_line` | presentation, animated | `intensity` | 0–100 | "Hum bar": a soft band of light sweeping down the pane every 6.7 s (cool-retro-term's glowing line) |
 
 - **Order:** effects are applied in a fixed order (scanlines, then corners),
   over the pane's pixel region, beneath the pointer and API overlays.

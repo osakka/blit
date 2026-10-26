@@ -3354,7 +3354,10 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
     uint64_t now = monotonic_us();
     char errors[192];
     char escaped_error[256];
-    char scheduler[4096];
+    /* One entry per output, each about 1.5 KB with its compositor, effects
+       and flip details: sized for every output Blit can have, so a third
+       display never truncates the array mid-entry. */
+    static char scheduler[BLIT_MAX_DISPLAYS * 3072 + 64];
     char hotplug[512];
     char hotplug_error[256];
     BlitKmsHotplugInfo hotplug_info;

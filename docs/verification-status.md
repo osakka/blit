@@ -28,6 +28,15 @@ Gates:
   - an idle screen presents nothing with the line at 0, its pane switched
     off, or the master switch off.
   On native, a saved line is reported unavailable and costs no frames.
+- **The full suites found one real bug.** The per-output diagnostics, longer
+  now with the effects fields, overflowed their fixed 4 KB buffer at three
+  displays, cutting the JSON mid-entry (`display_layout_gate` and
+  `kms_hotplug_gate` failed to parse it). The buffer is now sized for every
+  output Blit can have. The other failures were the machine's load (around
+  9): `sync_output`, `terminal_conformance`, `mouse_report`, `frame_rate`
+  and `terminal_soak` fail the same way with the shipped 0.2.30 binary at
+  that load.
+- The hum bar ("Hum bar", the owner's name; key `glowing_line`).
 - `output_capture_gate` (new): the exact bytes in order, timed reads,
   truncation at `max_bytes`, `DELETE` frees, 400 and 404 refusals.
 - The WebSocket gates `stream_replay`, `input_stream_text`,

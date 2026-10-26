@@ -59,9 +59,10 @@ static const BlitEffectSpec blit_effect_specs[BLIT_EFFECT_COUNT] = {
     /* An old set's colour fringe: each channel leans to one side,
        blit_effect_rgb_shift_px apart (cool-retro-term's rgb shift). */
     { "rgb_shift", "amount", 100, BLIT_EFFECT_PRESENTATION, "RGB shift", 0 },
-    /* A soft band of light sweeping down the pane (cool-retro-term's
-       glowing line): blit_effect_line_value. */
-    { "glowing_line", "intensity", 100, BLIT_EFFECT_PRESENTATION, "Glowing line", 1 },
+    /* A soft band of light sweeping down the pane: blit_effect_line_value.
+       The key is cool-retro-term's name ("glowing line"); the title is the
+       owner's, after the real CRT artefact it evokes. */
+    { "glowing_line", "intensity", 100, BLIT_EFFECT_PRESENTATION, "Hum bar", 1 },
 };
 
 /* The glowing line (ADR 0188), as cool-retro-term's randomPass: its length,
