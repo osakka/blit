@@ -1,5 +1,34 @@
 # Verification status
 
+## 2026-10-26: 0.2.30 settings saves off the main loop; RGB shift
+
+- **ADR 0189.** The owner's 11:23 restart on 0.2.28 was the console
+  watchdog. Its report names the main thread in `fsync` (syscall 74), in
+  `folio_wait_bit_common`, for 9,070 ms in "input, sessions and API". A
+  settings save fsync'd on the main loop during an `apt-get upgrade`.
+  - Saves now run on a writer thread. `PUT` and `DELETE /v1/settings` are
+    held until their change is durable, then answered with the same receipt.
+  - The 0.2.29 font round-trip fix stands as a separate real bug; it was not
+    this restart.
+- **ADR 0187 addendum: RGB shift**, with an effect `title` column in the
+  registry and API.
+- **The font cell-fit check** runs before the unchanged-font no-op.
+
+Gates:
+- `settings_writer_gate` (new), every save delayed 3 s:
+  - the PUT is answered when durable, with a clean receipt;
+  - `GET /v1/version` within 34 ms throughout;
+  - 122 presents during the save;
+  - storage `pending` with the old saved revision;
+  - overlapping PUTs both answered;
+  - `DELETE` resets after the removal;
+  - a failing write answers 503 and recovers.
+- `presentation_effects_gate` adds an exact RGB shift case (striped pane,
+  2 px samples, more than 1,000 fringed pixels).
+- The settings, login, font, display, pointer and effects gates pass.
+  `pane_effects_gate`'s CPU-cost budget trips only under the machine's load
+  (about 7) and passes when rerun.
+
 ## 2026-10-26: 0.2.29 settings writes no longer reflow the panes
 
 Found while tracing the owner's report that Blit restarted once while they

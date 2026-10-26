@@ -1139,6 +1139,13 @@ disk. Inspect `storage.state` (`clean`, `pending`, `error`, `disabled`),
 500 ms. A successful settings replacement has a clean receipt from the same
 serializer as GET, with `effective` plus `applied`/`refused` details.
 
+The disk work runs on its own writer thread (ADR 0189), so a slow or busy
+disk never stalls drawing, input or the console watchdog. A `PUT` or `DELETE
+/v1/settings` is answered once its change is durable, with the same receipt
+as before. While a save is in flight, `GET /v1/settings` reports `pending`
+with the previous `saved_revision`. A request whose save is not confirmed
+within 30 s is answered 503 `settings_write_failed`; the save may still
+complete, so read the storage state.
 The writer syncs file contents and the parent directory around atomic rename.
 Replacement no longer deletes the old file first. A forced save failure
 returns HTTP 503 `settings_write_failed`, not success; changes may already

@@ -384,6 +384,13 @@ typedef struct {
     char update_path[256];
     char update_sha256[65];
     int screenshot_output_index;
+    /* ADR 0189: a settings request parked until its save is durable:
+       1 PUT /v1/settings, 2 DELETE /v1/settings. */
+    int settings_wait;
+    unsigned long long settings_wait_generation;
+    int settings_applied, settings_refused;
+    int settings_old_columns, settings_old_rows;
+    char settings_refusal[512];
     char response_header[512];
     size_t response_header_length;
     size_t response_header_offset;
@@ -1364,6 +1371,31 @@ typedef struct {
     int settings_dirty;
     int settings_write_reported;
     uint64_t settings_dirty_us;
+    /* ADR 0189: the disk work of a settings save runs on its own thread, so
+       the main loop -- which draws and feeds the console watchdog -- never
+       waits on a disk. Every change is a generation; a write carries the
+       generation it was built from, and a request waiting for a durable
+       save waits for its generation. One job at a time, in a mailbox. */
+    unsigned long long settings_generation;
+    unsigned long long settings_durable_generation;
+    int settings_flush_now;
+    int settings_remove_pending;        /* a DELETE waits for its removal */
+    int settings_writer_running;
+    int settings_writer_stop;
+    pthread_t settings_writer_thread;
+    pthread_mutex_t settings_writer_lock;
+    pthread_cond_t settings_writer_wake;
+    /* The job (owned by the writer while busy) and its result. */
+    int settings_job_kind;              /* 0 none, 1 write, 2 remove */
+    int settings_job_busy;
+    char *settings_job_text;
+    size_t settings_job_length;
+    unsigned long long settings_job_generation;
+    unsigned long long settings_job_revision;
+    int settings_result_ready;
+    int settings_result_ok;
+    int settings_result_errno;
+    unsigned settings_write_delay_ms;   /* gate fault injection only */
     unsigned long long settings_revision;
     unsigned long long settings_saved_revision;
     char settings_document[BLIT_SETTINGS_CAPACITY];
@@ -20115,6 +20147,7 @@ static void settings_mark_dirty(BlitRuntime *runtime)
 {
     if (runtime == NULL || !runtime->settings_enabled)
         return;
+    ++runtime->settings_generation;
     if (!runtime->settings_dirty)
         runtime->settings_dirty_us = monotonic_us();
     runtime->settings_dirty = 1;
@@ -20169,15 +20202,188 @@ static int settings_write(const char *path, const char *text, size_t length)
     return settings_sync_parent(path);
 }
 
-/* Coalesced: a slider dragging sensitivity_percent must not be one fsync per
-   pixel. `force` is the teardown flush, which is one place now rather than
-   three -- issue #63 made the API restart's exec, the update install's exit
-   and SIGTERM converge on the same return from main. */
+/* ADR 0189: the settings writer thread. It takes one job at a time from
+   the mailbox -- a document to write durably, or the file to remove -- and
+   posts the result; the main loop collects it (settings_service). Nothing
+   here touches runtime state but the mailbox, under its lock. */
+static void *settings_writer(void *argument)
+{
+    BlitRuntime *runtime = argument;
+    for (;;) {
+        int kind, ok, error;
+        char *text;
+        size_t length;
+        pthread_mutex_lock(&runtime->settings_writer_lock);
+        while (!runtime->settings_writer_stop && !runtime->settings_job_busy)
+            pthread_cond_wait(&runtime->settings_writer_wake, &runtime->settings_writer_lock);
+        if (!runtime->settings_job_busy) {
+            pthread_mutex_unlock(&runtime->settings_writer_lock);
+            break;
+        }
+        kind = runtime->settings_job_kind;
+        text = runtime->settings_job_text;
+        length = runtime->settings_job_length;
+        pthread_mutex_unlock(&runtime->settings_writer_lock);
+        /* Gate fault injection: a slow disk, so a gate can show the main
+           loop never waits on one. */
+        if (runtime->settings_write_delay_ms > 0)
+            usleep(runtime->settings_write_delay_ms * 1000U);
+        errno = 0;
+        if (kind == 2) {
+            int removed = unlink(runtime->settings_path);
+            ok = !((removed != 0 && errno != ENOENT) ||
+                   (removed == 0 && !settings_sync_parent(runtime->settings_path)));
+        } else {
+            ok = settings_write(runtime->settings_path, text, length);
+        }
+        error = errno;
+        pthread_mutex_lock(&runtime->settings_writer_lock);
+        runtime->settings_result_ok = ok;
+        runtime->settings_result_errno = error;
+        runtime->settings_result_ready = 1;
+        runtime->settings_job_busy = 0;
+        pthread_mutex_unlock(&runtime->settings_writer_lock);
+    }
+    return NULL;
+}
+
+static void start_settings_writer(BlitRuntime *runtime)
+{
+    const char *delay = getenv("BLIT_SETTINGS_WRITE_DELAY_MS");
+    if (runtime->settings_writer_running || !runtime->settings_enabled)
+        return;
+    runtime->settings_write_delay_ms = delay != NULL ? (unsigned)strtoul(delay, NULL, 10) : 0;
+    if (runtime->settings_write_delay_ms > 10000) runtime->settings_write_delay_ms = 10000;
+    pthread_mutex_init(&runtime->settings_writer_lock, NULL);
+    pthread_cond_init(&runtime->settings_writer_wake, NULL);
+    runtime->settings_writer_stop = 0;
+    runtime->settings_writer_running = 1;
+    if (pthread_create(&runtime->settings_writer_thread, NULL, settings_writer, runtime) != 0) {
+        /* No thread means saves run on the event loop, as they did before:
+           a slow disk then stalls it, but nothing is lost. */
+        runtime->settings_writer_running = 0;
+        fprintf(stderr, "blit: settings writer thread unavailable; saves run on the event loop\n");
+    }
+}
+
+/* Hand the writer a job: the current document (a copy it owns) or a removal. */
+static int settings_writer_hand(BlitRuntime *runtime, int kind)
+{
+    static char document[BLIT_SETTINGS_CAPACITY];
+    size_t length = 0;
+    char *text = NULL;
+    if (kind == 1) {
+        length = settings_build(runtime, document, sizeof(document),
+                                runtime->settings_revision + 1);
+        if (length == 0 || length + 1 >= sizeof(document)) {
+            runtime->settings_write_reported = 1;
+            return 0;
+        }
+        text = malloc(length + 1);
+        if (text == NULL) return 0;
+        memcpy(text, document, length + 1);
+    }
+    pthread_mutex_lock(&runtime->settings_writer_lock);
+    runtime->settings_job_kind = kind;
+    runtime->settings_job_text = text;
+    runtime->settings_job_length = length;
+    runtime->settings_job_generation = runtime->settings_generation;
+    runtime->settings_job_revision = runtime->settings_revision + 1;
+    runtime->settings_job_busy = 1;
+    pthread_cond_signal(&runtime->settings_writer_wake);
+    pthread_mutex_unlock(&runtime->settings_writer_lock);
+    return 1;
+}
+
+static void settings_complete_requests(BlitRuntime *runtime, int kind, int ok,
+                                       unsigned long long generation);
+
+/* Once per loop turn: collect a finished job, answer the requests it
+   satisfies, and hand over the next one -- at once when a request waits
+   (settings_flush_now), else after the coalescing interval: a slider
+   dragging sensitivity_percent must not be one fsync per pixel. A failed
+   write retries at that interval, said once. Never waits on the disk. */
+static void settings_service(BlitRuntime *runtime)
+{
+    int ready = 0, ok = 0, error = 0, kind = 0;
+    unsigned long long generation = 0, revision = 0;
+    char *text = NULL;
+    if (runtime == NULL || !runtime->settings_writer_running) return;
+    pthread_mutex_lock(&runtime->settings_writer_lock);
+    if (runtime->settings_result_ready) {
+        ready = 1;
+        ok = runtime->settings_result_ok;
+        error = runtime->settings_result_errno;
+        kind = runtime->settings_job_kind;
+        generation = runtime->settings_job_generation;
+        revision = runtime->settings_job_revision;
+        text = runtime->settings_job_text;
+        runtime->settings_job_text = NULL;
+        runtime->settings_job_kind = 0;
+        runtime->settings_result_ready = 0;
+    }
+    pthread_mutex_unlock(&runtime->settings_writer_lock);
+    if (ready && kind == 1) {
+        if (ok) {
+            runtime->settings_revision = revision;
+            runtime->settings_saved_revision = revision;
+            runtime->settings_durable_generation = generation;
+            runtime->settings_write_reported = 0;
+            /* What is on disk is now the document, unless something changed
+               since this one was built; then that newer state stays dirty. */
+            if (generation == runtime->settings_generation) {
+                snprintf(runtime->settings_document,
+                         sizeof(runtime->settings_document), "%s", text);
+                runtime->settings_dirty = 0;
+            }
+        } else {
+            if (!runtime->settings_write_reported)
+                fprintf(stderr, "blit: cannot write %s: %s\n",
+                        runtime->settings_path, strerror(error));
+            /* Said once, not on every retry. A settings write that fails in
+               silence is the shape that cost an afternoon. */
+            runtime->settings_write_reported = 1;
+            runtime->settings_dirty_us = monotonic_us();
+        }
+    }
+    free(text);
+    if (ready)
+        settings_complete_requests(runtime, kind, ok, generation);
+    pthread_mutex_lock(&runtime->settings_writer_lock);
+    if (runtime->settings_job_busy || runtime->settings_result_ready) {
+        pthread_mutex_unlock(&runtime->settings_writer_lock);
+        return;
+    }
+    pthread_mutex_unlock(&runtime->settings_writer_lock);
+    if (runtime->settings_remove_pending) {
+        runtime->settings_remove_pending = 0;
+        settings_writer_hand(runtime, 2);
+        return;
+    }
+    if (!runtime->settings_enabled || !runtime->settings_dirty) {
+        runtime->settings_flush_now = 0;
+        return;
+    }
+    if (!runtime->settings_flush_now &&
+        monotonic_us() - runtime->settings_dirty_us < (uint64_t)BLIT_SETTINGS_FLUSH_US)
+        return;
+    runtime->settings_flush_now = 0;
+    settings_writer_hand(runtime, 1);
+}
+
+/* A save, asked for. `force` hands it to the writer at its next turn rather
+   than after the coalescing interval. Never waits on the disk. Without the
+   writer thread it writes here, as Blit always did. */
 static void settings_flush(BlitRuntime *runtime, int force)
 {
     static char document[BLIT_SETTINGS_CAPACITY];
     size_t length;
 
+    if (runtime != NULL && runtime->settings_writer_running) {
+        if (force && runtime->settings_dirty) runtime->settings_flush_now = 1;
+        settings_service(runtime);
+        return;
+    }
     if (runtime == NULL || !runtime->settings_enabled || !runtime->settings_dirty)
         return;
     if (!force &&
@@ -20195,19 +20401,48 @@ static void settings_flush(BlitRuntime *runtime, int force)
                  sizeof(runtime->settings_document), "%s", document);
         ++runtime->settings_revision;
         runtime->settings_saved_revision = runtime->settings_revision;
+        runtime->settings_durable_generation = runtime->settings_generation;
         runtime->settings_dirty = 0;
         runtime->settings_write_reported = 0;
     } else if (!runtime->settings_write_reported) {
-        /* Said once, not on every retry. A settings write that fails in
-           silence is the shape that cost an afternoon: the API reports the
-           configuration as applied and persisted, and nothing anywhere says
-           the document never reached the disk. */
         runtime->settings_write_reported = 1;
         fprintf(stderr, "blit: cannot write %s: %s\n",
                 runtime->settings_path, strerror(errno));
     }
     if (runtime->settings_dirty)
         runtime->settings_dirty_us = monotonic_us();
+}
+
+/* At exit: let the writer finish what it holds, stop it, and write what is
+   still dirty here. A write accepted inside the coalescing window must still
+   reach the disk, and a restart is exactly when it would not. */
+static void settings_flush_final(BlitRuntime *runtime)
+{
+    if (runtime->settings_writer_running) {
+        int i, busy = 0;
+        for (i = 0; i < 500; ++i) {
+            pthread_mutex_lock(&runtime->settings_writer_lock);
+            busy = runtime->settings_job_busy;
+            pthread_mutex_unlock(&runtime->settings_writer_lock);
+            if (!busy) break;
+            usleep(10000);
+        }
+        if (busy) {
+            /* Still writing after five seconds: leave it to finish as the
+               process ends. Writing here too would race it on the same
+               temporary file; its rename keeps the file whole either way. */
+            fprintf(stderr, "blit: settings save still in progress at exit\n");
+            return;
+        }
+        settings_service(runtime);
+        pthread_mutex_lock(&runtime->settings_writer_lock);
+        runtime->settings_writer_stop = 1;
+        pthread_cond_signal(&runtime->settings_writer_wake);
+        pthread_mutex_unlock(&runtime->settings_writer_lock);
+        pthread_join(runtime->settings_writer_thread, NULL);
+        runtime->settings_writer_running = 0;
+    }
+    settings_flush(runtime, 1);
 }
 
 /* Read the document, or decide it cannot be read. An unparseable document
@@ -20814,6 +21049,61 @@ static int settings_reset(BlitRuntime *runtime, int remove_file)
         runtime->settings_write_reported = 0;
     }
     return 1;
+}
+
+/* ADR 0189: answer the settings requests a finished job satisfies, with the
+   same receipts they always had. A PUT waits for its own generation to be
+   durable; a DELETE for its removal, and only then resets the live
+   settings, so a failed removal still leaves them unchanged. */
+static void settings_complete_requests(BlitRuntime *runtime, int kind, int ok,
+                                       unsigned long long generation)
+{
+    static char body[BLIT_SETTINGS_CAPACITY + 8192];
+    int i;
+    for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i) {
+        BlitHttpClient *client = &runtime->http_clients[i];
+        if (!client->used || client->settings_wait == 0)
+            continue;
+        if (client->settings_wait == 1) {
+            if (kind != 1 || client->settings_wait_generation > generation)
+                continue;
+            if (!ok) {
+                send_problem(client->fd, 503, "Service Unavailable", "settings_write_failed",
+                             "Settings applied in memory but durable save could not be confirmed. Inspect GET /v1/settings before retrying.");
+            } else {
+                size_t used;
+                char escaped_refusal[1100];
+                settings_json(runtime, body, sizeof(body));
+                used = strlen(body);
+                if (used > 0) body[--used] = '\0';
+                json_escape(client->settings_refusal, escaped_refusal, sizeof(escaped_refusal));
+                json_appendf(body, sizeof(body), &used,
+                             ",\"applied\":%d,\"refused\":%d,\"refusal\":\"%s\"}",
+                             client->settings_applied, client->settings_refused,
+                             escaped_refusal);
+                send_http(client->fd, 200, "OK", "application/json", body);
+            }
+        } else {
+            if (kind != 2)
+                continue;
+            if (!ok) {
+                send_problem(client->fd, 503, "Service Unavailable", "settings_write_failed",
+                             "Settings reset could not be confirmed durable; live configuration unchanged. Inspect settings storage state.");
+            } else {
+                settings_reset(runtime, 0);
+                runtime->settings_saved_revision = runtime->settings_revision;
+                runtime->settings_write_reported = 0;
+                settings_apply_font(runtime);
+                settings_apply_pane_layout(runtime, client->settings_old_columns,
+                                           client->settings_old_rows);
+                reset_render_schedule(runtime, monotonic_us());
+                settings_json(runtime, body, sizeof(body));
+                send_http(client->fd, 200, "OK", "application/json", body);
+            }
+        }
+        client->settings_wait = 0;
+        remove_http_client(runtime, i);
+    }
 }
 
 
@@ -21949,6 +22239,18 @@ static void handle_request(int fd, BlitRuntime *runtime,
                     return;
                 }
             }
+            if (runtime->settings_writer_running && client != NULL) {
+                /* ADR 0189: the removal is the writer's; the live settings
+                   reset only once it is durable, in settings_complete_requests,
+                   so a failure still leaves them unchanged. */
+                client->settings_wait = 2;
+                client->settings_wait_generation = runtime->settings_generation;
+                client->settings_old_columns = runtime->pane_columns;
+                client->settings_old_rows = runtime->pane_rows;
+                runtime->settings_remove_pending = 1;
+                settings_service(runtime);
+                return;
+            }
             {
                 int old_columns = runtime->pane_columns;
                 int old_rows = runtime->pane_rows;
@@ -22127,6 +22429,17 @@ static void handle_request(int fd, BlitRuntime *runtime,
                 }
             }
             settings_mark_dirty(runtime);
+            if (runtime->settings_writer_running && client != NULL) {
+                /* ADR 0189: answered when this change is durable, by
+                   settings_complete_requests; the loop keeps running. */
+                client->settings_wait = 1;
+                client->settings_wait_generation = runtime->settings_generation;
+                client->settings_applied = applied;
+                client->settings_refused = refused;
+                snprintf(client->settings_refusal, sizeof(client->settings_refusal), "%s", refusal);
+                settings_flush(runtime, 1);
+                return;
+            }
             settings_flush(runtime, 1);
             if (runtime->settings_dirty || runtime->settings_write_reported) {
                 send_problem(fd, 503, "Service Unavailable", "settings_write_failed",
@@ -27341,7 +27654,7 @@ static void service_http_client(BlitRuntime *runtime, int index)
     if (complete == 0 || client->length < required)
         return;
     handle_request(client->fd, runtime, client, client->request);
-    if (client->screenshot_output_index > 0) {
+    if (client->screenshot_output_index > 0 || client->settings_wait != 0) {
         client->length = 0;
         client->request[0] = '\0';
         client->accepted_us = monotonic_us();
@@ -27688,6 +28001,7 @@ int main(int argc, char **argv)
         if (mouse_device != NULL && mouse_device[0] != '\0')
             evdev_register_path(&runtime, mouse_device, 0);
         start_evdev_opener(&runtime);
+        start_settings_writer(&runtime);
         scan_evdev_devices(&runtime, 0);
         scan_audio_devices(&runtime, 0);
         open_snd_watch(&runtime);
@@ -27855,6 +28169,18 @@ int main(int argc, char **argv)
                     snprintf(runtime.update_detail,
                              sizeof(runtime.update_detail),
                              "update upload idle timeout");
+                    remove_http_client(&runtime, i);
+                }
+                continue;
+            }
+            /* ADR 0189: a request waiting for a durable save waits longer
+               than an idle client, then is told it could not be confirmed. */
+            if (client->settings_wait != 0) {
+                if (now > client->accepted_us &&
+                    now - client->accepted_us > 30000000ULL) {
+                    send_problem(client->fd, 503, "Service Unavailable", "settings_write_failed",
+                                 "The durable save was not confirmed within 30 s; it may still complete. Inspect GET /v1/settings storage state.");
+                    client->settings_wait = 0;
                     remove_http_client(&runtime, i);
                 }
                 continue;
@@ -28234,7 +28560,7 @@ int main(int argc, char **argv)
        update install's exit and SIGTERM all return through here. A write
        accepted inside the coalescing window must still reach the disk, and a
        restart is exactly when it would not. */
-    settings_flush(&runtime, 1);
+    settings_flush_final(&runtime);
     destroy_outputs(&runtime);
     /* The start guard is for a crash. A start stopped in order before its
        hold was over -- an update, a restart, a stop -- tore its outputs down
