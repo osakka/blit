@@ -207,6 +207,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0187 — Curvature and glow are presentation effects, drawn as the GPU presents](0187-presentation-effects.md)
 - [0188 — Animated effects re-present a held scene on a frame clock that exists only while one is on](0188-animated-effects.md)
 - [0189 — Settings writes never block the main loop; the receipt is unchanged](0189-settings-writes-off-the-loop.md)
+- [0190 — Flicker, horizontal sync and jitter: per-frame randomness from C, on the frame clock](0190-flicker-horizontal-sync-jitter.md)
 
 ## Adding an ADR
 
