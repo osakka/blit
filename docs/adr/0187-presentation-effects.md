@@ -1,6 +1,6 @@
 # ADR 0187: Curvature and glow are presentation effects, drawn as the GPU presents
 
-- Status: proposed
+- Status: accepted (2026-10-26, after the measurement below)
 - Date: 2026-10-26
 - Scope: effects registry, GLES compositor, pointer input, effects API and
   settings, diagnostics
@@ -244,3 +244,24 @@ gains these cases, on `gles`:
   `/v1/effects` reports it unavailable.
 - **Cost:** the GPU milliseconds are reported. The budget is checked on the
   owner's GPU, not llvmpipe.
+
+### Measured on the owner's Radeon (0.2.29, 2026-10-26)
+
+DP-1 at 1920×2160, split 1×2. Both panes have curvature, glow, scanlines and
+corners. GPU time per frame, averaged over 10 s each, A/B with the master
+switch:
+
+| State | GPU per frame | Present panes | Glow rebuilds |
+|---|---|---|---|
+| Effects on | 2.31 ms | 2 | 207 in 274 frames |
+| Effects off | 0.49 ms | 0 | 0 |
+| On again | 2.23 ms | 2 | 152 in 371 frames |
+
+- The presentation effects cost about 1.8 ms per frame, glow rebuilds
+  included. That is within the 2 ms budget, on more pixels than the
+  2560×1440 it was stated for.
+- Switched off, the frame costs what a frame with no effects costs. So the
+  switches bypass the effects, they don't dim them.
+- Glow rebuilds track the panes' own changes: the clock, htop and the
+  cursor. They no longer follow changes elsewhere on the output (0.2.29).
+
