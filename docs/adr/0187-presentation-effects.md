@@ -89,8 +89,11 @@ What this means:
 The panel shows the amount as a percentage.
 
 **Glow.** Its source is a small blurred copy of each glowing pane:
-- The copy is a quarter-size texture, made by drawing the pane's scene region
-  with linear filtering, then halved once more with linear filtering.
+- The copy is made by repeated halving, to half size and then to a quarter,
+  optionally once more. Each step is one linear-filtered draw at exactly half
+  size, so every output texel is a true 2×2 box of its source. A single 4×
+  step would sample only some of the source pixels, and a thin glyph stroke
+  could fall between samples and get no glow.
 - Each pane is drawn into its own region of the glow texture, with a black
   border of one texel, so glow never crosses into a neighbouring pane.
 - The copy is rebuilt only when the scene changed this frame, and only for
@@ -116,13 +119,40 @@ option, if the owner wants it smoother.
   4. Otherwise samples the scene inside that pane's own rectangle, so it never
      reads another pane. The scene's rows are bottom-up, and the lookup flips
      them.
-  5. Adds glow.
+  5. Applies the pane's scanlines, if it has curvature (see below).
+  6. Adds glow.
 
-**What the warp carries.** Local effects are already in the scene, so they
-bend with the content, as a real tube's would. The corner arc follows the
-curve, and scanlines curve with the rows. The pointer and API overlays are
-drawn after the present pass, in screen space, unwarped. Screenshots read
-back after the present pass, so they show the effects.
+**Filtering.** The scene texture is `GL_NEAREST`, which is right for today's
+1:1 copy. Under curvature the mapping is no longer 1:1, and nearest sampling
+gives jagged glyph edges. So a curved pane is sampled with `GL_LINEAR`. The
+glow downsample draws are linear too. GLES 2 has no sampler objects, so the
+scene texture's filter is set with `glTexParameteri` before those draws and
+put back to `GL_NEAREST` before the plain copy.
+
+**What the warp carries, and where scanlines go.** Corners are in the scene,
+so they bend with the content: the corner arc follows the curve.
+
+Scanlines cannot stay in the scene for a curved pane. They have a 2 px
+period:
+- Nearest sampling through a warp would double or skip rows, giving moiré
+  bands.
+- Linear sampling would average them to a flat grey, and the effect would
+  vanish.
+
+So there is one rule, decided by one predicate: **if curvature is drawn for
+a pane, that pane's scanlines are drawn by the present shader in screen
+space**, using the registry's `blit_effect_scanline_alpha` on the screen row
+counted from the pane's top. The scene skips them for that pane. Otherwise,
+including on the CPU compositor where curvature is unavailable, scanlines
+stay in the scene, exactly as in ADR 0186.
+
+This is the order cool-retro-term uses: the scanlines sit on the glass, not
+on the picture. The predicate is the same one that decides whether curvature
+is drawn, so the two can never both draw scanlines or both skip them.
+
+The pointer and API overlays are drawn after the present pass, in screen
+space, unwarped. Screenshots read back after the present pass, so they show
+the effects.
 
 **Pointer input follows the warp.** A click must reach the content the user
 sees under the pointer. Where `blit_server.c` turns a display pixel into a
@@ -133,8 +163,10 @@ clamps to the nearest edge cell, as the existing inset rule already does.
 
 **Precision.** The warp needs `highp` floats in the fragment shader.
 Curvature at 2560 px in `mediump` (10-bit mantissa) is visibly wrong.
-Without `GL_FRAGMENT_PRECISION_HIGH`, presentation effects are unavailable on
-that output, and the reason is reported.
+`GL_FRAGMENT_PRECISION_HIGH` is visible only inside a shader, so Blit checks
+at start with `glGetShaderPrecisionFormat(GL_FRAGMENT_SHADER, GL_HIGH_FLOAT)`.
+A zero range or precision means no `highp`. Presentation effects are then
+unavailable on that output, with the reason `no highp fragment precision`.
 
 **Where it is unavailable, it is said, not imitated.** On a CPU-composed
 output, or without `highp`, presentation effects are not drawn. The saved
@@ -177,6 +209,10 @@ gains these cases, on `gles`:
 - **Warp:** a pane painted with alternating 8 px bands. The readback must
   match the shared C warp: within one band edge at the boundaries, exact
   elsewhere, and black outside the tube.
+- **Scanlines under curvature:** a pane with curvature and scanlines over a
+  flat colour. In every 16-row window, close to half the rows must be dark,
+  so there is no moiré and no flattening. The scene for that pane must hold
+  no scanline darkening, so they are drawn exactly once.
 - **Pointer:** motion injected at the screen position of a known cell's
   warped centre must report that cell. One injection in the black margin must
   report the nearest edge cell.
