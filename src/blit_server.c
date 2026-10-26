@@ -16562,22 +16562,15 @@ static int apply_font_configuration(BlitRuntime *runtime, const char *path,
          (size_px < BLIT_FONT_SIZE_MIN_PX || size_px > BLIT_FONT_SIZE_MAX_PX ||
           scale_tenths != 0)))
         return 0;
-    /* Already the active font: nothing to rasterise, reflow or redraw. */
-    if (runtime->font.data != NULL && strcmp(path, runtime->font.path) == 0 &&
-        scale_tenths == runtime->font_scale_tenths && size_px == runtime->font_size_px)
-        return 1;
     memset(&candidate, 0, sizeof(candidate));
     if (strcmp(path, runtime->font.path) != 0 &&
         blit_font_load_path(&candidate, path) != 0) {
         blit_font_free(&candidate);
         return 0;
     }
-    if (!prepare_font_raster(candidate.data ? &candidate : &runtime->font,
-                             path, scale_tenths, size_px, &raster)) {
-        blit_font_free(&candidate); return 0;
-    }
-    /* Do not install a font that makes a configured partition smaller than
-       one complete cell. Validate before replacing the active font. */
+    /* Do not install -- or keep -- a font that makes a configured partition
+       smaller than one complete cell. Checked first, for an unchanged font
+       too, before anything is rasterised or replaced. */
     for (i = 0; i < runtime->display_count; ++i) {
         int columns, rows;
         const BlitFont *font = candidate.data != NULL ? &candidate : &runtime->font;
@@ -16588,9 +16581,16 @@ static int apply_font_configuration(BlitRuntime *runtime, const char *path,
         if (runtime->displays[i].bounds.w / columns < cell_width ||
             runtime->displays[i].bounds.h / rows < cell_height) {
             blit_font_free(&candidate);
-            blit_raster_close(raster);
             return 0;
         }
+    }
+    /* Already the active font: nothing to rasterise, reflow or redraw. */
+    if (candidate.data == NULL && runtime->font.data != NULL &&
+        scale_tenths == runtime->font_scale_tenths && size_px == runtime->font_size_px)
+        return 1;
+    if (!prepare_font_raster(candidate.data ? &candidate : &runtime->font,
+                             path, scale_tenths, size_px, &raster)) {
+        blit_font_free(&candidate); return 0;
     }
     if (candidate.data != NULL) {
         blit_font_free(&runtime->font);
