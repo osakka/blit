@@ -300,7 +300,44 @@ static int protected_geometry(uint32_t scalar)
 {
     /* Keep exact terminal geometry; outline fonts often leave seams here. */
     return (scalar >= 0x2500 && scalar <= 0x259f) ||
-        (scalar >= 0xe0b0 && scalar <= 0xe0b3);
+        (scalar >= 0xe0b0 && scalar <= 0xe0b3) ||
+        (scalar >= 0x2800 && scalar <= 0x28ff);
+}
+
+/* ADR 0191: Braille (U+2800-28FF) is cell geometry, as terminals draw it --
+   a font's dots rarely land on the cell grid, and graphs then show gaps.
+   2 columns x 4 rows: bits 0-2 are dots 1-3 down the left column, bits 3-5
+   dots 4-6 down the right, bits 6 and 7 dots 7 and 8 at the bottom. Column
+   centres at 1/4 and 3/4 of the width, rows at (2k + 1) / 8 of the height;
+   round dots of radius 0.3 x the smaller dot spacing, so they never touch,
+   anti-aliased by 8x8 samples in sixteenths as the bar corners are. */
+static void draw_braille(uint32_t scalar, RasterEntry *entry)
+{
+    static const int column[8] = { 0, 0, 0, 1, 1, 1, 0, 1 };
+    static const int row[8] = { 0, 1, 2, 0, 1, 2, 3, 3 };
+    int x, y, sx, sy, dot, w = entry->glyph.width, h = entry->glyph.height;
+    unsigned bits = scalar - 0x2800;
+    double spacing = (double)w / 2.0 < (double)h / 4.0 ? (double)w / 2.0 : (double)h / 4.0;
+    long r16 = (long)(16.0 * 0.3 * spacing + 0.5), cx[8], cy[8];
+    if (r16 < 8) r16 = 8;
+    for (dot = 0; dot < 8; ++dot) {
+        cx[dot] = 16L * w * (2 * column[dot] + 1) / 4;
+        cy[dot] = 16L * h * (2 * row[dot] + 1) / 8;
+    }
+    for (y = 0; y < h; ++y) for (x = 0; x < w; ++x) {
+        int covered = 0;
+        for (sy = 0; sy < 8; ++sy) for (sx = 0; sx < 8; ++sx) {
+            long qx = 16L * x + 2 * sx + 1, qy = 16L * y + 2 * sy + 1;
+            for (dot = 0; dot < 8; ++dot) {
+                long dx = qx - cx[dot], dy = qy - cy[dot];
+                if ((bits & (1U << dot)) && dx * dx + dy * dy <= r16 * r16) {
+                    ++covered;
+                    break;
+                }
+            }
+        }
+        entry->pixels[y * entry->glyph.stride + x] = (unsigned char)((covered * 255 + 32) / 64);
+    }
 }
 
 /* Core Powerline separators are cell geometry, not cap-height icons.
@@ -604,6 +641,9 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *key,
         draw_powerline(scalar,&next); result=1;
     } else if (key->length == 1 && bar_corner(scalar)) {
         draw_bar_corner(scalar, &next); result = 1;
+    } else if (key->length == 1 && scalar >= 0x2800 && scalar <= 0x28ff &&
+               next.glyph.format == BLIT_RASTER_COVERAGE) {
+        draw_braille(scalar, &next); result = 1;
     } else if (key->length == 1 && invisible_format(scalar)) result = 1;
     else if (next.glyph.format == BLIT_RASTER_RGBA_PREMULTIPLIED && !outline_colour)
         result = draw_colour_glyph(raster, colour_index, &next);

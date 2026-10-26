@@ -1,6 +1,13 @@
 # Verification status
 
-## 2026-10-26: 0.2.32 flicker, horizontal sync and jitter
+## 2026-10-26: 0.2.32 flicker, horizontal sync and jitter; Braille
+
+- **ADR 0191, first half: Braille is cell geometry.** btop's graphs showed
+  `?`. It sends real Braille, and Blit Modern Nerd has none of the 256. Dots
+  are now drawn on the cell grid: 2×4, round, never touching.
+  `braille_gate` (new, both compositors, 22 and 16 px) checks 64 dot
+  centres against their bits and the gaps between dots. The 0.2.30 binary
+  fails it at the first dot.
 
 ADR 0190, the owner's "implement the real ones", read from cool-retro-term's
 `terminal_dynamic` shaders: flicker, horizontal sync and jitter.
