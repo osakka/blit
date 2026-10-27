@@ -1500,7 +1500,7 @@ Candidate562's separate frozen full-regression gate below remains pending.
 
 ## 2026-10-19 candidate562: selectable retro font and exact SDL atlas boundaries
 
-ADR0145 adds optional `blit-hibr-spleen16`: pinned Spleen2.2.0 plus the exact
+ADR0145 adds optional `blit-spleen16`: pinned Spleen2.2.0 plus the exact
 checked-in Hibr fallback.1,575 scalar mappings retain1,181 unique fallback
 mappings;92 printable ASCII masks differ. Protected box/block, combining and
 control-diamond geometry is unchanged. Regeneration is byte-identical and

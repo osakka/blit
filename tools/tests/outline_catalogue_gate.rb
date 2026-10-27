@@ -18,7 +18,7 @@ Dir.chdir(root) do
       ENV.fetch('BLIT_HARFBUZZ_LIBRARY', '/lib/x86_64-linux-gnu/libharfbuzz.so.0'), '-o', binary)
     %w[BlitModernNerd-Regular.ttf BlitRetroNerd-Regular.ttf].each do |font|
       raise "raster catalogue failed: #{font}" unless system(binary,
-        'assets/fonts/Blit-Hibr-Terminus16.psf', "assets/fonts/#{font}", 'assets/fonts/NotoColorEmoji.ttf', input)
+        'assets/fonts/Blit-Terminus16.psf', "assets/fonts/#{font}", 'assets/fonts/NotoColorEmoji.ttf', input)
     end
   end
 end

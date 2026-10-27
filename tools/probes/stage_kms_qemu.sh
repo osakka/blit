@@ -16,8 +16,8 @@ test -n "$version"
 mkdir -p "$stage/blit-stage/fonts"
 cp "$binary" "$stage/blit-stage/blit-server"
 strings "$stage/blit-stage/blit-server" | grep -Fx "$version" >/dev/null
-cp "$repo_root/assets/fonts/Blit-Hibr-Terminus16.psf" \
-    "$stage/blit-stage/fonts/Blit-Hibr-Terminus16.psf"
+cp "$repo_root/assets/fonts/Blit-Terminus16.psf" \
+    "$stage/blit-stage/fonts/Blit-Terminus16.psf"
 
 test -x "$stage/usr/bin/busybox"
 find "$stage/usr/bin/sh" -delete 2>/dev/null || true

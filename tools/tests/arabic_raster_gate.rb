@@ -37,7 +37,7 @@ Dir.chdir(root) do
       'tools/tests/arabic_raster_gate.c', 'src/blit_raster.c', 'src/blit_font.c',
       '/lib/x86_64-linux-gnu/libfreetype.so.6', '/lib/x86_64-linux-gnu/libharfbuzz.so.0', '-o', binary)
     passed = inputs.zip(%w[Retro Modern]).map do |arabic, profile|
-      command = [binary, 'assets/fonts/Blit-Hibr-Terminus16.psf',
+      command = [binary, 'assets/fonts/Blit-Terminus16.psf',
         "assets/fonts/Blit#{profile}Nerd-Regular.ttf", arabic, input]
       command = ['valgrind','--error-exitcode=99','--leak-check=full','--errors-for-leak-kinds=definite,indirect',*command] if ENV['BLIT_FONT_VALGRIND']=='1'
       system(*command)

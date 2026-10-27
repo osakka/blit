@@ -8,7 +8,9 @@ require_relative 'test_profile'
 require_relative 'gate_bmp'
 
 port = gate_port(Integer(ENV.fetch('BLIT_FONT_API_PORT','18995')))
-env = TestProfile.environment
+# The profiles are Blit's own fonts, from the repository (ADR 0194): the
+# console fonts this used to find installed on the host are retired.
+env = TestProfile.environment.merge('BLIT_FONT_ROOT' => File.expand_path('../../assets/fonts', __dir__))
 pid = Process.spawn(env, TestProfile.binary, port.to_s,
                     out: '/tmp/blit-font-api-gate.log', err: [:child, :out])
 at_exit do

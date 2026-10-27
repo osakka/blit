@@ -96,7 +96,7 @@ Dir.mktmpdir('blit-native-auxiliary') do |root|
     File.write(file,"strict\nexport TMPDIR='#{root}'\nexec \"$HIBR\"#{trace} '#{ROOT}/hibr/#{script}' \"$@\"#{redirect}\n")
   end
   server_env={**gate_display_env,
-    'BLIT_PSF_FONT'=>File.join(ROOT,'assets/fonts/Blit-Hibr-Terminus16.psf'),'BLIT_INPUT_ROOT'=>File.join(root,'input'),
+    'BLIT_PSF_FONT'=>File.join(ROOT,'assets/fonts/Blit-Terminus16.psf'),'BLIT_INPUT_ROOT'=>File.join(root,'input'),
     'BLIT_SETTINGS'=>'ignore','BLIT_AUTH_TOKEN'=>'native-auxiliary-admin','BLIT_PANE_LAYOUT'=>'1x2',
     'BLIT_LOGIN_PANE_ID'=>'pane-display-1-2','BLIT_LOGIN_AUTOSTART'=>'1',
     'BLIT_LOGIN_COMMAND'=>File.join(ROOT,'tools/tests/fixtures/login_identity.rb'),'BLIT_LOGIN_SCRIPT'=>'',

@@ -144,7 +144,8 @@ cp -a "$ROOT/packaging/blit.service" "$stage/lib/systemd/system/"
 install -d -m 0755 "$stage/usr/share/doc/blit/examples"
 cp -a "$ROOT/packaging/blit-unprivileged.conf" \
     "$stage/usr/share/doc/blit/examples/"
-cp -a "$BUNDLE/fonts/." "$stage/usr/lib/blit/fonts/"
+# The fonts are Blit's own, from assets/fonts alone (ADR 0194). The build
+# bundle's fonts directory held a stale console font and a duplicate.
 if [ -d "$ROOT/assets/fonts" ]; then
 	cp -a "$ROOT/assets/fonts/." "$stage/usr/lib/blit/fonts/"
 fi

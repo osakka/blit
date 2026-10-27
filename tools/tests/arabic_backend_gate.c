@@ -90,7 +90,7 @@ int main(int argc,char **argv)
     memset(&output,0,sizeof(output)); output.mode.hdisplay=W; output.mode.vdisplay=H;
     output.back.map=pixels; output.back.pitch=W*4;
     CHECK(argc==4);
-    CHECK(!blit_font_load_path(font,"assets/fonts/Blit-Hibr-Terminus16.psf"));
+    CHECK(!blit_font_load_path(font,"assets/fonts/Blit-Terminus16.psf"));
     for(si=0;si<(int)(sizeof(sizes)/sizeof(*sizes));++si) {
         BlitRaster *raster;
         ch=sizes[si]; cw=(ch+1)/2;

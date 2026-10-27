@@ -10,7 +10,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-FONT = ROOT / "assets/fonts/Blit-Hibr-Terminus16.psf"
+FONT = ROOT / "assets/fonts/Blit-Terminus16.psf"
 GENERATOR = ROOT / "tools/build-hibr-font.py"
 
 

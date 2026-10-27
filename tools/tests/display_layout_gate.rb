@@ -31,7 +31,7 @@ Dir.mktmpdir('blit-layout') do |root|
     'LD_PRELOAD'=>mock,'LD_LIBRARY_PATH'=>File.join(ROOT,'build/deps/prefix/lib/x86_64-linux-gnu'),
     'BLIT_LOGIN_AUTOSTART'=>'0','BLIT_PANE_LAYOUT'=>'1x2','BLIT_AUTH_TOKEN'=>'',
     'BLIT_SETTINGS_PATH'=>File.join(root,'settings.json'),'BLIT_INPUT_ROOT'=>File.join(root,'input'),
-    'BLIT_PSF_FONT'=>File.join(ROOT,'assets/fonts/Blit-Hibr-Terminus16.psf')}
+    'BLIT_PSF_FONT'=>File.join(ROOT,'assets/fonts/Blit-Terminus16.psf')}
   pid=nil
   start=-> do
     pid=spawn(env,BINARY,PORT.to_s,out:File.join(root,'log'),err:[:child,:out])

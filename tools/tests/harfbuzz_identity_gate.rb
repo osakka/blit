@@ -20,7 +20,7 @@ Dir.chdir(project) do
       'tools/tests/harfbuzz_baseline_gate.c', 'src/blit_font.c', 'src/blit_raster.c',
       ENV.fetch('BLIT_FREETYPE_LIBRARY', '/lib/x86_64-linux-gnu/libfreetype.so.6'),
       ENV.fetch('BLIT_HARFBUZZ_LIBRARY', '/lib/x86_64-linux-gnu/libharfbuzz.so.0'), '-o', binary)
-    raise 'baseline rejection failed' unless system(binary, 'assets/fonts/Blit-Hibr-Terminus16.psf',
+    raise 'baseline rejection failed' unless system(binary, 'assets/fonts/Blit-Terminus16.psf',
       'assets/fonts/BlitModernNerd-Regular.ttf', 'assets/fonts/NotoColorEmoji.ttf')
   end
 end

@@ -33,7 +33,7 @@ if [ "${BLIT_VT_SERVER_TEST:-0}" = 1 ]; then
     tcc -std=c99 -O2 "$root/tools/tests/native_vt_server_gate.c" \
         "$root/src/blit_vt.c" -o "$work/root/vt-server-gate"
     cp "$binary" "$work/root/blit-server"
-    cp "$root/assets/fonts/Blit-Hibr-Terminus16.psf" "$work/root/font.psf"
+    cp "$root/assets/fonts/Blit-Terminus16.psf" "$work/root/font.psf"
     for module in drm drm_kms_helper drm_ttm_helper drm_vram_helper; do
         cp "$modules/kernel/drivers/gpu/drm/$module.ko" "$work/root/$module.ko"
     done

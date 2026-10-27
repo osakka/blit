@@ -31,7 +31,7 @@ def durable_bytes(path)
 end
 def start(root, extra={})
   env={**gate_display_env,
-       'BLIT_PSF_FONT'=>File.join(ROOT,'assets/fonts/Blit-Hibr-Terminus16.psf'),
+       'BLIT_PSF_FONT'=>File.join(ROOT,'assets/fonts/Blit-Terminus16.psf'),
        'BLIT_INPUT_ROOT'=>File.join(root,'input'), 'BLIT_SETTINGS_PATH'=>File.join(root,'settings.json'),
        'BLIT_PANE_LAYOUT'=>'1x2','BLIT_LOGIN_AUTOSTART'=>'0',
        'BLIT_LOGIN_PANE_ID'=>'pane-display-1-1',

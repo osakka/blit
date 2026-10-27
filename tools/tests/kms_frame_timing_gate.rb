@@ -26,7 +26,7 @@ require_relative 'gate_server'
 ROOT = File.expand_path('../..', __dir__)
 BINARY = ENV.fetch('BLIT_GATE_BINARY', File.join(ROOT, 'build/blit/blit-server'))
 FONT = ENV.fetch('BLIT_GATE_FONT',
-                 File.join(ROOT, 'assets/fonts/Blit-Hibr-Terminus16.psf'))
+                 File.join(ROOT, 'assets/fonts/Blit-Terminus16.psf'))
 HZ = 60
 
 abort("kms-frame-timing gate: missing #{BINARY}") unless File.executable?(BINARY)

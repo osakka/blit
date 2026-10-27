@@ -123,6 +123,17 @@
     "license_file": "licenses/3270-LICENSE.txt",
     "license_sha256": "ef855fadca28e91a4123f7299bd79dcd78a7e19dfc364039790bb75bdedd515a"
   },
+  "jetbrainless": {
+    "profile": "blit-jetbrainless",
+    "file": "BlitJetBrainlessNerd-Regular.ttf",
+    "source": "Renamed derivative of Nerd Fonts v3.4.0 JetBrains Mono NL (no ligatures) Mono, JetBrains Mono 2.304, OFL 1.1 with no Reserved Font Name; full source Unicode and full pinned Nerd catalogue",
+    "upstream": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/v3.4.0/patched-fonts/JetBrainsMono/NoLigatures/Regular/JetBrainsMonoNLNerdFontMono-Regular.ttf",
+    "upstream_sha256": "d83b3639f2a78e6d6da2cc2a7de4c2fc6817819a2199a6213790b3f7573710d1",
+    "sha256": "4e95abbf2d0151dfdf20f12f29714fffbb94b3beb2fc6d66b2c2bd7f59d3fbb4",
+    "license_file": "licenses/JetBrainsMono-OFL.txt",
+    "license_upstream": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/v3.4.0/src/unpatched-fonts/JetBrainsMono/OFL.txt",
+    "license_sha256": "30f0c136e3c88e422d0791acd97238870f9054a9729bc34cf2ff0d4ed8cac4ad"
+  },
   "catalogue": {
     "file": "nerd-glyphnames-v3.4.0.json",
     "upstream": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/v3.4.0/glyphnames.json",

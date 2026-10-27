@@ -15,7 +15,7 @@ port = Integer(ENV.fetch('BLIT_PANE_SPLIT_PORT', '19291'), 10)
 env = {
   **gate_display_env,
   
-  'BLIT_PSF_FONT' => 'assets/fonts/Blit-Hibr-Terminus16.psf'
+  'BLIT_PSF_FONT' => 'assets/fonts/Blit-Terminus16.psf'
 }
 pid = Process.spawn(env, 'build/blit/blit-server', port.to_s,
                     out: '/tmp/blit-pane-split-gate.log', err: [:child, :out])

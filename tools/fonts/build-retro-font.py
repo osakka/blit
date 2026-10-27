@@ -12,7 +12,7 @@ import unicodedata
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-MANIFEST = ROOT / 'assets/fonts/Blit-Hibr-Spleen16.source.json'
+MANIFEST = ROOT / 'assets/fonts/Blit-Spleen16.source.json'
 
 
 def checked(path, expected):

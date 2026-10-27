@@ -243,25 +243,20 @@ typedef struct {
 } BlitFontProfile;
 
 static const BlitFontProfile blit_font_profiles[] = {
-    {"blit-hibr-terminus16", "/usr/lib/blit/fonts/Blit-Hibr-Terminus16.psf"},
-    {"blit-hibr-spleen16", "/usr/lib/blit/fonts/Blit-Hibr-Spleen16.psf"},
+    {"blit-terminus16", "/usr/lib/blit/fonts/Blit-Terminus16.psf"},
+    {"blit-spleen16", "/usr/lib/blit/fonts/Blit-Spleen16.psf"},
     {"blit-modern", "/usr/lib/blit/fonts/BlitModernNerd-Regular.ttf", "BlitArabicModern.ttf"},
     {"blit-retro", "/usr/lib/blit/fonts/BlitRetroNerd-Regular.ttf", "BlitArabicRetro.ttf"},
-    {"uni2-terminus16", "/usr/lib/blit/fonts/Uni2-Terminus16.psf"},
-    {"lat15-terminus16", "/usr/lib/blit/fonts/Lat15-Terminus16.psf"},
-    {"uni2-console", "/usr/share/consolefonts/Uni2-Terminus16.psf"},
-    {"uni2-blit", "/usr/share/blit/Uni2-Terminus16.psf"},
-    {"uni2-fixed16", "/usr/share/consolefonts/Uni2-Fixed16.psf"},
-    {"lat15-console", "/usr/share/consolefonts/Lat15-Terminus16.psf"}
+    {"blit-jetbrainless", "/usr/lib/blit/fonts/BlitJetBrainlessNerd-Regular.ttf", "BlitArabicModern.ttf"}
 };
 
 /* The 16x16 font for wide cells (ADR 0062). It is a separate artifact because
    PSF2 carries one cell size per file, so this is not a profile of the
    primary font and must not appear in the profile list a client can select. */
 static const char *blit_font_wide_paths[] = {
-    "/usr/lib/blit/fonts/Blit-Hibr-Unifont16.psf",
-    "/usr/share/blit/fonts/Blit-Hibr-Unifont16.psf",
-    "assets/fonts/Blit-Hibr-Unifont16.psf"
+    "/usr/lib/blit/fonts/Blit-Unifont16.psf",
+    "/usr/share/blit/fonts/Blit-Unifont16.psf",
+    "assets/fonts/Blit-Unifont16.psf"
 };
 
 int blit_font_load_wide(BlitFont *font)
@@ -352,7 +347,7 @@ int blit_font_profile_available(int index)
     snprintf(sibling, sizeof(sibling), "%.*sNotoEmojiText.ttf",
              slash ? (int)(slash - path + 1) : 0, path);
     if (access(sibling, R_OK) != 0) return 0;
-    snprintf(sibling, sizeof(sibling), "%.*sBlit-Hibr-Terminus16.psf",
+    snprintf(sibling, sizeof(sibling), "%.*sBlit-Terminus16.psf",
              slash ? (int)(slash - path + 1) : 0, path);
     return access(sibling, R_OK) == 0;
 }
@@ -368,7 +363,7 @@ int blit_font_load_path(BlitFont *font, const char *path)
     if (length > 4 && strcmp(path + length - 4, ".ttf") == 0) {
         const char *slash = strrchr(path, '/');
         if (access(path, R_OK) != 0) return -1;
-        snprintf(fallback, sizeof(fallback), "%.*sBlit-Hibr-Terminus16.psf",
+        snprintf(fallback, sizeof(fallback), "%.*sBlit-Terminus16.psf",
                  slash ? (int)(slash - path + 1) : 0, path);
         source = fallback;
     }

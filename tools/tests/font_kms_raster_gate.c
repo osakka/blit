@@ -96,7 +96,7 @@ int main(int argc, char **argv)
     memset(&font, 0, sizeof(font)); memset(&output, 0, sizeof(output));
     CHECK(blit_font_load_path(&font, argv[1]) == 0);
     memset(&wide, 0, sizeof(wide));
-    CHECK(blit_font_load_path(&wide, "assets/fonts/Blit-Hibr-Unifont16.psf") == 0);
+    CHECK(blit_font_load_path(&wide, "assets/fonts/Blit-Unifont16.psf") == 0);
     CHECK(blit_font_has_glyph(&wide, 0x2615));
     output.mode.hdisplay = 160; output.mode.vdisplay = 96;
     output.back.map = pixels; output.back.pitch = 160 * 4;

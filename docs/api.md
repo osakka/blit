@@ -933,7 +933,7 @@ For example, `{"size_px":23}` selects12x23 cells for the8x16 font. This is
 font/cell sizing, not a display mode change. Existing bitmap profiles are
 sampled at this size. Font release0.1.564 adds `blit-modern`, rasterizing Hack outline text
 at a fitted native size, with antialiased coverage and Noto intrinsic-colour
-emoji. `blit-hibr-spleen16` is the additional pixel-art retro profile; both
+emoji. `blit-spleen16` is the additional pixel-art retro profile; both
 remain selectable alongside Terminus. Select smooth text, for example, with
 `{"font_id":"blit-modern","size_px":23}`. Pixel-art fallback characters are
 still pixel-art: adding these profiles does not implement universal Unicode,
@@ -941,6 +941,17 @@ complex-script/ligature shaping or ZWJ/variation-selector emoji sequences.
 Candidate0.1.562 contained this work but was not deployed; config-only
 maintenance0.1.563 intentionally excludes it. Discover available profiles
 through `GET /v1/fonts`, not a version-number comparison alone.
+
+Since 0.2.35 (ADR 0194) the profiles are Blit's own fonts only:
+- **Outline:** `blit-modern` (Hack), `blit-retro` (3270) and
+  `blit-jetbrainless`. The last is JetBrains Mono 2.304 without ligatures,
+  built by the same generator with the full Nerd catalogue, Blit's icons
+  and the symbol blocks. It shares `blit-modern`'s Arabic companion.
+- **Pixel:** `blit-terminus16` and `blit-spleen16`, renamed from
+  `blit-hibr-terminus16` and `blit-hibr-spleen16`.
+
+The console-font profiles (`uni2-*`, `lat15-*`) are retired. A saved
+selection naming a retired id falls back to the boot font.
 
 Candidate0.1.573 adds `blit-retro`, an antialiased 3270 Mono derivative, and
 expands both outline profiles to the full pinned Nerd Fonts3.4.0 catalogue.
@@ -1034,7 +1045,7 @@ write):
 curl --fail --request PUT \
   --header 'Content-Type: application/json' \
   --header 'If-Match: REVISION' \
-  --data '{"document":{"version":1,"input_devices":{},"audio_devices":{},"font":{"font_id":"blit-hibr-terminus16","scale":1.1},"server":{"render_interval_ms":16,"pane_layout":"1x2","renderer":"software","kms_async_pageflip":false,"expect_desktop":true}}}' \
+  --data '{"document":{"version":1,"input_devices":{},"audio_devices":{},"font":{"font_id":"blit-terminus16","scale":1.1},"server":{"render_interval_ms":16,"pane_layout":"1x2","renderer":"software","kms_async_pageflip":false,"expect_desktop":true}}}' \
   http://HOST:8080/v1/settings
 ```
 

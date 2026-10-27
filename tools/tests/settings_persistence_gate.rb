@@ -36,7 +36,7 @@ ROOT = File.expand_path('../..', __dir__)
 PORT = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', '19348'), 10))
 BINARY = ENV.fetch('BLIT_GATE_BINARY', File.join(ROOT, 'build/blit/blit-server'))
 FONT = ENV.fetch('BLIT_GATE_FONT',
-                 File.join(ROOT, 'assets/fonts/Blit-Hibr-Terminus16.psf'))
+                 File.join(ROOT, 'assets/fonts/Blit-Terminus16.psf'))
 BASE = URI("http://127.0.0.1:#{PORT}")
 STABLE = 'input-0003-046d-c52b-usb-0000-00-14.0-3-input0'
 SECOND = 'input-0003-05ac-0256-usb-0000-00-14.0-4-input0'
@@ -79,8 +79,9 @@ end
 
 $server = nil
 def start(env)
+  # The font profiles are Blit's own, read from the repository (ADR 0194).
   $server = spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
-                    }
+                    'BLIT_FONT_ROOT' => File.join(ROOT, 'assets/fonts') }
                     .merge(env),
                   BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')
   Timeout.timeout(20) do

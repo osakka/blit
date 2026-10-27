@@ -30,7 +30,7 @@ FileUtils.ln_s(FAKE_DESKTOP_IMPL, FAKE_DESKTOP)
 env = {
   **gate_display_env,
   
-  'BLIT_PSF_FONT' => ENV.fetch('BLIT_GATE_FONT', File.join(ROOT, 'assets/fonts/Blit-Hibr-Terminus16.psf')),
+  'BLIT_PSF_FONT' => ENV.fetch('BLIT_GATE_FONT', File.join(ROOT, 'assets/fonts/Blit-Terminus16.psf')),
   'BLIT_SETTINGS' => 'ignore',
   'BLIT_COMMAND_ALLOWLIST' => FAKE_DESKTOP
 }

@@ -10,7 +10,7 @@ module TestProfile
   ROOT = File.expand_path('../..', __dir__)
 
   def self.binary = ENV.fetch('BLIT_GATE_BINARY', File.join(ROOT, 'build/blit/blit-server'))
-  def self.font = ENV.fetch('BLIT_GATE_FONT', File.join(ROOT, 'assets/fonts/Blit-Hibr-Terminus16.psf'))
+  def self.font = ENV.fetch('BLIT_GATE_FONT', File.join(ROOT, 'assets/fonts/Blit-Terminus16.psf'))
 
   def self.environment
     gate_display_env.merge(

@@ -6,7 +6,24 @@ For application authors: [complete developer reference](../../docs/font-referenc
 [emoji categories](../../docs/fonts/emoji.md). Tables are generated from these
 canonical assets, not an independently maintained glyph registry.
 
-## Smooth Blit Retro and Blit Modern
+## Smooth Blit Retro, Blit Modern and Blit JetBrainless
+
+`blit-jetbrainless` (0.2.35, ADR 0194) is JetBrains Mono 2.304, the version
+without ligatures, from the same pinned Nerd Fonts release. JetBrains Mono
+is under the SIL OFL 1.1 with no Reserved Font Name, so this is the typeface
+itself, renamed. It gets the same treatment as the other two: the full Nerd
+catalogue, Blit's icons, the symbol blocks, and Braille and blocks as cell
+geometry. It uses `blit-modern`'s Arabic companion. Its licence is
+`licenses/JetBrainsMono-OFL.txt`.
+
+The directory holds Blit's own fonts and their sources and licences only:
+- **Pixel:** `Blit-Terminus16.psf`, the boot and fallback font, and
+  `Blit-Spleen16.psf`. Both were renamed from `Blit-Hibr-*`.
+- **Wide cells:** `Blit-Unifont16.psf`.
+- **Outline:** the three outline fonts and their Arabic companions.
+- **Emoji:** the colour and text emoji faces.
+
+The console fonts (Uni2, Lat15) and the stray Hack copy are gone.
 
 `blit-retro` is the new smooth, rounded mainframe-inspired profile, based on
 pinned Nerd Fonts3.4.0 3270 Mono. `blit-modern` is the clean Hack Mono companion.
@@ -40,10 +57,13 @@ See `licenses/nerd-v3.4.0/README.md` for icon-family attribution and sources.
 Generate both with the same tool and hash-checked upstream inputs:
 
 ```sh
-PYTHONPATH=<fontTools4.60.1> python3 tools/fonts/build-outline-nerd.py \
+PYTHONPATH=<fontTools4.60.1> python3 tools/fonts/build-outline-nerd.py --symbols <noto-symbol-sources> \
   --profile retro /path/to/3270NerdFontMono-Regular.ttf assets/fonts/BlitRetroNerd-Regular.ttf
-PYTHONPATH=<fontTools4.60.1> python3 tools/fonts/build-outline-nerd.py \
+PYTHONPATH=<fontTools4.60.1> python3 tools/fonts/build-outline-nerd.py --symbols <noto-symbol-sources> \
   --profile modern /path/to/HackNerdFontMono-Regular.ttf assets/fonts/BlitModernNerd-Regular.ttf
+PYTHONPATH=<fontTools4.60.1> python3 tools/fonts/build-outline-nerd.py --symbols <noto-symbol-sources> \
+  --profile jetbrainless /path/to/JetBrainsMonoNLNerdFontMono-Regular.ttf \
+  assets/fonts/BlitJetBrainlessNerd-Regular.ttf
 ruby tools/fonts/preview.rb
 ruby tools/tests/outline_catalogue_gate.rb
 ```
@@ -77,8 +97,8 @@ wide BMP characters retain the separate wide PSF. No Hibr code is changed.
 
 ## Retro: Blit Hibr Spleen16
 
-`Blit-Hibr-Spleen16.psf` is an optional8x16 retro face based on Spleen2.2.0
-(profile `blit-hibr-spleen16`). Default Terminus is unchanged. It provides
+`Blit-Spleen16.psf` is an optional8x16 retro face based on Spleen2.2.0
+(profile `blit-spleen16`). Default Terminus is unchanged. It provides
 1,575 scalar mappings, retaining all1,181 unique scalar mappings from the
 existing Hibr font, with92 visibly different printable ASCII masks.
 Box/block geometry, combining marks and the fitted control diamond retain
@@ -89,12 +109,12 @@ Upstream Spleen is BSD2-clause. The combined font contains OFL-covered
 fallback material and is distributed under OFL1.1 with the upstream and
 fallback notices retained in `licenses/` (Terminus, DejaVu, Noto and Droid).
 The respective notices remain authoritative. Build provenance, exact source
-commit and hashes are in `Blit-Hibr-Spleen16.source.json`. Regenerate using
+commit and hashes are in `Blit-Spleen16.source.json`. Regenerate using
 the pinned upstream BDF, not arbitrary host fonts:
 
 ```sh
 python3 tools/fonts/build-retro-font.py /path/to/spleen-8x16.bdf \
-  assets/fonts/Blit-Hibr-Spleen16.psf
+  assets/fonts/Blit-Spleen16.psf
 BLIT_SPLEEN_SOURCE=/path/to/spleen-8x16.bdf python3 tools/tests/retro_font_gate.py
 ```
 
@@ -161,7 +181,7 @@ is not added by these font files. See ADR0147 for the renderer boundary.
 
 ## Default: Blit Hibr Terminus16
 
-`Blit-Hibr-Terminus16.psf` is the default runtime font. It preserves the bundled
+`Blit-Terminus16.psf` is the default runtime font. It preserves the bundled
 Terminus 8×16 glyphs and adds the missing Hibr Unicode desktop glyphs at the
 same cell size. The added glyphs are rasterized from DejaVu Sans Mono, which is
 licensed under the permissive DejaVu font license; see the system font package
@@ -176,8 +196,11 @@ fallback masks and diamond symmetry; the manifest gate checks coverage.
 Regenerate it with:
 
 ```sh
-tools/build-hibr-font.py assets/fonts/Uni2-Terminus16.psf \
-  assets/fonts/Blit-Hibr-Terminus16.psf \
+# Uni2-Terminus16 from Debian console-setup-linux 1.221, sha256
+# 002f331400ea0257f894a6b81fafa7a0ab8ba8b816149b81487043dbf2d37e1a
+zcat /usr/share/consolefonts/Uni2-Terminus16.psf.gz > /tmp/Uni2-Terminus16.psf
+tools/build-hibr-font.py /tmp/Uni2-Terminus16.psf \
+  assets/fonts/Blit-Terminus16.psf \
   /usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf \
   /usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf \
   /usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf \
@@ -196,7 +219,7 @@ from potentially aliased fallback-font bitmaps.
 
 ## The wide font
 
-`Blit-Hibr-Unifont16.psf` is the **16×16** font used for cells a wide
+`Blit-Unifont16.psf` is the **16×16** font used for cells a wide
 character occupies. It is a second artifact rather than an extension of the
 8×16 font because PSF2 carries one cell size per file, and a wide character
 needs a bitmap twice as wide — a two-cell character drawn from an 8×16 bitmap
@@ -219,7 +242,7 @@ Regenerate it with:
 
 ```sh
 tools/fonts/make-wide-psf.py /usr/share/unifont/unifont.bdf \
-  assets/fonts/Blit-Hibr-Unifont16.psf
+  assets/fonts/Blit-Unifont16.psf
 ```
 
 Only glyphs the BDF marks `DWIDTH 16` are taken; a narrow glyph belongs in the

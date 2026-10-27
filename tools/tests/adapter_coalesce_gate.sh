@@ -10,7 +10,7 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 BINARY=${BLIT_GATE_BINARY:-$ROOT/build/blit/blit-server}
 PORT=${BLIT_GATE_PORT:-19246}
 PORT=$(gate_port "$PORT")
-FONT=${BLIT_GATE_FONT:-$ROOT/assets/fonts/Blit-Hibr-Terminus16.psf}
+FONT=${BLIT_GATE_FONT:-$ROOT/assets/fonts/Blit-Terminus16.psf}
 PROBE=$ROOT/build/tests/adapter_coalesce_gate
 LOG=$(mktemp /tmp/blit-coalesce-gate.XXXXXX)
 SESSION=$(mktemp /tmp/blit-coalesce-session.XXXXXX)

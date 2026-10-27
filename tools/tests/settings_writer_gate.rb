@@ -60,7 +60,7 @@ Dir.mktmpdir('blit-settings-writer') do |root|
   store = File.join(root, 'store')
   Dir.mkdir(store)
   env = gate_display_env(width: 640, height: 384).merge(
-    'BLIT_PSF_FONT' => File.join(ROOT, 'assets/fonts/Blit-Hibr-Terminus16.psf'),
+    'BLIT_PSF_FONT' => File.join(ROOT, 'assets/fonts/Blit-Terminus16.psf'),
     'BLIT_LOGIN_AUTOSTART' => '0', 'BLIT_EXPECT_DESKTOP' => '0', 'BLIT_AUTH_TOKEN' => '',
     'BLIT_SETTINGS_PATH' => File.join(store, 'settings.json'),
     'BLIT_SETTINGS_WRITE_DELAY_MS' => DELAY_MS.to_s)

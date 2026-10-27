@@ -30,7 +30,7 @@ ROOT = File.expand_path('../..', __dir__)
 PORT = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', '19253'), 10))
 BINARY = ENV.fetch('BLIT_GATE_BINARY', File.join(ROOT, 'build/blit/blit-server'))
 FONT = ENV.fetch('BLIT_GATE_FONT',
-                 File.join(ROOT, 'assets/fonts/Blit-Hibr-Terminus16.psf'))
+                 File.join(ROOT, 'assets/fonts/Blit-Terminus16.psf'))
 BASE = URI("http://127.0.0.1:#{PORT}")
 FB_W = Integer(ENV.fetch('BLIT_GATE_FB_WIDTH', '1024'), 10)
 FB_H = Integer(ENV.fetch('BLIT_GATE_FB_HEIGHT', '768'), 10)

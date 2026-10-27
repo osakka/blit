@@ -326,7 +326,7 @@ Run `tools/tests/terminal_conformance.rb` against a TCC-built server with the
 dummy video backend and the bundled production font. Start the server with:
 
 ```sh
-BLIT_PSF_FONT=assets/fonts/Blit-Hibr-Terminus16.psf \
+BLIT_PSF_FONT=assets/fonts/Blit-Terminus16.psf \
 SDL_VIDEODRIVER=dummy LD_LIBRARY_PATH=build/sdl3-kms \
   build/blit/blit-server 19195
 ```

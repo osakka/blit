@@ -67,7 +67,7 @@ BINARY=${BLIT_GATE_BINARY:-$ROOT/build/blit/blit-server}
 # build tree carries a copy that is not regenerated with it and has been
 # observed stale and short of glyphs the manifest gate requires, so a local
 # run must not reach for it by default.
-FONT=${BLIT_GATE_FONT:-$ROOT/assets/fonts/Blit-Hibr-Terminus16.psf}
+FONT=${BLIT_GATE_FONT:-$ROOT/assets/fonts/Blit-Terminus16.psf}
 PACKAGE=${BLIT_GATE_PACKAGE:-}
 LIVE=${BLIT_GATE_LIVE:-}
 PORT=${BLIT_GATE_BASE_PORT:-19400}

@@ -30,7 +30,7 @@ abort "GLES_COMPOSITOR_FAIL #{frame_line}" unless $?.success?
 
 def server(port, env)
   pid = spawn(env.merge('BLIT_LOGIN_AUTOSTART' => '0',
-                        'BLIT_PSF_FONT' => File.join(GATE_ROOT, 'assets/fonts/Blit-Hibr-Terminus16.psf')),
+                        'BLIT_PSF_FONT' => File.join(GATE_ROOT, 'assets/fonts/Blit-Terminus16.psf')),
               ENV.fetch('BLIT_GATE_BINARY', File.join(GATE_ROOT, 'build/blit/blit-server')),
               port.to_s, out: File::NULL, err: File::NULL)
   base = URI("http://127.0.0.1:#{port}")

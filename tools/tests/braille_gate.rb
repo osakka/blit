@@ -47,7 +47,7 @@ GLYPHS = { 0x28FF => 0xFF, 0x2800 => 0x00, 0x2809 => 0x09, 0x28C0 => 0xC0 }.free
 
 Dir.mktmpdir('blit-braille') do |root|
   env = gate_display_env(width: W, height: H).merge(
-    'BLIT_PSF_FONT' => File.join(ROOT, 'assets/fonts/Blit-Hibr-Terminus16.psf'),
+    'BLIT_PSF_FONT' => File.join(ROOT, 'assets/fonts/Blit-Terminus16.psf'),
     'BLIT_FONT_ROOT' => File.join(ROOT, 'assets/fonts'),
     'BLIT_LOGIN_AUTOSTART' => '0', 'BLIT_EXPECT_DESKTOP' => '0', 'BLIT_AUTH_TOKEN' => '',
     'BLIT_SETTINGS_PATH' => File.join(root, 'settings.json'))

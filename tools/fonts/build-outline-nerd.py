@@ -19,7 +19,10 @@ from fontTools.pens.recordingPen import DecomposingRecordingPen
 from fontTools.pens.boundsPen import BoundsPen
 
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument('--profile', choices=['modern', 'retro'], required=True)
+# Each profile: its manifest section and the name its family takes.
+PROFILES = {'modern': ('outline', 'Modern'), 'retro': ('retro', 'Retro'),
+            'jetbrainless': ('jetbrainless', 'JetBrainless')}
+parser.add_argument('--profile', choices=sorted(PROFILES), required=True)
 parser.add_argument('source', type=Path)
 parser.add_argument('output', type=Path)
 parser.add_argument('--symbols', type=Path, required=True,
@@ -29,7 +32,7 @@ root = Path(__file__).resolve().parents[2]
 manifest = json.loads((root / 'assets/fonts/modern-fonts.source.json').read_text())
 if fontTools.__version__ != manifest['build']['fonttools_version']:
     raise SystemExit('use the fontTools version pinned in modern-fonts.source.json')
-source = manifest['outline' if args.profile == 'modern' else 'retro']
+source = manifest[PROFILES[args.profile][0]]
 if hashlib.sha256(args.source.read_bytes()).hexdigest() != source['upstream_sha256']:
     raise SystemExit(f'unreviewed {args.profile} source: SHA256 mismatch')
 font = TTFont(args.source, recalcTimestamp=False)
@@ -197,7 +200,7 @@ font.setGlyphOrder(order)
 font['COLR'] = buildCOLR(layers, version=0, glyphMap=font.getReverseGlyphMap())
 font['CPAL'] = buildCPAL([palette])
 # A renamed derivative, with upstream notices retained in name/license tables.
-family = 'Blit ' + args.profile.title() + ' Nerd'
+family = 'Blit ' + PROFILES[args.profile][1] + ' Nerd'
 postscript = family.replace(' ', '')
 names = {1: family, 2: 'Regular', 3: postscript + '-3.0',
          4: family + ' Regular', 6: postscript + '-Regular',

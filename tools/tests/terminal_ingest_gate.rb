@@ -66,7 +66,7 @@ Dir.mktmpdir('blit-terminal-ingest') do |root|
     end
   end
   env = gate_display_env(width: 1920, height: 1080).merge(
-    'BLIT_PSF_FONT' => File.join(ROOT, 'assets/fonts/Blit-Hibr-Terminus16.psf'),
+    'BLIT_PSF_FONT' => File.join(ROOT, 'assets/fonts/Blit-Terminus16.psf'),
     'BLIT_LOGIN_AUTOSTART' => '0', 'BLIT_EXPECT_DESKTOP' => '0', 'BLIT_AUTH_TOKEN' => '',
     'BLIT_SETTINGS_PATH' => File.join(root, 'settings.json'))
   pid = spawn(env, BINARY, PORT.to_s, out: File::NULL, err: File::NULL)

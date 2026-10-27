@@ -161,7 +161,7 @@ int main(void)
     char error[160];
     int i;
     memset(&kms, 0, sizeof(kms));
-    if (blit_font_load_path(&font, "assets/fonts/Blit-Hibr-Terminus16.psf") < 0 ||
+    if (blit_font_load_path(&font, "assets/fonts/Blit-Terminus16.psf") < 0 ||
         blit_font_load_wide(&wide) < 0) {
         fprintf(stderr, "GLES_COMPOSE_FAIL fonts do not load\n");
         return 1;

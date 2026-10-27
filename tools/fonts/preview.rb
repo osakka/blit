@@ -16,7 +16,7 @@ Dir.chdir(root) do
       arabic ? 'tools/probes/arabic_preview.c' : 'tools/probes/font_preview.c', 'src/blit_font.c', 'src/blit_raster.c', library,
       ENV.fetch('BLIT_HARFBUZZ_LIBRARY', '/lib/x86_64-linux-gnu/libharfbuzz.so.0'), '-o', binary)
     ppm = File.join(work, 'specimen.ppm')
-    arguments = ['assets/fonts/Blit-Hibr-Terminus16.psf',
+    arguments = ['assets/fonts/Blit-Terminus16.psf',
       'assets/fonts/BlitRetroNerd-Regular.ttf', 'assets/fonts/BlitModernNerd-Regular.ttf',
     ]
     if arabic

@@ -24,8 +24,8 @@ not a screenshot of a browser glyph.
 | --- | --- | --- | --- |
 | `blit-retro` | Smooth mainframe-inspired3270 Mono/Nerd derivative | Blit Arabic Retro, Kawkab Mono derivative | Intrinsic-colour originals and shared Noto emoji |
 | `blit-modern` | Smooth Hack Mono/Nerd derivative | Blit Arabic Modern, GNU FreeMono derivative | Same original catalogue and shared Noto emoji |
-| `blit-hibr-terminus16` | Bitmap Terminus-based default | No native Arabic companion | Terminal foreground/background, not native colour-font glyphs |
-| `blit-hibr-spleen16` | Bitmap Spleen-based retro option | No native Arabic companion | Terminal foreground/background, not native colour-font glyphs |
+| `blit-terminus16` | Bitmap Terminus-based default | No native Arabic companion | Terminal foreground/background, not native colour-font glyphs |
+| `blit-spleen16` | Bitmap Spleen-based retro option | No native Arabic companion | Terminal foreground/background, not native colour-font glyphs |
 
 The smooth profiles are renamed, tailored derivatives, not wholly original
 typeface designs. Native grayscale antialiasing rasterizes text at the

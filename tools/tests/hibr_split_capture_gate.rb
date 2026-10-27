@@ -59,7 +59,7 @@ Dir.mktmpdir('blit-split-capture-gate') do |work|
   env = {
     **gate_display_env,
     
-    'BLIT_PSF_FONT' => ENV.fetch('BLIT_GATE_FONT', File.join(ROOT, 'assets/fonts/Blit-Hibr-Terminus16.psf')),
+    'BLIT_PSF_FONT' => ENV.fetch('BLIT_GATE_FONT', File.join(ROOT, 'assets/fonts/Blit-Terminus16.psf')),
     'BLIT_SETTINGS' => 'ignore',
     'BLIT_COMMAND_ALLOWLIST' => launcher
   }

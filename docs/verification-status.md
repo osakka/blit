@@ -1,5 +1,28 @@
 # Verification status
 
+## 2026-10-27: 0.2.35 Blit JetBrainless; the font set is Blit's own (ADR 0194)
+
+- **New font:** `blit-jetbrainless`, JetBrains Mono 2.304 without
+  ligatures (OFL, no Reserved Font Name), built by the outline generator
+  with the full Nerd catalogue, Blit's icons and 1,535 Noto symbols. It is
+  reproducible (`4e95abbf…`), and Modern and Retro still rebuild to their
+  shipped hashes. Its cells match Modern's: 11×22 at 22 px, 8×16 at 16 px.
+- **Renamed:** `blit-terminus16` and `blit-spleen16`, with their files, and
+  `Blit-Unifont16.psf`.
+- **Removed:** the six console profiles; `Uni2-Terminus16.psf`, whose
+  regeneration now reads Debian's identical copy, pinned by hash; the stale
+  `Lat15` from the build bundle; and the unused Hack copy. The emoji audit's
+  negative fixture is now Blit Modern.
+- **Gates:**
+  - `package_artifact_gate` fails if a retired file ships.
+  - `font_api_gate` and `settings_persistence_gate` now read the
+    repository's fonts; they had relied on the console fonts being installed
+    on the build machine.
+  - Font suite: 36 pass.
+  - Full suite: 148 pass, and the one failure, `settings_persistence`, was
+    that reliance; it passes after the fix.
+  - GPU suite: 64 pass, and its one failure was the same gate.
+
 ## 2026-10-27: 0.2.34 touchpad drag and typing (ADR 0193)
 
 The owner, on an HP Chromebook running Blit from hibr-apt, couldn't tap to

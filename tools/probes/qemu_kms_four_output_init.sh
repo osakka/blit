@@ -40,7 +40,7 @@ $b cp /blit-stage/libc.so.6 /usr/lib/x86_64-linux-gnu/libc.so.6
 export BLIT_DRM_DEVICE=/dev/dri/card0
 export BLIT_KMS_TRACE_TIMING=1
 export BLIT_KMS_TRACE_PHASES=1
-export BLIT_PSF_FONT=/blit-stage/fonts/Blit-Hibr-Terminus16.psf
+export BLIT_PSF_FONT=/blit-stage/fonts/Blit-Terminus16.psf
 BLIT_DISPLAY_BACKEND=kms BLIT_BIND_ADDRESS=127.0.0.1 \
     /blit-stage/ld-linux-x86-64.so.2 \
     --library-path /blit-stage:/blit-stage/lib \

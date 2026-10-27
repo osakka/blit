@@ -1,7 +1,7 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# Issue #24. Two different files have been named Blit-Hibr-Terminus16.psf: the
+# Issue #24. Two different files have been named Blit-Terminus16.psf: the
 # checked-in 929-glyph artifact and a stale 540-glyph copy in the build tree.
 # The package ships the right one, so the divergence only ever appeared in
 # local runs -- in the direction that hides a regression, because the missing
@@ -23,8 +23,8 @@ require_relative 'gate_bmp'
 ROOT = File.expand_path('../..', __dir__)
 PORT = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', '19261'), 10))
 BINARY = ENV.fetch('BLIT_GATE_BINARY', File.join(ROOT, 'build/blit/blit-server'))
-ASSET = File.join(ROOT, 'assets/fonts/Blit-Hibr-Terminus16.psf')
-WIDE_ASSET = File.join(ROOT, 'assets/fonts/Blit-Hibr-Unifont16.psf')
+ASSET = File.join(ROOT, 'assets/fonts/Blit-Terminus16.psf')
+WIDE_ASSET = File.join(ROOT, 'assets/fonts/Blit-Unifont16.psf')
 FONT = ENV.fetch('BLIT_GATE_FONT', ASSET)
 BASE = URI("http://127.0.0.1:#{PORT}")
 CELL_W = 8

@@ -28,7 +28,7 @@ Dir.chdir(root) do
       ENV.fetch('BLIT_FREETYPE_LIBRARY', '/lib/x86_64-linux-gnu/libfreetype.so.6'),
       ENV.fetch('BLIT_HARFBUZZ_LIBRARY', '/lib/x86_64-linux-gnu/libharfbuzz.so.0'), '-o', binary)
     %w[BlitModernNerd-Regular.ttf BlitRetroNerd-Regular.ttf].each do |face|
-      command = [binary, 'assets/fonts/Blit-Hibr-Terminus16.psf', "assets/fonts/#{face}", 'assets/fonts/NotoColorEmoji.ttf', input]
+      command = [binary, 'assets/fonts/Blit-Terminus16.psf', "assets/fonts/#{face}", 'assets/fonts/NotoColorEmoji.ttf', input]
       command = ['valgrind', '--error-exitcode=99', '--leak-check=full', '--errors-for-leak-kinds=definite,indirect', *command] if ENV['BLIT_FONT_VALGRIND'] == '1'
       raise "custom glyph raster failed: #{face}" unless system(*command)
     end

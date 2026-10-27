@@ -27,7 +27,7 @@ workloads = {
 }
 results = %w[Retro Modern].flat_map do |profile|
   workloads.map do |name, keys|
-    args = [out, 'assets/fonts/Blit-Hibr-Terminus16.psf',
+    args = [out, 'assets/fonts/Blit-Terminus16.psf',
             "assets/fonts/Blit#{profile}Nerd-Regular.ttf", 'assets/fonts/NotoColorEmoji.ttf',
             "assets/fonts/BlitArabic#{profile}.ttf"]
     stdout, stderr, status = Open3.capture3(*args, stdin_data: keys.map { |k| k.to_s(16) }.join("\n") + "\n")
@@ -41,7 +41,7 @@ if ARGV == ['--check']
   end
 end
 files = sources + %w[src/blit_raster.h src/blit_font.h src/blit_cell_cluster.h
-  assets/fonts/hibr-ui-glyphs.json assets/fonts/Blit-Hibr-Terminus16.psf
+  assets/fonts/hibr-ui-glyphs.json assets/fonts/Blit-Terminus16.psf
   assets/fonts/BlitRetroNerd-Regular.ttf assets/fonts/BlitModernNerd-Regular.ttf
   assets/fonts/BlitArabicRetro.ttf assets/fonts/BlitArabicModern.ttf assets/fonts/NotoColorEmoji.ttf]
 puts JSON.pretty_generate({

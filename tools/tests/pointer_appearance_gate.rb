@@ -21,7 +21,7 @@ Dir.mktmpdir('blit-pointer-appearance') do |root|
     start=-> do
       env={**gate_display_env,'BLIT_LOGIN_AUTOSTART'=>'0',
            'BLIT_SETTINGS_PATH'=>File.join(root,'settings.json'),'BLIT_INPUT_ROOT'=>root,
-           'BLIT_PSF_FONT'=>File.join(ROOT,'assets/fonts/Blit-Hibr-Terminus16.psf'),
+           'BLIT_PSF_FONT'=>File.join(ROOT,'assets/fonts/Blit-Terminus16.psf'),
            }
       pid=spawn(env,ENV.fetch('BLIT_GATE_BINARY',File.join(ROOT,'build/blit/blit-server')),PORT.to_s,out:File.join(root,'server.log'),err:[:child,:out])
       Timeout.timeout(10){loop{begin;break if request('GET','/v1/version')[0]==200;rescue Errno::ECONNREFUSED;end;sleep 0.02}}

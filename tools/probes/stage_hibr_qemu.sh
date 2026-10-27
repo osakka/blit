@@ -19,14 +19,14 @@ test -d "$stage/blit-stage/mods"
 cp "$blit_binary" "$stage/blit-stage/blit-server"
 test -x "$stage/blit-stage/blit-server"
 strings "$stage/blit-stage/blit-server" | grep -Fx "$expected_version" >/dev/null
-test -f "$repo_root/assets/fonts/Blit-Hibr-Terminus16.psf"
+test -f "$repo_root/assets/fonts/Blit-Terminus16.psf"
 test -f "$repo_root/hibr/blit-console.hibr"
 test -f "$repo_root/hibr/blit-session.hibr"
 test -f "$repo_root/hibr/blit-hibr-console.hibr"
 test -f "$repo_root/hibr/blit-stock-session.hibr"
 mkdir -p "$stage/blit-stage/fonts"
-cp "$repo_root/assets/fonts/Blit-Hibr-Terminus16.psf" \
-    "$stage/blit-stage/fonts/Blit-Hibr-Terminus16.psf"
+cp "$repo_root/assets/fonts/Blit-Terminus16.psf" \
+    "$stage/blit-stage/fonts/Blit-Terminus16.psf"
 cp "$repo_root/hibr/blit-console.hibr" "$stage/blit-stage/blit-console.hibr"
 cp "$repo_root/hibr/blit-session.hibr" "$stage/blit-stage/blit-session.hibr"
 cp "$repo_root/hibr/blit-hibr-console.hibr" "$stage/blit-stage/blit-hibr-console.hibr"

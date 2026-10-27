@@ -274,7 +274,7 @@ test can validate a local mocked display or a controlled remote fixture.
 
 ```sh
 . tools/tests/gate_display.sh && gate_display_setup
-env BLIT_PSF_FONT=assets/fonts/Blit-Hibr-Terminus16.psf $GATE_DISPLAY_ENV \
+env BLIT_PSF_FONT=assets/fonts/Blit-Terminus16.psf $GATE_DISPLAY_ENV \
   build/blit/blit-server 19195
 
 BLIT_TEST_SERVER=http://127.0.0.1:19195 \

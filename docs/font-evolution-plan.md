@@ -225,7 +225,7 @@ session replacement to Blit. Operator aesthetic/whole-desktop resize review
 and the separate pointer-performance phase remain open.
 
 The bounded live probe supports `BLIT_FONT_ID=blit-modern` or
-`BLIT_FONT_ID=blit-hibr-spleen16` with `BLIT_FONT_SIZES=17,19,23` and existing
+`BLIT_FONT_ID=blit-spleen16` with `BLIT_FONT_SIZES=17,19,23` and existing
 `BLIT_LIVE`, `BLIT_AUTH_TOKEN`, `BLIT_EVIDENCE_DIR` controls. It captures every
 output, checks complete-cell grids and unchanged backend/physical pane regions,
 then restores the original profile AND size policy. It refuses to overwrite a
@@ -239,7 +239,7 @@ measurement or root-cause finding. Keep font and pointer changes separable.
 
 ## Current implementation: release0.1.564 (initial candidate562)
 
-Both new profiles are integrated: Spleen retro (`blit-hibr-spleen16`) and
+Both new profiles are integrated: Spleen retro (`blit-spleen16`) and
 smooth Hack/Noto colour (`blit-modern`). Original Terminus remains default.
 The shared FreeType rasterizer is linked into the server and consumed by
 native KMS, SDL software and SDL/OpenGLES2. Exact cell sizing, per-context

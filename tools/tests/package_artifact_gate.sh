@@ -58,7 +58,7 @@ manifest_hash_matches hibr_adapter_sha256 \
 
 test -x "$stage/usr/lib/blit/bin/blit-server"
 test -f "$stage/usr/lib/blit/hibr/console-blit.so"
-test -f "$stage/usr/lib/blit/fonts/Blit-Hibr-Spleen16.psf"
+test -f "$stage/usr/lib/blit/fonts/Blit-Spleen16.psf"
 test -f "$stage/usr/lib/blit/fonts/BlitRetroNerd-Regular.ttf"
 test -f "$stage/usr/lib/blit/fonts/nerd-glyphnames-v3.4.0.json"
 test -f "$stage/usr/lib/blit/fonts/licenses/3270-LICENSE.txt"
@@ -76,7 +76,17 @@ test -x "$stage/usr/share/blit/hibr/blit-login-session.hibr"
 test -x "$stage/usr/share/blit/hibr/blit-desktop-observe.hibr"
 test -x "$stage/usr/share/blit/hibr/blit-desktop-place.hibr"
 source_commit=$(sed -n 's/^source_commit: //p' "$manifest")
-for font_asset in Blit-Hibr-Spleen16.psf Blit-Hibr-Spleen16.source.json licenses/Spleen-LICENSE.txt Hack-Regular.ttf BlitModernNerd-Regular.ttf BlitRetroNerd-Regular.ttf NotoColorEmoji.ttf NotoEmojiText.ttf NotoEmojiText-LICENSE.txt Hack-LICENSE.txt licenses/HackNerd-LICENSE.txt licenses/NerdFonts-LICENSE.txt licenses/FontAwesome-LICENSE.txt NotoColorEmoji-LICENSE.txt modern-fonts.source.json icons/catalogue.json icons/LICENSE.txt icons/blit.svg icons/hibr-pen.svg icons/wifi-bars.svg icons/bluetooth.svg icons/berkanan.svg icons/wired.svg; do
+# ADR 0194: the font directory holds Blit's own fonts. The console fonts the
+# old profiles named, a stale build copy among them, and the stray Hack copy
+# must not come back.
+for gone in Uni2-Terminus16.psf Lat15-Terminus16.psf Hack-Regular.ttf Hack-LICENSE.txt \
+        Blit-Hibr-Terminus16.psf Blit-Hibr-Spleen16.psf Blit-Hibr-Unifont16.psf; do
+    if [ -e "$stage/usr/lib/blit/fonts/$gone" ]; then
+        echo "PACKAGE_ARTIFACT_FAIL retired font shipped: $gone" >&2
+        exit 1
+    fi
+done
+for font_asset in Blit-Terminus16.psf Blit-Unifont16.psf Blit-Spleen16.psf Blit-Spleen16.source.json licenses/Spleen-LICENSE.txt BlitModernNerd-Regular.ttf BlitRetroNerd-Regular.ttf BlitJetBrainlessNerd-Regular.ttf licenses/JetBrainsMono-OFL.txt NotoColorEmoji.ttf NotoEmojiText.ttf NotoEmojiText-LICENSE.txt licenses/HackNerd-LICENSE.txt licenses/NerdFonts-LICENSE.txt licenses/FontAwesome-LICENSE.txt NotoColorEmoji-LICENSE.txt modern-fonts.source.json icons/catalogue.json icons/LICENSE.txt icons/blit.svg icons/hibr-pen.svg icons/wifi-bars.svg icons/bluetooth.svg icons/berkanan.svg icons/wired.svg; do
     cmp -s <(git -C "$root" show "$source_commit:assets/fonts/$font_asset") \
         "$stage/usr/lib/blit/fonts/$font_asset" || {
         echo "PACKAGE_ARTIFACT_FAIL font differs from recorded source: $font_asset" >&2

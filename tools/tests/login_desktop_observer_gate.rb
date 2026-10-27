@@ -92,7 +92,7 @@ Dir.mktmpdir('blit-login-observe') do |root|
     HIBR
     File.write(observer,source)
     env={**gate_display_env,
-      'BLIT_PSF_FONT'=>File.join(ROOT,'assets/fonts/Blit-Hibr-Terminus16.psf'),
+      'BLIT_PSF_FONT'=>File.join(ROOT,'assets/fonts/Blit-Terminus16.psf'),
       'BLIT_INPUT_ROOT'=>File.join(root,'input'),'BLIT_SETTINGS'=>'ignore',
       'BLIT_LOGIN_AUTOSTART'=>'1','BLIT_AUTH_TOKEN'=>'observer-admin',
       'BLIT_LOGIN_COMMAND'=>File.join(ROOT,'tools/tests/fixtures/login_identity.rb'),

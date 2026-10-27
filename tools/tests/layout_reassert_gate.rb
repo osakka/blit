@@ -27,7 +27,7 @@ ROOT = File.expand_path('../..', __dir__)
 PORT = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', '19257'), 10))
 BINARY = ENV.fetch('BLIT_GATE_BINARY', File.join(ROOT, 'build/blit/blit-server'))
 FONT = ENV.fetch('BLIT_GATE_FONT',
-                 File.join(ROOT, 'assets/fonts/Blit-Hibr-Terminus16.psf'))
+                 File.join(ROOT, 'assets/fonts/Blit-Terminus16.psf'))
 HIBR = ENV.fetch('BLIT_GATE_HIBR', '/usr/bin/hibr')
 BASE = URI("http://127.0.0.1:#{PORT}")
 LIMIT = 4

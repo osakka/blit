@@ -35,7 +35,7 @@ raise 'requires 8x16 font at scale1' unless grid['cell_width'] == 8 && grid['cel
 active = get('/v1/fonts').fetch('active')
 font_name = File.basename(active.fetch('path'))
 raise 'requires a checked-in Blit Hibr font' unless
-  %w[Blit-Hibr-Terminus16.psf Blit-Hibr-Spleen16.psf].include?(font_name)
+  %w[Blit-Terminus16.psf Blit-Spleen16.psf].include?(font_name)
 font = File.binread(File.expand_path("../../assets/fonts/#{font_name}", __dir__))
 magic, _version, header, _flags, count, size, height, width = font[0,32].unpack('L<8')
 raise 'font identity/geometry mismatch' unless magic == 0x864ab572 && count == active['glyphs'] && width == 8 && height == 16

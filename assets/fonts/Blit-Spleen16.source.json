@@ -1,5 +1,5 @@
 {
-  "profile_id": "blit-hibr-spleen16",
+  "profile_id": "blit-spleen16",
   "upstream": "https://github.com/fcambus/spleen",
   "version": "2.2.0",
   "commit": "0493c34e22791824767c618fed42c434b477662c",
@@ -8,9 +8,9 @@
   "upstream_license": "BSD-2-Clause",
   "output_license": "OFL-1.1 with retained upstream/fallback notices",
   "license_file": "licenses/Spleen-LICENSE.txt",
-  "fallback_file": "Blit-Hibr-Terminus16.psf",
+  "fallback_file": "Blit-Terminus16.psf",
   "fallback_sha256": "d0c26aac1b09c461b6d5ec431be2ba47f639679c5679e4a097b3bd8efec910e9",
-  "output_file": "Blit-Hibr-Spleen16.psf",
+  "output_file": "Blit-Spleen16.psf",
   "output_sha256": "13e0c44d6254d3de6b2eb1fac87fb8412bb3361ecd566517c8daabc9cc5cce37",
   "geometry": {"width": 8, "height": 16, "baseline": 12}
 }

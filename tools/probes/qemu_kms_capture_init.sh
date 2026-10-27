@@ -37,8 +37,8 @@ flip_timeout_arg=$($b cat /proc/cmdline 2>/dev/null | \
 if [ -n "$flip_timeout_arg" ]; then
     export BLIT_KMS_FLIP_TIMEOUT_MS=$flip_timeout_arg
 fi
-if [ -f /blit-stage/fonts/Blit-Hibr-Terminus16.psf ]; then
-    export BLIT_PSF_FONT=/blit-stage/fonts/Blit-Hibr-Terminus16.psf
+if [ -f /blit-stage/fonts/Blit-Terminus16.psf ]; then
+    export BLIT_PSF_FONT=/blit-stage/fonts/Blit-Terminus16.psf
 fi
 if [ -e /dev/dri/card1 ]; then export BLIT_DRM_DEVICE=/dev/dri/card1; else export BLIT_DRM_DEVICE=/dev/dri/card0; fi
 loss_test=0
