@@ -1,0 +1,59 @@
+# ADR 0196: Battery and volume are one levelled icon per state
+
+- Status: accepted (2026-10-27; the owner's screen is the last check)
+- Date: 2026-10-27
+- Scope: `assets/fonts/icons` (catalogue and artwork), `BlitIcons-Regular.ttf`,
+  the icon gates
+
+## Context
+
+On Blit, Hibr's menu bar showed the battery as two glyphs side by side: a
+Nerd bolt or plug, then a Nerd battery level. The owner asked for one icon
+that says the whole state, levelled like Blit's Wi-Fi icon, and the same for
+volume. On other terminals Hibr keeps its own bars.
+
+## Options considered
+
+1. **Keep a state mark beside a level glyph.** This is what was there, and
+   it is what the owner called coupling.
+2. **One colour icon per state, in Blit's icon font.** Levels come from one
+   drawing each, as Wi-Fi does. Hibr picks one codepoint per state.
+
+## Decision
+
+Option 2, with codepoints agreed with Hibr:
+
+| IDs | Codepoints | Drawing |
+|---|---|---|
+| `battery-0` … `battery-4` | U+100009–U+10000D | `battery.svg`: upright battery, 0–4 teal segments |
+| `battery-0-charging` … `battery-4-charging` | U+10000E–U+100012 | `battery-charging.svg`: green segments, a yellow bolt inside |
+| `battery-ac` | U+100013 | `battery-ac.svg`: full, with a plug inside: on mains, not charging |
+| `volume-0` | U+100014 | `volume-muted.svg`: speaker with a red cross |
+| `volume-1` … `volume-3` | U+100015–U+100017 | `volume.svg`: speaker, 1–3 active waves |
+
+- **Levels** use the Wi-Fi mechanism: a path is active when its
+  `data-level` is at or below the icon's `signal_level`, and otherwise takes
+  its `data-inactive-fill`.
+- **Muted** is its own drawing, because a level can only add parts, not
+  replace them.
+- **U+100007 and U+100008** stay the bar corners (cell geometry), so the
+  new range starts at U+100009.
+
+## Consequences
+
+- Hibr maps its battery and volume glyphs to these in its Blit set and
+  draws one glyph per state. Other glyph sets are unchanged.
+- The icon font grows from 9 to 24 colour glyphs. It is still built
+  reproducibly from `catalogue.json`, and fitted by the stack like every
+  other icon.
+
+## Evidence (0.2.38)
+
+- `custom_icon_gate`: all 22 colour originals in every text font at all 57
+  sizes, premultiplied with partial-alpha edges. Every level is a distinct
+  raster: Wi-Fi 4, battery 11 (including charging and mains), volume 4.
+- `custom_icon_api_gate`: the 22 originals through a real PTY, one column
+  each, with identical pixels by PTY and API.
+- `font_kms_raster_gate`: the new range on the KMS path at every size.
+- `build-blit-icons.py` builds the same font twice
+  (sha256 `80c0feec…2c15`).

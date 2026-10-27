@@ -85,10 +85,16 @@ The authoritative mapping is [icons/catalogue.json](../assets/fonts/icons/catalo
 also served unchanged by authenticated `GET /v1/fonts/icons`.
 [The generated table](fonts/special.md) gives every ID, codepoint and valid
 JSON escape. Keep application choices semantic: `hibr-pen`, `wifi-1` through
-`wifi-4`, `bluetooth`, `blit`. Resolve those IDs from the catalogue instead of
-maintaining an independently numbered table in every application.
+`wifi-4`, `bluetooth`, `blit`, `battery-0` through `battery-4`,
+`battery-0-charging` through `battery-4-charging`, `battery-ac`, and
+`volume-0` (muted) through `volume-3`. Resolve those IDs from the catalogue
+instead of maintaining an independently numbered table in every application.
 
-All seven originals use **one terminal column** in every font.
+**One icon says the whole state.** The charging bolt and the mains plug are
+drawn inside the battery, so a status bar shows one glyph per state, never a
+mark beside a level.
+
+All 22 originals use **one terminal column** in every font.
 They are plane16 private-use scalars, not standard Unicode, ordinary emoji,
 or portable assignments in an unrelated font. In particular:
 

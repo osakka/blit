@@ -1,5 +1,22 @@
 # Verification status
 
+## 2026-10-27: 0.2.38 battery and volume icons, one per state (ADR 0196)
+
+- **15 new colour icons** in Blit's icon font, with codepoints agreed with
+  Hibr: battery 0–4 (U+100009–10000D), charging 0–4 (U+10000E–100012), on
+  mains (U+100013), volume muted and 1–3 (U+100014–100017). The bolt and the
+  plug are inside the battery, so one glyph says the whole state.
+- **Gates:** `custom_icon_gate` covers 22 originals in every font at 57
+  sizes, each level a distinct raster; `custom_icon_api_gate` covers the PTY
+  path, one column each, with API parity; `font_kms_raster_gate` covers the
+  new range.
+- **Suites:** font 37/37, full 150/150, GLES 64/65. The GLES miss was
+  `mouse_report_gate` (21 motion reports in a 40-sample sweep, against one a
+  frame), which passed twice on rerun. That is a timing flake in code this
+  release does not touch.
+- **Hibr side (pending):** its Blit glyph set maps battery and volume to
+  these, and its menu bar draws one glyph per state.
+
 ## 2026-10-27: 0.2.37 Iosevka Term dropped (ADR 0195, as built)
 
 - **Five text fonts ship:** Hack, IBM 3270, JetBrains Mono NL, Fira Code and

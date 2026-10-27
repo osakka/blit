@@ -27,7 +27,7 @@ int main(int argc, char **argv)
     CHECK(!blit_font_load_path(&font, argv[1]));
     for (size = 8; size <= 64; ++size) {
         BlitRaster *r = blit_raster_open(&font, argv[2], argv[3], (size + 1) / 2, size);
-        unsigned hashes[7];
+        unsigned hashes[0x18];
         int index;
         CHECK(r);
         for (index = 0; index < required_count; ++index) {
@@ -57,11 +57,14 @@ int main(int argc, char **argv)
             CHECK(ink);
             ++script_samples;
         }
-        for (cp = 0x100000; cp <= 0x100006; ++cp) {
+        /* Every colour original: U+100000-100006 and U+100009-100017;
+           U+100007/8 are the bar corners, cell geometry. */
+        for (cp = 0x100000; cp <= 0x100017; ++cp) {
             BlitRasterGlyph g, again;
             unsigned hash = 2166136261U;
             int x, y, ink = 0, colour = 0, partial = 0;
             unsigned long renders;
+            if (cp == 0x100007 || cp == 0x100008) continue;
             CHECK(blit_raster_get(r, cp, 1, &g));
             CHECK(!g.fallback && g.format == BLIT_RASTER_RGBA_PREMULTIPLIED);
             CHECK(g.width == (size + 1) / 2 && g.height == size);
@@ -83,9 +86,17 @@ int main(int argc, char **argv)
             CHECK(renders == blit_raster_render_count(r));
             ++samples;
         }
-        for (index = 2; index < 6; ++index) {
-            int other;
-            for (other = index + 1; other < 6; ++other) CHECK(hashes[index] != hashes[other]);
+        /* Each level is its own raster: Wi-Fi 1-4, battery 0-4, charging
+           0-4 and on mains, volume muted and 1-3. */
+        {
+            static const int groups[][2] = {{2, 6}, {9, 20}, {0x14, 0x18}};
+            int group;
+            for (group = 0; group < 3; ++group)
+                for (index = groups[group][0]; index < groups[group][1]; ++index) {
+                    int other;
+                    for (other = index + 1; other < groups[group][1]; ++other)
+                        CHECK(hashes[index] != hashes[other]);
+                }
         }
         {
             BlitRasterGlyph g;
@@ -102,6 +113,6 @@ int main(int argc, char **argv)
         blit_raster_close(r);
     }
     blit_font_free(&font);
-    printf("CUSTOM_ICON_PASS samples=%d sizes=57 icons=7 distinct_wifi=4 colour=premultiplied pen_alias=themed cache=bounded ui_scalars=%d ui_span_cases=%d scripts=%d no_replacement=verified\n", samples, required_count, ui_samples, script_samples);
+    printf("CUSTOM_ICON_PASS samples=%d sizes=57 icons=22 distinct_levels=wifi4+battery11+volume4 colour=premultiplied pen_alias=themed cache=bounded ui_scalars=%d ui_span_cases=%d scripts=%d no_replacement=verified\n", samples, required_count, ui_samples, script_samples);
     return 0;
 }

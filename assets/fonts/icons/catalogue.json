@@ -11,7 +11,22 @@
     {"id":"wifi-2", "codepoint":"100003", "source":"wifi-bars.svg", "signal_level":2},
     {"id":"wifi-3", "codepoint":"100004", "source":"wifi-bars.svg", "signal_level":3},
     {"id":"wifi-4", "codepoint":"100005", "source":"wifi-bars.svg", "signal_level":4},
-    {"id":"bluetooth", "codepoint":"100006", "source":"bluetooth.svg"}
+    {"id":"bluetooth", "codepoint":"100006", "source":"bluetooth.svg"},
+    {"id":"battery-0", "codepoint":"100009", "source":"battery.svg", "signal_level":0},
+    {"id":"battery-1", "codepoint":"10000A", "source":"battery.svg", "signal_level":1},
+    {"id":"battery-2", "codepoint":"10000B", "source":"battery.svg", "signal_level":2},
+    {"id":"battery-3", "codepoint":"10000C", "source":"battery.svg", "signal_level":3},
+    {"id":"battery-4", "codepoint":"10000D", "source":"battery.svg", "signal_level":4},
+    {"id":"battery-0-charging", "codepoint":"10000E", "source":"battery-charging.svg", "signal_level":0},
+    {"id":"battery-1-charging", "codepoint":"10000F", "source":"battery-charging.svg", "signal_level":1},
+    {"id":"battery-2-charging", "codepoint":"100010", "source":"battery-charging.svg", "signal_level":2},
+    {"id":"battery-3-charging", "codepoint":"100011", "source":"battery-charging.svg", "signal_level":3},
+    {"id":"battery-4-charging", "codepoint":"100012", "source":"battery-charging.svg", "signal_level":4},
+    {"id":"battery-ac", "codepoint":"100013", "source":"battery-ac.svg"},
+    {"id":"volume-0", "codepoint":"100014", "source":"volume-muted.svg"},
+    {"id":"volume-1", "codepoint":"100015", "source":"volume.svg", "signal_level":1},
+    {"id":"volume-2", "codepoint":"100016", "source":"volume.svg", "signal_level":2},
+    {"id":"volume-3", "codepoint":"100017", "source":"volume.svg", "signal_level":3}
   ],
   "text_glyphs": [
     {"id":"berkanan", "codepoint":"16D2", "source":"berkanan.svg", "colour":false},

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 20">
+  <title>Battery — on mains, not charging, with a plug</title>
+  <path fill="#c9d1d9" d="M5 0H7Q8 0 8 1V2H4V1Q4 0 5 0Z M1 2H11Q12 2 12 3V19Q12 20 11 20H1Q0 20 0 19V3Q0 2 1 2Z M1.5 3.5V18.5H10.5V3.5Z"/>
+  <path fill="#41d6bf" d="M2.5 4H9.5V17.5H2.5Z"/>
+  <path fill="#10202b" d="M4.2 5.5H5.4V8.5H4.2Z M6.6 5.5H7.8V8.5H6.6Z M3.2 8.5H8.8V11.5Q8.8 13.8 6.6 14.2V16.5H5.4V14.2Q3.2 13.8 3.2 11.5Z"/>
+</svg>

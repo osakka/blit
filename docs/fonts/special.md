@@ -13,6 +13,21 @@ Generated from the same catalogue served by `GET /v1/fonts/icons`. These origina
 | `wifi-3` | `U+100004` | `"\udbc0\udc04"` | 3 |
 | `wifi-4` | `U+100005` | `"\udbc0\udc05"` | 4 |
 | `bluetooth` | `U+100006` | `"\udbc0\udc06"` | — |
+| `battery-0` | `U+100009` | `"\udbc0\udc09"` | 0 |
+| `battery-1` | `U+10000A` | `"\udbc0\udc0a"` | 1 |
+| `battery-2` | `U+10000B` | `"\udbc0\udc0b"` | 2 |
+| `battery-3` | `U+10000C` | `"\udbc0\udc0c"` | 3 |
+| `battery-4` | `U+10000D` | `"\udbc0\udc0d"` | 4 |
+| `battery-0-charging` | `U+10000E` | `"\udbc0\udc0e"` | 0 |
+| `battery-1-charging` | `U+10000F` | `"\udbc0\udc0f"` | 1 |
+| `battery-2-charging` | `U+100010` | `"\udbc0\udc10"` | 2 |
+| `battery-3-charging` | `U+100011` | `"\udbc0\udc11"` | 3 |
+| `battery-4-charging` | `U+100012` | `"\udbc0\udc12"` | 4 |
+| `battery-ac` | `U+100013` | `"\udbc0\udc13"` | — |
+| `volume-0` | `U+100014` | `"\udbc0\udc14"` | — |
+| `volume-1` | `U+100015` | `"\udbc0\udc15"` | 1 |
+| `volume-2` | `U+100016` | `"\udbc0\udc16"` | 2 |
+| `volume-3` | `U+100017` | `"\udbc0\udc17"` | 3 |
 
 ## Themed text additions
 
