@@ -1,5 +1,21 @@
 # Verification status
 
+## 2026-10-27: 0.2.45 classic telephone icons (ADR 0196)
+
+- **`phone-classic-off`, `-wait`, `-on` and `-ring`, at U+10001F–100022:**
+  a rotary desk phone in longwire's four line states, beside the modern
+  handset. The owner chose both, and longwire's Phone Style setting picks
+  one.
+- **Gates:** `custom_icon_gate` covers 33 originals, each style's four
+  states being distinct rasters. The PTY and KMS gates cover the new range.
+- **Suites:**
+  - font 38/38 and GLES 66/66.
+  - Full 152/153: `pane_effects_gate` again went over its 5 ms CPU bound
+    under suite load (5.63 ms), and passed 3 of 3 alone. Icons don't touch
+    the effects pass.
+  - That bound now fails in most full runs on the build host. Making it
+    load-independent is open work.
+
 ## 2026-10-27: 0.2.44 telephone icons for longwire (ADR 0196)
 
 - **`phone-off`, `phone-wait`, `phone-on` and `phone-ring`, at

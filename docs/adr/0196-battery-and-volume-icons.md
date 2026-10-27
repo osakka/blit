@@ -59,6 +59,12 @@ Option 2, with codepoints agreed with Hibr:
   The handset is one variable-width stroke along an arc. The outline and
   the dashes are the band between its edge and an inset of it, so all
   four share one shape.
+- **Classic telephone (0.2.45).** The owner wanted the choice of a retro
+  phone too. A rotary desk phone comes in the same four states:
+  `phone-classic-off`, `-wait`, `-on` and `-ring`, at U+10001F–100022. Its
+  parts are the base (with the dial cut into it when filled), the dial and
+  the handset (one arched outline with its two cups), each insettable the
+  same way. longwire's Phone Style setting picks Modern or Classic.
 - **Hibr no longer reads `BLIT_VERSION` (its 0.99.360).** Choosing the
   blit glyph set is the one switch for every Blit icon. So a Blit release
   must reach the owner's machines before the Hibr release that uses its

@@ -35,6 +35,10 @@ Generated from the same catalogue served by `GET /v1/fonts/icons`. These origina
 | `phone-wait` | `U+10001C` | `"\udbc0\udc1c"` | — |
 | `phone-on` | `U+10001D` | `"\udbc0\udc1d"` | — |
 | `phone-ring` | `U+10001E` | `"\udbc0\udc1e"` | — |
+| `phone-classic-off` | `U+10001F` | `"\udbc0\udc1f"` | — |
+| `phone-classic-wait` | `U+100020` | `"\udbc0\udc20"` | — |
+| `phone-classic-on` | `U+100021` | `"\udbc0\udc21"` | — |
+| `phone-classic-ring` | `U+100022` | `"\udbc0\udc22"` | — |
 
 ## Themed text additions
 

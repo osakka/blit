@@ -33,7 +33,11 @@
     {"id":"phone-off", "codepoint":"10001B", "source":"phone-off.svg"},
     {"id":"phone-wait", "codepoint":"10001C", "source":"phone-wait.svg"},
     {"id":"phone-on", "codepoint":"10001D", "source":"phone-on.svg"},
-    {"id":"phone-ring", "codepoint":"10001E", "source":"phone-ring.svg"}
+    {"id":"phone-ring", "codepoint":"10001E", "source":"phone-ring.svg"},
+    {"id":"phone-classic-off", "codepoint":"10001F", "source":"phone-classic-off.svg"},
+    {"id":"phone-classic-wait", "codepoint":"100020", "source":"phone-classic-wait.svg"},
+    {"id":"phone-classic-on", "codepoint":"100021", "source":"phone-classic-on.svg"},
+    {"id":"phone-classic-ring", "codepoint":"100022", "source":"phone-classic-ring.svg"}
   ],
   "text_glyphs": [
     {"id":"berkanan", "codepoint":"16D2", "source":"berkanan.svg", "colour":false},
