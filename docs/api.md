@@ -954,7 +954,7 @@ through `GET /v1/fonts`, not a version-number comparison alone.
 - **The list is read fresh on each request,** so a font copied in appears
   without a restart.
 - **Shipped fonts:** `hack`, `ibm-3270`, `jetbrains-mono-nl`, `fira-code`,
-  `ibm-plex-mono`, `iosevka-term`, `blit-terminus16` and `blit-spleen16`.
+  `ibm-plex-mono`, `blit-terminus16` and `blit-spleen16`.
 - **Glyph coverage:** every outline font draws icons, symbols, box drawing,
   Braille, blocks, Arabic, emoji and Unifont's coverage from Blit's glyph
   stack, fitted to that font.

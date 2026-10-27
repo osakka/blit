@@ -37,7 +37,6 @@ The shipped text fonts are unmodified upstream releases:
 | `jetbrains-mono-nl` | JetBrains Mono NL 2.304 | OFL 1.1 |
 | `fira-code` | Fira Code 6.2 | OFL 1.1 |
 | `ibm-plex-mono` | IBM Plex Mono 1.1.0 | OFL 1.1 |
-| `iosevka-term` | Iosevka Term 34.9.1 | OFL 1.1 |
 | `blit-terminus16`, `blit-spleen16` | Bitmap pixel fonts | OFL / BSD |
 
 **Every outline font draws through one glyph stack.** For each character,

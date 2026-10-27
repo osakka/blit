@@ -1,5 +1,14 @@
 # Verification status
 
+## 2026-10-27: 0.2.37 Iosevka Term dropped (ADR 0195, as built)
+
+- **Five text fonts ship:** Hack, IBM 3270, JetBrains Mono NL, Fira Code and
+  IBM Plex Mono. Iosevka Term was 11.6 MB, about 40% of the package; the
+  stack already covers its glyphs and the fixed cell cancels its
+  narrowness. Copied into `/usr/local/lib/blit/fonts/text`, it is
+  discovered as before.
+- **`package_artifact_gate`** now refuses it as a retired file.
+
 ## 2026-10-27: 0.2.36 text fonts are discovered; every glyph from one stack (ADR 0195)
 
 - **Six unmodified upstream text fonts ship in `text/`:** Hack 3.003,

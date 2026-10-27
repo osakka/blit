@@ -37,7 +37,6 @@ These are asset cmap counts, not glyph counts, application coverage or effective
 | text-JetBrainsMonoNL-Regular | `text/JetBrainsMonoNL-Regular.ttf` | 1363 |
 | text-FiraCode-Regular | `text/FiraCode-Regular.ttf` | 1586 |
 | text-IBMPlexMono-Regular | `text/IBMPlexMono-Regular.ttf` | 983 |
-| text-IosevkaTerm-Regular | `text/IosevkaTerm-Regular.ttf` | 7761 |
 | stack-icons | `BlitIcons-Regular.ttf` | 10 |
 | stack-nerd | `SymbolsNerdFontMono-Regular.ttf` | 10410 |
 | stack-NotoSansSymbols2-Regular | `NotoSansSymbols2-Regular.ttf` | 2955 |

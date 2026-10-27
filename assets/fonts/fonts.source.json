@@ -64,18 +64,6 @@
       "license_file": "licenses/IBMPlexMono-OFL.txt",
       "license_upstream": "ibm-plex-mono.zip:ibm-plex-mono/LICENSE.txt",
       "license_sha256": "7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da"
-    },
-    {
-      "file": "text/IosevkaTerm-Regular.ttf",
-      "source": "Iosevka Term 34.9.1",
-      "upstream": "https://github.com/be5invis/Iosevka/releases/download/v34.9.1/PkgTTF-IosevkaTerm-34.9.1.zip",
-      "upstream_sha256": "3bd57a66a7f1e429a131d3bc35f4d0f3a8eb722f2fe8f59f595e424bda9a33c9",
-      "member": "IosevkaTerm-Regular.ttf",
-      "sha256": "430ad4f56c6cd82e4c954efb6dd4b3e2b4cc2b2b1bd4f8143f3d3800096f32b4",
-      "license": "OFL-1.1",
-      "license_file": "licenses/Iosevka-LICENSE.md",
-      "license_upstream": "https://raw.githubusercontent.com/be5invis/Iosevka/v34.9.1/LICENSE.md",
-      "license_sha256": "4ba53c7c1cb39279aae5f8d7d22054c485c71169920e5a36ed098b115e2e3c5d"
     }
   ],
   "stack": {

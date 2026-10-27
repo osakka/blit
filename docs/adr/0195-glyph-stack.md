@@ -86,7 +86,6 @@ them):
 | JetBrains Mono (NL) | JetBrains v2.304 | OFL 1.1 |
 | Fira Code | tonsky 6.2 | OFL 1.1 |
 | IBM Plex Mono | IBM plex-mono 1.1.0 | OFL 1.1 |
-| Iosevka Term | be5invis v34.9.1 | OFL 1.1 |
 
 Pixel fonts: Blit Terminus 16 and Blit Spleen 16, as now.
 
@@ -107,9 +106,8 @@ The ids `blit-modern`, `blit-retro` and `blit-jetbrainless` become `hack`,
   directory does too. The two pixel fonts are the exception (see "Not yet").
 - **Coverage is proven once, for the stack,** by one gate run over every
   discovered font.
-- **Package size:** six unmodified text fonts and one 4 KB icon font replace
-  three baked 2.5–3 MB fonts. Five of the text fonts are 0.15–0.3 MB;
-  Iosevka Term alone is 11.6 MB.
+- **Package size:** five unmodified text fonts of 0.15–0.3 MB each and one
+  4 KB icon font replace three baked 2.5–3 MB fonts.
 - **More faces are open at once:** about ten. Each glyph is resolved once,
   then cached by the raster's existing cell-keyed cache, so a steady screen
   costs nothing more. The cost of a first-time resolve is measured.
@@ -125,9 +123,10 @@ below. The differences from the decision above:
   FreeMono. It was chosen originally because it covers Hibr's vocalised
   specimen. Blit Arabic Retro, from Kawkab Mono, is retired. FreeMono's GPL
   source offer stays in `sources/`.
-- **Iosevka Term's regular TTF is 11.6 MB,** for its very wide coverage. It
-  is shipped, and the package grows by it, so "the package shrinks" holds
-  for the other five fonts only. Dropping it is one file.
+- **Iosevka Term was shipped in 0.2.36 and dropped in 0.2.37.** Its TTF is
+  11.6 MB, about 40% of the package, for coverage the stack already gives
+  and a narrowness the fixed cell cancels. An operator who wants it copies
+  it into `/usr/local/lib/blit/fonts/text`. Five text fonts now ship.
 - **A text font's cell is its `0` advance,** not its widest glyph. Iosevka's
   few wide glyphs had shrunk its text.
 - **Nerd's private-use icons come from Nerd Symbols,** even when the text

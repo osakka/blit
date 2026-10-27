@@ -23,7 +23,6 @@ same applies to an operator's own fonts in `/usr/local/lib/blit/fonts/text`.
 | `text/JetBrainsMonoNL-Regular.ttf` | JetBrains Mono NL 2.304 | `licenses/JetBrainsMono-OFL.txt` |
 | `text/FiraCode-Regular.ttf` | Fira Code 6.2 | `licenses/FiraCode-OFL.txt` |
 | `text/IBMPlexMono-Regular.ttf` | IBM Plex Mono 1.1.0 | `licenses/IBMPlexMono-OFL.txt` |
-| `text/IosevkaTerm-Regular.ttf` | Iosevka Term 34.9.1 | `licenses/Iosevka-LICENSE.md` |
 
 **Every glyph a text font lacks comes from one stack,** in this directory,
 fitted to the chosen font when drawn:
