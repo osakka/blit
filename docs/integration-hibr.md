@@ -389,6 +389,12 @@ the stable binding coordinates for the ABI-level adapter; the adapter must
 use them to address the server-owned surface and must not discover or invent
 another surface identity.
 
+Every PTY child also receives `BLIT_VERSION`, the server's version (the same
+value as `GET /v1/version`'s `server_version`). A child keys Blit-only
+features on it with no token or request: for example, the battery and volume
+icons (ADR 0196) need 0.2.38 or later. It is not `TERM_PROGRAM`, which Hibr
+uses to name a display.
+
 Two further variables are credentials and are not interchangeable:
 
 - `BLIT_SESSION_TOKEN` is the owner handshake secret from

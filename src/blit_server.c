@@ -15388,6 +15388,11 @@ static int create_session(BlitRuntime *runtime, const char *json,
             setenv("BLIT_SESSION_TOKEN", session_token, 1) != 0 ||
             setenv("BLIT_SURFACE_ID", surface_text, 1) != 0 ||
             setenv("BLIT_SERVER_PORT", port_text, 1) != 0 ||
+            /* What a child can key Blit-only features on (ADR 0196: the
+               battery and volume icons arrived in 0.2.38) without a token
+               or a request. Not TERM_PROGRAM: Hibr names a display after
+               that, and it would rename every display "blit". */
+            setenv("BLIT_VERSION", blit_version, 1) != 0 ||
             setenv("TERM", "xterm-kitty", 1) != 0 ||
             setenv("COLORTERM", "truecolor", 1) != 0 ||
             /* Hibr's auto bidi probe treats xterm-kitty as a terminal

@@ -217,6 +217,7 @@ suite_terminal() {
     run_gate session_write_resize_gate.rb ruby tools/tests/session_write_resize_gate.rb
     run_gate layout_reassert_gate.rb ruby tools/tests/layout_reassert_gate.rb
     run_gate terminal_ingest_gate.rb ruby tools/tests/terminal_ingest_gate.rb
+    run_gate child_environment_gate.rb ruby tools/tests/child_environment_gate.rb
 }
 
 suite_font() {

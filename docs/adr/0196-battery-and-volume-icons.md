@@ -47,6 +47,12 @@ Option 2, with codepoints agreed with Hibr:
   reproducibly from `catalogue.json`, and fitted by the stack like every
   other icon.
 
+- **A child can tell which Blit it runs under (0.2.39).** Hibr's desktop
+  keeps no Blit URL or token, so it can't ask `GET /v1/fonts/icons`
+  cheaply. Every session child now gets `BLIT_VERSION`, the server's
+  version, and Hibr uses the new icons from 0.2.38 on, with its bars below
+  that. `TERM_PROGRAM` was not used, because Hibr names a display after it.
+
 ## Evidence (0.2.38)
 
 - `custom_icon_gate`: all 22 colour originals in every text font at all 57
@@ -57,3 +63,5 @@ Option 2, with codepoints agreed with Hibr:
 - `font_kms_raster_gate`: the new range on the KMS path at every size.
 - `build-blit-icons.py` builds the same font twice
   (sha256 `80c0feec…2c15`).
+- `child_environment_gate` (0.2.39, new): a session child's `BLIT_VERSION`
+  equals `server_version`, beside the binding coordinates.

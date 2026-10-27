@@ -1,5 +1,13 @@
 # Verification status
 
+## 2026-10-27: 0.2.39 children see BLIT_VERSION (ADR 0196)
+
+- **Every session child gets `BLIT_VERSION`,** so Hibr's desktop, which
+  keeps no Blit URL or token, can use the 0.2.38 icons on 0.2.38 or later
+  and its bars below that.
+- **`child_environment_gate` (new, terminal suite):** the child's value
+  equals `GET /v1/version`.
+
 ## 2026-10-27: 0.2.38 battery and volume icons, one per state (ADR 0196)
 
 - **15 new colour icons** in Blit's icon font, with codepoints agreed with
