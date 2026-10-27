@@ -928,6 +928,13 @@ typedef struct {
        pixels of the surface rather than in cells. It implies the SGR form
        whether or not 1006 is also set, as in xterm. */
     int terminal_mouse_pixels;
+    /* Mode ?7701, pointer lock (ADR 0198, #139): engaged only while this
+       session has focus. The pointer stays still and hidden, and the
+       program is sent raw movement instead of positions. */
+    int terminal_pointer_lock;
+    /* Blit took the lock back but the program's input was full, so the
+       notice that says so is still to be written. */
+    int terminal_pointer_lock_notice;
     /* OSC 22 (#138): the pointer shapes the program asked for, innermost
        last. Names are stored as sent; the art they resolve to is decided
        when the pointer is drawn over this session. */
@@ -1082,6 +1089,16 @@ typedef struct {
     unsigned long long motion_pending_session;
     char motion_pending_report[64];
     uint64_t motion_sent_us;
+    /* Pointer lock (ADR 0198): raw counts moved and not yet reported,
+       summed, sent at most once a frame like pixel motion. */
+    int pointer_lock_dx;
+    int pointer_lock_dy;
+    /* When a locked program was first seen not reading its input: two
+       seconds of that and Blit gives the pointer back (ADR 0198). */
+    uint64_t pointer_lock_stalled_us;
+    uint64_t pointer_lock_checked_us;
+    unsigned long long diagnostic_pointer_lock_reports;
+    unsigned long long diagnostic_pointer_lock_releases;
     int font_scale_tenths;
     /* Exactly one size policy: positive pixels imply scale_tenths == 0. */
     int font_size_px;
@@ -2149,6 +2166,7 @@ static int render_wait_ms(BlitRuntime *runtime, uint64_t now)
 }
 
 static void update_pointer_shape(BlitRuntime *runtime);
+static BlitSession *pointer_lock_session(BlitRuntime *runtime);
 
 static void gles_guard_start(BlitRuntime *runtime)
 {
@@ -3008,6 +3026,7 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"evdev_keyboard_keys_undelivered\":%llu,"
         "\"input_keys_dropped\":%llu,"
         "\"input_reports_dropped\":%llu,"
+        "\"pointer_lock_reports\":%llu,\"pointer_lock_releases\":%llu,"
         "\"evdev_service_budget_yields\":%llu,"
         "\"last_evdev_keyboard_event_age_ms\":%llu,"
         "\"last_evdev_keyboard_path\":\"%s\","
@@ -3095,6 +3114,8 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         runtime->diagnostic_evdev_keyboard_keys_undelivered,
         runtime->diagnostic_input_keys_dropped,
         runtime->diagnostic_input_reports_dropped,
+        runtime->diagnostic_pointer_lock_reports,
+        runtime->diagnostic_pointer_lock_releases,
         runtime->diagnostic_evdev_service_budget_yields,
         runtime->diagnostic_last_evdev_keyboard_event_us > 0 &&
                 now >= runtime->diagnostic_last_evdev_keyboard_event_us ?
@@ -9268,6 +9289,39 @@ static void terminal_write_reply(BlitSession *session, const char *reply)
         write(session->pty_fd, reply, strlen(reply));
 }
 
+/* Pointer lock, mode ?7701 (ADR 0198). A program asks for it and may only
+   have it while its session has Blit's focus; otherwise it is refused, and
+   the refusal is the same report a query would give, so the program always
+   learns where it stands. */
+static void terminal_set_pointer_lock(BlitSession *session, int enabled)
+{
+    if (!enabled) {
+        session->terminal_pointer_lock = 0;
+        return;
+    }
+    if (session->focused && !session->child_exited && session->pty_fd >= 0) {
+        session->terminal_pointer_lock = 1;
+        return;
+    }
+    session->terminal_pointer_lock = 0;
+    terminal_write_reply(session, "\033[?7701;2$y");
+}
+
+/* Blit takes the lock back: on a reset, focus leaving, or a program that has
+   stopped reading. The program is told, unasked, so it can show its own
+   pointer again; a program that gave it back itself is not. */
+static void terminal_drop_pointer_lock(BlitSession *session)
+{
+    static const char notice[] = "\033[?7701;2$y";
+
+    if (!session->terminal_pointer_lock)
+        return;
+    session->terminal_pointer_lock = 0;
+    session->terminal_pointer_lock_notice = session->pty_fd < 0 ||
+        write(session->pty_fd, notice, sizeof(notice) - 1) !=
+            (ssize_t)(sizeof(notice) - 1);
+}
+
 static BlitSavedCursor *terminal_saved_cursor(BlitSession *session)
 {
     return &session->terminal_saved_cursor[session->terminal_alternate ? 1 : 0];
@@ -12239,6 +12293,8 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
             session->terminal_mouse_sgr = enabled;
         if (terminal_csi_has_mode(sequence, 1016))
             session->terminal_mouse_pixels = enabled;
+        if (terminal_csi_has_mode(sequence, 7701))
+            terminal_set_pointer_lock(session, enabled);
         if (terminal_csi_has_mode(sequence, 2026))
             session->terminal_synchronized = enabled;
         if (terminal_csi_has_mode(sequence, 25)) {
@@ -12302,6 +12358,7 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         case 1004: state = session->terminal_focus_reporting ? 1 : 2; break;
         case 1006: state = session->terminal_mouse_sgr ? 1 : 2; break;
         case 1016: state = session->terminal_mouse_pixels ? 1 : 2; break;
+        case 7701: state = session->terminal_pointer_lock ? 1 : 2; break;
         case 80: state = session->terminal_sixel_display_mode ? 1 : 2; break;
         case 8452:
             state = session->terminal_sixel_cursor_right ? 1 : 2; break;
@@ -12364,6 +12421,7 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         session->terminal_mouse_mode = 0;
         session->terminal_mouse_sgr = 0;
         session->terminal_mouse_pixels = 0;
+        terminal_drop_pointer_lock(session);
         session->terminal_pointer_depth = 0;
         session->terminal_synchronized = 0;
         terminal_sixel_reset_palette(session);
@@ -12487,6 +12545,9 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
     } else if (private_mode && (command == 'h' || command == 'l') &&
                has_first && first == 1016) {
         session->terminal_mouse_pixels = command == 'h';
+    } else if (private_mode && (command == 'h' || command == 'l') &&
+               has_first && first == 7701) {
+        terminal_set_pointer_lock(session, command == 'h');
     } else if (private_mode && (command == 'h' || command == 'l') &&
                has_first && first == 25) {
         int cursor_was_visible = surface->cursor_visible;
@@ -13170,6 +13231,7 @@ static int terminal_consume_chunk(BlitRuntime *runtime, BlitSession *session,
                 session->terminal_mouse_mode = 0;
                 session->terminal_mouse_sgr = 0;
                 session->terminal_mouse_pixels = 0;
+                terminal_drop_pointer_lock(session);
                 session->terminal_pointer_depth = 0;
                 session->terminal_synchronized = 0;
                 session->terminal_alternate_mode = 0;
@@ -14038,6 +14100,7 @@ static void refresh_session_state(BlitRuntime *runtime, BlitSession *session)
                 snprintf(session->state, sizeof(session->state), "failed");
         }
         session->child_exited = 1;
+        session->terminal_pointer_lock = 0;
         session->terminal_pointer_depth = 0;
         /* Keep the PTY readable after waitpid reaps the child.  The child may
            have emitted final terminal bytes (including an OSC title or a
@@ -14637,10 +14700,12 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
        faults with the same symptom. */
     used += (size_t)snprintf(
         body + used, capacity - used,
-        ",\"mouse_reporting\":{\"mode\":%d,\"sgr\":%s,\"pixels\":%s}",
+        ",\"mouse_reporting\":{\"mode\":%d,\"sgr\":%s,\"pixels\":%s,"
+        "\"pointer_lock\":%s}",
         session->terminal_mouse_mode,
         session->terminal_mouse_sgr ? "true" : "false",
-        session->terminal_mouse_pixels ? "true" : "false");
+        session->terminal_mouse_pixels ? "true" : "false",
+        session->terminal_pointer_lock ? "true" : "false");
     /* OSC 22 names are [a-z0-9_-] only, so they need no JSON escaping. */
     used += (size_t)snprintf(
         body + used, capacity - used,
@@ -23154,7 +23219,12 @@ static void handle_request(int fd, BlitRuntime *runtime,
                                                           adaptive);
             runtime->evdev_mouse_y += scale_pointer_delta(dy, sensitivity,
                                                           adaptive);
-            update_evdev_pointer(runtime);
+            runtime->pointer_lock_dx += dx;
+            runtime->pointer_lock_dy += dy;
+            /* Applied as absolute injection is, whether or not a physical
+               mouse is attached: the evdev path's wait for a device would
+               drop an injected motion on a machine with none. */
+            update_pointer_position(runtime, "api-pointer");
         } else if (strcmp(kind, "pointer_wheel") == 0) {
             int direction;
             if (!json_int(payload, "delta", &delta) || delta == 0) {
@@ -25521,6 +25591,9 @@ static void update_pointer_shape(BlitRuntime *runtime)
                 shape = BLIT_POINTER_SHAPE_DEFAULT;
         }
     }
+    /* A locked pointer is hidden wherever it is (ADR 0198). */
+    if (pointer_lock_session(runtime) != NULL)
+        shape = BLIT_POINTER_SHAPE_HIDDEN;
     hidden = shape == BLIT_POINTER_SHAPE_HIDDEN;
     if (shape >= 0)
         config.shape = shape;
@@ -25549,6 +25622,99 @@ static BlitSession *mouse_target(BlitRuntime *runtime, int output_index,
 static int write_input_bytes(BlitSession *session, const char *bytes,
                              size_t length, unsigned long long *dropped);
 
+static int active_mouse_button(const BlitRuntime *runtime);
+static int mouse_modifier_bits(const BlitRuntime *runtime);
+
+/* The session holding the pointer, if any. Only a focused session can hold
+   it, so there is at most one. */
+static BlitSession *pointer_lock_session(BlitRuntime *runtime)
+{
+    int i;
+
+    for (i = 0; i < BLIT_MAX_SESSIONS; ++i)
+        if (runtime->sessions[i].used && runtime->sessions[i].terminal_pointer_lock)
+            return &runtime->sessions[i];
+    return NULL;
+}
+
+/* A report to the locked program. */
+static void pointer_lock_write(BlitRuntime *runtime, BlitSession *session,
+                               const char *report)
+{
+    if (write_input_bytes(session, report, strlen(report),
+                          &runtime->diagnostic_input_reports_dropped))
+        ++runtime->diagnostic_pointer_lock_reports;
+}
+
+/* Bytes sent to the program and not yet read by it: what waits in its
+   terminal's input, seen from the terminal side. A write to the PTY would
+   only fail once tens of kilobytes had queued, about a minute of motion, so
+   that is no test of a stuck program; this is. -1 when it can't be told. */
+static int pty_unread_input(const BlitSession *session)
+{
+    char name[64];
+    int fd, unread = -1;
+
+    if (session->pty_fd < 0 || ptsname_r(session->pty_fd, name, sizeof(name)) != 0)
+        return -1;
+    fd = open(name, O_RDWR | O_NOCTTY | O_NONBLOCK | O_CLOEXEC);
+    if (fd < 0)
+        return -1;
+    if (ioctl(fd, FIONREAD, &unread) != 0)
+        unread = -1;
+    close(fd);
+    return unread;
+}
+
+/* Each pass: a lock whose session has lost focus, exited or closed is given
+   back, and a notice the program could not take before is tried again. A
+   few times a second, the holder is checked for reading: input left unread
+   for two seconds means the program is stuck, and a stuck program must not
+   keep the pointer. A program reading normally empties its input within
+   milliseconds of a report. */
+static void service_pointer_lock(BlitRuntime *runtime)
+{
+    static const char notice[] = "\033[?7701;2$y";
+    BlitSession *holder = pointer_lock_session(runtime);
+    uint64_t now = monotonic_us();
+    int i;
+
+    if (holder == NULL)
+        runtime->pointer_lock_stalled_us = 0;
+    else if (now - runtime->pointer_lock_checked_us >= 250000ULL) {
+        runtime->pointer_lock_checked_us = now;
+        if (pty_unread_input(holder) <= 0)
+            runtime->pointer_lock_stalled_us = 0;
+        else if (runtime->pointer_lock_stalled_us == 0)
+            runtime->pointer_lock_stalled_us = now;
+        else if (now - runtime->pointer_lock_stalled_us >= 2000000ULL) {
+            diagnostic_trace(runtime, "pointer_lock_released",
+                             "reason=program_not_reading");
+            terminal_drop_pointer_lock(holder);
+            ++runtime->diagnostic_pointer_lock_releases;
+            runtime->pointer_lock_stalled_us = 0;
+        }
+    }
+
+    for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
+        BlitSession *session = &runtime->sessions[i];
+        if (!session->used)
+            continue;
+        if (session->terminal_pointer_lock &&
+            (!session->focused || session->child_exited || session->pty_fd < 0)) {
+            diagnostic_trace(runtime, "pointer_lock_released",
+                             !session->focused ? "reason=focus_moved" : "reason=program_ended");
+            terminal_drop_pointer_lock(session);
+            ++runtime->diagnostic_pointer_lock_releases;
+        }
+        if (session->terminal_pointer_lock_notice && session->pty_fd >= 0 &&
+            !session->child_exited &&
+            write(session->pty_fd, notice, sizeof(notice) - 1) ==
+                (ssize_t)(sizeof(notice) - 1))
+            session->terminal_pointer_lock_notice = 0;
+    }
+}
+
 /* Writes the motion report held back by the frame limit, if any. */
 static void flush_mouse_motion(BlitRuntime *runtime)
 {
@@ -25557,6 +25723,21 @@ static void flush_mouse_motion(BlitRuntime *runtime)
     if (!runtime->motion_pending)
         return;
     runtime->motion_pending = 0;
+    if ((session = pointer_lock_session(runtime)) != NULL) {
+        char report[64];
+        if (runtime->pointer_lock_dx == 0 && runtime->pointer_lock_dy == 0)
+            return;
+        snprintf(report, sizeof(report), "\033[<%d;%d;%dM",
+                 active_mouse_button(runtime) + mouse_modifier_bits(runtime) + 32,
+                 runtime->pointer_lock_dx, runtime->pointer_lock_dy);
+        runtime->pointer_lock_dx = 0;
+        runtime->pointer_lock_dy = 0;
+        runtime->motion_sent_us = monotonic_us();
+        pointer_lock_write(runtime, session, report);
+        return;
+    }
+    runtime->pointer_lock_dx = 0;
+    runtime->pointer_lock_dy = 0;
     session = find_session_id(runtime, runtime->motion_pending_session);
     if (session == NULL || session->pty_fd < 0)
         return;
@@ -25724,6 +25905,17 @@ static void send_mouse_report(BlitRuntime *runtime,
     }
     session = session;
     flush_mouse_motion(runtime);
+    /* ADR 0198: while locked, buttons and the wheel go to the holder, in
+       the lock's form; the deltas were just flushed, so these carry none. */
+    {
+        BlitSession *locked = pointer_lock_session(runtime);
+        if (locked != NULL) {
+            snprintf(report, sizeof(report), "\033[<%d;0;0%c",
+                     button + mouse_modifier_bits(runtime), release ? 'm' : 'M');
+            pointer_lock_write(runtime, locked, report);
+            return;
+        }
+    }
     if (session != NULL && !release && button == 0)
         focus_session(runtime, session);
     if (session == NULL || session->pty_fd < 0)
@@ -25859,6 +26051,21 @@ static void update_pointer_position(BlitRuntime *runtime,
     int changed;
     if (runtime->output_count <= 0)
         return;
+    /* ADR 0198: a locked pointer does not move. What moved is the raw count
+       already summed for the program; the visible pointer's own motion is
+       undone, and nothing else hears of it. */
+    if (pointer_lock_session(runtime) != NULL && runtime->pointer_valid) {
+        runtime->evdev_mouse_x = runtime->pointer_x;
+        runtime->evdev_mouse_y = runtime->pointer_y;
+        if (runtime->pointer_lock_dx != 0 || runtime->pointer_lock_dy != 0) {
+            runtime->motion_pending = 1;
+            if (monotonic_us() >= runtime->motion_sent_us + BLIT_MOTION_PIXEL_US)
+                flush_mouse_motion(runtime);
+        }
+        return;
+    }
+    runtime->pointer_lock_dx = 0;
+    runtime->pointer_lock_dy = 0;
     old_x = runtime->pointer_x;
     old_y = runtime->pointer_y;
     old_output = runtime->pointer_output;
@@ -26396,6 +26603,8 @@ static void service_evdev_mouse(BlitRuntime *runtime)
                             scale_pointer_delta(pad.dx, sensitivity, adaptive);
                         runtime->evdev_mouse_y +=
                             scale_pointer_delta(pad.dy, sensitivity, adaptive);
+                        runtime->pointer_lock_dx += pad.dx;
+                        runtime->pointer_lock_dy += pad.dy;
                     }
                     for (tick = 0; tick < abs(pad.wheel_y); ++tick)
                         evdev_emit_wheel(runtime, configuration, 0,
@@ -26427,11 +26636,13 @@ static void service_evdev_mouse(BlitRuntime *runtime)
                     if (configuration != NULL) ++configuration->pointer_motion;
                     runtime->evdev_mouse_x +=
                         scale_pointer_delta(event.value, sensitivity, adaptive);
+                    runtime->pointer_lock_dx += event.value;
                 } else if (event.code == REL_Y) {
                     ++runtime->diagnostic_evdev_mouse_motion_events;
                     if (configuration != NULL) ++configuration->pointer_motion;
                     runtime->evdev_mouse_y +=
                         scale_pointer_delta(event.value, sensitivity, adaptive);
+                    runtime->pointer_lock_dy += event.value;
                 }
             } else if (event.type == EV_SYN && event.code == SYN_REPORT) {
                 ++runtime->diagnostic_evdev_mouse_syncs;
@@ -28613,6 +28824,7 @@ int main(int argc, char **argv)
         service_native_join_lifetimes(&runtime, monotonic_us());
         service_auxiliary_displays(&runtime, monotonic_us());
 
+        service_pointer_lock(&runtime);
         if (mouse_motion_wait_ms(&runtime, monotonic_us()) == 0)
             flush_mouse_motion(&runtime);
         pending_before_events = runtime.render_pending;

@@ -215,6 +215,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0195 — Text fonts are discovered; every glyph comes from one shipped stack](0195-glyph-stack.md)
 - [0196 — Battery and volume are one levelled icon per state](0196-battery-and-volume-icons.md)
 - [0197 — An icon that spans columns is one codepoint per column](0197-icons-that-span-columns.md)
+- [0198 — Pointer lock: a focused program can hold the pointer and read raw motion](0198-pointer-lock.md)
 
 ## Adding an ADR
 

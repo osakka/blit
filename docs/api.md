@@ -437,6 +437,33 @@ for SGR-Pixels (1016), where a report carries the pointer's position in
 pixels of the surface, one-based, instead of its cell. Under 1016 motion is
 held to one report a frame (`BLIT_MOTION_PIXEL_US`, 16.7 ms), the newest
 position kept, and a button report writes any held motion first.
+`pointer_lock` is true while the session holds the pointer (mode ?7701).
+
+**Pointer lock, mode ?7701 (ADR 0198).** For games that turn with the
+mouse.
+- **Asking:** a program asks first, with DECRQM (`CSI ? 7701 $ p`). Blit
+  answers `CSI ? 7701 ; 2 $ y` (settable, off) or `; 1` (on).
+- **Engaging:** `CSI ? 7701 h` engages only while the session has Blit's
+  focus. Otherwise it is refused, with `CSI ? 7701 ; 2 $ y`.
+- **While locked:**
+  - the pointer stays where it was, hidden;
+  - the program is sent raw mouse counts (no sensitivity or acceleration)
+    as `CSI < b ; dx ; dy M`, summed and at most one report a frame, with
+    `b` = 35 plus modifiers, or 32 + button while one is held;
+  - buttons and the wheel come as `CSI < b ; 0 ; 0 M/m`;
+  - absolute motion is ignored;
+  - no other session hears any of it.
+- **Release:**
+  - The program gives the lock back with `CSI ? 7701 l`, and is sent no
+    reply.
+  - Blit takes it back when focus moves to another session, the program
+    exits or the session closes, on RIS or a soft reset, and when the
+    program leaves its input unread for two seconds (it is stuck). Each
+    time, Blit sends an unsolicited `CSI ? 7701 ; 2 $ y`.
+  - The pointer reappears where it was locked.
+- **No release key in Blit.** The desktop's own shortcut releases it.
+- **Counters:** `pointer_lock_reports` and `pointer_lock_releases` in
+  `GET /v1/diagnostics/runtime`.
 
 When this map and the schema disagree, the schema wins and the documentation
 must be corrected in the same change. A route addition is not complete until

@@ -1,5 +1,24 @@
 # Verification status
 
+## 2026-10-27: 0.2.42 pointer lock, mode ?7701 (ADR 0198, #139)
+
+- **A focused program can hold the pointer** and read raw mouse counts as
+  `CSI < b ; dx ; dy M`, for Boxer's mouse-turning games. The protocol was
+  agreed with Hibr (#379) and Boxer (hibr-boxer #1).
+- **Released** by the program, on focus moving, the program ending, RIS or
+  a soft reset, and when the program leaves input unread for two seconds.
+  Blit tells the program each time it takes the lock back itself. There is
+  no Blit key: the desktop's Release Pointer shortcut is the one key.
+- **`pointer_relative` injection** now moves the pointer with no mouse
+  attached, as absolute injection does.
+- **`pointer_lock_gate` (new):** query, refusal, a still and hidden
+  pointer, exact raw sums, coalescing, buttons, focus-loss release with the
+  notice, a silent program release, and a stuck program released.
+- **Suites:** full 151/152 at first. `network_auth_gate` failed because
+  the two new diagnostics counters weren't listed as required in the
+  schema; that is fixed, and it and `api_schema_gate` pass. GLES 66/66,
+  including `mouse_report_gate` and the new gate.
+
 ## 2026-10-27: 0.2.41 the power icon; the hui badge at 80% of the cell
 
 - **`power` U+10001A:** the power symbol, colour, one column, for Hibr's

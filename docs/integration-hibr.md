@@ -395,6 +395,14 @@ features on it with no token or request: for example, the battery and volume
 icons (ADR 0196) need 0.2.38 or later. It is not `TERM_PROGRAM`, which Hibr
 uses to name a display.
 
+**Pointer lock (ADR 0198).** Hibr asks for mode ?7701 with DECRQM, and
+engages it with `CSI ? 7701 h` for a window that wants relative mouse
+motion, such as a Boxer game. It gives the lock back with `CSI ? 7701 l`,
+from its Release Pointer shortcut, on window focus loss, and on menus.
+Blit sends `CSI ? 7701 ; 2 $ y` when it takes the lock back itself. The
+reports are deltas, so hold must forward them without its per-display
+position offset. The full protocol is in `docs/api.md`.
+
 Two further variables are credentials and are not interchangeable:
 
 - `BLIT_SESSION_TOKEN` is the owner handshake secret from

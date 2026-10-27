@@ -308,6 +308,7 @@ suite_renderer() {
     run_gate deferred_damage_gate.rb ruby tools/tests/deferred_damage_gate.rb
     run_gate pointer_geometry_gate.rb ruby tools/tests/pointer_geometry_gate.rb
     run_gate mouse_report_gate.rb ruby tools/tests/mouse_report_gate.rb
+    run_gate pointer_lock_gate.rb ruby tools/tests/pointer_lock_gate.rb
     run_gate key_encoding_gate.rb ruby tools/tests/key_encoding_gate.rb
     run_gate input_stream_text_gate.rb ruby tools/tests/input_stream_text_gate.rb
     run_gate keyboard_settings_gate.rb ruby tools/tests/keyboard_settings_gate.rb
