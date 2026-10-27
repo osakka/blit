@@ -905,8 +905,10 @@ static int draw_outline_face(FT_Face face, int baseline, uint32_t scalar, Raster
      codepoint per column, each drawn as its slice of the whole: the icon
      font gives every part the whole outline, shifted left by its column,
      and its ink wider than one icon (90% of an advance) says how many
-     columns it spans. It fills 95% of the span and of the cell's height,
-     centred on the span, and each cell keeps its own slice.
+     columns it spans. It fills 95% of the span and 80% of the cell's
+     height, a little taller than the capitals as text with its descenders
+     is, centred on the span and on half the cap height like any icon but
+     kept inside the cell; each cell keeps its own slice.
    Returns 1 when drawn, 0 when the face has no such glyph, -1 on error.
    The face's size is left changed: only the text face is shared, and its
    caller restores it. */
@@ -935,9 +937,11 @@ static int draw_fitted(BlitRaster *raster, FT_Face face, int rule, uint32_t scal
         if (span > 1) {
             int column = (int)floor((span * advance / 2.0 - (box.xMin + box.xMax) / 2.0) / advance + 0.5);
             fit = 0.95 * span * w / bw;
-            if (0.95 * h / bh < fit) fit = 0.95 * h / bh;
+            if (0.8 * h / bh < fit) fit = 0.8 * h / bh;
             ox = span * w / 2.0 - column * w - fit * (box.xMin + box.xMax) / 2.0;
-            oy = (raster->baseline - h / 2.0) - fit * (box.yMin + box.yMax) / 2.0;
+            oy = raster->cap / 2.0 - fit * (box.yMin + box.yMax) / 2.0;
+            if (oy + fit * box.yMax > raster->baseline) oy = raster->baseline - fit * box.yMax;
+            if (oy + fit * box.yMin < raster->baseline - h) oy = raster->baseline - h - fit * box.yMin;
             goto place;
         }
         natural = w / advance;

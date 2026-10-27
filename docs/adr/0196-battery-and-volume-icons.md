@@ -47,6 +47,13 @@ Option 2, with codepoints agreed with Hibr:
   reproducibly from `catalogue.json`, and fitted by the stack like every
   other icon.
 
+- **Power (0.2.41):** `power` at U+10001A, `power.svg`, is the standard
+  power symbol with a teal ring and a light bar. It is for Hibr's Power
+  item on machines with no battery.
+- **Hibr no longer reads `BLIT_VERSION` (its 0.99.360).** Choosing the
+  blit glyph set is the one switch for every Blit icon. So a Blit release
+  must reach the owner's machines before the Hibr release that uses its
+  codepoints. `BLIT_VERSION` stays for any child that wants it.
 - **A child can tell which Blit it runs under (0.2.39).** Hibr's desktop
   keeps no Blit URL or token, so it can't ask `GET /v1/fonts/icons`
   cheaply. Every session child now gets `BLIT_VERSION`, the server's

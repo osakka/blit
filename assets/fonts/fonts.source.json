@@ -70,7 +70,7 @@
     "icons": {
       "file": "BlitIcons-Regular.ttf",
       "source": "Blit original artwork, built by tools/fonts/build-blit-icons.py from icons/catalogue.json",
-      "sha256": "8e8a1869ae853f5593a217b6321f97edb8dcb5f148cf5672c254e72455035140",
+      "sha256": "10d7a9762f35acd6455217227cefb62b504c1169f16c57eec08570ffd5147d98",
       "license_file": "icons/LICENSE.txt"
     },
     "nerd": {
@@ -152,7 +152,7 @@
     "catalogue": "icons/catalogue.json",
     "format": "COLR v0 / CPAL; original SVG paths; monochrome U+270E pen alias",
     "sources": {
-      "icons/catalogue.json": "8c00c01d5053de9b559b0d7d4eb41516f377d41ea8bdfe0a71f33c2e4fd4e55b",
+      "icons/catalogue.json": "43ccbe8cdd58c2c5bde1951a975f5e8c9fe85d6d41ab7cbf4c7a6d65ae5b4df4",
       "icons/berkanan.svg": "f16019c94cf20f1a9dc42b7127e04ed68b0303260e6a8935ede1110bc1abdd5f",
       "icons/wired.svg": "6a5207758fb6ef13dbda9d5392fb32aeb9e6c9beea33280ecf46bd64fe2200b1",
       "icons/LICENSE.txt": "a1f68010aa91a710d0b41857f158f3fb1316778a0dc13321577f86cb82a9badb",
@@ -165,7 +165,8 @@
       "icons/battery-ac.svg": "665d7ffe83e33c35b9492009f4c12e46480e3918ce3bf684a15342181ca37796",
       "icons/volume.svg": "6e7509b916436969724a559445637e37aa114ff228da317a544147d484aa6806",
       "icons/volume-muted.svg": "f71aecbd791a9b86c7559f95628817df3cbae0ac598ef8472573c8e085dc76fa",
-      "icons/hui.svg": "e82fc66c5fa25c2c325a39c3ef63a0b43bdb4fd2135a13f645cc19b73b23c887"
+      "icons/hui.svg": "e82fc66c5fa25c2c325a39c3ef63a0b43bdb4fd2135a13f645cc19b73b23c887",
+      "icons/power.svg": "8a0d66ef8b858d08ba0d83968e1d9a152cde00e62ce2825af0a391a2be3da3b1"
     }
   },
   "ui_coverage": {

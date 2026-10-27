@@ -87,7 +87,7 @@ also served unchanged by authenticated `GET /v1/fonts/icons`.
 JSON escape. Keep application choices semantic: `hibr-pen`, `wifi-1` through
 `wifi-4`, `bluetooth`, `blit`, `battery-0` through `battery-4`,
 `battery-0-charging` through `battery-4-charging`, `battery-ac`, and
-`volume-0` (muted) through `volume-3`, and `hui-left` + `hui-right`. Resolve those IDs from the catalogue
+`volume-0` (muted) through `volume-3`, `power`, and `hui-left` + `hui-right`. Resolve those IDs from the catalogue
 instead of maintaining an independently numbered table in every application.
 
 **One icon says the whole state.** The charging bolt and the mains plug are
@@ -98,7 +98,7 @@ mark beside a level.
 `hui-right` side by side: each is one column, and each draws its half of
 one badge (ADR 0197).
 
-All 24 originals use **one terminal column** in every font.
+All 25 originals use **one terminal column** in every font.
 They are plane16 private-use scalars, not standard Unicode, ordinary emoji,
 or portable assignments in an unrelated font. In particular:
 

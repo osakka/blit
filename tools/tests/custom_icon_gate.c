@@ -28,8 +28,8 @@ int main(int argc, char **argv)
     CHECK(!blit_font_load_path(&font, argv[1]));
     for (size = 8; size <= 64; ++size) {
         BlitRaster *r = blit_raster_open(&font, argv[2], argv[3], (size + 1) / 2, size);
-        unsigned hashes[0x1a];
-        int seam[2][96], reach[2];
+        unsigned hashes[0x1b];
+        int seam[2][96], reach[2], tall[2];
         int index;
         CHECK(r);
         for (index = 0; index < required_count; ++index) {
@@ -59,10 +59,10 @@ int main(int argc, char **argv)
             CHECK(ink);
             ++script_samples;
         }
-        /* Every colour original: U+100000-100006 and U+100009-100019;
+        /* Every colour original: U+100000-100006 and U+100009-10001A;
            U+100007/8 are the bar corners, cell geometry. U+100018/9 are
            the two columns of the hui badge (ADR 0197). */
-        for (cp = 0x100000; cp <= 0x100019; ++cp) {
+        for (cp = 0x100000; cp <= 0x10001a; ++cp) {
             BlitRasterGlyph g, again;
             unsigned hash = 2166136261U;
             int x, y, ink = 0, colour = 0, partial = 0;
@@ -84,11 +84,20 @@ int main(int argc, char **argv)
             }
             CHECK(ink && colour && partial);
             hashes[cp - 0x100000] = hash;
-            if (cp >= 0x100018) {
+            if (cp == 0x100018 || cp == 0x100019) {
                 /* The badge's edge columns where its halves meet. */
                 int column = cp == 0x100018 ? g.width - 1 : 0;
                 for (y = 0; y < g.height; ++y)
                     seam[cp - 0x100018][y] = g.pixels[y * g.stride + column * 4 + 3];
+                {
+                    int first = -1, last = -1;
+                    for (y = 0; y < g.height; ++y) for (x = 0; x < g.width; ++x)
+                        if (g.pixels[y * g.stride + x * 4 + 3]) {
+                            if (first < 0) first = y;
+                            last = y;
+                        }
+                    tall[cp - 0x100018] = last - first + 1;
+                }
                 /* How far the ring reaches from the seam, on the middle row. */
                 reach[cp - 0x100018] = -1;
                 for (x = 0; x < g.width; ++x) {
@@ -116,20 +125,26 @@ int main(int argc, char **argv)
                         CHECK(hashes[index] != hashes[other]);
                 }
         }
-        /* The halves meet: the ring and the letters cross the seam on the
-           same rows in both, give or take one row, and the ring reaches as
-           far either side of the seam, give or take a pixel, so neither
-           half is shifted. */
+        /* The halves meet: no row is clearly inked on one side of the seam
+           and blank on the other, which a half shifted up or down makes;
+           and the ring reaches as far either side of the seam, give or
+           take a pixel, which a half shifted sideways breaks. The edge
+           columns are neighbours, not copies, so their values may differ. */
         {
-            int y, left = 0, right = 0, apart = 0;
+            int x, y, left = 0, right = 0, apart = 0;
             CHECK(hashes[0x18] != hashes[0x19]);
             for (y = 0; y < size; ++y) {
+                int most = seam[0][y] > seam[1][y] ? seam[0][y] : seam[1][y];
+                int least = seam[0][y] < seam[1][y] ? seam[0][y] : seam[1][y];
                 left += seam[0][y] > 0;
                 right += seam[1][y] > 0;
-                apart += (seam[0][y] > 0) != (seam[1][y] > 0);
+                apart += most >= 96 && least == 0;
             }
-            CHECK(left > 0 && right > 0 && apart <= 1);
+            CHECK(left > 0 && right > 0 && apart == 0);
             CHECK(reach[0] > 0 && reach[1] > 0 && abs(reach[0] - reach[1]) <= 1);
+            /* The ring is whole, 80% of the cell tall: kept inside the
+               cell, not clipped by it. */
+            for (x = 0; x < 2; ++x) CHECK(tall[x] >= (int)(0.8 * size) - 1);
         }
         {
             BlitRasterGlyph g;
@@ -146,6 +161,6 @@ int main(int argc, char **argv)
         blit_raster_close(r);
     }
     blit_font_free(&font);
-    printf("CUSTOM_ICON_PASS samples=%d sizes=57 icons=24 distinct_levels=wifi4+battery11+volume4 hui_seam=met colour=premultiplied pen_alias=themed cache=bounded ui_scalars=%d ui_span_cases=%d scripts=%d no_replacement=verified\n", samples, required_count, ui_samples, script_samples);
+    printf("CUSTOM_ICON_PASS samples=%d sizes=57 icons=25 distinct_levels=wifi4+battery11+volume4 hui_seam=met colour=premultiplied pen_alias=themed cache=bounded ui_scalars=%d ui_span_cases=%d scripts=%d no_replacement=verified\n", samples, required_count, ui_samples, script_samples);
     return 0;
 }

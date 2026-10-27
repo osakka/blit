@@ -1,5 +1,25 @@
 # Verification status
 
+## 2026-10-27: 0.2.41 the power icon; the hui badge at 80% of the cell
+
+- **`power` U+10001A:** the power symbol, colour, one column, for Hibr's
+  Power item on machines with no battery (ADR 0196).
+- **The hui badge** is 80% of the cell's height (18 px at 22 px, was 21),
+  centred on the text's cap band and kept inside the cell, as the owner
+  chose from a side-by-side render (ADR 0197).
+- **Gates:** `custom_icon_gate` covers 25 originals, the seam on visible
+  ink, and the badge's full height (not clipped). A 2 px shift of a half
+  still fails it, and so does a 2 px vertical shift. The seam test compares
+  rows, not pixel values: the two edge columns are neighbours and may
+  differ. The first version failed in JetBrains Mono NL at 12 px for that
+  reason.
+- **Suites:** font 37/37; full 150/151 before that seam-test fix (only
+  `custom_icon_gate`), which passes alone and in the font suite after it.
+  GLES 64/65: `mouse_report_gate` fails under this build machine's load
+  (load average 6–9 on 4 cores). The 0.2.40 build fails it the same way
+  (31–32 motion reports in a 40-sample sweep), and it passed at 0.2.39 and
+  0.2.40 when the machine was quieter. Not a regression.
+
 ## 2026-10-27: 0.2.40 the hui badge, an icon two columns wide (ADR 0197)
 
 - **hui-left U+100018 and hui-right U+100019:** the letters "hui" in a teal

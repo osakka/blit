@@ -34,7 +34,9 @@ Option 2.
   than one icon (90% of an advance), or the build fails.
 - **Raster:** for Blit's icon face, ink wider than 90% of an advance gives
   the span, and its centre gives the column. A spanning icon fills 95% of
-  the span and of the cell's height, centred on the span and on the cell.
+  the span and 80% of the cell's height (from 0.2.41; 95% in 0.2.40),
+  centred on the span and on half the cap height like any icon, and kept
+  inside the cell.
   Each cell keeps its own slice, so the halves meet at the seam. The
   raster reads no catalogue.
 
@@ -45,8 +47,10 @@ Option 2.
 - Written alone, or on a terminal without Blit's icon font, each part is
   half a badge. Hibr uses them only in its Blit glyph set, keyed on
   `BLIT_VERSION` 0.2.40 or later.
-- The badge is the size of a square in the cell, not cap height, so it
-  reads as an emblem beside the menu titles. One-column icons keep their
+- **Size:** the owner chose 80% of the cell's height (0.2.41) over 95%
+  (0.2.40, too big beside the menu titles) and over cap height (13 px at
+  22 px, with letters of about 4 px). It stands a little taller than the
+  capitals, as text with its descenders does. One-column icons keep their
   rule.
 
 ## Evidence (0.2.40)
@@ -54,7 +58,9 @@ Option 2.
 - `custom_icon_gate`, in every text font at all 57 sizes:
   - each half is one cell, in colour, with antialiased edges;
   - the halves ink the same rows at the seam, give or take one;
-  - the ring reaches equally far either side of the seam, within a pixel.
+  - the ring reaches equally far either side of the seam, within a pixel;
+  - the badge is at least 80% of the cell tall, so it is not clipped
+    (0.2.41).
   Shifting a half by 2 px fails the gate (checked by mutation).
 - `custom_icon_api_gate`: both halves through a real PTY, one column each,
   with identical pixels by PTY and API.

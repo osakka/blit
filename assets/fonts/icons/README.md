@@ -26,6 +26,7 @@ itself.
 | volume-0 | U+100014 | Speaker with a red cross: muted |
 | volume-1 … volume-3 | U+100015–U+100017 | Speaker with 1–3 active waves |
 | hui-left, hui-right | U+100018, U+100019 | The letters "hui" in a teal ring: one badge, two columns |
+| power | U+10001A | The power symbol: a teal open ring and a light bar |
 
 The hui badge spans two columns as two codepoints, written side by side;
 each draws its half of the one drawing in `hui.svg` (ADR 0197). Neither

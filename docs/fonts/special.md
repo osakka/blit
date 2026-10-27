@@ -30,6 +30,7 @@ Generated from the same catalogue served by `GET /v1/fonts/icons`. These origina
 | `volume-3` | `U+100017` | `"\udbc0\udc17"` | 3 |
 | `hui-left` | `U+100018` | `"\udbc0\udc18"` | — |
 | `hui-right` | `U+100019` | `"\udbc0\udc19"` | — |
+| `power` | `U+10001A` | `"\udbc0\udc1a"` | — |
 
 ## Themed text additions
 
