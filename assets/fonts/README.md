@@ -81,8 +81,9 @@ monochrome outlines; full end-to-end/live acceptance remains open.
 Reproduce the complete-corpus raster test with
 `ruby tools/tests/emoji_cluster_raster_gate.rb`;
 `BLIT_FONT_VALGRIND=1` additionally checks that fixture under Valgrind.
-Missing scalars and protected box/block geometry retain pixel-art PSF fallback;
-wide BMP characters retain the separate wide PSF. No Hibr code is changed.
+A pixel font keeps every glyph it has, box drawing included, and borrows the
+glyph stack for the rest (ADR 0199). Wide characters keep the separate wide
+PSF.
 
 ## Retro: Blit Hibr Spleen16
 
@@ -118,8 +119,10 @@ antialiasing. `NotoColorEmoji.ttf` 2.057 draws supported colour scalars that
 the stack's earlier faces don't. Font size8–64px means exact cell height;
 the font's em size is fitted inside that cell, not stretched after rendering.
 The default font is not changed by installation. Select a font through the
-same API or Control Panel as the others. Outline fonts scale smoothly;
-Spleen and Terminus keep their intentional bitmap pixels.
+same API or Control Panel as the others. Outline fonts scale smoothly.
+Spleen and Terminus keep their intentional bitmap pixels for every glyph
+they have, and take icons, symbols and emoji from the glyph stack, fitted to
+their own H (ADR 0199).
 
 `fonts.source.json` pins every file's SHA-256 and licence.
 `licenses/NerdFonts-LICENSE.txt` and `licenses/FontAwesome-LICENSE.txt`

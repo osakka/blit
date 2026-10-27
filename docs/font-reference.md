@@ -55,6 +55,13 @@ Stack glyphs are fitted to the chosen font at draw time, so every font has
 every glyph, including one you add. Native grayscale antialiasing
 rasterizes text at the requested size.
 
+**The pixel fonts** (Blit Terminus 16 and Blit Spleen 16) draw every glyph
+they have themselves, in their own pixels, box drawing included. The stack
+supplies the rest: Blit's icons, Nerd icons, symbols, emoji and Unifont's
+one-column coverage, fitted to the font's own H (ADR 0199). Wide characters
+come from Blit's wide pixel font. Only a character no face has shows the
+font's `?`.
+
 `size_px` is **cell height8–64**, not point size, browser zoom or display
 resolution. Read `active.cell_pixels` after changing it; never calculate
 image placement from an assumed half-width cell. Resizing changes the grid

@@ -216,6 +216,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0196 — Battery and volume are one levelled icon per state](0196-battery-and-volume-icons.md)
 - [0197 — An icon that spans columns is one codepoint per column](0197-icons-that-span-columns.md)
 - [0198 — Pointer lock: a focused program can hold the pointer and read raw motion](0198-pointer-lock.md)
+- [0199 — Pixel fonts keep their own glyphs and borrow the glyph stack for the rest](0199-pixel-fonts-on-the-glyph-stack.md)
 
 ## Adding an ADR
 

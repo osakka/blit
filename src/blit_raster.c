@@ -28,6 +28,7 @@ typedef struct {
 
 struct BlitRaster {
     BlitFont fallback;
+    int pixel;  /* a pixel font's raster: blit_raster_open_pixel (ADR 0199) */
     FT_Library library;
     FT_Face outline, colour, text_emoji, arabic;
     /* ADR 0195: the glyph stack beside the text font. Each may be absent;
@@ -96,6 +97,32 @@ static FT_Face stack_face(BlitRaster *raster, const char *directory, int length,
     return face;
 }
 
+/* ADR 0199: a pixel font has no metrics but its pixels. Its baseline is the
+   row under its H, its cap height that H's ink, and its em the size a text
+   face with that cap height would have; each scaled to the cell. */
+static void pixel_metrics(BlitRaster *raster)
+{
+    const BlitFont *font = &raster->fallback;
+    size_t index = blit_font_glyph_index(font, 'H');
+    int top = -1, bottom = -1, row, column;
+
+    for (row = 0; row < (int)font->height; ++row)
+        for (column = 0; column < (int)font->width; ++column)
+            if (blit_font_glyph_pixel(font, index, 'H', row, column)) {
+                if (top < 0) top = row;
+                bottom = row;
+            }
+    if (top < 0) {
+        raster->baseline = raster->height * 4 / 5;
+        raster->cap = raster->height * 7 / 10;
+    } else {
+        raster->baseline = (bottom + 1) * raster->height / (int)font->height;
+        raster->cap = (bottom - top + 1) * raster->height / (int)font->height;
+    }
+    raster->em = raster->cap * 10 / 7;
+    if (raster->em > raster->height) raster->em = raster->height;
+}
+
 /* ADR 0195: the stack's faces sit beside the colour emoji face. The icons'
    box is the text font's cap height, as the outline generator fitted them:
    OS/2 sCapHeight where the font says, else the height of its H. */
@@ -106,12 +133,15 @@ static void open_stack(BlitRaster *raster, const char *colour_path)
     };
     const char *slash = strrchr(colour_path, '/');
     int length = slash ? (int)(slash - colour_path + 1) : 0, i;
-    TT_OS2 *os2 = (TT_OS2 *)FT_Get_Sfnt_Table(raster->outline, FT_SFNT_OS2);
+    TT_OS2 *os2 = raster->outline ?
+        (TT_OS2 *)FT_Get_Sfnt_Table(raster->outline, FT_SFNT_OS2) : NULL;
     raster->icons = stack_face(raster, colour_path, length, "BlitIcons-Regular.ttf");
     raster->nerd = stack_face(raster, colour_path, length, "SymbolsNerdFontMono-Regular.ttf");
     for (i = 0; i < 3; ++i) raster->symbols[i] = stack_face(raster, colour_path, length, symbols[i]);
     raster->unifont[0] = stack_face(raster, colour_path, length, "Unifont-Regular.otf");
     raster->unifont[1] = stack_face(raster, colour_path, length, "UnifontUpper-Regular.otf");
+    if (!raster->outline)
+        return;  /* a pixel font's metrics come from its own H */
     if (os2 && os2->version >= 2 && os2->sCapHeight > 0)
         raster->cap = (int)((long)os2->sCapHeight * raster->em / raster->outline->units_per_EM);
     else if (!FT_Set_Pixel_Sizes(raster->outline, 0, raster->em) &&
@@ -239,6 +269,20 @@ BlitRaster *blit_raster_open(const BlitFont *fallback,
 fail:
     blit_raster_close(raster);
     return NULL;
+}
+
+/* ADR 0199: a pixel font's raster. It declines every glyph the font has,
+   so those keep the font's own drawing path, and draws the rest from the
+   glyph stack, fitted to the font's own H. */
+BlitRaster *blit_raster_open_pixel(const BlitFont *font, const char *colour_path,
+                                   int width, int height)
+{
+    BlitRaster *raster = blit_raster_open(font, NULL, colour_path, width, height);
+    if (!raster) return NULL;
+    raster->pixel = 1;
+    pixel_metrics(raster);
+    open_stack(raster, colour_path);
+    return raster;
 }
 
 int blit_raster_set_arabic(BlitRaster *raster, const char *path)
@@ -1127,6 +1171,12 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *key,
     int outline_colour = !arabic && !blit_icon && key->length == 1 && !protected_geometry(scalar) &&
         !invisible_format(scalar) && outline_has_colour(raster->outline, scalar);
     int result = 0, x, y;
+    /* ADR 0199: a pixel font draws every glyph it has itself, on its own
+       path and at its own pixels; the stack is only for what it lacks.
+       Declining here is what sends the cell back to that path. */
+    if (raster->pixel && key->length == 1 && !blit_icon &&
+        blit_font_has_glyph(&raster->fallback, scalar))
+        return 0;
     slot = (unsigned)(blit_cell_cluster_hash(key) % RASTER_SETS);
     set = &raster->cache[slot * RASTER_WAYS];
     /* Four bounded full-key comparisons; collisions may coexist. Ages are
@@ -1214,11 +1264,15 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *key,
             result = draw_text_emoji(raster, scalar, &next);
         for (face = 0; !result && face < 3; ++face)
             result = draw_fitted(raster, raster->symbols[face], FIT_SYMBOL, scalar, &next, 0);
-        for (face = 0; !result && face < 2; ++face)
+        /* A pixel font's wide characters stay pixels: Blit's wide PSF has
+           them, so Unifont's outlines are only its one-column net. */
+        for (face = 0; !result && face < 2 && (!raster->pixel || columns == 1); ++face)
             result = draw_fitted(raster, raster->unifont[face], FIT_SYMBOL, scalar, &next, 0);
     }
     if (result < 0 || (outline_colour && !result)) { free(next.pixels); return 0; }
     if (!result && key->length > 1 && !text_selector) { free(next.pixels); return 0; }
+    /* Nothing has it: a pixel font shows its own replacement, as before. */
+    if (!result && raster->pixel) { free(next.pixels); return 0; }
     if (!result) {
         const BlitFont *font = &raster->fallback;
         size_t index = blit_font_glyph_index(font, scalar);

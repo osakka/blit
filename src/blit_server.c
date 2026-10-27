@@ -16643,7 +16643,7 @@ static void fonts_json(const BlitRuntime *runtime, char *body, size_t capacity)
         runtime_terminal_cell_height(runtime),
         (unsigned long)runtime->font.glyph_count,
         (unsigned long)runtime->font.unicode_count,
-        runtime->font.raster_get ? "native-antialiased" : "bitmap-nearest",
+        blit_font_is_outline(runtime->font.path) ? "native-antialiased" : "bitmap-nearest",
         runtime->font.raster_get ? "true" : "false",
         arabic_json,
         (unsigned long)blit_raster_cached_bytes(runtime->font.raster_state),
@@ -16759,21 +16759,28 @@ static int font_sizing_parse(const char *configuration, int *scale, int *pixels)
 static int prepare_font_raster(BlitFont *font, const char *path,
                                 int scale, int pixels, BlitRaster **result)
 {
-    *result = NULL;
-    if (blit_font_is_outline(path)) {
-        char colour[1024];
-        /* ADR 0195: the emoji faces and the glyph stack are the root's. */
-        snprintf(colour, sizeof(colour), "%s", blit_font_root_file("NotoColorEmoji.ttf"));
-        *result = blit_raster_open(font, path, colour,
-            font_cell_dimension(font, 1, scale, pixels),
-            font_cell_dimension(font, 0, scale, pixels));
-        if (!*result) return 0;
-        {
-            const char *arabic=blit_font_arabic_path(path);
-            if (arabic && !blit_raster_set_arabic(*result,arabic)) {
-                blit_raster_close(*result); *result=NULL; return 0;
-            }
-        }
+    char colour[1024];
+    const char *arabic;
+
+    /* ADR 0195: the emoji faces and the glyph stack are the root's. A pixel
+       font (ADR 0199) has no outline: it keeps its own glyphs and borrows
+       the stack for those it lacks. */
+    snprintf(colour, sizeof(colour), "%s", blit_font_root_file("NotoColorEmoji.ttf"));
+    *result = blit_font_is_outline(path) ?
+        blit_raster_open(font, path, colour,
+                         font_cell_dimension(font, 1, scale, pixels),
+                         font_cell_dimension(font, 0, scale, pixels)) :
+        blit_raster_open_pixel(font, colour,
+                               font_cell_dimension(font, 1, scale, pixels),
+                               font_cell_dimension(font, 0, scale, pixels));
+    /* Without the stack a pixel font still draws everything it has, as it
+       always did; only an outline font cannot draw at all. */
+    if (!*result) return !blit_font_is_outline(path);
+    arabic = blit_font_is_outline(path) ? blit_font_arabic_path(path) : NULL;
+    if (arabic && !blit_raster_set_arabic(*result, arabic)) {
+        blit_raster_close(*result);
+        *result = NULL;
+        return 0;
     }
     return 1;
 }

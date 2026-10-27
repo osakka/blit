@@ -958,16 +958,12 @@ the active size policy. `active.sizing` identifies `scale` or `pixels`;
 scale under pixel mode is derived and need not be a valid legacy scale write.
 For example, `{"size_px":23}` selects12x23 cells for the8x16 font. This is
 font/cell sizing, not a display mode change. Existing bitmap profiles are
-sampled at this size. Font release0.1.564 adds `blit-modern`, rasterizing Hack outline text
-at a fitted native size, with antialiased coverage and Noto intrinsic-colour
-emoji. `blit-spleen16` is the additional pixel-art retro profile; both
-remain selectable alongside Terminus. Select smooth text, for example, with
-`{"font_id":"blit-modern","size_px":23}`. Pixel-art fallback characters are
-still pixel-art: adding these profiles does not implement universal Unicode,
-complex-script/ligature shaping or ZWJ/variation-selector emoji sequences.
-Candidate0.1.562 contained this work but was not deployed; config-only
-maintenance0.1.563 intentionally excludes it. Discover available profiles
-through `GET /v1/fonts`, not a version-number comparison alone.
+sampled at this size. Outline fonts (`rasterization: "native-antialiased"`)
+are drawn at a fitted native size. Pixel fonts (`"bitmap-nearest"`) keep
+their own pixels for every glyph they have, and take the rest from the glyph
+stack, so both kinds report `colour_glyphs: true` (ADR 0199). Select smooth
+text, for example, with `{"font_id":"hack","size_px":23}`. Discover available
+profiles through `GET /v1/fonts`, not a version-number comparison alone.
 
 **Since 0.2.36 (ADR 0195), fonts are discovered.**
 - **What `GET /v1/fonts` lists:** every regular, monospaced TTF or OTF in

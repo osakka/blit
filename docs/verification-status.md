@@ -1,5 +1,23 @@
 # Verification status
 
+## 2026-10-27: 0.2.43 pixel fonts on the glyph stack (ADR 0199)
+
+- **Blit Terminus 16 and Blit Spleen 16** keep every glyph they have, in
+  their own pixels, and take icons, symbols and emoji from the glyph stack,
+  fitted to their own H. Wide characters stay with the wide pixel font.
+  Only a character no face has shows `?`.
+- **`pixel_font_stack_gate` (new),** both fonts at 57 sizes: own glyphs
+  declined, borrowed glyphs drawn, wide characters in pixels, a missing
+  one declined. Of Hibr's 101 UI glyphs, 74 are each font's own and 27
+  come from the stack.
+- **Suites:**
+  - font 38/38 and GLES 66/66.
+  - Full 148/149: `pane_effects_gate` went over its 5 ms CPU effects bound
+    (5.45 ms) under suite load. Alone, five runs each: 0.2.43 took
+    3.0–3.4 ms and 0.2.42 took 3.3–4.1 ms, so it is not a regression.
+  - The four Hibr adapter gates skipped after the build host rebooted,
+    because their Hibr checkout was gone. Run against v0.99.225, all pass.
+
 ## 2026-10-27: 0.2.42 pointer lock, mode ?7701 (ADR 0198, #139)
 
 - **A focused program can hold the pointer** and read raw mouse counts as

@@ -178,9 +178,7 @@ below. The differences from the decision above:
 
   Every glyph is then cached, so a steady screen costs nothing more.
 
-## Not yet
+## Not yet (done in 0.2.43)
 
-**The pixel fonts, Blit Terminus 16 and Blit Spleen 16, are not on the
-stack.** A bitmap profile draws only its PSF's glyphs and falls back to `?`
-for icons and symbols. Every outline font has every glyph; the pixel fonts
-don't, yet.
+**The pixel fonts were not on the stack.** A bitmap profile drew only its
+PSF's glyphs, with `?` for icons and symbols. ADR 0199 puts them on it.

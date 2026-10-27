@@ -32,6 +32,12 @@ typedef struct BlitRaster BlitRaster;
 BlitRaster *blit_raster_open(const BlitFont *fallback,
                             const char *outline_path, const char *colour_path,
                             int cell_width, int cell_height);
+/* ADR 0199: a pixel font's raster. It declines (returns 0 for) every glyph
+   the PSF has, so those keep the font's own drawing path, and draws what it
+   lacks from the glyph stack beside colour_path, fitted to the font's H. A
+   glyph nothing has is declined too, for the font's own replacement. */
+BlitRaster *blit_raster_open_pixel(const BlitFont *font, const char *colour_path,
+                                   int cell_width, int cell_height);
 void blit_raster_close(BlitRaster *raster);
 /* Experimental Arabic companion. Attach once before any raster lookup;
    failures leave the context unchanged. No bidi, paragraph shaping or profile

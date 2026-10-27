@@ -236,6 +236,7 @@ suite_font() {
     run_gate bar_corner_gate.rb ruby tools/tests/bar_corner_gate.rb
     run_gate outline_catalogue_gate.rb ruby tools/tests/outline_catalogue_gate.rb
     run_gate custom_icon_gate.rb ruby tools/tests/custom_icon_gate.rb
+    run_gate pixel_font_stack_gate.rb ruby tools/tests/pixel_font_stack_gate.rb
     run_gate custom_icon_api_gate.rb ruby tools/tests/custom_icon_api_gate.rb
     run_gate arabic_raster_gate.rb ruby tools/tests/arabic_raster_gate.rb
     run_gate arabic_word_gate.py python3 tools/tests/arabic_word_gate.py
