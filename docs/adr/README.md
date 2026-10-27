@@ -214,6 +214,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0194 — Blit's own fonts only, renamed; JetBrains Mono as Blit JetBrainless](0194-font-set-cleanup-and-jetbrainless.md)
 - [0195 — Text fonts are discovered; every glyph comes from one shipped stack](0195-glyph-stack.md)
 - [0196 — Battery and volume are one levelled icon per state](0196-battery-and-volume-icons.md)
+- [0197 — An icon that spans columns is one codepoint per column](0197-icons-that-span-columns.md)
 
 ## Adding an ADR
 

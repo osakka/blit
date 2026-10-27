@@ -25,6 +25,11 @@ itself.
 | battery-ac | U+100013 | Full teal battery with a dark plug: on mains, not charging |
 | volume-0 | U+100014 | Speaker with a red cross: muted |
 | volume-1 … volume-3 | U+100015–U+100017 | Speaker with 1–3 active waves |
+| hui-left, hui-right | U+100018, U+100019 | The letters "hui" in a teal ring: one badge, two columns |
+
+The hui badge spans two columns as two codepoints, written side by side;
+each draws its half of the one drawing in `hui.svg` (ADR 0197). Neither
+is a wide character, so no width table changes.
 
 U+100007 and U+100008 are the bar corners, drawn as cell geometry (see
 `cell_geometry` in the catalogue).

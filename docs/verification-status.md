@@ -1,5 +1,18 @@
 # Verification status
 
+## 2026-10-27: 0.2.40 the hui badge, an icon two columns wide (ADR 0197)
+
+- **hui-left U+100018 and hui-right U+100019:** the letters "hui" in a teal
+  ring, written side by side, each one column and each drawing its half of
+  one badge. No width table changes.
+- **Raster:** a Blit icon wider than one icon is fitted across its span,
+  95% of the square, and each cell keeps its slice.
+- **Gates:** `custom_icon_gate` checks the seam (same inked rows, the ring
+  equally far either side) at 57 sizes in every font, and fails on a 2 px
+  shift. `custom_icon_api_gate` covers the PTY path.
+- **Hibr side (pending):** the blit glyph set, and Pen or hui in the Menu
+  Bar control panel.
+
 ## 2026-10-27: 0.2.39 children see BLIT_VERSION (ADR 0196)
 
 - **Every session child gets `BLIT_VERSION`,** so Hibr's desktop, which

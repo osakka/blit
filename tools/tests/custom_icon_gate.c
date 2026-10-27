@@ -1,6 +1,7 @@
 /* Original glyphs through the production raster, not cmap presence alone. */
 #include "../../src/blit_raster.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "CUSTOM_ICON_FAIL line=%d size=%d cp=%x\n", __LINE__, size, cp); return 1; } } while (0)
@@ -27,7 +28,8 @@ int main(int argc, char **argv)
     CHECK(!blit_font_load_path(&font, argv[1]));
     for (size = 8; size <= 64; ++size) {
         BlitRaster *r = blit_raster_open(&font, argv[2], argv[3], (size + 1) / 2, size);
-        unsigned hashes[0x18];
+        unsigned hashes[0x1a];
+        int seam[2][96], reach[2];
         int index;
         CHECK(r);
         for (index = 0; index < required_count; ++index) {
@@ -57,9 +59,10 @@ int main(int argc, char **argv)
             CHECK(ink);
             ++script_samples;
         }
-        /* Every colour original: U+100000-100006 and U+100009-100017;
-           U+100007/8 are the bar corners, cell geometry. */
-        for (cp = 0x100000; cp <= 0x100017; ++cp) {
+        /* Every colour original: U+100000-100006 and U+100009-100019;
+           U+100007/8 are the bar corners, cell geometry. U+100018/9 are
+           the two columns of the hui badge (ADR 0197). */
+        for (cp = 0x100000; cp <= 0x100019; ++cp) {
             BlitRasterGlyph g, again;
             unsigned hash = 2166136261U;
             int x, y, ink = 0, colour = 0, partial = 0;
@@ -81,6 +84,21 @@ int main(int argc, char **argv)
             }
             CHECK(ink && colour && partial);
             hashes[cp - 0x100000] = hash;
+            if (cp >= 0x100018) {
+                /* The badge's edge columns where its halves meet. */
+                int column = cp == 0x100018 ? g.width - 1 : 0;
+                for (y = 0; y < g.height; ++y)
+                    seam[cp - 0x100018][y] = g.pixels[y * g.stride + column * 4 + 3];
+                /* How far the ring reaches from the seam, on the middle row. */
+                reach[cp - 0x100018] = -1;
+                for (x = 0; x < g.width; ++x) {
+                    int at = cp == 0x100018 ? x : g.width - 1 - x;
+                    if (g.pixels[(g.height / 2) * g.stride + at * 4 + 3]) {
+                        reach[cp - 0x100018] = cp == 0x100018 ? g.width - x : at + 1;
+                        break;
+                    }
+                }
+            }
             renders = blit_raster_render_count(r);
             CHECK(blit_raster_get(r, cp, 1, &again));
             CHECK(renders == blit_raster_render_count(r));
@@ -98,6 +116,21 @@ int main(int argc, char **argv)
                         CHECK(hashes[index] != hashes[other]);
                 }
         }
+        /* The halves meet: the ring and the letters cross the seam on the
+           same rows in both, give or take one row, and the ring reaches as
+           far either side of the seam, give or take a pixel, so neither
+           half is shifted. */
+        {
+            int y, left = 0, right = 0, apart = 0;
+            CHECK(hashes[0x18] != hashes[0x19]);
+            for (y = 0; y < size; ++y) {
+                left += seam[0][y] > 0;
+                right += seam[1][y] > 0;
+                apart += (seam[0][y] > 0) != (seam[1][y] > 0);
+            }
+            CHECK(left > 0 && right > 0 && apart <= 1);
+            CHECK(reach[0] > 0 && reach[1] > 0 && abs(reach[0] - reach[1]) <= 1);
+        }
         {
             BlitRasterGlyph g;
             cp = 0x270e;
@@ -113,6 +146,6 @@ int main(int argc, char **argv)
         blit_raster_close(r);
     }
     blit_font_free(&font);
-    printf("CUSTOM_ICON_PASS samples=%d sizes=57 icons=22 distinct_levels=wifi4+battery11+volume4 colour=premultiplied pen_alias=themed cache=bounded ui_scalars=%d ui_span_cases=%d scripts=%d no_replacement=verified\n", samples, required_count, ui_samples, script_samples);
+    printf("CUSTOM_ICON_PASS samples=%d sizes=57 icons=24 distinct_levels=wifi4+battery11+volume4 hui_seam=met colour=premultiplied pen_alias=themed cache=bounded ui_scalars=%d ui_span_cases=%d scripts=%d no_replacement=verified\n", samples, required_count, ui_samples, script_samples);
     return 0;
 }

@@ -901,6 +901,12 @@ static int draw_outline_face(FT_Face face, int baseline, uint32_t scalar, Raster
      text font's size, shrunk only to fit 90% of the advance and 95% of the
      cell, centred across the cell, on its own baseline unless that would
      leave the cell.
+   - A Blit icon that spans columns (ADR 0197, the hui badge) is one
+     codepoint per column, each drawn as its slice of the whole: the icon
+     font gives every part the whole outline, shifted left by its column,
+     and its ink wider than one icon (90% of an advance) says how many
+     columns it spans. It fills 95% of the span and of the cell's height,
+     centred on the span, and each cell keeps its own slice.
    Returns 1 when drawn, 0 when the face has no such glyph, -1 on error.
    The face's size is left changed: only the text face is shared, and its
    caller restores it. */
@@ -914,7 +920,7 @@ static int draw_fitted(BlitRaster *raster, FT_Face face, int rule, uint32_t scal
     FT_Vector delta;
     FT_Bitmap *bitmap;
     double natural, fit, bw, bh, ox, oy, limit;
-    int w = entry->glyph.width, h = entry->glyph.height, left, top, x, y, failed;
+    int w = entry->glyph.width, h = entry->glyph.height, left, top, x, y, failed, span = 1;
     if (!face || !(index = FT_Get_Char_Index(face, scalar))) return 0;
     if (FT_Load_Glyph(face, index, FT_LOAD_NO_SCALE)) return -1;
     if (face->glyph->format != FT_GLYPH_FORMAT_OUTLINE) return 0;
@@ -925,6 +931,15 @@ static int draw_fitted(BlitRaster *raster, FT_Face face, int rule, uint32_t scal
     if (rule == FIT_ICON) {
         double advance = face->glyph->metrics.horiAdvance > 0 ?
             (double)face->glyph->metrics.horiAdvance : face->units_per_EM * 0.6;
+        if (face == raster->icons) span = (int)ceil(bw / (0.9 * advance) - 1e-6);
+        if (span > 1) {
+            int column = (int)floor((span * advance / 2.0 - (box.xMin + box.xMax) / 2.0) / advance + 0.5);
+            fit = 0.95 * span * w / bw;
+            if (0.95 * h / bh < fit) fit = 0.95 * h / bh;
+            ox = span * w / 2.0 - column * w - fit * (box.xMin + box.xMax) / 2.0;
+            oy = (raster->baseline - h / 2.0) - fit * (box.yMin + box.yMax) / 2.0;
+            goto place;
+        }
         natural = w / advance;
         limit = raster->cap / bh;
     } else {
@@ -942,6 +957,7 @@ static int draw_fitted(BlitRaster *raster, FT_Face face, int rule, uint32_t scal
         if (above > raster->baseline) oy = raster->baseline - above;
         else if (below > h - raster->baseline) oy = below - (h - raster->baseline);
     }
+place:
     if (FT_Set_Char_Size(face, 0, (FT_F26Dot6)(fit * face->units_per_EM * 64.0 + 0.5), 72, 72))
         return -1;
     left = (int)floor(ox);

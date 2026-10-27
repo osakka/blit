@@ -28,6 +28,8 @@ Generated from the same catalogue served by `GET /v1/fonts/icons`. These origina
 | `volume-1` | `U+100015` | `"\udbc0\udc15"` | 1 |
 | `volume-2` | `U+100016` | `"\udbc0\udc16"` | 2 |
 | `volume-3` | `U+100017` | `"\udbc0\udc17"` | 3 |
+| `hui-left` | `U+100018` | `"\udbc0\udc18"` | — |
+| `hui-right` | `U+100019` | `"\udbc0\udc19"` | — |
 
 ## Themed text additions
 

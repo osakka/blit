@@ -17,9 +17,9 @@ Dir.chdir(root) do
   icons = JSON.parse(File.read("assets/fonts/#{manifest.fetch('catalogue')}"))
   expected = %w[blit hibr-pen wifi-1 wifi-2 wifi-3 wifi-4 bluetooth] +
     (0..4).map { |l| "battery-#{l}" } + (0..4).map { |l| "battery-#{l}-charging" } +
-    %w[battery-ac] + (0..3).map { |l| "volume-#{l}" }
+    %w[battery-ac] + (0..3).map { |l| "volume-#{l}" } + %w[hui-left hui-right]
   raise 'incomplete original catalogue' unless icons.fetch('icons').map { |i| i.fetch('id') } == expected
-  raise 'unexpected private mappings' unless icons.fetch('icons').map { |i| i.fetch('codepoint').to_i(16) } == (0x100000..0x100006).to_a + (0x100009..0x100017).to_a
+  raise 'unexpected private mappings' unless icons.fetch('icons').map { |i| i.fetch('codepoint').to_i(16) } == (0x100000..0x100006).to_a + (0x100009..0x100019).to_a
   Dir.mktmpdir('blit-custom-icons') do |work|
     binary = File.join(work, 'gate')
     input = File.join(work, 'ui.txt')

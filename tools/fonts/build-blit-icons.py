@@ -8,6 +8,11 @@ exactly what the outline generator made; only the container changes. The
 renderer fits each glyph to the cell at draw time (the icon rule: within
 90% of the advance and the text font's cap height, centred), so the units
 here are only a canvas: advance 600, cap height 700, em 1000.
+
+An icon that spans columns (ADR 0197) is one codepoint per column, from
+one drawing: each part carries the whole outline, drawn across the span
+and shifted left by its column. Its ink is wider than one icon (90% of an
+advance), which is how the renderer knows the span.
 """
 import argparse
 import copy
@@ -56,9 +61,12 @@ for icon in catalogue['icons'] + catalogue.get('text_glyphs', []):
         raise SystemExit('a colour icon must sit in private-use plane 16')
     svg = ET.parse(fonts / 'icons' / icon['source']).getroot()
     vx, vy, vw, vh = map(float, svg.attrib['viewBox'].split())
-    scale = min(ADVANCE * .9 / vw, CAP / vh)
+    columns, column = icon.get('columns', 1), icon.get('column', 0)
+    scale = min(ADVANCE * columns * .9 / vw, CAP / vh)
+    if columns > 1 and vw * scale <= ADVANCE * .9:
+        raise SystemExit(f'{icon["id"]}: a {columns}-column icon must be wider than one')
     transform = (scale, 0, 0, -scale,
-                 (ADVANCE - vw * scale) / 2 - vx * scale,
+                 (ADVANCE * columns - vw * scale) / 2 - vx * scale - column * ADVANCE,
                  (CAP + vh * scale) / 2 + vy * scale)
     name = 'blit.' + icon['id']
     silhouette = TTGlyphPen(None)
