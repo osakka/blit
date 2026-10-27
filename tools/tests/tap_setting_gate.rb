@@ -106,6 +106,33 @@ Dir.mktmpdir('blit-tap') do |root|
     failures << "PATCH tap_to_click off -> #{code}" unless code == 200
     failures << 'the touchpad does not read back tap_to_click off' unless
       device('bcm5974').fetch('configuration')['tap_to_click'] == false
+
+    # ADR 0193: tap_and_drag and disable_while_typing, on by default, on
+    # touchpads only, saved only when switched off.
+    %w[tap_and_drag disable_while_typing].each do |key|
+      failures << "a mouse is offered #{key}" if
+        device('Gate Mouse').fetch('configuration').key?(key)
+      failures << "a touchpad is not offered #{key} on by default" unless
+        device('bcm5974').fetch('configuration')[key] == true
+      code, = request('PATCH', "/v1/input/devices/#{pad}", body: { 'configuration' => { key => false } })
+      failures << "PATCH #{key} off -> #{code}" unless code == 200
+      failures << "the touchpad does not read back #{key} off" unless
+        device('bcm5974').fetch('configuration')[key] == false
+      code, body = request('GET', '/v1/settings')
+      failures << "the settings document does not keep #{key} off" unless
+        code == 200 && body.to_json.include?("\"#{key}\":false")
+      code, = request('PATCH', "/v1/input/devices/#{mouse}", body: { 'configuration' => { key => false } })
+      failures << "PATCH #{key} on a mouse -> #{code}, wanted 422" unless code == 422
+      code, = request('PATCH', "/v1/input/devices/#{pad}", body: { 'configuration' => { key => 'no' } })
+      failures << "PATCH #{key} \"no\" -> #{code}, wanted 400" unless code == 400
+      code, = request('PATCH', "/v1/input/devices/#{pad}", body: { 'configuration' => { key => true } })
+      failures << "PATCH #{key} on -> #{code}" unless code == 200
+      code, body = request('GET', '/v1/settings')
+      failures << "the settings document keeps #{key} at its default" if
+        code == 200 && body.to_json.include?("\"#{key}\"")
+    end
+    failures << 'a touchpad without slots reports multitouch' if
+      device('bcm5974').fetch('capabilities').include?('multitouch')
   ensure
     Process.kill('TERM', server) rescue nil
     Timeout.timeout(10) { Process.wait(server) } rescue nil
@@ -113,7 +140,7 @@ Dir.mktmpdir('blit-tap') do |root|
 end
 
 if failures.empty?
-  puts 'TAP_SETTING_PASS offered=touchpad_only default=off patch=200 mouse=422 not_boolean=400 kept=settings'
+  puts 'TAP_SETTING_PASS offered=touchpad_only default=off patch=200 mouse=422 not_boolean=400 kept=settings tap_and_drag,disable_while_typing=default_on,touchpad_only,kept_when_off'
 else
   failures.each { |f| warn "TAP_SETTING_FAIL #{f}" }
   exit 1

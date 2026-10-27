@@ -1408,6 +1408,8 @@ sample repeatedly and correlate with CPU, loop gaps and physical input counts.
 | `scroll_step` | how many reports one wheel notch produces |
 | `acceleration` | `{"profile":"flat"}` or `{"profile":"adaptive"}` |
 | `tap_to_click` | a touchpad only: a quick touch is a click (one finger left, two right); off by default |
+| `tap_and_drag` | a touchpad only, with tapping on: a tap holds the left button for 180 ms, and a touch in that time drags it until lifted; tap, tap is a double click; on by default (ADR 0193) |
+| `disable_while_typing` | a touchpad only: for 500 ms after each key typed (not modifiers) the pad does not move, scroll or tap; pressing it still clicks; on by default (ADR 0193) |
 | `deadzone_percent` | gamepad axes: what reads as zero |
 | `invert_axes` | gamepad axes: which have their sign flipped |
 

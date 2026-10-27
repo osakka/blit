@@ -443,6 +443,9 @@ typedef struct {
 /* A touchpad: where the finger is (EV_ABS with a finger tool), not how far it
    moved, read as a pointer through blit_touchpad.h. */
 #define BLIT_INPUT_CAP_TOUCHPAD 128
+/* A touchpad that reports multitouch slots: while it is pressed, the pointer
+   follows the finger that moves, not the one holding the click (ADR 0193). */
+#define BLIT_INPUT_CAP_MULTITOUCH 256
 
 /* Issue #66. The kernel autorepeats for a device that reports EV_REP, and the
    delay and period are per-device kernel settings reached with EVIOCGREP and
@@ -545,6 +548,13 @@ typedef struct {
     /* A touchpad's tap: a quick touch is a click (blit_touchpad.h). Off
        unless asked for, as macOS has it. */
     int tap_to_click;
+    /* ADR 0193: with tapping on, a tap holds the button briefly so a second
+       touch can drag. On unless switched off, as libinput has it, so the
+       stored value is the switch-off. */
+    int tap_drag_off;
+    /* ADR 0193: the pad is ignored briefly after each key typed. On unless
+       switched off, so the stored value is the switch-off. */
+    int dwt_off;
     /* Issue #71. A left/right press is held briefly only when this opt-in
        emulation is enabled. The pending state belongs to the device, not the
        aggregate pointer, so two mice cannot complete each other's chord. */
@@ -1100,6 +1110,8 @@ typedef struct {
     unsigned int evdev_mouse_buttons[BLIT_MAX_INPUT_DEVICES];
     /* Each pointer slot's touchpad state; active is 0 for a mouse. */
     BlitTouchpad evdev_touchpads[BLIT_MAX_INPUT_DEVICES];
+    /* Until when the touchpads are paused by typing (ADR 0193). */
+    uint64_t typing_until_us;
     /* open() calls the device scan has made, lifetime. The scan used to open
        every path once per kind, so this is how the reduction to one probe per
        path is measured rather than asserted. */
@@ -5033,6 +5045,10 @@ static void probe_input_device(int fd, unsigned *kinds,
     if (has_axis) *capabilities |= BLIT_INPUT_CAP_AXES;
     if (gamepad) *capabilities |= BLIT_INPUT_CAP_GAMEPAD_BUTTONS;
     if (touchpad) *capabilities |= BLIT_INPUT_CAP_TOUCHPAD;
+    if (touchpad && input_bit(abs_bits, ABS_MT_SLOT) &&
+        input_bit(abs_bits, ABS_MT_POSITION_X) &&
+        input_bit(abs_bits, ABS_MT_POSITION_Y))
+        *capabilities |= BLIT_INPUT_CAP_MULTITOUCH;
     {
         unsigned long event_bits[2];
         memset(event_bits, 0, sizeof(event_bits));
@@ -5120,6 +5136,7 @@ static unsigned input_sidecar_capabilities(const char *text)
     if (strstr(text, "axes") != NULL) capabilities |= BLIT_INPUT_CAP_AXES;
     if (strstr(text, "repeat") != NULL) capabilities |= BLIT_INPUT_CAP_REPEAT;
     if (strstr(text, "touchpad") != NULL) capabilities |= BLIT_INPUT_CAP_TOUCHPAD;
+    if (strstr(text, "multitouch") != NULL) capabilities |= BLIT_INPUT_CAP_MULTITOUCH;
     return capabilities;
 }
 
@@ -5459,7 +5476,7 @@ static int input_device_configured(const BlitInputDevice *device)
         device->middle_button_emulation_enabled ||
         device->middle_button_window_ms != BLIT_MIDDLE_BUTTON_WINDOW_DEFAULT ||
         device->scroll_step > BLIT_INPUT_SCROLL_STEP_DEFAULT ||
-        device->tap_to_click ||
+        device->tap_to_click || device->tap_drag_off || device->dwt_off ||
         device->deadzone_percent > 0 || device->invert_axis_count > 0 ||
         device->repeat_configured || device->caps_lock_boot >= 0 ||
         device->num_lock_boot >= 0;
@@ -5834,6 +5851,8 @@ static size_t input_device_item_json(const BlitRuntime *runtime,
     if (device->capabilities & BLIT_INPUT_CAP_TOUCHPAD)
         complete &= json_appendf(body, capacity, &used, "%s\"touchpad\"",
                             first ? "" : ",");
+    if (device->capabilities & BLIT_INPUT_CAP_MULTITOUCH)
+        complete &= json_appendf(body, capacity, &used, ",\"multitouch\"");
     complete &= json_appendf(body, capacity, &used,
         "],\"identity\":{\"bustype\":%u,\"vendor\":%u,\"product\":%u,"
         "\"version\":%u,\"uniq\":\"%s\",\"phys\":\"%s\"},"
@@ -5875,8 +5894,11 @@ static size_t input_device_item_json(const BlitRuntime *runtime,
             device->acceleration_adaptive ? "adaptive" : "flat");
         if (device->capabilities & BLIT_INPUT_CAP_TOUCHPAD)
             complete &= json_appendf(body, capacity, &used,
-                ",\"tap_to_click\":%s",
-                device->tap_to_click ? "true" : "false");
+                ",\"tap_to_click\":%s,\"tap_and_drag\":%s,"
+                "\"disable_while_typing\":%s",
+                device->tap_to_click ? "true" : "false",
+                device->tap_drag_off ? "false" : "true",
+                device->dwt_off ? "false" : "true");
         if (device->button_count > 0) {
             int button_index;
             complete &= json_appendf(body, capacity, &used, ",\"buttons\":{");
@@ -7649,6 +7671,8 @@ enum {
     BLIT_INPUT_PROPERTY_DEADZONE,
     BLIT_INPUT_PROPERTY_INVERT_AXES,
     BLIT_INPUT_PROPERTY_TAP_TO_CLICK,
+    BLIT_INPUT_PROPERTY_TAP_AND_DRAG,
+    BLIT_INPUT_PROPERTY_DISABLE_WHILE_TYPING,
     BLIT_INPUT_PROPERTY_COUNT
 };
 
@@ -7660,7 +7684,8 @@ static const char *const blit_input_device_properties[] = {
     "repeat_delay_ms", "repeat_rate_hz", "caps_lock_boot",
     "num_lock_boot", "modifiers", "buttons", "scroll_step",
     "acceleration", "middle_button_emulation", "deadzone_percent",
-    "invert_axes", "tap_to_click"
+    "invert_axes", "tap_to_click", "tap_and_drag",
+    "disable_while_typing"
 };
 
 static int input_device_property_index(const char *property)
@@ -7704,6 +7729,8 @@ static int input_device_property_applicability(const BlitInputDevice *device,
     case BLIT_INPUT_PROPERTY_INVERT_AXES:
         return input_device_supports(device, BLIT_INPUT_KIND_GAMEPAD);
     case BLIT_INPUT_PROPERTY_TAP_TO_CLICK:
+    case BLIT_INPUT_PROPERTY_TAP_AND_DRAG:
+    case BLIT_INPUT_PROPERTY_DISABLE_WHILE_TYPING:
         return (device->capabilities & BLIT_INPUT_CAP_TOUCHPAD) != 0;
     default:
         return -1;
@@ -13667,6 +13694,65 @@ static unsigned int evdev_mouse_button_aggregate(const BlitRuntime *runtime)
 }
 
 static void dispatch_evdev_mouse_button(BlitRuntime *runtime, int device_index,
+                                        int button, int pressed);
+
+/* A touchpad's buttons, as blit_touchpad.h answered them: a press or
+   release, then any whole click from a tap. */
+static void dispatch_touchpad_buttons(BlitRuntime *runtime, int device_index,
+                                      BlitInputDevice *configuration,
+                                      const BlitTouchpadOut *pad)
+{
+    if (pad->button_changed) {
+        ++runtime->diagnostic_evdev_mouse_button_events;
+        if (configuration != NULL)
+            ++configuration->pointer_buttons;
+        dispatch_evdev_mouse_button(runtime, device_index, pad->button,
+                                    pad->button_pressed);
+    }
+    if (pad->tap_button >= 0) {
+        ++runtime->diagnostic_evdev_mouse_button_events;
+        if (configuration != NULL)
+            configuration->pointer_buttons += 2;
+        dispatch_evdev_mouse_button(runtime, device_index, pad->tap_button, 1);
+        dispatch_evdev_mouse_button(runtime, device_index, pad->tap_button, 0);
+    }
+}
+
+/* ADR 0193: a held tap that no touch came for is let go at its deadline.
+   Called every pass; the loop's wait is clamped to the nearest one. */
+static void service_touchpad_deadlines(BlitRuntime *runtime, uint64_t now)
+{
+    int i;
+    for (i = 0; i < runtime->evdev_mouse_count; ++i) {
+        BlitTouchpadOut pad;
+        if (!runtime->evdev_touchpads[i].active ||
+            !blit_touchpad_tick(&runtime->evdev_touchpads[i], (long long)now,
+                                &pad))
+            continue;
+        runtime->input_source = input_device_for_slot(
+            runtime, runtime->evdev_mouse_paths, i);
+        dispatch_touchpad_buttons(runtime, i, runtime->input_source, &pad);
+        update_evdev_pointer(runtime);
+    }
+}
+
+/* Milliseconds until the nearest touchpad deadline, or -1 for none. */
+static int touchpad_deadline_wait_ms(const BlitRuntime *runtime, uint64_t now)
+{
+    int i, wait = -1;
+    for (i = 0; i < runtime->evdev_mouse_count; ++i) {
+        const BlitTouchpad *t = &runtime->evdev_touchpads[i];
+        int ms;
+        if (!t->active || !t->tap_held || t->dragging || t->due_us == 0)
+            continue;
+        ms = (long long)now >= t->due_us ? 0 :
+            (int)((t->due_us - (long long)now + 999LL) / 1000LL);
+        if (wait < 0 || ms < wait) wait = ms;
+    }
+    return wait;
+}
+
+static void dispatch_evdev_mouse_button(BlitRuntime *runtime, int device_index,
                                         int button, int pressed)
 {
     unsigned int bit;
@@ -18090,6 +18176,10 @@ static int apply_input_device_configuration(BlitRuntime *runtime,
     int natural_scroll_requested;
     int tap_to_click = 0;
     int tap_to_click_requested;
+    int tap_and_drag = 1;
+    int tap_and_drag_requested;
+    int dwt = 1;
+    int dwt_requested;
     char route[512];
     char route_target[128];
     const char *route_cursor;
@@ -18190,6 +18280,37 @@ static int apply_input_device_configuration(BlitRuntime *runtime,
         config_problem(problem, 422, "Unprocessable Entity",
                        "device_property_not_applicable",
                        "tap_to_click applies to a device Blit reads as a touchpad.");
+        return 0;
+    }
+    tap_and_drag_requested = json_bool(scalars, "tap_and_drag",
+                                       &tap_and_drag);
+    if (json_key_cursor(scalars, "tap_and_drag") != NULL &&
+        !tap_and_drag_requested) {
+        config_problem(problem, 400, "Bad Request",
+                       "invalid_device_configuration",
+                       "tap_and_drag must be a JSON boolean.");
+        return 0;
+    }
+    if (tap_and_drag_requested &&
+        input_device_property_applicability(device, "tap_and_drag") != 1) {
+        config_problem(problem, 422, "Unprocessable Entity",
+                       "device_property_not_applicable",
+                       "tap_and_drag applies to a device Blit reads as a touchpad.");
+        return 0;
+    }
+    dwt_requested = json_bool(scalars, "disable_while_typing", &dwt);
+    if (json_key_cursor(scalars, "disable_while_typing") != NULL &&
+        !dwt_requested) {
+        config_problem(problem, 400, "Bad Request",
+                       "invalid_device_configuration",
+                       "disable_while_typing must be a JSON boolean.");
+        return 0;
+    }
+    if (dwt_requested &&
+        input_device_property_applicability(device, "disable_while_typing") != 1) {
+        config_problem(problem, 422, "Unprocessable Entity",
+                       "device_property_not_applicable",
+                       "disable_while_typing applies to a device Blit reads as a touchpad.");
         return 0;
     }
     repeat_delay_requested = json_int(scalars, "repeat_delay_ms",
@@ -18614,6 +18735,14 @@ static int apply_input_device_configuration(BlitRuntime *runtime,
     }
     if (tap_to_click_requested && tap_to_click != device->tap_to_click) {
         device->tap_to_click = tap_to_click;
+        changed = 1;
+    }
+    if (tap_and_drag_requested && !tap_and_drag != device->tap_drag_off) {
+        device->tap_drag_off = !tap_and_drag;
+        changed = 1;
+    }
+    if (dwt_requested && !dwt != device->dwt_off) {
+        device->dwt_off = !dwt;
         changed = 1;
     }
     if (acceleration_requested &&
@@ -19287,6 +19416,16 @@ static size_t settings_input_configuration(const BlitInputDevice *device,
     }
     if (device->tap_to_click) {
         json_appendf(out, capacity, &used, "%s\"tap_to_click\":true",
+                     first ? "" : ",");
+        first = 0;
+    }
+    if (device->tap_drag_off) {
+        json_appendf(out, capacity, &used, "%s\"tap_and_drag\":false",
+                     first ? "" : ",");
+        first = 0;
+    }
+    if (device->dwt_off) {
+        json_appendf(out, capacity, &used, "%s\"disable_while_typing\":false",
                      first ? "" : ",");
         first = 0;
     }
@@ -21210,6 +21349,8 @@ static int settings_reset(BlitRuntime *runtime, int remove_file)
         device->scroll_step = BLIT_INPUT_SCROLL_STEP_DEFAULT;
         device->acceleration_adaptive = 0;
         device->tap_to_click = 0;
+        device->tap_drag_off = 0;
+        device->dwt_off = 0;
         flush_middle_button_pending(runtime, device);
         device->middle_button_emulation_enabled = 0;
         device->middle_button_window_ms = BLIT_MIDDLE_BUTTON_WINDOW_DEFAULT;
@@ -23975,9 +24116,17 @@ static void evdev_touchpad_setup(BlitRuntime *runtime, int slot, int fd,
         return;
     blit_touchpad_init(t, ax.minimum, ax.maximum, ax.resolution,
                        ay.minimum, ay.maximum, ay.resolution);
-    fprintf(stderr, "blit: evdev touchpad: %s x=%d..%d/%d y=%d..%d/%d\n",
+    if (input_bit(absolute, ABS_MT_SLOT) &&
+        input_bit(absolute, ABS_MT_POSITION_X) &&
+        input_bit(absolute, ABS_MT_POSITION_Y)) {
+        struct input_absinfo slots;
+        memset(&slots, 0, sizeof(slots));
+        if (ioctl(fd, EVIOCGABS(ABS_MT_SLOT), &slots) == 0)
+            blit_touchpad_multitouch(t, slots.maximum + 1);
+    }
+    fprintf(stderr, "blit: evdev touchpad: %s x=%d..%d/%d y=%d..%d/%d slots=%d\n",
             path, ax.minimum, ax.maximum, ax.resolution, ay.minimum,
-            ay.maximum, ay.resolution);
+            ay.maximum, ay.resolution, t->slot_count);
 }
 
 static int input_path_seen(char paths[][128], int count, const char *path)
@@ -26211,27 +26360,19 @@ static void service_evdev_mouse(BlitRuntime *runtime)
                 int tick;
                 runtime->evdev_touchpads[device_index].tap =
                     configuration != NULL && configuration->tap_to_click;
+                runtime->evdev_touchpads[device_index].drag =
+                    configuration != NULL && !configuration->tap_drag_off;
+                runtime->evdev_touchpads[device_index].typing_until_us =
+                    configuration != NULL && configuration->dwt_off ? 0 :
+                    (long long)runtime->typing_until_us;
                 if (blit_touchpad_event(&runtime->evdev_touchpads[device_index],
                                         (long long)input_started_us,
                                         event.type, event.code, event.value,
                                         &pad)) {
-                    if (pad.tap_button >= 0) {
-                        ++runtime->diagnostic_evdev_mouse_button_events;
-                        if (configuration != NULL)
-                            configuration->pointer_buttons += 2;
-                        dispatch_evdev_mouse_button(runtime, device_index,
-                                                    pad.tap_button, 1);
-                        dispatch_evdev_mouse_button(runtime, device_index,
-                                                    pad.tap_button, 0);
-                    }
-                    if (pad.button_changed) {
-                        ++runtime->diagnostic_evdev_mouse_button_events;
-                        if (configuration != NULL)
-                            ++configuration->pointer_buttons;
-                        dispatch_evdev_mouse_button(runtime, device_index,
-                                                    pad.button,
-                                                    pad.button_pressed);
-                    }
+                    /* The button change first: a drag's release comes
+                       before the whole click of a double tap. */
+                    dispatch_touchpad_buttons(runtime, device_index,
+                                              configuration, &pad);
                     if (pad.dx != 0 || pad.dy != 0) {
                         ++runtime->diagnostic_evdev_mouse_motion_events;
                         if (configuration != NULL)
@@ -27196,6 +27337,19 @@ static void dispatch_evdev_key_event(BlitRuntime *runtime,
     }
 }
 
+static int evdev_code_is_modifier(int code)
+{
+    switch (code) {
+    case KEY_LEFTSHIFT: case KEY_RIGHTSHIFT:
+    case KEY_LEFTCTRL: case KEY_RIGHTCTRL:
+    case KEY_LEFTALT: case KEY_RIGHTALT:
+    case KEY_LEFTMETA: case KEY_RIGHTMETA:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
 static void service_evdev_keyboard(BlitRuntime *runtime)
 {
     struct input_event event;
@@ -27230,6 +27384,12 @@ static void service_evdev_keyboard(BlitRuntime *runtime)
                 runtime->input_source != NULL &&
                 runtime->input_source->present;
             if (event.type != EV_KEY) continue;
+            /* A key typed, held or repeating, pauses the touchpads
+               (ADR 0193). Modifiers do not: Ctrl-click is one gesture. */
+            if (event.value != 0 && event.code < BTN_MISC &&
+                !evdev_code_is_modifier(event.code))
+                runtime->typing_until_us = input_started_us +
+                    BLIT_TOUCHPAD_TYPING_MS * 1000ULL;
             if (event.value != 0) {
                 if (!runtime->evdev_keyboard_reported[device_index]) {
                     fprintf(stderr, "blit: evdev keyboard events received from %s\n",
@@ -28635,6 +28795,12 @@ int main(int argc, char **argv)
            scan that retires whatever the burst's own scan caught half-removed
            (issue #72 follow-on). A hotplug is exactly when the loop has no
            other reason to wake. */
+        {
+            /* A held tap is let go at its deadline (ADR 0193). */
+            int touchpad_wait_ms = touchpad_deadline_wait_ms(&runtime, now);
+            if (touchpad_wait_ms >= 0 && touchpad_wait_ms < wait_ms)
+                wait_ms = touchpad_wait_ms;
+        }
         if (runtime.evdev_resettle_us != 0) {
             int resettle_wait_ms = now >= runtime.evdev_resettle_us ? 0 :
                 (int)((runtime.evdev_resettle_us - now + 999ULL) / 1000ULL);
@@ -28659,6 +28825,7 @@ int main(int argc, char **argv)
         blit_vt_phase("loop: after select");
         service_native_console(&runtime);
         if (!blit_running) break;
+        service_touchpad_deadlines(&runtime, monotonic_us());
         runtime.diagnostic_last_select_ms =
             (double)(monotonic_us() - select_started_us) / 1000.0;
         if (runtime.diagnostic_last_select_ms >

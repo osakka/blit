@@ -1,5 +1,36 @@
 # Verification status
 
+## 2026-10-27: 0.2.34 touchpad drag and typing (ADR 0193)
+
+The owner, on an HP Chromebook running Blit from hibr-apt, couldn't tap to
+drag a window, or hold the pad with one finger and move with another.
+- **A pressed pad follows the finger that moves,** read from the multitouch
+  slots, and a pressed pad never scrolls.
+- **Tap-and-drag,** on by default with tapping, with a deadline release on
+  the loop's wait.
+- **Disable-while-typing,** on by default: 500 ms after each key typed,
+  modifiers excepted.
+- Both new settings are per touchpad, and the Blit Mouse pane gains their
+  rows (panel 0.1.18).
+- Devices report a `multitouch` capability.
+
+Gates:
+- `touchpad_gate` gains the pressed drag, with and without slots; tap-and-
+  drag (hold, drag, deadline, double click, late loop, pad press, off); and
+  typing.
+- `tap_setting_gate` covers both settings.
+- The panel's `blit_mouse_gate` checks the rows.
+- Full suite: 149 pass. GPU suite: 65 pass.
+
+The mini PC (192.168.10.54) has no touchpad, so acceptance waits for the
+owner's HP.
+
+**Measured after hibr 0.99.352 (with 0.2.33):** hold went from 64% to 10% of
+a core, and Blit from 4,103 to 35,440 bytes per read, so the transport is
+idle. The video still arrives at about 8 frames a second, so the rate is
+set upstream, in the browser's page capture. Hibr and the browser session
+are following that up.
+
 ## 2026-10-26: 0.2.33 video ingest; animation fills gaps only
 
 The owner reported slow YouTube and window moves after turning on the

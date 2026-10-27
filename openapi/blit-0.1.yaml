@@ -3490,7 +3490,7 @@ components:
             (issue #66).
           items:
             type: string
-            enum: [rel-x, rel-y, buttons, keys, axes, gamepad-buttons, repeat]
+            enum: [rel-x, rel-y, buttons, keys, axes, gamepad-buttons, repeat, touchpad, multitouch]
         identity:
           type: object
           description: What the device reports about itself, as read by evdev.
@@ -3574,6 +3574,27 @@ components:
               description: >-
                 Pointer devices only. Inverts the wheel direction this device
                 reports.
+            tap_to_click:
+              type: boolean
+              default: false
+              description: >-
+                Touchpads only. A quick touch is a click: one finger left, two
+                right.
+            tap_and_drag:
+              type: boolean
+              default: true
+              description: >-
+                Touchpads only, with tap_to_click on. A one-finger tap holds
+                the left button for 180 ms; a touch in that time drags with it
+                held until lifted, and a second tap makes a double click (ADR
+                0193).
+            disable_while_typing:
+              type: boolean
+              default: true
+              description: >-
+                Touchpads only. For 500 ms after each key typed, modifiers
+                excepted, the pad does not move the pointer, scroll or tap;
+                pressing it still clicks (ADR 0193).
             buttons:
               type: object
               additionalProperties:

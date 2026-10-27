@@ -29,7 +29,26 @@
  * typing is a click nobody meant. A tap is a touch that ends within
  * BLIT_TOUCHPAD_TAP_MS having moved less than BLIT_TOUCHPAD_TAP_PX, and the
  * pad never pressed down during it: one finger is a left click, two are a
- * right one. Tap-and-drag is not done.
+ * right one.
+ *
+ * Dragging (ADR 0193). While the button is held -- the pad pressed, or a
+ * tap-and-drag -- the pointer follows the finger that moves, read from the
+ * multitouch slots where the pad has them: the finger holding the click
+ * stays put, so it is pinned in effect, and a held pad never scrolls. The
+ * single-touch position cannot do this, since the kernel makes it from the
+ * oldest finger, which is the one holding the click.
+ *
+ * Tap-and-drag (drag, on unless switched off) makes a one-finger tap press
+ * the left button at once and let it go BLIT_TOUCHPAD_TAP_MS later. A touch
+ * inside that window drags with the button held until it lifts; one that is
+ * itself a tap makes a double click. With no touch, the release is due at
+ * due_us, which blit_touchpad_tick answers when the loop reaches it.
+ *
+ * Disable-while-typing: until typing_until_us, which the server sets
+ * BLIT_TOUCHPAD_TYPING_MS after each key typed, the pad neither moves the
+ * pointer, scrolls nor taps -- a palm grazing it mid-sentence moves nothing.
+ * A touch that began then stays ignored until it lifts. Pressing the pad
+ * still clicks, and a held button still drags: both are deliberate.
  */
 
 #include <linux/input.h>
@@ -50,6 +69,20 @@
 #ifndef BLIT_TOUCHPAD_TAP_PX
 #define BLIT_TOUCHPAD_TAP_PX 8
 #endif
+#ifndef BLIT_TOUCHPAD_TYPING_MS
+#define BLIT_TOUCHPAD_TYPING_MS 500
+#endif
+#define BLIT_TOUCHPAD_SLOTS 10
+
+/* One multitouch slot: a finger by its tracking id (-1 for none), where it
+   last was, and where this report says it is. */
+typedef struct BlitTouchpadSlot {
+    int id;
+    int x, y;
+    int nx, ny;
+    int got;
+    int have;
+} BlitTouchpadSlot;
 
 typedef struct BlitTouchpad {
     int active;
@@ -74,6 +107,22 @@ typedef struct BlitTouchpad {
     int down_fingers;
     long down_moved;
     int down_pressed;
+    /* Multitouch slots, where the pad has them. */
+    int mt;
+    int slot_count;
+    int slot;
+    BlitTouchpadSlot slots[BLIT_TOUCHPAD_SLOTS];
+    /* Tap-and-drag: whether it is wanted, and a tap's button held down,
+       waiting until due_us for a touch that would drag it. */
+    int drag;
+    int tap_held;
+    int tap_held_button;
+    int dragging;
+    long long due_us;
+    /* Disable-while-typing: ignored until then (0 for off), and whether
+       this touch began while typing. */
+    long long typing_until_us;
+    int down_typing;
 } BlitTouchpad;
 
 /* What one event asks of the pointer: motion and wheel on a SYN_REPORT,
@@ -110,6 +159,21 @@ static void blit_touchpad_init(BlitTouchpad *t, int min_x, int max_x,
     t->res_y = res_y;
 }
 
+/* The pad reports multitouch slots, this many. The kernel copies the slot
+   values into ABS_X/ABS_Y for the single-touch position, so the two share
+   units and one scale serves both. */
+static void blit_touchpad_multitouch(BlitTouchpad *t, int slots)
+{
+    int i;
+    t->mt = slots > 0;
+    t->slot_count = slots > BLIT_TOUCHPAD_SLOTS ? BLIT_TOUCHPAD_SLOTS : slots;
+    t->slot = 0;
+    for (i = 0; i < BLIT_TOUCHPAD_SLOTS; ++i) {
+        memset(&t->slots[i], 0, sizeof(t->slots[i]));
+        t->slots[i].id = -1;
+    }
+}
+
 /* Pad units to 1/256 pixel: by the pad's millimetres where the driver says
    how many units one is, else so the pad's whole width is a fixed span. */
 static long blit_touchpad_scale(const BlitTouchpad *t, int units, int axis_y)
@@ -138,6 +202,58 @@ static long blit_touchpad_abs(long v)
     return v < 0 ? -v : v;
 }
 
+/* Take this report's slot positions: each finger's movement since the last
+   one, and which moved most (into dx, dy when asked). A finger seen for the
+   first time only sets where it starts. */
+static void blit_touchpad_follow(BlitTouchpad *t, int *dx, int *dy)
+{
+    long best = 0;
+    int i;
+    if (dx) *dx = 0;
+    if (dy) *dy = 0;
+    for (i = 0; i < t->slot_count; ++i) {
+        BlitTouchpadSlot *s = &t->slots[i];
+        int mx, my;
+        long moved;
+        if (s->id < 0) { s->got = 0; continue; }
+        if (!s->have) {
+            if (s->got & 1) s->x = s->nx;
+            if (s->got & 2) s->y = s->ny;
+            s->have = s->got == 3;
+            s->got = 0;
+            continue;
+        }
+        mx = s->got & 1 ? s->nx - s->x : 0;
+        my = s->got & 2 ? s->ny - s->y : 0;
+        if (s->got & 1) s->x = s->nx;
+        if (s->got & 2) s->y = s->ny;
+        s->got = 0;
+        moved = blit_touchpad_abs(mx) + blit_touchpad_abs(my);
+        if (moved > best) {
+            best = moved;
+            if (dx) *dx = mx;
+            if (dy) *dy = my;
+        }
+    }
+}
+
+/* The loop's turn, at now_us: a held tap that no touch came for is let go
+   once due. Returns 1 when out holds that release. */
+static int blit_touchpad_tick(BlitTouchpad *t, long long now_us,
+                              BlitTouchpadOut *out)
+{
+    memset(out, 0, sizeof(*out));
+    out->tap_button = -1;
+    if (!t->tap_held || t->dragging || t->due_us == 0 || now_us < t->due_us)
+        return 0;
+    out->button_changed = 1;
+    out->button = t->tap_held_button;
+    out->button_pressed = 0;
+    t->tap_held = 0;
+    t->due_us = 0;
+    return 1;
+}
+
 /* One event, at now_us on a monotonic clock (only a tap reads it). Returns
    1 when out holds something for the pointer. */
 static int blit_touchpad_event(BlitTouchpad *t, long long now_us, int type,
@@ -150,8 +266,16 @@ static int blit_touchpad_event(BlitTouchpad *t, long long now_us, int type,
     memset(out, 0, sizeof(*out));
     out->tap_button = -1;
     if (type == EV_ABS) {
+        BlitTouchpadSlot *s = t->mt && t->slot >= 0 && t->slot < t->slot_count ?
+            &t->slots[t->slot] : NULL;
         if (code == ABS_X) { t->nx = value; t->got_x = 1; }
         else if (code == ABS_Y) { t->ny = value; t->got_y = 1; }
+        else if (code == ABS_MT_SLOT) t->slot = value;
+        /* A new tracking id is a new finger: its first position is where
+           it starts, never a movement from where another one was. */
+        else if (code == ABS_MT_TRACKING_ID && s) { s->id = value; s->have = 0; s->got = 0; }
+        else if (code == ABS_MT_POSITION_X && s) { s->nx = value; s->got |= 1; }
+        else if (code == ABS_MT_POSITION_Y && s) { s->ny = value; s->got |= 2; }
         return 0;
     }
     if (type == EV_KEY) {
@@ -171,8 +295,18 @@ static int blit_touchpad_event(BlitTouchpad *t, long long now_us, int type,
                 if (t->pressed)
                     return 0;
                 t->pressed = 1;
-                t->pressed_button = t->fingers_seen >= 2 ? 2 : 0;
                 t->down_pressed = 1;
+                if (t->tap_held) {
+                    /* Pressing the pad during a held tap: the hold becomes
+                       the press, already down, and its release is the
+                       pad's. */
+                    t->pressed_button = t->tap_held_button;
+                    t->tap_held = 0;
+                    t->dragging = 0;
+                    t->due_us = 0;
+                    return 0;
+                }
+                t->pressed_button = t->fingers_seen >= 2 ? 2 : 0;
             } else {
                 if (!t->pressed)
                     return 0;
@@ -191,16 +325,39 @@ static int blit_touchpad_event(BlitTouchpad *t, long long now_us, int type,
     fingers = t->fingers_seen;
     if (!t->touching || fingers == 0) {
         int tapped = t->tap && t->down && !t->down_pressed && !t->pressed &&
+            !t->down_typing &&
             now_us - t->down_us <= BLIT_TOUCHPAD_TAP_MS * 1000LL &&
             t->down_moved < 256L * BLIT_TOUCHPAD_TAP_PX;
-        if (tapped)
+        int answered = 0;
+        if (t->down && t->dragging) {
+            /* The drag ends with its finger. A touch that was itself a tap
+               is the second click of a double click. */
+            out->button_changed = 1;
+            out->button = t->tap_held_button;
+            out->button_pressed = 0;
+            t->tap_held = 0;
+            t->dragging = 0;
+            if (tapped)
+                out->tap_button = t->down_fingers >= 2 ? 2 : 0;
+            answered = 1;
+        } else if (tapped && t->drag && t->down_fingers < 2) {
+            out->button_changed = 1;
+            out->button = 0;
+            out->button_pressed = 1;
+            t->tap_held = 1;
+            t->tap_held_button = 0;
+            t->due_us = now_us + BLIT_TOUCHPAD_TAP_MS * 1000LL;
+            answered = 1;
+        } else if (tapped) {
             out->tap_button = t->down_fingers >= 2 ? 2 : 0;
+            answered = 1;
+        }
         t->down = 0;
         t->have = 0;
         t->retouch = 0;
         t->got_x = t->got_y = 0;
         t->fingers = 0;
-        return tapped;
+        return answered;
     }
     if (!t->down) {
         t->down = 1;
@@ -208,9 +365,59 @@ static int blit_touchpad_event(BlitTouchpad *t, long long now_us, int type,
         t->down_fingers = 0;
         t->down_moved = 0;
         t->down_pressed = t->pressed;
+        t->down_typing = now_us < t->typing_until_us;
+        if (t->tap_held && !t->dragging) {
+            if (now_us <= t->due_us) {
+                t->dragging = 1;
+                t->due_us = 0;
+            } else {
+                /* The loop reached the deadline late: the tap is over, and
+                   this touch is a new one. */
+                out->button_changed = 1;
+                out->button = t->tap_held_button;
+                out->button_pressed = 0;
+                t->tap_held = 0;
+                t->due_us = 0;
+                /* And the touch starts here, as any other would. */
+                blit_touchpad_follow(t, NULL, NULL);
+                if (t->got_x) t->x = t->nx;
+                if (t->got_y) t->y = t->ny;
+                t->have = t->got_x || t->got_y;
+                t->got_x = t->got_y = 0;
+                t->retouch = 0;
+                t->fingers = fingers;
+                t->frac_x = t->frac_y = 0;
+                t->scroll_x = t->scroll_y = 0;
+                return 1;
+            }
+        }
     }
     if (fingers > t->down_fingers)
         t->down_fingers = fingers;
+    if (t->mt && (t->pressed || t->dragging)) {
+        /* Held: the finger that moved most moves the pointer. Nothing here
+           scrolls, and the single-touch position is only kept current. */
+        int dx = 0, dy = 0;
+        blit_touchpad_follow(t, &dx, &dy);
+        if (t->got_x) t->x = t->nx;
+        if (t->got_y) t->y = t->ny;
+        t->have = 1;
+        t->got_x = t->got_y = 0;
+        t->retouch = 0;
+        t->fingers = fingers;
+        t->scroll_x = t->scroll_y = 0;
+        if (dx == 0 && dy == 0)
+            return 0;
+        px = blit_touchpad_scale(t, dx, 0);
+        py = blit_touchpad_scale(t, dy, 1);
+        t->down_moved += blit_touchpad_abs(px) + blit_touchpad_abs(py);
+        t->frac_x += px;
+        t->frac_y += py;
+        out->dx = blit_touchpad_take(&t->frac_x);
+        out->dy = blit_touchpad_take(&t->frac_y);
+        return out->dx != 0 || out->dy != 0;
+    }
+    blit_touchpad_follow(t, NULL, NULL);
     if (!t->have || t->retouch || fingers != t->fingers) {
         t->retouch = 0;
         if (t->got_x) t->x = t->nx;
@@ -232,6 +439,9 @@ static int blit_touchpad_event(BlitTouchpad *t, long long now_us, int type,
     px = blit_touchpad_scale(t, dx_units, 0);
     py = blit_touchpad_scale(t, dy_units, 1);
     t->down_moved += blit_touchpad_abs(px) + blit_touchpad_abs(py);
+    if ((t->down_typing || now_us < t->typing_until_us) &&
+        !t->pressed && !t->dragging)
+        return 0;
     if (fingers >= 2) {
         /* Two fingers scroll the traditional way: an upward stroke is a
            wheel tick up, as a wheel turned away from the person is. Natural
