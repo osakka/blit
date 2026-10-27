@@ -17,13 +17,13 @@ Dir.chdir(root) do
       ENV.fetch('BLIT_HARFBUZZ_LIBRARY', '/lib/x86_64-linux-gnu/libharfbuzz.so.0'), '-o', binary)
     ppm = File.join(work, 'specimen.ppm')
     arguments = ['assets/fonts/Blit-Terminus16.psf',
-      'assets/fonts/BlitRetroNerd-Regular.ttf', 'assets/fonts/BlitModernNerd-Regular.ttf',
+      'assets/fonts/text/3270-Regular.ttf', 'assets/fonts/text/Hack-Regular.ttf',
     ]
     if arabic
       samples = JSON.parse(File.read('assets/fonts/arabic-specimens.json')).fetch('samples')
       input = File.join(work, 'samples.txt')
       File.write(input, samples.map { |s| cp=s.fetch('visual').codepoints; [cp.size,*cp.map { |c| c.to_s(16) }].join(' ') }.join("\n"))
-      arguments.concat(['assets/fonts/BlitArabicRetro.ttf', 'assets/fonts/BlitArabicModern.ttf', input, ppm])
+      arguments.concat(['assets/fonts/BlitArabicModern.ttf', input, ppm])
     else
       arguments.concat(['assets/fonts/NotoColorEmoji.ttf', ppm])
     end

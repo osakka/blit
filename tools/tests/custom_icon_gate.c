@@ -10,7 +10,11 @@ int main(int argc, char **argv)
     BlitFont font;
     int size = 0, samples = 0;
     unsigned cp = 0, required[128];
-    int required_count = 0, ui_samples = 0;
+    int required_count = 0, ui_samples = 0, script_samples = 0;
+    /* ADR 0195: what the glyph stack adds to any font -- an overhanging
+       long arrow, and scripts no shipped text font has (Cyrillic,
+       Hebrew, Thai, Georgian, Ethiopic, CJK) -- drawn, never fallback. */
+    static const unsigned scripts[] = { 0x27f6, 0x0416, 0x05e9, 0x0e01, 0x10d0, 0x1200, 0x6f22, 0x5b57 };
     FILE *input;
     if (argc != 5) return 2;
     input = fopen(argv[4], "r");
@@ -40,6 +44,18 @@ int main(int argc, char **argv)
                 CHECK(ink);
                 ++ui_samples;
             }
+        }
+        for (index = 0; index < (int)(sizeof(scripts) / sizeof(scripts[0])); ++index) {
+            BlitRasterGlyph g;
+            int x, y, ink = 0, span = scripts[index] >= 0x3000 ? 2 : 1;
+            cp = scripts[index];
+            CHECK(blit_raster_get(r, cp, span, &g));
+            CHECK(!g.fallback);
+            for (y = 0; y < g.height; ++y) for (x = 0; x < g.width; ++x)
+                ink += g.pixels[y * g.stride + x * (int)g.format +
+                    (g.format == BLIT_RASTER_RGBA_PREMULTIPLIED ? 3 : 0)] != 0;
+            CHECK(ink);
+            ++script_samples;
         }
         for (cp = 0x100000; cp <= 0x100006; ++cp) {
             BlitRasterGlyph g, again;
@@ -86,6 +102,6 @@ int main(int argc, char **argv)
         blit_raster_close(r);
     }
     blit_font_free(&font);
-    printf("CUSTOM_ICON_PASS samples=%d sizes=57 icons=7 distinct_wifi=4 colour=premultiplied pen_alias=themed cache=bounded ui_scalars=%d ui_span_cases=%d no_replacement=verified\n", samples, required_count, ui_samples);
+    printf("CUSTOM_ICON_PASS samples=%d sizes=57 icons=7 distinct_wifi=4 colour=premultiplied pen_alias=themed cache=bounded ui_scalars=%d ui_span_cases=%d scripts=%d no_replacement=verified\n", samples, required_count, ui_samples, script_samples);
     return 0;
 }

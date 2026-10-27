@@ -32,7 +32,7 @@ Dir.mktmpdir('blit-font-probe-gate') do |work|
       end
     end
     original = identity.call(get.call('/v1/fonts').fetch('active'))
-    %w[blit-modern blit-spleen16 unavailable-font].each do |profile|
+    %w[hack blit-spleen16 unavailable-font].each do |profile|
       probe_env = {'BLIT_LIVE'=>base.to_s, 'BLIT_AUTH_TOKEN'=>'', 'BLIT_FONT_ID'=>profile,
         'BLIT_FONT_SIZES'=>'17,23', 'BLIT_EVIDENCE_DIR'=>File.join(work,profile)}
       output,status = Open3.capture2e(probe_env,'ruby',File.join(root,'tools/probes/host_font_size.rb'))

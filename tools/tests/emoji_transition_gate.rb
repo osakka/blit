@@ -38,7 +38,7 @@ Dir.mktmpdir('blit-emoji-transitions') do |work|
     samples=["❤️","1️⃣","🇬🇧","👍🏽","👩‍💻","👨‍👩‍👧‍👦",
       "🏴\u{e0067 e0062 e0065 e006e e0067 e007f}","\u2764\ufe0e","\u{1f41f}\ufe0e"]
     child='require "io/console";require "json";STDIN.raw!;STDOUT.sync=true;STDOUT.write("\e[?25l\e]2;ready\a");STDIN.each_line{|l|STDOUT.write(JSON.parse(l))}'
-    %w[blit-modern blit-retro].each do |profile|
+    %w[hack ibm-3270].each do |profile|
       ENV.fetch('BLIT_TRANSITION_SIZES','15,16').split(',').map(&:to_i).each do |size|
         request.call('PUT','/v1/fonts',{font_id:profile,size_px:size})
         session=request.call('POST','/v1/terminal-sessions',{command:RbConfig.ruby,

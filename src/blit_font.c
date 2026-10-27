@@ -2,6 +2,7 @@
 #include "blit_raster.h"
 
 #include <unistd.h>
+#include <strings.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -236,41 +237,219 @@ static int font_load_file(BlitFont *font, const char *path)
     return 0;
 }
 
-typedef struct {
-    const char *id;
-    const char *path;
-    const char *arabic;
-} BlitFontProfile;
+/* ADR 0195: the font list is discovered, not written by hand.
+ *
+ * One fonts root (BLIT_FONT_ROOT, else /usr/lib/blit/fonts) holds the glyph
+ * stack, the emoji and Arabic faces, the pixel fonts, and text/, the shipped
+ * text fonts. BLIT_FONT_LOCAL_ROOT (else /usr/local/lib/blit/fonts) may hold
+ * an operator's own text/. A text font is any regular, scalable, fixed-width
+ * TTF or OTF with a Unicode charmap; its id is its family name in lower-case
+ * kebab form and its title the family name. A pixel font is a PSF in the
+ * root whose cells are narrower than tall (the square one is the wide-cell
+ * font, ADR 0062). What fails is listed with its reason. Each file is opened
+ * once and remembered by size and mtime, so a font added later appears on
+ * the next listing without a restart. */
+#include <ctype.h>
+#include <dirent.h>
+#include <sys/stat.h>
 
-static const BlitFontProfile blit_font_profiles[] = {
-    {"blit-terminus16", "/usr/lib/blit/fonts/Blit-Terminus16.psf"},
-    {"blit-spleen16", "/usr/lib/blit/fonts/Blit-Spleen16.psf"},
-    {"blit-modern", "/usr/lib/blit/fonts/BlitModernNerd-Regular.ttf", "BlitArabicModern.ttf"},
-    {"blit-retro", "/usr/lib/blit/fonts/BlitRetroNerd-Regular.ttf", "BlitArabicRetro.ttf"},
-    {"blit-jetbrainless", "/usr/lib/blit/fonts/BlitJetBrainlessNerd-Regular.ttf", "BlitArabicModern.ttf"}
-};
+#define BLIT_FONT_MAX_FILES 96
+
+typedef struct {
+    char path[512];
+    char id[64];
+    char title[96];
+    char reason[96];   /* empty for a usable font */
+    int outline;
+    int local;
+    off_t size;
+    time_t mtime;
+} BlitFontFile;
+
+static BlitFontFile font_files[BLIT_FONT_MAX_FILES];
+static int font_file_count;
+
+const char *blit_font_root(void)
+{
+    const char *root = getenv("BLIT_FONT_ROOT");
+    return root && *root ? root : "/usr/lib/blit/fonts";
+}
+
+static const char *font_local_root(void)
+{
+    const char *root = getenv("BLIT_FONT_LOCAL_ROOT");
+    return root && *root ? root : "/usr/local/lib/blit/fonts";
+}
+
+const char *blit_font_root_file(const char *name)
+{
+    static char paths[4][1024];
+    static int next;
+    char *path = paths[next++ & 3];
+    snprintf(path, 1024, "%s/%s", blit_font_root(), name);
+    return path;
+}
+
+int blit_font_is_outline(const char *path)
+{
+    size_t length = path ? strlen(path) : 0;
+    return length > 4 && (strcasecmp(path + length - 4, ".ttf") == 0 ||
+                          strcasecmp(path + length - 4, ".otf") == 0);
+}
+
+static void font_kebab(const char *name, char *id, size_t capacity)
+{
+    size_t used = 0;
+    int dash = 0;
+    for (; *name && used + 1 < capacity; ++name) {
+        unsigned char c = (unsigned char)*name;
+        if (isalnum(c)) {
+            if (dash && used) id[used++] = '-';
+            if (used + 1 < capacity) id[used++] = (char)tolower(c);
+            dash = 0;
+        } else dash = 1;
+    }
+    id[used] = '\0';
+}
+
+/* Outline fonts are read by the native raster (blit_raster.c), which owns
+   FreeType; the PSF loader and the standalone KMS gates stay free of it. */
+static BlitFontOutlineInspector font_outline_inspector;
+
+void blit_font_set_outline_inspector(BlitFontOutlineInspector inspector)
+{
+    font_outline_inspector = inspector;
+}
+
+static void font_inspect_outline(BlitFontFile *file)
+{
+    char family[96];
+    if (!font_outline_inspector) {
+        snprintf(file->reason, sizeof(file->reason), "no outline font engine");
+        return;
+    }
+    family[0] = '\0';
+    if (!font_outline_inspector(file->path, family, sizeof(family),
+                                file->reason, sizeof(file->reason)))
+        return;
+    snprintf(file->title, sizeof(file->title), "%s", family);
+    font_kebab(family, file->id, sizeof(file->id));
+}
+
+static void font_inspect_pixel(BlitFontFile *file)
+{
+    BlitFont font;
+    const char *base = strrchr(file->path, '/');
+    char name[96];
+    size_t length;
+    memset(&font, 0, sizeof(font));
+    if (font_load_file(&font, file->path) != 0) {
+        snprintf(file->reason, sizeof(file->reason), "not a readable PSF");
+        return;
+    }
+    if (font.width >= font.height)
+        snprintf(file->reason, sizeof(file->reason), "a wide-cell font");
+    blit_font_free(&font);
+    if (file->reason[0]) return;
+    snprintf(name, sizeof(name), "%s", base ? base + 1 : file->path);
+    length = strlen(name);
+    if (length > 4) name[length - 4] = '\0';
+    font_kebab(name, file->id, sizeof(file->id));
+    snprintf(file->title, sizeof(file->title), "%s", name);
+    for (length = 0; file->title[length]; ++length)
+        if (file->title[length] == '-') file->title[length] = ' ';
+}
+
+static int font_name_order(const void *a, const void *b)
+{
+    return strcmp(*(char *const *)a, *(char *const *)b);
+}
+
+/* One directory's candidate files, sorted, appended to the new list. */
+static void font_scan(const char *directory, int outline, int local,
+                      const BlitFontFile *previous, int previous_count,
+                      BlitFontFile *next, int *count)
+{
+    DIR *dir = opendir(directory);
+    struct dirent *entry;
+    char *names[BLIT_FONT_MAX_FILES];
+    int found = 0, i, j;
+    if (!dir) return;
+    while ((entry = readdir(dir)) != NULL && found < BLIT_FONT_MAX_FILES) {
+        size_t length = strlen(entry->d_name);
+        int wanted = outline ? blit_font_is_outline(entry->d_name) :
+            length > 4 && strcmp(entry->d_name + length - 4, ".psf") == 0;
+        if (wanted && entry->d_name[0] != '.') names[found++] = strdup(entry->d_name);
+    }
+    closedir(dir);
+    qsort(names, (size_t)found, sizeof(names[0]), font_name_order);
+    for (i = 0; i < found; ++i) {
+        BlitFontFile file;
+        struct stat info;
+        memset(&file, 0, sizeof(file));
+        snprintf(file.path, sizeof(file.path), "%s/%s", directory, names[i]);
+        free(names[i]);
+        if (*count >= BLIT_FONT_MAX_FILES || stat(file.path, &info) != 0 ||
+            !S_ISREG(info.st_mode)) continue;
+        file.outline = outline;
+        file.local = local;
+        file.size = info.st_size;
+        file.mtime = info.st_mtime;
+        for (j = 0; j < previous_count; ++j)
+            if (!strcmp(previous[j].path, file.path) && previous[j].size == file.size &&
+                previous[j].mtime == file.mtime) break;
+        if (j < previous_count) file = previous[j];
+        else if (outline) font_inspect_outline(&file);
+        else font_inspect_pixel(&file);
+        /* The first font to claim an id keeps it: the shipped set before an
+           operator's own. A later file of the same family is reported. */
+        if (!file.reason[0])
+            for (j = 0; j < *count; ++j)
+                if (!next[j].reason[0] && !strcmp(next[j].id, file.id)) {
+                    snprintf(file.reason, sizeof(file.reason), "same family as %s",
+                             strrchr(next[j].path, '/') + 1);
+                    break;
+                }
+        next[(*count)++] = file;
+    }
+}
+
+void blit_font_discover(void)
+{
+    static BlitFontFile next[BLIT_FONT_MAX_FILES];
+    char directory[1024];
+    int count = 0;
+    snprintf(directory, sizeof(directory), "%s", blit_font_root());
+    font_scan(directory, 0, 0, font_files, font_file_count, next, &count);
+    snprintf(directory, sizeof(directory), "%s/text", blit_font_root());
+    font_scan(directory, 1, 0, font_files, font_file_count, next, &count);
+    snprintf(directory, sizeof(directory), "%s/text", font_local_root());
+    font_scan(directory, 1, 1, font_files, font_file_count, next, &count);
+    memcpy(font_files, next, sizeof(next[0]) * (size_t)count);
+    font_file_count = count;
+}
+
+/* The usable fonts are the profiles; index i is the i-th usable file. */
+static const BlitFontFile *font_profile(int index)
+{
+    int i, seen = 0;
+    if (!font_file_count) blit_font_discover();
+    for (i = 0; i < font_file_count; ++i)
+        if (!font_files[i].reason[0] && seen++ == index) return &font_files[i];
+    return NULL;
+}
 
 /* The 16x16 font for wide cells (ADR 0062). It is a separate artifact because
-   PSF2 carries one cell size per file, so this is not a profile of the
-   primary font and must not appear in the profile list a client can select. */
-static const char *blit_font_wide_paths[] = {
-    "/usr/lib/blit/fonts/Blit-Unifont16.psf",
-    "/usr/share/blit/fonts/Blit-Unifont16.psf",
-    "assets/fonts/Blit-Unifont16.psf"
-};
-
+   PSF2 carries one cell size per file, so it is not a profile. */
 int blit_font_load_wide(BlitFont *font)
 {
     const char *configured = getenv("BLIT_PSF_WIDE_FONT");
-    size_t i;
 
     if (font == NULL) return -1;
     if (configured != NULL && configured[0] != '\0')
         return blit_font_load_path(font, configured);
-    for (i = 0; i < sizeof(blit_font_wide_paths) /
-                    sizeof(blit_font_wide_paths[0]); ++i)
-        if (blit_font_load_path(font, blit_font_wide_paths[i]) == 0)
-            return 0;
+    if (blit_font_load_path(font, blit_font_root_file("Blit-Unifont16.psf")) == 0)
+        return 0;
     /* Not fatal: a wide cell falls back to the primary font's substitute,
        which is what every release before ADR 0062 did. */
     fprintf(stderr, "blit: wide font unavailable; wide cells fall back to the "
@@ -280,27 +459,52 @@ int blit_font_load_wide(BlitFont *font)
 
 int blit_font_profile_count(void)
 {
-    return (int)(sizeof(blit_font_profiles) / sizeof(blit_font_profiles[0]));
+    int i, count = 0;
+    if (!font_file_count) blit_font_discover();
+    for (i = 0; i < font_file_count; ++i) count += !font_files[i].reason[0];
+    return count;
 }
 
 const char *blit_font_profile_id(int index)
 {
-    if (index < 0 || index >= blit_font_profile_count()) return NULL;
-    return blit_font_profiles[index].id;
+    const BlitFontFile *file = font_profile(index);
+    return file ? file->id : NULL;
+}
+
+const char *blit_font_profile_title(int index)
+{
+    const BlitFontFile *file = font_profile(index);
+    return file ? file->title : NULL;
 }
 
 const char *blit_font_profile_path(int index)
 {
-    static char paths[16][512];
-    const char *root = getenv("BLIT_FONT_ROOT");
-    if (index < 0 || index >= blit_font_profile_count()) return NULL;
-    if (root && *root && strncmp(blit_font_profiles[index].path, "/usr/lib/blit/fonts/",
-                               sizeof("/usr/lib/blit/fonts/") - 1) == 0) {
-        snprintf(paths[index], sizeof(paths[index]), "%s/%s", root,
-                 strrchr(blit_font_profiles[index].path, '/') + 1);
-        return paths[index];
-    }
-    return blit_font_profiles[index].path;
+    const BlitFontFile *file = font_profile(index);
+    return file ? file->path : NULL;
+}
+
+int blit_font_profile_local(int index)
+{
+    const BlitFontFile *file = font_profile(index);
+    return file ? file->local : 0;
+}
+
+int blit_font_rejected_count(void)
+{
+    int i, count = 0;
+    for (i = 0; i < font_file_count; ++i) count += font_files[i].reason[0] != 0;
+    return count;
+}
+
+const char *blit_font_rejected(int index, const char **reason)
+{
+    int i, seen = 0;
+    for (i = 0; i < font_file_count; ++i)
+        if (font_files[i].reason[0] && seen++ == index) {
+            if (reason) *reason = font_files[i].reason;
+            return font_files[i].path;
+        }
+    return NULL;
 }
 
 const char *blit_font_profile_for_path(const char *path)
@@ -309,62 +513,40 @@ const char *blit_font_profile_for_path(const char *path)
     if (path == NULL) return "custom";
     for (i = 0; i < blit_font_profile_count(); ++i)
         if (strcmp(path, blit_font_profile_path(i)) == 0)
-            return blit_font_profiles[i].id;
+            return blit_font_profile_id(i);
     return "custom";
 }
 
+/* ADR 0195: one Arabic companion serves every outline font. */
 const char *blit_font_arabic_path(const char *primary)
 {
-    static char path[1024];
-    int i;
-    const char *slash;
-    if (!primary) return NULL;
-    for (i=0; i<blit_font_profile_count(); ++i)
-        if (!strcmp(primary,blit_font_profile_path(i)) && blit_font_profiles[i].arabic) {
-            slash=strrchr(primary,'/');
-            if (snprintf(path,sizeof(path),"%.*s%s",slash?(int)(slash-primary+1):0,
-                         primary,blit_font_profiles[i].arabic)>=(int)sizeof(path)) return NULL;
-            return path;
-        }
-    return NULL;
+    return blit_font_is_outline(primary) ? blit_font_root_file("BlitArabicModern.ttf") : NULL;
 }
 
 int blit_font_profile_available(int index)
 {
+    static const char *const needed[] = {
+        "NotoColorEmoji.ttf", "NotoEmojiText.ttf", "Blit-Terminus16.psf", "BlitArabicModern.ttf"
+    };
     const char *path = blit_font_profile_path(index);
-    char sibling[512];
-    const char *slash;
+    size_t i;
     if (!path || access(path, R_OK) != 0) return 0;
-    {
-        const char *arabic=blit_font_arabic_path(path);
-        if (arabic && access(arabic,R_OK)!=0) return 0;
-    }
-    if (!strstr(path, ".ttf")) return 1;
-    slash = strrchr(path, '/');
-    snprintf(sibling, sizeof(sibling), "%.*sNotoColorEmoji.ttf",
-             slash ? (int)(slash - path + 1) : 0, path);
-    if (access(sibling, R_OK) != 0) return 0;
-    snprintf(sibling, sizeof(sibling), "%.*sNotoEmojiText.ttf",
-             slash ? (int)(slash - path + 1) : 0, path);
-    if (access(sibling, R_OK) != 0) return 0;
-    snprintf(sibling, sizeof(sibling), "%.*sBlit-Terminus16.psf",
-             slash ? (int)(slash - path + 1) : 0, path);
-    return access(sibling, R_OK) == 0;
+    if (!blit_font_is_outline(path)) return 1;
+    for (i = 0; i < sizeof(needed) / sizeof(needed[0]); ++i)
+        if (access(blit_font_root_file(needed[i]), R_OK) != 0) return 0;
+    return 1;
 }
 
 int blit_font_load_path(BlitFont *font, const char *path)
 {
     char fallback[512];
     const char *source = path;
-    size_t length;
     if (font == NULL || path == NULL || path[0] == '\0') return -1;
     blit_font_free(font);
-    length = strlen(path);
-    if (length > 4 && strcmp(path + length - 4, ".ttf") == 0) {
-        const char *slash = strrchr(path, '/');
+    if (blit_font_is_outline(path)) {
+        /* An outline font's canonical PSF fallback is the root's Terminus. */
         if (access(path, R_OK) != 0) return -1;
-        snprintf(fallback, sizeof(fallback), "%.*sBlit-Terminus16.psf",
-                 slash ? (int)(slash - path + 1) : 0, path);
+        snprintf(fallback, sizeof(fallback), "%s", blit_font_root_file("Blit-Terminus16.psf"));
         source = fallback;
     }
     if (font_load_file(font, source) != 0) return -1;
@@ -383,6 +565,7 @@ void blit_font_load(BlitFont *font)
     if (font == NULL) return;
     if (configured != NULL && configured[0] != '\0' &&
         blit_font_load_path(font, configured) == 0) return;
+    if (blit_font_load_path(font, blit_font_root_file("Blit-Terminus16.psf")) == 0) return;
     for (i = 0; i < blit_font_profile_count(); ++i)
         if (blit_font_load_path(font, blit_font_profile_path(i)) == 0) return;
     fprintf(stderr, "blit: font unavailable; using built-in fallback\n");

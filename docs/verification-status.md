@@ -1,5 +1,28 @@
 # Verification status
 
+## 2026-10-27: 0.2.36 text fonts are discovered; every glyph from one stack (ADR 0195)
+
+- **Six unmodified upstream text fonts ship in `text/`:** Hack 3.003,
+  IBM 3270 3.0.1, JetBrains Mono NL 2.304, Fira Code 6.2, IBM Plex Mono 1.1.0
+  and Iosevka Term 34.9.1. Any regular monospaced TTF or OTF in a `text/`
+  directory is listed by its family name.
+- **The glyph stack:** geometry (now including box drawing), Blit's icon
+  font, the text font, Nerd Symbols, Noto Symbols 2 / Symbols / Math,
+  emoji, one Arabic companion, and Unifont 16. Glyphs are fitted at draw
+  time; an overhanging text glyph is shrunk, not dropped.
+- **Retired:** the baked Modern, Retro and JetBrainless fonts, their
+  generator, and Arabic Retro.
+- **Gates:**
+  - `outline_catalogue_gate`: 10,386 Nerd codepoints × 57 sizes × 6 fonts,
+    0 failures.
+  - `custom_icon_gate`: UI glyphs, Blit icons, scripts and ⟶, in every font.
+  - `font_discovery_gate` (new): shipped, local, rejected and live removal.
+  - `font_assets_gate` (replaces `modern_font_assets_gate`).
+  - `font_raster_gate`: box drawing is geometry.
+- **Cost on the build machine:** raster open 0.3 → 1.6 ms; first
+  icon/symbol render 13 → 19 µs; fallbacks in the sample 12 → 0.
+- **Not yet:** the two pixel fonts are not on the stack.
+
 ## 2026-10-27: 0.2.35 Blit JetBrainless; the font set is Blit's own (ADR 0194)
 
 - **New font:** `blit-jetbrainless`, JetBrains Mono 2.304 without

@@ -4,8 +4,11 @@
 #include FT_FREETYPE_H
 #include FT_COLOR_H
 #include FT_ADVANCES_H
+#include FT_OUTLINE_H
+#include FT_TRUETYPE_TABLES_H
 #include "../vendor/harfbuzz/hb.h"
 #include "../vendor/harfbuzz/hb-ft.h"
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -27,6 +30,10 @@ struct BlitRaster {
     BlitFont fallback;
     FT_Library library;
     FT_Face outline, colour, text_emoji, arabic;
+    /* ADR 0195: the glyph stack beside the text font. Each may be absent;
+       a missing face is skipped, never fatal. */
+    FT_Face icons, nerd, symbols[3], unifont[2];
+    int cap; /* the text font's cap height in pixels: the icons' box */
     hb_font_t *arabic_font;
     hb_buffer_t *arabic_buffer;
     int arabic_baseline;
@@ -43,6 +50,15 @@ struct BlitRaster {
 
 static int ceil_26_6(FT_Pos value) { return (int)((value + 63) / 64); }
 
+/* The loaded glyph's top, in 26.6 pixels above the baseline. */
+static FT_Pos face_top(FT_Face face)
+{
+    FT_BBox box;
+    if (face->glyph->format != FT_GLYPH_FORMAT_OUTLINE) return 0;
+    FT_Outline_Get_CBox(&face->glyph->outline, &box);
+    return box.yMax;
+}
+
 void blit_raster_close(BlitRaster *raster)
 {
     int i;
@@ -53,11 +69,88 @@ void blit_raster_close(BlitRaster *raster)
     if (raster->arabic_font) hb_font_destroy(raster->arabic_font);
     if (raster->arabic_buffer) hb_buffer_destroy(raster->arabic_buffer);
     if (raster->arabic) FT_Done_Face(raster->arabic);
+    if (raster->icons) FT_Done_Face(raster->icons);
+    if (raster->nerd) FT_Done_Face(raster->nerd);
+    for (i = 0; i < 3; ++i) if (raster->symbols[i]) FT_Done_Face(raster->symbols[i]);
+    for (i = 0; i < 2; ++i) if (raster->unifont[i]) FT_Done_Face(raster->unifont[i]);
     if (raster->text_emoji) FT_Done_Face(raster->text_emoji);
     if (raster->outline) FT_Done_Face(raster->outline);
     if (raster->colour) FT_Done_Face(raster->colour);
     if (raster->library) FT_Done_FreeType(raster->library);
     free(raster);
+}
+
+/* A face from the font directory, or NULL when it is absent or unusable. */
+static FT_Face stack_face(BlitRaster *raster, const char *directory, int length,
+                          const char *name)
+{
+    char path[1024];
+    FT_Face face = NULL;
+    if (snprintf(path, sizeof(path), "%.*s%s", length, directory, name) >= (int)sizeof(path))
+        return NULL;
+    if (FT_New_Face(raster->library, path, 0, &face)) return NULL;
+    if (!FT_IS_SCALABLE(face) || FT_Select_Charmap(face, FT_ENCODING_UNICODE)) {
+        FT_Done_Face(face);
+        return NULL;
+    }
+    return face;
+}
+
+/* ADR 0195: the stack's faces sit beside the colour emoji face. The icons'
+   box is the text font's cap height, as the outline generator fitted them:
+   OS/2 sCapHeight where the font says, else the height of its H. */
+static void open_stack(BlitRaster *raster, const char *colour_path)
+{
+    static const char *const symbols[3] = {
+        "NotoSansSymbols2-Regular.ttf", "NotoSansSymbols-Regular.ttf", "NotoSansMath-Regular.ttf"
+    };
+    const char *slash = strrchr(colour_path, '/');
+    int length = slash ? (int)(slash - colour_path + 1) : 0, i;
+    TT_OS2 *os2 = (TT_OS2 *)FT_Get_Sfnt_Table(raster->outline, FT_SFNT_OS2);
+    raster->icons = stack_face(raster, colour_path, length, "BlitIcons-Regular.ttf");
+    raster->nerd = stack_face(raster, colour_path, length, "SymbolsNerdFontMono-Regular.ttf");
+    for (i = 0; i < 3; ++i) raster->symbols[i] = stack_face(raster, colour_path, length, symbols[i]);
+    raster->unifont[0] = stack_face(raster, colour_path, length, "Unifont-Regular.otf");
+    raster->unifont[1] = stack_face(raster, colour_path, length, "UnifontUpper-Regular.otf");
+    if (os2 && os2->version >= 2 && os2->sCapHeight > 0)
+        raster->cap = (int)((long)os2->sCapHeight * raster->em / raster->outline->units_per_EM);
+    else if (!FT_Set_Pixel_Sizes(raster->outline, 0, raster->em) &&
+             !FT_Load_Char(raster->outline, 'H', FT_LOAD_DEFAULT))
+        raster->cap = (int)(face_top(raster->outline) + 63) / 64;
+    if (raster->cap < 1 || raster->cap > raster->height) raster->cap = raster->height * 7 / 10;
+}
+
+/* ADR 0195: what makes a file a Blit text font -- regular, scalable,
+   fixed-width, with a Unicode charmap -- answered with FreeType for the font
+   list (blit_font_set_outline_inspector). */
+int blit_raster_inspect_outline(const char *path, char *family, size_t family_size,
+                                char *reason, size_t reason_size)
+{
+    static FT_Library library;
+    FT_Face face;
+    int usable = 0;
+    if (!library && FT_Init_FreeType(&library)) {
+        snprintf(reason, reason_size, "font engine unavailable");
+        return 0;
+    }
+    if (FT_New_Face(library, path, 0, &face)) {
+        snprintf(reason, reason_size, "not a readable font");
+        return 0;
+    }
+    if (!FT_IS_SCALABLE(face)) snprintf(reason, reason_size, "not scalable");
+    else if (!FT_IS_FIXED_WIDTH(face)) snprintf(reason, reason_size, "not monospaced");
+    else if (face->style_flags & (FT_STYLE_FLAG_BOLD | FT_STYLE_FLAG_ITALIC))
+        snprintf(reason, reason_size, "not a regular style");
+    else if (FT_Select_Charmap(face, FT_ENCODING_UNICODE))
+        snprintf(reason, reason_size, "no Unicode character map");
+    else if (!face->family_name || !*face->family_name)
+        snprintf(reason, reason_size, "no family name");
+    else {
+        snprintf(family, family_size, "%s", face->family_name);
+        usable = 1;
+    }
+    FT_Done_Face(face);
+    return usable;
 }
 
 BlitRaster *blit_raster_open(const BlitFont *fallback,
@@ -84,13 +177,20 @@ BlitRaster *blit_raster_open(const BlitFont *fallback,
             !FT_IS_FIXED_WIDTH(raster->outline) ||
             FT_Select_Charmap(raster->outline, FT_ENCODING_UNICODE)) goto fail;
         /* API height means exact terminal cell height, not em size. Fit both
-           ascent/descent and advance; do not stretch an already made bitmap. */
+           ascent/descent and advance; do not stretch an already made bitmap.
+           The advance is the font's cell, that of its '0' (ADR 0195): a
+           font's widest glyph (Iosevka has a few) is not its cell, and
+           fitting that shrank all its text. An overhanging glyph is fitted
+           on its own when drawn. */
+        FT_UInt cell_glyph = FT_Get_Char_Index(raster->outline, '0');
         for (em = height; em >= 1; --em) {
             int ascent, descent, advance;
+            FT_Fixed cell_advance;
             if (FT_Set_Pixel_Sizes(raster->outline, 0, em)) goto fail;
             ascent = ceil_26_6(raster->outline->size->metrics.ascender);
             descent = ceil_26_6(-raster->outline->size->metrics.descender);
-            advance = ceil_26_6(raster->outline->size->metrics.max_advance);
+            advance = cell_glyph && !FT_Get_Advance(raster->outline, cell_glyph, FT_LOAD_DEFAULT, &cell_advance) ?
+                (int)((cell_advance + 65535) / 65536) : ceil_26_6(raster->outline->size->metrics.max_advance);
             if (ascent + descent <= height && advance <= width) {
                 raster->em = em;
                 raster->baseline = (height - ascent - descent) / 2 + ascent;
@@ -134,6 +234,7 @@ BlitRaster *blit_raster_open(const BlitFont *fallback,
             !hb_buffer_pre_allocate(raster->shape_buffer, BLIT_CLUSTER_MAX_SCALARS)) goto fail;
         hb_ft_font_set_load_flags(raster->colour_font, FT_LOAD_COLOR);
     }
+    if (raster->outline && colour_path) open_stack(raster, colour_path);
     return raster;
 fail:
     blit_raster_close(raster);
@@ -346,6 +447,286 @@ static int draw_block_element(uint32_t scalar, RasterEntry *entry)
     return 1;
 }
 
+/* ADR 0195: Box Drawing (U+2500-257F) is cell geometry, as kitty, WezTerm
+   and Alacritty draw it. A font's lines rarely reach the cell's edges at a
+   fitted size, so frames showed gaps; this range already came from the
+   16 px PSF fallback, scaled. Each codepoint is its arms -- up, right,
+   down, left, each light, heavy or double -- plus a dash count, or an arc
+   or a diagonal. The table is derived from the Unicode character names
+   (BOX DRAWINGS DOWN LIGHT AND RIGHT HEAVY and so on), not drawn by hand.
+   Arms meet on whole pixels at the cell's centre and reach its edges, so
+   neighbouring cells join; double lines meet with inner and outer corners;
+   arcs and diagonals are anti-aliased by 4x4 samples. */
+typedef struct {
+    unsigned char arms;   /* 2 bits each: up, right<<2, down<<4, left<<6 */
+    unsigned char dashes; /* 0, or 2, 3 or 4 dashes along the line */
+    unsigned char kind;   /* 0 lines, 1 arc, 2 diagonal */
+    unsigned char diagonal; /* 1 upper right to lower left, 2 upper left to lower right, 3 both */
+} BoxSpec;
+
+static const BoxSpec box_specs[128] = {
+    /* 2500 light horizontal */ {0x44, 0, 0, 0},
+    /* 2501 heavy horizontal */ {0x88, 0, 0, 0},
+    /* 2502 light vertical */ {0x11, 0, 0, 0},
+    /* 2503 heavy vertical */ {0x22, 0, 0, 0},
+    /* 2504 light triple dash horizontal */ {0x44, 3, 0, 0},
+    /* 2505 heavy triple dash horizontal */ {0x88, 3, 0, 0},
+    /* 2506 light triple dash vertical */ {0x11, 3, 0, 0},
+    /* 2507 heavy triple dash vertical */ {0x22, 3, 0, 0},
+    /* 2508 light quadruple dash horizontal */ {0x44, 4, 0, 0},
+    /* 2509 heavy quadruple dash horizontal */ {0x88, 4, 0, 0},
+    /* 250A light quadruple dash vertical */ {0x11, 4, 0, 0},
+    /* 250B heavy quadruple dash vertical */ {0x22, 4, 0, 0},
+    /* 250C light down and right */ {0x14, 0, 0, 0},
+    /* 250D down light and right heavy */ {0x18, 0, 0, 0},
+    /* 250E down heavy and right light */ {0x24, 0, 0, 0},
+    /* 250F heavy down and right */ {0x28, 0, 0, 0},
+    /* 2510 light down and left */ {0x50, 0, 0, 0},
+    /* 2511 down light and left heavy */ {0x90, 0, 0, 0},
+    /* 2512 down heavy and left light */ {0x60, 0, 0, 0},
+    /* 2513 heavy down and left */ {0xa0, 0, 0, 0},
+    /* 2514 light up and right */ {0x05, 0, 0, 0},
+    /* 2515 up light and right heavy */ {0x09, 0, 0, 0},
+    /* 2516 up heavy and right light */ {0x06, 0, 0, 0},
+    /* 2517 heavy up and right */ {0x0a, 0, 0, 0},
+    /* 2518 light up and left */ {0x41, 0, 0, 0},
+    /* 2519 up light and left heavy */ {0x81, 0, 0, 0},
+    /* 251A up heavy and left light */ {0x42, 0, 0, 0},
+    /* 251B heavy up and left */ {0x82, 0, 0, 0},
+    /* 251C light vertical and right */ {0x15, 0, 0, 0},
+    /* 251D vertical light and right heavy */ {0x19, 0, 0, 0},
+    /* 251E up heavy and right down light */ {0x16, 0, 0, 0},
+    /* 251F down heavy and right up light */ {0x25, 0, 0, 0},
+    /* 2520 vertical heavy and right light */ {0x26, 0, 0, 0},
+    /* 2521 down light and right up heavy */ {0x1a, 0, 0, 0},
+    /* 2522 up light and right down heavy */ {0x29, 0, 0, 0},
+    /* 2523 heavy vertical and right */ {0x2a, 0, 0, 0},
+    /* 2524 light vertical and left */ {0x51, 0, 0, 0},
+    /* 2525 vertical light and left heavy */ {0x91, 0, 0, 0},
+    /* 2526 up heavy and left down light */ {0x52, 0, 0, 0},
+    /* 2527 down heavy and left up light */ {0x61, 0, 0, 0},
+    /* 2528 vertical heavy and left light */ {0x62, 0, 0, 0},
+    /* 2529 down light and left up heavy */ {0x92, 0, 0, 0},
+    /* 252A up light and left down heavy */ {0xa1, 0, 0, 0},
+    /* 252B heavy vertical and left */ {0xa2, 0, 0, 0},
+    /* 252C light down and horizontal */ {0x54, 0, 0, 0},
+    /* 252D left heavy and right down light */ {0x94, 0, 0, 0},
+    /* 252E right heavy and left down light */ {0x58, 0, 0, 0},
+    /* 252F down light and horizontal heavy */ {0x98, 0, 0, 0},
+    /* 2530 down heavy and horizontal light */ {0x64, 0, 0, 0},
+    /* 2531 right light and left down heavy */ {0xa4, 0, 0, 0},
+    /* 2532 left light and right down heavy */ {0x68, 0, 0, 0},
+    /* 2533 heavy down and horizontal */ {0xa8, 0, 0, 0},
+    /* 2534 light up and horizontal */ {0x45, 0, 0, 0},
+    /* 2535 left heavy and right up light */ {0x85, 0, 0, 0},
+    /* 2536 right heavy and left up light */ {0x49, 0, 0, 0},
+    /* 2537 up light and horizontal heavy */ {0x89, 0, 0, 0},
+    /* 2538 up heavy and horizontal light */ {0x46, 0, 0, 0},
+    /* 2539 right light and left up heavy */ {0x86, 0, 0, 0},
+    /* 253A left light and right up heavy */ {0x4a, 0, 0, 0},
+    /* 253B heavy up and horizontal */ {0x8a, 0, 0, 0},
+    /* 253C light vertical and horizontal */ {0x55, 0, 0, 0},
+    /* 253D left heavy and right vertical light */ {0x95, 0, 0, 0},
+    /* 253E right heavy and left vertical light */ {0x59, 0, 0, 0},
+    /* 253F vertical light and horizontal heavy */ {0x99, 0, 0, 0},
+    /* 2540 up heavy and down horizontal light */ {0x56, 0, 0, 0},
+    /* 2541 down heavy and up horizontal light */ {0x65, 0, 0, 0},
+    /* 2542 vertical heavy and horizontal light */ {0x66, 0, 0, 0},
+    /* 2543 left up heavy and right down light */ {0x96, 0, 0, 0},
+    /* 2544 right up heavy and left down light */ {0x5a, 0, 0, 0},
+    /* 2545 left down heavy and right up light */ {0xa5, 0, 0, 0},
+    /* 2546 right down heavy and left up light */ {0x69, 0, 0, 0},
+    /* 2547 down light and up horizontal heavy */ {0x9a, 0, 0, 0},
+    /* 2548 up light and down horizontal heavy */ {0xa9, 0, 0, 0},
+    /* 2549 right light and left vertical heavy */ {0xa6, 0, 0, 0},
+    /* 254A left light and right vertical heavy */ {0x6a, 0, 0, 0},
+    /* 254B heavy vertical and horizontal */ {0xaa, 0, 0, 0},
+    /* 254C light double dash horizontal */ {0x44, 2, 0, 0},
+    /* 254D heavy double dash horizontal */ {0x88, 2, 0, 0},
+    /* 254E light double dash vertical */ {0x11, 2, 0, 0},
+    /* 254F heavy double dash vertical */ {0x22, 2, 0, 0},
+    /* 2550 double horizontal */ {0xcc, 0, 0, 0},
+    /* 2551 double vertical */ {0x33, 0, 0, 0},
+    /* 2552 down single and right double */ {0x1c, 0, 0, 0},
+    /* 2553 down double and right single */ {0x34, 0, 0, 0},
+    /* 2554 double down and right */ {0x3c, 0, 0, 0},
+    /* 2555 down single and left double */ {0xd0, 0, 0, 0},
+    /* 2556 down double and left single */ {0x70, 0, 0, 0},
+    /* 2557 double down and left */ {0xf0, 0, 0, 0},
+    /* 2558 up single and right double */ {0x0d, 0, 0, 0},
+    /* 2559 up double and right single */ {0x07, 0, 0, 0},
+    /* 255A double up and right */ {0x0f, 0, 0, 0},
+    /* 255B up single and left double */ {0xc1, 0, 0, 0},
+    /* 255C up double and left single */ {0x43, 0, 0, 0},
+    /* 255D double up and left */ {0xc3, 0, 0, 0},
+    /* 255E vertical single and right double */ {0x1d, 0, 0, 0},
+    /* 255F vertical double and right single */ {0x37, 0, 0, 0},
+    /* 2560 double vertical and right */ {0x3f, 0, 0, 0},
+    /* 2561 vertical single and left double */ {0xd1, 0, 0, 0},
+    /* 2562 vertical double and left single */ {0x73, 0, 0, 0},
+    /* 2563 double vertical and left */ {0xf3, 0, 0, 0},
+    /* 2564 down single and horizontal double */ {0xdc, 0, 0, 0},
+    /* 2565 down double and horizontal single */ {0x74, 0, 0, 0},
+    /* 2566 double down and horizontal */ {0xfc, 0, 0, 0},
+    /* 2567 up single and horizontal double */ {0xcd, 0, 0, 0},
+    /* 2568 up double and horizontal single */ {0x47, 0, 0, 0},
+    /* 2569 double up and horizontal */ {0xcf, 0, 0, 0},
+    /* 256A vertical single and horizontal double */ {0xdd, 0, 0, 0},
+    /* 256B vertical double and horizontal single */ {0x77, 0, 0, 0},
+    /* 256C double vertical and horizontal */ {0xff, 0, 0, 0},
+    /* 256D light arc down and right */ {0x14, 0, 1, 0},
+    /* 256E light arc down and left */ {0x50, 0, 1, 0},
+    /* 256F light arc up and left */ {0x41, 0, 1, 0},
+    /* 2570 light arc up and right */ {0x05, 0, 1, 0},
+    /* 2571 light diagonal upper right to lower left */ {0x00, 0, 2, 1},
+    /* 2572 light diagonal upper left to lower right */ {0x00, 0, 2, 2},
+    /* 2573 light diagonal cross */ {0x00, 0, 2, 3},
+    /* 2574 light left */ {0x40, 0, 0, 0},
+    /* 2575 light up */ {0x01, 0, 0, 0},
+    /* 2576 light right */ {0x04, 0, 0, 0},
+    /* 2577 light down */ {0x10, 0, 0, 0},
+    /* 2578 heavy left */ {0x80, 0, 0, 0},
+    /* 2579 heavy up */ {0x02, 0, 0, 0},
+    /* 257A heavy right */ {0x08, 0, 0, 0},
+    /* 257B heavy down */ {0x20, 0, 0, 0},
+    /* 257C light left and heavy right */ {0x48, 0, 0, 0},
+    /* 257D light up and heavy down */ {0x21, 0, 0, 0},
+    /* 257E heavy left and light right */ {0x84, 0, 0, 0},
+    /* 257F heavy up and light down */ {0x12, 0, 0, 0},
+};
+
+enum { BOX_UP, BOX_RIGHT, BOX_DOWN, BOX_LEFT };
+
+static void box_rect(RasterEntry *entry, int vertical, int a0, int a1,
+                     int c0, int c1, int dashes, int length)
+{
+    int a, c, w = entry->glyph.width, h = entry->glyph.height;
+    for (a = a0 < 0 ? 0 : a0; a < a1 && a < length; ++a) {
+        if (dashes) {
+            /* Dashes evenly along the whole cell, each a third gap; a part
+               too short to hold both stays solid, so a tiny cell keeps ink. */
+            int part = a * dashes / length;
+            int p0 = part * length / dashes, p1 = (part + 1) * length / dashes;
+            int gap = p1 - p0 < 2 ? 0 : (p1 - p0) / 3 > 0 ? (p1 - p0) / 3 : 1;
+            if (a < p0 + gap / 2 || a >= p1 - (gap - gap / 2)) continue;
+        }
+        for (c = c0 < 0 ? 0 : c0; c < c1; ++c) {
+            int x = vertical ? c : a, y = vertical ? a : c;
+            if (x < w && y < h) entry->pixels[y * entry->glyph.stride + x] = 255;
+        }
+    }
+}
+
+/* One arm, along its axis from the centre to its edge. sign is +1 for the
+   right and down arms, -1 for the left and up ones; lo and hi are the
+   perpendicular arms on the low and high side of its cross axis. */
+static void box_arm(RasterEntry *entry, int vertical, int sign, int weight,
+                    int opposite, int lo, int hi, int light, int heavy,
+                    int offset, int dashes)
+{
+    int length = vertical ? entry->glyph.height : entry->glyph.width;
+    int cross = vertical ? entry->glyph.width : entry->glyph.height;
+    int ca = length / 2, cc = cross / 2, k;
+    int tlo = lo == 2 ? heavy : light, thi = hi == 2 ? heavy : light;
+    if (!weight) return;
+    if (weight == 3) {
+        for (k = -1; k <= 1; k += 2) {
+            int near = k < 0 ? lo : hi, far = k < 0 ? hi : lo;
+            int tnear = k < 0 ? tlo : thi, tfar = k < 0 ? thi : tlo;
+            int edge;
+            /* Stop at the near perpendicular's line on this side; meet the
+               opposite arm at the centre; round an outer corner past the
+               far perpendicular; or start at the centre alone. */
+            if (near) edge = sign > 0 ? (near == 3 ? ca + offset - light / 2 : ca - tnear / 2)
+                                      : (near == 3 ? ca - offset - light / 2 + light : ca - tnear / 2 + tnear);
+            else if (opposite) edge = ca;
+            else if (far) edge = sign > 0 ? (far == 3 ? ca - offset - light / 2 : ca - tfar / 2)
+                                          : (far == 3 ? ca + offset - light / 2 + light : ca - tfar / 2 + tfar);
+            else edge = sign > 0 ? ca - light / 2 : ca - light / 2 + light;
+            if (sign > 0) box_rect(entry, vertical, edge, length,
+                                   cc + k * offset - light / 2, cc + k * offset - light / 2 + light, dashes, length);
+            else box_rect(entry, vertical, 0, edge,
+                          cc + k * offset - light / 2, cc + k * offset - light / 2 + light, dashes, length);
+        }
+    } else {
+        int t = weight == 2 ? heavy : light;
+        int double_perp = lo == 3 || hi == 3;
+        int tp = (lo ? tlo : 0) > (hi ? thi : 0) ? tlo : (hi ? thi : 0);
+        int edge;
+        if (double_perp)
+            edge = opposite ? ca : (sign > 0 ? ca + offset - light / 2 : ca - offset - light / 2 + light);
+        else if (lo || hi) edge = sign > 0 ? ca - tp / 2 : ca - tp / 2 + tp;
+        else edge = opposite ? ca : (sign > 0 ? ca - t / 2 : ca - t / 2 + t);
+        if (sign > 0) box_rect(entry, vertical, edge, length, cc - t / 2, cc - t / 2 + t, dashes, length);
+        else box_rect(entry, vertical, 0, edge, cc - t / 2, cc - t / 2 + t, dashes, length);
+    }
+}
+
+/* Distance in pixels from (x, y) to the segment (ax, ay)-(bx, by). */
+static double box_segment_distance(double x, double y, double ax, double ay, double bx, double by)
+{
+    double dx = bx - ax, dy = by - ay, t = 0, length = dx * dx + dy * dy;
+    if (length > 0) t = ((x - ax) * dx + (y - ay) * dy) / length;
+    if (t < 0) t = 0; else if (t > 1) t = 1;
+    dx = x - (ax + t * dx); dy = y - (ay + t * dy);
+    return sqrt(dx * dx + dy * dy);
+}
+
+static void box_curve(const BoxSpec *spec, RasterEntry *entry, int light)
+{
+    int x, y, sx, sy, w = entry->glyph.width, h = entry->glyph.height;
+    /* The straight lines' centres, so a curve meets them exactly. */
+    double lx = w / 2 - light / 2 + light / 2.0, ly = h / 2 - light / 2 + light / 2.0;
+    double half = light / 2.0, r = (w < h ? w : h) / 2.0;
+    int right = (spec->arms >> 2) & 3, down = (spec->arms >> 4) & 3;
+    double ux = right ? 1 : -1, uy = down ? 1 : -1;
+    double ox = lx + ux * r, oy = ly + uy * r;
+    if (spec->kind == 1) {
+        /* The straight runs to the edges are whole pixels, as in every
+           other line; only the quarter circle between them is sampled. */
+        int ty = (int)(down ? floor(oy) : ceil(oy)), tx = (int)(right ? floor(ox) : ceil(ox));
+        box_rect(entry, 1, down ? ty : 0, down ? h : ty, w / 2 - light / 2, w / 2 - light / 2 + light, 0, h);
+        box_rect(entry, 0, right ? tx : 0, right ? w : tx, h / 2 - light / 2, h / 2 - light / 2 + light, 0, w);
+    }
+    for (y = 0; y < h; ++y) for (x = 0; x < w; ++x) {
+        int covered = 0;
+        unsigned char *out = entry->pixels + y * entry->glyph.stride + x;
+        for (sy = 0; sy < 4; ++sy) for (sx = 0; sx < 4; ++sx) {
+            double px = x + (sx + 0.5) / 4, py = y + (sy + 0.5) / 4, d = 1e9;
+            if (spec->kind == 2) {
+                double d1 = box_segment_distance(px, py, w, 0, 0, h);
+                double d2 = box_segment_distance(px, py, 0, 0, w, h);
+                d = spec->diagonal == 1 ? d1 : spec->diagonal == 2 ? d2 : (d1 < d2 ? d1 : d2);
+                covered += d <= half + 0.25;
+            } else if ((px - ox) * ux <= 0 && (py - oy) * uy <= 0) {
+                d = fabs(sqrt((px - ox) * (px - ox) + (py - oy) * (py - oy)) - r);
+                covered += d <= half;
+            }
+        }
+        if (covered) {
+            unsigned char value = (unsigned char)((covered * 255 + 8) / 16);
+            if (value > *out) *out = value;
+        }
+    }
+}
+
+static void draw_box_drawing(uint32_t scalar, RasterEntry *entry)
+{
+    const BoxSpec *spec = &box_specs[scalar - 0x2500];
+    int w = entry->glyph.width;
+    /* Light lines a tenth of the cell's width, at least a pixel; heavy
+       about twice that; double lines light, a light line apart. */
+    int light = (w + 5) / 10 > 0 ? (w + 5) / 10 : 1;
+    int heavy = light * 2 > light + 1 ? light * 2 : light + 1;
+    int arm[4], i;
+    for (i = 0; i < 4; ++i) arm[i] = (spec->arms >> (2 * i)) & 3;
+    if (spec->kind) { box_curve(spec, entry, light); return; }
+    box_arm(entry, 0, +1, arm[BOX_RIGHT], arm[BOX_LEFT], arm[BOX_UP], arm[BOX_DOWN], light, heavy, light, spec->dashes);
+    box_arm(entry, 0, -1, arm[BOX_LEFT], arm[BOX_RIGHT], arm[BOX_UP], arm[BOX_DOWN], light, heavy, light, spec->dashes);
+    box_arm(entry, 1, +1, arm[BOX_DOWN], arm[BOX_UP], arm[BOX_LEFT], arm[BOX_RIGHT], light, heavy, light, spec->dashes);
+    box_arm(entry, 1, -1, arm[BOX_UP], arm[BOX_DOWN], arm[BOX_LEFT], arm[BOX_RIGHT], light, heavy, light, spec->dashes);
+}
+
 /* ADR 0191: Braille (U+2800-28FF) is cell geometry, as terminals draw it --
    a font's dots rarely land on the cell grid, and graphs then show gaps.
    2 columns x 4 rows: bits 0-2 are dots 1-3 down the left column, bits 3-5
@@ -511,8 +892,99 @@ static int draw_outline_face(FT_Face face, int baseline, uint32_t scalar, Raster
     return 1;
 }
 
+/* ADR 0195: the glyph stack's two fitting rules, moved here from the
+   outline generator (ADRs 0156, 0191) so any text font gets them.
+   - FIT_ICON (Nerd and Blit icons): within 90% of the advance and the text
+     font's cap height, centred on half the cap height, never larger than
+     the icon's own one-advance design.
+   - FIT_SYMBOL (Noto symbols, Unifont, an overhanging text glyph): at the
+     text font's size, shrunk only to fit 90% of the advance and 95% of the
+     cell, centred across the cell, on its own baseline unless that would
+     leave the cell.
+   Returns 1 when drawn, 0 when the face has no such glyph, -1 on error.
+   The face's size is left changed: only the text face is shared, and its
+   caller restores it. */
+enum { FIT_ICON, FIT_SYMBOL };
+
+static int draw_fitted(BlitRaster *raster, FT_Face face, int rule, uint32_t scalar,
+                       RasterEntry *entry, int colour)
+{
+    FT_UInt index;
+    FT_BBox box;
+    FT_Vector delta;
+    FT_Bitmap *bitmap;
+    double natural, fit, bw, bh, ox, oy, limit;
+    int w = entry->glyph.width, h = entry->glyph.height, left, top, x, y, failed;
+    if (!face || !(index = FT_Get_Char_Index(face, scalar))) return 0;
+    if (FT_Load_Glyph(face, index, FT_LOAD_NO_SCALE)) return -1;
+    if (face->glyph->format != FT_GLYPH_FORMAT_OUTLINE) return 0;
+    FT_Outline_Get_CBox(&face->glyph->outline, &box);
+    bw = (double)(box.xMax - box.xMin);
+    bh = (double)(box.yMax - box.yMin);
+    if (bw <= 0 || bh <= 0) return 1;
+    if (rule == FIT_ICON) {
+        double advance = face->glyph->metrics.horiAdvance > 0 ?
+            (double)face->glyph->metrics.horiAdvance : face->units_per_EM * 0.6;
+        natural = w / advance;
+        limit = raster->cap / bh;
+    } else {
+        natural = (double)raster->em / face->units_per_EM;
+        limit = 0.95 * h / bh;
+    }
+    fit = natural;
+    if (0.9 * w / bw < fit) fit = 0.9 * w / bw;
+    if (limit < fit) fit = limit;
+    ox = w / 2.0 - fit * (box.xMin + box.xMax) / 2.0;
+    if (rule == FIT_ICON) oy = raster->cap / 2.0 - fit * (box.yMin + box.yMax) / 2.0;
+    else {
+        double above = fit * box.yMax, below = -fit * box.yMin;
+        oy = 0;
+        if (above > raster->baseline) oy = raster->baseline - above;
+        else if (below > h - raster->baseline) oy = below - (h - raster->baseline);
+    }
+    if (FT_Set_Char_Size(face, 0, (FT_F26Dot6)(fit * face->units_per_EM * 64.0 + 0.5), 72, 72))
+        return -1;
+    left = (int)floor(ox);
+    delta.x = (FT_Pos)((ox - left) * 64.0);
+    delta.y = (FT_Pos)(oy * 64.0);
+    FT_Set_Transform(face, NULL, &delta);
+    failed = FT_Load_Glyph(face, index, FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL |
+                           (colour ? FT_LOAD_COLOR : 0));
+    FT_Set_Transform(face, NULL, NULL);
+    if (failed) return -1;
+    bitmap = &face->glyph->bitmap;
+    if (bitmap->pitch < 0 ||
+        (!colour && (bitmap->pixel_mode != FT_PIXEL_MODE_GRAY || bitmap->num_grays != 256)) ||
+        (colour && bitmap->pixel_mode != FT_PIXEL_MODE_BGRA)) return -1;
+    left += face->glyph->bitmap_left;
+    top = raster->baseline - face->glyph->bitmap_top;
+    /* Fitted to the cell, so at most hinting's pixel can stray: trim it. */
+    for (y = 0; y < (int)bitmap->rows; ++y) for (x = 0; x < (int)bitmap->width; ++x) {
+        int cx = left + x, cy = top + y;
+        unsigned char *out;
+        const unsigned char *in;
+        if (cx < 0 || cy < 0 || cx >= w || cy >= h) continue;
+        out = entry->pixels + cy * entry->glyph.stride + cx * (int)entry->glyph.format;
+        in = bitmap->buffer + y * bitmap->pitch + x * (colour ? 4 : 1);
+        if (!colour) out[0] = in[0];
+        else { out[0] = in[2]; out[1] = in[1]; out[2] = in[0]; out[3] = in[3]; }
+    }
+    return 1;
+}
+
+/* The text font's glyph at the cell's size; one that would overhang the
+   cell (Hack's long arrows, U+27F5-27FF) is shrunk to fit, not dropped to
+   the PSF's '?'. */
 static int draw_outline(BlitRaster *raster, uint32_t scalar, RasterEntry *entry)
-{ return draw_outline_face(raster->outline, raster->baseline, scalar, entry); }
+{
+    int result = draw_outline_face(raster->outline, raster->baseline, scalar, entry);
+    if (result == 0 && raster->outline && FT_Get_Char_Index(raster->outline, scalar)) {
+        result = draw_fitted(raster, raster->outline, FIT_SYMBOL, scalar, entry,
+                             entry->glyph.format == BLIT_RASTER_RGBA_PREMULTIPLIED);
+        if (FT_Set_Pixel_Sizes(raster->outline, 0, raster->em)) return -1;
+    }
+    return result;
+}
 
 static int outline_has_colour(FT_Face face, uint32_t scalar)
 {
@@ -627,7 +1099,12 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *key,
     int columns = key->columns;
     int arabic = raster->arabic && arabic_scalar(scalar);
     int text_selector = key->length == 2 && key->scalars[1] == 0xfe0e && blit_emoji_variation(scalar);
-    int outline_colour = !arabic && key->length == 1 && !protected_geometry(scalar) &&
+    /* ADR 0195: Blit's own icons come first: its colour icons in plane 16
+       and the pen at U+270E, whatever the text font has there. */
+    int blit_icon = !arabic && key->length == 1 && raster->icons &&
+        (scalar >= 0x100000 || scalar == 0x270e) && !bar_corner(scalar) &&
+        FT_Get_Char_Index(raster->icons, scalar);
+    int outline_colour = !arabic && !blit_icon && key->length == 1 && !protected_geometry(scalar) &&
         !invisible_format(scalar) && outline_has_colour(raster->outline, scalar);
     int result = 0, x, y;
     slot = (unsigned)(blit_cell_cluster_hash(key) % RASTER_SETS);
@@ -663,6 +1140,8 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *key,
         FT_Get_Char_Index(raster->colour, scalar) ?
         BLIT_RASTER_RGBA_PREMULTIPLIED : BLIT_RASTER_COVERAGE;
     if (outline_colour) next.glyph.format = BLIT_RASTER_RGBA_PREMULTIPLIED;
+    if (blit_icon) next.glyph.format = outline_has_colour(raster->icons, scalar) ?
+        BLIT_RASTER_RGBA_PREMULTIPLIED : BLIT_RASTER_COVERAGE;
     if (arabic) next.glyph.format = BLIT_RASTER_COVERAGE;
     if (text_selector) next.glyph.format = BLIT_RASTER_COVERAGE;
     else if (key->length > 1 && !arabic) {
@@ -683,6 +1162,9 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *key,
         draw_powerline(scalar,&next); result=1;
     } else if (key->length == 1 && bar_corner(scalar)) {
         draw_bar_corner(scalar, &next); result = 1;
+    } else if (key->length == 1 && scalar >= 0x2500 && scalar <= 0x257f &&
+               next.glyph.format == BLIT_RASTER_COVERAGE) {
+        draw_box_drawing(scalar, &next); result = 1;
     } else if (key->length == 1 && scalar >= 0x2800 && scalar <= 0x28ff &&
                next.glyph.format == BLIT_RASTER_COVERAGE) {
         draw_braille(scalar, &next); result = 1;
@@ -691,12 +1173,29 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *key,
                draw_block_element(scalar, &next)) {
         result = 1;
     } else if (key->length == 1 && invisible_format(scalar)) result = 1;
+    else if (blit_icon)
+        result = draw_fitted(raster, raster->icons, FIT_ICON, scalar, &next,
+                             next.glyph.format == BLIT_RASTER_RGBA_PREMULTIPLIED);
     else if (next.glyph.format == BLIT_RASTER_RGBA_PREMULTIPLIED && !outline_colour)
         result = draw_colour_glyph(raster, colour_index, &next);
     else if (!protected_geometry(scalar)) {
-        result = draw_outline(raster, scalar, &next);
+        /* ADR 0195, the stack: Nerd's private-use icons from Nerd Symbols
+           whatever the text font puts there; then the text font; Blit's
+           monochrome text glyphs; any other Nerd icon; text emoji where
+           asked for; the Noto symbol faces; and Unifont last. */
+        int pua = (scalar >= 0xe000 && scalar <= 0xf8ff) ||
+            (scalar >= 0xf0000 && scalar <= 0xffffd);
+        int face;
+        if (pua) result = draw_fitted(raster, raster->nerd, FIT_ICON, scalar, &next, 0);
+        if (!result) result = draw_outline(raster, scalar, &next);
+        if (!result) result = draw_fitted(raster, raster->icons, FIT_ICON, scalar, &next, 0);
+        if (!result && !pua) result = draw_fitted(raster, raster->nerd, FIT_ICON, scalar, &next, 0);
         if (!result && (text_selector || blit_emoji_variation(scalar)))
             result = draw_text_emoji(raster, scalar, &next);
+        for (face = 0; !result && face < 3; ++face)
+            result = draw_fitted(raster, raster->symbols[face], FIT_SYMBOL, scalar, &next, 0);
+        for (face = 0; !result && face < 2; ++face)
+            result = draw_fitted(raster, raster->unifont[face], FIT_SYMBOL, scalar, &next, 0);
     }
     if (result < 0 || (outline_colour && !result)) { free(next.pixels); return 0; }
     if (!result && key->length > 1 && !text_selector) { free(next.pixels); return 0; }

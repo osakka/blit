@@ -16,7 +16,7 @@ from fontTools.ttLib import TTFont
 
 root = Path(__file__).resolve().parents[2]
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument('--profile', choices=['retro', 'modern'], required=True)
+parser.add_argument('--profile', choices=['modern'], required=True)  # ADR 0195: Retro retired
 parser.add_argument('source', type=Path)
 parser.add_argument('output', type=Path)
 args = parser.parse_args()

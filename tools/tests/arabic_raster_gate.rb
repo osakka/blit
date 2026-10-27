@@ -4,10 +4,11 @@ require 'tmpdir'
 require 'json'
 require 'digest'
 root = File.expand_path('../..', __dir__)
-abort 'usage: arabic_raster_gate.rb [RETRO_ARABIC MODERN_ARABIC]' unless [0,2].include?(ARGV.size)
+abort 'usage: arabic_raster_gate.rb [ARABIC]' unless [0,1].include?(ARGV.size)
 Dir.chdir(root) do
   manifest = JSON.parse(File.read('assets/fonts/arabic-fonts.source.json'))
-  %w[retro modern].each do |profile|
+  # ADR 0195: one Arabic companion serves every text font.
+  %w[modern].each do |profile|
     entry = manifest.fetch(profile)
     raise "wrong #{profile} font" unless Digest::SHA256.file("assets/fonts/#{entry.fetch('file')}").hexdigest == entry.fetch('sha256')
     raise 'license identity mismatch' unless Digest::SHA256.file("assets/fonts/#{entry.fetch('license_file')}").hexdigest == entry.fetch('license_sha256')
@@ -27,7 +28,7 @@ Dir.chdir(root) do
       end
     end
   end
-  inputs = ARGV.empty? ? %w[retro modern].map { |p| "assets/fonts/#{manifest.fetch(p).fetch('file')}" } : ARGV
+  arabic = ARGV.empty? ? "assets/fonts/#{manifest.fetch('modern').fetch('file')}" : ARGV[0]
   Dir.mktmpdir('blit-arabic-gate') do |work|
     binary = File.join(work, 'gate')
     input = File.join(work, 'cells.txt')
@@ -36,9 +37,8 @@ Dir.chdir(root) do
       "-I#{root}/build/deps/prefix/include/freetype2",
       'tools/tests/arabic_raster_gate.c', 'src/blit_raster.c', 'src/blit_font.c',
       '/lib/x86_64-linux-gnu/libfreetype.so.6', '/lib/x86_64-linux-gnu/libharfbuzz.so.0', '-o', binary)
-    passed = inputs.zip(%w[Retro Modern]).map do |arabic, profile|
-      command = [binary, 'assets/fonts/Blit-Terminus16.psf',
-        "assets/fonts/Blit#{profile}Nerd-Regular.ttf", arabic, input]
+    passed = %w[text/Hack-Regular.ttf text/3270-Regular.ttf].map do |text|
+      command = [binary, 'assets/fonts/Blit-Terminus16.psf', "assets/fonts/#{text}", arabic, input]
       command = ['valgrind','--error-exitcode=99','--leak-check=full','--errors-for-leak-kinds=definite,indirect',*command] if ENV['BLIT_FONT_VALGRIND']=='1'
       system(*command)
     end

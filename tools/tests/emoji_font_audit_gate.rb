@@ -10,9 +10,9 @@ Dir.chdir(root) do
   report = JSON.parse(out)
   raise 'audit scope mislabelled' unless report.fetch('scope') == 'font_shaping_only_not_colour_raster_or_terminal_acceptance'
   raise 'RGI coverage gap' unless report.fetch('rgi_failures').zero? && report.fetch('failures').empty?
-  raise 'wrong audit font' unless report.fetch('font_sha256') == JSON.parse(File.read('assets/fonts/modern-fonts.source.json')).fetch('colour').fetch('sha256')
+  raise 'wrong audit font' unless report.fetch('font_sha256') == JSON.parse(File.read('assets/fonts/fonts.source.json')).fetch('colour').fetch('sha256')
   # An ordinary text font must fail the same complete-emoji requirement.
-  out, _err, status = Open3.capture3(*command, '--font', 'assets/fonts/BlitModernNerd-Regular.ttf')
+  out, _err, status = Open3.capture3(*command, '--font', 'assets/fonts/text/Hack-Regular.ttf')
   raise 'missing-glyph negative fixture passed' if status.success?
   negative = JSON.parse(out)
   raise 'negative fixture did not expose missing/split emoji' unless negative.fetch('rgi_failures') > 0

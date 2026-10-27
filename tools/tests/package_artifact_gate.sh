@@ -59,11 +59,11 @@ manifest_hash_matches hibr_adapter_sha256 \
 test -x "$stage/usr/lib/blit/bin/blit-server"
 test -f "$stage/usr/lib/blit/hibr/console-blit.so"
 test -f "$stage/usr/lib/blit/fonts/Blit-Spleen16.psf"
-test -f "$stage/usr/lib/blit/fonts/BlitRetroNerd-Regular.ttf"
+test -f "$stage/usr/lib/blit/fonts/text/3270-Regular.ttf"
 test -f "$stage/usr/lib/blit/fonts/nerd-glyphnames-v3.4.0.json"
-test -f "$stage/usr/lib/blit/fonts/licenses/3270-LICENSE.txt"
+test -f "$stage/usr/lib/blit/fonts/licenses/IBM3270-LICENSE.txt"
 BLIT_GATE_FONT_ROOT="$stage/usr/lib/blit/fonts" \
-    ruby "$root/tools/tests/modern_font_assets_gate.rb"
+    ruby "$root/tools/tests/font_assets_gate.rb"
 test -f "$stage/usr/lib/blit/fonts/licenses/Spleen-LICENSE.txt"
 test -f "$stage/usr/lib/blit/fonts/licenses/Terminus-OFL.txt"
 test -f "$stage/usr/lib/blit/fonts/licenses/DejaVu-notice.txt"
@@ -80,20 +80,22 @@ source_commit=$(sed -n 's/^source_commit: //p' "$manifest")
 # old profiles named, a stale build copy among them, and the stray Hack copy
 # must not come back.
 for gone in Uni2-Terminus16.psf Lat15-Terminus16.psf Hack-Regular.ttf Hack-LICENSE.txt \
-        Blit-Hibr-Terminus16.psf Blit-Hibr-Spleen16.psf Blit-Hibr-Unifont16.psf; do
+        Blit-Hibr-Terminus16.psf Blit-Hibr-Spleen16.psf Blit-Hibr-Unifont16.psf \
+        BlitModernNerd-Regular.ttf BlitRetroNerd-Regular.ttf BlitJetBrainlessNerd-Regular.ttf \
+        BlitArabicRetro.ttf modern-fonts.source.json; do
     if [ -e "$stage/usr/lib/blit/fonts/$gone" ]; then
         echo "PACKAGE_ARTIFACT_FAIL retired font shipped: $gone" >&2
         exit 1
     fi
 done
-for font_asset in Blit-Terminus16.psf Blit-Unifont16.psf Blit-Spleen16.psf Blit-Spleen16.source.json licenses/Spleen-LICENSE.txt BlitModernNerd-Regular.ttf BlitRetroNerd-Regular.ttf BlitJetBrainlessNerd-Regular.ttf licenses/JetBrainsMono-OFL.txt NotoColorEmoji.ttf NotoEmojiText.ttf NotoEmojiText-LICENSE.txt licenses/HackNerd-LICENSE.txt licenses/NerdFonts-LICENSE.txt licenses/FontAwesome-LICENSE.txt NotoColorEmoji-LICENSE.txt modern-fonts.source.json icons/catalogue.json icons/LICENSE.txt icons/blit.svg icons/hibr-pen.svg icons/wifi-bars.svg icons/bluetooth.svg icons/berkanan.svg icons/wired.svg; do
+for font_asset in Blit-Terminus16.psf Blit-Unifont16.psf Blit-Spleen16.psf Blit-Spleen16.source.json licenses/Spleen-LICENSE.txt text/Hack-Regular.ttf text/3270-Regular.ttf text/JetBrainsMonoNL-Regular.ttf text/FiraCode-Regular.ttf text/IBMPlexMono-Regular.ttf text/IosevkaTerm-Regular.ttf licenses/Hack-LICENSE.md licenses/IBM3270-LICENSE.txt licenses/JetBrainsMono-OFL.txt licenses/FiraCode-OFL.txt licenses/IBMPlexMono-OFL.txt licenses/Iosevka-LICENSE.md BlitIcons-Regular.ttf SymbolsNerdFontMono-Regular.ttf licenses/NerdFontsSymbolsOnly-LICENSE.txt NotoSansSymbols2-Regular.ttf NotoSansSymbols-Regular.ttf NotoSansMath-Regular.ttf Unifont-Regular.otf UnifontUpper-Regular.otf licenses/Unifont-LICENSE.txt NotoColorEmoji.ttf NotoEmojiText.ttf NotoEmojiText-LICENSE.txt licenses/NerdFonts-LICENSE.txt licenses/FontAwesome-LICENSE.txt NotoColorEmoji-LICENSE.txt fonts.source.json icons/catalogue.json icons/LICENSE.txt icons/blit.svg icons/hibr-pen.svg icons/wifi-bars.svg icons/bluetooth.svg icons/berkanan.svg icons/wired.svg; do
     cmp -s <(git -C "$root" show "$source_commit:assets/fonts/$font_asset") \
         "$stage/usr/lib/blit/fonts/$font_asset" || {
         echo "PACKAGE_ARTIFACT_FAIL font differs from recorded source: $font_asset" >&2
         exit 1
     }
 done
-for font_asset in BlitArabicRetro.ttf BlitArabicModern.ttf arabic-fonts.source.json arabic-specimens.json KawkabMono-LICENSE.txt FreeMono-LICENSE.txt FreeMono-README.txt FreeMono-AUTHORS.txt sources/freefont-src-20120503.tar.gz; do
+for font_asset in BlitArabicModern.ttf arabic-fonts.source.json arabic-specimens.json FreeMono-LICENSE.txt FreeMono-README.txt FreeMono-AUTHORS.txt sources/freefont-src-20120503.tar.gz; do
     cmp -s <(git -C "$root" show "$source_commit:assets/fonts/$font_asset") \
         "$stage/usr/lib/blit/fonts/$font_asset" || {
         echo "PACKAGE_ARTIFACT_FAIL Arabic asset differs from recorded source: $font_asset" >&2

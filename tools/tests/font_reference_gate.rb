@@ -30,7 +30,10 @@ special = File.read(File.join(pages, 'special.md'))
   raise 'private scalar JSON encoding incorrect' unless JSON.parse(encoded).codepoints == [hex.to_i(16)]
 end
 coverage = JSON.parse(File.read(File.join(pages, 'coverage.json')))
-raise 'native inventory incomplete' unless coverage.fetch('faces').size == 6
+# ADR 0195: every shipped text font, the stack, the Arabic and emoji faces.
+manifest = JSON.parse(File.read(File.join(fonts, 'fonts.source.json')))
+expected = manifest.fetch('text').size + 2 + manifest.fetch('stack').fetch('symbols').size + manifest.fetch('stack').fetch('unifont').size + 3
+raise 'native inventory incomplete' unless coverage.fetch('faces').size == expected
 coverage.fetch('faces').each_value do |entry|
   raise 'font hash drift' unless Digest::SHA256.file(File.join(fonts, entry.fetch('file'))).hexdigest == entry.fetch('sha256')
   last = -2
@@ -64,4 +67,4 @@ public_entries.each do |path|
   raise "internal URL in public entry point: #{path}" if File.read(File.join(root,path)).match?(%r{https?://git\.home\.arpa})
 end
 raise 'public reference address missing' unless File.read(File.join(root,'docs/font-reference.md')).include?('https://github.com/osakka/blit/blob/main/docs/font-reference.md')
-puts "FONT_REFERENCE_PASS nerd_names=#{found.size} nerd_scalars=#{found.values.uniq.size} originals=#{icons['icons'].size} emoji_entries=#{emoji.size} native_faces=6 links=local_exact scope=documentation_not_renderer"
+puts "FONT_REFERENCE_PASS nerd_names=#{found.size} nerd_scalars=#{found.values.uniq.size} originals=#{icons['icons'].size} emoji_entries=#{emoji.size} native_faces=#{coverage.fetch(%q(faces)).size} links=local_exact scope=documentation_not_renderer"

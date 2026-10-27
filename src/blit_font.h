@@ -44,6 +44,23 @@ void blit_font_load(BlitFont *font);
 int blit_font_load_wide(BlitFont *font);
 int blit_font_load_path(BlitFont *font, const char *path);
 void blit_font_free(BlitFont *font);
+/* ADR 0195: the font list is discovered from the fonts root (see
+   blit_font.c). blit_font_discover rescans; the other calls read the last
+   scan, scanning once if none was made. */
+const char *blit_font_root(void);
+const char *blit_font_root_file(const char *name);
+int blit_font_is_outline(const char *path);
+void blit_font_discover(void);
+/* Reads an outline font: 1 with its family name when it is a usable text
+   font, else 0 with the reason. Set by the native raster's owner; without
+   one, outline files are listed as rejected. */
+typedef int (*BlitFontOutlineInspector)(const char *path, char *family, size_t family_size,
+                                        char *reason, size_t reason_size);
+void blit_font_set_outline_inspector(BlitFontOutlineInspector inspector);
+const char *blit_font_profile_title(int index);
+int blit_font_profile_local(int index);
+int blit_font_rejected_count(void);
+const char *blit_font_rejected(int index, const char **reason);
 int blit_font_profile_count(void);
 const char *blit_font_profile_id(int index);
 const char *blit_font_profile_path(int index);

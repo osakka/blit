@@ -57,15 +57,15 @@ int main(int argc, char **argv)
         int x, y, partial = 0, coloured = 0;
         CHECK(raster);
         {
-            /* An 8px point sample used to miss source row7 entirely. */
+            /* ADR 0195: box drawing is cell geometry. U+2500 is a solid
+               light line through the cell's centre, edge to edge, at every
+               size, so neighbouring cells join. */
             BlitRasterGlyph g;
-            int ink = 0;
+            int light = (width + 5) / 10 > 0 ? (width + 5) / 10 : 1;
+            int line = size / 2 - light / 2;
             CHECK(blit_raster_get(raster, 0x2500, 1, &g));
             for (y = 0; y < size; ++y) for (x = 0; x < width; ++x)
-                ink += g.pixels[y * g.stride + x] != 0;
-            CHECK(ink);
-            if (size == 8) for (x = 0; x < width; ++x)
-                CHECK(g.pixels[3 * g.stride + x] == 127);
+                CHECK(g.pixels[y * g.stride + x] == (y >= line && y < line + light ? 255 : 0));
             /* Preserve complete half-block rows, including odd cell sizes. */
             CHECK(blit_raster_get(raster, 0x2580, 1, &g));
             for (y = 0; y < size; ++y) for (x = 0; x < width; ++x)

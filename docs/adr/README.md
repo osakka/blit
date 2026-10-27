@@ -212,6 +212,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0192 — A session's output is taken in full buffers, not one PTY read per loop pass](0192-terminal-output-in-full-buffers.md)
 - [0193 — Touchpad drag and typing: tap-and-drag, a pressed pad follows the moving finger, and the pad pauses while typing](0193-touchpad-drag.md)
 - [0194 — Blit's own fonts only, renamed; JetBrains Mono as Blit JetBrainless](0194-font-set-cleanup-and-jetbrainless.md)
+- [0195 — Text fonts are discovered; every glyph comes from one shipped stack](0195-glyph-stack.md)
 
 ## Adding an ADR
 

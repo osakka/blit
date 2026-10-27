@@ -25,11 +25,12 @@ workloads = {
   # one cell to isolate replacement policy, not terminal width negotiation.
   'three_colliding_keys' => [0x41, 0xfec1, 0x1f341]
 }
-results = %w[Retro Modern].flat_map do |profile|
+# ADR 0195: plain text fonts with the stack; one Arabic companion.
+results = { 'Retro' => '3270-Regular.ttf', 'Modern' => 'Hack-Regular.ttf' }.flat_map do |profile, text|
   workloads.map do |name, keys|
     args = [out, 'assets/fonts/Blit-Terminus16.psf',
-            "assets/fonts/Blit#{profile}Nerd-Regular.ttf", 'assets/fonts/NotoColorEmoji.ttf',
-            "assets/fonts/BlitArabic#{profile}.ttf"]
+            "assets/fonts/text/#{text}", 'assets/fonts/NotoColorEmoji.ttf',
+            'assets/fonts/BlitArabicModern.ttf']
     stdout, stderr, status = Open3.capture3(*args, stdin_data: keys.map { |k| k.to_s(16) }.join("\n") + "\n")
     abort "#{profile}/#{name} failed (#{status.exitstatus}): #{stderr}" unless status.success?
     JSON.parse(stdout).merge('profile' => profile, 'workload' => name)
@@ -42,8 +43,8 @@ if ARGV == ['--check']
 end
 files = sources + %w[src/blit_raster.h src/blit_font.h src/blit_cell_cluster.h
   assets/fonts/hibr-ui-glyphs.json assets/fonts/Blit-Terminus16.psf
-  assets/fonts/BlitRetroNerd-Regular.ttf assets/fonts/BlitModernNerd-Regular.ttf
-  assets/fonts/BlitArabicRetro.ttf assets/fonts/BlitArabicModern.ttf assets/fonts/NotoColorEmoji.ttf]
+  assets/fonts/text/3270-Regular.ttf assets/fonts/text/Hack-Regular.ttf
+  assets/fonts/BlitArabicModern.ttf assets/fonts/NotoColorEmoji.ttf]
 puts JSON.pretty_generate({
   'scope' => 'local shared-raster cache only; not live drawing, SDL atlas, or display FPS',
   'cell_pixels' => [11, 22], 'columns' => 1,

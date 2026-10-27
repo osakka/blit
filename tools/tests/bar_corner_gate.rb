@@ -9,7 +9,7 @@ Dir.chdir(root) do
       'tools/tests/bar_corner_gate.c','src/blit_font.c','src/blit_raster.c',
       ENV.fetch('BLIT_FREETYPE_LIBRARY','/lib/x86_64-linux-gnu/libfreetype.so.6'),
       ENV.fetch('BLIT_HARFBUZZ_LIBRARY','/lib/x86_64-linux-gnu/libharfbuzz.so.0'),'-o',binary)
-    %w[BlitModernNerd-Regular.ttf BlitRetroNerd-Regular.ttf].each do |face|
+    %w[text/Hack-Regular.ttf text/3270-Regular.ttf].each do |face|
       command=[binary,'assets/fonts/Blit-Terminus16.psf',"assets/fonts/#{face}",'assets/fonts/NotoColorEmoji.ttf']
       command=['valgrind','--error-exitcode=99','--leak-check=full','--errors-for-leak-kinds=definite,indirect',*command] if ENV['BLIT_FONT_VALGRIND']=='1'
       raise "bar corners failed: #{face}" unless system(*command)

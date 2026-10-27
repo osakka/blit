@@ -2,7 +2,7 @@
 
 [Developer guide](../font-reference.md) · [Canonical runtime catalogue](../../assets/fonts/icons/catalogue.json)
 
-Generated from the same catalogue served by `GET /v1/fonts/icons`. These original intrinsic-colour icons are one cell each in both native profiles. Supplementary private-use assignments are a Blit contract, not standard Unicode or Nerd Fonts assignments.
+Generated from the same catalogue served by `GET /v1/fonts/icons`. These original intrinsic-colour icons are one cell each in every native font, from the glyph stack. Supplementary private-use assignments are a Blit contract, not standard Unicode or Nerd Fonts assignments.
 
 | Semantic ID | Codepoint | JSON string | Signal level |
 | --- | --- | --- | --- |
@@ -28,7 +28,7 @@ Berkanan preserves its runic meaning; it is not the Bluetooth icon. Existing sta
 
 ## Cell geometry
 
-Drawn by the shared raster at every cell size, edge to edge, in the terminal foreground: no outline font carries them, so neighbouring cells join without a seam. One cell each, in both native profiles.
+Drawn by the shared raster at every cell size, edge to edge, in the terminal foreground: no outline font carries them, so neighbouring cells join without a seam. One cell each, in every font.
 
 | Semantic ID | Codepoint | JSON string | Shape |
 | --- | --- | --- | --- |

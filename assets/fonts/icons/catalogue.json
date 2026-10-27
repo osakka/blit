@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "profiles": ["blit-modern", "blit-retro"],
+  "profiles": ["*"],
   "columns": 1,
   "namespace": "Blit private-use plane16; not a Unicode or Nerd assignment",
   "license": "LICENSE.txt",

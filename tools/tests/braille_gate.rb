@@ -57,7 +57,7 @@ Dir.mktmpdir('blit-braille') do |root|
     Timeout.timeout(15) { loop { break if (request('GET', '/v1/version').first rescue nil) == 200; sleep 0.1 } }
     text = GLYPHS.keys.map { |cp| [cp].pack('U') }.join(' ')
     [22, 16].each do |size|
-      code, = request('PUT', '/v1/fonts', { font_id: 'blit-modern', size_px: size })
+      code, = request('PUT', '/v1/fonts', { font_id: 'hack', size_px: size })
       check(code == 200, "font #{size}px -> #{code}")
       sleep 0.5
       code, session = request('POST', '/v1/terminal-sessions',

@@ -19,8 +19,9 @@ request = lambda do |method, path, body = nil, status = 200|
   JSON.parse(r.body)
 end
 Dir.mktmpdir('blit-modern-api') do |work|
-  fonts = File.join(work, 'fonts'); Dir.mkdir(fonts)
-  %w[Blit-Terminus16.psf Blit-Spleen16.psf BlitModernNerd-Regular.ttf BlitRetroNerd-Regular.ttf BlitArabicModern.ttf BlitArabicRetro.ttf NotoColorEmoji.ttf NotoEmojiText.ttf].each do |asset|
+  fonts = File.join(work, 'fonts'); Dir.mkdir(fonts); Dir.mkdir(File.join(fonts, 'text'))
+  # ADR 0195: a fonts root holds the stack; text/ holds the text fonts.
+  %w[Blit-Terminus16.psf Blit-Spleen16.psf text/Hack-Regular.ttf text/3270-Regular.ttf BlitArabicModern.ttf NotoColorEmoji.ttf NotoEmojiText.ttf].each do |asset|
     FileUtils.copy_file(File.join(root, 'assets/fonts', asset), File.join(fonts, asset))
   end
   env = TestProfile.environment.merge('BLIT_SETTINGS'=>'load',
@@ -45,16 +46,16 @@ Dir.mktmpdir('blit-modern-api') do |work|
   end
   begin
     launch.call
-    result = request.call('PUT', '/v1/fonts', {font_id:'blit-modern', size_px:23})
+    result = request.call('PUT', '/v1/fonts', {font_id:'hack', size_px:23})
     raise 'native face not selected' unless result.dig('active', 'rasterization') == 'native-antialiased'
     raise 'colour support absent' unless result.dig('active', 'colour_glyphs') == true
     raise 'Arabic companion absent' unless result.dig('active','arabic_companion','family') == 'Blit Arabic Modern'
-    %w[blit-retro blit-modern].each do |profile|
+    %w[ibm-3270 hack].each do |profile|
       request.call('PUT', '/v1/fonts', {font_id:profile})
       (8..64).each do |size|
         active = request.call('PUT', '/v1/fonts', {size_px:size}).fetch('active')
         raise "incorrect #{profile} #{size}px metrics" unless active['size_px'] == size && active.dig('cell_pixels','height') == size && active['id'] == profile && active['rasterization'] == 'native-antialiased'
-        raise 'wrong companion identity' unless File.basename(active.dig('arabic_companion','path')) == "BlitArabic#{profile=='blit-modern'?'Modern':'Retro'}.ttf"
+        raise 'wrong companion identity' unless File.basename(active.dig('arabic_companion','path')) == 'BlitArabicModern.ttf'
       end
     end
     request.call('PUT', '/v1/fonts', {size_px:23})
@@ -66,11 +67,11 @@ Dir.mktmpdir('blit-modern-api') do |work|
     active = request.call('PUT', '/v1/fonts', {font_id:'blit-spleen16'}).fetch('active')
     raise 'retro policy changed' unless active['size_px'] == 23 && active['rasterization'] == 'bitmap-nearest'
     raise 'bitmap misreports Arabic' unless active['arabic_companion'].nil?
-    active = request.call('PUT', '/v1/fonts', {font_id:'blit-modern'}).fetch('active')
+    active = request.call('PUT', '/v1/fonts', {font_id:'hack'}).fetch('active')
     raise 'modern policy changed' unless active['size_px'] == 23 && active['rasterization'] == 'native-antialiased'
-    %w[blit-modern blit-retro].each do |profile|
+    %w[hack ibm-3270].each do |profile|
       request.call('PUT', '/v1/fonts', {font_id:profile})
-      ['NotoColorEmoji.ttf','NotoEmojiText.ttf',"BlitArabic#{profile=='blit-modern'?'Modern':'Retro'}.ttf"].each do |asset|
+      ['NotoColorEmoji.ttf','NotoEmojiText.ttf','BlitArabicModern.ttf'].each do |asset|
         path = File.join(fonts, asset)
         File.rename(path, path + '.missing')
         begin

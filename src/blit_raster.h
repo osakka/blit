@@ -56,4 +56,7 @@ void blit_raster_attach(BlitFont *font, BlitRaster *raster);
 uint32_t blit_raster_blend(const BlitRasterGlyph *glyph, int x, int y,
                          uint32_t foreground, uint32_t background);
 
+int blit_raster_inspect_outline(const char *path, char *family, size_t family_size,
+                                char *reason, size_t reason_size);
+
 #endif

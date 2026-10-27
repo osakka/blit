@@ -67,7 +67,7 @@ def shaped(font, scalars):
         buffer_close(b)
 
 samples = json.loads((root / 'assets/fonts/arabic-specimens.json').read_text())['samples']
-for profile in ('Retro', 'Modern'):
+for profile in ('Modern',):  # ADR 0195: the one Arabic companion
     blob = blob_open(str(root / f'assets/fonts/BlitArabic{profile}.ttf').encode())
     if not blob:
         raise SystemExit('cannot open reference font')

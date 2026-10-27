@@ -29,7 +29,7 @@ Dir.mktmpdir('blit-emoji-api') do |work|
         end
       end
     end
-    request.call('PUT', '/v1/fonts', {font_id:'blit-modern',size_px:16})
+    request.call('PUT', '/v1/fonts', {font_id:'hack',size_px:16})
     session = request.call('POST', '/v1/terminal-sessions', {command:'/bin/cat', surface:{width:16,height:2}}, 201)
     path = "/v1/surfaces/#{session.fetch('surface_id')}/cells"
     samples = ["❤️", "1️⃣", "🇬🇧", "👍🏽", "👩‍💻", "👨‍👩‍👧‍👦", "🏴\u{e0067 e0062 e0065 e006e e0067 e007f}"]

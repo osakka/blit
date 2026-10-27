@@ -228,7 +228,8 @@ suite_font() {
     run_gate hibr_font_manifest_gate.py python3 tools/tests/hibr_font_manifest_gate.py
     run_gate font_fit_gate.py python3 tools/tests/font_fit_gate.py
     run_gate retro_font_gate.py python3 tools/tests/retro_font_gate.py
-    run_gate modern_font_assets_gate.rb ruby tools/tests/modern_font_assets_gate.rb
+    run_gate font_assets_gate.rb ruby tools/tests/font_assets_gate.rb
+    run_gate font_discovery_gate.rb ruby tools/tests/font_discovery_gate.rb
     run_gate font_reference_gate.rb ruby tools/tests/font_reference_gate.rb
     run_gate powerline_geometry_gate.rb ruby tools/tests/powerline_geometry_gate.rb
     run_gate bar_corner_gate.rb ruby tools/tests/bar_corner_gate.rb
@@ -255,13 +256,13 @@ suite_font() {
     fi
     run_gate modern_nerd_gate.sh sh tools/tests/modern_nerd_gate.sh
     run_gate font_raster_gate.sh sh tools/tests/font_raster_gate.sh \
-        "$FONT" "${BLIT_GATE_OUTLINE:-$ROOT/assets/fonts/BlitModernNerd-Regular.ttf}" \
+        "$FONT" "${BLIT_GATE_OUTLINE:-$ROOT/assets/fonts/text/Hack-Regular.ttf}" \
         "${BLIT_GATE_COLOUR:-$ROOT/assets/fonts/NotoColorEmoji.ttf}"
     run_gate font_kms_raster sh tools/tests/font_backend_raster_gate.sh
     run_gate retro_outline_raster sh tools/tests/font_raster_gate.sh \
-        "$FONT" "$ROOT/assets/fonts/BlitRetroNerd-Regular.ttf" \
+        "$FONT" "$ROOT/assets/fonts/text/3270-Regular.ttf" \
         "$ROOT/assets/fonts/NotoColorEmoji.ttf" 20
-    run_gate retro_outline_kms env BLIT_GATE_OUTLINE="$ROOT/assets/fonts/BlitRetroNerd-Regular.ttf" \
+    run_gate retro_outline_kms env BLIT_GATE_OUTLINE="$ROOT/assets/fonts/text/3270-Regular.ttf" \
         sh tools/tests/font_backend_raster_gate.sh
     run_gate modern_font_api_gate.rb ruby tools/tests/modern_font_api_gate.rb
     run_gate host_font_probe_gate.rb ruby tools/tests/host_font_probe_gate.rb

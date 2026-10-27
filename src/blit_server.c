@@ -16578,11 +16578,14 @@ static void fonts_json(const BlitRuntime *runtime, char *body, size_t capacity)
         arabic_json,
         (unsigned long)blit_raster_cached_bytes(runtime->font.raster_state),
         blit_raster_render_count(runtime->font.raster_state));
+    /* ADR 0195: the list is what the font directories hold right now. */
+    blit_font_discover();
     for (i = 0; i < blit_font_profile_count() && used + 128 < capacity; ++i) {
         const char *id = blit_font_profile_id(i);
         const char *path = blit_font_profile_path(i);
-        char profile_path[1024];
+        char profile_path[1024], title[256];
         char companion_json[2200]="null";
+        json_escape(blit_font_profile_title(i), title, sizeof(title));
         json_escape(path, profile_path, sizeof(profile_path));
         if (blit_font_arabic_path(path)) {
             char escaped[2048];
@@ -16590,9 +16593,23 @@ static void fonts_json(const BlitRuntime *runtime, char *body, size_t capacity)
             snprintf(companion_json,sizeof(companion_json),"\"%s\"",escaped);
         }
         used += (size_t)snprintf(body + used, capacity - used,
-            "%s{\"id\":\"%s\",\"path\":\"%s\",\"available\":%s,\"rasterization\":\"%s\",\"arabic_companion_path\":%s}",
-            first ? "" : ",", id, profile_path, blit_font_profile_available(i) ? "true" : "false",
-            strstr(path, ".ttf") ? "native-antialiased" : "bitmap-nearest",companion_json);
+            "%s{\"id\":\"%s\",\"title\":\"%s\",\"path\":\"%s\",\"source\":\"%s\","
+            "\"available\":%s,\"rasterization\":\"%s\",\"arabic_companion_path\":%s}",
+            first ? "" : ",", id, title, profile_path,
+            blit_font_profile_local(i) ? "local" : "shipped",
+            blit_font_profile_available(i) ? "true" : "false",
+            blit_font_is_outline(path) ? "native-antialiased" : "bitmap-nearest",companion_json);
+        first = 0;
+    }
+    used += (size_t)snprintf(body + used, capacity - used, "],\"rejected\":[");
+    for (i = 0, first = 1; i < blit_font_rejected_count() && used + 128 < capacity; ++i) {
+        const char *reason = "";
+        char escaped_reject[1024], escaped_reason[256];
+        json_escape(blit_font_rejected(i, &reason), escaped_reject, sizeof(escaped_reject));
+        json_escape(reason, escaped_reason, sizeof(escaped_reason));
+        used += (size_t)snprintf(body + used, capacity - used,
+            "%s{\"path\":\"%s\",\"reason\":\"%s\"}", first ? "" : ",",
+            escaped_reject, escaped_reason);
         first = 0;
     }
     snprintf(body + used, capacity - used, "]}");
@@ -16602,18 +16619,12 @@ static void fonts_json(const BlitRuntime *runtime, char *body, size_t capacity)
    duplicate private-use mappings in the server or Control Panel. */
 static int font_icons_json(char *body, size_t capacity)
 {
-    const char *profile = NULL, *slash;
     char path[1024];
     FILE *file;
     size_t length, limit = capacity < 8192 ? capacity : 8192;
-    int too_long, failed, i;
-    for (i = 0; i < blit_font_profile_count(); ++i)
-        if (strcmp(blit_font_profile_id(i), "blit-modern") == 0) {
-            profile = blit_font_profile_path(i); break;
-        }
-    slash = profile ? strrchr(profile, '/') : NULL;
-    if (!slash || limit < 2 || snprintf(path, sizeof(path), "%.*s/icons/catalogue.json",
-        (int)(slash - profile), profile) >= (int)sizeof(path)) return 0;
+    int too_long, failed;
+    if (limit < 2 || snprintf(path, sizeof(path), "%s", blit_font_root_file("icons/catalogue.json"))
+        >= (int)sizeof(path)) return 0;
     file = fopen(path, "rb");
     if (!file) return 0;
     length = fread(body, 1, limit - 1, file);
@@ -16631,6 +16642,7 @@ static int font_path_for_id(const char *id, char *path, size_t capacity)
 
     if (id == NULL || id[0] == '\0')
         return 0;
+    blit_font_discover();
     for (i = 0; i < blit_font_profile_count(); ++i) {
         if (strcmp(id, blit_font_profile_id(i)) == 0) {
             snprintf(path, capacity, "%s", blit_font_profile_path(i));
@@ -16677,13 +16689,11 @@ static int font_sizing_parse(const char *configuration, int *scale, int *pixels)
 static int prepare_font_raster(BlitFont *font, const char *path,
                                 int scale, int pixels, BlitRaster **result)
 {
-    size_t length = strlen(path);
     *result = NULL;
-    if (length > 4 && strcmp(path + length - 4, ".ttf") == 0) {
-        char colour[512];
-        const char *slash = strrchr(path, '/');
-        snprintf(colour, sizeof(colour), "%.*sNotoColorEmoji.ttf",
-                 slash ? (int)(slash - path + 1) : 0, path);
+    if (blit_font_is_outline(path)) {
+        char colour[1024];
+        /* ADR 0195: the emoji faces and the glyph stack are the root's. */
+        snprintf(colour, sizeof(colour), "%s", blit_font_root_file("NotoColorEmoji.ttf"));
         *result = blit_raster_open(font, path, colour,
             font_cell_dimension(font, 1, scale, pixels),
             font_cell_dimension(font, 0, scale, pixels));
@@ -28125,6 +28135,8 @@ int main(int argc, char **argv)
         fprintf(stderr, "usage: %s [port]\n", argv[0]);
         return 2;
     }
+    /* ADR 0195: the font list reads outline fonts through the native raster. */
+    blit_font_set_outline_inspector(blit_raster_inspect_outline);
     /* Was a bind address asked for, or is this the default? The distinction
        decides what happens when there is no token: an operator who said
        nothing gets a safe listener, and one who explicitly asked for a

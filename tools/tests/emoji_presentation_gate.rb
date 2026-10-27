@@ -21,7 +21,7 @@ Dir.chdir(root) do
       'tools/tests/emoji_presentation_gate.c','src/blit_font.c','src/blit_raster.c',
       ENV.fetch('BLIT_FREETYPE_LIBRARY','/lib/x86_64-linux-gnu/libfreetype.so.6'),
       ENV.fetch('BLIT_HARFBUZZ_LIBRARY','/lib/x86_64-linux-gnu/libharfbuzz.so.0'),'-o',binary)
-    %w[BlitModernNerd-Regular.ttf BlitRetroNerd-Regular.ttf].each do |profile|
+    %w[text/Hack-Regular.ttf text/3270-Regular.ttf].each do |profile|
       sizes=ENV['BLIT_PRESENTATION_SIZE'] ? [ENV['BLIT_PRESENTATION_SIZE']]*2 : %w[8 64]
       command=[binary,'assets/fonts/Blit-Terminus16.psf',"assets/fonts/#{profile}",'assets/fonts/NotoColorEmoji.ttf',*sizes]
       command=['valgrind','--error-exitcode=99','--leak-check=full','--errors-for-leak-kinds=definite,indirect',*command] if ENV['BLIT_FONT_VALGRIND']=='1'

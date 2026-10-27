@@ -547,7 +547,7 @@ Dir.mktmpdir('blit-presentation-effects') do |root|
   # used to reset to the boot font and back -- two reflows of every pane
   # and two glyph atlas rebuilds per write, on every live effects change.
   # A saved font profile other than the boot font, as on a real desktop.
-  code, = request('PUT', '/v1/fonts', { font_id: 'blit-modern', size_px: 20 })
+  code, = request('PUT', '/v1/fonts', { font_id: 'hack', size_px: 20 })
   check(code == 200, "font profile: #{code}")
   Timeout.timeout(10) { sleep 0.1 until get('/v1/settings').dig('document', 'font', 'size_px') == 20 }
   before = get('/v1/topology')['panes'].map { |p| p['cell_grid'].values_at('columns', 'rows') }

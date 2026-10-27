@@ -53,7 +53,7 @@ Dir.mktmpdir('blit-custom-icon-api') do |work|
     end
     sequences={icons:(0x100000..0x100006).to_a.pack('U*')+"\u16d2\u21cc\u270e\u2615X",
                arabic:"ﺮﺒْﺣِ ٠١٢٣٤٥٦٧٨٩ ﻻX"}
-    %w[blit-modern blit-retro].each do |profile|
+    %w[hack ibm-3270].each do |profile|
       [16,17,22].each do |size|
         request.call('PUT','/v1/fonts',{font_id:profile,size_px:size})
         sequences.each do |kind, sequence|

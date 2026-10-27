@@ -6,76 +6,66 @@ For application authors: [complete developer reference](../../docs/font-referenc
 [emoji categories](../../docs/fonts/emoji.md). Tables are generated from these
 canonical assets, not an independently maintained glyph registry.
 
-## Smooth Blit Retro, Blit Modern and Blit JetBrainless
+## Text fonts and the glyph stack (ADR 0195)
 
-`blit-jetbrainless` (0.2.35, ADR 0194) is JetBrains Mono 2.304, the version
-without ligatures, from the same pinned Nerd Fonts release. JetBrains Mono
-is under the SIL OFL 1.1 with no Reserved Font Name, so this is the typeface
-itself, renamed. It gets the same treatment as the other two: the full Nerd
-catalogue, Blit's icons, the symbol blocks, and Braille and blocks as cell
-geometry. It uses `blit-modern`'s Arabic companion. Its licence is
-`licenses/JetBrainsMono-OFL.txt`.
+**Text fonts are discovered.** Every regular, monospaced TTF or OTF in
+`text/` is a Blit font, shipped exactly as its upstream releases it. The
+same applies to an operator's own fonts in `/usr/local/lib/blit/fonts/text`.
+- **Ids:** a font's id is its family name in kebab form, such as
+  `jetbrains-mono-nl`.
+- **Rejected files** are listed in `GET /v1/fonts` with their reason, for
+  example "not monospaced".
 
-The directory holds Blit's own fonts and their sources and licences only:
-- **Pixel:** `Blit-Terminus16.psf`, the boot and fallback font, and
-  `Blit-Spleen16.psf`. Both were renamed from `Blit-Hibr-*`.
-- **Wide cells:** `Blit-Unifont16.psf`.
-- **Outline:** the three outline fonts and their Arabic companions.
-- **Emoji:** the colour and text emoji faces.
+| File | Font | Licence |
+| --- | --- | --- |
+| `text/Hack-Regular.ttf` | Hack 3.003 | `licenses/Hack-LICENSE.md` |
+| `text/3270-Regular.ttf` | IBM 3270 3.0.1 | `licenses/IBM3270-LICENSE.txt` |
+| `text/JetBrainsMonoNL-Regular.ttf` | JetBrains Mono NL 2.304 | `licenses/JetBrainsMono-OFL.txt` |
+| `text/FiraCode-Regular.ttf` | Fira Code 6.2 | `licenses/FiraCode-OFL.txt` |
+| `text/IBMPlexMono-Regular.ttf` | IBM Plex Mono 1.1.0 | `licenses/IBMPlexMono-OFL.txt` |
+| `text/IosevkaTerm-Regular.ttf` | Iosevka Term 34.9.1 | `licenses/Iosevka-LICENSE.md` |
 
-The console fonts (Uni2, Lat15) and the stray Hack copy are gone.
+**Every glyph a text font lacks comes from one stack,** in this directory,
+fitted to the chosen font when drawn:
+1. **Cell geometry,** drawn by the raster: box drawing, block elements,
+   Braille, core Powerline and Blit's bar corners.
+2. **`BlitIcons-Regular.ttf`:** Blit's seven colour icons, the pen alias
+   and the themed text glyphs. Built by `tools/fonts/build-blit-icons.py`
+   from `icons/catalogue.json`.
+3. **The text font itself.** A glyph that would overhang the cell is
+   shrunk to fit, not dropped.
+4. **`SymbolsNerdFontMono-Regular.ttf`:** all 10,386 Nerd icons, Nerd
+   Fonts v3.4.0. Its private-use icons win over a text font's own.
+5. **Noto Sans Symbols 2, Noto Sans Symbols and Noto Sans Math.**
+6. **`NotoEmojiText.ttf` and `NotoColorEmoji.ttf`.**
+7. **`BlitArabicModern.ttf`:** one Arabic companion for every font.
+8. **`Unifont-Regular.otf` and `UnifontUpper-Regular.otf`:** GNU Unifont 16,
+   so `?` is left only for codepoints no font has.
 
-`blit-retro` is the new smooth, rounded mainframe-inspired profile, based on
-pinned Nerd Fonts3.4.0 3270 Mono. `blit-modern` is the clean Hack Mono companion.
-Both are Blit-tailored renamed derivatives, not original typeface designs.
-Both retain the complete pinned Nerd catalogue: **10,386 distinct codepoints**,
-plus their source Unicode repertoires. Native grayscale antialiasing is used
-at each requested size; neither profile enlarges a one-bit bitmap for text.
-Nerd icons take terminal colours; supported emoji scalars use the shared
-Noto Colour Emoji2.057 face for intrinsic multicolour artwork.
+Two fitting rules apply, both carried over from the retired outline
+generator:
+- **Icons** fit within 90% of the advance and the text font's cap height,
+  centred.
+- **Symbols** keep the text font's size and baseline, shrunk only to fit the
+  cell.
 
-Candidate588 adds [seven original colour icons](icons/README.md): Blit,
-Hibr pen, Wi-Fi levels1..4 and Bluetooth. Editable SVGs generate COLR v0
-layers in both faces. Discover their explicit one-cell mappings through
-`GET /v1/fonts/icons`; ordinary Nerd icons remain theme-coloured. The existing
-U+270E pen alias now uses original monochrome artwork. Missing Hibr text
-U+16D2 and Retro U+21CC are covered. This is not a claim of universal Unicode
-coverage; live reports and upstream icon selection remain separate in118/330.
+Each text font's cell is its `0` advance, so a few extra-wide glyphs don't
+shrink its text.
 
-![Actual shared-raster specimen: Blit Retro and Modern](../../docs/images/blit-fonts.png)
-
-Select with `PUT /v1/fonts`, for example
-`{"font_id":"blit-retro","size_px":24}`. The existing font inventory and
-Control Panel use the same profiles. Sizes8..64px specify exact cell height,
-not an em height or whole-display scale. Default Terminus and the selectable
-pixel-art Spleen remain unchanged. Deployment and acceptance are recorded in
-[current state](../../docs/current-state.md) and the verification ledger.
-
-`modern-fonts.source.json` is the single provenance manifest for **both**
-outline profiles, shared colour/monochrome emoji fallbacks, catalogue and licences.
-See `licenses/nerd-v3.4.0/README.md` for icon-family attribution and sources.
-Generate both with the same tool and hash-checked upstream inputs:
+**Provenance:** `fonts.source.json` pins every file by SHA-256, with its
+upstream URL and licence. `font_assets_gate.rb` checks it, and that `text/`
+holds nothing unpinned. To rebuild Blit's icon font:
 
 ```sh
-PYTHONPATH=<fontTools4.60.1> python3 tools/fonts/build-outline-nerd.py --symbols <noto-symbol-sources> \
-  --profile retro /path/to/3270NerdFontMono-Regular.ttf assets/fonts/BlitRetroNerd-Regular.ttf
-PYTHONPATH=<fontTools4.60.1> python3 tools/fonts/build-outline-nerd.py --symbols <noto-symbol-sources> \
-  --profile modern /path/to/HackNerdFontMono-Regular.ttf assets/fonts/BlitModernNerd-Regular.ttf
-PYTHONPATH=<fontTools4.60.1> python3 tools/fonts/build-outline-nerd.py --symbols <noto-symbol-sources> \
-  --profile jetbrainless /path/to/JetBrainsMonoNLNerdFontMono-Regular.ttf \
-  assets/fonts/BlitJetBrainlessNerd-Regular.ttf
-ruby tools/fonts/preview.rb
-ruby tools/tests/outline_catalogue_gate.rb
+PYTHONPATH=<fontTools4.60.1> python3 tools/fonts/build-blit-icons.py assets/fonts/BlitIcons-Regular.ttf
+ruby tools/tests/outline_catalogue_gate.rb   # full Nerd catalogue, every text font, 57 sizes
+ruby tools/tests/custom_icon_gate.rb         # Blit icons and Hibr's UI glyphs, every text font
 ```
 
-The preview is `build/font-preview/blit-fonts.png`, generated with Blit's real
-production raster and compositor without SDL, Hibr or a connected display.
-Complete icons fit within cap height and90% advance. The shared raster overrides
-core Powerline U+E0B0..U+E0B3 with cell-fitted antialiased geometry (ADR0164),
-including an opaque full-height solid base. Powerline Extras are not covered
-by that guarantee; bitmap-only profiles remain unchanged.
-Every catalogue codepoint is raster-tested at all57 integer heights for both
-profiles; `cod-blank` intentionally has no ink. See ADR0156.
+Retired in 0.2.36:
+- the baked Blit Modern, Retro and JetBrainless Nerd fonts;
+- their generator, `build-outline-nerd.py`;
+- Blit Arabic Retro.
 
 Scope matters: this is **not all Unicode or all emoji sequences**. Font files
 alone do not shape flags, skin tones, ZWJ families or VS16 presentation; that
@@ -124,21 +114,19 @@ modern antialiased/colour profile is separate.
 
 ## Shared outline and colour rendering policy
 
-Profile `blit-modern` uses `BlitModernNerd-Regular.ttf`, a renamed, reproducibly
-generated derivative of Nerd Fonts3.4.0 Hack Mono, for native-size
-antialiased monospaced text and `NotoColorEmoji.ttf`2.057 for supported colour
-scalars absent from the outline face. Font size8–64px means exact cell height;
+Each outline text font (above) is rasterized at native size with grayscale
+antialiasing. `NotoColorEmoji.ttf` 2.057 draws supported colour scalars that
+the stack's earlier faces don't. Font size8–64px means exact cell height;
 the font's em size is fitted inside that cell, not stretched after rendering.
-The default font is not changed by installation. Select this profile through
-the same API/Control Panel as the others. The modern face scales smoothly;
-Spleen/Terminus retain intentional bitmap pixels.
+The default font is not changed by installation. Select a font through the
+same API or Control Panel as the others. Outline fonts scale smoothly;
+Spleen and Terminus keep their intentional bitmap pixels.
 
-`modern-fonts.source.json` pins source package versions, font SHA256s and
-license SHA256s. `licenses/HackNerd-LICENSE.txt`, `licenses/NerdFonts-LICENSE.txt`
-and `licenses/FontAwesome-LICENSE.txt` preserve the upstream notices, including
-Fonticons attribution and Font Awesome licensing. The original Hack face stays
-as a legacy provenance reference/negative emoji-audit fixture, not a second Modern runtime profile or
-an input to the full-Nerd generator. Noto remains
+`fonts.source.json` pins every file's SHA-256 and licence.
+`licenses/NerdFonts-LICENSE.txt` and `licenses/FontAwesome-LICENSE.txt`
+preserve the upstream icon notices, including Fonticons attribution and Font
+Awesome licensing. Hack doubles as the emoji audit's negative fixture: a text
+font that lacks emoji. Noto remains
 unmodified, from upstream release `v2026-09-24-unicode18_0`, its2D CBDT/CBLC
 font rather than an unsupported COLRv1 face. This replaced the older Debian
 Noto2.042 asset in candidate574; see the deployment ledger for current status.
@@ -158,24 +146,20 @@ Noto2.042 fails174 RGI entries and10 minimally-qualified variants. These are
 bitmap validation or permission to claim complete emoji support. The audit
 does not install HarfBuzz or add it to the production binary. See ADR0157.
 
-Before ADR0156, Modern retained only1475 Font Awesome mappings; that restriction
-is superseded by the complete pinned Nerd catalogue above. Before588,
-U+270E (`✎`) used a Font Awesome pencil alias; ADR0172 replaces that alias
-with the original themed pen silhouette without changing Hibr codepoints.
-Complete icon outlines are fitted with5% side insets and the text cap-height
-bound; no cropping or proportional advance. Icons take the terminal foreground
-colour; colour emoji remain a separate mechanism. Generate with
-the single `tools/fonts/build-outline-nerd.py` generator shown above.
-The generator checks the pinned source hash and never downloads implicitly.
+U+270E (`✎`) is Blit's original themed pen silhouette (ADR 0172), from
+the icon font. Complete icon outlines are fitted at draw time with 5% side
+insets and the text cap-height bound: no cropping and no proportional
+advance. Icons take the terminal foreground colour; colour emoji remain a
+separate mechanism.
 
-From567, colour artwork is bounded by Modern's fitted text em rather than
+From567, colour artwork is bounded by the fitted text em rather than
 the full cell height (which includes line spacing). Its aspect ratio and
 one/two-cell allocation remain unchanged. This is a shared raster policy,
 not a bell-specific substitution or another font-size setting; see ADR0151.
 
-Protected box/block geometry and missing scalars use the existing PSF
-fallback; those fallback characters remain pixel-art. Wide BMP characters
-retain the separate wide PSF. This is not universal Unicode, script shaping,
+Box drawing and block elements are cell geometry. A codepoint no face in the
+stack has falls back to the PSF's `?`. Wide BMP characters keep the separate
+wide PSF where no outline face draws them. This is not universal Unicode, script shaping,
 ligature or emoji-sequence support. Explicit variation-selector/ZWJ shaping
 is not added by these font files. See ADR0147 for the renderer boundary.
 

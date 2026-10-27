@@ -14,4 +14,4 @@ tcc -O2 -std=c99 \
  -o "$root/build/tests/font-raster-kms"
 export LD_LIBRARY_PATH="$root/build/deps/prefix/lib/x86_64-linux-gnu"
 "$root/build/tests/font-raster-kms" "$root/assets/fonts/Blit-Terminus16.psf" \
- "${BLIT_GATE_OUTLINE:-$root/assets/fonts/BlitModernNerd-Regular.ttf}" "$root/assets/fonts/NotoColorEmoji.ttf"
+ "${BLIT_GATE_OUTLINE:-$root/assets/fonts/text/Hack-Regular.ttf}" "$root/assets/fonts/NotoColorEmoji.ttf"

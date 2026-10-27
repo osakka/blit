@@ -1,8 +1,8 @@
 # Blit font and glyph developer reference
 
 For Hibr application, desktop and Control Panel developers. This reference
-describes the font assets delivered in0.1.588; query the running server for
-its actual selected profile. It does not require changes to Hibr core.
+describes the font set since Blit 0.2.36 (ADR 0195). Query the running
+server for the fonts it found and the one selected. It does not require changes to Hibr core.
 
 Public reference: [github.com/osakka/blit — font reference](https://github.com/osakka/blit/blob/main/docs/font-reference.md).
 
@@ -20,16 +20,41 @@ not a screenshot of a browser glyph.
 
 ## Families and sizing
 
-| API profile | Style and sources | Arabic companion | Colour |
-| --- | --- | --- | --- |
-| `blit-retro` | Smooth mainframe-inspired3270 Mono/Nerd derivative | Blit Arabic Retro, Kawkab Mono derivative | Intrinsic-colour originals and shared Noto emoji |
-| `blit-modern` | Smooth Hack Mono/Nerd derivative | Blit Arabic Modern, GNU FreeMono derivative | Same original catalogue and shared Noto emoji |
-| `blit-terminus16` | Bitmap Terminus-based default | No native Arabic companion | Terminal foreground/background, not native colour-font glyphs |
-| `blit-spleen16` | Bitmap Spleen-based retro option | No native Arabic companion | Terminal foreground/background, not native colour-font glyphs |
+**The font list is discovered,** not fixed:
+- **Outline text fonts:** any regular, monospaced TTF or OTF in the fonts
+  root's `text/` folder, plus `/usr/local/lib/blit/fonts/text` for your own.
+- **Ids:** a font's id is its family name in kebab form, and its title is
+  the family name.
+- **`GET /v1/fonts`** lists `profiles` (with `title` and
+  `source: shipped|local`) and `rejected` (with each reason).
 
-The smooth profiles are renamed, tailored derivatives, not wholly original
-typeface designs. Native grayscale antialiasing rasterizes text at the
-requested size. Bitmap fallback glyphs remain bitmap artwork.
+The shipped text fonts are unmodified upstream releases:
+
+| API id | Font | Licence |
+| --- | --- | --- |
+| `hack` | Hack 3.003 | MIT and Bitstream Vera |
+| `ibm-3270` | IBM 3270 3.0.1 | BSD-3-Clause |
+| `jetbrains-mono-nl` | JetBrains Mono NL 2.304 | OFL 1.1 |
+| `fira-code` | Fira Code 6.2 | OFL 1.1 |
+| `ibm-plex-mono` | IBM Plex Mono 1.1.0 | OFL 1.1 |
+| `iosevka-term` | Iosevka Term 34.9.1 | OFL 1.1 |
+| `blit-terminus16`, `blit-spleen16` | Bitmap pixel fonts | OFL / BSD |
+
+**Every outline font draws through one glyph stack.** For each character,
+in order:
+1. Blit's cell geometry: box drawing, blocks, Braille, Powerline and bar
+   corners.
+2. Blit's own icons.
+3. The text font.
+4. Nerd Fonts Symbols.
+5. Noto Sans Symbols 2, Noto Sans Symbols and Noto Sans Math.
+6. The emoji faces.
+7. Blit Arabic Modern.
+8. Unifont.
+
+Stack glyphs are fitted to the chosen font at draw time, so every font has
+every glyph, including one you add. Native grayscale antialiasing
+rasterizes text at the requested size.
 
 `size_px` is **cell height8–64**, not point size, browser zoom or display
 resolution. Read `active.cell_pixels` after changing it; never calculate
@@ -64,7 +89,7 @@ JSON escape. Keep application choices semantic: `hibr-pen`, `wifi-1` through
 `wifi-4`, `bluetooth`, `blit`. Resolve those IDs from the catalogue instead of
 maintaining an independently numbered table in every application.
 
-All seven originals use **one terminal column** in Modern and Retro.
+All seven originals use **one terminal column** in every font.
 They are plane16 private-use scalars, not standard Unicode, ordinary emoji,
 or portable assignments in an unrelated font. In particular:
 
@@ -183,7 +208,7 @@ acceptance. See the [font plan](font-evolution-plan.md).
 - [Generated native coverage](fonts/coverage.json): exact SHA256 and inclusive
   scalar ranges from each native font's best Unicode cmap. This is asset
   coverage, not runtime routing, fallback, ink or shaping conformance.
-- [Outline provenance](../assets/fonts/modern-fonts.source.json),
+- [Font provenance](../assets/fonts/fonts.source.json),
   [Arabic provenance](../assets/fonts/arabic-fonts.source.json),
   [Emoji corpus](../assets/unicode/emoji-18.0/source.json), and
   [Hibr UI snapshot](../assets/fonts/hibr-ui-glyphs.json). The latter is a
@@ -198,8 +223,8 @@ python3 tools/fonts/build-reference.py --check
 ruby tools/tests/font_reference_gate.rb
 ```
 
-The generator verifies pinned input hashes and both profiles' full Nerd and
-original-icon cmap coverage. Regenerate and commit derived tables together
+The generator verifies pinned input hashes, and that the glyph stack covers
+the full Nerd catalogue and the original icons. Regenerate and commit derived tables together
 when canonical assets change. No host fonts, network or running display are
 needed. Repository Markdown on [GitHub](https://github.com/osakka/blit) is the
 public publication format. Use repository-relative file links within the
@@ -212,7 +237,8 @@ site should consume the same files rather than introduce a parallel catalogue.
 Keep [font notices](../assets/fonts/README.md), [Nerd family attribution](../assets/fonts/licenses/nerd-v3.4.0/README.md),
 [original-art MIT licence](../assets/fonts/icons/LICENSE.txt), and
 [Unicode data licence](../assets/unicode/emoji-18.0/LICENSE.txt) when redistributing
-the respective material. Arabic Retro is OFL1.1; Arabic Modern is GPLv3+ with
-the documented font-embedding exception and preferred source included.
+the respective material. Each text font's licence is in `licenses/`. Arabic
+Modern is GPLv3+ with the documented font-embedding exception and preferred
+source included; Unifont is used under the OFL 1.1.
 Typeface, source-art and trademark rights are distinct. Inclusion of a brand
 glyph does not grant permission to use its trademark.

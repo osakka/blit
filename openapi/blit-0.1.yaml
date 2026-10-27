@@ -1916,6 +1916,7 @@ components:
         version: {type: integer, minimum: 1}
         profiles:
           type: array
+          description: The fonts that draw these icons; "*" is every outline font, from the glyph stack (ADR 0195).
           items: {type: string}
         columns: {type: integer, const: 1}
         namespace: {type: string}
@@ -1929,9 +1930,14 @@ components:
       additionalProperties: false
     FontProfile:
       type: object
+      description: >-
+        A font Blit found (ADR 0195): an outline text font in the fonts root's
+        text/ or the local text/, or a narrow-cell PSF in the root.
       required: [id, path, available]
       properties:
         id: {$ref: '#/components/schemas/ResourceId'}
+        title: {type: string, description: The font's family name.}
+        source: {type: string, enum: [shipped, local]}
         path: {type: string}
         available: {type: boolean}
         arabic_companion_path:
@@ -2019,6 +2025,16 @@ components:
         profiles:
           type: array
           items: {$ref: '#/components/schemas/FontProfile'}
+        rejected:
+          type: array
+          description: Files in the font directories that are not usable fonts, and why.
+          items:
+            type: object
+            required: [path, reason]
+            properties:
+              path: {type: string}
+              reason: {type: string}
+            additionalProperties: false
       additionalProperties: false
     ServerDetails:
       type: object

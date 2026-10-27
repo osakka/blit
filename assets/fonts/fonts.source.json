@@ -1,0 +1,244 @@
+{
+  "policy": "ADR 0195: text fonts ship unmodified in text/ and are discovered; every glyph they lack comes from the shipped stack, fitted at draw time. Each file here is pinned by SHA-256 to its upstream; package_artifact_gate checks the package against this manifest.",
+  "build": {
+    "fonttools_version": "4.60.1",
+    "icons_generator": "tools/fonts/build-blit-icons.py"
+  },
+  "text": [
+    {
+      "file": "text/Hack-Regular.ttf",
+      "source": "Hack 3.003",
+      "upstream": "https://github.com/source-foundry/Hack/releases/download/v3.003/Hack-v3.003-ttf.zip",
+      "upstream_sha256": "0c2604631b1f055041c68a0e09ae4801acab6c5072ba2db6a822f53c3f8290ac",
+      "member": "ttf/Hack-Regular.ttf",
+      "sha256": "15f55cc0c85a2988d2b4b3a8cdb5d77fdfbaf319e1bb5309d725db9818fb7125",
+      "license": "MIT and Bitstream Vera",
+      "license_file": "licenses/Hack-LICENSE.md",
+      "license_upstream": "https://raw.githubusercontent.com/source-foundry/Hack/v3.003/LICENSE.md",
+      "license_sha256": "1f61bb7c790c59b4b0ecdf304628b94e42ae4c8020094a8c3da73381ab212623"
+    },
+    {
+      "file": "text/3270-Regular.ttf",
+      "source": "IBM 3270 3.0.1",
+      "upstream": "https://github.com/rbanffy/3270font/releases/download/v3.0.1/3270_fonts_d916271.zip",
+      "upstream_sha256": "623fb815b16d6c4940b5014a21c5474ef6cddb02c325d03f153341b676b4cffa",
+      "member": "3270-Regular.ttf",
+      "sha256": "81aa369c1f580253d3bc082de725039d0d95c5b7ccdc98107f3dabd0c76c561f",
+      "license": "BSD-3-Clause",
+      "license_file": "licenses/IBM3270-LICENSE.txt",
+      "license_upstream": "3270_fonts_d916271.zip:LICENSE.txt",
+      "license_sha256": "ef855fadca28e91a4123f7299bd79dcd78a7e19dfc364039790bb75bdedd515a"
+    },
+    {
+      "file": "text/JetBrainsMonoNL-Regular.ttf",
+      "source": "JetBrains Mono NL 2.304",
+      "upstream": "https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip",
+      "upstream_sha256": "6f6376c6ed2960ea8a963cd7387ec9d76e3f629125bc33d1fdcd7eb7012f7bbf",
+      "member": "fonts/ttf/JetBrainsMonoNL-Regular.ttf",
+      "sha256": "fb3b2575d7b0657359707993288f12a7360344d39387bb26050e276d61f6bd2a",
+      "license": "OFL-1.1",
+      "license_file": "licenses/JetBrainsMono-OFL.txt",
+      "license_upstream": "JetBrainsMono-2.304.zip:OFL.txt",
+      "license_sha256": "30f0c136e3c88e422d0791acd97238870f9054a9729bc34cf2ff0d4ed8cac4ad"
+    },
+    {
+      "file": "text/FiraCode-Regular.ttf",
+      "source": "Fira Code 6.2",
+      "upstream": "https://github.com/tonsky/FiraCode/releases/download/6.2/Fira_Code_v6.2.zip",
+      "upstream_sha256": "0949915ba8eb24d89fd93d10a7ff623f42830d7c5ffc3ecbf960e4ecad3e3e79",
+      "member": "ttf/FiraCode-Regular.ttf",
+      "sha256": "5992ab9640e2df491b2f609467b1de60e8bc39b2c28db184342a0592d98f6117",
+      "license": "OFL-1.1",
+      "license_file": "licenses/FiraCode-OFL.txt",
+      "license_upstream": "https://raw.githubusercontent.com/tonsky/FiraCode/6.2/LICENSE",
+      "license_sha256": "1d41e10031ab125302780a05ec4c91d218e47db0c7e37cf315cce5e608cdc25c"
+    },
+    {
+      "file": "text/IBMPlexMono-Regular.ttf",
+      "source": "IBM Plex Mono 1.1.0",
+      "upstream": "https://github.com/IBM/plex/releases/download/%40ibm%2Fplex-mono%401.1.0/ibm-plex-mono.zip",
+      "upstream_sha256": "4bfc936d0e1fd19db6327a3786eabdbc3dc0d464500576f6458f6706df68d26c",
+      "member": "ibm-plex-mono/fonts/complete/ttf/IBMPlexMono-Regular.ttf",
+      "sha256": "fe11304a5fe956d5744e9b6a246cc83d90425245e75a62230044966ca96a7f50",
+      "license": "OFL-1.1 (Reserved Font Name \"Plex\"; shipped unmodified)",
+      "license_file": "licenses/IBMPlexMono-OFL.txt",
+      "license_upstream": "ibm-plex-mono.zip:ibm-plex-mono/LICENSE.txt",
+      "license_sha256": "7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da"
+    },
+    {
+      "file": "text/IosevkaTerm-Regular.ttf",
+      "source": "Iosevka Term 34.9.1",
+      "upstream": "https://github.com/be5invis/Iosevka/releases/download/v34.9.1/PkgTTF-IosevkaTerm-34.9.1.zip",
+      "upstream_sha256": "3bd57a66a7f1e429a131d3bc35f4d0f3a8eb722f2fe8f59f595e424bda9a33c9",
+      "member": "IosevkaTerm-Regular.ttf",
+      "sha256": "430ad4f56c6cd82e4c954efb6dd4b3e2b4cc2b2b1bd4f8143f3d3800096f32b4",
+      "license": "OFL-1.1",
+      "license_file": "licenses/Iosevka-LICENSE.md",
+      "license_upstream": "https://raw.githubusercontent.com/be5invis/Iosevka/v34.9.1/LICENSE.md",
+      "license_sha256": "4ba53c7c1cb39279aae5f8d7d22054c485c71169920e5a36ed098b115e2e3c5d"
+    }
+  ],
+  "stack": {
+    "icons": {
+      "file": "BlitIcons-Regular.ttf",
+      "source": "Blit original artwork, built by tools/fonts/build-blit-icons.py from icons/catalogue.json",
+      "sha256": "7c025c7900e465b5253492b34c63579ae9f5194b8ffcbf66790d1bf606e16f62",
+      "license_file": "icons/LICENSE.txt"
+    },
+    "nerd": {
+      "file": "SymbolsNerdFontMono-Regular.ttf",
+      "source": "Nerd Fonts v3.4.0 Symbols Only Mono: the full pinned catalogue",
+      "upstream": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/v3.4.0/patched-fonts/NerdFontsSymbolsOnly/SymbolsNerdFontMono-Regular.ttf",
+      "sha256": "f0f624d9b474bea1662cf7e862d44aebe1ae1f6c7f9cb7a0ca5d0e5ac9561c60",
+      "license_file": "licenses/NerdFontsSymbolsOnly-LICENSE.txt",
+      "license_sha256": "84a7a98c82140fb12c37fe42b93805baa16024cb3e5acc599b7ffe612c55d847"
+    },
+    "symbols": [
+      {
+        "file": "NotoSansSymbols2-Regular.ttf",
+        "upstream": "https://raw.githubusercontent.com/google/fonts/7b6724ac7ececc713e9ba93af309f7520c9a80a3/ofl/notosanssymbols2/NotoSansSymbols2-Regular.ttf",
+        "license_file": "licenses/NotoSansSymbols2-OFL.txt",
+        "license_sha256": "b118dd41337806a5d4797052c77caf3bd096aed783e5eb21b4d11154351e1ac0",
+        "sha256": "7d5fb73b7ca67a6798101741f5d280a3d016a56a197afcd4199dbb57b4b82a21"
+      },
+      {
+        "file": "NotoSansSymbols-Regular.ttf",
+        "upstream": "https://raw.githubusercontent.com/google/fonts/caa8c83707a5797d62fd02f14301391986f21d75/ofl/notosanssymbols/NotoSansSymbols%5Bwght%5D.ttf",
+        "license_file": "licenses/NotoSansSymbols-OFL.txt",
+        "license_sha256": "b118dd41337806a5d4797052c77caf3bd096aed783e5eb21b4d11154351e1ac0",
+        "sha256": "f7e7e04b4a24b6c78893d50cbfd2b2f6cae49617ab047bfef668d252adb128f7"
+      },
+      {
+        "file": "NotoSansMath-Regular.ttf",
+        "upstream": "https://raw.githubusercontent.com/google/fonts/dbd1ab6e65dc59bcda3ca8de9fd372f58f98e0af/ofl/notosansmath/NotoSansMath-Regular.ttf",
+        "license_file": "licenses/NotoSansMath-OFL.txt",
+        "license_sha256": "c9c63b8ed6cf76b2ce0c58b241acfc1195c2c928334c989c7047cbdac58773d9",
+        "sha256": "3f495fe933c06786e4d5f6d86b8ee70b6753a68ee3b9d87528726de0f6e2c47d"
+      }
+    ],
+    "unifont": [
+      {
+        "file": "Unifont-Regular.otf",
+        "upstream": "https://unifoundry.com/pub/unifont/unifont-16.0.04/font-builds/unifont-16.0.04.otf",
+        "sha256": "0e3981ab552231b5a2a870f2b61741903a4bf25c23ef5aeb05fdced1b3c7af4d",
+        "license": "OFL-1.1 (or GPL-2.0+ with the font embedding exception)",
+        "license_file": "licenses/Unifont-LICENSE.txt",
+        "license_sha256": "1e74cb82bf476843e97c2596297b04219b1a7e51f7238944a8c031cb9401fa87"
+      },
+      {
+        "file": "UnifontUpper-Regular.otf",
+        "upstream": "https://unifoundry.com/pub/unifont/unifont-16.0.04/font-builds/unifont_upper-16.0.04.otf",
+        "sha256": "fc8c6e9c4958243cef651c87cfbd916916f3545215d3ebcae92366b6edbb2f05",
+        "license": "OFL-1.1 (or GPL-2.0+ with the font embedding exception)",
+        "license_file": "licenses/Unifont-LICENSE.txt",
+        "license_sha256": "1e74cb82bf476843e97c2596297b04219b1a7e51f7238944a8c031cb9401fa87"
+      }
+    ]
+  },
+  "colour": {
+    "file": "NotoColorEmoji.ttf",
+    "version": "2.057",
+    "source": "Unmodified Noto Emoji 2D v2.057, release v2026-09-24-unicode18_0; CBDT/CBLC bitmap colour strikes",
+    "upstream": "https://raw.githubusercontent.com/googlefonts/noto-emoji/v2026-09-24-unicode18_0/2D/fonts/NotoColorEmoji.ttf",
+    "sha256": "15671215ab769fdc7162a045d56fd7d7e477c51b04e6b3c761d914d8fdd6cc44",
+    "license_file": "NotoColorEmoji-LICENSE.txt",
+    "license_sha256": "500bb1ccf43df7bbb522112f9133a52b16e1c35e809632f5d8609b179152de5b"
+  },
+  "text_emoji": {
+    "file": "NotoEmojiText.ttf",
+    "version": "3.002",
+    "source": "Unmodified Noto Emoji variable monochrome outlines, default weight400; shared text-presentation fallback",
+    "upstream": "https://raw.githubusercontent.com/google/fonts/8b0a1d0f5983c89bc2b93f1b5fb55f9e252744b5/ofl/notoemoji/NotoEmoji%5Bwght%5D.ttf",
+    "sha256": "de6c18832938afc99caf132b39d6a30a19bac7f2e812e28db2535b4608d27551",
+    "license_file": "NotoEmojiText-LICENSE.txt",
+    "license_sha256": "500bb1ccf43df7bbb522112f9133a52b16e1c35e809632f5d8609b179152de5b"
+  },
+  "catalogue": {
+    "file": "nerd-glyphnames-v3.4.0.json",
+    "upstream": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/v3.4.0/glyphnames.json",
+    "sha256": "e2d10d23f5bff0bd6f0676e9b01d9789fcdc656de7b498a2955c27716ea4439c",
+    "unique_codepoints": 10386,
+    "intentionally_blank": "U+EC03 cod-blank"
+  },
+  "custom_icons": {
+    "catalogue": "icons/catalogue.json",
+    "format": "COLR v0 / CPAL; original SVG paths; monochrome U+270E pen alias",
+    "sources": {
+      "icons/catalogue.json": "ab5c999244ac89f4c761b03a92a36fd5f9382fcc0d67cad023cdeead88471d42",
+      "icons/berkanan.svg": "f16019c94cf20f1a9dc42b7127e04ed68b0303260e6a8935ede1110bc1abdd5f",
+      "icons/wired.svg": "6a5207758fb6ef13dbda9d5392fb32aeb9e6c9beea33280ecf46bd64fe2200b1",
+      "icons/LICENSE.txt": "a1f68010aa91a710d0b41857f158f3fb1316778a0dc13321577f86cb82a9badb",
+      "icons/blit.svg": "7106e348a7ea198c09e459989b4d60c36a12ec9e73b02b6f86817554b0983cab",
+      "icons/hibr-pen.svg": "832950dba6ccf71c3dc57b188952d9c4cc90f7387fb820e36ca01a7d25fe8fb4",
+      "icons/wifi-bars.svg": "f4b75054e3da17019c2347d099d1c6907a4247d95bcb6289c5b7045a1c0cea8d",
+      "icons/bluetooth.svg": "65c0631d66b9edd267ea92de11a5068174978c47e0f7e3714ac12d6dd7fdc1ee"
+    }
+  },
+  "ui_coverage": {
+    "file": "hibr-ui-glyphs.json",
+    "sha256": "627aefc6bc2073fa041acba899b971219e27f6c33e0e85403d62cc125b4ad4f9",
+    "scalars": 101
+  },
+  "icon_licenses": [
+    {
+      "file": "licenses/Apache-2.0.txt",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "file": "licenses/NerdFonts-LICENSE.txt",
+      "sha256": "1f6ad4edae6479aaace3112ede5279a23284ae54b2a34db66357aef5f64df160"
+    },
+    {
+      "file": "licenses/FontAwesome-LICENSE.txt",
+      "sha256": "de784a808496d49f5f80dd9d1d6e9a51cff712cfbc339e7c25155631ae3cdb5d"
+    },
+    {
+      "file": "licenses/nerd-v3.4.0/Codicons.txt",
+      "sha256": "d6239afa918961b465b07bf7411cbe34ff6685854f58553db7966f4881a0211f"
+    },
+    {
+      "file": "licenses/nerd-v3.4.0/Devicons.txt",
+      "sha256": "508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1"
+    },
+    {
+      "file": "licenses/nerd-v3.4.0/FontAwesomeExtension.txt",
+      "sha256": "b47b15d771c4507a75ff65beca3a78168d6af4cca9b45177a1aa817139c64ba5"
+    },
+    {
+      "file": "licenses/nerd-v3.4.0/FontLogos.txt",
+      "sha256": "88d9b4eb60579c191ec391ca04c16130572d7eedc4a86daa58bf28c6e14c9bcd"
+    },
+    {
+      "file": "licenses/nerd-v3.4.0/IECPower.txt",
+      "sha256": "11aef1cdf2d58d822e6857e2574870ccc59d4900052bf5c098e319d750e7ac3d"
+    },
+    {
+      "file": "licenses/nerd-v3.4.0/MaterialDesign.txt",
+      "sha256": "3bae6305bcaa6d10219b999f65c342034c2d40b1c0e8567fa08605e73ccba829"
+    },
+    {
+      "file": "licenses/nerd-v3.4.0/Octicons.txt",
+      "sha256": "4f886642f9e8d99eeadd484acdac011c3fde8a338faf52f5ca1408c13b9a9b63"
+    },
+    {
+      "file": "licenses/nerd-v3.4.0/Pomicons.txt",
+      "sha256": "cb4797a9745683f287c28833db596e9d68ec43082d59359b3a49c504f0f610ce"
+    },
+    {
+      "file": "licenses/nerd-v3.4.0/PowerlineExtra.txt",
+      "sha256": "544307a58e6826c24145b2af1c3578b53e2e21ae0e6c67ab4c6abd544304d26a"
+    },
+    {
+      "file": "licenses/nerd-v3.4.0/PowerlineSymbols.txt",
+      "sha256": "46d5355e4734468135d8e4a30d0916292cc4df2b3ec30aa68c866f82497933be"
+    },
+    {
+      "file": "licenses/nerd-v3.4.0/SetiUI.txt",
+      "sha256": "d4d2d888c6a0a220a7b0e2d6013cf37539b0e05ef937002b3b33bdb364575b88"
+    },
+    {
+      "file": "licenses/nerd-v3.4.0/WeatherIcons.txt",
+      "sha256": "69cdedc8a4f57a30d68e4f045af8b9cce0ec3b1a6e7eec1ad41737c894f26790"
+    }
+  ]
+}

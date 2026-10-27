@@ -30,7 +30,7 @@ Dir.mktmpdir('blit-emoji-pty') do |work|
         end
       end
     end
-    request.call('PUT','/v1/fonts',{font_id:'blit-modern',size_px:16})
+    request.call('PUT','/v1/fonts',{font_id:'hack',size_px:16})
     display = TestProfile.display_id!(request.call('GET','/v1/displays'))
     capture = lambda do
       r = Net::HTTP.get_response(base + "/v1/diagnostics/screenshots/#{display}")

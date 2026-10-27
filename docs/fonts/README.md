@@ -4,7 +4,7 @@
 
 Generated from pinned Nerd Fonts3.4.0 and packaged font cmaps. Do not edit these tables; run `tools/fonts/build-reference.py`.
 
-10,764 names/aliases, **10,386 distinct codepoints**, present in both Modern and Retro. Names can alias the same scalar.
+10,764 names/aliases, **10,386 distinct codepoints**, drawn for every Blit font from the glyph stack (ADR 0195). Names can alias the same scalar.
 
 | Category | Names/aliases | Distinct codepoints |
 | --- | ---: | ---: |
@@ -32,10 +32,20 @@ These are asset cmap counts, not glyph counts, application coverage or effective
 
 | Face role | Asset | Mapped scalars |
 | --- | --- | ---: |
-| modern | `BlitModernNerd-Regular.ttf` | 13372 |
-| retro | `BlitRetroNerd-Regular.ttf` | 13816 |
-| arabic-modern | `BlitArabicModern.ttf` | 4160 |
-| arabic-retro | `BlitArabicRetro.ttf` | 1561 |
+| text-Hack-Regular | `text/Hack-Regular.ttf` | 1548 |
+| text-3270-Regular | `text/3270-Regular.ttf` | 1997 |
+| text-JetBrainsMonoNL-Regular | `text/JetBrainsMonoNL-Regular.ttf` | 1363 |
+| text-FiraCode-Regular | `text/FiraCode-Regular.ttf` | 1586 |
+| text-IBMPlexMono-Regular | `text/IBMPlexMono-Regular.ttf` | 983 |
+| text-IosevkaTerm-Regular | `text/IosevkaTerm-Regular.ttf` | 7761 |
+| stack-icons | `BlitIcons-Regular.ttf` | 10 |
+| stack-nerd | `SymbolsNerdFontMono-Regular.ttf` | 10410 |
+| stack-NotoSansSymbols2-Regular | `NotoSansSymbols2-Regular.ttf` | 2955 |
+| stack-NotoSansSymbols-Regular | `NotoSansSymbols-Regular.ttf` | 1107 |
+| stack-NotoSansMath-Regular | `NotoSansMath-Regular.ttf` | 3033 |
+| stack-Unifont-Regular | `Unifont-Regular.otf` | 58909 |
+| stack-UnifontUpper-Regular | `UnifontUpper-Regular.otf` | 57072 |
+| arabic | `BlitArabicModern.ttf` | 4160 |
 | colour-emoji | `NotoColorEmoji.ttf` | 1510 |
 | text-emoji | `NotoEmojiText.ttf` | 1489 |
 

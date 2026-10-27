@@ -942,16 +942,24 @@ Candidate0.1.562 contained this work but was not deployed; config-only
 maintenance0.1.563 intentionally excludes it. Discover available profiles
 through `GET /v1/fonts`, not a version-number comparison alone.
 
-Since 0.2.35 (ADR 0194) the profiles are Blit's own fonts only:
-- **Outline:** `blit-modern` (Hack), `blit-retro` (3270) and
-  `blit-jetbrainless`. The last is JetBrains Mono 2.304 without ligatures,
-  built by the same generator with the full Nerd catalogue, Blit's icons
-  and the symbol blocks. It shares `blit-modern`'s Arabic companion.
-- **Pixel:** `blit-terminus16` and `blit-spleen16`, renamed from
-  `blit-hibr-terminus16` and `blit-hibr-spleen16`.
-
-The console-font profiles (`uni2-*`, `lat15-*`) are retired. A saved
-selection naming a retired id falls back to the boot font.
+**Since 0.2.36 (ADR 0195), fonts are discovered.**
+- **What `GET /v1/fonts` lists:** every regular, monospaced TTF or OTF in
+  the fonts root's `text/` folder or `/usr/local/lib/blit/fonts/text`, plus
+  the narrow-cell PSFs in the root.
+- **Each profile** has an `id` (its family name in kebab form, for example
+  `jetbrains-mono-nl`), a `title`, a `source` (`shipped` or `local`), a
+  `path`, `available` and `rasterization`.
+- **`rejected`** lists the files that aren't fonts Blit can use, each with
+  a `reason`.
+- **The list is read fresh on each request,** so a font copied in appears
+  without a restart.
+- **Shipped fonts:** `hack`, `ibm-3270`, `jetbrains-mono-nl`, `fira-code`,
+  `ibm-plex-mono`, `iosevka-term`, `blit-terminus16` and `blit-spleen16`.
+- **Glyph coverage:** every outline font draws icons, symbols, box drawing,
+  Braille, blocks, Arabic, emoji and Unifont's coverage from Blit's glyph
+  stack, fitted to that font.
+- **Retired ids:** `blit-modern`, `blit-retro`, `blit-jetbrainless` and the
+  console fonts. A saved selection naming one falls back to the boot font.
 
 Candidate0.1.573 adds `blit-retro`, an antialiased 3270 Mono derivative, and
 expands both outline profiles to the full pinned Nerd Fonts3.4.0 catalogue.

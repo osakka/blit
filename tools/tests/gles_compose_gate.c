@@ -245,7 +245,7 @@ int main(void)
     /* The host's font: Modern at 11x22 with colour emoji and the Arabic
        companion, whose ink overhangs its cells. */
     {
-        BlitRaster *raster = blit_raster_open(&font, "assets/fonts/BlitModernNerd-Regular.ttf",
+        BlitRaster *raster = blit_raster_open(&font, "assets/fonts/text/Hack-Regular.ttf",
                                               "assets/fonts/NotoColorEmoji.ttf", 11, 22);
         if (raster == NULL || !blit_raster_set_arabic(raster, "assets/fonts/BlitArabicModern.ttf")) {
             fprintf(stderr, "GLES_COMPOSE_FAIL the Modern/Arabic raster does not open\n");

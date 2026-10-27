@@ -46,7 +46,7 @@ def ranges(values):
 def generate():
     if fontTools.__version__ != '4.60.1':
         raise SystemExit('Use pinned fontTools4.60.1 (same as font builders)')
-    modern, arabic = load('modern-fonts.source.json'), load('arabic-fonts.source.json')
+    modern, arabic = load('fonts.source.json'), load('arabic-fonts.source.json')
     nerd = load(modern['catalogue']['file'])
     assert digest(FONTS / modern['catalogue']['file']) == modern['catalogue']['sha256']
     icons = load(modern['custom_icons']['catalogue'])
@@ -62,9 +62,14 @@ def generate():
         groups.setdefault(family, []).append((name, cp))
     distinct = {cp for entries in groups.values() for _, cp in entries}
     assert len(distinct) == modern['catalogue']['unique_codepoints']
-    entries = [('modern', modern['outline']), ('retro', modern['retro']),
-               ('arabic-modern', arabic['modern']), ('arabic-retro', arabic['retro']),
-               ('colour-emoji', modern['colour']), ('text-emoji', modern['text_emoji'])]
+    # ADR 0195: the text fonts as shipped, and the glyph stack every one of
+    # them draws through.
+    stack = modern['stack']
+    entries = [('text-' + Path(t['file']).stem, t) for t in modern['text']]
+    entries += [('stack-icons', stack['icons']), ('stack-nerd', stack['nerd'])]
+    entries += [('stack-' + Path(e['file']).stem, e) for e in stack['symbols'] + stack['unifont']]
+    entries += [('arabic', arabic['modern']), ('colour-emoji', modern['colour']),
+                ('text-emoji', modern['text_emoji'])]
     coverage = {'format_version': 1, 'scope': 'Exact native asset cmap, not runtime routing, ink, width or shaping conformance. Ranges are inclusive hexadecimal scalars.', 'faces': {}}
     cmaps = {}
     for role, entry in entries:
@@ -75,18 +80,17 @@ def generate():
         cmaps[role] = cmap
         coverage['faces'][role] = {'file': entry['file'], 'sha256': entry['sha256'],
                                     'scalar_count': len(cmap), 'ranges': ranges(cmap)}
-    for role in ('modern', 'retro'):
-        assert distinct <= cmaps[role].keys(), role
-        assert all(int(i['codepoint'], 16) in cmaps[role] for i in icons['icons']), role
+    assert distinct <= cmaps['stack-nerd'].keys(), 'stack-nerd'
+    assert all(int(i['codepoint'], 16) in cmaps['stack-icons'] for i in icons['icons']), 'stack-icons'
     outputs = {'coverage.json': json.dumps(coverage, indent=2) + '\n'}
     intro = '# Generated glyph catalogue\n\n[Developer guide](../font-reference.md) · [Special additions](special.md) · [Exact native coverage](coverage.json)\n\n'
     intro += 'Generated from pinned Nerd Fonts3.4.0 and packaged font cmaps. Do not edit these tables; run `tools/fonts/build-reference.py`.\n\n'
-    intro += f'{sum(map(len, groups.values())):,} names/aliases, **{len(distinct):,} distinct codepoints**, present in both Modern and Retro. Names can alias the same scalar.\n\n'
+    intro += f'{sum(map(len, groups.values())):,} names/aliases, **{len(distinct):,} distinct codepoints**, drawn for every Blit font from the glyph stack (ADR 0195). Names can alias the same scalar.\n\n'
     intro += '| Category | Names/aliases | Distinct codepoints |\n| --- | ---: | ---: |\n'
     for family, items in sorted(groups.items()):
         intro += f'| [{FAMILIES[family]}]({family}.md) | {len(items)} | {len({cp for _, cp in items})} |\n'
         page = f'# {FAMILIES[family]}\n\n[Category index](README.md) · [Integration rules](../font-reference.md)\n\n'
-        page += 'Both Blit Modern and Retro contain these mappings. Symbols use the terminal foreground colour. The glyph column uses your browser font, not the Blit rasterizer; codepoints/JSON are authoritative.\n\n'
+        page += 'Every Blit font draws these, from the glyph stack. Symbols use the terminal foreground colour. The glyph column uses your browser font, not the Blit rasterizer; codepoints/JSON are authoritative.\n\n'
         page += '| Name | Codepoint | Copy glyph | JSON string |\n| --- | --- | --- | --- |\n'
         for name, cp in sorted(items):
             page += f'| `{name}` | `U+{cp:04X}` | `{chr(cp)}` | `{json.dumps(chr(cp), ensure_ascii=True)}` |\n'
@@ -97,7 +101,7 @@ def generate():
         intro += f'| {role} | `{entry["file"]}` | {entry["scalar_count"]} |\n'
     outputs['README.md'] = intro
     special = '# Blit/Hibr special additions\n\n[Developer guide](../font-reference.md) · [Canonical runtime catalogue](../../assets/fonts/icons/catalogue.json)\n\n'
-    special += 'Generated from the same catalogue served by `GET /v1/fonts/icons`. These original intrinsic-colour icons are one cell each in both native profiles. Supplementary private-use assignments are a Blit contract, not standard Unicode or Nerd Fonts assignments.\n\n'
+    special += 'Generated from the same catalogue served by `GET /v1/fonts/icons`. These original intrinsic-colour icons are one cell each in every native font, from the glyph stack. Supplementary private-use assignments are a Blit contract, not standard Unicode or Nerd Fonts assignments.\n\n'
     special += '| Semantic ID | Codepoint | JSON string | Signal level |\n| --- | --- | --- | --- |\n'
     for icon in icons['icons']:
         cp = int(icon['codepoint'], 16)
@@ -112,7 +116,7 @@ def generate():
         cp = int(icon['codepoint'], 16)
         special += f'| `{icon["id"]}` | `U+{cp:04X}` | `{json.dumps(chr(cp))}` |\n'
     special += '\nBerkanan preserves its runic meaning; it is not the Bluetooth icon. Existing standard/Nerd assignments are not repurposed.\n'
-    special += '\n## Cell geometry\n\nDrawn by the shared raster at every cell size, edge to edge, in the terminal foreground: no outline font carries them, so neighbouring cells join without a seam. One cell each, in both native profiles.\n\n'
+    special += '\n## Cell geometry\n\nDrawn by the shared raster at every cell size, edge to edge, in the terminal foreground: no outline font carries them, so neighbouring cells join without a seam. One cell each, in every font.\n\n'
     special += '| Semantic ID | Codepoint | JSON string | Shape |\n| --- | --- | --- | --- |\n'
     for icon in icons.get('cell_geometry', []):
         cp = int(icon['codepoint'], 16)
@@ -179,7 +183,7 @@ def main():
     unexpected = {p.name for p in args.output.glob('*') if p.is_file()} - outputs.keys()
     if stale or unexpected:
         raise SystemExit(f'FONT_REFERENCE_FAIL stale={stale} unexpected={sorted(unexpected)}')
-    print(f'FONT_REFERENCE_PASS pages={len(outputs)-1} native_faces=6 catalogue=10386_distinct check={args.check}')
+    print(f'FONT_REFERENCE_PASS pages={len(outputs)-1} native_faces={len(json.loads(outputs["coverage.json"])["faces"])} catalogue=10386_distinct check={args.check}')
 
 
 if __name__ == '__main__':

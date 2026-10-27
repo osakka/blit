@@ -18,9 +18,10 @@ Dir.chdir(root) do
       '/lib/x86_64-linux-gnu/libfreetype.so.6','/lib/x86_64-linux-gnu/libharfbuzz.so.0',
       '-Lbuild/deps/prefix/lib/x86_64-linux-gnu','-ldrm','-lutil','-lz','-o',binary)
     env={'LD_LIBRARY_PATH'=>"#{root}/build/deps/prefix/lib/x86_64-linux-gnu"}
-    %w[Retro Modern].each do |profile|
-      command=[binary,"assets/fonts/Blit#{profile}Nerd-Regular.ttf",
-        'assets/fonts/NotoColorEmoji.ttf',"assets/fonts/BlitArabic#{profile}.ttf"]
+    # ADR 0195: one Arabic companion beside every text font.
+    %w[Hack-Regular.ttf 3270-Regular.ttf].each do |profile|
+      command=[binary,"assets/fonts/text/#{profile}",
+        'assets/fonts/NotoColorEmoji.ttf','assets/fonts/BlitArabicModern.ttf']
       command=['valgrind','--error-exitcode=99','--leak-check=full',
         '--errors-for-leak-kinds=definite,indirect',*command] if ENV['BLIT_FONT_VALGRIND']=='1'
       raise "#{profile} failed" unless system(env,*command)
