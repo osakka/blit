@@ -27,6 +27,10 @@ itself.
 | volume-1 … volume-3 | U+100015–U+100017 | Speaker with 1–3 active waves |
 | hui-left, hui-right | U+100018, U+100019 | The letters "hui" in a teal ring: one badge, two columns |
 | power | U+10001A | The power symbol: a teal open ring and a light bar |
+| phone-off | U+10001B | Telephone handset, grey outline: the line is off |
+| phone-wait | U+10001C | Telephone handset, amber dashed outline: connecting |
+| phone-on | U+10001D | Telephone handset, filled teal: on, with a number |
+| phone-ring | U+10001E | Filled handset with gold ring waves: a call |
 
 The hui badge spans two columns as two codepoints, written side by side;
 each draws its half of the one drawing in `hui.svg` (ADR 0197). Neither

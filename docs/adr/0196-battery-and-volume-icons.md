@@ -50,6 +50,15 @@ Option 2, with codepoints agreed with Hibr:
 - **Power (0.2.41):** `power` at U+10001A, `power.svg`, is the standard
   power symbol with a teal ring and a light bar. It is for Hibr's Power
   item on machines with no battery.
+- **Telephone (0.2.44),** for longwire's menu bar item and Control
+  Strip module, asked for by the owner:
+  - `phone-off`, U+10001B: outline;
+  - `phone-wait`, U+10001C: dashed outline, connecting;
+  - `phone-on`, U+10001D: filled;
+  - `phone-ring`, U+10001E: filled, with ring waves.
+  The handset is one variable-width stroke along an arc. The outline and
+  the dashes are the band between its edge and an inset of it, so all
+  four share one shape.
 - **Hibr no longer reads `BLIT_VERSION` (its 0.99.360).** Choosing the
   blit glyph set is the one switch for every Blit icon. So a Blit release
   must reach the owner's machines before the Hibr release that uses its

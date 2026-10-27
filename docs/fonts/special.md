@@ -31,6 +31,10 @@ Generated from the same catalogue served by `GET /v1/fonts/icons`. These origina
 | `hui-left` | `U+100018` | `"\udbc0\udc18"` | — |
 | `hui-right` | `U+100019` | `"\udbc0\udc19"` | — |
 | `power` | `U+10001A` | `"\udbc0\udc1a"` | — |
+| `phone-off` | `U+10001B` | `"\udbc0\udc1b"` | — |
+| `phone-wait` | `U+10001C` | `"\udbc0\udc1c"` | — |
+| `phone-on` | `U+10001D` | `"\udbc0\udc1d"` | — |
+| `phone-ring` | `U+10001E` | `"\udbc0\udc1e"` | — |
 
 ## Themed text additions
 

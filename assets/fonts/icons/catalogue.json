@@ -29,7 +29,11 @@
     {"id":"volume-3", "codepoint":"100017", "source":"volume.svg", "signal_level":3},
     {"id":"hui-left", "codepoint":"100018", "source":"hui.svg", "columns":2, "column":0},
     {"id":"hui-right", "codepoint":"100019", "source":"hui.svg", "columns":2, "column":1},
-    {"id":"power", "codepoint":"10001A", "source":"power.svg"}
+    {"id":"power", "codepoint":"10001A", "source":"power.svg"},
+    {"id":"phone-off", "codepoint":"10001B", "source":"phone-off.svg"},
+    {"id":"phone-wait", "codepoint":"10001C", "source":"phone-wait.svg"},
+    {"id":"phone-on", "codepoint":"10001D", "source":"phone-on.svg"},
+    {"id":"phone-ring", "codepoint":"10001E", "source":"phone-ring.svg"}
   ],
   "text_glyphs": [
     {"id":"berkanan", "codepoint":"16D2", "source":"berkanan.svg", "colour":false},

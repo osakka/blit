@@ -1,5 +1,17 @@
 # Verification status
 
+## 2026-10-27: 0.2.44 telephone icons for longwire (ADR 0196)
+
+- **`phone-off`, `phone-wait`, `phone-on` and `phone-ring`, at
+  U+10001B–10001E:** colour, one column, for longwire's line state: off,
+  connecting, on, and an incoming call. Hibr maps them as GL[phoneoff],
+  GL[phonewait], GL[phoneon] and GL[phonering].
+- **Gates:** `custom_icon_gate` now covers 29 originals, and the four phone
+  states are distinct rasters. `custom_icon_api_gate` and
+  `font_kms_raster_gate` cover the new range.
+- **Suites:** font 38/38, full 153/153 (the Hibr adapter gates included,
+  against v0.99.225), GLES 66/66.
+
 ## 2026-10-27: 0.2.43 pixel fonts on the glyph stack (ADR 0199)
 
 - **Blit Terminus 16 and Blit Spleen 16** keep every glyph they have, in

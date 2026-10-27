@@ -51,7 +51,7 @@ Dir.mktmpdir('blit-custom-icon-api') do |work|
       raise 'capture failed' unless r.code=='200' && r.body.start_with?('BM')
       r.body
     end
-    sequences={icons:((0x100000..0x100006).to_a+(0x100009..0x10001a).to_a).pack('U*')+"\u16d2\u21cc\u270e\u2615X",
+    sequences={icons:((0x100000..0x100006).to_a+(0x100009..0x10001e).to_a).pack('U*')+"\u16d2\u21cc\u270e\u2615X",
                arabic:"ﺮﺒْﺣِ ٠١٢٣٤٥٦٧٨٩ ﻻX"}
     %w[hack ibm-3270].each do |profile|
       [16,17,22].each do |size|
@@ -73,7 +73,7 @@ Dir.mktmpdir('blit-custom-icon-api') do |work|
             end
             cells=snapshot.fetch('cells').select{|c|c['y']==0 && c['width']!=0}.sort_by{|c|c['x']}
             raise 'UTF-8 glyphs lost/reordered' unless cells.map{|c|c['text']}.join.rstrip==sequence
-            raise 'private glyphs changed terminal advance' if kind==:icons && !cells.first(25).all?{|c|c['width']==1}
+            raise 'private glyphs changed terminal advance' if kind==:icons && !cells.first(29).all?{|c|c['width']==1}
             pty=capture.call
             request.call('PUT',path,{base_revision:snapshot.fetch('revision'),cells:[{x:0,y:0,text:' '*40},{x:0,y:0,text:sequence}]})
             raise 'PTY/API presented pixels differ' unless capture.call==pty

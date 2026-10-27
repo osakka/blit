@@ -28,7 +28,7 @@ int main(int argc, char **argv)
     CHECK(!blit_font_load_path(&font, argv[1]));
     for (size = 8; size <= 64; ++size) {
         BlitRaster *r = blit_raster_open(&font, argv[2], argv[3], (size + 1) / 2, size);
-        unsigned hashes[0x1b];
+        unsigned hashes[0x1f];
         int seam[2][96], reach[2], tall[2];
         int index;
         CHECK(r);
@@ -59,10 +59,10 @@ int main(int argc, char **argv)
             CHECK(ink);
             ++script_samples;
         }
-        /* Every colour original: U+100000-100006 and U+100009-10001A;
+        /* Every colour original: U+100000-100006 and U+100009-10001E;
            U+100007/8 are the bar corners, cell geometry. U+100018/9 are
            the two columns of the hui badge (ADR 0197). */
-        for (cp = 0x100000; cp <= 0x10001a; ++cp) {
+        for (cp = 0x100000; cp <= 0x10001e; ++cp) {
             BlitRasterGlyph g, again;
             unsigned hash = 2166136261U;
             int x, y, ink = 0, colour = 0, partial = 0;
@@ -114,11 +114,12 @@ int main(int argc, char **argv)
             ++samples;
         }
         /* Each level is its own raster: Wi-Fi 1-4, battery 0-4, charging
-           0-4 and on mains, volume muted and 1-3. */
+           0-4 and on mains, volume muted and 1-3, and the four telephone
+           states. */
         {
-            static const int groups[][2] = {{2, 6}, {9, 20}, {0x14, 0x18}};
+            static const int groups[][2] = {{2, 6}, {9, 20}, {0x14, 0x18}, {0x1b, 0x1f}};
             int group;
-            for (group = 0; group < 3; ++group)
+            for (group = 0; group < 4; ++group)
                 for (index = groups[group][0]; index < groups[group][1]; ++index) {
                     int other;
                     for (other = index + 1; other < groups[group][1]; ++other)
@@ -161,6 +162,6 @@ int main(int argc, char **argv)
         blit_raster_close(r);
     }
     blit_font_free(&font);
-    printf("CUSTOM_ICON_PASS samples=%d sizes=57 icons=25 distinct_levels=wifi4+battery11+volume4 hui_seam=met colour=premultiplied pen_alias=themed cache=bounded ui_scalars=%d ui_span_cases=%d scripts=%d no_replacement=verified\n", samples, required_count, ui_samples, script_samples);
+    printf("CUSTOM_ICON_PASS samples=%d sizes=57 icons=29 distinct_levels=wifi4+battery11+volume4+phone4 hui_seam=met colour=premultiplied pen_alias=themed cache=bounded ui_scalars=%d ui_span_cases=%d scripts=%d no_replacement=verified\n", samples, required_count, ui_samples, script_samples);
     return 0;
 }
