@@ -44,6 +44,9 @@ Option 2.
 
 - An application writes the parts side by side, in order: Hibr writes
   `${GL[huil]}${GL[huir]}`.
+- **The same drawing can come in both widths.** The large phones (0.3.0)
+  are the one-column phone SVGs listed again with `columns: 2`, so there
+  is one drawing per phone.
 - Written alone, or on a terminal without Blit's icon font, each part is
   half a badge. Hibr uses them only in its Blit glyph set, keyed on
   `BLIT_VERSION` 0.2.40 or later.

@@ -51,7 +51,7 @@ Dir.mktmpdir('blit-custom-icon-api') do |work|
       raise 'capture failed' unless r.code=='200' && r.body.start_with?('BM')
       r.body
     end
-    sequences={icons:((0x100000..0x100006).to_a+(0x100009..0x100022).to_a).pack('U*')+"\u16d2\u21cc\u270e\u2615X",
+    sequences={icons:((0x100000..0x100006).to_a+(0x100009..0x100032).to_a).pack('U*')+"\u16d2\u21cc\u270e\u2615X",
                arabic:"ﺮﺒْﺣِ ٠١٢٣٤٥٦٧٨٩ ﻻX"}
     %w[hack ibm-3270].each do |profile|
       [16,17,22].each do |size|
@@ -61,7 +61,7 @@ Dir.mktmpdir('blit-custom-icon-api') do |work|
           code=fragmented ? 'STDOUT.binmode;STDOUT.sync=true;ARGV[0].bytes.each{|b|STDOUT.write(b.chr);sleep 0.001};sleep 10' : 'STDOUT.binmode;STDOUT.sync=true;STDOUT.write(ARGV[0]);sleep 10'
           session=request.call('POST','/v1/terminal-sessions',{
             command:RbConfig.ruby,arguments:['-e',code,"\e[?25l"+sequence],
-            surface:{width:40,height:2},text_layout:'scalar'},201)
+            surface:{width:64,height:2},text_layout:'scalar'},201)
           path="/v1/surfaces/#{session.fetch('surface_id')}/cells"
           begin
             snapshot=Timeout.timeout(5) do
@@ -73,9 +73,9 @@ Dir.mktmpdir('blit-custom-icon-api') do |work|
             end
             cells=snapshot.fetch('cells').select{|c|c['y']==0 && c['width']!=0}.sort_by{|c|c['x']}
             raise 'UTF-8 glyphs lost/reordered' unless cells.map{|c|c['text']}.join.rstrip==sequence
-            raise 'private glyphs changed terminal advance' if kind==:icons && !cells.first(33).all?{|c|c['width']==1}
+            raise 'private glyphs changed terminal advance' if kind==:icons && !cells.first(49).all?{|c|c['width']==1}
             pty=capture.call
-            request.call('PUT',path,{base_revision:snapshot.fetch('revision'),cells:[{x:0,y:0,text:' '*40},{x:0,y:0,text:sequence}]})
+            request.call('PUT',path,{base_revision:snapshot.fetch('revision'),cells:[{x:0,y:0,text:' '*64},{x:0,y:0,text:sequence}]})
             raise 'PTY/API presented pixels differ' unless capture.call==pty
             cases+=1
           ensure

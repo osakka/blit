@@ -1,5 +1,27 @@
 # Verification status
 
+## 2026-10-28: 0.3.0, the start of the 0.3 series: large, two-column phone icons (ADR 0196, 0197)
+
+- **0.3.0 opens the 0.3 series.** The owner called Blit stable and very
+  usable. 0.2 built native KMS, the glyph stack and discovered fonts, the
+  Blit icons, and pointer lock. 0.3 continues with point releases.
+
+- **Each phone icon, in both styles and all four states, now also comes as
+  a two-column badge:** a left/right pair at U+100023–100032, drawn from
+  the same SVG as the one-column icon. longwire's Phone Icon Size picks
+  Small (the default) or Large, and Hibr maps the pairs as GL[phoneoff2]
+  and so on.
+- **Gates:**
+  - `custom_icon_gate` covers 49 originals, and no large half repeats
+    another.
+  - `custom_icon_api_gate` sends the whole range through a PTY, one column
+    each, on a 64-column surface.
+  - `font_kms_raster_gate` covers the first and last pairs.
+- **Rendered** through Blit at 22 px, small and large side by side: each
+  large phone is whole and seamless.
+- **Suites** (built as 0.2.48, released as 0.3.0 with no code change):
+  font 38/38, full 153/153, GLES 66/66.
+
 ## 2026-10-28: 0.2.47 the classic telephone icons redrawn (ADR 0196)
 
 - **The owner saw the classic icons broken.** The ringing one's waves

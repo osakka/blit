@@ -32,6 +32,7 @@ itself.
 | phone-on | U+10001D | Telephone handset, filled teal: on, with a number |
 | phone-ring | U+10001E | Filled handset with gold ring waves: a call |
 | phone-classic-off … phone-classic-ring | U+10001F–U+100022 | A classic rotary desk phone in the same four states: outline, dashed, filled, filled with ring waves |
+| phone-…-large-left, -right | U+100023–U+100032 | Every phone icon again, two columns wide: modern off, wait, on, ring, then classic, a left/right pair each |
 
 The hui badge spans two columns as two codepoints, written side by side;
 each draws its half of the one drawing in `hui.svg` (ADR 0197). Neither

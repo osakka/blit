@@ -73,6 +73,12 @@ Option 2, with codepoints agreed with Hibr:
   and dashes spaced evenly along the outline. Both sets now come from
   `tools/fonts/draw-phone-icons.py`, which refuses an icon whose ink is
   wider than its view box. It reproduces the modern set byte for byte.
+- **Large phones (0.3.0).** The owner keeps one cell as the default and
+  wanted the option of two. Every phone icon, both styles and all four
+  states, also comes as a two-column badge (ADR 0197): a left/right pair
+  from the same drawing, at U+100023–100032. longwire's Phone Icon Size
+  setting picks Small or Large for the menu bar, and the Control Strip
+  keeps Small.
 - **Hibr no longer reads `BLIT_VERSION` (its 0.99.360).** Choosing the
   blit glyph set is the one switch for every Blit icon. So a Blit release
   must reach the owner's machines before the Hibr release that uses its
