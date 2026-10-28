@@ -108,6 +108,9 @@ Dir.mktmpdir('blit-pointer-lock') do |root|
     unfocused = session(cold, '\033[?7701h', 0, delay: 0.2)
     wait_until('the refusal') { sent(cold).include?(OFF) }
     check(!hidden?, 'a refused lock hid the pointer')
+    _, refused = request('GET', "/v1/terminal-sessions/#{unfocused['id']}")
+    check(refused.dig('mouse_reporting', 'pointer_lock_refusals') == 1,
+          "the refusal was not counted: #{refused['mouse_reporting']}")
     request('DELETE', "/v1/terminal-sessions/#{unfocused['id']}")
 
     # Engaged with focus.
@@ -118,7 +121,8 @@ Dir.mktmpdir('blit-pointer-lock') do |root|
     before = sent(held)
     check(before.index(OFF) < before.index(ON), "DECRQM before engaging was not 2: #{before.inspect}")
     _, state = request('GET', "/v1/terminal-sessions/#{game['id']}")
-    check(state.dig('mouse_reporting', 'pointer_lock') == true, "session JSON: #{state['mouse_reporting']}")
+    check(state.dig('mouse_reporting', 'pointer_lock') == true &&
+          state.dig('mouse_reporting', 'pointer_lock_refusals').zero?, "session JSON: #{state['mouse_reporting']}")
     wait_until('the pointer to hide') { hidden? }
     at = pointer
 
@@ -175,7 +179,7 @@ Dir.mktmpdir('blit-pointer-lock') do |root|
     end
     _, state = request('GET', "/v1/terminal-sessions/#{frozen['id']}")
     check(state.dig('mouse_reporting', 'pointer_lock') == false, 'a stuck program kept the lock')
-    puts 'POINTER_LOCK_PASS query=2_then_1 refused_unfocused=told hidden=yes still=yes ' \
+    puts 'POINTER_LOCK_PASS query=2_then_1 refused_unfocused=told+counted hidden=yes still=yes ' \
          "raw_sum=exact coalesced=#{moves.size}/20 buttons=lock_form focus_loss=released+told " \
          'program_release=silent stuck_program=released'
   ensure

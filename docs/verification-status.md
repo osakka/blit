@@ -1,5 +1,16 @@
 # Verification status
 
+## 2026-10-28: 0.2.46 pointer-lock refusals are counted (ADR 0198)
+
+- **Each session's `mouse_reporting.pointer_lock_refusals`** counts the lock
+  requests Blit refused because the session lacked focus or had ended. On
+  the owner's machine the lock never engaged, and nothing showed whether
+  Hibr had asked or on which session. Hibr had asked on a display it had
+  only moved across (fixed in Hibr 0.99.368).
+- **`pointer_lock_gate`:** an unfocused request is counted once; an
+  engaged session counts none.
+- **Suites:** full 153/153, GLES 66/66.
+
 ## 2026-10-27: 0.2.45 classic telephone icons (ADR 0196)
 
 - **`phone-classic-off`, `-wait`, `-on` and `-ring`, at U+10001F–100022:**

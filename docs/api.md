@@ -437,7 +437,9 @@ for SGR-Pixels (1016), where a report carries the pointer's position in
 pixels of the surface, one-based, instead of its cell. Under 1016 motion is
 held to one report a frame (`BLIT_MOTION_PIXEL_US`, 16.7 ms), the newest
 position kept, and a button report writes any held motion first.
-`pointer_lock` is true while the session holds the pointer (mode ?7701).
+`pointer_lock` is true while the session holds the pointer (mode ?7701), and
+`pointer_lock_refusals` counts the requests refused because the session
+lacked focus or had ended, so you can see which session a program asked on.
 
 **Pointer lock, mode ?7701 (ADR 0198).** For games that turn with the
 mouse.

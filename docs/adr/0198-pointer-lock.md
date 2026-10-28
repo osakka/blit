@@ -67,6 +67,12 @@ behaviour.
 - A program that blocks for over two seconds while locked loses the lock,
   and is told.
 
+- **Refusals are counted (0.2.46).** On the owner's machine the lock never
+  engaged, and nothing showed whether Hibr had asked. It had asked on a
+  display it had only moved across, not the one Blit had focused. Each
+  session's `mouse_reporting.pointer_lock_refusals` now counts the requests
+  refused.
+
 ## Evidence (0.2.42)
 
 `pointer_lock_gate` (new) uses raw-mode sessions that copy every byte they

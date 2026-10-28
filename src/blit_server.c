@@ -935,6 +935,10 @@ typedef struct {
     /* Blit took the lock back but the program's input was full, so the
        notice that says so is still to be written. */
     int terminal_pointer_lock_notice;
+    /* Requests for the lock refused because the session lacked focus or had
+       ended: which session a program asked on, and that it was refused, is
+       otherwise invisible from outside. */
+    unsigned long terminal_pointer_lock_refusals;
     /* OSC 22 (#138): the pointer shapes the program asked for, innermost
        last. Names are stored as sent; the art they resolve to is decided
        when the pointer is drawn over this session. */
@@ -9304,6 +9308,7 @@ static void terminal_set_pointer_lock(BlitSession *session, int enabled)
         return;
     }
     session->terminal_pointer_lock = 0;
+    ++session->terminal_pointer_lock_refusals;
     terminal_write_reply(session, "\033[?7701;2$y");
 }
 
@@ -14701,11 +14706,12 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
     used += (size_t)snprintf(
         body + used, capacity - used,
         ",\"mouse_reporting\":{\"mode\":%d,\"sgr\":%s,\"pixels\":%s,"
-        "\"pointer_lock\":%s}",
+        "\"pointer_lock\":%s,\"pointer_lock_refusals\":%lu}",
         session->terminal_mouse_mode,
         session->terminal_mouse_sgr ? "true" : "false",
         session->terminal_mouse_pixels ? "true" : "false",
-        session->terminal_pointer_lock ? "true" : "false");
+        session->terminal_pointer_lock ? "true" : "false",
+        session->terminal_pointer_lock_refusals);
     /* OSC 22 names are [a-z0-9_-] only, so they need no JSON escaping. */
     used += (size_t)snprintf(
         body + used, capacity - used,
