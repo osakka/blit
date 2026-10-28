@@ -1,5 +1,20 @@
 # Verification status
 
+## 2026-10-28: 0.2.47 the classic telephone icons redrawn (ADR 0196)
+
+- **The owner saw the classic icons broken.** The ringing one's waves
+  reached past its view box, so its ink was wider than one icon, and the
+  renderer drew it as half of a two-column badge. The other three were too
+  fine for 10 px.
+- **Redrawn:** thicker lines, a bigger dial, ring marks beside the base,
+  and dashes cut evenly along the outline (outer and inset matched point for
+  point). The new `tools/fonts/draw-phone-icons.py` draws both sets,
+  reproduces the modern set byte for byte, and refuses an icon whose ink is
+  wider than its view box.
+- **Checked** through Blit at 22 px with JetBrains Mono NL, and at 16 and
+  10 px.
+- **Suites:** font 38/38, full 153/153, GLES 66/66.
+
 ## 2026-10-28: 0.2.46 pointer-lock refusals are counted (ADR 0198)
 
 - **Each session's `mouse_reporting.pointer_lock_refusals`** counts the lock

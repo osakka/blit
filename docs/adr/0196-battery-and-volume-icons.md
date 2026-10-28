@@ -65,6 +65,14 @@ Option 2, with codepoints agreed with Hibr:
   parts are the base (with the dial cut into it when filled), the dial and
   the handset (one arched outline with its two cups), each insettable the
   same way. longwire's Phone Style setting picks Modern or Classic.
+- **The classic set redrawn (0.2.47).** As first shipped, its ringing icon's
+  waves reached past the view box. That made its ink wider than one icon,
+  so the renderer took it for a two-column icon and drew half of a badge.
+  The other three were too fine to read at the menu bar's 10 px. They are
+  redrawn with thicker lines, a bigger dial, ring marks beside the base,
+  and dashes spaced evenly along the outline. Both sets now come from
+  `tools/fonts/draw-phone-icons.py`, which refuses an icon whose ink is
+  wider than its view box. It reproduces the modern set byte for byte.
 - **Hibr no longer reads `BLIT_VERSION` (its 0.99.360).** Choosing the
   blit glyph set is the one switch for every Blit icon. So a Blit release
   must reach the owner's machines before the Hibr release that uses its

@@ -70,7 +70,7 @@
     "icons": {
       "file": "BlitIcons-Regular.ttf",
       "source": "Blit original artwork, built by tools/fonts/build-blit-icons.py from icons/catalogue.json",
-      "sha256": "e24b410ea0419ae81bd8d8a16d9c4af11dccdba89c591ba6f0a4f3e9e19295bd",
+      "sha256": "2e828dd474ec203609b92928e6e8b7add10e9af4432c3895af668c82a36bb1ea",
       "license_file": "icons/LICENSE.txt"
     },
     "nerd": {
@@ -171,10 +171,10 @@
       "icons/phone-wait.svg": "89b806c4ba9badf8a51dc4836388dda312d086aa2d08c34dde85ad91a78ae5d1",
       "icons/phone-on.svg": "7ac79e9749a52856761775648409b154644462a997a3fbc9dbf9f795d9572f89",
       "icons/phone-ring.svg": "c1d87de62c4ab81e5c2bb97ef875b35f3a36408eeb5f007db67a8930c1566b9c",
-      "icons/phone-classic-off.svg": "d2423b1e874d26c78ec57b496e3d756dbe1e634ff6a74a1008d5d5476aef37b6",
-      "icons/phone-classic-wait.svg": "eb7a64349d62273a5d5bffaf2b3d44dfe960e0706b0c4d6887191bbba2be13ff",
-      "icons/phone-classic-on.svg": "f63910c3e39183a5f1bdf169d0a617f0fe56ff85f43e5b04f02e3e3b288231ed",
-      "icons/phone-classic-ring.svg": "b2b6de33f302a1209c75784e8ac31c7b3518b7592d4f3ceb8aeabf4100b7da41"
+      "icons/phone-classic-off.svg": "d243f52d4f57eb66a217072f73cb7e17d41b083d66c76151b6f509959b6dee17",
+      "icons/phone-classic-wait.svg": "ccf24b1f077ff30e6564ab196a9aaba5506db2bd0657c3a023610d899bd66b00",
+      "icons/phone-classic-on.svg": "a9ad1956e18c26bff515a3215e261fe17d29ce5c47a2eaf6b6142d4d895b5f71",
+      "icons/phone-classic-ring.svg": "301fcfd19391dc5372ea913154d3bab512760da977346359e9d3131ca1f76f57"
     }
   },
   "ui_coverage": {
