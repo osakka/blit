@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>image, amber: a two-column file icon</title>
+  <path fill="#141414" d="M7 2 L20 2 L26 8 L26 30 L7 30Z"/>
+  <path fill="#f7f7f2" d="M8 3 L19.6 3 L25 8.4 L25 29 L8 29Z"/>
+  <path fill="#d9d9d2" d="M20 3 L20 8 L25 8Z"/>
+  <path fill="#141414" d="M19 3 L20 3 L20 9 L25 9 L25 8 L19 8Z"/>
+  <path fill="#141414" d="M8 10H25V27H8Z"/>
+  <path fill="#e8a93a" d="M9 11H24V26H9Z"/>
+  <path fill="#8fd0f2" d="M10 12H23V25H10Z"/>
+  <path fill="#5aa85a" d="M10 25 L10 20 L14 16 L18 20 L20 18 L23 21 L23 25Z"/>
+  <path fill="#f4c542" d="M18 13 L21 13 L21 16 L18 16Z"/>
+</svg>

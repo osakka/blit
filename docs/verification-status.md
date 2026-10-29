@@ -1,5 +1,19 @@
 # Verification status
 
+## 2026-10-29: 0.3.4 file-manager icons (ADR 0201, 0197)
+
+- **48 two-column colour icons for Hibr's Files** at U+100033–100092:
+  twelve kinds in four colourways, one generator, one drawing per kind,
+  with colourways from a primary colour. The owner approved the preview.
+- **Spanning icons revised (ADR 0197):** the span is the part's advance,
+  not its ink's width, and every spanning icon is fitted by its design box,
+  so a family shares one scale and one line. The hui badge is unchanged.
+- **Catalogue API limit** raised from 8 KiB to 64 KiB (the catalogue is
+  ~17 KiB). **The package gate** checks every icon file in the commit.
+- **Gates:** `custom_icon_gate` covers 145 originals, with whole file icons
+  distinct from 16 px; the API and KMS gates sample the range.
+- **Suites:** font 38/38, full 154/154, GLES 67/67.
+
 ## 2026-10-29: 0.3.3 Kitty success replies (ADR 0200)
 
 - **A completed `a=t`, `a=T` or `a=f`, and an `a=p`, are answered

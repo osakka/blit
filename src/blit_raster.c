@@ -35,6 +35,10 @@ struct BlitRaster {
        a missing face is skipped, never fatal. */
     FT_Face icons, nerd, symbols[3], unifont[2];
     int cap; /* the text font's cap height in pixels: the icons' box */
+    /* Blit's icon font, in its own units (ADR 0197): one column's advance,
+       and the height of the box every icon is drawn in. A part spanning
+       columns has an advance of its span in columns. */
+    double icon_advance, icon_cap;
     hb_font_t *arabic_font;
     hb_buffer_t *arabic_buffer;
     int arabic_baseline;
@@ -136,6 +140,14 @@ static void open_stack(BlitRaster *raster, const char *colour_path)
     TT_OS2 *os2 = raster->outline ?
         (TT_OS2 *)FT_Get_Sfnt_Table(raster->outline, FT_SFNT_OS2) : NULL;
     raster->icons = stack_face(raster, colour_path, length, "BlitIcons-Regular.ttf");
+    if (raster->icons) {
+        FT_Fixed advance = 0;
+        TT_OS2 *icon_os2 = (TT_OS2 *)FT_Get_Sfnt_Table(raster->icons, FT_SFNT_OS2);
+        raster->icon_advance = !FT_Get_Advance(raster->icons, 0, FT_LOAD_NO_SCALE, &advance) &&
+            advance > 0 ? (double)advance : raster->icons->units_per_EM * 0.6;
+        raster->icon_cap = icon_os2 && icon_os2->sCapHeight > 0 ?
+            (double)icon_os2->sCapHeight : raster->icons->units_per_EM * 0.7;
+    }
     raster->nerd = stack_face(raster, colour_path, length, "SymbolsNerdFontMono-Regular.ttf");
     for (i = 0; i < 3; ++i) raster->symbols[i] = stack_face(raster, colour_path, length, symbols[i]);
     raster->unifont[0] = stack_face(raster, colour_path, length, "Unifont-Regular.otf");
@@ -945,14 +957,13 @@ static int draw_outline_face(FT_Face face, int baseline, uint32_t scalar, Raster
      text font's size, shrunk only to fit 90% of the advance and 95% of the
      cell, centred across the cell, on its own baseline unless that would
      leave the cell.
-   - A Blit icon that spans columns (ADR 0197, the hui badge) is one
-     codepoint per column, each drawn as its slice of the whole: the icon
-     font gives every part the whole outline, shifted left by its column,
-     and its ink wider than one icon (90% of an advance) says how many
-     columns it spans. It fills 95% of the span and 80% of the cell's
-     height, a little taller than the capitals as text with its descenders
-     is, centred on the span and on half the cap height like any icon but
-     kept inside the cell; each cell keeps its own slice.
+   - A Blit icon that spans columns (ADR 0197) is one codepoint per
+     column, each drawn as its slice of the whole: the icon font gives every
+     part the whole outline, shifted left by its column, and an advance of
+     the whole span. Its design box -- the icon font's cap height -- is
+     drawn at 80% of the cell's height, centred on the span and on half the
+     text's cap height and kept inside the cell, so a family of spanning
+     icons shares one scale and one line; each cell keeps its own slice.
    Returns 1 when drawn, 0 when the face has no such glyph, -1 on error.
    The face's size is left changed: only the text face is shared, and its
    caller restores it. */
@@ -977,13 +988,21 @@ static int draw_fitted(BlitRaster *raster, FT_Face face, int rule, uint32_t scal
     if (rule == FIT_ICON) {
         double advance = face->glyph->metrics.horiAdvance > 0 ?
             (double)face->glyph->metrics.horiAdvance : face->units_per_EM * 0.6;
-        if (face == raster->icons) span = (int)ceil(bw / (0.9 * advance) - 1e-6);
+        if (face == raster->icons && raster->icon_advance > 0)
+            span = (int)floor(advance / raster->icon_advance + 0.5);
         if (span > 1) {
-            int column = (int)floor((span * advance / 2.0 - (box.xMin + box.xMax) / 2.0) / advance + 0.5);
-            fit = 0.95 * span * w / bw;
-            if (0.8 * h / bh < fit) fit = 0.8 * h / bh;
-            ox = span * w / 2.0 - column * w - fit * (box.xMin + box.xMax) / 2.0;
-            oy = raster->cap / 2.0 - fit * (box.yMin + box.yMax) / 2.0;
+            /* The part's span is its advance; its column is where its ink's
+               centre falls, which the generator keeps near its column's
+               share of the span. Every spanning icon is fitted by its design
+               box -- the icon font's cap height to 80% of the cell -- so a
+               family is drawn at one scale and on one line, shrunk only if
+               its ink would not fit the span. */
+            double one = raster->icon_advance;
+            int column = (int)floor((span * one / 2.0 - (box.xMin + box.xMax) / 2.0) / one + 0.5);
+            fit = 0.8 * h / raster->icon_cap;
+            if (0.95 * span * w / bw < fit) fit = 0.95 * span * w / bw;
+            ox = (span / 2.0 - column) * (w - fit * one);
+            oy = raster->cap / 2.0 - fit * raster->icon_cap / 2.0;
             if (oy + fit * box.yMax > raster->baseline) oy = raster->baseline - fit * box.yMax;
             if (oy + fit * box.yMin < raster->baseline - h) oy = raster->baseline - h - fit * box.yMin;
             goto place;

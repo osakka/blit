@@ -40,6 +40,23 @@ Option 2.
   Each cell keeps its own slice, so the halves meet at the seam. The
   raster reads no catalogue.
 
+## As built, revised (0.3.4)
+
+The file icons (ADR 0201) broke the first version's two rules.
+- **The span was read from the ink's width** ("wider than one icon"). A
+  document page, narrow on its square canvas, would read as one column.
+  The span is now the part's **advance**: the generator gives a part
+  `600 × columns`, and the raster divides by the icon font's own column
+  (the advance of glyph 0). The column is where the ink's centre falls, and
+  the generator refuses a part whose centre isn't within its column's
+  share.
+- **The fit was to the ink,** so a tall page and a wide folder came out at
+  different scales. Every spanning icon is now fitted by its **design box**,
+  the icon font's cap height (700 units) at 80% of the cell. It is centred
+  on half the text's cap height, and shrunk only if its ink would not fit
+  the span. A family shares one scale and one line. The hui badge, whose
+  ink fills its design box, is unchanged.
+
 ## Consequences
 
 - An application writes the parts side by side, in order: Hibr writes

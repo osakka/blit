@@ -95,6 +95,18 @@ for font_asset in Blit-Terminus16.psf Blit-Unifont16.psf Blit-Spleen16.psf Blit-
         exit 1
     }
 done
+# Every icon source the release recorded is the one packaged: the icon set
+# grows by families (ADR 0196, 0197), so it is read from the commit, not
+# listed here by hand.
+for icon_asset in $(git -C "$root" ls-tree --name-only "$source_commit" assets/fonts/icons/); do
+    icon_asset=${icon_asset#assets/fonts/}
+    [ -f "$stage/usr/lib/blit/fonts/$icon_asset" ] &&
+    cmp -s <(git -C "$root" show "$source_commit:assets/fonts/$icon_asset") \
+        "$stage/usr/lib/blit/fonts/$icon_asset" || {
+        echo "PACKAGE_ARTIFACT_FAIL icon source differs from recorded source: $icon_asset" >&2
+        exit 1
+    }
+done
 for font_asset in BlitArabicModern.ttf arabic-fonts.source.json arabic-specimens.json FreeMono-LICENSE.txt FreeMono-README.txt FreeMono-AUTHORS.txt sources/freefont-src-20120503.tar.gz; do
     cmp -s <(git -C "$root" show "$source_commit:assets/fonts/$font_asset") \
         "$stage/usr/lib/blit/fonts/$font_asset" || {

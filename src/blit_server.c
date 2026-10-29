@@ -16922,7 +16922,9 @@ static int font_icons_json(char *body, size_t capacity)
 {
     char path[1024];
     FILE *file;
-    size_t length, limit = capacity < 8192 ? capacity : 8192;
+    /* Bounded, not tight: the catalogue grows with each icon family (the
+       file icons took it past 16 KiB). */
+    size_t length, limit = capacity < 65536 ? capacity : 65536;
     int too_long, failed;
     if (limit < 2 || snprintf(path, sizeof(path), "%s", blit_font_root_file("icons/catalogue.json"))
         >= (int)sizeof(path)) return 0;

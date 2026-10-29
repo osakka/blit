@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>text, green: a two-column file icon</title>
+  <path fill="#141414" d="M7 2 L20 2 L26 8 L26 30 L7 30Z"/>
+  <path fill="#f7f7f2" d="M8 3 L19.6 3 L25 8.4 L25 29 L8 29Z"/>
+  <path fill="#d9d9d2" d="M20 3 L20 8 L25 8Z"/>
+  <path fill="#141414" d="M19 3 L20 3 L20 9 L25 9 L25 8 L19 8Z"/>
+  <path fill="#57b86a" d="M10 10H19V12H10Z"/>
+  <path fill="#4a4a52" d="M10 14H20V15.2H10Z"/>
+  <path fill="#4a4a52" d="M10 17H23V18.2H10Z"/>
+  <path fill="#4a4a52" d="M10 20H20V21.2H10Z"/>
+  <path fill="#4a4a52" d="M10 23H23V24.2H10Z"/>
+</svg>

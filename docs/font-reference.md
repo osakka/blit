@@ -97,8 +97,9 @@ JSON escape. Keep application choices semantic: `hibr-pen`, `wifi-1` through
 `volume-0` (muted) through `volume-3`, `power`, `phone-off`, `phone-wait`,
 `phone-on`, `phone-ring`, their classic counterparts `phone-classic-off`
 through `phone-classic-ring`, the large two-column version of each
-(`phone-off-large-left` + `phone-off-large-right` and so on), and
-`hui-left` + `hui-right`. Resolve those IDs from the catalogue
+(`phone-off-large-left` + `phone-off-large-right` and so on), the file
+icons (`file-<kind>-<colour>-left` + `-right`, ADR 0201), and `hui-left` +
+`hui-right`. Resolve those IDs from the catalogue
 instead of maintaining an independently numbered table in every application.
 
 **One icon says the whole state.** The charging bolt and the mains plug are
@@ -109,7 +110,7 @@ mark beside a level.
 `hui-right` side by side: each is one column, and each draws its half of
 one badge (ADR 0197).
 
-All 49 originals use **one terminal column** in every font.
+All 145 originals use **one terminal column** in every font.
 They are plane16 private-use scalars, not standard Unicode, ordinary emoji,
 or portable assignments in an unrelated font. In particular:
 

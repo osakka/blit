@@ -218,6 +218,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0198 — Pointer lock: a focused program can hold the pointer and read raw motion](0198-pointer-lock.md)
 - [0199 — Pixel fonts keep their own glyphs and borrow the glyph stack for the rest](0199-pixel-fonts-on-the-glyph-stack.md)
 - [0200 — Kitty images change in place: replace by id, and edit the root frame](0200-kitty-images-change-in-place.md)
+- [0201 — File-manager icons: one drawing per kind, colourways by a primary colour](0201-file-manager-icons.md)
 
 ## Adding an ADR
 

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>video, amber: a two-column file icon</title>
+  <path fill="#141414" d="M7 2 L20 2 L26 8 L26 30 L7 30Z"/>
+  <path fill="#f7f7f2" d="M8 3 L19.6 3 L25 8.4 L25 29 L8 29Z"/>
+  <path fill="#d9d9d2" d="M20 3 L20 8 L25 8Z"/>
+  <path fill="#141414" d="M19 3 L20 3 L20 9 L25 9 L25 8 L19 8Z"/>
+  <path fill="#141414" d="M9 11H24V26H9Z"/>
+  <path fill="#f7f7f2" d="M10 12H11.6V13.6H10Z"/>
+  <path fill="#f7f7f2" d="M13.4 12H15.0V13.6H13.4Z"/>
+  <path fill="#f7f7f2" d="M16.8 12H18.400000000000002V13.6H16.8Z"/>
+  <path fill="#f7f7f2" d="M20.2 12H21.8V13.6H20.2Z"/>
+  <path fill="#f7f7f2" d="M10 23H11.6V24.6H10Z"/>
+  <path fill="#f7f7f2" d="M13.4 23H15.0V24.6H13.4Z"/>
+  <path fill="#f7f7f2" d="M16.8 23H18.400000000000002V24.6H16.8Z"/>
+  <path fill="#f7f7f2" d="M20.2 23H21.8V24.6H20.2Z"/>
+  <path fill="#e8a93a" d="M9 14.5H24V22.0H9Z"/>
+  <path fill="#ffffff" d="M14.5 15.8 L19.5 18.2 L14.5 20.6Z"/>
+</svg>

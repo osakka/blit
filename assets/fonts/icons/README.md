@@ -32,7 +32,8 @@ itself.
 | phone-on | U+10001D | Telephone handset, filled teal: on, with a number |
 | phone-ring | U+10001E | Filled handset with gold ring waves: a call |
 | phone-classic-off … phone-classic-ring | U+10001F–U+100022 | A classic rotary desk phone in the same four states: outline, dashed, filled, filled with ring waves |
-| phone-…-large-left, -right | U+100023–U+100032 | Every phone icon again, two columns wide: modern off, wait, on, ring, then classic, a left/right pair each |
+| phone-…-large-left, -right | U+100023–U+100032 | Every phone icon again, two columns wide: modern off, wait, on, ring, then classic, a left/right pair each (being retired; the range is never reused) |
+| file-<kind>-<colour>-left, -right | U+100033–U+100092 | File-manager icons, two columns wide, in a System 7 spirit: folder, document, text, pdf, image, audio, video, archive, code, application, disk, trash, in classic, blue, green and amber; drawn by `tools/fonts/draw-file-icons.py` (ADR 0201) |
 
 The hui badge spans two columns as two codepoints, written side by side;
 each draws its half of the one drawing in `hui.svg` (ADR 0197). Neither

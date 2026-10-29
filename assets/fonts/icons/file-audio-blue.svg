@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>audio, blue: a two-column file icon</title>
+  <path fill="#141414" d="M7 2 L20 2 L26 8 L26 30 L7 30Z"/>
+  <path fill="#f7f7f2" d="M8 3 L19.6 3 L25 8.4 L25 29 L8 29Z"/>
+  <path fill="#d9d9d2" d="M20 3 L20 8 L25 8Z"/>
+  <path fill="#141414" d="M19 3 L20 3 L20 9 L25 9 L25 8 L19 8Z"/>
+  <path fill="#4c9be8" d="M17 10H19V21H17Z"/>
+  <path fill="#4c9be8" d="M17 10 L23 8 L23 11 L19 12.5Z"/>
+  <path fill="#4c9be8" d="M12 20 L17 19 L19 21 L17 24 L12 24.5 L10.5 22Z"/>
+  <path fill="#141414" d="M19 10H19.8V21H19Z"/>
+</svg>

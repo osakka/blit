@@ -11,8 +11,9 @@ here are only a canvas: advance 600, cap height 700, em 1000.
 
 An icon that spans columns (ADR 0197) is one codepoint per column, from
 one drawing: each part carries the whole outline, drawn across the span
-and shifted left by its column. Its ink is wider than one icon (90% of an
-advance), which is how the renderer knows the span.
+and shifted left by its column. Each part's advance is the span's
+(600 per column), which is how the renderer knows it; its ink's centre
+must lie within its own column's share, which is how it knows the column.
 """
 import argparse
 import copy
@@ -47,6 +48,7 @@ order = ['.notdef']
 glyphs = {'.notdef': TTGlyphPen(None).glyph()}
 cmap = {}
 layers, palette = {}, []
+advances = {}
 
 
 def store(name, glyph):
@@ -63,8 +65,6 @@ for icon in catalogue['icons'] + catalogue.get('text_glyphs', []):
     vx, vy, vw, vh = map(float, svg.attrib['viewBox'].split())
     columns, column = icon.get('columns', 1), icon.get('column', 0)
     scale = min(ADVANCE * columns * .9 / vw, CAP / vh)
-    if columns > 1 and vw * scale <= ADVANCE * .9:
-        raise SystemExit(f'{icon["id"]}: a {columns}-column icon must be wider than one')
     transform = (scale, 0, 0, -scale,
                  (ADVANCE * columns - vw * scale) / 2 - vx * scale - column * ADVANCE,
                  (CAP + vh * scale) / 2 + vy * scale)
@@ -85,6 +85,14 @@ for icon in catalogue['icons'] + catalogue.get('text_glyphs', []):
             parse_path(path.attrib['d'], TransformPen(silhouette, transform))
     glyph = silhouette.glyph()
     store(name, glyph)
+    # A part spanning columns says so in its advance; the renderer finds its
+    # column from its ink's centre, which must lie within its column's share.
+    advances[name] = ADVANCE * columns
+    if columns > 1 and glyph.numberOfContours:
+        glyph.recalcBounds(glyphs)
+        centre = (glyph.xMin + glyph.xMax) / 2
+        if abs(centre - (ADVANCE * columns / 2 - column * ADVANCE)) > ADVANCE * .4:
+            raise SystemExit(f'{icon["id"]}: its ink is off centre for column {column}')
     if colour:
         layers[name] = colour_layers
     cmap[cp] = name
@@ -98,7 +106,8 @@ builder = FontBuilder(UPEM, isTTF=True)
 builder.setupGlyphOrder(order)
 builder.setupCharacterMap(cmap)
 builder.setupGlyf(glyphs)
-builder.setupHorizontalMetrics({n: (ADVANCE, getattr(glyphs[n], 'xMin', 0)) for n in order})
+builder.setupHorizontalMetrics({n: (advances.get(n, ADVANCE), getattr(glyphs[n], 'xMin', 0))
+                                for n in order})
 builder.setupHorizontalHeader(ascent=ASCENT, descent=DESCENT)
 builder.setupOS2(sTypoAscender=ASCENT, sTypoDescender=DESCENT, usWinAscent=ASCENT,
                  usWinDescent=-DESCENT, sCapHeight=CAP)
