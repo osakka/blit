@@ -50,6 +50,15 @@ rest by swapping a primary colour.
   codepoints each from U+10009B to U+1000F2. Boxer is a Boxer game without
   its cover art: two boxing gloves. Hibr names each `GL[f<kind>]` plus the
   colour suffixes.
+- **Special folders are a folder plus a badge (0.3.7):** a small outlined
+  square at the folder's lower right holds an emblem in the primary colour
+  (branch, gear, house, shield, monitor, arrow, page, note, frame, film,
+  diamond, glove). One folder drawing serves twelve special folders.
+- **0.3.7 adds thirty-nine kinds,** U+1000F3–10022A: the twelve folders,
+  and rc, history, service, key, network, cron, readme, license, log,
+  kernel, boot, c, asm, makefile, patch, json, vector, rom, ebook, exe,
+  disc, package, library, lock, database, usb, share. The catalogue then
+  passes 64 KiB, so the API limit rises to 256 KiB.
 
 ## Consequences
 

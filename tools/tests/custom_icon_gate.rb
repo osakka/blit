@@ -22,9 +22,11 @@ Dir.chdir(root) do
     %w[classic blue green amber].product(%w[folder document text pdf image audio video archive code application disk trash])
       .flat_map { |v, k| ["file-#{k}-#{v}-left", "file-#{k}-#{v}-right"] } +
     %w[home boxer markdown spreadsheet diagram presentation font web terminal settings bundle link]
+      .product(%w[classic blue green amber]).flat_map { |k, v| ["file-#{k}-#{v}-left", "file-#{k}-#{v}-right"] } +
+    %w[folder-git folder-config folder-local folder-system folder-desktop folder-downloads folder-documents folder-music folder-pictures folder-videos folder-apps folder-games rc history service key network cron readme license log kernel boot c asm makefile patch json vector rom ebook exe disc package library lock database usb share]
       .product(%w[classic blue green amber]).flat_map { |k, v| ["file-#{k}-#{v}-left", "file-#{k}-#{v}-right"] }
   raise 'incomplete original catalogue' unless icons.fetch('icons').map { |i| i.fetch('id') } == expected
-  raise 'unexpected private mappings' unless icons.fetch('icons').map { |i| i.fetch('codepoint').to_i(16) } == (0x100000..0x100006).to_a + (0x100009..0x100022).to_a + (0x100033..0x1000f2).to_a
+  raise 'unexpected private mappings' unless icons.fetch('icons').map { |i| i.fetch('codepoint').to_i(16) } == (0x100000..0x100006).to_a + (0x100009..0x100022).to_a + (0x100033..0x10022a).to_a
   Dir.mktmpdir('blit-custom-icons') do |work|
     binary = File.join(work, 'gate')
     input = File.join(work, 'ui.txt')

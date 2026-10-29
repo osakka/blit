@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>rom, classic: a two-column file icon</title>
+  <path fill="#141414" d="M5 3 L27 3 L27 27 L24 29 L8 29 L5 27Z"/>
+  <path fill="#8e99f3" d="M6 4 L26 4 L26 26.6 L23.6 28 L8.4 28 L6 26.6Z"/>
+  <path fill="#dce0fb" d="M6 4H26V5.4H6Z"/>
+  <path fill="#141414" d="M9 7H23V18H9Z"/>
+  <path fill="#f7f7f2" d="M10 8H22V17H10Z"/>
+  <path fill="#8fd0f2" d="M10 8H22V13H10Z"/>
+  <path fill="#5aa85a" d="M10 17 L10 13 L13 11 L16 13.4 L19 11.4 L22 13 L22 17Z"/>
+  <path fill="#3246e9" d="M8 21H24V26H8Z"/>
+  <path fill="#b8bcc4" d="M9.4 21.6H10.8V25.400000000000002H9.4Z"/>
+  <path fill="#b8bcc4" d="M12.2 21.6H13.6V25.400000000000002H12.2Z"/>
+  <path fill="#b8bcc4" d="M15 21.6H16.4V25.400000000000002H15Z"/>
+  <path fill="#b8bcc4" d="M17.8 21.6H19.2V25.400000000000002H17.8Z"/>
+  <path fill="#b8bcc4" d="M20.6 21.6H22.0V25.400000000000002H20.6Z"/>
+</svg>

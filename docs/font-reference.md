@@ -109,7 +109,7 @@ mark beside a level.
 `hui-right` side by side: each is one column, and each draws its half of
 one badge (ADR 0197).
 
-All 225 originals use **one terminal column** in every font.
+All 537 originals use **one terminal column** in every font.
 They are plane16 private-use scalars, not standard Unicode, ordinary emoji,
 or portable assignments in an unrelated font. In particular:
 

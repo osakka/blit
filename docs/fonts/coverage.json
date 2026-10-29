@@ -3115,8 +3115,8 @@
     },
     "stack-icons": {
       "file": "BlitIcons-Regular.ttf",
-      "sha256": "ca7b609d66ef3894af3cd40b60c6e789858b04ca7fc4e4561cc9cf698eeb80c8",
-      "scalar_count": 228,
+      "sha256": "50011b1b6846ecbff1fd54dbf3e0dc8af3670baef9664fceeefe67301ef8de0d",
+      "scalar_count": 540,
       "ranges": [
         [
           "16D2",
@@ -3140,7 +3140,7 @@
         ],
         [
           "100033",
-          "1000F2"
+          "10022A"
         ]
       ]
     },

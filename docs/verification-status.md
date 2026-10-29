@@ -1,5 +1,22 @@
 # Verification status
 
+## 2026-10-29: 0.3.7 thirty-nine more file icon kinds (ADR 0201)
+
+- **Special folders, folder plus a badge:** git, config, local, system,
+  desktop, downloads, documents, music, pictures, videos, apps, games.
+- **Files:** rc, history, service, key, network, cron, readme, license, log,
+  kernel, boot, c, asm, makefile, patch, json, vector, rom, ebook, exe,
+  disc, package, library, lock, database; devices usb and share.
+- Four colourways each, at U+1000F3–10022A. The owner approved a preview.
+  The catalogue limit rises to 256 KiB, since it is now 64.7 KiB.
+- **Gates:** `custom_icon_gate` covers 537 originals, and the sixty-three
+  file kinds are distinct from 16 px. The API and KMS gates sample the last
+  pair.
+- **`custom_icon_gate`** now asks for antialiased edges of the set at each
+  size, not of every drawing. The USB stick's right half is straight
+  rectangles that land exactly on whole pixels at 20 px.
+- **Suites:** font 38/38, full 154/154, GLES 67/67.
+
 ## 2026-10-29: 0.3.6 twelve more file icon kinds (ADR 0201)
 
 - **Twelve kinds added at U+100093–1000F2,** four colourways each, a kind

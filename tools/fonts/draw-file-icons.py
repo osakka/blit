@@ -360,6 +360,299 @@ def link():
     ]
 
 
+# ---- emblems: a small badge drawn over the folder's lower right ----------
+def badge(*glyph):
+    return [('outline', rect(17, 15, 13, 13)), ('paper', rect(18, 16, 11, 11))] + list(glyph)
+
+
+def gear_shape(cx, cy, r_out, r_in, teeth=8, role='primary'):
+    import math
+    pts = []
+    for k in range(teeth):
+        a = 2 * math.pi * k / teeth
+        for da, r in ((-0.24, r_in), (-0.16, r_out), (0.16, r_out), (0.24, r_in)):
+            pts.append((round(cx + r * math.cos(a + da), 2), round(cy + r * math.sin(a + da), 2)))
+    return [(role, poly(*pts)), ('paper', circle(cx, cy, r_in * 0.45))]
+
+
+def em_branch():
+    return badge(('primary', circle(21, 19, 1.6)), ('primary', circle(21, 25, 1.6)),
+                 ('primary', circle(26, 21, 1.6)), ('primary', rect(20.4, 19, 1.2, 6)),
+                 ('primary', poly((21.6, 23), (25.4, 21.8), (25.8, 22.8), (21.6, 24.2))))
+
+
+def em_gear():
+    return badge(*gear_shape(23.5, 21.5, 4.6, 3.2))
+
+
+def em_house():
+    return badge(('primary', poly((23.5, 17.5), (28, 21.5), (19, 21.5))), ('primary', rect(20, 21.5, 7, 4.5)),
+                 ('paper', rect(22.6, 23, 1.8, 3)))
+
+
+def em_shield():
+    return badge(('primary', poly((19.5, 17.6), (27.5, 17.6), (27.5, 21.5), (23.5, 26.4), (19.5, 21.5))),
+                 ('light', poly((19.5, 17.6), (23.5, 17.6), (23.5, 26.4), (19.5, 21.5))))
+
+
+def em_monitor():
+    return badge(('outline', rect(19, 17.5, 9, 6.5)), ('primary', rect(19.8, 18.3, 7.4, 4.9)),
+                 ('outline', rect(22.8, 24, 1.4, 1.4)), ('outline', rect(21, 25.2, 5, 0.9)))
+
+
+def em_download():
+    return badge(('primary', rect(22.6, 17.4, 1.8, 5)), ('primary', poly((19.8, 21.8), (27.2, 21.8), (23.5, 25.4))),
+                 ('outline', rect(19.5, 25.6, 8, 0.9)))
+
+
+def em_page():
+    return badge(('outline', rect(20.5, 17.4, 6, 8.2)), ('paper', rect(21.2, 18.1, 4.6, 6.8)),
+                 ('primary', rect(21.8, 19, 3.4, 0.9)), ('ink', rect(21.8, 21, 3.4, 0.7)), ('ink', rect(21.8, 22.8, 2.6, 0.7)))
+
+
+def em_note():
+    return badge(('primary', rect(24, 17.4, 1.3, 6.6)), ('primary', poly((24, 17.4), (27.6, 16.8), (27.6, 18.6), (25.3, 19.2))),
+                 ('primary', circle(22.6, 24.3, 1.9)))
+
+
+def em_frame():
+    return badge(('outline', rect(19, 17.8, 9, 7.6)), ('sky', rect(19.8, 18.6, 7.4, 6)),
+                 ('hill', poly((19.8, 24.6), (19.8, 22.4), (22, 20.6), (24.4, 22.8), (27.2, 21.4), (27.2, 24.6))),
+                 ('primary', rect(24.8, 19.2, 1.6, 1.6)))
+
+
+def em_film():
+    return badge(('outline', rect(19, 17.6, 9, 8)), ('primary', rect(19, 19.6, 9, 4)),
+                 ('white', poly((22.4, 20.2), (25.2, 21.6), (22.4, 23))))
+
+
+def em_diamond():
+    return badge(('outline', poly((23.5, 16.8), (28.2, 21.5), (23.5, 26.2), (18.8, 21.5))),
+                 ('primary', poly((23.5, 18), (27, 21.5), (23.5, 25), (20, 21.5))))
+
+
+def em_glove():
+    return badge(('outline', circle(22.8, 20.4, 3.6)), ('primary', circle(22.8, 20.4, 2.8)),
+                 ('outline', circle(25.6, 22.2, 1.9)), ('primary', circle(25.6, 22.2, 1.2)),
+                 ('outline', rect(20.4, 23.2, 5, 3)), ('paper', rect(21, 23.6, 3.8, 2)))
+
+
+def special(emblem):
+    return lambda: folder() + emblem()
+
+
+# ---- more files --------------------------------------------------------------
+def big_letter(*layers):
+    return page() + list(layers)
+
+
+def c_source():
+    return page() + [('primary', poly((21, 13), (19, 11.2), (14.2, 11.2), (10.5, 14.4), (10.5, 20.6), (14.2, 23.8),
+                                      (19, 23.8), (21, 22), (19.5, 20.4), (18, 21.6), (15, 21.6), (13, 19.6),
+                                      (13, 15.4), (15, 13.4), (18, 13.4), (19.5, 14.6))),
+                     ('ink', rect(10, 26, 12, 1.2))]
+
+
+def asm():
+    rows = [('ink', rect(10, y, 4, 1.2)) for y in (11, 14, 17, 20, 23)] + \
+           [('primary', rect(15.5, y, 7 if y % 2 else 5, 1.2)) for y in (11, 14, 17, 20, 23)]
+    return page() + rows
+
+
+def makefile():
+    return page() + [('primary', poly((11, 24), (17.4, 17.6), (16.6, 15.2), (18.6, 13), (21.6, 12.6), (19.6, 14.6),
+                                      (20.2, 16.6), (22.2, 17.2), (24.2, 15.2), (23.8, 18.2), (21.6, 20.2),
+                                      (19.2, 19.4), (12.8, 25.8))),
+                     ('ink', rect(10, 10, 6, 1.2))]
+
+
+def readme():
+    return page() + [('primary', circle(16.5, 18, 6)), ('white', rect(15.7, 17, 1.6, 5)),
+                     ('white', rect(15.7, 14, 1.6, 1.6))]
+
+
+def license_doc():
+    return page() + [('ink', rect(10, 10, 13, 1.2)), ('ink', rect(10, 13, 10, 1.2)),
+                     ('primary', poly((13, 22), (13, 29), (15, 27.4), (17, 29), (17, 22))),
+                     ('primary', circle(15, 20, 4.2)), ('light', circle(15, 20, 2.6)), ('primary', circle(15, 20, 1.6))]
+
+
+def log():
+    rows = []
+    for y in (10, 13.5, 17, 20.5, 24):
+        rows += [('primary', rect(9.5, y, 3.5, 1.4)), ('ink', rect(14, y, 9 if y != 17 else 6, 1.4))]
+    return page() + rows
+
+
+def history():
+    return page() + [('outline', circle(16.5, 18, 7)), ('paper', circle(16.5, 18, 6)),
+                     ('primary', rect(15.9, 13.5, 1.2, 5)), ('primary', poly((16.5, 17.4), (20, 19.6), (19.4, 20.6), (16, 18.6))),
+                     ('primary', poly((9, 12), (12, 10.6), (11.4, 13.6)))]
+
+
+def rc():
+    return page() + [('outline', rect(9, 10, 15, 11)), ('ink', rect(10, 11, 13, 9)),
+                     ('white', poly((11.6, 13), (14.6, 15.5), (11.6, 18), (11.6, 16.7), (13.2, 15.5), (11.6, 14.3))),
+                     ('white', rect(15.4, 17, 4, 1.2))] + gear_shape(19.5, 24, 3.6, 2.5)
+
+
+def service():
+    return gear_shape(16, 16, 13.5, 9.6, role='primary') + [
+        ('outline', circle(16, 16, 6.2)), ('light', circle(16, 16, 5.2)),
+        ('primary', poly((14.2, 12.8), (19.6, 16), (14.2, 19.2)))]
+
+
+def key():
+    return [('outline', circle(10, 16, 7.5)), ('primary', circle(10, 16, 6.3)), ('paper', circle(8.6, 16, 2.2)),
+            ('outline', rect(15, 14.2, 15, 3.6)), ('primary', rect(15, 15.2, 14, 1.6)),
+            ('outline', rect(22, 17.4, 2.4, 4)), ('outline', rect(26, 17.4, 2.4, 5.4)),
+            ('primary', rect(22.6, 17, 1.2, 3.6)), ('primary', rect(26.6, 17, 1.2, 5))]
+
+
+def network():
+    return [('outline', rect(12, 3, 8, 7)), ('primary', rect(13, 4, 6, 5)),
+            ('outline', rect(3, 21, 8, 7)), ('primary', rect(4, 22, 6, 5)),
+            ('outline', rect(21, 21, 8, 7)), ('primary', rect(22, 22, 6, 5)),
+            ('ink', rect(15.4, 10, 1.2, 6)), ('ink', rect(6.4, 15.4, 19.2, 1.2)),
+            ('ink', rect(6.4, 15.4, 1.2, 5.6)), ('ink', rect(24.4, 15.4, 1.2, 5.6))]
+
+
+def cron():
+    return [('outline', rect(4, 6, 24, 22)), ('paper', rect(5, 7, 22, 20)), ('primary', rect(5, 7, 22, 5)),
+            ('outline', rect(9, 4, 2, 5)), ('outline', rect(21, 4, 2, 5))] + \
+           [('ink', rect(x, y, 3, 2.4)) for y in (14, 18, 22) for x in (7, 12, 17, 22)] + [('primary', rect(17, 18, 3, 2.4))]
+
+
+def kernel():
+    pins = [('outline', rect(x, 3, 1.6, 4)) for x in (10, 14, 18, 22)] + \
+           [('outline', rect(x, 25, 1.6, 4)) for x in (10, 14, 18, 22)] + \
+           [('outline', rect(3, y, 4, 1.6)) for y in (10, 14, 18, 22)] + \
+           [('outline', rect(25, y, 4, 1.6)) for y in (10, 14, 18, 22)]
+    return pins + [('outline', rect(7, 7, 18, 18)), ('primary', rect(8, 8, 16, 16)), ('light', rect(8, 8, 16, 1.4)),
+                   ('shade', rect(11, 11, 10, 10)), ('primary', rect(12.4, 12.4, 7.2, 7.2))]
+
+
+def boot():
+    return kernel()[:-2] + [('paper', circle(16, 16, 5.6)), ('primary', circle(16, 16.6, 4.4)), ('paper', circle(16, 16.6, 3)),
+                            ('paper', rect(14.8, 10, 2.4, 6)), ('primary', rect(15.4, 10.6, 1.2, 5.6))]
+
+
+def patch():
+    return page() + [('hill', rect(10, 11, 4, 1.4)), ('hill', rect(11.3, 9.7, 1.4, 4)), ('ink', rect(15, 11, 8, 1.2)),
+                     ('red', rect(10, 16.5, 4, 1.4)), ('ink', rect(15, 16.5, 6, 1.2)),
+                     ('primary', rect(10, 22, 13, 1.4)), ('primary', rect(10, 25, 9, 1.4))]
+
+
+def json_doc():
+    return page() + [('primary', poly((13, 11), (11, 11), (10, 12), (10, 16), (9, 17.5), (10, 19), (10, 23), (11, 24),
+                                      (13, 24), (13, 22.6), (11.8, 22.6), (11.6, 22.4), (11.6, 18.8), (10.8, 17.5),
+                                      (11.6, 16.2), (11.6, 12.6), (11.8, 12.4), (13, 12.4))),
+                     ('primary', poly((19, 11), (21, 11), (22, 12), (22, 16), (23, 17.5), (22, 19), (22, 23), (21, 24),
+                                      (19, 24), (19, 22.6), (20.2, 22.6), (20.4, 22.4), (20.4, 18.8), (21.2, 17.5),
+                                      (20.4, 16.2), (20.4, 12.6), (20.2, 12.4), (19, 12.4))),
+                     ('ink', circle(16, 17.5, 1.1, 10))]
+
+
+def vector():
+    return page() + [('ink', rect(9.4, 21.4, 3, 3)), ('ink', rect(20.6, 12.4, 3, 3)),
+                     ('primary', poly((11, 22), (13.6, 15.6), (19, 13.4), (21.4, 14.4), (17.4, 16.2), (14.4, 21.4))),
+                     ('outline', poly((12.6, 23.4), (20, 26), (22.4, 21), (21.2, 20.4), (19.6, 24.4), (13, 22.2)))]
+
+
+def rom():
+    return [('outline', poly((5, 3), (27, 3), (27, 27), (24, 29), (8, 29), (5, 27))),
+            ('primary', poly((6, 4), (26, 4), (26, 26.6), (23.6, 28), (8.4, 28), (6, 26.6))),
+            ('light', rect(6, 4, 20, 1.4)),
+            ('outline', rect(9, 7, 14, 11)), ('paper', rect(10, 8, 12, 9)),
+            ('sky', rect(10, 8, 12, 5)), ('hill', poly((10, 17), (10, 13), (13, 11), (16, 13.4), (19, 11.4), (22, 13), (22, 17))),
+            ('shade', rect(8, 21, 16, 5))] + [('metal', rect(x, 21.6, 1.4, 3.8)) for x in (9.4, 12.2, 15, 17.8, 20.6)]
+
+
+def ebook():
+    return [('outline', poly((2, 7), (15, 5), (16, 6), (17, 5), (30, 7), (30, 27), (17, 25), (16, 26), (15, 25), (2, 27))),
+            ('paper', poly((3, 8), (15, 6.2), (15, 24), (3, 25.8))),
+            ('paper', poly((17, 6.2), (29, 8), (29, 25.8), (17, 24))),
+            ('primary', rect(15, 6, 2, 19))] + \
+           [('ink', poly((5, 11 + d), (13, 9.8 + d), (13, 10.8 + d), (5, 12 + d))) for d in (0, 3, 6, 9)] + \
+           [('ink', poly((19, 9.8 + d), (27, 11 + d), (27, 12 + d), (19, 10.8 + d))) for d in (0, 3, 6, 9)]
+
+
+def exe():
+    return [('outline', rect(3, 5, 26, 22)), ('primary', rect(4, 6, 24, 4)), ('light', rect(4, 6, 24, 1)),
+            ('paper', rect(4, 10, 24, 16)),
+            ('white', rect(24.4, 7, 2.2, 2)), ('white', rect(21.4, 7, 2.2, 2)),
+            ('outline', rect(7, 13, 8, 8)), ('red', rect(7.6, 13.6, 3.2, 3.2)), ('hill', rect(11.2, 13.6, 3.2, 3.2)),
+            ('sky', rect(7.6, 17.2, 3.2, 3.2)), ('sun', rect(11.2, 17.2, 3.2, 3.2)),
+            ('ink', rect(17, 14, 8, 1.2)), ('ink', rect(17, 17, 6, 1.2)), ('ink', rect(17, 20, 7, 1.2))]
+
+
+def disc():
+    return [('outline', circle(16, 16, 14, 32)), ('metal', circle(16, 16, 13, 32)),
+            ('light', poly((16, 3), (24, 5.6), (17, 14), (16, 9))),
+            ('primary', poly((16, 29), (8, 26.4), (15, 18), (16, 23))),
+            ('outline', circle(16, 16, 4.4)), ('paper', circle(16, 16, 3.2)), ('outline', circle(16, 16, 1.6))]
+
+
+def package():
+    return archive() + [('paper', poly((7, 15), (13, 17.8), (13, 23), (7, 20.2))),
+                        ('primary', poly((8, 17), (12, 18.9), (12, 19.9), (8, 18))),
+                        ('ink', poly((8, 19.4), (12, 21.3), (12, 22), (8, 20.1)))]
+
+
+def library():
+    plates = []
+    for i, y in enumerate((20, 13, 6)):
+        plates += [('outline', poly((3, y + 3), (16, y - 2.5), (29, y + 3), (16, y + 8.5))),
+                   (('primary', 'light', 'shade')[i % 3], poly((4.6, y + 3), (16, y - 1.4), (27.4, y + 3), (16, y + 7.4)))]
+    return plates
+
+
+def lock():
+    return page() + [('outline', rect(10, 17, 13, 11)), ('primary', rect(11, 18, 11, 9)),
+                     ('outline', poly((12, 17), (12, 13.5), (14, 11), (19, 11), (21, 13.5), (21, 17),
+                                      (19.4, 17), (19.4, 14), (18.4, 12.6), (14.6, 12.6), (13.6, 14), (13.6, 17))),
+                     ('paper', circle(16.5, 21.5, 1.4)), ('paper', rect(16, 21.5, 1, 3.4))]
+
+
+def database():
+    import math
+    def ell(cy, rx=11, ry=3.6, steps=24, rev=False):
+        pts = [(round(16 + rx * math.cos(2 * math.pi * k / steps), 2), round(cy + ry * math.sin(2 * math.pi * k / steps), 2))
+               for k in range(steps)]
+        return poly(*(pts[::-1] if rev else pts))
+    return [('outline', rect(4, 7, 24, 18)), ('outline', ell(25, 12, 4.6)), ('outline', ell(7, 12, 4.6)),
+            ('primary', rect(5, 7, 22, 18)), ('primary', ell(25, 11, 3.6)),
+            ('shade', rect(5, 14.4, 22, 1)), ('shade', rect(5, 20, 22, 1)),
+            ('light', ell(7, 11, 3.6))]
+
+
+def usb():
+    return [('outline', rect(10, 2, 12, 9)), ('metal', rect(11, 3, 10, 8)),
+            ('outline', rect(13, 5, 2, 2)), ('outline', rect(17, 5, 2, 2)),
+            ('outline', rect(8, 10, 16, 20)), ('primary', rect(9, 11, 14, 18)), ('light', rect(9, 11, 1.4, 18)),
+            ('white', rect(15.4, 15, 1.2, 9)), ('white', poly((14, 15.6), (16, 13), (18, 15.6))),
+            ('white', rect(12.4, 19, 1.2, 3)), ('white', rect(18.4, 18, 1.2, 3)),
+            ('white', rect(12.4, 21.4, 4, 1.2)), ('white', rect(16, 20.4, 3.6, 1.2))]
+
+
+def share():
+    return folder() + [('outline', rect(15.4, 24, 1.2, 4)), ('outline', rect(6, 28, 20, 1.6)),
+                       ('primary', circle(16, 28.8, 2.2))]
+
+
+MORE = {
+    'folder-git': special(em_branch), 'folder-config': special(em_gear), 'folder-local': special(em_house),
+    'folder-system': special(em_shield), 'folder-desktop': special(em_monitor),
+    'folder-downloads': special(em_download), 'folder-documents': special(em_page),
+    'folder-music': special(em_note), 'folder-pictures': special(em_frame), 'folder-videos': special(em_film),
+    'folder-apps': special(em_diamond), 'folder-games': special(em_glove),
+    'rc': rc, 'history': history, 'service': service, 'key': key, 'network': network, 'cron': cron,
+    'readme': readme, 'license': license_doc, 'log': log, 'kernel': kernel, 'boot': boot,
+    'c': c_source, 'asm': asm, 'makefile': makefile, 'patch': patch, 'json': json_doc, 'vector': vector,
+    'rom': rom, 'ebook': ebook, 'exe': exe, 'disc': disc, 'package': package, 'library': library,
+    'lock': lock, 'database': database, 'usb': usb, 'share': share,
+}
+
 ICONS = {
     'folder': folder, 'document': document, 'text': text, 'pdf': pdf,
     'image': image, 'audio': audio, 'video': video, 'archive': archive,
@@ -368,6 +661,7 @@ ICONS = {
     'diagram': diagram, 'presentation': presentation, 'font': font, 'web': web,
     'terminal': terminal, 'settings': settings, 'bundle': bundle, 'link': link,
 }
+ICONS.update(MORE)
 
 
 def svg(layers, colours, title):

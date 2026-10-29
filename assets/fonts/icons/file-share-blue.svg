@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>share, blue: a two-column file icon</title>
+  <path fill="#141414" d="M2 6 L12 6 L14 9 L30 9 L30 28 L2 28Z"/>
+  <path fill="#1768b7" d="M3 7 L11.5 7 L13.5 10 L29 10 L29 27 L3 27Z"/>
+  <path fill="#4c9be8" d="M3 12 L29 12 L29 26 L3 26Z"/>
+  <path fill="#141414" d="M3 11H29V12H3Z"/>
+  <path fill="#99c6f2" d="M3 12H29V13.2H3Z"/>
+  <path fill="#99c6f2" d="M3 12H4.2V26H3Z"/>
+  <path fill="#1768b7" d="M3 25H29V26H3Z"/>
+  <path fill="#141414" d="M15.4 24H16.6V28H15.4Z"/>
+  <path fill="#141414" d="M6 28H26V29.6H6Z"/>
+  <path fill="#4c9be8" d="M18.2 28.8 L18.13 29.37 L17.91 29.9 L17.56 30.36 L17.1 30.71 L16.57 30.93 L16.0 31.0 L15.43 30.93 L14.9 30.71 L14.44 30.36 L14.09 29.9 L13.87 29.37 L13.8 28.8 L13.87 28.23 L14.09 27.7 L14.44 27.24 L14.9 26.89 L15.43 26.67 L16.0 26.6 L16.57 26.67 L17.1 26.89 L17.56 27.24 L17.91 27.7 L18.13 28.23Z"/>
+</svg>

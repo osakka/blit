@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>patch, classic: a two-column file icon</title>
+  <path fill="#141414" d="M7 2 L20 2 L26 8 L26 30 L7 30Z"/>
+  <path fill="#f7f7f2" d="M8 3 L19.6 3 L25 8.4 L25 29 L8 29Z"/>
+  <path fill="#d9d9d2" d="M20 3 L20 8 L25 8Z"/>
+  <path fill="#141414" d="M19 3 L20 3 L20 9 L25 9 L25 8 L19 8Z"/>
+  <path fill="#5aa85a" d="M10 11H14V12.4H10Z"/>
+  <path fill="#5aa85a" d="M11.3 9.7H12.700000000000001V13.7H11.3Z"/>
+  <path fill="#4a4a52" d="M15 11H23V12.2H15Z"/>
+  <path fill="#d8443c" d="M10 16.5H14V17.9H10Z"/>
+  <path fill="#4a4a52" d="M15 16.5H21V17.7H15Z"/>
+  <path fill="#8e99f3" d="M10 22H23V23.4H10Z"/>
+  <path fill="#8e99f3" d="M10 25H19V26.4H10Z"/>
+</svg>

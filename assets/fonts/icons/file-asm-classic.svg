@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>asm, classic: a two-column file icon</title>
+  <path fill="#141414" d="M7 2 L20 2 L26 8 L26 30 L7 30Z"/>
+  <path fill="#f7f7f2" d="M8 3 L19.6 3 L25 8.4 L25 29 L8 29Z"/>
+  <path fill="#d9d9d2" d="M20 3 L20 8 L25 8Z"/>
+  <path fill="#141414" d="M19 3 L20 3 L20 9 L25 9 L25 8 L19 8Z"/>
+  <path fill="#4a4a52" d="M10 11H14V12.2H10Z"/>
+  <path fill="#4a4a52" d="M10 14H14V15.2H10Z"/>
+  <path fill="#4a4a52" d="M10 17H14V18.2H10Z"/>
+  <path fill="#4a4a52" d="M10 20H14V21.2H10Z"/>
+  <path fill="#4a4a52" d="M10 23H14V24.2H10Z"/>
+  <path fill="#8e99f3" d="M15.5 11H22.5V12.2H15.5Z"/>
+  <path fill="#8e99f3" d="M15.5 14H20.5V15.2H15.5Z"/>
+  <path fill="#8e99f3" d="M15.5 17H22.5V18.2H15.5Z"/>
+  <path fill="#8e99f3" d="M15.5 20H20.5V21.2H15.5Z"/>
+  <path fill="#8e99f3" d="M15.5 23H22.5V24.2H15.5Z"/>
+</svg>

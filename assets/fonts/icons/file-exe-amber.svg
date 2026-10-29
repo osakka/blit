@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>exe, amber: a two-column file icon</title>
+  <path fill="#141414" d="M3 5H29V27H3Z"/>
+  <path fill="#e8a93a" d="M4 6H28V10H4Z"/>
+  <path fill="#f1cb88" d="M4 6H28V7H4Z"/>
+  <path fill="#f7f7f2" d="M4 10H28V26H4Z"/>
+  <path fill="#ffffff" d="M24.4 7H26.599999999999998V9H24.4Z"/>
+  <path fill="#ffffff" d="M21.4 7H23.599999999999998V9H21.4Z"/>
+  <path fill="#141414" d="M7 13H15V21H7Z"/>
+  <path fill="#d8443c" d="M7.6 13.6H10.8V16.8H7.6Z"/>
+  <path fill="#5aa85a" d="M11.2 13.6H14.399999999999999V16.8H11.2Z"/>
+  <path fill="#8fd0f2" d="M7.6 17.2H10.8V20.4H7.6Z"/>
+  <path fill="#f4c542" d="M11.2 17.2H14.399999999999999V20.4H11.2Z"/>
+  <path fill="#4a4a52" d="M17 14H25V15.2H17Z"/>
+  <path fill="#4a4a52" d="M17 17H23V18.2H17Z"/>
+  <path fill="#4a4a52" d="M17 20H24V21.2H17Z"/>
+</svg>

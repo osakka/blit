@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>folder-pictures, blue: a two-column file icon</title>
+  <path fill="#141414" d="M2 6 L12 6 L14 9 L30 9 L30 28 L2 28Z"/>
+  <path fill="#1768b7" d="M3 7 L11.5 7 L13.5 10 L29 10 L29 27 L3 27Z"/>
+  <path fill="#4c9be8" d="M3 12 L29 12 L29 26 L3 26Z"/>
+  <path fill="#141414" d="M3 11H29V12H3Z"/>
+  <path fill="#99c6f2" d="M3 12H29V13.2H3Z"/>
+  <path fill="#99c6f2" d="M3 12H4.2V26H3Z"/>
+  <path fill="#1768b7" d="M3 25H29V26H3Z"/>
+  <path fill="#141414" d="M17 15H30V28H17Z"/>
+  <path fill="#f7f7f2" d="M18 16H29V27H18Z"/>
+  <path fill="#141414" d="M19 17.8H28V25.4H19Z"/>
+  <path fill="#8fd0f2" d="M19.8 18.6H27.200000000000003V24.6H19.8Z"/>
+  <path fill="#5aa85a" d="M19.8 24.6 L19.8 22.4 L22 20.6 L24.4 22.8 L27.2 21.4 L27.2 24.6Z"/>
+  <path fill="#4c9be8" d="M24.8 19.2H26.400000000000002V20.8H24.8Z"/>
+</svg>

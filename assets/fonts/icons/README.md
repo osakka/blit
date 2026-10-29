@@ -36,6 +36,7 @@ itself.
 | file-<kind>-<colour>-left, -right | U+100033–U+100092 | File-manager icons, two columns wide, in a System 7 spirit: folder, document, text, pdf, image, audio, video, archive, code, application, disk, trash, in classic, blue, green and amber; drawn by `tools/fonts/draw-file-icons.py` (ADR 0201) |
 | file-home-<colour>-left, -right | U+100093–U+10009A | Home, the first kind added after the twelve: a house with a roof in the primary colour; classic, blue, green, amber |
 | file-<kind>-<colour>-left, -right | U+10009B–U+1000F2 | Eleven more kinds, eight codepoints each in this order: boxer (a Boxer game without its cover: two boxing gloves), markdown, spreadsheet, diagram, presentation, font, web, terminal, settings, bundle (a Hibr bundle), link |
+| file-<kind>-<colour>-left, -right | U+1000F3–U+10022A | Thirty-nine more, eight codepoints each in this order: special folders with a badge (folder-git, -config, -local, -system, -desktop, -downloads, -documents, -music, -pictures, -videos, -apps, -games), then rc, history, service, key, network, cron, readme, license, log, kernel, boot, c, asm, makefile, patch, json, vector, rom, ebook, exe, disc, package, library, lock, database, usb, share |
 
 The hui badge spans two columns as two codepoints, written side by side;
 each draws its half of the one drawing in `hui.svg` (ADR 0197). Neither

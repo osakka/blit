@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>folder-music, amber: a two-column file icon</title>
+  <path fill="#141414" d="M2 6 L12 6 L14 9 L30 9 L30 28 L2 28Z"/>
+  <path fill="#a87314" d="M3 7 L11.5 7 L13.5 10 L29 10 L29 27 L3 27Z"/>
+  <path fill="#e8a93a" d="M3 12 L29 12 L29 26 L3 26Z"/>
+  <path fill="#141414" d="M3 11H29V12H3Z"/>
+  <path fill="#f1cb88" d="M3 12H29V13.2H3Z"/>
+  <path fill="#f1cb88" d="M3 12H4.2V26H3Z"/>
+  <path fill="#a87314" d="M3 25H29V26H3Z"/>
+  <path fill="#141414" d="M17 15H30V28H17Z"/>
+  <path fill="#f7f7f2" d="M18 16H29V27H18Z"/>
+  <path fill="#e8a93a" d="M24 17.4H25.3V24.0H24Z"/>
+  <path fill="#e8a93a" d="M24 17.4 L27.6 16.8 L27.6 18.6 L25.3 19.2Z"/>
+  <path fill="#e8a93a" d="M24.5 24.3 L24.44 24.79 L24.25 25.25 L23.94 25.64 L23.55 25.95 L23.09 26.14 L22.6 26.2 L22.11 26.14 L21.65 25.95 L21.26 25.64 L20.95 25.25 L20.76 24.79 L20.7 24.3 L20.76 23.81 L20.95 23.35 L21.26 22.96 L21.65 22.65 L22.11 22.46 L22.6 22.4 L23.09 22.46 L23.55 22.65 L23.94 22.96 L24.25 23.35 L24.44 23.81Z"/>
+</svg>
