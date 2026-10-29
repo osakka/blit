@@ -38,22 +38,6 @@
     {"id":"phone-classic-wait", "codepoint":"100020", "source":"phone-classic-wait.svg"},
     {"id":"phone-classic-on", "codepoint":"100021", "source":"phone-classic-on.svg"},
     {"id":"phone-classic-ring", "codepoint":"100022", "source":"phone-classic-ring.svg"},
-    {"id":"phone-off-large-left", "codepoint":"100023", "source":"phone-off.svg", "columns":2, "column":0},
-    {"id":"phone-off-large-right", "codepoint":"100024", "source":"phone-off.svg", "columns":2, "column":1},
-    {"id":"phone-wait-large-left", "codepoint":"100025", "source":"phone-wait.svg", "columns":2, "column":0},
-    {"id":"phone-wait-large-right", "codepoint":"100026", "source":"phone-wait.svg", "columns":2, "column":1},
-    {"id":"phone-on-large-left", "codepoint":"100027", "source":"phone-on.svg", "columns":2, "column":0},
-    {"id":"phone-on-large-right", "codepoint":"100028", "source":"phone-on.svg", "columns":2, "column":1},
-    {"id":"phone-ring-large-left", "codepoint":"100029", "source":"phone-ring.svg", "columns":2, "column":0},
-    {"id":"phone-ring-large-right", "codepoint":"10002A", "source":"phone-ring.svg", "columns":2, "column":1},
-    {"id":"phone-classic-off-large-left", "codepoint":"10002B", "source":"phone-classic-off.svg", "columns":2, "column":0},
-    {"id":"phone-classic-off-large-right", "codepoint":"10002C", "source":"phone-classic-off.svg", "columns":2, "column":1},
-    {"id":"phone-classic-wait-large-left", "codepoint":"10002D", "source":"phone-classic-wait.svg", "columns":2, "column":0},
-    {"id":"phone-classic-wait-large-right", "codepoint":"10002E", "source":"phone-classic-wait.svg", "columns":2, "column":1},
-    {"id":"phone-classic-on-large-left", "codepoint":"10002F", "source":"phone-classic-on.svg", "columns":2, "column":0},
-    {"id":"phone-classic-on-large-right", "codepoint":"100030", "source":"phone-classic-on.svg", "columns":2, "column":1},
-    {"id":"phone-classic-ring-large-left", "codepoint":"100031", "source":"phone-classic-ring.svg", "columns":2, "column":0},
-    {"id":"phone-classic-ring-large-right", "codepoint":"100032", "source":"phone-classic-ring.svg", "columns":2, "column":1},
     {"id":"file-folder-classic-left", "codepoint":"100033", "source":"file-folder-classic.svg", "columns":2, "column":0},
     {"id":"file-folder-classic-right", "codepoint":"100034", "source":"file-folder-classic.svg", "columns":2, "column":1},
     {"id":"file-document-classic-left", "codepoint":"100035", "source":"file-document-classic.svg", "columns":2, "column":0},
@@ -154,6 +138,9 @@
   "text_glyphs": [
     {"id":"berkanan", "codepoint":"16D2", "source":"berkanan.svg", "colour":false},
     {"id":"wired", "codepoint":"21CC", "source":"wired.svg", "colour":false}
+  ],
+  "retired": [
+    {"from":"100023", "to":"100032", "was":"large two-column phone icons", "note":"dropped by the owner in 0.3.5; never reused, so an old client can never show something else there"}
   ],
   "cell_geometry": [
     {"id":"bar-corner-left", "codepoint":"100007", "colour":false, "shape":"cell filled except a quarter-circle cut at its top-left, radius the cell's shorter side"},

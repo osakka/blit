@@ -79,6 +79,10 @@ Option 2, with codepoints agreed with Hibr:
   from the same drawing, at U+100023–100032. longwire's Phone Icon Size
   setting picks Small or Large for the menu bar, and the Control Strip
   keeps Small.
+- **Large phones retired (0.3.5).** The owner decided regular is all
+  longwire needs. longwire 0.5.22 and Hibr 0.99.378 stopped using them
+  first, then Blit removed them. U+100023–100032 is listed under `retired`
+  in the catalogue and is never reused.
 - **Hibr no longer reads `BLIT_VERSION` (its 0.99.360).** Choosing the
   blit glyph set is the one switch for every Blit icon. So a Blit release
   must reach the owner's machines before the Hibr release that uses its

@@ -1,5 +1,14 @@
 # Verification status
 
+## 2026-10-29: 0.3.5 the large phone icons retired (ADR 0196)
+
+- **U+100023–100032 removed,** after longwire 0.5.22 and Hibr 0.99.378
+  stopped using them, as the owner asked. The catalogue lists the range
+  under `retired`, and it is never reused. 129 colour originals remain.
+- **`custom_icon_gate`** checks the retired range draws nothing from Blit's
+  icons. The API and KMS gates no longer sample it.
+- **Suites:** font 38/38, full 154/154, GLES 67/67.
+
 ## 2026-10-29: 0.3.4 file-manager icons (ADR 0201, 0197)
 
 - **48 two-column colour icons for Hibr's Files** at U+100033–100092:
