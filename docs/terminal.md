@@ -30,16 +30,18 @@ Programs started in a session get `TERM=xterm-kitty` and
 | --- | --- |
 | BS, HT, CR | As usual; HT stops at the right margin. |
 | LF, VT, FF | Line feed; also a carriage return when LNM (mode 20) is set. |
-| SO, SI | Select G1 / G0. |
+| SO, SI | Invoke G1 / G0. |
 | CAN, SUB | Cancel a sequence in progress. |
 | BEL, ENQ, NUL, DEL | Ignored: no bell, no answerback. |
-| 8-bit C1 | IND, NEL, HTS, RI, DCS, SOS, CSI, ST, OSC, PM, APC (raw or UTF-8 encoded). SOS and PM are read and discarded. |
+| 8-bit C1 | IND, NEL, HTS, RI, SS2, SS3, DCS, SOS, CSI, ST, OSC, PM, APC (raw or UTF-8 encoded). SOS and PM are read and discarded. |
 
 ## Escape sequences
 
 | Sequence | Effect |
 | --- | --- |
-| `ESC ( 0`, `ESC ) 0` | DEC Special Graphics (line drawing) into G0 / G1; any other final selects ASCII. |
+| `ESC ( 0`, `ESC ) 0`, `ESC * 0`, `ESC + 0` | DEC Special Graphics (line drawing) into G0, G1, G2 or G3; any other final selects ASCII. `ESC -`, `.`, `/` (96-character sets) designate ASCII. |
+| `ESC N`, `ESC O` | Single shift: G2 or G3 for the next character. |
+| `ESC n`, `ESC o` | Locking shift: G2 or G3 until shifted again. |
 | `ESC =`, `ESC >` | Application / normal keypad. |
 | `ESC 7`, `ESC 8` | Save / restore cursor, attributes, character sets, origin and wrap mode (per screen). |
 | `ESC D`, `ESC M`, `ESC E` | Index, reverse index, next line. |
@@ -58,10 +60,11 @@ Programs started in a session get `TERM=xterm-kitty` and
 | `CSI n G`, `` CSI n ` `` | Column absolute |
 | `CSI r;c H`, `CSI r;c f` | Cursor position (origin-relative under DECOM) |
 | `CSI n I`, `CSI n Z` | Tab forward / back |
-| `CSI n J`, `CSI ? n J` | Erase in display, 0–3 |
+| `CSI n J`, `CSI ? n J` | Erase in display: below, above, all; 3 erases the scrollback only |
 | `CSI n K`, `CSI ? n K` | Erase in line, 0–2 |
 | `CSI n L`, `CSI n M` | Insert / delete lines (within margins) |
 | `CSI n S`, `CSI n T` | Scroll up / down (within margins) |
+| `LF`, `IND`, `NEL`, `RI`, wrapping | Scroll within the left/right margins when they are set |
 | `CSI n X` | Erase characters |
 | `CSI n a`, `CSI n e` | Column / row relative |
 | `CSI n b` | Repeat the last character (or emoji) |
@@ -74,13 +77,13 @@ Programs started in a session get `TERM=xterm-kitty` and
 | `CSI t;b r` | Scroll region |
 | `CSI l;r s` | Left/right margins when DECLRMM is set; otherwise save cursor |
 | `CSI u` | Restore cursor |
-| `CSI 18 t` | Report the text area size in cells (the only window operation answered) |
-| `CSI n SP q` | Cursor style 0–6 (blinking styles are drawn steady) |
+| `CSI 14 t`, `CSI 16 t`, `CSI 18 t`, `CSI 19 t` | Report the text area in pixels, a cell in pixels, the text area in cells, the screen in cells |
+| `CSI n SP q` | Cursor style 0–6 (blinking styles are drawn steady, and reported as set) |
 | `CSI ! p` | Soft reset |
 | `CSI n $ p`, `CSI ? n $ p` | Report a mode's state |
 | `CSI n " q` | Character protection |
 | `CSI … $ x`, `$ z`, `$ {`, `$ v`, `$ r`, `$ t`, `* x` | Fill, erase, selective erase, copy, change and reverse attributes in a rectangle, attribute change extent |
-| `CSI c`, `CSI > c`, `CSI > q` | Device attributes (`?62;4;22;28c`), secondary attributes (`>1;10;0c`), version (`blit-term`) |
+| `CSI c`, `CSI > c`, `CSI = c`, `CSI > q` | Device attributes (`?62;4;22;28c`), secondary attributes (`>1;10;0c`), unit id (`DCS ! \| 00000000`), version (`Blit(<version>)`) |
 | `CSI ? 1;… S` | Sixel graphics attributes (256 registers, 4096×4096) |
 
 ### SGR
@@ -90,9 +93,9 @@ Programs started in a session get `TERM=xterm-kitty` and
 | 0 | Reset |
 | 1, 2, 3, 4, 5, 7, 8, 9 | Bold, dim, italic, underline, blink, reverse, hidden, strikethrough |
 | 22, 23, 24, 25, 27, 28, 29 | Turn the above off |
-| 4:0, 4:3 | No underline; curly underline (drawn straight) |
-| 30–37, 40–47, 90–97, 100–107 | 16 colours |
-| 38, 48, 58 with `;5;n` or `;2;r;g;b` (or colons) | 256 colours and truecolour for text, background and underline |
+| 4:0 – 4:5 | No underline; single, double, curly, dotted, dashed (all drawn as one underline) |
+| 30–37, 40–47, 90–97, 100–107 | 16 colours, xterm's: `000000 cd0000 00cd00 cdcd00 0000ee cd00cd 00cdcd e5e5e5`, bright `7f7f7f ff0000 00ff00 ffff00 5c5cff ff00ff 00ffff ffffff` |
+| 38, 48, 58 with `;5;n`, `;2;r;g;b`, `:5:n`, `:2:r:g:b` or `:2:CS:r:g:b` | 256 colours and truecolour for text, background and underline |
 | 39, 49, 59 | Default text, background and underline colour |
 
 ### DEC private modes
@@ -102,7 +105,7 @@ Programs started in a session get `TERM=xterm-kitty` and
 | 1 | Application cursor keys |
 | 6 | Origin mode |
 | 7 | Auto-wrap |
-| 9, 1000, 1002, 1003 | Mouse tracking: X10, normal, button-event, any-event |
+| 9, 1000, 1002, 1003 | Mouse tracking: X10 (presses only, no modifiers), normal, button-event, any-event |
 | 1004 | Focus in/out events |
 | 1006, 1016 | SGR and SGR-pixel mouse encoding |
 | 25 | Show cursor |
@@ -113,7 +116,7 @@ Programs started in a session get `TERM=xterm-kitty` and
 | 80 | Sixel display mode |
 | 8452 | Sixel leaves the cursor to the right of the image |
 | 2004 | Bracketed paste |
-| 2026 | Synchronized output: the pane is not redrawn until the update ends |
+| 2026 | Synchronized output: the pane is not redrawn until the update ends (reported by DECRQM) |
 | 7701 | Blit pointer lock (below) |
 
 ## OSC
@@ -132,7 +135,7 @@ Programs started in a session get `TERM=xterm-kitty` and
 | Request | Effect |
 | --- | --- |
 | `DCS … q` | Sixel image |
-| `DCS $ q` | Request a setting (DECRQSS): margins, cursor style, SGR, protection, conformance and others |
+| `DCS $ q` | Request a setting (DECRQSS): margins, cursor style, SGR with its colours, protection, conformance and others |
 | `DCS + q` | Terminal capabilities (XTGETTCAP): name, colours, RGB, size, `Tc`, `bce` |
 
 ## Mouse, paste, focus and keyboard
@@ -159,13 +162,13 @@ Programs started in a session get `TERM=xterm-kitty` and
 
 | Item | Supported |
 | --- | --- |
-| Actions | `a=t` transmit, `a=T` transmit and show, `a=p` place, `a=d` delete, `a=q` query, `a=f` with `r=1` edit the image in place ([ADR 0200](adr/0200-kitty-images-change-in-place.md)) |
+| Actions | `a=t` transmit, `a=T` transmit and show, `a=p` place, `a=d` delete, `a=q` query (PNG too), `a=f` with `r=1` edit the image in place ([ADR 0200](adr/0200-kitty-images-change-in-place.md)); `a=p`, `a=d` and `a=q` need no data section |
 | Transmission | Direct (`t=d`), in chunks (`m=1`) |
 | Formats | `f=24` RGB, `f=32` RGBA, `f=100` PNG; `o=z` zlib compression |
 | Placement | source rectangle `x y w h`, cell offset `X Y`, size in cells `c r`, layer `z`, placement id `p`, `C=1` to keep the cursor |
 | Replacing | transmitting to an existing id replaces its pixels and keeps its placements |
 | Delete | `a i z c p q x y`, and their capitals to free the image too |
-| Replies | `OK`, `EINVAL`, `ENOENT`, `ENOSPC`; `q=1` hides OK, `q=2` hides everything |
+| Replies | `OK`, or an error for every failure (`EINVAL`, `ENOENT`, `ENOSPC`, `EFBIG`, `ENOMEM`); only to a request with `i=`; `q=1` hides OK, `q=2` hides everything |
 | Limits | 8 images per session (shared with Sixel), 8 placements per image, 4096×4096 pixels, 64 MiB per image |
 
 Images scroll with their text and are clipped at the edge of the pane.
@@ -199,25 +202,22 @@ background (`P2=1`), display mode (80) and cursor placement (8452).
 | --- | --- |
 | Grid | 512 columns × 160 rows |
 | Scrollback | 1,000 lines, main screen only |
-| Escape string (OSC, DCS, APC) | 16 KiB |
+| OSC, APC (one Kitty chunk) | 16 KiB |
+| DCS (a sixel image) | 8 MiB; a larger one is refused whole |
 
 ## Known gaps
 
-These are what the code does today, recorded so nobody relies on them.
+What Blit does not do, and why:
 
-- **Sixel images larger than 16 KiB of data are cut off**: the escape
-  string buffer drops what does not fit. Small sixels work; large ones
-  should use the Kitty protocol, which is chunked.
-- **Bright colours 90–97 / 100–107 and palette entries 8–15 are computed
-  darker than they should be.**
-- SGR `4:1`, `4:2`, `4:4`, `4:5` (underline styles) also turn on another
-  attribute; `38:2:CS:r:g:b` with a colour-space id is misread.
-- `CSI 3 J` clears the screen as well as the scrollback.
-- Line feeds and wrapping inside left/right margins scroll the full width.
-- Only G0 and G1 exist; `ESC *` and `ESC +` act on them.
-- `CSI = c` answers as DA1. Window operations other than 18 are ignored.
-- Mode 9 reports like 1000. DECRQM answers 0 for 69, 1048 and 2026.
-- DECRQSS for SGR reports attributes but not colours.
-- Kitty: no file, temporary-file or shared-memory transmission, no
-  animation, no Unicode placeholders; some failures send no reply.
-- No bell, no OSC 4/104 palette changes, no OSC 52 read.
+- **No bell.** There is nothing to ring; a desktop that wants one can watch
+  its own output.
+- **No OSC 4 / 104 palette changes.** Colours are resolved when text is
+  written, so a palette change could only affect new text; doing it
+  properly means keeping palette indices per cell.
+- **OSC 52 writes the clipboard but never reads it**, so a program cannot
+  read what another one copied.
+- **Kitty:** only direct transmission (`t=d`). File, temporary-file and
+  shared-memory transmission would let a program make Blit, which runs as
+  root, read a path of its choosing. No animation, no Unicode placeholders.
+- **Underline styles** (double, curly, dotted, dashed) are understood and
+  drawn as a single underline.

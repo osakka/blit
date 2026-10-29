@@ -43,6 +43,7 @@ The complete list of escape sequences is in the [terminal reference](terminal.md
 | --- | --- | --- | --- |
 | Terminal sessions started, placed, resized and stopped through the API, as any local user | 0.1 | 0002, 0010 | Used |
 | xterm-compatible emulation: 256 colours and truecolour, attributes, cursor styles, scroll regions, margins | 0.1 | 0004 | Used |
+| Terminal fixes: xterm's bright colours, underline styles, colon colours, `CSI 3 J`, margins, four character sets, background-colour erase, window size reports, DECRQM/DECRQSS/DA3 answers | 0.3.12 | — | Tested |
 | 1,000 lines of scrollback on the wheel; alternate screen | 0.1 | 0004 | Used |
 | Mouse reporting: normal, button and any-motion tracking; SGR and pixel coordinates | 0.1; pixels 0.2.6 | 0029 | Used |
 | Bracketed paste, focus events, synchronized output | 0.1 | 0029 | Tested |
@@ -62,8 +63,8 @@ The complete list of escape sequences is in the [terminal reference](terminal.md
 | Kitty graphics protocol: chunked, compressed RGB/RGBA/PNG, placements, layers, deletion | 0.1 | 0005, 0056, 0060, 0084 | Used (Hibr's wallpaper and video) |
 | Images scroll with their text | 0.1.491 | 0087 | Tested |
 | Kitty images changed in place, redrawing only the changed rectangle | 0.3.1 | 0200 | Tested |
-| Kitty success replies (`OK`), quiet levels respected | 0.3.3 | 0200 | Tested |
-| Sixel images | 0.1 | 0021 | Used |
+| Kitty replies: `OK`, and an error for every failure; quiet levels respected | 0.3.3; errors 0.3.12 | 0200 | Tested |
+| Sixel images, up to 8 MiB of data each | 0.1; large 0.3.12 | 0021 | Used |
 | Pixel-exact image scaling | 0.1.557 | 0139 | Used |
 | Binary WebSocket frame stream for emulators and games | 0.1 | 0013, 0166 | Used |
 

@@ -1,5 +1,40 @@
 # Verification status
 
+## 2026-10-29: 0.3.12 terminal fixes from the terminal reference
+
+Writing [the terminal reference](terminal.md) from the code (0.3.10) found
+these; each now has a case in `terminal_conformance.rb`.
+
+- **Colours:** bright colours (SGR 90–97, 100–107, palette 8–15) are
+  xterm's, not a darkened copy of 0–7.
+- **SGR sub-parameters** are parsed as such: underline styles `4:1`–`4:5`
+  no longer set bold, dim or blink; `38:2:CS:r:g:b` reads its colour space;
+  `CSI ? m` is no longer taken as SGR.
+- **`CSI 3 J`** erases the scrollback and leaves the screen.
+- **Left/right margins:** line feed, index, next line, reverse index and
+  wrapping scroll only inside them; a lone-row scroll outside them does not.
+- **Background-colour erase:** a line scrolled in or inserted takes the
+  current background, as the `bce` Blit advertises promises.
+- **Character sets:** G0–G3 with SS2/SS3 and LS2/LS3; 96-character
+  designations no longer print their final byte; C1 DCS is DCS.
+- **Replies:** DA3 (`CSI = c`) answers with a unit id; XTVERSION names the
+  release (`Blit(0.3.12)`); DECRQM reports modes 69 and 2026; DECRQSS
+  reports SGR colours and the exact cursor style; window reports 14, 16 and
+  19 (pixel and character sizes) are answered.
+- **Mouse mode 9** reports presses only, without modifiers.
+- **Sixel** images over 16 KiB decode whole (the string grows to 8 MiB);
+  past that one is refused whole and the screen carries on.
+- **Kitty:** every failure answers with an error (`EINVAL`, `ENOENT`,
+  `ENOSPC`, `EFBIG`, `ENOMEM`) to a request that names its image, honouring
+  `q=`; `a=p` and `a=q` need no data section; `a=q` answers for PNG. Hibr
+  sends `q=2`, so it sees none of these.
+- **Mouse mode 9** has its own case in `mouse_report_gate.rb` (press only,
+  no release): it fails on 0.3.11 and passes on 0.3.12.
+- **Suites:** font 38/38; full 154/155, the one failure
+  `hibr_split_capture_gate.rb` stopping at its server start under suite
+  load, then passing alone three times and in a rerun of the Hibr suite
+  (15/15); GLES 67/67.
+
 ## 2026-10-29: 0.3.11 the GPU compositor is the default (ADR 0181, revised)
 
 - **The owner asked for the GPU by default and the CPU by choice.** With no

@@ -1099,10 +1099,6 @@ snapshot = run_case(base, 'da1-query',
                     "stty -icanon -echo min 0 time 5; printf '\\033[c'; dd if=/dev/tty bs=1 count=14 2>/dev/null | od -An -tx1 | tr -d ' \\n'", width: 80)
 assert_equal('1b5b3f36323b343b32323b323863', row_text(snapshot), 'DA1 advertises sixel and rectangular editing')
 
-snapshot = run_case(base, 'xtversion-query',
-                    "stty -icanon -echo min 0 time 5; printf '\\033[>q'; dd if=/dev/tty bs=1 count=19 2>/dev/null | od -An -tx1 | tr -d ' \\n'", width: 80)
-assert_equal('1b503e7c626c69742d7465726d20302e311b5c', row_text(snapshot),
-             'XTVERSION reply')
 
 snapshot = run_case(base, 'window-size-query',
                     "stty -icanon -echo min 0 time 5; printf '\\033[18t'; dd if=/dev/tty bs=1 count=11 2>/dev/null | od -An -tx1 | tr -d ' \\n'")
@@ -2343,5 +2339,177 @@ snapshot = run_case(base, 'charset-designator-does-not-leak',
 cells = cell_map(snapshot)
 assert_equal('A', cells.fetch([0, 0]).fetch('text'), 'charset prefix')
 assert_equal('B', cells.fetch([1, 0]).fetch('text'), 'charset recovery')
+
+# 0.3.12: fixes found by writing docs/terminal.md from the code.
+
+# Bright colours are xterm's 8-15, not a darkened copy of 0-7.
+snapshot = run_case(base, 'bright-colours',
+                    "printf '\\033[91mA\\033[0;101mB\\033[0;38;5;9mC\\033[0;97mD'")
+cells = cell_map(snapshot)
+assert_equal('#ff0000', cells.fetch([0, 0]).fetch('style').fetch('foreground'), 'SGR 91 is bright red')
+assert_equal('#ff0000', cells.fetch([1, 0]).fetch('style').fetch('background'), 'SGR 101 is bright red')
+assert_equal('#ff0000', cells.fetch([2, 0]).fetch('style').fetch('foreground'), 'palette 9 is bright red')
+assert_equal('#ffffff', cells.fetch([3, 0]).fetch('style').fetch('foreground'), 'SGR 97 is white')
+
+# Underline styles are sub-parameters of 4, never SGR codes of their own.
+snapshot = run_case(base, 'underline-styles',
+                    "printf '\\033[4:1mA\\033[0;4:2mB\\033[0;4:5mC\\033[0;4:3mD\\033[4:0mE'")
+cells = cell_map(snapshot)
+%w[A B C D].each_with_index do |letter, x|
+  style = cells.fetch([x, 0]).fetch('style')
+  assert_equal(true, style.fetch('underline'), "#{letter} is underlined")
+  assert_equal([false, false, false], [style.fetch('bold'), style.fetch('dim'), style.fetch('blink')],
+               "#{letter}'s underline style sets nothing else")
+end
+assert_equal(false, cells.fetch([4, 0]).fetch('style', {}).fetch('underline', false), '4:0 ends the underline')
+
+# The colon colour forms, with and without the colour space.
+snapshot = run_case(base, 'colon-colours',
+                    "printf '\\033[38:2:0:10:20:30mA\\033[38:2::40:50:60mB\\033[38:2:70:80:90mC\\033[38:5:196mD\\033[38;2;1;2;3;48;2;4;5;6mE'")
+cells = cell_map(snapshot)
+assert_equal('#0a141e', cells.fetch([0, 0]).fetch('style').fetch('foreground'), '38:2:CS:r:g:b')
+assert_equal('#28323c', cells.fetch([1, 0]).fetch('style').fetch('foreground'), '38:2::r:g:b')
+assert_equal('#46505a', cells.fetch([2, 0]).fetch('style').fetch('foreground'), '38:2:r:g:b')
+assert_equal('#ff0000', cells.fetch([3, 0]).fetch('style').fetch('foreground'), '38:5:n')
+assert_equal(['#010203', '#040506'],
+             [cells.fetch([4, 0]).fetch('style').fetch('foreground'),
+              cells.fetch([4, 0]).fetch('style').fetch('background')], 'semicolon forms')
+
+# CSI ? m is not SGR.
+snapshot = run_case(base, 'private-m-is-not-sgr', "printf '\\033[?4mA\\033[>1mB'")
+cells = cell_map(snapshot)
+assert_equal(false, cells.fetch([0, 0]).fetch('style', {}).fetch('underline', false), 'CSI ? 4 m leaves attributes alone')
+
+# CSI 3 J erases the saved lines and leaves the screen.
+created = request(base, 'POST', '/v1/terminal-sessions', {
+  'command' => '/bin/sh',
+  'arguments' => ['-c', "printf 'a\\nb\\nc\\033[3J'; sleep 1"],
+  'surface' => { 'width' => 4, 'height' => 2 }
+})
+id = created.fetch('id')
+Timeout.timeout(5) do
+  loop do
+    break unless %w[starting running].include?(request(base, 'GET', "/v1/terminal-sessions/#{id}").fetch('state'))
+    sleep 0.02
+  end
+end
+screen = cell_map(request(base, 'GET', "/v1/surfaces/surface-#{id}/cells"))
+assert_equal(0, request(base, 'GET', "/v1/surfaces/surface-#{id}/scrollback").fetch('count'), 'CSI 3 J clears scrollback')
+assert_equal(%w[b c], [screen.fetch([0, 0]).fetch('text'), screen.fetch([0, 1]).fetch('text')],
+             'CSI 3 J keeps the screen')
+request(base, 'DELETE', "/v1/terminal-sessions/#{id}")
+puts 'PASS csi-3J-keeps-screen'
+
+def reply_case(base, name, query, count)
+  run_case(base, name,
+           "stty -icanon -echo min 0 time 5; printf '#{query}'; " \
+           "dd if=/dev/tty bs=1 count=#{count} 2>/dev/null | od -An -tx1 | tr -d ' \\n'",
+           width: 120)
+end
+
+def hex(text) = text.unpack1('H*')
+
+# DA3 answers with a unit id instead of DA1.
+assert_equal(hex("\eP!|00000000\e\\"), row_text(reply_case(base, 'da3', '\\033[=c', 14)), 'DA3 reply')
+
+# XTVERSION names the release.
+version = File.read(File.expand_path('../../packaging/VERSION', __dir__)).strip
+expected = "\eP>|Blit(#{version})\e\\"
+assert_equal(hex(expected), row_text(reply_case(base, 'xtversion-release', '\\033[>q', expected.bytesize)),
+             'XTVERSION names the release')
+
+# DECRQM knows left/right margin mode and synchronized output.
+assert_equal(hex("\e[?2026;2$y"), row_text(reply_case(base, 'decrqm-2026-reset', '\\033[?2026$p', 11)),
+             'DECRQM 2026 reset')
+assert_equal(hex("\e[?2026;1$y"), row_text(reply_case(base, 'decrqm-2026-set', '\\033[?2026h\\033[?2026$p\\033[?2026l', 11)),
+             'DECRQM 2026 set')
+assert_equal(hex("\e[?69;1$y"), row_text(reply_case(base, 'decrqm-69', '\\033[?69h\\033[?69$p\\033[?69l', 9)),
+             'DECRQM 69 set')
+
+# Window reports: cell size and text area in pixels, screen in characters.
+cell = row_text(reply_case(base, 'xtwinops-16', '\\033[16t', 9))
+height, width = [cell].pack('H*').match(/\e\[6;(\d+);(\d+)t/).captures.map(&:to_i)
+raise 'cell size reply' unless height.positive? && width.positive?
+area = [row_text(reply_case(base, 'xtwinops-14', '\\033[14t', 12))].pack('H*')
+assert_equal("\e[4;#{4 * height};#{120 * width}t", area[0, "\e[4;#{4 * height};#{120 * width}t".size],
+             'text area in pixels')
+assert_equal(hex("\e[9;4;120t"), row_text(reply_case(base, 'xtwinops-19', '\\033[19t', 10)), 'screen in characters')
+puts 'PASS xtwinops-14-16-19'
+
+# DECRQSS: SGR with its colours, the cursor style exactly.
+assert_equal(hex("\eP1$r0;1;38:2::1:2:3;48:2::205:0:0m\e\\"),
+             row_text(reply_case(base, 'decrqss-sgr-colours', '\\033[1;38;2;1;2;3;41m\\033P$qm\\033\\\\\\033[0m', 40)),
+             'DECRQSS SGR carries colours')
+assert_equal(hex("\eP1$r5 q\e\\"), row_text(reply_case(base, 'decrqss-decscusr', '\\033[5 q\\033P$q q\\033\\\\', 10)),
+             'DECRQSS DECSCUSR keeps the style')
+
+# Four character sets: G2 by single shift for one character, G3 locked.
+snapshot = run_case(base, 'g2-g3', "printf '\\033*0\\033Nqq\\033+0\\033oq\\033(B\\017q'")
+assert_equal("─q─q", row_text(snapshot)[0, 4], 'SS2 for one character, LS3 until SI')
+
+# 96-character designations do not print their final byte.
+assert_equal('AB', row_text(run_case(base, 'g96-designation', "printf 'A\\033-AB'"))[0, 2],
+             '96-character designation')
+
+# Left/right margins: a line feed at the bottom scrolls only inside them.
+snapshot = run_case(base, 'lf-in-margins',
+                    "printf 'ABCD\\r\\nEFGH\\033[?69h\\033[2;3s\\033[2;2H\\n\\033[?69l'", width: 4, height: 2)
+margin = cell_map(snapshot)
+assert_equal(%w[A F G D E H], [[0, 0], [1, 0], [2, 0], [3, 0], [0, 1], [3, 1]].map { |c| margin.fetch(c).fetch('text') },
+             'margins: only the columns inside scroll')
+assert_equal(true, [[1, 1], [2, 1]].all? { |c| margin[c].nil? || margin[c].fetch('text').strip.empty? },
+             'margins: the row scrolled in is blank inside')
+
+# A line scrolled in takes the current background (bce).
+snapshot = run_case(base, 'bce-scroll', "printf 'a\\r\\nb\\033[44m\\r\\n'", width: 3, height: 2)
+assert_equal('#0000ee', cell_map(snapshot).fetch([0, 1]).fetch('style').fetch('background'),
+             'scrolled-in line takes the current background')
+
+# Mode 9 reports presses only, with no modifiers: covered by mouse gates.
+
+# Kitty: a placement for an unknown image answers ENOENT; a PNG probe OK.
+kitty = reply_case(base, 'kitty-enoent', '\\033_Ga=p,i=77\\033\\\\', 18)
+assert_equal(hex("\e_Gi=77;ENOENT\e\\"), row_text(kitty), 'kitty unknown image ENOENT')
+kitty = reply_case(base, 'kitty-png-probe', '\\033_Ga=q,i=78,f=100;\\033\\\\', 14)
+assert_equal(hex("\e_Gi=78;OK\e\\"), row_text(kitty), 'kitty PNG probe OK')
+
+# A sixel larger than the 16 KiB string buffer decodes whole; one past the
+# 8 MiB bound is refused, and the screen carries on.
+def sixel_state(base, name, script)
+  created = request(base, 'POST', '/v1/terminal-sessions', {
+    'command' => '/bin/sh', 'arguments' => ['-c', "#{script}; sleep 3"],
+    'surface' => { 'width' => 20, 'height' => 4 }
+  })
+  id = created.fetch('id')
+  state = nil
+  Timeout.timeout(20) do
+    loop do
+      state = request(base, 'GET', "/v1/terminal-sessions/#{id}")
+      break if state['graphics'].to_a.any? || !%w[starting running].include?(state.fetch('state'))
+      sleep 0.05
+    end
+  end
+  sleep 0.3
+  [request(base, 'GET', "/v1/terminal-sessions/#{id}"),
+   cell_map(request(base, 'GET', "/v1/surfaces/surface-#{id}/cells"))].tap do
+    request(base, 'DELETE', "/v1/terminal-sessions/#{id}")
+    puts "PASS #{name}"
+  end
+end
+band = '~' * 4000
+large_file = Tempfile.new('blit-sixel')
+large_file.write("\ePq#0;2;100;0;0#0#{([band] * 4).join('-')}\e\\")
+large_file.close
+large, = sixel_state(base, 'sixel-over-16k', "cat #{large_file.path}")
+image = large.fetch('graphics').find { |g| g.fetch('width') == 4000 }
+raise "sixel over 16 KiB: #{large['graphics'].inspect}" unless image && image.fetch('height') == 24
+
+huge_file = Tempfile.new('blit-sixel-huge')
+huge_file.write("\ePq#{'?' * 9_000_000}\e\\Z")
+huge_file.close
+refused, cells = sixel_state(base, 'sixel-over-bound', "cat #{huge_file.path}")
+raise 'sixel past the bound was drawn' unless refused.fetch('graphics').to_a.empty?
+assert_equal('Z', cells.fetch([0, 0]).fetch('text'), 'text after a refused sixel')
+
 
 puts 'terminal conformance: PASS'

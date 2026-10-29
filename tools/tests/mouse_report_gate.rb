@@ -156,6 +156,24 @@ else
 end
 delete_session(legacy.fetch('id'))
 
+# X10 (mode 9) reports a press and nothing else: no release, no modifiers.
+# A press and release of button 0 at column 3, row 1 is one report, button
+# byte 32 (space), column byte 35 (#), row byte 33 (!).
+x10 = reporting_session('\\033[?9h')
+sleep 2.0
+move_to(3, 1)
+request('POST', '/v1/input/inject', 'kind' => 'pointer_button', 'button' => 0, 'pressed' => true)
+request('POST', '/v1/input/inject', 'kind' => 'pointer_button', 'button' => 0, 'pressed' => false)
+found, text = wait_for(x10.fetch('surface_id'), '^[[M')
+sleep 0.6
+text = echoed(x10.fetch('surface_id'))
+if !found
+  failures << "an X10 session received no press report: #{text.inspect}"
+elsif text.scan('^[[M').length != 1 || !text.include?('^[[M #!')
+  failures << "X10 must report the press only, as ESC [ M space # !: #{text.inspect}"
+end
+delete_session(x10.fetch('id'))
+
 # #36. SGR reports are easier to count than to spell: code, column, row.
 # A code with the 32 bit set is a motion report.
 def motions(surface_id)
@@ -329,5 +347,5 @@ unless failures.empty?
   exit 1
 end
 
-puts "MOUSE_REPORT_PASS legacy_wheel_byte=96 hover_1002=0 drag_1002=#{dragged.length} " \
+puts "MOUSE_REPORT_PASS legacy_wheel_byte=96 x10=press_only hover_1002=0 drag_1002=#{dragged.length} " \
      "hover_1003=#{anywhere.length} pixel_sweep=#{pixel_sweep} reports_dropped=#{before.inspect}->#{after.inspect}"
