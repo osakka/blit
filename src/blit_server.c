@@ -3351,7 +3351,7 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
                 "\"gpu_timed\":%s,\"gpu_last_ms\":%.3f,\"gpu_max_ms\":%.3f,"
                 "\"gpu_total_us\":%llu,\"gpu_frames\":%llu,"
                 "\"frame_quads\":%llu,\"frame_draw_calls\":%llu,"
-                "\"upload_ms\":%.3f},"
+                "\"upload_ms\":%.3f,\"image_partial_uploads\":%llu},"
                 "\"effects\":{\"cpu_last_ms\":%.3f,\"cpu_max_ms\":%.3f,"
                 "\"gpu_quads\":%llu,\"present_panes\":%llu,\"glow_rebuilds\":%llu,"
                 "\"presentation_unavailable\":\"%s\",\"animation_hz\":%d,"
@@ -3376,6 +3376,7 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
                 have_kms_info ? kms_info.gles_frame_quads : 0ULL,
                 have_kms_info ? kms_info.gles_frame_draws : 0ULL,
                 have_kms_info ? kms_info.gles_upload_ms : 0.0,
+                have_kms_info ? kms_info.gles_image_partial_uploads : 0ULL,
                 have_kms_info ? kms_info.effects_last_ms : 0.0,
                 have_kms_info ? kms_info.effects_max_ms : 0.0,
                 have_kms_info ? kms_info.effects_quads : 0ULL,
@@ -7164,6 +7165,36 @@ static void mark_graphics_image_damage(BlitSurface *surface,
     if (!surface->damage_valid) mark_surface_damage(surface, 0, 0);
 }
 
+/* ADR 0200: only the cells an edited rectangle of the image (x, y, w, h in
+   its own pixels) lands on, through each placement's source rectangle and
+   scale, rounded out to whole pixels. */
+static void mark_graphics_rect_damage(BlitSurface *surface,
+                                      const BlitGraphicsImage *image,
+                                      int x, int y, int w, int h,
+                                      int cell_width, int cell_height)
+{
+    BlitGraphicsDraw draws[BLIT_GRAPHICS_MAX_PLACEMENTS + 1];
+    int i;
+    int count = blit_graphics_collect(image, 1, draws,
+                                     BLIT_GRAPHICS_MAX_PLACEMENTS + 1);
+    for (i = 0; i < count; ++i) {
+        const BlitGraphicsDraw *d = &draws[i];
+        int x0 = x > d->src_x ? x : d->src_x;
+        int y0 = y > d->src_y ? y : d->src_y;
+        int x1 = x + w < d->src_x + d->src_w ? x + w : d->src_x + d->src_w;
+        int y1 = y + h < d->src_y + d->src_h ? y + h : d->src_y + d->src_h;
+        long long left, top, right, bottom;
+        if (x1 <= x0 || y1 <= y0 || d->src_w <= 0 || d->src_h <= 0) continue;
+        left = d->x + (long long)(x0 - d->src_x) * d->width / d->src_w;
+        top = d->y + (long long)(y0 - d->src_y) * d->height / d->src_h;
+        right = d->x + ((long long)(x1 - d->src_x) * d->width + d->src_w - 1) / d->src_w;
+        bottom = d->y + ((long long)(y1 - d->src_y) * d->height + d->src_h - 1) / d->src_h;
+        mark_graphics_damage(surface, (int)left, (int)top, (int)(right - left),
+                             (int)(bottom - top), cell_width, cell_height);
+    }
+    if (!surface->damage_valid) mark_surface_damage(surface, 0, 0);
+}
+
 /* Issue #48. A cell's colours and attributes belong under `style`, and this
    parser finds keys by search, so a cell that carried them at the top level
    was accepted with 200 and no style applied. The schema says
@@ -10202,9 +10233,31 @@ static int kitty_stage_land(BlitSession *session, int image_id, int quiet)
         kitty_reply(session, image_id, quiet, "EINVAL");
         return 0;
     }
+    {
+        unsigned long long from = target->generation;
+        target->generation = next_graphics_generation();
+        /* An edit is remembered so a renderer can refresh just it; any other
+           change forgets the history and forces a whole refresh. */
+        if (session->terminal_kitty_stage_mode == 2) {
+            BlitGraphicsEdit edit;
+            edit.from = from;
+            edit.to = target->generation;
+            edit.x = session->terminal_kitty_stage_x;
+            edit.y = session->terminal_kitty_stage_y;
+            edit.width = stage->width;
+            edit.height = stage->height;
+            if (target->edit_count == BLIT_GRAPHICS_EDIT_HISTORY) {
+                memmove(target->edits, target->edits + 1,
+                        sizeof(target->edits[0]) * (BLIT_GRAPHICS_EDIT_HISTORY - 1));
+                --target->edit_count;
+            }
+            target->edits[target->edit_count++] = edit;
+        } else {
+            target->edit_count = 0;
+        }
+    }
     graphics_image_release(stage);
     ++target->revision;
-    target->generation = next_graphics_generation();
     return 1;
 }
 
@@ -10955,11 +11008,20 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
         if (session->terminal_kitty_upload_active &&
             session->terminal_kitty_upload_id == image->id)
             session->terminal_kitty_upload_active = 0;
-        /* ADR 0200: a staged upload lands now, all at once. */
+        /* ADR 0200: a staged upload lands now, all at once. An edit damages
+           only the cells its rectangle lands on. */
         if (image == &session->terminal_kitty_stage) {
+            int edit = session->terminal_kitty_stage_mode == 2;
+            int ex = session->terminal_kitty_stage_x, ey = session->terminal_kitty_stage_y;
+            int ew = image->width, eh = image->height;
             if (!kitty_stage_land(session, image_id, quiet))
                 return;
             image = graphics_image_find(session, (unsigned int)image_id);
+            if (edit && image->advance == 0) {
+                mark_graphics_rect_damage(surface, image, ex, ey, ew, eh,
+                                          cell_width, cell_height);
+                return;
+            }
         }
         if (image->advance > 0) {
             kitty_advance_cursor(session, surface, image,

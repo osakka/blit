@@ -1,5 +1,29 @@
 # Verification status
 
+## 2026-10-29: 0.3.2 Kitty edits redraw only what changed; two load-proof gates
+
+- **A Kitty `a=f` edit damages only the cells its rectangle lands on**
+  (ADR 0200). The GPU compositor refreshes only that rectangle of the
+  image's texture, using a short edit history on the image, and
+  `image_partial_uploads` counts it. Hibr's X Screen saves render work as
+  well as bytes.
+- **`kitty_frame_edit_gate`:** an 8×8 edit of a 64×64 image damages 1×1
+  cell (it was 8×4), and on GLES the partial-upload counter rises.
+- **`pane_effects_gate` no longer fails under load.** The CPU effects cost
+  was measured on the wall clock, which counted preemption as cost. It is
+  now the thread's CPU time, which is what the figure is documented as.
+- **`mouse_report_gate` no longer fails under load.** The 1016 sweep was
+  allowed 20 reports however long its 40 injections took. It is now held
+  to the frames the sweep actually spanned, which is the rule it tests.
+- **Both checked under eight busy loops** (load average 8.6 on 4 cores):
+  3 of 3 pass each. Before, the sweep sent 30–31 reports there and failed.
+- **`presentation_effects_gate` race fixed.** It found the glowing line's
+  band in one screenshot and read the pixels of a later one, where the band
+  had moved, which failed once in the first GLES run ("light below the
+  leading edge"). The band and its pixels now come from the same
+  screenshot: 3 of 3 pass on GLES, and it passes on the CPU path.
+- **Suites:** full 154/154, GLES 67/67.
+
 ## 2026-10-29: 0.3.1 Kitty images change in place (ADR 0200)
 
 - **`a=f,r=1` edits a rectangle of an image already shown** (chunked,

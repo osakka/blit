@@ -56,6 +56,7 @@ struct KmsGlesResources {
     int font_cell_width, font_cell_height;
     /* Time this frame spent making sprites and uploading textures. */
     long long upload_us;
+    unsigned long long partial_uploads;
     uint32_t *scratch_black, *scratch_white;
     unsigned char *sprite_pixels;
     size_t scratch_pixels;
@@ -304,6 +305,23 @@ static BlitGlesTexture kms_gles_image(BlitKms *kms, KmsGlesResources *r,
         slot->texture = 0;
     }
     uploaded = kms_now_us();
+    /* ADR 0200: a texture one or more in-place edits behind is refreshed
+       only where they changed it. */
+    {
+        int ex, ey, ew, eh;
+        if (slot->texture && slot->image == image &&
+            blit_graphics_edited_since(image, slot->generation, &ex, &ey, &ew, &eh)) {
+            if (blit_gles_texture_update(kms->gles, slot->texture, bytes, ex, ey, ew, eh,
+                                         image->pixels + ((size_t)ey * image->width + ex) * bytes,
+                                         image->width * bytes) == 0) {
+                r->upload_us += kms_now_us() - uploaded;
+                ++r->partial_uploads;
+                slot->generation = image->generation;
+                slot->used_frame = r->frame;
+                return slot->texture;
+            }
+        }
+    }
     if (!slot->texture)
         slot->texture = blit_gles_texture_create(kms->gles, image->width,
                                                  image->height, bytes);
@@ -821,6 +839,7 @@ static int kms_gles_compose(BlitKms *kms, KmsOutput *output,
     output->info.gles_frame_draws = draws_after - draws_before;
     output->info.gles_frame_quads = (vertices_after - vertices_before) / 6;
     output->info.gles_upload_ms = (double)r->upload_us / 1000.0;
+    output->info.gles_image_partial_uploads = r->partial_uploads;
     output->info.effects_quads = r->effect_quads;
     output->info.effects_last_ms = 0;
     {

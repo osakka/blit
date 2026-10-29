@@ -45,9 +45,14 @@ A transmission that changes a complete image is staged and lands at once.
 - **X Screen** can send one full image, then only changed rectangles with
   `a=f,r=1`, and no new `a=p`.
 - **Re-sending an id is safe.** The image changes instead of vanishing.
-- **Damage covers the whole image's cells,** not just the rectangle. The
-  bandwidth saved is in the PTY stream; narrowing the redraw to the
-  rectangle is possible later work.
+- **An edit redraws only what it changed (0.3.2).** Its rectangle is mapped
+  through each placement's source rectangle and scale, and only those cells
+  are damaged. The image keeps a short history of its edits, as the
+  rectangle changed between two generations. The GPU compositor walks back
+  from the image's generation to its texture's, and uploads just the union
+  of those rectangles. A replacement, a new image, or a gap in the history
+  forces a whole upload. `image_partial_uploads` in the compositor
+  diagnostics counts the partial ones.
 
 ## Evidence (0.3.1)
 
@@ -59,3 +64,7 @@ A transmission that changes a complete image is staged and lands at once.
   shows the edit with no new `a=p`;
 - an out-of-bounds edit, an edit of an unknown id, and an edit of frame 2
   are each refused (three rejections), and the image is unchanged.
+- 0.3.2:
+  - an 8×8 edit of a 64×64 image (8×4 cells) damages 1×1 cell, as read
+    from the stream's `surface_delta`;
+  - on the GPU compositor, `image_partial_uploads` rises.

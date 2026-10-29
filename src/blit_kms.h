@@ -142,6 +142,9 @@ typedef struct {
     unsigned long long gpu_total_us, gpu_frames;
     unsigned long long gles_frame_quads, gles_frame_draws;
     double gles_upload_ms;
+    /* ADR 0200: image textures refreshed only where an in-place edit
+       changed them, rather than whole. */
+    unsigned long long gles_image_partial_uploads;
     /* ADR 0186: what pane effects cost this output's last frame -- CPU time
        laying them on, or the quads the GPU drew for them -- and the worst
        CPU frame, so a new effect's cost is visible before it is a problem. */

@@ -197,6 +197,16 @@ static long long kms_now_us(void)
     return (long long)now.tv_sec * 1000000LL + now.tv_nsec / 1000;
 }
 
+/* The CPU time this thread has used. A cost measured on the wall clock
+   counts the time the thread was preempted, which is the machine's load,
+   not the work's. */
+static long long kms_thread_cpu_us(void)
+{
+    struct timespec now;
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &now);
+    return (long long)now.tv_sec * 1000000LL + now.tv_nsec / 1000;
+}
+
 static int kms_flip_timeout_ms(void)
 {
     const char *timeout_value = getenv("BLIT_KMS_FLIP_TIMEOUT_MS");
@@ -547,7 +557,7 @@ static void apply_view_effects(KmsOutput *output, const BlitKmsSurfaceView *view
     /* Local effects only: the CPU compositor never draws presentation
        effects (ADR 0187), so scanlines always stay here. */
     if (!blit_effect_set_has(set, BLIT_EFFECT_LOCAL)) return;
-    started = kms_now_us();
+    started = kms_thread_cpu_us();
     if (x0 < 0) x0 = 0;
     if (y0 < 0) y0 = 0;
     if (x1 > output->mode.hdisplay) x1 = output->mode.hdisplay;
@@ -575,7 +585,7 @@ static void apply_view_effects(KmsOutput *output, const BlitKmsSurfaceView *view
                 if (coverage) effect_darken(output, x, y, coverage);
             }
     }
-    output->effects_frame_us += kms_now_us() - started;
+    output->effects_frame_us += kms_thread_cpu_us() - started;
 }
 
 static void draw_kms_overlays(KmsOutput *output,

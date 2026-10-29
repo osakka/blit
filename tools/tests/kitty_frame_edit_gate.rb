@@ -11,9 +11,13 @@
 #   * the screen shows each edit with no new a=p
 #   * an edit outside the image, on an unknown image, or on another frame is
 #     refused and leaves the image exactly as it was
+#   * an edit damages only the cells its rectangle lands on, not the image's
+#   * on the GPU compositor, an edited texture is refreshed only where it
+#     changed (image_partial_uploads)
 
 require 'base64'
 require 'json'
+require 'socket'
 require 'net/http'
 require 'timeout'
 require 'tmpdir'
@@ -45,6 +49,15 @@ def esc(keys, data = '')
   "\\033_G#{keys};#{data}\\033\\\\"
 end
 
+# A transmission in 4096-byte base64 chunks, as Hibr sends them.
+def chunked(keys, data)
+  pieces = Base64.strict_encode64(data).scan(/.{1,4096}/)
+  pieces.each_with_index.map do |piece, i|
+    more = i < pieces.size - 1 ? 1 : 0
+    esc(i.zero? ? "#{keys},m=#{more}" : "m=#{more},q=2", piece)
+  end.join
+end
+
 def solid(rgb, width, height)
   (rgb.pack('C*') * (width * height)).b
 end
@@ -62,6 +75,63 @@ def paint(image, patch, x, y, width, patch_width, from, blend)
     end
   end
   out
+end
+
+def read_exact(socket, length, seconds)
+  data = +''
+  deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + seconds
+  while data.bytesize < length
+    remaining = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    raise Timeout::Error if remaining <= 0 || !IO.select([socket], nil, nil, remaining)
+    data << socket.readpartial(length - data.bytesize)
+  end
+  data
+end
+
+def websocket_text(socket, seconds)
+  header = read_exact(socket, 2, seconds).bytes
+  length = header[1] & 0x7f
+  length = read_exact(socket, 2, seconds).unpack1('n') if length == 126
+  length = read_exact(socket, 8, seconds).unpack1('Q>') if length == 127
+  read_exact(socket, length, seconds).force_encoding(Encoding::UTF_8)
+end
+
+def open_stream
+  socket = TCPSocket.new('127.0.0.1', PORT)
+  socket.write("GET /v1/stream HTTP/1.1\r\nHost: 127.0.0.1:#{PORT}\r\nConnection: Upgrade\r\n" \
+               "Upgrade: websocket\r\nSec-WebSocket-Version: 13\r\n" \
+               "Sec-WebSocket-Key: #{['blit-frame-edit'].pack('m0')}\r\n\r\n")
+  response = +''
+  response << read_exact(socket, 1, 2) until response.include?("\r\n\r\n")
+  raise 'websocket handshake failed' unless response.start_with?('HTTP/1.1 101')
+  socket
+end
+
+# The largest damage, in cells, any surface_delta for `surface` reported
+# while the stream was read.
+def damage_seen(socket, surface, seconds)
+  widest = [0, 0]
+  deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + seconds
+  loop do
+    remaining = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    break if remaining <= 0
+    text = websocket_text(socket, remaining) rescue break
+    event = JSON.parse(text) rescue next
+    next unless event['type'] == 'surface_delta' && event['surface_id'] == surface && event['damage']
+    d = event['damage']
+    widest = [d['width'], d['height']] if d['width'] * d['height'] > widest[0] * widest[1]
+  end
+  widest
+end
+
+def partial_uploads
+  outputs = JSON.parse(request('GET', '/v1/diagnostics')[1]).dig('render', 'outputs') || []
+  outputs.sum { |o| o.dig('compositor', 'image_partial_uploads').to_i }
+end
+
+def gpu_composing?
+  outputs = JSON.parse(request('GET', '/v1/diagnostics')[1]).dig('render', 'outputs') || []
+  outputs.any? { |o| o.dig('compositor', 'active') == 'gles' }
 end
 
 def image_state(session)
@@ -103,7 +173,11 @@ Dir.mktmpdir('blit-kitty-frame-edit') do |root|
       esc('a=f,r=1,i=9,x=14,y=14,s=2,v=2,f=32,X=1,q=2', Base64.strict_encode64(over)),
       esc('a=f,r=1,i=9,x=12,y=12,s=8,v=8,f=24,q=2', Base64.strict_encode64(solid([1, 2, 3], 8, 8))) +
         esc('a=f,r=1,i=77,x=0,y=0,s=1,v=1,f=24,q=2', Base64.strict_encode64(solid([1, 2, 3], 1, 1))) +
-        esc('a=f,r=2,i=9,x=0,y=0,s=1,v=1,f=24,q=2', Base64.strict_encode64(solid([1, 2, 3], 1, 1)))
+        esc('a=f,r=2,i=9,x=0,y=0,s=1,v=1,f=24,q=2', Base64.strict_encode64(solid([1, 2, 3], 1, 1))),
+      # a 64x64 image at row 3: 8x4 cells of 8x16
+      '\\033[4;1H' + chunked('a=T,f=24,s=64,v=64,i=10,q=2,C=1', solid([9, 9, 9], 64, 64)),
+      # an 8x8 edit inside one cell's worth of it
+      esc('a=f,r=1,i=10,x=40,y=36,s=8,v=8,f=24,q=2', Base64.strict_encode64(solid([200, 100, 50], 8, 8)))
     ]
     steps.each_with_index { |text, i| File.write(File.join(root, "step#{i}"), text) }
     script = steps.each_index.map do |i|
@@ -154,8 +228,24 @@ Dir.mktmpdir('blit-kitty-frame-edit') do |root|
     check(refused['pixel_crc32'] == Zlib.crc32(expected), 'a refused edit changed the image')
     check(rejections.call == rejected_before + 3,
           "out-of-bounds, unknown-id and other-frame edits were not all refused: #{rejections.call - rejected_before}")
+    large = run.call(6)
+    check(JSON.parse(request('GET', "/v1/terminal-sessions/#{session}")[1])['graphics']
+            .any? { |g| g['id'] == 10 && g['complete'] }, "the 64x64 image did not arrive: #{large.inspect}")
+    surface = JSON.parse(request('GET', "/v1/terminal-sessions/#{session}")[1]).fetch('surface_id')
+    uploads_before = partial_uploads
+    stream = open_stream
+    File.write(File.join(root, 'go7'), '')
+    damage = damage_seen(stream, surface, 2.0)
+    stream.close
+    check(File.exist?(File.join(root, 'done7')), 'the edit of the large image did not run')
+    check(damage[0].positive? && damage[0] <= 2 && damage[1] <= 2,
+          "an 8x8 edit of a 64x64 image damaged #{damage[0]}x#{damage[1]} cells; the image is 8x4")
+    if gpu_composing?
+      Timeout.timeout(5) { sleep 0.05 until partial_uploads > uploads_before }
+    end
     puts 'KITTY_FRAME_EDIT_PASS replace=pixels+placement+screen edit=chunked+zlib blend=alpha overwrite=X1 ' \
-         'refused=bounds+id+frame image_intact=yes'
+         "refused=bounds+id+frame image_intact=yes damage=#{damage[0]}x#{damage[1]}_cells " \
+         "gpu_partial=#{gpu_composing? ? 'yes' : 'cpu_compositor'}"
   ensure
     Process.kill('TERM', pid) rescue nil
     Process.wait(pid) rescue nil

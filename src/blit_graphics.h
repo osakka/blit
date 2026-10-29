@@ -54,6 +54,17 @@ typedef struct {
     int scroll_anchored;
 } BlitGraphicsPlacement;
 
+/* ADR 0200: one in-place edit of an image's pixels -- the rectangle that
+   changed from generation `from` to generation `to`. A renderer whose copy
+   is at `from` need only refresh that rectangle. */
+typedef struct {
+    unsigned long long from;
+    unsigned long long to;
+    int x, y, width, height;
+} BlitGraphicsEdit;
+
+#define BLIT_GRAPHICS_EDIT_HISTORY 8
+
 /* Renderer-neutral graphics record.  Kitty and sixel decoders both publish
    into this store; the compositors receive read-only views of the same
    pixels. */
@@ -90,6 +101,10 @@ typedef struct {
     /* Unique identity for the pixel contents.  The GPU compositor uses this
        to discard a texture when a Kitty/Sixel image is replaced or updated. */
     unsigned long long generation;
+    /* The last edits, oldest first; cleared by anything that changes the
+       image some other way. Empty means renderers refresh it whole. */
+    BlitGraphicsEdit edits[BLIT_GRAPHICS_EDIT_HISTORY];
+    int edit_count;
     unsigned char base64_tail[4];
     int base64_tail_length;
     /* Set while `pixels` holds an undecoded container rather than raw
@@ -130,6 +145,39 @@ typedef struct {
     int src_w;
     int src_h;
 } BlitGraphicsDraw;
+
+/* ADR 0200: the rectangle that changed since a renderer's copy at
+   generation `since`, found by walking the edit history back from the
+   image's generation. 0 when the history does not reach `since`, so the
+   copy must be refreshed whole. */
+static inline int blit_graphics_edited_since(const BlitGraphicsImage *image,
+                                             unsigned long long since,
+                                             int *x, int *y, int *width, int *height)
+{
+    unsigned long long at = image->generation;
+    int x0 = 0, y0 = 0, x1 = 0, y1 = 0, found = 0, i;
+    while (at != since) {
+        for (i = image->edit_count - 1; i >= 0; --i)
+            if (image->edits[i].to == at) break;
+        if (i < 0) return 0;
+        {
+            const BlitGraphicsEdit *e = &image->edits[i];
+            if (!found) {
+                x0 = e->x; y0 = e->y; x1 = e->x + e->width; y1 = e->y + e->height;
+                found = 1;
+            } else {
+                if (e->x < x0) x0 = e->x;
+                if (e->y < y0) y0 = e->y;
+                if (e->x + e->width > x1) x1 = e->x + e->width;
+                if (e->y + e->height > y1) y1 = e->y + e->height;
+            }
+            at = e->from;
+        }
+    }
+    if (!found) return 0;
+    *x = x0; *y = y0; *width = x1 - x0; *height = y1 - y0;
+    return 1;
+}
 
 static inline int blit_graphics_draw_resolve(const BlitGraphicsImage *image,
                                              int x, int y, int width,

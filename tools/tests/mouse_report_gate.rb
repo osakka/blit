@@ -239,7 +239,13 @@ end
 # under 1016 would be forty reports where a cell report sends three. Held to a
 # frame, it is a handful, and the last one is where the pointer stopped.
 before = pixel_reports(pixels.fetch('surface_id')).length
+started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 40.times { |i| move_to(1 + i / 8, 3, i % 8) }
+# The rule is one report a frame, so the allowance is the frames the sweep
+# actually spanned (plus the one in flight at each end). A fixed count made
+# the gate fail on a loaded build host, where the same forty requests take
+# longer and so legitimately span more frames.
+frames = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) / (1.0 / 60)).ceil + 2
 sleep 0.5
 swept = pixel_reports(pixels.fetch('surface_id'))[before..] || []
 moved = swept.select { |code, _, _, _| code >= 32 }
@@ -247,9 +253,9 @@ last_x = (1 + 39 / 8 - 1) * CELL_W + 39 % 8 + 1
 if moved.empty?
   failures << 'a sweep under 1003 and 1016 reported no motion at all'
 else
-  if moved.length > 20
-    failures << "a sweep of 40 samples sent #{moved.length} motion reports " \
-                'under 1016; it is held to one a frame'
+  if moved.length > [frames, 39].min
+    failures << "a sweep of 40 samples over #{frames} frames sent #{moved.length} " \
+                'motion reports under 1016; it is held to one a frame'
   end
   unless moved.last[1] == last_x && moved.last[2] == CELL_H * 2 + 3
     failures << "the last motion report under 1016 was #{moved.last.inspect}, " \

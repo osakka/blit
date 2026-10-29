@@ -365,10 +365,18 @@ Dir.mktmpdir('blit-presentation-effects') do |root|
       check(rows == (rows.first..rows.last).to_a, "the band is not one run: #{rows}")
       rows
     end
-    band = nil
-    Timeout.timeout(15) { sleep 0.2 until (band = edge_of.call(screenshot)) }
-    shot = screenshot
-    band = edge_of.call(shot) || band
+    # The band and every pixel read about it come from one screenshot. It
+    # moves between screenshots, so reading a later shot at an earlier shot's
+    # band found the light where the band had gone ("light below the leading
+    # edge") whenever the band had left the pane in between.
+    band = shot = nil
+    Timeout.timeout(15) do
+      until band
+        shot = screenshot
+        band = edge_of.call(shot)
+        sleep 0.2 unless band
+      end
+    end
     length = PANE_H / 3
     check(band.size <= length + 2 && band.size >= length / 2, "band length #{band.size}, expected about #{length}")
     lifts = band.map { |y| lift.call(shot, y) }
