@@ -12,21 +12,21 @@ do not manufacture corresponding GitHub issue links. Public code/docs live at
 ## Read first
 
 - [Current state](current-state.md): dated host/version/config observations.
-- [Verification ledger](verification-status.md): what passed, failed or remains
+- [Verification ledger](../verification-status.md): what passed, failed or remains
   unverified; local fixtures are not physical movement acceptance.
 - [Performance programme](performance-0.2.md) and
   [source investigation](kitty-rendering-investigation.md).
 - [Backend parity plan](backend-parity-plan.md),
   [matrix](backend-parity-matrix.md) and
-  [ADR0137](adr/0137-presentation-backend-feature-and-performance-parity.md),
-  superseded by [ADR 0184](adr/0184-sdl-is-removed.md), which removed SDL.
-- [Proposed retained-rendering decision](adr/0180-retained-gpu-implementation-workstream.md):
+  [ADR0137](../adr/0137-presentation-backend-feature-and-performance-parity.md),
+  superseded by [ADR 0184](../adr/0184-sdl-is-removed.md), which removed SDL.
+- [Proposed retained-rendering decision](../adr/0180-retained-gpu-implementation-workstream.md):
   implementation mechanism and native ownership decision remain open in128.
 
 ## Checkpoint, not a performance verdict
 
 Last deployed canary:0.2.1, runtime source7ca0dbc, identity in
-[release manifest](../releases/0.2.1.yaml). Stable rollback tag:v0.1.589;
+[release manifest](../../releases/0.2.1.yaml). Stable rollback tag:v0.1.589;
 0.2.0 and589 archives have been retained locally. Discover current API version,
 saved settings, Hibr/hold identity and output inventory before any experiment.
 The last recorded Hibr runtime is0.99.285/ABI16, adapter pinned to compatible

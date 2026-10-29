@@ -109,4 +109,4 @@ narrower boundary was measured. A screenshot that is incomplete or visually
 wrong is a failed visual result even if frame timing is healthy. A synthetic
 input trace is not physical input evidence. A Blit input receipt is not proof
 that Hibr acted on the event. Record the first unproven boundary explicitly;
-do not fill it with inference. See [the current restart point](current-state.md).
+do not fill it with inference. See [the current restart point](history/current-state.md).

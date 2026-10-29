@@ -1,5 +1,36 @@
 # Verification status
 
+## 2026-10-29: 0.3.10 documentation rewritten; manual pages
+
+- **New:** [features](features.md) (everything Blit does, with version, ADR
+  and how far it is proved), the [terminal reference](terminal.md) (written
+  from the code, with its known gaps), a current [roadmap](roadmap.md), and
+  manual pages `blit(8)`, `blit.env(5)` and `blit-update-helper(8)`,
+  installed under `/usr/share/man`.
+- **Rewritten:** the README, the documentation index and the architecture
+  page; SDL and release-candidate wording removed from the current guides.
+  Eleven working notes from 0.1 and 0.2 moved to `docs/history/`, links
+  repaired.
+- **The OpenAPI document** now lists the saved settings `kms_compositor`,
+  `kms_frame_timing` and `effects_animation_hz`, which the server already
+  accepted.
+- **Font specimen** (`docs/images/blit-fonts.png`) redrawn by
+  `tools/fonts/preview.rb`: the five text fonts, Blit and file icons, Nerd
+  glyphs and emoji.
+- **`documentation_gate.rb`** (schema suite): every `BLIT_` name the server
+  reads or exports is in `blit(8)`, the manual pages format without groff
+  warnings, and no relative link in the repository is broken. The package
+  gate checks the manual pages and the new documents are in the package.
+- **Found, not yet fixed** (roadmap, item 1): sixel streams over 16 KiB are
+  cut off; bright colours 90–97 are darker than normal ones; SGR `4:n`
+  underline styles leak into other attributes; `CSI 3 J` clears the screen.
+  `BLIT_AUTH_TOKEN_FILE`, named in the API guide, was never implemented; the
+  guide no longer names it.
+- **Pointer lock** (ADR 0198, 0.2.42) is confirmed on the owner's machine:
+  the owner reported on 2026-10-28 that locking works, and #139 is closed.
+  [Features](features.md) marks it Used on that evidence.
+- **Suites:** font 38/38, full 155/155 (with the documentation gate), GLES 67/67.
+
 ## 2026-10-29: 0.3.9 non-folder colour slots retired (ADR 0201)
 
 - **Step 3 of the changeover.** Hibr 0.99.385 names non-folder kinds
@@ -1136,7 +1167,7 @@ preserving historical reports and leaving all issues open. Read-back verifies
 ten complete descriptions (scope, source pointers, tests/acceptance, boundaries
 and prerequisites),24 native Gitea dependency edges and0 unresolved template
 placeholders. The dependency index is
-[performance architecture handoff](performance-architecture-handoff.md);
+[performance architecture handoff](history/performance-architecture-handoff.md);
 ADR0180 is proposed, with mechanism/native ownership approval delegated to128.
 Full issue work orders remain in Gitea, not a second editable repository copy.
 
@@ -1395,7 +1426,7 @@ remaining stages and controlled video/movement/input-latency measurement.
 ## 2026-10-21: Kitty architecture audit, no runtime implementation change
 
 Internal125/122; pinned Kitty source and exact local code paths are recorded
-in[the investigation](kitty-rendering-investigation.md). The bounded local
+in[the investigation](history/kitty-rendering-investigation.md). The bounded local
 TCC probe invokes production functions: moving an existing placement preserves
 pixel generation but damages all240x135 cells; wallpaper makes native graphics
 bounds full-view; production scanout preparation copies16,588,800 bytes.
@@ -1414,7 +1445,7 @@ live settings/backend, Hibr source or sessions were changed. The earlier
 Stablev0.1.589 annotation/target is verified on the public GitHub mirror.
 Development packaging/VERSION is0.2.0; TCC builds it successfully. No0.2
 release/tag/package deployment is claimed; the live host still reports589.
-Internal122/123 and ADR0176 own the[performance programme](performance-0.2.md).
+Internal122/123 and ADR0176 own the[performance programme](history/performance-0.2.md).
 
 Production cache workload: Retro and Modern,11x22px,200 warmed passes;
 ASCII19,000 lookups/0 repeats; ASCII+Hibr UI39,200/0 (released code28,800
@@ -3107,7 +3138,7 @@ KMSDRM/GLES2 and physical multi-output acceptance remain pending.
 existing0.1.554 local binary. Only test tooling/documentation changed; no
 new runtime binary or Debian package was produced by this increment.
 
-The [parity matrix](backend-parity-matrix.md) inventories recent direct-KMS
+The [parity matrix](history/backend-parity-matrix.md) inventories recent direct-KMS
 work and common feature requirements under issue104. It records pending
 acceptance rather than extrapolating local software results to hardware.
 
@@ -4563,7 +4594,7 @@ The authenticated 20-second physical capture recorded zero evdev motion and
 zero evdev button events. Physical window movement therefore remains
 unmeasured, not passed. The next acceptance transaction must include a visible
 window, physical evdev traces, Hibr surface revisions, render-path traces, and
-a screenshot. See [current-state.md](current-state.md).
+a screenshot. See [current-state.md](history/current-state.md).
 
 The claim vocabulary is strict: timing stability is only timing stability;
 process liveness is only process liveness; an incomplete screenshot is a

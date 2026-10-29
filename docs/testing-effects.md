@@ -81,21 +81,21 @@ BLIT_GATE_BACKEND=gles ruby tools/tests/presentation_effects_gate.rb
 
 `/v1/overlays` is the schema-first rectangle overlay resource. An overlay is
 attached to one known display and has logical `x`, `y`, `width`, `height`,
-`color`, and `opacity` fields. The SDL3 and direct KMS backends composite up
+`color`, and `opacity` fields. The KMS compositor (GLES or CPU) composites up
 to 16 solid rectangles after terminal text and effects and before the software
 pointer.
 The lifecycle is revisioned through the normal resource response and is
 covered by the terminal conformance runner.
 
-The direct KMS capture gate creates an overlay on `display-47` and verifies
-its blue pixel in the captured PPM. It also enables scanlines and verifies
-that a populated row is followed by a suppressed row. This checks that the
-API state reaches KMS pixels rather than only being accepted by the API.
+The QEMU direct KMS capture probe (`tools/probes/qemu_kms_capture_init.sh`,
+see [KMS testing](testing-kms.md)) creates an overlay on `display-47` and
+verifies its blue pixel in the captured PPM. This checks that the API state
+reaches KMS pixels rather than only being accepted by the API.
 
-The SDL screenshot overlay gate checks the corresponding failure mode reported
-on physical displays: a red rectangle is captured at the top-left, deleted
-through the API, and captured again. The second BMP must not retain the red
-pixel:
+The screenshot overlay gate checks the corresponding failure mode reported
+on physical displays, on the mock KMS display: a red rectangle is captured at
+the top-left, deleted through the API, and captured again. The second BMP must
+not retain the red pixel:
 
 ```sh
 BLIT_GATE_BINARY=build/blit/blit-server \

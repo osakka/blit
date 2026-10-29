@@ -156,7 +156,7 @@ cmp -s <(git -C "$root" show "$documentation_commit:README.md") \
     echo "PACKAGE_ARTIFACT_FAIL root README differs from recorded documentation" >&2
     exit 1
 }
-for document in README.md roadmap.md verification-status.md diagnostic-capture.md; do
+for document in README.md features.md terminal.md roadmap.md verification-status.md diagnostic-capture.md; do
     cmp -s <(git -C "$root" show "$documentation_commit:docs/$document") \
         "$stage/usr/share/doc/blit/docs/$document" || {
         echo "PACKAGE_ARTIFACT_FAIL documentation differs from recorded commit: $document" >&2
@@ -165,6 +165,16 @@ for document in README.md roadmap.md verification-status.md diagnostic-capture.m
     cmp -s "$stage/usr/share/doc/blit/docs/$document" \
         "$stage/usr/lib/blit/docs/$document" || {
         echo "PACKAGE_ARTIFACT_FAIL installed documentation copies disagree: $document" >&2
+        exit 1
+    }
+done
+# The manual pages are the repository's, with the package's version in
+# their title line.
+for page in blit.8 blit.env.5 blit-update-helper.8; do
+    installed="$stage/usr/share/man/man${page##*.}/$page.gz"
+    cmp -s <(git -C "$root" show "$documentation_commit:man/$page" | sed "s/@VERSION@/$release/") \
+        <(gzip -dc "$installed" 2>/dev/null) || {
+        echo "PACKAGE_ARTIFACT_FAIL manual page missing or differs from recorded commit: $page" >&2
         exit 1
     }
 done

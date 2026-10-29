@@ -1,18 +1,19 @@
 # Live diagnostic capture
 
-`BLIT_AUTH_TOKEN=... ruby tools/probes/host_font_size.rb` requires the
-pixel-size API (candidate561). It changes global font cell heights through
+`BLIT_AUTH_TOKEN=... ruby tools/probes/host_font_size.rb` uses the
+pixel-size font API. It changes global font cell heights through
 17,19,23px, saves observations/BMP captures, checks unchanged renderer and
 physical pane regions plus complete grid bounds, then restores the original
 size policy. Override the bounded list with `BLIT_FONT_SIZES` (at most eight
-values8..64). It never kills applications, injects input or switches renderer.
+values 8..64). It never kills applications, injects input or changes the
+compositor.
 It refuses to overwrite a concurrently changed font on restoration. This
 probe visibly resizes active applications; run it only during an agreed test
 window. Geometry/capture success does not prove desktop pixel correctness,
 font aesthetic quality, new glyph coverage or input-to-photon performance.
 
 `BLIT_AUTH_TOKEN=... ruby tools/probes/host_pointer_art.rb` is a read-only
-direct-KMS pointer framebuffer oracle for unrotated native-size outputs.
+direct-KMS pointer framebuffer oracle for native-size outputs.
 It compiles the canonical shared art source, brackets a cached screenshot
 with observations, and checks every visible opaque cursor pixel and hotspot
 against that stamp. It changes no pointer position, settings, sessions or
@@ -444,8 +445,10 @@ device's `route` names a `session-N` target, which does not survive a restart
 either. Both are reported in the device item and both are honest gaps rather
 than oversights.
 
-The document has three sections: `input_devices`, `audio_devices` and
-`displays`. A display is keyed by its **name**, not by `display-<n>`, for the
+The device sections are `input_devices`, `audio_devices` and `displays`;
+the document also holds `font`, `server`, `login` and pane `effects`
+([blit(8)](../man/blit.8) names the saved setting behind each environment
+variable). A display is keyed by its **name**, not by `display-<n>`, for the
 same stability reason — the name is the connector (`DP-1` on the live host)
 while `display-<n>` is enumeration order. The `displays` section is also the
 one whose subjects do not exist yet when the document loads, so it is applied
@@ -762,23 +765,14 @@ Interpretation is deliberately layered:
   layout/session state or its content boundary. Do not “fix” that by changing
   Blit's raster geometry or by modifying Hibr.
 
-The 0.1.389 live capture on the real host established this boundary: Blit
-reported 1920x2160 at 60 Hz, the control PTY reported 240x135, and the shell
-surface rendered cleanly. The unchanged Hibr capture presented coherently with
-no missed deadlines but occupied only the upper desktop region, leaving the
-lower framebuffer black. The captured artifacts are retained locally under
-`diagnostics/live-0.1.389-*` and are not treated as a passing full-desktop
-acceptance result. The Hibr-side lifecycle defect is tracked in
-[Hibr issue #145](https://git.home.arpa/itdlabs/hibr/issues/145); Blit remains
-responsible for preserving the evidence and must not paper over the missing
-Hibr rows by inventing terminal cells or changing the output geometry.
-
-The same boundary was reproduced against 0.1.393 on 2026-10-09. The ordinary
-shell control returned `stty size` `135 240` and the Hibr capture was saved at
-`diagnostics/live-hibr-screenshot-20261009T084834Z/`. The screenshot is the
-authoritative visual artifact for this run: it shows the Hibr scene above the
-black lower region while the API reports a healthy 1920x2160, 60 Hz output
-(then on SDL, removed in ADR 0184).
+This boundary has been observed on the live host: Blit reported a healthy
+1920x2160, 60 Hz output, the control shell's `stty size` was `135 240` and
+rendered cleanly, while the unchanged Hibr capture presented coherently with
+no missed deadlines but filled only the upper desktop region, leaving the
+lower framebuffer black. The Hibr-side lifecycle defect is tracked in
+[Hibr issue #145](https://git.home.arpa/itdlabs/hibr/issues/145); Blit
+preserves the evidence and must not paper over the missing Hibr rows by
+inventing terminal cells or changing the output geometry.
 
 ## What a capture is, and what its headers mean
 

@@ -53,7 +53,7 @@ every integer cell height8..64, partial coverage, metrics, opaque full-block
 coverage, intrinsic colour/premultiplication, exact blend vectors over black
 and white, bounds, cache reuse/pressure and failed-load survival. Valgrind
 checks memory errors/leaks. Inputs are explicit reviewed Hack/Noto assets;
-provenance is in `docs/font-evolution-plan.md`.
+provenance is in `docs/history/font-evolution-plan.md`.
 
 The server now links FreeType and exposes `blit-modern` (unmodified pinned
 Hack3.003 plus Noto Colour Emoji2.042). Terminus remains default; Spleen remains

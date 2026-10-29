@@ -7,7 +7,7 @@ adds original vector/COLRv0 Blit/Hibr art, four Wi-Fi levels and Bluetooth,
 missing U+16D2 and Retro U+21CC, a versioned101-scalar Hibr GL snapshot and
 `GET /v1/fonts/icons` canonical discovery. The themed U+270E pen is now
 original, not the previous Font Awesome alias. Nerd mappings and Unicode
-emoji presentation remain unchanged. See [icon contract](../assets/fonts/icons/README.md).
+emoji presentation remain unchanged. See [icon contract](../../assets/fonts/icons/README.md).
 Hibr330 tracks opt-in selection; no Hibr source was modified. Local tests and
 specimen are not physical acceptance or proof of every application glyph.
 Earlier candidate/deployment statements below are dated historical evidence.
@@ -79,7 +79,7 @@ The TCC value gate preserves all5,244 corpus entries at both owner-supplied
 cell spans; it does not test segmentation or shaping. Native attachment-layout
 pixel regression is red before/green after; no live deployment occurred.
 
-The execution queue lives only in [roadmap.md](roadmap.md): finish fonts,
+The execution queue lives only in [roadmap.md](roadmap-0.1-0.2.md): finish fonts,
 then browser111, SDL104, measured performance and release acceptance. Do not
 equate a font-file upgrade with complete emoji rendering.
 
@@ -137,7 +137,7 @@ are unchanged. No display, live configuration or Hibr change is required.
 Run `ruby tools/fonts/preview.rb` for the actual production-raster specimen.
 The catalogue gate checks592,002 glyph/size cases per face, including deliberate
 empty `cod-blank`; partial-alpha, colour, API/restart and backend composition
-tests remain separate. See [font assets](../assets/fonts/README.md) for exact
+tests remain separate. See [font assets](../../assets/fonts/README.md) for exact
 sources, licences, reproducible commands and scope. These are local checks,
 not a claim of physical visual acceptance. The host remains572.
 

@@ -14,9 +14,9 @@ Nothing here authorizes silent backend/layout/font changes or Hibr code edits.
 Detailed implementation handoff: [architecture work index](performance-architecture-handoff.md).
 Internal126–135 split the structural work into independently pickable tickets;
 122/125/104 remain parent authorities and120 owns solid-copy integration.
-[ADR0180](adr/0180-retained-gpu-implementation-workstream.md) is proposed,
+[ADR0180](../adr/0180-retained-gpu-implementation-workstream.md) is proposed,
 not an approved SDL/raw-GL ownership mechanism or native contract downgrade.
-[ADR0181](adr/0181-gles-compositor-inside-native-kms.md) decides the
+[ADR0181](../adr/0181-gles-compositor-inside-native-kms.md) decides the
 mechanism (accepted 2026-10-24): a GLES compositor inside native KMS, CPU kept as the baseline and
 oracle, SDL retired at cutover.
 
@@ -61,10 +61,10 @@ All resulting glyph pixels/metrics match their initial signatures in each
 run. The196-key working set occupies47,432 pixel bytes after the change,
 versus28,072 with thrashing; the existing4MiB resident pixel ceiling remains.
 ASCII is the no-churn control, not an advertised speedup. Full-key retention
-and four-way LRU are recorded in[ADR0176](adr/0176-measured-performance-and-raster-cache.md).
+and four-way LRU are recorded in[ADR0176](../adr/0176-measured-performance-and-raster-cache.md).
 This removes proven repeated work; it does **not** yet quantify live frame gain.
 
-Stage two/internal125 begins with[retained graphics damage](adr/0177-retained-graphics-damage.md):
+Stage two/internal125 begins with[retained graphics damage](../adr/0177-retained-graphics-damage.md):
 placement-only commands and one shared comparison against the last composed
 scene. Both renderers preserve unchanged wallpaper outside affected regions.
 The new production fixture compares36 steps with full-redraw pixel oracles

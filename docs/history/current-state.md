@@ -2456,7 +2456,7 @@ creation occurs in startup `KMSDRM_InitDisplays()`. There is no runtime
 connector-to-SDL-display reconciliation to consume. Direction has been
 requested for a documented version-pinned local SDL extension, considering
 the vendored contribution guidance; no SDL edits have been made. See proposed
-[ADR0129](adr/0129-sdl-kmsdrm-hotplug-dependency-boundary.md). Issue100 remains
+[ADR0129](../adr/0129-sdl-kmsdrm-hotplug-dependency-boundary.md). Issue100 remains
 unimplemented; do not claim that changing panel polling implements hotplug.
 The accepted live0.1.543 desktop, renderer and native clients are untouched.
 
@@ -2852,7 +2852,7 @@ manual joins against an unregistered login session.
 ### 2026-10-17 deployed 0.1.536: edge fit and complete glyphs
 
 The user requested correction of the clipped right edge and icon shapes.
-[ADR0123](adr/0123-centred-grids-and-complete-font-rasters.md) records two
+[ADR0123](../adr/0123-centred-grids-and-complete-font-rasters.md) records two
 reproduced defects: redundant4px presentation inset beyond the already
 centred grid (#97), and overwide fallback outlines cropped into8px (#98).
 Both regressions fail before correction. Version 0.1.536 sets the extra
@@ -2890,7 +2890,7 @@ named `blit-upper` in Hibr. At that attachment the held owner stayed PID239437:
 primary client-4 at `(67,0,67,240)`, join at `(0,0,67,240)`, union134x240.
 This is a real vertical join, not a mirror or a second primary desktop.
 
-[ADR 0122](adr/0122-native-hibr-join-orchestration.md) records the native
+[ADR 0122](../adr/0122-native-hibr-join-orchestration.md) records the native
 per-client PTY/input boundary and [issue #96](https://git.home.arpa/itdlabs/blit/issues/96)
 tracks the API role/association gap: both sessions currently report role
 none, because the login wrapper is not registered as a desktop primary.
@@ -2957,7 +2957,7 @@ The user authenticated. The 0.1.534 capture shows only the upper wallpaper
 portion; the surface snapshot itself has blank rows below row 22. This is
 **not a correct complete desktop**, despite the prior bounded pixel/cadence
 tests passing. [Issue #94](https://git.home.arpa/itdlabs/blit/issues/94) and
-[ADR 0121](adr/0121-terminal-stream-fragmentation-cannot-drop-bytes.md) record
+[ADR 0121](../adr/0121-terminal-stream-fragmentation-cannot-drop-bytes.md) record
 a reproduced Blit parser defect: pending UTF-8 plus a large PTY read silently
 discards that entire read because its join buffer is only 772 bytes.
 The actual service-entry pipe regression fails before and passes after
@@ -3004,7 +3004,7 @@ The final physical soak passes: 6000 producer frames, 466 pointer requests,
 exactly 1980 DRM vblanks over 33.050589 s, with zero skipped refreshes. Observed
 DRM cadence is 59.908161 Hz; nominal mode timing is 59.997136 Hz. This resolves
 the small nominal-rate discrepancy without weakening a percentage threshold.
-[ADR 0120](adr/0120-kms-vblank-clock-is-observable.md) defines the independent
+[ADR 0120](../adr/0120-kms-vblank-clock-is-observable.md) defines the independent
 clock evidence and zero-skipped-vblank acceptance rule. Trace API:
 `/v1/diagnostics/trace?kind=kms_vblank&limit=16`.
 
@@ -3024,7 +3024,7 @@ current deployed state.
 with zero stale pixels over 2,051,904 checked pixels. Its 6000-frame soak also
 has zero stale pixels but fails the long refresh check: 59.912 submissions/s
 over 33.232 s versus the reported 60.0-Hz mode. Linux rounds mode.vrefresh;
-[ADR 0119](adr/0119-kms-refresh-keeps-the-mode-timing-fraction.md) corrects the
+[ADR 0119](../adr/0119-kms-refresh-keeps-the-mode-timing-fraction.md) corrects the
 active/enumerated metadata from pixel clock and totals. The actual-mode
 regression fails before and passes after; deployment and the same long soak
 remain pending. No rate tolerance is weakened and mode selection is unchanged.
@@ -3035,7 +3035,7 @@ remain pending. No rate tolerance is weakened and mode selection is unchanged.
 52.6–54.1 Hz direct-KMS cadence on a 60-Hz output. The live refresh assertion
 fails before correction. The trace shows a pending-flip deferral, then the
 completed flip waits for another software deadline, producing some 32-ms
-submission gaps. [ADR 0118](adr/0118-retry-deferred-kms-frames-at-flip-completion.md)
+submission gaps. [ADR 0118](../adr/0118-retry-deferred-kms-frames-at-flip-completion.md)
 retries only previously deferred outputs whose buffers the canonical KMS
 state now reports ready. Other output deadlines and SDL remain unchanged.
 The readiness and per-output retry tests pass, as do 51 renderer/terminal gates
@@ -3050,7 +3050,7 @@ expired PTY/group deadlines being reopened by incoming output, and a zero
 `select()` wait while an eight-millisecond quiet window still prohibits
 rendering. Direct KMS also left the session batch flag set after consumption.
 The real-function regressions fail before correction and pass afterward.
-[ADR 0117](adr/0117-terminal-coalescing-deadline-closes-at-presentation.md)
+[ADR 0117](../adr/0117-terminal-coalescing-deadline-closes-at-presentation.md)
 keeps deadlines fixed until presentation/release and clears consumed batch
 flags. The focused join barrier and local frame-rate gates pass (59.999 Hz
 in the dummy-backend frame-rate fixture). This is not physical-host timing.
@@ -3082,7 +3082,7 @@ rectangle paths also overwrite outstanding damage. These are Blit defects;
 Hibr source has not been modified.
 
 Deployed 0.1.530 corrects these through one shared rectangle-union operation
-and separate pointer accumulation; see [ADR 0116](adr/0116-damage-union-preserves-all-pending-work.md)
+and separate pointer accumulation; see [ADR 0116](../adr/0116-damage-union-preserves-all-pending-work.md)
 and [issue #89](https://git.home.arpa/itdlabs/blit/issues/89). The previous
 uncommitted full-output redraw proposal was withdrawn before deployment.
 The actual KMS presenter now matches a fresh complete render at every pixel in
@@ -3125,7 +3125,7 @@ motion-pass evidence. Direct-KMS frame-rate counters are now populated by the
 same diagnostics path as SDL.
 
 The package identity for the previous deployed build is recorded in
-[`releases/0.1.528.yaml`](../releases/0.1.528.yaml). These are bounded
+[`releases/0.1.528.yaml`](../../releases/0.1.528.yaml). These are bounded
 renderer measurements, not visual acceptance of the Hibr desktop, physical
 input, wallpaper, graphics protocol, or joins.
 
@@ -3301,9 +3301,9 @@ timing counters are healthy.
 ### 0.1.514 performance and login-placement candidate
 
 The source candidate for `0.1.514` retains the bounded integer-scale KMS
-graphics path in [ADR 0102](adr/0102-kms-integer-scale-fast-path.md), adds
-the persistent CPU scene described in [ADR 0103](adr/0103-kms-cpu-scene-cache.md), and
-closes the auto-start login relocation invariant in [ADR 0104](adr/0104-login-target-relocation-and-pane-redraw.md): the session returned by
+graphics path in [ADR 0102](../adr/0102-kms-integer-scale-fast-path.md), adds
+the persistent CPU scene described in [ADR 0103](../adr/0103-kms-cpu-scene-cache.md), and
+closes the auto-start login relocation invariant in [ADR 0104](../adr/0104-login-target-relocation-and-pane-redraw.md): the session returned by
 `/v1/login` is explicitly attached to the requested pane before topology
 derives its surface assignment. This targets the observed mismatch where the
 login resource named the lower pane while its session occupied the upper
@@ -3443,4 +3443,4 @@ Temporary captures are outside Git. The latest relevant local captures were:
 
 These paths are evidence for the current workspace only. Do not commit them,
 their credentials, or generated packages. The durable summary belongs in
-[`docs/verification-status.md`](verification-status.md).
+[`docs/verification-status.md`](../verification-status.md).

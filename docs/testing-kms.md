@@ -1,25 +1,28 @@
 # Direct KMS boundary
 
-The production server now owns this boundary in `src/blit_kms.c`. Build it
-with the TCC toolchain:
+Native DRM/KMS is Blit's only presentation backend (ADR 0184). It lives in
+`src/blit_kms.c`; frames are composed by the GLES compositor (ADR 0181,
+`BLIT_KMS_COMPOSITOR=gles`) or by the CPU compositor. Build the server with the
+TCC toolchain:
 
 ```sh
-tools/build-tcc.sh build/blit/blit-server-kms
+tools/build-tcc.sh build/blit/blit-server
 ```
 
-On a DRM-capable guest VT, run the production path:
+On a DRM-capable guest VT, run it:
 
 ```sh
-BLIT_DISPLAY_BACKEND=kms BLIT_BIND_ADDRESS=0.0.0.0 \
-  ./build/blit/blit-server-kms 8080
+BLIT_BIND_ADDRESS=0.0.0.0 ./build/blit/blit-server 8080
 ```
 
-It must report connected outputs or fail explicitly with a DRM diagnostic. A
-host without `/dev/dri/card0` is not a valid presentation test.
+It must report connected outputs or say why it has none. If KMS cannot be
+opened, Blit still serves its API with no outputs and reports the reason as
+the presentation error in `/v1/diagnostics`. A host without `/dev/dri/card0`
+(or the device named by `BLIT_DRM_DEVICE`) is not a valid presentation test.
+The environment variables used here are listed in [blit(8)](../man/blit.8).
 
-The direct-display migration begins with the DRM/KMS boundary, independently
-of Hibr and SDL3. The diagnostic probe enumerates cards, connectors, and modes
-without changing display state:
+The diagnostic probe enumerates cards, connectors, and modes independently of
+the server and Hibr, without changing display state:
 
 ```sh
 tcc -std=c99 \
@@ -32,22 +35,17 @@ sudo ./build/blit/drm-kms-probe
 ```
 
 The production KMS backend uses the same inventory boundary with explicit
-connector/CRTC ownership, dumb-buffer allocation, and page-flip completion.
+connector/CRTC ownership, scanout buffers (dumb buffers for the CPU
+compositor, GBM for GLES), and page-flip completion.
 The probe remains read-only; it is not a second presentation implementation.
 If a driver does not deliver a page-flip completion within the bounded wait,
 Blit records the connector and switches that output to a direct modeset path
 instead of freezing the entire gateway.
 
-When the SDL3 backend enumerates displays but cannot create any presentable
-KMSDRM windows, Blit attempts this same direct-KMS backend before declaring
-the server unready. The API then reports `drm-kms` and
-`presentation_sync: drm-page-flip`; it never reports SDL readiness while
-`outputs` is zero. If both paths fail, startup remains visible as an explicit
-backend error rather than leaving an apparently live black desktop.
-
-If the explicit `BLIT_KMS_ASYNC_PAGEFLIP` diagnostic/test policy is enabled,
-the API reports `drm-page-flip-async`; that mode may tear and is not the
-production default.
+The API reports the backend as `drm-kms` and `presentation_sync:
+drm-page-flip`. If the explicit `BLIT_KMS_ASYNC_PAGEFLIP` diagnostic/test
+policy is enabled, it reports `drm-page-flip-async`; that mode may tear and is
+not the production default.
 
 The page-flip wait is bounded to 100 ms per output by default. This prevents a
 lost or delayed DRM event from turning one logical frame into a multi-second
@@ -95,8 +93,8 @@ the renderer fills the view rectangle once before drawing glyphs. Mixed
 backgrounds are coalesced into horizontal runs, and inverse cells continue
 through the same effective-color path so color and attribute semantics remain
 exact. Native-size PSF rows are cached in the shared font object and the KMS
-renderer uses a native-size bitmap path; scaled cells retain the general
-scaler. These are bounded hot-path optimizations, not a second renderer.
+compositor uses a native-size bitmap path; scaled cells retain the general
+scaler. These are bounded hot-path optimizations, not a second compositor.
 API-owned graphic frames use the same principle: an unscaled canvas avoids
 the general source-coordinate scaler while clipped or resized frames retain
 the existing alpha/compositing path. The direct-KMS API pixel gate exercises
@@ -112,15 +110,15 @@ lists every connector mode and the active mode. Blit selects the highest
 refresh mode that preserves the connector's preferred/native geometry; it does
 not silently trade away the display's native geometry for a lower-resolution
 mode with a higher refresh. A missing card, connector, or mode is a structured
-capability result—not a reason to fall back silently to SDL text rendering.
+capability result, not something to paper over.
+
 ## Logical width and pointer input
 
-Direct KMS normally uses the packaged 8-pixel-wide console font, which gives
-128 columns on a 1024-pixel output. To request approximately 200 columns,
+With the default 8×16 `Blit-Terminus16.psf` font, direct KMS gives 128 columns on a 1024-pixel output. To request approximately 200 columns,
 start the server with:
 
 ```sh
-BLIT_KMS_CELL_WIDTH=5 BLIT_DISPLAY_BACKEND=kms blit 8080
+BLIT_KMS_CELL_WIDTH=5 blit 8080
 ```
 
 The override is authoritative: pane discovery, rendering, cursor placement,
@@ -133,10 +131,10 @@ normalized to Blit's `session-N` stream identity before filtering.
 cell in both axes; it does not merely enlarge the cell while leaving an
 unscaled glyph in its upper-left corner.
 
-The production launcher selects the bundled `Blit-Terminus16.psf` font,
-which preserves Terminus and adds the Hibr Unicode desktop glyphs at the same
-8×16 cell geometry. The server logs the selected font dimensions and glyph
-count. Presentation is a
+With no saved font and no `BLIT_PSF_FONT`, the server starts on the bundled
+`Blit-Terminus16.psf`; it logs the selected font dimensions and glyph count.
+The text fonts, pixel fonts and the glyph stack beneath them are described in
+the [font reference](font-reference.md). Presentation is a
 hard refresh invariant: each active output must schedule independently at the
 maximum refresh supported by its selected mode, and no configured render
 interval may intentionally under-run that cadence. Deadlines use a monotonic
@@ -244,12 +242,11 @@ counters are printed because TCG/VKMS startup can miss virtual page flips
 before the producer starts. This is virtual high-refresh timing evidence, not
 a physical 240 Hz hardware claim.
 
-On the current 0.1.401 TCC build, the two-vCPU QEMU run accepted all 240
-frames but increased missed deadlines from 20 to 40. An eight-vCPU,
-multithreaded-TCG comparison improved that to 3 and 16 respectively, still
-failing the visible-cadence predicate. `/dev/kvm` is absent on the test host;
-repeat this gate with KVM or physical hardware before changing the production
-scheduler. Do not enable asynchronous page flips to turn this into a pass.
+Under QEMU TCG this variant has accepted all 240 frames but added missed
+deadlines, failing the visible-cadence predicate. `/dev/kvm` is absent on the
+test host; repeat this gate with KVM or physical hardware before changing the
+production scheduler. Do not enable asynchronous page flips to turn this into
+a pass.
 
 For comparison only, `blit.kms_async=1` enables the existing asynchronous
 page-flip policy in the fixture and reports `drm-page-flip-async`; it may tear
@@ -305,8 +302,7 @@ made.
 The fixture also accepts `blit.kitty_stack=1`. This sends two overlapping
 Kitty images with different z values and a two-pixel image positioned partly
 outside the pane. `PPM_DISPLAY_47_WIDE_STACK_CLIP_PASS` requires the higher-z
-pixel and the clipped image's visible second pixel at their exact coordinates;
-the equivalent SDL3 fixture uses the BMP oracle.
+pixel and the clipped image's visible second pixel at their exact coordinates.
 
 The fixture accepts `blit.kitty_limits=1` for the resource-lifecycle gate. It
 fills the bounded store with incomplete uploads, submits an oversized upload,
@@ -322,14 +318,14 @@ mode handling, and are not treated as rendered image state.
 
 The fixture accepts `blit.sixel=1` for the initial sixel gate. It sends two
 direct-color sixel columns with six-row raster data and requires
-`PPM_DISPLAY_47_SIXEL_PASS`; the equivalent SDL3 capture passes
-`SDL_SIXEL_PASS`. This validates the shared RGBA graphics object and both
-renderers for the bounded sixel capability advertised in the session contract.
+`PPM_DISPLAY_47_SIXEL_PASS`. This validates the shared RGBA graphics object
+and the KMS compositor for the bounded sixel capability advertised in the
+session contract.
 A payload that cannot be parsed at all is still rejected diagnostically, but
 geometry past the bound is clipped rather than discarded and neither colour
 space nor an undefined colour register costs an image -- see the Sixel section
-of `docs/terminal-engine.md`, which `tools/tests/sixel_decoder_gate.rb`
-asserts against the framebuffer.
+of the [terminal reference](terminal.md#sixel); `tools/tests/sixel_decoder_gate.rb`
+asserts this against the framebuffer.
 
 ## Pointer stress gate
 
@@ -337,14 +333,11 @@ The input-only QEMU variant starts two terminal surfaces, routes the synthetic
 evdev keyboard and pointer independently, and emits 180 pointer motions at
 16 ms intervals with periodic primary-button and wheel events. It must report
 both `BLIT_INPUT_KEYPAD_PASS` and `BLIT_INPUT_STREAM_PASS`. With
-`BLIT_KMS_TRACE_TIMING=1`, the renderer's per-present timings are also retained
-in the serial log; the current TCG/VKMS run stayed below 103 ms for the normal
-stress frames, with one 482 ms fixture outlier, and no multi-second redraw.
-For phase diagnosis, `BLIT_KMS_TRACE_PHASES=1` additionally records wait,
-glyph-draw, and page-flip intervals. The optimized PSF rasterizer's current
-two-output Hibr fixture measured 56 samples with a maximum 147.739 ms glyph
-draw and 154.447 ms total present under QEMU TCG; the acceptance marker and
-pixel gate must still pass when timing is enabled.
+`BLIT_KMS_TRACE_TIMING=1`, the per-present timings are also retained in the
+serial log; a multi-second redraw is a failure. For phase diagnosis,
+`BLIT_KMS_TRACE_PHASES=1` additionally records wait, glyph-draw, and page-flip
+intervals; the acceptance marker and pixel gate must still pass when timing is
+enabled.
 
 The refresh gate must record, per output, selected refresh, effective
 scheduler cadence, missed-deadline count, and page-flip wait time. The

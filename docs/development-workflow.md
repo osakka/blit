@@ -110,9 +110,8 @@ incremental composition against full-redraw pixels;
 counts or screenshots alone are insufficient. Preserve held/deferred snapshot
 acknowledgement and unknown-caller fallback (ADR0177).
 
-For the[0.2 performance programme](performance-0.2.md), `font` also runs the
-production cache workload (`ruby tools/probes/font_cache_workload.rb --check`)
-and `timing` verifies the read-only baseline sampler's units, counter-reset
+The `font` suite also runs the production cache workload
+(`ruby tools/probes/font_cache_workload.rb --check`), and `timing` verifies the read-only baseline sampler's units, counter-reset
 rejection and backend-change rejection. Report cache work separately from
 live frame latency. Keep source/font identities and workload conditions with
 the result; never promote an idle API sample into a Kitty comparison.
@@ -121,6 +120,9 @@ Use the narrowest gate that proves the change, then run the broader gate before
 handoff:
 
 - schema/API changes: schema validation, API conformance, and version identity;
+- documentation changes: `ruby tools/tests/documentation_gate.rb` (in the
+  schema suite) for environment variables in `blit(8)`, manual-page
+  formatting and links;
 - terminal changes: TCC build and `tools/tests/terminal_conformance.rb`;
 - font/Unicode changes: glyph coverage, UTF-8 snapshots, and a Hibr capture;
 - renderer/input changes: the renderer suite on `BLIT_GATE_BACKEND=native` and
@@ -185,13 +187,13 @@ is correct. It is not a statement about the behaviour it cannot reach, and the
 distance between those two has cost this project multiple releases. The known
 blind spots, so that a green run is read for what it is:
 
-**Renderer coverage depends on the selected backend.** Historically the SDL
-renderer gates ran only against `software` in a container without a GPU,
-while the physical path used `opengles2`. An optimisation that assumed
-render-target persistence produced a visible screensaver trail that survived
-two "fixed" claims. Five reproductions passed because all five ran on
-`software`. See ADRs0070/0099 and issue79. Run compositor changes on both
-`native` and `gles`; physical GPU timing still requires host acceptance.
+**Compositor coverage depends on the selected backend.** Gates once ran only
+against a software renderer in a container without a GPU, while the physical
+path used GLES. An optimisation that assumed render-target persistence
+produced a visible screensaver trail that survived two "fixed" claims; five
+reproductions passed because all five ran in software. See ADRs 0070/0099 and
+issue 79. Run compositor changes on both `native` and `gles`; physical GPU
+timing still requires host acceptance.
 
 **A gate that cannot fail is not evidence.** Every gate should be run once
 against the reverted change and observed to fail; a gate added alongside a fix
@@ -208,11 +210,11 @@ hotplug gate exercises the device table but not the poll set, which had to be
 measured on the host directly. Fabricated nodes also cannot reproduce a USB
 hub that resets 66 times.
 
-**The deployment path is partly unexercised.** The direct-KMS presentation
-path is not covered by the default run; `physical_multi_display_gate.rb`,
-`screenshot_nonblocking_gate.sh`, and the QEMU oracle are opt-in and absent
-from the reported totals. `tools/probes/host_cell_pixel_agreement.rb`, which
-states the cells-versus-pixels invariant, is run by no automated path at all.
+**The deployment path is partly unexercised.** The default run drives the
+KMS code against the DRM mock, not a real card. `physical_multi_display_gate.rb`
+and `screenshot_nonblocking_gate.sh` run only with `BLIT_GATE_LIVE` (otherwise
+they are skips), and the QEMU oracle only when invoked.
+`tools/probes/host_cell_pixel_agreement.rb`, which states the cells-versus-pixels invariant, is run by no automated path at all.
 Unprivileged-profile access to backlight and control devices is unmeasured.
 A skip that is never taken is indistinguishable from a test that does not
 exist.

@@ -1,6 +1,6 @@
 # Blit API guide
 
-## Native console ownership (candidate0.1.587)
+## Native console ownership (since 0.1.587)
 
 `GET /v1/diagnostics/processes` (0.2.17) lists up to 16 processes of the
 logged-in owner (Blit's own user before login), busiest first by cumulative
@@ -148,7 +148,8 @@ The default development endpoint is `http://HOST:8080`. All public resources
 are versioned under `/v1`; `/v1/version` is the first request a client should
 make and returns both `server_version` and `api_version`.
 
-When `BLIT_AUTH_TOKEN` or `BLIT_AUTH_TOKEN_FILE` is configured, send:
+When `BLIT_AUTH_TOKEN` is configured (the package generates one in
+`/etc/blit/blit.env`), send:
 
 ```sh
 curl --fail --header 'Authorization: Bearer TOKEN' \
@@ -372,26 +373,27 @@ status codes.
 | Area | Endpoints | Purpose |
 | --- | --- | --- |
 | Identity | `GET /v1/version`, `GET /v1/server` | Compatibility and server capabilities |
-| Hardware | `GET /v1/graphics`, `/v1/displays`, `/v1/audio` | Discover renderers, outputs, modes, and sound devices |
-| Fonts/topology | `GET/PUT /v1/fonts`, `GET/PUT /v1/topology` | Select logical cell geometry and pane placement |
+| Hardware | `GET /v1/graphics`, `/v1/displays[/{id}]`, `/v1/audio[/{id}]`, `/v1/audio/cards[/{id}]` | Discover the compositor, outputs, modes, sound devices and mixers |
+| Fonts/topology | `GET/PUT /v1/fonts`, `GET /v1/fonts/icons`, `GET/PUT /v1/topology` | Select the font and cell size, discover Blit icons, place panes |
 | Settings | `GET/PUT/DELETE /v1/settings` | Inspect, replace, or reset API-owned server settings |
 | Login | `GET/POST/DELETE /v1/login` | Supervise one root-owned Hibr login screen and its authenticated child session |
-| Terminals | `GET/POST /v1/terminal-sessions`, `GET/PATCH/DELETE /v1/terminal-sessions/{id}`, `POST /v1/terminal-sessions/{id}/input` | Inventory, create, place, inspect, drive, and stop PTY sessions |
+| Auxiliary displays | `GET/PUT /v1/auxiliary-displays`, `POST /v1/auxiliary-displays/apply` | Start and place Hibr on the other monitors |
+| Terminals | `GET/POST /v1/terminal-sessions`, `GET/PATCH/DELETE /v1/terminal-sessions/{id}`, `POST /v1/terminal-sessions/{id}/input`, `/graphics`, `/output-capture` | Inventory, create, place, inspect, drive, and stop PTY sessions; reset their images; capture their output |
 | Hibr | `GET /v1/terminal-sessions/{id}/hibr-owner` | Inspect the primary/join ownership attachment |
 | Surfaces | `GET/PUT /v1/surfaces/{id}/cells`, `GET /v1/surfaces/{id}/summary`, `GET /v1/surfaces/{id}/scrollback` | Read and revision-update authoritative terminal state |
-| Input | `GET /v1/input/devices`, `GET/POST /v1/input/inject`, `GET/PUT /v1/input/routes` | Discover, diagnose, and route physical or synthetic input |
+| Input | `GET /v1/input/devices[/{id}]`, `GET/POST /v1/input/inject`, `GET/PUT /v1/input/routes[/{id}]` | Discover, configure, and route physical or synthetic input |
 | Presentation | `POST /v1/frames`, `GET /v1/stream` | Commit coherent frames and consume event/pixel streams |
 | Graphics | `GET /v1/effects`, `POST/DELETE /v1/overlays/{id}` | Report pane effects; manage bounded overlays |
-| Diagnostics | `GET /v1/diagnostics`, `/runtime`, `/observation`, `/trace`, `/screenshots/{display_id}` | Inspect aggregate state, timing, events, and evidence captures |
-| Control | `POST /v1/control/shutdown`, `/restart` | Stop or restart the supervised server |
-| Updates | `POST /v1/control/update`, `GET /status`, `POST /cancel`, `/reset` | Upload and supervise a verified package update |
+| Diagnostics | `GET /v1/diagnostics`, `/runtime`, `/console`, `/processes`, `/observation`, `/trace`, `/screenshots/{display_id}` | Inspect aggregate state, timing, the console, busy processes, events, and evidence captures |
+| Control | `POST /v1/control/shutdown`, `/restart`, `GET/PUT /v1/control/shutdown-key` | Stop or restart the server; program the keyboard chord that stops it |
+| Updates | `PUT /v1/control/update`, `GET /status`, `POST /cancel`, `/reset` | Upload and supervise a verified package update |
 
-The schema currently contains 43 path templates. Keep this table synchronized when a
+The schema contains 49 path templates (`api_schema_gate.rb` checks the count). Keep this table synchronized when a
 path is added, removed, or renamed; the schema remains the authoritative count.
 
 ### Method-level reference
 
-This is the stable mental model for the 40 paths; the OpenAPI file remains the
+This is the stable mental model for the paths; the OpenAPI file remains the
 exact method, parameter, and response reference:
 
 ```text
@@ -435,7 +437,7 @@ A session's `mouse_reporting` says what its program asked for: `mode`
 (1000, 1002, 1003 or 0), `sgr` for the SGR encoding (1006) and `pixels`
 for SGR-Pixels (1016), where a report carries the pointer's position in
 pixels of the surface, one-based, instead of its cell. Under 1016 motion is
-held to one report a frame (`BLIT_MOTION_PIXEL_US`, 16.7 ms), the newest
+held to one report a frame (a fixed 16.7 ms), the newest
 position kept, and a button report writes any held motion first.
 `pointer_lock` is true while the session holds the pointer (mode ?7701), and
 `pointer_lock_refusals` counts the requests refused because the session
@@ -905,7 +907,7 @@ Two limits are worth knowing rather than discovering:
   rotation. Both machines this was measured on have a single output, so that
   is a stated consequence rather than a tested one.
 
-### Explicit emoji cell layout (offline candidate578)
+### Explicit emoji cell layout (since 0.1.578)
 
 `PUT /v1/surfaces/{id}/cells` accepts optional `text_layout`:
 
@@ -1078,7 +1080,7 @@ write):
 curl --fail --request PUT \
   --header 'Content-Type: application/json' \
   --header 'If-Match: REVISION' \
-  --data '{"document":{"version":1,"input_devices":{},"audio_devices":{},"font":{"font_id":"blit-terminus16","scale":1.1},"server":{"render_interval_ms":16,"pane_layout":"1x2","renderer":"software","kms_async_pageflip":false,"expect_desktop":true}}}' \
+  --data '{"document":{"version":1,"input_devices":{},"audio_devices":{},"font":{"font_id":"blit-terminus16","scale":1.1},"server":{"render_interval_ms":16,"pane_layout":"1x2","kms_compositor":"gles","kms_async_pageflip":false,"expect_desktop":true}}}' \
   http://HOST:8080/v1/settings
 ```
 
@@ -1268,7 +1270,7 @@ before a disconnect.
 
 ## Input
 
-### Negotiated keyboard reporting (candidate0.1.585)
+### Negotiated keyboard reporting (since 0.1.585)
 
 `GET /v1/terminal-sessions/{id}` exposes
 `terminal_capabilities.keyboard`: `protocol: kitty`, `supported_flags:11`,
@@ -1570,10 +1572,10 @@ and different remaps, which is what makes per-device routing usable.
 
 ## Original font icon discovery
 
-`GET /v1/fonts/icons` returns the canonical packaged versioned catalogue for
-Modern/Retro: seven original intrinsic-colour icons, their hexadecimal scalar
-mappings, one-cell allocation, four Wi-Fi signal levels and standard text
-fallback additions. Authentication is the same as other read endpoints. A
+`GET /v1/fonts/icons` returns the packaged, versioned catalogue of Blit's own
+colour icons (status icons, the hui badge, telephones, file-manager icons):
+each icon's id, codepoint, how many columns it spans, and the codepoints
+retired and never reused. Authentication is the same as other read endpoints. A
 missing/unreadable/oversized catalogue returns503
 `font_icon_catalogue_unavailable`; this request never changes the selected
 font or the screen. See [the icon contract](../assets/fonts/icons/README.md)
@@ -1581,8 +1583,8 @@ and [full developer glyph reference](font-reference.md) for generated category
 tables, semantic IDs, JSON encodings, width/colour rules and safe fallbacks.
 
 `GET /v1/fonts` remains authoritative for the active profile and exact pixel
-size; use `PUT /v1/fonts` to select Modern/Retro. Bitmap-only profiles do not
-gain these colour glyphs. Clients must select the documented characters;
+size; use `PUT /v1/fonts` to select a font. The icons sit in the glyph stack
+under every font, pixel fonts included (ADR 0195, 0199). Clients must select the documented characters;
 existing ASCII/Unicode/Nerd UI modes do not automatically become multicolour.
 Do not equate the active `glyphs`/`mappings` PSF fallback counters with the
 repertoire of the attached outline/emoji faces.

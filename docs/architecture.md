@@ -1,167 +1,98 @@
-# Initial architecture
+# Architecture
 
-## Runtime shape
+How the Blit server is put together today. The reasons behind each choice
+are in the [decision records](adr/README.md); what it can do is in
+[features](features.md).
+
+## Shape
 
 ```text
-API clients
-    |
-    v
-API transport and protocol adapter
-    |
-    v
-Command validation -> authoritative scene state -> event journal
-                              |
-                              v
-                     layout and damage planning
-                              |
-                              v
-                    effect graph / frame assembly
-                              |
-                              v
-                 renderer-neutral frame plan
-                    /                 \
-                   v                   v
-          direct DRM/KMS text       SDL3 canvas/effects
-             presentation              adapter
-                   \                   /
-                    v                 v
-                     physical outputs
+ API clients (HTTP + WebSocket)        evdev: keyboards, mice, touchpads, gamepads
+              │                                         │
+              ▼                                         ▼
+ ┌─────────────────────────── main loop (select) ───────────────────────────┐
+ │  API gateway ── settings document ── input routing ── PTY sessions        │
+ │        │                                   │               │              │
+ │        ▼                                   ▼               ▼              │
+ │  topology: monitors → panes ──────── terminal emulator: cells, scrollback,│
+ │                                       Kitty/Sixel images, damage          │
+ │                                              │                            │
+ │                                              ▼                            │
+ │                 compositor: GLES on the GPU, or the CPU; effects          │
+ └──────────────────────────────────────────────┬────────────────────────────┘
+                                                │ DRM/KMS page flips
+                                                ▼
+                                            monitors
 ```
 
-The public API must terminate at the protocol adapter. No client should need
-to link against SDL3, access renderer objects, or understand a particular
-display backend.
+Beside the main loop:
 
-## Toolchain boundary
+- a **settings writer** thread that saves the settings document without
+  blocking the loop (ADR 0189);
+- an **input opener** thread, because opening some evdev nodes is slow;
+- a **hotplug monitor** thread watching for monitors (ADR 0130);
+- a **console watchdog** process that restores the console and stops the
+  server if the loop hangs for 10 seconds (ADR 0170);
+- the **update helper**, a separate root service that installs packages
+  uploaded through the API (ADR 0008).
 
-blit production code and first-party contract tooling are compiled with the
-pinned TCC toolchain. The boundary to SDL3 and other dependencies is an
-ordinary, narrow C ABI. TCC compatibility is a release gate for that boundary;
-it is not acceptable to develop against one compiler and discover TCC failures
-later.
+## The parts
 
-The project may use a host compiler to build external dependencies or bootstrap
-TCC, but that does not create a second blit implementation. The exact
-exception and artifact provenance must be recorded in the build documentation.
+| Part | Where | What it owns |
+| --- | --- | --- |
+| API gateway | `src/blit_server.c` | HTTP and WebSocket parsing, bearer tokens, the OpenAPI routes, errors as `application/problem+json`, the event stream with replay and back-pressure |
+| Settings | `src/blit_server.c` | one revisioned document (`/v1/settings`), applied at start and on every change, written to `/var/lib/blit/settings.json` |
+| Sessions | `src/blit_server.c` | PTYs, child processes started with `execve` (no shell in between), their user, environment and lifecycle |
+| Terminal emulator | `src/blit_server.c` | the byte parser, cells and attributes, scrollback, alternate screen, Kitty and Sixel images; see the [terminal reference](terminal.md) |
+| Topology | `src/blit_display_layout.h`, `src/blit_display_geometry.h` | monitors, panes per monitor (up to 8×8), which session is in which pane |
+| Input | `src/blit_server.c`, `src/blit_touchpad.h`, `src/blit_input_*.h` | evdev discovery and identity, keyboard and pointer settings, routing to sessions, pointer lock |
+| Glyphs | `src/blit_font.c`, `src/blit_raster.c`, `src/blit_cell_geometry.h` | text fonts, the glyph stack, HarfBuzz shaping, colour glyphs, cell-exact line drawing, the glyph cache |
+| KMS | `src/blit_kms.c`, `src/blit_kms_hotplug.h` | connectors, modes, buffers, page flips, refresh scheduling, hotplug |
+| GPU compositor | `src/blit_gles.c`, `src/blit_kms_gles.c` | composing panes, glyphs, images and effects with OpenGL ES; Mesa is loaded at run time |
+| Effects | `src/blit_effects.h` | the one list of effects, their parameters and order, shared by both compositors |
+| Console | `src/blit_vt.c` | the virtual terminal Blit holds, console switching, the watchdog |
+| Sound | `src/blit_audio_control.h` | sound cards' mixers |
 
-## Proposed subsystems
+## A frame
 
-### API gateway
+1. Something changes: a program writes to its PTY, a client calls the API,
+   a key is pressed, a monitor appears.
+2. The terminal emulator updates cells and images and records the damaged
+   rectangles.
+3. When a monitor is due for its next refresh, the compositor redraws only
+   the damage for the panes on it, applies the pane's effects, and uploads
+   only what changed.
+4. KMS flips the new frame onto the monitor. Each monitor runs at its own
+   refresh rate; an idle monitor is not redrawn at all.
+5. Counters (frames, flips, missed refreshes, GPU time per phase) are
+   updated and reported in `/v1/diagnostics/runtime`.
 
-Owns transport listeners, authentication/authorization hooks, request
-decoding, schema validation, capability negotiation, error responses, and
-subscriptions. The first transport should be chosen for local automation and
-diagnostics; a remote transport can be added without changing resource
-semantics.
+A program can hold its pane still while it draws with synchronized output
+(mode 2026).
 
-### State engine
+## Decisions that shape everything
 
-Maintains the authoritative model of outputs, canvases, surfaces, styles,
-effects, input routes, and frame lifecycle. Mutations are applied in a defined
-order and produce typed events.
+- **One way to present** (ADR 0184): native KMS. Frames are composed on
+  the CPU unless the GPU compositor (ADR 0181) is chosen; when it is but
+  the GPU is unavailable, the CPU draws the same pixels instead, and a GPU
+  start that crashes forces the CPU next time.
+- **One glyph stack** (ADR 0195): every font gets the same icons, symbols,
+  emoji and fallbacks, in one order.
+- **The API is the only control** (ADR 0002): the Control Panel, scripts
+  and tests all use the same OpenAPI routes; settings saved through it
+  replace startup values.
+- **Blit does not own the desktop**: Hibr owns its desktop and runs inside
+  Blit sessions; Blit starts Hibr's installed commands and never edits
+  Hibr ([Hibr integration](integration-hibr.md)).
+- **Built with TCC** (ADR 0001): a small, fast compiler, pinned, with
+  FreeType and HarfBuzz from the distribution.
 
-### Terminal model
+## Security
 
-Represents a Unicode-aware grid, cell attributes, cursor/selection state,
-scrolling, and damage regions. Managed PTY sessions feed terminal input and
-output through this model; the PTY is a process boundary, not the canonical
-display state.
-
-### Session and input manager
-
-Owns terminal-session lifecycle, PTY attachment, flow control, device/seat
-identity, focus, pointer reporting, keyboard routing, selection, and input
-permissions. It emits typed input and lifecycle events to the API stream and
-feeds terminal output into the authoritative state engine.
-
-### Layout and output manager
-
-Discovers outputs, records their capabilities, and maps them into a logical
-canvas. It must represent gaps, offsets, rotations, scaling, and unavailable
-outputs explicitly. A canvas may span outputs without requiring one giant
-physical framebuffer.
-
-### Effect engine
-
-Evaluates a versioned effect graph at frame time. Effects should declare their
-inputs, parameters, supported color formats, and cost characteristics. The
-engine needs a bounded policy for expensive effects and a clear behavior when
-an effect cannot run.
-
-Effects are per pane (ADR 0186). They are set in the settings document's
-`effects`, keyed by output name and pane ordinal, and reported by
-`GET /v1/effects`. One registry (`src/blit_effects.h`) names them, bounds their
-parameters, fixes their order and holds the pixel rule that both compositors
-use.
-
-The effects so far, scanlines and rounded corners, are local: a pixel's result
-depends only on its position and the pixel underneath. Each compositor applies
-them inside the rectangle it has just repainted, so an effect costs nothing
-outside damage and no pixel is darkened twice.
-
-Effects that sample neighbours or move geometry (curvature, glow) are a
-separate class. They need an offscreen pass per pane and run on the GPU only;
-on the CPU compositor they would be reported as unavailable, not imitated.
-
-### Overlay compositor
-
-Owns bounded graphic canvases that are explicitly attached to a topology or
-surface. SDL3 and direct KMS composite the canonical overlay records after
-terminal/effect composition. Overlays can be used for diagnostics, status,
-images, or visual instrumentation, but may not silently replace terminal or
-layout state.
-
-### Direct display and SDL3 adapters
-
-The direct DRM/KMS adapter is the correctness-critical terminal presentation
-path. It owns connectors, modes, buffers, page flips, output recovery, and the
-software/hardware cursor policy. It consumes the renderer-neutral terminal
-frame plan and never parses PTY bytes.
-
-The SDL3 adapter translates only graphic canvases and effects into SDL3
-resources and presentation operations. SDL3 failures must be converted into
-stable blit errors and events; they must not change terminal state.
-
-Gamepad evdev devices are discovered independently of keyboards and pointers.
-Their raw button/axis events are routed to a selected session and published on
-the input stream with receipt timestamps. Blit does not invent a universal
-keyboard escape-sequence mapping for gamepads; an emulator or API client owns
-the controller mapping.
-
-### Persistence and observability
-
-Configuration, snapshots, structured logs, metrics, and diagnostic frame data
-should be separate from the hot rendering path. A server restart must have a
-documented policy for restoring or discarding scene state.
-
-## Frame lifecycle
-
-1. A client submits a validated scene mutation or content update.
-2. The state engine applies it and marks affected regions as damaged.
-3. The layout manager resolves logical regions against current outputs.
-4. The effect engine builds a bounded render plan from the scene snapshot.
-5. The SDL3 adapter renders and presents the plan to each active output.
-6. The server emits acknowledgement, timing, presentation, and failure events.
-
-The exact threading model is intentionally open. The contract must define
-ordering and visibility first; implementation can then use one or more worker
-threads without changing client behavior.
-
-## Multi-monitor model
-
-blit should model an output arrangement as a named topology, not infer a
-single rectangular desktop. Each output has a stable server-local identity,
-physical bounds, logical bounds, transform, and presentation status. The
-canvas-to-output mapping should be queryable and mutable through the API.
-
-Initial policy questions include whether a frame is committed atomically
-across outputs, how refresh-rate differences are handled, and what happens
-when an output disappears mid-frame.
-
-## Security boundary
-
-Binding a process directly to display hardware is privileged. The design must
-separate the API's authorization model from SDL3/OS privileges and should
-support a least-privilege deployment model. Authentication, client identity,
-capabilities, and destructive operations need schema-level representation even
-if the first local transport uses operating-system credentials.
+Blit runs as root by default, because it opens the display, input devices
+and the console, and starts sessions as other users. The API is protected
+by a bearer token; without one it listens on loopback only. Sessions can be
+limited to an allow-list of commands. An unprivileged profile runs it as
+user `blit` with the device groups it needs. Package installation is a
+separate root helper that only accepts a package named `blit` with the
+checksum the server sends it. See `man blit` and ADR 0065.

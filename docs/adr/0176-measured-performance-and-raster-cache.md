@@ -51,7 +51,7 @@ Measure server CPU, parser work, raster/composition, copy/upload, presentation
 and input latency separately. Distinguish native CPU composition from SDL/GL,
 and Hibr/hold from Blit. Reuse current diagnostic APIs before adding counters;
 any new public telemetry must be schema-first. See the
-[0.2 performance programme](../performance-0.2.md).
+[0.2 performance programme](../history/performance-0.2.md).
 
 ## Verification and limits
 

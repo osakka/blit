@@ -28,8 +28,9 @@ same applies to an operator's own fonts in `/usr/local/lib/blit/fonts/text`.
 fitted to the chosen font when drawn:
 1. **Cell geometry,** drawn by the raster: box drawing, block elements,
    Braille, core Powerline and Blit's bar corners.
-2. **`BlitIcons-Regular.ttf`:** Blit's seven colour icons, the pen alias
-   and the themed text glyphs. Built by `tools/fonts/build-blit-icons.py`
+2. **`BlitIcons-Regular.ttf`:** Blit's original colour icons (Wi-Fi,
+   battery, volume, telephones, file-manager icons and the rest), the pen
+   alias and the themed text glyphs. Built by `tools/fonts/build-blit-icons.py`
    from `icons/catalogue.json`.
 3. **The text font itself.** A glyph that would overhang the cell is
    shrunk to fit, not dropped.
@@ -67,17 +68,15 @@ Retired in 0.2.36:
 - Blit Arabic Retro.
 
 Scope matters: this is **not all Unicode or all emoji sequences**. Font files
-alone do not shape flags, skin tones, ZWJ families or VS16 presentation; that
-shared-renderer acceptance remains internal tracking110; see the
-[font plan](../../docs/font-evolution-plan.md).
-Candidate576 adds an internal HarfBuzz/FreeType colour-cluster raster, tested
-against all5,244 pinned Emoji18.0 entries at16px and representative families
-at8..64px. The specimen includes its output, not a claim of terminal support.
-Candidate577 adds compositor consumption, tested with representative sequence
-families in native KMS and both SDL paths. Candidates578/579 add explicit
-API/PTY emoji grouping while preserving default scalar layout. Candidate580
-adds Unicode18.0 default/VS15/VS16 presentation and pinned Noto Emoji3.002
-monochrome outlines; full end-to-end/live acceptance remains open.
+alone do not shape flags, skin tones, ZWJ families or VS16 presentation. The
+raster does that with HarfBuzz and FreeType as colour clusters, tested against
+all 5,244 pinned Emoji 18.0 entries at 16px and representative families at
+8..64px; the compositor draws them, explicit API/PTY emoji grouping is
+available beside the default scalar layout, and Unicode 18.0
+default/VS15/VS16 presentation uses the pinned Noto Emoji 3.002 monochrome
+outlines for text presentation. Remaining end-to-end acceptance is internal
+tracking 110; the history is in the
+[font plan](../../docs/history/font-evolution-plan.md).
 Reproduce the complete-corpus raster test with
 `ruby tools/tests/emoji_cluster_raster_gate.rb`;
 `BLIT_FONT_VALGRIND=1` additionally checks that fixture under Valgrind.
@@ -85,10 +84,10 @@ A pixel font keeps every glyph it has, box drawing included, and borrows the
 glyph stack for the rest (ADR 0199). Wide characters keep the separate wide
 PSF.
 
-## Retro: Blit Hibr Spleen16
+## Pixel font: Blit Spleen16
 
-`Blit-Spleen16.psf` is an optional8x16 retro face based on Spleen2.2.0
-(profile `blit-spleen16`). Default Terminus is unchanged. It provides
+`Blit-Spleen16.psf` is an optional 8x16 pixel font based on Spleen 2.2.0
+(id `blit-spleen16`). Default Terminus is unchanged. It provides
 1,575 scalar mappings, retaining all1,181 unique scalar mappings from the
 existing Hibr font, with92 visibly different printable ASCII masks.
 Box/block geometry, combining marks and the fitted control diamond retain
@@ -109,8 +108,7 @@ BLIT_SPLEEN_SOURCE=/path/to/spleen-8x16.bdf python3 tools/tests/retro_font_gate.
 ```
 
 Pixel size changes use `PUT /v1/fonts` with `size_px`; this bitmap face does
-not become an outline font or intrinsic-colour font by resizing it. The
-modern antialiased/colour profile is separate.
+not become an outline font by resizing it.
 
 ## Shared outline and colour rendering policy
 
@@ -130,8 +128,8 @@ preserve the upstream icon notices, including Fonticons attribution and Font
 Awesome licensing. Hack doubles as the emoji audit's negative fixture: a text
 font that lacks emoji. Noto remains
 unmodified, from upstream release `v2026-09-24-unicode18_0`, its2D CBDT/CBLC
-font rather than an unsupported COLRv1 face. This replaced the older Debian
-Noto2.042 asset in candidate574; see the deployment ledger for current status.
+font rather than an unsupported COLRv1 face. It replaced the older Debian
+Noto 2.042 asset.
 
 The complete Unicode Emoji18.0 test corpus and licence are pinned in
 `assets/unicode/emoji-18.0`. The independent offline font-shaping audit is:
@@ -146,7 +144,7 @@ All5,244 entries shape to one nonzero glyph in Noto2.057 with HarfBuzz6.0.0;
 Noto2.042 fails174 RGI entries and10 minimally-qualified variants. These are
 **font-shaping** results, not a production renderer implementation, colour
 bitmap validation or permission to claim complete emoji support. The audit
-does not install HarfBuzz or add it to the production binary. See ADR0157.
+runs offline and does not install HarfBuzz. See ADR 0157.
 
 U+270E (`✎`) is Blit's original themed pen silhouette (ADR 0172), from
 the icon font. Complete icon outlines are fitted at draw time with 5% side
@@ -154,7 +152,7 @@ insets and the text cap-height bound: no cropping and no proportional
 advance. Icons take the terminal foreground colour; colour emoji remain a
 separate mechanism.
 
-From567, colour artwork is bounded by the fitted text em rather than
+Since 0.1.567, colour artwork is bounded by the fitted text em rather than
 the full cell height (which includes line spacing). Its aspect ratio and
 one/two-cell allocation remain unchanged. This is a shared raster policy,
 not a bell-specific substitution or another font-size setting; see ADR0151.
@@ -234,25 +232,26 @@ tools/fonts/make-wide-psf.py /usr/share/unifont/unifont.bdf \
 Only glyphs the BDF marks `DWIDTH 16` are taken; a narrow glyph belongs in the
 primary font. Codepoints outside the BMP are **not** covered, because
 `unifont.bdf` is a BMP font — emoji live in plane 1 and need Unifont's
-`unifont_upper`, which is a separate decision recorded in ADR 0062.
-## Arabic companions (119)
+`unifont_upper`, which is a separate decision recorded in ADR 0062. Outside
+the wide cells, plane 1 and beyond come from the glyph stack's
+`UnifontUpper-Regular.otf`.
 
-`BlitArabicRetro.ttf` (Kawkab Mono0.501 derivative) and
-`BlitArabicModern.ttf` (GNU FreeMono20120503 derivative) are required companions
-of canonical Retro/Modern profiles in candidate0.1.588.
-They preserve source outlines and positioning; native antialiased glyphs and
-cell-local mark clusters replace PSF substitution for the tested Arabic
-repertoire. There is no second bidi pass: Hibr already supplies visual forms.
-The companion shares the primary Latin baseline. GET/v1/fonts identifies the
-loaded companion; missing files reject replacement atomically. Arbitrary
-custom font paths do not automatically receive a companion.
+## The Arabic companion
+
+`BlitArabicModern.ttf` (GNU FreeMono 20120503 derivative) is the one Arabic
+companion attached to every outline text font (ADR 0195). It preserves source outlines and positioning; native
+antialiased glyphs and cell-local mark clusters replace PSF substitution for
+the tested Arabic repertoire. There is no second bidi pass: Hibr already
+supplies visual forms. The companion shares the primary Latin baseline.
+`GET /v1/fonts` identifies the loaded companion (`active.arabic_companion`)
+and each profile's `arabic_companion_path`; pixel fonts have none.
 
 Canonical source/output hashes and licences: `arabic-fonts.source.json`.
-`tools/fonts/build-arabic-profile.py --profile retro|modern SOURCE OUTPUT`
-uses pinned fontTools4.60.1, Unicode14.0.0 decompositions and HarfBuzz6.0.0.
+`tools/fonts/build-arabic-profile.py --profile modern SOURCE OUTPUT`
+uses pinned fontTools 4.60.1, Unicode 14.0.0 decompositions and HarfBuzz 6.0.0.
 It adds only missing presentation aliases that the source shaper resolves to
-one glyph; it does not promise all Arabic forms exist. Both faces retain the
-source notices. Kawkab is OFL1.1. FreeMono is GPLv3-or-later with its font
+one glyph; it does not promise all Arabic forms exist. The face retains the
+source notices. FreeMono is GPLv3-or-later with its font
 embedding exception retained in the font and `FreeMono-README.txt`;
 `FreeMono-LICENSE.txt` is the GPL and `FreeMono-AUTHORS.txt` credits contributors.
 The complete upstream preferred-source/build archive is included at
@@ -269,11 +268,11 @@ It is a finite corpus, not exhaustive Quranic/Unicode coverage.
 Run `ruby tools/tests/arabic_raster_gate.rb` or the normal font gate suite.
 Generate a real raster preview with
 `ruby tools/fonts/preview.rb --arabic build/font-preview/blit-arabic.png`.
-Backend fixtures now consume ink offsets and verify neighbouring-ink damage,
+The backend fixture consumes ink offsets and verifies neighbouring-ink damage,
 pane clipping, cursor repaint and mixed Latin/Arabic/colour cache collisions
-through KMS mock, SDL software and offscreen GLES. Run
-`ruby tools/tests/arabic_backend_gate.rb kms|software|opengles2` (one mode).
-These are finite composition tests, not physical scanout or typographic
-acceptance. Physical typography review remains separate from automated gates.
+through the KMS compositor's cell path, under two text fonts. Run
+`ruby tools/tests/arabic_backend_gate.rb`. These are finite composition
+tests, not physical scanout or typographic acceptance. Physical typography
+review remains separate from automated gates.
 
-[Inspect the actual candidate raster specimen](../../docs/images/blit-arabic-candidates.png).
+[Inspect the raster specimen](../../docs/images/blit-arabic-candidates.png).

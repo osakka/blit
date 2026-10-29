@@ -1,10 +1,10 @@
 # Kitty comparison: rendering architecture, not just glyph caching
 
 Follow-up: the0.2 development candidate now implements the first shared
-placement-damage stage in[ADR0177](adr/0177-retained-graphics-damage.md).
+placement-damage stage in[ADR0177](../adr/0177-retained-graphics-damage.md).
 The source findings and original probe outputs below describe the pinned
 pre-fix checkpoint; the probe itself was removed with SDL in
-[ADR 0184](adr/0184-sdl-is-removed.md). Image uploads, CPU native composition
+[ADR 0184](../adr/0184-sdl-is-removed.md). Image uploads, CPU native composition
 and whole-output copying are not claimed fixed by that stage. See current-state/verification notes.
 
 Date: 2026-10-21. Blit source checkpoint: c5e241e, development0.2.0.

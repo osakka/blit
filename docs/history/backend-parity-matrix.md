@@ -1,6 +1,6 @@
 # Backend parity acceptance matrix
 
-> **Superseded by [ADR 0184](adr/0184-sdl-is-removed.md).** SDL is removed and native KMS is the only presentation path, so there is no backend parity to track. Kept as a historical record; tools it names may no longer exist.
+> **Superseded by [ADR 0184](../adr/0184-sdl-is-removed.md).** SDL is removed and native KMS is the only presentation path, so there is no backend parity to track. Kept as a historical record; tools it names may no longer exist.
 
 Tracking: [#104](https://git.home.arpa/itdlabs/blit/issues/104).
 

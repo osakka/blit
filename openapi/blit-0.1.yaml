@@ -2675,6 +2675,19 @@ components:
                   enum: [kms]
                   description: Native KMS is the only presentation backend (ADR 0184); any other value is refused.
                 kms_async_pageflip: {type: boolean}
+                kms_compositor:
+                  type: string
+                  enum: [cpu, gles]
+                  description: Compose on the GPU (gles) or the CPU (ADR 0181); applied at the next start.
+                kms_frame_timing:
+                  type: string
+                  enum: [immediate, late]
+                  description: Compose as soon as there is work, or just before each refresh (ADR 0183); applied at once.
+                effects_animation_hz:
+                  type: integer
+                  minimum: 10
+                  maximum: 30
+                  description: Frame rate of animated pane effects (ADR 0188).
                 expect_desktop: {type: boolean}
                 shutdown_key:
                   $ref: '#/components/schemas/ShutdownKey'

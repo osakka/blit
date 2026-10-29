@@ -1,350 +1,153 @@
 # Blit
 
-> API-driven, text-first display service for native KMS Linux hosts.
+**A display server for text.** Blit drives your monitors directly through
+the Linux kernel, with no X11 or Wayland, and fills them with fast,
+good-looking terminals: truecolour, colour emoji, Nerd Font and icon
+glyphs, Kitty and Sixel images, CRT effects. Everything is controlled
+through an HTTP and WebSocket API.
 
-Public repository: [github.com/osakka/blit](https://github.com/osakka/blit).
+Blit is the display under the [Hibr](https://github.com/osakka/hibr) text
+desktop, but it does not need Hibr: any program can run in a Blit session.
 
-Stable checkpoint: **v0.1.589**. The **0.2 development line** targets measured
-rendering/CPU improvements without sacrificing correctness; see the
-[performance programme](docs/performance-0.2.md). Candidate is not a release.
-For independent implementation, start with the
-[architecture handoff and ticket dependency index](docs/performance-architecture-handoff.md).
+Current release: see [`packaging/VERSION`](packaging/VERSION).
+Repository: [github.com/osakka/blit](https://github.com/osakka/blit).
 
-Blit is the display and terminal boundary; Hibr remains the desktop/session
-owner. The normal integration is one Blit service, one primary Hibr desktop,
-and zero or more Hibr `desktop --join` attachments placed by Blit's logical
-topology API. Blit does not patch Hibr, launch competing desktop owners, or
-require an X11/Wayland compositor.
+## What it does
 
-The project is written and built with TCC at the Blit boundary. Hibr is an
-independent runtime dependency: Blit launches and observes the installed Hibr
-desktop/session commands, but never edits the Hibr source tree.
+- **Monitors:** several at once, each at its own refresh rate, each split
+  into a grid of up to 8×8 panes. Monitors can be plugged in while running.
+- **Fast:** only what changed is redrawn. Frames are composed on the CPU,
+  or on the GPU (OpenGL ES) when you choose it in the Control Panel; if the
+  GPU can't be used, the CPU takes over.
+- **Terminals:** xterm-compatible with the Kitty keyboard protocol, mouse
+  reporting, bracketed paste, synchronized output, hyperlinks and pointer
+  lock for games. See the [terminal reference](docs/terminal.md).
+- **Images:** the Kitty graphics protocol (including in-place edits) and
+  Sixel. Hibr's wallpaper and video play through it.
+- **Fonts:** Hack, JetBrains Mono, Fira Code, IBM Plex Mono, IBM 3270,
+  Terminus and Spleen, any size from 8 to 64 pixels, changed live. Drop
+  in your own monospaced font. Under every font sits one glyph stack: Nerd
+  Fonts, colour emoji, Arabic, Unifont, and Blit's own colour icons.
+- **Input:** keyboards, mice, touchpads and gamepads, found as they are
+  plugged in, each configurable: repeat rate, remapping, pointer speed,
+  natural scrolling, a choice of pointer looks.
+- **Effects:** rounded corners, scanlines, screen curvature, glow, RGB
+  shift and an old CRT's hum bar, per pane.
+- **Sound and power:** sound cards' volume and mixer, backlight brightness.
+- **Safe to run:** a bearer token on every request, an allow-list of
+  commands, an unprivileged mode, updates through a separate checked
+  helper, and Ctrl+Alt+Backspace to stop it.
 
-## The short version
+The full list, with when each arrived and how it has been proved, is in
+[features](docs/features.md).
 
-Presentation configuration has one owner: saved API settings. The environment
-supplies startup fallbacks, not silent overrides. Read
-`/v1/settings` → `effective.presentation_configuration` to see the source,
-validity and actual backend. Native KMS is the only presentation backend
-(ADR 0184); its compositor is GLES on the GPU, with the CPU as the fallback.
-See [the configuration ownership guide](docs/api.md#presentation-configuration-ownership-01563).
+![Blit's text fonts, icons, file icons, Nerd glyphs and colour emoji, drawn by its own raster](docs/images/blit-fonts.png)
 
-Blit is a server, not a terminal launcher script and not a replacement for
-Hibr. A client connects to Blit's TCP API, discovers hardware, creates or
-observes terminal sessions, assigns surfaces to logical panes, and receives
-state, diagnostics, input, and frame events. Blit presents the result through
-native KMS and can expose bounded Kitty/Sixel-compatible graphics alongside
-terminal cells.
+## Install
 
-The canonical boundaries are deliberately simple:
-
-```text
-OpenAPI/HTTP + WebSocket
-          |
-          v
-  Blit resource/lifecycle state  <---- physical input
-          |
-          +---- PTY + terminal state <---- Hibr desktop/session
-          |
-          +---- logical topology and panes
-          |
-          +---- native KMS presentation (GLES, CPU fallback)
-```
-
-## What Blit owns—and what it does not
-
-Blit owns the network contract, terminal state, logical display topology,
-input routing, diagnostics, and presentation. Hibr remains the desktop/session
-owner. The intended deployment has one primary Hibr desktop and zero or more
-`desktop --join` attachments orchestrated through Blit's API; Blit does not
-patch Hibr or start competing desktop owners.
-
-Keep these evidence boundaries separate:
-
-| Boundary | What proves it | What it does not prove |
-| --- | --- | --- |
-| API/state | versions, resources, revisions, routes, diagnostics | pixels reached scanout |
-| Renderer/presentation | cadence counters, missed deadlines, screenshots | Hibr supplied the expected scene |
-| Host acceptance | the exact binary on named hardware | behavior on another GPU, monitor, or input device |
-
-The [verification ledger](docs/verification-status.md) is the single place
-where these claims are separated.
-
-Pointer appearance is API-owned through the settings document: three shared
-antialiased shapes, four palettes,24–64px size and shadow, independent of font
-scale. The catalogue's **Blit Mouse** pane exposes appearance and per-device
-controls alongside **Blit**, using one connection and settings draft. See the
-[API guide](docs/api.md) and [ADR0133](docs/adr/0133-shared-api-owned-pointer-appearance.md)
-for the0.1.550 contract and the verification ledger for deployment status.
-
-Acceptance is bounded to the recorded tests and host observations. Read the
-[current state and restart point](docs/current-state.md) before resuming work:
-it records the user's accepted one-output split, native attachment evidence,
-remaining hardware coverage, and current implementation gaps. Do not infer a
-correct UI from healthy timing counters or a successful API response.
-
-## Five-minute operator path
-
-The package installs a systemd service and the native `blit` executable. The
-API is plain HTTP over TCP; the default development port is 8080. Start with
-identity and readiness, then inspect hardware before creating a session:
+Blit is published in Hibr's apt repository (amd64; it needs HarfBuzz 6.0 or
+later, so Debian 12, Ubuntu 24.04 or newer):
 
 ```sh
-curl --fail http://127.0.0.1:8080/v1/version
-curl --fail http://127.0.0.1:8080/v1/server
-curl --fail http://127.0.0.1:8080/v1/displays
-curl --fail http://127.0.0.1:8080/v1/diagnostics/runtime
+curl -fsSL https://osakka.github.io/hibr-apt/hibr.gpg \
+  | sudo tee /usr/share/keyrings/hibr.gpg > /dev/null
+echo "deb [signed-by=/usr/share/keyrings/hibr.gpg] https://osakka.github.io/hibr-apt stable main" \
+  | sudo tee /etc/apt/sources.list.d/hibr.list
+sudo apt update
+sudo apt install blit hibr
 ```
 
-For a real deployment, configure a bearer token and restrict the listener at
-the network boundary. An unauthenticated `0.0.0.0` listener is a test-LAN
-configuration only. The complete client transaction, Hibr ownership rules,
-stream protocol, error model, and shutdown/update behavior are in the
-[API guide](docs/api.md).
+The package installs and starts `blit.service`, generates an API token in
+`/etc/blit/blit.env`, and shows Hibr's login screen on the first monitor.
+`apt upgrade` keeps it current.
 
-The smallest useful acceptance loop is:
-
-```text
-version -> server -> displays/topology -> create one session
-        -> observe revisions/runtime -> delete session -> verify zero resources
-```
-
-A client must preserve opaque IDs and revisions returned by Blit; it must not
-derive resource IDs from display names or assume that an HTTP success means a
-frame has already been presented.
-
-The OpenAPI document defines wire behavior. The C implementation defines the
-runtime. ADRs explain durable decisions. Tests and the verification ledger are
-the evidence for claims. No generated client, shell wrapper, screenshot, or
-package is an alternate source of behavior.
-
-## Hibr Control Panel
-
-The catalogue pane is published separately from the Blit Debian package:
+## First steps
 
 ```sh
-catalogue install control-panel/blit
+man blit                                   # the server, its settings and files
+TOKEN=$(sudo sed -n 's/^BLIT_AUTH_TOKEN=//p' /etc/blit/blit.env)
+curl -s http://127.0.0.1:8080/v1/version
+curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8080/v1/displays
 ```
 
-Open **Control Panel → Hardware → Blit**. Set the server URL and
-API bearer token in the pane. Pane0.1.3 remembers the URL through Hibr's
-normal settings and the token in a private0600 JSON file under
-`$XDG_CONFIG_HOME/hibr/blit` (default `~/.config/hibr/blit`). The token is
-URL-bound, masked and excluded from exports; this is filesystem-protected
-plaintext, not encryption. The privileged updater token is separate and
-never requested. Use Blit0.1.546 or newer (independent grids were introduced
-in0.1.545;0.1.546 makes legacy migration durable). The pane requires
-Hibr0.99.244. Catalogue availability depends on the configured mirror.
+Start a shell as yourself in a session:
 
-Stage auxiliary pane selections, use **Apply auxiliaries now** for the running
-policy, and **Save as Default** for restart-persistent intent. Login placement
-preferences are startup-applied. Font controls use the live font API; Hibr's
-Displays pane owns arrangement after an auxiliary's first confirmed join.
-Control Panel0.1.7 selects font cell height8–64px, with one-pixel keyboard
-steps. The Font selector offers existing Terminus, pixel-art Spleen retro,
-and native antialiased `blit-modern` with colour emoji in0.1.564. Candidate562
-was held; config-only563 does not include the new profiles. Font changes
-save through Blit's API. Native horizontal sliders also select each monitor's independent
-columns/rows (1–8 each). **Save as Default** applies/saves the grid; new
-unconfigured monitors start1x1. Blit refuses removing occupied panes instead
-of killing their terminals. See [the API layout contract](docs/api.md#displays-topology-and-fonts).
+```sh
+curl -s -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d "{\"command\":\"/bin/bash\",\"arguments\":[\"-l\"],\"user\":\"$USER\"}" \
+  http://127.0.0.1:8080/v1/terminal-sessions
+```
+
+From the Hibr desktop, everything is in the Control Panel: the **Blit**
+pane (fonts, panes per monitor, the compositor, the login screen, Restart
+Blit, the Ctrl+Alt+Backspace switch), **Blit Mouse** and **Blit Effects**.
 The [pane guide](https://github.com/osakka/hibr-apps/blob/main/docs/blit.md)
-documents connection, conflict handling, import/export and diagnostics. The
-canonical pane lives only in hibr-apps, not in Hibr core or this package.
+explains each control.
 
-Offline candidate0.1.579 includes smooth `blit-retro`, full pinned Nerd
-coverage in both outline profiles (10,386 codepoints) and Noto2D2.057 colour
-emoji. Existing bitmap profiles stay selectable. Generate an actual-raster
-specimen without a display using `ruby tools/fonts/preview.rb`.
-The [font guide](assets/fonts/README.md) records API selection, provenance and
-limits. Hibr developers can browse the [full glyph reference](docs/font-reference.md):
-Nerd categories, original Blit/Hibr colour icons, emoji sequences, native
-coverage and API integration rules.
-Candidate0.1.588 adds separate Retro/Modern Arabic companions,
-positioned diacritics and Arabic-Indic digits; the font API reports the loaded
-companion. See the [Arabic raster preview](docs/images/blit-arabic-candidates.png)
-and [current rollout status](docs/current-state.md); finite test coverage is
-not a universal Arabic/Quranic claim.
-Independent font shaping passes all5,244 pinned Emoji18.0 entries;
-the shared bounded cluster raster now shapes and draws the full corpus in
-offline16px module tests. Terminal segmentation, presentation policy and
-end-to-end conformance remain open (internal tracking110; see the
-[font plan](docs/font-evolution-plan.md)).
-Owned clusters reach both native KMS compositors (CPU and GLES), with
-representative pixel checks. API updates can explicitly
-request `text_layout:"emoji"`; the scalar default is unchanged for existing
-providers. New PTY sessions can also select `text_layout:"emoji"` explicitly;
-the full corpus passes contiguous/byte-fragmented parser tests. Complete
-Unicode18.0 text/default presentation is implemented in the shared raster;
-remaining geometry and end-to-end acceptance are still open.
-HarfBuzz>=6.0.0 is an explicit runtime dependency, not a second renderer.
-Native KMS now reads the canonical sixteen-slot attachment layout correctly
-(internal tracking113). Not deployed. The active queue is
-[fonts → browser sizing → performance/correctness → release](docs/roadmap.md).
-See [the font completion contract](docs/font-evolution-plan.md) for remaining
-work; shaping coverage alone does not mean complete terminal emoji support.
+## Configure
 
-## Who should read what
+- **Startup values** go in `/etc/blit/blit.env`
+  ([`blit.env(5)`](man/blit.env.5)), then `sudo systemctl restart blit`.
+- **Everything else** is saved through the API in one settings document
+  (`/v1/settings`) and replaces the startup value. The Control Panel uses
+  the same API.
+- **Restart** without a reboot: `sudo systemctl restart blit`, or Restart
+  Blit in the Control Panel.
+- **Recover** from a bad setting: stop the service and start once with
+  `BLIT_SETTINGS=ignore` (see `man blit`).
 
-- **API client author:** start with [`docs/api.md`](docs/api.md), then use the
-  OpenAPI schema for exact request and response types.
-- **Hibr integrator:** read [`docs/integration-hibr.md`](docs/integration-hibr.md)
-  and the Hibr lifecycle ADRs before starting a desktop or `--join` session.
-- **Blit contributor:** read the [engineering constitution](docs/engineering-constitution.md)
-  and [development workflow](docs/development-workflow.md) before editing.
-- **Release/operator:** read [gateway testing](docs/testing-gateway.md) and the
-  [verification ledger](docs/verification-status.md) before deployment.
-- **Contributor/reviewer:** read the [repository hygiene standard](docs/repository-hygiene.md)
-  before staging or pushing a change.
+## Documentation
 
-## What exists today
+| If you want to… | Read |
+| --- | --- |
+| See everything Blit can do | [Features](docs/features.md) |
+| Run and configure it | `man blit`, `man blit.env`, [operator runbook](docs/api.md#operator-runbook-prove-the-server-before-touching-a-desktop) |
+| Write a client | [API guide](docs/api.md), then the [OpenAPI document](openapi/blit-0.1.yaml) |
+| Know which escape sequences work | [Terminal reference](docs/terminal.md) |
+| Use glyphs and icons from an application | [Font and glyph reference](docs/font-reference.md) |
+| Integrate a desktop | [Hibr integration](docs/integration-hibr.md) |
+| Understand how it is built | [Architecture](docs/architecture.md), [decision records](docs/adr/README.md) |
+| Contribute | [Development workflow](docs/development-workflow.md), [engineering constitution](docs/engineering-constitution.md) |
+| Know what is next | [Roadmap](docs/roadmap.md) |
+| Check what has been proved | [Verification ledger](docs/verification-status.md) |
 
-- TCP HTTP API at port 8080, with a versioned `/v1` resource namespace.
-- OpenAPI 3.1 source of truth in [`openapi/blit-0.1.yaml`](openapi/blit-0.1.yaml).
-- WebSocket event and bounded pixel-stream upgrade at `/v1/stream`.
-- PTY-backed terminal sessions with revisioned cell surfaces and scrollback.
-- A single supervised Hibr login manager with root-owned KMS/input and
-  per-user desktop or shell children.
-- Native KMS presentation (GLES compositor, CPU fallback), refresh-aware
-  scheduling, and diagnostics for frames, render time, missed deadlines,
-  input, and streams.
-- Direct-KMS live output reconciliation with a background connector observer,
-  stable output lifetimes, API-visible hotplug errors and zero-output recovery.
-- Logical multi-display topology and pane layouts, including Hibr primary plus
-  `desktop --join` ownership rules.
-- API-selectable font profiles and logical scale, Kitty-first graphics, and a
-  bounded Sixel capability.
-- Saved auxiliary defaults and a live Apply API with authenticated Hibr
-  standby startup, native placement confirmation and observable progress.
-- A catalogue **Blit** Control Panel in
-  [hibr-apps](https://github.com/osakka/hibr-apps), with separate Apply/Save,
-  fonts, login preferences, configuration import/export and diagnostics.
-- TCC builds, QEMU/VKMS fixtures, terminal conformance, package gates, and
-  live-host diagnostic gates.
+All of it: [docs/README.md](docs/README.md).
 
-Physical multi-monitor, physical evdev, physical high-refresh, and full Hibr
-geometry acceptance remain explicitly open. See the [verification ledger](docs/verification-status.md);
-the project does not turn a virtual or partial result into a hardware claim.
+## Build from source
 
-## Start with the contract
-
-Read the [API guide](docs/api.md) for the operator and client workflow, then
-use the [OpenAPI document](openapi/blit-0.1.yaml) for exact schemas. The most
-useful first requests are:
+Blit is C, built with TCC. It needs FreeType (≥ 2.12.1) headers and
+library, HarfBuzz (≥ 6.0.0, headers pinned in `vendor/harfbuzz`), libdrm
+and zlib; Mesa's EGL/GLES/GBM are loaded at run time.
 
 ```sh
-curl http://127.0.0.1:8080/v1/version
-curl http://127.0.0.1:8080/v1/server
-curl http://127.0.0.1:8080/v1/displays
-curl http://127.0.0.1:8080/v1/diagnostics/runtime
+tools/build-tcc.sh                                      # build/blit/blit-server
+tools/build-tcc.sh build/blit/blit-helper helper
+tools/run-gates.sh all                                  # the test suites
+packaging/build-deb.sh build/pkg                        # the .deb
 ```
 
-The first three responses answer different questions: `/v1/version` identifies
-the running binary and API contract, `/v1/server` describes server capabilities,
-and `/v1/displays` describes currently discovered outputs. A successful HTTP
-response alone does not mean a display is ready; inspect its state and runtime
-diagnostics before creating a workload.
+Use `BLIT_FREETYPE_INCLUDE=/usr/include/freetype2` to build against system
+headers. Suites and their requirements are listed by `tools/run-gates.sh
+--help`; the [development workflow](docs/development-workflow.md) has the
+release procedure.
 
-When authentication is configured, add `Authorization: Bearer TOKEN` to API
-requests. Never put credentials in source, logs, screenshots, or commits.
-
-## Build and verify
-
-The server requires FreeType headers, libfreetype6>=2.12.1 and the
-OS-maintained libharfbuzz.so.0>=6.0.0. HarfBuzz public headers are pinned in
-`vendor/harfbuzz`; no private runtime is bundled. Install your
-distribution's `libfreetype-dev` or stage the reviewed Debian development
-package headers at `build/deps/prefix/include/freetype2`. Set
-`BLIT_FREETYPE_INCLUDE=/usr/include/freetype2` when using system headers;
-`BLIT_FREETYPE_LIBRARY` can override the default amd64 soname library path.
-This links the distro runtime library; no private FreeType runtime is bundled.
-Pinned font assets and their licenses are checked in under `assets/fonts`.
-
-```sh
-tools/build-tcc.sh build/blit/blit-server server
-ruby tools/tests/hibr_singleton_gate.rb
-tools/tests/api_schema_gate.rb
-tools/tests/restart_gate.sh
-tools/tests/package_artifact_gate.sh /path/to/blit_<version>-1_amd64.deb
-```
-
-The conformance runner deliberately targets a caller-owned server so the same
-test can validate a local mocked display or a controlled remote fixture.
-`tools/run-gates.sh terminal` starts one on the DRM mock for you; by hand:
-
-```sh
-. tools/tests/gate_display.sh && gate_display_setup
-env BLIT_PSF_FONT=assets/fonts/Blit-Terminus16.psf $GATE_DISPLAY_ENV \
-  build/blit/blit-server 19195
-
-BLIT_TEST_SERVER=http://127.0.0.1:19195 \
-BLIT_EXPECTED_VERSION="$(sed -n '1p' packaging/VERSION)" \
-  ruby tools/tests/terminal_conformance.rb
-```
-
-The bounded soak uses the same ownership rule and additionally requires the
-server PID so it can enforce the RSS ceiling. See
-[`docs/implementation-and-verification.md`](docs/implementation-and-verification.md)
-for the exact two-process invocation and cleanup contract. Gates that own
-their server, such as the frame-rate gate, state that explicitly.
-
-The package is a derived release artifact. Build it only after the source,
-schema, tests, documentation, and verification entry agree; the package gate
-checks its embedded version, manifest hash, runtime binary, schema, and
-documentation payload.
-
-The exact test matrix and QEMU commands are in
-[`docs/implementation-and-verification.md`](docs/implementation-and-verification.md).
-The development workflow requires one source-of-truth change, a focused gate,
-an evidence update, `git diff --check`, and a deliberate commit/push for each
-cycle.
-
-## API contract at a glance
-
-The API is intentionally discoverable and revisioned. A client should treat
-the following sequence as a transaction boundary:
+## How it fits together
 
 ```text
-version -> capabilities -> outputs/topology -> session -> surface/input
-        -> stream/diagnostics -> cleanup -> zero-resource verification
+ API clients, Hibr's Control Panel          keyboards, mice, touchpads
+          │  HTTP + WebSocket                          │ evdev
+          ▼                                            ▼
+ ┌──────────────────────────── blit ─────────────────────────────┐
+ │ settings · sessions · panes per monitor · input routing        │
+ │ terminal emulator (PTY) · Kitty/Sixel images · glyph stack     │
+ │ compositor: GPU (OpenGL ES) or CPU · effects                   │
+ └────────────────────────────┬───────────────────────────────────┘
+                              │ DRM/KMS
+                              ▼
+                          monitors
 ```
 
-On a packaged Hibr host, `/v1/login` is the lifecycle boundary for the
-authenticated desktop or shell: logout retires the user session and returns
-to a fresh login screen.
-
-`openapi/blit-0.1.yaml` is the machine-readable contract; `docs/api.md` is
-the operator and client guide. The schema gate checks that the documented
-terminal-input route remains `POST /v1/terminal-sessions/{id}/input`, that
-the parent session route remains lifecycle-only, and that the public path
-count stays aligned with the release evidence. This prevents a client from
-silently depending on a route that the server does not implement.
-
-## Documentation map
-
-- [Vision and scope](docs/vision.md)
-- [Architecture](docs/architecture.md)
-- [API guide](docs/api.md)
-- [Hibr integration](docs/integration-hibr.md)
-- [Terminal engine](docs/terminal-engine.md)
-- [Testing and evidence](docs/implementation-and-verification.md)
-- [Development workflow](docs/development-workflow.md)
-- [Repository hygiene and handoff standard](docs/repository-hygiene.md)
-- [Roadmap](docs/roadmap.md)
-- [ADR index](docs/adr/README.md)
-- [Verification status](docs/verification-status.md)
-- [Current state and restart point](docs/current-state.md)
-
-## Project boundaries
-
-The repository's `tools/` scripts are build, test, deployment, and diagnostic
-fixtures. They are not runtime dependencies or an alternative implementation.
-Generated build trees, vendor dependency trees, screenshots, logs, old
-packages, and QEMU outputs belong outside version control.
-
-The current release ledger is intentionally conservative: QEMU/VKMS proves
-repeatable virtual topology and lifecycle behavior, while physical monitor
-count, physical evdev behavior, physical high-refresh scanout, and full Hibr
-geometry remain host-specific acceptance work. See
-[`docs/verification-status.md`](docs/verification-status.md) before describing
-any result as hardware validated.
+Blit owns the screens, input, terminals and the API. Hibr, or any other
+program, runs inside sessions and owns its own desktop. Blit never edits
+Hibr; it starts Hibr's installed commands and talks to them through the
+API.

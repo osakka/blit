@@ -21,7 +21,7 @@
 # the non-cached form used to force a rebuild of the output it was inspecting
 # and so showed the batch the renderer was withholding.
 #
-# docs/terminal-engine.md states the contract this gate measures.
+# docs/terminal.md (Synchronized output) states the contract this gate measures.
 
 require 'json'
 require 'net/http'

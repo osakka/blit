@@ -16,7 +16,7 @@ automated and hardware acceptance criteria pass.
    geometry or maintain a second display/surface model.
 5. Every mutation is revisioned, bounded, observable, and either committed or
    rejected with a typed problem response.
-6. Renderer backends consume read-only frame plans. They never parse PTY
+6. The compositors consume read-only frame plans. They never parse PTY
    output or mutate canonical terminal state.
 7. TCC builds all first-party production C code. A successful host-compiler
    build is never release evidence.
@@ -29,8 +29,8 @@ automated and hardware acceptance criteria pass.
 
 - `BLIT-PLAT-001`: run without X11 or Wayland on a Linux DRM/KMS host.
 - `BLIT-PLAT-002`: expose one stable API service over TCP.
-- `BLIT-PLAT-003`: support SDL3 for the optional renderer/effects boundary and
-  direct DRM/KMS for the correctness-critical text path.
+- `BLIT-PLAT-003`: present through native DRM/KMS only (ADR 0184), composing
+  with the GLES compositor (ADR 0181) or the CPU compositor as fallback.
 - `BLIT-PLAT-004`: run as a managed non-root service when the host grants the
   required DRM/input permissions.
 - `BLIT-PLAT-005`: report backend, display, graphics, audio, and input
@@ -105,7 +105,7 @@ automated and hardware acceptance criteria pass.
 ### Presentation and effects
 
 - `BLIT-RENDER-001`: present the same immutable frame-plan semantics through
-  direct KMS and SDL3 adapters.
+  the GLES and CPU compositors.
 - `BLIT-RENDER-002`: prevent stale pixels, pointer trails, cross-output
   cursors, and partial redraw corruption.
 - `BLIT-EFFECT-001`: implement bounded, deterministic CRT effects only after
@@ -117,8 +117,8 @@ automated and hardware acceptance criteria pass.
 
 ### Gate 0 — repository and toolchain
 
-Deliver: clean documentation map, ADRs, TCC build commands, pinned SDL3 and
-libdrm artifacts, reproducible fixture scripts, and no undocumented generated
+Deliver: clean documentation map, ADRs, TCC build commands, pinned libdrm,
+Mesa and HarfBuzz artifacts, reproducible fixture scripts, and no undocumented generated
 files.
 
 Evidence:
@@ -164,9 +164,10 @@ revision-traceable surface snapshots across repeated runs and no renderer is
 involved in the assertions. “Repeatable” here describes the fixture output
 only; it is not a visual or physical-host acceptance claim.
 
-### Gate 3 — presentation adapters
+### Gate 3 — presentation
 
-Deliver: direct KMS and SDL3 adapters consuming the same frame plan.
+Deliver: the direct KMS backend with GLES and CPU compositors consuming the
+same frame plan.
 
 Tests:
 
@@ -174,10 +175,10 @@ Tests:
   redraw frames;
 - pixel/framebuffer assertions for known cell fixtures;
 - pointer movement with previous-position invalidation;
-- renderer failure and output-loss diagnostics.
+- compositor failure and output-loss diagnostics.
 
-Exit condition: both adapters produce equivalent logical output and neither
-  owns terminal state.
+Exit condition: both compositors produce equivalent logical output
+(`BLIT_GATE_BACKEND=native` and `gles`) and neither owns terminal state.
 
 ### Gate 4 — topology and geometry
 
@@ -196,7 +197,7 @@ Test matrix:
 For each case assert topology JSON, pane bounds, surface ownership, PTY
 dimensions, rendered cell coordinates, and absence of duplicate surfaces.
 
-Exit condition: all matrix cases pass in dummy and VKMS environments, with
+Exit condition: all matrix cases pass on the DRM mock and in VKMS, with
 physical-host confirmation for at least one multi-monitor arrangement.
 
 ### Gate 5 — input and Hibr integration
@@ -257,7 +258,7 @@ Every acceptance result must record:
 
 - commit ID;
 - TCC version;
-- kernel, QEMU, Alpine, SDL3, libdrm, and Hibr versions;
+- kernel, QEMU, Alpine, libdrm, Mesa, and Hibr versions;
 - exact command and environment;
 - input fixture and expected result;
 - machine-readable result;
@@ -288,6 +289,6 @@ The final handover must contain:
 ## Release decision
 
 The release is blocked if any requirement above lacks evidence, any matrix
-case is skipped, any advertised API behavior is a stub, any renderer owns
+case is skipped, any advertised API behavior is a stub, any compositor owns
 canonical state, or any Hibr path requires manual geometry or undocumented
 environment assumptions.

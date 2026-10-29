@@ -1,172 +1,111 @@
 # Blit documentation
 
-blit is a schema-first, API-driven text display server with a native SDL3
-renderer and an integrated library of CRT/retro-terminal effects. It is
-intended to provide a text-centric display surface without requiring X11 or
-Wayland, while still supporting a desktop-sized canvas spanning multiple
-monitors.
+Blit is an API-driven display server for text: it drives monitors directly
+through Linux DRM/KMS, composes frames on the CPU or, when chosen, the GPU (OpenGL ES), and presents terminal sessions with images, emoji, icons and
+effects. Hibr's desktop runs on it; so can any other program.
 
 Public repository: [github.com/osakka/blit](https://github.com/osakka/blit).
-Public file links use repository-relative paths or GitHub `blob/main` URLs.
-The internal engineering origin and issue backlog remain separate; internal
-issue numbers must not be assumed to identify GitHub issues.
-
-This directory is the project contract. Implementation work should update the
-relevant documentation and schema in the same change.
+Issue numbers in these documents (#111) are the internal tracker's, not
+GitHub's.
 
 ## Start here
 
-Blit has three audiences, and they should not have to reverse-engineer one
-another's assumptions:
+| You are… | Read, in order |
+| --- | --- |
+| **Trying Blit out** | the [README](../README.md), [features](features.md), `man blit` ([source](../man/blit.8)) |
+| **Running it** | `man blit`, `man blit.env` ([source](../man/blit.env.5)), the [operator runbook](api.md#operator-runbook-prove-the-server-before-touching-a-desktop), [diagnostic capture](diagnostic-capture.md) |
+| **Writing a client** | the [API guide](api.md), the [OpenAPI document](../openapi/blit-0.1.yaml), [API principles](spec/api-principles.md) |
+| **Writing a terminal program** | the [terminal reference](terminal.md), the [font and glyph reference](font-reference.md) |
+| **Integrating a desktop** | [Hibr integration](integration-hibr.md), then the Hibr ADRs in the [index](adr/README.md) |
+| **Contributing** | the [engineering constitution](engineering-constitution.md), [development workflow](development-workflow.md), [repository hygiene](repository-hygiene.md), [architecture](architecture.md) |
 
-1. **Operators and API clients**: read [the API guide](api.md), then use the
-   [OpenAPI contract](../openapi/blit-0.1.yaml) for exact fields and status
-   codes.
-2. **Hibr integrators**: read [Hibr integration](integration-hibr.md) and the
-   [font/glyph developer reference](font-reference.md), then the Hibr
-   lifecycle ADRs. Blit owns placement, input routes, surfaces, and
-   diagnostics; Hibr owns desktop semantics and `--join` behavior.
-3. **Contributors and release operators**: read the
-   [engineering constitution](engineering-constitution.md),
-   [development workflow](development-workflow.md), and
-   [verification ledger](verification-status.md).
+## Everything
 
-The shortest accurate project description is: **the OpenAPI schema defines the
-wire contract, the TCC-built C server implements it, ADRs record durable
-decisions, and the verification ledger limits what we are allowed to claim**.
+**Using Blit**
 
-For a first integration, keep this transaction model in view:
+- [Features](features.md) — everything Blit does, when it arrived, how far
+  it has been proved.
+- [Terminal reference](terminal.md) — escape sequences, mouse and keyboard
+  protocols, Kitty graphics, Sixel, Unicode, limits and known gaps.
+- [Font and glyph reference](font-reference.md) — fonts, the glyph stack,
+  Nerd Fonts, emoji and Blit's own icons, with codepoints.
+- [Font assets](../assets/fonts/README.md) and [icons](../assets/fonts/icons/README.md)
+  — what is shipped, its provenance and licences.
+- Manual pages: [`blit(8)`](../man/blit.8), [`blit.env(5)`](../man/blit.env.5),
+  [`blit-update-helper(8)`](../man/blit-update-helper.8).
 
-```text
-discover -> create one owned resource -> mutate with revision/idempotency
-         -> observe stream events -> repair from HTTP state when needed
-         -> delete -> verify zero owned resources
-```
+**The API**
 
-Blit is the API and presentation boundary; Hibr remains the desktop/session
-owner. One primary Hibr desktop may have joined clients, but a client must
-not start competing desktop owners to fill a pane or monitor. This distinction
-is the source of truth for the API guide and Hibr integration documentation.
+- [API guide](api.md) — discovery, sessions, displays and panes, fonts,
+  input, sound, settings, diagnostics, control, the event stream, errors.
+- [OpenAPI document](../openapi/blit-0.1.yaml) — the exact wire contract.
+- [API principles](spec/api-principles.md) — how the API is designed.
+- [Hibr integration](integration-hibr.md) — login, desktop ownership,
+  joined displays, the optional console adapter.
 
-## Source-of-truth order
+**Design**
 
-When two documents appear to disagree, resolve the discrepancy in this order:
+- [Vision and scope](vision.md) — what Blit is for, and what it is not.
+- [Architecture](architecture.md) — how the server is put together.
+- [Decision records](adr/README.md) — why it is the way it is.
+- [Rectangle copy](rectangle-copy.md) — the DECCRA contract with Hibr.
 
-1. `openapi/blit-0.1.yaml` for HTTP, WebSocket, schemas, status codes, and
-   public field names.
-2. The C implementation for behavior already inside the published contract.
-3. An accepted ADR for an architectural or semantic decision.
-4. The verification ledger for what has actually been built and observed.
-5. Guides and READMEs for explanation, examples, and operator workflow.
+**Building, testing, releasing**
 
-Guides must not invent fields or promise capabilities absent from the schema.
-If a useful behavior is not yet in the schema, record it as roadmap work or an
-ADR proposal instead of documenting it as an API guarantee.
-
-The installed runtime boundary is the TCC-built `blit-server` binary. No
-shell launcher is shipped in the runtime package: Hibr remains an
-independently installed executable and is controlled through Blit's API and
-Hibr's own desktop/session commands. Blit starts an API-requested command
-directly with `execve`; it does not insert a shell between the PTY and the
-requested executable. Shell files in `tools/` are only reproducible build and
-test fixtures, never runtime dependencies.
-
-Do not distribute `build/blit-desktop-current` as a desktop bundle. It is a
-build staging directory, and the Debian builder rejects stale launchers or
-other non-runtime files found beside the native server. Start Hibr separately
-using Hibr's installed `desktop` command and use Blit's API for surfaces,
-panes, input routing, and diagnostics.
-
-## Documentation map
-
-- [Vision and scope](vision.md) — what blit is, who it serves, and the
-  initial non-goals.
-- [Architecture](architecture.md) — the proposed runtime model and the major
-  boundaries between API, terminal state, effects, layout, and rendering.
-- [API guide](api.md) — endpoint map, safe call ordering, Hibr orchestration,
-  diagnostics, streaming, errors, and client rules.
-- [API principles](spec/api-principles.md) — schema-first rules for designing
-  the public API.
-- [OpenAPI contract](../openapi/blit-0.1.yaml) — the canonical version 0.1
-  network API and stream message schemas.
-- [Engineering constitution](engineering-constitution.md) — the project’s
-  non-negotiable development constraints.
-- [Development workflow](development-workflow.md) — ADR, testing, evidence,
-  commit, and push cadence for each implementation cycle.
-- [Repository hygiene](repository-hygiene.md) — source-of-truth boundaries,
-  generated-artifact rules, claim vocabulary, and handoff discipline.
-- [Toolchain baseline](toolchain.md) — the compiler and dependency gates for
-  this workspace.
-- [Backend parity plan](backend-parity-plan.md) — shared feature contract,
-  refresh-rate acceptance, SDL hotplug and physical comparison sequence.
-- [Physical backend comparison](testing-backend-parity.md) — bounded API-only
-  comparison, evidence capture and baseline restoration.
-- [Roadmap](roadmap.md) — the ordered implementation milestones and exit
-  criteria.
+- [Development workflow](development-workflow.md) — the cycle from change
+  to release, and the required gates.
+- [Engineering constitution](engineering-constitution.md) — rules every
+  change follows.
+- [Repository hygiene](repository-hygiene.md) — what belongs in the
+  repository, staging and handoff.
+- [Toolchain](toolchain.md) — TCC and the dependencies.
 - [Implementation and verification contract](implementation-and-verification.md)
-  — normative requirements, release gates, test matrix, and handover package.
-- [Bare-metal testing](testing-baremetal.md) — how to test direct KMSDRM on a
-  Linux host without X11 or Wayland.
-- [Gateway testing](testing-gateway.md) — how to build and exercise the first
-  TCP/OpenAPI/WebSocket gateway slice.
-- [Effect testing](testing-effects.md) — deterministic SDL effect validation
-  and direct-KMS capability behavior.
-- [hibr integration](integration-hibr.md) — standalone-service decision,
-  native PTY compatibility, the optional console-module adapter, and the
-  one-desktop independent-viewport join contract.
-- [ADR index](adr/README.md) — decisions that constrain implementation.
-- [Verification status](verification-status.md) — the current evidence ledger,
-  release gates, and explicitly unverified items.
-- [Current state and restart point](current-state.md) — the latest live
-  evidence, strict claim rules, recovery sequence, and next investigation.
+  — requirements, test matrix and release gates.
+- Testing guides: [KMS](testing-kms.md), [bare metal](testing-baremetal.md),
+  [the API gateway](testing-gateway.md), [effects](testing-effects.md).
+- [Diagnostic capture](diagnostic-capture.md) — collecting evidence from a
+  live machine.
 
-## How to read a result
+**Status**
 
-There are four different states and they must not be conflated:
+- [Roadmap](roadmap.md) — what is next, in order.
+- [Verification ledger](verification-status.md) — the evidence for each
+  release.
+- [History](history/README.md) — earlier plans, investigations and restart notes,
+  kept as records.
 
-- **specified**: present in the OpenAPI contract or an accepted ADR;
-- **implemented**: present in the source and covered by a focused test;
-- **validated**: the matching binary/package passed the relevant end-to-end
-  gate;
-- **host accepted**: the exact deployed binary passed on the named physical
-  host, hardware, input devices, and display mode.
+## Which document wins
 
-The ledger records these separately. A passing dummy backend, QEMU output, or
-screenshot does not prove physical evdev, physical monitor count, Hibr
-geometry, or high-refresh behavior on another host.
+When two disagree:
 
-The authenticated `GET /v1/diagnostics/runtime` endpoint is the canonical
-remote troubleshooting surface. It combines the normal diagnostics snapshot
-with uptime, rendered-frame count, measured render duration, missed refresh
-deadlines, and a bounded in-memory event log. It is intentionally bounded so
-diagnostics cannot consume unbounded server memory.
+1. the [OpenAPI document](../openapi/blit-0.1.yaml), for anything on the wire;
+2. the C source, for behaviour inside that contract;
+3. an accepted [decision record](adr/README.md);
+4. the [verification ledger](verification-status.md), for what has been proved;
+5. guides and READMEs.
 
-## Claim discipline
+A guide that disagrees with the code is a bug in the guide. The
+documentation gate (`tools/tests/documentation_gate.rb`) checks that every
+environment variable the server reads is in `blit(8)`, that the manual
+pages format cleanly, and that no link in the repository is broken.
 
-“Stable” is never a synonym for visually correct. Timing, lifecycle, pixels,
-physical input, and Hibr behaviour are separate evidence boundaries. An
-incomplete screenshot or missing physical trace keeps the result incomplete,
-even when API requests succeed and timing counters are healthy. The current
-restart point and the exact evidence required next are recorded in
-[current-state.md](current-state.md).
+## How far something is proved
 
-## Documentation maintenance
+The ledger keeps these apart, and so should anyone reporting a result:
 
-Every public API change updates the OpenAPI file, this guide, the relevant ADR
-or roadmap entry, and at least one focused gate in the same cycle. Every
-release entry names the exact source commit, package checksum, toolchain, and
-limitations. Do not commit generated packages, screenshots, logs, QEMU images,
-or local host captures; link to the command and evidence location instead.
-The complete staging, review, commit, and push rules are in
-[repository hygiene](repository-hygiene.md).
+- **specified** — in the OpenAPI document or an accepted ADR;
+- **implemented** — in the source, with a focused test;
+- **validated** — the package passed the relevant suites;
+- **host accepted** — the exact package works on the named machine, with
+  its monitors, input devices and display modes.
 
-## Working status
+A passing test against the mock display does not prove physical input,
+monitor count or high refresh rates on real hardware.
 
-The project has a TCC-built server, deterministic VKMS/KMS coverage, passing
-terminal and Hibr acceptance fixtures, and an operational Hibr console
-adapter. Physical-host release acceptance remains open; the exact evidence
-and the separate physical pointer, multi-monitor, and 120/240 Hz hardware
-gates are recorded in
-[verification-status.md](verification-status.md). Items marked as open
-questions should be resolved through an ADR before they become hidden
-implementation assumptions.
+## Keeping the documentation right
+
+A change to the API updates the OpenAPI document, the API guide, the
+relevant ADR and a gate in the same commit. A new feature gets a row in
+[features](features.md); a new environment variable gets an entry in
+[`blit(8)`](../man/blit.8) (the gate enforces it). Every release adds a
+ledger entry naming its package checksum and suite results.

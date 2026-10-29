@@ -1,8 +1,8 @@
 # Rectangle-copy integration contract
 
-Released0.1.589, internal Blit120 / Hibr337. Deployed by operator request;
-version, binary identity and saved-configuration preservation verified.
-Hibr/hold integration and solid-drag performance acceptance remain pending.
+Since 0.1.589 (internal #120, Hibr #337). Blit implements DECCRA; using it
+for solid window moves through Hibr's hold transport is still to be
+confirmed on screen (see the [roadmap](roadmap.md)).
 
 ## Capability and wire format
 

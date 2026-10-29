@@ -11,7 +11,7 @@ Public reference: [github.com/osakka/blit — font reference](https://github.com
 [every pinned emoji by category](fonts/emoji.md),
 [exact native font coverage](fonts/coverage.json).
 
-![Production-raster Retro/Modern specimen, including original colour icons](images/blit-fonts.png)
+![Production-raster font specimen, including original colour icons](images/blit-fonts.png)
 
 The image is rendered by Blit's production rasterizer. Glyphs in the web
 tables use your browser's fonts: a missing box or different colour there
@@ -74,8 +74,8 @@ of a cell. Their ink bounds and terminal advance are different concepts.
 | Need | Reference | Rendering/integration rule |
 | --- | --- | --- |
 | Ordinary text, punctuation and source-font scripts | [Native coverage](fonts/coverage.json) | Primary face plus established fallback; asset cmap is not a promise of script shaping |
-| App actions, files, development, devices, weather, brands | [17 Nerd categories](fonts/README.md) |10,764 names/aliases,10,386 distinct scalars in both smooth profiles; uses terminal foreground colour |
-| Branded Blit/Hibr menu icons, Wi-Fi1–4, Bluetooth | [Seven original colour additions](fonts/special.md) | Explicit semantic ID/private scalar, one cell, intrinsic palette |
+| App actions, files, development, devices, weather, brands | [17 Nerd categories](fonts/README.md) | 10,764 names/aliases, 10,386 distinct scalars, under every font; uses terminal foreground colour |
+| Branded Blit/Hibr menu icons, Wi-Fi1–4, Bluetooth | [Original colour additions](fonts/special.md) | Explicit semantic ID/private scalar, one cell, intrinsic palette |
 | Themed Hibr pen, runic text, wired indicator | [Themed text additions](fonts/special.md#themed-text-additions) | U+270E, U+16D2, U+21CC retain documented text meanings |
 | Powerline separators and box/block UI geometry | [Powerline](fonts/pl.md), [Extras](fonts/ple.md) | Core U+E0B0..E0B3 use cell-fitted geometry; do not extend that guarantee to every Extra; box/half-block geometry is protected |
 | Arabic and Arabic-Indic digits | [Arabic section below](#arabic-and-arabic-indic-numerals) | Native companions, shared baseline, existing Hibr visual ordering |
@@ -109,7 +109,7 @@ mark beside a level.
 `hui-right` side by side: each is one column, and each draws its half of
 one badge (ADR 0197).
 
-All 543 originals use **one terminal column** in every font.
+Every original uses **one terminal column** in every font.
 They are plane16 private-use scalars, not standard Unicode, ordinary emoji,
 or portable assignments in an unrelated font. In particular:
 
@@ -140,9 +140,9 @@ curl --fail-with-body "$BLIT_URL/v1/fonts/icons" \
 
 Recommended integration sequence:
 
-1. Read the selected profile from `active.id`. The catalogue's `profiles`
-   says which profiles support these originals; `available` on an inactive
-   profile does not mean it is selected.
+1. Read the selected font from `active.id`. The catalogue's `profiles` is
+   `["*"]`: the originals come from the glyph stack, so every font has them.
+   `available` on an inactive profile does not mean it is selected.
 2. Fetch the catalogue, check `version`, and resolve the exact semantic ID.
    Parse hexadecimal `codepoint` into a Unicode scalar; emit UTF-8. Respect
    catalogue `columns` for these icons, not UTF-8 byte/UTF-16-unit length.
@@ -174,10 +174,12 @@ by this reference.
 
 ## Arabic and Arabic-Indic numerals
 
-Both smooth profiles attach their required companion automatically. Inspect
-`active.arabic_companion` for actual loaded family/path, shared `baseline_px`
-and `shaping: "visual-cell-marks"`; bitmap profiles report null. Primary
-`glyphs`/`mappings` counts describe PSF fallback, not total native coverage.
+Every outline text font attaches the one Arabic companion, Blit Arabic
+Modern, automatically. Inspect `active.arabic_companion` for the loaded
+family/path, shared `baseline_px` and `shaping: "visual-cell-marks"`; each
+profile reports `arabic_companion_path`. Both are null for the pixel fonts.
+Primary `glyphs`/`mappings` counts describe the PSF fallback, not total
+coverage.
 
 The requested Arabic-Indic/Hindi numerals are **`٠١٢٣٤٥٦٧٨٩`**, U+0660..0669.
 They are separate from Western `0123456789`, U+0030..0039; Devanagari digits
@@ -211,12 +213,12 @@ emoji presentation for supported sequences. ZWJ, modifiers, regional-indicator
 flags, keycaps and tags are multi-scalar clusters, not individual Nerd glyphs.
 
 Scalar layout remains the compatibility default. An application deliberately
-using cluster layout must follow the [explicit emoji layout API](api.md#explicit-emoji-cell-layout-offline-candidate578),
+using cluster layout must follow the [explicit emoji layout API](api.md#explicit-emoji-cell-layout-since-01578),
 including owner/continuation cells and width. Do not switch the existing Hibr
 desktop's layout policy globally to make an icon work. Font/corpus coverage,
 browser appearance and passing local raster tests are not universal terminal
 or physical conformance guarantees; internal tracking110 covers remaining
-acceptance. See the [font plan](font-evolution-plan.md).
+acceptance. See the [font plan](history/font-evolution-plan.md).
 
 ## Machine-readable sources and reproducibility
 

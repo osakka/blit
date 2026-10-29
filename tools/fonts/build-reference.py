@@ -121,7 +121,7 @@ def generate():
     for icon in icons.get('cell_geometry', []):
         cp = int(icon['codepoint'], 16)
         special += f'| `{icon["id"]}` | `U+{cp:04X}` | `{json.dumps(chr(cp))}` | {icon["shape"]} |\n'
-    special += '\n[Production-raster specimen, including all seven colour originals](../images/blit-fonts.png).\n'
+    special += '\n[Production-raster specimen: text fonts, Blit icons, file icons, Nerd glyphs and emoji](../images/blit-fonts.png).\n'
     outputs['special.md'] = special
     emoji_root = ROOT / 'assets/unicode/emoji-18.0'
     emoji_manifest = json.loads((emoji_root / 'source.json').read_text(encoding='utf-8'))

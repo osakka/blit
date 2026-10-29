@@ -54,6 +54,6 @@ results remain separate from real GPU/scanout/input evidence. Stable589 and
 dated canary manifests remain rollback references; no live backend switch or
 stable0.2 release is implied by a planning ADR.
 
-See [implementation handoff](../performance-architecture-handoff.md) for the
+See [implementation handoff](../history/performance-architecture-handoff.md) for the
 dependency index. Full task descriptions remain in the internal issue bodies;
 the repository does not maintain a competing editable copy of those work orders.

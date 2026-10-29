@@ -39,7 +39,7 @@ There is no cursor save/restore at these sequences in either the DEC set or
 Kitty's. Cursor save/restore is `ESC 7`/`ESC 8` (DECSC/DECRC) and `CSI s`/`CSI
 u` (SCOSC/SCORC), and Blit implements all four correctly. The behaviour being
 replaced was a Blit-local invention occupying the Kitty keyboard protocol's
-exact sequences, which `docs/terminal-engine.md` then described as
+exact sequences, which `docs/history/terminal-engine.md` then described as
 "Kitty-compatible cursor restore (`CSI ? u`)" — the opposite of what Kitty
 does with them.
 
@@ -120,7 +120,7 @@ Three session fields that existed only for the removed behaviour
 (`terminal_cursor_saved`, `terminal_cursor_saved_x`, `terminal_cursor_saved_y`)
 are deleted rather than left unwritten.
 
-`docs/terminal-engine.md` stops calling the old behaviour Kitty-compatible, in
+`docs/history/terminal-engine.md` stops calling the old behaviour Kitty-compatible, in
 both places it said so.
 
 ## Evidence

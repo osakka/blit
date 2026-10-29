@@ -80,17 +80,15 @@ test used Alpine Linux 3.24.0, QEMU TCG (no `/dev/kvm` was available), and a
 `CONFIG_DRM_VIRTIO_GPU=y`; the guest created a VKMS card and a virtio DRM card
 (`/dev/dri/card0` and `/dev/dri/card1`) plus `/dev/dri/renderD128`. Point the
 server at the virtio card with `BLIT_DRM_DEVICE=/dev/dri/card1`. For GLES
-composition the initramfs must stage Mesa's `kms_swrast_dri.so`, its
+composition (`BLIT_KMS_COMPOSITOR=gles`) the initramfs must stage Mesa's `kms_swrast_dri.so`, its
 dependencies, and the GLVND vendor file, then set `LIBGL_DRIVERS_PATH` and
 `__EGL_VENDOR_LIBRARY_DIRS`; without them the CPU compositor is used. A real
 bare-metal KMS test remains required before accepting physical display
 ownership and hardware timing behavior.
 
-The full runtime path in this guest was last validated on the SDL KMSDRM
-backend (SDL, removed in ADR 0184): `/v1/graphics` reported the virtio PCI
-card, `/v1/diagnostics/runtime` reported the 74.99 Hz output and
-refresh-aware scheduler, and a PTY-backed Hibr workload reached `running` with
-its surface revision advancing and desktop text present. The guest must mount `devtmpfs`, create `/dev/pts` after that
+In this guest, `/v1/graphics` should report the virtio PCI card and
+`/v1/diagnostics/runtime` the output's refresh and the refresh-aware
+scheduler. The guest must mount `devtmpfs`, create `/dev/pts` after that
 mount, mount `devpts` with a usable `/dev/ptmx`, and bring up loopback for the
 API readiness check.
 
@@ -214,5 +212,6 @@ frame, and upgrades the WebSocket stream.
 - no outputs: the DRM node opened, but no connector/mode was available.
 - permission or DRM-master errors: the display manager, another compositor,
   or device permissions still own the primary node.
-- GLES compositor not started: the EGL/GLES, GBM backend, or DRI driver needs
+- `GLES compositor not started` or `GLES compositor unavailable, using CPU`
+  in the log: the EGL/GLES, GBM backend, or DRI driver needs
   investigation; Blit composes with the CPU compositor in the meantime.

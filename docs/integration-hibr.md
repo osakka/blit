@@ -4,7 +4,7 @@ For glyph selection and colour icons, use the [font developer reference](font-re
 It covers API discovery, complete generated categories, semantic mappings,
 width/UTF-8 rules and fallbacks without modifying Hibr core.
 
-For opt-in solid window movement, see the candidate
+For opt-in solid window movement, see the
 [rectangle-copy contract](rectangle-copy.md). Standard DECCRA capability at
 Blit is not evidence that the complete Hibr/hold route supports forwarding it.
 
@@ -39,7 +39,7 @@ Keys it does not implement are refused and reported in
 `graphics_diagnostics.last_error` rather than ignored. Hibr's emitter uses
 only whole-image display and the `I`/`A` deletes, which are unchanged.
 
-The SDL3 state engine must not be linked into hibr, and hibr must not become a
+Blit's state engine must not be linked into hibr, and hibr must not become a
 second owner of display state. This preserves process isolation and lets other
 clients use blit without hibr.
 
@@ -86,7 +86,7 @@ OpenAPI + WebSocket client boundary
         |
 standalone blit server
         |
-direct DRM/KMS outputs (SDL3 is optional for effects)
+direct DRM/KMS outputs
 ```
 
 ## Compatibility probe
@@ -114,7 +114,7 @@ Catalogue, Modules, and Task Manager. QEMU fixtures may override
 Start the direct server binary, with no Blit shell launcher involved:
 
 ```sh
-BLIT_DISPLAY_BACKEND=kms BLIT_BIND_ADDRESS=127.0.0.1 blit 8080
+BLIT_BIND_ADDRESS=127.0.0.1 blit 8080
 ```
 
 The packaged default binds to `0.0.0.0` for network clients. Keep the explicit
@@ -157,12 +157,11 @@ including forwarding join input to its registered primary. It is not the
 current native vertical-join flow below. Do not apply its additional transform
 to a native Hibr hold client which already rewrites its own local input.
 
-Hibr #238 (viewport pictures) and #240 (true 2-D desktop layout) are now closed.
-The live host has Hibr 0.99.232 ABI16, whose native hold contract supports
-both row and column placement/input. Their old dependency-blocked status is
-historical. This capability does not establish Blit's full joined-image or
-interactive acceptance; actual captures and protocol/input evidence remain
-required. Blit does not patch Hibr source.
+Hibr's native hold contract supports both row and column placement and input
+(Hibr #238 viewport pictures, #240 true 2-D desktop layout). That capability
+does not by itself establish Blit's full joined-image or interactive
+acceptance; actual captures and protocol/input evidence remain required. Blit
+does not patch Hibr source.
 
 ### Joining an already authenticated login desktop
 
@@ -364,8 +363,8 @@ output first, then centres a complete-cell grid independently inside each
 physical pane region. This prevents a menu or glyph row from straddling a
 hinge when the physical half-height is not divisible by the current cell
 height. The topology reports each pane's `pixel_region` and pane-local
-`cell_grid`; those are the single source of truth for SDL placement and input
-mapping (ADR 0075). The adapter must not derive a second origin from the font
+`cell_grid`; those are the single source of truth for pixel placement and
+input mapping (ADR 0075). The adapter must not derive a second origin from the font
 name or display mode (ADR 0076).
 
 The production join flow is:
@@ -482,8 +481,8 @@ The local join-viewport gate now proves the server-side contract without
 modifying Hibr: one primary and one `--join` session are created, each PTY
 paints a different surface, direct writes to the joined surface are rejected
 with `hibr_join_surface_read_only`, and a pointer hit in the joined pane is
-traced with the primary as `input_session`. This is a Blit integration gate,
-not physical-display acceptance. The live host still needs a fresh package
-deployment and screenshot/input validation before we claim that the wallpaper,
-context menu, and full Hibr window-placement experience work on the real
-display.
+traced with the primary as `input_session`
+(`tools/tests/hibr_join_viewport_gate.rb`). This is a Blit integration gate,
+not physical-display acceptance: it does not show that the wallpaper,
+context menu and full Hibr window placement work on a real display, which
+needs screenshots and input on the live host.

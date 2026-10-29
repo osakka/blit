@@ -277,4 +277,4 @@ Drawn by the shared raster at every cell size, edge to edge, in the terminal for
 | `bar-corner-left` | `U+100007` | `"\udbc0\udc07"` | cell filled except a quarter-circle cut at its top-left, radius the cell's shorter side |
 | `bar-corner-right` | `U+100008` | `"\udbc0\udc08"` | cell filled except a quarter-circle cut at its top-right, radius the cell's shorter side |
 
-[Production-raster specimen, including all seven colour originals](../images/blit-fonts.png).
+[Production-raster specimen: text fonts, Blit icons, file icons, Nerd glyphs and emoji](../images/blit-fonts.png).

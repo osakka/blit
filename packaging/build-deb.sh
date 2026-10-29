@@ -155,6 +155,13 @@ if [ -d "$ROOT/openapi" ]; then
 	cp -a "$ROOT/openapi" "$stage/usr/lib/blit/openapi"
 fi
 ln -s /usr/lib/blit/bin/blit-server "$stage/usr/bin/blit"
+# The manual pages carry the package's own version in their title line.
+for page in "$ROOT"/man/*.[1-9]; do
+    section=${page##*.}
+    mkdir -p "$stage/usr/share/man/man$section"
+    sed "s/@VERSION@/$version/" "$page" | gzip -9n \
+        > "$stage/usr/share/man/man$section/${page##*/}.gz"
+done
 cp -a "$ROOT/README.md" "$stage/usr/share/doc/blit/"
 cp -a "$VERSION_FILE" "$stage/usr/share/doc/blit/VERSION"
 cp -a "$HIBR_VERSION_FILE" "$stage/usr/share/doc/blit/HIBR_VERSION"

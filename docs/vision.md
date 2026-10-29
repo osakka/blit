@@ -32,9 +32,10 @@ is insufficient.
    and terminal mouse reporting.
 7. Make retro-terminal effects reproducible, configurable, and composable.
 8. Allow clients to control the server over a network without depending on
-   SDL3 types or implementation details.
-9. Keep the renderer replaceable: SDL3 is the initial platform/rendering
-   integration, not the public API.
+   backend types or implementation details.
+9. Keep the compositor behind the public API: native DRM/KMS is the one
+   presentation backend, composed by the GLES compositor or the CPU
+   compositor, and neither leaks into the API.
 10. Support interactive Hibr workloads, including terminal-native games and
     pixel-oriented arcade/emulation sessions, with refresh-aware presentation
     and observable input latency.
@@ -47,9 +48,6 @@ is insufficient.
   focus, and lifecycle semantics.
 - A promise that blit provides a complete remote desktop protocol.
 - Unbounded graphic overlays that displace the text model as canonical state.
-- A promise that every SDL3 backend can operate without a window-system
-  integration. The deployment must select and validate a direct display path
-  such as DRM/KMS where appropriate.
 - Unbounded visual effects that can make frame timing or output behavior
   nondeterministic.
 - A claim that Kitty or sixel alone is a high-rate emulator frame transport;
@@ -106,6 +104,6 @@ not silently alter terminal content, input routing, or layout.
 
 ### Hardware boundaries are visible
 
-Monitor enumeration, modes, rotation, placement, hotplug, and presentation
-failures belong in the API model rather than being hidden behind best-effort
+Monitor enumeration, modes, placement, hotplug, and presentation failures
+belong in the API model rather than being hidden behind best-effort
 behavior.

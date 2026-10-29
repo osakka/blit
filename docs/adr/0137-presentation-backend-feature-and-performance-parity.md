@@ -20,7 +20,7 @@ baseline merely because it is the reference implementation.
 Use one published API/terminal/input/geometry/scene contract for all three
 presentation paths. Keep drawing and resource ownership in their respective
 adapters. Implement the bidirectional feature matrix and measured acceptance
-sequence in the [backend parity plan](../backend-parity-plan.md).
+sequence in the [backend parity plan](../history/backend-parity-plan.md).
 
 Presentation mechanisms may differ; observable feature behavior must agree.
 Expose actual backend identity and timing evidence without equating an SDL

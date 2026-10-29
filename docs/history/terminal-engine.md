@@ -58,7 +58,7 @@ shell conformance path is stable.
    sequences, not cursor save/restore: they move no cursor, and `CSI ? u`
    reports active flags. Candidate585 implements flags1/2/8 with separate
    bounded main/alternate stacks and exact evdev key encoding; flags4/16 are
-   not advertised ([ADR0169](adr/0169-kitty-keyboard-super-events.md)).
+   not advertised ([ADR0169](../adr/0169-kitty-keyboard-super-events.md)).
    SGR conceal (`8`/`28`) is retained in the canonical cell
    style and suppressed by both renderers while preserving the cell background.
    Synchronized output (`CSI ? 2026 h/l`) gates presentation of that session's
@@ -98,15 +98,15 @@ shell conformance path is stable.
    Kitty graphics placements (source rectangle, cell offset, numbered
    placements, the `a i c p q x y z` delete targets) and the refusal of
    unimplemented keys are specified in
-   [ADR 0060](adr/0060-kitty-placements-source-rectangles-and-delete-targets.md).
+   [ADR 0060](../adr/0060-kitty-placements-source-rectangles-and-delete-targets.md).
    Multi-chunk Kitty uploads keep the opening chunk's image id in the owning
    terminal session; conforming `q=2,m=1` and `q=2,m=0` continuations omit
    `i=` and are resolved to that current upload. See
-   [ADR 0084](adr/0084-kitty-continuations-use-the-current-upload.md).
+   [ADR 0084](../adr/0084-kitty-continuations-use-the-current-upload.md).
    Hibr also sends 4096 base64 bytes per Kitty chunk. The bounded APC buffer
    therefore carries the control header and the complete chunk before decode;
    the boundary is covered by the large-chunk graphics trace gate and
-   [ADR 0096](adr/0096-kitty-apc-buffer-carries-the-full-hibr-chunk.md).
+   [ADR 0096](../adr/0096-kitty-apc-buffer-carries-the-full-hibr-chunk.md).
    Hibr wallpaper is Kitty `f=100` PNG data, not a request to synthesize
    half-block cells. Blit accumulates the complete bounded transmission,
    decodes PNG into RGBA graphics, and presents those pixels in the graphics
@@ -115,7 +115,7 @@ shell conformance path is stable.
    incomplete Kitty image. The trace gate exercises a multi-chunk PNG and
    rejects neither its full chunks nor its decoded image.
    An image already shown can be changed in place
-   ([ADR 0200](adr/0200-kitty-images-change-in-place.md)):
+   ([ADR 0200](../adr/0200-kitty-images-change-in-place.md)):
    - `a=t`/`a=T` with its id replaces its pixels and keeps its placements;
    - `a=f,r=1` writes an `s`×`v` rectangle at `x`,`y` into the root frame
      (chunked, `o=z`, `f=24/32`; alpha blends unless `X=1`).
@@ -406,7 +406,7 @@ then placement id. This ordering is explicit and independent of the internal
 image-slot allocation order, so equal-z overlaps have one result on SDL and
 direct KMS. Replacing a `(image id, placement id)` reference therefore changes
 one retained scene record; the presentation boundary repaints the old and new
-coverage before publishing the frame. See [ADR 0110](adr/0110-kitty-retained-scene-ordering-and-invalidation.md).
+coverage before publishing the frame. See [ADR 0110](../adr/0110-kitty-retained-scene-ordering-and-invalidation.md).
 
 On direct KMS, a graphics-only mutation uses the union of the previous and
 current retained-graphics bounds, quantized outward to complete cells. The
@@ -414,4 +414,4 @@ old rectangle is included so replacement and deletion reveal the cached scene;
 the current rectangle is included so the new placement is composed. If either
 scene cannot be bounded, the presenter deliberately falls back to a complete
 view redraw. This keeps the atomic frame boundary while avoiding full-output
-wallpaper work for small moving graphics. See [ADR 0111](adr/0111-bounded-retained-graphics-damage.md).
+wallpaper work for small moving graphics. See [ADR 0111](../adr/0111-bounded-retained-graphics-damage.md).

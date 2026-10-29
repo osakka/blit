@@ -1,6 +1,6 @@
 # Backend comparison on the physical host
 
-> **Superseded by [ADR 0184](adr/0184-sdl-is-removed.md).** SDL is removed and native KMS is the only presentation path, so there is no backend parity to track. Kept as a historical record; tools it names may no longer exist.
+> **Superseded by [ADR 0184](../adr/0184-sdl-is-removed.md).** SDL is removed and native KMS is the only presentation path, so there is no backend parity to track. Kept as a historical record; tools it names may no longer exist.
 
 Use `tools/probes/host_backend_comparison.rb` after installing0.1.556 or later.
 This is an operator comparison that restarts Blit and ends its current

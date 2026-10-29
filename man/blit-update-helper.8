@@ -1,0 +1,76 @@
+.TH BLIT-UPDATE-HELPER 8 "2026-10-29" "Blit @VERSION@" "System Administration"
+.SH NAME
+blit-update-helper \- installs Blit packages uploaded through the API
+.SH SYNOPSIS
+.B /usr/lib/blit/bin/blit-update-helper
+.SH DESCRIPTION
+.B blit-update-helper
+is the privileged half of Blit's live update.
+A client uploads a package with
+.B "PUT /v1/control/update"
+and the update token; the server stores it in
+.I /var/lib/blit/updates/
+and asks the helper to install it.
+The server never installs packages itself, so it can run without
+root (see
+.IR /usr/share/doc/blit/examples/blit-unprivileged.conf ).
+.PP
+The helper runs as
+.BR blit-update-helper.service ,
+as root with group blit.
+It listens on
+.IR /run/blit/update.sock ,
+mode 0660, so only the server's group can reach it.
+For each request it:
+.IP 1. 4
+checks the package's SHA-256 against the one the server sent;
+.IP 2. 4
+checks that the package is named
+.BR blit ;
+.IP 3. 4
+installs it with
+.BR dpkg (1);
+.IP 4. 4
+reloads systemd and restarts
+.BR blit.service .
+.PP
+It replies
+.B OK
+or
+.B ERROR
+with the reason, which the server returns to the client.
+.PP
+It takes no arguments and reads no environment.
+.SH PROTOCOL
+One line per connection, within 3 seconds:
+.PP
+.RS 4
+.EX
+UPDATE \fIpath\fP \fIsha256\fP
+.EE
+.RE
+.SH EXIT STATUS
+.TP
+.B 0
+A package was installed; systemd starts the helper again.
+.TP
+.B 1
+The socket could not be created.
+.TP
+.B 2
+Arguments were given.
+.SH FILES
+.TP
+.I /run/blit/update.sock
+The socket.
+.TP
+.I /var/lib/blit/updates/
+Uploaded packages.
+.TP
+.I /etc/blit/update.token
+The token the server requires for an update; see
+.BR blit.env (5).
+.SH SEE ALSO
+.BR blit (8),
+.BR blit.env (5),
+.BR dpkg (1)
