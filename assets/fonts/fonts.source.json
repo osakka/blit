@@ -70,7 +70,7 @@
     "icons": {
       "file": "BlitIcons-Regular.ttf",
       "source": "Blit original artwork, built by tools/fonts/build-blit-icons.py from icons/catalogue.json",
-      "sha256": "742c4df884f68801b98c42449769a60bf1f5eba32d8770669da33291252d6cc7",
+      "sha256": "d38575e58d8229d85622040d82fddbdc3c733b3adbf05d32b857a4a7fa00d776",
       "license_file": "icons/LICENSE.txt"
     },
     "nerd": {
@@ -152,7 +152,7 @@
     "catalogue": "icons/catalogue.json",
     "format": "COLR v0 / CPAL; original SVG paths; monochrome U+270E pen alias",
     "sources": {
-      "icons/catalogue.json": "04820119e8c4872b7c62041ea1e4f5b3902f7ba3450ab716ca3aa4cf617ad285",
+      "icons/catalogue.json": "8898485ea714829eb187714c76acd34cd14e7c16795eeac7cc594f8d8f18cdc6",
       "icons/berkanan.svg": "f16019c94cf20f1a9dc42b7127e04ed68b0303260e6a8935ede1110bc1abdd5f",
       "icons/wired.svg": "6a5207758fb6ef13dbda9d5392fb32aeb9e6c9beea33280ecf46bd64fe2200b1",
       "icons/LICENSE.txt": "a1f68010aa91a710d0b41857f158f3fb1316778a0dc13321577f86cb82a9badb",

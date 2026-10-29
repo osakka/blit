@@ -10,14 +10,15 @@ int main(int argc, char **argv)
 {
     BlitFont font;
     int size = 0, samples = 0;
-    unsigned cp = 0, required[128], distinct[512];
-    int required_count = 0, distinct_count = 0, ui_samples = 0, script_samples = 0;
+    unsigned cp = 0, required[128], distinct[512], live[1024], retired[1024];
+    int required_count = 0, distinct_count = 0, live_count = 0, retired_count = 0,
+        ui_samples = 0, script_samples = 0, at;
     /* ADR 0195: what the glyph stack adds to any font -- an overhanging
        long arrow, and scripts no shipped text font has (Cyrillic,
        Hebrew, Thai, Georgian, Ethiopic, CJK) -- drawn, never fallback. */
     static const unsigned scripts[] = { 0x27f6, 0x0416, 0x05e9, 0x0e01, 0x10d0, 0x1200, 0x6f22, 0x5b57 };
     FILE *input;
-    if (argc != 6) return 2;
+    if (argc != 8) return 2;
     input = fopen(argv[4], "r");
     if (!input) return 2;
     while (required_count < 128 && fscanf(input, "%x", &cp) == 1)
@@ -31,6 +32,17 @@ int main(int argc, char **argv)
         distinct[distinct_count++] = cp;
     fclose(input);
     CHECK(distinct_count > 1);
+    /* Every colour original in the catalogue, and every retired codepoint
+       (ADR 0201): read, not written here as ranges. */
+    input = fopen(argv[6], "r");
+    if (!input) return 2;
+    while (live_count < 1024 && fscanf(input, "%x", &cp) == 1) live[live_count++] = cp;
+    fclose(input);
+    input = fopen(argv[7], "r");
+    if (!input) return 2;
+    while (retired_count < 1024 && fscanf(input, "%x", &cp) == 1) retired[retired_count++] = cp;
+    fclose(input);
+    CHECK(live_count > 0 && retired_count > 0);
     memset(&font, 0, sizeof(font));
     CHECK(!blit_font_load_path(&font, argv[1]));
     for (size = 8; size <= 64; ++size) {
@@ -67,19 +79,21 @@ int main(int argc, char **argv)
             CHECK(ink);
             ++script_samples;
         }
-        /* Every colour original: U+100000-100006 and U+100009-100230;
-           U+100007/8 are the bar corners, cell geometry. U+100018/9 are
-           the two columns of the hui badge (ADR 0197). */
-        for (cp = 0x100000; cp <= 0x100230; ++cp) {
+        /* A retired codepoint draws nothing from the icons; every live one
+           is a colour original. U+100007/8, the bar corners, are cell
+           geometry and in neither list. U+100018/9 are the two columns of
+           the hui badge (ADR 0197). */
+        for (at = 0; at < retired_count; ++at) {
+            BlitRasterGlyph g;
+            cp = retired[at];
+            CHECK(!blit_raster_get(r, cp, 1, &g) || g.fallback);
+        }
+        for (at = 0; at < live_count; ++at) {
             BlitRasterGlyph g, again;
             unsigned hash = 2166136261U;
             int x, y, ink = 0, colour = 0, partial = 0;
             unsigned long renders;
-            /* U+100007/8 are cell geometry; U+100023-100032 are retired. */
-            if (cp == 0x100007 || cp == 0x100008 || (cp >= 0x100023 && cp <= 0x100032)) {
-                CHECK(cp <= 0x100008 || !blit_raster_get(r, cp, 1, &g) || g.fallback);
-                continue;
-            }
+            cp = live[at];
             CHECK(blit_raster_get(r, cp, 1, &g));
             CHECK(!g.fallback && g.format == BLIT_RASTER_RGBA_PREMULTIPLIED);
             CHECK(g.width == (size + 1) / 2 && g.height == size);
@@ -147,9 +161,8 @@ int main(int argc, char **argv)
         CHECK(partial_icons > 0);
         /* Two-column icons are told apart whole -- a plain half of one page
            may match another's -- and from 16 px, below which two icons can
-           honestly round to the same pixels: the file icons (U+100033-22A),
-           sixty-three kinds in four colourways, so no two kinds and no two
-           colourways of a kind look alike. */
+           honestly round to the same pixels: one per file drawing -- each
+           kind, and each colourway of a folder -- so no two look alike. */
         if (size >= 16) {
             int a, b;
             for (a = 0; a < distinct_count; ++a)
@@ -194,6 +207,6 @@ int main(int argc, char **argv)
         blit_raster_close(r);
     }
     blit_font_free(&font);
-    printf("CUSTOM_ICON_PASS samples=%d sizes=57 icons=543 distinct_levels=wifi4+battery11+volume4+phone4x2 file_icons=distinct_drawings retired=100023-100032 hui_seam=met colour=premultiplied pen_alias=themed cache=bounded ui_scalars=%d ui_span_cases=%d scripts=%d no_replacement=verified\n", samples, required_count, ui_samples, script_samples);
+    printf("CUSTOM_ICON_PASS samples=%d sizes=57 icons=catalogue distinct_levels=wifi4+battery11+volume4+phone4x2 file_icons=distinct_drawings retired=catalogue hui_seam=met colour=premultiplied pen_alias=themed cache=bounded ui_scalars=%d ui_span_cases=%d scripts=%d no_replacement=verified\n", samples, required_count, ui_samples, script_samples);
     return 0;
 }

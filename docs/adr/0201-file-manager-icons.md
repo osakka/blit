@@ -77,9 +77,14 @@ special folders and the share), which Files' Control Panel picks.
      non-folder kind, so Hibr's `_blue`, `_green` and `_amber` names show
      it too.
   2. Hibr names non-folder kinds without a colour.
-  3. Blit retires the unused slots, never reused.
+  3. Blit retires the unused slots, never reused. **Done in 0.3.9**, after
+     Hibr 0.99.385: 294 codepoints (the blue, green and amber slots of the
+     non-folder kinds) are listed under `retired` in the catalogue and draw
+     nothing from Blit's icons.
 - `custom_icon_gate` takes one codepoint per distinct drawing from the
-  catalogue, and requires those to differ.
+  catalogue, and requires those to differ. Since 0.3.9 it also takes the
+  live icons and the retired codepoints from the catalogue, not from ranges
+  written in the gate.
 
 ## Consequences
 

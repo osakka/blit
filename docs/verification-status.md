@@ -1,5 +1,18 @@
 # Verification status
 
+## 2026-10-29: 0.3.9 non-folder colour slots retired (ADR 0201)
+
+- **Step 3 of the changeover.** Hibr 0.99.385 names non-folder kinds
+  without a colour, so their blue, green and amber slots -- 294 codepoints
+  in 41 ranges -- are retired: listed in the catalogue, never reused, and
+  drawing nothing from Blit's icons. 249 colour originals remain; folders
+  keep their four colourways.
+- **`custom_icon_gate`** reads the live icons and the retired codepoints
+  from the catalogue: every live one draws in colour, every retired one
+  draws nothing from the icons, and the distinct drawings differ from 16 px.
+  The KMS raster gate samples live classic slots.
+- **Suites:** font 38/38, full 154/154, GLES 67/67.
+
 ## 2026-10-29: 0.3.8 natural-colour file icons; colourways for folders only (ADR 0201)
 
 - **Fifty-two file kinds have one look each, in their own natural colours.**
