@@ -43,6 +43,14 @@ rest by swapping a primary colour.
   request), so Files picks by file kind and a theme or setting picks the
   colour.
 
+- **Kinds added later** take the next free codepoints, a kind at a time,
+  four colourways each (left/right pairs). In 0.3.6: home
+  (U+100093–10009A), then boxer, markdown, spreadsheet, diagram,
+  presentation, font, web, terminal, settings, bundle and link, eight
+  codepoints each from U+10009B to U+1000F2. Boxer is a Boxer game without
+  its cover art: two boxing gloves. Hibr names each `GL[f<kind>]` plus the
+  colour suffixes.
+
 ## Consequences
 
 - Hibr maps `GL[ffolder]`, `GL[fdoc]` and so on, with `_blue`, `_green` and

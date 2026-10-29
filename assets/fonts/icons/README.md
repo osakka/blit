@@ -34,6 +34,8 @@ itself.
 | phone-classic-off … phone-classic-ring | U+10001F–U+100022 | A classic rotary desk phone in the same four states: outline, dashed, filled, filled with ring waves |
 | — | U+100023–U+100032 | **Retired** (0.3.5): the large two-column phones, which the owner dropped. Listed under `retired` in the catalogue; never reused, so an old client can't show something else there |
 | file-<kind>-<colour>-left, -right | U+100033–U+100092 | File-manager icons, two columns wide, in a System 7 spirit: folder, document, text, pdf, image, audio, video, archive, code, application, disk, trash, in classic, blue, green and amber; drawn by `tools/fonts/draw-file-icons.py` (ADR 0201) |
+| file-home-<colour>-left, -right | U+100093–U+10009A | Home, the first kind added after the twelve: a house with a roof in the primary colour; classic, blue, green, amber |
+| file-<kind>-<colour>-left, -right | U+10009B–U+1000F2 | Eleven more kinds, eight codepoints each in this order: boxer (a Boxer game without its cover: two boxing gloves), markdown, spreadsheet, diagram, presentation, font, web, terminal, settings, bundle (a Hibr bundle), link |
 
 The hui badge spans two columns as two codepoints, written side by side;
 each draws its half of the one drawing in `hui.svg` (ADR 0197). Neither

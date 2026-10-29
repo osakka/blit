@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>home, blue: a two-column file icon</title>
+  <path fill="#141414" d="M21 5H26V13H21Z"/>
+  <path fill="#7c818c" d="M22 6H25V13H22Z"/>
+  <path fill="#141414" d="M6 15H26V29H6Z"/>
+  <path fill="#f7f7f2" d="M7 16H25V28H7Z"/>
+  <path fill="#1768b7" d="M7 26.8H25V28.0H7Z"/>
+  <path fill="#141414" d="M16 3 L30.5 16.5 L1.5 16.5Z"/>
+  <path fill="#4c9be8" d="M16 4.7 L28.2 15.5 L3.8 15.5Z"/>
+  <path fill="#99c6f2" d="M16 4.7 L17 5.6 L5.1 15.5 L3.8 15.5Z"/>
+  <path fill="#1768b7" d="M3.8 15.5 L28.2 15.5 L27.1 14.5 L4.9 14.5Z"/>
+  <path fill="#141414" d="M9 19H15V29H9Z"/>
+  <path fill="#4c9be8" d="M10 20H14V28H10Z"/>
+  <path fill="#f4c542" d="M12.6 23.6H13.5V24.5H12.6Z"/>
+  <path fill="#141414" d="M18 18.5H24V24.5H18Z"/>
+  <path fill="#8fd0f2" d="M19 19.5H23V23.5H19Z"/>
+  <path fill="#141414" d="M20.6 19.5H21.400000000000002V23.5H20.6Z"/>
+  <path fill="#141414" d="M19 21.1H23V21.900000000000002H19Z"/>
+</svg>

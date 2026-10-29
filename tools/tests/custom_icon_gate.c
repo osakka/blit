@@ -28,7 +28,7 @@ int main(int argc, char **argv)
     CHECK(!blit_font_load_path(&font, argv[1]));
     for (size = 8; size <= 64; ++size) {
         BlitRaster *r = blit_raster_open(&font, argv[2], argv[3], (size + 1) / 2, size);
-        unsigned hashes[0x93];
+        unsigned hashes[0xf3];
         int seam[2][96], reach[2], tall[2];
         int index;
         CHECK(r);
@@ -59,10 +59,10 @@ int main(int argc, char **argv)
             CHECK(ink);
             ++script_samples;
         }
-        /* Every colour original: U+100000-100006 and U+100009-100092;
+        /* Every colour original: U+100000-100006 and U+100009-1000F2;
            U+100007/8 are the bar corners, cell geometry. U+100018/9 are
            the two columns of the hui badge (ADR 0197). */
-        for (cp = 0x100000; cp <= 0x100092; ++cp) {
+        for (cp = 0x100000; cp <= 0x1000f2; ++cp) {
             BlitRasterGlyph g, again;
             unsigned hash = 2166136261U;
             int x, y, ink = 0, colour = 0, partial = 0;
@@ -132,11 +132,11 @@ int main(int argc, char **argv)
         }
         /* Two-column icons are told apart whole -- a plain half of one page
            may match another's -- and from 16 px, below which two icons can
-           honestly round to the same pixels: the file icons (U+100033-92),
-           twelve kinds in four colourways, so no two kinds and no two
+           honestly round to the same pixels: the file icons (U+100033-F2),
+           twenty-four kinds in four colourways, so no two kinds and no two
            colourways of a kind look alike. */
         if (size >= 16) {
-            static const int pairs[][2] = {{0x33, 0x93}};
+            static const int pairs[][2] = {{0x33, 0xf3}};
             int range;
             for (range = 0; range < 1; ++range)
                 for (index = pairs[range][0]; index < pairs[range][1]; index += 2) {
@@ -181,6 +181,6 @@ int main(int argc, char **argv)
         blit_raster_close(r);
     }
     blit_font_free(&font);
-    printf("CUSTOM_ICON_PASS samples=%d sizes=57 icons=129 distinct_levels=wifi4+battery11+volume4+phone4x2 file_icons=12x4x2 retired=100023-100032 hui_seam=met colour=premultiplied pen_alias=themed cache=bounded ui_scalars=%d ui_span_cases=%d scripts=%d no_replacement=verified\n", samples, required_count, ui_samples, script_samples);
+    printf("CUSTOM_ICON_PASS samples=%d sizes=57 icons=225 distinct_levels=wifi4+battery11+volume4+phone4x2 file_icons=24x4x2 retired=100023-100032 hui_seam=met colour=premultiplied pen_alias=themed cache=bounded ui_scalars=%d ui_span_cases=%d scripts=%d no_replacement=verified\n", samples, required_count, ui_samples, script_samples);
     return 0;
 }

@@ -63,6 +63,13 @@ def poly(*points):
     return 'M' + ' L'.join(f'{x} {y}' for x, y in points) + 'Z'
 
 
+def circle(cx, cy, r, steps=24, reverse=False):
+    import math
+    pts = [(round(cx + r * math.cos(2 * math.pi * k / steps), 2),
+            round(cy + r * math.sin(2 * math.pi * k / steps), 2)) for k in range(steps)]
+    return poly(*(pts[::-1] if reverse else pts))
+
+
 def page(x0=7, x1=26, top=2, bottom=30, ear=6):
     """A dog-eared page: its outline, its paper, and its folded corner."""
     outer = poly((x0, top), (x1 - ear, top), (x1, top + ear), (x1, bottom), (x0, bottom))
@@ -190,10 +197,176 @@ def trash():
     ]
 
 
+def home():
+    return [
+        # chimney behind the roof
+        ('outline', rect(21, 5, 5, 8)),
+        ('metal-dark', rect(22, 6, 3, 7)),
+        # walls
+        ('outline', rect(6, 15, 20, 14)),
+        ('paper', rect(7, 16, 18, 12)),
+        ('shade', rect(7, 26.8, 18, 1.2)),
+        # a solid roof over them
+        ('outline', poly((16, 3), (30.5, 16.5), (1.5, 16.5))),
+        ('primary', poly((16, 4.7), (28.2, 15.5), (3.8, 15.5))),
+        ('light', poly((16, 4.7), (17, 5.6), (5.1, 15.5), (3.8, 15.5))),
+        ('shade', poly((3.8, 15.5), (28.2, 15.5), (27.1, 14.5), (4.9, 14.5))),
+        # door and window
+        ('outline', rect(9, 19, 6, 10)),
+        ('primary', rect(10, 20, 4, 8)),
+        ('sun', rect(12.6, 23.6, 0.9, 0.9)),
+        ('outline', rect(18, 18.5, 6, 6)),
+        ('sky', rect(19, 19.5, 4, 4)),
+        ('outline', rect(20.6, 19.5, 0.8, 4)),
+        ('outline', rect(19, 21.1, 4, 0.8)),
+    ]
+
+
+def boxer():
+    """A Boxer game without its cover art: two boxing gloves, facing."""
+    def glove(cx, side):
+        # side is +1 for a glove whose thumb is on its right, -1 on its left
+        fist, thumb = (cx, 11.5), (cx + side * 5.2, 15.5)
+        return [
+            ('outline', circle(*fist, 7.4)), ('outline', circle(*thumb, 3.6)),
+            ('outline', rect(cx - 5, 17, 10, 9)),
+            ('primary', circle(*fist, 6.3)), ('primary', circle(*thumb, 2.5)),
+            ('light', circle(cx - side * 2.4, 8.6, 1.8)),
+            ('shade', poly((cx + side * 2.6, 13.6), (cx + side * 3.4, 12.6), (cx + side * 4.4, 14.4),
+                           (cx + side * 3.4, 15.6))),
+            ('paper', rect(cx - 4, 18, 8, 7)),
+            ('ink', rect(cx - 4, 20, 8, 0.8)), ('ink', rect(cx - 4, 22.6, 8, 0.8)),
+            ('primary', rect(cx - 4, 18, 8, 1.2)),
+        ]
+    return glove(9, 1) + glove(23, -1) + [('outline', rect(4, 27, 24, 1.4))]
+
+
+def markdown():
+    return page() + [
+        ('outline', rect(9, 12, 15, 10)),
+        ('primary', rect(10, 13, 13, 8)),
+        ('white', poly((11, 19.5), (11, 14.5), (12.6, 14.5), (14, 16.4), (15.4, 14.5), (17, 14.5),
+                       (17, 19.5), (15.6, 19.5), (15.6, 17), (14, 19), (12.4, 17), (12.4, 19.5))),
+        ('white', poly((19, 14.5), (20.4, 14.5), (20.4, 17), (21.6, 17), (19.7, 19.6), (17.8, 17), (19, 17))),
+        ('ink', rect(10, 25, 12, 1.2)),
+    ]
+
+
+def spreadsheet():
+    cells = [('ink', rect(9, y, 15, 0.7)) for y in (14, 17.5, 21, 24.5)] + \
+            [('ink', rect(x, 10, 0.7, 17)) for x in (13.5, 18.5)]
+    return page() + [('outline', rect(9, 10, 15, 17)), ('paper', rect(9.7, 10.7, 13.6, 15.6)),
+                     ('primary', rect(9.7, 10.7, 13.6, 3.3))] + cells + [('light', rect(14.2, 18.2, 4.3, 2.8))]
+
+
+def diagram():
+    def node(x, y, w, h):
+        return [('outline', rect(x, y, w, h)), ('primary', rect(x + 1, y + 1, w - 2, h - 2)),
+                ('light', rect(x + 1, y + 1, w - 2, 1))]
+    return [
+        ('ink', rect(15.4, 10, 1.2, 6)), ('ink', rect(8, 15.4, 16, 1.2)),
+        ('ink', rect(8, 15.4, 1.2, 6)), ('ink', rect(22.8, 15.4, 1.2, 6)),
+    ] + node(10, 3, 12, 8) + node(2, 20, 12, 9) + node(18, 20, 12, 9)
+
+
+def presentation():
+    return [
+        ('outline', rect(2, 4, 28, 19)),
+        ('paper', rect(3, 5, 26, 17)),
+        ('primary', rect(3, 5, 26, 3)),
+        ('shade', rect(7, 15, 4, 5)), ('primary', rect(13, 12, 4, 8)), ('light', rect(19, 10, 4, 10)),
+        ('ink', rect(6, 20, 20, 0.8)),
+        ('outline', rect(15.2, 23, 1.6, 4)),
+        ('outline', poly((10, 30), (15.2, 26), (16.8, 26), (22, 30), (20.4, 30), (16, 27.2), (11.6, 30))),
+    ]
+
+
+def font():
+    return page() + [
+        ('primary', poly((9, 26), (13.6, 11), (16.4, 11), (21, 26), (18.2, 26), (17.2, 22.4), (12.8, 22.4),
+                         (11.8, 26))),
+        ('paper', poly((13.6, 19.8), (15, 14.8), (16.4, 19.8))),
+        ('ink', rect(20.5, 22, 3.5, 1)),
+    ]
+
+
+def web():
+    return [
+        ('outline', circle(16, 16, 13.5)),
+        ('primary', circle(16, 16, 12.3)),
+        ('light', poly((16, 3.7), (19, 4.4), (12, 6), (8, 9.2), (7.2, 8.4), (11, 5.2))),
+        ('outline', rect(3.5, 15.4, 25, 1.2)),
+        ('outline', rect(15.4, 3.5, 1.2, 25)),
+        ('outline', poly((16, 3.7), (21, 9), (22.4, 16), (21, 23), (16, 28.3), (19.4, 22.6), (20.6, 16),
+                         (19.4, 9.4))),
+        ('outline', poly((16, 3.7), (11, 9), (9.6, 16), (11, 23), (16, 28.3), (12.6, 22.6), (11.4, 16),
+                         (12.6, 9.4))),
+        ('outline', rect(6, 9.6, 20, 1)), ('outline', rect(6, 21.4, 20, 1)),
+    ]
+
+
+def terminal():
+    return [
+        ('outline', rect(2, 5, 28, 23)),
+        ('primary', rect(3, 6, 26, 4)),
+        ('light', rect(3, 6, 26, 1)),
+        ('ink', rect(3, 10, 26, 17)),
+        ('white', poly((7, 14), (12, 17.5), (7, 21), (7, 19.4), (9.8, 17.5), (7, 15.6))),
+        ('white', rect(13, 20, 6, 1.4)),
+        ('paper', rect(25, 7, 2, 2)),
+    ]
+
+
+def settings():
+    import math
+    teeth = []
+    for k in range(8):
+        a = math.pi * 2 * k / 8
+        for da, r in ((-0.22, 9.4), (-0.16, 13), (0.16, 13), (0.22, 9.4)):
+            teeth.append((round(16 + r * math.cos(a + da), 2), round(16 + r * math.sin(a + da), 2)))
+    outer = []
+    for k in range(8):
+        a = math.pi * 2 * k / 8
+        outer += [(round(16 + r * math.cos(a + da), 2), round(16 + r * math.sin(a + da), 2))
+                  for da, r in ((-0.22, 10.4), (-0.17, 14.2), (0.17, 14.2), (0.22, 10.4))]
+    return [
+        ('outline', poly(*outer)),
+        ('primary', poly(*teeth)),
+        ('light', circle(16, 16, 8.4)),
+        ('primary', circle(16, 16, 7.4)),
+        ('outline', circle(16, 16, 4)),
+        ('paper', circle(16, 16, 2.8)),
+    ]
+
+
+def bundle():
+    return [
+        ('outline', poly((16, 3), (29, 9.5), (29, 23), (16, 29.5), (3, 23), (3, 9.5))),
+        ('light', poly((16, 4.4), (27.4, 10), (16, 15.6), (4.6, 10))),
+        ('primary', poly((4.2, 11.2), (15.4, 16.8), (15.4, 28), (4.2, 22.4))),
+        ('shade', poly((16.6, 16.8), (27.8, 11.2), (27.8, 22.4), (16.6, 28))),
+        ('outline', poly((15.4, 16.6), (16.6, 16.6), (16.6, 29), (15.4, 29))),
+        ('paper', poly((9.5, 7.2), (21.5, 13.2), (21.5, 16.4), (19.7, 17.3), (19.7, 14.1), (7.7, 8.1))),
+    ]
+
+
+def link():
+    return page() + [
+        ('ink', rect(10, 10, 13, 1.2)), ('ink', rect(10, 13, 9, 1.2)),
+        ('outline', rect(5, 17, 13, 12)),
+        ('primary', rect(6, 18, 11, 10)),
+        ('white', poly((8.5, 26), (8.5, 23), (10, 21.5), (12.6, 21.5), (12.6, 20), (15.4, 22.6), (12.6, 25.2),
+                       (12.6, 23.7), (10.6, 23.7), (10, 24.3), (10, 26))),
+    ]
+
+
 ICONS = {
     'folder': folder, 'document': document, 'text': text, 'pdf': pdf,
     'image': image, 'audio': audio, 'video': video, 'archive': archive,
     'code': code, 'application': application, 'disk': disk, 'trash': trash,
+    'home': home, 'boxer': boxer, 'markdown': markdown, 'spreadsheet': spreadsheet,
+    'diagram': diagram, 'presentation': presentation, 'font': font, 'web': web,
+    'terminal': terminal, 'settings': settings, 'bundle': bundle, 'link': link,
 }
 
 

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>diagram, green: a two-column file icon</title>
+  <path fill="#4a4a52" d="M15.4 10H16.6V16H15.4Z"/>
+  <path fill="#4a4a52" d="M8 15.4H24V16.6H8Z"/>
+  <path fill="#4a4a52" d="M8 15.4H9.2V21.4H8Z"/>
+  <path fill="#4a4a52" d="M22.8 15.4H24.0V21.4H22.8Z"/>
+  <path fill="#141414" d="M10 3H22V11H10Z"/>
+  <path fill="#57b86a" d="M11 4H21V10H11Z"/>
+  <path fill="#94d2a0" d="M11 4H21V5H11Z"/>
+  <path fill="#141414" d="M2 20H14V29H2Z"/>
+  <path fill="#57b86a" d="M3 21H13V28H3Z"/>
+  <path fill="#94d2a0" d="M3 21H13V22H3Z"/>
+  <path fill="#141414" d="M18 20H30V29H18Z"/>
+  <path fill="#57b86a" d="M19 21H29V28H19Z"/>
+  <path fill="#94d2a0" d="M19 21H29V22H19Z"/>
+</svg>

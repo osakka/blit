@@ -1,5 +1,19 @@
 # Verification status
 
+## 2026-10-29: 0.3.6 twelve more file icon kinds (ADR 0201)
+
+- **Twelve kinds added at U+100093–1000F2,** four colourways each, a kind
+  at a time:
+  - home: a house with its roof in the primary colour;
+  - boxer: a Boxer game without its cover, two boxing gloves;
+  - markdown, spreadsheet, diagram, presentation, font, web, terminal,
+    settings, bundle (a Hibr bundle) and link.
+  The owner asked for them, and saw a preview.
+- **Gates:** `custom_icon_gate` covers 225 originals, and the twenty-four
+  file kinds are distinct from 16 px. The API and KMS gates sample the last
+  pair.
+- **Suites:** font 38/38, full 154/154, GLES 67/67.
+
 ## 2026-10-29: 0.3.5 the large phone icons retired (ADR 0196)
 
 - **U+100023–100032 removed,** after longwire 0.5.22 and Hibr 0.99.378

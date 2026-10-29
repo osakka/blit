@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>markdown, classic: a two-column file icon</title>
+  <path fill="#141414" d="M7 2 L20 2 L26 8 L26 30 L7 30Z"/>
+  <path fill="#f7f7f2" d="M8 3 L19.6 3 L25 8.4 L25 29 L8 29Z"/>
+  <path fill="#d9d9d2" d="M20 3 L20 8 L25 8Z"/>
+  <path fill="#141414" d="M19 3 L20 3 L20 9 L25 9 L25 8 L19 8Z"/>
+  <path fill="#141414" d="M9 12H24V22H9Z"/>
+  <path fill="#8e99f3" d="M10 13H23V21H10Z"/>
+  <path fill="#ffffff" d="M11 19.5 L11 14.5 L12.6 14.5 L14 16.4 L15.4 14.5 L17 14.5 L17 19.5 L15.6 19.5 L15.6 17 L14 19 L12.4 17 L12.4 19.5Z"/>
+  <path fill="#ffffff" d="M19 14.5 L20.4 14.5 L20.4 17 L21.6 17 L19.7 19.6 L17.8 17 L19 17Z"/>
+  <path fill="#4a4a52" d="M10 25H22V26.2H10Z"/>
+</svg>
