@@ -860,6 +860,16 @@ typedef struct {
        this is per PTY stream, not global state. */
     unsigned int terminal_kitty_upload_id;
     int terminal_kitty_upload_active;
+    /* ADR 0200: a transmission that replaces an image already complete
+       (a=t/a=T with its id) or edits its root frame (a=f, r=1) is decoded
+       here, and merged into the image only when its last chunk arrives, so
+       what is shown never holds half an upload. mode is 1 to replace, 2 to
+       edit the rectangle at (x, y), blending unless X=1 asked to overwrite. */
+    BlitGraphicsImage terminal_kitty_stage;
+    int terminal_kitty_stage_mode;
+    int terminal_kitty_stage_x;
+    int terminal_kitty_stage_y;
+    int terminal_kitty_stage_blend;
     char terminal_title[128];
     char terminal_clipboard[4096];
     char terminal_notification[1024];
@@ -10110,6 +10120,94 @@ static int kitty_placement_get(const BlitGraphicsImage *image,
     return 0;
 }
 
+static int kitty_placements_in_bounds(const BlitGraphicsImage *image);
+
+/* ADR 0200: write a decoded patch into an image's pixels at (x, y). Kitty
+   samples are straight RGB or RGBA; a patch pixel with alpha blends over what
+   is there unless the edit asked to overwrite (X=1). The patch must lie
+   inside the image. */
+static int kitty_frame_edit(BlitGraphicsImage *target, const BlitGraphicsImage *patch,
+                            int x, int y, int blend)
+{
+    int to = target->format == 24 ? 3 : 4, from = patch->format == 24 ? 3 : 4;
+    int row, column;
+
+    if (x < 0 || y < 0 || patch->width > target->width - x ||
+        patch->height > target->height - y)
+        return 0;
+    for (row = 0; row < patch->height; ++row) {
+        const unsigned char *in = patch->pixels + (size_t)row * patch->width * from;
+        unsigned char *out = target->pixels +
+            ((size_t)(y + row) * target->width + x) * to;
+        for (column = 0; column < patch->width; ++column, in += from, out += to) {
+            int alpha = from == 4 ? in[3] : 255, channel;
+            if (!blend || alpha == 255) {
+                for (channel = 0; channel < 3; ++channel) out[channel] = in[channel];
+                if (to == 4) out[3] = (unsigned char)alpha;
+                continue;
+            }
+            for (channel = 0; channel < 3; ++channel)
+                out[channel] = (unsigned char)((in[channel] * alpha +
+                    out[channel] * (255 - alpha) + 127) / 255);
+            if (to == 4)
+                out[3] = (unsigned char)(alpha + (out[3] * (255 - alpha) + 127) / 255);
+        }
+    }
+    return 1;
+}
+
+/* ADR 0200: land a complete staged upload in the image it was for, a
+   replacement taking its pixels whole and an edit writing its rectangle,
+   then free the stage. 0 when it could not land, the image untouched. */
+static int kitty_stage_land(BlitSession *session, int image_id, int quiet)
+{
+    BlitGraphicsImage *stage = &session->terminal_kitty_stage;
+    BlitGraphicsImage *target = graphics_image_find(session, (unsigned int)image_id);
+
+    if (target == NULL || !target->complete) {
+        graphics_image_release(stage);
+        graphics_reject(session, "frame-target-gone");
+        kitty_reply(session, image_id, quiet, "ENOENT");
+        return 0;
+    }
+    if (session->terminal_kitty_stage_mode == 1) {
+        BlitGraphicsImage before = *target;
+        target->pixels = stage->pixels;
+        target->width = stage->width;
+        target->height = stage->height;
+        target->format = stage->format;
+        target->bytes = stage->bytes;
+        target->capacity = stage->capacity;
+        stage->pixels = before.pixels;  /* freed with the stage below */
+        if (!kitty_placements_in_bounds(target)) {
+            /* A smaller replacement must not leave a placement cropping
+               outside it: keep the old pixels instead. */
+            stage->pixels = target->pixels;
+            target->pixels = before.pixels;
+            target->width = before.width;
+            target->height = before.height;
+            target->format = before.format;
+            target->bytes = before.bytes;
+            target->capacity = before.capacity;
+            graphics_image_release(stage);
+            graphics_reject(session, "placement-bounds");
+            kitty_reply(session, image_id, quiet, "EINVAL");
+            return 0;
+        }
+    } else if (!kitty_frame_edit(target, stage, session->terminal_kitty_stage_x,
+                                 session->terminal_kitty_stage_y,
+                                 session->terminal_kitty_stage_blend)) {
+        graphics_image_release(stage);
+        graphics_reject(session, "frame-bounds");
+        kitty_reply(session, image_id, quiet, "EINVAL");
+        return 0;
+    }
+    graphics_image_release(stage);
+    ++target->revision;
+    target->generation = next_graphics_generation();
+    return 1;
+}
+
 static void kitty_placement_remove(BlitGraphicsImage *image, unsigned int id)
 {
     int slot;
@@ -10378,6 +10476,8 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
     char delete_target[8];
     KittyPlacement placement;
     BlitGraphicsImage *image;
+    BlitGraphicsImage *shown = NULL;  /* the image a staged upload lands in */
+    int stage = 0;
     int index;
 
     payload[session->terminal_string_length] = '\0';
@@ -10492,6 +10592,37 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
         }
         compressed = 1;
     }
+    /* ADR 0200. a=f edits a frame of an image already shown. Only the root
+       frame, r=1, is supported: Blit has no animation, and a new frame
+       (no r) or another frame would be pixels nothing ever draws. x and y
+       place the rectangle in the frame, s and v are its size, and X is the
+       composition: 0 blends by alpha, 1 overwrites. */
+    if (strcmp(action, "f") == 0) {
+        BlitGraphicsImage *target = graphics_image_find(session, (unsigned int)image_id);
+        if (placement_rows != 1 || placement_columns != 0 || offset_x > 1 ||
+            target == NULL || !target->complete ||
+            strcmp(target->protocol, "kitty") != 0) {
+            graphics_reject(session, "unsupported-frame");
+            kitty_reply(session, image_id, quiet, "EINVAL");
+            return;
+        }
+        graphics_image_release(&session->terminal_kitty_stage);
+        session->terminal_kitty_stage_mode = 2;
+        session->terminal_kitty_stage_x = src_x;
+        session->terminal_kitty_stage_y = src_y;
+        session->terminal_kitty_stage_blend = offset_x == 0;
+        stage = 1;
+        snprintf(action, sizeof(action), "t");
+    } else if ((strcmp(action, "t") == 0 || strcmp(action, "T") == 0) && image_id != 0) {
+        BlitGraphicsImage *target = graphics_image_find(session, (unsigned int)image_id);
+        /* The same id again replaces what that image shows, as in kitty;
+           it used to be refused, and the refusal dropped the image. */
+        if (target != NULL && target->complete && strcmp(target->protocol, "kitty") == 0) {
+            graphics_image_release(&session->terminal_kitty_stage);
+            session->terminal_kitty_stage_mode = 1;
+            stage = 1;
+        }
+    }
     /* Hibr emits the protocol's canonical a=T form.  The following chunks
        deliberately omit a and carry only q=2, so an absent action means a
        continuation of the already allocated image. */
@@ -10603,11 +10734,19 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
         graphics_reject(session, "unsupported-action");
         return;
     }
-    image = graphics_image_find(session, (unsigned int)image_id);
+    if (session->terminal_kitty_stage.used &&
+        session->terminal_kitty_stage.id == (unsigned int)image_id &&
+        !session->terminal_kitty_stage.complete && action[0] == '\0')
+        stage = 1;
+    shown = graphics_image_find(session, (unsigned int)image_id);
+    image = stage ? (session->terminal_kitty_stage.used ? &session->terminal_kitty_stage : NULL) : shown;
     if (action[0] == '\0' && (image == NULL || image->complete)) {
         graphics_reject(session, "continuation-incomplete");
         return;
     }
+    if (stage && action[0] != '\0' && format == 0 &&
+        session->terminal_kitty_stage_mode == 2)
+        format = 32;  /* a=f's default, as kitty's */
     if (action[0] != '\0' &&
         (!kitty_parameter_int(payload, 'f', 0, &format) ||
          !kitty_parameter_int(payload, 's', 0, &width) ||
@@ -10645,7 +10784,10 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
         return;
     }
     if (image == NULL) {
-        for (index = 0; index < BLIT_GRAPHICS_MAX_IMAGES; ++index)
+        /* A staged upload has its own slot and takes none of the store's. */
+        if (stage)
+            image = &session->terminal_kitty_stage;
+        for (index = 0; image == NULL && index < BLIT_GRAPHICS_MAX_IMAGES; ++index)
             if (!session->graphics[index].used) {
                 image = &session->graphics[index];
                 break;
@@ -10721,13 +10863,15 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
             kitty_reply(session, image_id, quiet, "EINVAL");
             return;
         }
-        if (!kitty_place(image, &placement)) {
+        /* A staged replacement is placed on the image it replaces, which
+           keeps showing its old pixels until the new ones are complete. */
+        if (!kitty_place(stage ? shown : image, &placement)) {
             graphics_image_release(image);
             graphics_reject(session, "placement-store-full");
             kitty_reply(session, image_id, quiet, "ENOSPC");
             return;
         }
-        image->advance = keep_cursor ? 0 : placement_id + 1;
+        (stage ? shown : image)->advance = keep_cursor ? 0 : placement_id + 1;
     }
     if (image->width != width || image->height != height || image->format != format ||
         !kitty_decode_chunk(image, separator + 1)) {
@@ -10811,6 +10955,12 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
         if (session->terminal_kitty_upload_active &&
             session->terminal_kitty_upload_id == image->id)
             session->terminal_kitty_upload_active = 0;
+        /* ADR 0200: a staged upload lands now, all at once. */
+        if (image == &session->terminal_kitty_stage) {
+            if (!kitty_stage_land(session, image_id, quiet))
+                return;
+            image = graphics_image_find(session, (unsigned int)image_id);
+        }
         if (image->advance > 0) {
             kitty_advance_cursor(session, surface, image,
                                  (unsigned int)(image->advance - 1));
@@ -17053,6 +17203,7 @@ static void destroy_session(BlitRuntime *runtime, BlitSession *session)
     }
     for (i = 0; i < BLIT_GRAPHICS_MAX_IMAGES; ++i)
         graphics_image_release(&session->graphics[i]);
+    graphics_image_release(&session->terminal_kitty_stage);
     if (session->focused)
         session->focused = 0;
     memset(session, 0, sizeof(*session));

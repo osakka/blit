@@ -1,0 +1,61 @@
+# ADR 0200: Kitty images change in place: replace by id, and edit the root frame
+
+- Status: accepted (2026-10-29)
+- Date: 2026-10-29
+- Scope: `blit_server.c` (the Kitty graphics parser), a new gate
+- For: hibr #404, X Screen in pixels
+
+## Context
+
+Hibr's X Screen sends each frame as a whole Kitty image: `a=T,f=24`,
+about 0.9 MB at 640×400. To send only what X says changed, it needs to
+change an image that is already on screen. Two parts of the Kitty
+protocol do that, and Blit had neither:
+- **`a=f,r=1`** edits the root frame, a rectangle at a time. Blit refused
+  `a=f` outright.
+- **`a=t`/`a=T` with the id of a complete image** replaces its data in kitty.
+  Blit treated the upload as a continuation of the finished image, refused
+  it, and the refusal released the image. It vanished from the screen.
+
+## Decision
+
+A transmission that changes a complete image is staged and lands at once.
+- **Staging.** It decodes into the session's staging image, which takes no
+  slot in the store. Continuation chunks without `i=` find it, as they find
+  any current upload (ADR 0084). Chunking, `o=z` and `f=100` behave as for
+  a new image.
+- **Landing.** Nothing changes on screen until the last chunk.
+  - A **replacement** swaps in the new pixels, size and format, and keeps
+    every placement. A placement whose source rectangle would fall outside
+    a smaller replacement is refused, and the old pixels stay.
+  - An **edit** writes the rectangle into the image. Straight RGB or RGBA,
+    RGBA blending by alpha unless `X=1` asks to overwrite. A rectangle
+    outside the image is refused, and the image is untouched.
+  - Either way the image's generation advances, so the GPU compositor
+    uploads the new texture, and its cells are damaged.
+- **Only the root frame.** Blit has no animation, so `a=f` without `r`
+  (a new frame) or with `r` other than 1 would be pixels nothing draws. It
+  is refused with `EINVAL`, as is an edit of an unknown or incomplete image.
+- **Placement on replacement.** `a=T` on a replacement places the image
+  being replaced, which keeps showing its old pixels until the new ones
+  land.
+
+## Consequences
+
+- **X Screen** can send one full image, then only changed rectangles with
+  `a=f,r=1`, and no new `a=p`.
+- **Re-sending an id is safe.** The image changes instead of vanishing.
+- **Damage covers the whole image's cells,** not just the rectangle. The
+  bandwidth saved is in the PTY stream; narrowing the redraw to the
+  rectangle is possible later work.
+
+## Evidence (0.3.1)
+
+`kitty_frame_edit_gate` (new) checks a 16×16 image:
+- the same-id replacement has exact pixels (CRC32), keeps its placement,
+  and the screen shows it;
+- a chunked edit, a compressed RGBA edit blending by alpha, and an `X=1`
+  overwrite each give exactly the pixels Ruby computes, and the screen
+  shows the edit with no new `a=p`;
+- an out-of-bounds edit, an edit of an unknown id, and an edit of frame 2
+  are each refused (three rejections), and the image is unchanged.

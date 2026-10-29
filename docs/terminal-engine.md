@@ -114,6 +114,13 @@ shell conformance path is stable.
    rendering mode; it is never an automatic substitute for a rejected or
    incomplete Kitty image. The trace gate exercises a multi-chunk PNG and
    rejects neither its full chunks nor its decoded image.
+   An image already shown can be changed in place
+   ([ADR 0200](adr/0200-kitty-images-change-in-place.md)):
+   - `a=t`/`a=T` with its id replaces its pixels and keeps its placements;
+   - `a=f,r=1` writes an `s`×`v` rectangle at `x`,`y` into the root frame
+     (chunked, `o=z`, `f=24/32`; alpha blends unless `X=1`).
+   Either lands only when its last chunk arrives. A new frame or another
+   frame (`r`≠1) is refused, since Blit has no animation.
    The `CSI >` modifyOtherKeys family and the Kitty keyboard flag prefixes are
    parsed and consumed without leaking their control parameters into cell
    attributes.

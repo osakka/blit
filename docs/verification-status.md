@@ -1,5 +1,17 @@
 # Verification status
 
+## 2026-10-29: 0.3.1 Kitty images change in place (ADR 0200)
+
+- **`a=f,r=1` edits a rectangle of an image already shown** (chunked,
+  `o=z`, RGB or RGBA blending by alpha, `X=1` overwrites). It lands when
+  its last chunk arrives. This is for Hibr's X Screen, which can now send
+  only changed rectangles (hibr #404).
+- **`a=t`/`a=T` with a complete image's id replaces its pixels** and keeps
+  its placements. It used to be refused, and the refusal dropped the image.
+- **`kitty_frame_edit_gate` (new):** exact pixels for each case, the screen
+  showing each change, and three refusals that leave the image intact.
+- **Suites:** full 154/154, GLES 67/67 (the new gate runs in both).
+
 ## 2026-10-28: 0.3.0, the start of the 0.3 series: large, two-column phone icons (ADR 0196, 0197)
 
 - **0.3.0 opens the 0.3 series.** The owner called Blit stable and very
