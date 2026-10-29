@@ -73,9 +73,9 @@ A program can hold its pane still while it draws with synchronized output
 ## Decisions that shape everything
 
 - **One way to present** (ADR 0184): native KMS. Frames are composed on
-  the CPU unless the GPU compositor (ADR 0181) is chosen; when it is but
-  the GPU is unavailable, the CPU draws the same pixels instead, and a GPU
-  start that crashes forces the CPU next time.
+  the GPU (ADR 0181) unless the CPU is chosen; when the GPU is unavailable,
+  the CPU draws the same pixels instead, and a GPU start that crashes forces
+  the CPU next time.
 - **One glyph stack** (ADR 0195): every font gets the same icons, symbols,
   emoji and fallbacks, in one order.
 - **The API is the only control** (ADR 0002): the Control Panel, scripts

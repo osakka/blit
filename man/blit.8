@@ -22,7 +22,7 @@ and desktops run as terminal sessions inside Blit, and Hibr's Control
 Panel configures Blit through the same API as any other client.
 Blit does not need Hibr to run; any program can be started in a session.
 .PP
-Frames are composed on the CPU, or on the GPU through OpenGL ES when that is
+Frames are composed on the GPU through OpenGL ES, or on the CPU when that is
 chosen; if the GPU cannot be used, the CPU composes instead.
 Each display can be split into a grid of panes, each holding one session.
 .PP
@@ -132,8 +132,10 @@ the one backend; any other value is reported as invalid in
 .BR /v1/settings .
 .TP
 .B BLIT_KMS_COMPOSITOR
-.B gles
-composes frames on the GPU; anything else, or unset, uses the CPU.
+.B cpu
+composes frames on the CPU; unset, or
+.BR gles ,
+uses the GPU, falling back to the CPU when the GPU cannot be used.
 Saved setting:
 .BR server.kms_compositor ,
 applied at the next start.

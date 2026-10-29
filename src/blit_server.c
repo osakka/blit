@@ -28636,8 +28636,15 @@ int main(int argc, char **argv)
     }
     runtime.boot_render_interval_ms = runtime.render_interval_ms;
     runtime.boot_kms_async_pageflip = runtime.kms_async_pageflip;
-    runtime.boot_kms_compositor_gles = getenv("BLIT_KMS_COMPOSITOR") != NULL &&
-        strcmp(getenv("BLIT_KMS_COMPOSITOR"), "gles") == 0;
+    /* The GPU by default; the CPU when asked for. A GPU that cannot start
+       still falls back to the CPU, with the reason (ADR 0181). */
+    runtime.boot_kms_compositor_gles = getenv("BLIT_KMS_COMPOSITOR") == NULL ||
+        strcmp(getenv("BLIT_KMS_COMPOSITOR"), "cpu") != 0;
+    if (getenv("BLIT_KMS_COMPOSITOR") != NULL &&
+        strcmp(getenv("BLIT_KMS_COMPOSITOR"), "cpu") != 0 &&
+        strcmp(getenv("BLIT_KMS_COMPOSITOR"), "gles") != 0)
+        fprintf(stderr, "blit: BLIT_KMS_COMPOSITOR=%s is neither gles nor cpu; using the GPU\n",
+                getenv("BLIT_KMS_COMPOSITOR"));
     runtime.kms_compositor_gles = runtime.boot_kms_compositor_gles;
     /* Immediate by default: on the host the owner found it smoother, and a
        loop stall through a late slot costs a frame that immediate does not

@@ -18,8 +18,9 @@ release. What is not here yet is in the [roadmap](roadmap.md).
 | Feature | Since | ADR | Status |
 | --- | --- | --- | --- |
 | Drives monitors directly through Linux DRM/KMS: no X11, Wayland or SDL | 0.1 (only path since 0.2.22) | 0004, 0184 | Used |
-| Frames composed on the CPU, or on the GPU with OpenGL ES when chosen (Mesa, loaded at run time) | 0.2.9 | 0181 | Used |
-| If the GPU is chosen but cannot be used, the CPU composes instead, with the reason reported | 0.2.9 | 0181 | Used |
+| Frames composed on the GPU with OpenGL ES (Mesa, loaded at run time); the default since 0.3.11 | 0.2.9 | 0181 | Used |
+| The CPU compositor, when chosen | 0.2.9 | 0181 | Used |
+| If the GPU cannot be used, the CPU composes instead, with the reason reported | 0.2.9 | 0181 | Used |
 | A GPU start that crashes falls back to the CPU for the next start | 0.2.10 | 0181 | Used |
 | Only changed areas are recomposed and uploaded | 0.2.11 | 0181 | Used |
 | Each monitor refreshes at its own rate, fractional rates kept; nothing is drawn while idle | 0.1.533 | 0006, 0119 | Used |

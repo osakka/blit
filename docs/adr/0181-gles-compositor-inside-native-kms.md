@@ -192,3 +192,13 @@ channel.
 - SDL containment: SDL symbols occur only in `src/blit_server.c`.
 - The owner accepted the decision on 2026-10-24. Evidence that the
   implementation meets it is the cutover criteria above.
+
+## Revised (0.3.11): the GPU is the default
+
+The owner, 2026-10-29: Blit should use the GPU when there is one, and the
+CPU only when it is chosen. An unset `BLIT_KMS_COMPOSITOR` (and no saved
+`server.kms_compositor`) now means `gles`; `cpu` chooses the CPU. Nothing
+else changes: a GPU that cannot start, or a GPU start that crashed last
+time, still composes on the CPU, with the reason in `/v1/diagnostics`. The
+test harnesses name `cpu` explicitly, so the CPU compositor stays the one
+the default suites measure, and `BLIT_GATE_BACKEND=gles` the GPU.

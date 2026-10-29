@@ -80,7 +80,7 @@ test used Alpine Linux 3.24.0, QEMU TCG (no `/dev/kvm` was available), and a
 `CONFIG_DRM_VIRTIO_GPU=y`; the guest created a VKMS card and a virtio DRM card
 (`/dev/dri/card0` and `/dev/dri/card1`) plus `/dev/dri/renderD128`. Point the
 server at the virtio card with `BLIT_DRM_DEVICE=/dev/dri/card1`. For GLES
-composition (`BLIT_KMS_COMPOSITOR=gles`) the initramfs must stage Mesa's `kms_swrast_dri.so`, its
+composition (the default) the initramfs must stage Mesa's `kms_swrast_dri.so`, its
 dependencies, and the GLVND vendor file, then set `LIBGL_DRIVERS_PATH` and
 `__EGL_VENDOR_LIBRARY_DIRS`; without them the CPU compositor is used. A real
 bare-metal KMS test remains required before accepting physical display

@@ -49,6 +49,6 @@ def gate_display_env(width: 1024, height: 768, backend: GATE_BACKEND)
   File.write(state, "1 0 0 0\n1 #{width} #{height}\n")
   env = { 'BLIT_DISPLAY_BACKEND' => 'kms', 'BLIT_DRM_DEVICE' => device,
           'BLIT_DRM_MOCK_STATE' => state, 'LD_PRELOAD' => gate_drm_mock }
-  return env unless backend == 'gles'
+  return env.merge('BLIT_KMS_COMPOSITOR' => 'cpu') unless backend == 'gles'
   env.merge('BLIT_KMS_COMPOSITOR' => 'gles', 'BLIT_GLES_PLATFORM' => 'surfaceless')
 end

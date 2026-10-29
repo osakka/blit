@@ -1,5 +1,19 @@
 # Verification status
 
+## 2026-10-29: 0.3.11 the GPU compositor is the default (ADR 0181, revised)
+
+- **The owner asked for the GPU by default and the CPU by choice.** With no
+  `BLIT_KMS_COMPOSITOR` and no saved `server.kms_compositor`, Blit now
+  composes with GLES; `cpu` chooses the CPU. A GPU that cannot start, or
+  crashed starting last time, still falls back to the CPU with the reason.
+  An unknown value is logged and means the GPU.
+- **The owner's machine already had `gles` saved**, so its screen does not
+  change; the default matters for new installs and after a settings reset.
+- **Gates:** every harness that starts the server now names its compositor
+  (`cpu` for the default suites, `gles` for `BLIT_GATE_BACKEND=gles`), so
+  the CPU compositor stays covered.
+- **Suites:** font 38/38, full 155/155, GLES 67/67.
+
 ## 2026-10-29: 0.3.10 documentation rewritten; manual pages
 
 - **New:** [features](features.md) (everything Blit does, with version, ADR

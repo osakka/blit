@@ -16,9 +16,9 @@ Repository: [github.com/osakka/blit](https://github.com/osakka/blit).
 
 - **Monitors:** several at once, each at its own refresh rate, each split
   into a grid of up to 8×8 panes. Monitors can be plugged in while running.
-- **Fast:** only what changed is redrawn. Frames are composed on the CPU,
-  or on the GPU (OpenGL ES) when you choose it in the Control Panel; if the
-  GPU can't be used, the CPU takes over.
+- **Fast:** frames are composed on the GPU (OpenGL ES), and only what
+  changed is redrawn. Choose the CPU in the Control Panel if you prefer;
+  if the GPU can't be used, the CPU takes over by itself.
 - **Terminals:** xterm-compatible with the Kitty keyboard protocol, mouse
   reporting, bracketed paste, synchronized output, hyperlinks and pointer
   lock for games. See the [terminal reference](docs/terminal.md).

@@ -23,8 +23,8 @@ FreeType, HarfBuzz, libutil and zlib.
 | KMS runtime | Not testable here: no `/dev/dri` device node exposed |
 
 The GLES compositor (ADR 0181) does not link EGL, GLES or GBM at build time.
-When `BLIT_KMS_COMPOSITOR=gles` (saved setting `server.kms_compositor`),
-`src/blit_gles.c` opens `libEGL.so.1`, `libGLESv2.so.2` and `libgbm.so.1` with
+Unless the CPU is chosen (`BLIT_KMS_COMPOSITOR=cpu`, or the saved setting
+`server.kms_compositor`), `src/blit_gles.c` opens `libEGL.so.1`, `libGLESv2.so.2` and `libgbm.so.1` with
 `dlopen` at start-up; if they are missing, Blit logs why and composes on the
 CPU instead.
 

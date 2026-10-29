@@ -27,7 +27,7 @@ Dir.mktmpdir('blit-layout') do |root|
     '-I'+File.join(ROOT,'build/deps/prefix/include/libdrm'),File.join(ROOT,'tools/tests/fixtures/drm_hotplug_mock.c'),'-o',mock),'mock compile')
   File.write(state,"3 0 0 0\n93 640 384\n94 640 384\n95 640 384\n")
   File.write(device,''); Dir.mkdir(File.join(root,'input'))
-  env={'BLIT_DISPLAY_BACKEND'=>'kms','BLIT_DRM_DEVICE'=>device,'BLIT_DRM_MOCK_STATE'=>state,
+  env={'BLIT_DISPLAY_BACKEND'=>'kms','BLIT_KMS_COMPOSITOR'=>'cpu','BLIT_DRM_DEVICE'=>device,'BLIT_DRM_MOCK_STATE'=>state,
     'LD_PRELOAD'=>mock,'LD_LIBRARY_PATH'=>File.join(ROOT,'build/deps/prefix/lib/x86_64-linux-gnu'),
     'BLIT_LOGIN_AUTOSTART'=>'0','BLIT_PANE_LAYOUT'=>'1x2','BLIT_AUTH_TOKEN'=>'',
     'BLIT_SETTINGS_PATH'=>File.join(root,'settings.json'),'BLIT_INPUT_ROOT'=>File.join(root,'input'),

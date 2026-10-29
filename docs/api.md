@@ -213,7 +213,7 @@ resource is usable only when its API state and capability fields say it is.
 longer exists: a saved value is carried as an unknown key and has no effect.
 
 `document.server.kms_compositor` (0.2.9, ADR 0181) chooses how the native
-backend composes a frame: `cpu` (the default, the reference) or `gles`. It is
+backend composes a frame: `gles` (the default since 0.3.11) or `cpu`. It is
 read when the native backend opens, so a change applies at the next start
 (`POST /v1/control/restart`); `effective.kms_compositor` is the saved choice
 and `BLIT_KMS_COMPOSITOR` the boot default. Any other value is a 400

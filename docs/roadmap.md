@@ -17,7 +17,7 @@ once it was stable for daily use. Since then:
 - Documentation rewritten, manual pages added (0.3.10).
 
 SDL is gone (ADR 0184): native KMS is the only way Blit presents, composed
-on the CPU or, when chosen, the GPU.
+on the GPU by default (0.3.11), or on the CPU.
 
 ## Next, in order
 

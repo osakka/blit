@@ -1,7 +1,8 @@
 # Blit documentation
 
 Blit is an API-driven display server for text: it drives monitors directly
-through Linux DRM/KMS, composes frames on the CPU or, when chosen, the GPU (OpenGL ES), and presents terminal sessions with images, emoji, icons and
+through Linux DRM/KMS, composes frames on the GPU (OpenGL ES), or on the CPU when chosen or when
+there is no usable GPU,, and presents terminal sessions with images, emoji, icons and
 effects. Hibr's desktop runs on it; so can any other program.
 
 Public repository: [github.com/osakka/blit](https://github.com/osakka/blit).
