@@ -51,7 +51,7 @@ Dir.mktmpdir('blit-custom-icon-api') do |work|
       raise 'capture failed' unless r.code=='200' && r.body.start_with?('BM')
       r.body
     end
-    sequences={icons:((0x100000..0x100006).to_a+(0x100009..0x100022).to_a+[0x100033,0x100034,0x100229,0x10022a]).pack('U*')+"\u16d2\u21cc\u270e\u2615X",
+    sequences={icons:((0x100000..0x100006).to_a+(0x100009..0x100022).to_a+[0x100033,0x100034,0x10022f,0x100230]).pack('U*')+"\u16d2\u21cc\u270e\u2615X",
                arabic:"ﺮﺒْﺣِ ٠١٢٣٤٥٦٧٨٩ ﻻX"}
     %w[hack ibm-3270].each do |profile|
       [16,17,22].each do |size|

@@ -543,6 +543,12 @@ Generated from the same catalogue served by `GET /v1/fonts/icons`. These origina
 | `file-share-green-right` | `U+100228` | `"\udbc0\ude28"` | — |
 | `file-share-amber-left` | `U+100229` | `"\udbc0\ude29"` | — |
 | `file-share-amber-right` | `U+10022A` | `"\udbc0\ude2a"` | — |
+| `file-image-jpg-left` | `U+10022B` | `"\udbc0\ude2b"` | — |
+| `file-image-jpg-right` | `U+10022C` | `"\udbc0\ude2c"` | — |
+| `file-image-png-left` | `U+10022D` | `"\udbc0\ude2d"` | — |
+| `file-image-png-right` | `U+10022E` | `"\udbc0\ude2e"` | — |
+| `file-image-gif-left` | `U+10022F` | `"\udbc0\ude2f"` | — |
+| `file-image-gif-right` | `U+100230` | `"\udbc0\ude30"` | — |
 
 ## Themed text additions
 

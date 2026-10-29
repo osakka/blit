@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>image-png: a two-column file icon</title>
+  <path fill="#141414" d="M7 2 L20 2 L26 8 L26 30 L7 30Z"/>
+  <path fill="#f7f7f2" d="M8 3 L19.6 3 L25 8.4 L25 29 L8 29Z"/>
+  <path fill="#d9d9d2" d="M20 3 L20 8 L25 8Z"/>
+  <path fill="#141414" d="M19 3 L20 3 L20 9 L25 9 L25 8 L19 8Z"/>
+  <path fill="#141414" d="M9 7H23V18H9Z"/>
+  <path fill="#8fd0f2" d="M10 8H22V17H10Z"/>
+  <path fill="#5aa85a" d="M10 17 L10 13.4 L13.4 10.6 L16.4 13.6 L18.6 12 L22 14.4 L22 17Z"/>
+  <path fill="#f4c542" d="M18 8.6H20.4V11.0H18Z"/>
+  <path fill="#141414" d="M5 19H22.5V28H5Z"/>
+  <path fill="#3f8fe0" d="M6 20H21.5V27H6Z"/>
+  <path fill="#ffffff" d="M7.15 21.5H8.35V22.7H7.15Z"/>
+  <path fill="#ffffff" d="M8.35 21.5H9.549999999999999V22.7H8.35Z"/>
+  <path fill="#ffffff" d="M7.15 22.7H8.35V23.9H7.15Z"/>
+  <path fill="#ffffff" d="M9.55 22.7H10.75V23.9H9.55Z"/>
+  <path fill="#ffffff" d="M7.15 23.9H8.35V25.099999999999998H7.15Z"/>
+  <path fill="#ffffff" d="M8.35 23.9H9.549999999999999V25.099999999999998H8.35Z"/>
+  <path fill="#ffffff" d="M7.15 25.1H8.35V26.3H7.15Z"/>
+  <path fill="#ffffff" d="M7.15 26.3H8.35V27.5H7.15Z"/>
+  <path fill="#ffffff" d="M11.95 21.5H13.149999999999999V22.7H11.95Z"/>
+  <path fill="#ffffff" d="M13.15 21.5H14.35V22.7H13.15Z"/>
+  <path fill="#ffffff" d="M11.95 22.7H13.149999999999999V23.9H11.95Z"/>
+  <path fill="#ffffff" d="M14.35 22.7H15.549999999999999V23.9H14.35Z"/>
+  <path fill="#ffffff" d="M11.95 23.9H13.149999999999999V25.099999999999998H11.95Z"/>
+  <path fill="#ffffff" d="M14.35 23.9H15.549999999999999V25.099999999999998H14.35Z"/>
+  <path fill="#ffffff" d="M11.95 25.1H13.149999999999999V26.3H11.95Z"/>
+  <path fill="#ffffff" d="M14.35 25.1H15.549999999999999V26.3H14.35Z"/>
+  <path fill="#ffffff" d="M11.95 26.3H13.149999999999999V27.5H11.95Z"/>
+  <path fill="#ffffff" d="M14.35 26.3H15.549999999999999V27.5H14.35Z"/>
+  <path fill="#ffffff" d="M17.95 21.5H19.15V22.7H17.95Z"/>
+  <path fill="#ffffff" d="M19.15 21.5H20.349999999999998V22.7H19.15Z"/>
+  <path fill="#ffffff" d="M16.75 22.7H17.95V23.9H16.75Z"/>
+  <path fill="#ffffff" d="M16.75 23.9H17.95V25.099999999999998H16.75Z"/>
+  <path fill="#ffffff" d="M19.15 23.9H20.349999999999998V25.099999999999998H19.15Z"/>
+  <path fill="#ffffff" d="M16.75 25.1H17.95V26.3H16.75Z"/>
+  <path fill="#ffffff" d="M19.15 25.1H20.349999999999998V26.3H19.15Z"/>
+  <path fill="#ffffff" d="M17.95 26.3H19.15V27.5H17.95Z"/>
+  <path fill="#ffffff" d="M19.15 26.3H20.349999999999998V27.5H19.15Z"/>
+</svg>

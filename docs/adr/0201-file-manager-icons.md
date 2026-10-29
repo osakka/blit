@@ -60,6 +60,27 @@ rest by swapping a primary colour.
   disc, package, library, lock, database, usb, share. The catalogue then
   passes 64 KiB, so the API limit rises to 256 KiB.
 
+## Revised (0.3.8): colour for folders, natural colours for the rest
+
+The owner found four colourways of everything samey, and too many icons to
+make. **Only folders have colourways now** (the plain folder, the twelve
+special folders and the share), which Files' Control Panel picks.
+- **Every other kind has one look in its own natural colours,** as in System
+  7: a red-roofed house, burgundy Boxer gloves, a gold key, a grey disk, a
+  green spreadsheet, a blue globe. The generator gives each kind a colour
+  in `NATURAL` and draws it once (`file-<kind>.svg`).
+- **Labels.** A 3×5 pixel font in the generator writes a format's name on
+  an icon: PDF on the PDF icon, and JPG, PNG and GIF on three new picture
+  kinds at U+10022B–100230.
+- **The changeover keeps every codepoint working:**
+  1. Blit 0.3.8 draws the natural icon in all four colour slots of each
+     non-folder kind, so Hibr's `_blue`, `_green` and `_amber` names show
+     it too.
+  2. Hibr names non-folder kinds without a colour.
+  3. Blit retires the unused slots, never reused.
+- `custom_icon_gate` takes one codepoint per distinct drawing from the
+  catalogue, and requires those to differ.
+
 ## Consequences
 
 - Hibr maps `GL[ffolder]`, `GL[fdoc]` and so on, with `_blue`, `_green` and

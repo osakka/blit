@@ -1,9 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <title>archive, amber: a two-column file icon</title>
-  <path fill="#141414" d="M3 10 L16 4 L29 10 L29 26 L16 30 L3 26Z"/>
-  <path fill="#c99a5b" d="M4 10.6 L16 5.1 L28 10.6 L28 25.4 L16 29 L4 25.4Z"/>
-  <path fill="#141414" d="M4 10.6 L16 16 L28 10.6 L28 11.6 L16 17 L4 11.6Z"/>
-  <path fill="#141414" d="M15.5 16.5H16.5V29.0H15.5Z"/>
-  <path fill="#e8a93a" d="M9 8 L11 7 L23 12.6 L23 26.3 L21 27.2 L21 13.6Z"/>
-  <path fill="#f1cb88" d="M9 8 L10 7.5 L22 13.1 L21 13.6Z"/>
-</svg>

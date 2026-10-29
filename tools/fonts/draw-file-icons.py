@@ -24,6 +24,31 @@ VARIANTS = {
     'green': '#57b86a',
     'amber': '#e8a93a',
 }
+# Every kind but a folder has one look, in its own natural colour, as in
+# System 7: a house has a red roof, a key is gold, a disk is grey. Only
+# folders come in the colourways above, so Files can colour them.
+NATURAL = {
+    'document': '#4c7fd9', 'text': '#4c7fd9', 'pdf': '#d8443c', 'image': '#b07a3c',
+    'audio': '#a05cd6', 'video': '#55596a', 'archive': '#d34c4c', 'code': '#3cae5c',
+    'application': '#8e6cf0', 'disk': '#5a8fd8', 'trash': '#8a8f9a', 'home': '#d0453c',
+    'boxer': '#7a2430', 'markdown': '#3a3a44', 'spreadsheet': '#3fa45a', 'diagram': '#4c9be8',
+    'presentation': '#e8873a', 'font': '#2f2f38', 'web': '#3f8fe0', 'terminal': '#3fbf6a',
+    'settings': '#8a909c', 'bundle': '#41b8a8', 'link': '#3f8fe0', 'rc': '#3fbf6a',
+    'history': '#4c7fd9', 'service': '#e8873a', 'key': '#e0b030', 'network': '#3f8fe0',
+    'cron': '#d8443c', 'readme': '#3f8fe0', 'license': '#e0b030', 'log': '#7c818c',
+    'kernel': '#3a9a5a', 'boot': '#3a9a5a', 'c': '#3f6fd0', 'asm': '#e8873a',
+    'makefile': '#7c818c', 'patch': '#8e6cf0', 'json': '#e0b030', 'vector': '#d04c9c',
+    'image-jpg': '#d8693c', 'image-png': '#3f8fe0', 'image-gif': '#8e6cf0',
+    'rom': '#8a8f9a', 'ebook': '#9c5a2c', 'exe': '#3f6fd0', 'disc': '#c070e0',
+    'package': '#d34c4c', 'library': '#3f8fe0', 'lock': '#e0b030', 'database': '#3f8fe0',
+    'usb': '#4a5060',
+}
+
+
+def is_folder(name):
+    return name == 'folder' or name == 'share' or name.startswith('folder-')
+
+
 FIXED = {
     'outline': '#141414',
     'paper': '#f7f7f2',
@@ -70,6 +95,37 @@ def circle(cx, cy, r, steps=24, reverse=False):
     return poly(*(pts[::-1] if reverse else pts))
 
 
+# A 3x5 pixel font for labels on icons (PDF, JPG...): one unit per pixel.
+GLYPHS = {
+    'A': ['010', '101', '111', '101', '101'], 'B': ['110', '101', '110', '101', '110'],
+    'C': ['011', '100', '100', '100', '011'], 'D': ['110', '101', '101', '101', '110'],
+    'E': ['111', '100', '110', '100', '111'], 'F': ['111', '100', '110', '100', '100'],
+    'G': ['011', '100', '101', '101', '011'], 'I': ['111', '010', '010', '010', '111'],
+    'J': ['001', '001', '001', '101', '010'], 'M': ['101', '111', '101', '101', '101'],
+    'N': ['110', '101', '101', '101', '101'], 'P': ['110', '101', '110', '100', '100'],
+    'W': ['101', '101', '111', '111', '101'],
+}
+
+
+def label(text, x, y, role='white', unit=1.0):
+    """Text in the label font: each letter 3 units wide, 1 apart."""
+    layers = []
+    for i, ch in enumerate(text):
+        for r, row in enumerate(GLYPHS[ch]):
+            for c, bit in enumerate(row):
+                if bit == '1':
+                    layers.append((role, rect(x + (i * 4 + c) * unit, y + r * unit, unit, unit)))
+    return layers
+
+
+def tag(text):
+    """A coloured band across a page's foot, with the format's name."""
+    width = (len(text) * 4 - 1) * 1.2
+    x = 6 + (15.5 - width) / 2
+    return [('outline', rect(5, 19, 17.5, 9)), ('primary', rect(6, 20, 15.5, 7))] + \
+        label(text, x, 21.5, 'white', 1.2)
+
+
 def page(x0=7, x1=26, top=2, bottom=30, ear=6):
     """A dog-eared page: its outline, its paper, and its folded corner."""
     outer = poly((x0, top), (x1 - ear, top), (x1, top + ear), (x1, bottom), (x0, bottom))
@@ -103,13 +159,8 @@ def text():
 
 
 def pdf():
-    return page() + [('primary', rect(8, 27, 17, 2))] + [
-        ('red', rect(5, 17, 16, 9)),
-        ('outline', rect(5, 17, 16, 0.8)),
-        ('white', poly((8, 24), (10.5, 19), (12.5, 22.5), (14, 20.5), (17.5, 24))),
-        ('ink', rect(10, 10, 12, 1.2)),
-        ('ink', rect(10, 13, 9, 1.2)),
-    ]
+    return page() + [('ink', rect(10, 10, 12, 1.2)), ('ink', rect(10, 13, 9, 1.2)),
+                     ('ink', rect(10, 16, 11, 1.2))] + tag('PDF')
 
 
 def image():
@@ -120,6 +171,16 @@ def image():
         ('hill', poly((10, 25), (10, 20), (14, 16), (18, 20), (20, 18), (23, 21), (23, 25))),
         ('sun', poly((18, 13), (21, 13), (21, 16), (18, 16))),
     ]
+
+
+def picture_tagged(fmt):
+    def draw():
+        return page() + [
+            ('outline', rect(9, 7, 14, 11)), ('sky', rect(10, 8, 12, 9)),
+            ('hill', poly((10, 17), (10, 13.4), (13.4, 10.6), (16.4, 13.6), (18.6, 12), (22, 14.4), (22, 17))),
+            ('sun', rect(18, 8.6, 2.4, 2.4)),
+        ] + tag(fmt)
+    return draw
 
 
 def audio():
@@ -657,7 +718,8 @@ ICONS = {
     'folder': folder, 'document': document, 'text': text, 'pdf': pdf,
     'image': image, 'audio': audio, 'video': video, 'archive': archive,
     'code': code, 'application': application, 'disk': disk, 'trash': trash,
-    'home': home, 'boxer': boxer, 'markdown': markdown, 'spreadsheet': spreadsheet,
+    'home': home, 'image-jpg': picture_tagged('JPG'), 'image-png': picture_tagged('PNG'),
+    'image-gif': picture_tagged('GIF'), 'boxer': boxer, 'markdown': markdown, 'spreadsheet': spreadsheet,
     'diagram': diagram, 'presentation': presentation, 'font': font, 'web': web,
     'terminal': terminal, 'settings': settings, 'bundle': bundle, 'link': link,
 }
@@ -675,12 +737,20 @@ def main():
     parser.add_argument('out', type=Path)
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
+    folders = [name for name in ICONS if is_folder(name)]
+    others = [name for name in ICONS if not is_folder(name)]
+    missing = [name for name in others if name not in NATURAL]
+    if missing:
+        raise SystemExit(f'no natural colour for {missing}')
     for variant, primary in VARIANTS.items():
         colours = palette(primary)
-        for name, draw in ICONS.items():
+        for name in folders:
             (args.out / f'file-{name}-{variant}.svg').write_text(
-                svg(draw(), colours, f'{name}, {variant}: a two-column file icon'))
-    print(f'FILE_ICONS_DRAWN icons={len(ICONS)} variants={len(VARIANTS)}')
+                svg(ICONS[name](), colours, f'{name}, {variant}: a two-column folder icon'))
+    for name in others:
+        (args.out / f'file-{name}.svg').write_text(
+            svg(ICONS[name](), palette(NATURAL[name]), f'{name}: a two-column file icon'))
+    print(f'FILE_ICONS_DRAWN folders={len(folders)}x{len(VARIANTS)} others={len(others)}')
 
 
 if __name__ == '__main__':

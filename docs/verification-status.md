@@ -1,5 +1,18 @@
 # Verification status
 
+## 2026-10-29: 0.3.8 natural-colour file icons; colourways for folders only (ADR 0201)
+
+- **Fifty-two file kinds have one look each, in their own natural colours.**
+  Only folders keep the four colourways. The owner approved a preview.
+- **PDF carries a "PDF" label, and three new picture kinds carry JPG, PNG
+  or GIF** (U+10022B–100230), from a 3×5 label font in the generator.
+- **Every existing codepoint still draws.** A non-folder kind's colour
+  slots all show its one drawing until Hibr names it without a colour;
+  then the slots are retired. 196 colourway SVGs were removed.
+- **`custom_icon_gate`** covers 543 originals, and the distinct drawings
+  (one codepoint each, from the catalogue) are distinct from 16 px.
+- **Suites:** font 38/38, full 154/154, GLES 67/67.
+
 ## 2026-10-29: 0.3.7 thirty-nine more file icon kinds (ADR 0201)
 
 - **Special folders, folder plus a badge:** git, config, local, system,

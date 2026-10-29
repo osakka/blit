@@ -10,25 +10,32 @@ int main(int argc, char **argv)
 {
     BlitFont font;
     int size = 0, samples = 0;
-    unsigned cp = 0, required[128];
-    int required_count = 0, ui_samples = 0, script_samples = 0;
+    unsigned cp = 0, required[128], distinct[512];
+    int required_count = 0, distinct_count = 0, ui_samples = 0, script_samples = 0;
     /* ADR 0195: what the glyph stack adds to any font -- an overhanging
        long arrow, and scripts no shipped text font has (Cyrillic,
        Hebrew, Thai, Georgian, Ethiopic, CJK) -- drawn, never fallback. */
     static const unsigned scripts[] = { 0x27f6, 0x0416, 0x05e9, 0x0e01, 0x10d0, 0x1200, 0x6f22, 0x5b57 };
     FILE *input;
-    if (argc != 5) return 2;
+    if (argc != 6) return 2;
     input = fopen(argv[4], "r");
     if (!input) return 2;
     while (required_count < 128 && fscanf(input, "%x", &cp) == 1)
         required[required_count++] = cp;
     fclose(input);
     CHECK(required_count == 101);
+    /* One left-half codepoint per distinct file drawing (ADR 0201). */
+    input = fopen(argv[5], "r");
+    if (!input) return 2;
+    while (distinct_count < 512 && fscanf(input, "%x", &cp) == 1)
+        distinct[distinct_count++] = cp;
+    fclose(input);
+    CHECK(distinct_count > 1);
     memset(&font, 0, sizeof(font));
     CHECK(!blit_font_load_path(&font, argv[1]));
     for (size = 8; size <= 64; ++size) {
         BlitRaster *r = blit_raster_open(&font, argv[2], argv[3], (size + 1) / 2, size);
-        unsigned hashes[0x22b];
+        unsigned hashes[0x231];
         int partial_icons = 0;
         int seam[2][96], reach[2], tall[2];
         int index;
@@ -60,10 +67,10 @@ int main(int argc, char **argv)
             CHECK(ink);
             ++script_samples;
         }
-        /* Every colour original: U+100000-100006 and U+100009-10022A;
+        /* Every colour original: U+100000-100006 and U+100009-100230;
            U+100007/8 are the bar corners, cell geometry. U+100018/9 are
            the two columns of the hui badge (ADR 0197). */
-        for (cp = 0x100000; cp <= 0x10022a; ++cp) {
+        for (cp = 0x100000; cp <= 0x100230; ++cp) {
             BlitRasterGlyph g, again;
             unsigned hash = 2166136261U;
             int x, y, ink = 0, colour = 0, partial = 0;
@@ -144,13 +151,11 @@ int main(int argc, char **argv)
            sixty-three kinds in four colourways, so no two kinds and no two
            colourways of a kind look alike. */
         if (size >= 16) {
-            static const int pairs[][2] = {{0x33, 0x22b}};
-            int range;
-            for (range = 0; range < 1; ++range)
-                for (index = pairs[range][0]; index < pairs[range][1]; index += 2) {
-                    int other;
-                    for (other = index + 2; other < pairs[range][1]; other += 2)
-                        CHECK(hashes[index] != hashes[other] || hashes[index + 1] != hashes[other + 1]);
+            int a, b;
+            for (a = 0; a < distinct_count; ++a)
+                for (b = a + 1; b < distinct_count; ++b) {
+                    int i = (int)distinct[a] - 0x100000, j = (int)distinct[b] - 0x100000;
+                    CHECK(hashes[i] != hashes[j] || hashes[i + 1] != hashes[j + 1]);
                 }
         }
         /* The halves meet: no row is clearly inked on one side of the seam
@@ -189,6 +194,6 @@ int main(int argc, char **argv)
         blit_raster_close(r);
     }
     blit_font_free(&font);
-    printf("CUSTOM_ICON_PASS samples=%d sizes=57 icons=537 distinct_levels=wifi4+battery11+volume4+phone4x2 file_icons=63x4x2 retired=100023-100032 hui_seam=met colour=premultiplied pen_alias=themed cache=bounded ui_scalars=%d ui_span_cases=%d scripts=%d no_replacement=verified\n", samples, required_count, ui_samples, script_samples);
+    printf("CUSTOM_ICON_PASS samples=%d sizes=57 icons=543 distinct_levels=wifi4+battery11+volume4+phone4x2 file_icons=distinct_drawings retired=100023-100032 hui_seam=met colour=premultiplied pen_alias=themed cache=bounded ui_scalars=%d ui_span_cases=%d scripts=%d no_replacement=verified\n", samples, required_count, ui_samples, script_samples);
     return 0;
 }
