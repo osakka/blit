@@ -36,6 +36,14 @@ A transmission that changes a complete image is staged and lands at once.
 - **Only the root frame.** Blit has no animation, so `a=f` without `r`
   (a new frame) or with `r` other than 1 would be pixels nothing draws. It
   is refused with `EINVAL`, as is an edit of an unknown or incomplete image.
+- **Success is answered (0.3.3).** Like kitty, a completed `a=t`, `a=T`
+  or `a=f`, and a placement made with `a=p`, are answered
+  `ESC _Gi=<id>;OK ESC \` unless `q=` quiets it. `q=1` keeps only errors
+  and `q=2` keeps nothing. A transmission's quiet level is its opening
+  chunk's, so a continuation without `q=` doesn't turn the reply back on.
+  Before 0.3.3 only `a=q` was answered. Hibr's probe for edits (`a=t,t=d`
+  then `a=f` of a 1×1 image, i=4202) waits for both OKs, so it fell back
+  to whole pictures.
 - **Placement on replacement.** `a=T` on a replacement places the image
   being replaced, which keeps showing its old pixels until the new ones
   land.
@@ -68,3 +76,5 @@ A transmission that changes a complete image is staged and lands at once.
   - an 8×8 edit of a 64×64 image (8×4 cells) damages 1×1 cell, as read
     from the stream's `surface_delta`;
   - on the GPU compositor, `image_partial_uploads` rises.
+- 0.3.3: Hibr's probe, byte for byte, gets `i=4202;OK` twice in order, and
+  a `q=2` edit after it gets nothing.

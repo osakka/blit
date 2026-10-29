@@ -860,6 +860,9 @@ typedef struct {
        this is per PTY stream, not global state. */
     unsigned int terminal_kitty_upload_id;
     int terminal_kitty_upload_active;
+    /* The q= of the opening chunk: continuations may leave q out, and that
+       must not turn a quiet transmission's reply on. */
+    int terminal_kitty_upload_quiet;
     /* ADR 0200: a transmission that replaces an image already complete
        (a=t/a=T with its id) or edits its root frame (a=f, r=1) is decoded
        here, and merged into the image only when its last chunk arrives, so
@@ -10688,6 +10691,10 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
         session->terminal_kitty_upload_id = (unsigned int)image_id;
         session->terminal_kitty_upload_active = 1;
     }
+    if (action[0] != '\0')
+        session->terminal_kitty_upload_quiet = quiet;
+    else if (quiet < session->terminal_kitty_upload_quiet)
+        quiet = session->terminal_kitty_upload_quiet;
     if (strcmp(action, "d") == 0) {
         /* The target defaults to a, every visible placement. x and y here
            are cell coordinates counted from 1, like cursor positions. */
@@ -10780,6 +10787,7 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
         if (new_valid) mark_graphics_damage(surface, new_draw.x, new_draw.y,
             new_draw.width, new_draw.height, cell_width, cell_height);
         if (!surface->damage_valid) mark_surface_damage(surface, 0, 0);
+        kitty_reply(session, image_id, quiet, "OK");
         return;
     }
     if ((action[0] != '\0' && strcmp(action, "t") != 0) ||
@@ -11020,6 +11028,7 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
             if (edit && image->advance == 0) {
                 mark_graphics_rect_damage(surface, image, ex, ey, ew, eh,
                                           cell_width, cell_height);
+                kitty_reply(session, image_id, quiet, "OK");
                 return;
             }
         }
@@ -11029,6 +11038,10 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
             image->advance = 0;
         }
         mark_graphics_image_damage(surface, image, cell_width, cell_height);
+        /* Kitty answers a completed transmission (a=t, a=T, a=f) with OK
+           unless q= quiets it (ADR 0200); a producer probing for a=f keys
+           on this. */
+        kitty_reply(session, image_id, quiet, "OK");
     }
 }
 

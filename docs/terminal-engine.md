@@ -120,7 +120,8 @@ shell conformance path is stable.
    - `a=f,r=1` writes an `s`×`v` rectangle at `x`,`y` into the root frame
      (chunked, `o=z`, `f=24/32`; alpha blends unless `X=1`).
    Either lands only when its last chunk arrives. A new frame or another
-   frame (`r`≠1) is refused, since Blit has no animation.
+   frame (`r`≠1) is refused, since Blit has no animation. Success is
+   answered `OK` unless `q=` quiets it, as in kitty.
    The `CSI >` modifyOtherKeys family and the Kitty keyboard flag prefixes are
    parsed and consumed without leaking their control parameters into cell
    attributes.

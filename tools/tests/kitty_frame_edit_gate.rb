@@ -14,6 +14,9 @@
 #   * an edit damages only the cells its rectangle lands on, not the image's
 #   * on the GPU compositor, an edited texture is refreshed only where it
 #     changed (image_partial_uploads)
+#   * Hibr's probe, exactly as it sends it: a q=0 a=t,t=d of a 1x1 image and
+#     a q=0 a=f of it are each answered `i=4202;OK`, in order, and a q=2 a=f
+#     is not answered at all (edits turn on at the two OKs)
 
 require 'base64'
 require 'json'
@@ -243,9 +246,24 @@ Dir.mktmpdir('blit-kitty-frame-edit') do |root|
     if gpu_composing?
       Timeout.timeout(5) { sleep 0.05 until partial_uploads > uploads_before }
     end
+    # Hibr's probe, byte for byte, read back from a raw-mode session.
+    replies = File.join(root, 'probe-replies')
+    probe = esc('i=4202,s=1,v=1,a=t,t=d,f=24', 'AAAA') +
+            esc('a=f,r=1,i=4202,x=0,y=0,s=1,v=1,f=24', 'AAAA') +
+            esc('a=f,r=1,i=4202,x=0,y=0,s=1,v=1,f=24,q=2', 'AAAA')
+    File.write(File.join(root, 'probe.sh'),
+               "stty raw -echo; : > #{replies}; sleep 0.5; printf '%b' '#{probe}'; exec cat > #{replies}\n")
+    code, = request('POST', '/v1/terminal-sessions',
+                    { command: '/bin/sh', arguments: [File.join(root, 'probe.sh')],
+                      surface: { width: 40, height: 4 }, display_id: display })
+    check(code == 201, "probe session -> #{code}")
+    sleep 2
+    got = File.exist?(replies) ? File.binread(replies) : ''
+    check(got == "\e_Gi=4202;OK\e\\" * 2,
+          "the probe was answered #{got.inspect}; two i=4202;OK and nothing for q=2 turn edits on")
     puts 'KITTY_FRAME_EDIT_PASS replace=pixels+placement+screen edit=chunked+zlib blend=alpha overwrite=X1 ' \
          "refused=bounds+id+frame image_intact=yes damage=#{damage[0]}x#{damage[1]}_cells " \
-         "gpu_partial=#{gpu_composing? ? 'yes' : 'cpu_compositor'}"
+         "gpu_partial=#{gpu_composing? ? 'yes' : 'cpu_compositor'} hibr_probe=OK,OK,silent"
   ensure
     Process.kill('TERM', pid) rescue nil
     Process.wait(pid) rescue nil

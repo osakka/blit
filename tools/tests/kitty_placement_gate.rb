@@ -119,7 +119,7 @@ phase_a = [
   cup(1, 11), esc("a=T,#{common},i=2,x=0,y=4,w=4,h=4,X=3,Y=2,C=1", payload),
   # numbered placement 1 of image 3: red; placement 2 of it: yellow
   cup(1, 21), esc("a=T,#{common},i=3,p=1,x=0,y=0,w=4,h=4,C=1", payload),
-  cup(1, 31), esc('a=p,i=3,p=2,x=4,y=4,w=4,h=4,C=1'),
+  cup(1, 31), esc('a=p,i=3,p=2,x=4,y=4,w=4,h=4,C=1,q=2'),
   # no C=1: the cursor moves past the 1x1-cell image
   cup(5, 1), esc("a=T,#{common},i=4", payload)
 ].join

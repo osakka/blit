@@ -1,5 +1,27 @@
 # Verification status
 
+## 2026-10-29: 0.3.3 Kitty success replies (ADR 0200)
+
+- **A completed `a=t`, `a=T` or `a=f`, and an `a=p`, are answered
+  `i=<id>;OK`** unless `q=` quiets them, as in kitty. The quiet level is the
+  opening chunk's. Before this only `a=q` was answered. So Hibr 0.99.376's
+  probe for edits (two OKs for i=4202) failed on Blit, and X Screen fell
+  back to whole pictures.
+- **`kitty_frame_edit_gate`** replays Hibr's probe byte for byte from a
+  raw-mode session: two `i=4202;OK`, in order, and silence for a `q=2`
+  edit.
+- **`kitty_placement_gate`**'s own `a=p` now carries `q=2`. Its OK reply,
+  echoed by the gate's shell, had moved the cursor the gate measures.
+- **Correction to 0.3.2:** `pane_effects_gate` did fail once more under
+  suite load, at 5.17 ms of thread CPU time. Contention inflates CPU time
+  too, so 0.3.2's claim that the gate no longer fails under load was
+  overstated. The bound is now half a refresh (8.3 ms), the gate's stated
+  requirement ("far under a refresh"). Measured alone the cost is about
+  3 ms.
+- **Suites:** full 153/154 (`pane_effects_gate` at 5.17 ms, before the
+  bound change), then `pane_effects_gate` passed 3/3 under eight busy loops
+  with the new bound. GLES 67/67.
+
 ## 2026-10-29: 0.3.2 Kitty edits redraw only what changed; two load-proof gates
 
 - **A Kitty `a=f` edit damages only the cells its rectangle lands on**
