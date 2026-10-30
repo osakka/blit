@@ -404,7 +404,7 @@ GET    /v1/version                         compatibility handshake
 GET    /v1/server                          capabilities and links
 GET    /v1/graphics /displays /audio       hardware inventory
 GET/PUT /v1/control/shutdown-key           the keyboard stop chord
-GET/PATCH /v1/displays/{id}                rotation and brightness
+GET/PATCH /v1/displays/{id}                brightness
 GET/PATCH /v1/audio/cards[/{id}]           a card's mixer
 GET/PUT /v1/fonts /topology               revisioned configuration
 GET     /v1/effects                        pane effects (set in settings)
@@ -859,9 +859,10 @@ brightness    only where a backlight is attributed to the display.
 
 **`rotation`** is not a capability: native KMS composes straight into the
 connector's framebuffer and has no rotation transform (ADR 0184 removed the
-SDL path that had one). A PATCH with `rotation` is a 422
-`display_rotation_unsupported`; a value other than `0`, `90`, `180` or `270`
-is still a 400 `invalid_display_rotation`.
+SDL path that had one). A PATCH with `rotation: 0` is accepted, since that
+is what every display is; `90`, `180` or `270` is a 422
+`display_rotation_unsupported`, and any other value a 400
+`invalid_display_rotation`.
 
 **`brightness_percent`** reads `actual_brightness` -- what the panel is doing
 -- and writes `brightness` -- what was requested. A driver that ramps will
@@ -895,20 +896,13 @@ is empty), so `brightness` is absent there and that is the answer rather than a
 gap. The code path is real and gated locally against a fabricated backlight
 under `BLIT_BACKLIGHT_ROOT`.
 
-Two limits are worth knowing rather than discovering:
-
-- Whether the **unprivileged profile** (ADR 0065) can write
-  `/sys/class/backlight/*/brightness` is not measured. The attribute is
-  typically `root:video` with a udev rule granting the seat's user, the gate
-  runs against fabricated files, and the live host runs as root with no
-  backlight. It is the same unmeasured-group caveat as the ALSA control device
-  in #68, and it belongs to an operator who switches profiles on hardware that
-  has a panel.
-- On a **multi-display** host, rotating one display changes its width, so a
-  topology placement computed against the old width may no longer tile. Blit
-  does not recompute the placement for you: re-`PUT /v1/topology` after a
-  rotation. Both machines this was measured on have a single output, so that
-  is a stated consequence rather than a tested one.
+One limit is worth knowing rather than discovering: whether the **unprivileged
+profile** (ADR 0065) can write `/sys/class/backlight/*/brightness` is not
+measured. The attribute is typically `root:video` with a udev rule granting the
+seat's user, the gate runs against fabricated files, and the live host runs as
+root with no backlight. It is the same unmeasured-group caveat as the ALSA
+control device in #68, and it belongs to an operator who switches profiles on
+hardware that has a panel.
 
 ### Explicit emoji cell layout (since 0.1.578)
 
@@ -1602,7 +1596,13 @@ session). It connects (`SOCK_SEQPACKET`), says hello with the token, and
 sends frames: a 48-byte header and one memfd sealed against shrinking,
 growing and writing. The image is placed, layered and deleted with ordinary
 Kitty escapes on the session's terminal, under the same id. The byte layout
-and rules are in the ADR's "Wire format". Each session reports
+and rules are in the ADR's "Wire format".
+
+The channel is local only. A program reached over ssh, or running on another
+machine, has no `BLIT_FRAME_SOCKET` and could not reach it if it had: it
+sends its pictures through the terminal as Kitty images, exactly as before.
+A client that finds the variables missing, cannot connect, or is refused at
+the hello should fall back the same way. Each session reports
 `frames.accepted`, `refused`, `stale`, `superseded` and `last_error`; the
 server reports `graphics.frames` in `/v1/diagnostics`.
 

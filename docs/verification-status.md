@@ -1,5 +1,45 @@
 # Verification status
 
+## 2026-10-30: 0.3.20 `blit --version` and `blit --help`
+
+- The owner asked how to tell which Blit is running. `blit --version`
+  (`-V`) prints `blit <version>`; `blit --help` (`-h`) a short usage that
+  points at `blit(8)`; any other non-port argument still exits 2 with the
+  usage. `blit(8)` documents both, and notes the running server's version
+  is also `BLIT_VERSION` in every session and `/v1/version`.
+- `documentation_gate.rb` runs the built server: `--version` must name
+  `packaging/VERSION`, and `--help` must point at `blit(8)`.
+- **Step 2 of ADR 0202 measured live** (Blit 0.3.19, Hibr 0.99.398, YouTube
+  in a window, 60.1 s, after one sign-out and sign-in): each of the three
+  displays' sessions accepted 706 frames by descriptor (11.7/s), none
+  refused, stale or superseded; `graphics_payloads_kitty` +0, so no picture
+  crossed a PTY. Hibr desktop 34.5%, hold 2.9%, Blit 9.6%, against 32.0%,
+  25.4% and 25.3% on step 1. Blit drew 80.7 frames/s with 3.5 missed
+  deadlines/s. ADR 0202 records it under "Result" and is marked in use.
+- **Documentation pass**, each claim checked against the code:
+  - ADR 0202: the hello's refusal is `ERROR 0 EACCES` (or `EINVAL`), not
+    `ERROR EACCES`; frames are read with `pread`, not mapped; the socket is
+    abstract, so it has no file mode (it said 0660, group `blit`); `ENOMEM`
+    is a reply; a signed-out sender is refused. It now says the channel is
+    local only, and what happens over ssh or from another machine. Its
+    verification section says what the gate covers and what it does not
+    (the uid rules need root).
+  - The API guide, `blit(8)`, the terminal reference and the Hibr
+    integration guide state the local-only rule; the integration guide has a
+    section on Hibr's two picture paths and how to tell which is in use.
+  - `PATCH /v1/displays/{id}` accepts `rotation: 0`; the API guide said
+    every rotation was refused. The endpoint summary no longer says
+    rotation; the multi-display rotation caveat is gone (nothing rotates).
+    The OpenAPI drops `rotation` from the capabilities enum and from the
+    bounds text; the settings guide says what the `displays` section keeps.
+  - Architecture: the frame socket in the diagram, the parts and security;
+    `blit_display_geometry.h` (deleted in 0.3.16) gone from the parts.
+  - Roadmap at 0.3.20; #143 and #144 off it, #109 waiting on the owner;
+    video and dragging results recorded. Features: descriptor frames `Used`,
+    `--version`/`--help`, the submit-phase counters. README: `blit
+    --version` for the installed Blit, `/v1/version` for the running one.
+- **Suites:** font 38/38, full 157/157 (6 skips), GLES renderer 66/66 (1 skip). After the documentation pass, `documentation_gate` and `api_schema_gate` rerun and pass.
+
 ## 2026-10-30: 0.3.19 the frame sender's uid is checked on every frame (ADR 0202)
 
 - **Why:** the Hibr maintainers found the main view (the login session) on

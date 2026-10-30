@@ -2141,14 +2141,11 @@ components:
         bounds:
           type: object
           description: >-
-            The display's rectangle in the desktop's coordinate space, which
-            is the *logical* one: at a rotation of 90 or 270 its width and
-            height are the active mode's exchanged, because a rotated monitor
-            occupies a rotated rectangle. `modes` and `active_mode` stay
-            physical, and `state.physical` carries the mode's own size beside
-            them. That is the same split `xrandr` reports, and it is what lets
-            the cell grid, the pointer hit test and the topology placements all
-            work in one space.
+            The display's rectangle in the desktop's coordinate space. Native
+            KMS has no rotation (ADR 0184), so its size is the active mode's;
+            `state.physical` carries the mode's own size beside it. The cell
+            grid, the pointer hit test and the topology placements all work in
+            this one space.
           required: [x, y, width, height]
           properties:
             x: {type: integer}
@@ -2176,7 +2173,7 @@ components:
             only where a backlight is attributed to the display.
           items:
             type: string
-            enum: [mode-report, rotation, brightness]
+            enum: [mode-report, brightness]
         state:
           type: object
           required: [present, presentation_state, physical]

@@ -33,6 +33,16 @@ pages.each do |page|
   raise "#{page}: groff warnings:\n#{out}" unless out.empty? && $?.success?
 end
 
+# blit --version names the packaged version; --help points at the manual.
+binary = File.join(root, 'build/blit/blit-server')
+if File.executable?(binary)
+  version = File.read('packaging/VERSION').strip
+  said = IO.popen([binary, '--version'], &:read)
+  raise "blit --version said #{said.inspect}, the package is #{version}" unless said == "blit #{version}\n" && $?.success?
+  help = IO.popen([binary, '--help'], &:read)
+  raise "blit --help does not point at blit(8): #{help.inspect}" unless $?.success? && help.include?('blit(8)')
+end
+
 broken = []
 IO.popen(%w[git ls-files -z *.md], &:read).split("\0").each do |file|
   next if file.start_with?('vendor/')
@@ -44,4 +54,5 @@ IO.popen(%w[git ls-files -z *.md], &:read).split("\0").each do |file|
 end
 raise "broken links:\n#{broken.join("\n")}" unless broken.empty?
 
-puts "DOCUMENTATION_PASS names=#{names.size} internal=#{INTERNAL.size} pages=#{pages.size} links=checked"
+puts "DOCUMENTATION_PASS names=#{names.size} internal=#{INTERNAL.size} pages=#{pages.size} links=checked " \
+     "version_flag=#{File.executable?(binary) ? 'checked' : 'no_binary'}"

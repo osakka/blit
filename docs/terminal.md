@@ -169,7 +169,7 @@ Programs started in a session get `TERM=xterm-kitty` and
 | Replacing | transmitting to an existing id replaces its pixels and keeps its placements |
 | Delete | `a i z c p q x y`, and their capitals to free the image too |
 | Replies | `OK`, or an error for every failure (`EINVAL`, `ENOENT`, `ENOSPC`, `EFBIG`, `ENOMEM`); only to a request with `i=`; `q=1` hides OK, `q=2` hides everything |
-| Frames by descriptor | A program in a session can send an image's pixels as a sealed memfd over `BLIT_FRAME_SOCKET` instead of base64, and place and delete it with Kitty escapes ([ADR 0202](adr/0202-local-frames-by-descriptor.md)) |
+| Frames by descriptor | A program in a session can send an image's pixels as a sealed memfd over `BLIT_FRAME_SOCKET` instead of base64, and place and delete it with Kitty escapes ([ADR 0202](adr/0202-local-frames-by-descriptor.md)). Local only: over ssh, pictures stay Kitty escapes |
 | Limits | 16 images per session (shared with Sixel), 8 placements per image, 4096×4096 pixels, 64 MiB per image |
 
 Images scroll with their text and are clipped at the edge of the pane.

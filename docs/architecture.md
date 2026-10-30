@@ -7,9 +7,10 @@ are in the [decision records](adr/README.md); what it can do is in
 ## Shape
 
 ```text
- API clients (HTTP + WebSocket)        evdev: keyboards, mice, touchpads, gamepads
-              │                                         │
-              ▼                                         ▼
+ API clients            frame socket:              evdev: keyboards, mice,
+ (HTTP + WebSocket)      pictures by memfd          touchpads, gamepads
+         │                       │                           │
+         ▼                       ▼                           ▼
  ┌─────────────────────────── main loop (select) ───────────────────────────┐
  │  API gateway ── settings document ── input routing ── PTY sessions        │
  │        │                                   │               │              │
@@ -43,8 +44,9 @@ Beside the main loop:
 | API gateway | `src/blit_server.c` | HTTP and WebSocket parsing, bearer tokens, the OpenAPI routes, errors as `application/problem+json`, the event stream with replay and back-pressure |
 | Settings | `src/blit_server.c` | one revisioned document (`/v1/settings`), applied at start and on every change, written to `/var/lib/blit/settings.json` |
 | Sessions | `src/blit_server.c` | PTYs, child processes started with `execve` (no shell in between), their user, environment and lifecycle |
-| Terminal emulator | `src/blit_server.c` | the byte parser, cells and attributes, scrollback, alternate screen, Kitty and Sixel images; see the [terminal reference](terminal.md) |
-| Topology | `src/blit_display_layout.h`, `src/blit_display_geometry.h` | monitors, panes per monitor (up to 8×8), which session is in which pane |
+| Terminal emulator | `src/blit_server.c`, `src/blit_graphics.h` | the byte parser, cells and attributes, scrollback, alternate screen, Kitty and Sixel images; see the [terminal reference](terminal.md) |
+| Frame socket | `src/blit_frames.h` | pictures by descriptor from programs on this machine: a sealed memfd per frame into a session's Kitty image, checked by session token and sender uid (ADR 0202) |
+| Topology | `src/blit_display_layout.h` | monitors, panes per monitor (up to 8×8), which session is in which pane |
 | Input | `src/blit_server.c`, `src/blit_touchpad.h`, `src/blit_input_*.h` | evdev discovery and identity, keyboard and pointer settings, routing to sessions, pointer lock |
 | Glyphs | `src/blit_font.c`, `src/blit_raster.c`, `src/blit_cell_geometry.h` | text fonts, the glyph stack, HarfBuzz shaping, colour glyphs, cell-exact line drawing, the glyph cache |
 | KMS | `src/blit_kms.c`, `src/blit_kms_hotplug.h` | connectors, modes, buffers, page flips, refresh scheduling, hotplug |
@@ -91,7 +93,10 @@ A program can hold its pane still while it draws with synchronized output
 
 Blit runs as root by default, because it opens the display, input devices
 and the console, and starts sessions as other users. The API is protected
-by a bearer token; without one it listens on loopback only. Sessions can be
+by a bearer token; without one it listens on loopback only. The frame socket
+is local only and takes frames from a session's own user (or root) holding
+that session's token; it never opens a name it is given (ADR 0066, 0202).
+Sessions can be
 limited to an allow-list of commands. An unprivileged profile runs it as
 user `blit` with the device groups it needs. Package installation is a
 separate root helper that only accepts a package named `blit` with the

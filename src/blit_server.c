@@ -28992,10 +28992,31 @@ int main(int argc, char **argv)
     struct sockaddr_in address;
     static BlitRuntime runtime;
 
+    if (argc > 1 && (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-V") == 0)) {
+        printf("blit %s\n", BLIT_BUILD_VERSION);
+        return 0;
+    }
+    if (argc > 1 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
+        printf("Usage: blit [port]\n"
+               "       blit --version | --help\n"
+               "\n"
+               "The Blit display server: drives the monitors through Linux DRM/KMS and\n"
+               "serves terminal sessions, pictures and its HTTP/WebSocket API on port\n"
+               "(default 8080). Normally run by systemd as blit.service.\n"
+               "\n"
+               "Startup settings come from the environment (/etc/blit/blit.env under\n"
+               "systemd); everything else is saved through the API.\n"
+               "\n"
+               "  -V, --version  print the version and exit\n"
+               "  -h, --help     print this help and exit\n"
+               "\n"
+               "See blit(8) and blit.env(5).\n");
+        return 0;
+    }
     if (argc > 1)
         port = atoi(argv[1]);
     if (port < 1 || port > 65535) {
-        fprintf(stderr, "usage: %s [port]\n", argv[0]);
+        fprintf(stderr, "usage: %s [port]\n       %s --version | --help\n", argv[0], argv[0]);
         return 2;
     }
     /* ADR 0195: the font list reads outline fonts through the native raster. */

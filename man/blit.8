@@ -7,6 +7,9 @@ blit, blit-server \- API-driven native KMS display and terminal server
 .SH SYNOPSIS
 .B blit
 .RI [ port ]
+.br
+.B blit
+.BR \-\-version " | " \-\-help
 .SH DESCRIPTION
 .B blit
 drives the machine's displays directly through the Linux kernel's mode
@@ -41,6 +44,18 @@ It is normally not started by hand.
 TCP port for the API, 1 to 65535.
 The default is 8080, which the packaged service also uses.
 Any other argument is ignored.
+.TP
+.BR \-V ", " \-\-version
+Print the version, as
+.BR "blit @VERSION@" ,
+and exit.
+The running server's version is also in
+.B BLIT_VERSION
+in every session and at
+.BR /v1/version .
+.TP
+.BR \-h ", " \-\-help
+Print a short usage summary and exit.
 .PP
 Everything else is configured through the environment (below) at startup,
 and through the API's saved settings document afterwards.
@@ -376,7 +391,8 @@ The session's identity, and a token for its own requests.
 .BR BLIT_FRAME_SOCKET ", " BLIT_FRAME_TOKEN
 Where to send this session's picture frames by descriptor, and the random
 secret that proves the sender is in this session (ADR 0202). Set only when
-the frame socket is up.
+the frame socket is up. Local only: a program reached over ssh, or on
+another machine, sends its pictures through the terminal instead.
 .TP
 .B BLIT_PANE_ID
 The pane the session is in, when it has one.

@@ -5,7 +5,7 @@ internal issue tracker's, not GitHub's. What already works is in
 [features](features.md); the plans and restart notes from the 0.1 and 0.2
 lines are kept in [history](history/roadmap-0.1-0.2.md).
 
-## Where we are (0.3.15, 2026-10-30)
+## Where we are (0.3.20, 2026-10-30)
 
 Blit is the display server under Hibr on the owner's machine, released
 continuously through Hibr's apt repository. The 0.3 line started at 0.3.0
@@ -18,6 +18,11 @@ once it was stable for daily use. Since then:
 - The GPU compositor is the default (0.3.11).
 - Terminal fixes found by writing the terminal reference (0.3.12).
 - Frames no longer held or scheduled late (0.3.13–0.3.15).
+- Startup cannot hang on a stuck GPU, rotation plumbing removed, the DRM test
+  double sleeps instead of polling (0.3.16).
+- Pictures by descriptor: video reaches Blit as shared memory instead of
+  text through the terminal, on this machine (0.3.17–0.3.19, ADR 0202).
+- `blit --version` and `blit --help` (0.3.20).
 
 SDL is gone (ADR 0184): native KMS is the only way Blit presents, composed
 on the GPU by default (0.3.11), or on the CPU.
@@ -34,6 +39,13 @@ video, the browser, games) on the owner's machine, timed per output.
   on the game's monitor, 10.5% → 0% on the other. The font-size stall (#146)
   was the settings fsync, off the loop since 0.2.30; the owner confirms it
   no longer happens (close the ticket).
+- Done: video through Hibr. A YouTube window cost Hibr's desktop 69%, its
+  hold 23% and Blit 21% of a core as Kitty images through the terminal; by
+  descriptor (ADR 0202, Hibr 0.99.398) hold is 3% and Blit 10%. What remains
+  is Hibr's desktop producing the frames (about 35%), Hibr's to reduce.
+- Done: dragging windows, measured with the owner: 58 fps on one monitor,
+  41–50 fps across both, at most 3% of flips late; the owner finds it smooth.
+  The cost while dragging is Hibr's, not Blit's.
 - Done: the 106 ms loop stall of #95 (measured on the 0.1.535 loop) does not
   recur on 0.3.15: in 4 h on the owner's machine the worst loop gap was
   30 ms and the worst frame gap 42 ms, and in a 60 s sample no 500 ms window
@@ -60,7 +72,9 @@ already be fixed.
 - Shrinking the font leaves joined Hibr views in their old layout: a second
   menu bar, another display's window (#147). Blit's grids and PTYs are
   right; Hibr's to fix. Blit adds a gate for its side and re-runs the sweep.
-- Startup must not block before the API is listening (#109).
+- Startup must not block before the API is listening (#109): since 0.3.16
+  a GPU start that hangs is killed after 10 s and the next start runs on the
+  CPU with the API up; close the ticket once the owner agrees.
 - Display mode selection, which needs a resize handshake with the desktop
   (#60).
 - A stable display name so per-display settings survive a restart (#103).
@@ -73,8 +87,6 @@ already be fixed.
 
 ### 5. Housekeeping
 
-- Remove the unused display rotation plumbing (#143).
-- The DRM test double should not poll every millisecond (#144).
 - The gate runner must stop cleanly on Ctrl+C (#106); one entry point and CI
   for the gates (#27); a GPU in the gate suite (#79).
 - Intermittent loss of fake input devices in a gate (#124).

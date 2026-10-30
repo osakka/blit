@@ -441,6 +441,31 @@ the authoritative topology snapshot supplied by Blit. Blit does not ship or
 invoke a shell launcher. Re-running against an existing held Hibr desktop uses
 the documented `--resume` path, while auxiliary clients always use `--join`.
 
+## Pictures: by descriptor here, through the terminal from elsewhere
+
+Hibr's pictures -- video, browser pages, games, the wallpaper -- reach Blit
+by one of two paths, and Hibr picks between them on its own:
+
+- **On this machine** (Hibr 0.99.398 or later, Blit 0.3.19 or later): Hibr's
+  console writes each frame to a sealed memfd and passes it over
+  `BLIT_FRAME_SOCKET`, through hold where the desktop is held. Placement,
+  layering and deletion stay Kitty escapes on the terminal, under the same
+  image id ([ADR 0202](adr/0202-local-frames-by-descriptor.md)). The login
+  screen passes the two frame variables, and only those, into the session
+  it starts. The wallpaper stays a Kitty image, since it is placed rarely.
+- **From anywhere else** -- Hibr reached over ssh, run on another machine,
+  or on macOS: the variables are absent or the socket unreachable, so Hibr
+  sends Kitty images through the terminal (one image id per picture,
+  changed in place, [ADR 0200](adr/0200-kitty-images-change-in-place.md)).
+  A held desktop with even one such display sends all its displays this
+  way, so hold needs only one encoder.
+
+Nothing needs configuring. To see which path is in use, read a session's
+`frames.accepted` in `GET /v1/terminal-sessions`: it climbs while pictures
+arrive by descriptor and stays still otherwise. With a video playing on the
+owner's machine, the descriptor path cut Hibr's hold from 23% to 3% of a
+core and Blit from 21% to 10% (the ADR's "Result").
+
 ## Current integration status
 
 The standalone PTY route and the ABI-level `console-blit` provider are

@@ -219,7 +219,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0199 — Pixel fonts keep their own glyphs and borrow the glyph stack for the rest](0199-pixel-fonts-on-the-glyph-stack.md)
 - [0200 — Kitty images change in place: replace by id, and edit the root frame](0200-kitty-images-change-in-place.md)
 - [0201 — File-manager icons: one drawing per kind, colourways by a primary colour](0201-file-manager-icons.md)
-- [0202 — Local picture frames by descriptor, not through the terminal (proposed)](0202-local-frames-by-descriptor.md)
+- [0202 — Local picture frames by descriptor, not through the terminal](0202-local-frames-by-descriptor.md)
 
 ## Adding an ADR
 

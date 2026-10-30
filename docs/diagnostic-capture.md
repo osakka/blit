@@ -457,8 +457,10 @@ after the outputs are initialised and before the first frame.
 What is in each section is the setting Blit owns and nothing else:
 
 ```text
-displays   rotation only, which native KMS refuses (ADR 0184), so in
-           practice the section stays empty. Power is not persisted -- the
+displays   nothing for a display that is attached: rotation went with SDL
+           (ADR 0184), and an attached display's old entry is dropped on the
+           next save. An entry for a display not attached now is kept for
+           when it returns. Power is not persisted -- the
            startup modeset turns the panel on anyway, so a stored `off` would
            be a dark boot whose only remedy is an API nobody can see. Brightness
            is not persisted either: systemd-backlight already restores it.

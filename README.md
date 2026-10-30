@@ -65,8 +65,9 @@ The package installs and starts `blit.service`, generates an API token in
 
 ```sh
 man blit                                   # the server, its settings and files
+blit --version                             # the installed Blit
 TOKEN=$(sudo sed -n 's/^BLIT_AUTH_TOKEN=//p' /etc/blit/blit.env)
-curl -s http://127.0.0.1:8080/v1/version
+curl -s http://127.0.0.1:8080/v1/version    # the running Blit
 curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8080/v1/displays
 ```
 

@@ -64,7 +64,7 @@ The complete list of escape sequences is in the [terminal reference](terminal.md
 | Images scroll with their text | 0.1.491 | 0087 | Tested |
 | Kitty images changed in place, redrawing only the changed rectangle | 0.3.1 | 0200 | Tested |
 | Kitty replies: `OK`, and an error for every failure; quiet levels respected | 0.3.3; errors 0.3.12 | 0200 | Tested |
-| Picture frames by descriptor: a sealed memfd over a local, token-checked socket instead of base64 through the terminal (for video and pages) | 0.3.17 | 0202 | Tested (Hibr's side in progress) |
+| Picture frames by descriptor: a sealed memfd over a local, token-checked socket instead of base64 through the terminal (for video and pages). Local only: a program over ssh or on another machine sends pictures through the terminal | 0.3.17; login sessions 0.3.19 | 0202 | Used (with Hibr 0.99.398) |
 | 16 images per session | 0.3.17 | 0202 | Tested |
 | Sixel images, up to 8 MiB of data each | 0.1; large 0.3.12 | 0021 | Used |
 | Pixel-exact image scaling | 0.1.557 | 0139 | Used |
@@ -185,12 +185,13 @@ Errors are `application/problem+json` with stable codes.
 | Restart in place through the API, without a reboot | 0.1.451 | — | Used |
 | Debian package on Hibr's apt repository, with a release receipt per version | 0.2.2 | 0091 | Used |
 | Manual pages: `blit(8)`, `blit.env(5)`, `blit-update-helper(8)` | 0.3.10 | — | Tested |
+| `blit --version` and `blit --help` | 0.3.20 | — | Tested |
 
 ## Diagnostics
 
 | Feature | Since | Status |
 | --- | --- | --- |
-| Runtime counters: frames, flips, missed refreshes, GPU time, per-output phases | 0.1; GPU time 0.2.16 | Used |
+| Runtime counters: frames, flips, missed refreshes, GPU time, per-output phases, when after the vblank each flip was submitted | 0.1; GPU time 0.2.16; submit phase 0.3.14 | Used |
 | Event log, correlated trace, observation snapshot, process view | 0.1; processes 0.2.17 | Used |
 | Console watchdog: restores the screen and reports where the loop stalled | 0.1.587; report 0.2.26 | Used |
 | Screenshots and session output capture | 0.1; capture 0.2.31 | Used |

@@ -1,8 +1,8 @@
 # ADR 0202: local picture frames by descriptor, not through the terminal
 
-- Status: accepted; Blit's half implemented in 0.3.17 (2026-10-30), Hibr's
-  half (the console writer and hold's descriptor passing) in progress.
-  Reviewed by the Hibr maintainers; their answers and changes are folded in.
+- Status: accepted and in use. Blit's half in 0.3.17–0.3.19, Hibr's in
+  0.99.397–0.99.398 (2026-10-30). Reviewed by the Hibr maintainers; their
+  answers and changes are folded in. Measured result under "Result".
 - Scope: moving large or frequent pictures (video, a game, a browser page)
   from a program in a Blit session to Blit without encoding them into the
   terminal stream
@@ -59,7 +59,7 @@ must not be opened.
    z-order and deletion stay in the terminal stream as Kitty escapes under
    the same image id.
 
-## Decision (proposed)
+## Decision
 
 Option 3.
 
@@ -79,7 +79,7 @@ Option 3.
   against shrinking, growing and writing (`F_SEAL_SHRINK | F_SEAL_GROW |
   F_SEAL_WRITE`; the producer has to unmap its writable mapping before
   `F_SEAL_WRITE` will succeed), checks its size covers `stride x height`,
-  maps it read-only, uploads the pixels (or the rectangle) into that
+  reads it with `pread` (never mapped, never written), uploads the pixels (or the rectangle) into that
   session's image `i=`, and closes it. No name is opened, created or
   unlinked; ADR 0066's invariant is untouched.
 - **Two channels, ordered by a sequence number.** Creation, placement and
@@ -117,6 +117,13 @@ Option 3.
   display puts all of them back on `t=d`, so hold never needs a second
   encoder); and the wallpaper stays on `t=d` (placed rarely and already
   kept).
+- **Local only.** A descriptor cannot leave the machine, so the channel
+  exists only for a program on the same host as Blit. A program reached
+  over ssh, or running anywhere else, has no `BLIT_FRAME_SOCKET` (ssh does
+  not forward it), and if it had one it could not reach an abstract socket
+  in another kernel, nor pass the token check of a Blit it did reach. It
+  sends its pictures through the terminal as before (`t=d`); nothing about
+  this channel changes that path.
 - **Linux only.** memfd and descriptor passing are Linux; Hibr on macOS
   stays on `t=d`.
 - **A login session** (0.3.19). The login screen starts the user's session
@@ -155,7 +162,9 @@ one message per `recvmsg` (`SOCK_SEQPACKET`).
   | 12 | 4 | token length, 1–64 |
   | 16 | n | `BLIT_FRAME_TOKEN` |
 
-  Answered `OK\n`, or `ERROR EACCES\n` and the connection closes. A
+  Answered `OK\n`, or `ERROR 0 EACCES\n` (wrong token, or a uid that may
+  not send to that session) or `ERROR 0 EINVAL\n` (not a hello), and the
+  connection closes. A
   frame before a successful hello closes the connection.
 - **Frame**, 48 bytes and exactly one memfd in `SCM_RIGHTS`:
 
@@ -178,8 +187,10 @@ one message per `recvmsg` (`SOCK_SEQPACKET`).
   must lie inside the image. An image's first frame is a whole one; a
   whole frame with a new width or height resizes it, placements kept.
 - **Replies** only on error, one line: `ERROR <image id> <code>\n`, the
-  codes as Kitty's (`EINVAL`, `ENOENT`, `ENOSPC`, `EFBIG`). Accepted frames
-  are not answered.
+  codes as Kitty's (`EINVAL`, `ENOENT`, `ENOSPC`, `EFBIG`, `ENOMEM`).
+  Accepted frames are not answered. A frame from a uid that may no longer
+  send to the session (its user signed out) is answered `ERROR 0 EACCES`
+  and the connection closes.
 - **Newest wins.** Frames are read as they arrive; of several waiting for
   one image only the newest is applied, the others' descriptors closed
   unread.
@@ -188,24 +199,44 @@ one message per `recvmsg` (`SOCK_SEQPACKET`).
 
 - A video frame costs a memfd write in the producer, a descriptor hop
   through hold and one GPU upload in Blit: no base64, no PTY copy, no hold
-  copy of the pixels. The expected result is most of the 69% + 23% + 21%
-  above; it is to be measured, not claimed.
-- Blit gains a second listener. It is local, mode 0660, group `blit`; the
-  session token and peer uid are what authorise a frame, and a frame can
-  only ever reach its own session's images.
-- Hibr's work: write frames to a memfd and send them by descriptor where
-  `BLIT_FRAME_SOCKET` is set, and pass descriptors through hold. Until then
-  step 1 above applies.
+  copy of the pixels. Measured under "Result".
+- Blit gains a second listener. It is local and abstract, so it has no file
+  and no file mode: the session token and the peer's uid are what authorise
+  a frame, and a frame can only ever reach its own session's images.
+- Two picture paths stay in Blit for good: descriptors for a program on this
+  host, the terminal for everything else (ssh, another machine, macOS).
 - Later, the GLES compositor could import a dma-buf the same way (zero copy
   to the GPU); this record does not decide that.
 
-## Evidence to gather
+## Result
 
-- The same 60 s video measurement on the owner's machine before and after,
-  per process, with the same windows open.
-- A gate: a client sends frames by descriptor into a placed image and the
-  screenshot shows them; a wrong token, a wrong uid, an unsealed or short
-  memfd and an oversized frame are each refused with their code; a frame
-  before its `a=p` is drawn when placed; a frame after its `a=d` gets
-  `ENOENT`; an older sequence number is dropped; nothing under `/dev/shm`
-  is opened.
+The same 60 s YouTube measurement on the owner's machine, a video playing
+in a Hibr window across three displays (two 1920x1080, one 2560x1440):
+
+| process | Kitty `a=T` (0.99.395) | one id, `a=f` (0.99.397) | by descriptor (0.99.398, Blit 0.3.19) |
+|---|---|---|---|
+| Hibr desktop | 69.3% | 32.0% | 34.5% |
+| Hibr hold | 22.9% | 25.4% | 2.9% |
+| Blit | 21.4% | 25.3% | 9.6% |
+
+The 0.99.397 column composes twice the pixels of the first (all displays,
+not one view). By descriptor, each display's session accepted 706 frames
+(11.7/s) with none refused, stale or superseded, and no picture byte crossed
+a PTY (`graphics_payloads_kitty` +0). What remains is Hibr's desktop
+producing the frames.
+
+## Verification
+
+- The same 60 s video measurement, above.
+- `tools/tests/frame_descriptor_gate.sh` (the Hibr suite) sends frames by
+  descriptor into a placed image and checks the screenshot. It covers: a
+  wrong token refused at the hello; unsealed, short, oversized and unknown
+  frames refused with their codes; newest wins and an older sequence is
+  dropped; a rectangle edit; a frame before its `a=p` drawn when placed; a
+  held `a=p` placed when its first frame lands, or refused `ENOENT` after
+  two seconds; a frame after its `a=d` refused `ENOENT`.
+- Not gated: the uid rules (a wrong uid at the hello, a signed-out user's
+  later frames), which need a second uid and so root; they are
+  `frame_peer_allowed` in `src/blit_frames.h`. That no name is ever opened
+  holds by construction: the frame path calls no `open`, `shm_open` or
+  `unlink`.
