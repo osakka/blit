@@ -5,7 +5,7 @@ internal issue tracker's, not GitHub's. What already works is in
 [features](features.md); the plans and restart notes from the 0.1 and 0.2
 lines are kept in [history](history/roadmap-0.1-0.2.md).
 
-## Where we are (0.3.12, 2026-10-29)
+## Where we are (0.3.15, 2026-10-30)
 
 Blit is the display server under Hibr on the owner's machine, released
 continuously through Hibr's apt repository. The 0.3 line started at 0.3.0
@@ -17,6 +17,7 @@ once it was stable for daily use. Since then:
 - Documentation rewritten, manual pages added (0.3.10).
 - The GPU compositor is the default (0.3.11).
 - Terminal fixes found by writing the terminal reference (0.3.12).
+- Frames no longer held or scheduled late (0.3.13–0.3.15).
 
 SDL is gone (ADR 0184): native KMS is the only way Blit presents, composed
 on the GPU by default (0.3.11), or on the CPU.
@@ -28,7 +29,11 @@ on the GPU by default (0.3.11), or on the CPU.
 Measured, not guessed: the same workloads (dragging windows, wallpaper,
 video, the browser, games) on the owner's machine, timed per output.
 
-- A font-size change that stalls the loop for over 10 s on the real GPU (#146).
+- Done: the Hibr frame barrier no longer holds every frame, and animation
+  frames start just after a vblank (0.3.13–0.3.15): late flips 14.7% → 6.0%
+  on the game's monitor, 10.5% → 0% on the other. The font-size stall (#146)
+  was the settings fsync, off the loop since 0.2.30; the owner confirms it
+  no longer happens (close the ticket).
 - Isolated loop stalls and skipped refreshes (#95).
 - Pointer and dragging latency (#101); high refresh rates, 120/240 Hz (#21).
 - The 0.2 architecture tickets: retained GPU composition and movement
