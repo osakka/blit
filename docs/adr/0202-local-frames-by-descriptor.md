@@ -1,6 +1,7 @@
 # ADR 0202: local picture frames by descriptor, not through the terminal
 
-- Status: proposed (2026-10-30), for review with the Hibr maintainers
+- Status: proposed (2026-10-30); reviewed by the Hibr maintainers the same
+  day (their answers and changes are folded in below)
 - Scope: moving large or frequent pictures (video, a game, a browser page)
   from a program in a Blit session to Blit without encoding them into the
   terminal stream
@@ -67,27 +68,49 @@ Option 3.
   names a live session and that the peer's uid (`SO_PEERCRED`) is that
   session's user. Everything the client sends after that applies to that
   session only.
-- **A frame.** A fixed binary header (image id, width, height, format 24 or
-  32, stride, and for an edit the rectangle `x y w h`) and one memfd passed
-  with `SCM_RIGHTS`. Blit requires the memfd sealed against shrinking and
-  writing (`F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_WRITE`), checks its size
-  covers `stride x height`, maps it read-only, uploads the pixels (or the
-  rectangle) into that session's Kitty image `i=`, and closes it. No name
-  is opened, created or unlinked; ADR 0066's invariant is untouched.
-- **Everything else stays Kitty.** The client places, moves, layers and
-  deletes the image with ordinary escapes on its PTY (`a=p`, `a=d`, `z=`).
-  A frame for an image the session has not placed is stored and drawn when
-  placed, as a transmission is today.
-- **Through hold.** The Hibr desktop runs behind `hold`; the program in
-  the Blit session is hold's client. The desktop passes the memfd to the
-  client over hold's own local socket and the client forwards it to Blit
-  with its session token. A client that is not in a Blit session (an ssh
-  attach, a plain terminal) keeps `t=d`.
+- **A frame.** A fixed binary header -- image id, a sequence number, width,
+  height, format 24 or 32, stride, and for an edit the rectangle `x y w h`
+  -- and one memfd passed with `SCM_RIGHTS`. Blit requires the memfd sealed
+  against shrinking, growing and writing (`F_SEAL_SHRINK | F_SEAL_GROW |
+  F_SEAL_WRITE`; the producer has to unmap its writable mapping before
+  `F_SEAL_WRITE` will succeed), checks its size covers `stride x height`,
+  maps it read-only, uploads the pixels (or the rectangle) into that
+  session's image `i=`, and closes it. No name is opened, created or
+  unlinked; ADR 0066's invariant is untouched.
+- **Two channels, ordered by a sequence number.** Creation, placement and
+  deletion travel on the PTY and pixels on the socket, with no ordering
+  between the two. So an image is either a Kitty image or a *descriptor
+  image*, never both:
+  - a descriptor image's pixels only ever travel on the socket, its first
+    frame included; the PTY carries only `a=p`, `a=d` and `z=` for it;
+  - each frame carries a sequence number that rises per id, and Blit drops
+    a frame that is not newer than the one it holds;
+  - a frame for a deleted id gets `ENOENT` and is dropped; producers never
+    reuse an id;
+  - a frame for an id not yet placed is kept and drawn when the `a=p`
+    arrives.
+- **Through hold** (Hibr's design, from their review). Unheld, the desktop's
+  console connects to `BLIT_FRAME_SOCKET` itself: one hop. Held, two hops:
+  the desktop opens a frame connection to its own hold server (uid checked
+  with `SO_PEERCRED`), and the server passes the same descriptor to each
+  client whose view holds the picture and whose terminal speaks kitty -- one
+  window across two views goes to both. The server keeps the last memfd per
+  image so a client that attaches later gets the current frame, and drops it
+  on delete. Ids are the ones each client sees. A client not in a Blit
+  session (an ssh attach, a plain terminal) never receives a descriptor and
+  stays on `t=d`.
+- **The producer** is Hibr's console (`cn_image`, through which every
+  picture reaches the terminal), so one writer covers video, pages, games
+  and pictures.
+- **Linux only.** memfd and descriptor passing are Linux; Hibr on macOS
+  stays on `t=d`.
 - **Offered, not assumed.** A session gets `BLIT_FRAME_SOCKET` only when
   the channel is up; a client without it, or refused at the hello, uses
   `t=d`. The Kitty `a=q` probe is unchanged.
-- **Bounds.** The same limits as a Kitty image (4096x4096, 64 MiB, 8 images
-  per session). One frame in flight per image: a newer frame for the same id
+- **Bounds.** The same limits as a Kitty image (4096x4096, 64 MiB), with
+  the per-session image count raised from 8 to 16 for both: a desktop can
+  hold a wallpaper, a video, a browser page and two previews at once, and
+  hold keeps one more during a replacement. One frame in flight per image: a newer frame for the same id
   replaces one not yet uploaded, so a slow GPU drops frames instead of
   queueing them. Errors are a one-line reply on the socket, with the same
   codes as Kitty (`EINVAL`, `ENOENT`, `ENOSPC`, `EFBIG`).
@@ -113,5 +136,7 @@ Option 3.
   per process, with the same windows open.
 - A gate: a client sends frames by descriptor into a placed image and the
   screenshot shows them; a wrong token, a wrong uid, an unsealed or short
-  memfd and an oversized frame are each refused with their code; nothing
-  under `/dev/shm` is opened.
+  memfd and an oversized frame are each refused with their code; a frame
+  before its `a=p` is drawn when placed; a frame after its `a=d` gets
+  `ENOENT`; an older sequence number is dropped; nothing under `/dev/shm`
+  is opened.
