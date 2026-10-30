@@ -119,6 +119,15 @@ Option 3.
   kept).
 - **Linux only.** memfd and descriptor passing are Linux; Hibr on macOS
   stays on `t=d`.
+- **A login session** (0.3.19). The login screen starts the user's session
+  from an empty environment and passes on nothing of Blit's but its
+  version (Hibr 0.99.357: the API token is the screen's, not the
+  session's). It may pass `BLIT_FRAME_SOCKET` and `BLIT_FRAME_TOKEN`, and
+  only those: the frame token reaches nothing but this session's images,
+  and only from the signed-in user's uid (or root). Blit checks the
+  sender's uid on every frame, not only at the hello, so a connection left
+  over from a user who signed out is refused and closed rather than
+  reaching the login screen or the next user.
 - **Offered, not assumed.** A session gets `BLIT_FRAME_SOCKET` only when
   the channel is up; a client without it, or refused at the hello, uses
   `t=d`. The Kitty `a=q` probe is unchanged.

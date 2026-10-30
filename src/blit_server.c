@@ -785,6 +785,7 @@ typedef struct {
     int fd;
     int authenticated;
     unsigned long long session_id;
+    uid_t uid;  /* the peer's, from SO_PEERCRED at the hello */
 } BlitFrameClient;
 
 #define BLIT_FRAME_DELETED 64

@@ -1,5 +1,25 @@
 # Verification status
 
+## 2026-10-30: 0.3.19 the frame sender's uid is checked on every frame (ADR 0202)
+
+- **Why:** the Hibr maintainers found the main view (the login session) on
+  `t=d`: the login screen starts the user's session from an empty
+  environment, so its hold client never saw `BLIT_FRAME_SOCKET`/`TOKEN`.
+  Hibr 0.99.398 passes those two, and only those, into the session.
+- **Blit's part:** the uid allowed for a login session follows the
+  signed-in user, but it was checked only at the hello. Now every frame is
+  checked; a connection whose uid is no longer allowed (its user signed
+  out) is answered `EACCES` and closed (`frame-peer-signed-out`).
+- **Step 1 measured live** (Hibr 0.99.397, whole-frame `a=f` into one id,
+  YouTube in a window, 60 s): desktop 69.3% → 32.0%, hold 22.9% → 25.4%,
+  Blit 21.4% → 25.3%, with the video at 1221x682 against 924x462 (about
+  twice the pixels); 560 partial GPU uploads per output; no `a=T` per frame.
+- **Not testable without root:** a second uid. `frame_descriptor_gate`
+  still passes on both compositors.
+- **Suites:** font 38/38, full 157/157; GLES 66/67, the failure
+  `settings_persistence_gate.rb` once in the suite (it passed in the full
+  suite and 3/3 alone; nothing here touches settings).
+
 ## 2026-10-30: 0.3.18 a placement may arrive before its first frame (ADR 0202)
 
 - **Found by the Hibr maintainers:** inside hold the frame goes to the

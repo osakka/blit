@@ -330,6 +330,7 @@ static void frame_hello(BlitRuntime *runtime, int index, const unsigned char *me
             frame_peer_allowed(session, peer.uid)) {
             client->session_id = session->id;
             client->authenticated = 1;
+            client->uid = peer.uid;
             ++session->frame_connections;
             frame_reply(client->fd, "OK\n");
             return;
@@ -395,8 +396,17 @@ static void frame_client_service(BlitRuntime *runtime, int index)
             continue;
         }
         session = find_session_id(runtime, client->session_id);
-        if (session == NULL) {
+        /* Who may send is checked on every frame, not only at the hello: a
+           login session's user changes, and a connection left over from
+           one who signed out must not reach the next screen or user. */
+        if (session == NULL || !frame_peer_allowed(session, client->uid)) {
             for (j = 0; j < fd_count; ++j) close(fds[j]);
+            if (session != NULL) {
+                ++session->frames_refused;
+                snprintf(session->frames_last_error, sizeof(session->frames_last_error),
+                         "%s", "frame-peer-signed-out");
+            }
+            frame_reply(client->fd, "ERROR 0 EACCES\n");
             frame_client_close(runtime, index);
             break;
         }
