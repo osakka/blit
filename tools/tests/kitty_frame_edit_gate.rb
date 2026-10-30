@@ -180,7 +180,10 @@ Dir.mktmpdir('blit-kitty-frame-edit') do |root|
       # a 64x64 image at row 3: 8x4 cells of 8x16
       '\\033[4;1H' + chunked('a=T,f=24,s=64,v=64,i=10,q=2,C=1', solid([9, 9, 9], 64, 64)),
       # an 8x8 edit inside one cell's worth of it
-      esc('a=f,r=1,i=10,x=40,y=36,s=8,v=8,f=24,q=2', Base64.strict_encode64(solid([200, 100, 50], 8, 8)))
+      esc('a=f,r=1,i=10,x=40,y=36,s=8,v=8,f=24,q=2', Base64.strict_encode64(solid([200, 100, 50], 8, 8))),
+      # A whole-picture edit, as a video frame on an edit-capable terminal
+      # would be sent: the full extent of image 9 in one a=f.
+      esc("a=f,r=1,i=9,x=0,y=0,s=#{SIZE},v=#{SIZE},f=24,q=2", Base64.strict_encode64(red))
     ]
     steps.each_with_index { |text, i| File.write(File.join(root, "step#{i}"), text) }
     script = steps.each_index.map do |i|
@@ -246,6 +249,12 @@ Dir.mktmpdir('blit-kitty-frame-edit') do |root|
     if gpu_composing?
       Timeout.timeout(5) { sleep 0.05 until partial_uploads > uploads_before }
     end
+    whole = run.call(8)
+    whole9 = JSON.parse(request('GET', "/v1/terminal-sessions/#{session}")[1])['graphics'].find { |g| g['id'] == 9 }
+    check(whole9 && whole9['pixel_crc32'] == Zlib.crc32(red), "a whole-extent edit wrote the wrong pixels: #{whole9.inspect}")
+    check(whole9['visible'] && whole9['x'] == first['x'] && whole9['y'] == first['y'],
+          "a whole-extent edit lost the placement: #{whole9.inspect} (#{whole.inspect})")
+    check(screen_pixel(display, 2, 2) == [255, 0, 0], 'the screen does not show the whole-extent edit')
     # Hibr's probe, byte for byte, read back from a raw-mode session.
     replies = File.join(root, 'probe-replies')
     probe = esc('i=4202,s=1,v=1,a=t,t=d,f=24', 'AAAA') +
@@ -261,7 +270,7 @@ Dir.mktmpdir('blit-kitty-frame-edit') do |root|
     got = File.exist?(replies) ? File.binread(replies) : ''
     check(got == "\e_Gi=4202;OK\e\\" * 2,
           "the probe was answered #{got.inspect}; two i=4202;OK and nothing for q=2 turn edits on")
-    puts 'KITTY_FRAME_EDIT_PASS replace=pixels+placement+screen edit=chunked+zlib blend=alpha overwrite=X1 ' \
+    puts 'KITTY_FRAME_EDIT_PASS replace=pixels+placement+screen whole_edit=placement_kept edit=chunked+zlib blend=alpha overwrite=X1 ' \
          "refused=bounds+id+frame image_intact=yes damage=#{damage[0]}x#{damage[1]}_cells " \
          "gpu_partial=#{gpu_composing? ? 'yes' : 'cpu_compositor'} hibr_probe=OK,OK,silent"
   ensure
