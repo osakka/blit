@@ -54,7 +54,12 @@ already be fixed.
 ### 3. Display robustness
 
 - A black band across the primary after Hibr's Restart Desktop (#142).
-- Odd cell heights (17, 19 px) lose the wallpaper (#114).
+- Odd cell heights (17, 19 px) lose the wallpaper (#114): reproduced live on
+  0.3.15 with three Hibr views; Hibr deletes the picture after an OK probe.
+  Passed to Hibr.
+- Shrinking the font leaves joined Hibr views in their old layout: a second
+  menu bar, another display's window (#147). Blit's grids and PTYs are
+  right; Hibr's to fix. Blit adds a gate for its side and re-runs the sweep.
 - Startup must not block before the API is listening (#109).
 - Display mode selection, which needs a resize handshake with the desktop
   (#60).
