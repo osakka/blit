@@ -13,6 +13,7 @@
 # Every other gate runs through GLES with BLIT_GATE_BACKEND=gles.
 
 require 'json'
+require 'fileutils'
 require 'net/http'
 require 'timeout'
 require 'tmpdir'
@@ -150,7 +151,43 @@ Dir.mktmpdir('blit-gles-setting') do |root|
       end
     end
   end
+
+  # 6. A GPU start that hangs rather than crashes (issue #109). The API does
+  #    not come up behind it; on the host the console watchdog kills the
+  #    server after 10 s and systemd starts it again. The guard marker must
+  #    already be on disk while it hangs, so that next start is on the CPU
+  #    and the API answers; the one after tries the GPU again.
+  FileUtils.rm_f(marker)
+  hung = spawn(env.merge('BLIT_LOGIN_AUTOSTART' => '0', 'BLIT_TEST_MODE' => '1',
+                         'BLIT_TEST_GLES_HANG_MS' => '60000',
+                         'BLIT_PSF_FONT' => File.join(GATE_ROOT, 'assets/fonts/Blit-Terminus16.psf')),
+               ENV.fetch('BLIT_GATE_BINARY', File.join(GATE_ROOT, 'build/blit/blit-server')),
+               port.to_s, out: '/dev/null', err: '/dev/null')
+  begin
+    Timeout.timeout(10) { sleep 0.1 until File.exist?(marker) }
+    sleep 1.5
+    reachable = begin
+      Net::HTTP.start('127.0.0.1', port, open_timeout: 1, read_timeout: 1) { |h| h.get('/v1/version') }
+      true
+    rescue StandardError
+      false
+    end
+    abort 'GLES_COMPOSITOR_FAIL a hung GPU start is reachable; the test hook did not hang it' if reachable
+  ensure
+    Process.kill('KILL', hung) rescue nil
+    Process.wait(hung) rescue nil
+  end
+  abort 'GLES_COMPOSITOR_FAIL a hung GPU start left no guard marker' unless File.exist?(marker)
+  server(port, env) do |base|
+    state = compositor(base)
+    abort "GLES_COMPOSITOR_FAIL the start after a hung GPU start was not on the CPU: #{state.inspect}" unless
+      state['active'] == 'cpu' && state['reason'].include?('previous GLES start')
+  end
+  server(port, env) do |base|
+    abort 'GLES_COMPOSITOR_FAIL the GPU was not tried again after the hang' unless compositor(base)['active'] == 'gles'
+  end
 end
 
 puts "GLES_COMPOSITOR_PASS #{frame_line.sub('GLES_FRAME_PASS ', 'frame=')} " \
-     'surfaceless=gles fallback=cpu_with_reason setting=saved_and_applied guard=crash_start_skipped_then_retried orderly_stop=not_a_crash'
+     'surfaceless=gles fallback=cpu_with_reason setting=saved_and_applied guard=crash_start_skipped_then_retried ' \
+     'orderly_stop=not_a_crash hung_start=cpu_next_then_gpu'

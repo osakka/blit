@@ -13,7 +13,6 @@
 #include "blit_input_identity.h"
 #include "blit_touchpad.h"
 #include "blit_audio_control.h"
-#include "blit_display_geometry.h"
 #include "blit_cell_geometry.h"
 #include "blit_damage.h"
 #include "blit_ink.h"
@@ -204,7 +203,6 @@ typedef struct {
     BlitRect bounds;
     int physical_width;
     int physical_height;
-    int rotation;
     double refresh_hz;
     int mode_count;
     int active_mode;
@@ -1797,26 +1795,18 @@ static int refresh_period_ms(double refresh_hz)
     return period;
 }
 
-/* Issue #69. The one place a display's rectangle is written. The mode the
-   connector drives goes in physical_*, and `bounds` is that mode under the
-   display's rotation. Every caller that learns a size from a backend goes
-   through here, so a rotation cannot end up half applied -- which is the
-   failure that would leave the cell grid and the scene texture disagreeing
-   about how big the display is. */
+/* Issue #69. The one place a display's rectangle is written: the mode the
+   connector drives, at its place in the arrangement. Native KMS has no
+   rotation (ADR 0184), so the logical rectangle is the mode. */
 static void set_display_geometry(BlitDisplay *display, int x, int y,
                                  int width, int height)
 {
-    int logical_width;
-    int logical_height;
-
     display->physical_width = width;
     display->physical_height = height;
-    blit_rotate_size(display->rotation, width, height, &logical_width,
-                     &logical_height);
     display->bounds.x = x;
     display->bounds.y = y;
-    display->bounds.w = logical_width;
-    display->bounds.h = logical_height;
+    display->bounds.w = width;
+    display->bounds.h = height;
 }
 
 static int display_index_for_output(const BlitRuntime *runtime,
@@ -4085,7 +4075,7 @@ static void topology_json(const BlitRuntime *runtime, char *body, size_t capacit
             body + used, capacity - used,
             "%s{\"display_id\":\"display-%llu\",\"bounds\":{"
             "\"x\":%d,\"y\":%d,\"width\":%d,\"height\":%d},"
-            "\"rotation\":%d,\"scale\":1,\"layout\":{\"columns\":%d,\"rows\":%d},\"cell_grid\":{"
+            "\"scale\":1,\"layout\":{\"columns\":%d,\"rows\":%d},\"cell_grid\":{"
             "\"columns\":%d,\"rows\":%d,\"cell_width\":%d,"
             "\"cell_height\":%d,\"pixel_width\":%d,"
             "\"pixel_height\":%d,\"origin_x\":%d,\"origin_y\":%d,"
@@ -4093,7 +4083,7 @@ static void topology_json(const BlitRuntime *runtime, char *body, size_t capacit
             i == 0 ? "" : ",", runtime->displays[i].id,
             runtime->displays[i].bounds.x, runtime->displays[i].bounds.y,
             runtime->displays[i].bounds.w, runtime->displays[i].bounds.h,
-            runtime->displays[i].rotation, pane_columns, pane_rows, geometry.columns, geometry.rows,
+            pane_columns, pane_rows, geometry.columns, geometry.rows,
             geometry.cell_width, geometry.cell_height, geometry.pixel_width,
             geometry.pixel_height, geometry.origin_x, geometry.origin_y,
             geometry.remainder_x, geometry.remainder_y);
@@ -19592,9 +19582,8 @@ static const char *display_rejected_property(const char *configuration)
 static int apply_display_rotation(BlitRuntime *runtime, int display_index,
                                   int rotation, BlitConfigProblem *problem)
 {
-    BlitDisplay *display = &runtime->displays[display_index];
-
-    if (!blit_rotation_valid(rotation)) {
+    (void)display_index;
+    if (rotation != 0 && rotation != 90 && rotation != 180 && rotation != 270) {
         config_problem(problem, 400, "Bad Request", "invalid_display_rotation",
                        "rotation must be 0, 90, 180, or 270. It is the "
                        "clockwise angle Blit rotates the image by, so at 90 "
@@ -19602,7 +19591,9 @@ static int apply_display_rotation(BlitRuntime *runtime, int display_index,
                        "top-right of the panel.");
         return 0;
     }
-    if (rotation == display->rotation)
+    /* 0 is what every display is; anything else needs a transform native
+       KMS does not have. */
+    if (rotation == 0)
         return 1;
     (void)runtime;
     config_problem(problem, 422, "Unprocessable Entity",
@@ -20228,26 +20219,6 @@ static int find_display_name(const BlitRuntime *runtime, const char *name)
     return -1;
 }
 
-/* Rotation, and only rotation.
- 
-   Power is deliberately not persisted: startup performs a modeset that
-   turns the panel on anyway, so a stored `off` would be a dark
-   boot whose only remedy is the API the operator cannot see. Brightness is
-   not persisted either, for the reason stage 4 gave about mixer values --
-   systemd-backlight already restores it across a boot, and two things
-   restoring one setting is how they end up fighting. */
-static size_t settings_display_configuration(const BlitDisplay *display,
-                                             char *out, size_t capacity)
-{
-    size_t used = 0;
-
-    out[0] = '\0';
-    if (display->rotation == 0)
-        return 0;
-    json_appendf(out, capacity, &used, "{\"rotation\":%d}", display->rotation);
-    return used;
-}
-
 static void settings_copy_unseen(BlitRuntime *runtime, const char *section,
                                  int kind, char *out, size_t capacity,
                                  size_t *used, int *first)
@@ -20269,8 +20240,8 @@ static void settings_copy_unseen(BlitRuntime *runtime, const char *section,
             continue;
         /* A stored entry whose subject is live has already been written from
            that subject, including the case where it is live and now carries
-           nothing -- a display returned to rotation 0 loses its entry, which
-           is how a setting gets cleared rather than accumulating. */
+           nothing, which is how a setting gets cleared rather than
+           accumulating. */
         if (kind == BLIT_SETTINGS_INPUT ?
                 find_input_device_id(runtime, key) != NULL :
             kind == BLIT_SETTINGS_AUDIO ?
@@ -21029,19 +21000,14 @@ static size_t settings_build(BlitRuntime *runtime, char *out, size_t capacity,
     }
     settings_copy_unseen(runtime, "audio_devices", BLIT_SETTINGS_AUDIO, out,
                          capacity, &used, &first);
+    /* Nothing of a live display is persisted: rotation went with SDL (ADR
+       0184); power is not, because startup's modeset turns the panel on and
+       a stored `off` would be a dark boot; brightness is not, because
+       systemd-backlight already restores it and two restorers fight. A live
+       display's old entry is dropped; one for a display not attached now is
+       kept for when it returns. */
     json_appendf(out, capacity, &used, "},\"displays\":{");
     first = 1;
-    for (i = 0; i < runtime->display_count; ++i) {
-        char configuration[128];
-        if (settings_display_configuration(&runtime->displays[i],
-                                           configuration,
-                                           sizeof(configuration)) == 0)
-            continue;
-        json_appendf(out, capacity, &used, "%s\"%s\":%s",
-                     first ? "" : ",", runtime->displays[i].name,
-                     configuration);
-        first = 0;
-    }
     settings_copy_unseen(runtime, "displays", BLIT_SETTINGS_DISPLAY, out,
                          capacity, &used, &first);
     json_appendf(out, capacity, &used, "},\"font\":{");
@@ -21563,12 +21529,6 @@ static void settings_apply_audio_device(BlitRuntime *runtime,
                 audio->id, problem.detail);
 }
 
-/* Issue #69. Applied after the displays are enumerated, because the physical
-   size has to exist before a rotation can exchange its axes, and before the
-   first frame, because the scene texture is sized from the result. That
-   ordering is stage 1's bug restated: a stored input setting used to be
-   applied where the device entry was allocated, which was before the kernel
-   had been asked what the device could do. */
 /* The server section, applied at boot. A chord that cannot be parsed leaves
    the default in place rather than leaving the machine with no way to stop
    the server from its own keyboard. */
@@ -25658,20 +25618,6 @@ static void surface_origin_px(BlitRuntime *runtime, const BlitSurface *surface,
         *origin_y += other->height * cell_height + BLIT_SURFACE_INSET_PX;
     }
 }
-
-/* Issue #69. The one draw that puts a composed scene on a panel.
- 
-   All three paths that present a cached scene go through it, because rotation
-   has to apply to every one of them: the pointer-cache fast path presents the
-   scene without rebuilding it, so a rotation applied only in the full-redraw
-   path would un-rotate itself the moment the pointer moved.
-
-   The destination is the scene's *own* rectangle, centred on the panel, and
-   the rotation is about that rectangle's centre. Passing the panel's
-   rectangle instead is the mistake that looks correct at 0 and 180 and crops
-   at 90; `display_geometry_gate.c` asserts the footprint for that reason. The
-   render scale is set to 1 for the draw because the scene texture is in
-   device pixels while the renderer is in font-scaled units. */
 
 static void finish_render_diagnostics(BlitRuntime *runtime,
                                       uint64_t diagnostic_render_started)

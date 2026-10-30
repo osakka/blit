@@ -281,7 +281,6 @@ suite_renderer() {
     run_gate input_identity_gate.sh "$ROOT"/tools/tests/input_identity_gate.sh
     run_gate pointer_curve_gate.sh "$ROOT"/tools/tests/pointer_curve_gate.sh
     run_gate audio_control_gate.sh "$ROOT"/tools/tests/audio_control_gate.sh
-    run_gate display_geometry_gate.sh "$ROOT"/tools/tests/display_geometry_gate.sh
     run_gate evdev_char_gate.sh "$ROOT"/tools/tests/evdev_char_gate.sh
     run_gate native_vt_kernel_gate.sh sh tools/tests/native_vt_kernel_gate.sh
     run_gate vt_watchdog_report_gate.sh sh "$ROOT"/tools/tests/vt_watchdog_report_gate.sh

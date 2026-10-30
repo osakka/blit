@@ -1851,6 +1851,12 @@ int blit_kms_open(BlitKms *kms, char *error, size_t error_capacity)
         fprintf(stderr, "blit: GLES compositor not started: %s\n", kms->gles_error);
     } else if (kms->gles_requested) {
         const char *platform = getenv("BLIT_GLES_PLATFORM");
+        /* Tests only: a GPU start that hangs rather than fails (issue #109).
+           The console watchdog ends such a start; the guard marker written
+           before it sends the next start to the CPU. */
+        if (getenv("BLIT_TEST_GLES_HANG_MS") != NULL && getenv("BLIT_TEST_MODE") != NULL &&
+            strcmp(getenv("BLIT_TEST_MODE"), "1") == 0)
+            usleep((useconds_t)atoi(getenv("BLIT_TEST_GLES_HANG_MS")) * 1000U);
         kms->gles = platform != NULL && strcmp(platform, "surfaceless") == 0 ?
             blit_gles_open_surfaceless(kms->gles_error, sizeof(kms->gles_error)) :
             blit_gles_open_gbm(kms->fd, kms->gles_error, sizeof(kms->gles_error));
@@ -2554,9 +2560,14 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
             output->flip_submit_phase = -1;
             if (output->flip_submit_sequence_valid && ns > 0) {
                 long long since = output->flip_started_us - (long long)(ns / 1000ULL);
-                if (since >= 0)
-                    output->flip_submit_phase = since / 1000 < BLIT_KMS_FLIP_PHASE_BUCKETS - 1 ?
-                        (int)(since / 1000) : BLIT_KMS_FLIP_PHASE_BUCKETS - 1;
+                /* A vblank between the submission and this read makes the
+                   flip look submitted after it; it came just before, so it
+                   counts from the vblank before that. */
+                if (since < 0 && output->info.refresh_hz >= 1.0)
+                    since += (long long)(1000000.0 / output->info.refresh_hz);
+                if (since < 0) since = 0;
+                output->flip_submit_phase = since / 1000 < BLIT_KMS_FLIP_PHASE_BUCKETS - 1 ?
+                    (int)(since / 1000) : BLIT_KMS_FLIP_PHASE_BUCKETS - 1;
             }
         }
         if (submitted_output_mask != NULL)

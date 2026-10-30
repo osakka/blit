@@ -9,6 +9,74 @@
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
+#include <dlfcn.h>
+#include <fcntl.h>
+#include <stdarg.h>
+#include <stdint.h>
+#include <sys/timerfd.h>
+#include <sys/mman.h>
+
+/* The device is a timerfd (issue #144), readable exactly when a page flip
+   has completed -- at once, or at its vblank in periodic mode -- as a real
+   DRM fd is. A regular file is always readable, so the server handled
+   events on every loop pass and this mock slept 1 ms in drmHandleEvent to
+   stop it spinning, capping the loop near 1000 passes a second. Every other
+   open goes to the C library. */
+static int mock_fds[16], mock_fd_count;
+static int mock_device(const char *path)
+{
+    const char *device = getenv("BLIT_DRM_DEVICE");
+    int fd;
+    if (device == NULL || path == NULL || strcmp(path, device) != 0)
+        return -2;
+    fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+    if (fd >= 0 && mock_fd_count < 16) mock_fds[mock_fd_count++] = fd;
+    return fd;
+}
+static int mock_is_device(int fd)
+{
+    int i;
+    for (i = 0; i < mock_fd_count; ++i) if (mock_fds[i] == fd) return 1;
+    return 0;
+}
+/* A dumb buffer is mapped through the device fd; the mock's is plain
+   memory, as a real dumb buffer is, so the map is anonymous. */
+void *mmap(void *address, size_t length, int protection, int flags, int fd, off_t offset)
+{
+    static void *(*real)(void *, size_t, int, int, int, off_t);
+    if (real == NULL) real = (void *(*)(void *, size_t, int, int, int, off_t))dlsym(RTLD_NEXT, "mmap");
+    if (fd >= 0 && mock_is_device(fd))
+        return real(address, length, protection, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    return real(address, length, protection, flags, fd, offset);
+}
+void *mmap64(void *address, size_t length, int protection, int flags, int fd, off_t offset)
+{
+    return mmap(address, length, protection, flags, fd, offset);
+}
+int open(const char *path, int flags, ...)
+{
+    static int (*real)(const char *, int, ...);
+    mode_t mode = 0;
+    int fd = mock_device(path);
+    if (fd != -2) return fd;
+    if (flags & (O_CREAT | O_TMPFILE)) {
+        va_list list; va_start(list, flags); mode = (mode_t)va_arg(list, int); va_end(list);
+    }
+    if (real == NULL) real = (int (*)(const char *, int, ...))dlsym(RTLD_NEXT, "open");
+    return real(path, flags, mode);
+}
+int open64(const char *path, int flags, ...)
+{
+    static int (*real)(const char *, int, ...);
+    mode_t mode = 0;
+    int fd = mock_device(path);
+    if (fd != -2) return fd;
+    if (flags & (O_CREAT | O_TMPFILE)) {
+        va_list list; va_start(list, flags); mode = (mode_t)va_arg(list, int); va_end(list);
+    }
+    if (real == NULL) real = (int (*)(const char *, int, ...))dlsym(RTLD_NEXT, "open64");
+    return real(path, flags, mode);
+}
 
 typedef struct { int count, fail_add, fail_remove, delay; unsigned ids[16]; int width[16], height[16]; } MockState;
 static MockState state(void)
@@ -111,12 +179,33 @@ static unsigned long long mock_period_us(void)
     double value = hz ? atof(hz) : 0.0;
     return value >= 1.0 ? (unsigned long long)(1000000.0 / value) : 0ULL;
 }
+/* The device becomes readable at the earliest pending completion: its
+   vblank in periodic mode, otherwise at once. Nothing pending, it is not. */
+static void mock_arm(int fd)
+{
+    struct itimerspec when;
+    unsigned long long period = mock_period_us(), due = 0;
+    int i;
+    memset(&when, 0, sizeof(when));
+    for (i = 0; i < pending_count; ++i) {
+        unsigned long long at = period ?
+            (pending[i].submitted_us / period + 1) * period : pending[i].submitted_us;
+        if (due == 0 || at < due) due = at;
+    }
+    if (pending_count > 0) {
+        if (due == 0) due = 1;
+        when.it_value.tv_sec = (time_t)(due / 1000000ULL);
+        when.it_value.tv_nsec = (long)(due % 1000000ULL) * 1000L;
+    }
+    timerfd_settime(fd, TFD_TIMER_ABSTIME, &when, NULL);
+}
 int drmModePageFlip(int fd, uint32_t crtc, uint32_t fb, uint32_t flags, void *data)
 {
-    (void)fd; (void)crtc; (void)fb; (void)flags;
+    (void)crtc; (void)fb; (void)flags;
     if (pending_count >= 256) return -1;
     pending[pending_count].data = data;
     pending[pending_count++].submitted_us = mock_now_us();
+    mock_arm(fd);
     return 0;
 }
 /* In periodic mode, the vblank number now is the count of whole periods. */
@@ -133,7 +222,9 @@ int drmHandleEvent(int fd, drmEventContextPtr context)
 {
     static unsigned sequence; struct timespec now; int i, kept = 0;
     unsigned long long period = mock_period_us();
-    usleep(1000); clock_gettime(CLOCK_MONOTONIC, &now);
+    uint64_t expirations;
+    if (read(fd, &expirations, sizeof(expirations)) < 0) { /* not due yet, or not a timerfd */ }
+    clock_gettime(CLOCK_MONOTONIC, &now);
     if (period) {
         unsigned long long at = mock_now_us();
         for (i = 0; i < pending_count; ++i) {
@@ -146,11 +237,14 @@ int drmHandleEvent(int fd, drmEventContextPtr context)
                 pending[kept++] = pending[i];
         }
         pending_count = kept;
+        mock_arm(fd);
         return 0;
     }
     for (i = 0; i < pending_count; ++i)
         context->page_flip_handler(fd, ++sequence, now.tv_sec, now.tv_nsec / 1000, pending[i].data);
-    pending_count = 0; return 0;
+    pending_count = 0;
+    mock_arm(fd);
+    return 0;
 }
 drmModeObjectPropertiesPtr drmModeObjectGetProperties(int fd, uint32_t id, uint32_t type)
 { (void)fd; (void)id; (void)type; return NULL; }

@@ -292,6 +292,11 @@ How long a GPU start must stay healthy before its crash guard is
 cleared; default 30.
 After a crash during a GPU start, the next start uses the CPU.
 .TP
+.B BLIT_TEST_GLES_HANG_MS
+With
+.BR BLIT_TEST_MODE=1 ,
+makes the GPU start hang this many milliseconds, to test recovery.
+.TP
 .B BLIT_KMS_MODESET
 When set, performs a full mode set on every frame.
 .TP
@@ -426,7 +431,9 @@ Used by the kernel to release and reacquire the console when switching
 virtual terminals.
 .PP
 A separate watchdog process restores the console and kills the server if
-its main loop stops for 10 seconds.
+its main loop stops for 10 seconds, so systemd starts it again. It is
+running before the displays are opened: a GPU start that hangs is ended
+the same way, and the next start composes on the CPU so the API comes up.
 .SH EXIT STATUS
 .TP
 .B 0

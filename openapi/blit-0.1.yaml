@@ -238,17 +238,16 @@ paths:
     patch:
       tags: [hardware]
       operationId: updateDisplay
-      summary: Set a display's rotation or brightness
+      summary: Set a display's brightness
       description: >-
         Only the properties this display lists in `capabilities` are accepted,
         and anything else is refused with `invalid_display_property` rather
         than ignored. Selecting a mode is deliberately not here: it resizes
         every surface on the display and needs issue #60's resize protocol.
 
-        `rotation` is refused with 409 `display_rotation_in_use` while a
-        surface is present on the display, because rotating exchanges the cell
-        grid's width and height and a surface's owner is the one that decides
-        its size (ADR 0063). `brightness_percent` is refused with 422
+        `rotation` is accepted only as 0 (native KMS has no rotation
+        transform, ADR 0184): any other valid angle is a 422
+        `display_rotation_unsupported`. `brightness_percent` is refused with 422
         `display_brightness_unsupported` where no backlight is attributed.
       requestBody:
         required: true
@@ -2230,13 +2229,10 @@ components:
             that owner. The modes are reported so a controller can show them;
             `mode` is still refused.
 
-            `rotation` is the angle, clockwise, by which Blit rotates the
-            rendered image before presenting it: at 90 what was drawn at the
-            top-left of the logical rectangle appears at the top-right of the
-            panel. It is stated as a corner rather than as an enum because
-            DRM's ROTATE_90 is anticlockwise and RandR calls the same transform
-            "right". It is Blit's own render transform, needs no DRM master,
-            and is persisted (ADR 0067).
+            `rotation` is accepted only as 0: native KMS composes straight into
+            the connector's framebuffer and has no rotation transform (ADR
+            0184). Any other valid angle is a 422 `display_rotation_unsupported`,
+            an invalid one a 400 `invalid_display_rotation`.
 
             `brightness_percent` is the backlight's level. It is read from
             `actual_brightness`, which is what the panel is doing, and written
@@ -3974,7 +3970,6 @@ components:
             properties:
               display_id: {$ref: '#/components/schemas/ResourceId'}
               bounds: {$ref: '#/components/schemas/Bounds'}
-              rotation: {type: integer, enum: [0, 90, 180, 270]}
               scale: {type: number, exclusiveMinimum: 0}
               layout:
                 type: object

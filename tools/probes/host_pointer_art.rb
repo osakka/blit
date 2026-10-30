@@ -26,8 +26,7 @@ skip('pointer_or_appearance_unavailable') unless pointer && pointer['valid'] && 
 skip('pointer_not_yet_composed') if pointer['dirty']
 output=before.dig('diagnostics','render','outputs',pointer['output'])
 display=before.dig('displays','displays').find{|d|d['id']==output['display_id']}
-skip('requires_unrotated_native_size') unless display &&
-  (display.dig('configuration','rotation') || 0)==0 &&
+skip('requires_native_size') unless display &&
   output['render_width']==display.dig('bounds','width') &&
   output['render_height']==display.dig('bounds','height')
 shape=%w[arrow hand precision].index(appearance['shape'])

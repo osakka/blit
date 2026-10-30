@@ -1,5 +1,34 @@
 # Verification status
 
+## 2026-10-30: 0.3.16 a hung GPU start recovers; rotation plumbing gone; the mock DRM fd is real (#109, #143, #144)
+
+- **#109, a GPU start that hangs.** The console watchdog runs before the
+  displays are opened, so a hang there is killed after 10 s and systemd
+  starts Blit again; the guard marker, written before the GPU start, sends
+  that start to the CPU, and the API comes up. `gles_compositor_gate.rb`
+  now proves the chain the test display allows: with a test-only hang
+  (`BLIT_TEST_GLES_HANG_MS`, honoured only with `BLIT_TEST_MODE=1`) the
+  API is unreachable and the marker is on disk; killed, the next start is
+  on the CPU with the reason, and the one after tries the GPU again. The
+  watchdog itself is `vt_watchdog_report_gate`. `blit(8)` describes it.
+- **#143, rotation.** Always 0 since ADR 0184. Gone: the display field,
+  `rotation` in `/v1/topology`, the persisted `displays` entry, the rotate
+  helpers and `display_geometry_gate`. Kept: `PATCH` accepts 0, refuses
+  other angles with 422 `display_rotation_unsupported` and invalid ones
+  with 400.
+- **#144, the mock display.** The mock DRM device is now a timerfd,
+  readable exactly when a page flip completes (at once, or at its vblank),
+  with dumb buffers mapped anonymously; the 1 ms sleep in
+  `drmHandleEvent` is gone. Measuring it showed the event loop answering
+  a due flip 0.4–21 ms late while a PTY floods it -- true of the old mock
+  too, and the next thing to look at under the 0.2 architecture tickets.
+- **Fixed on the way:** a flip whose vblank passed between submission and
+  the sequence read was left out of `submit_phase_ms`; it is counted in
+  the last bucket now.
+- **Suites:** font 38/38, full 156/156; GLES 66/67, the failure
+  `sync_output_gate.rb` once in the suite (its known llvmpipe flake, noted
+  at 0.2.10), then 12 of 12 alone.
+
 ## 2026-10-30: 0.3.15 animation frames start just after a vblank
 
 - **What 0.3.14 showed** on the owner's machine (5 minutes after deploy):
