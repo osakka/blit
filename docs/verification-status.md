@@ -19,7 +19,13 @@
   `presentation_effects_gate.rb` still sees 30 Hz with no missed deadlines.
   The mock's GLES path has no page flips, so the live buckets are the
   evidence.
-- **Live after:** LIVE_PENDING.
+- **Live after** (0.3.15 on the owner's machine, 380 s after deploy):
+  display-102, whose frames are all animation: 0 late of 11,400 (0.3.14:
+  896, 10.5%), every flip submitted 0–3 ms after its vblank. display-93,
+  the game's monitor: 731 late of 12,219 (6.0%; 0.3.14: 14.7%), all still
+  submitted 12–16 ms after the vblank -- frames whose content arrived that
+  late, which no schedule can save. Missed deadlines: 568 / 477 in 380 s
+  (about 1.5 / 1.3 a second, from about 30 before 0.3.13).
 - **Suites:** font 38/38, full 156/156, GLES 67/67.
 
 ## 2026-10-30: 0.3.14 when late flips were submitted
