@@ -35,7 +35,8 @@ video, the browser, games) on the owner's machine, timed per output.
   was the settings fsync, off the loop since 0.2.30; the owner confirms it
   no longer happens (close the ticket).
 - Isolated loop stalls and skipped refreshes (#95).
-- Pointer and dragging latency (#101); high refresh rates, 120/240 Hz (#21).
+- High refresh rates, 120/240 Hz (#21). (Pointer latency, #101, was fixed in
+  0.1.565 and accepted by the owner; dragging is measured under #125/#135.)
 - The 0.2 architecture tickets: retained GPU composition and movement
   acceptance (#125, #122), fair scheduling of input, PTYs, API and rendering
   (#134), per-frame latency tracing (#126), deterministic replay (#127),
