@@ -34,7 +34,10 @@ video, the browser, games) on the owner's machine, timed per output.
   on the game's monitor, 10.5% → 0% on the other. The font-size stall (#146)
   was the settings fsync, off the loop since 0.2.30; the owner confirms it
   no longer happens (close the ticket).
-- Isolated loop stalls and skipped refreshes (#95).
+- Done: the 106 ms loop stall of #95 (measured on the 0.1.535 loop) does not
+  recur on 0.3.15: in 4 h on the owner's machine the worst loop gap was
+  30 ms and the worst frame gap 42 ms, and in a 60 s sample no 500 ms window
+  had a gap over 11.8 ms (close the ticket).
 - High refresh rates, 120/240 Hz (#21). (Pointer latency, #101, was fixed in
   0.1.565 and accepted by the owner; dragging is measured under #125/#135.)
 - The 0.2 architecture tickets: retained GPU composition and movement
