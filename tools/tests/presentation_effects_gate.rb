@@ -399,6 +399,11 @@ Dir.mktmpdir('blit-presentation-effects') do |root|
     check(ticks >= 30 && ticks <= 75, "#{ticks} animation frames in about #{elapsed} s at 30 Hz")
     check(drawn.all?(&:zero?), "animation frames redrew cells: #{drawn}")
     check(last.dig('effects', 'glow_rebuilds') == first.dig('effects', 'glow_rebuilds'), 'animation rebuilt glow')
+    # An animation frame is due when its tick says so: the gap since the
+    # output's last frame is not a missed deadline (a 30 Hz effect on a
+    # 60 Hz output counted one a frame before 0.3.13).
+    missed = last['missed_deadlines'] - first['missed_deadlines']
+    check(missed <= 3, "#{missed} missed deadlines in #{ticks} animation-only frames")
     # Real frames carry the animation; ticks only fill gaps. With pane 2
     # drawing continuously (as video does), the present rate is what it is
     # without animation, and almost no frame is animation-only. (On the

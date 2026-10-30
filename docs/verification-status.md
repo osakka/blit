@@ -1,5 +1,36 @@
 # Verification status
 
+## 2026-10-29: 0.3.13 the Hibr frame barrier stops holding every frame (ADR 0082, revised)
+
+- **Found on the owner's machine.** Both monitors missed about 40% of their
+  refresh deadlines. In 30 s of ordinary use, with a game drawing in the
+  primary Hibr view: 311 frame barriers armed, 251 with 1 of 3 views dirty,
+  254 timeouts, each holding a frame a full refresh; 386 missed deadlines on
+  display-93 and 403 on display-102.
+- **Fixed:** the barrier groups only one monitor's views, and a view that
+  let a barrier time out is not waited for again until it draws again
+  (forgiven after 1 s of quiet on that monitor).
+- **`hibr_frame_barrier_scope_gate.rb`** (Hibr suite): a quiet view and a
+  drawing one on one monitor give 1 timeout in 75 frames (0.3.12: 42); views
+  4 ms apart on two monitors open no barrier.
+  `hibr_join_frame_barrier_gate.rb` still passes: two quiet views redrawn
+  4 ms apart present together.
+- **Most of the remaining "misses" were not misses.** A second 30 s sample
+  (`tools/probes/frame_barrier_sample.rb`) had only 23 barrier timeouts but
+  892 / 879 missed deadlines against 784 / 783 presents: the owner's panes
+  run an animated effect at 30 Hz, and on a 60 Hz monitor every animation
+  frame was counted as a missed deadline. An animation frame is now due
+  when its tick fires. `presentation_effects_gate.rb` checks it: 0.3.12
+  counted 109 missed deadlines in 52 animation-only frames; 0.3.13, none.
+- **Real late flips remain**: 14,342 of 81,393 flips on display-93 were
+  late (17%). That is the next item.
+- **Live after:** LIVE_PENDING.
+- **Suites:** font 38/38; full 155/156 and GLES 66/67, the failure in both
+  `surface_damage_gate.c` still naming the single barrier deadline. Fixed,
+  the renderer suite was rerun: CPU 67/67; GLES 66/67, the one failure
+  `kms_hotplug_gate.rb` (a CPU-compositor gate) timing out under load, which
+  passed alone three times and in the earlier full GLES run.
+
 ## 2026-10-29: 0.3.12 terminal fixes from the terminal reference
 
 Writing [the terminal reference](terminal.md) from the code (0.3.10) found

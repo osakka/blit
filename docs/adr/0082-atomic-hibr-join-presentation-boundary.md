@@ -1,6 +1,6 @@
 # ADR 0082: Atomic presentation boundary for one Hibr desktop
 
-- Status: accepted
+- Status: accepted; revised 2026-10-29 (0.3.13), see the end
 - Date: 2026-10-15
 - Scope: SDL presentation scheduling for native Hibr primary and join PTYs
 - Depends on: [ADR 0072](0072-refresh-bound-damage-coalescing.md),
@@ -74,3 +74,35 @@ until the Hibr contracts in ADR 0081 are available.
 - Live 0.1.482 diagnostics: SDL renderer `opengles2`, selected refresh 60 Hz,
   target interval 16 ms, no missed deadlines in the current measurement
   window, and zero decoded graphics images.
+
+## Revised (0.3.13): one monitor's views, and only views that are drawing
+
+Joined views became independent viewports on their own monitors (ADR 0127),
+and a quiet view stopped being a degraded condition: it is a monitor nobody
+is drawing on. The barrier still waited for it, a full refresh, on every
+frame of the view in use. On the owner's machine, 2026-10-29, in 30 s of
+ordinary use with a game in the primary view: 311 barriers, 251 of them with
+1 of 3 views dirty, 254 timeouts, and 386 / 403 missed refresh deadlines on
+the two monitors.
+
+- **Per output.** A barrier groups the Hibr views on one output. Two
+  monitors flip at their own vblanks, so no barrier could show a frame on
+  both together; views on different monitors never wait for each other.
+  The deadline and the held scene are per output: a held monitor presents
+  only its pointer, the others present as usual.
+- **Only views that are drawing.** A view that let a barrier time out is
+  not waited for again until it draws again. After one second with no view
+  on that output drawing -- longer than a pause between keystrokes -- every
+  view is waited for again, because a redraw of the whole desktop after a
+  pause is the case this barrier exists for.
+
+`hibr_join_frame_barrier_gate.rb` keeps that case: two quiet views redrawn
+4 ms apart are presented together. `hibr_frame_barrier_scope_gate.rb`
+proves the revision: with one view quiet and the other drawing for 75
+frames there is one timeout (0.3.12: 42), and views 4 ms apart on two
+monitors open no barrier.
+
+Blit is guessing when a redraw spans views; Hibr's hold layer knows. A
+begin/end mark from hold around a redraw of several views would let Blit
+drop the guess.
+

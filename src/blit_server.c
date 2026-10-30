@@ -137,6 +137,11 @@ extern char **environ;
    damage, then present whatever arrived.  This is deliberately bounded: a
    missing or quiet join must never stall the primary surface indefinitely. */
 #define BLIT_HIBR_FRAME_BARRIER_FALLBACK_US 16000ULL
+/* ADR 0082, revised: a view that let a barrier time out is not waited for
+   again until it draws again, or until its monitor's views have all been
+   quiet this long -- longer than a pause between keystrokes, so typing in
+   one view never re-arms the wait for a view nobody is drawing on. */
+#define BLIT_HIBR_FRAME_BARRIER_FORGIVE_US 1000000ULL
 /* How long a Hibr desktop may hold a registered owner without painting
    anything before that is reported as a fault (issue #32). Generous on
    purpose: a fresh desktop paints within a second, and the cost of being
@@ -807,6 +812,8 @@ typedef struct {
     int hibr_process;
     int hibr_desktop_primary;
     int hibr_desktop_join;
+    /* Let a frame barrier time out; not waited for until it draws again. */
+    int hibr_frame_barrier_excluded;
     char hibr_desktop_session[128];
     unsigned long long native_login_id;
     pid_t native_owner_pid;
@@ -1029,7 +1036,10 @@ typedef struct {
     unsigned long long topology_revision;
     int render_pending;
     uint64_t terminal_frame_quiet_until_us;
-    uint64_t hibr_frame_barrier_until_us;
+    /* Per output: views on different monitors cannot flip together, so a
+       barrier holds one monitor's views only. */
+    uint64_t hibr_frame_barrier_until_us[BLIT_MAX_DISPLAYS];
+    uint64_t hibr_frame_barrier_activity_us[BLIT_MAX_DISPLAYS];
     uint64_t render_last_us;
     int render_interval_ms;
     int render_effective_interval_ms;
@@ -1665,8 +1675,8 @@ static BlitSession *find_session_id(BlitRuntime *runtime,
 static void destroy_session(BlitRuntime *runtime, BlitSession *session);
 static int output_animated(const BlitRuntime *runtime, int output_index);
 static void cancel_auxiliary_worker(BlitRuntime *runtime);
-static int hibr_frame_barrier_active(const BlitRuntime *runtime,
-                                     uint64_t now);
+static uint32_t hibr_frame_barrier_held(const BlitRuntime *runtime,
+                                        uint64_t now);
 static void arm_hibr_frame_barrier(BlitRuntime *runtime,
                                    const BlitSession *session,
                                    uint64_t now);
@@ -2000,16 +2010,16 @@ static void kms_adapt_lead(BlitRuntime *runtime, int output_index)
 /* Once per loop pass: a frame was waiting, nothing held the scene, and the
    loop's previous pass came before an output's compose slot while this one
    comes after that slot's vblank -- the loop was busy through it. */
-static void kms_check_slots(BlitRuntime *runtime, uint64_t now, int held)
+static void kms_check_slots(BlitRuntime *runtime, uint64_t now, uint32_t held)
 {
     int i;
     uint64_t previous = runtime->kms_slot_checked_us;
     runtime->kms_slot_checked_us = now;
-    if (!runtime->render_pending || held || previous == 0) return;
+    if (!runtime->render_pending || previous == 0) return;
     for (i = 0; i < runtime->output_count && i < BLIT_MAX_DISPLAYS; ++i) {
         uint64_t due = runtime->render_next_us[i];
         uint64_t slot, lead;
-        if (due == 0) continue;
+        if (due == 0 || (held & (1U << i))) continue;
         slot = kms_aligned_due(runtime, i, due);
         lead = runtime->kms_lead_us[i] ? runtime->kms_lead_us[i] : KMS_LEAD_START_US;
         if (slot != due && previous < slot && now > slot + lead)
@@ -2167,22 +2177,25 @@ static int render_wait_ms(BlitRuntime *runtime, uint64_t now)
 {
     int wait_ms = 10;
     int i;
+    uint32_t held;
     uint64_t not_before = now;
 
     if (!runtime->render_pending)
         return wait_ms;
     if (runtime->terminal_frame_quiet_until_us > not_before)
         not_before = runtime->terminal_frame_quiet_until_us;
-    if (hibr_frame_barrier_active(runtime, now) &&
-        runtime->hibr_frame_barrier_until_us > not_before)
-        not_before = runtime->hibr_frame_barrier_until_us;
+    held = hibr_frame_barrier_held(runtime, now);
     for (i = 0; i < runtime->output_count; ++i) {
         uint64_t delta;
         uint64_t due = runtime->render_next_us[i];
+        uint64_t fence = not_before;
+        if ((held & (1U << i)) && i < BLIT_MAX_DISPLAYS &&
+            runtime->hibr_frame_barrier_until_us[i] > fence)
+            fence = runtime->hibr_frame_barrier_until_us[i];
         /* Scene fences hold terminal pixels, not the software cursor over
            the last committed scene. Retain each output's refresh deadline. */
-        if (!(runtime->pointer_dirty_outputs & (1U << i)) && due < not_before)
-            due = not_before;
+        if (!(runtime->pointer_dirty_outputs & (1U << i)) && due < fence)
+            due = fence;
         if (due != 0) due = kms_aligned_due(runtime, i, due);
         if (due <= now)
             return 0;
@@ -15502,65 +15515,112 @@ static BlitSession *hibr_render_source(BlitRuntime *runtime,
 /* A native Hibr desktop is one logical scene even though its primary and
    joined hold clients arrive over separate PTYs.  The PTYs do not provide a
    shared read boundary, so one member can become dirty a few milliseconds
-   before another.  Treat the group as a bounded presentation unit: if at
-   least one member has damage, wait for all members that have damage to
-   arrive, or until the one-refresh deadline expires.
+   before another.  Treat the members on one output as a bounded
+   presentation unit: if one has damage, wait for the others to arrive, or
+   until the one-refresh deadline expires (ADR 0082).
+
+   Revised: the unit is one output, because two monitors flip at their own
+   vblanks and could never show a frame together; and a member that let the
+   last barrier time out is not waited for again until it draws again, so a
+   view nobody is drawing on does not hold every frame of the one in use.
 
    This is a presentation rule only.  It does not merge the terminal grids,
    mirror a join, or invent a missing Kitty/Sixel picture.  Each viewport
    remains authoritative for its own PTY output. */
+static int session_output_index(const BlitRuntime *runtime,
+                                const BlitSession *session)
+{
+    int display = session->display_id[0] == '\0' ? 0 :
+        display_index_by_id(runtime, session->display_id);
+    return output_index_for_display_index(runtime, display);
+}
+
+static int hibr_frame_barrier_member(const BlitSession *session,
+                                     const char *desktop_name, uint64_t now)
+{
+    int native_ready = native_login_ready(session, now);
+    return session->used && !session->surface_retired &&
+        (native_ready || session->hibr_desktop_primary || session->hibr_desktop_join) &&
+        strcmp(native_ready ? "desktop" : session->hibr_desktop_session, desktop_name) == 0;
+}
+
+static int hibr_frame_barrier_dirty(const BlitRuntime *runtime,
+                                    const BlitSession *session)
+{
+    BlitSurface *surface = find_surface_id((BlitRuntime *)runtime, session->id);
+    return surface != NULL && surface->used && surface->damage_valid &&
+        !surface->frame_open;
+}
+
 static void hibr_frame_barrier_group_state(const BlitRuntime *runtime,
                                            const char *desktop_name,
-                                           int *members, int *dirty)
+                                           int output, int *members, int *dirty)
 {
+    uint64_t now = monotonic_us();
     int i;
 
     *members = 0;
     *dirty = 0;
     for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
         const BlitSession *session = &runtime->sessions[i];
-        BlitSurface *surface;
-        int native_ready = native_login_ready(session, monotonic_us());
-
-        if (!session->used || session->surface_retired ||
-            (!native_ready && (!session->hibr_desktop_primary && !session->hibr_desktop_join)) ||
-            strcmp(native_ready ? "desktop" : session->hibr_desktop_session, desktop_name) != 0)
+        int is_dirty;
+        if (!hibr_frame_barrier_member(session, desktop_name, now) ||
+            session_output_index(runtime, session) != output)
             continue;
-        surface = find_surface_id((BlitRuntime *)runtime, session->id);
+        is_dirty = hibr_frame_barrier_dirty(runtime, session);
+        if (session->hibr_frame_barrier_excluded && !is_dirty)
+            continue;
         ++*members;
-        if (surface != NULL && surface->used && surface->damage_valid &&
-            !surface->frame_open)
-            ++*dirty;
+        *dirty += is_dirty;
     }
 }
 
-static int hibr_frame_barrier_is_incomplete(const BlitRuntime *runtime)
+static const char *hibr_frame_barrier_group(const BlitSession *session,
+                                            uint64_t now)
 {
+    if (!session->used)
+        return NULL;
+    if (native_login_ready(session, now))
+        return "desktop";
+    if ((session->hibr_desktop_primary || session->hibr_desktop_join) &&
+        session->hibr_desktop_session[0] != '\0')
+        return session->hibr_desktop_session;
+    return NULL;
+}
+
+static int hibr_frame_barrier_is_incomplete(const BlitRuntime *runtime,
+                                            int output)
+{
+    uint64_t now = monotonic_us();
     int i;
 
     for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
         const BlitSession *session = &runtime->sessions[i];
+        const char *group = hibr_frame_barrier_group(session, now);
         int members;
         int dirty;
-        int native_ready = native_login_ready(session, monotonic_us());
 
-        if (!session->used || (!native_ready && (!session->hibr_desktop_primary ||
-            session->hibr_desktop_session[0] == '\0')))
+        if (group == NULL || session_output_index(runtime, session) != output)
             continue;
-        hibr_frame_barrier_group_state(runtime,
-                                       native_ready ? "desktop" : session->hibr_desktop_session,
-                                       &members, &dirty);
+        hibr_frame_barrier_group_state(runtime, group, output, &members, &dirty);
         if (members > 1 && dirty > 0 && dirty < members)
             return 1;
     }
     return 0;
 }
 
-static int hibr_frame_barrier_active(const BlitRuntime *runtime,
-                                     uint64_t now)
+/* The outputs whose scene a barrier holds right now. */
+static uint32_t hibr_frame_barrier_held(const BlitRuntime *runtime,
+                                        uint64_t now)
 {
-    return runtime->hibr_frame_barrier_until_us > now &&
-        hibr_frame_barrier_is_incomplete(runtime);
+    uint32_t held = 0;
+    int o;
+
+    for (o = 0; o < runtime->output_count && o < BLIT_MAX_DISPLAYS; ++o)
+        if (runtime->hibr_frame_barrier_until_us[o] > now &&
+            hibr_frame_barrier_is_incomplete(runtime, o))
+            held |= 1U << o;
+    return held;
 }
 
 static void arm_hibr_frame_barrier(BlitRuntime *runtime,
@@ -15569,35 +15629,81 @@ static void arm_hibr_frame_barrier(BlitRuntime *runtime,
 {
     int members;
     int dirty;
-    uint64_t period = BLIT_HIBR_FRAME_BARRIER_FALLBACK_US;
     uint64_t deadline;
-    int native_ready = native_login_ready(session, now);
     const char *group;
+    int output;
+    int i;
 
-    if (session == NULL || (!native_ready && ((!session->hibr_desktop_primary &&
-                            !session->hibr_desktop_join) ||
-        session->hibr_desktop_session[0] == '\0')))
+    if (session == NULL)
         return;
-    group = native_ready ? "desktop" : session->hibr_desktop_session;
-    hibr_frame_barrier_group_state(runtime, group,
-                                   &members, &dirty);
+    group = hibr_frame_barrier_group(session, now);
+    output = session_output_index(runtime, session);
+    if (group == NULL || output < 0 || output >= BLIT_MAX_DISPLAYS)
+        return;
+    /* Drawing again puts a view back in its barrier. After a quiet spell on
+       this output, every view is waited for again: a redraw of the whole
+       desktop after a pause is the case the barrier exists for. */
+    ((BlitSession *)session)->hibr_frame_barrier_excluded = 0;
+    if (now - runtime->hibr_frame_barrier_activity_us[output] >
+        BLIT_HIBR_FRAME_BARRIER_FORGIVE_US)
+        for (i = 0; i < BLIT_MAX_SESSIONS; ++i)
+            if (session_output_index(runtime, &runtime->sessions[i]) == output)
+                runtime->sessions[i].hibr_frame_barrier_excluded = 0;
+    runtime->hibr_frame_barrier_activity_us[output] = now;
+    hibr_frame_barrier_group_state(runtime, group, output, &members, &dirty);
     if (members < 2 || dirty < 1)
         return;
-    if (runtime->output_count > 0)
-        period = output_render_period_us(runtime, 0);
-    deadline = now + period;
     /* Never extend an open barrier.  A producer that continually writes
        chunks must not turn this bounded coalescing rule into a hang. */
-    if (runtime->hibr_frame_barrier_until_us != 0)
+    if (runtime->hibr_frame_barrier_until_us[output] != 0)
         return;
-    runtime->hibr_frame_barrier_until_us = deadline;
+    deadline = now + output_render_period_us(runtime, output);
+    runtime->hibr_frame_barrier_until_us[output] = deadline;
     {
-        char detail[192];
+        char detail[224];
         snprintf(detail, sizeof(detail),
-                 "desktop=%s members=%d dirty=%d deadline_us=%llu period_us=%llu",
-                 group, members, dirty,
-                 (unsigned long long)deadline, (unsigned long long)period);
+                 "desktop=%s output=%d members=%d dirty=%d deadline_us=%llu period_us=%llu",
+                 group, output, members, dirty, (unsigned long long)deadline,
+                 (unsigned long long)(deadline - now));
         diagnostic_trace(runtime, "hibr_frame_barrier", detail);
+    }
+}
+
+/* Each loop pass: a barrier whose members have all arrived releases; one
+   past its deadline times out, and the members that did not arrive are not
+   waited for again until they draw. */
+static void service_hibr_frame_barriers(BlitRuntime *runtime, uint64_t now)
+{
+    int o;
+
+    for (o = 0; o < runtime->output_count && o < BLIT_MAX_DISPLAYS; ++o) {
+        char detail[96];
+        int excluded = 0;
+        int i;
+        if (runtime->hibr_frame_barrier_until_us[o] == 0)
+            continue;
+        if (!hibr_frame_barrier_is_incomplete(runtime, o)) {
+            snprintf(detail, sizeof(detail), "output=%d all_active_members_dirty", o);
+            diagnostic_trace(runtime, "hibr_frame_barrier_release", detail);
+            runtime->hibr_frame_barrier_until_us[o] = 0;
+            continue;
+        }
+        if (now < runtime->hibr_frame_barrier_until_us[o])
+            continue;
+        for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
+            BlitSession *session = &runtime->sessions[i];
+            if (hibr_frame_barrier_group(session, now) != NULL &&
+                session_output_index(runtime, session) == o &&
+                !hibr_frame_barrier_dirty(runtime, session) &&
+                !session->hibr_frame_barrier_excluded) {
+                session->hibr_frame_barrier_excluded = 1;
+                ++excluded;
+            }
+        }
+        snprintf(detail, sizeof(detail),
+                 "output=%d deadline_expired_bounded_release excluded=%d", o, excluded);
+        diagnostic_trace(runtime, "hibr_frame_barrier_timeout", detail);
+        runtime->hibr_frame_barrier_until_us[o] = 0;
     }
 }
 
@@ -20653,7 +20759,7 @@ static void effects_animation_tick(BlitRuntime *runtime, uint64_t now)
             continue;
         if (now - runtime->output_presented_us[i] < period ||
             now < runtime->terminal_frame_quiet_until_us ||
-            hibr_frame_barrier_active(runtime, now)) {
+            (hibr_frame_barrier_held(runtime, now) & bit)) {
             /* Real frames are flowing, or about to: look again a period
                after the last one. */
             runtime->animation_next_us[i] = runtime->output_presented_us[i] + period;
@@ -20661,8 +20767,13 @@ static void effects_animation_tick(BlitRuntime *runtime, uint64_t now)
             continue;
         }
         runtime->animation_due |= bit;
+        /* The animation frame is wanted now. With nothing else waiting, the
+           output was idle until this moment, so a deadline left over from
+           its last frame is not one this frame missed: a 30 Hz effect on a
+           60 Hz monitor counted every frame as a missed deadline. */
+        if (!runtime->render_pending || runtime->render_next_us[i] > now)
+            runtime->render_next_us[i] = now;
         runtime->render_pending = 1;
-        if (runtime->render_next_us[i] > now) runtime->render_next_us[i] = now;
         runtime->animation_next_us[i] = now + period;
     }
 }
@@ -29560,36 +29671,32 @@ int main(int argc, char **argv)
            each output's refresh deadline. */
         if (!pending_before_events && runtime.render_pending)
             rephase_idle_render_schedule(&runtime, now);
-        if (runtime.hibr_frame_barrier_until_us > 0 &&
-            !hibr_frame_barrier_is_incomplete(&runtime)) {
-            diagnostic_trace(&runtime, "hibr_frame_barrier_release",
-                             "all_active_members_dirty");
-            runtime.hibr_frame_barrier_until_us = 0;
-        } else if (runtime.hibr_frame_barrier_until_us > 0 &&
-                   now >= runtime.hibr_frame_barrier_until_us &&
-                   hibr_frame_barrier_is_incomplete(&runtime)) {
-            diagnostic_trace(&runtime, "hibr_frame_barrier_timeout",
-                             "deadline_expired_bounded_release");
-            runtime.hibr_frame_barrier_until_us = 0;
-        }
+        service_hibr_frame_barriers(&runtime, now);
         update_pointer_shape(&runtime);
         gles_guard_check(&runtime);
-        kms_check_slots(&runtime, now, now < runtime.terminal_frame_quiet_until_us ||
-                        hibr_frame_barrier_active(&runtime, now));
-        effects_animation_tick(&runtime, now);
-        if (blit_vt_active() && runtime.render_pending &&
-            (output_mask = due_output_mask(&runtime, now)) != 0) {
-            int hold_scene = now < runtime.terminal_frame_quiet_until_us ||
-                hibr_frame_barrier_active(&runtime, now);
-            /* Inside a quiet window only the pointer may present, with the
-               scene held. (Animation ticks never fire inside one.) */
-            if (hold_scene)
-                output_mask &= runtime.pointer_dirty_outputs;
+        {
+            /* A quiet window holds every output; a barrier, its own. */
+            uint32_t held = now < runtime.terminal_frame_quiet_until_us ?
+                all_output_mask(&runtime) : hibr_frame_barrier_held(&runtime, now);
+            kms_check_slots(&runtime, now, held);
+            effects_animation_tick(&runtime, now);
+            if (blit_vt_active() && runtime.render_pending &&
+                (output_mask = due_output_mask(&runtime, now)) != 0) {
+                /* A held output may present only the pointer, over its
+                   held scene. (Animation ticks never fire inside a hold.) */
+                output_mask &= ~held | runtime.pointer_dirty_outputs;
+            } else {
+                output_mask = 0;
+            }
             if (output_mask != 0) {
+                uint32_t scene = output_mask & ~held;
                 blit_vt_phase("render: compose and present outputs");
                 blit_kms_request_animation(runtime.kms, runtime.animation_due & output_mask);
                 runtime.animation_due &= ~output_mask;
-                render_current_surfaces(&runtime, output_mask, hold_scene);
+                if (scene != 0)
+                    render_current_surfaces(&runtime, scene, 0);
+                if (output_mask & held)
+                    render_current_surfaces(&runtime, output_mask & held, 1);
                 for (i = 0; i < runtime.output_count && i < BLIT_MAX_DISPLAYS; ++i) {
                     int display_index = display_index_for_output(&runtime, i);
                     BlitKmsDisplayInfo kms_info;
@@ -29604,7 +29711,7 @@ int main(int argc, char **argv)
                     }
                 }
                 blit_vt_phase("loop: after render");
-                if (!hold_scene)
+                if (now >= runtime.terminal_frame_quiet_until_us)
                     runtime.terminal_frame_quiet_until_us = 0;
                 advance_render_schedule(&runtime, now, output_mask);
                 expire_pixel_frame_pending(&runtime, monotonic_us());

@@ -343,11 +343,11 @@ static void expired_batch_deadline_gate(void)
                  sizeof(join->hibr_desktop_session), "desktop");
         other->id = 2; other->used = 1;
         runtime->surfaces[1] = other;
-        runtime->hibr_frame_barrier_until_us = 1;
+        runtime->hibr_frame_barrier_until_us[0] = 1;
         arm_hibr_frame_barrier(runtime, session, 10000);
-        if (runtime->hibr_frame_barrier_until_us != 1) {
+        if (runtime->hibr_frame_barrier_until_us[0] != 1) {
             fprintf(stderr, "TERMINAL_BATCH_FAIL expired_join_barrier rearmed=%llu\n",
-                    (unsigned long long)runtime->hibr_frame_barrier_until_us);
+                    (unsigned long long)runtime->hibr_frame_barrier_until_us[0]);
             ++failures;
         }
         free(other);

@@ -350,6 +350,7 @@ suite_hibr() {
     run_gate hibr_singleton_gate.rb ruby tools/tests/hibr_singleton_gate.rb
     run_gate hibr_join_viewport_gate.rb ruby tools/tests/hibr_join_viewport_gate.rb
     run_gate hibr_join_frame_barrier_gate.rb ruby tools/tests/hibr_join_frame_barrier_gate.rb
+    run_gate hibr_frame_barrier_scope_gate.rb ruby tools/tests/hibr_frame_barrier_scope_gate.rb
     run_gate hibr_split_capture_gate.rb ruby tools/tests/hibr_split_capture_gate.rb
     run_gate hibr_join_placement_gate.sh "$ROOT"/tools/tests/hibr_join_placement_gate.sh
     # Needs only the Hibr headers, not a Hibr process: it compiles the shipped
