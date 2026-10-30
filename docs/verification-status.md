@@ -24,7 +24,12 @@
   counted 109 missed deadlines in 52 animation-only frames; 0.3.13, none.
 - **Real late flips remain**: 14,342 of 81,393 flips on display-93 were
   late (17%). That is the next item.
-- **Live after:** LIVE_PENDING.
+- **Live after** (0.3.13 on the owner's machine, same 30 s probe, ordinary
+  use; the workload is the owner's and not identical): missed deadlines
+  47 / 207 against 925 / 796 presents (before: 892 / 879 against 784 / 783),
+  no barrier armed or timed out (before: 23 timeouts in that sample, 254 in
+  the first). Late flips remain about 15% / 11%; `kms_frame_retry` 80 in
+  30 s. Those are the next item.
 - **Suites:** font 38/38; full 155/156 and GLES 66/67, the failure in both
   `surface_damage_gate.c` still naming the single barrier deadline. Fixed,
   the renderer suite was rerun: CPU 67/67; GLES 66/67, the one failure
