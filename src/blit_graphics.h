@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define BLIT_GRAPHICS_MAX_IMAGES 8
+#define BLIT_GRAPHICS_MAX_IMAGES 16
 /* A physical 1920x2160 output needs a full-screen RGB image for Hibr
    wallpaper (12,441,600 bytes). Keep the limit bounded while covering
    4096-class displays and RGBA frames without silently forcing a glyph

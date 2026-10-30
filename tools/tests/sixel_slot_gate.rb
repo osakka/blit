@@ -2,10 +2,11 @@
 # frozen_string_literal: true
 
 # Gitea #85. A sixel that has scrolled off the screen can never be shown
-# again -- it has no id a client can place -- yet it kept one of the eight
-# image slots for the life of the session, so the ninth sixel (and every
-# Kitty image after it) was refused with image-store-full and a program
-# printing pictures simply stopped producing them. This gate prints twelve
+# again -- it has no id a client can place -- yet it kept one of the
+# session's image slots (eight then, sixteen since 0.3.17) for the life of
+# the session, so the next sixel (and every Kitty image after it) was
+# refused with image-store-full and a program printing pictures simply
+# stopped producing them. This gate prints twenty, more than the slots,
 # sixels, scrolling each one off, then one more, and requires the last one
 # to be on screen and nothing to have been rejected.
 
@@ -62,7 +63,7 @@ end
 SCRIPT = <<~'SH'
   sixel() { printf '\033Pq#0;2;100;0;0#0!8~\033\\'; }
   i=0
-  while [ $i -lt 12 ]; do
+  while [ $i -lt 20 ]; do
     sixel
     printf '\n\n\n\n\n\n\n\n'
     i=$((i+1))

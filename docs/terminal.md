@@ -169,7 +169,7 @@ Programs started in a session get `TERM=xterm-kitty` and
 | Replacing | transmitting to an existing id replaces its pixels and keeps its placements |
 | Delete | `a i z c p q x y`, and their capitals to free the image too |
 | Replies | `OK`, or an error for every failure (`EINVAL`, `ENOENT`, `ENOSPC`, `EFBIG`, `ENOMEM`); only to a request with `i=`; `q=1` hides OK, `q=2` hides everything |
-| Limits | 8 images per session (shared with Sixel), 8 placements per image, 4096×4096 pixels, 64 MiB per image |
+| Limits | 16 images per session (shared with Sixel), 8 placements per image, 4096×4096 pixels, 64 MiB per image |
 
 Images scroll with their text and are clipped at the edge of the pane.
 
