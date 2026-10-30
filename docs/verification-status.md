@@ -1,5 +1,20 @@
 # Verification status
 
+## 2026-10-30: 0.3.18 a placement may arrive before its first frame (ADR 0202)
+
+- **Found by the Hibr maintainers:** inside hold the frame goes to the
+  socket and the `a=p` to the PTY, two inputs Blit reads independently, so
+  the placement can be read first; Kitty's rule refuses it and it is lost.
+- **Fixed:** while a session has a frame connection, an `a=p` that keeps
+  the cursor and names no image yet is held for 2 s and placed when that
+  id's first frame lands (answered `OK`, or nothing under `q=2`); if none
+  comes it is refused `ENOENT`. Other sessions and cursor-moving placements
+  keep Kitty's rule.
+- **`frame_descriptor_gate`** adds both: an `a=p` before its frame is
+  placed when the frame lands; one whose frame never comes is refused
+  after 2 s and a later frame finds the image unplaced. Both compositors.
+- **Suites:** font 38/38, full 157/157, GLES 66/66.
+
 ## 2026-10-30: 0.3.17 picture frames by descriptor; 16 images per session (ADR 0202)
 
 - **Why:** with a YouTube video playing on the owner's machine, Hibr's

@@ -93,7 +93,13 @@ Option 3.
   - a frame for a deleted id gets `ENOENT` and is dropped; producers never
     reuse an id;
   - a frame for an id not yet placed is kept and drawn when the `a=p`
-    arrives.
+    arrives;
+  - the reverse, an `a=p` read before its image's first frame (0.3.18):
+    while the session has a frame connection, an `a=p` that keeps the
+    cursor (`C=1`) and names no image yet is held for two seconds and
+    placed when that id's first frame lands; if none comes, it is refused
+    `ENOENT` as Kitty would. Sessions without a frame connection, and
+    placements that move the cursor, keep Kitty's rule unchanged.
 - **Through hold** (Hibr's design, from their review). Unheld, the desktop's
   console connects to `BLIT_FRAME_SOCKET` itself: one hop. Held, two hops:
   the desktop opens a frame connection to its own hold server (uid checked
@@ -106,7 +112,11 @@ Option 3.
   stays on `t=d`.
 - **The producer** is Hibr's console (`cn_image`, through which every
   picture reaches the terminal), so one writer covers video, pages, games
-  and pictures.
+  and pictures. Two Hibr decisions: a session's pictures go by descriptor
+  only when every display of it can take them (one ssh or plain-terminal
+  display puts all of them back on `t=d`, so hold never needs a second
+  encoder); and the wallpaper stays on `t=d` (placed rarely and already
+  kept).
 - **Linux only.** memfd and descriptor passing are Linux; Hibr on macOS
   stays on `t=d`.
 - **Offered, not assumed.** A session gets `BLIT_FRAME_SOCKET` only when

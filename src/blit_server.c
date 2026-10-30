@@ -788,6 +788,19 @@ typedef struct {
 } BlitFrameClient;
 
 #define BLIT_FRAME_DELETED 64
+#define BLIT_FRAME_PENDING 8
+#define BLIT_FRAME_PENDING_US 2000000ULL
+
+/* ADR 0202: an a=p that arrived on the PTY before its image's first frame
+   arrived on the frame socket, held until the frame lands or the time is
+   up. The fields are a Kitty placement's. */
+typedef struct {
+    int used;
+    unsigned int image_id, id;
+    int x, y, width, height, z, src_x, src_y, src_w, src_h, scroll_anchored;
+    int quiet;
+    uint64_t deadline_us;
+} BlitPendingPlacement;
 
 typedef struct {
     int used;
@@ -869,6 +882,8 @@ typedef struct {
     int frame_deleted_next;
     unsigned long frames_accepted, frames_refused, frames_stale, frames_superseded;
     char frames_last_error[32];
+    int frame_connections;
+    BlitPendingPlacement frame_pending[BLIT_FRAME_PENDING];
     int terminal_escape;
     /* Hibr emits a single SGR containing bold plus truecolor foreground and
        background (three decimal components each).  A 32-byte buffer cuts
@@ -10841,6 +10856,39 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
         BlitGraphicsDraw old_draw, new_draw;
         int old_valid = 0, new_valid = 0;
         image = graphics_image_find(session, (unsigned int)image_id);
+        /* ADR 0202: the PTY and the frame socket are two inputs, so an a=p
+           can be read before its image's first frame. While the session
+           has a frame connection, an a=p that keeps the cursor and names
+           no image yet is held for two seconds and placed when the frame
+           lands. Everything else is Kitty's rule. */
+        if (image == NULL && keep_cursor && session->frame_connections > 0) {
+            BlitPendingPlacement *slot = NULL;
+            int k;
+            for (k = 0; k < BLIT_FRAME_PENDING; ++k) {
+                BlitPendingPlacement *p = &session->frame_pending[k];
+                if (p->used && p->image_id == (unsigned int)image_id && p->id == placement.id) {
+                    slot = p;
+                    break;
+                }
+                if (!p->used && slot == NULL) slot = p;
+            }
+            if (slot == NULL) {
+                kitty_fail(session, image_id, quiet, "placement-pending-full", "ENOSPC");
+                return;
+            }
+            slot->used = 1;
+            slot->image_id = (unsigned int)image_id;
+            slot->id = placement.id;
+            slot->x = placement.x; slot->y = placement.y;
+            slot->width = placement.width; slot->height = placement.height;
+            slot->z = placement.z;
+            slot->src_x = placement.src_x; slot->src_y = placement.src_y;
+            slot->src_w = placement.src_w; slot->src_h = placement.src_h;
+            slot->scroll_anchored = placement.scroll_anchored;
+            slot->quiet = quiet;
+            slot->deadline_us = monotonic_us() + BLIT_FRAME_PENDING_US;
+            return;
+        }
         if (image == NULL || !image->complete) {
             kitty_fail(session, image_id, quiet, "placement-incomplete", "ENOENT");
             return;
@@ -29702,6 +29750,7 @@ int main(int argc, char **argv)
         }
         if (ready > 0)
             frame_service(&runtime, &readable);
+        frame_expire_placements(&runtime, monotonic_us());
         if (ready > 0) {
             for (i = 0; i < runtime.evdev_mouse_count; ++i)
                 if (runtime.evdev_mouse_fds[i] >= 0 &&

@@ -222,10 +222,29 @@ def main():
         client.send(frame(7, 20, 16, 16), memfd(red))
         check(client.reply().startswith(b'ERROR 7 ENOENT'), 'a frame after its delete was not refused')
 
+        # 7. The reverse order: an a=p read before its image's first frame
+        #    is held while the session has a frame connection, and placed
+        #    when the frame lands.
+        run('\\033[6;1H\\033_Ga=p,i=11,q=2,C=1\\033\\\\')
+        client.send(frame(11, 1, 16, 16), memfd(red))
+        got = wait_for(lambda: (image(session, 11)[0] or {}).get('visible') and image(session, 11)[0],
+                       'an a=p before its first frame was not placed when the frame landed')
+        # ...and one whose frame never comes is refused after two seconds:
+        # a frame that arrives later finds the image unplaced.
+        rejected = image(session, 7)[1].get('graphics_diagnostics', {}).get('rejected', 0)
+        run('\\033[8;1H\\033_Ga=p,i=12,q=2,C=1\\033\\\\')
+        time.sleep(2.6)
+        check(image(session, 7)[1].get('graphics_diagnostics', {}).get('rejected', 0) == rejected + 1,
+              'a held placement was not refused after two seconds')
+        client.send(frame(12, 1, 16, 16), memfd(red))
+        late = wait_for(lambda: image(session, 12)[0], 'the late frame did not land')
+        check(not late.get('visible'), 'an expired placement was applied: %s' % late)
+
         frames = image(session, 7)[1]['frames']
         print('FRAME_DESCRIPTOR_PASS token=random hello=token_checked before_placement=kept screen=drawn '
               'newest=wins stale=dropped edit=rectangle refused=unsealed+short+efbig+unknown '
               'kitty_into_descriptor=refused frame_into_kitty=refused after_delete=enoent '
+              'placement_before_frame=held_then_placed expired_placement=refused '
               'accepted=%d refused=%d stale=%d wrong_uid=not_tested_without_root'
               % (frames['accepted'], frames['refused'], frames['stale']))
     finally:

@@ -25,8 +25,14 @@ static void frame_reply(int fd, const char *line)
 
 static void frame_client_close(BlitRuntime *runtime, int index)
 {
-    if (runtime->frame_clients[index].used)
+    if (runtime->frame_clients[index].used) {
+        if (runtime->frame_clients[index].authenticated) {
+            BlitSession *session = find_session_id(runtime, runtime->frame_clients[index].session_id);
+            if (session != NULL && session->frame_connections > 0)
+                --session->frame_connections;
+        }
         close(runtime->frame_clients[index].fd);
+    }
     memset(&runtime->frame_clients[index], 0, sizeof(runtime->frame_clients[index]));
 }
 
@@ -250,6 +256,31 @@ static void frame_apply(BlitRuntime *runtime, BlitSession *session, int client_f
         image->edit_count = 0;
     }
     ++image->revision;
+    /* Placements that arrived first (ADR 0202) take effect now. */
+    {
+        int k;
+        for (k = 0; k < BLIT_FRAME_PENDING; ++k) {
+            BlitPendingPlacement *p = &session->frame_pending[k];
+            KittyPlacement placement;
+            if (!p->used || p->image_id != image->id)
+                continue;
+            placement.id = p->id;
+            placement.x = p->x; placement.y = p->y;
+            placement.width = p->width; placement.height = p->height;
+            placement.z = p->z;
+            placement.src_x = p->src_x; placement.src_y = p->src_y;
+            placement.src_w = p->src_w; placement.src_h = p->src_h;
+            placement.scroll_anchored = p->scroll_anchored;
+            if (!kitty_place(image, &placement)) {
+                graphics_reject(session, "placement-store-full");
+                kitty_reply(session, (int)p->image_id, p->quiet, "ENOSPC");
+            } else {
+                kitty_reply(session, (int)p->image_id, p->quiet, "OK");
+            }
+            memset(p, 0, sizeof(*p));
+            whole = 1;  /* the new placement is damaged whole */
+        }
+    }
     ++session->frames_accepted;
     ++runtime->frames_accepted;
     if (surface != NULL) {
@@ -299,6 +330,7 @@ static void frame_hello(BlitRuntime *runtime, int index, const unsigned char *me
             frame_peer_allowed(session, peer.uid)) {
             client->session_id = session->id;
             client->authenticated = 1;
+            ++session->frame_connections;
             frame_reply(client->fd, "OK\n");
             return;
         }
@@ -413,6 +445,24 @@ static void frame_client_service(BlitRuntime *runtime, int index)
         if (session != NULL && runtime->frame_clients[index].used)
             frame_apply(runtime, session, runtime->frame_clients[index].fd, &batch[i]);
         close(batch[i].fd);
+    }
+}
+
+/* A held placement whose frame never came is refused as Kitty would. */
+static void frame_expire_placements(BlitRuntime *runtime, uint64_t now)
+{
+    int i, k;
+    for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
+        BlitSession *session = &runtime->sessions[i];
+        if (!session->used)
+            continue;
+        for (k = 0; k < BLIT_FRAME_PENDING; ++k) {
+            BlitPendingPlacement *p = &session->frame_pending[k];
+            if (!p->used || now < p->deadline_us)
+                continue;
+            kitty_fail(session, (int)p->image_id, p->quiet, "placement-incomplete", "ENOENT");
+            memset(p, 0, sizeof(*p));
+        }
     }
 }
 
