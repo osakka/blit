@@ -1,5 +1,29 @@
 # Verification status
 
+## 2026-10-30: window dragging on the owner's machine, Blit 0.3.16 (#125, #135)
+
+The owner dragged windows for 40 s on the main monitor, between its two
+Hibr views, and across to the second monitor and back; read through the
+API (presents, flips, `submit_phase_ms`, frame barrier, loop-gap windows).
+
+| | display-93 (1920x2160) | display-102 (2560x1440) |
+|---|---|---|
+| presents/s | 50.1 | 40.9 |
+| missed deadlines | 17 | 14 |
+| late flips | 29 / 2,014 (1.4%) | 48 / 1,644 (2.9%) |
+
+- Every late flip was submitted in the last 1–5 ms before its vblank.
+- Loop gap per 500 ms window: median 8.6 ms, worst 11.4 ms, none over a
+  refresh.
+- Frame barrier: 874 armed, 710 released with both views, 165 timeouts.
+- Blit 12.7% of a core.
+- One monitor alone (40 s earlier): 58.5 presents/s, 0 missed, 0.5% late.
+- The owner: "it felt fine". The frame rate follows Hibr's redraws; Blit
+  does not limit it.
+- The second monitor, switched off and on during the session, was found
+  again by hotplug (inventory revision 1 → 2), presented on GLES with its
+  Hibr view and wallpaper restored (#100).
+
 ## 2026-10-30: 0.3.16 a hung GPU start recovers; rotation plumbing gone; the mock DRM fd is real (#109, #143, #144)
 
 - **#109, a GPU start that hangs.** The console watchdog runs before the
