@@ -3365,6 +3365,18 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
         if (used < capacity) {
             char reason[384];
             char renderer[256];
+            char phase_on_time[224], phase_late[224];
+            size_t on_used = 0, late_used = 0;
+            int bucket;
+            phase_on_time[0] = phase_late[0] = '\0';
+            for (bucket = 0; bucket < BLIT_KMS_FLIP_PHASE_BUCKETS; ++bucket) {
+                on_used += (size_t)snprintf(phase_on_time + on_used, sizeof(phase_on_time) - on_used,
+                                            "%s%u", bucket ? "," : "",
+                                            have_kms_info ? kms_info.flip_phase_on_time[bucket] : 0U);
+                late_used += (size_t)snprintf(phase_late + late_used, sizeof(phase_late) - late_used,
+                                              "%s%u", bucket ? "," : "",
+                                              have_kms_info ? kms_info.flip_phase_late[bucket] : 0U);
+            }
             json_escape(have_kms_info ? kms_info.compositor_reason : "", reason,
                         sizeof(reason));
             json_escape(have_kms_info ? kms_info.compositor_renderer : "", renderer,
@@ -3386,7 +3398,8 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
                 "\"flip\":{\"last_ms\":%.3f,\"max_ms\":%.3f,"
                 "\"total_us\":%llu,\"count\":%llu,"
                 "\"timing\":\"%s\",\"lead_us\":%llu,"
-                "\"on_time\":%llu,\"late\":%llu,\"slot_misses\":%llu}}",
+                "\"on_time\":%llu,\"late\":%llu,\"slot_misses\":%llu,"
+                "\"submit_phase_ms\":{\"on_time\":[%s],\"late\":[%s]}}}",
                 have_kms_info ? kms_info.compositor : "unavailable",
                 have_kms_info && kms_info.compositor_requested[0] ?
                     kms_info.compositor_requested : (have_kms_info ? "cpu" : "unavailable"),
@@ -3422,7 +3435,8 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
                                      runtime->kms_lead_us[i] : 0),
                 have_kms_info ? kms_info.flips_on_time : 0ULL,
                 have_kms_info ? kms_info.flips_late : 0ULL,
-                (unsigned long long)(i < BLIT_MAX_DISPLAYS ? runtime->kms_slot_misses[i] : 0));
+                (unsigned long long)(i < BLIT_MAX_DISPLAYS ? runtime->kms_slot_misses[i] : 0),
+                phase_on_time, phase_late);
         }
     }
     if (used < capacity)

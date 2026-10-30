@@ -84,6 +84,7 @@ typedef struct {
        the flip is on time if it completes at that vblank or the next. */
     uint64_t flip_submit_sequence;
     int flip_submit_sequence_valid;
+    int flip_submit_phase;  /* ms after the previous vblank, or -1 */
     volatile int flip_done;
     long long flip_started_us;
     int modeset_fallback;
@@ -247,8 +248,14 @@ static void kms_flip_handler(int fd, unsigned int frame, unsigned int sec,
         ++output->info.flip_completions;
         if (output->flip_submit_sequence_valid) {
             uint32_t after = frame - (uint32_t)output->flip_submit_sequence;
-            if (after >= 2U && after < 0x80000000U) ++output->info.flips_late;
+            int late = after >= 2U && after < 0x80000000U;
+            if (late) ++output->info.flips_late;
             else ++output->info.flips_on_time;
+            if (output->flip_submit_phase >= 0) {
+                unsigned *bucket = late ? output->info.flip_phase_late :
+                    output->info.flip_phase_on_time;
+                ++bucket[output->flip_submit_phase];
+            }
         } else if (output->flip_started_us > 0 && output->info.refresh_hz >= 1.0) {
             /* No vblank counter: a flip event's timestamp is the start of
                the new frame's scanout, after the vblank began, so an on-time
@@ -2543,6 +2550,14 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
             output->flip_submit_sequence_valid =
                 drmCrtcGetSequence(kms->fd, output->crtc, &sequence, &ns) == 0;
             output->flip_submit_sequence = sequence;
+            /* ns is the previous vblank, on CLOCK_MONOTONIC like kms_now_us. */
+            output->flip_submit_phase = -1;
+            if (output->flip_submit_sequence_valid && ns > 0) {
+                long long since = output->flip_started_us - (long long)(ns / 1000ULL);
+                if (since >= 0)
+                    output->flip_submit_phase = since / 1000 < BLIT_KMS_FLIP_PHASE_BUCKETS - 1 ?
+                        (int)(since / 1000) : BLIT_KMS_FLIP_PHASE_BUCKETS - 1;
+            }
         }
         if (submitted_output_mask != NULL)
             *submitted_output_mask |= 1U << i;

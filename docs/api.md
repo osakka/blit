@@ -248,7 +248,10 @@ frame misses its vblank -- a flip completing two or more vblanks after the
 CRTC's vblank number at submission, or the loop busy through the compose slot
 -- and shrinks by 0.25 ms (to 2 ms) after 240 flips on time. Each output's
 `flip` object in `/v1/diagnostics` reports `timing`, `lead_us`, `on_time`,
-`late` and `slot_misses`. See ADR 0183.
+`late` and `slot_misses`, and (0.3.14) `submit_phase_ms`: the on-time and
+late flips counted by how many whole milliseconds after the previous vblank
+each was submitted (17 buckets, the last 16 ms and over). Late flips gathered
+in the last buckets were submitted too close to the vblank. See ADR 0183.
 
 From 0.2.10 a GLES start is guarded. Blit creates
 `<settings path>.gles-starting` before opening GLES and removes it once every

@@ -78,6 +78,7 @@ def sample(port)
     late: b['flip']['late'] - a['flip']['late'],
     slot_misses: b['flip']['slot_misses'] - a['flip']['slot_misses'],
     on_time: b['flip']['on_time'] - a['flip']['on_time'],
+    phase: b['flip'].fetch('submit_phase_ms'), totals: [b['flip']['on_time'], b['flip']['late']],
     lead_us: b['flip']['lead_us'], timing: b['flip']['timing']
   }
 end
@@ -134,6 +135,11 @@ failures << format('late compose presents %.1f/s against %.1f/s', late[:fps], im
 total = late[:late] + late[:on_time]
 failures << "#{late[:late]} of #{total} late-compose flips missed their vblank" unless
   total.positive? && late[:late] <= total * 0.05
+# Every classified flip is in one submit-phase bucket: 17 one-ms buckets.
+phase = late[:phase]
+failures << "submit phase buckets #{phase.inspect}" unless
+  phase['on_time'].size == 17 && phase['late'].size == 17 &&
+  [phase['on_time'].sum, phase['late'].sum] == late[:totals]
 failures << "lead #{late[:lead_us]} us out of bounds" unless
   late[:lead_us].between?(2000, 1_000_000 / HZ / 2)
 unless failures.empty?

@@ -135,6 +135,13 @@ typedef struct {
     /* Flips shown at the first vblank after their submission, and flips
        that missed it (kernel vblank time minus submission > one period). */
     unsigned long long flips_on_time, flips_late;
+    /* The same, by how long after the previous vblank the flip was
+       submitted, in whole milliseconds; the last bucket is 16 and over. Late
+       flips gathered at the end say "submitted too close to the vblank";
+       spread across the period, something else holds them. */
+#define BLIT_KMS_FLIP_PHASE_BUCKETS 17
+    unsigned flip_phase_on_time[BLIT_KMS_FLIP_PHASE_BUCKETS];
+    unsigned flip_phase_late[BLIT_KMS_FLIP_PHASE_BUCKETS];
     /* GPU frames: GPU time (when the driver can time it), and the last
        frame's quads, draw calls and texture upload time. */
     int gpu_timed;

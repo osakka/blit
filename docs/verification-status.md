@@ -1,5 +1,19 @@
 # Verification status
 
+## 2026-10-30: 0.3.14 when late flips were submitted
+
+- **Why:** after 0.3.13 about 14% of flips on both of the owner's monitors
+  still land a vblank late, with GPU time per frame only 0.4–1.5 ms, so GPU
+  cost is not the cause.
+- **New diagnostic:** each output's `flip.submit_phase_ms` counts on-time
+  and late flips by how long after the previous vblank they were submitted
+  (17 one-millisecond buckets). Late flips at the end of the period were
+  submitted too close to the vblank; spread through it, something else
+  holds them. Runtime behaviour is unchanged.
+- **`kms_frame_timing_gate.rb`** checks every classified flip is in exactly
+  one bucket.
+- **Suites:** font 38/38, full 156/156, GLES 67/67.
+
 ## 2026-10-29: 0.3.13 the Hibr frame barrier stops holding every frame (ADR 0082, revised)
 
 - **Found on the owner's machine.** Both monitors missed about 40% of their
