@@ -1,5 +1,27 @@
 # Verification status
 
+## 2026-10-30: 0.3.15 animation frames start just after a vblank
+
+- **What 0.3.14 showed** on the owner's machine (5 minutes after deploy):
+  every late flip was submitted 12–16 ms after the previous vblank, none
+  earlier. display-93: 1,487 late, by millisecond 12–16: 34, 176, 516, 671,
+  90. display-102: 896 late: 2, 19, 174, 591, 110. A flip submitted with
+  less than about 3 ms left cannot make that vblank.
+- **Most frames there are the panes' animated effects** (all of
+  display-102's). Their 30 Hz tick fell wherever the period came round, and
+  the loop woke for it only at its next 10 ms poll, so animation frames
+  drifted through those last milliseconds.
+- **Fixed:** an animation tick is put 0.5 ms after the vblank nearest its
+  due time, and the loop wakes for it. A tick on a vblank comes round a
+  little under a period after the last animation frame, so the "real frames
+  are flowing" test now uses three quarters of a period.
+- **Gates:** `surface_damage_gate.c` checks the alignment arithmetic;
+  `presentation_effects_gate.rb` still sees 30 Hz with no missed deadlines.
+  The mock's GLES path has no page flips, so the live buckets are the
+  evidence.
+- **Live after:** LIVE_PENDING.
+- **Suites:** font 38/38, full 156/156, GLES 67/67.
+
 ## 2026-10-30: 0.3.14 when late flips were submitted
 
 - **Why:** after 0.3.13 about 14% of flips on both of the owner's monitors

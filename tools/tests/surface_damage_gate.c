@@ -436,8 +436,38 @@ static void stable_client_names_gate(void)
 #undef NAME_CHECK
 }
 
+/* 0.3.15: an animation tick is put just after the vblank nearest its due
+   time, so its frame has the whole refresh to compose in. */
+static void check_vblank_alignment(void)
+{
+    const uint64_t period = 16667, vblank = 1000000;
+    struct { uint64_t target, now, want; } cases[] = {
+        {vblank + 2 * period + 3000, vblank, vblank + 2 * period + 500},   /* nearest, after */
+        {vblank + 2 * period - 3000, vblank, vblank + 2 * period + 500},   /* nearest, before */
+        {vblank + 9 * period + 8000, vblank, vblank + 9 * period + 500},   /* rounds down */
+        {vblank + 9 * period + 9000, vblank, vblank + 10 * period + 500},  /* rounds up */
+        {vblank - 3 * period, vblank + 100, vblank + 500},                 /* never before now */
+        {vblank + 2 * period, vblank + 2 * period + 600, vblank + 3 * period + 500},
+    };
+    size_t i;
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+        uint64_t got = vblank_aligned_time(cases[i].target, cases[i].now, vblank, period);
+        if (got != cases[i].want) {
+            fprintf(stderr, "VBLANK_ALIGN_FAIL case=%zu target=%llu got=%llu want=%llu\n", i,
+                    (unsigned long long)cases[i].target, (unsigned long long)got,
+                    (unsigned long long)cases[i].want);
+            ++failures;
+        }
+    }
+    if (vblank_aligned_time(1234, 0, 0, period) != 1234) {
+        fprintf(stderr, "VBLANK_ALIGN_FAIL unknown vblank must leave the time alone\n");
+        ++failures;
+    }
+}
+
 int main(void)
 {
+    check_vblank_alignment();
     BlitRectangle rectangle;
     int direction;
     subject.width = 80;

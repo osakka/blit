@@ -2180,6 +2180,15 @@ static int render_wait_ms(BlitRuntime *runtime, uint64_t now)
     uint32_t held;
     uint64_t not_before = now;
 
+    /* Wake for an animation tick when it is due, not at the next 10 ms poll,
+       which put the tick anywhere in the refresh. */
+    for (i = 0; i < runtime->output_count && i < BLIT_MAX_DISPLAYS; ++i) {
+        uint64_t next = runtime->animation_next_us[i];
+        if (next == 0) continue;
+        if (next <= now) { wait_ms = 0; break; }
+        if ((int)((next - now + 999ULL) / 1000ULL) < wait_ms)
+            wait_ms = (int)((next - now + 999ULL) / 1000ULL);
+    }
     if (!runtime->render_pending)
         return wait_ms;
     if (runtime->terminal_frame_quiet_until_us > not_before)
@@ -20757,6 +20766,52 @@ static int output_animated(const BlitRuntime *runtime, int output_index)
    whole period, and never inside a quiet window or a Hibr frame barrier,
    where real content is on its way. */
 
+/* An animation frame is Blit's own to schedule, so it is put just after a
+   vblank, with the whole refresh to compose in: ticking at whatever moment
+   the period came round drifted through the last milliseconds before each
+   vblank, too late for the flip to make it (0.3.14's submit_phase_ms: every
+   late flip on the owner's machine was submitted in the last 3-4 ms). The
+   nearest vblank to `target` keeps the configured rate. */
+#define BLIT_ANIMATION_AFTER_VBLANK_US 500ULL
+/* The point BLIT_ANIMATION_AFTER_VBLANK_US after the vblank nearest
+   `target`, given one vblank time and the refresh period; never at or
+   before `now`. */
+static uint64_t vblank_aligned_time(uint64_t target, uint64_t now,
+                                    uint64_t vblank_us, uint64_t period_us)
+{
+    long long period = (long long)period_us;
+    long long vblank = (long long)vblank_us + (long long)BLIT_ANIMATION_AFTER_VBLANK_US;
+    long long steps;
+    uint64_t aligned;
+
+    if (period <= 0 || vblank_us == 0)
+        return target;
+    if ((long long)target >= vblank)
+        steps = ((long long)target - vblank + period / 2) / period;
+    else
+        steps = -((vblank - (long long)target + period / 2) / period);
+    aligned = (uint64_t)(vblank + steps * period);
+    while (aligned <= now)
+        aligned += (uint64_t)period;
+    return aligned;
+}
+
+static uint64_t animation_after_vblank(BlitRuntime *runtime, int output,
+                                       uint64_t target, uint64_t now)
+{
+    BlitKmsDisplayInfo info;
+    int display = display_index_for_output(runtime, output);
+    double refresh;
+
+    if (display < 0 || blit_kms_display_info(runtime->kms, display, &info) != 0)
+        return target;
+    refresh = info.observed_refresh_hz >= 1.0 ? info.observed_refresh_hz : info.refresh_hz;
+    if (refresh < 1.0)
+        return target;
+    return vblank_aligned_time(target, now, info.vblank_timestamp_us,
+                               (uint64_t)(1000000.0 / refresh));
+}
+
 static void effects_animation_tick(BlitRuntime *runtime, uint64_t now)
 {
     uint64_t period = 1000000ULL / (uint64_t)(runtime->effects_animation_hz > 0 ?
@@ -20771,7 +20826,10 @@ static void effects_animation_tick(BlitRuntime *runtime, uint64_t now)
         }
         if (runtime->animation_next_us[i] != 0 && now < runtime->animation_next_us[i])
             continue;
-        if (now - runtime->output_presented_us[i] < period ||
+        /* Three quarters of a period: a tick put on a vblank comes round a
+           little under a period after the frame the last tick presented,
+           and that frame is not a real one flowing. */
+        if (now - runtime->output_presented_us[i] < period * 3 / 4 ||
             now < runtime->terminal_frame_quiet_until_us ||
             (hibr_frame_barrier_held(runtime, now) & bit)) {
             /* Real frames are flowing, or about to: look again a period
@@ -20788,7 +20846,7 @@ static void effects_animation_tick(BlitRuntime *runtime, uint64_t now)
         if (!runtime->render_pending || runtime->render_next_us[i] > now)
             runtime->render_next_us[i] = now;
         runtime->render_pending = 1;
-        runtime->animation_next_us[i] = now + period;
+        runtime->animation_next_us[i] = animation_after_vblank(runtime, i, now + period, now);
     }
 }
 
