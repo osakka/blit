@@ -62,12 +62,16 @@ must not be opened.
 
 Option 3.
 
-- **The channel.** Blit listens on a Unix socket, `/run/blit/frames.sock`,
-  and tells each session where with `BLIT_FRAME_SOCKET`. A client connects,
-  sends a hello with its `BLIT_SESSION_TOKEN`, and Blit checks the token
-  names a live session and that the peer's uid (`SO_PEERCRED`) is that
-  session's user. Everything the client sends after that applies to that
-  session only.
+- **The channel.** Blit listens on an abstract-namespace Unix socket (no
+  file, so no directory permissions stand between a session's user and it)
+  and tells each session its name in `BLIT_FRAME_SOCKET`, with a random
+  per-session secret in `BLIT_FRAME_TOKEN`. A client connects, sends a
+  hello with that token, and Blit checks the token names a live session and
+  that the peer's uid (`SO_PEERCRED`) may send that session frames: the
+  signed-in user for a login session, the account a session was started
+  as otherwise, or root. Everything the client sends after that applies to
+  that session only. (`BLIT_SESSION_TOKEN` is not used: it is built from
+  the start time and the session number and is not a secret.)
 - **A frame.** A fixed binary header -- image id, a sequence number, width,
   height, format 24 or 32, stride, and for an edit the rectangle `x y w h`
   -- and one memfd passed with `SCM_RIGHTS`. Blit requires the memfd sealed
@@ -114,6 +118,51 @@ Option 3.
   replaces one not yet uploaded, so a slow GPU drops frames instead of
   queueing them. Errors are a one-line reply on the socket, with the same
   codes as Kitty (`EINVAL`, `ENOENT`, `ENOSPC`, `EFBIG`).
+
+## Wire format (version 1)
+
+Blit is the server, so it states the bytes. Little-endian, fixed offsets,
+one message per `recvmsg` (`SOCK_SEQPACKET`).
+
+- **Socket:** abstract `blit-frames-<port>` (`sun_path` starts with a NUL),
+  given as `BLIT_FRAME_SOCKET=@blit-frames-<port>`; `<port>` is the API's.
+- **Hello**, the first message, no descriptors:
+
+  | offset | size | field |
+  |---|---|---|
+  | 0 | 8 | magic `BLITFRM1` |
+  | 8 | 4 | version, `1` |
+  | 12 | 4 | token length, 1–64 |
+  | 16 | n | `BLIT_FRAME_TOKEN` |
+
+  Answered `OK\n`, or `ERROR EACCES\n` and the connection closes. A
+  frame before a successful hello closes the connection.
+- **Frame**, 48 bytes and exactly one memfd in `SCM_RIGHTS`:
+
+  | offset | size | field |
+  |---|---|---|
+  | 0 | 4 | magic `FRM1` |
+  | 4 | 4 | image id, ≥ 1 |
+  | 8 | 8 | sequence, rising per image id |
+  | 16 | 4 | image width |
+  | 20 | 4 | image height |
+  | 24 | 4 | format, `24` (RGB) or `32` (RGBA) |
+  | 28 | 4 | stride, bytes per row in the memfd |
+  | 32 | 4 | x |
+  | 36 | 4 | y |
+  | 40 | 4 | w |
+  | 44 | 4 | h |
+
+  `w = h = 0` is the whole image: the memfd holds `width x height` rows of
+  `stride` bytes. Otherwise it holds the `w x h` rectangle at `x, y`, which
+  must lie inside the image. An image's first frame is a whole one; a
+  whole frame with a new width or height resizes it, placements kept.
+- **Replies** only on error, one line: `ERROR <image id> <code>\n`, the
+  codes as Kitty's (`EINVAL`, `ENOENT`, `ENOSPC`, `EFBIG`). Accepted frames
+  are not answered.
+- **Newest wins.** Frames are read as they arrive; of several waiting for
+  one image only the newest is applied, the others' descriptors closed
+  unread.
 
 ## Consequences
 
