@@ -64,6 +64,8 @@ The complete list of escape sequences is in the [terminal reference](terminal.md
 | Images scroll with their text | 0.1.491 | 0087 | Tested |
 | Kitty images changed in place, redrawing only the changed rectangle | 0.3.1 | 0200 | Tested |
 | Kitty replies: `OK`, and an error for every failure; quiet levels respected | 0.3.3; errors 0.3.12 | 0200 | Tested |
+| Picture frames by descriptor: a sealed memfd over a local, token-checked socket instead of base64 through the terminal (for video and pages) | 0.3.17 | 0202 | Tested (Hibr's side in progress) |
+| 16 images per session | 0.3.17 | 0202 | Tested |
 | Sixel images, up to 8 MiB of data each | 0.1; large 0.3.12 | 0021 | Used |
 | Pixel-exact image scaling | 0.1.557 | 0139 | Used |
 | Binary WebSocket frame stream for emulators and games | 0.1 | 0013, 0166 | Used |

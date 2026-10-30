@@ -1,7 +1,8 @@
 # ADR 0202: local picture frames by descriptor, not through the terminal
 
-- Status: proposed (2026-10-30); reviewed by the Hibr maintainers the same
-  day (their answers and changes are folded in below)
+- Status: accepted; Blit's half implemented in 0.3.17 (2026-10-30), Hibr's
+  half (the console writer and hold's descriptor passing) in progress.
+  Reviewed by the Hibr maintainers; their answers and changes are folded in.
 - Scope: moving large or frequent pictures (video, a game, a browser page)
   from a program in a Blit session to Blit without encoding them into the
   terminal stream

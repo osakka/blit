@@ -1592,6 +1592,20 @@ existing ASCII/Unicode/Nerd UI modes do not automatically become multicolour.
 Do not equate the active `glyphs`/`mappings` PSF fallback counters with the
 repertoire of the attached outline/emoji faces.
 
+## Picture frames by descriptor
+
+A program running in a Blit session can send an image's pixels without
+encoding them into the terminal ([ADR 0202](adr/0202-local-frames-by-descriptor.md)).
+Its environment carries `BLIT_FRAME_SOCKET` (an abstract Unix socket,
+`@blit-frames-<port>`) and `BLIT_FRAME_TOKEN` (a random secret for that
+session). It connects (`SOCK_SEQPACKET`), says hello with the token, and
+sends frames: a 48-byte header and one memfd sealed against shrinking,
+growing and writing. The image is placed, layered and deleted with ordinary
+Kitty escapes on the session's terminal, under the same id. The byte layout
+and rules are in the ADR's "Wire format". Each session reports
+`frames.accepted`, `refused`, `stale`, `superseded` and `last_error`; the
+server reports `graphics.frames` in `/v1/diagnostics`.
+
 ## Diagnostics and screenshots
 
 `GET /v1/diagnostics/observation` is the canonical incident snapshot. It is

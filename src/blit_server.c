@@ -46,6 +46,8 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/un.h>
+#include <sys/random.h>
+#include <stddef.h>
 #include <time.h>
 #include <unistd.h>
 #include <pthread.h>
@@ -780,6 +782,15 @@ typedef struct {
 
 typedef struct {
     int used;
+    int fd;
+    int authenticated;
+    unsigned long long session_id;
+} BlitFrameClient;
+
+#define BLIT_FRAME_DELETED 64
+
+typedef struct {
+    int used;
     unsigned long long id;
     pid_t process_id;
     int pty_fd;
@@ -849,6 +860,15 @@ typedef struct {
     uint64_t hibr_owner_registered_us;
     int hibr_unpainted_reported;
     char hibr_session_token[64];
+    /* ADR 0202: the secret a frame client proves it is in this session
+       with, the account the session's frames may come from, the image ids
+       deleted lately (a frame for one is ENOENT), and the counts. */
+    char frame_token[40];
+    uid_t frame_uid;
+    unsigned int frame_deleted[BLIT_FRAME_DELETED];
+    int frame_deleted_next;
+    unsigned long frames_accepted, frames_refused, frames_stale, frames_superseded;
+    char frames_last_error[32];
     int terminal_escape;
     /* Hibr emits a single SGR containing bold plus truecolor foreground and
        background (three decimal components each).  A 32-byte buffer cuts
@@ -1496,6 +1516,11 @@ typedef struct {
     int auxiliary_worker_binding;
     uint64_t auxiliary_worker_deadline_us;
     uint64_t console_input_since_us;
+    /* ADR 0202: the frame socket and its clients. */
+    int frame_fd;
+    char frame_name[64];
+    BlitFrameClient frame_clients[32];
+    unsigned long long frames_accepted, frames_refused;
 } BlitRuntime;
 
 static unsigned long long blit_graphics_generation;
@@ -1683,6 +1708,7 @@ static BlitSession *hibr_render_source(BlitRuntime *runtime,
 static BlitGraphicsImage *graphics_image_find(BlitSession *session,
                                               unsigned int id);
 static void graphics_image_release(BlitGraphicsImage *image);
+static void frame_note_deleted(BlitSession *session, const BlitGraphicsImage *image);
 static int surface_targets_output(BlitRuntime *runtime,
                                   BlitSurface *surface, int output_index);
 static void pixel_frame_reset(BlitRuntime *runtime, BlitStream *stream,
@@ -3644,7 +3670,8 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              "\"graphics\":{\"max_images\":%d,\"max_width\":%d,"
              "\"max_height\":%d,\"max_bytes\":%lu,"
              "\"sixel_max_width\":%d,\"sixel_max_height\":%d,"
-             "\"sixel_color_registers\":%d},"
+             "\"sixel_color_registers\":%d,"
+             "\"frames\":{\"socket\":\"%s%s\",\"accepted\":%llu,\"refused\":%llu}},"
              "\"errors\":%s,\"warnings\":%s}",
              runtime->kms != NULL && runtime->display_count > 0 ?
                  "true" : "false", backend, escaped_error,
@@ -3671,6 +3698,8 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              (unsigned long)BLIT_GRAPHICS_MAX_BYTES,
              BLIT_SIXEL_MAX_WIDTH, BLIT_SIXEL_MAX_HEIGHT,
              BLIT_SIXEL_COLOR_REGISTERS,
+             runtime->frame_fd >= 0 ? "@" : "", runtime->frame_fd >= 0 ? runtime->frame_name : "",
+             runtime->frames_accepted, runtime->frames_refused,
              errors,
              warnings);
 }
@@ -10538,8 +10567,10 @@ static int kitty_delete(BlitSession *session, BlitSurface *surface,
             }
         }
         if (free_data && (removed > 0 || kind == 'a') &&
-            !kitty_image_has_placement(image))
+            !kitty_image_has_placement(image)) {
+            frame_note_deleted(session, image);
             graphics_image_release(image);
+        }
     }
     if (!surface->damage_valid) mark_surface_damage(surface, 0, 0);
     return 1;
@@ -10850,6 +10881,12 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
         !session->terminal_kitty_stage.complete && action[0] == '\0')
         stage = 1;
     shown = graphics_image_find(session, (unsigned int)image_id);
+    /* ADR 0202: a descriptor image's pixels only arrive on the frame
+       socket; the PTY may place and delete it, nothing more. */
+    if (shown != NULL && shown->descriptor) {
+        kitty_fail(session, image_id, quiet, "descriptor-image", "EINVAL");
+        return;
+    }
     image = stage ? (session->terminal_kitty_stage.used ? &session->terminal_kitty_stage : NULL) : shown;
     if (action[0] == '\0' && (image == NULL || image->complete)) {
         graphics_reject(session, "continuation-incomplete");
@@ -15231,6 +15268,13 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
             session->graphics_rejected, session->graphics_evicted,
             escaped_graphics_error);
     }
+    /* ADR 0202: frames by descriptor into this session's images. */
+    used += (size_t)snprintf(
+        body + used, capacity - used,
+        ",\"frames\":{\"accepted\":%lu,\"refused\":%lu,\"stale\":%lu,"
+        "\"superseded\":%lu,\"last_error\":\"%s\"}",
+        session->frames_accepted, session->frames_refused, session->frames_stale,
+        session->frames_superseded, session->frames_last_error);
     snprintf(body + used, capacity - used, "}");
 }
 
@@ -15747,6 +15791,7 @@ static int create_session(BlitRuntime *runtime, const char *json,
     pid_t process_id;
     unsigned long long session_id;
     char session_token[64];
+    char frame_token[40];
     int hibr_resume_requested = 0;
     int hibr_process = 0;
     int hibr_desktop_primary = 0;
@@ -15918,6 +15963,16 @@ static int create_session(BlitRuntime *runtime, const char *json,
     session_id = runtime->next_session_id;
     snprintf(session_token, sizeof(session_token), "%llu-%llu",
              (unsigned long long)runtime->started_us, session_id);
+    {
+        /* ADR 0202: BLIT_SESSION_TOKEN is not a secret; the frame socket's
+           credential is random. */
+        unsigned char random_bytes[16];
+        int k;
+        frame_token[0] = '\0';
+        if (getrandom(random_bytes, sizeof(random_bytes), 0) == (ssize_t)sizeof(random_bytes))
+            for (k = 0; k < 16; ++k)
+                snprintf(frame_token + k * 2, 3, "%02x", random_bytes[k]);
+    }
     process_id = forkpty(&master_fd, NULL, NULL, &size);
     if (process_id < 0) {
         fprintf(stderr, "blit: forkpty failed: %s\n", strerror(errno));
@@ -15956,6 +16011,13 @@ static int create_session(BlitRuntime *runtime, const char *json,
         snprintf(session_text, sizeof(session_text), "%llu", session_id);
         snprintf(surface_text, sizeof(surface_text), "surface-%llu", session_id);
         snprintf(port_text, sizeof(port_text), "%d", runtime->listen_port);
+        if (runtime->frame_fd >= 0 && frame_token[0] != '\0') {
+            char frame_socket[80];
+            snprintf(frame_socket, sizeof(frame_socket), "@%s", runtime->frame_name);
+            if (setenv("BLIT_FRAME_SOCKET", frame_socket, 1) != 0 ||
+                setenv("BLIT_FRAME_TOKEN", frame_token, 1) != 0)
+                _exit(126);
+        }
         if (setenv("BLIT_SESSION_ID", session_text, 1) != 0 ||
             setenv("BLIT_SESSION_TOKEN", session_token, 1) != 0 ||
             setenv("BLIT_SURFACE_ID", surface_text, 1) != 0 ||
@@ -16072,6 +16134,8 @@ static int create_session(BlitRuntime *runtime, const char *json,
             session->id = session_id;
             snprintf(session->hibr_session_token,
                      sizeof(session->hibr_session_token), "%s", session_token);
+            snprintf(session->frame_token, sizeof(session->frame_token), "%s", frame_token);
+            session->frame_uid = run_as_user ? run_uid : geteuid();
             ++runtime->next_session_id;
             session->process_id = process_id;
             session->pty_fd = master_fd;
@@ -28868,6 +28932,8 @@ static void service_http_client(BlitRuntime *runtime, int index)
     remove_http_client(runtime, index);
 }
 
+#include "blit_frames.h"
+
 int main(int argc, char **argv)
 {
     int port = 8080;
@@ -28894,6 +28960,7 @@ int main(int argc, char **argv)
     if (!bind_requested)
         bind_address = "0.0.0.0";
     memset(&runtime, 0, sizeof(runtime));
+    runtime.frame_fd = -1;
     runtime.login_observer_fd = -1;
     runtime.evdev_watch_fd = -1;
     runtime.snd_watch_fd = -1;
@@ -28984,6 +29051,8 @@ int main(int argc, char **argv)
     }
     runtime.next_session_id = 1;
     runtime.listen_port = port;
+    /* ADR 0202. Before any session starts, so every child is told. */
+    frame_listen(&runtime, port);
     runtime.next_frame_id = 1;
     runtime.next_event_sequence = 1;
     runtime.topology_revision = 1;
@@ -29404,6 +29473,7 @@ int main(int argc, char **argv)
         FD_ZERO(&readable);
         FD_ZERO(&writable);
         FD_SET(server_fd, &readable);
+        frame_select(&runtime, &readable, &max_fd);
         for (i = 0; i < runtime.evdev_mouse_count; ++i) {
             int input_fd = runtime.evdev_mouse_fds[i];
             if (input_fd < 0) continue;
@@ -29630,6 +29700,8 @@ int main(int argc, char **argv)
             if (!accept_http_clients(&runtime, server_fd))
                 break;
         }
+        if (ready > 0)
+            frame_service(&runtime, &readable);
         if (ready > 0) {
             for (i = 0; i < runtime.evdev_mouse_count; ++i)
                 if (runtime.evdev_mouse_fds[i] >= 0 &&

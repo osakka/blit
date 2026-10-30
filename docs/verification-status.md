@@ -1,5 +1,35 @@
 # Verification status
 
+## 2026-10-30: 0.3.17 picture frames by descriptor; 16 images per session (ADR 0202)
+
+- **Why:** with a YouTube video playing on the owner's machine, Hibr's
+  desktop used 69%, hold 23% and Blit 21% of a core, every frame a new
+  base64 Kitty image through two PTYs.
+- **Blit's half of ADR 0202:** an abstract `SOCK_SEQPACKET` socket per
+  server (`@blit-frames-<port>`), told to every session with a random
+  `BLIT_FRAME_TOKEN` (`BLIT_SESSION_TOKEN` is start time plus session number
+  and not a secret; noted, not changed). A client says hello with the
+  token; its uid must be the session's (the signed-in user for a login
+  session) or root. A frame is a 48-byte header and one sealed memfd, read
+  with `pread` into the session's image. Placement and deletion stay Kitty
+  escapes; a descriptor image takes no Kitty pixels and a Kitty image takes
+  no frames; a frame after a freeing delete is `ENOENT`; an older sequence
+  is dropped; of several frames waiting for one image the newest is applied
+  and the rest closed unread. No name from any channel is opened (ADR 0066
+  holds, and names 0202 as its second authenticated route).
+- **16 images per session**, from 8, asked for by the Hibr maintainers.
+- **`frame_descriptor_gate`** (Hibr suite), on both compositors: the token
+  is separate and random; a wrong token is refused; a frame before its
+  placement is kept and drawn on placement (screenshot); newest wins on
+  screen; a stale frame is dropped; an edit writes its rectangle; unsealed,
+  short, oversized and unknown-edit frames are refused with their codes;
+  Kitty pixels into a descriptor image and a frame into a Kitty image are
+  refused; a frame after `a=d,d=I` is `ENOENT`. Not tested: a peer whose
+  uid may not send (needs a second uid, so root).
+- **Hibr's half** (the console writer, hold passing the descriptor) is in
+  progress; until then nothing uses the socket.
+- **Suites:** font 38/38, full 157/157, GLES 66/66.
+
 ## 2026-10-30: window dragging on the owner's machine, Blit 0.3.16 (#125, #135)
 
 The owner dragged windows for 40 s on the main monitor, between its two

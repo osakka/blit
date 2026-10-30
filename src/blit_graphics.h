@@ -101,6 +101,10 @@ typedef struct {
     /* Unique identity for the pixel contents.  The GPU compositor uses this
        to discard a texture when a Kitty/Sixel image is replaced or updated. */
     unsigned long long generation;
+    /* ADR 0202: pixels arrive by descriptor, never through the PTY, and a
+       frame not newer than the last is dropped. */
+    int descriptor;
+    unsigned long long descriptor_sequence;
     /* The last edits, oldest first; cleared by anything that changes the
        image some other way. Empty means renderers refresh it whole. */
     BlitGraphicsEdit edits[BLIT_GRAPHICS_EDIT_HISTORY];

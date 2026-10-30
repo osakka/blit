@@ -373,6 +373,11 @@ The API token, when there is one; not given to the login screen.
 .BR BLIT_SESSION_ID ", " BLIT_SESSION_TOKEN ", " BLIT_SURFACE_ID
 The session's identity, and a token for its own requests.
 .TP
+.BR BLIT_FRAME_SOCKET ", " BLIT_FRAME_TOKEN
+Where to send this session's picture frames by descriptor, and the random
+secret that proves the sender is in this session (ADR 0202). Set only when
+the frame socket is up.
+.TP
 .B BLIT_PANE_ID
 The pane the session is in, when it has one.
 .TP

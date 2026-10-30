@@ -138,3 +138,14 @@ Teeth: with the `t` check removed from the refusal list, the path is decoded
 as pixel data and the diagnosis becomes `incomplete-data` -- Blit reporting
 the wrong thing about a path it was handed, which is the shape issue #14
 named. Measured on both binaries.
+
+## Later (0.3.17): a second authenticated route
+
+[ADR 0202](0202-local-frames-by-descriptor.md) adds the frame socket: a
+program in a session sends an image's pixels as a sealed memfd, after
+proving it is in that session with a random per-session token and its
+uid. It keeps this record's invariant -- the descriptor is one the client
+already holds, and no name from any channel is opened -- and is the answer
+for local video and pages that would otherwise push megabytes through the
+PTY.
+
